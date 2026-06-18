@@ -21,22 +21,18 @@ Runs against `~/.agents/skills` (override with `SKILLS_DIR=...`).
 1. Ensures the skills dir is a git repo; commits a **pre-update snapshot** (`PRE`).
 2. Runs `npx skills update -g`.
 3. Commits the upstream result (`POST`) — so both your version and upstream's now live in git history.
-4. For every skill in `.protected-skills`: if upstream changed it, **restores your version** and prints the exact `git diff PRE POST -- <skill>` to review the upstream delta and merge by hand.
+4. **Auto-detects which skills you've edited** and protects them: for each lock-tracked skill it compares your pre-update tree SHA to the lock's `skillFolderHash`; any that diverged are ones you changed. If upstream also changed such a skill, it **restores your version** and prints `git diff PRE POST -- <skill>` so you can review the upstream delta and merge by hand.
 5. Prints a change summary and the one-line undo: `git reset --hard PRE`.
 
-Unprotected skills update normally. Nothing is ever lost — `PRE` is always in git.
+Unedited skills update normally. Nothing is ever lost — `PRE` is always in git.
 
-## .protected-skills
+## Why auto-detect (not a pre-edit prompt)
 
-A newline-delimited list (next to this dir, at the skills-dir root) of skill folders you've hand-edited. `#` comments allowed. Example:
+"Protect a skill when I edit it" is tempting to wire as a hook on Edit/Write, but it's unnecessary: a skill *is* edited exactly when its content diverges from the lock's recorded upstream hash. Detecting that at update time needs no list, no event hook, and can't be forgotten. Edit freely; protection is computed for you.
 
-```
-teach
-implement-paper
-marimo-notebook
-```
+## Optional manual override
 
-Add a skill here the moment you edit it, so the next update preserves it.
+If you want to force-protect a skill the auto-detector can't see (e.g. a hand-made skill with no lockfile entry), create `.protected-skills` at the skills-dir root — one skill name per line, `#` comments allowed. It's unioned with the auto-detected set. Most setups never need it.
 
 ## Notes
 
