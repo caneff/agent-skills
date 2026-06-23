@@ -19,13 +19,6 @@ Treat the current directory as a teaching workspace. The state of their learning
 - `./assets/*`: Reusable **components** shared across lessons. See [Assets](#assets).
 - `NOTES.md`: A scratchpad for you to jot down user preferences, or working notes.
 
-## Mode interactions (mandatory)
-
-These override any session-level mode while you are working inside this skill:
-
-- **Ponytail / laziness modes are OFF here.** Do not apply YAGNI-minimalism or "shortest diff wins" to teaching artifacts. Lessons and references are durable, beautiful documents reread across sessions; completeness, citations, and polish matter more than brevity of output. Lazy *process* is fine (don't over-research a quick turn); never ship a deliberately minimal *deliverable*.
-- **Humanize every deliverable.** All reader-facing prose you write into a lesson or reference (`./lessons/*.html`, `./reference/*.html`) must be run through the `humanizer` skill's rules before you save it: no em/en dashes, no significance inflation or promotional language, no servile/quiz-answer openers ("Right.", "Exactly."), no decorative emoji, varied sentence rhythm, plain `is/are/has`. This applies to the prose only — code, UI labels, syntax, and functional formatting (e.g. bold field names in step instructions) stay as-is. Caveman terseness still governs chat/explanation, not these deliverables (per the user's global caveman↔humanizer boundary).
-
 ## Philosophy
 
 To learn at a deep level, the user needs three things:
@@ -50,18 +43,6 @@ Fluency can give the user an illusory sense of mastery, but storage strength is 
 - Using retrieval practice (recall from memory)
 - Spacing (distributing practice over time)
 - Interleaving (mixing up different but related topics in practice - for skills practice only)
-
-## Rigor: verify before you teach
-
-This skill runs at elevated reasoning effort (`effort: high` in the frontmatter) because its output is **durable**: a wrong fact in a lesson is re-read on every review, and a wrong inference in a learning record steers future lessons. Errors compound across sessions, so accuracy and judgment matter more here than in throwaway chat. For the highest-leverage moments — designing or substantially revising a lesson or reference, computing the zone of proximal development, or diagnosing why a learner's build is stuck — deliberate deeply; the user can raise session effort to `xhigh`/`max` for heavy authoring. Stay lean on quick conversational turns so the feedback loop stays tight.
-
-Hold to this discipline:
-
-- **Verify domain and product facts before asserting them** — never from parametric memory alone. Ground claims in official docs (tracked in `RESOURCES.md`) or have the user check the actual product, *especially* before writing a claim into a durable artifact (lesson, reference, learning record). Cite the source.
-- **Treat the learner's reported error message or observed behavior as ground truth.** When it conflicts with your mental model, your model is wrong — update it, don't argue it away. Offer the cheap empirical test instead of a confident guess.
-- **State uncertainty plainly.** "I'm not sure — try X and tell me what you see" beats a confident wrong answer that gets baked into a lesson.
-- **Prefer the minimal correct form.** Resist belt-and-suspenders ceremony; teach the simplest thing that works and add steps only when they earn their place.
-- **When you find an artifact is wrong, fix the artifact *and* the learning record — not just the chat reply.** Corrections must reach the durable layer, or the error resurfaces next session.
 
 ## Lessons
 
@@ -123,7 +104,6 @@ For skill acquisition, difficulty is the tool. Effortful retrieval is what build
 
 - Interactive lessons, using quizzes and light in-browser tasks
 - Lessons which guide the user through a list of real-world steps to take (for instance, yoga poses)
-- In-agent quizzes, where you ask the user scenario-based questions about what they've learned
 
 Each of these should be based on a **feedback loop**, where the user receives feedback on their performance. This feedback loop should be as tight as possible, giving feedback immediately - and ideally automatically.
 
