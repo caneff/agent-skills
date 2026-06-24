@@ -34,7 +34,17 @@ The user wants to land their work on main. **You do not have authority to push o
 
 3. **Confirm the merge strategy** with the user if they didn't specify: `--squash` (default), `--merge`, or `--rebase`. Default to deleting the branch after.
 
-4. **Hand off.** Print the exact command for the user to run, prefixed with `! ` so it runs in their shell. Chain the local main-sync onto the merge with `&&` so it fires automatically once the merge succeeds:
+4. **Hand off.** Print the exact command for the user to run, prefixed with `! ` so it runs in their shell.
+
+   **Default — use the `ship` script.** `~/.local/bin/ship` (on PATH) wraps the whole squash-merge → wait-for-MERGED → sync-main chain in one argument. For the common case (green checks, no worktree pin, repo without `--auto`), this is the handoff:
+
+   ```
+   ! ship <number>
+   ```
+
+   `ship` always squash-merges and deletes the branch, polls until the PR state is `MERGED`, then fast-forwards local main exactly once. It takes no flags. Fall back to the full command below only when you need behavior `ship` doesn't cover: a different merge strategy (`--merge`/`--rebase`), `--auto` for still-pending checks, or a worktree-pinned branch.
+
+   **Full command** (what `ship` expands to — use directly for the edge cases above). Chain the local main-sync onto the merge with `&&` so it fires automatically once the merge succeeds:
 
    ```
    ! gh pr merge <number> --squash --delete-branch && until [ "$(gh pr view <number> --json state -q .state)" = MERGED ]; do sleep 10; done && ~/.claude/hooks/sync-main-after-merge.sh --now
@@ -49,12 +59,6 @@ The user wants to land their work on main. **You do not have authority to push o
    ```
 
    `true` **and** checks still pending → insert `--auto` before `--delete-branch` in the command above. `false`, or checks already green → leave it out (the plain command shown is correct).
-
-   If the user has the `ship` shell function installed, this shorthand is equivalent:
-
-   ```
-   ! ship <number> --squash --delete-branch
-   ```
 
    **Worktree-pinned branch (sandcastle).** `--delete-branch` deletes the *local* branch too, which fails when a worktree has it checked out — and that non-zero exit short-circuits the `&&`, so the sync never runs. Before handing off, check whether `headRefName` is pinned:
 

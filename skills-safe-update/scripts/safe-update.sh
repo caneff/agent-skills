@@ -18,6 +18,14 @@ git add -A
 git commit -qm "pre-update snapshot $(date +%F)" >/dev/null 2>&1 || true
 PRE=$(git rev-parse HEAD)
 
+# capture the lock's upstream hashes BEFORE updating. skillFolderHash IS the
+# git tree SHA of the skill folder, so a hash here describes the *installed*
+# upstream version. Read it AFTER npx (as we used to) and npx has already
+# rewritten it to the NEW upstream — making every updated skill look edited.
+PRELOCK=$(mktemp)
+LOCK="${SKILL_LOCK:-$(dirname "$SKILLS")/.skill-lock.json}"
+[ -f "$LOCK" ] && python3 -c "import json;d=json.load(open('$LOCK')).get('skills',{});[print(k+chr(9)+v.get('skillFolderHash','')) for k,v in d.items()]" > "$PRELOCK"
+
 # 3. update through the package manager
 echo "running: npx skills update -g"
 npx -y skills update -g
@@ -30,17 +38,18 @@ fi
 POST=$(git rev-parse HEAD)
 
 # 5. protect locally-edited skills: keep YOUR version, flag upstream delta.
-# Protected set = AUTO-DETECTED (on-disk diverged from the lock's skillFolderHash)
+# Protected set = AUTO-DETECTED (pre-update on-disk tree diverged from the
+# PRE-UPDATE lock hash, i.e. from the upstream version you had installed)
 # UNION any manual entries in .protected-skills (override for untracked/edge cases).
 declare -A PROT
-LOCK="${SKILL_LOCK:-$(dirname "$SKILLS")/.skill-lock.json}"
-if [ -f "$LOCK" ]; then
+if [ -s "$PRELOCK" ]; then
   while IFS=$'\t' read -r name hash; do
     [ -z "$name" ] && continue
     cur=$(git rev-parse "$PRE:$name" 2>/dev/null) || continue   # tree SHA of your pre-update version
-    [ "$cur" != "$hash" ] && PROT[$name]=1                       # diverged => you edited it
-  done < <(python3 -c "import json,sys;d=json.load(open('$LOCK')).get('skills',{});[print(k+chr(9)+v.get('skillFolderHash','')) for k,v in d.items()]")
+    [ "$cur" != "$hash" ] && PROT[$name]=1                       # diverged from installed upstream => you edited it
+  done < "$PRELOCK"
 fi
+rm -f "$PRELOCK"
 if [ -f .protected-skills ]; then
   while read -r s; do [[ -z "$s" || "$s" == \#* ]] && continue; PROT[$s]=1; done < .protected-skills
 fi
