@@ -11,10 +11,27 @@ disable-model-invocation: true
 ## Quick start
 
 ```bash
-bash scripts/safe-update.sh
+bash scripts/skills-status.sh   # read-only: what's edited vs out of date
+bash scripts/safe-update.sh     # do the update, preserving edits
 ```
 
-Runs against `~/.agents/skills` (override with `SKILLS_DIR=...`).
+Both run against `~/.agents/skills` (override with `SKILLS_DIR=...`).
+
+## Check status first (read-only)
+
+`safe-update.sh` only knows the **edit** axis (your copy vs the lock) and learns it mid-update. `scripts/skills-status.sh` adds the second axis the lockfile alone hides — your copy vs **current upstream** — and mutates nothing, so run it before deciding to update:
+
+```bash
+bash scripts/skills-status.sh
+```
+
+It classifies each lock-tracked skill by comparing three tree SHAs (`local` = your working copy, `lock` = the version you installed from, `upstream` = the source repo now):
+
+- **clean** — matches upstream, untouched.
+- **edited, on latest** — your edits sit on the current upstream; nothing to rebase.
+- **OUT OF DATE** — upstream moved past your installed version; `safe-update.sh` will pull it.
+- **EDITED+STALE (merge needed)** — your edits sit on an *old* upstream; updating will need the hand-merge `safe-update.sh` prints.
+- **ORPHAN** — installed but gone from upstream (renamed/removed); clean up the lock entry by hand.
 
 ## What it does
 
@@ -38,4 +55,5 @@ If you want to force-protect a skill the auto-detector can't see (e.g. a hand-ma
 
 - This skill is hand-maintained, not installed via `npx skills`, so it has no lockfile entry and the package manager leaves it alone.
 - After a clean review, you're already committed — the git buffer stays current for next time.
-- Lockfile drift (entries for deleted skills, or skills you added by hand) is a separate one-time cleanup, not handled here: drop dead entries and add untracked ones in `~/.agents/.skill-lock.json`.
+- Lockfile drift (entries for deleted skills, or skills you added by hand) is a separate one-time cleanup, not handled here: drop dead entries and add untracked ones in `~/.agents/.skill-lock.json`. `skills-status.sh` flags the **ORPHAN** case (installed but gone upstream).
+- `skills-status.sh` needs `gh` (authenticated) + network to read upstream; offline it reports `upstream UNKNOWN` and only the edit axis is trustworthy.
