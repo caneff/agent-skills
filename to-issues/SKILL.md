@@ -54,12 +54,25 @@ Iterate until the user approves the breakdown.
 
 For each approved slice, publish a new issue to the issue tracker. Use the issue body template below. These issues are considered ready for AFK agents, so publish them with the correct triage label unless instructed otherwise.
 
-Publish issues in dependency order (blockers first) so you can reference real issue identifiers in the "Blocked by" field.
+Publish issues in dependency order (blockers first) so the parent and blocker issues exist with real numbers before anything references them.
+
+**Wire relationships natively, not just as prose.** When the tracker is GitHub, record the parent and dependency edges as first-class GitHub relationships at create time so automation (planners, dependency graphs) can read them from structured fields — `gh issue list --json parent,blockedBy,blocking,issueType` — instead of re-parsing the body:
+
+```
+gh issue create --title "..." --body "..." \
+  --type <Task|Bug|...> --parent <parent#> --blocked-by <blocker#,blocker#>
+```
+
+- `--parent` makes this a sub-issue of the source issue (the `## Parent` section's machine-readable form).
+- `--blocked-by` records the dependency edges from step 4 (the `## Blocked by` section's machine-readable form).
+- `--type` sets the issue type. Only pass a type name the tracker already defines (draw from the triage/type vocabulary referenced above); omit `--type` when no types are defined, since `gh` errors on an unknown type name.
+
+GitHub now renders sub-issues and dependencies in its UI, so the body's `## Parent` / `## Blocked by` sections become a human-readable mirror of these native fields — keep them as a fallback for trackers that lack native types/dependencies, but the native flags are the source of truth.
 
 <issue-template>
 ## Parent
 
-A reference to the parent issue on the issue tracker (if the source was an existing issue, otherwise omit this section).
+A reference to the parent issue on the issue tracker (if the source was an existing issue, otherwise omit this section). On GitHub, also set this natively via `gh issue create --parent <parent#>` — this section mirrors that relationship for readers.
 
 ## What to build
 
@@ -77,7 +90,7 @@ Avoid specific file paths or code snippets — they go stale fast. Exception: if
 
 - A reference to the blocking ticket (if any)
 
-Or "None - can start immediately" if no blockers.
+Or "None - can start immediately" if no blockers. On GitHub, also record these natively via `gh issue create --blocked-by <#,#>`; this section mirrors those relationships for readers.
 
 </issue-template>
 
