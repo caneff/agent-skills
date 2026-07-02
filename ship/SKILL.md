@@ -32,17 +32,17 @@ The user wants to land their work on main. **You do not have authority to push o
 
 2. **Report readiness** in one short block: PR number + title, CI/check rollup (pass/fail/pending), review decision, and `mergeStateStatus` (e.g. CLEAN, BLOCKED, BEHIND). If checks are failing or the PR is BLOCKED, say so plainly — don't bury it.
 
-3. **Confirm the merge strategy** with the user if they didn't specify: `--squash` (default), `--merge`, or `--rebase`. Default to deleting the branch after.
+3. **Merge strategy is auto-picked by `ship`** (squash if the PR took post-creation churn, rebase if it's still clean) — don't prompt for it by default. Only pass an explicit `--squash|--merge|--rebase` as ship's second arg when the user asks for one. The branch is deleted after either way.
 
 4. **Hand off.** Print the exact command for the user to run, prefixed with `! ` so it runs in their shell.
 
-   **Default — use the `ship` script.** `~/.local/bin/ship` (on PATH) wraps the whole squash-merge → wait-for-MERGED → sync-main chain in one argument. For the common case (green checks, no worktree pin, repo without `--auto`), this is the handoff:
+   **Default — use the `ship` script.** `~/.local/bin/ship` (on PATH) wraps the whole merge → wait-for-MERGED → sync-main chain in one argument. For the common case (green checks, no worktree pin, repo without `--auto`), this is the handoff:
 
    ```
    ! ship <number>
    ```
 
-   `ship` always squash-merges and deletes the branch, polls until the PR state is `MERGED`, then fast-forwards local main exactly once. It takes no flags. Fall back to the full command below only when you need behavior `ship` doesn't cover: a different merge strategy (`--merge`/`--rebase`), `--auto` for still-pending checks, or a worktree-pinned branch.
+   `ship` auto-picks the merge strategy by churn: it counts commits pushed **after** the PR opened — any such review-fixup churn → `--squash` (fold it into one clean commit), none (the PR still holds its original atomic commits) → `--rebase` (preserve them on main). It then deletes the branch, polls until the PR state is `MERGED`, and fast-forwards local main exactly once. Override the auto-pick with an optional second arg: `ship <number> --squash|--rebase|--merge`. Fall back to the full command below only for behavior `ship` doesn't cover: `--auto` for still-pending checks, or a worktree-pinned branch.
 
    **Full command** (what `ship` expands to — use directly for the edge cases above). Chain the local main-sync onto the merge with `&&` so it fires automatically once the merge succeeds:
 
