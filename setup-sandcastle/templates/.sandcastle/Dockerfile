@@ -1,0 +1,53 @@
+# Sandbox image for a Python (uv) target repo. Runs the coding agent, git, gh,
+# and the target's uv/just toolchain. main.mts runs on the HOST (via tsx) — it
+# is never in this image; only the in-sandbox agent + its tools live here.
+FROM debian:bookworm-slim
+
+# System dependencies
+RUN apt-get update && apt-get install -y \
+  git \
+  curl \
+  ca-certificates \
+  jq \
+  && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+  | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+  && apt-get update && apt-get install -y gh \
+  && rm -rf /var/lib/apt/lists/*
+
+# Build-args for UID/GID alignment: sandcastle docker build-image defaults these
+# to the host user's UID/GID so image-built files and bind-mounted files share
+# an owner without runtime chown.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+# Create the agent user aligned to the host UID/GID.
+RUN groupadd -o -g $AGENT_GID agent \
+  && useradd -o -u $AGENT_UID -g $AGENT_GID -m -d /home/agent -s /bin/bash agent
+USER ${AGENT_UID}:${AGENT_GID}
+
+# uv — manages Python per the target's .python-version. Installed as the agent
+# user so it lands on the agent's PATH.
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Bake the target's exact interpreter into an image LAYER so no container re-fetches
+# it at run time. The skill substitutes PYTHON_VERSION from the target's
+# .python-version at build time.
+ARG PYTHON_VERSION=3.13
+RUN /home/agent/.local/bin/uv python install ${PYTHON_VERSION}
+
+# Claude Code CLI (standalone binary — not a Node app).
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+# uv + claude both install under ~/.local/bin
+ENV PATH="/home/agent/.local/bin:$PATH"
+
+WORKDIR /home/agent
+
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at
+# /home/agent/workspace and overrides the working directory there at container start.
+ENTRYPOINT ["sleep", "infinity"]
