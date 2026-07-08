@@ -1,0 +1,1489 @@
+/* visual-teach — shared lesson stylesheet.
+   Themeable via 9 tokens (override in a workspace's own CSS or a lesson <head>).
+   Tints/hovers are derived with color-mix(), not extra tokens. */
+
+:root {
+  --vt-ink: #1a1f2b; /* body text */
+  --vt-muted: #5b6472; /* secondary text */
+  --vt-accent: #1a73e8; /* links, kicker, h2 rule, primary */
+  --vt-accent-fg: #ffffff; /* text on accent fill */
+  --vt-rule: #e3e6ea; /* borders, dividers */
+  --vt-paper: #ffffff; /* page / card background */
+  --vt-good: #0d7d4d; /* quiz correct, checklist done */
+  --vt-bad: #c5221f; /* quiz wrong */
+  --vt-warn: #f9ab00; /* caution callout */
+}
+
+/* derived tints */
+:root {
+  --vt-soft: color-mix(in srgb, var(--vt-ink) 4%, var(--vt-paper));
+  --vt-stripe: color-mix(in srgb, var(--vt-ink) 6%, var(--vt-paper));
+  --vt-neutral-soft: color-mix(in srgb, var(--vt-ink) 12%, var(--vt-paper));
+  --vt-accent-dk: color-mix(in oklch, var(--vt-accent) 78%, #000);
+  /* colored tints mix in oklch: mixing toward paper in srgb desaturates fast and
+     reads grey; oklch preserves chroma so the soft fills stay clean pastels. */
+  --vt-good-soft: color-mix(in oklch, var(--vt-good) 12%, var(--vt-paper));
+  --vt-bad-soft: color-mix(in oklch, var(--vt-bad) 12%, var(--vt-paper));
+  --vt-warn-soft: color-mix(in oklch, var(--vt-warn) 14%, var(--vt-paper));
+  --vt-accent-soft: color-mix(in oklch, var(--vt-accent) 8%, var(--vt-paper));
+}
+
+/* dark mode — override the 9 base tokens; derived tints + masked icons follow.
+   Auto via prefers-color-scheme; force with [data-theme="dark"]; opt out with [data-theme="light"]. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --vt-ink: #e6e9ee;
+    --vt-muted: #97a2b2;
+    --vt-accent: #5b9dff;
+    --vt-accent-fg: #0b1220;
+    --vt-rule: #2b313b;
+    --vt-paper: #13171d;
+    --vt-good: #3ecf8e;
+    --vt-bad: #ff6b6b;
+    --vt-warn: #f5c451;
+    color-scheme: dark;
+  }
+}
+/* Higher specificity (0,2,0 vs 0,1,0) so this beats an author's flat :root override,
+   keeping dark-mode contrast correct without requiring per-theme author blocks. */
+:root[data-theme="dark"] {
+  --vt-ink: #e6e9ee;
+  --vt-muted: #97a2b2;
+  --vt-accent: #5b9dff;
+  --vt-accent-fg: #0b1220;
+  --vt-rule: #2b313b;
+  --vt-paper: #13171d;
+  --vt-good: #3ecf8e;
+  --vt-bad: #ff6b6b;
+  --vt-warn: #f5c451;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  font-family: Georgia, "Times New Roman", serif;
+  color: var(--vt-ink);
+  margin: 0;
+  background: var(--vt-paper);
+  line-height: 1.6;
+}
+main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+}
+
+/* page shell */
+.vt-kicker {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--vt-accent);
+}
+h1 {
+  font-size: 2.1rem;
+  line-height: 1.2;
+  margin: 0.3rem 0 0.5rem;
+  letter-spacing: -0.01em;
+}
+.vt-lede {
+  font-size: 1.1rem;
+  color: var(--vt-muted);
+  font-style: italic;
+  margin-bottom: 0.5rem;
+}
+.vt-meta {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.85rem;
+  color: var(--vt-muted);
+  margin-bottom: 2.5rem;
+}
+h2 {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 1.25rem;
+  margin-top: 2.8rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 2px solid var(--vt-rule);
+  position: relative;
+}
+h2 .vt-num {
+  color: var(--vt-accent);
+  margin-right: 0.4rem;
+}
+/* section anchor: hidden until the heading is hovered or the link is focused */
+.vt-anchor {
+  margin-left: 0.35rem;
+  color: var(--vt-muted);
+  text-decoration: none;
+  font-weight: 400;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+h2:hover .vt-anchor,
+h3:hover .vt-anchor,
+.vt-anchor:focus-visible {
+  opacity: 1;
+}
+.vt-anchor:hover {
+  color: var(--vt-accent);
+}
+a {
+  color: var(--vt-accent);
+}
+code {
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 0.88em;
+  background: var(--vt-soft);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  white-space: nowrap; /* inline code stays on one line — never break mid-token */
+}
+a code {
+  background: none;
+  padding-inline: 0.1em;
+}
+
+/* callout + tones (themeable SVG tone icons; ::before is decorative, aria-hidden by nature) */
+.vt-callout {
+  position: relative;
+  background: var(--vt-warn-soft);
+  border-left: 4px solid var(--cal-color, var(--vt-warn));
+  padding: 0.9rem 1.1rem 0.9rem 3rem;
+  margin: 1.4rem 0;
+  font-size: 0.97rem;
+  border-radius: 0 8px 8px 0;
+  --cal-color: var(--vt-warn);
+  --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J00xMiA5djQnLz48cGF0aCBkPSdNMTIgMTdoLjAxJy8+PHBhdGggZD0nTTEwLjMgNC4zIDEuOCAxOWEyIDIgMCAwIDAgMS43IDNoMTYuOWEyIDIgMCAwIDAgMS43IC0zTDEzLjcgNC4zYTIgMiAwIDAgMCAtMy40IDB6Jy8+PC9zdmc+");
+}
+.vt-callout::before {
+  content: "";
+  position: absolute;
+  left: 1.1rem;
+  top: 1rem;
+  width: 1.3rem;
+  height: 1.3rem;
+  background-color: var(--cal-color);
+  -webkit-mask: var(--cal-icon) no-repeat center / contain;
+  mask: var(--cal-icon) no-repeat center / contain;
+}
+.vt-callout.warn {
+  background: var(--vt-warn-soft);
+  --cal-color: var(--vt-warn);
+  --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J00xMiA5djQnLz48cGF0aCBkPSdNMTIgMTdoLjAxJy8+PHBhdGggZD0nTTEwLjMgNC4zIDEuOCAxOWEyIDIgMCAwIDAgMS43IDNoMTYuOWEyIDIgMCAwIDAgMS43IC0zTDEzLjcgNC4zYTIgMiAwIDAgMCAtMy40IDB6Jy8+PC9zdmc+");
+}
+.vt-callout.info {
+  background: var(--vt-accent-soft);
+  --cal-color: var(--vt-accent);
+  --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxjaXJjbGUgY3g9JzEyJyBjeT0nMTInIHI9JzknLz48cGF0aCBkPSdNMTIgOGguMDEnLz48cGF0aCBkPSdNMTEgMTJoMXY0aDEnLz48L3N2Zz4=");
+}
+.vt-callout.insight {
+  background: var(--vt-accent-soft);
+  --cal-color: var(--vt-accent);
+  --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J005IDE4aDYnLz48cGF0aCBkPSdNMTAgMjFoNCcvPjxwYXRoIGQ9J00xMiAzYTYgNiAwIDAgMSA0IDEwLjVjLS42LjYtMSAxLjUtMSAyLjVIOWMwLTEtLjQtMS45LTEtMi41QTYgNiAwIDAgMSAxMiAzeicvPjwvc3ZnPg==");
+}
+.vt-callout.success {
+  background: var(--vt-good-soft);
+  --cal-color: var(--vt-good);
+  --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxjaXJjbGUgY3g9JzEyJyBjeT0nMTInIHI9JzknLz48cGF0aCBkPSdNOSAxMmwyIDJsNCAtNCcvPjwvc3ZnPg==");
+}
+.vt-callout.risk {
+  background: var(--vt-bad-soft);
+  --cal-color: var(--vt-bad);
+  --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J004LjMgM0gxNS43TDIxIDguM1YxNS43TDE1LjcgMjFIOC4zTDMgMTUuN1Y4LjNaJy8+PHBhdGggZD0nTTEyIDh2NCcvPjxwYXRoIGQ9J00xMiAxNmguMDEnLz48L3N2Zz4=");
+}
+
+/* table — base */
+.vt-table,
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.93rem;
+  margin: 1rem 0;
+}
+th {
+  text-align: start;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--vt-muted);
+  padding: 0.45rem 0.6rem;
+  border-bottom: 2px solid var(--vt-rule);
+  /* bottom-align so the recommended column's badge sits above without shoving its label out of line */
+  vertical-align: bottom;
+}
+td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--vt-rule);
+  vertical-align: top;
+}
+
+/* table — responsive wrapper + zebra + density */
+.vt-table-wrap {
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+.vt-table-wrap > .vt-table,
+.vt-table-wrap > table {
+  margin: 0;
+}
+.vt-table tbody tr:nth-child(even) {
+  background: var(--vt-stripe);
+}
+.vt-table.compact th,
+.vt-table.compact td {
+  padding: 0.3rem 0.5rem;
+}
+
+/* table — header column (first column = row headers) */
+.vt-table th[scope="row"] {
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.9rem;
+  color: var(--vt-ink);
+  font-weight: 600;
+  white-space: nowrap;
+  /* match td's divider — the generic `th` rule's 2px underline is for thead only */
+  border-bottom: 1px solid var(--vt-rule);
+}
+/* table — comparison-matrix: subdue the row-label column header so data columns read first */
+.vt-table thead th:first-child {
+  color: var(--vt-muted);
+  font-weight: 400;
+}
+
+/* table — cell status: ✓ / ✗ / ~ auto-rendered, tinted, themeable */
+.vt-ok,
+.vt-no,
+.vt-partial {
+  text-align: center;
+  font-weight: 700;
+}
+.vt-ok {
+  color: var(--vt-good);
+  background: var(--vt-good-soft);
+}
+.vt-no {
+  color: var(--vt-bad);
+  background: var(--vt-bad-soft);
+}
+.vt-partial {
+  color: var(--vt-warn);
+  background: var(--vt-warn-soft);
+}
+.vt-ok::before {
+  content: "✓";
+}
+.vt-no::before {
+  content: "✗";
+}
+.vt-partial::before {
+  content: "~";
+}
+/* optional flavor under an icon cell: e.g. ✗ / "rewrite the list" */
+.vt-ok .note,
+.vt-no .note,
+.vt-partial .note {
+  display: block;
+  font-weight: 400;
+  font-size: 0.82rem;
+  color: var(--vt-muted);
+  margin-top: 0.15rem;
+}
+
+/* table — comparison highlight: recommended column via <col> + .vt-th-pick header.
+   The soft background tints text-cell tables, but loses to zebra stripes and to
+   cell fills (.vt-ok/.vt-no) since <col> is the lowest paint layer. The accent
+   side+bottom rails are box-shadow, which paints ABOVE cell/row backgrounds, so
+   the column stays highlighted even when every cell is a status fill. Together
+   with .vt-th-pick's top border this frames the recommended column. */
+.vt-col-pick {
+  background: var(--vt-accent-soft);
+  box-shadow:
+    inset 2px 0 var(--vt-accent),
+    inset -2px 0 var(--vt-accent),
+    inset 0 -2px var(--vt-accent);
+}
+/* .vt-th-pick on the <th> adds the top accent border (border on <col> is unreliable with border-collapse) */
+.vt-th-pick {
+  background: var(--vt-accent-soft);
+  border-top: 3px solid var(--vt-accent);
+}
+.vt-pick-badge {
+  display: block;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.63rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--vt-accent);
+  margin-bottom: 0.18rem;
+}
+
+/* table — row emphasis */
+.vt-row-key {
+  background: var(--vt-accent-soft);
+}
+.vt-row-key th[scope="row"],
+.vt-row-key td:first-child {
+  box-shadow: inset 3px 0 0 var(--vt-accent);
+}
+
+/* table — key/value reference */
+.vt-kv {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.95rem;
+}
+.vt-kv th[scope="row"] {
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.92rem;
+  color: var(--vt-ink);
+  font-weight: 600;
+  width: 30%;
+  padding: 0.5rem 0.7rem 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--vt-rule);
+  border-right: 1px solid var(--vt-rule);
+  background: var(--vt-soft);
+  vertical-align: top;
+  white-space: nowrap;
+}
+.vt-kv td {
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--vt-rule);
+  vertical-align: top;
+}
+
+/* pill — base (accent fill) */
+.vt-pill {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.78rem;
+  color: var(--vt-accent-fg);
+  background: var(--vt-accent);
+  vertical-align: middle;
+}
+
+/* pill — semantic fills */
+.vt-pill.neutral {
+  background: var(--vt-neutral-soft);
+  color: var(--vt-muted);
+}
+.vt-pill.good {
+  background: var(--vt-good);
+  color: var(--vt-accent-fg);
+}
+.vt-pill.bad {
+  background: var(--vt-bad);
+  color: var(--vt-accent-fg);
+}
+.vt-pill.warn {
+  background: var(--vt-warn);
+  color: #000;
+}
+
+/* pill — outline */
+.vt-pill.outline {
+  background: transparent;
+  color: var(--vt-accent);
+  border: 1px solid var(--vt-accent);
+}
+.vt-pill.outline.neutral {
+  color: var(--vt-muted);
+  border-color: var(--vt-muted);
+}
+.vt-pill.outline.good {
+  color: var(--vt-good);
+  border-color: var(--vt-good);
+}
+.vt-pill.outline.bad {
+  color: var(--vt-bad);
+  border-color: var(--vt-bad);
+}
+.vt-pill.outline.warn {
+  color: #9a6b00;
+  border-color: var(--vt-warn);
+}
+
+/* pill — size */
+.vt-pill.sm {
+  font-size: 0.68rem;
+  padding: 0.02rem 0.4rem;
+}
+
+/* pill — status dot */
+.vt-pill.dot::before {
+  content: "●";
+  margin-right: 0.35em;
+  font-size: 0.8em;
+  vertical-align: baseline;
+  color: currentColor;
+}
+
+/* pill — leading icon */
+.vt-pill.ic-check::before {
+  content: "✓";
+  margin-right: 0.3em;
+}
+.vt-pill.ic-warn::before {
+  content: "⚠";
+  margin-right: 0.3em;
+}
+
+/* difficulty / level pills */
+.vt-level {
+  display: inline-block;
+  padding: 0.07rem 0.6rem;
+  border-radius: 999px;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.vt-level::before {
+  content: "●";
+  margin-right: 0.4em;
+  font-size: 0.85em;
+}
+.vt-level.beginner {
+  background: var(--vt-good-soft);
+  color: var(--vt-good);
+}
+.vt-level.intermediate {
+  background: var(--vt-warn-soft);
+  color: #9a6b00;
+}
+.vt-level.advanced {
+  background: var(--vt-bad-soft);
+  color: var(--vt-bad);
+}
+
+/* count / step badge */
+.vt-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: var(--vt-accent);
+  color: var(--vt-accent-fg);
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.vt-badge.sm {
+  width: 1.2rem;
+  height: 1.2rem;
+  font-size: 0.7rem;
+}
+
+/* keyboard keycap */
+.vt-kbd {
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1;
+  display: inline-block;
+  padding: 0.25em 0.5em;
+  background: var(--vt-paper);
+  color: var(--vt-ink);
+  border: 1px solid var(--vt-rule);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  box-shadow: 0 1px 0 var(--vt-rule);
+}
+
+/* checklist (persisted) */
+.vt-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 1.2rem 0;
+}
+.vt-checklist li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.8rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--vt-rule);
+  border-radius: 10px;
+  margin-bottom: 0.6rem;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.vt-checklist li:has(input:checked) {
+  background: var(--vt-good-soft);
+  border-color: var(--vt-good);
+}
+.vt-checklist li:has(input:checked) .vt-step-body {
+  color: var(--vt-muted);
+}
+.vt-checklist input[type="checkbox"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.2rem;
+  accent-color: var(--vt-good);
+  cursor: pointer;
+}
+.vt-step-title {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 0.15rem;
+}
+.vt-step-body {
+  font-size: 0.95rem;
+}
+.vt-progress-bar {
+  height: 6px;
+  background: var(--vt-rule);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 0.4rem 0 0.2rem;
+}
+.vt-progress-bar-fill {
+  height: 100%;
+  background: var(--vt-good);
+  border-radius: 3px;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+.vt-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+.vt-progress {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.85rem;
+  color: var(--vt-muted);
+  margin: 0;
+}
+.vt-reset {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.72rem;
+  color: var(--vt-muted);
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.vt-reset:hover {
+  color: var(--vt-accent);
+}
+.vt-reset:focus-visible {
+  outline: 3px solid var(--vt-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* quiz */
+.vt-quiz {
+  border: 1px solid var(--vt-rule);
+  border-radius: 12px;
+  padding: 1.2rem 1.3rem;
+  margin: 1.3rem 0;
+}
+.vt-quiz p.q {
+  font-weight: bold;
+  margin: 0 0 0.7rem;
+}
+.vt-quiz button.opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 0.95rem;
+  background: var(--vt-soft);
+  border: 1px solid var(--vt-rule);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+  color: var(--vt-ink);
+}
+.vt-quiz button.opt:hover:not(:disabled) {
+  border-color: var(--vt-accent);
+}
+.vt-quiz button.opt:focus-visible {
+  outline: 3px solid var(--vt-accent);
+  outline-offset: 2px;
+}
+.vt-quiz button.opt:disabled {
+  cursor: default;
+}
+.vt-quiz button.opt.correct {
+  background: var(--vt-good-soft);
+  border-color: var(--vt-good);
+}
+.vt-quiz button.opt.wrong {
+  background: var(--vt-bad-soft);
+  border-color: var(--vt-bad);
+}
+.vt-quiz button.opt.selected {
+  border-color: var(--vt-accent);
+  background: var(--vt-accent-soft);
+}
+.vt-quiz .feedback {
+  font-size: 0.92rem;
+  margin-top: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  display: none;
+}
+.vt-quiz .feedback.show {
+  display: block;
+}
+.vt-quiz .feedback.good {
+  background: var(--vt-good-soft);
+}
+.vt-quiz .feedback.bad {
+  background: var(--vt-bad-soft);
+}
+.vt-fb-correct {
+  margin: 0.6rem -0.8rem -0.6rem;
+  padding: 0.55rem 0.8rem;
+  background: var(--vt-good-soft);
+  border-radius: 0 0 8px 8px;
+}
+.vt-quiz-check {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.9rem;
+  margin-top: 0.4rem;
+  padding: 0.45rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--vt-accent);
+  background: var(--vt-accent);
+  color: var(--vt-accent-fg);
+  cursor: pointer;
+}
+.vt-quiz-check:focus-visible {
+  outline: 3px solid var(--vt-accent);
+  outline-offset: 2px;
+}
+.vt-quiz-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* recap + next-CTA */
+.vt-recap {
+  border-radius: 12px;
+  border-left: 4px solid var(--vt-good);
+  background: var(--vt-good-soft);
+  padding: 1rem 1.2rem;
+  margin: 2rem 0 1rem;
+}
+.vt-recap .h {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+/* up-next teaser — plain forward pointer, deliberately NOT a button/link */
+.vt-upnext {
+  color: var(--vt-muted);
+  font-size: 0.9rem;
+  margin: 1.5rem 0 1rem;
+}
+.vt-upnext em {
+  font-style: italic;
+  color: var(--vt-ink);
+}
+
+/* code block */
+.vt-code {
+  border: 1px solid var(--vt-rule);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 1.2rem 0;
+}
+.vt-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.78rem;
+  color: var(--vt-muted);
+  padding: 0.4rem 0.8rem;
+  background: var(--vt-soft);
+  border-bottom: 1px solid var(--vt-rule);
+}
+.vt-code-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--vt-rule);
+  background: var(--vt-paper);
+  color: var(--vt-muted);
+  border-radius: 6px;
+  padding: 0.25rem;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+}
+.vt-code-copy svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.vt-code-copy:hover {
+  color: var(--vt-accent);
+  border-color: var(--vt-accent);
+}
+.vt-code pre {
+  margin: 0;
+  overflow-x: auto;
+  background: none;
+}
+.vt-code pre code {
+  display: block;
+  padding: 0.9rem 1rem;
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  background: none;
+  color: var(--vt-ink);
+  text-shadow: none;
+  white-space: pre; /* block code keeps its newlines + scrolls (overrides inline nowrap) */
+}
+
+/* Prism token theme — written entirely in --vt-* tokens; flips with dark mode automatically */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: var(--vt-muted);
+  font-style: italic;
+}
+.token.punctuation,
+.token.operator {
+  color: var(--vt-muted);
+}
+.token.keyword,
+.token.tag,
+.token.boolean,
+.token.atrule {
+  color: var(--vt-accent);
+  font-weight: 600;
+}
+.token.string,
+.token.attr-value,
+.token.char,
+.token.inserted {
+  color: var(--vt-good);
+}
+/* token colors blend a chromatic color with ink/another hue — keep srgb: oklch
+   interpolates hue even toward near-neutral ink, rotating amber→maroon etc. */
+.token.number,
+.token.constant {
+  color: color-mix(in srgb, var(--vt-warn) 70%, var(--vt-ink));
+}
+.token.function,
+.token.class-name {
+  color: color-mix(in srgb, var(--vt-accent) 50%, var(--vt-bad));
+}
+.token.builtin,
+.token.property,
+.token.attr-name,
+.token.symbol {
+  color: var(--vt-bad);
+}
+.token.deleted {
+  color: var(--vt-bad);
+  text-decoration: line-through;
+}
+.token.selector,
+.token.important,
+.token.bold {
+  font-weight: bold;
+}
+.token.italic {
+  font-style: italic;
+}
+.token.entity,
+.token.url {
+  color: var(--vt-good);
+  text-decoration: underline;
+}
+.token.regex {
+  color: color-mix(in srgb, var(--vt-good) 60%, var(--vt-accent));
+}
+
+/* manual token-emphasis inline variant (pcode) */
+code.vt-pcode {
+  background: var(--vt-accent-soft);
+  color: var(--vt-accent);
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--vt-accent) 25%, transparent);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+}
+
+/* primary-source card — masked SVG book icon (follows --vt-accent; swapped from emoji for OS-independence) */
+.vt-source {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  border-left: 3px solid var(--vt-accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--vt-accent-soft);
+  padding: 0.7rem 0.9rem;
+  margin: 1.2rem 0;
+  font-size: 0.95rem;
+  --src-book: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J00zIDZhOSA5IDAgMCAxIDkgMGE5IDkgMCAwIDEgOSAwdjEzYTkgOSAwIDAgMCAtOSAwYTkgOSAwIDAgMCAtOSAweicvPjxwYXRoIGQ9J00xMiA2djEzJy8+PC9zdmc+");
+}
+.vt-source::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.18rem;
+  background-color: var(--vt-accent);
+  -webkit-mask: var(--src-book) no-repeat center / contain;
+  mask: var(--src-book) no-repeat center / contain;
+}
+.vt-source .h {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+/* shell — meta bar: time / prereqs / difficulty / lesson position */
+.vt-metabar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.85rem;
+  color: var(--vt-muted);
+  margin: 0 0 2rem;
+}
+.vt-metabar .item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.vt-metabar .item + .item {
+  border-left: 1px solid var(--vt-rule);
+  padding-left: 0.9rem;
+}
+.vt-metabar strong {
+  color: var(--vt-ink);
+  font-weight: 600;
+}
+
+/* shell — objectives card */
+.vt-objectives {
+  border-left: 3px solid var(--vt-accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--vt-accent-soft);
+  padding: 0.8rem 1.1rem;
+  margin: 1.5rem 0;
+}
+.vt-objectives .h {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+.vt-objectives ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+.vt-objectives li {
+  margin: 0.25rem 0;
+}
+
+/* shell — mission tie-in */
+.vt-mission {
+  border-left: 3px solid var(--vt-accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--vt-soft);
+  padding: 0.7rem 0.9rem;
+  margin: 1.5rem 0;
+  font-size: 0.95rem;
+}
+.vt-mission strong {
+  color: var(--vt-accent-dk);
+}
+
+/* teacher box (raised: SVG cap, question chips, self-explanation prompt, community pointer) */
+.vt-teacher {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  border: 2px dashed var(--vt-accent);
+  border-radius: 12px;
+  padding: 0.9rem 1.15rem;
+  background: var(--vt-accent-soft);
+  margin: 2rem 0;
+  --teacher-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J00yMiA5TDEyIDVMMiA5bDEwIDRsMTAgLTR2NicvPjxwYXRoIGQ9J002IDEwLjZWMTZjMCAxLjcgMi43IDMgNiAzczYgLTEuMyA2IC0zdi01LjQnLz48L3N2Zz4=");
+}
+.vt-teacher::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 1.8rem;
+  height: 1.8rem;
+  margin-top: 0.1rem;
+  background-color: var(--vt-accent);
+  -webkit-mask: var(--teacher-icon) no-repeat center / contain;
+  mask: var(--teacher-icon) no-repeat center / contain;
+}
+.vt-teacher .h {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+.vt-teacher p {
+  margin: 0.3rem 0;
+  font-size: 0.95rem;
+}
+.vt-asks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.7rem 0 0.1rem;
+}
+.vt-ask {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.83rem;
+  border: 1px solid var(--vt-rule);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  background: var(--vt-paper);
+  color: var(--vt-ink);
+}
+.vt-ask::before {
+  content: "\201C";
+  opacity: 0.5;
+}
+.vt-ask::after {
+  content: "\201D";
+  opacity: 0.5;
+}
+
+/* footer / sources (source-type icons, companion slot, verified-date) */
+.vt-sources {
+  margin-top: 3rem;
+  border-top: 1px solid var(--vt-rule);
+  padding-top: 1rem;
+  color: var(--vt-muted);
+  font-size: 0.85rem;
+}
+.vt-sources .lbl {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.vt-reflist {
+  list-style: none;
+  margin: 0.6rem 0;
+  padding: 0;
+}
+.vt-reflist li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin: 0.4rem 0;
+  line-height: 1.4;
+}
+.vt-reflist .note {
+  color: var(--vt-muted);
+}
+.vt-src-ic {
+  flex: 0 0 auto;
+  width: 0.95rem;
+  height: 0.95rem;
+  align-self: center;
+  background-color: var(--vt-muted);
+  -webkit-mask: var(--src-icon) no-repeat center / contain;
+  mask: var(--src-icon) no-repeat center / contain;
+}
+.vt-src-ic[data-type="spec"] {
+  --src-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J003IDhsLTQgNGw0IDQnLz48cGF0aCBkPSdNMTcgOGw0IDRsLTQgNCcvPjxwYXRoIGQ9J00xNCA0bC00IDE2Jy8+PC9zdmc+");
+}
+.vt-src-ic[data-type="video"] {
+  --src-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxyZWN0IHg9JzMnIHk9JzUnIHdpZHRoPScxOCcgaGVpZ2h0PScxNCcgcng9JzInLz48cGF0aCBkPSdNMTAgOWw1IDNsLTUgM3onLz48L3N2Zz4=");
+}
+.vt-src-ic[data-type="forum"] {
+  --src-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J00yMSAxNGEyIDIgMCAwIDEgLTIgMkg3bC00IDRWNmEyIDIgMCAwIDEgMiAtMmgxNGEyIDIgMCAwIDEgMiAyeicvPjwvc3ZnPg==");
+}
+.vt-src-ic[data-type="doc"] {
+  --src-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J00xNCAzdjRhMSAxIDAgMCAwIDEgMWg0Jy8+PHBhdGggZD0nTTE3IDIxSDdhMiAyIDAgMCAxIC0yIC0yVjVhMiAyIDAgMCAxIDIgLTJoN2w1IDV2MTFhMiAyIDAgMCAxIC0yIDJ6Jy8+PHBhdGggZD0nTTkgMTNoNicvPjxwYXRoIGQ9J005IDE3aDYnLz48L3N2Zz4=");
+}
+.vt-src-ic[data-type="book"] {
+  --src-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J00zIDZhOSA5IDAgMCAxIDkgMGE5IDkgMCAwIDEgOSAwdjEzYTkgOSAwIDAgMCAtOSAwYTkgOSAwIDAgMCAtOSAweicvPjxwYXRoIGQ9J00xMiA2djEzJy8+PC9zdmc+");
+}
+.vt-companion {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.9rem;
+  padding-top: 0.8rem;
+  border-top: 1px dashed var(--vt-rule);
+}
+.vt-companion .vt-src-ic {
+  width: 1.05rem;
+  height: 1.05rem;
+  background-color: var(--vt-accent);
+}
+.vt-companion a {
+  font-weight: 600;
+}
+.vt-sources .meta {
+  margin-top: 0.7rem;
+  font-size: 0.78rem;
+  color: var(--vt-muted);
+}
+
+/* ====== diagram vocabulary ====== */
+
+/* panel / canvas */
+.vt-diagram {
+  background: var(--vt-soft);
+  border: 1px solid var(--vt-rule);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin: 1.4rem 0;
+  overflow-x: auto;
+}
+
+/* inline SVG: responsive + inherit --vt-ink so currentColor strokes theme with light/dark */
+.vt-diagram svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  color: var(--vt-ink);
+}
+
+.vt-diagram-caption {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.8rem;
+  color: var(--vt-muted);
+  text-align: center;
+  margin-top: 0.9rem;
+  letter-spacing: 0.02em;
+}
+
+/* node / box — labeled card.
+   inline-block (not inline-flex column) so <sup>/<sub> stay as baseline-
+   shifted inline text rather than collapsing onto a separate flex-item row. */
+.vt-node,
+.vt-box {
+  display: inline-block;
+  vertical-align: middle;
+  background: var(--vt-paper);
+  border: 1.5px solid var(--vt-rule);
+  border-radius: 8px;
+  padding: 0.55rem 1rem;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.88rem;
+  text-align: center;
+  min-width: 5.5rem;
+  line-height: 1.35;
+}
+
+/* emphasis variants */
+.vt-node.em,
+.vt-box.em {
+  background: var(--vt-accent-soft);
+  border-color: var(--vt-accent);
+  font-weight: 600;
+  color: var(--vt-accent);
+}
+
+.vt-node.muted,
+.vt-box.muted {
+  background: var(--vt-soft);
+  border-color: var(--vt-rule);
+  color: var(--vt-muted);
+}
+
+/* flow — row with auto arrow connectors between direct children.
+   Wraps to multiple rows for long sequences; the JS markFlowRows pass
+   suppresses the leading → on the first item of each wrapped row. */
+.vt-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 1rem 0;
+}
+
+.vt-flow > .vt-row-start {
+  margin-inline-start: 0;
+}
+
+.vt-flow > .vt-row-start::before {
+  content: none;
+}
+
+/* arrow before every child that follows another child */
+.vt-flow > * + * {
+  position: relative;
+  margin-inline-start: 1.6rem;
+}
+
+.vt-flow > * + *::before {
+  content: "→";
+  position: absolute;
+  inset-inline-start: -1.4rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1rem;
+  color: var(--vt-muted);
+  pointer-events: none;
+  line-height: 1;
+}
+
+[dir="rtl"] .vt-flow > * + *::before,
+.vt-flow[dir="rtl"] > * + *::before {
+  content: "←";
+}
+
+/* flex playground — pure display:flex container, no injected separators.
+   Use for layout demos (justify-content, align-items). vt-flow is for
+   sequences; vt-flex is for showing flex behavior. */
+.vt-flex {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin: 0.8rem 0;
+  padding: 0.6rem;
+  border: 1px dashed var(--vt-rule);
+  border-radius: 8px;
+  min-height: 3.2rem;
+}
+
+.vt-flex-item {
+  padding: 0.4rem 0.85rem;
+  background: var(--vt-soft);
+  border: 1px solid var(--vt-rule);
+  border-radius: 6px;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+/* justify-content modifiers */
+.vt-flex.jc-start {
+  justify-content: flex-start;
+}
+.vt-flex.jc-end {
+  justify-content: flex-end;
+}
+.vt-flex.jc-center {
+  justify-content: center;
+}
+.vt-flex.jc-between {
+  justify-content: space-between;
+}
+.vt-flex.jc-around {
+  justify-content: space-around;
+}
+.vt-flex.jc-evenly {
+  justify-content: space-evenly;
+}
+
+/* align-items modifiers */
+.vt-flex.ai-start {
+  align-items: flex-start;
+}
+.vt-flex.ai-end {
+  align-items: flex-end;
+}
+.vt-flex.ai-center {
+  align-items: center;
+}
+.vt-flex.ai-stretch {
+  align-items: stretch;
+}
+
+/* row / col — lane layout */
+.vt-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  align-items: flex-start;
+  margin: 0.8rem 0;
+}
+
+.vt-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  flex: 1 1 8rem;
+}
+
+/* row — keep items on one line (e.g. the five fields of a cron expression read
+   "* * * * *", never wrapped). Scrolls horizontally if it overflows. */
+.vt-row.nowrap {
+  flex-wrap: nowrap;
+  justify-content: center;
+  overflow-x: auto;
+}
+.vt-row.nowrap > .vt-col {
+  flex: 0 0 auto;
+}
+
+.vt-col-label,
+.vt-split-label {
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--vt-muted);
+  overflow-wrap: break-word; /* prevent long labels from clipping at the panel edge */
+}
+
+.vt-col-label {
+  margin-bottom: 0.2rem;
+}
+
+/* split — before / after two-panel */
+.vt-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+@media (max-width: 480px) {
+  .vt-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.vt-split-panel {
+  background: var(--vt-paper);
+  border: 1px solid var(--vt-rule);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  min-width: 0; /* grid items default to min-width:auto; 0 lets them shrink so inner vt-code scrolls */
+}
+
+.vt-split-label {
+  margin-bottom: 0.5rem;
+  font-weight: 700;
+}
+
+.vt-split-panel.before {
+  border-color: var(--vt-bad);
+}
+.vt-split-panel.after {
+  border-color: var(--vt-good);
+}
+.vt-split-panel.before .vt-split-label {
+  color: var(--vt-bad);
+}
+.vt-split-panel.after .vt-split-label {
+  color: var(--vt-good);
+}
+
+/* io — paired input→output code block */
+.vt-io {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  margin: 1.2rem 0;
+}
+
+@media (max-width: 600px) {
+  .vt-io {
+    grid-template-columns: 1fr;
+  }
+}
+
+.vt-io-input,
+.vt-io-output {
+  border: 1px solid var(--vt-rule);
+  border-radius: 10px;
+  overflow: hidden;
+  min-width: 0; /* allow grid children to shrink so long lines scroll, not clip */
+}
+
+.vt-io-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.78rem;
+  color: var(--vt-muted);
+  padding: 0.4rem 0.8rem;
+  background: var(--vt-soft);
+  border-bottom: 1px solid var(--vt-rule);
+}
+
+.vt-io-output .vt-io-head {
+  background: var(--vt-good-soft);
+}
+
+.vt-io pre {
+  margin: 0;
+  overflow-x: auto;
+  background: none;
+}
+
+.vt-io pre code {
+  display: block;
+  padding: 0.9rem 1rem;
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  background: none;
+  color: var(--vt-ink);
+  text-shadow: none;
+  white-space: pre;
+}
+
+/* ====== math (KaTeX) ====== */
+/* Display math block — uses --vt-ink so dark/light theming is automatic. */
+.vt-math {
+  margin: 1.2rem 0;
+  overflow-x: auto;
+  color: var(--vt-ink);
+}
+
+/* vt-eq: centered display-equation variant with its own type sizing.
+   Combine with vt-math: class="vt-math vt-eq" for a prominent formula. */
+.vt-eq {
+  text-align: center;
+  font-size: 1.35rem;
+}
+
+/* KaTeX defaults to 1.21em; reset to match surrounding prose */
+.katex {
+  font-size: 1em;
+}
+
+/* mermaid computed-graph container (populated by assets/mermaid.js) */
+.vt-mermaid {
+  margin: 1.4rem 0;
+  overflow-x: auto;
+  text-align: center;
+  background: var(--vt-soft);
+  border: 1px solid var(--vt-rule);
+  border-radius: 10px;
+  padding: 1rem;
+}
+.vt-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ====== print ====== */
+@media print {
+  .vt-quiz button,
+  .vt-reset {
+    display: none;
+  }
+  .vt-diagram {
+    border: 1px solid #ccc;
+    background: none;
+  }
+  .vt-node,
+  .vt-box {
+    border: 1px solid #ccc;
+  }
+  .vt-split {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* ====== forced-colors (Windows High Contrast / any forced-colors mode) ====== */
+@media (forced-colors: active) {
+  /* Callout tones: the SVG mask icon collapses to a single monochrome slab;
+     add a distinct text label per tone so they remain semantically distinguishable. */
+  .vt-callout.warn::after,
+  .vt-callout.info::after,
+  .vt-callout.insight::after,
+  .vt-callout.success::after,
+  .vt-callout.risk::after {
+    position: absolute;
+    top: 0.8rem;
+    left: 0.45rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .vt-callout.warn::after {
+    content: "⚠";
+  }
+  .vt-callout.info::after {
+    content: "ℹ";
+  }
+  .vt-callout.insight::after {
+    content: "💡";
+  }
+  .vt-callout.success::after {
+    content: "✓";
+  }
+  .vt-callout.risk::after {
+    content: "⛔";
+  }
+
+  /* Quiz per-option state: background/border-color both forced away; prepend a glyph. */
+  .vt-quiz button.opt.correct::before {
+    content: "✓ ";
+  }
+  .vt-quiz button.opt.wrong::before {
+    content: "✗ ";
+  }
+
+  /* Semantic pills: color is forced away; prepend a short text prefix. */
+  .vt-pill.good::before {
+    content: "✓ ";
+  }
+  .vt-pill.bad::before {
+    content: "✗ ";
+  }
+  .vt-pill.warn::before {
+    content: "! ";
+  }
+
+  /* vt-level: all three levels share the same ● glyph; make each distinct. */
+  .vt-level.beginner::before {
+    content: "○";
+  }
+  .vt-level.intermediate::before {
+    content: "◑";
+  }
+  .vt-level.advanced::before {
+    content: "●";
+  }
+
+  /* vt-node.em / vt-box.em: emphasis relies on background + accent color; add a visible outline. */
+  .vt-node.em,
+  .vt-box.em {
+    outline: 2px solid ButtonText;
+    outline-offset: 2px;
+  }
+}
+
+/* ====== prefers-reduced-motion ====== */
+@media (prefers-reduced-motion: reduce) {
+  /* Gate the progress-bar width animation so it does not run for users who opt out of motion. */
+  .vt-progress-bar-fill {
+    transition: none;
+  }
+}
