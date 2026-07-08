@@ -1,0 +1,33 @@
+# Run `uv run pre-commit autoupdate` after copying to pin revs to current.
+repos:
+  # Upstream, isolated: ruff runs in its own env (doesn't need your deps).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.13
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # Upstream hygiene. check-added-large-files matters for data repos (stops a
+  # stray CSV/checkpoint landing in git).
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+
+  # Local + system: ty must run in YOUR venv to resolve project imports —
+  # an isolated env wouldn't have your dependencies.
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty check
+        entry: uv run ty check
+        language: system
+        types: [python]
+        pass_filenames: false
+
+# pytest is deliberately absent — too slow for every commit, and blocking
+# commits trains --no-verify. It runs in CI (authoritative) instead.

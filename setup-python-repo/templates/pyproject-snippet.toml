@@ -1,0 +1,63 @@
+# Merge these blocks into the pyproject.toml that `uv init --lib` created.
+# Do NOT overwrite the [project] table uv wrote — only add requires-python to it.
+
+[project]
+requires-python = ">=3.14"
+
+# --- ruff (lint + format) ---
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+# Curated allowlist (predictable gate > maximal). NOT select=["ALL"].
+select = [
+  "E", "F", "I", "B", "UP",   # errors, pyflakes, imports, bugbear, pyupgrade
+  "SIM", "RUF",               # simplify, ruff-native
+  "C4", "PIE", "PERF",        # comprehensions, misc, perf
+  "PT", "A", "PTH",           # pytest-style, builtins-shadowing, pathlib
+  "S", "N", "ANN", "RET", "ISC",  # security, naming, annotations, returns, str-concat
+]
+ignore = [
+  "N803", "N806",  # capital-X feature matrices are a data-science idiom
+]
+# Note: the formatter owns ISC001. If ruff warns about the conflict, add "ISC001"
+# here — ISC002/ISC003 still carry their weight.
+
+[tool.ruff.lint.per-file-ignores]
+"*_test.py" = ["S101", "ANN"]  # asserts ARE pytest; tests don't need full annotations
+
+# --- ty (type check) ---
+# No strict mode. error-on-warning is the churn-proof strictness lever (beta:
+# don't hardcode a per-rule bump list — new releases would break it).
+[tool.ty.environment]
+python-version = "3.14"
+root = ["./src"]
+
+[tool.ty.terminal]
+error-on-warning = true
+
+[[tool.ty.overrides]]
+include = ["**/*_test.py"]
+
+[tool.ty.overrides.rules]
+deprecated = "ignore"  # tests exercise deprecated APIs on purpose
+
+# --- pytest (hardened) ---
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config"
+xfail_strict = true
+
+# --- coverage (soft — reported, not a hard wall) ---
+[tool.coverage.run]
+branch = true
+
+# --- wheel: don't ship interleaved test files ---
+# uv init --lib uses the uv_build backend. source-exclude keeps *_test.py out of
+# the built wheel (verified empirically). If the repo uses a different backend
+# (hatchling/setuptools), use that backend's exclude instead.
+[tool.uv.build-backend]
+source-exclude = ["**/*_test.py"]
+
+# NOTE: dev tools live in [dependency-groups] dev — but `uv add --dev` already
+# wrote that table. Do NOT add a second one here (duplicate key = TOML error).
+# Expected dev group: ruff, ty, pytest, pytest-cov, hypothesis, pre-commit.

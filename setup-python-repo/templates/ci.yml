@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0   # pin to current tag at setup time
+        with:
+          enable-cache: true
+
+      - name: Sync (includes dev group)
+        run: uv sync
+
+      # Same config as the local hooks — no bash mirror to keep in sync.
+      - name: Pre-commit (ruff + ty + hygiene)
+        run: uv run pre-commit run --all-files
+
+      - name: Pytest
+        run: uv run pytest

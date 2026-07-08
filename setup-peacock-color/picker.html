@@ -1,0 +1,42 @@
+<title>Peacock color picker</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.5 system-ui, sans-serif; display: grid; place-items: center;
+         min-height: 90vh; gap: 1.25rem; margin: 0; }
+  .swatch { width: min(80vw, 320px); height: 160px; border-radius: 16px;
+            box-shadow: 0 6px 24px #0004; display: grid; place-items: center;
+            font-weight: 700; letter-spacing: .04em; }
+  input[type=color] { width: 96px; height: 48px; border: none; background: none; cursor: pointer; }
+  .hex { font: 700 1.4rem ui-monospace, monospace; user-select: all; }
+  .group { display: grid; gap: 4px; justify-items: center; }
+  .group .label { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; opacity: .55; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 360px; }
+  .presets button { width: 32px; height: 32px; border-radius: 8px; border: 2px solid #8884; cursor: pointer; }
+  .hint { opacity: .7; font-size: .85rem; text-align: center; max-width: 320px; }
+</style>
+<div class="swatch" id="sw"><span id="fg">preview</span></div>
+<input type="color" id="pick" value="#9580ff">
+<div class="hex" id="hex">#9580ff</div>
+<div class="group"><span class="label">Dracula Pro</span><div class="presets" id="dracula"></div></div>
+<div class="group"><span class="label">Pastel</span><div class="presets" id="pastel"></div></div>
+<div class="hint">Pick a base color, then tell Claude the hex shown above.</div>
+<script>
+  const dracula = [["#9580ff","Purple"],["#ff80bf","Pink"],["#80ffea","Cyan"],["#8aff80","Green"],
+                   ["#ffca80","Orange"],["#ff9580","Red"],["#ffff80","Yellow"]];
+  // Curated, characterful pastels — a couple dusty/muted so it isn't just tinted rainbow.
+  const pastel = [["#a8e6cf","Mint"],["#c3a6e0","Wisteria"],["#f7b7a3","Melon"],["#eec6d3","Blush"],
+                  ["#a3b9f0","Periwinkle"],["#bcd9e0","Powder"],["#e8d59e","Butter"],["#b6c99b","Sage"],
+                  ["#e0a6a0","Dusty Rose"],["#9ed6c4","Seafoam"],["#d4b8a0","Sand"],["#c9d6a3","Pistachio"]];
+  const pick = document.getElementById('pick'), hex = document.getElementById('hex'),
+        sw = document.getElementById('sw'), fg = document.getElementById('fg');
+  function lum(h){const n=parseInt(h.slice(1),16),r=(n>>16)/255,g=(n>>8&255)/255,b=(n&255)/255;
+    const f=v=>v>.03928?((v+.055)/1.055)**2.4:v/12.92; return .2126*f(r)+.7152*f(g)+.4152*f(b);}
+  function render(v){ hex.textContent=v; sw.style.background=v;
+    const ink = lum(v)>.35 ? "#15141b" : "#f8f8f2"; sw.style.color=ink; fg.textContent=v; }
+  pick.addEventListener('input', e => render(e.target.value));
+  function fill(id, colors){ const box=document.getElementById(id);
+    colors.forEach(([c,name]) => { const b=document.createElement('button'); b.style.background=c;
+      b.title=name+" "+c; b.onclick=()=>{ pick.value=c; render(c); }; box.appendChild(b); }); }
+  fill('dracula', dracula); fill('pastel', pastel);
+  render(pick.value);
+</script>
