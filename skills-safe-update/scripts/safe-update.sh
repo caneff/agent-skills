@@ -13,7 +13,16 @@ if [ ! -d .git ]; then
   echo "initialized git buffer in $SKILLS"
 fi
 
+# the live lock sits OUTSIDE this repo (npx writes it to the skills-dir parent),
+# so it isn't backed up by git on its own. Mirror it into the repo at each
+# snapshot — PRE holds the old lock, POST the new — so the remote fully
+# reconstructs a run. Kept as a plain tracked copy (not a symlink: npx's
+# atomic-rename writes would clobber a symlink with a regular file silently).
+LOCK="${SKILL_LOCK:-$(dirname "$SKILLS")/.skill-lock.json}"
+snap_lock(){ [ -f "$LOCK" ] && cp "$LOCK" "$SKILLS/.skill-lock.json"; }
+
 # 2. snapshot current state (so PRE holds your edits)
+snap_lock
 git add -A
 git commit -qm "pre-update snapshot $(date +%F)" >/dev/null 2>&1 || true
 PRE=$(git rev-parse HEAD)
@@ -23,14 +32,14 @@ PRE=$(git rev-parse HEAD)
 # upstream version. Read it AFTER npx (as we used to) and npx has already
 # rewritten it to the NEW upstream — making every updated skill look edited.
 PRELOCK=$(mktemp)
-LOCK="${SKILL_LOCK:-$(dirname "$SKILLS")/.skill-lock.json}"
 [ -f "$LOCK" ] && python3 -c "import json;d=json.load(open('$LOCK')).get('skills',{});[print(k+chr(9)+v.get('skillFolderHash','')) for k,v in d.items()]" > "$PRELOCK"
 
 # 3. update through the package manager
 echo "running: npx skills update -g"
 npx -y skills update -g
 
-# 4. record upstream result
+# 4. record upstream result (npx rewrote the live lock — mirror the new one in)
+snap_lock
 git add -A
 if ! git commit -qm "upstream: skills update $(date +%F)" >/dev/null 2>&1; then
   echo "no upstream changes."; exit 0

@@ -86,6 +86,7 @@ If you want to force-protect a skill the auto-detector can't see (e.g. a hand-ma
 ## Notes
 
 - This skill is hand-maintained, not installed via `npx skills`, so it has no lockfile entry and the package manager leaves it alone.
+- The live lockfile lives outside the skills repo (npx writes it to the skills-dir parent). `safe-update.sh` mirrors it into the repo as a tracked `.skill-lock.json` at each snapshot — PRE the old lock, POST the new — so a run reconstructs fully from the git remote. The live file stays authoritative; the in-repo copy is backup only.
 - After a clean review, you're already committed — the git buffer stays current for next time.
 - Lockfile drift (entries for deleted skills, or skills you added by hand) is a separate one-time cleanup, not handled here: drop dead entries and add untracked ones in `~/.agents/.skill-lock.json`. `skills-status.sh` flags the **ORPHAN** case; [Follow renames & moves](#after-the-pull-follow-renames--moves) resolves it (rename/move/removal) instead of leaving it for hand-cleanup.
 - Distinct from `skills-sync` — that skill only reconciles `~/.agents/skills` bodies ↔ `~/.claude/skills` symlinks. It knows nothing about upstream; it's the final symlink-repair step here, not the updater.
