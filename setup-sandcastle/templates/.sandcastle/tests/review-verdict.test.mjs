@@ -1,5 +1,10 @@
 import { test, expect, describe } from "vitest";
-import { parseSpecVerdict, isHarnessError } from "../review-verdict.mts";
+import {
+  parseSpecVerdict,
+  parseStandardsVerdict,
+  combineVerdicts,
+  isHarnessError,
+} from "../review-verdict.mts";
 
 // The reviewer emits a sentinel line because sandbox.run has no structured
 // output (issue #130). Gate on an EXPLICIT FAIL only; everything else passes.
@@ -38,6 +43,86 @@ describe("parseSpecVerdict", () => {
 
   test("the word FAIL elsewhere (not the sentinel) does not trip the gate", () => {
     expect(parseSpecVerdict("the test suite did not FAIL\n").pass).toBe(true);
+  });
+});
+
+// The standards judge emits its own sentinel line, gated identically to spec:
+// only an explicit `SANDCASTLE_STANDARDS: FAIL` blocks; PASS or a missing
+// sentinel is fail-open. (Ticket #2 — additive parsing, nothing wired yet.)
+describe("parseStandardsVerdict", () => {
+  test("explicit PASS → pass", () => {
+    expect(
+      parseStandardsVerdict("checked standards\nSANDCASTLE_STANDARDS: PASS\n")
+    ).toEqual({ pass: true, reason: "" });
+  });
+
+  test("explicit FAIL → not pass, captures the reason line", () => {
+    const v = parseStandardsVerdict(
+      "notes...\nSANDCASTLE_STANDARDS: FAIL — no error handling on the DB call\n"
+    );
+    expect(v.pass).toBe(false);
+    expect(v.reason).toContain("no error handling on the DB call");
+  });
+
+  test("no verdict at all → pass (fail-open on a missing sentinel)", () => {
+    expect(parseStandardsVerdict("standards judge said nothing").pass).toBe(
+      true
+    );
+  });
+
+  test("a bare FAIL elsewhere does not trip the standards gate", () => {
+    expect(
+      parseStandardsVerdict("the linter did not FAIL on this diff\n").pass
+    ).toBe(true);
+  });
+
+  test("the spec sentinel does not trip the standards gate", () => {
+    expect(parseStandardsVerdict("SANDCASTLE_SPEC: FAIL — x\n").pass).toBe(true);
+  });
+});
+
+// The combined helper folds the two isolated judges' verdicts into one gate:
+// overall pass only if both axes pass, and it names which axis (or axes) failed
+// plus the captured reason so the re-implement pass gets targeted context.
+describe("combineVerdicts", () => {
+  const pass = { pass: true, reason: "" };
+
+  test("both pass → overall pass, no failing axes", () => {
+    expect(combineVerdicts(pass, pass)).toEqual({
+      pass: true,
+      failedAxes: [],
+      reasons: {},
+    });
+  });
+
+  test("spec fails → overall fail, spec axis named with its reason", () => {
+    const spec = { pass: false, reason: "SANDCASTLE_SPEC: FAIL — AC2 missing" };
+    const v = combineVerdicts(spec, pass);
+    expect(v.pass).toBe(false);
+    expect(v.failedAxes).toEqual(["spec"]);
+    expect(v.reasons.spec).toContain("AC2 missing");
+    expect(v.reasons.standards).toBeUndefined();
+  });
+
+  test("standards fails → overall fail, standards axis named", () => {
+    const standards = {
+      pass: false,
+      reason: "SANDCASTLE_STANDARDS: FAIL — unhandled promise",
+    };
+    const v = combineVerdicts(pass, standards);
+    expect(v.pass).toBe(false);
+    expect(v.failedAxes).toEqual(["standards"]);
+    expect(v.reasons.standards).toContain("unhandled promise");
+  });
+
+  test("both fail → overall fail, both axes named in spec-then-standards order", () => {
+    const spec = { pass: false, reason: "SANDCASTLE_SPEC: FAIL — a" };
+    const standards = { pass: false, reason: "SANDCASTLE_STANDARDS: FAIL — b" };
+    const v = combineVerdicts(spec, standards);
+    expect(v.pass).toBe(false);
+    expect(v.failedAxes).toEqual(["spec", "standards"]);
+    expect(v.reasons.spec).toContain("a");
+    expect(v.reasons.standards).toContain("b");
   });
 });
 

@@ -15,10 +15,52 @@ export interface SpecVerdict {
   reason: string;
 }
 
-export function parseSpecVerdict(stdout: string): SpecVerdict {
+// A single judge's verdict — both axes share this shape.
+export type AxisVerdict = SpecVerdict;
+
+export function parseSpecVerdict(stdout: string): AxisVerdict {
   const fail = stdout.match(/^SANDCASTLE_SPEC:\s*FAIL\b.*$/m);
   if (fail) return { pass: false, reason: fail[0].trim() };
   return { pass: true, reason: "" };
+}
+
+// The standards judge is gated identically to spec, on its own sentinel line
+// (`SANDCASTLE_STANDARDS: PASS` / `... FAIL — <reason>`). Same fail-open rule:
+// only an explicit FAIL blocks; a PASS or a missing sentinel passes.
+export function parseStandardsVerdict(stdout: string): AxisVerdict {
+  const fail = stdout.match(/^SANDCASTLE_STANDARDS:\s*FAIL\b.*$/m);
+  if (fail) return { pass: false, reason: fail[0].trim() };
+  return { pass: true, reason: "" };
+}
+
+export type ReviewAxis = "spec" | "standards";
+
+export interface CombinedVerdict {
+  // Overall gate: passes only when both axes pass.
+  pass: boolean;
+  // Which axes failed, in [spec, standards] order; empty when pass.
+  failedAxes: ReviewAxis[];
+  // The captured FAIL line for each failing axis, keyed by axis.
+  reasons: Partial<Record<ReviewAxis, string>>;
+}
+
+// Fold the two isolated judges' verdicts into one gate. The re-implement pass
+// reads failedAxes + reasons as targeted context for the fixes it must apply.
+export function combineVerdicts(
+  spec: AxisVerdict,
+  standards: AxisVerdict
+): CombinedVerdict {
+  const failedAxes: ReviewAxis[] = [];
+  const reasons: Partial<Record<ReviewAxis, string>> = {};
+  if (!spec.pass) {
+    failedAxes.push("spec");
+    reasons.spec = spec.reason;
+  }
+  if (!standards.pass) {
+    failedAxes.push("standards");
+    reasons.standards = standards.reason;
+  }
+  return { pass: failedAxes.length === 0, failedAxes, reasons };
 }
 
 // Distinguish a broken-harness fault from a genuine review failure.
