@@ -2,6 +2,7 @@
 name: setup-peacock-color
 description: Set a VS Code Peacock window color for the current repo — writes .vscode/settings.json with a base color plus all derived activity/status/title-bar customizations. Shows an interactive color picker artifact, or accepts a hex/color name directly. Use when the user wants to color/theme a VS Code window per-repo, mentions Peacock, or says "give this repo a color".
 when_to_use: When the user wants to set or change the Peacock color of a repo's VS Code window. Especially in WSL/SSH/remote windows, where the peacock.remoteColor key is required and easy to forget.
+disable-model-invocation: true
 ---
 
 # setup-peacock-color

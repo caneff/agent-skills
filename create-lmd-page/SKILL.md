@@ -1,6 +1,7 @@
 ---
 name: create-lmd-page
 description: Generate a Logic Masters Deutschland puzzle page (HTML) from a ruleset, a SudokuPad link, and an image id. Use when the user wants to create/format an LMD puzzle post, says "create lmd page", "/create-lmd-page", or gives a new ruleset + sudokupad link for a puzzle page.
+disable-model-invocation: true
 ---
 
 # Create LMD Page

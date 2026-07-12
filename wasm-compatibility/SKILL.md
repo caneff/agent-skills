@@ -1,6 +1,7 @@
 ---
 name: wasm-compatibility
 description: Check if a marimo notebook is compatible with WebAssembly (WASM) and report any issues.
+disable-model-invocation: true
 ---
 
 # WASM Compatibility Checker for marimo Notebooks
