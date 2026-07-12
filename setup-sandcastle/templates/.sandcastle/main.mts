@@ -12,9 +12,11 @@
 //                               (the forest); a child branch carries its parent's
 //                               commits but never an unrelated chain's. The
 //                               implementer runs first (100 iterations); if
-//                               there's work on the branch a reviewer runs in the
-//                               same sandbox (1 iteration). All issue pipelines
-//                               run concurrently via Promise.allSettled().
+//                               there's work on the branch two read-only judges
+//                               (Spec + Standards) run in the same sandbox (1
+//                               iteration each), committing nothing. All issue
+//                               pipelines run concurrently via
+//                               Promise.allSettled().
 //   Phase 3 (Open PRs):         The host splits the run's completed issues into
 //                               connected dependency components and opens ONE PR
 //                               per component: it merges each component's leaf
@@ -48,7 +50,12 @@ import {
   buildMultiParentBase,
 } from "./base-resolution.mts";
 import { prComponents, CompletedIssue } from "./pr-components.mts";
-import { parseSpecVerdict, isHarnessError } from "./review-verdict.mts";
+import {
+  parseSpecVerdict,
+  parseStandardsVerdict,
+  combineVerdicts,
+  isHarnessError,
+} from "./review-verdict.mts";
 import {
   classifyInReviewIssue,
   decideInReviewAction,
@@ -650,32 +657,70 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           ) ?? "(issue text unavailable)";
 
         try {
-          const review = await sandbox.run({
-            name: "reviewer",
-            logging: logging("reviewer", issue.branch),
+          // Two read-only judges replace the single committing reviewer (#1):
+          // a Spec judge and a Standards judge, each in its own isolated context
+          // so neither sees the other's working notes. Both diff against this
+          // issue's resolved base — its parent's branch or main. The base is
+          // immutable for the issue's lifetime in the forest, so the judges see
+          // only THIS issue's commits, not the parent chain it was stacked on.
+          // Can't reuse the built-in TARGET_BRANCH arg — sandcastle reserves it
+          // and pins it to the host branch (main), which would leak the parent
+          // chain's commits into the diff. Neither judge writes the branch; the
+          // implementer is the sole writer. Run them sequentially — both are
+          // read-only, so order is irrelevant.
+          const specReview = await sandbox.run({
+            name: "spec-reviewer",
+            logging: logging("spec-reviewer", issue.branch),
             maxIterations: 1,
             agent: sandcastle.claudeCode("claude-sonnet-5"),
-            promptFile: "./.sandcastle/review-prompt.md",
-            // Diff against this issue's resolved base — its parent's branch or
-            // main. The base is immutable for the issue's lifetime in the forest,
-            // so the reviewer sees only THIS issue's commits, not the parent
-            // chain it was stacked on. Can't reuse the built-in TARGET_BRANCH arg
-            // — sandcastle reserves it and pins it to the host branch (main),
-            // which would leak the parent chain's commits into the diff.
+            promptFile: "./.sandcastle/review-spec-prompt.md",
             promptArgs: {
               BRANCH: issue.branch,
               REVIEW_BASE: base,
               ISSUE_SPEC: `#${issue.id} ${issueSpec}`,
             },
           });
-          // Spec-conformance gate (#130): sandbox.run has no structured output,
-          // so the reviewer emits a sentinel line. An explicit FAIL means the
-          // branch does not satisfy the issue — re-implement it (handled in the
-          // outcome loop), do not accept it as done.
-          const verdict = parseSpecVerdict(review.stdout);
-          if (!verdict.pass) {
+          const standardsReview = await sandbox.run({
+            name: "standards-reviewer",
+            logging: logging("standards-reviewer", issue.branch),
+            maxIterations: 1,
+            agent: sandcastle.claudeCode("claude-sonnet-5"),
+            promptFile: "./.sandcastle/review-standards-prompt.md",
+            promptArgs: {
+              BRANCH: issue.branch,
+              REVIEW_BASE: base,
+            },
+          });
+          // Each judge emits a sentinel line (sandbox.run has no structured
+          // output, #130). Fail-open per axis: only an explicit FAIL blocks.
+          const specVerdict = parseSpecVerdict(specReview.stdout);
+          const standardsVerdict = parseStandardsVerdict(standardsReview.stdout);
+          const combined = combineVerdicts(specVerdict, standardsVerdict);
+          if (!combined.pass) {
+            // Post the failing judges' findings so the re-implement pass — the
+            // sole writer — gets targeted context. Route through the existing
+            // spec-fail path (shared REVIEW_RETRY_CAP; escalates to
+            // ready-for-human at the cap).
+            const sections: string[] = [];
+            if (!specVerdict.pass)
+              sections.push(`### Spec axis — FAIL\n\n${specReview.stdout.trim()}`);
+            if (!standardsVerdict.pass)
+              sections.push(
+                `### Standards axis — FAIL\n\n${standardsReview.stdout.trim()}`
+              );
+            const body =
+              `## Sandcastle review — changes requested\n\n` +
+              `This branch was reviewed read-only on two axes; the axes below ` +
+              `failed. Re-implement to address the findings (don't just silence ` +
+              `the verdict line).\n\n` +
+              sections.join("\n\n");
+            const findingsFile = `.sandcastle/logs/review-findings-${issue.id}.md`;
+            writeFileSync(findingsFile, body);
+            gh(`issue comment ${issue.id} --body-file ${findingsFile}`);
             console.warn(
-              `  ⚠ ${issue.id} failed spec review: ${verdict.reason}`
+              `  ⚠ ${issue.id} failed review (${combined.failedAxes.join(
+                ", "
+              )})`
             );
             return { issue, kind: "spec-fail" as const };
           }
