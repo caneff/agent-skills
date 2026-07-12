@@ -44,8 +44,10 @@ export interface CombinedVerdict {
   reasons: Partial<Record<ReviewAxis, string>>;
 }
 
-// Fold the two isolated judges' verdicts into one gate. The re-implement pass
-// reads failedAxes + reasons as targeted context for the fixes it must apply.
+// Fold the two isolated judges' verdicts into one gate. `pass` and `failedAxes`
+// drive routing and the findings comment the orchestrator posts; `reasons`
+// carries each failing axis's one-line FAIL summary for any caller that wants it
+// (the orchestrator posts the judges' fuller stdout instead).
 export function combineVerdicts(
   spec: AxisVerdict,
   standards: AxisVerdict
