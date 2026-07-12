@@ -6,9 +6,9 @@ import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
-const promptPath = join(repoRoot, ".sandcastle", "review-prompt.md");
+const promptPath = join(repoRoot, ".sandcastle", "review-standards-prompt.md");
 
-// Step 6 of review-prompt.md loads each CODING_STANDARDS.md conditionally,
+// The standards judge loads each CODING_STANDARDS.md conditionally,
 // keyed on what the branch diff touches (issue #172). The conditional logic
 // lives in `!`bash`` snippets of the form
 //   git diff --name-only ... | grep -qE '<pattern>' && cat <file>
@@ -67,7 +67,7 @@ const SANDCASTLE_MARKER = readFileSync(
   "utf8"
 ).split("\n")[0];
 
-describe("review-prompt step 6: diff-aware CODING_STANDARDS loading", () => {
+describe("review-standards-prompt: diff-aware CODING_STANDARDS loading", () => {
   test("a diff under src/ loads the project standards only", () => {
     const out = runSnippets(["src/rag_bootcamp/pipeline.py"]);
     expect(out).toContain(ROOT_MARKER);
