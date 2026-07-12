@@ -6,6 +6,7 @@ description: >-
   changes. Use when the user wants to start a marimo notebook or pair on an
   active marimo session.
 allowed-tools: Bash(bash **/scripts/discover-servers.sh *), Bash(bash **/scripts/execute-code.sh *), Read
+disable-model-invocation: true
 ---
 
 marimo is a reactive Python runtime for building reproducible Python programs

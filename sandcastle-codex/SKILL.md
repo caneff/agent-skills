@@ -1,6 +1,7 @@
 ---
 name: sandcastle-codex
 description: Use a Codex/ChatGPT subscription (not an OpenAI API key) when running Sandcastle's Codex agent in a sandbox. Use when the user wants Sandcastle's codex agent to authenticate with their ChatGPT/Codex subscription, mentions subscription/ChatGPT auth for Codex, wants to avoid an OPENAI_API_KEY, or hits "Quota exceeded" running Codex in a Sandcastle sandbox.
+disable-model-invocation: true
 ---
 
 # Sandcastle Codex — use a subscription instead of an API key

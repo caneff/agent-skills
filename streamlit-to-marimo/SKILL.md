@@ -1,6 +1,7 @@
 ---
 name: streamlit-to-marimo
 description: Convert a Streamlit app to a marimo notebook
+disable-model-invocation: true
 ---
 
 # Converting Streamlit Apps to Marimo

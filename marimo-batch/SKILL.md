@@ -1,6 +1,7 @@
 ---
 name: marimo-batch
 description: An opintionated skill to prepare a marimo notebook to make it ready for a scheduled run.
+disable-model-invocation: true
 ---
 
 Pydantic is a great way to declare a source of truth for a batch job, especially for ML. You can declare something like: 

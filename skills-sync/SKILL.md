@@ -1,6 +1,7 @@
 ---
 name: skills-sync
 description: Report and optionally repair drift between the two skill directories (~/.agents/skills canonical bodies, ~/.claude/skills symlinks). Use when a skill seems half-installed, a ~/.claude/skills entry is a real dir instead of a symlink, after manually adding/moving a skill, or to audit that every canonical body is exposed to Claude.
+disable-model-invocation: true
 ---
 
 # skills-sync

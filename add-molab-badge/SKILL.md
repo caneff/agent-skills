@@ -1,6 +1,7 @@
 ---
 name: add-molab-badge
 description: Add "Open in molab" badge(s) linking to marimo notebooks. Works with READMEs, docs, websites, or any markdown/HTML target.
+disable-model-invocation: true
 ---
 
 # Add molab badge

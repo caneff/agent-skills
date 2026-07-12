@@ -6,6 +6,7 @@ description: >-
   notes.
 metadata:
   visibility: exported
+disable-model-invocation: true
 ---
 
 ## Installed Mode

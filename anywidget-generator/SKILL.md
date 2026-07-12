@@ -1,6 +1,7 @@
 ---
 name: anywidget-generator
 description: Generate anywidget components for marimo notebooks.
+disable-model-invocation: true
 ---
 
 When writing an anywidget use vanilla javascript in `_esm` and do not forget about `_css`. The css should look bespoke in light mode and dark mode. Keep the css small unless explicitly asked to go the extra mile. When you display the widget it must be wrapped via `widget = mo.ui.anywidget(OriginalAnywidget())`. You can also point `_esm` and `_css` to external files if needed using pathlib. This makes sense if the widget does a lot of elaborate JavaScript or CSS.
