@@ -108,5 +108,6 @@ echo "DIGEST_PRE=$PRE"
 echo "DIGEST_POST=$POST"
 echo "DIGEST_SKILLS_DIR=$SKILLS"
 echo "DIGEST_CHANGED=$(echo $changed | tr '\n' ' ')"
+echo "DIGEST_KEPT=${kept[*]:-}"
 echo
 echo "undo everything:  git -C $SKILLS reset --hard $PRE"

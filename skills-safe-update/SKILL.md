@@ -26,6 +26,7 @@ The script emits anchors on its last lines for you:
 ```
 DIGEST_PRE=<sha>          DIGEST_POST=<sha>
 DIGEST_SKILLS_DIR=<dir>   DIGEST_CHANGED=<space-separated skill names>
+DIGEST_KEPT=<space-separated protected skill names>
 ```
 
 Then:
@@ -35,7 +36,20 @@ Then:
    git -C <DIGEST_SKILLS_DIR> --no-pager diff <DIGEST_PRE> <DIGEST_POST> -- <skill>/SKILL.md <skill>/*.md
    ```
 2. Write the digest as a short list: **one line per skill that meaningfully changed, in plain English — what changed and why it matters**, not a file stat. Collapse repeated mechanical changes (e.g. "every skill gained an `agents/openai.yaml` OpenAI variant") into a single cross-cutting line.
-3. Call out the **Kept-local** skills separately: their upstream delta was NOT applied, so flag anything the user is now missing and worth reviewing by hand.
+
+## Resolve protected conflicts (required, interactive)
+
+The protected (`DIGEST_KEPT`) skills kept YOUR version — the update reverted every upstream change to files that already existed in them (protection is whole-file, not a line-merge; only brand-new upstream files survive). Do NOT leave this as a passive "review by hand" note. For **each** kept skill:
+
+1. Read what upstream actually changed and was dropped:
+   ```bash
+   git -C <DIGEST_SKILLS_DIR> --no-pager diff <DIGEST_PRE> <DIGEST_POST> -- <skill>
+   ```
+2. Determine whether upstream changed anything **beyond** the inverse of your local edit. If the entire `PRE..POST` diff is just upstream removing/reverting the exact line(s) you added, there is **no real conflict** — drop that skill silently, don't surface it, don't ask about it. Only skills where upstream changed something *else* are worth discussing.
+3. For the skills that genuinely conflict: tell the user in plain English what upstream changed AND what your local edit was — distinguish the two — then **ask** whether to resolve: pull upstream in, keep local as-is, or hand-merge. Make a default recommendation from the diff. One question covering all real conflicts, not one per skill.
+4. On "resolve": hand-merge — apply the upstream file (`git checkout <DIGEST_POST> -- <skill>/<file>`), then re-graft the local edit so its intent survives, verify both are present, and commit. Never blindly overwrite the local edit away.
+
+If step 2 drops every kept skill (all upstream did was strip your customizations), say nothing about conflicts — there's nothing to discuss.
 
 Keep it tight. The user wants to know what changed in the pipeline, not read a diff.
 
