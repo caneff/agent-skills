@@ -4,11 +4,6 @@ description: "Implement a piece of work based on a spec or set of tickets."
 disable-model-invocation: true
 ---
 
-Before implementing, create and switch to a new git worktree for this work
-(use the EnterWorktree tool, or `git worktree add`). If already in a dedicated
-worktree for this task, stay there. All work happens in the worktree, never the
-original checkout.
-
 Implement the work described by the user in the spec or tickets.
 
 Use /tdd where possible, at pre-agreed seams.
@@ -17,4 +12,4 @@ Run typechecking regularly, single test files regularly, and the full test suite
 
 Once done, use /code-review to review the work.
 
-Commit your work to the worktree's branch.
+Commit your work to the current branch.
