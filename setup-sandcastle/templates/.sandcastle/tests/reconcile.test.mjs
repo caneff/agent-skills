@@ -59,6 +59,7 @@ const makeOpts = (overrides = {}) => ({
   sweepInjected: new Set(),
   sweepRequeued: new Set(),
   prAssignments: new Map(),
+  blockedByParentConflict: new Map(),
   ...overrides,
 });
 
@@ -200,6 +201,35 @@ describe("bucketIssues", () => {
     expect(result[0]).toMatchObject({ bucket: "ready-for-agent" });
   });
 
+  test("multi-parent conflict block → blocked-parent-conflict, carries parents (#64)", () => {
+    // #62 still holds its ready-for-agent label but was aborted this run.
+    const result = bucketIssues(
+      makeOpts({
+        openIssues: [
+          { number: 62, title: "purge facts", labels: ["ready-for-agent"] },
+        ],
+        blockedByParentConflict: new Map([["62", ["60", "61"]]]),
+      })
+    );
+    expect(result[0]).toMatchObject({
+      bucket: "blocked-parent-conflict",
+      blockedParents: ["60", "61"],
+    });
+  });
+
+  test("block takes precedence over the ready-for-agent label (#64)", () => {
+    // Same issue NOT in the block map falls through to ready-for-agent — proves
+    // the block, not the label, is what redirects it.
+    const result = bucketIssues(
+      makeOpts({
+        openIssues: [
+          { number: 62, title: "purge facts", labels: ["ready-for-agent"] },
+        ],
+      })
+    );
+    expect(result[0]).toMatchObject({ bucket: "ready-for-agent" });
+  });
+
   test("empty issue list → empty result", () => {
     expect(bucketIssues(makeOpts())).toEqual([]);
   });
@@ -250,6 +280,31 @@ describe("buildRunSummary", () => {
       { number: 6, title: "b", bucket: "human-gated-untriaged" },
     ];
     const out = buildRunSummary(bucketed);
+    expect(out).toMatch(/all.+human.gated|nothing left for the bot/i);
+  });
+
+  test("parent-conflict block names the parents a human must merge (#64)", () => {
+    const out = buildRunSummary([
+      {
+        number: 62,
+        title: "purge facts",
+        bucket: "blocked-parent-conflict",
+        blockedParents: ["60", "61"],
+      },
+    ]);
+    expect(out).toContain("parents #60, #61 conflict");
+    expect(out).toMatch(/merge upstream first/);
+  });
+
+  test("a parent-conflict block counts as human-gated (nothing left for the bot) (#64)", () => {
+    const out = buildRunSummary([
+      {
+        number: 62,
+        title: "purge facts",
+        bucket: "blocked-parent-conflict",
+        blockedParents: ["60", "61"],
+      },
+    ]);
     expect(out).toMatch(/all.+human.gated|nothing left for the bot/i);
   });
 });

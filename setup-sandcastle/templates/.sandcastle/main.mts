@@ -442,6 +442,16 @@ const headBranch = git("rev-parse --abbrev-ref HEAD") ?? "main";
 // Phase 3 head merge.
 const allCompleted: CompletedIssue[] = [];
 
+// Issues aborted this run because their multi-parent base could not be built:
+// two declared parents conflict when merged (issue #64). Parent branches are
+// static across a run's iterations, so the merge fails identically every time —
+// re-attempting burns iterations for nothing. We block the issue for the rest of
+// THIS run (no GitHub label: the block evaporates next run, and self-heals once a
+// human merges the conflicting parents into main). Map value is the conflicting
+// parent ids, so the run summary can name them. Authoritative hard gate; the
+// planner is also told (BLOCKED_THIS_RUN) so it stops re-selecting them.
+const blockedThisRun = new Map<string, string[]>();
+
 // Phase 0: clear pending review comments on open sandcastle PRs before taking
 // on new issue work. Once per run — humans don't comment mid-run, so a
 // per-iteration sweep would only re-scan the same set. Set SANDCASTLE_SKIP_ADDRESS=1
@@ -503,6 +513,20 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
             })
             .join("\n")
         : "(none yet — first iteration)",
+      // Issues aborted this run by a deterministic multi-parent conflict (#64).
+      // They cannot be built until a human merges their conflicting parents, so
+      // the planner must NOT re-select them this run. Belt-and-suspenders: the
+      // host also hard-drops them from `work` above.
+      BLOCKED_THIS_RUN: blockedThisRun.size
+        ? [...blockedThisRun]
+            .map(
+              ([id, parents]) =>
+                `- #${id} — parents ${parents
+                  .map((p) => `#${p}`)
+                  .join(", ")} conflict; do not select`
+            )
+            .join("\n")
+        : "(none)",
     },
     // Extract and validate the <plan> JSON into a typed object. Throws
     // StructuredOutputError if the tag is missing, the JSON is malformed, or
@@ -524,7 +548,9 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // local state with no index lag — filter against it.
   const handled = new Set(allCompleted.map((i) => i.id));
   const fresh = plan.output.issues
-    .filter((i) => !handled.has(i.id))
+    // Also drop issues blocked this run by a multi-parent conflict (#64) — the
+    // hard gate, in case the planner re-selects one despite BLOCKED_THIS_RUN.
+    .filter((i) => !handled.has(i.id) && !blockedThisRun.has(i.id))
     .map((i) => ({
       ...i,
       mode: "full" as const,
@@ -578,10 +604,15 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           buildMultiParentBase(issue.id, ps, { git, branchExistsWithWork }),
       });
       if (base === null) {
+        // Deterministic conflict: the parents conflict with each other, so this
+        // fails identically every iteration. Block the issue for the rest of the
+        // run (see blockedThisRun) instead of re-skipping to the iteration cap —
+        // it needs a human to merge the parents upstream first (#64).
+        blockedThisRun.set(issue.id, parents);
         console.error(
           `  ✗ ${issue.id} multi-parent base merge conflicted (${parents
             .map((p) => `#${p}`)
-            .join(", ")}); skipping this iteration, will retry next time`
+            .join(", ")}); blocked this run — merge parents upstream first`
         );
         return { issue, kind: "nothing" as const };
       }
@@ -999,6 +1030,7 @@ gcWorktrees();
     sweepInjected,
     sweepRequeued,
     prAssignments,
+    blockedByParentConflict: blockedThisRun,
   });
   const summary = buildRunSummary(bucketed);
   console.log(summary);

@@ -32,6 +32,16 @@ These issues were completed earlier in this same run. Their code is **already me
 
 **Override rule:** if an issue in the "in flight" list above _also_ appears here, it is in your base — treat it as a satisfied dependency, **not** a blocker. An issue whose only blockers are listed here is **UNBLOCKED**: select it and it will be stacked on top of that work.
 
+# BLOCKED THIS RUN (do NOT select — a human must act first)
+
+These issues have two or more parents whose branches conflict when merged. The conflict is deterministic — it fails identically every iteration — so they cannot be built this run until a human merges the conflicting parents upstream. **Do not select any issue listed here**, even if it otherwise looks unblocked.
+
+<blocked-this-run>
+
+{{BLOCKED_THIS_RUN}}
+
+</blocked-this-run>
+
 # TASK
 
 Analyze the issues and build a dependency graph. For each `ready-for-agent` issue, determine whether it **is blocked by** any other open issue — whether that other issue is `ready-for-agent` or already **in flight** (the list above) — **except** issues listed under "ALREADY DONE THIS RUN", which are satisfied dependencies you build on, never blockers.
