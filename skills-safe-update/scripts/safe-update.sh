@@ -77,8 +77,36 @@ if [ ${#restored[@]} -gt 0 ]; then
 fi
 
 # 6. summary
+# Categorize every skill that changed upstream (PRE..POST). Restored ones net to
+# zero across PRE..HEAD, so they'd vanish from a PRE..HEAD stat — compute against
+# POST and label them explicitly instead.
+changed=$(git --no-pager diff --name-only "$PRE" "$POST" | cut -d/ -f1 | sort -u | grep -v '^\.skill-lock\.json$' || true)
+declare -A RESTORED_SET
+for s in "${restored[@]:-}"; do [ -n "$s" ] && RESTORED_SET[$s]=1; done
+
 echo
-echo "=== what changed (vs before update) ==="
-git --no-pager diff --stat "$PRE" HEAD
+echo "=== update summary ==="
+updated=(); kept=()
+for s in $changed; do
+  if [ -n "${RESTORED_SET[$s]:-}" ]; then kept+=("$s"); else updated+=("$s"); fi
+done
+echo "Updated from upstream (${#updated[@]}):"
+for s in "${updated[@]:-}"; do [ -n "$s" ] && echo "  $s"; done
+if [ ${#kept[@]} -gt 0 ]; then
+  echo "Kept your local edits — upstream delta NOT applied (${#kept[@]}):"
+  for s in "${kept[@]}"; do echo "  $s   (review: git -C $SKILLS diff $PRE $POST -- $s)"; done
+fi
+
+echo
+echo "=== per-skill changes (upstream, PRE..POST) ==="
+git --no-pager diff --stat "$PRE" "$POST" -- $changed
+
+# Machine-readable anchors for the digest step (SKILL.md reads these to write the
+# plain-English summary). Keep the exact key names — the skill greps for them.
+echo
+echo "DIGEST_PRE=$PRE"
+echo "DIGEST_POST=$POST"
+echo "DIGEST_SKILLS_DIR=$SKILLS"
+echo "DIGEST_CHANGED=$(echo $changed | tr '\n' ' ')"
 echo
 echo "undo everything:  git -C $SKILLS reset --hard $PRE"
