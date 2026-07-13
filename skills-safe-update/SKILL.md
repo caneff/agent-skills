@@ -17,6 +17,28 @@ bash scripts/safe-update.sh     # do the update, preserving edits
 
 Both run against `~/.agents/skills` (override with `SKILLS_DIR=...`).
 
+## Always digest the result (required)
+
+`safe-update.sh` prints raw name-lists and a `--stat`. That is NOT the deliverable. After it finishes, **read the actual diffs and give the user a plain-English digest** — this step runs every time, not on request.
+
+The script emits anchors on its last lines for you:
+
+```
+DIGEST_PRE=<sha>          DIGEST_POST=<sha>
+DIGEST_SKILLS_DIR=<dir>   DIGEST_CHANGED=<space-separated skill names>
+```
+
+Then:
+
+1. For each changed skill, read its content diff — prose files only, skip pure boilerplate:
+   ```bash
+   git -C <DIGEST_SKILLS_DIR> --no-pager diff <DIGEST_PRE> <DIGEST_POST> -- <skill>/SKILL.md <skill>/*.md
+   ```
+2. Write the digest as a short list: **one line per skill that meaningfully changed, in plain English — what changed and why it matters**, not a file stat. Collapse repeated mechanical changes (e.g. "every skill gained an `agents/openai.yaml` OpenAI variant") into a single cross-cutting line.
+3. Call out the **Kept-local** skills separately: their upstream delta was NOT applied, so flag anything the user is now missing and worth reviewing by hand.
+
+Keep it tight. The user wants to know what changed in the pipeline, not read a diff.
+
 ## Check status first (read-only)
 
 `safe-update.sh` only knows the **edit** axis (your copy vs the lock) and learns it mid-update. `scripts/skills-status.sh` adds the second axis the lockfile alone hides — your copy vs **current upstream** — and mutates nothing, so run it before deciding to update:
