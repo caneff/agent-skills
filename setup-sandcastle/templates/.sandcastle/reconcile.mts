@@ -67,6 +67,7 @@ export type BucketName =
   | "human-gated-untriaged" // open, no lifecycle label
   | "in-flight-needs-review" // implemented; reviewer errored; pending re-review
   | "ready-for-agent" // queued for agent; may be blocked by dependencies
+  | "blocked-parent-conflict" // ≥2 parents conflict; needs a human merge (#64)
   | "uncategorized"; // BUG: should not happen
 
 export interface BucketedIssue {
@@ -74,12 +75,16 @@ export interface BucketedIssue {
   title: string;
   bucket: BucketName;
   prNumber?: number; // set for built-this-run / repaired-sweep-pr
+  blockedParents?: string[]; // conflicting parent ids, for blocked-parent-conflict
 }
 
 const HUMAN_GATED_BUCKETS = new Set<BucketName>([
   "human-gated-pr",
   "human-gated-ready-for-human",
   "human-gated-untriaged",
+  // A parent-conflict block needs a human to merge the parents — from the bot's
+  // view it is gated on a human, so "nothing left for the bot" stays accurate.
+  "blocked-parent-conflict",
 ]);
 const IN_FLIGHT_BUCKETS = new Set<BucketName>(["in-flight-needs-review"]);
 
@@ -93,11 +98,25 @@ export function bucketIssues(options: {
   sweepRequeued: Set<string>;
   // issue id → PR number, set during Phase 3
   prAssignments: Map<string, number>;
+  // issue id → conflicting parent ids: aborted this run because its multi-parent
+  // base could not be built (#64). Still carries its ready-for-agent label, so it
+  // must be caught before the label buckets below.
+  blockedByParentConflict: Map<string, string[]>;
 }): BucketedIssue[] {
   return options.openIssues.map((issue) => {
     const id = String(issue.number);
     const labelSet = new Set(issue.labels);
     const prNumber = options.prAssignments.get(id);
+
+    const blockedParents = options.blockedByParentConflict.get(id);
+    if (blockedParents) {
+      return {
+        number: issue.number,
+        title: issue.title,
+        bucket: "blocked-parent-conflict",
+        blockedParents,
+      };
+    }
 
     // A requeued-but-not-PR'd issue reports re-queued. Requeue happens two ways:
     // up front in the sweep (stale branch deleted) or post-Phase-3 (its merge
@@ -171,7 +190,13 @@ export function buildRunSummary(bucketed: BucketedIssue[]): string {
     items
       .map((i) => {
         const pr = prSuffix && i.prNumber != null ? ` → PR #${i.prNumber}` : "";
-        return `  #${i.number} — ${i.title}${pr}`;
+        // For a parent-conflict block, name the parents a human must merge.
+        const blocked = i.blockedParents?.length
+          ? ` — parents ${i.blockedParents
+              .map((p) => `#${p}`)
+              .join(", ")} conflict; merge upstream first`
+          : "";
+        return `  #${i.number} — ${i.title}${pr}${blocked}`;
       })
       .join("\n");
 
@@ -193,6 +218,10 @@ export function buildRunSummary(bucketed: BucketedIssue[]): string {
     "human-gated-untriaged"
   );
   section("In-flight: needs-review", "in-flight-needs-review");
+  section(
+    "Blocked: parent conflict (human must merge parents)",
+    "blocked-parent-conflict"
+  );
   section("Available (queued / blocked)", "ready-for-agent");
 
   const bugs = byBucket.get("uncategorized") ?? [];
