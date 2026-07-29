@@ -4,10 +4,20 @@ description: "Implement a piece of work based on a spec or set of tickets."
 disable-model-invocation: true
 ---
 
-Before implementing, create and switch to a new git worktree for this work
-(use the EnterWorktree tool, or `git worktree add`). If already in a dedicated
-worktree for this task, stay there. All work happens in the worktree, never the
-original checkout.
+Before creating the worktree, check the original checkout is clean
+(`git status`). The worktree branches from the pushed main, so anything left
+uncommitted there is invisible inside it — and copying it across leaves two
+copies of the same file to diverge and collide when the branch ships.
+
+Tracker and spec files are the usual offenders, since editing a ticket is not
+itself worktree work. Commit those to main and push them before starting; they
+are documents with nothing to break. Uncommitted *code* means work in progress
+that a ticket branch should not silently absorb — stop and ask.
+
+Then create and switch to a new git worktree for this work (use the
+EnterWorktree tool, or `git worktree add`). If already in a dedicated worktree
+for this task, stay there. All work happens in the worktree, never the original
+checkout.
 
 Implement the work described by the user in the spec or tickets.
 

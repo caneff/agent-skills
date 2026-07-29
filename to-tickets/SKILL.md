@@ -114,4 +114,6 @@ The end-to-end behaviour this ticket makes work, from the user's perspective —
 
 In either form, avoid specific file paths or code snippets — they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
 
+Publishing local ticket files, and amending them later, both change tracked files in the working checkout. Commit and push them to main before the next `/implement` — that command branches from the pushed main, so an uncommitted ticket edit is either missing inside the worktree or duplicated into it, and a duplicate that then advances on the branch conflicts when the work ships.
+
 Work the frontier one ticket at a time with `/implement`, clearing context between tickets.
