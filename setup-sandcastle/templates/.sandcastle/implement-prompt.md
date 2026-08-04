@@ -35,8 +35,8 @@ exact "crap tests" `/tdd` warns against.
 
 - **No new behavior** (deletion / refactor / docs / config): skip red-green. Make
   the change, then assert the end-state as plain verification (or just confirm the
-  existing suite still passes). Do not manufacture a test file to have something
-  to go RED on.
+  tests covering what you touched still pass — see FEEDBACK LOOPS). Do not
+  manufacture a test file to have something to go RED on.
 - **New behavior**: use the **`/tdd` skill** and follow it — do not improvise
   your own test rhythm. Its load-bearing rules:
   one vertical slice at a time (RED: one failing test → GREEN: minimal code to
@@ -46,7 +46,19 @@ exact "crap tests" `/tdd` warns against.
 
 # FEEDBACK LOOPS
 
-Before committing, run `just check` to ensure lint, type checks, and tests pass.
+Before each commit, run a **fast scoped check** — not the full `just check`:
+
+- `just lint` and `just typecheck` — both are fast and cover the whole repo.
+- The tests for the code you touched: run `git diff --name-only` (plus
+  `git status --porcelain` for untracked new files) to see what changed, map
+  those paths to their test files, and run only those with
+  `uv run pytest <files>`.
+
+This is a git-diff heuristic, not a test-impact tool — when unsure whether a
+test is affected, include it. The full suite is **not** your per-commit gate:
+the Phase-3 gate runs `just check` on the set's merged head before any PR
+opens, and PR CI runs it again. Your job here is a fast local check, not the
+full run.
 
 # COMMIT
 
