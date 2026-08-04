@@ -486,6 +486,7 @@ function initKatex() {
           { left: "\\(", right: "\\)", display: false },
           { left: "\\[", right: "\\]", display: true },
         ],
+        ignoredClasses: ["katex", "vt-math"],
         throwOnError: false,
       });
     } catch (e) {

@@ -405,6 +405,19 @@ print(re.findall(r'\d+', 'abc 123 def 456'))</code></pre>
 Vendor KaTeX into `assets/katex/` (already included). Link the CSS and scripts
 **before** `visual-teach.js`; `initKatex()` runs automatically on `DOMContentLoaded`.
 
+> **A `<!DOCTYPE html>` on line 1 is REQUIRED for inline math.** Without it
+> the browser renders in quirks mode, and KaTeX's `render()` (the
+> auto-render path used for `\(...\)` inline math) refuses outright —
+> every inline formula stays as raw LaTeX while `.vt-math` display blocks
+> (rendered via `renderToString`) still work, which makes the failure easy
+> to misdiagnose. All lessons should start with `<!DOCTYPE html>`.
+
+> **Link order matters:** `katex.min.css` must come **before**
+> `visual-teach.css` in the `<head>`. KaTeX's stylesheet sets
+> `.katex { font: … 1.21em … }`; visual-teach resets it to `1em` to match
+> prose, and the reset only wins if it loads later. katex.css after
+> visual-teach.css → all inline math renders 21% oversized.
+
 ```html
 <link rel="stylesheet" href="../assets/katex/katex.min.css" />
 <script src="../assets/katex/katex.min.js"></script>
