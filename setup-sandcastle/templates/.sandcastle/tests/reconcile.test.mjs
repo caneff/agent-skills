@@ -4,6 +4,7 @@ import {
   bucketIssues,
   buildRunSummary,
   decideInReviewAction,
+  planGateOutcome,
 } from "../reconcile.mts";
 
 // ---------------------------------------------------------------------------
@@ -306,6 +307,49 @@ describe("buildRunSummary", () => {
       },
     ]);
     expect(out).toMatch(/all.+human.gated|nothing left for the bot/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// planGateOutcome — Phase-3 full-suite gate (#24). pass opens; any non-pass
+// requeues and comments the failing tail on every issue in the set.
+// ---------------------------------------------------------------------------
+describe("planGateOutcome", () => {
+  const set = ["101", "102", "103"];
+
+  test("pass → open, no comments", () => {
+    const plan = planGateOutcome({ status: "pass", tail: "" }, set);
+    expect(plan).toEqual({ action: "open", commentIssueIds: [] });
+  });
+
+  test("test-fail → requeue, comment on every issue in the set", () => {
+    const plan = planGateOutcome(
+      { status: "test-fail", tail: "FAIL foo.test.ts" },
+      set
+    );
+    expect(plan.action).toBe("requeue");
+    expect(plan.commentIssueIds).toEqual(set);
+  });
+
+  test("harness-error → requeue, comment on every issue in the set", () => {
+    const plan = planGateOutcome(
+      { status: "harness-error", tail: "sandbox unavailable" },
+      set
+    );
+    expect(plan.action).toBe("requeue");
+    expect(plan.commentIssueIds).toEqual(set);
+  });
+
+  test("a green single-issue set opens with no comments", () => {
+    expect(planGateOutcome({ status: "pass", tail: "" }, ["9"])).toEqual({
+      action: "open",
+      commentIssueIds: [],
+    });
+  });
+
+  test("does not alias the caller's set array", () => {
+    const plan = planGateOutcome({ status: "test-fail", tail: "" }, set);
+    expect(plan.commentIssueIds).not.toBe(set);
   });
 });
 
