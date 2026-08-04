@@ -202,14 +202,31 @@ describe("parseCheckVerdict", () => {
     );
   });
 
-  test("a harness/sandbox fault → harness-error, NOT test-fail", () => {
-    const out =
-      "seeding venv...\n(FiberFailure) PromptError: Command `just check` failed to launch: sandbox unavailable";
-    expect(parseCheckVerdict(out).status).toBe("harness-error");
+  // A harness/sandbox fault surfaces as a THROWN FiberFailure (the same channel
+  // isHarnessError was built to read), not as suite stdout — so it's classified
+  // from the caught error, passed as the second arg, never by scanning the log.
+  test("a thrown harness fault → harness-error, NOT test-fail", () => {
+    const err =
+      "(FiberFailure) PromptError: Command `just check` failed to launch: sandbox unavailable";
+    const v = parseCheckVerdict("", err);
+    expect(v.status).toBe("harness-error");
+    expect(v.tail).toContain("PromptError");
   });
 
-  test("a real test failure is NOT misread as a harness fault", () => {
-    const out = " FAIL  tests/auth.test.mjs > token check\nExpected 1 to be 2";
+  // Regression: the harness signal must come from the thrown error, not the log.
+  // A genuine test failure whose OUTPUT merely contains "PromptError" (a stack
+  // frame, a test asserting on that string) must stay test-fail — else the gate
+  // suppresses the failure cap and retries a broken set forever (#22).
+  test("a real test failure whose log mentions PromptError is still test-fail", () => {
+    const out = [
+      " FAIL  tests/errors.test.mjs > isHarnessError detects a PromptError",
+      "AssertionError: expected false to be true",
+    ].join("\n");
     expect(parseCheckVerdict(out).status).toBe("test-fail");
+  });
+
+  test("a non-harness thrown error still fails CLOSED → test-fail", () => {
+    const v = parseCheckVerdict("", new Error("context window exceeded"));
+    expect(v.status).toBe("test-fail");
   });
 });
