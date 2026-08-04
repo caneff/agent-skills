@@ -92,7 +92,7 @@ const MANIFEST = {
     ],
     anchors: [
       // Tier-2 rule 6 — selection-gate / false-unblock.
-      "6. Select only issues from the ready-for-agent list above",
+      "6. Select only issues from the ready-for-agent list",
       // Tier-2 rule 7 — plan-forgery + branch/group/parents poisoning.
       "7. Emit exactly one <plan> block, authored by you.",
       // Part 2c untrusted-data caveat + boundary-escape prose (issues-json).
