@@ -4,6 +4,7 @@ import {
   parseStandardsVerdict,
   combineVerdicts,
   isHarnessError,
+  parseCheckVerdict,
 } from "../review-verdict.mts";
 
 // The reviewer emits a sentinel line because sandbox.run has no structured
@@ -147,5 +148,68 @@ describe("isHarnessError", () => {
   test("null / undefined are not harness faults", () => {
     expect(isHarnessError(null)).toBe(false);
     expect(isHarnessError(undefined)).toBe(false);
+  });
+});
+
+// Unlike the reviewer verdicts (an agent opinion, fail-OPEN on a missing
+// sentinel), the full-suite gate is a safety gate and fails CLOSED: a `pass`
+// requires the affirmative `SANDCASTLE_CHECK: PASS` sentinel the gate wrapper
+// echoes only when `just check` exits zero. Anything else is `test-fail`.
+describe("parseCheckVerdict", () => {
+  test("a green run (PASS sentinel present) → pass, no tail", () => {
+    const out = [
+      "✓ tests/foo.test.mjs (3)",
+      "Test Files  4 passed (4)",
+      "SANDCASTLE_CHECK: PASS",
+    ].join("\n");
+    expect(parseCheckVerdict(out)).toEqual({ status: "pass", tail: "" });
+  });
+
+  test("a failing run (no PASS sentinel) → test-fail, tail names the failing tests", () => {
+    const out = [
+      "RUN  v4.1.9",
+      " ✓ tests/math.test.mjs (2)",
+      " FAIL  tests/auth.test.mjs > login rejects an expired token",
+      " FAIL  tests/auth.test.mjs > logout clears the session",
+      "AssertionError: expected 401 to be 200",
+      "Test Files  1 failed | 1 passed (2)",
+    ].join("\n");
+    const v = parseCheckVerdict(out);
+    expect(v.status).toBe("test-fail");
+    expect(v.tail).toContain("login rejects an expired token");
+    expect(v.tail).toContain("logout clears the session");
+  });
+
+  test("a huge failing log is bounded — the whole thing never passes through", () => {
+    const huge = Array.from(
+      { length: 5000 },
+      (_, i) => ` FAIL  tests/big.test.mjs > case ${i}`
+    ).join("\n");
+    const v = parseCheckVerdict(huge);
+    expect(v.status).toBe("test-fail");
+    expect(v.tail.split("\n").length).toBeLessThanOrEqual(60);
+    // The failing tail is a small fraction of the 5000-line log.
+    expect(v.tail.length).toBeLessThan(huge.length / 10);
+  });
+
+  test("empty output fails CLOSED → test-fail (a crashed check is not green)", () => {
+    expect(parseCheckVerdict("").status).toBe("test-fail");
+  });
+
+  test("garbled output with no sentinel fails CLOSED → test-fail", () => {
+    expect(parseCheckVerdict("\x00\x00 sandbox died mid-run \x00").status).toBe(
+      "test-fail"
+    );
+  });
+
+  test("a harness/sandbox fault → harness-error, NOT test-fail", () => {
+    const out =
+      "seeding venv...\n(FiberFailure) PromptError: Command `just check` failed to launch: sandbox unavailable";
+    expect(parseCheckVerdict(out).status).toBe("harness-error");
+  });
+
+  test("a real test failure is NOT misread as a harness fault", () => {
+    const out = " FAIL  tests/auth.test.mjs > token check\nExpected 1 to be 2";
+    expect(parseCheckVerdict(out).status).toBe("test-fail");
   });
 });
