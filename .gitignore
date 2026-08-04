@@ -1,2 +1,7 @@
-# nothing ignored; skills are the content
+# skills are the content; only build/deps artifacts are ignored
 .claude/worktrees/
+# installed deps, never committed. No trailing slash: also catches a
+# `node_modules` symlink (a worktree pointing at the root install), which a
+# dir-only `node_modules/` pattern would miss and leave untracked — that stray
+# symlink is what blocks `ship`'s worktree removal.
+node_modules
