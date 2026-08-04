@@ -33,4 +33,7 @@ Run typechecking regularly, single test files regularly, and the full test suite
 
 Once done, use /code-review to review the work.
 
-Commit your work to the worktree's branch.
+Commit your work to the worktree's branch. When a ticket maps to a GitHub
+issue, put a closing keyword (`Closes #<n>`) in the final commit body — a bare
+`(#<n>)` mention links the issue but does not close it, so `pushpr`'s PR
+inherits the mention and merging leaves the issue open.
