@@ -55,12 +55,14 @@ import {
   parseStandardsVerdict,
   combineVerdicts,
   isHarnessError,
+  parseCheckVerdict,
 } from "./review-verdict.mts";
 import {
   classifyInReviewIssue,
   decideInReviewAction,
   bucketIssues,
   buildRunSummary,
+  planGateOutcome,
   OpenIssue,
   PrRef,
 } from "./reconcile.mts";
@@ -956,6 +958,74 @@ if (components.length === 0) {
           `(all ${leaves.length} leaf merge(s) conflicted); skipping its PR.`
       );
       continue;
+    }
+
+    // -----------------------------------------------------------------------
+    // Full-suite gate (#22): before opening the PR, run the whole `just check`
+    // (lint + typecheck + tests) on the assembled head IN A SANDBOX — the same
+    // toolchain the target's CI runs, never the bare host worktree — so a red set
+    // never reaches a human as an open PR. A green verdict opens as today; any
+    // non-pass withholds the PR and requeues the whole set: the failing tail is
+    // commented on every issue, then the set flows into the post-Phase-3
+    // reconciliation below (which relabels ready-for-agent + deletes the stale
+    // branch) so the next iteration rebuilds it informed by the comment.
+    //
+    // The gate agent runs `just check && echo <sentinel>` and reports its raw
+    // stdout; parseCheckVerdict reads the sentinel and fails CLOSED — a crashed or
+    // garbled check is test-fail, and only a THROWN sandbox/harness fault (caught
+    // below, passed as `error`) classifies as harness-error. Both non-pass verdicts
+    // requeue; harness-error is retried next iteration without a real code failure.
+    // -----------------------------------------------------------------------
+    const gateIds = issues.map((i) => i.id);
+    let checkStdout = "";
+    let checkError: unknown;
+    try {
+      const gateCfg = sandboxConfig(identity);
+      const gate = await sandcastle.createSandbox({
+        branch: prBranch, // already built + local; checked out, not re-cut
+        ...gateCfg,
+        copyToWorktree, // seed .venv so `just check` reuses deps, no re-resolve
+      });
+      try {
+        const check = await gate.run({
+          name: `check-gate-${n + 1}`,
+          logging: logging(`check-gate-${n + 1}`, prBranch),
+          maxIterations: 1,
+          agent: sandcastle.claudeCode("claude-sonnet-5"),
+          promptFile: "./.sandcastle/check-prompt.md",
+          promptArgs: { MERGE_HEAD: prBranch },
+        });
+        checkStdout = check.stdout;
+      } finally {
+        await gate.close();
+      }
+    } catch (e) {
+      // The harness-error channel parseCheckVerdict reads via `error` — a thrown
+      // FiberFailure (prompt assembly, sandbox launch), never scanned from stdout.
+      // Requeue rather than abort: a bad head is not a broken run.
+      checkError = e;
+    }
+
+    const verdict = parseCheckVerdict(checkStdout, checkError);
+    const plan = planGateOutcome(verdict, gateIds);
+    if (plan.action === "requeue") {
+      const body =
+        `## Sandcastle full-suite gate — PR withheld\n\n` +
+        `\`just check\` on this set's merged head (\`${prBranch}\`) came back ` +
+        `**${verdict.status}**, so no PR was opened. The set is requeued for a ` +
+        `fresh rebuild — address the failure below, don't just silence it.\n\n` +
+        "```\n" +
+        `${verdict.tail || "(no output captured)"}\n` +
+        "```\n";
+      const gateFile = `.sandcastle/logs/check-gate-${runId}-${n + 1}.md`;
+      writeFileSync(gateFile, body);
+      for (const id of plan.commentIssueIds)
+        gh(`issue comment ${id} --body-file ${gateFile}`);
+      console.error(
+        `  ✗ Component ${n + 1}: full-suite gate ${verdict.status}; PR withheld, ` +
+          `${plan.commentIssueIds.length} issue(s) commented → requeued.`
+      );
+      continue; // skip push + PR open; post-Phase-3 reconciliation requeues them
     }
 
     // Push the assembled head host-side so the agent only has to open the PR.

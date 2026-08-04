@@ -3,6 +3,9 @@
 // classifyInReviewIssue: classify a single in-review issue based on its PRs.
 // bucketIssues: bucket all open issues for the end-of-run summary.
 // buildRunSummary: format the bucketed summary as a printable string.
+// planGateOutcome: decide open-vs-requeue from the Phase-3 full-suite verdict.
+
+import type { CheckVerdict } from "./review-verdict.mts";
 
 // ---------------------------------------------------------------------------
 // Reconciliation sweep — classifyInReviewIssue
@@ -46,6 +49,39 @@ export function classifyInReviewIssue(prs: PrRef[]): InReviewClassification {
   if (prs.some((pr) => pr.state === "CLOSED" || pr.state === "MERGED"))
     return "human-vetoed";
   return "stranded";
+}
+
+// ---------------------------------------------------------------------------
+// Phase-3 full-suite gate — planGateOutcome (#22 / #24)
+// ---------------------------------------------------------------------------
+
+export type GateAction = "open" | "requeue";
+
+export interface GatePlan {
+  //   open    — the suite is green; push the head and open the PR as today.
+  //   requeue — non-green; do NOT open the PR. main.mts posts the failing tail
+  //             on commentIssueIds and leaves the set PR-less, so the existing
+  //             post-Phase-3 reconciliation relabels it ready-for-agent and
+  //             deletes the stale branch for a fresh rebuild next iteration.
+  action: GateAction;
+  // Issues to comment the bounded failing tail on: every issue in the set on a
+  // non-pass, empty on pass. The tail itself rides on the verdict (verdict.tail);
+  // this only carries WHICH issues get it.
+  commentIssueIds: string[];
+}
+
+// Gate a PR set on its merged head's full-suite CHECK verdict. Only a green
+// suite ("pass") opens the PR; ANY non-pass — a real "test-fail" or the
+// fail-closed "harness-error" — blocks it and requeues the whole set, so a
+// broken head never reaches a human as an open PR. On a requeue every issue in
+// the set is commented with the failing tail, giving the next iteration the
+// context to rebuild. Pure: main.mts executes the returned plan.
+export function planGateOutcome(
+  verdict: CheckVerdict,
+  setIssueIds: string[]
+): GatePlan {
+  if (verdict.status === "pass") return { action: "open", commentIssueIds: [] };
+  return { action: "requeue", commentIssueIds: [...setIssueIds] };
 }
 
 // ---------------------------------------------------------------------------
