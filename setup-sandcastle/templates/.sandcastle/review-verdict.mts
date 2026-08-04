@@ -95,8 +95,8 @@ export type CheckStatus = "pass" | "test-fail" | "harness-error";
 
 export interface CheckVerdict {
   status: CheckStatus;
-  // Bounded failure context for "test-fail" (failing test names + last N lines)
-  // or the matched fault line for "harness-error"; empty on "pass".
+  // Bounded failure context: failing test names + last N lines for "test-fail",
+  // a bounded form of the fault for "harness-error"; empty on "pass".
   tail: string;
 }
 
@@ -125,11 +125,21 @@ function boundedTail(output: string): string {
   return [...failNames, ...lastN].join("\n").trim();
 }
 
-export function parseCheckVerdict(output: string): CheckVerdict {
-  // Harness first: a sandbox/harness fault means the check never really ran, so
-  // there's no PASS sentinel to find — classifying it before the pass/fail split
-  // keeps infrastructure flakiness out of the failure cap. Reuses isHarnessError.
-  if (isHarnessError(output)) return { status: "harness-error", tail: boundedTail(output) };
-  if (CHECK_PASS.test(output ?? "")) return { status: "pass", tail: "" };
-  return { status: "test-fail", tail: boundedTail(output) };
+// `output` is the check's stdout; `error` is whatever the gate's sandbox.run
+// THREW (undefined when it returned normally). The harness signal comes only
+// from `error` — the same thrown-FiberFailure channel isHarnessError was built
+// to read — never from scanning stdout, so a genuine test failure whose log
+// merely mentions "PromptError" isn't misread as infrastructure flakiness.
+export function parseCheckVerdict(
+  output: string,
+  error?: unknown
+): CheckVerdict {
+  // A thrown harness/sandbox fault: the check never really ran, so it's not the
+  // code's fault. Classified first, before the pass/fail split, so the caller
+  // can retry without counting it against the failure cap.
+  if (error !== undefined && isHarnessError(error))
+    return { status: "harness-error", tail: boundedTail(String(error)) };
+  // A non-harness throw (or no throw) with no PASS sentinel fails CLOSED.
+  if (CHECK_PASS.test(output)) return { status: "pass", tail: "" };
+  return { status: "test-fail", tail: boundedTail(output || String(error ?? "")) };
 }
