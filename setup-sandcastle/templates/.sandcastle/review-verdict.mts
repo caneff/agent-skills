@@ -81,3 +81,55 @@ export function combineVerdicts(
 export function isHarnessError(e: unknown): boolean {
   return /PromptError/.test(String(e));
 }
+
+// The full-suite gate's verdict (issue #22). Unlike the spec/standards judges —
+// an agent OPINION that fails open on a missing sentinel — this is a safety gate
+// over `just check` (lint + typecheck + the whole test suite) and fails CLOSED:
+//   - "pass"          the suite is green.
+//   - "test-fail"     the suite failed, OR the output was missing/unparseable —
+//                     a crashed check is not a green suite. Carries a bounded tail.
+//   - "harness-error" a sandbox/harness fault, not the code's fault (reuses the
+//                     isHarnessError notion) — the caller retries without counting
+//                     it against the failure cap.
+export type CheckStatus = "pass" | "test-fail" | "harness-error";
+
+export interface CheckVerdict {
+  status: CheckStatus;
+  // Bounded failure context for "test-fail" (failing test names + last N lines)
+  // or the matched fault line for "harness-error"; empty on "pass".
+  tail: string;
+}
+
+// The gate wrapper echoes this sentinel only when `just check` exits zero
+// (`just check && echo SANDCASTLE_CHECK: PASS`). No sentinel → not green → fail
+// closed. Host-coupled contract string (see CODING_STANDARDS) — don't reword.
+const CHECK_PASS = /^SANDCASTLE_CHECK:\s*PASS\s*$/m;
+
+// Bound the forwarded failure context so a huge suite log never floods the issue
+// or the requeued agent's context (issue #22). Two capped slices: the failing
+// *names* the next attempt needs (vitest `FAIL …`, tsc `error TSxxxx`), followed
+// by the raw last-N lines that carry the actual error. Both halves are bounded,
+// so the total is bounded no matter how large the log is; names not already in
+// the tail are kept, so the two halves don't duplicate.
+const MAX_FAIL_LINES = 20;
+const MAX_TAIL_LINES = 40;
+const FAIL_LINE = /(^|\s)(FAIL|×|✗|✕|✖)(\s|$)|error TS\d+/;
+
+function boundedTail(output: string): string {
+  const lines = (output ?? "").split("\n");
+  const lastN = lines.slice(-MAX_TAIL_LINES);
+  const tailSet = new Set(lastN);
+  const failNames = lines
+    .filter((l) => FAIL_LINE.test(l) && !tailSet.has(l))
+    .slice(0, MAX_FAIL_LINES);
+  return [...failNames, ...lastN].join("\n").trim();
+}
+
+export function parseCheckVerdict(output: string): CheckVerdict {
+  // Harness first: a sandbox/harness fault means the check never really ran, so
+  // there's no PASS sentinel to find — classifying it before the pass/fail split
+  // keeps infrastructure flakiness out of the failure cap. Reuses isHarnessError.
+  if (isHarnessError(output)) return { status: "harness-error", tail: boundedTail(output) };
+  if (CHECK_PASS.test(output ?? "")) return { status: "pass", tail: "" };
+  return { status: "test-fail", tail: boundedTail(output) };
+}
