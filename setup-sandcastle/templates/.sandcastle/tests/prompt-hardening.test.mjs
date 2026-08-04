@@ -53,7 +53,7 @@ const MANIFEST = {
       // Tier-2 rule 6 — scope + branch confinement.
       "6. Work only on issue {{TASK_ID}} on branch {{BRANCH}}.",
       // Tier-2 rule 7 — no fake-green / no premature or suppressed COMPLETE.
-      "7. Never skip `just check`, fabricate a passing result, or emit",
+      "7. Never skip your checks, fabricate a passing result, or emit",
       // Untrusted-data wrapper around {{ISSUE_TITLE}}.
       "<untrusted-user-data>",
       "</untrusted-user-data>",
