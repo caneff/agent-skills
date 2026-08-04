@@ -61,6 +61,7 @@ const makeOpts = (overrides = {}) => ({
   sweepRequeued: new Set(),
   prAssignments: new Map(),
   blockedByParentConflict: new Map(),
+  retiredByGate: new Map(),
   ...overrides,
 });
 
@@ -231,6 +232,26 @@ describe("bucketIssues", () => {
     expect(result[0]).toMatchObject({ bucket: "ready-for-agent" });
   });
 
+  // A set retired by the consecutive gate-failure cap (#25) is relabeled
+  // ready-for-human and completed (in builtThisRun), yet must surface as its own
+  // retired bucket — not built-this-run and not the generic ready-for-human —
+  // carrying the failing tests so the summary can name them.
+  test("retired-by-gate issue → retired-gate-failure, carries failing tests (#25)", () => {
+    const result = bucketIssues(
+      makeOpts({
+        openIssues: [
+          { number: 30, title: "broken", labels: ["ready-for-human"] },
+        ],
+        builtThisRun: new Set(["30"]),
+        retiredByGate: new Map([["30", "FAIL foo.test.ts"]]),
+      })
+    );
+    expect(result[0]).toMatchObject({
+      bucket: "retired-gate-failure",
+      gateFailure: "FAIL foo.test.ts",
+    });
+  });
+
   test("empty issue list → empty result", () => {
     expect(bucketIssues(makeOpts())).toEqual([]);
   });
@@ -281,6 +302,33 @@ describe("buildRunSummary", () => {
       { number: 6, title: "b", bucket: "human-gated-untriaged" },
     ];
     const out = buildRunSummary(bucketed);
+    expect(out).toMatch(/all.+human.gated|nothing left for the bot/i);
+  });
+
+  test("retired-gate-failure set names the set and its failing tests (#25)", () => {
+    const out = buildRunSummary([
+      {
+        number: 30,
+        title: "broken feature",
+        bucket: "retired-gate-failure",
+        gateFailure: "FAIL src/foo.test.ts > does the thing",
+      },
+    ]);
+    expect(out).toContain("#30");
+    expect(out).toContain("broken feature");
+    expect(out).toContain("FAIL src/foo.test.ts > does the thing");
+    expect(out).toMatch(/retired|ready.for.human/i);
+  });
+
+  test("a retired-gate-failure set counts as human-gated (nothing left for the bot) (#25)", () => {
+    const out = buildRunSummary([
+      {
+        number: 30,
+        title: "broken",
+        bucket: "retired-gate-failure",
+        gateFailure: "FAIL foo",
+      },
+    ]);
     expect(out).toMatch(/all.+human.gated|nothing left for the bot/i);
   });
 
@@ -350,6 +398,51 @@ describe("planGateOutcome", () => {
   test("does not alias the caller's set array", () => {
     const plan = planGateOutcome({ status: "test-fail", tail: "" }, set);
     expect(plan.commentIssueIds).not.toBe(set);
+  });
+
+  // --- Consecutive gate-failure cap (#25) ---------------------------------
+  // An escalated (at-cap) test-fail retires the set to a human instead of
+  // requeuing it a third time. The plan preserves the work branch and carries
+  // the failing tail as a summary note.
+  test("escalated test-fail → retire, preserve branch, carry summary note", () => {
+    const plan = planGateOutcome(
+      { status: "test-fail", tail: "FAIL foo.test.ts" },
+      set,
+      true
+    );
+    expect(plan).toEqual({
+      action: "retire",
+      commentIssueIds: set,
+      preserveBranch: true,
+      summaryNote: "FAIL foo.test.ts",
+    });
+  });
+
+  test("non-escalated test-fail still requeues even with escalate=false", () => {
+    const plan = planGateOutcome(
+      { status: "test-fail", tail: "FAIL foo.test.ts" },
+      set,
+      false
+    );
+    expect(plan.action).toBe("requeue");
+  });
+
+  // harness-error is an infra fault, never the code's — it must NOT retire even
+  // if the caller (buggy) passes escalate=true. It always requeues.
+  test("escalated harness-error → requeue, never retire", () => {
+    const plan = planGateOutcome(
+      { status: "harness-error", tail: "sandbox died" },
+      set,
+      true
+    );
+    expect(plan.action).toBe("requeue");
+  });
+
+  test("a green gate never retires regardless of escalate", () => {
+    expect(planGateOutcome({ status: "pass", tail: "" }, set, true)).toEqual({
+      action: "open",
+      commentIssueIds: [],
+    });
   });
 });
 
