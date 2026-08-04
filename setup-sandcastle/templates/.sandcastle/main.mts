@@ -474,6 +474,12 @@ allCompleted.push(...completedFromSweep);
 // Track issue → PR number across all Phase 3 opens for the run summary.
 const prAssignments = new Map<string, number>();
 
+// Issue id → bounded failing-test tail for sets retired by the Phase-3
+// consecutive gate-failure cap (#25). A retired set is relabeled ready-for-human,
+// has its work branch PRESERVED (skipped in the post-Phase-3 reconciliation
+// below), and is named — with its failing tests — in the run summary.
+const retiredByGate = new Map<string, string>();
+
 for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
 
@@ -1007,7 +1013,69 @@ if (components.length === 0) {
     }
 
     const verdict = parseCheckVerdict(checkStdout, checkError);
-    const plan = planGateOutcome(verdict, gateIds);
+
+    // Consecutive gate-failure cap (#25): count one failure per issue under key
+    // gate-<id>. A real "test-fail" increments and may escalate at the cap; a
+    // "harness-error" is an infra fault and is NEVER counted (it can't retire a
+    // good set); a "pass" clears the counter so the cap is CONSECUTIVE failures.
+    // The set fails and passes the gate in lockstep, so all its gate-<id>
+    // counters move together and escalate on the same iteration.
+    let escalated = false;
+    {
+      let gateAttempts = readAttempts();
+      if (verdict.status === "pass") {
+        for (const id of gateIds) delete gateAttempts[`gate-${id}`];
+      } else if (verdict.status === "test-fail") {
+        for (const id of gateIds) {
+          const r = recordAttempt(gateAttempts, `gate-${id}`);
+          gateAttempts = r.attempts;
+          // OR-reduce, not last-wins: the set escalates if ANY member hit the
+          // cap. In lockstep every gate-<id> escalates together, but recordAttempt
+          // deletes a key when it escalates, so were the counters ever out of step
+          // a last-wins read could miss an escalation and loop the set forever.
+          escalated ||= r.escalate;
+        }
+      }
+      writeAttempts(gateAttempts);
+    }
+
+    const plan = planGateOutcome(verdict, gateIds, escalated);
+
+    if (plan.action === "retire") {
+      // The set has failed the full suite REVIEW_RETRY_CAP times running.
+      // Requeuing again would loop forever, so park it on a human: relabel
+      // ready-for-human, comment the failing tail, and — when the plan says so —
+      // PRESERVE the work branch. Recording the id in retiredByGate is what
+      // preserves it: the post-Phase-3 reconciliation below skips those ids, so
+      // the human inherits the actual failing tree instead of a deleted branch.
+      const body =
+        `## Sandcastle full-suite gate — retired to a human\n\n` +
+        `\`just check\` on this set's merged head (\`${prBranch}\`) failed the ` +
+        `full suite ${REVIEW_RETRY_CAP} times running, so the set is parked as ` +
+        `**ready-for-human** rather than requeued again. Its work branch is ` +
+        `preserved for you to inspect. Address the failure below.\n\n` +
+        "```\n" +
+        `${verdict.tail || "(no output captured)"}\n` +
+        "```\n";
+      const gateFile = `.sandcastle/logs/check-gate-${runId}-${n + 1}.md`;
+      writeFileSync(gateFile, body);
+      for (const id of plan.commentIssueIds) {
+        gh(`issue comment ${id} --body-file ${gateFile}`);
+        relabel(id, "ready-for-human", [
+          "ready-for-agent",
+          "needs-review",
+          "in-review",
+        ]);
+        if (plan.preserveBranch)
+          retiredByGate.set(id, plan.summaryNote ?? verdict.tail);
+      }
+      console.error(
+        `  ✗ Component ${n + 1}: full-suite gate failed ${REVIEW_RETRY_CAP}x; ` +
+          `set retired → ready-for-human (branch ${prBranch} preserved).`
+      );
+      continue; // skip push + PR open; reconciliation must not touch these
+    }
+
     if (plan.action === "requeue") {
       const body =
         `## Sandcastle full-suite gate — PR withheld\n\n` +
@@ -1074,6 +1142,9 @@ if (components.length === 0) {
 // re-queued, never "PR opened".
 for (const issue of allCompleted) {
   if (prAssignments.has(issue.id)) continue;
+  // Retired by the gate cap (#25): already relabeled ready-for-human, and its
+  // branch is deliberately preserved for the human — do NOT requeue or delete it.
+  if (retiredByGate.has(issue.id)) continue;
   relabel(issue.id, "ready-for-agent", ["in-review", "needs-review"]);
   git(`branch -D ${issue.branch}`);
   sweepInjected.delete(issue.id);
@@ -1101,6 +1172,7 @@ gcWorktrees();
     sweepRequeued,
     prAssignments,
     blockedByParentConflict: blockedThisRun,
+    retiredByGate,
   });
   const summary = buildRunSummary(bucketed);
   console.log(summary);
