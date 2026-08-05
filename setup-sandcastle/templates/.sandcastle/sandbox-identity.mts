@@ -84,7 +84,7 @@ export function sandboxConfig(
 ) {
   return {
     sandbox: dockerFn({
-      env: identity.env,
+      env: { ...identity.env, UV_PROJECT_ENVIRONMENT: "/home/agent/.venv" },
       // Mount the host's global Claude skills read-only so the in-sandbox
       // `claude` agent has the same skills you do (e.g. /tdd, referenced by
       // implement-prompt.md). Not vendored into the repo — always live/current.

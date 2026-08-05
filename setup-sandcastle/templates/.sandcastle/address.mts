@@ -82,7 +82,7 @@ export async function addressOpenPRs(prs?: string[]): Promise<void> {
       hooks,
       copyToWorktree: [".venv"],
       sandbox: docker({
-        env: identity.env,
+        env: { ...identity.env, UV_PROJECT_ENVIRONMENT: "/home/agent/.venv" },
         mounts: [
           {
             hostPath: "~/.claude/skills",
