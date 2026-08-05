@@ -6,6 +6,7 @@ description: >-
   changes. Use when the user wants to start a marimo notebook or pair on an
   active marimo session.
 allowed-tools: Bash(bash **/scripts/discover-servers.sh *), Bash(bash **/scripts/execute-code.sh *), Read
+disable-model-invocation: true
 ---
 
 marimo is a reactive Python runtime for building reproducible Python programs
@@ -29,17 +30,17 @@ prefer `ctx.cells[...].code` for current cell code.
 Use the bundled script (`bash scripts/execute-code.sh`) or MCP
 (`execute_code(...)`) to run Python in a live marimo kernel.
 
-`execute-code.sh` always takes `--url`. If the user provides a notebook URL,
-target it directly:
+If the user provides a notebook URL, target it directly:
 
 ```bash
 bash scripts/execute-code.sh --url http://localhost:2718 -c "print('connected')"
 ```
 
-Pass code with `-c CODE`, `-` for stdin, or a file path:
+Use `-c` only for short one-liners. For multiline code or code containing
+quotes, backticks, `$`, or braces, use a single-quoted heredoc:
 
 ```bash
-bash scripts/execute-code.sh --url http://localhost:2718 - <<'PY'
+bash scripts/execute-code.sh --url http://localhost:2718 <<'PY'
 import marimo._code_mode as cm
 
 async with cm.get_context() as ctx:
@@ -48,22 +49,27 @@ async with cm.get_context() as ctx:
 PY
 ```
 
-If the user gives no URL, find or start a notebook. Look for a running server
-with `bash scripts/discover-servers.sh`, MCP `list_sessions()`, or local
-process context, and pass the `url` it reports to `--url`. With one notebook
-open, the script targets it automatically; with several, pass `--file` with
-the notebook's file key.
+When code already lives in a file, pass the file path:
+
+```bash
+bash scripts/execute-code.sh --url http://localhost:2718 /tmp/code.py
+```
+
+If no target is provided, find or start a session. First look for a running
+session with `bash scripts/discover-servers.sh`, MCP `list_sessions()`, or
+local process context. When multiple sessions are possible, target with
+`--url`, `--port`, or `--session`.
 
 If no server is running and the user wants a notebook, start marimo with
 `--no-token` (and without `--headless`) so it auto-registers for discovery. The
-notebook UI must be open for `execute-code` to target it. The right invocation
-depends on context (project tooling, global install, sandbox mode). If the
-notebook file contains a PEP 723 `#
+notebook UI must be open before there is an active session for `execute-code`
+to target. The right way to invoke marimo depends on context (project tooling,
+global install, sandbox mode). If the notebook file contains a PEP 723 `#
 /// script` header, it MUST be opened with `--sandbox` — otherwise marimo
 ignores the inline dependencies. See
 [finding-marimo.md](reference/finding-marimo.md) for the full decision tree and
-[execution-context.md](reference/execution-context.md) for selector resolution,
-scripts, MCP, and shell quoting.
+[execution-context.md](reference/execution-context.md) for scripts, MCP, and
+shell quoting.
 
 ## Scratchpad Scope
 
