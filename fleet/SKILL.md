@@ -24,7 +24,7 @@ Example:
 
 Dispatch on the skill's argument:
 
-- **(no args)** → **spawn the fleet** (main flow below).
+- **(no args)** → **spawn the fleet** (main flow below). By default the directory list comes from your VSCode workspace, not the fleet file.
 - **`list`** → print the current file contents (expanded to absolute paths), one per line, marking any path that doesn't exist. Spawn nothing.
 - **`add <path>`** → append `<path>` to the file if not already present (compare by resolved absolute path), then print the updated list. Spawn nothing.
 - **`remove <path>`** / **`rm <path>`** → delete the line whose resolved path matches `<path>`; warn if no match. Spawn nothing.
@@ -33,7 +33,7 @@ Dispatch on the skill's argument:
 
 ## Spawn the fleet
 
-1. Read `~/.claude/fleet-dirs.txt`. Drop blank/`#` lines. Expand `~` and env vars to absolute paths.
+1. Get the directory list. **Default to the VSCode workspace:** glob `~/src/*.code-workspace` — exactly one → resolve its folders (see the `workspace` section below) and use those; several → list them and ask which; none → fall back to `~/.claude/fleet-dirs.txt`. Reading a workspace this way does **not** write to the fleet file — it's a live source. (Use `workspace` explicitly if you want the dirs saved to the fleet file instead.) Whichever source: drop blank/`#` lines, expand `~` and env vars to absolute paths.
 2. For each path, check it exists and is a directory. Collect the missing ones; **skip** them (don't spawn) and list them in the final report.
 3. Derive a name for each agent from the directory's basename, sanitized to match `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` (replace any other character with `-`). On a name collision, suffix with the parent directory name, then `-2`, `-3`, … until unique.
 4. Spawn **all** agents in a **single message** (parallel tool calls), one `Agent` call each, with:
