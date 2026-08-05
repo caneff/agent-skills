@@ -166,6 +166,45 @@ Prioritize findings in this order:
 Do not flood the review with low-value nits if there are larger structural issues.
 Prefer a smaller number of high-conviction comments over a long list of cosmetic notes.
 
+## Present the review as an HTML report
+
+Deliver the review as a **single self-contained HTML file**, the same way `/improve-codebase-architecture` does — not as a wall of terminal prose.
+
+Write the file to the OS temp directory so nothing lands in the repo. Resolve the temp dir from `$TMPDIR`, falling back to `/tmp` (or `%TEMP%` on Windows), and write to `<tmpdir>/code-quality-review-<timestamp>.html` so each run gets a fresh file. Open it for the user — `xdg-open <path>` on Linux, `open <path>` on macOS, `start <path>` on Windows — and tell them the absolute path.
+
+The report uses **Tailwind via CDN** for layout and **Mermaid via CDN** for the diagrams where a graph communicates the structure better than prose (a "3 writers → 1 canonical helper" fan-in, a duplicated-parser dependency, a coupling that should be split). Mix Mermaid with hand-built before/after **code blocks** — a code-judo move is usually shown best as `before` vs `after` source, side by side, not as a graph.
+
+The report leads with a one-line **verdict**, then a **headline** card for the single strongest code-judo move, then the ranked findings as cards (each with a severity badge, the files, the one-sentence problem, the before/after, and win bullets), and closes with a **Deliberately leaving alone** list so the reader sees what was considered and consciously kept.
+
+Keep the same bar as the rest of this skill: high-conviction findings only, structural before cosmetic, the ranking order above. The HTML is the medium; it does not lower the standard.
+
+See [HTML-REPORT.md](HTML-REPORT.md) for the full scaffold, card anatomy, diagram patterns, and styling.
+
+## Write the review in plain language
+
+Write every finding in Simplified Technical English (ASD-STE100), the same voice `/wait-what` asks for. The reader must understand each finding on the first read. Apply that test to your own output: if a sentence only makes sense to someone who already speaks the dialect, rewrite it.
+
+Rules:
+
+- Keep sentences short. One idea per sentence. Aim for 20 words or fewer.
+- Use active voice. Write "the digest drops the report", not "the report is dropped".
+- Use the present tense.
+- Use the same word for the same thing every time. Do not swap in synonyms.
+- Use the domain terms from `CONTEXT.md` exactly (e.g. Vault, Capture, Inbox, Digest, Todo board, Todo id). Do not invent new names for them.
+- Keep real technical terms — module, regex, parser, atomic write, race condition, dataclass. These are the correct names, not jargon.
+- Remove the figurative and insider terms from the written finding. **This skill uses metaphors to steer _you_ — "code judo", "spaghetti", "thermo-nuclear", "leaks across the seam" — but they must not appear in the review.** Translate each into plain words that say what is actually true:
+  - "there's a code-judo move here" → "one change removes the extra code"
+  - "this is spaghetti" → "this function does two jobs at once and is hard to follow"
+  - "feature logic leaks across the seam" → "feature logic sits in a shared file where it does not belong"
+- State the cost plainly. Say what breaks, and when. "Change the comment format and the digest stops seeing stale todos."
+
+Before / after:
+
+- Dialect: "There's a code-judo move here that makes these branches disappear."
+- Plain: "You can move this logic into one function. Then the three branches are not needed."
+
+This governs both the terminal summary and the HTML report. Plain language is a requirement of the output, not a lower standard for it — the findings stay as strict and as ambitious as everywhere else in this skill.
+
 ## Approval Bar
 
 Do not approve merely because behavior seems correct.
