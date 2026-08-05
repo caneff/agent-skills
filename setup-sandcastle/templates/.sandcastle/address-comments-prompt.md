@@ -41,7 +41,9 @@ question or your reasoning. A wrong "fix" is worse than a question.
 # VERIFY, COMMIT, PUSH
 
 1. Run `just check`. It must pass.
-2. Commit the changes: `git commit -am "Address review comments on #{{PR_NUMBER}}"`.
+2. Stage everything and commit — use `git add -A`, not `git commit -am`, because
+   `-am` skips any NEW file a fix added and it would never reach the PR:
+   `git add -A && git commit -m "Address review comments on #{{PR_NUMBER}}"`.
    (The pre-commit hook will re-run lint/format/tests — let it.)
 3. `git push` to update the PR.
 4. Capture the new commit SHA: `SHA=$(git rev-parse --short HEAD)`.
@@ -50,10 +52,16 @@ question or your reasoning. A wrong "fix" is worse than a question.
 
 For every comment you addressed or chose not to, post a reply in its thread.
 
+Write each reply to a file first (`reply.md`), then post the file. Do NOT pass
+the reply inline with `-f body="…"` / `--body "…"`: the blockquote `>` and the
+backticks around the SHA get mangled by the shell (the backticks run as a command
+substitution and the code span vanishes). Substitute the real SHA into the file
+as you write it.
+
 - **Inline thread** — reply in the same thread:
-  `gh api repos/$OWNER_REPO/pulls/{{PR_NUMBER}}/comments/<comment_id>/replies -f body="<reply>"`
+  `gh api repos/$OWNER_REPO/pulls/{{PR_NUMBER}}/comments/<comment_id>/replies -F body=@reply.md`
   where `<comment_id>` is the thread-starting comment's `id`.
-- **Top-level** — `gh pr comment {{PR_NUMBER}} --body "<reply>"`.
+- **Top-level** — `gh pr comment {{PR_NUMBER}} --body-file reply.md`.
 
 Reply content: **start every reply with a Markdown blockquote of the comment you
 are responding to** so the thread is self-contained — one or two `> `-prefixed

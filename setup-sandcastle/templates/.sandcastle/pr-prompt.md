@@ -17,7 +17,7 @@ your only job is to open ONE pull request from it and write its prose.
 
 Read-only inspection to write an accurate body is expected:
 
-- `git fetch origin {{MERGE_HEAD}}`
+- `git fetch origin main {{MERGE_HEAD}}`
 - `git log --oneline origin/main..origin/{{MERGE_HEAD}}` — these are the commits the PR contains.
 - `git diff origin/main...origin/{{MERGE_HEAD}}` — the full diff, for writing the body below.
 
@@ -26,9 +26,16 @@ do not run them here.)
 
 # OPEN THE PR
 
-`gh pr create --base main --head {{MERGE_HEAD}} --title "Sandcastle: <N> issue(s)" --body "<body>"`
-where `<N>` is the number of issues actually folded in. Build `<body>` with these
-sections:
+Do this in order, in one pass:
+
+1. Write the PR body (sections below) to a file: `pr-body.md`.
+2. `gh pr create --base main --head {{MERGE_HEAD}} --title "Sandcastle: <N> issue(s)" --body-file pr-body.md`
+   where `<N>` is the number of issues actually folded in.
+
+**Use `--body-file`, never inline `--body`.** The body contains backticks and
+`#`; passed inline they trigger shell command substitution and corrupt the PR.
+
+Build the body in `pr-body.md` with these sections:
 
 ## Summary
 
@@ -40,8 +47,8 @@ One subsection per issue that made it in. For each:
 
 - A `### #<id> — <title>` heading.
 - 1-3 bullets describing the actual change (read the issue's commits/diff with
-  `git log` / `git diff main...{{MERGE_HEAD}} -- <paths>`; describe behavior, not
-  file lists).
+  `git log` / `git diff origin/main...origin/{{MERGE_HEAD}} -- <paths>`; describe
+  behavior, not file lists).
 - A `Closes #<id>` line so the squash-merge auto-closes every issue.
 
 ## QA checklist

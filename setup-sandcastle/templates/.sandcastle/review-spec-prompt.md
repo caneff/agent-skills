@@ -89,10 +89,14 @@ Standards judge, so do not fail the branch here for style or refactor nits.
 Do NOT try to implement missing requirements yourself; that is a re-implement,
 which the orchestrator routes back to a fresh implementer. Judge and report only.
 
-Emit your verdict as the FINAL line of your output, exactly one of (the prefix
-must match verbatim — the host greps for it):
+Emit your verdict on its own line, exactly one of the two forms below. The line
+MUST start at column zero with `SANDCASTLE_SPEC:` — no leading `- `, no
+backticks, no markdown, nothing before or after it on the line. The host greps
+`^SANDCASTLE_SPEC:` and gates fail-open: a FAIL that isn't matched verbatim is
+read as PASS, so a mis-formatted line silently ships a failing branch.
 
-- `SANDCASTLE_SPEC: PASS`
-- `SANDCASTLE_SPEC: FAIL — <one-line reason>`
+SANDCASTLE_SPEC: PASS
 
-Then, on the next line, output <promise>COMPLETE</promise>.
+SANDCASTLE_SPEC: FAIL — <one-line reason>
+
+After that line, output <promise>COMPLETE</promise> on the next line.
