@@ -37,8 +37,6 @@ Break the work into **tracer bullet** tickets.
 
 Give each ticket its **blocking edges** — the other tickets that must complete before it can start. A ticket with no blockers can start immediately.
 
-Give each ticket its **seams under test** — the public boundaries `/implement` will write its failing tests against (see the `tdd` skill for what a seam is). Name the interface, not the internals. Agreeing them here is what makes them the "pre-agreed seams" `/implement` needs, so implementation never starts without a place to put the red test.
-
 **Wide refactors are the exception to vertical slicing.** A **wide refactor** is one mechanical change — rename a column, retype a shared symbol — whose **blast radius** fans across the whole codebase, so a single edit breaks thousands of call sites at once and no vertical slice can land green. Don't force it into a tracer bullet; sequence it as **expand–contract**. First expand: add the new form beside the old so nothing breaks. Then migrate the call sites over in batches sized by blast radius (per package, per directory), each batch its own ticket blocked by the expand, keeping CI green batch to batch because the old form still exists. Finally contract: delete the old form once no caller remains, in a ticket blocked by every migrate batch. When even the batches can't stay green alone, keep the sequence but let them share an integration branch that all block a final integrate-and-verify ticket — green is promised only there.
 
 ### 4. Quiz the user
@@ -48,13 +46,11 @@ Present the proposed breakdown as a numbered list. For each ticket, show:
 - **Title**: short descriptive name
 - **Blocked by**: which other tickets (if any) must complete first
 - **What it delivers**: the end-to-end behaviour this ticket makes work
-- **Seams under test**: the public boundaries its tests will be written against
 
 Ask the user:
 
 - Does the granularity feel right? (too coarse / too fine)
 - Are the blocking edges correct — does each ticket only depend on tickets that genuinely gate it?
-- Are the seams the right ones to test at?
 - Should any tickets be merged or split further?
 
 Iterate until the user approves the breakdown.
@@ -77,8 +73,6 @@ Do NOT close or modify any parent issue.
 **What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective — not a layer-by-layer implementation list.
 
 **Blocked by:** the numbers/titles of the tickets that gate this one, or "None — can start immediately".
-
-**Seams under test:** the public boundaries the tests go against — user-approved, so `/implement` writes its failing tests here without asking again.
 
 **Status:** ready-for-agent
 
@@ -106,14 +100,6 @@ The end-to-end behaviour this ticket makes work, from the user's perspective —
 
 - A reference to each blocking ticket, or "None — can start immediately".
 
-## Seams under test
-
-- The public boundaries the tests go against — user-approved, so `/implement` writes its failing tests here without asking again.
-
 </issue-template>
 
 In either form, avoid specific file paths or code snippets — they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
-
-Publishing local ticket files, and amending them later, both change tracked files in the working checkout. Commit and push them to main before the next `/implement` — that command branches from the pushed main, so an uncommitted ticket edit is either missing inside the worktree or duplicated into it, and a duplicate that then advances on the branch conflicts when the work ships.
-
-Work the frontier one ticket at a time with `/implement`, clearing context between tickets.
