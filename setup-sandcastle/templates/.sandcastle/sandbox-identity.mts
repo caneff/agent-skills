@@ -70,6 +70,33 @@ export async function sandboxIdentity(
 }
 
 /**
+ * The `onSandboxReady` command list, shared by every sandbox creation site
+ * (`sandboxConfig` here and `address.mts`).
+ *
+ * Sandcastle runs `onSandboxReady` hooks with unbounded concurrency, and every
+ * `git config` write takes an exclusive `.git/config.lock` on the bind-mounted
+ * host `.git`. So ALL git-config writes — the identity pair AND the hook-path
+ * isolation — must live in ONE entry, chained with `&&`, or they race and the
+ * loser dies with "could not lock config file: File exists" (issue #52). `mkdir`
+ * doesn't touch the lock, so its position in the chain is harmless.
+ *
+ * Hook-path isolation: the host `.git` (carrying the host pre-commit hook) is
+ * mounted in, but pre-commit isn't on the container PATH, so a plain commit
+ * dies; pointing `core.hooksPath` at an empty dir disables it in-sandbox. The
+ * Phase-3 `just check` gate runs the same ruff/ty.
+ */
+export function onSandboxReadyCommands(
+  identity: SandboxIdentity
+): Array<{ command: string }> {
+  const gitWrites = [
+    "mkdir -p /home/agent/.git-no-hooks",
+    ...identity.gitConfigCommands.map((c) => c.command),
+    "git config core.hooksPath /home/agent/.git-no-hooks",
+  ];
+  return [{ command: gitWrites.join(" && ") }, { command: "uv sync" }];
+}
+
+/**
  * Returns the sandbox and hooks config that bakes identity into every sandbox
  * creation site. Spread the result into sandcastle.run() or createSandbox():
  *   sandcastle.run({ ...sandboxConfig(identity), name: "...", ... })
@@ -98,12 +125,7 @@ export function sandboxConfig(
     }),
     hooks: {
       sandbox: {
-        onSandboxReady: [
-          ...identity.gitConfigCommands,
-          // In-sandbox only: the parent .git (with the host pre-commit hook) is mounted in, but pre-commit is not on the container PATH, so a plain commit dies. The Phase-3 "just check" gate runs the same ruff/ty.
-          { command: "mkdir -p /home/agent/.git-no-hooks && git config core.hooksPath /home/agent/.git-no-hooks" },
-          { command: "uv sync" },
-        ],
+        onSandboxReady: onSandboxReadyCommands(identity),
       },
     },
   };

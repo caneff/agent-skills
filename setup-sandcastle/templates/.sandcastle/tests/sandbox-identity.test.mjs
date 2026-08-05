@@ -56,15 +56,18 @@ test("sandboxConfig: calls dockerFn with identity.env and the read-only skills m
   });
 });
 
-test("sandboxConfig: gitConfigCommands and uv sync land in onSandboxReady", () => {
-  const gitCmd = { command: "git config user.name Bot" };
-  const identity = { env: {}, gitConfigCommands: [gitCmd] };
+test("sandboxConfig: gitConfigCommands fold into the chained git entry, before uv sync", () => {
+  const identity = {
+    env: {},
+    gitConfigCommands: [{ command: "git config user.name Bot" }],
+  };
   const cfg = sandboxConfig(identity, () => ({}));
   const ready = cfg.hooks.sandbox.onSandboxReady;
-  expect(ready).toContainEqual(gitCmd);
-  expect(ready).toContainEqual({ command: "uv sync" });
-  const gitIdx = ready.findIndex((c) => c.command === gitCmd.command);
+  // The identity write is chained into the single git-config entry (not its own
+  // entry — that would race the lock, #52), which still runs before uv sync.
+  const gitIdx = ready.findIndex((c) => c.command.includes("git config"));
   const uvIdx = ready.findIndex((c) => c.command === "uv sync");
+  expect(ready[gitIdx].command).toContain("git config user.name Bot");
   expect(gitIdx).toBeLessThan(uvIdx);
 });
 
@@ -78,6 +81,25 @@ test("sandboxConfig: onSandboxReady is [disable-hooks, uv sync] when no gitConfi
     },
     { command: "uv sync" },
   ]);
+});
+
+test("sandboxConfig: ALL git-config writes chain into ONE onSandboxReady entry (no .git/config.lock race, #52)", () => {
+  // Identity writes and the core.hooksPath write hit the same .git/config.lock;
+  // Sandcastle runs onSandboxReady hooks concurrently, so any two git-config
+  // entries race and the loser dies. Exactly one entry may touch `git config`.
+  const identity = {
+    env: {},
+    gitConfigCommands: [
+      { command: 'git config user.name "Bot" && git config user.email "b@x"' },
+    ],
+  };
+  const ready = sandboxConfig(identity, () => ({})).hooks.sandbox
+    .onSandboxReady;
+  const gitEntries = ready.filter((c) => c.command.includes("git config"));
+  expect(gitEntries).toHaveLength(1);
+  // That one entry carries both the identity writes and the hooks-path write.
+  expect(gitEntries[0].command).toContain("user.name");
+  expect(gitEntries[0].command).toContain("core.hooksPath");
 });
 
 // ── no-op branch: bot vars unset ─────────────────────────────────────────────
