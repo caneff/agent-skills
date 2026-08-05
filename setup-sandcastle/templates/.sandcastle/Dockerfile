@@ -40,6 +40,11 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ARG PYTHON_VERSION=3.13
 RUN /home/agent/.local/bin/uv python install ${PYTHON_VERSION}
 
+# just — the target's task runner. The PR check-gate runs `just check` inside
+# this image, so the binary must be on the agent's PATH (installed in-ecosystem
+# via uv, matching how setup-python-repo installs it on the host).
+RUN /home/agent/.local/bin/uv tool install rust-just
+
 # Claude Code CLI (standalone binary — not a Node app).
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
