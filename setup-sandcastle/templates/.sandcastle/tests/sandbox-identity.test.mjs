@@ -43,7 +43,10 @@ test("sandboxConfig: calls dockerFn with identity.env and the read-only skills m
     captured = opts;
     return {};
   });
-  expect(captured.env).toEqual({ GH_TOKEN: "tok" });
+  expect(captured.env).toEqual({
+    GH_TOKEN: "tok",
+    UV_PROJECT_ENVIRONMENT: "/home/agent/.venv",
+  });
   // The host's global Claude skills are mounted read-only so the in-sandbox
   // agent has /tdd etc. — not vendored into the repo.
   expect(captured.mounts).toContainEqual({
@@ -65,10 +68,16 @@ test("sandboxConfig: gitConfigCommands and uv sync land in onSandboxReady", () =
   expect(gitIdx).toBeLessThan(uvIdx);
 });
 
-test("sandboxConfig: onSandboxReady is exactly [uv sync] when no gitConfigCommands", () => {
+test("sandboxConfig: onSandboxReady is [disable-hooks, uv sync] when no gitConfigCommands", () => {
   const identity = { env: {}, gitConfigCommands: [] };
   const cfg = sandboxConfig(identity, () => ({}));
-  expect(cfg.hooks.sandbox.onSandboxReady).toEqual([{ command: "uv sync" }]);
+  expect(cfg.hooks.sandbox.onSandboxReady).toEqual([
+    {
+      command:
+        "mkdir -p /home/agent/.git-no-hooks && git config core.hooksPath /home/agent/.git-no-hooks",
+    },
+    { command: "uv sync" },
+  ]);
 });
 
 // ── no-op branch: bot vars unset ─────────────────────────────────────────────
