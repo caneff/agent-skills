@@ -29,6 +29,7 @@ Dispatch on the skill's argument:
 - **`add <path>`** → append `<path>` to the file if not already present (compare by resolved absolute path), then print the updated list. Spawn nothing.
 - **`remove <path>`** / **`rm <path>`** → delete the line whose resolved path matches `<path>`; warn if no match. Spawn nothing.
 - **`edit`** → print the file's path and tell the user they can edit it directly (`! $EDITOR ~/.claude/fleet-dirs.txt`). Spawn nothing.
+- **`workspace [<file>]`** → import folders from a VSCode `.code-workspace` file into the fleet file, then print the updated list. Spawn nothing. See below.
 
 ## Spawn the fleet
 
@@ -55,6 +56,20 @@ Do not modify anything during orientation. Keep the report short.
 ```
 
 5. Report the roster back to the user: a table of `name → directory`, note any skipped (missing) directories, and remind them they can address any agent later via `SendMessage` (or from the agent overview), and re-run this skill after editing the fleet file to change the lineup.
+
+## Import from a VSCode workspace (`workspace` arg)
+
+A `.code-workspace` file is JSON with a `folders` array; each `folders[].path` is **relative to the workspace file's own directory**. Import them:
+
+1. Resolve the file. If `<file>` given, use it. Else glob `~/src/*.code-workspace`: exactly one → use it; several → list them and ask which; none → tell the user to pass a path.
+2. Extract and resolve each folder path against the file's directory. One line does it:
+   ```
+   WS=~/src/uberworkspace.code-workspace
+   jq -r '.folders[].path' "$WS" | while read p; do realpath -m "$(dirname "$WS")/$p"; done
+   ```
+3. Append each resolved path to `~/.claude/fleet-dirs.txt` if not already present (compare by resolved absolute path), same as `add`. Then print the updated list.
+
+This does not spawn the fleet — run the skill with no args afterward to do that. It also does not auto-track the *currently focused* VSCode window; it imports whatever workspace file you point at.
 
 ## Notes
 
