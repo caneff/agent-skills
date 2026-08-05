@@ -65,6 +65,8 @@ export async function addressOpenPRs(prs?: string[]): Promise<void> {
     sandbox: {
       onSandboxReady: [
         ...identity.gitConfigCommands,
+        // In-sandbox only: the parent .git (with the host pre-commit hook) is mounted in, but pre-commit is not on the container PATH, so a plain commit dies. The Phase-3 "just check" gate runs the same ruff/ty.
+        { command: "mkdir -p /home/agent/.git-no-hooks && git config core.hooksPath /home/agent/.git-no-hooks" },
         { command: "uv sync" },
       ],
     },
@@ -82,7 +84,7 @@ export async function addressOpenPRs(prs?: string[]): Promise<void> {
       hooks,
       copyToWorktree: [".venv"],
       sandbox: docker({
-        env: identity.env,
+        env: { ...identity.env, UV_PROJECT_ENVIRONMENT: "/home/agent/.venv" },
         mounts: [
           {
             hostPath: "~/.claude/skills",

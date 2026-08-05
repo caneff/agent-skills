@@ -84,7 +84,7 @@ export function sandboxConfig(
 ) {
   return {
     sandbox: dockerFn({
-      env: identity.env,
+      env: { ...identity.env, UV_PROJECT_ENVIRONMENT: "/home/agent/.venv" },
       // Mount the host's global Claude skills read-only so the in-sandbox
       // `claude` agent has the same skills you do (e.g. /tdd, referenced by
       // implement-prompt.md). Not vendored into the repo — always live/current.
@@ -100,6 +100,8 @@ export function sandboxConfig(
       sandbox: {
         onSandboxReady: [
           ...identity.gitConfigCommands,
+          // In-sandbox only: the parent .git (with the host pre-commit hook) is mounted in, but pre-commit is not on the container PATH, so a plain commit dies. The Phase-3 "just check" gate runs the same ruff/ty.
+          { command: "mkdir -p /home/agent/.git-no-hooks && git config core.hooksPath /home/agent/.git-no-hooks" },
           { command: "uv sync" },
         ],
       },
