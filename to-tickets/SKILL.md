@@ -74,6 +74,8 @@ Do NOT close or modify any parent issue.
 
 # <NN> — <Ticket title>
 
+**TL;DR:** one or two sentences of plain English — what this ticket gets working, said so anyone (non-engineer included) understands it. No domain jargon, no coined terms, no glossary words that need a gloss. Everything below this line may use the project's full technical vocabulary freely.
+
 **What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective — not a layer-by-layer implementation list.
 
 **Blocked by:** the numbers/titles of the tickets that gate this one, or "None — can start immediately".
@@ -92,6 +94,10 @@ Do NOT close or modify any parent issue.
 ## Parent
 
 A reference to the parent issue on the tracker (if the source was an existing issue, otherwise omit this section).
+
+## TL;DR
+
+One or two sentences of plain English — what this ticket gets working, said so anyone (non-engineer included) understands it. No domain jargon, no coined terms, no glossary words that need a gloss. Every section below may use the project's full technical vocabulary freely.
 
 ## What to build
 
