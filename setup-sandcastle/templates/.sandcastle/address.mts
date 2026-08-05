@@ -15,7 +15,10 @@
 import { execSync } from "node:child_process";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { sandboxIdentity } from "./sandbox-identity.mts";
+import {
+  sandboxIdentity,
+  onSandboxReadyCommands,
+} from "./sandbox-identity.mts";
 
 const sh = (cmd: string) => execSync(cmd, { encoding: "utf8" }).trim();
 
@@ -63,12 +66,9 @@ export async function addressOpenPRs(prs?: string[]): Promise<void> {
   const identity = await sandboxIdentity();
   const hooks = {
     sandbox: {
-      onSandboxReady: [
-        ...identity.gitConfigCommands,
-        // In-sandbox only: the parent .git (with the host pre-commit hook) is mounted in, but pre-commit is not on the container PATH, so a plain commit dies. The Phase-3 "just check" gate runs the same ruff/ty.
-        { command: "mkdir -p /home/agent/.git-no-hooks && git config core.hooksPath /home/agent/.git-no-hooks" },
-        { command: "uv sync" },
-      ],
+      // All git-config writes chained into one entry (issue #52); see
+      // onSandboxReadyCommands for why.
+      onSandboxReady: onSandboxReadyCommands(identity),
     },
   };
 
