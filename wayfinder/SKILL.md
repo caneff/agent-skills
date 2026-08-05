@@ -62,7 +62,7 @@ Each ticket is a **child issue** of the map; the tracker's issue id is its ident
 <the decision or investigation this ticket resolves>
 ```
 
-Each ticket carries a `wayfinder:<type>` label — one of `research`, `prototype`, `grilling`, `task` (see [Ticket Types](#ticket-types)).
+Each ticket carries a `wayfinder:<type>` label — one of `research`, `prototype`, `grilling`, `domain-modeling`, `task` (see [Ticket Types](#ticket-types)).
 
 A session **claims** a ticket by assigning it to the dev driving the map, **first**, before any work, so concurrent sessions skip it. That assignee _is_ the claim: an open, unassigned ticket is unclaimed.
 
@@ -77,6 +77,7 @@ Every ticket is either **HITL** — human in the loop, worked *with* a human who
 - **Research** (AFK): Reading documentation, third-party APIs, or local resources like knowledge bases to surface a fact a decision waits on. Resolved by a `/research` **subagent**. Use when knowledge outside the current working directory is required.
 - **Prototype** (HITL): Raise the fidelity of the discussion by making a cheap, rough, concrete artifact to react to — an outline, a rough take, a stub, or UI/logic code via the /prototype skill. Links the prototype as an asset. Use when "how should it look" or "how should it behave" is the key question.
 - **Grilling** (HITL): Conversation via the /grilling and /domain-modeling skills, one question at a time. The default case.
+- **Domain modeling** (HITL): Build or reconcile a *cluster* of the domain's language via the /domain-modeling skill — a context's ubiquitous language, or a bounded-context split (`CONTEXT-MAP.md`). Distinct from grilling by its **output**: a grilling ticket resolves to a *decision* (a line in the map's Decisions-so-far); a domain-modeling ticket resolves to *committed model artifacts* in the repo (`CONTEXT.md` entries, an ADR under `docs/adr/`). Its "done" is _the model is written down_, not _a choice is made_. Reach for it only when the modeling is too big to capture in place at another ticket's resolution — a single term or a single ADR is written inline (see [Domain model](#domain-model)), never turned into its own ticket. The AFK parts (writing files, cross-referencing code) happen inside it, but it can't resolve without the live human whose language it challenges.
 - **Task** (HITL or AFK): Manual work that must happen before a *decision* can be made — nothing to decide, prototype, or research, but the discussion is blocked until it's done. Signing up for a service so its API can be judged, provisioning access, moving data so its shape can be seen. This is the one type that *does* rather than decides — and it earns its place by unblocking a decision, not by delivering the destination. The agent drives it alone where it can (AFK); otherwise it hands the human a precise checklist (HITL). Resolved when the work is done; the answer records what was done and any resulting facts (credentials location, new URLs, row counts) later tickets depend on.
 
 ## Fog of war
@@ -100,6 +101,20 @@ Out-of-scope work never graduates — the frontier stops at the destination — 
 
 Ruling something out of scope is a scoping act, not a step on the route. When a ticket that already exists turns out to sit past the destination — mis-scoped in while charting, or exposed by a resolution — **close it** (a closed ticket is unambiguously off the frontier) and leave one line in the **Out of scope** section: the gist plus why it's out of scope, linking the closed ticket. It stays out of **Decisions so far**, which records the route actually walked — a scope boundary isn't a step on it.
 
+## Domain model
+
+Charting and every resolution **accrete the repo's domain model** — they don't merely consult it. The model lives in two artifacts the /domain-modeling skill owns: `CONTEXT.md` (the glossary — terms only, no implementation) and `docs/adr/` (decision records for hard-to-reverse, surprising, genuinely-traded-off calls). The map's `## Notes` names where they live so every session can find them.
+
+Writing them is **planning, not doing**: a glossary entry and an ADR are decision _records_ — the crystallized form of a decision, wayfinder's native output — not build deliverables, so they don't breach [Plan, don't do](#plan-dont-do).
+
+**One decision, one home.** A plain decision lives as its Decisions-so-far gist pointing at its ticket. Promote it to an ADR only when the /domain-modeling three-part test fires — hard to reverse, surprising without context, a real trade-off — and then the **ADR is the store**: the ticket's resolution comment and the map's Decisions-so-far line each become a gist plus a link to the ADR, never a restatement. The map stays an index. `CONTEXT.md` is orthogonal — it stores _terms_, not decisions, so terms get no Decisions-so-far line and the map never mirrors the glossary.
+
+**Capture in place; graduate when it overflows.** A single term or a single ADR is written inline at the resolution that surfaced it. Only when the modeling is bigger — a cluster of terms, a bounded-context split — does it earn its own `domain-modeling` ticket instead.
+
+**Shared files.** `CONTEXT.md` is one file and ADRs are numbered, so concurrent sessions can clash. Resolve it at merge like any file conflict — a duplicate ADR number is cosmetic, renumbered then. Don't build locking or number-reservation for a rare, self-healing collision.
+
+The artifacts are written to the **working tree**: the next session in this checkout sees them immediately, and they land through the repo's normal flow like any other change. The skill writes the model; it does not commit it.
+
 ## Invocation
 
 Two modes. Either way, **never resolve more than one ticket per session** — with the exception of research tickets.
@@ -109,9 +124,9 @@ Two modes. Either way, **never resolve more than one ticket per session** — wi
 User invokes with a loose idea.
 
 1. **Load the skills.** Call the Skill tool for `grilling` and `domain-modeling` — two calls, both made before your first question to the user. Every step below runs under them.
-2. **Name the destination.** Run a `/grilling` and `/domain-modeling` session to pin down what this map is finding its way to — the spec, decision, or change. The destination fixes the scope, so it's settled first.
-3. **Map the frontier.** Grill again, **breadth-first** this time: fan out across the whole space rather than deep on any one thread, surfacing the open decisions and the first steps takeable now. **If this surfaces no fog** — the way to the destination is already clear, the whole journey small enough for one session — you don't need a map. Stop and ask the user how they'd like to proceed.
-4. **Create the map** (label `wayfinder:map`): Destination and Notes filled in, Decisions-so-far empty, the fog sketched into **Not yet specified**.
+2. **Name the destination.** Run a `/grilling` and `/domain-modeling` session to pin down what this map is finding its way to — the spec, decision, or change. The destination fixes the scope, so it's settled first. **Capture the language as it surfaces:** the terms you sharpen naming the destination are the first glossary entries — write them to `CONTEXT.md` as they crystallize (see [Domain model](#domain-model)), don't let them evaporate when charting ends. ADRs are rare this early — little is decided yet — but a foundational trade-off locked _as_ the destination earns one now.
+3. **Map the frontier.** Grill again, **breadth-first** this time: fan out across the whole space rather than deep on any one thread, surfacing the open decisions and the first steps takeable now — and the terms they turn on, captured to `CONTEXT.md` as above. **If this surfaces no fog** — the way to the destination is already clear, the whole journey small enough for one session — you don't need a map. Stop and ask the user how they'd like to proceed.
+4. **Create the map** (label `wayfinder:map`): Destination and Notes filled in — **Notes names the domain-model home** (`CONTEXT.md`, `docs/adr/`) so every later session consults and accretes it — Decisions-so-far empty, the fog sketched into **Not yet specified**.
 5. **Create the tickets you can specify now** as child issues of the map — then wire blocking edges in a **second pass** (issues need ids before they can reference each other). Wiring sorts them into the frontier and the blocked; everything you can't yet specify stays in the fog — the **Not yet specified** section.
 6. **Fire the research subagents.** For each `research` ticket you just created, spin up a `/research` subagent to resolve it in parallel, capturing its findings on a throwaway `research/<name>` branch with a context pointer from the ticket.
 7. Stop — charting is one session's work; it hand-resolves nothing.
@@ -122,8 +137,8 @@ User invokes with a map (URL or number). A ticket is **optional** — without on
 
 1. Load the **map** — the low-res view, not every ticket body.
 2. Choose the ticket. If the user named one, use it. Otherwise take the first frontier ticket in order. **Claim it**: assign it to yourself before any work.
-3. Resolve it — **zoom as needed**: fetch the full body of any related or closed ticket on demand; invoke the skills the `## Notes` block names. If in doubt, use `/grilling` and `/domain-modeling`. **If the claimed ticket is a build task** — a `task` ticket whose resolution ships code (an effort that carries execution in its map, per Notes) — **always resolve it through `/implement`**, never by hand-editing code in the wayfinder session.
-4. Record the resolution: post the answer as a **resolution comment**, **close** the issue, and **append a context pointer** to the map's Decisions-so-far.
+3. Resolve it — **zoom as needed**: fetch the full body of any related or closed ticket on demand; invoke the skills the `## Notes` block names. **Load `/domain-modeling` for every ticket** — the model accretes as you resolve, not only when a ticket is explicitly about it — and reach for `/grilling` too whenever a decision needs drawing out. **If the claimed ticket is a build task** — a `task` ticket whose resolution ships code (an effort that carries execution in its map, per Notes) — **always resolve it through `/implement`**, never by hand-editing code in the wayfinder session.
+4. Record the resolution: post the answer as a **resolution comment**, **close** the issue, and **append a context pointer** to the map's Decisions-so-far. **Then run the domain-model capture** (see [Domain model](#domain-model)): if resolving this crystallized a term, write it to `CONTEXT.md`; if it settled a hard-to-reverse, surprising, genuine trade-off, write an ADR — and when it becomes an ADR, the ADR is its home, so the resolution comment and the Decisions-so-far line are a gist plus a link to it, not a restatement; if the modeling is bigger than one term or one ADR — a whole cluster or a context boundary — spawn a `domain-modeling` ticket instead of inlining it.
 5. Add newly-surfaced tickets (create-then-wire); graduate any fog the answer has made specifiable, clearing each graduated patch from **Not yet specified** so it lives only as its new ticket. If the answer reveals a ticket — this one or another — sits beyond the destination, **rule it out of scope** rather than resolving it on the route. If the decision invalidates other parts of the map, update or delete those tickets.
 
 The user may run unblocked tickets in parallel, so expect other sessions to be editing the tracker concurrently.
