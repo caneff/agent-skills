@@ -1,5 +1,5 @@
 import { test, expect, describe } from "vitest";
-import { prComponents } from "../pr-components.mts";
+import { prComponents, parentsFromBlockedBy } from "../pr-components.mts";
 
 // One PR per connected dependency component (issue #127). Components are the
 // connected pieces of the parent-edge graph over the issues completed THIS run.
@@ -131,5 +131,38 @@ describe("prComponents — topic grouping", () => {
       issue("108", ["112"], "ui"),
     ]);
     expect(idSets(comps)).toEqual([["108", "112"]]);
+  });
+});
+
+// Issue #50: the reconciliation sweep recovered stranded branches with
+// parents:[], discarding the dependency graph, so a stacked recovery
+// (#46 ← #47 ← #48) opened one redundant PR per tip. The fix rebuilds each
+// swept branch's parents from its GitHub blockedBy edges. Every blockedBy id is
+// kept as a parent; prComponents' own present-filter drops any not completed
+// this run, so the sweep does no pre-restriction.
+describe("parentsFromBlockedBy — sweep rebuilds the parent graph (#50)", () => {
+  // Mirror the sweep's inject path: a swept CompletedIssue whose parents come
+  // from its blockedBy edge list (numbers, as GitHub's graph returns them).
+  const swept = (id, blockedBy = []) => ({
+    id: String(id),
+    title: `issue ${id}`,
+    branch: `sandcastle/issue-${id}`,
+    parents: parentsFromBlockedBy(blockedBy),
+  });
+
+  test("a stranded stack 46←47←48 collapses to ONE component with leaf 48", () => {
+    const comps = prComponents([swept(46), swept(47, [46]), swept(48, [47])]);
+    expect(comps).toHaveLength(1);
+    expect(comps[0].issues.map((i) => i.id).sort()).toEqual(["46", "47", "48"]);
+    expect(comps[0].leaves.map((l) => l.id)).toEqual(["48"]);
+  });
+
+  test("a blockedBy parent absent from this run is dropped, not linked", () => {
+    // 48 is blocked by 47, but only 48 was recovered this run (47 already
+    // merged / not in the set). The edge drops; 48 stands alone off main.
+    const comps = prComponents([swept(48, [47])]);
+    expect(comps).toHaveLength(1);
+    expect(comps[0].issues.map((i) => i.id)).toEqual(["48"]);
+    expect(comps[0].leaves.map((l) => l.id)).toEqual(["48"]);
   });
 });

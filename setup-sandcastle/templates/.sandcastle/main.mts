@@ -49,7 +49,11 @@ import {
   issueBranch,
   buildMultiParentBase,
 } from "./base-resolution.mts";
-import { prComponents, CompletedIssue } from "./pr-components.mts";
+import {
+  prComponents,
+  parentsFromBlockedBy,
+  CompletedIssue,
+} from "./pr-components.mts";
 import {
   parseSpecVerdict,
   parseStandardsVerdict,
@@ -263,6 +267,27 @@ function getPrsReferencingIssues(): Map<number, PrRef[]> {
   );
 }
 
+// Each in-review issue's `blockedBy` edge ids, keyed by issue number (issue
+// #50). The reconciliation sweep uses these to rebuild a recovered branch's
+// parents (see `parentsFromBlockedBy`) instead of dropping the dependency graph.
+// One bulk query for the whole in-review set — no per-issue fetch — mirroring
+// the `blockedBy` pull the planner already does in plan-prompt.md.
+const blockedByRowsSchema = z.array(
+  z.object({ number: z.number(), blockedBy: z.array(z.number()) })
+);
+
+function getBlockedByForInReview(): Map<number, number[]> {
+  const out = gh(
+    `issue list --state open --label "in-review" --limit 100 --json number,blockedBy --jq '[.[] | {number, blockedBy: [.blockedBy.nodes[].number]}]'`
+  );
+  const map = new Map<number, number[]>();
+  if (!out) return map;
+  for (const row of blockedByRowsSchema.parse(JSON.parse(out))) {
+    map.set(row.number, row.blockedBy);
+  }
+  return map;
+}
+
 // ---------------------------------------------------------------------------
 // Reconciliation sweep: run once at run start to restore the invariant
 //   in-review ⟺ an open PR references the issue.
@@ -294,6 +319,7 @@ function reconciliationSweep(): {
     `\n=== Reconciliation sweep: ${inReview.length} in-review issue(s) ===\n`
   );
   const prsForIssues = getPrsReferencingIssues();
+  const blockedByForIssues = getBlockedByForInReview();
 
   const sweepInjected = new Set<string>();
   const sweepRequeued = new Set<string>();
@@ -330,7 +356,10 @@ function reconciliationSweep(): {
         id,
         title: issue.title,
         branch,
-        parents: [],
+        // Rebuild the dependency graph from GitHub blockedBy edges (issue #50);
+        // prComponents drops any parent not also completed this run, so a
+        // stacked recovery collapses into one PR instead of one per tip.
+        parents: parentsFromBlockedBy(blockedByForIssues.get(issue.number) ?? []),
       });
     } else {
       // requeue: no branch, no work, OR a stale branch that conflicts with main.

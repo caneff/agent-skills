@@ -37,6 +37,19 @@ export interface PrComponent {
   leaves: CompletedIssue[];
 }
 
+// Rebuild a swept branch's `parents` from its GitHub `blockedBy` edges (issue
+// #50). The reconciliation sweep recovers a stranded branch but used to inject
+// `parents: []`, discarding the dependency graph — a stacked recovery then
+// opened one redundant PR per tip. `blockedBy` is the durable ground truth on
+// the issues, so the sweep reconstructs parents from it. Every edge is kept as a
+// string id (matching `parents`); `prComponents` drops any not completed this
+// run via its own present-filter, so there is no pre-restriction here. Purely
+// inferred parents (file-overlap edges with no `blockedBy` behind them) can't be
+// recovered post-crash and are the known gap.
+export function parentsFromBlockedBy(blockedBy: number[]): string[] {
+  return blockedBy.map(String);
+}
+
 // Partition completed issues into connected components by parent edges, each with
 // its leaf tips. Component order follows first appearance in `issues`.
 export function prComponents(issues: CompletedIssue[]): PrComponent[] {
