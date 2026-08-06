@@ -72,6 +72,7 @@ import {
 } from "./reconcile.mts";
 import { parseOpenIssues, parsePrsClosingIssues } from "./github-parse.mts";
 import { parseSandcastleWorktrees } from "./worktrees.mts";
+import { planRetention } from "./log-retention.mts";
 import {
   REVIEW_RETRY_CAP,
   readAttempts,
@@ -168,25 +169,18 @@ mkdirSync(".sandcastle/logs", { recursive: true });
 // A log with no run inside the window is emptied (all its runs are stale).
 // ponytail: parse the header we already emit; no run-index/db needed.
 const LOG_RETENTION_DAYS = 14;
+// Thin file-IO caller; the keep/empty/keep-from decision lives in the pure,
+// tested planRetention (ADR-0002).
 function pruneOldRuns(dir: string, cutoffMs: number) {
-  const hdr = /^--- Run started: (.+?) ---$/;
   for (const name of readdirSync(dir)) {
     if (!name.endsWith(".log")) continue;
     const file = `${dir}/${name}`;
     const lines = readFileSync(file, "utf8").split("\n");
-    let keepFrom = lines.length; // no recent run found → empty the file
-    for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(hdr);
-      if (m && Date.parse(m[1]) >= cutoffMs) {
-        keepFrom = i;
-        break;
-      }
-    }
-    if (keepFrom === 0) continue; // already all-recent
-    const kept = lines.slice(keepFrom).join("\n");
-    if (kept.trim() === "")
+    const plan = planRetention(lines, cutoffMs);
+    if (plan.action === "keep-all") continue; // already all-recent
+    if (plan.action === "empty")
       unlinkSync(file); // no recent runs → drop the file
-    else writeFileSync(file, kept);
+    else writeFileSync(file, lines.slice(plan.index).join("\n"));
   }
 }
 try {
