@@ -88,5 +88,6 @@ as inherited scaffold.
   `bot-setup.md` — copied verbatim (language-agnostic).
 - Dropped: `proof-protocol.md`, `shot.mjs`, `logo.*`, `logs/`, `proof/`,
   `review-attempts.json` (runtime state).
-- `tests/review-standards-loading.test.mjs` — retargeted to Python paths; a dev-home
-  `templates/CODING_STANDARDS.md` fixture feeds its root-standards marker.
+- `tests/review-standards-loading.test.mjs` — retargeted to Python paths; synthesizes
+  its own root + Sandcastle `CODING_STANDARDS.md` markers in a temp dir (no tracked
+  dev-home fixture).

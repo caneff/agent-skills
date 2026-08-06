@@ -1,6 +1,7 @@
-import { test, expect, describe } from "vitest";
+import { test, expect, describe, beforeAll, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -19,6 +20,26 @@ const promptPath = join(repoRoot, ".sandcastle", "review-standards-prompt.md");
 // truth) and feed them a synthetic diff path-set via a fake `git` on PATH, so
 // the test breaks if the prompt's selection logic regresses.
 
+// The snippets `cat` two relative paths — `CODING_STANDARDS.md` and
+// `.sandcastle/CODING_STANDARDS.md` — that only exist in a real target repo.
+// We synthesize both in a temp dir with known first-line markers and run the
+// snippets there, so the test owns its fixtures instead of depending on stray
+// standards files living in the template tree.
+const ROOT_MARKER = "# Project coding standards (test fixture)";
+const SANDCASTLE_MARKER = "# Sandcastle coding standards (test fixture)";
+
+let fixtureDir;
+beforeAll(() => {
+  fixtureDir = mkdtempSync(join(tmpdir(), "review-standards-"));
+  writeFileSync(join(fixtureDir, "CODING_STANDARDS.md"), `${ROOT_MARKER}\n`);
+  mkdirSync(join(fixtureDir, ".sandcastle"));
+  writeFileSync(
+    join(fixtureDir, ".sandcastle", "CODING_STANDARDS.md"),
+    `${SANDCASTLE_MARKER}\n`
+  );
+});
+afterAll(() => rmSync(fixtureDir, { recursive: true, force: true }));
+
 /** Pull the `!`...`` ` bash snippets that pipe a diff into grep && cat. */
 function extractStandardsSnippets() {
   const prompt = readFileSync(promptPath, "utf8");
@@ -33,7 +54,8 @@ function extractStandardsSnippets() {
 /**
  * Run every standards snippet with `git diff --name-only` stubbed to print
  * `paths`. Returns the concatenated stdout (i.e. whichever standards files the
- * snippets chose to cat). Runs from repoRoot so relative cat paths resolve.
+ * snippets chose to cat). Runs from the temp fixture dir so the snippets'
+ * relative cat paths resolve to our synthesized markers.
  */
 function runSnippets(paths) {
   const snippets = extractStandardsSnippets();
@@ -48,7 +70,7 @@ function runSnippets(paths) {
     // a non-zero exit as empty output, not a test failure.
     try {
       out += execFileSync("bash", ["-c", script], {
-        cwd: repoRoot,
+        cwd: fixtureDir,
         encoding: "utf8",
       });
     } catch (e) {
@@ -57,15 +79,6 @@ function runSnippets(paths) {
   }
   return out;
 }
-
-const ROOT_MARKER = readFileSync(
-  join(repoRoot, "CODING_STANDARDS.md"),
-  "utf8"
-).split("\n")[0];
-const SANDCASTLE_MARKER = readFileSync(
-  join(repoRoot, ".sandcastle", "CODING_STANDARDS.md"),
-  "utf8"
-).split("\n")[0];
 
 describe("review-standards-prompt: diff-aware CODING_STANDARDS loading", () => {
   test("a diff under src/ loads the project standards only", () => {
