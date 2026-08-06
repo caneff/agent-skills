@@ -32,10 +32,11 @@ only.
 | `NO_SYMLINK`   | agents body has no `~/.claude` symlink | creates the symlink |
 | `NOT_SYMLINK`  | `~/.claude` entry is a real dir, not a symlink | moves body to agents, symlinks back (refuses if an agents body already exists) |
 | `WRONG_TARGET` | symlink resolves but points at the wrong body | relinks |
-| `BROKEN_LINK`  | symlink target does not resolve | relinks if an agents body exists, else reports |
+| `BROKEN_LINK`  | symlink target does not resolve | relinks if an agents body exists, else removes the dead symlink |
 
-`--fix` only creates symlinks or moves a stray `~/.claude` body into
-`~/.agents`. It never deletes a real directory.
+`--fix` creates symlinks, moves a stray `~/.claude` body into `~/.agents`, and
+removes dangling `~/.claude` symlinks (ones whose body is gone). It never
+deletes a real directory.
 
 Override `AGENTS` / `CLAUDE` env vars to point at other trees (the self-test
 uses this).
