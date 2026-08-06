@@ -14,11 +14,7 @@
 
 import { execSync } from "node:child_process";
 import * as sandcastle from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import {
-  sandboxIdentity,
-  onSandboxReadyCommands,
-} from "./sandbox-identity.mts";
+import { sandboxIdentity, sandboxConfig } from "./sandbox-identity.mts";
 
 const sh = (cmd: string) => execSync(cmd, { encoding: "utf8" }).trim();
 
@@ -64,13 +60,6 @@ export async function addressOpenPRs(prs?: string[]): Promise<void> {
 
   // Mint once per run; installation tokens are valid ~1h, no caching needed.
   const identity = await sandboxIdentity();
-  const hooks = {
-    sandbox: {
-      // All git-config writes chained into one entry (issue #52); see
-      // onSandboxReadyCommands for why.
-      onSandboxReady: onSandboxReadyCommands(identity),
-    },
-  };
 
   // Sequential: each run pushes to a branch, so we avoid concurrent pushes and
   // keep token spend predictable. `branchStrategy: branch` fetches that branch
@@ -81,18 +70,8 @@ export async function addressOpenPRs(prs?: string[]): Promise<void> {
       `\n=== Addressing review comments on PR #${pr} (${branch}) ===\n`
     );
     await sandcastle.run({
-      hooks,
+      ...sandboxConfig(identity),
       copyToWorktree: [".venv"],
-      sandbox: docker({
-        env: { ...identity.env, UV_PROJECT_ENVIRONMENT: "/home/agent/.venv" },
-        mounts: [
-          {
-            hostPath: "~/.claude/skills",
-            sandboxPath: "~/.claude/skills",
-            readonly: true,
-          },
-        ],
-      }),
       branchStrategy: { type: "branch", branch },
       name: `address-pr-${pr}`,
       maxIterations: 30,
