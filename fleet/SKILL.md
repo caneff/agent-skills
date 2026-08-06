@@ -36,7 +36,8 @@ Dispatch on the skill's argument:
 1. Get the directory list. **Default to the VSCode workspace:** glob `~/src/*.code-workspace` — exactly one → resolve its folders (see the `workspace` section below) and use those; several → list them and ask which; none → fall back to `~/.claude/fleet-dirs.txt`. Reading a workspace this way does **not** write to the fleet file — it's a live source. (Use `workspace` explicitly if you want the dirs saved to the fleet file instead.) Whichever source: drop blank/`#` lines, expand `~` and env vars to absolute paths.
 2. For each path, check it exists and is a directory. Collect the missing ones; **skip** them (don't spawn) and list them in the final report.
 3. Derive a name for each agent from the directory's basename, sanitized to match `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` (replace any other character with `-`). On a name collision, suffix with the parent directory name, then `-2`, `-3`, … until unique.
-4. Spawn **all** agents in a **single message** (parallel tool calls), one `Agent` call each, with:
+4. List the currently running background agents (use `TaskList`, or the agent overview) and collect their names. For each directory whose derived name matches a running agent, **skip** it — don't spawn a duplicate — and record it as "already running" for the report.
+5. Spawn **all** remaining agents in a **single message** (parallel tool calls), one `Agent` call each, with:
    - `subagent_type: general-purpose`
    - `name:` the derived name
    - `run_in_background: true` (named + background = a standing teammate that parks idle and waits for `SendMessage`)
@@ -55,7 +56,7 @@ Do a quick orientation, then STOP and wait:
 Do not modify anything during orientation. Keep the report short.
 ```
 
-5. Report the roster back to the user: a table of `name → directory`, note any skipped (missing) directories, and remind them they can address any agent later via `SendMessage` (or from the agent overview), and re-run this skill after editing the fleet file to change the lineup.
+6. Report the roster back to the user: a table of `name → directory`. List skipped directories in two groups — **missing** (path doesn't exist) and **already running** (an agent with that name is already up). Remind them they can address any agent later via `SendMessage` (or from the agent overview), and re-run this skill after editing the fleet file to change the lineup.
 
 ## Import from a VSCode workspace (`workspace` arg)
 
@@ -74,4 +75,4 @@ This does not spawn the fleet — run the skill with no args afterward to do tha
 ## Notes
 
 - The fleet file is plain text on purpose — the user edits it by hand or this skill edits it via `add`/`remove`. No config format, no schema.
-- Re-running the skill spawns a fresh set; it does not deduplicate against agents already running from a previous run. If the user wants to change the lineup, they edit the file (or use `add`/`remove`) and re-run.
+- Re-running the skill skips any directory whose derived agent name is already running, so it won't spawn duplicates on top of a previous run — only directories without a live agent get a fresh spawn. To change the lineup, edit the file (or use `add`/`remove`) and re-run.
