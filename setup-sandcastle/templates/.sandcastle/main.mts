@@ -144,6 +144,15 @@ function git(args: string): string | null {
   }
 }
 
+// Write a Markdown body to a log file, then comment it on each issue with
+// `--body-file` (not an inline `--body`) so a body with backticks or quotes
+// can't break shell escaping. One place owns that file-not-shell-string choice.
+function commentIssues(ids: string[], slug: string, body: string): void {
+  const file = `.sandcastle/logs/${slug}.md`;
+  writeFileSync(file, body);
+  for (const id of ids) gh(`issue comment ${id} --body-file ${file}`);
+}
+
 // Log verbosity via SANDCASTLE_VERBOSE:
 //   unset/0  quiet — parsed human-readable log only (drops tool-use blocks). Default.
 //   1/2/full raw   — every raw stdout line verbatim (full firehose, interleaved)
@@ -782,9 +791,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
               `failed. Re-implement to address the findings (don't just silence ` +
               `the verdict line).\n\n` +
               sections.join("\n\n");
-            const findingsFile = `.sandcastle/logs/review-findings-${issue.id}.md`;
-            writeFileSync(findingsFile, body);
-            gh(`issue comment ${issue.id} --body-file ${findingsFile}`);
+            commentIssues([issue.id], `review-findings-${issue.id}`, body);
             console.warn(
               `  ⚠ ${issue.id} failed review (${combined.failedAxes.join(
                 ", "
@@ -1086,10 +1093,8 @@ if (components.length === 0) {
         "```\n" +
         `${verdict.tail || "(no output captured)"}\n` +
         "```\n";
-      const gateFile = `.sandcastle/logs/check-gate-${runId}-${n + 1}.md`;
-      writeFileSync(gateFile, body);
+      commentIssues(plan.commentIssueIds, `check-gate-${runId}-${n + 1}`, body);
       for (const id of plan.commentIssueIds) {
-        gh(`issue comment ${id} --body-file ${gateFile}`);
         relabel(id, "ready-for-human", [
           "ready-for-agent",
           "needs-review",
@@ -1114,10 +1119,7 @@ if (components.length === 0) {
         "```\n" +
         `${verdict.tail || "(no output captured)"}\n` +
         "```\n";
-      const gateFile = `.sandcastle/logs/check-gate-${runId}-${n + 1}.md`;
-      writeFileSync(gateFile, body);
-      for (const id of plan.commentIssueIds)
-        gh(`issue comment ${id} --body-file ${gateFile}`);
+      commentIssues(plan.commentIssueIds, `check-gate-${runId}-${n + 1}`, body);
       console.error(
         `  ✗ Component ${n + 1}: full-suite gate ${verdict.status}; PR withheld, ` +
           `${plan.commentIssueIds.length} issue(s) commented → requeued.`
