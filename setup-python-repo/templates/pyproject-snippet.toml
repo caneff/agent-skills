@@ -24,7 +24,7 @@ ignore = [
 # here — ISC002/ISC003 still carry their weight.
 
 [tool.ruff.lint.per-file-ignores]
-"*_test.py" = ["S101", "ANN"]  # asserts ARE pytest; tests don't need full annotations
+"*_test.py" = ["S101"]  # asserts ARE pytest; annotations still required (types everywhere)
 
 # --- ty (type check) ---
 # No strict mode. error-on-warning is the churn-proof strictness lever (beta:
