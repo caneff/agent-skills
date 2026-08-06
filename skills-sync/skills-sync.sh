@@ -21,7 +21,14 @@ scan() {
     if [ -L "$d" ]; then
       if [ ! -e "$d/SKILL.md" ]; then
         echo "BROKEN_LINK $n"
-        [ "$fix" = fix ] && [ -d "$AGENTS/$n" ] && ln -sfn "$want" "$d"
+        if [ "$fix" = fix ]; then
+          if [ -d "$AGENTS/$n" ]; then
+            ln -sfn "$want" "$d"
+          else
+            # no body to point at — prune the dead symlink (only ever a symlink here)
+            rm "$d"; echo "  removed dead link $n" >&2
+          fi
+        fi
         continue
       fi
       tgt=$(readlink "$d")
@@ -88,6 +95,8 @@ self_test() {
   [ -L "$CLAUDE/nolink" ] || { echo "FAIL: nolink symlink not created"; fail=1; }
   [ -L "$CLAUDE/realdir" ] && [ -d "$AGENTS/realdir" ] || { echo "FAIL: realdir not moved+linked"; fail=1; }
   [ "$(readlink "$CLAUDE/wrong")" = "../../.agents/skills/wrong" ] || { echo "FAIL: wrong not relinked"; fail=1; }
+  # dangling link (no body) is removed, not left behind
+  [ ! -L "$CLAUDE/dead" ] || { echo "FAIL: dead symlink not removed by --fix"; fail=1; }
 
   rm -rf "$T"
   [ "$fail" = 0 ] && { echo "self-test OK"; return 0; } || { echo "self-test FAILED"; return 1; }
