@@ -5,9 +5,10 @@ Usage: extract_puzzle.py <sudokupad-url-or-id>
 Prints JSON {title, author, rules} to stdout. Exits non-zero if fetch/decode fails.
 
 The API returns an lz-string(base64) blob prefixed with a format tag ("scl").
-The payload is a JS object literal (unquoted keys, `t`/`f` bools) — not strict
-JSON — so we string-slice the three fields we need instead of parsing it.
-ponytail: slice the 3 fields we need; write a real JS-literal parser only if a field slice ever misses.
+Two payload shapes exist: SudokuMaker exports are valid JSON with the fields
+under "metadata"; legacy SudokuPad blobs are a JS object literal (unquoted keys,
+`t`/`f` bools) — not strict JSON — so those we string-slice instead of parsing.
+ponytail: JSON first, slice as fallback; the slice missed on SudokuMaker's metadata.rules.
 """
 import json, re, sys, urllib.request
 import lzstring
@@ -65,8 +66,12 @@ def main():
     data = lzstring.LZString().decompressFromBase64(body)
     if not data:
         sys.exit("decompress failed (unexpected blob format)")
-    out = {"title": field(data, "t"), "author": field(data, "author"),
-           "rules": field(data, "rules")}
+    try:  # SudokuMaker: valid JSON, fields under "metadata"
+        m = json.loads(data)["metadata"]
+        out = {k: m.get(k) for k in ("title", "author", "rules")}
+    except (ValueError, KeyError, TypeError):  # legacy SudokuPad JS-literal blob
+        out = {"title": field(data, "t"), "author": field(data, "author"),
+               "rules": field(data, "rules")}
     if not out["rules"]:
         sys.exit("no rules field found in puzzle data")
     out["layout"] = layout_hint(out["rules"])

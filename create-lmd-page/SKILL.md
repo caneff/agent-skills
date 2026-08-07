@@ -20,6 +20,8 @@ single prompt. Skip any input the user already supplied. Order:
 2. **Image id** — e.g. `001344`, used in the `<img:ID>` placeholder
 3. **Notes** (optional) — intro/flavor text shown at the *top* of the page, above the image, with no header. If not given, omit the intro block entirely.
 
+**Linking a setter's name in the notes.** When the user says "link to <name>'s LMD page" (or asks to link a name mentioned in the notes), wrap that name in an anchor to their LMD user page: `https://logic-masters.de/Raetselportal/Benutzer/eingestellt.php?name=<NAME>` (substitute the name, URL-encoding it if needed). Don't ask for the URL — build it from this template.
+
 ### Auto-extract rules from the link
 
 After the link, run:
@@ -52,7 +54,7 @@ Fill the template below, then:
 
 Formatting rules:
 
-- Each named rule becomes one block inside the Rules card: `<strong style="display: block;">` name on its own line, then the rule text. When the rule is a single statement, use a `<span style="color: #444;">`; when it has several points (the extractor's `•` bullets), use a `<ul style="color: #444; margin: 4px 0 0; padding-left: 18px; max-width: none;">` with one `<li style="max-width: none;">` per point (the `max-width: none` is the gutter fix below). Last block gets `margin-bottom: 0;`, all others `margin-bottom: 14px;`.
+- Each named rule becomes one block inside the Rules card: `<strong style="display: block;">` name on its own line, then the rule text as a `<ul style="color: #444; margin: 4px 0 0; padding-left: 18px; max-width: none;">` with one `<li style="max-width: none;">` per point (the `max-width: none` is the gutter fix below). Always use the bullet list — even a single-statement rule is one `<li>` bullet, so every rule reads consistently. Last block gets `margin-bottom: 0;`, all others `margin-bottom: 14px;`.
 - **Rules card right-gutter (the important gotcha).** If the rules are rendered as a bullet list (`<ul><li>`), LMD's own CSS caps list-item text to a fixed measure (~560px). The lines then wrap short no matter how wide you make the card, leaving a big empty band on the right — and it comes back every time you widen the card, because the site is overriding you. **Fix: add `max-width: none;` to every `<ul>` and `<li>` in the Rules card.** That releases the cap so the text fills the card width. Once released, the card can be as wide as you like with no gutter. (Symmetric `16px 18px` card padding keeps the small left/right gutters even.) `<span>`-based (non-bullet) rule text isn't capped, so it only matters when you use bullets — but adding it is harmless, so the templates below include it.
 - Escape special characters as HTML entities (`&ouml;`, `&deg;`, `&amp;`, etc.).
 - Fix obvious typos in rule text (e.g. "sum the the" → "sum to the"), but never change rule meaning. Mention any fix you made.
@@ -107,7 +109,7 @@ epigraph, `#ddf` bar, and rule blocks are identical in both.
       <div style="padding: 16px 18px;">
         <div style="margin-bottom: 14px; line-height: 1.5;"><strong style="display: block;">{{RULE_NAME}}</strong><ul style="color: #444; margin: 4px 0 0; padding-left: 18px; max-width: none;"><li style="max-width: none;">{{RULE_POINT}}</li></ul></div>
         <!-- one block per rule (last uses margin-bottom: 0). One <li> per bullet point.
-             Single-statement rule: swap the <ul> for <span style="color: #444;">{{RULE_TEXT}}</span>. -->
+             A single-statement rule is still a <ul> with one <li> — always bullet. -->
       </div>
     </aside>
   </div>
@@ -140,7 +142,7 @@ Everything else is identical to two-column.
       <div style="padding: 16px 18px;">
         <div style="margin-bottom: 14px; line-height: 1.5;"><strong style="display: block;">{{RULE_NAME}}</strong><ul style="color: #444; margin: 4px 0 0; padding-left: 18px; max-width: none;"><li style="max-width: none;">{{RULE_POINT}}</li></ul></div>
         <!-- one block per rule (last uses margin-bottom: 0). One <li> per bullet point.
-             Single-statement rule: swap the <ul> for <span style="color: #444;">{{RULE_TEXT}}</span>. -->
+             A single-statement rule is still a <ul> with one <li> — always bullet. -->
       </div>
     </aside>
   </div>
