@@ -31,6 +31,11 @@ as inherited scaffold.
    already-installed repos via `copier update` — the answers-file breadcrumb is what
    makes that update a reproducible diff between two tags. That rollout is separate
    work; the `setup-sandcastle` skill itself installs and does not drive updates.
+   **`copier.yml` lives at the repo root** (with `_subdirectory:
+   setup-sandcastle/templates/.sandcastle`), not in the template folder: copier
+   records `_commit` in the breadcrumb only when sourced from the git root, and
+   without `_commit` there is no version to diff from — a subfolder source renders
+   correct files but silently breaks update.
 5. **Isolated Docker sandbox** — not `noSandbox()`. The use case is AFK/parallel
    autonomous agents making commits; running that unsandboxed on the host is the
    3am page. Isolation is load-bearing, not speculative.
