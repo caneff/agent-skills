@@ -47,20 +47,23 @@ Abort with the exact fix if any is missing:
 `copier copy` renders the template into `.sandcastle/`: it drops the dev-only
 `tests/` (a target never edits the `.mts`), fills `PYTHON_VERSION` into the
 Dockerfile from the target's `.python-version`, and writes
-`.sandcastle/.copier-answers.yml` — the breadcrumb recording the template tag
-this repo sits on, so a later `copier update` can merge in template edits. Render
-into `./.sandcastle`; the template's
-`_subdirectory: .sandcastle` emits its files at the destination root:
+`.sandcastle/.copier-answers.yml` — the breadcrumb recording the template
+version (`_commit`) this repo sits on, so a later `copier update` can merge in
+template edits. Source the **skills repo**, not the template subfolder — copier
+records `_commit` only from the git root (why: `references/design-decisions.md`
+decision 4). It emits the subtree at the destination root, so render into
+`./.sandcastle`:
 
 ```bash
 copier copy --defaults \
   --vcs-ref=sandcastle-template/v1 \
   --data PYTHON_VERSION="$(cat .python-version)" \
-  <skill>/templates ./.sandcastle
+  https://github.com/caneff/agent-skills.git ./.sandcastle
 ```
 
 `--vcs-ref` pins to the current template tag — bump it whenever a newer
-`sandcastle-template/vN` ships.
+`sandcastle-template/vN` ships. (A local checkout path — the skills repo root —
+works too and needs no network, but records a machine-local `_src_path`.)
 
 **Done when:** `.sandcastle/main.mts` exists, `.sandcastle/tests/` does not, the
 Dockerfile's `ARG PYTHON_VERSION` equals `.python-version`, and
