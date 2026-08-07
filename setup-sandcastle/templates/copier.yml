@@ -1,0 +1,20 @@
+# Copier template for the Sandcastle orchestrator.
+# `copier copy` installs it into a repo; `copier update` later merges template
+# edits into an installed repo, keeping that repo's own additions. The template
+# files live in the `.sandcastle` subdirectory; this copier.yml is the root
+# copier reads (pointed at `setup-sandcastle/templates`, pinned to a
+# `sandcastle-template/vN` git tag).
+_subdirectory: .sandcastle
+
+# The dev-only vitest suite guards the canonical `.mts` here; a target never
+# edits the orchestrator, so it never ships. Both patterns are needed: the bare
+# `tests` drops the directory entry, `tests/**` drops its contents (a lone
+# trailing-slash pattern leaves an empty tests/ behind).
+_exclude:
+  - "tests"
+  - "tests/**"
+
+PYTHON_VERSION:
+  type: str
+  help: "Python the sandbox bakes in — the target's .python-version (e.g. 3.14)"
+  default: "3.13"

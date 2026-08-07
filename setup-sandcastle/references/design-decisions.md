@@ -1,6 +1,6 @@
 # setup-sandcastle — design decisions
 
-Why the skill is shaped the way it is. Not shipped to targets (the install copies
+Why the skill is shaped the way it is. Not shipped to targets (the install renders
 only `templates/.sandcastle/`). Maintenance reference for future edits.
 
 ## Origin
@@ -14,9 +14,10 @@ as inherited scaffold.
 
 ## Locked decisions
 
-1. **Targets get runtime-only.** The 10 vitest tests + vitest stay in this skill's
-   `templates/` (the canonical home you hack); install copies `.sandcastle/` minus
-   `tests/`. Nobody edits the `.mts` in a target, so the tests are dead weight there.
+1. **Targets get runtime-only.** The vitest suite + vitest stay in this skill's
+   `templates/` (the canonical home you hack); copier renders `.sandcastle/` with the
+   `tests/` excluded (`copier.yml` `_exclude`). Nobody edits the `.mts` in a target,
+   so the tests are dead weight there.
 2. **Canonical home = this skill's `templates/`.** No separate repo — that would
    re-create the drift it exists to avoid. You hack here with `npm test` green,
    commit to the skills repo, and the next install carries it. One source of truth.
@@ -25,8 +26,11 @@ as inherited scaffold.
    `npm run typecheck` (the mechanical drift net — the vitest tests don't exercise
    the sandcastle API, only pure functions), fix `main.mts`, `npm test`, commit.
    No auto-folding of upstream's scaffold — the fork diverged too far to merge.
-4. **Install-only v1.** No "update an already-installed `.sandcastle/`" path — that's
-   a merge against possibly-hacked target code; build it when N targets actually drift.
+4. **The template is copier-managed; this skill still only installs.** copier was
+   adopted (map #65, spec #70) precisely so template edits can later be merged into
+   already-installed repos via `copier update` — the answers-file breadcrumb is what
+   makes that update a reproducible diff between two tags. That rollout is separate
+   work; the `setup-sandcastle` skill itself installs and does not drive updates.
 5. **Isolated Docker sandbox** — not `noSandbox()`. The use case is AFK/parallel
    autonomous agents making commits; running that unsandboxed on the host is the
    3am page. Isolation is load-bearing, not speculative.
@@ -34,9 +38,9 @@ as inherited scaffold.
    needs only the agent + git + gh + the target's uv toolchain (`main.mts` runs on
    the *host* via tsx; Claude CLI is a standalone binary). uv provides Python;
    `RUN uv python install ${PYTHON_VERSION}` **bakes the interpreter into an image
-   layer** so no container re-fetches it. `ARG PYTHON_VERSION` is set from the
-   target's `.python-version` at install (step 2). Dropped: node, wrangler,
-   Playwright/chromium.
+   layer** so no container re-fetches it. copier renders `ARG PYTHON_VERSION` from the
+   target's `.python-version` (a copier answer) at install (step 1) — the Dockerfile
+   ships as `Dockerfile.jinja`. Dropped: node, wrangler, Playwright/chromium.
 7. **Hard-require setup-python-repo; drop proof entirely.** The pipeline leans on
    `just check` (implementer gate) + the target's PR CI (authoritative) + the
    reviewer's spec verdict. That IS the proof — a Python repo needs no visual
@@ -53,12 +57,14 @@ as inherited scaffold.
     `bot-setup.md` + the `GITHUB_APP_*` `.env` block. Wired into `main.mts`/`address.mts`,
     no-ops when env unset — removing it is net work. `.env.example` only dropped the
     Cloudflare/R2 block.
-11. **Prompts stored pre-retargeted; install = dumb copy.** All templatization
+11. **Prompts stored pre-retargeted; install renders with copier.** All templatization
     (`npm run test`→`just check`, Python grep paths in the review standards-loader,
     uv Dockerfile, `.venv` copyToWorktree) is baked into `templates/` at build time.
-    Install never seds a prompt. `disable-model-invocation`, user-invoked.
+    copier's only install-time substitution is `PYTHON_VERSION` (a copier answer into
+    `Dockerfile.jinja`); prompts/config carry no jinja and copier copies them verbatim.
+    `disable-model-invocation`, user-invoked.
 12. **`.env` seed copies by path, never reads.** Secrets never enter the agent's
-    context; the copy is verified gitignored before proceeding (SKILL.md step 4).
+    context; the copy is verified gitignored before proceeding (SKILL.md step 3).
 
 ## Gotchas found in the live rag-bootcamp install
 
