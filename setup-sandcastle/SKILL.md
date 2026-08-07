@@ -16,11 +16,12 @@ This composes **on top of** [`setup-python-repo`](../setup-python-repo/SKILL.md)
 it consumes that repo's `just check`, PR CI, `CODING_STANDARDS.md`, and
 `AGENTS.md`. It does not create them — **step 0 hard-requires them.**
 
-The orchestrator is a frozen snapshot copied from this skill's
-[`templates/`](templates/) (the canonical home where the `.mts` is hacked with
-its vitest suite green). Targets get **runtime-only** code — no tests, no
-vitest. Install is a **dumb copy** — prompts/Dockerfile/config already ship
-Python-retargeted; nothing is sed'd at install time.
+The orchestrator lives in this skill's [`templates/`](templates/) as a **copier
+template** (the canonical home where the `.mts` is hacked with its vitest suite
+green). Targets get **runtime-only** code — no tests, no vitest. Install
+**renders** it with copier: prompts/config already ship Python-retargeted, and
+the one interpreter-specific value — `PYTHON_VERSION` — copier fills from the
+target's `.python-version` (no install-time `sed`).
 
 ## 0. Prereqs — check, fail fast
 
@@ -35,36 +36,37 @@ Abort with the exact fix if any is missing:
 - **Docker** — `docker info` succeeds (agents run in Docker sandboxes).
 - **Node host runtime** — `node` and `npx` on PATH (`main.mts` runs on the host
   via tsx). No Node in the sandbox image — only on the host.
+- **copier** — `command -v copier` (the template engine step 1 renders with;
+  `uv tool install copier` if missing).
 - Target is a git repo with `.python-version`.
 
-**Done when:** all five pass, or you've stopped with the precise missing-prereq message.
+**Done when:** all six pass, or you've stopped with the precise missing-prereq message.
 
-## 1. Copy the orchestrator
+## 1. Render the orchestrator with copier
 
-Copy this skill's `templates/.sandcastle/` → the target repo root, **excluding
-`tests/`** (those guard the canonical home; a target never edits the `.mts`):
-
-```bash
-cp -r <skill>/templates/.sandcastle ./.sandcastle
-rm -rf ./.sandcastle/tests
-```
-
-**Done when:** `.sandcastle/main.mts` exists and `.sandcastle/tests/` does not.
-
-## 2. Pin the sandbox Python
-
-The `.sandcastle/Dockerfile` bakes the target's exact interpreter into an image
-layer (`RUN uv python install ${PYTHON_VERSION}`) so no container re-fetches it.
-Set the build-arg default to match the repo:
+`copier copy` renders the template into `.sandcastle/`: it drops the dev-only
+`tests/` (a target never edits the `.mts`), fills `PYTHON_VERSION` into the
+Dockerfile from the target's `.python-version`, and writes
+`.sandcastle/.copier-answers.yml` — the breadcrumb recording the template tag
+this repo sits on, so a later `copier update` can merge in template edits. Render
+into `./.sandcastle`; the template's
+`_subdirectory: .sandcastle` emits its files at the destination root:
 
 ```bash
-V=$(cat .python-version)              # e.g. 3.14
-sed -i "s/^ARG PYTHON_VERSION=.*/ARG PYTHON_VERSION=${V}/" .sandcastle/Dockerfile
+copier copy --defaults \
+  --vcs-ref=sandcastle-template/v1 \
+  --data PYTHON_VERSION="$(cat .python-version)" \
+  <skill>/templates ./.sandcastle
 ```
 
-**Done when:** the Dockerfile's `ARG PYTHON_VERSION` equals `.python-version`.
+`--vcs-ref` pins to the current template tag — bump it whenever a newer
+`sandcastle-template/vN` ships.
 
-## 3. Wire the host runtime (package.json)
+**Done when:** `.sandcastle/main.mts` exists, `.sandcastle/tests/` does not, the
+Dockerfile's `ARG PYTHON_VERSION` equals `.python-version`, and
+`.sandcastle/.copier-answers.yml` is present.
+
+## 2. Wire the host runtime (package.json)
 
 `main.mts` runs on the host via tsx and imports `@ai-hero/sandcastle` + `zod`.
 `npm init -y` if there's no `package.json`, then set deps + the run script
@@ -86,7 +88,7 @@ Add `node_modules/` to the repo's `.gitignore` if it isn't already ignored.
 
 **Done when:** `npm ls @ai-hero/sandcastle` shows `0.10.0`.
 
-## 4. Seed `.env` (careful — secrets path)
+## 3. Seed `.env` (careful — secrets path)
 
 `.sandcastle/.env` holds the Claude + GitHub tokens. **Copy by path, never read
 its contents** — reading a filled `.env` would pull secrets into the transcript.
@@ -126,7 +128,7 @@ fill by hand."*
 
 **Done when:** `.sandcastle/.env` exists **and** `git check-ignore` confirms it's ignored.
 
-## 5. Verify
+## 4. Verify
 
 ```bash
 npx tsc -p .sandcastle/tsconfig.json      # orchestrator typechecks against the installed lib
@@ -139,7 +141,7 @@ pinned `@ai-hero/sandcastle`. Fix anything red before declaring done.
 
 ## Notes — what the user does next (not the skill's job)
 
-- **Fill `.env`** (if skipped in step 4), then build the sandbox image via the
+- **Fill `.env`** (if skipped in step 3), then build the sandbox image via the
   sandcastle CLI, then `npm run sandcastle`.
 - **Label issues `ready-for-agent`** — the planner only selects those.
 - **Optional bot identity** — see [`.sandcastle/bot-setup.md`](templates/.sandcastle/bot-setup.md)
