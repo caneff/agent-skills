@@ -52,16 +52,20 @@ question or your reasoning. A wrong "fix" is worse than a question.
 
 For every comment you addressed or chose not to, post a reply in its thread.
 
-Write each reply to a file first (`reply.md`), then post the file. Do NOT pass
+Run `mkdir -p .sandcastle/logs` once, then write each reply to
+`.sandcastle/logs/reply.md` and post the file. Write it there, never in the repo
+root: that directory is gitignored, so a reply cannot leave the checkout dirty.
+The `mkdir` matters because `logs/` is gitignored and so is absent from a fresh
+worktree or clone. Do NOT pass
 the reply inline with `-f body="…"` / `--body "…"`: the blockquote `>` and the
 backticks around the SHA get mangled by the shell (the backticks run as a command
 substitution and the code span vanishes). Substitute the real SHA into the file
 as you write it.
 
 - **Inline thread** — reply in the same thread:
-  `gh api repos/$OWNER_REPO/pulls/{{PR_NUMBER}}/comments/<comment_id>/replies -F body=@reply.md`
+  `gh api repos/$OWNER_REPO/pulls/{{PR_NUMBER}}/comments/<comment_id>/replies -F body=@.sandcastle/logs/reply.md`
   where `<comment_id>` is the thread-starting comment's `id`.
-- **Top-level** — `gh pr comment {{PR_NUMBER}} --body-file reply.md`.
+- **Top-level** — `gh pr comment {{PR_NUMBER}} --body-file .sandcastle/logs/reply.md`.
 
 Reply content: **start every reply with a Markdown blockquote of the comment you
 are responding to** so the thread is self-contained — one or two `> `-prefixed
