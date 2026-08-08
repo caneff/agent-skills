@@ -67,7 +67,7 @@ Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock
 
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
 
-Do NOT close or modify any parent issue.
+When the source was a tracker issue — a spec or plan these tickets now decompose — strip its `ready-for-agent` label. The planner grabs every `ready-for-agent` issue, so a spec left with that label races its own children into the build queue and gets implemented a second time (redundantly, on its own branch). Leave the issue open as the tickets' parent reference; don't otherwise edit its contents.
 
 <local-ticket-template>
 
