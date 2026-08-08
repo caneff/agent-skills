@@ -70,6 +70,26 @@ export async function sandboxIdentity(
 }
 
 /**
+ * Push a freshly-minted bot token into an env map so host-side `gh()`/`git()`
+ * calls authenticate as the bot. Called after each `sandboxIdentity()` mint —
+ * at startup and once per iteration — to keep the host token under GitHub's
+ * 1-hour installation-token cap on long runs.
+ *
+ * No-op when identity carries no token (personal-token mode, bot vars unset):
+ * the maintainer's ambient GH_TOKEN must never be clobbered.
+ */
+export function applyBotToken(
+  identity: SandboxIdentity,
+  env: Record<string, string | undefined>
+): void {
+  const token = identity.env.GH_TOKEN;
+  if (token) {
+    env.GH_TOKEN = token;
+    env.GITHUB_TOKEN = token;
+  }
+}
+
+/**
  * The `onSandboxReady` command list, shared by every sandbox creation site
  * (`sandboxConfig` here and `address.mts`).
  *

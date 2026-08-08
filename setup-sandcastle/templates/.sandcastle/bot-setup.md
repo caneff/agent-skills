@@ -125,7 +125,12 @@ Add three repository secrets at **Settings → Secrets and variables → Actions
 
 ## Step 6 — Mint a token (one-liner)
 
-With the three env vars set, mint a short-lived (~1 hour) installation token:
+A `sandcastle` run no longer needs this step: with the three `GITHUB_APP_*` vars
+in `.sandcastle/.env`, `main.mts` mints the installation token itself and
+re-mints it every iteration, so long runs never hit GitHub's ~1-hour token cap.
+
+The one-liner below is still handy for ad-hoc `gh`/`git` calls in your own shell
+(minted once, so it expires after ~1 hour):
 
 ```bash
 export GITHUB_TOKEN=$(node .sandcastle/mint-gh-token.mjs)

@@ -43,7 +43,11 @@
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { addressOpenPRs } from "./address.mts";
-import { sandboxIdentity, sandboxConfig } from "./sandbox-identity.mts";
+import {
+  sandboxIdentity,
+  sandboxConfig,
+  applyBotToken,
+} from "./sandbox-identity.mts";
 import {
   resolveBase,
   issueBranch,
@@ -430,9 +434,14 @@ const planSchema = z.object({
 // guards against a pathological re-planning loop.
 const MAX_ITERATIONS = 20;
 
-// Resolve sandbox identity once. No-op when bot env vars are unset.
-// Installation tokens are short-lived (~1h); minting per run keeps them fresh.
-const identity = await sandboxIdentity();
+// Resolve sandbox identity. No-op when bot env vars are unset.
+// GitHub caps App installation tokens at ~1h, so a token minted once dies on any
+// run that outlasts it (retries routinely push past the hour). We re-mint at the
+// top of each iteration (below) instead; `identity` is reassigned there, and
+// applyBotToken pushes each fresh token into process.env so the host gh()/git()
+// calls stay authenticated too. This first mint covers Phase 0 + the sweep.
+let identity = await sandboxIdentity();
+applyBotToken(identity, process.env);
 
 // Copy the host's virtualenv into the worktree before each sandbox starts.
 // Avoids resolving+downloading every dependency from scratch; sandboxConfig's
@@ -514,6 +523,13 @@ const retiredByGate = new Map<string, string>();
 
 for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
+
+  // Re-mint before this iteration's sandboxes are cut: installation tokens
+  // expire ~1h after minting, so a long run's later iterations would otherwise
+  // bake a dead token into every sandbox (and the host gh() calls) and 401.
+  // Minting is one JWT sign + one REST call — cheap enough to do every pass.
+  identity = await sandboxIdentity();
+  applyBotToken(identity, process.env);
 
   // -------------------------------------------------------------------------
   // Phase 1: Plan
