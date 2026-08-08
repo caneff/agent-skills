@@ -6,6 +6,6 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
-    include: [".sandcastle/tests/**/*.test.mjs"],
+    include: ["templates/.sandcastle/tests/**/*.test.mjs"],
   },
 });

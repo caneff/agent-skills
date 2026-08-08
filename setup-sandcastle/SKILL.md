@@ -44,21 +44,22 @@ Abort with the exact fix if any is missing:
 
 ## 1. Render the orchestrator with copier
 
-`copier copy` renders the template into `.sandcastle/`: it drops the dev-only
-`tests/` (a target never edits the `.mts`), fills `PYTHON_VERSION` into the
-Dockerfile from the target's `.python-version`, and writes
-`.sandcastle/.copier-answers.yml` — the breadcrumb recording the template
+`copier copy` renders the template as a `.sandcastle/` **subtree at this repo's
+root**: it drops the dev-only `tests/` (a target never edits the `.mts`), fills
+`PYTHON_VERSION` into the Dockerfile from the target's `.python-version`, and
+writes a root `.copier-answers.yml` — the breadcrumb recording the template
 version (`_commit`) this repo sits on, so a later `copier update` can merge in
 template edits. Source the **skills repo**, not the template subfolder — copier
 records `_commit` only from the git root (why: `references/design-decisions.md`
-decision 4). It emits the subtree at the destination root, so render into
-`./.sandcastle`:
+decision 4). The subproject root **is** this repo's git root (#93), so render
+into `.` — copier writes only `.sandcastle/` and the root breadcrumb, scattering
+nothing else across the target:
 
 ```bash
 copier copy --defaults \
-  --vcs-ref=sandcastle-template/v3 \
+  --vcs-ref=sandcastle-template/v4 \
   --data PYTHON_VERSION="$(cat .python-version)" \
-  https://github.com/caneff/agent-skills.git ./.sandcastle
+  https://github.com/caneff/agent-skills.git .
 ```
 
 `--vcs-ref` pins to the current template tag — bump it whenever a newer
@@ -66,8 +67,8 @@ copier copy --defaults \
 works too and needs no network, but records a machine-local `_src_path`.)
 
 **Done when:** `.sandcastle/main.mts` exists, `.sandcastle/tests/` does not, the
-Dockerfile's `ARG PYTHON_VERSION` equals `.python-version`, and
-`.sandcastle/.copier-answers.yml` is present.
+Dockerfile's `ARG PYTHON_VERSION` equals `.python-version`, and a root
+`.copier-answers.yml` is present.
 
 ## 2. Seed the implementer's `CLAUDE.md`
 
@@ -81,10 +82,11 @@ required both targets, so they resolve inside the sandbox):
 printf '@AGENTS.md\n@CODING_STANDARDS.md\n' > CLAUDE.md
 ```
 
-Root file, above `.sandcastle/` — the install step seeds it and copier never
-manages it (its `_subdirectory` is `.sandcastle`). Import the **root**
-`CODING_STANDARDS.md` (the src standard the implementer builds against), not the
-`.sandcastle/` orchestrator standard the review gate loads conditionally.
+The install step seeds it and copier never manages it — the template renders
+only `.sandcastle/` and the root breadcrumb, never a root `CLAUDE.md`, so
+`copier update` leaves it untouched. Import the **root** `CODING_STANDARDS.md`
+(the src standard the implementer builds against), not the `.sandcastle/`
+orchestrator standard the review gate loads conditionally.
 
 **Done when:** `CLAUDE.md` exists at the repo root and its body is exactly
 `@AGENTS.md` then `@CODING_STANDARDS.md`.
@@ -166,41 +168,59 @@ pinned `@ai-hero/sandcastle`. Fix anything red before declaring done.
 
 Once a repo is installed, later `sandcastle-template/vN` tags reach it through
 the [`sandcastle-propagate`](sandcastle-propagate) maintainer script. It
-discovers every adopter under `~/src` by its `.sandcastle/.copier-answers.yml`
+discovers every adopter under `~/src` by its root `.copier-answers.yml`
 breadcrumb (no hardcoded list), preserves each repo's `PYTHON_VERSION`, then
 commits `.sandcastle` and pushes. Always dry-run first:
 
 ```bash
 sandcastle-propagate --dry-run     # show what each repo would receive
-sandcastle-propagate               # re-render, commit, push (skips dirty repos)
+sandcastle-propagate               # copier update, commit, push (skips dirty repos)
 ```
 
-Pass a ref to pin (`sandcastle-propagate sandcastle-template/v3`); the default
+Pass a ref to pin (`sandcastle-propagate sandcastle-template/v4`); the default
 is the newest `sandcastle-template/v*` tag.
 
-**Caveat — it re-renders, it does not merge.** The script uses
-`copier copy --overwrite`, not `copier update`, because `copier update` is
-broken for the `./.sandcastle` subdir layout (its diff runs in a temp render
-where the `.sandcastle` path does not exist, so git aborts). A re-render
-overwrites every rendered file, so a genuine hand-edit under `.sandcastle`
-**would** be replaced rather than merged.
+**It is a real 3-way merge, not a re-render.** The script runs `copier update`
+(#93): template edits merge in and a file an adopter legitimately edited under
+`.sandcastle` is preserved. Update resolves now because the subproject root is
+the repo's git root, so copier's update diff runs against a path that exists in
+both the temp render and the real tree. A genuine conflict (adopter and template
+touched the same lines) lands as inline `<<<<<<<` markers; the script refuses to
+commit such a tree and flags the repo for a human, so a half-merged state is
+never pushed.
 
-Two properties bound that risk — data loss is not silent:
+Safety properties:
 
 - **Runtime state is untouched.** `.env`, `logs/`, `worktrees/`, and
   `review-attempts.json` are not template-rendered, so copier never writes or
-  deletes them. Only files the template owns are overwritten.
-- **Uncommitted work is skipped; overwritten work stays in git.** The script
-  refuses any repo with a dirty tree, so an in-progress edit is never clobbered
-  — commit or stash first. On a clean repo it commits `.sandcastle` before
-  pushing, so whatever a re-render replaced is preserved in history and visible
-  in that commit's diff, recoverable rather than gone.
+  deletes them.
+- **Uncommitted work is skipped.** The script refuses any repo with a dirty
+  tree — commit or stash first. On a clean repo it commits `.sandcastle` and the
+  root breadcrumb before pushing, so every merged change is in that commit's
+  diff.
 
-To confirm before running, diff a repo's live `.sandcastle` against the target
-render (`copier copy --pretend`, or `--dry-run` here) — every changed line
-should be template drift the new tag supersedes, not project-specific text.
-Restoring real 3-way `copier update` (which merges instead of overwrites, and
-retires this hack) is tracked in #93.
+To confirm before running, `--dry-run` (`copier update --pretend`) shows the
+merge each repo would receive without touching it.
+
+### One-time migration off the old layout
+
+Repos installed before #93 carry the breadcrumb at `.sandcastle/.copier-answers.yml`
+(the old `./.sandcastle` subdir layout) and are pinned to a pre-v4 tag. `copier
+update` cannot bridge that layout shift, so migrate each once — a re-render onto
+the new root layout, since their `.sandcastle` is generated and unedited:
+
+```bash
+# from the adopter repo root, on a clean tree:
+copier copy --overwrite --defaults \
+  --vcs-ref=sandcastle-template/v4 \
+  --data PYTHON_VERSION="$(cat .python-version)" \
+  https://github.com/caneff/agent-skills.git .
+git rm -q .sandcastle/.copier-answers.yml      # drop the stale subdir breadcrumb
+git add .sandcastle .copier-answers.yml && git commit -m "chore(sandcastle): migrate to root layout (#93)" && git push
+```
+
+After that one migration, `sandcastle-propagate` (real `copier update`) carries
+every future tag.
 
 ## Notes — what the user does next (not the skill's job)
 

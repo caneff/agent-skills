@@ -14,28 +14,44 @@ as inherited scaffold.
 
 ## Locked decisions
 
-1. **Targets get runtime-only.** The vitest suite + vitest stay in this skill's
-   `templates/` (the canonical home you hack); copier renders `.sandcastle/` with the
-   `tests/` excluded (`copier.yml` `_exclude`). Nobody edits the `.mts` in a target,
-   so the tests are dead weight there.
-2. **Canonical home = this skill's `templates/`.** No separate repo — that would
-   re-create the drift it exists to avoid. You hack here with `npm test` green,
-   commit to the skills repo, and the next install carries it. One source of truth.
+1. **Targets get runtime-only.** The dev harness — `package.json`,
+   `vitest.config.mjs`, and the `tests/` suite — is the canonical home you hack;
+   copier renders the `.sandcastle/` subtree with `tests/` excluded (`copier.yml`
+   `_exclude`). The `package.json`/`vitest.config.mjs` sit at `setup-sandcastle/`,
+   ABOVE the `_subdirectory` (`setup-sandcastle/templates`), so they are outside the
+   render boundary and never ship; the `tests/` live under `templates/.sandcastle/`
+   and are dropped by `_exclude`. Nobody edits the `.mts` in a target, so the tests
+   are dead weight there.
+2. **Canonical home = this skill's `templates/.sandcastle/`.** No separate repo —
+   that would re-create the drift it exists to avoid. You hack the `.mts` there, run
+   `npm test` from `setup-sandcastle/` green, commit to the skills repo, and the next
+   install carries it. One source of truth.
 3. **Upstream drift = exact pin + `tsc` net + CHANGELOG, manual.** Pin
    `@ai-hero/sandcastle` to an exact version. On bump: read the CHANGELOG,
    `npm run typecheck` (the mechanical drift net — the vitest tests don't exercise
    the sandcastle API, only pure functions), fix `main.mts`, `npm test`, commit.
    No auto-folding of upstream's scaffold — the fork diverged too far to merge.
-4. **The template is copier-managed; this skill still only installs.** copier was
-   adopted (map #65, spec #70) precisely so template edits can later be merged into
-   already-installed repos via `copier update` — the answers-file breadcrumb is what
-   makes that update a reproducible diff between two tags. That rollout is separate
-   work; the `setup-sandcastle` skill itself installs and does not drive updates.
-   **`copier.yml` lives at the repo root** (with `_subdirectory:
-   setup-sandcastle/templates/.sandcastle`), not in the template folder: copier
-   records `_commit` in the breadcrumb only when sourced from the git root, and
-   without `_commit` there is no version to diff from — a subfolder source renders
-   correct files but silently breaks update.
+4. **The template is copier-managed; `copier update` merges edits into adopters.**
+   copier was adopted (map #65, spec #70) precisely so template edits can later be
+   merged into already-installed repos via `copier update` — the answers-file
+   breadcrumb makes that update a reproducible diff between two tags. `sandcastle-propagate`
+   drives it across every adopter (the `setup-sandcastle` skill itself only installs).
+   Two placements are load-bearing:
+   - **`copier.yml` lives at the repo root**, not in the template folder: copier
+     records `_commit` in the breadcrumb only when sourced from the git root, and
+     without `_commit` there is no version to diff from — a subfolder source renders
+     correct files but silently breaks update.
+   - **`_subdirectory` is `setup-sandcastle/templates`, and the subproject root the
+     template installs into is the TARGET's git root** — `.sandcastle/` renders as a
+     subtree beneath it, with the answers breadcrumb at the root (#93). The earlier
+     `_subdirectory: .../templates/.sandcastle` + install-into-`./.sandcastle` layout
+     put the breadcrumb in a subdir, so `copier update` run from the target root could
+     not find it ("Template not found"), and copier's update diff — scoped to the
+     `.sandcastle` subproject path — did not resolve. Moving the subproject root to the
+     git root is what makes update a real 3-way merge. The dev-home harness
+     (`package.json`, `vitest.config.mjs`, `tests/`) sits ABOVE this subdirectory in
+     `setup-sandcastle/`, structurally outside the render, so it never ships to a target
+     (decision 1's boundary, one level up from the old `_exclude`-only guard).
 5. **Isolated Docker sandbox** — not `noSandbox()`. The use case is AFK/parallel
    autonomous agents making commits; running that unsandboxed on the host is the
    3am page. Isolation is load-bearing, not speculative.

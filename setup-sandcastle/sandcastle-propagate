@@ -1,23 +1,21 @@
 #!/usr/bin/env bash
 # sandcastle-propagate [--dry-run] [REF]
 #
-# Push the Sandcastle template to every adopter repo, then commit + push each.
-# Adopters are discovered, not listed: any repo under $SEARCH_ROOT with a
-# .sandcastle/.copier-answers.yml breadcrumb pointing at caneff/agent-skills.
+# Carry the Sandcastle template into every adopter repo with a real 3-way
+# `copier update`, then commit + push each. Adopters are discovered, not listed:
+# any repo under $SEARCH_ROOT with a root `.copier-answers.yml` breadcrumb
+# pointing at caneff/agent-skills.
 #
-# Why `copier copy --overwrite` and not `copier update`: copier update is broken
-# for this layout (the template installs into the ./.sandcastle SUBDIR, so
-# copier's subproject subdir is ".sandcastle", but its update diff runs inside a
-# temp render where the files sit at root — `git diff-tree ... .sandcastle` then
-# dies "not in the working tree"; copier 9.17.1). A plain re-render sidesteps it,
-# and it is SAFE here because adopters never hand-edit .sandcastle — the
-# orchestrator is generated (CONTEXT.md). Any local edit under .sandcastle WOULD
-# be clobbered; that is the known ceiling of this approach.
+# Uses `copier update`, not the old `copier copy --overwrite` re-render hack.
+# Update works now because the subproject root is the target's git root, with
+# `.sandcastle/` a subtree beneath it (#93) — so copier's update diff resolves
+# and it merges template edits while preserving an adopter's own edits (a
+# conflict surfaces as markers to resolve, not a silent overwrite). The breadcrumb
+# copier reads lives at the repo root, so update runs from there.
 #
 # REF defaults to the newest sandcastle-template/v* tag in the skills checkout.
 set -euo pipefail
 
-TEMPLATE_URL="https://github.com/caneff/agent-skills.git"
 SKILLS_REPO="${SKILLS_REPO:-$HOME/.agents/skills}"
 SEARCH_ROOT="${SEARCH_ROOT:-$HOME/src}"
 
@@ -32,6 +30,7 @@ updated=0 skipped=0
 while IFS= read -r -d '' answers; do
   # Ours? Match the _src_path key, not any substring. Skip before any git work.
   grep -q '^_src_path:.*caneff/agent-skills' "$answers" || continue
+  # The breadcrumb sits at the repo root, so its dir is the repo (up to symlinks).
   repo=$(git -C "$(dirname "$answers")" rev-parse --show-toplevel 2>/dev/null) || {
     echo "  skip $answers — not inside a git repo"; skipped=$((skipped + 1)); continue
   }
@@ -44,9 +43,10 @@ while IFS= read -r -d '' answers; do
 
   pyv=$(sed -n "s/^PYTHON_VERSION: *//p" "$answers" | tr -d "\"'")
   echo "== $name (PYTHON_VERSION=$pyv) =="
-  if ! ( cd "$repo" && copier copy --overwrite --defaults $PRETEND \
-        --vcs-ref "$REF" --data PYTHON_VERSION="$pyv" \
-        "$TEMPLATE_URL" ./.sandcastle ); then
+  # `copier update` reads the template URL + old ref from the breadcrumb; we only
+  # steer the target ref and re-assert PYTHON_VERSION so the answer survives.
+  if ! ( cd "$repo" && copier update --defaults --trust $PRETEND \
+        --vcs-ref "$REF" --data PYTHON_VERSION="$pyv" ); then
     echo "  copier failed for $name — skipping" >&2
     skipped=$((skipped + 1)); continue
   fi
@@ -56,9 +56,17 @@ while IFS= read -r -d '' answers; do
   if [ -z "$(git -C "$repo" status --porcelain)" ]; then
     echo "  already at $REF, nothing to commit"; continue
   fi
+  # A real conflict (an adopter edited a file the template also changed) lands as
+  # inline `<<<<<<<`/`>>>>>>>` markers — copier's default. Never commit those:
+  # surface them for a human, don't push a half-merged tree.
+  if grep -rIlE '^(<{7}|>{7}) ' "$repo/.sandcastle" >/dev/null 2>&1; then
+    echo "  update left inline conflict markers in $name — resolve by hand, skipping" >&2
+    skipped=$((skipped + 1)); continue
+  fi
   # Guard the whole commit+push: a stale branch or push reject skips this repo,
-  # it does not abort the sweep to every repo after it.
-  if ! ( git -C "$repo" add .sandcastle &&
+  # it does not abort the sweep to every repo after it. Stage the subtree and the
+  # root breadcrumb.
+  if ! ( git -C "$repo" add .sandcastle .copier-answers.yml &&
          git -C "$repo" commit -q -m "chore(sandcastle): update template to $REF" &&
          git -C "$repo" push -q ); then
     echo "  commit/push failed for $name — skipping (repo left with local commit)" >&2
@@ -66,6 +74,6 @@ while IFS= read -r -d '' answers; do
   fi
   echo "  committed + pushed"
   updated=$((updated + 1))
-done < <(find "$SEARCH_ROOT" -maxdepth 4 -path '*/.sandcastle/.copier-answers.yml' -print0)
+done < <(find "$SEARCH_ROOT" -maxdepth 4 -name '.copier-answers.yml' -print0)
 
 echo "Done. updated=$updated skipped=$skipped"
