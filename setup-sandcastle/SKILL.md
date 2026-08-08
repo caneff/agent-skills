@@ -69,7 +69,27 @@ works too and needs no network, but records a machine-local `_src_path`.)
 Dockerfile's `ARG PYTHON_VERSION` equals `.python-version`, and
 `.sandcastle/.copier-answers.yml` is present.
 
-## 2. Wire the host runtime (package.json)
+## 2. Seed the implementer's `CLAUDE.md`
+
+Headless `claude` auto-loads a repo-root `CLAUDE.md` and expands its
+`@`-imports, but it ignores `AGENTS.md` on its own — so without this file the
+implementer builds blind and the coding standard reaches only the review gate.
+Seed a root `CLAUDE.md` whose whole body is the two imports (step 0 already
+required both targets, so they resolve inside the sandbox):
+
+```bash
+printf '@AGENTS.md\n@CODING_STANDARDS.md\n' > CLAUDE.md
+```
+
+Root file, above `.sandcastle/` — the install step seeds it and copier never
+manages it (its `_subdirectory` is `.sandcastle`). Import the **root**
+`CODING_STANDARDS.md` (the src standard the implementer builds against), not the
+`.sandcastle/` orchestrator standard the review gate loads conditionally.
+
+**Done when:** `CLAUDE.md` exists at the repo root and its body is exactly
+`@AGENTS.md` then `@CODING_STANDARDS.md`.
+
+## 3. Wire the host runtime (package.json)
 
 `main.mts` runs on the host via tsx and imports `@ai-hero/sandcastle` + `zod`.
 `npm init -y` if there's no `package.json`, then set deps + the run script
@@ -91,7 +111,7 @@ Add `node_modules/` to the repo's `.gitignore` if it isn't already ignored.
 
 **Done when:** `npm ls @ai-hero/sandcastle` shows `0.10.0`.
 
-## 3. Seed `.env` (careful — secrets path)
+## 4. Seed `.env` (careful — secrets path)
 
 `.sandcastle/.env` holds the Claude + GitHub tokens. **Copy by path, never read
 its contents** — reading a filled `.env` would pull secrets into the transcript.
@@ -131,7 +151,7 @@ fill by hand."*
 
 **Done when:** `.sandcastle/.env` exists **and** `git check-ignore` confirms it's ignored.
 
-## 4. Verify
+## 5. Verify
 
 ```bash
 npx tsc -p .sandcastle/tsconfig.json      # orchestrator typechecks against the installed lib
@@ -144,7 +164,7 @@ pinned `@ai-hero/sandcastle`. Fix anything red before declaring done.
 
 ## Notes — what the user does next (not the skill's job)
 
-- **Fill `.env`** (if skipped in step 3), then build the sandbox image via the
+- **Fill `.env`** (if skipped in step 4), then build the sandbox image via the
   sandcastle CLI, then `npm run sandcastle`.
 - **Label issues `ready-for-agent`** — the planner only selects those.
 - **Optional bot identity** — see [`.sandcastle/bot-setup.md`](templates/.sandcastle/bot-setup.md)
