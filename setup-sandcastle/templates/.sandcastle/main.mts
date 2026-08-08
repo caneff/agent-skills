@@ -56,6 +56,7 @@ import {
 import {
   prComponents,
   parentsFromBlockedBy,
+  mergeParentEdges,
   CompletedIssue,
 } from "./pr-components.mts";
 import {
@@ -291,6 +292,33 @@ function getBlockedByForInReview(): Map<number, number[]> {
   if (!out) return map;
   for (const row of blockedByRowsSchema.parse(JSON.parse(out))) {
     map.set(row.number, row.blockedBy);
+  }
+  return map;
+}
+
+// GitHub's native sub-issue edge (each open issue's `parent` field), as a
+// childId → parentId map (issue #90). Folded into the PR-set graph via
+// `mergeParentEdges` at Phase 3 so a spec and a sub-issue that supersedes it
+// group into ONE PR instead of two — the durable backstop to the LLM planner,
+// which is told to honor `parent` (plan-prompt.md) but can still miss it. String
+// ids match `CompletedIssue.parents`; `mergeParentEdges` only reads edges for
+// issues completed this run, and `prComponents` drops any parent not present, so
+// fetching the whole open set is harmless.
+const parentRowsSchema = z.array(
+  z.object({ number: z.number(), parent: z.number().nullable() })
+);
+
+function getParentEdges(): Map<string, string> {
+  // ponytail: --limit 100 matches every other issue fetch here; a repo with
+  // >100 open issues could miss a completed issue's parent edge (it then falls
+  // back to the planner-declared parents). Raise the limit if that ceiling bites.
+  const out = gh(
+    `issue list --state open --limit 100 --json number,parent --jq '[.[] | {number, parent: .parent.number}]'`
+  );
+  const map = new Map<string, string>();
+  if (!out) return map;
+  for (const row of parentRowsSchema.parse(JSON.parse(out))) {
+    if (row.parent !== null) map.set(String(row.number), String(row.parent));
   }
   return map;
 }
@@ -956,7 +984,12 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
 // head and an agent opens ONE PR from it into main (prose only — the agent runs
 // no git).
 // ---------------------------------------------------------------------------
-const components = prComponents(allCompleted);
+// Fold GitHub sub-issue (`parent`) edges into the graph before grouping (issue
+// #90), so a spec and a child that supersedes it land in one PR set even when the
+// planner declared no edge between them. One fetch covers every completed issue —
+// fresh-plan and sweep-injected alike — so this is the single deterministic
+// chokepoint the LLM planner can't slip past.
+const components = prComponents(mergeParentEdges(allCompleted, getParentEdges()));
 if (components.length === 0) {
   console.log("\nNo completed issues across the run. No PR to open.");
 } else {

@@ -50,6 +50,25 @@ export function parentsFromBlockedBy(blockedBy: number[]): string[] {
   return blockedBy.map(String);
 }
 
+// Fold GitHub's native sub-issue edge into each issue's `parents` (issue #90).
+// A child linked to a parent via GitHub's `parent` field — not `blockedBy`, and
+// regardless of what the LLM planner declared — carries that intent invisibly:
+// the planner (soft guidance) can still miss it, so a parent spec and a child
+// that supersedes it get built independently and open as two PRs. `parentOf`
+// maps childId → parentId from GitHub; this appends each edge to the child's
+// `parents` (deduped), and `prComponents`' own present-filter drops any parent
+// not completed this run — so an edge to an already-merged parent is a no-op.
+export function mergeParentEdges(
+  issues: CompletedIssue[],
+  parentOf: Map<string, string>
+): CompletedIssue[] {
+  return issues.map((issue) => {
+    const p = parentOf.get(issue.id);
+    if (!p || issue.parents.includes(p)) return issue;
+    return { ...issue, parents: [...issue.parents, p] };
+  });
+}
+
 // Partition completed issues into connected components by parent edges, each with
 // its leaf tips. Component order follows first appearance in `issues`.
 export function prComponents(issues: CompletedIssue[]): PrComponent[] {
