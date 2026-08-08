@@ -31,8 +31,8 @@ Abort with the exact fix if any is missing:
   workflow exists (`.github/workflows/*.yml`); `CODING_STANDARDS.md` and
   `AGENTS.md` are present. Missing → *"run `/setup-python-repo` first."*
 - **tdd skill** — `~/.claude/skills/tdd/` exists (the implementer prompt calls
-  `/tdd`; step 3 mounts your global skills into the sandbox). Missing →
-  *"install the tdd skill first."*
+  `/tdd`; the sandbox bind-mounts `~/.claude/skills` at run time, so it resolves
+  in-container). Missing → *"install the tdd skill first."*
 - **Docker** — `docker info` succeeds (agents run in Docker sandboxes).
 - **Node host runtime** — `node` and `npx` on PATH (`main.mts` runs on the host
   via tsx). No Node in the sandbox image — only on the host.
