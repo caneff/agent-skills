@@ -162,6 +162,46 @@ pinned `@ai-hero/sandcastle`. Fix anything red before declaring done.
 
 **Done when:** `npx tsc -p .sandcastle/tsconfig.json` exits clean.
 
+## Updating adopters
+
+Once a repo is installed, later `sandcastle-template/vN` tags reach it through
+the [`sandcastle-propagate`](sandcastle-propagate) maintainer script. It
+discovers every adopter under `~/src` by its `.sandcastle/.copier-answers.yml`
+breadcrumb (no hardcoded list), preserves each repo's `PYTHON_VERSION`, then
+commits `.sandcastle` and pushes. Always dry-run first:
+
+```bash
+sandcastle-propagate --dry-run     # show what each repo would receive
+sandcastle-propagate               # re-render, commit, push (skips dirty repos)
+```
+
+Pass a ref to pin (`sandcastle-propagate sandcastle-template/v3`); the default
+is the newest `sandcastle-template/v*` tag.
+
+**Caveat — it re-renders, it does not merge.** The script uses
+`copier copy --overwrite`, not `copier update`, because `copier update` is
+broken for the `./.sandcastle` subdir layout (its diff runs in a temp render
+where the `.sandcastle` path does not exist, so git aborts). A re-render
+overwrites every rendered file, so a genuine hand-edit under `.sandcastle`
+**would** be replaced rather than merged.
+
+Two properties bound that risk — data loss is not silent:
+
+- **Runtime state is untouched.** `.env`, `logs/`, `worktrees/`, and
+  `review-attempts.json` are not template-rendered, so copier never writes or
+  deletes them. Only files the template owns are overwritten.
+- **Uncommitted work is skipped; overwritten work stays in git.** The script
+  refuses any repo with a dirty tree, so an in-progress edit is never clobbered
+  — commit or stash first. On a clean repo it commits `.sandcastle` before
+  pushing, so whatever a re-render replaced is preserved in history and visible
+  in that commit's diff, recoverable rather than gone.
+
+To confirm before running, diff a repo's live `.sandcastle` against the target
+render (`copier copy --pretend`, or `--dry-run` here) — every changed line
+should be template drift the new tag supersedes, not project-specific text.
+Restoring real 3-way `copier update` (which merges instead of overwrites, and
+retires this hack) is tracked in #93.
+
 ## Notes — what the user does next (not the skill's job)
 
 - **Fill `.env`** (if skipped in step 4), then build the sandbox image via the
@@ -173,5 +213,5 @@ pinned `@ai-hero/sandcastle`. Fix anything red before declaring done.
 - **Upstream upgrades** are a *maintenance* action on this skill's `templates/`,
   not on a target. In `templates/`: `npm outdated @ai-hero/sandcastle` → read
   its CHANGELOG → bump the pin → `npm run typecheck && npm test` → commit. The
-  next install carries it. **This skill is install-only** — it does not update an
-  already-installed `.sandcastle/`.
+  next install carries it, and `sandcastle-propagate` (see "Updating adopters")
+  pushes it to repos already installed.
