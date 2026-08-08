@@ -4,18 +4,29 @@
 #
 # This file sits at the REPO ROOT on purpose. copier records `_commit` in a
 # target's `.copier-answers.yml` only when its source is the git root; point it
-# at the `setup-sandcastle/templates` subdirectory instead and the breadcrumb
-# pins no version, leaving `copier update` with no ref to diff from. So the
-# config lives here and `_subdirectory` reaches down to the template tree.
-_subdirectory: setup-sandcastle/templates/.sandcastle
+# at a subdirectory instead and the breadcrumb pins no version, leaving
+# `copier update` with no ref to diff from. So the config lives here and
+# `_subdirectory` reaches down to the template tree.
+#
+# `_subdirectory` is `setup-sandcastle/templates`, NOT `.../templates/.sandcastle`
+# (issue #93). The subproject root the template renders into is the TARGET's git
+# root, with `.sandcastle/` a subtree beneath it and the answers breadcrumb at
+# the root. That is what lets `copier update`, run from the target's git root,
+# resolve its diff and do a real 3-way merge — the old `.sandcastle`-as-root
+# layout put the breadcrumb in a subdir where root-level `copier update` could
+# not find it. The dev-home harness (package.json, vitest.config.mjs, tests/)
+# lives ABOVE this subdirectory in `setup-sandcastle/`, so it is structurally
+# outside the render and never ships to a target.
+_subdirectory: setup-sandcastle/templates
 
 # The dev-only vitest suite guards the canonical `.mts`; a target never edits
-# the orchestrator, so it never ships. Both patterns are needed: the bare
-# `tests` drops the directory entry, `tests/**` drops its contents (a lone
-# trailing-slash pattern leaves an empty tests/ behind).
+# the orchestrator, so it never ships. Both patterns are needed: the bare path
+# drops the directory entry, the `/**` drops its contents (a lone trailing-slash
+# pattern leaves an empty tests/ behind). Paths are anchored at the subproject
+# root (`templates/`), so the tests under `.sandcastle/` need the prefix.
 _exclude:
-  - "tests"
-  - "tests/**"
+  - ".sandcastle/tests"
+  - ".sandcastle/tests/**"
 
 PYTHON_VERSION:
   type: str
