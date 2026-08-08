@@ -56,7 +56,7 @@ decision 4). It emits the subtree at the destination root, so render into
 
 ```bash
 copier copy --defaults \
-  --vcs-ref=sandcastle-template/v2 \
+  --vcs-ref=sandcastle-template/v3 \
   --data PYTHON_VERSION="$(cat .python-version)" \
   https://github.com/caneff/agent-skills.git ./.sandcastle
 ```

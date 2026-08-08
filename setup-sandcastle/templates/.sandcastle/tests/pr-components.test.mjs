@@ -1,5 +1,9 @@
 import { test, expect, describe } from "vitest";
-import { prComponents, parentsFromBlockedBy } from "../pr-components.mts";
+import {
+  prComponents,
+  parentsFromBlockedBy,
+  mergeParentEdges,
+} from "../pr-components.mts";
 
 // One PR per connected dependency component (issue #127). Components are the
 // connected pieces of the parent-edge graph over the issues completed THIS run.
@@ -164,5 +168,45 @@ describe("parentsFromBlockedBy — sweep rebuilds the parent graph (#50)", () =>
     expect(comps).toHaveLength(1);
     expect(comps[0].issues.map((i) => i.id)).toEqual(["48"]);
     expect(comps[0].leaves.map((l) => l.id)).toEqual(["48"]);
+  });
+});
+
+// Issue #90: GitHub's native sub-issue edge (a child's `parent` field) must fold
+// into the same graph as the planner-declared `parents`, so a parent spec and a
+// sub-issue that covers it never open as two independent PRs. mergeParentEdges is
+// the pure merge: given the completed set and a childId → parentId map from
+// GitHub, it appends each present parent edge to the child's `parents`, then
+// prComponents groups them. The concrete regression: #77 (spec) and #78 (its
+// sub-issue) both ready-for-agent, #78 carrying parent:77 but zero blockedBy —
+// the planner saw two unrelated issues and Phase 3 opened #85 and #86.
+describe("mergeParentEdges — fold GitHub sub-issue edges into the graph (#90)", () => {
+  test("a child's parent edge groups it with its parent in ONE component", () => {
+    const merged = mergeParentEdges(
+      [issue("77"), issue("78")],
+      new Map([["78", "77"]])
+    );
+    expect(idSets(prComponents(merged))).toEqual([["77", "78"]]);
+  });
+
+  test("the parent edge is appended to any planner-declared parents, deduped", () => {
+    // 78 already builds on 77 per the planner; the identical GitHub edge must not
+    // duplicate 77 in the parents list.
+    const merged = mergeParentEdges(
+      [issue("77"), issue("78", ["77"])],
+      new Map([["78", "77"]])
+    );
+    expect(merged.find((i) => i.id === "78").parents).toEqual(["77"]);
+  });
+
+  test("a parent edge to an issue NOT completed this run drops (present-filter)", () => {
+    // 78's parent 77 wasn't built this run; the edge is kept on 78 but prComponents
+    // drops it, so 78 stands alone off main.
+    const merged = mergeParentEdges([issue("78")], new Map([["78", "77"]]));
+    expect(idSets(prComponents(merged))).toEqual([["78"]]);
+  });
+
+  test("no parent edges is an identity — issues pass through unchanged", () => {
+    const input = [issue("77"), issue("78")];
+    expect(mergeParentEdges(input, new Map())).toEqual(input);
   });
 });
