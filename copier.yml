@@ -28,6 +28,18 @@ _exclude:
   - ".sandcastle/tests"
   - ".sandcastle/tests/**"
 
+# The template fills its own blanks with `[[ ]]` / `[% %]`, not copier's default
+# `{{ }}` / `{% %}`. The prompt-drawer files under `.sandcastle/` carry their own
+# `{{TASK_ID}}` / `{{BRANCH}}` placeholders, which the agent expands at RUN time —
+# under the default delimiters copier would eat them the moment a prompt file
+# becomes renderable. Distinct delimiters keep the two expansion passes apart.
+# These apply to rendered path names too, hence `[[ _copier_conf.answers_file ]]`.
+_envops:
+  block_start_string: "[%"
+  block_end_string: "%]"
+  variable_start_string: "[["
+  variable_end_string: "]]"
+
 PYTHON_VERSION:
   type: str
   help: "Python the sandbox bakes in — the target's .python-version (e.g. 3.14)"

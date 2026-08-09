@@ -83,6 +83,56 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
   });
 });
 
+// The template fills its own blanks with `[[ ]]` / `[% %]` (copier `_envops`),
+// because the prompt-drawer files carry their OWN `{{TASK_ID}}` / `{{BRANCH}}`
+// placeholders that the agent expands at run time. Under copier's default
+// delimiters the two styles are the same syntax, so the moment a prompt file
+// becomes renderable copier eats the runtime placeholders.
+//
+// The live template has no renderable file carrying both styles yet, so the
+// probe supplies one: a throwaway `.jinja` file dropped into a fixture copy of
+// the live `copier.yml` + templates. It renders through the real config, so it
+// fails if `_envops` is missing or wrong.
+describe.skipIf(!hasCopier())("template delimiters do not collide with runtime placeholders", () => {
+  let src;
+  let target;
+  const PROBE = ".sandcastle/envops-probe.txt";
+
+  beforeAll(() => {
+    src = mkdtempSync(join(tmpdir(), "sandcastle-envops-src-"));
+    cpSync(join(repoRoot, "copier.yml"), join(src, "copier.yml"));
+    cpSync(
+      join(repoRoot, "setup-sandcastle", "templates"),
+      join(src, "setup-sandcastle", "templates"),
+      { recursive: true }
+    );
+    writeFileSync(
+      join(src, "setup-sandcastle", "templates", `${PROBE}.jinja`),
+      "runtime: {{TASK_ID}}\nanswer: [[ PYTHON_VERSION ]]\nblock: [% if PYTHON_VERSION %]yes[% endif %]\n"
+    );
+    target = mkdtempSync(join(tmpdir(), "sandcastle-envops-tgt-"));
+    execFileSync(
+      "copier",
+      ["copy", "--defaults", "--data", "PYTHON_VERSION=3.14", src, target],
+      { encoding: "utf8" }
+    );
+  });
+  afterAll(() => {
+    if (src) rmSync(src, { recursive: true, force: true });
+    if (target) rmSync(target, { recursive: true, force: true });
+  });
+
+  test("leaves a runtime {{ }} placeholder untouched in a rendered file", () => {
+    expect(readFileSync(join(target, PROBE), "utf8")).toMatch(/^runtime: \{\{TASK_ID\}\}$/m);
+  });
+
+  test("expands an answer written with the template's own delimiters", () => {
+    const rendered = readFileSync(join(target, PROBE), "utf8");
+    expect(rendered).toMatch(/^answer: 3\.14$/m);
+    expect(rendered).toMatch(/^block: yes$/m);
+  });
+});
+
 // The regression that proves the capability: a copy→update round-trip run from
 // the target's git root completes and does a REAL 3-way merge. On the old subdir
 // layout the breadcrumb sat at `.sandcastle/.copier-answers.yml`, so `copier

@@ -37,7 +37,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 # Bake the target's exact interpreter into an image LAYER so no container re-fetches
 # it at run time. copier renders PYTHON_VERSION from the target's .python-version
 # (recorded as a copier answer) when the template is installed.
-ARG PYTHON_VERSION={{ PYTHON_VERSION }}
+ARG PYTHON_VERSION=[[ PYTHON_VERSION ]]
 RUN /home/agent/.local/bin/uv python install ${PYTHON_VERSION}
 
 # just — the target's task runner. The PR check-gate runs `just check` inside
