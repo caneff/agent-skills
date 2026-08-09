@@ -28,7 +28,27 @@ _exclude:
   - ".sandcastle/tests"
   - ".sandcastle/tests/**"
 
+# Custom jinja delimiters: the prompts carry sandcastle's OWN {{TASK_ID}}-style
+# runtime placeholders, which default copier delimiters would eat.
+_envops:
+  block_start_string: "[%"
+  block_end_string: "%]"
+  variable_start_string: "[["
+  variable_end_string: "]]"
+
+LANGUAGE:
+  type: str
+  help: "The adopter's ecosystem"
+  choices: ["python", "node"]
+  default: "python"
+
 PYTHON_VERSION:
   type: str
   help: "Python the sandbox bakes in — the target's .python-version (e.g. 3.14)"
   default: "3.13"
+  when: "[[ LANGUAGE == 'python' ]]"
+
+CHECK_COMMAND:
+  type: str
+  help: "Command the full-suite gate runs (lint + typecheck + tests)"
+  default: "[% if LANGUAGE == 'node' %]npm run lint && npm run typecheck && npm run test[% else %]just check[% endif %]"

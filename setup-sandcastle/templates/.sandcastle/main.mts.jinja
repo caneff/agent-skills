@@ -476,7 +476,7 @@ applyBotToken(identity, process.env);
 // Copy the host's virtualenv into the worktree before each sandbox starts.
 // Avoids resolving+downloading every dependency from scratch; sandboxConfig's
 // `uv sync` hook reconciles anything added since the copy.
-const copyToWorktree = [".venv"];
+const copyToWorktree = ["[% if LANGUAGE == 'node' %]node_modules[% else %].venv[% endif %]"];
 
 // ---------------------------------------------------------------------------
 // Main loop
