@@ -39,7 +39,14 @@ Then start the **status refresher**, once, in its own `run_in_background` call �
 
     ~/.claude/skills/sandcastle-watch/status-refresh.sh "$LOG" "$(git rev-parse --show-toplevel)"
 
-It rewrites `.sandcastle/logs/watch-status` every 60s while the orchestrator lives and deletes it on exit, so the bar survives long quiet stretches and clears itself the moment the run ends. Don't hand-roll this in the tick: a tick that only fires on milestones — or one you skip while reading a reviewer log — lets the file age past the segment's 180s guard and the line vanishes mid-run. The script interpolates only numbers it counts out of `$LOG`, never agent text.
+It rewrites `.sandcastle/logs/watch-status` every 60s while the orchestrator lives and deletes it on exit, so the bar survives long quiet stretches and clears itself the moment the run ends. Don't hand-roll this in the tick: a tick that only fires on milestones — or one you skip while reading a reviewer log — lets the file age past the segment's 180s guard and the line vanishes mid-run. Only digits scraped from `$LOG` reach the file, never agent text.
+
+The format is settled — don't improvise a different one:
+
+    🏰 3/20 · 101 102 104 · 0 PR                       healthy: dim throughout
+    🏰 3/20 · 101 102 104 · 0 PR · 2✗ 103 105 · 1⚠ 104  trouble: only the tail lit
+
+Iteration, the ids in flight this iteration, PRs opened, then a marker per trouble kind with its own failing ids appended — `✗` in red, `⚠` in yellow. In-flight ids stay put when trouble appears; the failing ones are additive. Config colour is dead here (the segment is `rawValue: true`, so ccstatusline passes the script's own escapes straight through), which is why the script paints itself. `status-refresh.sh <log> <root> once` renders a single frame to stdout — use it to check the format against a finished run's log.
 
 **Done when:** the run is in the background (harness-tracked), the refresher is running, and you have the `$LOG` path.
 
@@ -56,7 +63,7 @@ Substitute that path into every command below — write to it with the Write too
 
 1. Spawn a **fire-and-return subagent** (no name, foreground) with this job: "Read `$LOG` from byte offset `<N>` onward — the path and offset the main agent passes you; a fresh subagent keeps no state between ticks — plus the tail of the newest `.sandcastle/logs/<branch>-<name>.log`. Return a compact status: current phase/iteration, issues in flight and their state, PRs opened, new failures/warnings, whether the run has finished, and the new end-of-file offset. Bucket a failed issue as **setup noise** — reported separately from real failures, with its issue id — when it failed during sandbox setup with an `ExecError` whose exit code is followed by an empty stderr." Digesting the verbose agent chatter is exactly the noisy work to keep off the main context.
 2. Advance `<N>` to the offset it returned. Diff its status against the last one: if nothing changed, say nothing; if it changed, tell the user one or two lines — what moved.
-3. Nothing to do for the status bar — `status-refresh.sh` from step 1 owns `.sandcastle/logs/watch-status` and keeps it fresh on its own 60s clock. The scoped `sandcastle-segment.sh` ccstatusline segment (shipped alongside this skill in `sandcastle-watch/`; ccstatusline's `commandPath` points at it) resolves the session's repo root and shows that repo's file only, dropping it once it's older than 180s. If the line goes missing while a run is live, check the refresher is still alive (`pgrep -f status-refresh.sh`) before touching the file by hand.
+3. Nothing to do for the status bar — `status-refresh.sh` from step 1 owns `.sandcastle/logs/watch-status` and keeps it fresh on its own 60s clock. The scoped `sandcastle-segment.sh` ccstatusline segment (shipped alongside this skill in `sandcastle-watch/`; ccstatusline's `commandPath` points at it) resolves the session's repo root and shows that repo's file only. With no fresh file it rests at a dim `🏰 idle` in any repo that has a `.sandcastle/` directory, and prints nothing anywhere else — so a blank segment means "not a Sandcastle repo," never "the watcher died." If the line goes missing while a run is live, check the refresher is still alive (`pgrep -f status-refresh.sh`) before touching the file by hand.
 4. On a **headline milestone** — iteration boundary, an issue done or really failed (setup noise is not a milestone — see *Setup noise*), a PR opened, or the run finishing — also send the user a push notification. On WSL (`command -v powershell.exe`), fire a Windows desktop toast alongside it, so the milestone lands on the desktop the user is actually looking at:
 
    Write the milestone text to the run's body file, then point the script at it:

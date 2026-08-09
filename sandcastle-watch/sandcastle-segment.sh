@@ -10,7 +10,17 @@ cwd=$(jq -r '.cwd // .workspace.current_dir // empty' 2>/dev/null)
 # then resolves to a doubled path, finds nothing, and blanks the segment.
 root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || root=$cwd
 f="${root:-$cwd}/.sandcastle/logs/watch-status"
-[ -f "$f" ] || exit 0
+# No live run: a repo that CAN run Sandcastle rests at "idle"; anywhere else the
+# segment stays silent, so the marker's absence means "not a Sandcastle repo"
+# rather than something arbitrary.
+if [ ! -f "$f" ]; then
+  [ -d "${root:-$cwd}/.sandcastle" ] && printf '\033[2m🏰 idle\033[0m\n'
+  exit 0
+fi
 # ponytail: 180s freshness guard = self-clearing if the watch loop dies uncleanly.
 # if/fi (not &&) so a stale file exits 0 — a bare && leaks exit 1 to ccstatusline.
-if [ $(( $(date +%s) - $(stat -c %Y "$f") )) -lt 180 ]; then cat "$f"; fi
+if [ $(( $(date +%s) - $(stat -c %Y "$f") )) -lt 180 ]; then
+  cat "$f"
+else
+  printf '\033[2m🏰 idle\033[0m\n'
+fi
