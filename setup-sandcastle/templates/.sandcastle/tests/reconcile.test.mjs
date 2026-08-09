@@ -4,6 +4,7 @@ import {
   bucketIssues,
   buildRunSummary,
   decideInReviewAction,
+  deliveredParentIds,
   planGateOutcome,
   planOutcomeTransition,
 } from "../reconcile.mts";
@@ -64,6 +65,7 @@ const makeOpts = (overrides = {}) => ({
   prAssignments: new Map(),
   blockedByParentConflict: new Map(),
   retiredByGate: new Map(),
+  deliveredParents: new Set(),
   ...overrides,
 });
 
@@ -194,6 +196,23 @@ describe("bucketIssues", () => {
     expect(result[0]).toMatchObject({ bucket: "human-gated-untriaged" });
   });
 
+  // A spent parent (children all closed) surfaces as ready-to-close, and does so
+  // even when it still carries a stray lifecycle label — the close reminder must
+  // win over that label. This is the #99 case that lingered open as ready-for-human.
+  test("delivered parent with a stray label → human-gated-delivered-parent", () => {
+    const result = bucketIssues(
+      makeOpts({
+        openIssues: [
+          { number: 99, title: "spec: nine fixes", labels: ["ready-for-human"] },
+        ],
+        deliveredParents: new Set(["99"]),
+      })
+    );
+    expect(result[0]).toMatchObject({
+      bucket: "human-gated-delivered-parent",
+    });
+  });
+
   test("ready-for-agent not built this run → ready-for-agent", () => {
     const result = bucketIssues(
       makeOpts({
@@ -256,6 +275,42 @@ describe("bucketIssues", () => {
 
   test("empty issue list → empty result", () => {
     expect(bucketIssues(makeOpts())).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deliveredParentIds — an open parent whose every child is closed
+// ---------------------------------------------------------------------------
+describe("deliveredParentIds", () => {
+  test("open parent, every child closed → flagged", () => {
+    const edges = [
+      { number: 99, state: "OPEN", parent: null },
+      { number: 100, state: "CLOSED", parent: 99 },
+      { number: 101, state: "CLOSED", parent: 99 },
+    ];
+    expect(deliveredParentIds(edges)).toEqual(new Set(["99"]));
+  });
+
+  test("one child still open → not flagged", () => {
+    const edges = [
+      { number: 99, state: "OPEN", parent: null },
+      { number: 100, state: "CLOSED", parent: 99 },
+      { number: 101, state: "OPEN", parent: 99 },
+    ];
+    expect(deliveredParentIds(edges)).toEqual(new Set());
+  });
+
+  test("parent already closed → not flagged (nothing to close)", () => {
+    const edges = [
+      { number: 99, state: "CLOSED", parent: null },
+      { number: 100, state: "CLOSED", parent: 99 },
+    ];
+    expect(deliveredParentIds(edges)).toEqual(new Set());
+  });
+
+  test("childless open issue → not a parent, not flagged", () => {
+    const edges = [{ number: 42, state: "OPEN", parent: null }];
+    expect(deliveredParentIds(edges)).toEqual(new Set());
   });
 });
 

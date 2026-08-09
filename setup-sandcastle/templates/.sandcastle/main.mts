@@ -72,6 +72,7 @@ import {
   decideInReviewAction,
   bucketIssues,
   buildRunSummary,
+  deliveredParentIds,
   planGateOutcome,
   planOutcomeTransition,
   OpenIssue,
@@ -323,6 +324,33 @@ function getParentEdges(): Map<string, string> {
     if (row.parent !== null) map.set(String(row.number), String(row.parent));
   }
   return map;
+}
+
+// Every issue's state and native parent, open AND closed — getParentEdges'
+// open-only fetch cannot see the closed children that make a parent "delivered".
+const issueEdgeRowsSchema = z.array(
+  z.object({
+    number: z.number(),
+    state: z.enum(["OPEN", "CLOSED"]),
+    parent: z.number().nullable(),
+  })
+);
+
+// Open parents whose every sub-issue is closed: the spec is delivered and only
+// its umbrella issue lingers. The bot never closes an issue, so the run summary
+// surfaces these for a human to close (spent-parent hygiene).
+function getDeliveredParents(): Set<string> {
+  // ponytail: --state all spans every closed issue, so the limit is higher than
+  // the open-only fetches. gh returns newest-first, and a spec's children sit
+  // near it in numbering, so truncation rarely splits a family. If it ever does
+  // (a repo past the cap), the flag can be wrong in either direction — this is a
+  // human-verified close reminder, not an auto-close, so the harm is a stray
+  // suggestion. Raise the limit if that ceiling bites.
+  const out = gh(
+    `issue list --state all --limit 1000 --json number,state,parent --jq '[.[] | {number, state, parent: .parent.number}]'`
+  );
+  if (!out) return new Set<string>();
+  return deliveredParentIds(issueEdgeRowsSchema.parse(JSON.parse(out)));
 }
 
 // ---------------------------------------------------------------------------
@@ -1221,6 +1249,7 @@ gcWorktrees();
     prAssignments,
     blockedByParentConflict: blockedThisRun,
     retiredByGate,
+    deliveredParents: getDeliveredParents(),
   });
   const summary = buildRunSummary(bucketed);
   console.log(summary);
