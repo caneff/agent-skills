@@ -55,8 +55,15 @@ const shim = (bin, name, body) => {
  * turn an omitted row green.
  *
  * Tests break one prereq at a time, then `run()` the script against it.
+ *
+ * `realTools` is for the one end-to-end run: it keeps the real `PATH` behind
+ * the shim dir so `copier`, `npm` and `npx` are the machine's own, shims only
+ * `docker` (whose daemon the install never actually needs) and `just`, and
+ * hands over the real `HOME` — the render clones a private template over
+ * https, so it needs the machine's git credentials, and the `tdd` skill the
+ * fixture home fakes is a real prereq of the machine running this test.
  */
-export function preflightFixture(repoRoot, arm) {
+export function preflightFixture(repoRoot, arm, { realTools = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "sandcastle-preflight-"));
   const home = join(root, "home");
   const bin = join(root, "bin");
@@ -65,12 +72,14 @@ export function preflightFixture(repoRoot, arm) {
   writeFileSync(join(home, ".claude", "skills", "tdd", "SKILL.md"), "# tdd\n");
   mkdirSync(bin, { recursive: true });
   shim(bin, "docker", "exit 0");
-  shim(bin, "copier", "exit 0");
-  // Real node: preflight reads package.json's `scripts` block with it. Rows
-  // that need node absent delete this shim rather than stubbing it out.
-  shim(bin, "node", `exec ${process.execPath} "$@"`);
-  shim(bin, "npx", "exit 0");
   shim(bin, "just", 'printf "Available recipes:\\n    check\\n    lint\\n    typecheck\\n"');
+  if (!realTools) {
+    shim(bin, "copier", "exit 0");
+    // Real node: preflight reads package.json's `scripts` block with it. Rows
+    // that need node absent delete this shim rather than stubbing it out.
+    shim(bin, "node", `exec ${process.execPath} "$@"`);
+    shim(bin, "npx", "exit 0");
+  }
 
   mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
   writeFileSync(join(repo, ".github", "workflows", "ci.yml"), "on: pull_request\n");
@@ -96,7 +105,9 @@ export function preflightFixture(repoRoot, arm) {
       return spawnSync(join(repoRoot, "setup-sandcastle", "install"), args, {
         cwd: repo,
         encoding: "utf8",
-        env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` },
+        env: realTools
+          ? { HOME: process.env.HOME, PATH: `${bin}:${process.env.PATH}` }
+          : { HOME: home, PATH: `${bin}:/usr/bin:/bin` },
       });
     },
   };

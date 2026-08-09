@@ -8,7 +8,13 @@
 # what lets the tests run it with nothing real installed.
 set -euo pipefail
 
-USAGE="usage: install <python|node> [--preflight] — the arm is required and never inferred"
+USAGE="usage: install <python|node> [--preflight] [--env-from <path>] — the arm is required and never inferred"
+
+# The skills checkout this script was invoked from. Used only to read the
+# template tag list; the render itself sources the public URL, because the
+# `_src_path` copier records is what `sandcastle-propagate` filters adopters on.
+SKILLS_REPO=$(cd "$(dirname "$0")/.." && pwd)
+TEMPLATE_URL=https://github.com/caneff/agent-skills.git
 
 die() {
   echo "$1"
@@ -22,9 +28,15 @@ case "$ARM" in
 esac
 
 PREFLIGHT_ONLY=""
+ENV_FROM=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --preflight) PREFLIGHT_ONLY=1 ;;
+    --env-from)
+      shift
+      ENV_FROM="${1:-}"
+      [ -n "$ENV_FROM" ] || die "--env-from needs a path — $USAGE"
+      ;;
     *) die "unknown flag $1 — $USAGE" ;;
   esac
   shift
@@ -107,10 +119,87 @@ else
     die "\`package.json\` defines no \`test\` script; the gate calls \`npm run test\`."
 fi
 
+if [ -n "$ENV_FROM" ]; then
+  [ -f "$ENV_FROM" ] ||
+    die "no file at $ENV_FROM: --env-from names the \`.env\` to copy in, and it must exist. Found nothing there."
+
+  # The render writes `.sandcastle/.gitignore` listing `.env`, and a deeper
+  # ignore file beats every rule above it — so the one way the copy still ends
+  # up stageable is the target already tracking that path. Caught here: after
+  # the copy, the secret is on disk.
+  if git ls-files --error-unmatch .sandcastle/.env >/dev/null 2>&1; then
+    die "refusing to copy your \`.env\`: .sandcastle/.env is already tracked by git, so the copy would be stageable and the secret would reach a commit. \`git rm --cached .sandcastle/.env\` first."
+  fi
+fi
+
 echo "preflight passed: this repo is ready for Sandcastle ($ARM arm). Nothing was written."
 
-[ -n "$PREFLIGHT_ONLY" ] && exit 0
+if [ -n "$PREFLIGHT_ONLY" ]; then
+  exit 0
+fi
 
-# The mutating phase — render, CLAUDE.md, host runtime, .env, npx tsc — is not
-# built yet (#163). Say so rather than exiting 0 on an install that never ran.
-die "the mutating phase is not built yet: nothing was installed. Run with --preflight until it lands."
+# --- the mutating phase: fail fast, naming the step and whether re-running is
+# safe. Everything below `copier copy` is idempotent; the render is not.
+
+REF=$(git -C "$SKILLS_REPO" tag -l 'sandcastle-template/v*' | sort -V | tail -1)
+[ -n "$REF" ] ||
+  die "step 1 (render): no sandcastle-template/v* tag in $SKILLS_REPO, so there is no version to pin the render to. Fetch tags there and re-run; nothing was written."
+
+echo "==> step 1/4: rendering .sandcastle/ at $REF"
+copier_args=(copy --defaults --vcs-ref="$REF" --data "LANGUAGE=$ARM")
+if [ "$ARM" = python ]; then
+  copier_args+=(--data "PYTHON_VERSION=$(cat .python-version)")
+fi
+copier "${copier_args[@]}" "$TEMPLATE_URL" . ||
+  die "step 1 (render) failed: \`copier copy\` is the one step that is NOT safe to re-run — a second run would re-render over whatever it left. Read \`git status\` here and decide by hand."
+
+echo "==> step 2/4: writing the implementer's CLAUDE.md"
+printf '@AGENTS.md\n@CODING_STANDARDS.md\n' > CLAUDE.md ||
+  die "step 2 (CLAUDE.md) failed: could not write CLAUDE.md at the repo root. Fix the permission and re-run — the render already landed, so re-running is safe only with --preflight passing on a repo that has one."
+
+echo "==> step 3/4: wiring the host runtime into package.json"
+# main.mts runs on the host via tsx and imports @ai-hero/sandcastle + zod. The
+# sandcastle pin is EXACT: upstream drift is deliberate, read the CHANGELOG.
+# @standard-schema/spec is undeclared by sandcastle's .d.ts but imported by it —
+# without it Output.object<T> collapses to any. @types/node backs tsconfig's
+# types:["node"].
+host_runtime() (
+  # A subshell that re-arms `set -e`: called as `host_runtime || die`, the
+  # inherited -e is suspended, and a failed `npm pkg set` would otherwise fall
+  # through to `npm install` and report that command's status instead.
+  set -e
+  [ -f package.json ] || npm init -y >/dev/null
+  npm pkg set 'dependencies.@ai-hero/sandcastle=0.10.0'
+  npm pkg set 'dependencies.zod=^4.4.3'
+  npm pkg set 'dependencies.@standard-schema/spec=^1.0.0'
+  npm pkg set 'devDependencies.tsx=^4.19.0'
+  npm pkg set 'devDependencies.typescript=^5.6.0'
+  npm pkg set 'devDependencies.@types/node=^22.0.0'
+  npm pkg set 'scripts.sandcastle=npx tsx .sandcastle/main.mts'
+  git check-ignore -q node_modules || printf 'node_modules/\n' >> .gitignore
+  npm install
+)
+host_runtime ||
+  die "step 3 (host runtime) failed: package.json and \`npm install\`. This step is idempotent — fix what npm reported and re-run just it, or re-run the whole install on a fresh repo."
+
+if [ -n "$ENV_FROM" ]; then
+  # Copy by path, never read the contents: reading a filled `.env` would pull
+  # secrets into the caller's transcript.
+  cp "$ENV_FROM" .sandcastle/.env ||
+    die "step 3 (.env) failed: could not copy $ENV_FROM to .sandcastle/.env. Idempotent — fix and re-run the copy by hand."
+fi
+
+echo "==> step 4/4: typechecking the rendered orchestrator"
+npx tsc -p .sandcastle/tsconfig.json ||
+  die "step 4 (verify) failed: the install landed but the rendered orchestrator does not typecheck against the pinned library. That is a TEMPLATE BUG, not an install failure — report it against the skills repo; re-running will not help."
+
+echo
+echo "install complete: Sandcastle is rendered at $REF ($ARM arm) and typechecks."
+echo "What remains for a human:"
+if [ -n "$ENV_FROM" ]; then
+  echo "  - .sandcastle/.env was seeded from $ENV_FROM. Its GITHUB_APP_* and CLAUDE_CODE_OAUTH_TOKEN values are account-level and unchanged."
+else
+  echo "  - Fill .sandcastle/.env (copy .sandcastle/.env.example): CLAUDE_CODE_OAUTH_TOKEN, and GH_TOKEN or the GITHUB_APP_* block."
+fi
+echo "  - Grant the GitHub App bot access to THIS repo: https://github.com/settings/installations -> the bot App -> Configure -> Repository access -> add this repo -> Save. See .sandcastle/bot-setup.md step 3."
+echo "  - Then build the sandbox image and run \`npm run sandcastle\`; the planner only selects issues labelled ready-for-agent."
