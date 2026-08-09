@@ -170,8 +170,8 @@ pinned `@ai-hero/sandcastle`. Fix anything red before declaring done.
 Once a repo is installed, later `sandcastle-template/vN` tags reach it through
 the [`sandcastle-propagate`](sandcastle-propagate) maintainer script. It
 discovers every adopter under `~/src` by its root `.copier-answers.yml`
-breadcrumb (no hardcoded list), preserves each repo's `PYTHON_VERSION`, then
-commits `.sandcastle` and pushes. Always dry-run first:
+breadcrumb (no hardcoded list), lets `copier update` re-assert each repo's own
+recorded answers, then commits `.sandcastle` and pushes. Always dry-run first:
 
 ```bash
 sandcastle-propagate --dry-run     # show what each repo would receive
@@ -289,8 +289,8 @@ Then, before committing:
 4. **Refresh `.sandcastle/tests/` too.** Adopters carry copies of the dev-home
    suite, and copier excludes tests from the render, so they never update
    themselves — they will be pinned to whatever API the adopter installed. Copy
-   the current suite over (skip `copier-template.test.mjs`, which tests this skill,
-   not a target), and locally adapt any assertion that encodes a local divergence.
+   the current suite over (skip `copier-template.test.mjs` and
+   `propagate.test.mjs`, which test this skill, not a target), and locally adapt any assertion that encodes a local divergence.
 5. **Run the adopter's whole CI locally, and read the EXIT CODE.** Not just
    `tsc` — whatever its workflow runs, typically `npm run lint && npm run typecheck
    && npm test`. Check `$?` explicitly; a wrapper or a summarizing proxy can print
