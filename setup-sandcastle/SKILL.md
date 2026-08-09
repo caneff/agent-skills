@@ -1,55 +1,99 @@
 ---
 name: setup-sandcastle
-description: Install the Sandcastle dev-automation orchestrator into a Python repo that already ran setup-python-repo. Adds .sandcastle/ (a plan→implement→review→PR agent pipeline over GitHub issues), wires it to `just check`, and runs agents in isolated Docker sandboxes. Requires Docker + a Node host runtime + the tdd skill.
+description: Install the Sandcastle dev-automation orchestrator into a repo. Adds .sandcastle/ (a plan→implement→review→PR agent pipeline over GitHub issues), wires it to the repo's own gate command, and runs agents in isolated Docker sandboxes. Requires Docker + a Node host runtime + the tdd skill.
 disable-model-invocation: true
 ---
 
-# Install Sandcastle into a Python repo
+# Install Sandcastle into a repo
 
 Bolt the **Sandcastle** orchestrator onto a repo so AFK agents turn
 `ready-for-agent` GitHub issues into reviewed PRs. `main.mts` loops
 plan→execute over issues; per issue an **implementer** agent makes commits and
-runs `just check`, then a **reviewer** agent gates the branch against the issue
-spec; completed issues open one PR per dependency component.
+runs the repo's gate, then a **reviewer** agent gates the branch against the
+issue spec; completed issues open one PR per dependency component.
 
-This composes **on top of** [`setup-python-repo`](../setup-python-repo/SKILL.md):
-it consumes that repo's `just check`, PR CI, `CODING_STANDARDS.md`, and
-`AGENTS.md`. It does not create them — **step 0 hard-requires them.**
+It consumes a gate command, PR CI, `CODING_STANDARDS.md`, and `AGENTS.md`, and
+creates none of them — **step 0 hard-requires them.** On the Python arm those
+come from [`setup-python-repo`](../setup-python-repo/SKILL.md), which the gate
+below names as the fix. A Node adopter has no equivalent skill to lean on, so
+step 0's assertion **is** the whole obligation: nothing creates the scripts it
+checks for.
 
 The orchestrator lives in this skill's [`templates/`](templates/) as a **copier
 template** (the canonical home where the `.mts` is hacked with its vitest suite
 green). Targets get **runtime-only** code — no tests, no vitest. Install
-**renders** it with copier: prompts/config already ship Python-retargeted, and
-copier fills the answers — `LANGUAGE`, which defaults to `python`, and (for a
-Python adopter) `PYTHON_VERSION` from the target's `.python-version` — with no
-install-time `sed`.
+**renders** it with copier, which fills the answers — `LANGUAGE`, which
+defaults to `python`, and (for a Python adopter) `PYTHON_VERSION` from the
+target's `.python-version` — with no install-time `sed`.
 
 ## 0. Prereqs — check, fail fast
 
-Abort with the exact fix if any is missing:
+**Establish `LANGUAGE` before checking anything language-specific.** Ask the
+user which arm this repo is — `python` or `node` — proposing what the target
+suggests (a `.python-version` or `pyproject.toml` → `python`; a `package.json`
+and no Python marker → `node`). The answer picks the arm below and is the same
+answer step 1 passes to copier.
 
-- **setup-python-repo markers** — `just --list` shows a `check` recipe; a PR CI
-  workflow exists (`.github/workflows/*.yml`); `CODING_STANDARDS.md` and
-  `AGENTS.md` are present. Missing → *"run `/setup-python-repo` first."*
+Then abort with the exact fix if any prereq is missing.
+
+**Both arms:**
+
 - **tdd skill** — `~/.claude/skills/tdd/` exists (the implementer prompt calls
   `/tdd`; the sandbox bind-mounts `~/.claude/skills` at run time, so it resolves
   in-container). Missing → *"install the tdd skill first."*
-- **Docker** — `docker info` succeeds (agents run in Docker sandboxes).
+- **Docker** — `docker info` succeeds (agents run in Docker sandboxes). Missing
+  → *"start Docker first: agents run in Docker sandboxes."*
 - **Node host runtime** — `node` and `npx` on PATH (`main.mts` runs on the host
   via tsx). The Python arm's sandbox image carries no Node; the Node arm's does,
   for the target's own toolchain, not for `main.mts`.
 - **copier** — `command -v copier` (the template engine step 1 renders with;
   `uv tool install copier` if missing).
-- Target is a git repo with `.python-version`.
+- **Target is a git repo**, with a PR CI workflow (`.github/workflows/*.yml`)
+  and `CODING_STANDARDS.md` and `AGENTS.md` present — the reviewer reads the
+  standards, the implementer reads `AGENTS.md`. Name whichever is absent:
+  *"Sandcastle needs a PR CI workflow / `CODING_STANDARDS.md` / `AGENTS.md`;
+  it consumes them and creates none of them."* On the Python arm,
+  `/setup-python-repo` writes all three.
 
-**Done when:** all six pass, or you've stopped with the precise missing-prereq message.
+**Python arm (`LANGUAGE=python`) also:**
+
+- **`.python-version`** at the repo root — step 1 reads it for the image's
+  interpreter. Missing → *"run `/setup-python-repo` first: no `.python-version`."*
+- **`just --list` shows `check`, `lint` and `typecheck`** — the render names all
+  three. Name whichever is absent: *"no `just check` recipe — run
+  `/setup-python-repo` first"*, *"`just` has no `lint` recipe; the per-commit
+  fast check calls it"*, *"`just` has no `typecheck` recipe; the per-commit fast
+  check calls it."*
+
+The assertion reaches past `check` deliberately. A repo may define `check` as one
+monolithic recipe with no separate `lint` or `typecheck`, and the implementer's
+per-commit fast check would then call a recipe that does not exist.
+
+**Node arm (`LANGUAGE=node`) also:**
+
+- **`package.json` at the repo root** defining a `lint`, a `typecheck` and a
+  `test` script — the render composes the gate from exactly those three, the way
+  `just check` composes its recipes. Missing file → *"no `package.json`:
+  Sandcastle's Node arm gates on npm scripts."* Missing script, named one by
+  one: *"`package.json` defines no `lint` script; the gate and the per-commit
+  fast check both call `npm run lint`"*, the same for `typecheck`, and
+  *"`package.json` defines no `test` script; the gate calls `npm run test`"* —
+  the per-commit fast check runs `npx vitest run <files>` instead, since `npm
+  run test` silently drops the file arguments.
+
+This arm's prereqs are the whole list: no `.python-version`, no
+`/setup-python-repo`.
+
+**Done when:** every shared prereq and every prereq of the established arm
+passes, or you have stopped with the precise missing-prereq message.
 
 ## 1. Render the orchestrator with copier
 
 `copier copy` renders the template as a `.sandcastle/` **subtree at this repo's
-root**: it drops the dev-only `tests/` (a target never edits the `.mts`), fills
-`PYTHON_VERSION` into the Dockerfile from the target's `.python-version`, and
-writes a root `.copier-answers.yml` — the breadcrumb recording the template
+root**: it drops the dev-only `tests/` (a target never edits the `.mts`), renders
+the arm `LANGUAGE` names — on the Python arm filling `PYTHON_VERSION` into the
+Dockerfile from the target's `.python-version` — and writes a root
+`.copier-answers.yml`, the breadcrumb recording the template
 version (`_commit`) this repo sits on, so a later `copier update` can merge in
 template edits. Source the **skills repo**, not the template subfolder — copier
 records `_commit` only from the git root (why: `references/design-decisions.md`
@@ -58,9 +102,17 @@ into `.` — copier writes only `.sandcastle/` and the root breadcrumb, scatteri
 nothing else across the target:
 
 ```bash
+# Python arm
 copier copy --defaults \
   --vcs-ref=sandcastle-template/v4 \
+  --data LANGUAGE=python \
   --data PYTHON_VERSION="$(cat .python-version)" \
+  https://github.com/caneff/agent-skills.git .
+
+# Node arm — no PYTHON_VERSION; copier does not ask for it on this arm
+copier copy --defaults \
+  --vcs-ref=sandcastle-template/v4 \
+  --data LANGUAGE=node \
   https://github.com/caneff/agent-skills.git .
 ```
 
@@ -68,9 +120,10 @@ copier copy --defaults \
 `sandcastle-template/vN` ships. (A local checkout path — the skills repo root —
 works too and needs no network, but records a machine-local `_src_path`.)
 
-**Done when:** `.sandcastle/main.mts` exists, `.sandcastle/tests/` does not, the
-Dockerfile's `ARG PYTHON_VERSION` equals `.python-version`, and a root
-`.copier-answers.yml` is present.
+**Done when:** `.sandcastle/main.mts` exists, `.sandcastle/tests/` does not, a
+root `.copier-answers.yml` is present recording the `LANGUAGE` you chose, and —
+on the Python arm — the Dockerfile's `ARG PYTHON_VERSION` equals
+`.python-version`.
 
 ## 2. Seed the implementer's `CLAUDE.md`
 
@@ -225,6 +278,24 @@ Safety properties:
 
 To confirm before running, `--dry-run` (`copier update --pretend`) shows the
 merge each repo would receive without touching it.
+
+### One-time: record `LANGUAGE=node` on a Node adopter
+
+`LANGUAGE` defaults to `python`, so a breadcrumb written before the answer
+existed carries no `LANGUAGE` and the first sweep supplies the default. For a
+Node adopter that is wrong: the sweep would render the Python image over its
+repo. Correct the answer once, by hand, and it persists to every later update
+with no flag:
+
+```bash
+# vN = the newest sandcastle-template tag, the same ref the sweep would use
+cd ~/src/visual-teach && copier update --defaults --trust \
+  --vcs-ref sandcastle-template/vN --data LANGUAGE=node
+```
+
+**Run it before the first sweep reaches that repo.** A `sandcastle-propagate`
+run that gets there first re-asserts `python` and rewrites the image, and
+undoing that costs a second migration.
 
 ### One-time migration off the old layout
 
