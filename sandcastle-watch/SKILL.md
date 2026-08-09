@@ -11,9 +11,13 @@ Start a Sandcastle run and monitor it hands-off: report progress on change, noti
 ## 0. Preconditions
 Repo must have `.sandcastle/main.mts` and a `sandcastle` npm script (`npm run | grep sandcastle`). Missing → stop: "No Sandcastle here — run `/setup-sandcastle` first."
 
-Never start a second run against the same repo — concurrent label writes corrupt state. Check for a live one first, but match the run **process**, not a command-string: `pgrep -f 'sandcastle/main.mts'` also matches your own shell command (which contains that string), a false positive that makes it look like a run is live when none is. The real run is a `node` process; your shell is `bash`, so filter on that:
+Never start a second run against the same repo — concurrent label writes corrupt state, and the damage is silent: two orchestrators interleave their label reads and writes, so one plans against a snapshot the other has already invalidated and exits having done nothing.
 
-    pgrep -f 'main\.mts' | while read -r pid; do [ "$(ps -o comm= -p "$pid")" = node ] && echo "$pid"; done
+Check for a live one first. Match on the command line, and exclude your own shell rather than filtering by process name:
+
+    pgrep -af 'tsx \.sandcastle/main\.mts' | grep -v 'bash -c'
+
+**Do not filter on `ps -o comm=`.** `tsx` renames the thread it runs on, so the orchestrator reports its `comm` as `MainThread` — never `node`. A `[ "$(ps -o comm= -p "$pid")" = node ]` guard therefore matches nothing and reports "no run live" while a run is very much live. A check that cannot fail is not a check.
 
 If that prints a pid, a run is already going — you can't capture its stdout after the fact, so attach to the newest per-agent log (`.sandcastle/logs/<branch>-<name>.log`, e.g. `main-planner.log`) and skip to step 2, watching those instead of `$LOG`. Starting fresh in step 1 is preferred when you have the choice, since only a fresh launch captures the combined stdout stream.
 
@@ -23,9 +27,11 @@ If that prints a pid, a run is already going — you can't capture its stdout af
 Sandcastle's milestone markers — phase/iteration headers, work assignments, `✓/✗/⚠` outcomes, `→ PR #N`, the final `=== Run Summary ===` — all go to **stdout**. Do **not** rely on a live `.sandcastle/logs/run-*.log`: this orchestrator writes `run-<id>.log` only once at the very end (just the summary), and its startup pruner deletes any header-less log you drop into `.sandcastle/logs` (a hand-made boot log included). So capture npm's stdout yourself, to a durable path **outside** `.sandcastle/logs` where the pruner can't touch it, and watch that:
 
     LOG=$(mktemp /tmp/sandcastle-watch-XXXXXX.log)
-    npm run sandcastle > "$LOG" 2>&1
+    setsid npm run sandcastle > "$LOG" 2>&1
 
-Launch that with `run_in_background` so the harness tracks the npm process itself and notifies you when it exits. Remember `$LOG` — it is the live combined stream for the whole run, and reused by every tick in step 2. If the run dies at startup, `$LOG` holds the traceback.
+Launch that with `run_in_background` so the harness tracks the process and notifies you when it exits. Remember `$LOG` — it is the live combined stream for the whole run, and reused by every tick in step 2. If the run dies at startup, `$LOG` holds the traceback.
+
+`setsid` is what makes the run **killable**. `npm run sandcastle` is a chain — `npm` forks `npm exec tsx`, which forks `sh -c tsx`, which forks the `node` that is the actual orchestrator. Kill the `npm` pid alone and the rest is orphaned, reparented, and still running: still writing labels, still opening sandboxes, still holding the stdout fd you are watching. `setsid` puts the whole chain in its own process group so one signal reaches all of it. See step 4 for the kill itself.
 
 **Done when:** the run is in the background (harness-tracked) and you have the `$LOG` path.
 
@@ -59,6 +65,23 @@ Substitute that path into every command below — write to it with the Write too
 
 ## 3. Finish
 On exit, do one final digest, show Sandcastle's own `=== Run Summary ===` block as the closing report, send a final "run complete — N PRs, M failed" notification, delete `.sandcastle/logs/watch-status` so the status bar clears at once (the 180s freshness guard is only the backstop for a loop that dies uncleanly), delete the `.toast` body file you minted, and stop the loop.
+
+## 4. Stopping a run early
+When the user asks you to stop the run, kill the **process group**, never a single pid — and never report it stopped on the strength of a process check alone.
+
+Find the group, signal it, then prove the run is dead by watching `$LOG` go quiet:
+
+    PGID=$(ps -o pgid= -p "$(pgrep -f 'tsx \.sandcastle/main\.mts' | head -1)" | tr -d ' ')
+    kill -TERM -"$PGID"; sleep 5
+    pgrep -f 'main\.mts' >/dev/null && kill -KILL -"$PGID"
+    a=$(wc -c < "$LOG"); sleep 20; b=$(wc -c < "$LOG")
+    [ "$a" = "$b" ] && echo "QUIET — dead" || echo "STILL GROWING — alive"
+
+**The log is the authority, not the process table.** Process checks are what let a half-killed run masquerade as a dead one: the orchestrator's children inherit its stdout fd, so an orphan keeps writing to `$LOG` after every pid you know about is gone. If the log is still growing, something is still running — go find it. Expect one last burst right after the kill (the shutdown notice naming preserved worktrees); that is the run finishing, and it settles within a few seconds.
+
+Prefer a stop at an **iteration boundary**. Sandcastle transitions each issue's label the moment its outcome is known, so a kill mid-review strands that issue between states — most often `in-review` with no branch, which means no PR will ever open and no agent will ever pick it up again. Watch `$LOG` for `Execution complete` before signalling. After any stop, check the labels against the branches that actually exist and repair what does not line up.
+
+**Done when:** `$LOG` has been flat for 20s and no `main.mts` process remains.
 
 ## Markers the digest subagent keys off
 `=== Phase 0 … ===` / `=== Reconciliation sweep … ===` / `=== Iteration N/MAX ===` · `  [mode] id: title → branch` (work in flight) · `  ✓` / `  ✗ id …` / `  ⚠ id …` (outcomes) · `… → PR #N` · the final `=== Run Summary ===` bucketed block.
