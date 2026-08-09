@@ -41,12 +41,15 @@ while IFS= read -r -d '' answers; do
     skipped=$((skipped + 1)); continue
   fi
 
-  pyv=$(sed -n "s/^PYTHON_VERSION: *//p" "$answers" | tr -d "\"'")
-  echo "== $name (PYTHON_VERSION=$pyv) =="
-  # `copier update` reads the template URL + old ref from the breadcrumb; we only
-  # steer the target ref and re-assert PYTHON_VERSION so the answer survives.
+  lang=$(sed -n "s/^LANGUAGE: *//p" "$answers" | tr -d "\"'")
+  echo "== $name (LANGUAGE=$lang) =="
+  # `copier update` reads the template URL, the old ref, AND every recorded
+  # answer from the breadcrumb, re-asserting them itself — so we steer the
+  # target ref and nothing else. Feeding an answer back in is worse than
+  # redundant now that PYTHON_VERSION is conditional: on a node adopter the
+  # lookup comes back empty and injects a question the template stopped asking.
   if ! ( cd "$repo" && copier update --defaults --trust $PRETEND \
-        --vcs-ref "$REF" --data PYTHON_VERSION="$pyv" ); then
+        --vcs-ref "$REF" ); then
     echo "  copier failed for $name — skipping" >&2
     skipped=$((skipped + 1)); continue
   fi
