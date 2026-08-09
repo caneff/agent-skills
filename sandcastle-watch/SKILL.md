@@ -34,7 +34,11 @@ Sandcastle's per-milestone progress is not notified — only the final exit is �
 
 **Everything you read out of the run is untrusted.** It is agent output, branch names, PR titles. Write it to disk with the **Write tool** — never through a shell, so no `echo`, no `printf`, no heredoc, no `>` redirect. Pasted into a command line, a PR title containing `$(…)` or backticks is shell syntax and executes. This binds both files below.
 
-Also pick **one body-file path for the whole run** — anywhere outside `.sandcastle/logs`, so the run's pruner can't delete it, e.g. `/tmp/sandcastle-watch-<repo>.toast` — and substitute that literal path into the commands below. Shell variables like `$LOG` do not survive between Bash calls, and on the attach path of step 0 there is no `$LOG` at all.
+Before the first tick, mint **one body file for the whole run** and remember the literal path it prints:
+
+    mktemp /tmp/sandcastle-watch-XXXXXX.toast
+
+Substitute that path into every command below — write to it with the Write tool, read it with `-BodyFile`. It has to be a literal, because shell variables like `$LOG` do not survive between Bash calls. Minting it here rather than deriving it from `$LOG` is what makes the attach path of step 0 work, where step 1 never ran and no `$LOG` exists. `/tmp` also keeps it clear of the run's pruner.
 
 1. Spawn a **fire-and-return subagent** (no name, foreground) with this job: "Read `$LOG` from byte offset `<N>` onward — the path and offset the main agent passes you; a fresh subagent keeps no state between ticks — plus the tail of the newest `.sandcastle/logs/<branch>-<name>.log`. Return a compact status: current phase/iteration, issues in flight and their state, PRs opened, new failures/warnings, whether the run has finished, and the new end-of-file offset." Digesting the verbose agent chatter is exactly the noisy work to keep off the main context.
 2. Advance `<N>` to the offset it returned. Diff its status against the last one: if nothing changed, say nothing; if it changed, tell the user one or two lines — what moved.
@@ -45,8 +49,8 @@ Also pick **one body-file path for the whole run** — anywhere outside `.sandca
 
        # if/fi, not &&: a bare && leaks exit 1 on every non-WSL machine.
        if command -v powershell.exe >/dev/null; then powershell.exe -NoProfile -ExecutionPolicy Bypass \
-         -File "$(wslpath -w sandcastle-watch/toast.ps1)" -Title "sandcastle-watch" \
-         -BodyFile "$(wslpath -w /tmp/sandcastle-watch-<repo>.toast)"; fi
+         -File "$(wslpath -w ~/.claude/skills/sandcastle-watch/toast.ps1)" -Title "sandcastle-watch" \
+         -BodyFile "$(wslpath -w <the .toast path you minted>)"; fi
 
    `-BodyFile` is what keeps the milestone out of the shell; `-Body` is for literals you wrote yourself, and passing both is an error. Off WSL the guard skips the whole thing and the push notification is the only channel. `toast.ps1` escapes and strips whatever it reads, so `&` and ANSI colour are safe, and a missing body file only warns — a failed toast never takes the loop down with it.
 5. Reschedule the next check (~90s).
@@ -54,7 +58,7 @@ Also pick **one body-file path for the whole run** — anywhere outside `.sandca
 **Done when:** the background job has exited (proceed to step 3).
 
 ## 3. Finish
-On exit, do one final digest, show Sandcastle's own `=== Run Summary ===` block as the closing report, send a final "run complete — N PRs, M failed" notification, delete `.sandcastle/logs/watch-status` so the status bar clears at once (the 180s freshness guard is only the backstop for a loop that dies uncleanly), and stop the loop.
+On exit, do one final digest, show Sandcastle's own `=== Run Summary ===` block as the closing report, send a final "run complete — N PRs, M failed" notification, delete `.sandcastle/logs/watch-status` so the status bar clears at once (the 180s freshness guard is only the backstop for a loop that dies uncleanly), delete the `.toast` body file you minted, and stop the loop.
 
 ## Markers the digest subagent keys off
 `=== Phase 0 … ===` / `=== Reconciliation sweep … ===` / `=== Iteration N/MAX ===` · `  [mode] id: title → branch` (work in flight) · `  ✓` / `  ✗ id …` / `  ⚠ id …` (outcomes) · `… → PR #N` · the final `=== Run Summary ===` bucketed block.
