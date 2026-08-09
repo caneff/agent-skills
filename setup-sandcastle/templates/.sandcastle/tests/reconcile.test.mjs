@@ -5,7 +5,9 @@ import {
   buildRunSummary,
   decideInReviewAction,
   planGateOutcome,
+  planOutcomeTransition,
 } from "../reconcile.mts";
+import { REVIEW_RETRY_CAP } from "../retry-policy.mts";
 
 // ---------------------------------------------------------------------------
 // classifyInReviewIssue — four PR-state branches
@@ -502,5 +504,204 @@ describe("decideInReviewAction", () => {
         mergesClean: true,
       })
     ).toBe("requeue");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// planOutcomeTransition — the post-build label decision (#102)
+// ---------------------------------------------------------------------------
+describe("planOutcomeTransition", () => {
+  // The below-the-cap cases below build their fixtures as REVIEW_RETRY_CAP - 1.
+  // At a cap of 1 that IS the cap, and those tests would quietly start
+  // asserting the escalation path instead.
+  test("the cap leaves room for a below-the-cap attempt", () => {
+    expect(REVIEW_RETRY_CAP).toBeGreaterThan(1);
+  });
+
+  const full = {
+    mode: "full",
+    id: "42",
+    title: "Add widget",
+    branch: "sandcastle/issue-42",
+    parents: ["7"],
+    group: "widgets",
+  };
+
+  test("done → in-review, dropping both buildable labels", () => {
+    const plan = planOutcomeTransition({
+      kind: "done",
+      issue: full,
+      attempts: {},
+    });
+    expect(plan.addLabel).toBe("in-review");
+    expect([...plan.removeLabels].sort()).toEqual([
+      "needs-review",
+      "ready-for-agent",
+    ]);
+    expect(plan.escalated).toBe(false);
+  });
+
+  // The pre-extraction inline loop dropped only ready-for-agent here, leaving a
+  // stale in-review label on an issue that is demonstrably NOT reviewed clean.
+  // Its three sibling transitions all dropped in-review, and the downstream
+  // bucketer tests in-review BEFORE needs-review — so a survivor reported the
+  // issue as "human-gated: open PR pending merge" while it sat waiting to be
+  // re-reviewed. Corrected here: every transition clears the labels it
+  // contradicts.
+  test("needs-review below the cap → needs-review, clearing the contradicted labels", () => {
+    const plan = planOutcomeTransition({
+      kind: "needs-review",
+      issue: full,
+      attempts: {},
+    });
+    expect(plan.addLabel).toBe("needs-review");
+    expect([...plan.removeLabels].sort()).toEqual([
+      "in-review",
+      "ready-for-agent",
+    ]);
+    expect(plan.escalated).toBe(false);
+    expect(plan.attempts).toEqual({ 42: 1 });
+    expect(plan.attemptCount).toBe(1);
+  });
+
+  test("needs-review at the cap → escalates to a full re-implement", () => {
+    const plan = planOutcomeTransition({
+      kind: "needs-review",
+      issue: full,
+      attempts: { 42: REVIEW_RETRY_CAP - 1 },
+    });
+    expect(plan.addLabel).toBe("ready-for-agent");
+    expect([...plan.removeLabels].sort()).toEqual([
+      "in-review",
+      "needs-review",
+    ]);
+    expect(plan.escalated).toBe(true);
+    // Cleared at the cap: the next lifecycle counts from zero.
+    expect(plan.attempts).toEqual({});
+    expect(plan.note).toBe(
+      `42 hit review-retry cap (${REVIEW_RETRY_CAP}); back to ready-for-agent for a full re-implement`
+    );
+  });
+
+  test("spec-fail below the cap → back to ready-for-agent on its own counter", () => {
+    const plan = planOutcomeTransition({
+      kind: "spec-fail",
+      issue: full,
+      attempts: {},
+    });
+    expect(plan.addLabel).toBe("ready-for-agent");
+    expect([...plan.removeLabels].sort()).toEqual([
+      "in-review",
+      "needs-review",
+    ]);
+    expect(plan.escalated).toBe(false);
+    // Keyed spec-<id>, NOT <id>: the re-implement cap and the re-review cap
+    // count independently for the same issue.
+    expect(plan.attempts).toEqual({ "spec-42": 1 });
+    // The note names the attempt out of the cap — it is the only place an
+    // operator sees the count, since the plan's counters are internal.
+    expect(plan.note).toBe(
+      `42 failed spec review; back to ready-for-agent to re-implement (attempt 1/${REVIEW_RETRY_CAP})`
+    );
+  });
+
+  test("spec-fail at the cap → handed to a human", () => {
+    const plan = planOutcomeTransition({
+      kind: "spec-fail",
+      issue: full,
+      attempts: { "spec-42": REVIEW_RETRY_CAP - 1 },
+    });
+    expect(plan.addLabel).toBe("ready-for-human");
+    expect([...plan.removeLabels].sort()).toEqual([
+      "in-review",
+      "needs-review",
+      "ready-for-agent",
+    ]);
+    expect(plan.escalated).toBe(true);
+    expect(plan.attempts).toEqual({});
+  });
+
+  // The completed record is what Phase 3 groups PR sets from, so what a `done`
+  // carries into it is a downstream decision, not bookkeeping.
+  describe("the completed record a done outcome carries", () => {
+    test("a full-mode issue keeps its forest position and topic group", () => {
+      const plan = planOutcomeTransition({
+        kind: "done",
+        issue: full,
+        attempts: {},
+      });
+      expect(plan.completed).toEqual({
+        id: "42",
+        title: "Add widget",
+        branch: "sandcastle/issue-42",
+        parents: ["7"],
+        group: "widgets",
+      });
+    });
+
+    // A review-only issue was picked up by label for a cheap re-review; it never
+    // went through the planner, so it has no parents and no topic group. Both
+    // are dropped rather than invented. `group` is absent, not "": prSets edges
+    // issues together on a shared group key, so the key this record carries
+    // decides PR grouping. (prSets also skips falsy keys, so "" would not fuse
+    // sets today — the point is that the record states "no topic" outright
+    // instead of leaning on that guard.)
+    test("a review-only issue drops parents and the group key entirely", () => {
+      const plan = planOutcomeTransition({
+        kind: "done",
+        issue: {
+          mode: "review-only",
+          id: "43",
+          title: "Re-reviewed",
+          branch: "sandcastle/issue-43",
+        },
+        attempts: {},
+      });
+      expect(plan.completed).toEqual({
+        id: "43",
+        title: "Re-reviewed",
+        branch: "sandcastle/issue-43",
+        parents: [],
+      });
+      expect("group" in plan.completed).toBe(false);
+    });
+
+    // An empty group key from the planner is "no topic", not a topic named "".
+    test("a full-mode issue with an empty group key drops it too", () => {
+      const plan = planOutcomeTransition({
+        kind: "done",
+        issue: { ...full, group: "" },
+        attempts: {},
+      });
+      expect("group" in plan.completed).toBe(false);
+    });
+  });
+
+  // No work was produced (blocked parent base, empty branch, or a pipeline that
+  // threw). That says nothing about the branch, so the issue keeps the label it
+  // arrived with and burns no attempt — next iteration retries it cleanly.
+  test("nothing → touches no label and spends no attempt", () => {
+    const plan = planOutcomeTransition({
+      kind: "nothing",
+      issue: full,
+      attempts: { 42: 1 },
+    });
+    expect(plan.addLabel).toBeNull();
+    expect(plan.removeLabels).toEqual([]);
+    expect(plan.attempts).toEqual({ 42: 1 });
+    expect(plan.attemptCount).toBe(0);
+    expect(plan.escalated).toBe(false);
+    expect(plan.completed).toBeUndefined();
+  });
+
+  // A re-review counter must not be spent by a spec failure, or vice versa.
+  test("the two caps do not consume each other's counter", () => {
+    const plan = planOutcomeTransition({
+      kind: "spec-fail",
+      issue: full,
+      attempts: { 42: REVIEW_RETRY_CAP - 1 },
+    });
+    expect(plan.escalated).toBe(false);
+    expect(plan.attempts).toEqual({ 42: REVIEW_RETRY_CAP - 1, "spec-42": 1 });
   });
 });

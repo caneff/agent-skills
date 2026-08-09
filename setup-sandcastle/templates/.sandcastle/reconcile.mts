@@ -4,8 +4,11 @@
 // bucketIssues: bucket all open issues for the end-of-run summary.
 // buildRunSummary: format the bucketed summary as a printable string.
 // planGateOutcome: decide open-vs-requeue from the Phase-3 full-suite verdict.
+// planOutcomeTransition: decide one issue's labels from its post-build outcome.
 
 import type { CheckVerdict } from "./review-verdict.mts";
+import type { CompletedIssue } from "./pr-components.mts";
+import { recordAttempt, REVIEW_RETRY_CAP, type Attempts } from "./retry-policy.mts";
 
 // ---------------------------------------------------------------------------
 // Reconciliation sweep — classifyInReviewIssue
@@ -104,6 +107,144 @@ export function planGateOutcome(
       summaryNote: verdict.tail,
     };
   return { action: "requeue", commentIssueIds: [...setIssueIds] };
+}
+
+// ---------------------------------------------------------------------------
+// Post-build outcome — planOutcomeTransition (#102)
+// ---------------------------------------------------------------------------
+
+// What the execute+review pipeline concluded for one issue.
+//   done         — implemented and reviewed clean; belongs in a PR set.
+//   needs-review — the reviewer errored; the branch is fine, re-review it.
+//   spec-fail    — reviewed, but the branch doesn't satisfy the issue.
+//   nothing      — no work happened: a multi-parent base conflict blocked the
+//                  issue, or the branch has no diff vs main. main.mts also maps
+//                  a rejected pipeline (sandbox crash, network) here.
+export type OutcomeKind = "done" | "needs-review" | "spec-fail" | "nothing";
+
+// The issue as the execute loop knows it. A full-mode issue came from the
+// planner and carries its forest position (parents) and topic group; a
+// review-only issue was picked up by label for a cheap re-review and has
+// neither.
+export type OutcomeIssue =
+  | {
+      mode: "full";
+      id: string;
+      title: string;
+      branch: string;
+      parents: string[];
+      group?: string;
+    }
+  | { mode: "review-only"; id: string; title: string; branch: string };
+
+export interface OutcomePlan {
+  // Label to add, or null when the outcome touches no label at all.
+  addLabel: string | null;
+  removeLabels: string[];
+  // Counters to persist after this outcome — already incremented, cleared, or
+  // untouched. Never the caller's object: every path returns a fresh one.
+  attempts: Attempts;
+  // How many failed attempts this outcome makes, 0 when it records none. NOT
+  // readable back out of `attempts`: at the cap recordAttempt clears the
+  // counter, so an escalating outcome reports count 2 with the key gone.
+  attemptCount: number;
+  // This outcome hit REVIEW_RETRY_CAP and changed lifecycle because of it.
+  escalated: boolean;
+  // done only: the PR-set membership record main.mts accumulates.
+  completed?: CompletedIssue;
+  // Operator-facing line main.mts prints, unindented — the caller owns layout.
+  // Absent when there is nothing to say.
+  note?: string;
+}
+
+export function planOutcomeTransition(input: {
+  kind: OutcomeKind;
+  issue: OutcomeIssue;
+  attempts: Attempts;
+}): OutcomePlan {
+  const { kind, issue, attempts } = input;
+
+  if (kind === "done") {
+    // Reviewed clean, so the retry counter is reset rather than incremented —
+    // a later failure starts its count from zero.
+    const next = { ...attempts };
+    delete next[issue.id];
+    return {
+      addLabel: "in-review",
+      removeLabels: ["ready-for-agent", "needs-review"],
+      attempts: next,
+      attemptCount: 0,
+      escalated: false,
+      completed: {
+        id: issue.id,
+        title: issue.title,
+        branch: issue.branch,
+        parents: issue.mode === "full" ? issue.parents : [],
+        ...(issue.mode === "full" && issue.group
+          ? { group: issue.group }
+          : {}),
+      },
+    };
+  }
+
+  if (kind === "needs-review") {
+    const r = recordAttempt(attempts, issue.id);
+    // At the cap, cheap re-review has provably failed to salvage the branch.
+    // Only a full implement pass can change the code, so hand it back to the
+    // implementer rather than queueing a re-review that will fail the same way.
+    if (r.escalate)
+      return {
+        addLabel: "ready-for-agent",
+        removeLabels: ["needs-review", "in-review"],
+        attempts: r.attempts,
+        attemptCount: r.count,
+        escalated: true,
+        note: `${issue.id} hit review-retry cap (${REVIEW_RETRY_CAP}); back to ready-for-agent for a full re-implement`,
+      };
+    return {
+      addLabel: "needs-review",
+      removeLabels: ["ready-for-agent", "in-review"],
+      attempts: r.attempts,
+      attemptCount: r.count,
+      escalated: false,
+    };
+  }
+
+  if (kind === "spec-fail") {
+    // Re-review cannot repair "built the wrong thing" — only re-implementing
+    // can. Counted under spec-<id> so a persistently-misunderstood issue burns
+    // its own cap rather than the re-review one.
+    const r = recordAttempt(attempts, `spec-${issue.id}`);
+    if (r.escalate)
+      return {
+        addLabel: "ready-for-human",
+        removeLabels: ["ready-for-agent", "needs-review", "in-review"],
+        attempts: r.attempts,
+        attemptCount: r.count,
+        escalated: true,
+        note: `${issue.id} failed spec review ${REVIEW_RETRY_CAP}x; handing to a human (ready-for-human)`,
+      };
+    return {
+      addLabel: "ready-for-agent",
+      removeLabels: ["needs-review", "in-review"],
+      attempts: r.attempts,
+      attemptCount: r.count,
+      escalated: false,
+      note: `${issue.id} failed spec review; back to ready-for-agent to re-implement (attempt ${r.count}/${REVIEW_RETRY_CAP})`,
+    };
+  }
+
+  // "nothing": no work was produced, which is a verdict on the run, not on the
+  // branch. Leave the issue exactly as it arrived — it keeps ready-for-agent
+  // and is retried cleanly. Counting an attempt here would spend a retry cap on
+  // an issue that was never actually reviewed.
+  return {
+    addLabel: null,
+    removeLabels: [],
+    attempts: { ...attempts },
+    attemptCount: 0,
+    escalated: false,
+  };
 }
 
 // ---------------------------------------------------------------------------
