@@ -3,6 +3,7 @@ import {
   prComponents,
   parentsFromBlockedBy,
   mergeParentEdges,
+  landedIssues,
 } from "../pr-components.mts";
 
 // One PR per connected dependency component (issue #127). Components are the
@@ -208,5 +209,52 @@ describe("mergeParentEdges — fold GitHub sub-issue edges into the graph (#90)"
   test("no parent edges is an identity — issues pass through unchanged", () => {
     const input = [issue("77"), issue("78")];
     expect(mergeParentEdges(input, new Map())).toEqual(input);
+  });
+});
+
+// Issue #115: a leaf whose merge conflicts is excluded from the PR head, but the
+// orchestrator credited it to the PR anyway — falsifying the run summary AND
+// suppressing the strand reconciliation meant to re-queue it. landedIssues asks
+// what actually landed rather than tracking which merges failed: an issue is
+// credited only when its branch is an ancestor of the assembled head.
+describe("landedIssues — credit only what reached the PR head (#115)", () => {
+  test("an issue whose branch is not an ancestor of the head is dropped", () => {
+    const landed = landedIssues(
+      [issue("101"), issue("102")],
+      (branch) => branch !== "sandcastle/issue-102"
+    );
+    expect(landed.map((i) => i.id)).toEqual(["101"]);
+  });
+
+  test("a non-leaf ancestor behind a conflicting leaf tip drops too", () => {
+    // Chain 105 → 106 (106 is the tip). 106 conflicts, so neither its own commits
+    // nor 105's — which only reached the head through 106 — are in the head. An
+    // id-set of failed LEAVES would still credit 105; ancestry does not.
+    const chain = [issue("105"), issue("106", ["105"])];
+    const inHead = new Set(["sandcastle/issue-101"]);
+    const landed = landedIssues([...chain, issue("101")], (branch) =>
+      inHead.has(branch)
+    );
+    expect(landed.map((i) => i.id)).toEqual(["101"]);
+  });
+
+  test("every branch an ancestor credits the whole set, order preserved", () => {
+    // The no-regression case: a run where all leaf merges succeed must assign
+    // exactly as before the fix.
+    const set = [issue("101"), issue("104", ["101"]), issue("107")];
+    expect(landedIssues(set, () => true)).toEqual(set);
+  });
+
+  test("an issue whose branch has no commits ahead of main stays credited", () => {
+    // 103 completed without needing a commit, so its branch still equals main —
+    // an ancestor of every head, including one whose other tip conflicted.
+    // Crediting it matches pre-fix behaviour; re-queuing it would loop forever,
+    // since the rebuild has nothing to add.
+    const conflicted = "sandcastle/issue-102";
+    const landed = landedIssues(
+      [issue("101"), issue("102"), issue("103")],
+      (branch) => branch !== conflicted
+    );
+    expect(landed.map((i) => i.id)).toEqual(["101", "103"]);
   });
 });

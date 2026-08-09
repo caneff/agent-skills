@@ -69,6 +69,24 @@ export function mergeParentEdges(
   });
 }
 
+// Which of a PR set's issues actually reached the assembled head (issue #115).
+//
+// The head is built by merging the set's leaf tips; a tip whose merge conflicts is
+// aborted and excluded, and its commits never land. Crediting the whole set
+// regardless both falsified the run summary and suppressed the strand
+// reconciliation, which skips any issue already carrying a PR assignment.
+//
+// Outcome-based, not failure-tracked: `isAncestor` answers "did this branch reach
+// the head", so a conflicting tip drops AND so does its whole ancestor chain,
+// whose commits only ever reached the head through that tip. A set of failed leaf
+// ids would miss those ancestors. Pure — the caller supplies the predicate.
+export function landedIssues(
+  issues: CompletedIssue[],
+  isAncestor: (branch: string) => boolean
+): CompletedIssue[] {
+  return issues.filter((i) => isAncestor(i.branch));
+}
+
 // Partition completed issues into connected components by parent edges, each with
 // its leaf tips. Component order follows first appearance in `issues`.
 export function prComponents(issues: CompletedIssue[]): PrComponent[] {
