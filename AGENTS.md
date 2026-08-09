@@ -6,7 +6,7 @@ Issues tracked in GitHub Issues via the `gh` CLI; external PRs are not a triage 
 
 ### Triage labels
 
-Five canonical roles, all mapped to their default label strings (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+Six canonical roles, all mapped to their default label strings (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `backlog`, `wontfix`). See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
