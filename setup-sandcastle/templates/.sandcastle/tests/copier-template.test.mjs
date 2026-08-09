@@ -59,6 +59,20 @@ const initRepo = (dir) => {
 // Every fixture reads the same file to ask what an adopter answered.
 const answersIn = (dir) => readFileSync(join(dir, BREADCRUMB), "utf8");
 
+const standardsIn = (dir) => readFileSync(join(dir, ".sandcastle", "CODING_STANDARDS.md"), "utf8");
+
+// The marker rule renders on every arm — divergence happens in a Python adopter
+// exactly as in a Node one — so both arms assert the same four things: the token
+// spelled exactly, the counter-example that gives the reason test its teeth,
+// adopter-ADDED files (which the review gate and the divergence report must
+// agree about), and the clause that makes an unmarked edit a review failure.
+const expectTheLocalMarkerRule = (doc) => {
+  expect(doc).toContain("sandcastle:local");
+  expect(doc).toMatch(/This repo is TypeScript/);
+  expect(doc).toMatch(/add a new file/i);
+  expect(doc).toMatch(/fails this axis/);
+};
+
 // Answers are matched line-anchored. A bare substring would also match a value
 // commented out, indented under another key, or prefixing a longer line.
 const recordedAnswer = (name, value) =>
@@ -115,6 +129,10 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
   test("renders the PYTHON_VERSION answer into the Dockerfile", () => {
     const dockerfile = readFileSync(join(target, ".sandcastle", "Dockerfile"), "utf8");
     expect(dockerfile).toMatch(/^ARG PYTHON_VERSION=3\.14$/m);
+  });
+
+  test("renders the sandcastle:local marker rule into the standards doc", () => {
+    expectTheLocalMarkerRule(standardsIn(target));
   });
 
   test("breadcrumb lands at the repo root and pins a non-empty _commit", () => {
@@ -192,6 +210,13 @@ describe.skipIf(!hasCopier())("template delimiters do not collide with runtime p
 // Re-pin PRE_ARC only when a render is deliberately changed for the Python arm,
 // and say so in the commit — that is the whole point of the assertion.
 const PRE_ARC = "59c7941"; // last commit before the LANGUAGE arc (issue #131)
+
+// Files an arc ticket deliberately APPENDS to. Listing one relaxes the promise
+// from "identical" to "the pre-arc body, still byte-for-byte, plus new text at
+// the end" — so the rest of the file stays pinned. Re-pinning PRE_ARC instead
+// would exempt every file at once and retire the net for the tickets to come.
+//   .sandcastle/CODING_STANDARDS.md — the sandcastle:local rule (issue #136)
+const ARC_APPENDED_RENDERS = [".sandcastle/CODING_STANDARDS.md"];
 
 // Answers each arc ticket deliberately ADDS to a Python adopter's breadcrumb.
 // The net below demands the breadcrumb equal the pre-arc one plus exactly these,
@@ -281,6 +306,10 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
     const [was, is] = [renderedTree(before), renderedTree(after)];
     for (const [path, body] of was) {
       if (path === BREADCRUMB) continue;
+      if (ARC_APPENDED_RENDERS.includes(path)) {
+        expect(is.get(path)?.startsWith(body), `${path} changed above the appended text`).toBe(true);
+        continue;
+      }
       expect(is.get(path), path).toBe(body);
     }
   });
@@ -390,6 +419,10 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
 
   test("records LANGUAGE as node in the breadcrumb", () => {
     expect(answersIn(fresh)).toMatch(recordedAnswer("LANGUAGE", "node"));
+  });
+
+  test("gets the sandcastle:local marker rule too — it is not a python-arm rule", () => {
+    expectTheLocalMarkerRule(standardsIn(fresh));
   });
 
   test("is never asked for a Python version, so none is recorded", () => {
