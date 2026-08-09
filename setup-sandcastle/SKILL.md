@@ -253,6 +253,26 @@ cp /tmp/new/.copier-answers.yml "$REPO/.copier-answers.yml"   # breadcrumb moves
 git -C "$REPO" rm -q .sandcastle/.copier-answers.yml
 ```
 
+**A line merge is not enough for a badly diverged file.** `git merge-file` works a
+region at a time, so on a file that drifted far it happily keeps *ours* where the
+new version added a definition and *theirs* where the new version calls it — a
+result that is textually merged and semantically broken. That is not a
+hypothetical: migrating visual-teach this way produced a `main.mts` calling
+`parseCheckVerdict` and `retiredByGate` that nothing defined, and a `reconcile.mts`
+missing the very buckets `main.mts` passed it.
+
+So split the files by how far they drifted:
+
+- **A file with a handful of deliberate local edits** — take the NEW render whole
+  and re-apply those edits by hand, each with a comment naming why it diverges.
+  Cleaner than any merge, and the next `copier update` conflict reads clearly.
+- **A file whose local side is only pre-old-ref template text** (an adopter pinned
+  to a tag its files predate — common) — take the new render whole. Prove it first
+  by finding the same lines in an older render, not by eye.
+- **A file the template never changed between the two refs** — leave it entirely
+  alone. Diff the two renders and you will usually find most files are in this
+  bucket, which is exactly why re-rendering costs so much for so little.
+
 Then, before committing:
 
 1. **Resolve every conflict by reading it.** A conflict whose local side is empty
@@ -261,10 +281,21 @@ Then, before committing:
 2. **Prove no local line vanished.** For each file, extract the lines the repo had
    that the OLD render did not — those are its edits — and confirm each one is
    still present in the merged file. That check is what catches a silent clobber.
+   Then classify each line it flags: age, or customization? Only the second kind
+   is a loss.
 3. **Re-apply any divergence the merge could not keep**, with a comment saying why,
    so the next `copier update` conflict is legible instead of mysterious.
-4. **Typecheck**: `npx tsc -p .sandcastle/tsconfig.json --noEmit`.
-5. **Open a PR.** A migration is not an auto-ship: a human reads what moved.
+4. **Refresh `.sandcastle/tests/` too.** Adopters carry copies of the dev-home
+   suite, and copier excludes tests from the render, so they never update
+   themselves — they will be pinned to whatever API the adopter installed. Copy
+   the current suite over (skip `copier-template.test.mjs`, which tests this skill,
+   not a target), and locally adapt any assertion that encodes a local divergence.
+5. **Run the adopter's whole CI locally, and read the EXIT CODE.** Not just
+   `tsc` — whatever its workflow runs, typically `npm run lint && npm run typecheck
+   && npm test`. Check `$?` explicitly; a wrapper or a summarizing proxy can print
+   something that reads like success over a failing command, and the migration that
+   prompted this rule was pushed on exactly that false green.
+6. **Open a PR.** A migration is not an auto-ship: a human reads what moved.
 
 After that one migration, `sandcastle-propagate` (real `copier update`) carries
 every future tag.
