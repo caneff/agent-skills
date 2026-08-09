@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# Install Sandcastle into the repo this is run from. Phase one is a preflight
+# that checks every prereq for the named arm and mutates nothing, so everything
+# a human must go fix is discovered before anything lands on disk.
+#
+# Every failure exits one non-zero status; the message carries the fix. Every
+# prereq is probed through PATH or under $HOME — no absolute paths — which is
+# what lets the tests run it with nothing real installed.
+set -uo pipefail
+
+die() {
+  echo "$1"
+  exit 1
+}
+
+ARM="${1:-}"
+case "$ARM" in
+  python | node) ;;
+  *) die "usage: install <python|node> [--preflight] — the arm is required and never inferred" ;;
+esac
+
+# --- preflight: checks everything, mutates nothing ------------------------
+
+[ -d "$HOME/.claude/skills/tdd" ] ||
+  die "no tdd skill at ~/.claude/skills/tdd: install the tdd skill first — the implementer prompt calls /tdd."
+
+docker info >/dev/null 2>&1 ||
+  die "docker info failed: start Docker first: agents run in Docker sandboxes."
+
+command -v node >/dev/null 2>&1 ||
+  die "no \`node\` on PATH: main.mts runs on the host via tsx."
+
+command -v npx >/dev/null 2>&1 ||
+  die "no \`npx\` on PATH: main.mts runs on the host via tsx."
+
+command -v copier >/dev/null 2>&1 ||
+  die "no \`copier\` on PATH: the render needs it — \`uv tool install copier\`."
+
+git rev-parse --git-dir >/dev/null 2>&1 ||
+  die "not a git repo: run install from the root of the target repo."
+
+# Locked decision 13 — never re-render over an adopter. Caught here, before
+# copier, because the render is the first irreversible act.
+for marker in .copier-answers.yml .sandcastle/main.mts; do
+  [ -e "$marker" ] &&
+    die "this repo already carries a Sandcastle render: found $marker. Never re-render over an adopter — carry template changes with \`copier update\` instead."
+done
+
+# It consumes these three and creates none of them; name whichever is absent.
+compgen -G ".github/workflows/*.yml" >/dev/null || compgen -G ".github/workflows/*.yaml" >/dev/null ||
+  die "Sandcastle needs a PR CI workflow (.github/workflows/*.yml); it consumes it and creates none of them."
+
+[ -f CODING_STANDARDS.md ] ||
+  die "Sandcastle needs \`CODING_STANDARDS.md\`; the reviewer reads it, and it creates none of them."
+
+[ -f AGENTS.md ] ||
+  die "Sandcastle needs \`AGENTS.md\`; the implementer reads it, and it creates none of them."
+
+if [ "$ARM" = python ]; then
+  [ -f .python-version ] ||
+    die "run \`/setup-python-repo\` first: no \`.python-version\` — the render reads it for the image's interpreter."
+
+  command -v just >/dev/null 2>&1 ||
+    die "no \`just\` on PATH: the Python arm's gate is \`just check\`."
+
+  # Reach past `check`: a repo may define it as one monolithic recipe with no
+  # separate `lint` or `typecheck`, and the per-commit fast check calls both.
+  recipes=$(just --list 2>/dev/null)
+  has_recipe() { printf '%s\n' "$recipes" | grep -qE "^[[:space:]]+$1([[:space:]]|$)"; }
+
+  has_recipe check ||
+    die "no \`just check\` recipe — run \`/setup-python-repo\` first."
+  has_recipe lint ||
+    die "\`just\` has no \`lint\` recipe; the per-commit fast check calls it."
+  has_recipe typecheck ||
+    die "\`just\` has no \`typecheck\` recipe; the per-commit fast check calls it."
+else
+  [ -f package.json ] ||
+    die "no \`package.json\`: Sandcastle's Node arm gates on npm scripts."
+
+  # ponytail: grep, not a JSON parse — `node` is a prereq but parsing with it
+  # would make the check untestable without a real node. A dependency literally
+  # named "lint" would false-pass; swap in `node -p` if that ever bites.
+  has_script() { grep -qE "\"$1\"[[:space:]]*:" package.json; }
+
+  has_script lint ||
+    die "\`package.json\` defines no \`lint\` script; the gate and the per-commit fast check both call \`npm run lint\`."
+  has_script typecheck ||
+    die "\`package.json\` defines no \`typecheck\` script; the gate and the per-commit fast check both call \`npm run typecheck\`."
+  has_script test ||
+    die "\`package.json\` defines no \`test\` script; the gate calls \`npm run test\`."
+fi
+
+echo "preflight passed: this repo is ready for Sandcastle ($ARM arm). Nothing was written."
+
+[ "${2:-}" = --preflight ] && exit 0
+
+# The mutating phase — render, CLAUDE.md, host runtime, .env, npx tsc — is not
+# built yet (#163). Say so rather than exiting 0 on an install that never ran.
+die "no mutating phase yet: this script is preflight only — re-run with --preflight."
