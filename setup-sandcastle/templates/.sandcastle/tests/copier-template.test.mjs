@@ -28,6 +28,7 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 // tests/ -> .sandcastle/ -> templates/ -> setup-sandcastle/ -> repo root
 const repoRoot = join(here, "..", "..", "..", "..");
+const BREADCRUMB = ".copier-answers.yml";
 
 // Several blocks below need a throwaway template repo holding the LIVE files,
 // because copier re-clones its source by the recorded `_commit` and a dirty
@@ -44,6 +45,24 @@ function copyLiveTemplateInto(src) {
 
 const discard = (...dirs) =>
   dirs.forEach((d) => d && rmSync(d, { recursive: true, force: true }));
+
+const gitIn = (dir) => (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+
+const initRepo = (dir) => {
+  const g = gitIn(dir);
+  g("init", "-q");
+  g("config", "user.email", "test@example.com");
+  g("config", "user.name", "Test");
+  return g;
+};
+
+// Every fixture reads the same file to ask what an adopter answered.
+const answersIn = (dir) => readFileSync(join(dir, BREADCRUMB), "utf8");
+
+// Answers are matched line-anchored. A bare substring would also match a value
+// commented out, indented under another key, or prefixing a longer line.
+const recordedAnswer = (name, value) =>
+  new RegExp(`^${name}: ['"]?${value.replace(".", "\\.")}['"]?$`, "m");
 
 function hasCopier() {
   try {
@@ -107,13 +126,10 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
     expect(answers()).toMatch(/PYTHON_VERSION: ['"]?3\.14['"]?/);
   });
 
-  // The default is load-bearing, not cosmetic: copier takes a defaulted answer
-  // silently under `--defaults`, so the three live Python adopters come out
-  // right with nobody answering anything. A question with NO default instead
-  // raises `ValueError: Question "LANGUAGE" is required` and aborts, which would
-  // make the first propagate sweep skip every adopter it touched.
+  // Nobody answered LANGUAGE here, and the render still records one. Why that
+  // default is load-bearing rather than a courtesy: see `copier.yml`.
   test("breadcrumb records LANGUAGE, defaulted to python when unanswered", () => {
-    expect(answers()).toMatch(/^LANGUAGE: ['"]?python['"]?$/m);
+    expect(answers()).toMatch(recordedAnswer("LANGUAGE", "python"));
   });
 });
 
@@ -176,7 +192,11 @@ describe.skipIf(!hasCopier())("template delimiters do not collide with runtime p
 // Re-pin PRE_ARC only when a render is deliberately changed for the Python arm,
 // and say so in the commit — that is the whole point of the assertion.
 const PRE_ARC = "59c7941"; // last commit before the LANGUAGE arc (issue #131)
-const BREADCRUMB = ".copier-answers.yml";
+
+// Answers each arc ticket deliberately ADDS to a Python adopter's breadcrumb.
+// The net below demands the breadcrumb equal the pre-arc one plus exactly these,
+// so a ticket declares its addition instead of the assertion quietly widening.
+const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 
 function renderedTree(root) {
   const files = new Map();
@@ -197,14 +217,6 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
   let update;
   const PRE = "sandcastle-template/vpre";
   const POST = "sandcastle-template/vpost";
-  const gitIn = (dir) => (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
-  const initRepo = (dir) => {
-    const g = gitIn(dir);
-    g("init", "-q");
-    g("config", "user.email", "test@example.com");
-    g("config", "user.name", "Test");
-    return g;
-  };
   const render = (ref) => {
     const target = mkdtempSync(join(tmpdir(), "sandcastle-arc-tgt-"));
     execFileSync(
@@ -273,11 +285,17 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
     }
   });
 
-  test("records the pre-arc answers in the breadcrumb it renders today", () => {
-    const [was, is] = [renderedTree(before).get(BREADCRUMB), renderedTree(after).get(BREADCRUMB)];
-    for (const line of was.split("\n").filter((l) => l && !l.startsWith("_"))) {
-      expect(is, line).toContain(line);
-    }
+  // Both directions. Subset-only would prove the pre-arc answers survived while
+  // letting a stray or duplicated answer leak into three live adopters unseen.
+  test("records the pre-arc answers plus exactly what the arc declares it added", () => {
+    const recorded = (tree) =>
+      tree
+        .get(BREADCRUMB)
+        .split("\n")
+        .filter((line) => line && !line.startsWith("_") && !line.startsWith("#"));
+    expect(recorded(renderedTree(after)).sort()).toEqual(
+      [...recorded(renderedTree(before)), ...ARC_ADDED_ANSWERS].sort()
+    );
   });
 
   test("copier update from a pre-arc breadcrumb completes (exit 0)", () => {
@@ -285,16 +303,15 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
   });
 
   test("the updated adopter's breadcrumb keeps its answers and its path", () => {
-    const breadcrumb = join(adopter, BREADCRUMB);
-    expect(existsSync(breadcrumb)).toBe(true);
-    expect(readFileSync(breadcrumb, "utf8")).toMatch(/PYTHON_VERSION: ['"]?3\.14['"]?/);
+    expect(existsSync(join(adopter, BREADCRUMB))).toBe(true);
+    expect(answersIn(adopter)).toMatch(recordedAnswer("PYTHON_VERSION", "3.14"));
   });
 
-  // Criterion from #133: an adopter whose breadcrumb predates the question must
-  // take the default on update, silently. If LANGUAGE had no default this update
-  // would have aborted rather than reached here.
+  // An adopter whose breadcrumb predates the question takes the default on
+  // update, silently. Without a default this update would have aborted rather
+  // than reached here — see the mutation noted in `copier.yml`.
   test("an adopter installed before LANGUAGE existed takes the default on update", () => {
-    expect(readFileSync(join(adopter, BREADCRUMB), "utf8")).toMatch(/^LANGUAGE: ['"]?python['"]?$/m);
+    expect(answersIn(adopter)).toMatch(recordedAnswer("LANGUAGE", "python"));
   });
 });
 
@@ -308,20 +325,19 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
 // for the propagate sweep to read back and re-assert.
 describe.skipIf(!hasCopier())("a node adopter", () => {
   let src;
-  let target;
-  let adopter;
-  let update;
+  let fresh;
+  let corrected;
+  let asInstalled;
+  let correction;
+  let sweep;
   const V1 = "sandcastle-template/vnode1";
   const V2 = "sandcastle-template/vnode2";
-  const gitIn = (dir) => (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
-  const initRepo = (dir) => {
-    const g = gitIn(dir);
-    g("init", "-q");
-    g("config", "user.email", "test@example.com");
-    g("config", "user.name", "Test");
-    return g;
+  const V3 = "sandcastle-template/vnode3";
+  const bump = (gsrc, tag) => {
+    appendFileSync(join(src, "setup-sandcastle", "templates", ".sandcastle", "CONTEXT.md"), "\n");
+    gsrc("commit", "-q", "-am", tag);
+    gsrc("tag", tag);
   };
-  const breadcrumbOf = (dir) => readFileSync(join(dir, BREADCRUMB), "utf8");
 
   beforeAll(() => {
     src = mkdtempSync(join(tmpdir(), "sandcastle-node-src-"));
@@ -331,53 +347,75 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
     gsrc("commit", "-q", "-m", "v1");
     gsrc("tag", V1);
 
-    target = mkdtempSync(join(tmpdir(), "sandcastle-node-tgt-"));
+    // A repo that says node at install time.
+    fresh = mkdtempSync(join(tmpdir(), "sandcastle-node-fresh-"));
     execFileSync(
       "copier",
-      ["copy", "--defaults", "--vcs-ref", V1, "--data", "LANGUAGE=node", src, target],
+      ["copy", "--defaults", "--vcs-ref", V1, "--data", "LANGUAGE=node", src, fresh],
       { encoding: "utf8" }
     );
 
-    // The migration an existing Python-defaulted adopter runs once to correct
-    // itself, followed by an ordinary sweep that passes no LANGUAGE at all.
-    adopter = mkdtempSync(join(tmpdir(), "sandcastle-node-adopter-"));
-    const gadopt = initRepo(adopter);
-    writeFileSync(join(adopter, "package.json"), '{ "name": "adopter" }\n');
+    // The real migration path: a repo that installed BEFORE LANGUAGE existed and
+    // so defaulted to python, then runs the one-time `--data LANGUAGE=node`
+    // correction, then gets swept like any other adopter with no flag at all.
+    // The correction has to overwrite a recorded answer, not supply a missing one.
+    corrected = mkdtempSync(join(tmpdir(), "sandcastle-node-corrected-"));
+    const gadopt = initRepo(corrected);
+    writeFileSync(join(corrected, "package.json"), '{ "name": "adopter" }\n');
     gadopt("add", "-A");
     gadopt("commit", "-q", "-m", "init adopter");
-    execFileSync(
-      "copier",
-      ["copy", "--defaults", "--vcs-ref", V1, "--data", "LANGUAGE=node", src, adopter],
-      { encoding: "utf8" }
-    );
+    execFileSync("copier", ["copy", "--defaults", "--vcs-ref", V1, src, corrected], {
+      encoding: "utf8",
+    });
     gadopt("add", "-A");
     gadopt("commit", "-q", "-m", "install sandcastle");
+    asInstalled = answersIn(corrected);
 
-    appendFileSync(join(src, "setup-sandcastle", "templates", ".sandcastle", "CONTEXT.md"), "\n");
-    gsrc("commit", "-q", "-am", "v2");
-    gsrc("tag", V2);
-    update = spawnSync("copier", ["update", "--defaults", "--trust", "--vcs-ref", V2], {
-      cwd: adopter,
+    bump(gsrc, V2);
+    correction = spawnSync(
+      "copier",
+      ["update", "--defaults", "--trust", "--vcs-ref", V2, "--data", "LANGUAGE=node"],
+      { cwd: corrected, encoding: "utf8" }
+    );
+    gadopt("add", "-A");
+    gadopt("commit", "-q", "-m", "correct LANGUAGE");
+
+    bump(gsrc, V3);
+    sweep = spawnSync("copier", ["update", "--defaults", "--trust", "--vcs-ref", V3], {
+      cwd: corrected,
       encoding: "utf8",
     });
   });
-  afterAll(() => discard(src, target, adopter));
+  afterAll(() => discard(src, fresh, corrected));
 
   test("records LANGUAGE as node in the breadcrumb", () => {
-    expect(breadcrumbOf(target)).toMatch(/^LANGUAGE: ['"]?node['"]?$/m);
+    expect(answersIn(fresh)).toMatch(recordedAnswer("LANGUAGE", "node"));
   });
 
   test("is never asked for a Python version, so none is recorded", () => {
-    expect(breadcrumbOf(target)).not.toMatch(/PYTHON_VERSION/);
+    expect(answersIn(fresh)).not.toMatch(/PYTHON_VERSION/);
   });
 
-  test("keeps LANGUAGE=node through a later update that passes no flag", () => {
-    expect(update.status, update.stderr).toBe(0);
-    expect(breadcrumbOf(adopter)).toMatch(/^LANGUAGE: ['"]?node['"]?$/m);
+  // Guards the two below from passing vacuously: there is a recorded python
+  // answer, and a recorded Python version, for the correction to overwrite.
+  test("installs as python with a Python version before any correction", () => {
+    expect(asInstalled).toMatch(recordedAnswer("LANGUAGE", "python"));
+    expect(asInstalled).toMatch(/PYTHON_VERSION/);
   });
 
-  test("gains no PYTHON_VERSION key from that update", () => {
-    expect(breadcrumbOf(adopter)).not.toMatch(/PYTHON_VERSION/);
+  test("the correction overwrites the recorded python answer", () => {
+    expect(correction.status, correction.stderr).toBe(0);
+    expect(answersIn(corrected)).toMatch(recordedAnswer("LANGUAGE", "node"));
+  });
+
+  test("the correction drops the Python version it had recorded as a python repo", () => {
+    expect(answersIn(corrected)).not.toMatch(/PYTHON_VERSION/);
+  });
+
+  test("a later sweep passing no flag keeps the correction", () => {
+    expect(sweep.status, sweep.stderr).toBe(0);
+    expect(answersIn(corrected)).toMatch(recordedAnswer("LANGUAGE", "node"));
+    expect(answersIn(corrected)).not.toMatch(/PYTHON_VERSION/);
   });
 });
 
@@ -401,14 +439,6 @@ describe.skipIf(!hasCopier())("copier update round-trips from the git root", () 
   const V2 = "sandcastle-template/vtest2";
   const contextInSrc = () => join(src, "setup-sandcastle", "templates", ".sandcastle", "CONTEXT.md");
   const contextInTarget = () => join(target, ".sandcastle", "CONTEXT.md");
-  const gitIn = (dir) => (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
-  const initRepo = (dir) => {
-    const g = gitIn(dir);
-    g("init", "-q");
-    g("config", "user.email", "test@example.com");
-    g("config", "user.name", "Test");
-    return g;
-  };
 
   beforeAll(() => {
     // --- fixture: a self-contained template repo built from the live files ---

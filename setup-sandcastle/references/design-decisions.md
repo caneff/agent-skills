@@ -81,8 +81,9 @@ as inherited scaffold.
 11. **Prompts stored pre-retargeted; install renders with copier.** All templatization
     (`npm run test`→`just check`, Python grep paths in the review standards-loader,
     uv Dockerfile, `.venv` copyToWorktree) is baked into `templates/` at build time.
-    copier's only install-time substitution is `PYTHON_VERSION` (a copier answer into
-    `Dockerfile.jinja`); prompts/config carry no jinja and copier copies them verbatim.
+    copier's install-time substitutions are the `LANGUAGE` answer and, on the Python
+    arm, `PYTHON_VERSION` (into `Dockerfile.jinja`); prompts/config carry no jinja and
+    copier copies them verbatim.
     `disable-model-invocation`, user-invoked.
 12. **`.env` seed copies by path, never reads.** Secrets never enter the agent's
     context; the copy is verified gitignored before proceeding (SKILL.md step 3).
