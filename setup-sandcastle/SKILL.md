@@ -36,7 +36,8 @@ Abort with the exact fix if any is missing:
   in-container). Missing → *"install the tdd skill first."*
 - **Docker** — `docker info` succeeds (agents run in Docker sandboxes).
 - **Node host runtime** — `node` and `npx` on PATH (`main.mts` runs on the host
-  via tsx). No Node in the sandbox image — only on the host.
+  via tsx). The Python arm's sandbox image carries no Node; the Node arm's does,
+  for the target's own toolchain, not for `main.mts`.
 - **copier** — `command -v copier` (the template engine step 1 renders with;
   `uv tool install copier` if missing).
 - Target is a git repo with `.python-version`.
