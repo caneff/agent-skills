@@ -48,7 +48,15 @@ The format is settled — don't improvise a different one:
     🏰 3/20 · 101 102 104 · 0 PR                       healthy: dim throughout
     🏰 3/20 · 101 102 104 · 0 PR · 2✗ 103 105 · 1⚠ 104  trouble: only the tail lit
 
-Iteration, the ids in flight this iteration, PRs opened, then a marker per trouble kind with its own failing ids appended — `✗` in red, `⚠` in yellow. In-flight ids stay put when trouble appears; the failing ones are additive. Config colour is dead here (the segment is `rawValue: true`, so ccstatusline passes the script's own escapes straight through), which is why the script paints itself. `status-refresh.sh <log> <root> once` renders a single frame to stdout — use it to check the format against a finished run's log.
+Iteration, the ids in flight this iteration, PRs opened, then a marker per trouble kind with its own failing ids appended — `✗` in red, `⚠` in yellow. In-flight ids stay put when trouble appears; the failing ones are additive. `status-refresh.sh <log> <root> once` renders a single frame to stdout — use it to check the format against a finished run's log.
+
+**You do not own this segment's colour, so don't try to fix colour here.** With a powerline theme active, ccstatusline strips the script's ANSI *and* ignores the segment's `color`/`backgroundColor`, painting every background itself from the theme's five-colour cycle, indexed by segment position. Both were verified against a real render: `\033[2m`/`\033[22;39m` never reached the output, and `backgroundColor: green` left the segment on its theme colour. The script's own escapes are harmless leftovers — editing them changes nothing on screen.
+
+So when the castle renders in the **same colour as the segment before it, with no `` separator between them**, the cause is a neighbour, not this skill: a trailing `merge` on the preceding segment glues ours into that segment's group, and a group shares one colour. Delete the `merge` from that neighbour. A segment that renders empty is the other trap — it consumes a cycle slot and is then dropped, shifting every colour after it.
+
+Diagnose by rendering the real bar, never by reading the script: ccstatusline reads its payload from stdin and truncates trailing segments to terminal width, so give it a wide pty or the castle vanishes and you chase a colour bug that is really a width artifact.
+
+    script -q /dev/null -c "stty cols 400; ccstatusline < payload.json" | cat -A
 
 **Done when:** the run is in the background (harness-tracked), the refresher is running, and you have the `$LOG` path.
 
