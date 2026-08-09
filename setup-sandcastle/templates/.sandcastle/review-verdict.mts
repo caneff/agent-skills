@@ -84,7 +84,8 @@ export function isHarnessError(e: unknown): boolean {
 
 // The full-suite gate's verdict (issue #22). Unlike the spec/standards judges —
 // an agent OPINION that fails open on a missing sentinel — this is a safety gate
-// over `just check` (lint + typecheck + the whole test suite) and fails CLOSED:
+// over the repo's check gate (lint + typecheck + the whole test suite) and fails
+// CLOSED:
 //   - "pass"          the suite is green.
 //   - "test-fail"     the suite failed, OR the output was missing/unparseable —
 //                     a crashed check is not a green suite. Carries a bounded tail.
@@ -100,9 +101,10 @@ export interface CheckVerdict {
   tail: string;
 }
 
-// The gate wrapper echoes this sentinel only when `just check` exits zero
-// (`just check && echo SANDCASTLE_CHECK: PASS`). No sentinel → not green → fail
-// closed. Host-coupled contract string (see CODING_STANDARDS) — don't reword.
+// The gate wrapper echoes this sentinel only when the repo's check command exits
+// zero (`… && echo SANDCASTLE_CHECK: PASS`, rendered into check-prompt.md). No
+// sentinel → not green → fail closed. Host-coupled contract string (see
+// CODING_STANDARDS) — don't reword.
 const CHECK_PASS = /^SANDCASTLE_CHECK:\s*PASS\s*$/m;
 
 // Bound the forwarded failure context so a huge suite log never floods the issue
