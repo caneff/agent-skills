@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sandcastle-propagate [--dry-run] [REF]
+# sandcastle-propagate [--dry-run] [--divergence] [REF]
 #
 # Carry the Sandcastle template into every adopter repo with a real 3-way
 # `copier update`, then commit + push each. Adopters are discovered, not listed:
@@ -14,17 +14,106 @@
 # copier reads lives at the repo root, so update runs from there.
 #
 # REF defaults to the newest sandcastle-template/v* tag in the skills checkout.
+#
+# `--divergence` skips the update entirely and only reports how far each adopter
+# has drifted from the template it recorded — see `divergence_report` below. A
+# plain sweep prints that same report after each repo it updates.
 set -euo pipefail
 
 SKILLS_REPO="${SKILLS_REPO:-$HOME/.agents/skills}"
 SEARCH_ROOT="${SEARCH_ROOT:-$HOME/src}"
 
-PRETEND=""
-if [ "${1:-}" = "--dry-run" ]; then PRETEND="--pretend"; shift; fi
+PRETEND="" REPORT_ONLY=""
+while [ -n "${1:-}" ] && [ "$1" != "${1#--}" ]; do
+  case "$1" in
+    --dry-run) PRETEND="--pretend" ;;
+    --divergence) REPORT_ONLY=yes ;;
+    *) echo "unknown flag $1" >&2; exit 1 ;;
+  esac
+  shift
+done
 
-REF="${1:-$(git -C "$SKILLS_REPO" tag -l 'sandcastle-template/v*' | sort -V | tail -1)}"
-[ -n "$REF" ] || { echo "no sandcastle-template/v* tag in $SKILLS_REPO" >&2; exit 1; }
-echo "Propagating $REF${PRETEND:+ (dry run)}"
+# One answer out of a breadcrumb, unquoted. Empty when the key isn't recorded.
+breadcrumb() { sed -n "s/^$1: *//p" "$2" | tr -d "\"'"; }
+
+# How far each adopter has drifted from the template it recorded. Rendered fresh
+# every run, never maintained: `copier copy` at the repo's OWN `_commit` with the
+# repo's OWN answers reconstructs what the template gave it, and the diff against
+# the live tree is the divergence. Diffing against the newest tag instead would
+# make a repo that simply hasn't synced yet look like one that had diverged.
+#
+# One line per hunk. A hunk carrying `sandcastle:local` prints its reason;
+# everything else is UNMARKED and prints first, because that is the list a human
+# is here to read. An adopter-ADDED file has no counterpart in the render, so it
+# arrives as a whole-file hunk and reports as NEW.
+divergence_report() {
+  local repo=$1 name=$2 answers=$3 commit src ref data
+  commit=$(breadcrumb _commit "$answers")
+  src=$(breadcrumb _src_path "$answers")
+  [ -n "$commit" ] && [ -n "$src" ] || { echo "  no _commit in $name's breadcrumb — no divergence report" >&2; return 0; }
+
+  ref=$(mktemp -d); data=$(mktemp)
+  trap 'rm -rf "$ref" "$data"' RETURN
+  # copier's own bookkeeping keys are not answers; feeding them back is an error.
+  # `|| true`: a breadcrumb of nothing but bookkeeping selects no lines, and a
+  # grep that matched nothing exits 1 — which under `set -e` would end the sweep.
+  grep -v '^_' "$answers" > "$data" || true
+  if ! copier copy --defaults --trust --vcs-ref "$commit" --data-file "$data" "$src" "$ref" >/dev/null 2>&1; then
+    echo "  could not re-render $name at $commit — no divergence report" >&2
+    return 0
+  fi
+
+  # `git diff` exits 1 when it finds a difference — the normal case here, and
+  # under `set -e -o pipefail` an unhandled one would abort the whole sweep.
+  { git diff --no-index --no-prefix --unified=0 -- "$ref/.sandcastle" "$repo/.sandcastle" 2>/dev/null || true; } |
+    awk -v name="$name" '
+      # One pending hunk at a time; every boundary emits it before moving on.
+      function emit() {
+        if (!pending) return
+        printf "%d\t%-14s %-44s %-9s %s\n", (reason == "" ? 0 : 1), name, \
+          (isnew ? path : path ":" line), (isnew ? "NEW" : "+" adds " -" dels), \
+          (reason == "" ? "UNMARKED" : "local: " reason)
+        pending = 0
+      }
+      # Header rules only fire in a header. Inside a hunk, an added line reading
+      # `++ foo` arrives as `+++ foo` and would otherwise be read as a filename.
+      /^diff --git / { emit(); header = 1 }
+      header && /^--- / { isnew = ($2 == "/dev/null"); gone = $2 }
+      header && /^\+\+\+ / {
+        # --no-index prints whole filesystem paths; the adopter-relative one
+        # starts at the subtree both sides share.
+        path = ($2 == "/dev/null") ? gone : $2
+        sub(/^.*\/\.sandcastle\//, ".sandcastle/", path)
+      }
+      /^@@ / {
+        emit(); header = 0
+        split($3, plus, ",")           # the +N[,M] side of `@@ -a,b +c,d @@`
+        line = substr(plus[1], 2); adds = 0; dels = 0; reason = ""; pending = 1
+      }
+      pending && /^\+/ {
+        adds++
+        i = index($0, "sandcastle:local")
+        if (i > 0) {
+          r = substr($0, i + 16)
+          sub(/^[ \t]*(—|--|-|:)?[ \t]*/, "", r); sub(/[ \t]*$/, "", r)
+          reason = r
+        }
+      }
+      pending && /^-/ { dels++ }
+      END { emit() }
+    ' | sort -s -k1,1n | cut -f2-
+}
+
+# A report-only run carries nothing, so it needs no ref — and must not die on a
+# checkout that has no template tag at all.
+if [ -n "$REPORT_ONLY" ]; then
+  REF=""
+  echo "Reporting divergence"
+else
+  REF="${1:-$(git -C "$SKILLS_REPO" tag -l 'sandcastle-template/v*' | sort -V | tail -1)}"
+  [ -n "$REF" ] || { echo "no sandcastle-template/v* tag in $SKILLS_REPO" >&2; exit 1; }
+  echo "Propagating $REF${PRETEND:+ (dry run)}"
+fi
 
 updated=0 skipped=0
 while IFS= read -r -d '' answers; do
@@ -36,13 +125,20 @@ while IFS= read -r -d '' answers; do
   }
   name=$(basename "$repo")
 
+  lang=$(breadcrumb LANGUAGE "$answers")
+  echo "== $name (LANGUAGE=$lang) =="
+
+  # Report-only: render, diff, print. Nothing is updated, committed or pushed,
+  # so a dirty tree is no obstacle — it is just more divergence to report.
+  if [ -n "$REPORT_ONLY" ]; then
+    divergence_report "$repo" "$name" "$answers"
+    continue
+  fi
+
   if [ -n "$(git -C "$repo" status --porcelain)" ]; then
     echo "  skip $name — working tree dirty; commit or stash first"
     skipped=$((skipped + 1)); continue
   fi
-
-  lang=$(sed -n "s/^LANGUAGE: *//p" "$answers" | tr -d "\"'")
-  echo "== $name (LANGUAGE=$lang) =="
   # `copier update` reads the template URL, the old ref, AND every recorded
   # answer from the breadcrumb, re-asserting them itself — so we steer the
   # target ref and nothing else. Feeding an answer back in is worse than
@@ -57,7 +153,8 @@ while IFS= read -r -d '' answers; do
   [ -n "$PRETEND" ] && continue
 
   if [ -z "$(git -C "$repo" status --porcelain)" ]; then
-    echo "  already at $REF, nothing to commit"; continue
+    echo "  already at $REF, nothing to commit"
+    divergence_report "$repo" "$name" "$answers"; continue
   fi
   # A real conflict (an adopter edited a file the template also changed) lands as
   # inline `<<<<<<<`/`>>>>>>>` markers — copier's default. Never commit those:
@@ -76,6 +173,9 @@ while IFS= read -r -d '' answers; do
     skipped=$((skipped + 1)); continue
   fi
   echo "  committed + pushed"
+  # Same report as `--divergence`, now that the breadcrumb records the new ref:
+  # what the merge could not carry is exactly what this repo holds locally.
+  divergence_report "$repo" "$name" "$answers"
   updated=$((updated + 1))
 done < <(find "$SEARCH_ROOT" -maxdepth 4 -name '.copier-answers.yml' -print0)
 
