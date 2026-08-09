@@ -106,6 +106,15 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
   test("breadcrumb records the PYTHON_VERSION answer", () => {
     expect(answers()).toMatch(/PYTHON_VERSION: ['"]?3\.14['"]?/);
   });
+
+  // The default is load-bearing, not cosmetic: copier takes a defaulted answer
+  // silently under `--defaults`, so the three live Python adopters come out
+  // right with nobody answering anything. A question with NO default instead
+  // raises `ValueError: Question "LANGUAGE" is required` and aborts, which would
+  // make the first propagate sweep skip every adopter it touched.
+  test("breadcrumb records LANGUAGE, defaulted to python when unanswered", () => {
+    expect(answers()).toMatch(/^LANGUAGE: ['"]?python['"]?$/m);
+  });
 });
 
 // Why the template renders with `[[ ]]` / `[% %]` instead of copier's defaults:
@@ -158,13 +167,16 @@ describe.skipIf(!hasCopier())("template delimiters do not collide with runtime p
 // branching the later tickets add. So we render the template as it stood BEFORE
 // the arc began and diff it against today's render, file by file.
 //
-// The breadcrumb is compared with its `_`-prefixed bookkeeping stripped:
-// `_commit` and `_src_path` record WHERE a render came from and must differ
-// between the two fixtures. The answers themselves must not.
+// The promise covers the rendered FILES. The breadcrumb is copier's own
+// bookkeeping and is expected to grow: `_commit` records where a render came
+// from, and each ticket in the arc adds the answers it introduces. So its path
+// is compared (a rename there broke the install once) but its contents are
+// asserted on their own, below, rather than pinned byte-for-byte.
 //
 // Re-pin PRE_ARC only when a render is deliberately changed for the Python arm,
 // and say so in the commit — that is the whole point of the assertion.
 const PRE_ARC = "59c7941"; // last commit before the LANGUAGE arc (issue #131)
+const BREADCRUMB = ".copier-answers.yml";
 
 function renderedTree(root) {
   const files = new Map();
@@ -172,9 +184,7 @@ function renderedTree(root) {
     if (!entry.isFile()) continue;
     const rel = join(entry.parentPath, entry.name).slice(root.length + 1);
     if (rel.startsWith(".git/")) continue;
-    let body = readFileSync(join(root, rel), "utf8");
-    if (rel === ".copier-answers.yml") body = body.replace(/^_.*\n?/gm, "");
-    files.set(rel, body);
+    files.set(rel, readFileSync(join(root, rel), "utf8"));
   }
   return files;
 }
@@ -257,7 +267,17 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
 
   test("renders every file byte-identically to the pre-arc template", () => {
     const [was, is] = [renderedTree(before), renderedTree(after)];
-    for (const [path, body] of was) expect(is.get(path), path).toBe(body);
+    for (const [path, body] of was) {
+      if (path === BREADCRUMB) continue;
+      expect(is.get(path), path).toBe(body);
+    }
+  });
+
+  test("records the pre-arc answers in the breadcrumb it renders today", () => {
+    const [was, is] = [renderedTree(before).get(BREADCRUMB), renderedTree(after).get(BREADCRUMB)];
+    for (const line of was.split("\n").filter((l) => l && !l.startsWith("_"))) {
+      expect(is, line).toContain(line);
+    }
   });
 
   test("copier update from a pre-arc breadcrumb completes (exit 0)", () => {
@@ -265,9 +285,99 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
   });
 
   test("the updated adopter's breadcrumb keeps its answers and its path", () => {
-    const breadcrumb = join(adopter, ".copier-answers.yml");
+    const breadcrumb = join(adopter, BREADCRUMB);
     expect(existsSync(breadcrumb)).toBe(true);
     expect(readFileSync(breadcrumb, "utf8")).toMatch(/PYTHON_VERSION: ['"]?3\.14['"]?/);
+  });
+
+  // Criterion from #133: an adopter whose breadcrumb predates the question must
+  // take the default on update, silently. If LANGUAGE had no default this update
+  // would have aborted rather than reached here.
+  test("an adopter installed before LANGUAGE existed takes the default on update", () => {
+    expect(readFileSync(join(adopter, BREADCRUMB), "utf8")).toMatch(/^LANGUAGE: ['"]?python['"]?$/m);
+  });
+});
+
+// The Node arm. Nothing in the RENDER branches on LANGUAGE yet — that arrives
+// with the later tickets — so what this proves is the answer travelling end to
+// end: question, breadcrumb, and the update that follows.
+//
+// `PYTHON_VERSION` is conditional on the Python arm, and copier drops an unasked
+// conditional answer from the breadcrumb. That is the point: a Node adopter's
+// recorded Python version disappears on its own instead of lingering as noise
+// for the propagate sweep to read back and re-assert.
+describe.skipIf(!hasCopier())("a node adopter", () => {
+  let src;
+  let target;
+  let adopter;
+  let update;
+  const V1 = "sandcastle-template/vnode1";
+  const V2 = "sandcastle-template/vnode2";
+  const gitIn = (dir) => (...args) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  const initRepo = (dir) => {
+    const g = gitIn(dir);
+    g("init", "-q");
+    g("config", "user.email", "test@example.com");
+    g("config", "user.name", "Test");
+    return g;
+  };
+  const breadcrumbOf = (dir) => readFileSync(join(dir, BREADCRUMB), "utf8");
+
+  beforeAll(() => {
+    src = mkdtempSync(join(tmpdir(), "sandcastle-node-src-"));
+    copyLiveTemplateInto(src);
+    const gsrc = initRepo(src);
+    gsrc("add", "-A");
+    gsrc("commit", "-q", "-m", "v1");
+    gsrc("tag", V1);
+
+    target = mkdtempSync(join(tmpdir(), "sandcastle-node-tgt-"));
+    execFileSync(
+      "copier",
+      ["copy", "--defaults", "--vcs-ref", V1, "--data", "LANGUAGE=node", src, target],
+      { encoding: "utf8" }
+    );
+
+    // The migration an existing Python-defaulted adopter runs once to correct
+    // itself, followed by an ordinary sweep that passes no LANGUAGE at all.
+    adopter = mkdtempSync(join(tmpdir(), "sandcastle-node-adopter-"));
+    const gadopt = initRepo(adopter);
+    writeFileSync(join(adopter, "package.json"), '{ "name": "adopter" }\n');
+    gadopt("add", "-A");
+    gadopt("commit", "-q", "-m", "init adopter");
+    execFileSync(
+      "copier",
+      ["copy", "--defaults", "--vcs-ref", V1, "--data", "LANGUAGE=node", src, adopter],
+      { encoding: "utf8" }
+    );
+    gadopt("add", "-A");
+    gadopt("commit", "-q", "-m", "install sandcastle");
+
+    appendFileSync(join(src, "setup-sandcastle", "templates", ".sandcastle", "CONTEXT.md"), "\n");
+    gsrc("commit", "-q", "-am", "v2");
+    gsrc("tag", V2);
+    update = spawnSync("copier", ["update", "--defaults", "--trust", "--vcs-ref", V2], {
+      cwd: adopter,
+      encoding: "utf8",
+    });
+  });
+  afterAll(() => discard(src, target, adopter));
+
+  test("records LANGUAGE as node in the breadcrumb", () => {
+    expect(breadcrumbOf(target)).toMatch(/^LANGUAGE: ['"]?node['"]?$/m);
+  });
+
+  test("is never asked for a Python version, so none is recorded", () => {
+    expect(breadcrumbOf(target)).not.toMatch(/PYTHON_VERSION/);
+  });
+
+  test("keeps LANGUAGE=node through a later update that passes no flag", () => {
+    expect(update.status, update.stderr).toBe(0);
+    expect(breadcrumbOf(adopter)).toMatch(/^LANGUAGE: ['"]?node['"]?$/m);
+  });
+
+  test("gains no PYTHON_VERSION key from that update", () => {
+    expect(breadcrumbOf(adopter)).not.toMatch(/PYTHON_VERSION/);
   });
 });
 
