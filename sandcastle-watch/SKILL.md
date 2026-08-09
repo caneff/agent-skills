@@ -35,7 +35,13 @@ Launch that with `run_in_background` so the harness tracks the process and notif
 
 `setsid` is what makes the run **killable**. `npm run sandcastle` is a chain — `npm` forks `npm exec tsx`, which forks `sh -c tsx`, which forks the `node` that is the actual orchestrator. Kill the `npm` pid alone and the rest is orphaned, reparented, and still running: still writing labels, still opening sandboxes, still holding the stdout fd you are watching. `setsid` puts the whole chain in its own process group so one signal reaches all of it. See step 4 for the kill itself.
 
-**Done when:** the run is in the background (harness-tracked) and you have the `$LOG` path.
+Then start the **status refresher**, once, in its own `run_in_background` call — it owns the status-bar file for the whole run:
+
+    ~/.claude/skills/sandcastle-watch/status-refresh.sh "$LOG" "$(git rev-parse --show-toplevel)"
+
+It rewrites `.sandcastle/logs/watch-status` every 60s while the orchestrator lives and deletes it on exit, so the bar survives long quiet stretches and clears itself the moment the run ends. Don't hand-roll this in the tick: a tick that only fires on milestones — or one you skip while reading a reviewer log — lets the file age past the segment's 180s guard and the line vanishes mid-run. The script interpolates only numbers it counts out of `$LOG`, never agent text.
+
+**Done when:** the run is in the background (harness-tracked), the refresher is running, and you have the `$LOG` path.
 
 ## 2. Watch loop (every ~90s until the run exits)
 Sandcastle's per-milestone progress is not notified — only the final exit is — so sample `$LOG` on an interval. Track a byte offset into `$LOG` across ticks (starts at 0). Each tick:
@@ -50,7 +56,7 @@ Substitute that path into every command below — write to it with the Write too
 
 1. Spawn a **fire-and-return subagent** (no name, foreground) with this job: "Read `$LOG` from byte offset `<N>` onward — the path and offset the main agent passes you; a fresh subagent keeps no state between ticks — plus the tail of the newest `.sandcastle/logs/<branch>-<name>.log`. Return a compact status: current phase/iteration, issues in flight and their state, PRs opened, new failures/warnings, whether the run has finished, and the new end-of-file offset. Bucket a failed issue as **setup noise** — reported separately from real failures, with its issue id — when it failed during sandbox setup with an `ExecError` whose exit code is followed by an empty stderr." Digesting the verbose agent chatter is exactly the noisy work to keep off the main context.
 2. Advance `<N>` to the offset it returned. Diff its status against the last one: if nothing changed, say nothing; if it changed, tell the user one or two lines — what moved.
-3. Write a one-line digest to `.sandcastle/logs/watch-status` in the run's repo (e.g. `🏰 iter 2/5 · 3 PRs · 1✗`, counting real failures only — setup noise stays out of the `✗` count) — **every tick, even when nothing changed**, and with the Write tool per the rule above; the digest is log-derived like everything else. The scoped `sandcastle-segment.sh` ccstatusline segment (shipped alongside this skill in `sandcastle-watch/`; ccstatusline's `commandPath` points at it) shows this file only in the window whose cwd is that repo, and drops it once it's older than 180s, so re-writing each ~90s tick is what keeps the status-bar line alive.
+3. Nothing to do for the status bar — `status-refresh.sh` from step 1 owns `.sandcastle/logs/watch-status` and keeps it fresh on its own 60s clock. The scoped `sandcastle-segment.sh` ccstatusline segment (shipped alongside this skill in `sandcastle-watch/`; ccstatusline's `commandPath` points at it) resolves the session's repo root and shows that repo's file only, dropping it once it's older than 180s. If the line goes missing while a run is live, check the refresher is still alive (`pgrep -f status-refresh.sh`) before touching the file by hand.
 4. On a **headline milestone** — iteration boundary, an issue done or really failed (setup noise is not a milestone — see *Setup noise*), a PR opened, or the run finishing — also send the user a push notification. On WSL (`command -v powershell.exe`), fire a Windows desktop toast alongside it, so the milestone lands on the desktop the user is actually looking at:
 
    Write the milestone text to the run's body file, then point the script at it:
@@ -75,7 +81,7 @@ Everything else is unchanged: a genuine `✗` and a failed review (`⚠ N failed
 **Done when:** the background job has exited (proceed to step 3).
 
 ## 3. Finish
-On exit, do one final digest, show Sandcastle's own `=== Run Summary ===` block as the closing report, send a final "run complete — N PRs, M failed" notification, delete `.sandcastle/logs/watch-status` so the status bar clears at once (the 180s freshness guard is only the backstop for a loop that dies uncleanly), delete the `.toast` body file you minted, and stop the loop.
+On exit, do one final digest, show Sandcastle's own `=== Run Summary ===` block as the closing report, send a final "run complete — N PRs, M failed" notification, delete the `.toast` body file you minted, and stop the loop.
 
 ## 4. Stopping a run early
 When the user asks you to stop the run, kill the **process group**, never a single pid — and never report it stopped on the strength of a process check alone.
