@@ -67,7 +67,7 @@ Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock
 
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
 
-When the source was a tracker issue — a spec or plan these tickets now decompose — strip its `ready-for-agent` label. The planner grabs every `ready-for-agent` issue, so a spec left with that label races its own children into the build queue and gets implemented a second time (redundantly, on its own branch). Leave the issue open as the tickets' parent reference; don't otherwise edit its contents.
+When the source was a tracker issue — a spec or plan these tickets now decompose — strip its `ready-for-agent` label and add `spec`. The planner grabs every `ready-for-agent` issue, so a spec left with that label races its own children into the build queue and gets implemented a second time (redundantly, on its own branch). The `spec` label is the opposite move: it marks the issue as a parent reference — not bare, not agent-grabbable — so a spent parent whose children have all merged is queryable (`label:spec is:open`) instead of lingering as untriaged-looking clutter. Leave the issue open as the tickets' parent reference; don't otherwise edit its contents.
 
 <local-ticket-template>
 
