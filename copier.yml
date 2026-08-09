@@ -40,7 +40,25 @@ _envops:
   variable_start_string: "[["
   variable_end_string: "]]"
 
+# The ecosystem the adopter is. `default: python` is load-bearing, not a
+# courtesy: copier takes a defaulted answer silently under `--defaults`, so the
+# existing Python adopters keep rendering correctly without anyone answering.
+# Drop the default and copier raises `ValueError: Question "LANGUAGE" is
+# required` instead, aborting the update — the first propagate sweep would skip
+# every adopter it reached.
+LANGUAGE:
+  type: str
+  help: "The adopter's ecosystem — decides the sandbox image and the build commands"
+  choices:
+    - python
+    - node
+  default: python
+
+# Asked only of a Python adopter. copier drops an unasked conditional answer
+# from the breadcrumb, so a Node adopter's recorded version disappears on its
+# own rather than lingering for the propagate sweep to read back and re-assert.
 PYTHON_VERSION:
   type: str
   help: "Python the sandbox bakes in — the target's .python-version (e.g. 3.14)"
   default: "3.13"
+  when: "[[ LANGUAGE == 'python' ]]"
