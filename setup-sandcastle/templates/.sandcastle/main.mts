@@ -72,6 +72,7 @@ import {
   bucketIssues,
   buildRunSummary,
   planGateOutcome,
+  planOutcomeTransition,
   OpenIssue,
   PrRef,
 } from "./reconcile.mts";
@@ -878,69 +879,24 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   }
 
   // Transition each issue's label the moment its outcome is known, so the NEXT
-  // iteration's planner (and any future run) sees the right state:
-  //   done         → in-review  (drop ready-for-agent + needs-review)
-  //   needs-review → needs-review (drop ready-for-agent; keep branch commits)
-  //   spec-fail    → ready-for-agent (re-implement), or ready-for-human at cap
-  //   nothing      → left ready-for-agent for a clean retry
-  // Only `done` issues are accumulated into the consolidated PR.
+  // iteration's planner (and any future run) sees the right state. Which label
+  // each outcome lands on is planOutcomeTransition's call (#102, ADR-0002); this
+  // loop only applies the plan it returns. A rejection carries no value, so its
+  // issue comes from `work` by index.
   let attempts = readAttempts();
   const completedIssues: CompletedIssue[] = [];
-  for (const outcome of settled) {
-    if (outcome.status !== "fulfilled") continue;
-    const { issue, kind } = outcome.value;
-    if (kind === "done") {
-      // Pure bookkeeping — no git mutation. A completed issue's branch IS its
-      // place in the forest; it was built on its real parent, so there is
-      // nothing to fold and the parent branch is immutable from here. We just
-      // record the edge so later iterations and Phase 3 can use it.
-      relabel(issue.id, "in-review", ["ready-for-agent", "needs-review"]);
-      delete attempts[issue.id]; // reviewed clean — reset the retry counter
-      completedIssues.push({
-        id: issue.id,
-        title: issue.title,
-        branch: issue.branch,
-        parents: issue.mode === "full" ? issue.parents : [],
-        ...(issue.mode === "full" && issue.group ? { group: issue.group } : {}),
-      });
-    } else if (kind === "needs-review") {
-      const r = recordAttempt(attempts, issue.id);
-      attempts = r.attempts;
-      if (r.escalate) {
-        // Cheap re-review failed REVIEW_RETRY_CAP times — the branch can't be
-        // salvaged by review alone. Escalate to a full implement pass (which
-        // can actually change the code) against current main.
-        relabel(issue.id, "ready-for-agent", ["needs-review", "in-review"]);
-        console.warn(
-          `  ${issue.id} hit review-retry cap (${REVIEW_RETRY_CAP}); back to ready-for-agent for a full re-implement`
-        );
-      } else {
-        relabel(issue.id, "needs-review", ["ready-for-agent"]);
-      }
-    } else if (kind === "spec-fail") {
-      // The branch was reviewed cleanly for code quality but does NOT satisfy
-      // the issue (#130). Re-implementing is the fix — re-review can't repair
-      // "built the wrong thing" — so send it back to ready-for-agent. Cap the
-      // re-implements with a distinct counter so a persistently-misunderstood
-      // issue doesn't loop forever; at the cap, hand it to a human.
-      const r = recordAttempt(attempts, `spec-${issue.id}`);
-      attempts = r.attempts;
-      if (r.escalate) {
-        relabel(issue.id, "ready-for-human", [
-          "ready-for-agent",
-          "needs-review",
-          "in-review",
-        ]);
-        console.warn(
-          `  ${issue.id} failed spec review ${REVIEW_RETRY_CAP}x; handing to a human (ready-for-human)`
-        );
-      } else {
-        relabel(issue.id, "ready-for-agent", ["needs-review", "in-review"]);
-        console.warn(
-          `  ${issue.id} failed spec review; back to ready-for-agent to re-implement (attempt ${r.count}/${REVIEW_RETRY_CAP})`
-        );
-      }
-    }
+  for (const [i, outcome] of settled.entries()) {
+    const issue = outcome.status === "fulfilled" ? outcome.value.issue : work[i]!;
+    const kind =
+      outcome.status === "fulfilled" ? outcome.value.kind : ("nothing" as const);
+    const plan = planOutcomeTransition({ kind, issue, attempts });
+    attempts = plan.attempts;
+    if (plan.addLabel) relabel(issue.id, plan.addLabel, plan.removeLabels);
+    if (plan.note) console.warn(`  ${plan.note}`);
+    // A completed issue's branch IS its place in the forest; it was built on its
+    // real parent, so there is nothing to fold and the parent branch is
+    // immutable from here. Recording the edge is all Phase 3 needs.
+    if (plan.completed) completedIssues.push(plan.completed);
   }
   writeAttempts(attempts);
 
