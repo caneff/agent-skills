@@ -6,9 +6,9 @@ import { dirname, join } from "node:path";
 import { hasCopier, preflightFixture } from "./render-fixture.mjs";
 
 // `install` is driven end to end as an agent runs it — `spawnSync` against a
-// temp repo, asserting exit status and stdout only, never internals. The
-// fixture shims `PATH` and `HOME`, so preflight runs on a machine with no
-// Docker, no copier and no `tdd` skill.
+// temp repo, asserting exit status, stdout, and the filesystem state it leaves
+// in the target, never internals. The fixture shims `PATH` and `HOME`, so
+// preflight runs on a machine with no Docker, no copier and no `tdd` skill.
 const here = dirname(fileURLToPath(import.meta.url));
 // tests/ -> .sandcastle/ -> templates/ -> setup-sandcastle/ -> repo root
 const repoRoot = join(here, "..", "..", "..", "..");
@@ -269,7 +269,7 @@ describe.skipIf(!hasCopier())("a full install, python arm", () => {
   test("renders, wires the host runtime, typechecks and hands off", { timeout: 600_000 }, () => {
     const f = preflightFixture(repoRoot, "python", { realTools: true });
     const r = f.run(["python"]);
-    expect(r.stdout + r.stderr).toContain("install complete");
+    expect(r.stdout).toContain("install complete");
     expect(r.status).toBe(0);
 
     const pkg = JSON.parse(readFileSync(join(f.repo, "package.json"), "utf8"));
