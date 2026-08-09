@@ -1031,7 +1031,7 @@ if (components.length === 0) {
     }
 
     // -----------------------------------------------------------------------
-    // Full-suite gate (#22): before opening the PR, run the whole `just check`
+    // Full-suite gate (#22): before opening the PR, run the whole `[[ CHECK_COMMAND ]]`
     // (lint + typecheck + tests) on the assembled head IN A SANDBOX — the same
     // toolchain the target's CI runs, never the bare host worktree — so a red set
     // never reaches a human as an open PR. A green verdict opens as today; any
@@ -1040,7 +1040,7 @@ if (components.length === 0) {
     // reconciliation below (which relabels ready-for-agent + deletes the stale
     // branch) so the next iteration rebuilds it informed by the comment.
     //
-    // The gate agent runs `just check && echo <sentinel>` and reports its raw
+    // The gate agent runs `[[ CHECK_COMMAND ]] && echo <sentinel>` and reports its raw
     // stdout; parseCheckVerdict reads the sentinel and fails CLOSED — a crashed or
     // garbled check is test-fail, and only a THROWN sandbox/harness fault (caught
     // below, passed as `error`) classifies as harness-error. Both non-pass verdicts
@@ -1114,7 +1114,7 @@ if (components.length === 0) {
       // the human inherits the actual failing tree instead of a deleted branch.
       const body =
         `## Sandcastle full-suite gate — retired to a human\n\n` +
-        `\`just check\` on this set's merged head (\`${prBranch}\`) failed the ` +
+        `\`[[ CHECK_COMMAND ]]\` on this set's merged head (\`${prBranch}\`) failed the ` +
         `full suite ${REVIEW_RETRY_CAP} times running, so the set is parked as ` +
         `**ready-for-human** rather than requeued again. Its work branch is ` +
         `preserved for you to inspect. Address the failure below.\n\n` +
@@ -1141,7 +1141,7 @@ if (components.length === 0) {
     if (plan.action === "requeue") {
       const body =
         `## Sandcastle full-suite gate — PR withheld\n\n` +
-        `\`just check\` on this set's merged head (\`${prBranch}\`) came back ` +
+        `\`[[ CHECK_COMMAND ]]\` on this set's merged head (\`${prBranch}\`) came back ` +
         `**${verdict.status}**, so no PR was opened. The set is requeued for a ` +
         `fresh rebuild — address the failure below, don't just silence it.\n\n` +
         "```\n" +
