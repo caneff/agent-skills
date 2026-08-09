@@ -48,7 +48,9 @@ the repo's git root, so copier's update diff runs against a path that exists in
 both the temp render and the real tree. A genuine conflict (adopter and template
 touched the same lines) lands as inline `<<<<<<<` markers; the script refuses to
 commit such a tree and flags the repo for a human, so a half-merged state is
-never pushed.
+never pushed. Resolve each one by reading it: a conflict whose local side is
+empty is a template addition, so take theirs; a conflict with real local content
+is a decision, so make it deliberately.
 
 Safety properties:
 
@@ -59,6 +61,11 @@ Safety properties:
   tree — commit or stash first. On a clean repo it commits `.sandcastle` and the
   root breadcrumb before pushing, so every merged change is in that commit's
   diff.
+- **A `tests/` directory an adopter carries never updates itself.** copier
+  excludes `tests/` from the render, so a sweep cannot refresh one; an adopter
+  installed before that exclusion is pinned to whatever API it copied. Copy the
+  current suite over by hand if you find one, skipping `copier-template.test.mjs`
+  and `propagate.test.mjs`, which test this skill rather than a target.
 
 To confirm before running, `--dry-run` (`copier update --pretend`) shows the
 merge each repo would receive without touching it.
