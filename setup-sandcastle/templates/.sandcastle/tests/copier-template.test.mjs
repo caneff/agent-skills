@@ -285,6 +285,22 @@ const ARC_REWRITTEN_PROSE = {
       "copyToWorktree, // seed the deps so the check reuses them, no re-resolve",
     ],
   ],
+  // .sandcastle/Dockerfile — the header's ecosystem clause branches (#134), but
+  // the two lines that only mention a toolchain in passing went neutral instead:
+  // the Node arm's image carries neither uv nor just, and a comment must not
+  // claim layers the file no longer renders.
+  ".sandcastle/Dockerfile": [
+    [
+      "# and the target's uv/just toolchain. main.mts runs on the HOST (via tsx) — it\n" +
+        "# is never in this image; only the in-sandbox agent + its tools live here.",
+      "# and the target's toolchain. main.mts runs on the HOST (via tsx) — it is never\n" +
+        "# in this image; only the in-sandbox agent + its tools live here.",
+    ],
+    [
+      "# uv + claude both install under ~/.local/bin",
+      "# The tools installed above land under ~/.local/bin",
+    ],
+  ],
 };
 
 // Answers each arc ticket deliberately ADDS to a Python adopter's breadcrumb.
@@ -581,6 +597,40 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
       'npm run lint && npm run typecheck && npm run test && echo "SANDCASTLE_CHECK: PASS"'
     );
     expect(gate).not.toContain("just check");
+  });
+
+  // The two places the ecosystems genuinely differ in the image. Everything else
+  // in the Dockerfile — apt deps, the gh block, the UID/GID args, the Claude CLI,
+  // PATH, WORKDIR, ENTRYPOINT — stays shared, which the byte-identity net next
+  // door holds to on the Python side.
+  test("builds on a Node base, and the Python arm still on Debian", () => {
+    expect(renderedIn(fresh, "Dockerfile")).toMatch(/^FROM node:22-bookworm$/m);
+    expect(renderedIn(twin, "Dockerfile")).toMatch(/^FROM debian:bookworm-slim$/m);
+  });
+
+  // The Node base image already ships a `node` user at 1000:1000, so `groupadd`
+  // and `useradd` would collide with it — this arm renames instead. The rename
+  // has to carry `-n agent` for the GROUP too: without it the container reports
+  // `gid=1000(node)` while the Python arm yields `gid=1000(agent)`, and the two
+  // ecosystems hand the orchestrator different identities inside the sandbox.
+  test("renames the base image's user and its group to agent", () => {
+    const dockerfile = renderedIn(fresh, "Dockerfile");
+    expect(dockerfile).toContain("groupmod -o -g $AGENT_GID -n agent node");
+    expect(dockerfile).toMatch(/usermod .*-l agent node/);
+    expect(dockerfile).not.toMatch(/groupadd|useradd/);
+  });
+
+  // `node` and `npm` ship with the base image and the derived commands are npm
+  // scripts, so this arm needs no extra toolchain — and carrying uv, a baked
+  // interpreter and a task runner a Node repo never invokes is three image
+  // layers of dead weight. The prose goes with them: nothing left in the file
+  // may claim a uv/just toolchain on an image that has neither.
+  test("installs no uv, no interpreter and no just, and claims none", () => {
+    const dockerfile = renderedIn(fresh, "Dockerfile");
+    expect(dockerfile).not.toMatch(/\buv\b|PYTHON_VERSION|rust-just|\bjust\b/);
+    // Not vacuous: the shared layers this arm keeps are still there.
+    expect(dockerfile).toContain("apt-get install -y gh");
+    expect(dockerfile).toContain("https://claude.ai/install.sh");
   });
 
   // Guards the two below from passing vacuously: there is a recorded python

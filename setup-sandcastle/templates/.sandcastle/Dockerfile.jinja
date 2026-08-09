@@ -1,7 +1,7 @@
-# Sandbox image for a Python (uv) target repo. Runs the coding agent, git, gh,
-# and the target's uv/just toolchain. main.mts runs on the HOST (via tsx) — it
-# is never in this image; only the in-sandbox agent + its tools live here.
-FROM debian:bookworm-slim
+# Sandbox image for a [% if LANGUAGE == 'node' %]JavaScript (npm)[% else %]Python (uv)[% endif %] target repo. Runs the coding agent, git, gh,
+# and the target's toolchain. main.mts runs on the HOST (via tsx) — it is never
+# in this image; only the in-sandbox agent + its tools live here.
+FROM [% if LANGUAGE == 'node' %]node:22-bookworm[% else %]debian:bookworm-slim[% endif %]
 
 # System dependencies
 RUN apt-get update && apt-get install -y \
@@ -25,11 +25,20 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
+[% if LANGUAGE == 'node' -%]
+# Rename the base image's own user — and its GROUP, hence `-n agent`; without
+# that the container reports gid=1000(node) and the two ecosystems hand the
+# orchestrator different identities — aligning it to the host UID/GID.
+RUN groupmod -o -g $AGENT_GID -n agent node \
+  && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -s /bin/bash -l agent node
+[% else -%]
 # Create the agent user aligned to the host UID/GID.
 RUN groupadd -o -g $AGENT_GID agent \
   && useradd -o -u $AGENT_UID -g $AGENT_GID -m -d /home/agent -s /bin/bash agent
+[% endif -%]
 USER ${AGENT_UID}:${AGENT_GID}
 
+[% if LANGUAGE != 'node' -%]
 # uv — manages Python per the target's .python-version. Installed as the agent
 # user so it lands on the agent's PATH.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -45,10 +54,11 @@ RUN /home/agent/.local/bin/uv python install ${PYTHON_VERSION}
 # via uv, matching how setup-python-repo installs it on the host).
 RUN /home/agent/.local/bin/uv tool install rust-just
 
+[% endif -%]
 # Claude Code CLI (standalone binary — not a Node app).
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# uv + claude both install under ~/.local/bin
+# The tools installed above land under ~/.local/bin
 ENV PATH="/home/agent/.local/bin:$PATH"
 
 WORKDIR /home/agent
