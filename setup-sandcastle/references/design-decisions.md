@@ -89,6 +89,38 @@ as inherited scaffold.
     `disable-model-invocation`, user-invoked.
 12. **`.env` seed copies by path, never reads.** Secrets never enter the agent's
     context; the copy is verified gitignored before proceeding (SKILL.md step 3).
+13. **Never re-render over an adopter — migrate by merging.** `copier copy
+    --overwrite` is the obvious shortcut for a layout shift `copier update`
+    cannot bridge, and it is wrong: it replaces every file the adopter edited
+    with template text, silently, since copier prints `overwrite` for a
+    clobbered local edit and a stale template file alike. This was documented
+    advice once, on the grounds that `.sandcastle` is "generated and unedited" —
+    it isn't. visual-teach carried a hand-edited `Dockerfile`, a TS sandbox
+    bootstrap in place of `uv sync`, and its own prompt-drawer wording; the
+    re-render took all of it, and none of those files had even changed between
+    the two refs. Assume every adopter has edits until you have diffed and
+    proved otherwise. Merge instead: base = the old ref's render, ours = the
+    repo as it stands, theirs = the new ref's render. Preflight enforces this
+    now — a second install over an existing render is refused.
+14. **A line merge can be textually clean and semantically broken.** `git
+    merge-file` works a region at a time, so on a badly diverged file it happily
+    keeps *ours* where the new version added a definition and *theirs* where the
+    new version calls it. Migrating visual-teach that way produced a `main.mts`
+    calling `parseCheckVerdict` and `retiredByGate` that nothing defined, and a
+    `reconcile.mts` missing the very buckets `main.mts` passed it. So split
+    files by how far they drifted — a handful of deliberate local edits means
+    take the new render whole and re-apply them by hand, each commented with why
+    it diverges — and afterwards prove no local line vanished: extract the lines
+    the repo had that the old render did not, confirm each survives, then
+    classify what that flags as age or as customization. Only the second is a
+    loss.
+15. **Read the exit code, not the summary.** Run the adopter's whole CI, not
+    just `tsc`, and check `$?` explicitly: a wrapper or a summarizing proxy can
+    print something that reads like success over a failing command. The
+    migration that prompted this rule was pushed on exactly that false green.
+    The same failure shape is why `sandcastle-propagate` counts four outcome
+    classes — a healthy fleet and a sweep that matched nothing must not print
+    the same line.
 
 ## Gotchas found in the live rag-bootcamp install
 
