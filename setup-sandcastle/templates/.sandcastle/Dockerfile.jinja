@@ -1,4 +1,4 @@
-# Sandbox image for a [[ LANGUAGE ]] target repo. Runs the coding agent, git, gh,
+# Sandbox image for a [% if LANGUAGE == 'node' %]Node (npm)[% else %]Python (uv)[% endif %] target repo. Runs the coding agent, git, gh,
 # and the target's uv/just toolchain. main.mts runs on the HOST (via tsx) — it
 # is never in this image; only the in-sandbox agent + its tools live here.
 [% if LANGUAGE == 'node' %]FROM node:22-bookworm[% else %]FROM debian:bookworm-slim[% endif %]
@@ -38,7 +38,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 # Bake the target's exact interpreter into an image LAYER so no container re-fetches
 # it at run time. copier renders PYTHON_VERSION from the target's .python-version
 # (recorded as a copier answer) when the template is installed.
-ARG PYTHON_VERSION={{ PYTHON_VERSION }}
+ARG PYTHON_VERSION=[[ PYTHON_VERSION ]]
 RUN /home/agent/.local/bin/uv python install ${PYTHON_VERSION}
 
 # just — the target's task runner. The PR check-gate runs `just check` inside
