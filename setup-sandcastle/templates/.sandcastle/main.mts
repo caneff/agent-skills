@@ -57,6 +57,7 @@ import {
   prComponents,
   parentsFromBlockedBy,
   mergeParentEdges,
+  landedIssues,
   CompletedIssue,
 } from "./pr-components.mts";
 import {
@@ -1126,6 +1127,21 @@ if (components.length === 0) {
       continue; // skip push + PR open; post-Phase-3 reconciliation requeues them
     }
 
+    // Which of this set's issues actually reached the head (#115) — see
+    // `landedIssues` for why ancestry rather than a set of failed leaf ids. The two
+    // consumers that speak for the PR read THIS list, never `issues`: the PR body
+    // below and `prAssignments` once the PR is open. An excluded issue is therefore
+    // neither named in the PR nor credited to it, which leaves the post-Phase-3
+    // reconciliation — it skips any issue already assigned — free to re-queue it.
+    // The gate paths above stay set-wide on purpose: no PR exists for them to lie
+    // about. Computed here, after the gate, so a withheld PR spends no subprocesses.
+    // `git` returns "" on success and null on failure, so compare against null —
+    // `--is-ancestor` reports its verdict through the exit code and prints nothing.
+    const landed = landedIssues(
+      issues,
+      (branch) => git(`merge-base --is-ancestor ${branch} ${prBranch}`) !== null
+    );
+
     // Push the assembled head host-side so the agent only has to open the PR.
     git(`push -u --force-with-lease origin ${prBranch}`);
     await sandcastle.run({
@@ -1137,8 +1153,10 @@ if (components.length === 0) {
       promptFile: "./.sandcastle/pr-prompt.md",
       promptArgs: {
         MERGE_HEAD: prBranch,
-        // One markdown line per issue in THIS component: id, title, branch.
-        ISSUES: issues
+        // One markdown line per issue whose commits are IN this head: id, title,
+        // branch. Excluded issues are omitted — the PR must not claim work it
+        // does not carry (#115).
+        ISSUES: landed
           .map((i) => `- #${i.id} — ${i.title} (branch \`${i.branch}\`)`)
           .join("\n"),
       },
@@ -1148,7 +1166,7 @@ if (components.length === 0) {
     const prNumRaw = gh(`pr view ${prBranch} --json number --jq .number`);
     const prNum = prNumRaw ? parseInt(prNumRaw, 10) : 0;
     if (prNum > 0) {
-      for (const issue of issues) prAssignments.set(issue.id, prNum);
+      for (const issue of landed) prAssignments.set(issue.id, prNum);
     }
   }
   console.log(`\n${components.length} PR(s) opened.`);
