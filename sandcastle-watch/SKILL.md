@@ -35,7 +35,13 @@ Sandcastle's per-milestone progress is not notified — only the final exit is �
 1. Spawn a **fire-and-return subagent** (no name, foreground) with this job: "Read `$LOG` from byte offset `<N>` onward — the path and offset the main agent passes you; a fresh subagent keeps no state between ticks — plus the tail of the newest `.sandcastle/logs/<branch>-<name>.log`. Return a compact status: current phase/iteration, issues in flight and their state, PRs opened, new failures/warnings, whether the run has finished, and the new end-of-file offset." Digesting the verbose agent chatter is exactly the noisy work to keep off the main context.
 2. Advance `<N>` to the offset it returned. Diff its status against the last one: if nothing changed, say nothing; if it changed, tell the user one or two lines — what moved.
 3. Write a one-line digest to `.sandcastle/logs/watch-status` in the run's repo (e.g. `🏰 iter 2/5 · 3 PRs · 1✗`) — **every tick, even when nothing changed.** The scoped `sandcastle-segment.sh` ccstatusline segment (shipped alongside this skill in `sandcastle-watch/`; ccstatusline's `commandPath` points at it) shows this file only in the window whose cwd is that repo, and drops it once it's older than 180s, so re-writing each ~90s tick is what keeps the status-bar line alive.
-4. On a **headline milestone** — iteration boundary, an issue done/failed, a PR opened, or the run finishing — also send the user a push notification.
+4. On a **headline milestone** — iteration boundary, an issue done/failed, a PR opened, or the run finishing — also send the user a push notification. On WSL (`command -v powershell.exe`), fire a Windows desktop toast alongside it, so the milestone lands on the desktop the user is actually looking at:
+
+       # if/fi, not &&: a bare && leaks exit 1 on every non-WSL machine.
+       if command -v powershell.exe >/dev/null; then powershell.exe -NoProfile -ExecutionPolicy Bypass \
+         -File "$(wslpath -w sandcastle-watch/toast.ps1)" -Title "sandcastle-watch" -Body "<milestone>"; fi
+
+   Off WSL the guard skips it and the push notification is the only channel. `toast.ps1` escapes and strips its own arguments, so a milestone carrying `&` or ANSI colour is safe.
 5. Reschedule the next check (~90s).
 
 **Done when:** the background job has exited (proceed to step 3).
