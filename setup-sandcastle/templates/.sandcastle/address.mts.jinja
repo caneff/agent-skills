@@ -71,7 +71,7 @@ export async function addressOpenPRs(prs?: string[]): Promise<void> {
     );
     await sandcastle.run({
       ...sandboxConfig(identity),
-      copyToWorktree: [".venv"],
+      copyToWorktree: ["[% if LANGUAGE == 'node' %]node_modules[% else %].venv[% endif %]"],
       branchStrategy: { type: "branch", branch },
       name: `address-pr-${pr}`,
       maxIterations: 30,

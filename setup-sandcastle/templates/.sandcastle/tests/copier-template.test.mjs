@@ -9,6 +9,7 @@ import {
   cpSync,
   mkdtempSync,
   rmSync,
+  symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -59,7 +60,10 @@ const initRepo = (dir) => {
 // Every fixture reads the same file to ask what an adopter answered.
 const answersIn = (dir) => readFileSync(join(dir, BREADCRUMB), "utf8");
 
-const standardsIn = (dir) => readFileSync(join(dir, ".sandcastle", "CODING_STANDARDS.md"), "utf8");
+// Any rendered file under the adopter's `.sandcastle/` subtree.
+const renderedIn = (dir, file) => readFileSync(join(dir, ".sandcastle", file), "utf8");
+
+const standardsIn = (dir) => renderedIn(dir, "CODING_STANDARDS.md");
 
 // The marker rule renders on every arm — divergence happens in a Python adopter
 // exactly as in a Node one — so both arms assert the same four things: the token
@@ -135,6 +139,39 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
     expectTheLocalMarkerRule(standardsIn(target));
   });
 
+  // Parameterizing the orchestrator meant renaming `main.mts` and `address.mts`
+  // to `.jinja`, which drops them out of the dev-home tsconfig's `*.mts` include
+  // — so `npm run typecheck` stopped seeing 58 KB of the orchestrator. Typecheck
+  // the RENDER instead: it is the same command an adopter runs (see SKILL.md),
+  // and it covers the file as it will actually exist. node_modules is symlinked
+  // in because the render lands outside the dev home, where resolution would
+  // otherwise find neither the sandcastle lib nor @types/node.
+  test("the rendered orchestrator typechecks", () => {
+    symlinkSync(join(repoRoot, "setup-sandcastle", "node_modules"), join(target, "node_modules"));
+    const tsc = spawnSync("npx", ["tsc", "-p", ".sandcastle/tsconfig.json"], {
+      cwd: target,
+      encoding: "utf8",
+    });
+    expect(tsc.stdout + tsc.stderr).toBe("");
+    expect(tsc.status).toBe(0);
+  }, 60_000);
+
+  // The commands are derived from LANGUAGE rather than asked, so the Python arm
+  // needs the same proof the Node arm gets: the derived values are the justfile
+  // recipes and `uv run pytest` this ecosystem actually has. The byte-identity
+  // net next door proves these bytes did not move; this says what they mean.
+  test("derives the justfile recipes and uv commands for a python adopter", () => {
+    expect(renderedIn(target, "check-prompt.md")).toContain(
+      'just check && echo "SANDCASTLE_CHECK: PASS"'
+    );
+    const prompt = renderedIn(target, "implement-prompt.md");
+    expect(prompt).toContain("`just lint` and `just typecheck`");
+    expect(prompt).toContain("uv run pytest <files>");
+    for (const file of ["main.mts", "address.mts"]) {
+      expect(renderedIn(target, file), file).toContain('[".venv"]');
+    }
+  });
+
   test("breadcrumb lands at the repo root and pins a non-empty _commit", () => {
     expect(existsSync(join(target, ".copier-answers.yml"))).toBe(true);
     expect(answers()).toMatch(/^_commit: .+$/m);
@@ -155,11 +192,12 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
 // see the `_envops` comment in `copier.yml`. What matters here is the behaviour
 // it buys — a run-time `{{ }}` placeholder passes through a render untouched.
 //
-// The live template has no renderable file carrying both styles yet (the prompt
-// drawer is plain `.md`, so copier copies it verbatim), so the probe supplies
-// one: a throwaway `.jinja` dropped into a fixture copy of the live template. It
-// renders through the real `copier.yml`, so it fails if `_envops` is missing or
-// wrong.
+// The live prompt drawer now carries both styles for real — `implement-prompt`
+// and `check-prompt` render `[[ CHECK_COMMAND ]]` while their `{{TASK_ID}}` and
+// `{{MERGE_HEAD}}` placeholders must survive untouched — but a probe still earns
+// its place: it isolates the delimiter behaviour to one throwaway `.jinja` that
+// fails on `_envops` alone, rather than only when a real prompt happens to
+// exercise both styles. It renders through the real `copier.yml`.
 describe.skipIf(!hasCopier())("template delimiters do not collide with runtime placeholders", () => {
   let src;
   let target;
@@ -217,6 +255,31 @@ const PRE_ARC = "59c7941"; // last commit before the LANGUAGE arc (issue #131)
 // would exempt every file at once and retire the net for the tickets to come.
 //   .sandcastle/CODING_STANDARDS.md — the sandcastle:local rule (issue #136)
 const ARC_APPENDED_RENDERS = [".sandcastle/CODING_STANDARDS.md"];
+
+// Comment text an arc ticket deliberately REWRITES in place. Each pair is
+// applied to the pre-arc body before the diff, so the rewrite is spelled out
+// here and every other byte of the file stays pinned — the same bargain as
+// ARC_APPENDED_RENDERS, for an edit rather than an append. A pair that no longer
+// matches fails too, so a stale declaration cannot sit here excusing nothing.
+//   .sandcastle/main.mts — the two copyToWorktree comments went neutral (#135).
+//   The value under them now branches by ecosystem and supplies the specifics
+//   the prose dropped, which is why the comments did not branch as well.
+const ARC_REWRITTEN_PROSE = {
+  ".sandcastle/main.mts": [
+    [
+      "// Copy the host's virtualenv into the worktree before each sandbox starts.\n" +
+        "// Avoids resolving+downloading every dependency from scratch; sandboxConfig's\n" +
+        "// `uv sync` hook reconciles anything added since the copy.",
+      "// Copy the host's installed dependencies into the worktree before each sandbox\n" +
+        "// starts. Avoids resolving+downloading every dependency from scratch;\n" +
+        "// sandboxConfig's install hook reconciles anything added since the copy.",
+    ],
+    [
+      "copyToWorktree, // seed .venv so `just check` reuses deps, no re-resolve",
+      "copyToWorktree, // seed the deps so the check reuses them, no re-resolve",
+    ],
+  ],
+};
 
 // Answers each arc ticket deliberately ADDS to a Python adopter's breadcrumb.
 // The net below demands the breadcrumb equal the pre-arc one plus exactly these,
@@ -310,7 +373,14 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
         expect(is.get(path)?.startsWith(body), `${path} changed above the appended text`).toBe(true);
         continue;
       }
-      expect(is.get(path), path).toBe(body);
+      let expected = body;
+      for (const [from, to] of ARC_REWRITTEN_PROSE[path] ?? []) {
+        expect(expected, `${path}: declared rewrite no longer matches the pre-arc text`).toContain(
+          from
+        );
+        expected = expected.replace(from, to);
+      }
+      expect(is.get(path), path).toBe(expected);
     }
   });
 
@@ -355,6 +425,7 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
 describe.skipIf(!hasCopier())("a node adopter", () => {
   let src;
   let fresh;
+  let twin;
   let corrected;
   let asInstalled;
   let correction;
@@ -383,6 +454,14 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
       ["copy", "--defaults", "--vcs-ref", V1, "--data", "LANGUAGE=node", src, fresh],
       { encoding: "utf8" }
     );
+
+    // The same template on the other arm, so a test can compare the two renders
+    // directly — the only way to catch prose that was forked per ecosystem
+    // rather than parameterized.
+    twin = mkdtempSync(join(tmpdir(), "sandcastle-node-twin-"));
+    execFileSync("copier", ["copy", "--defaults", "--vcs-ref", V1, src, twin], {
+      encoding: "utf8",
+    });
 
     // The real migration path: a repo that installed BEFORE LANGUAGE existed and
     // so defaulted to python, then runs the one-time `--data LANGUAGE=node`
@@ -427,6 +506,65 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
 
   test("is never asked for a Python version, so none is recorded", () => {
     expect(answersIn(fresh)).not.toMatch(/PYTHON_VERSION/);
+  });
+
+  // The gate agent runs this line verbatim and the orchestrator gates the PR on
+  // the sentinel it prints, so a `just check` here is not a cosmetic wrong word:
+  // a Node repo has no justfile and the gate would fail before running anything.
+  // The implementer runs these before every commit, so a wrong name here costs
+  // the feedback loop entirely: the agent's fast check errors instead of running.
+  test("the per-commit fast check names npm commands", () => {
+    const prompt = renderedIn(fresh, "implement-prompt.md");
+    expect(prompt).toContain("npm run lint");
+    expect(prompt).toContain("npm run typecheck");
+    expect(prompt).not.toMatch(/just (check|lint|typecheck)/);
+    expect(prompt).not.toContain("uv run pytest");
+  });
+
+  // `npm run test <files>` drops the file list — npm needs a `--` separator to
+  // forward arguments — so the "scoped" check would silently run everything.
+  // `npx vitest run <files>` forwards them, which is why the arm names it.
+  test("the scoped test command forwards its file arguments", () => {
+    const prompt = renderedIn(fresh, "implement-prompt.md");
+    expect(prompt).toContain("npx vitest run <files>");
+    expect(prompt).not.toMatch(/npm run test <files>/);
+  });
+
+  // The discipline the paragraph teaches — map changed paths to their tests,
+  // include when unsure, the full suite is not the per-commit gate — is
+  // ecosystem-neutral and must stay single-source. Blanking the four commands
+  // out of each arm should leave two byte-identical paragraphs; if a ticket ever
+  // forks the prose per ecosystem, this is what disagrees.
+  test("says the same thing on both arms once the commands are blanked", () => {
+    const blank = (text) =>
+      text.replace(
+        /npm run lint && npm run typecheck && npm run test|just check|npm run lint|just lint|npm run typecheck|just typecheck|npx vitest run <files>|uv run pytest <files>/g,
+        "<cmd>"
+      );
+    expect(blank(renderedIn(fresh, "implement-prompt.md"))).toBe(
+      blank(renderedIn(twin, "implement-prompt.md"))
+    );
+  });
+
+  // The orchestrator copies the host's dependency cache into each worktree so a
+  // sandbox reuses it instead of resolving from scratch. `.venv` does not exist
+  // in a Node repo, so the copy would be a silent no-op and every sandbox would
+  // pay a full `npm install`. The comments beside these values are asserted too:
+  // a neutral rewrite is the whole reason they were not branched.
+  test("seeds node_modules into each worktree, and says nothing Python beside it", () => {
+    for (const file of ["main.mts", "address.mts"]) {
+      const src = renderedIn(fresh, file);
+      expect(src, file).toContain('["node_modules"]');
+      expect(src, file).not.toMatch(/\.venv|\buv\b|pytest/);
+    }
+  });
+
+  test("the check-gate runs npm scripts, not a justfile recipe", () => {
+    const gate = renderedIn(fresh, "check-prompt.md");
+    expect(gate).toContain(
+      'npm run lint && npm run typecheck && npm run test && echo "SANDCASTLE_CHECK: PASS"'
+    );
+    expect(gate).not.toContain("just check");
   });
 
   // Guards the two below from passing vacuously: there is a recorded python

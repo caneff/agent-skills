@@ -62,3 +62,35 @@ PYTHON_VERSION:
   help: "Python the sandbox bakes in — the target's .python-version (e.g. 3.14)"
   default: "3.13"
   when: "[[ LANGUAGE == 'python' ]]"
+
+# The commands below are DERIVED from LANGUAGE, never asked: `when: false` keeps
+# each out of the prompt sequence and out of the breadcrumb, so an adopter can
+# neither drift from its ecosystem's commands nor be re-asked about them on a
+# sweep. Changing a command is a template edit that reaches every adopter.
+#
+# The Node arm calls npm scripts because that is what `setup-sandcastle` asserts
+# a Node adopter defines (lint, typecheck, test) — there is no `check` script to
+# lean on, so the gate composes the three the way `just check` composes them.
+
+CHECK_COMMAND:
+  type: str
+  when: false
+  default: "[% if LANGUAGE == 'node' %]npm run lint && npm run typecheck && npm run test[% else %]just check[% endif %]"
+
+LINT_COMMAND:
+  type: str
+  when: false
+  default: "[% if LANGUAGE == 'node' %]npm run lint[% else %]just lint[% endif %]"
+
+TYPECHECK_COMMAND:
+  type: str
+  when: false
+  default: "[% if LANGUAGE == 'node' %]npm run typecheck[% else %]just typecheck[% endif %]"
+
+# `npx vitest run <files>`, NOT `npm run test <files>`: npm needs a `--`
+# separator to forward arguments to the script and silently drops them without
+# it, which would quietly run the WHOLE suite as the per-commit "scoped" check.
+SCOPED_TEST_COMMAND:
+  type: str
+  when: false
+  default: "[% if LANGUAGE == 'node' %]npx vitest run <files>[% else %]uv run pytest <files>[% endif %]"

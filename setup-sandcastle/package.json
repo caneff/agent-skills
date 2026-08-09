@@ -6,8 +6,7 @@
   "description": "Canonical dev home for the Sandcastle Python orchestrator. Hack here with tests green; the skill installs .sandcastle/ (minus tests) into target repos.",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc -p templates/.sandcastle/tsconfig.json",
-    "sandcastle": "tsx templates/.sandcastle/main.mts"
+    "typecheck": "tsc -p templates/.sandcastle/tsconfig.json"
   },
   "dependencies": {
     "@ai-hero/sandcastle": "0.10.0",
