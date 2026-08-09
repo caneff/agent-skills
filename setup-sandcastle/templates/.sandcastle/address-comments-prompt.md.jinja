@@ -40,7 +40,7 @@ question or your reasoning. A wrong "fix" is worse than a question.
 
 # VERIFY, COMMIT, PUSH
 
-1. Run `just check`. It must pass.
+1. Run `[[ CHECK_COMMAND ]]`. It must pass.
 2. Stage everything and commit — use `git add -A`, not `git commit -am`, because
    `-am` skips any NEW file a fix added and it would never reach the PR:
    `git add -A && git commit -m "Address review comments on #{{PR_NUMBER}}"`.

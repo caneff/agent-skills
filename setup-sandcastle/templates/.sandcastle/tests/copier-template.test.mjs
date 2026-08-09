@@ -107,6 +107,11 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
       ["copy", "--defaults", "--data", "PYTHON_VERSION=3.14", repoRoot, target],
       { encoding: "utf8" }
     );
+    // The render lands outside the dev home, where module resolution would find
+    // neither the sandcastle lib nor @types/node — so the typecheck test below
+    // needs this. Linked here rather than inside that test: a test that mutates
+    // a fixture the whole block shares makes its neighbours order-dependent.
+    symlinkSync(join(repoRoot, "setup-sandcastle", "node_modules"), join(target, "node_modules"));
   });
   afterAll(() => target && rmSync(target, { recursive: true, force: true }));
 
@@ -143,17 +148,18 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
   // to `.jinja`, which drops them out of the dev-home tsconfig's `*.mts` include
   // — so `npm run typecheck` stopped seeing 58 KB of the orchestrator. Typecheck
   // the RENDER instead: it is the same command an adopter runs (see SKILL.md),
-  // and it covers the file as it will actually exist. node_modules is symlinked
-  // in because the render lands outside the dev home, where resolution would
-  // otherwise find neither the sandcastle lib nor @types/node.
+  // and it covers the file as it will actually exist.
+  //
+  // Note the cost of where this lives: the whole block is skipped without copier
+  // installed, so on such a machine nothing typechecks the orchestrator at all.
+  // copier is a documented prereq of the skill, and the maintenance gate
+  // (`npm run typecheck && npm test`) is run where it is installed.
   test("the rendered orchestrator typechecks", () => {
-    symlinkSync(join(repoRoot, "setup-sandcastle", "node_modules"), join(target, "node_modules"));
     const tsc = spawnSync("npx", ["tsc", "-p", ".sandcastle/tsconfig.json"], {
       cwd: target,
       encoding: "utf8",
     });
-    expect(tsc.stdout + tsc.stderr).toBe("");
-    expect(tsc.status).toBe(0);
+    expect(tsc.status, tsc.stdout + tsc.stderr).toBe(0);
   }, 60_000);
 
   // The commands are derived from LANGUAGE rather than asked, so the Python arm
@@ -556,6 +562,16 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
       const src = renderedIn(fresh, file);
       expect(src, file).toContain('["node_modules"]');
       expect(src, file).not.toMatch(/\.venv|\buv\b|pytest/);
+    }
+  });
+
+  // The gate prompt is not the only place the check command is spoken aloud: the
+  // orchestrator quotes it back in the comment it posts when a set fails, and the
+  // address-comments prompt tells its agent to run it. An agent handed a recipe
+  // its repo does not have follows the instruction and fails.
+  test("names no justfile recipe anywhere it tells an agent what to run", () => {
+    for (const file of ["main.mts", "address-comments-prompt.md"]) {
+      expect(renderedIn(fresh, file), file).not.toMatch(/just (check|lint|typecheck)/);
     }
   });
 
