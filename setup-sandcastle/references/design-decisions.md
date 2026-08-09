@@ -118,9 +118,9 @@ as inherited scaffold.
     just `tsc`, and check `$?` explicitly: a wrapper or a summarizing proxy can
     print something that reads like success over a failing command. The
     migration that prompted this rule was pushed on exactly that false green.
-    The same failure shape is why `sandcastle-propagate` counts four outcome
-    classes — a healthy fleet and a sweep that matched nothing must not print
-    the same line.
+    A summary line is not a verdict: the pre-#93 sweep printed
+    `updated=0 skipped=0` while it swept past every adopter, which reads exactly
+    like a fleet that was already current.
 
 ## Gotchas found in the live rag-bootcamp install
 
