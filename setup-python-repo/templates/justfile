@@ -1,5 +1,10 @@
 # One obvious entrypoint for the gate — agents and CI run `just check`.
 
+# CONTRACT: `check`, `lint` and `typecheck` are named by name outside this file.
+# setup-sandcastle asserts all three at install, and its rendered prompts call
+# `just lint` and `just typecheck` as the implementer's per-commit fast check.
+# Renaming one breaks every installed adopter — add an alias instead.
+
 # Full gate (what CI runs). Run before calling any task done.
 check: lint typecheck test
 
