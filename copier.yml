@@ -35,7 +35,6 @@ _envops:
   block_end_string: "%]"
   variable_start_string: "[["
   variable_end_string: "]]"
-  trim_blocks: true
 
 LANGUAGE:
   type: str

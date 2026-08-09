@@ -46,7 +46,6 @@ RUN /home/agent/.local/bin/uv python install ${PYTHON_VERSION}
 # via uv, matching how setup-python-repo installs it on the host).
 RUN /home/agent/.local/bin/uv tool install rust-just
 [% endif %]
-
 # Claude Code CLI (standalone binary — not a Node app).
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
