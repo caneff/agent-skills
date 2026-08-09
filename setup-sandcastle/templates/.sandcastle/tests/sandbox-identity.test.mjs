@@ -1,4 +1,9 @@
-import { test, expect, beforeEach, afterEach } from "vitest";
+import { test, expect, beforeAll, beforeEach, afterEach, afterAll } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname, join } from "node:path";
 
 // The module is imported once; sandboxIdentity() reads process.env at call time,
 // so manipulating process.env between tests is enough to exercise both branches.
@@ -30,13 +35,54 @@ afterEach(() => {
   }
 });
 
-// Import once; the helper reads process.env at call time, not at module load.
-const { sandboxIdentity, sandboxConfig } =
-  await import("../sandbox-identity.mts");
+// The module became a template when its install hook and its sandbox env began
+// branching on LANGUAGE (#146), so there is no plain `.mts` beside this file to
+// import any more. Render the Python arm once and exercise THAT — the same move
+// copier-template.test.mjs makes to typecheck the orchestrator, and it covers
+// the module as an adopter will actually run it. The Node arm's two rendered
+// values are asserted as text over there, where both arms sit side by side.
+//
+// The cost, stated plainly: without copier this whole file skips, so a machine
+// without it runs none of these checks. copier is a documented prereq of the
+// skill (`uv tool install copier`), and skipping beats a red the machine cannot
+// turn green — but see issue #112 on skips reading as a silent green.
+const here = dirname(fileURLToPath(import.meta.url));
+// tests/ -> .sandcastle/ -> templates/ -> setup-sandcastle/ -> repo root
+const repoRoot = join(here, "..", "..", "..", "..");
+
+function hasCopier() {
+  try {
+    execFileSync("copier", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const withRender = test.skipIf(!hasCopier());
+
+let rendered;
+let sandboxIdentity;
+let sandboxConfig;
+beforeAll(async () => {
+  if (!hasCopier()) return;
+  rendered = mkdtempSync(join(tmpdir(), "sandcastle-identity-"));
+  execFileSync(
+    "copier",
+    ["copy", "--defaults", "--quiet", "--data", "PYTHON_VERSION=3.14", repoRoot, rendered],
+    { encoding: "utf8" }
+  );
+  // The render lands outside the dev home, where `@ai-hero/sandcastle` would not
+  // resolve — the module imports it at load time.
+  symlinkSync(join(repoRoot, "setup-sandcastle", "node_modules"), join(rendered, "node_modules"));
+  ({ sandboxIdentity, sandboxConfig } = await import(
+    pathToFileURL(join(rendered, ".sandcastle", "sandbox-identity.mts")).href
+  ));
+}, 60_000);
+afterAll(() => rendered && rmSync(rendered, { recursive: true, force: true }));
 
 // ── sandboxConfig ─────────────────────────────────────────────────────────────
 
-test("sandboxConfig: calls dockerFn with identity.env and the read-only skills mount", () => {
+withRender("sandboxConfig: calls dockerFn with identity.env and the read-only skills mount", () => {
   const identity = { env: { GH_TOKEN: "tok" }, gitConfigCommands: [] };
   let captured = null;
   sandboxConfig(identity, (opts) => {
@@ -56,7 +102,7 @@ test("sandboxConfig: calls dockerFn with identity.env and the read-only skills m
   });
 });
 
-test("sandboxConfig: gitConfigCommands fold into the chained git entry, before uv sync", () => {
+withRender("sandboxConfig: gitConfigCommands fold into the chained git entry, before uv sync", () => {
   const identity = {
     env: {},
     gitConfigCommands: [{ command: "git config user.name Bot" }],
@@ -71,7 +117,7 @@ test("sandboxConfig: gitConfigCommands fold into the chained git entry, before u
   expect(gitIdx).toBeLessThan(uvIdx);
 });
 
-test("sandboxConfig: onSandboxReady is [disable-hooks, uv sync] when no gitConfigCommands", () => {
+withRender("sandboxConfig: onSandboxReady is [disable-hooks, uv sync] when no gitConfigCommands", () => {
   const identity = { env: {}, gitConfigCommands: [] };
   const cfg = sandboxConfig(identity, () => ({}));
   expect(cfg.hooks.sandbox.onSandboxReady).toEqual([
@@ -83,7 +129,7 @@ test("sandboxConfig: onSandboxReady is [disable-hooks, uv sync] when no gitConfi
   ]);
 });
 
-test("sandboxConfig: ALL git-config writes chain into ONE onSandboxReady entry (no .git/config.lock race, #52)", () => {
+withRender("sandboxConfig: ALL git-config writes chain into ONE onSandboxReady entry (no .git/config.lock race, #52)", () => {
   // Identity writes and the core.hooksPath write hit the same .git/config.lock;
   // Sandcastle runs onSandboxReady hooks concurrently, so any two git-config
   // entries race and the loser dies. Exactly one entry may touch `git config`.
@@ -104,7 +150,7 @@ test("sandboxConfig: ALL git-config writes chain into ONE onSandboxReady entry (
 
 // ── no-op branch: bot vars unset ─────────────────────────────────────────────
 
-test("sandbox-identity: no-op when bot vars unset — env and gitConfigCommands are empty", async () => {
+withRender("sandbox-identity: no-op when bot vars unset — env and gitConfigCommands are empty", async () => {
   const id = await sandboxIdentity();
   expect(id.env).toEqual({});
   expect(id.gitConfigCommands).toEqual([]);
@@ -112,7 +158,7 @@ test("sandbox-identity: no-op when bot vars unset — env and gitConfigCommands 
 
 // ── identity branch: all bot vars set ────────────────────────────────────────
 
-test("sandbox-identity: env and gitConfigCommands are fully populated when all bot vars set", async () => {
+withRender("sandbox-identity: env and gitConfigCommands are fully populated when all bot vars set", async () => {
   process.env.SANDCASTLE_BOT_GH_TOKEN = "ghp_test_token";
   process.env.SANDCASTLE_BOT_GIT_NAME = "Sandcastle Bot";
   process.env.SANDCASTLE_BOT_GIT_EMAIL = "bot@example.com";
@@ -126,7 +172,7 @@ test("sandbox-identity: env and gitConfigCommands are fully populated when all b
   expect(cmd).toContain("bot@example.com");
 });
 
-test("sandbox-identity: name+email collapse into ONE chained command (no .git/config.lock race)", async () => {
+withRender("sandbox-identity: name+email collapse into ONE chained command (no .git/config.lock race)", async () => {
   process.env.SANDCASTLE_BOT_GH_TOKEN = "ghp_test_token";
   process.env.SANDCASTLE_BOT_GIT_NAME = "Sandcastle Bot";
   process.env.SANDCASTLE_BOT_GIT_EMAIL = "bot@example.com";
@@ -144,7 +190,7 @@ test("sandbox-identity: name+email collapse into ONE chained command (no .git/co
 
 const fakeTokenMinter = async () => "ghs_minted_token";
 
-test("sandbox-identity: mints installation token when App creds set and SANDCASTLE_BOT_GH_TOKEN unset", async () => {
+withRender("sandbox-identity: mints installation token when App creds set and SANDCASTLE_BOT_GH_TOKEN unset", async () => {
   process.env.GITHUB_APP_ID = "42";
   process.env.GITHUB_APP_PRIVATE_KEY = "fake-key";
   process.env.GITHUB_APP_INSTALLATION_ID = "1001";
@@ -153,7 +199,7 @@ test("sandbox-identity: mints installation token when App creds set and SANDCAST
   expect(id.env.GH_TOKEN).toBe("ghs_minted_token");
 });
 
-test("sandbox-identity: SANDCASTLE_BOT_GH_TOKEN takes priority over App creds", async () => {
+withRender("sandbox-identity: SANDCASTLE_BOT_GH_TOKEN takes priority over App creds", async () => {
   process.env.SANDCASTLE_BOT_GH_TOKEN = "ghp_direct_token";
   process.env.GITHUB_APP_ID = "42";
   process.env.GITHUB_APP_PRIVATE_KEY = "fake-key";
@@ -164,7 +210,7 @@ test("sandbox-identity: SANDCASTLE_BOT_GH_TOKEN takes priority over App creds", 
   expect(id.env.GH_TOKEN).toBe("ghp_direct_token");
 });
 
-test("sandbox-identity: no-op when App creds partially set (missing installationId)", async () => {
+withRender("sandbox-identity: no-op when App creds partially set (missing installationId)", async () => {
   process.env.GITHUB_APP_ID = "42";
   process.env.GITHUB_APP_PRIVATE_KEY = "fake-key";
   // GITHUB_APP_INSTALLATION_ID intentionally unset
@@ -173,7 +219,7 @@ test("sandbox-identity: no-op when App creds partially set (missing installation
   expect(id.env).toEqual({});
 });
 
-test("sandbox-identity: tokenMinter called with appId, privateKey, installationId from env", async () => {
+withRender("sandbox-identity: tokenMinter called with appId, privateKey, installationId from env", async () => {
   process.env.GITHUB_APP_ID = "99";
   process.env.GITHUB_APP_PRIVATE_KEY = "pem-data";
   process.env.GITHUB_APP_INSTALLATION_ID = "777";
@@ -190,7 +236,7 @@ test("sandbox-identity: tokenMinter called with appId, privateKey, installationI
   expect(captured.privateKey).toBeTruthy();
 });
 
-test("sandbox-identity: no-op when App creds not set and SANDCASTLE_BOT_GH_TOKEN unset", async () => {
+withRender("sandbox-identity: no-op when App creds not set and SANDCASTLE_BOT_GH_TOKEN unset", async () => {
   // All vars cleared by beforeEach
   const id = await sandboxIdentity(fakeTokenMinter);
   expect(id.env).toEqual({});

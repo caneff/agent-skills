@@ -301,6 +301,47 @@ const ARC_REWRITTEN_PROSE = {
       "# The tools installed above land under ~/.local/bin",
     ],
   ],
+  // .sandcastle/sandbox-identity.mts — `ruff/ty` names Python linters and nothing
+  // else, so this one had no substitute to reach for and went neutral (#146).
+  ".sandcastle/sandbox-identity.mts": [
+    [
+      " * Phase-3 `just check` gate runs the same ruff/ty.",
+      " * Phase-3 check gate runs the same linters anyway.",
+    ],
+  ],
+  // .sandcastle/review-verdict.mts — both comments describe the gate WRAPPER,
+  // whose command is rendered from CHECK_COMMAND next door in check-prompt.md.
+  // Naming the recipe here would have meant templating a module 222 lines of
+  // dev tests import by name, for comment prose — so they point at the rendered
+  // command instead of repeating it (#146).
+  ".sandcastle/review-verdict.mts": [
+    [
+      "// over `just check` (lint + typecheck + the whole test suite) and fails CLOSED:",
+      "// over the repo's check gate (lint + typecheck + the whole test suite) and fails\n// CLOSED:",
+    ],
+    [
+      "// The gate wrapper echoes this sentinel only when `just check` exits zero\n" +
+        "// (`just check && echo SANDCASTLE_CHECK: PASS`). No sentinel → not green → fail\n" +
+        "// closed. Host-coupled contract string (see CODING_STANDARDS) — don't reword.",
+      "// The gate wrapper echoes this sentinel only when the repo's check command exits\n" +
+        "// zero (`… && echo SANDCASTLE_CHECK: PASS`, rendered into check-prompt.md). No\n" +
+        "// sentinel → not green → fail closed. Host-coupled contract string (see\n" +
+        "// CODING_STANDARDS) — don't reword.",
+    ],
+  ],
+  // .sandcastle/sandbox-identity.check.mts — the header named `just check` to
+  // explain why the check runs under tsx (#146). The reason survives the
+  // rewrite; only the Python-only recipe name goes.
+  ".sandcastle/sandbox-identity.check.mts": [
+    [
+      "// Self-check for applyBotToken — no test runner in this repo (package.json\n" +
+        '// "test" is a stub, `just check` is Python-only), so this runs via `npx tsx`.\n' +
+        "//   npx tsx .sandcastle/sandbox-identity.check.mts",
+      "// Self-check for applyBotToken — no test runner ships inside `.sandcastle/`, so\n" +
+        "// this runs via `npx tsx`:\n" +
+        "//   npx tsx .sandcastle/sandbox-identity.check.mts",
+    ],
+  ],
 };
 
 // Answers each arc ticket deliberately ADDS to a Python adopter's breadcrumb.
@@ -631,6 +672,43 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
     // Not vacuous: the shared layers this arm keeps are still there.
     expect(dockerfile).toContain("apt-get install -y gh");
     expect(dockerfile).toContain("https://claude.ai/install.sh");
+  });
+
+  // Every sandbox runs this hook the moment it comes up. `uv sync` does not
+  // exist on a Node image, so an unbranched hook means every sandbox starts with
+  // a failed hook and no installed dependencies — the counterpart to the
+  // `node_modules` #135 seeds into the worktree.
+  test("installs dependencies with npm, not uv", () => {
+    const identity = renderedIn(fresh, "sandbox-identity.mts");
+    expect(identity).toContain('{ command: "npm install" }');
+    expect(identity).not.toContain("uv sync");
+  });
+
+  // uv's own variable, telling it where to put the virtualenv. npm has no idea
+  // what it means, so on this arm it is a dead env var pointing at a directory
+  // that never exists.
+  test("sets no UV_PROJECT_ENVIRONMENT, and the Python arm still does", () => {
+    expect(renderedIn(fresh, "sandbox-identity.mts")).not.toContain("UV_PROJECT_ENVIRONMENT");
+    expect(renderedIn(twin, "sandbox-identity.mts")).toContain(
+      'UV_PROJECT_ENVIRONMENT: "/home/agent/.venv"'
+    );
+  });
+
+  // A sweep rather than a file list. The two ticketed sites (#135, #146) were
+  // each found by reading, and reading is what misses the next one — a file
+  // added later inherits this check for free. The Dockerfile is out of scope by
+  // construction: it is the one place naming a toolchain is the point, and its
+  // arms are asserted directly.
+  test("no rendered file names Python tooling anywhere outside the Dockerfile", () => {
+    const python = /\buv\b|\.venv|pytest|\bruff\b|just (check|lint|typecheck)/;
+    const offenders = [];
+    for (const [path, body] of renderedTree(join(fresh, ".sandcastle"))) {
+      if (path === "Dockerfile") continue;
+      for (const [i, line] of body.split("\n").entries()) {
+        if (python.test(line)) offenders.push(`${path}:${i + 1}: ${line.trim()}`);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   // Guards the two below from passing vacuously: there is a recorded python

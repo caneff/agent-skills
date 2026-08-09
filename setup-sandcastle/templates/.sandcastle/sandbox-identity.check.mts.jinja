@@ -1,5 +1,11 @@
-// Self-check for applyBotToken — no test runner in this repo (package.json
-// "test" is a stub, `just check` is Python-only), so this runs via `npx tsx`.
+{#- A template with nothing to render, on purpose. It imports the templated
+    `sandbox-identity.mts`, which exists only after copier runs, and the
+    dev-home tsconfig includes `*.mts` — so as a plain `.mts` this file would
+    typecheck against a sibling that is not there. Being a template hides it
+    from the dev home; the render typechecks it. This note is a jinja comment,
+    so it stays with the maintainer instead of shipping to every adopter. -#}
+// Self-check for applyBotToken — no test runner ships inside `.sandcastle/`, so
+// this runs via `npx tsx`:
 //   npx tsx .sandcastle/sandbox-identity.check.mts
 import assert from "node:assert";
 import { applyBotToken } from "./sandbox-identity.mts";
