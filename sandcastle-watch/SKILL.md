@@ -27,9 +27,11 @@ If that prints a pid, a run is already going — you can't capture its stdout af
 Sandcastle's milestone markers — phase/iteration headers, work assignments, `✓/✗/⚠` outcomes, `→ PR #N`, the final `=== Run Summary ===` — all go to **stdout**. Do **not** rely on a live `.sandcastle/logs/run-*.log`: this orchestrator writes `run-<id>.log` only once at the very end (just the summary), and its startup pruner deletes any header-less log you drop into `.sandcastle/logs` (a hand-made boot log included). So capture npm's stdout yourself, to a durable path **outside** `.sandcastle/logs` where the pruner can't touch it, and watch that:
 
     LOG=$(mktemp /tmp/sandcastle-watch-XXXXXX.log)
-    setsid npm run sandcastle > "$LOG" 2>&1
+    setsid --wait npm run sandcastle > "$LOG" 2>&1
 
 Launch that with `run_in_background` so the harness tracks the process and notifies you when it exits. Remember `$LOG` — it is the live combined stream for the whole run, and reused by every tick in step 2. If the run dies at startup, `$LOG` holds the traceback.
+
+`--wait` is not optional. Plain `setsid` forks the run into its own session and **returns immediately**, so the harness sees exit 0 within a second and fires the completion notification while the orchestrator is only just starting. You then believe the run is over, stop watching, and the run keeps going unattended. With `--wait`, `setsid` stays alive until the orchestrator exits and passes its status through, so the completion notification means what it says. If you ever get an exit within seconds of launch, do not trust it — `pgrep -af 'tsx \.sandcastle/main\.mts'` before concluding anything.
 
 `setsid` is what makes the run **killable**. `npm run sandcastle` is a chain — `npm` forks `npm exec tsx`, which forks `sh -c tsx`, which forks the `node` that is the actual orchestrator. Kill the `npm` pid alone and the rest is orphaned, reparented, and still running: still writing labels, still opening sandboxes, still holding the stdout fd you are watching. `setsid` puts the whole chain in its own process group so one signal reaches all of it. See step 4 for the kill itself.
 
