@@ -20,8 +20,9 @@ The orchestrator lives in this skill's [`templates/`](templates/) as a **copier
 template** (the canonical home where the `.mts` is hacked with its vitest suite
 green). Targets get **runtime-only** code — no tests, no vitest. Install
 **renders** it with copier: prompts/config already ship Python-retargeted, and
-the one interpreter-specific value — `PYTHON_VERSION` — copier fills from the
-target's `.python-version` (no install-time `sed`).
+copier fills the answers — `LANGUAGE`, which defaults to `python`, and (for a
+Python adopter) `PYTHON_VERSION` from the target's `.python-version` — with no
+install-time `sed`.
 
 ## 0. Prereqs — check, fail fast
 
