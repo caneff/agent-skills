@@ -6,7 +6,9 @@
 # Every failure exits one non-zero status; the message carries the fix. Every
 # prereq is probed through PATH or under $HOME — no absolute paths — which is
 # what lets the tests run it with nothing real installed.
-set -uo pipefail
+set -euo pipefail
+
+USAGE="usage: install <python|node> [--preflight] — the arm is required and never inferred"
 
 die() {
   echo "$1"
@@ -15,9 +17,18 @@ die() {
 
 ARM="${1:-}"
 case "$ARM" in
-  python | node) ;;
-  *) die "usage: install <python|node> [--preflight] — the arm is required and never inferred" ;;
+  python | node) shift ;;
+  *) die "$USAGE" ;;
 esac
+
+PREFLIGHT_ONLY=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --preflight) PREFLIGHT_ONLY=1 ;;
+    *) die "unknown flag $1 — $USAGE" ;;
+  esac
+  shift
+done
 
 # --- preflight: checks everything, mutates nothing ------------------------
 
@@ -36,25 +47,28 @@ command -v npx >/dev/null 2>&1 ||
 command -v copier >/dev/null 2>&1 ||
   die "no \`copier\` on PATH: the render needs it — \`uv tool install copier\`."
 
-git rev-parse --git-dir >/dev/null 2>&1 ||
-  die "not a git repo: run install from the root of the target repo."
+# The subproject root is the repo's git root (#93), so being *inside* a repo is
+# not enough — the render lands where this runs.
+[ "$(git rev-parse --show-toplevel 2>/dev/null || true)" = "$PWD" ] ||
+  die "not a git repo root: run install from the root of the target repo."
 
-# Locked decision 13 — never re-render over an adopter. Caught here, before
-# copier, because the render is the first irreversible act.
+# Never re-render over an adopter. Caught here, before copier, because the
+# render is the first irreversible act.
 for marker in .copier-answers.yml .sandcastle/main.mts; do
-  [ -e "$marker" ] &&
+  if [ -e "$marker" ]; then
     die "this repo already carries a Sandcastle render: found $marker. Never re-render over an adopter — carry template changes with \`copier update\` instead."
+  fi
 done
 
 # It consumes these three and creates none of them; name whichever is absent.
 compgen -G ".github/workflows/*.yml" >/dev/null || compgen -G ".github/workflows/*.yaml" >/dev/null ||
-  die "Sandcastle needs a PR CI workflow (.github/workflows/*.yml); it consumes it and creates none of them."
+  die "Sandcastle needs a PR CI workflow (.github/workflows/*.yml or *.yaml); it consumes one and creates none of them."
 
 [ -f CODING_STANDARDS.md ] ||
-  die "Sandcastle needs \`CODING_STANDARDS.md\`; the reviewer reads it, and it creates none of them."
+  die "Sandcastle needs \`CODING_STANDARDS.md\`; the reviewer reads it, and Sandcastle creates none of them."
 
 [ -f AGENTS.md ] ||
-  die "Sandcastle needs \`AGENTS.md\`; the implementer reads it, and it creates none of them."
+  die "Sandcastle needs \`AGENTS.md\`; the implementer reads it, and Sandcastle creates none of them."
 
 if [ "$ARM" = python ]; then
   [ -f .python-version ] ||
@@ -78,10 +92,12 @@ else
   [ -f package.json ] ||
     die "no \`package.json\`: Sandcastle's Node arm gates on npm scripts."
 
-  # ponytail: grep, not a JSON parse — `node` is a prereq but parsing with it
-  # would make the check untestable without a real node. A dependency literally
-  # named "lint" would false-pass; swap in `node -p` if that ever bites.
-  has_script() { grep -qE "\"$1\"[[:space:]]*:" package.json; }
+  # Read the `scripts` block, not the file's text: a devDependency or config key
+  # named "lint" must not pass for a script that isn't there. `node` is already
+  # a checked prereq by this point.
+  has_script() {
+    node -e 'const p=JSON.parse(require("node:fs").readFileSync("package.json","utf8"));process.exit((p.scripts||{})[process.argv[1]]?0:1)' "$1"
+  }
 
   has_script lint ||
     die "\`package.json\` defines no \`lint\` script; the gate and the per-commit fast check both call \`npm run lint\`."
@@ -93,8 +109,8 @@ fi
 
 echo "preflight passed: this repo is ready for Sandcastle ($ARM arm). Nothing was written."
 
-[ "${2:-}" = --preflight ] && exit 0
+[ -n "$PREFLIGHT_ONLY" ] && exit 0
 
 # The mutating phase — render, CLAUDE.md, host runtime, .env, npx tsc — is not
 # built yet (#163). Say so rather than exiting 0 on an install that never ran.
-die "no mutating phase yet: this script is preflight only — re-run with --preflight."
+die "the mutating phase is not built yet: nothing was installed. Run with --preflight until it lands."

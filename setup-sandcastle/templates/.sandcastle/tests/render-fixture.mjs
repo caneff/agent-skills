@@ -1,5 +1,6 @@
-// Shared render fixture for the dev-only suite. Two test files now need a real
-// copier render — copier-template.test.mjs to observe the install seam, and
+// Shared fixtures for the dev-only suite: a real copier render, and a repo the
+// install script's preflight can be run against. Two test files need the
+// render — copier-template.test.mjs to observe the install seam, and
 // sandbox-identity.test.mjs to import a module that only exists once rendered —
 // and both need the same answer to "is copier here at all". Keeping one copy
 // matters beyond tidiness: issue #112 tracks these skips reading as a silent
@@ -65,7 +66,9 @@ export function preflightFixture(repoRoot, arm) {
   mkdirSync(bin, { recursive: true });
   shim(bin, "docker", "exit 0");
   shim(bin, "copier", "exit 0");
-  shim(bin, "node", "exit 0");
+  // Real node: preflight reads package.json's `scripts` block with it. Rows
+  // that need node absent delete this shim rather than stubbing it out.
+  shim(bin, "node", `exec ${process.execPath} "$@"`);
   shim(bin, "npx", "exit 0");
   shim(bin, "just", 'printf "Available recipes:\\n    check\\n    lint\\n    typecheck\\n"');
 

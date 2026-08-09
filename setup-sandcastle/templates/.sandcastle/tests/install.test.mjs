@@ -26,11 +26,28 @@ describe("the language arm", () => {
     expect(r.status).not.toBe(0);
     expect(r.stdout).toContain("install <python|node>");
   });
+
+  test("an unrecognised flag is refused rather than ignored", () => {
+    const f = preflightFixture(repoRoot, "python");
+    const r = f.run(["python", "--dry-run", "--preflight"]);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toContain("unknown flag --dry-run");
+  });
 });
 
-// One row per prereq the script owns. The messages live only in `install` —
-// SKILL.md stops restating them — so this table is the only thing holding them
-// still, and each row matches its message exactly rather than sampling.
+// Each row breaks exactly one prereq and names the message that must come
+// back. The messages belong to `install`, and #167 drops SKILL.md's copy of
+// them, so this table becomes the only thing holding them still — hence full
+// coverage with exact matches rather than a sample.
+const eachRow = (rows, arm) =>
+  test.each(rows)("$what", ({ break: breakIt, says }) => {
+    const f = preflightFixture(repoRoot, arm);
+    breakIt(f);
+    const r = f.run();
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toContain(says);
+  });
+
 const SHARED = [
   {
     what: "the tdd skill is not installed",
@@ -79,15 +96,7 @@ const SHARED = [
   },
 ];
 
-describe.each(["python", "node"])("shared prereqs, %s arm", (arm) => {
-  test.each(SHARED)("$what", ({ break: breakIt, says }) => {
-    const f = preflightFixture(repoRoot, arm);
-    breakIt(f);
-    const r = f.run();
-    expect(r.status).not.toBe(0);
-    expect(r.stdout).toContain(says);
-  });
-});
+describe.each(["python", "node"])("shared prereqs, %s arm", (arm) => eachRow(SHARED, arm));
 
 // `just --list` is asserted past `check` deliberately: a repo may define one
 // monolithic `check` with no separate `lint` or `typecheck`, and the
@@ -149,27 +158,25 @@ const NODE = [
     break: scripts({ lint: "x", typecheck: "x" }),
     says: "`package.json` defines no `test` script; the gate calls `npm run test`",
   },
+  {
+    // The gate calls `npm run lint`; a dependency of that name does not answer.
+    what: "package.json names lint somewhere other than its scripts block",
+    break: (f) =>
+      writeFileSync(
+        join(f.repo, "package.json"),
+        JSON.stringify(
+          { devDependencies: { lint: "^1.0.0" }, scripts: { typecheck: "x", test: "x" } },
+          null,
+          2
+        ) + "\n"
+      ),
+    says: "`package.json` defines no `lint` script",
+  },
 ];
 
-describe("python arm prereqs", () => {
-  test.each(PYTHON)("$what", ({ break: breakIt, says }) => {
-    const f = preflightFixture(repoRoot, "python");
-    breakIt(f);
-    const r = f.run();
-    expect(r.status).not.toBe(0);
-    expect(r.stdout).toContain(says);
-  });
-});
+describe("python arm prereqs", () => eachRow(PYTHON, "python"));
 
-describe("node arm prereqs", () => {
-  test.each(NODE)("$what", ({ break: breakIt, says }) => {
-    const f = preflightFixture(repoRoot, "node");
-    breakIt(f);
-    const r = f.run();
-    expect(r.status).not.toBe(0);
-    expect(r.stdout).toContain(says);
-  });
-});
+describe("node arm prereqs", () => eachRow(NODE, "node"));
 
 // Every path in the repo with its bytes, so "mutated nothing" is asserted
 // against the whole tree rather than a couple of files we thought to check.
