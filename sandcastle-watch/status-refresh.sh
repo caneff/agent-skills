@@ -41,7 +41,11 @@ frame() {
 
 if [ "$ONCE" = once ]; then frame; exit 0; fi
 
-while pgrep -f 'tsx \.sandcastle/main\.mts' >/dev/null; do
+# SKILL.md's live-run check, kept identical so the two cannot drift. The
+# `bash -c` exclusion is inert here — this loop runs from a script file, so
+# nothing in its own command line can match — but it earns its keep by making
+# the one check that does need it impossible to write differently by accident.
+while pgrep -af 'tsx \.sandcastle/main\.mts' | grep -v 'bash -c' >/dev/null; do
   frame > "$F"
   sleep 60
 done

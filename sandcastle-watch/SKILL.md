@@ -13,9 +13,11 @@ Repo must have `.sandcastle/main.mts` and a `sandcastle` npm script (`npm run | 
 
 Never start a second run against the same repo — concurrent label writes corrupt state, and the damage is silent: two orchestrators interleave their label reads and writes, so one plans against a snapshot the other has already invalidated and exits having done nothing.
 
-Check for a live one first. Match on the command line, and exclude your own shell rather than filtering by process name:
+Check for a live one first. This is **the live-run check** — use it verbatim wherever this skill asks whether a run is going, kill path included:
 
     pgrep -af 'tsx \.sandcastle/main\.mts' | grep -v 'bash -c'
+
+Empty output means no run is live. The exclusion is the part that matters: you run this from a `bash -c` whose command line contains the very pattern you are searching for, so without it the check finds your own shell and reports a live run on an empty machine. The orchestrator chain — `sh -c npx tsx …`, `npm exec tsx …`, `node …/tsx …` — is never a `bash -c`, so dropping those lines drops exactly the false positive and nothing else. Any check that names a process by command line needs the same exclusion for the same reason.
 
 **Do not filter on `ps -o comm=`.** `tsx` renames the thread it runs on, so the orchestrator reports its `comm` as `MainThread` — never `node`. A `[ "$(ps -o comm= -p "$pid")" = node ]` guard therefore matches nothing and reports "no run live" while a run is very much live. A check that cannot fail is not a check.
 
@@ -31,7 +33,7 @@ Sandcastle's milestone markers — phase/iteration headers, work assignments, `�
 
 Launch that with `run_in_background` so the harness tracks the process and notifies you when it exits. Remember `$LOG` — it is the live combined stream for the whole run, and reused by every tick in step 2. If the run dies at startup, `$LOG` holds the traceback.
 
-`--wait` is not optional. Plain `setsid` forks the run into its own session and **returns immediately**, so the harness sees exit 0 within a second and fires the completion notification while the orchestrator is only just starting. You then believe the run is over, stop watching, and the run keeps going unattended. With `--wait`, `setsid` stays alive until the orchestrator exits and passes its status through, so the completion notification means what it says. If you ever get an exit within seconds of launch, do not trust it — `pgrep -af 'tsx \.sandcastle/main\.mts'` before concluding anything.
+`--wait` is not optional. Plain `setsid` forks the run into its own session and **returns immediately**, so the harness sees exit 0 within a second and fires the completion notification while the orchestrator is only just starting. You then believe the run is over, stop watching, and the run keeps going unattended. With `--wait`, `setsid` stays alive until the orchestrator exits and passes its status through, so the completion notification means what it says. If you ever get an exit within seconds of launch, do not trust it — run the live-run check from step 0 before concluding anything.
 
 `setsid` is what makes the run **killable**. `npm run sandcastle` is a chain — `npm` forks `npm exec tsx`, which forks `sh -c tsx`, which forks the `node` that is the actual orchestrator. Kill the `npm` pid alone and the rest is orphaned, reparented, and still running: still writing labels, still opening sandboxes, still holding the stdout fd you are watching. `setsid` puts the whole chain in its own process group so one signal reaches all of it. See step 4 for the kill itself.
 
@@ -63,7 +65,7 @@ Substitute that path into every command below — write to it with the Write too
 
 1. Spawn a **fire-and-return subagent** (no name, foreground) with this job: "Read `$LOG` from byte offset `<N>` onward — the path and offset the main agent passes you; a fresh subagent keeps no state between ticks — plus the tail of the newest `.sandcastle/logs/<branch>-<name>.log`. Return a compact status: current phase/iteration, issues in flight and their state, PRs opened, new failures/warnings, whether the run has finished, and the new end-of-file offset. Bucket a failed issue as **setup noise** — reported separately from real failures, with its issue id — when it failed during sandbox setup with an `ExecError` whose exit code is followed by an empty stderr." Digesting the verbose agent chatter is exactly the noisy work to keep off the main context.
 2. Advance `<N>` to the offset it returned. Diff its status against the last one: if nothing changed, say nothing; if it changed, tell the user one or two lines — what moved.
-3. Nothing to do for the status bar — `status-refresh.sh` from step 1 owns `.sandcastle/logs/watch-status` and keeps it fresh on its own 60s clock. The scoped `sandcastle-segment.sh` ccstatusline segment (shipped alongside this skill in `sandcastle-watch/`; ccstatusline's `commandPath` points at it) resolves the session's repo root and shows that repo's file only. With no fresh file it rests at a dim `🏰 idle` in any repo that has a `.sandcastle/` directory, and prints nothing anywhere else — so a blank segment means "not a Sandcastle repo," never "the watcher died." If the line goes missing while a run is live, check the refresher is still alive (`pgrep -f status-refresh.sh`) before touching the file by hand.
+3. Nothing to do for the status bar — `status-refresh.sh` from step 1 owns `.sandcastle/logs/watch-status` and keeps it fresh on its own 60s clock. The scoped `sandcastle-segment.sh` ccstatusline segment (shipped alongside this skill in `sandcastle-watch/`; ccstatusline's `commandPath` points at it) resolves the session's repo root and shows that repo's file only. With no fresh file it rests at a dim `🏰 idle` in any repo that has a `.sandcastle/` directory, and prints nothing anywhere else — so a blank segment means "not a Sandcastle repo," never "the watcher died." If the line goes missing while a run is live, check the refresher is still alive (`pgrep -af status-refresh.sh | grep -v 'bash -c'`) before touching the file by hand — same self-exclusion as the live-run check, and for the same reason.
 4. On a **headline milestone** — iteration boundary, an issue done or really failed (setup noise is not a milestone — see *Setup noise*), a PR opened, or the run finishing — also send the user a push notification. On WSL (`command -v powershell.exe`), fire a Windows desktop toast alongside it, so the milestone lands on the desktop the user is actually looking at:
 
    Write the milestone text to the run's body file, then point the script at it:
@@ -95,17 +97,21 @@ When the user asks you to stop the run, kill the **process group**, never a sing
 
 Find the group, signal it, then prove the run is dead by watching `$LOG` go quiet:
 
-    PGID=$(ps -o pgid= -p "$(pgrep -f 'tsx \.sandcastle/main\.mts' | head -1)" | tr -d ' ')
+    PID=$(pgrep -af 'tsx \.sandcastle/main\.mts' | grep -v 'bash -c' | awk 'NR==1{print $1}')
+    PGID=$(ps -o pgid= -p "${PID:-0}" 2>/dev/null | tr -d ' ')
+    [ -z "$PGID" ] && { echo "no run live"; exit 0; }
     kill -TERM -"$PGID"; sleep 5
-    pgrep -f 'main\.mts' >/dev/null && kill -KILL -"$PGID"
+    pgrep -af 'tsx \.sandcastle/main\.mts' | grep -v 'bash -c' >/dev/null && kill -KILL -"$PGID"
     a=$(wc -c < "$LOG"); sleep 20; b=$(wc -c < "$LOG")
     [ "$a" = "$b" ] && echo "QUIET — dead" || echo "STILL GROWING — alive"
+
+Both process checks are step 0's live-run check, verbatim. Guard on `PGID`, not on `PID` — the run can exit in the gap between the two, and an empty `PGID` turns every signal below into `kill -TERM -`, which either errors or, worse, is read as a bare option. With the guard, stopping a run when none is live prints "no run live" and signals nothing.
 
 **The log is the authority, not the process table.** Process checks are what let a half-killed run masquerade as a dead one: the orchestrator's children inherit its stdout fd, so an orphan keeps writing to `$LOG` after every pid you know about is gone. If the log is still growing, something is still running — go find it. Expect one last burst right after the kill (the shutdown notice naming preserved worktrees); that is the run finishing, and it settles within a few seconds.
 
 Prefer a stop at an **iteration boundary**. Sandcastle transitions each issue's label the moment its outcome is known, so a kill mid-review strands that issue between states — most often `in-review` with no branch, which means no PR will ever open and no agent will ever pick it up again. Watch `$LOG` for `Execution complete` before signalling. After any stop, check the labels against the branches that actually exist and repair what does not line up.
 
-**Done when:** `$LOG` has been flat for 20s and no `main.mts` process remains.
+**Done when:** `$LOG` has been flat for 20s and the live-run check comes back empty.
 
 ## Markers the digest subagent keys off
 `=== Phase 0 … ===` / `=== Reconciliation sweep … ===` / `=== Iteration N/MAX ===` · `  [mode] id: title → branch` (work in flight) · `  ✓` / `  ✗ id …` / `  ⚠ id …` (outcomes) · `✗ … ExecError: Command failed (exit N): …` with a blank line under it, during sandbox setup (setup noise — see step 2) · `… → PR #N` · the final `=== Run Summary ===` bucketed block.
