@@ -46,10 +46,10 @@ Before the first tick, mint **one body file for the whole run** and remember the
 
 Substitute that path into every command below — write to it with the Write tool, read it with `-BodyFile`. It has to be a literal, because shell variables like `$LOG` do not survive between Bash calls. Minting it here rather than deriving it from `$LOG` is what makes the attach path of step 0 work, where step 1 never ran and no `$LOG` exists. `/tmp` also keeps it clear of the run's pruner.
 
-1. Spawn a **fire-and-return subagent** (no name, foreground) with this job: "Read `$LOG` from byte offset `<N>` onward — the path and offset the main agent passes you; a fresh subagent keeps no state between ticks — plus the tail of the newest `.sandcastle/logs/<branch>-<name>.log`. Return a compact status: current phase/iteration, issues in flight and their state, PRs opened, new failures/warnings, whether the run has finished, and the new end-of-file offset." Digesting the verbose agent chatter is exactly the noisy work to keep off the main context.
+1. Spawn a **fire-and-return subagent** (no name, foreground) with this job: "Read `$LOG` from byte offset `<N>` onward — the path and offset the main agent passes you; a fresh subagent keeps no state between ticks — plus the tail of the newest `.sandcastle/logs/<branch>-<name>.log`. Return a compact status: current phase/iteration, issues in flight and their state, PRs opened, new failures/warnings, whether the run has finished, and the new end-of-file offset. Bucket a failed issue as **setup noise** — reported separately from real failures, with its issue id — when it failed during sandbox setup with an `ExecError` whose exit code is followed by an empty stderr." Digesting the verbose agent chatter is exactly the noisy work to keep off the main context.
 2. Advance `<N>` to the offset it returned. Diff its status against the last one: if nothing changed, say nothing; if it changed, tell the user one or two lines — what moved.
-3. Write a one-line digest to `.sandcastle/logs/watch-status` in the run's repo (e.g. `🏰 iter 2/5 · 3 PRs · 1✗`) — **every tick, even when nothing changed**, and with the Write tool per the rule above; the digest is log-derived like everything else. The scoped `sandcastle-segment.sh` ccstatusline segment (shipped alongside this skill in `sandcastle-watch/`; ccstatusline's `commandPath` points at it) shows this file only in the window whose cwd is that repo, and drops it once it's older than 180s, so re-writing each ~90s tick is what keeps the status-bar line alive.
-4. On a **headline milestone** — iteration boundary, an issue done/failed, a PR opened, or the run finishing — also send the user a push notification. On WSL (`command -v powershell.exe`), fire a Windows desktop toast alongside it, so the milestone lands on the desktop the user is actually looking at:
+3. Write a one-line digest to `.sandcastle/logs/watch-status` in the run's repo (e.g. `🏰 iter 2/5 · 3 PRs · 1✗`, counting real failures only — setup noise stays out of the `✗` count) — **every tick, even when nothing changed**, and with the Write tool per the rule above; the digest is log-derived like everything else. The scoped `sandcastle-segment.sh` ccstatusline segment (shipped alongside this skill in `sandcastle-watch/`; ccstatusline's `commandPath` points at it) shows this file only in the window whose cwd is that repo, and drops it once it's older than 180s, so re-writing each ~90s tick is what keeps the status-bar line alive.
+4. On a **headline milestone** — iteration boundary, an issue done or really failed (setup noise is not a milestone — see *Setup noise*), a PR opened, or the run finishing — also send the user a push notification. On WSL (`command -v powershell.exe`), fire a Windows desktop toast alongside it, so the milestone lands on the desktop the user is actually looking at:
 
    Write the milestone text to the run's body file, then point the script at it:
 
@@ -60,6 +60,15 @@ Substitute that path into every command below — write to it with the Write too
 
    `-BodyFile` is what keeps the milestone out of the shell; `-Body` is for literals you wrote yourself, and passing both is an error. Off WSL the guard skips the whole thing and the push notification is the only channel. `toast.ps1` escapes and strips whatever it reads, so `&` and ANSI colour are safe, and a missing body file only warns — a failed toast never takes the loop down with it.
 5. Reschedule the next check (~90s).
+
+### Setup noise — mention it, don't headline it
+An issue that fails during **sandbox setup** with an `ExecError` whose exit code is followed by an empty stderr is **setup noise**: the exec transport hiccupped, the command never ran, and the next iteration retries the issue and normally gets clean through. Git never exits non-zero silently — every `fatal:` writes to stderr first — so the blank line under the exit code is the tell:
+
+    ✗ 107 (sandcastle/issue-107) failed: (FiberFailure) ExecError: Command failed (exit 128): git config --global --add safe.directory "/home/agent/workspace"
+
+Report setup noise as "transient, iteration N+1 will retry" — one line in the tick, no notification, nothing asked of the user. Keep the issue ids the digester bucketed as setup noise; you persist across ticks and the throwaway subagent does not, so you are the only one who can see a repeat. If an id you already noted comes back as setup noise in the **next** iteration, that repetition is real trouble — headline it and hand it to the user.
+
+Everything else is unchanged: a genuine `✗` and a failed review (`⚠ N failed review`) both still headline, and both still need a human.
 
 **Done when:** the background job has exited (proceed to step 3).
 
@@ -84,4 +93,4 @@ Prefer a stop at an **iteration boundary**. Sandcastle transitions each issue's 
 **Done when:** `$LOG` has been flat for 20s and no `main.mts` process remains.
 
 ## Markers the digest subagent keys off
-`=== Phase 0 … ===` / `=== Reconciliation sweep … ===` / `=== Iteration N/MAX ===` · `  [mode] id: title → branch` (work in flight) · `  ✓` / `  ✗ id …` / `  ⚠ id …` (outcomes) · `… → PR #N` · the final `=== Run Summary ===` bucketed block.
+`=== Phase 0 … ===` / `=== Reconciliation sweep … ===` / `=== Iteration N/MAX ===` · `  [mode] id: title → branch` (work in flight) · `  ✓` / `  ✗ id …` / `  ⚠ id …` (outcomes) · `✗ … ExecError: Command failed (exit N): …` with a blank line under it, during sandbox setup (setup noise — see step 2) · `… → PR #N` · the final `=== Run Summary ===` bucketed block.
