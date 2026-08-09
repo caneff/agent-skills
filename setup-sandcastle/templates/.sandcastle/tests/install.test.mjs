@@ -1,8 +1,9 @@
 import { test, expect, describe } from "vitest";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { preflightFixture } from "./render-fixture.mjs";
+import { hasCopier, preflightFixture } from "./render-fixture.mjs";
 
 // `install` is driven end to end as an agent runs it — `spawnSync` against a
 // temp repo, asserting exit status and stdout only, never internals. The
@@ -217,6 +218,74 @@ describe("a repo that already carries a render", () => {
       expect(r.stdout).toContain(marker);
     }
   );
+});
+
+// Both checks are pulled forward into preflight (#151): a missing source found
+// after the render costs a re-render to recover from, and a stageable `.env` is
+// the one failure that leaks credentials, so neither waits for copier.
+describe("--env-from", () => {
+  test("a source path that does not exist is refused", () => {
+    const f = preflightFixture(repoRoot, "python");
+    const r = f.run(["python", "--preflight", "--env-from", join(f.root, "nope.env")]);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toContain("no file at");
+    expect(r.stdout).toContain("nope.env");
+  });
+
+  test("a copy that would be stageable is refused rather than made", () => {
+    // Tracked beats ignored in git, so the render's own `.sandcastle/.gitignore`
+    // would not cover this one — the secret would land in `git add .`.
+    const f = preflightFixture(repoRoot, "python");
+    const source = join(f.root, "source.env");
+    writeFileSync(source, "GH_TOKEN=shh\n");
+    mkdirSync(join(f.repo, ".sandcastle"), { recursive: true });
+    writeFileSync(join(f.repo, ".sandcastle", ".env"), "");
+    execFileSync("git", ["-C", f.repo, "add", "-f", join(".sandcastle", ".env")]);
+    const r = f.run(["python", "--preflight", "--env-from", source]);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toContain("already tracked by git");
+    expect(readFileSync(join(f.repo, ".sandcastle", ".env"), "utf8")).toBe("");
+  });
+});
+
+// One non-zero exit covers every failure (#151), so the message carries the
+// whole classification — which step was reached, and whether re-running is
+// safe. Driven with the fake `copier`, so it needs nothing real installed.
+test("a failed render names the step and says re-running is not safe", () => {
+  const f = preflightFixture(repoRoot, "python");
+  const before = snapshot(f.repo);
+  f.shim("copier", "exit 1");
+  const r = f.run(["python"]);
+  expect(r.status).not.toBe(0);
+  expect(r.stdout).toContain("step 1 (render) failed");
+  expect(r.stdout).toContain("NOT safe to re-run");
+  expect(snapshot(f.repo)).toBe(before);
+});
+
+// The one end-to-end run: real copier, real `npm install`, real `npx tsc`. The
+// install is not stubbed anywhere — a flag that skipped the slow part would
+// mean the asserted path is not the shipped path (#154).
+describe.skipIf(!hasCopier())("a full install, python arm", () => {
+  test("renders, wires the host runtime, typechecks and hands off", { timeout: 600_000 }, () => {
+    const f = preflightFixture(repoRoot, "python", { realTools: true });
+    const r = f.run(["python"]);
+    expect(r.stdout + r.stderr).toContain("install complete");
+    expect(r.status).toBe(0);
+
+    const pkg = JSON.parse(readFileSync(join(f.repo, "package.json"), "utf8"));
+    expect(pkg.scripts.sandcastle).toBe("npx tsx .sandcastle/main.mts");
+    expect(readFileSync(join(f.repo, "CLAUDE.md"), "utf8")).toBe(
+      "@AGENTS.md\n@CODING_STANDARDS.md\n"
+    );
+    // Run without `--env-from`, so the handoff owes the reader the `.env`.
+    expect(r.stdout).toContain(".sandcastle/.env");
+
+    // Locked decision 13, asserted against a real render rather than a marker
+    // file: the second run refuses instead of re-rendering over the first.
+    const again = f.run(["python"]);
+    expect(again.status).not.toBe(0);
+    expect(again.stdout).toContain("already carries a Sandcastle render");
+  });
 });
 
 test("no check reads an absolute path outside $HOME", () => {
