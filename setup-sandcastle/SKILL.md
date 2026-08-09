@@ -176,10 +176,25 @@ recorded answers, then commits `.sandcastle` and pushes. Always dry-run first:
 ```bash
 sandcastle-propagate --dry-run     # show what each repo would receive
 sandcastle-propagate               # copier update, commit, push (skips dirty repos)
+sandcastle-propagate --divergence  # report local drift only — changes nothing
 ```
 
 Pass a ref to pin (`sandcastle-propagate sandcastle-template/v4`); the default
 is the newest `sandcastle-template/v*` tag.
+
+Both the sweep and `--divergence` report how far each repo has drifted from the
+template it recorded — one line per hunk, unmarked first:
+
+```
+visual-teach   .sandcastle/Dockerfile:12    +6 -2   local: Playwright needs a browser binary
+visual-teach   .sandcastle/main.mts:479     +1 -1   UNMARKED
+```
+
+The report is computed, never maintained: the script re-renders each repo's own
+`_commit` with that repo's own answers and diffs the live tree against it. An
+`UNMARKED` line is drift nobody explained — either mark it with a
+`sandcastle:local` reason (rule 5 of the standards doc) or lift it into the
+template. Exit status is 0 whatever the report finds.
 
 **Install it as a symlink, never a copy**
 (`ln -sf "$PWD/setup-sandcastle/sandcastle-propagate" ~/.local/bin/`). A copy goes
