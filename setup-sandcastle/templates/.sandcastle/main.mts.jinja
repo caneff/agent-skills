@@ -501,10 +501,10 @@ const MAX_ITERATIONS = 20;
 let identity = await sandboxIdentity();
 applyBotToken(identity, process.env);
 
-// Copy the host's virtualenv into the worktree before each sandbox starts.
-// Avoids resolving+downloading every dependency from scratch; sandboxConfig's
-// `uv sync` hook reconciles anything added since the copy.
-const copyToWorktree = [".venv"];
+// Copy the host's installed dependencies into the worktree before each sandbox
+// starts. Avoids resolving+downloading every dependency from scratch;
+// sandboxConfig's install hook reconciles anything added since the copy.
+const copyToWorktree = ["[% if LANGUAGE == 'node' %]node_modules[% else %].venv[% endif %]"];
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -1054,7 +1054,7 @@ if (components.length === 0) {
       const gate = await sandcastle.createSandbox({
         branch: prBranch, // already built + local; checked out, not re-cut
         ...gateCfg,
-        copyToWorktree, // seed .venv so `just check` reuses deps, no re-resolve
+        copyToWorktree, // seed the deps so the check reuses them, no re-resolve
       });
       try {
         const check = await gate.run({
