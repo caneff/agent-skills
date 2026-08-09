@@ -9,11 +9,11 @@ import {
   cpSync,
   mkdtempSync,
   rmSync,
-  symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { hasCopier, renderPythonArm } from "./render-fixture.mjs";
 
 // The template's install seam is `copier copy`/`copier update`. copier.yml
 // lives at the REPO ROOT (with `_subdirectory: setup-sandcastle/templates`),
@@ -82,15 +82,6 @@ const expectTheLocalMarkerRule = (doc) => {
 const recordedAnswer = (name, value) =>
   new RegExp(`^${name}: ['"]?${value.replace(".", "\\.")}['"]?$`, "m");
 
-function hasCopier() {
-  try {
-    execFileSync("copier", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // copier is a documented install-time prereq (`uv tool install copier`); on a
 // machine without it, skip rather than fail a red the env can't turn green.
 describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git root", () => {
@@ -100,18 +91,10 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
     // `.sandcastle/` lands as a subtree. Source is the repo root (a git root),
     // no --vcs-ref: copier renders the working tree AND records `_commit` from
     // the source's HEAD, so the test runs against uncommitted template edits and
-    // still proves version pinning.
-    target = mkdtempSync(join(tmpdir(), "sandcastle-copier-"));
-    execFileSync(
-      "copier",
-      ["copy", "--defaults", "--data", "PYTHON_VERSION=3.14", repoRoot, target],
-      { encoding: "utf8" }
-    );
-    // The render lands outside the dev home, where module resolution would find
-    // neither the sandcastle lib nor @types/node — so the typecheck test below
-    // needs this. Linked here rather than inside that test: a test that mutates
-    // a fixture the whole block shares makes its neighbours order-dependent.
-    symlinkSync(join(repoRoot, "setup-sandcastle", "node_modules"), join(target, "node_modules"));
+    // still proves version pinning. `node_modules` is linked here rather than
+    // inside the typecheck test: a test that mutates a fixture the whole block
+    // shares makes its neighbours order-dependent.
+    target = renderPythonArm(repoRoot, { linkModules: true });
   });
   afterAll(() => target && rmSync(target, { recursive: true, force: true }));
 
@@ -709,6 +692,21 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  // review-verdict.mts is NOT a template: its two Python-naming comments talk
+  // about the gate wrapper, whose command check-prompt.md already renders, so
+  // they point at it instead of repeating it. Templating a module that 222
+  // lines of dev tests import by name, for comment prose, was the worse trade.
+  // Both arms therefore get the same file, and this is what says so — if a
+  // later ticket does branch it, this fails and the choice gets made again.
+  test("renders one review-verdict.mts for both arms, naming no recipe", () => {
+    const gate = renderedIn(fresh, "review-verdict.mts");
+    expect(gate).toBe(renderedIn(twin, "review-verdict.mts"));
+    expect(gate).not.toMatch(/just (check|lint|typecheck)/);
+    // The sentinel is a host-coupled contract string (CODING_STANDARDS rule 3):
+    // the prose around it moved, the string itself must not.
+    expect(gate).toContain("SANDCASTLE_CHECK:");
   });
 
   // Guards the two below from passing vacuously: there is a recorded python

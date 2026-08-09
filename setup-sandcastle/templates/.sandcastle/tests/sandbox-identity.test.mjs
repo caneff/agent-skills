@@ -1,9 +1,8 @@
 import { test, expect, beforeAll, beforeEach, afterEach, afterAll } from "vitest";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
+import { hasCopier, renderPythonArm } from "./render-fixture.mjs";
 
 // The module is imported once; sandboxIdentity() reads process.env at call time,
 // so manipulating process.env between tests is enough to exercise both branches.
@@ -49,15 +48,6 @@ afterEach(() => {
 const here = dirname(fileURLToPath(import.meta.url));
 // tests/ -> .sandcastle/ -> templates/ -> setup-sandcastle/ -> repo root
 const repoRoot = join(here, "..", "..", "..", "..");
-
-function hasCopier() {
-  try {
-    execFileSync("copier", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
 const withRender = test.skipIf(!hasCopier());
 
 let rendered;
@@ -65,15 +55,7 @@ let sandboxIdentity;
 let sandboxConfig;
 beforeAll(async () => {
   if (!hasCopier()) return;
-  rendered = mkdtempSync(join(tmpdir(), "sandcastle-identity-"));
-  execFileSync(
-    "copier",
-    ["copy", "--defaults", "--quiet", "--data", "PYTHON_VERSION=3.14", repoRoot, rendered],
-    { encoding: "utf8" }
-  );
-  // The render lands outside the dev home, where `@ai-hero/sandcastle` would not
-  // resolve — the module imports it at load time.
-  symlinkSync(join(repoRoot, "setup-sandcastle", "node_modules"), join(rendered, "node_modules"));
+  rendered = renderPythonArm(repoRoot, { linkModules: true });
   ({ sandboxIdentity, sandboxConfig } = await import(
     pathToFileURL(join(rendered, ".sandcastle", "sandbox-identity.mts")).href
   ));
