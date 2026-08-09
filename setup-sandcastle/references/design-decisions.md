@@ -55,7 +55,9 @@ as inherited scaffold.
 5. **Isolated Docker sandbox** — not `noSandbox()`. The use case is AFK/parallel
    autonomous agents making commits; running that unsandboxed on the host is the
    3am page. Isolation is load-bearing, not speculative.
-6. **Dockerfile: debian-slim + uv, no Node, no system Python.** The sandbox image
+6. **Dockerfile: debian-slim + uv, no Node, no system Python.** Since #134 this
+   describes the `LANGUAGE=python` arm; the Node arm renders `node:22-bookworm`
+   with no uv, no interpreter and no `just`. The sandbox image
    needs only the agent + git + gh + the target's uv toolchain (`main.mts` runs on
    the *host* via tsx; Claude CLI is a standalone binary). uv provides Python;
    `RUN uv python install ${PYTHON_VERSION}` **bakes the interpreter into an image
