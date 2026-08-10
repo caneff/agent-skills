@@ -9,7 +9,10 @@ Once a repo is installed, later `sandcastle-template/vN` tags reach it through
 the [`sandcastle-propagate`](../sandcastle-propagate) maintainer script. It
 discovers every adopter under `~/src` by its root `.copier-answers.yml`
 breadcrumb (no hardcoded list), lets `copier update` re-assert each repo's own
-recorded answers, then opens a pull request on each. Always dry-run first:
+recorded answers, then opens a pull request on each. A linked git worktree holds
+a checked-out copy of its repo's breadcrumb, so the walk finds it too — the sweep
+passes over it in silence, because sweeping it would open a pull request out of
+someone's in-progress branch. Always dry-run first:
 
 ```bash
 sandcastle-propagate --dry-run     # show what each repo would receive
