@@ -32,19 +32,19 @@ describe("recordAttempt", () => {
   test("distinct keys count independently (review vs spec for one issue)", () => {
     let a = {};
     a = recordAttempt(a, "issue-7").attempts; // review-retry key
-    a = recordAttempt(a, "spec-issue-7").attempts; // spec re-implement key
-    expect(a).toEqual({ "issue-7": 1, "spec-issue-7": 1 });
+    a = recordAttempt(a, "review-issue-7").attempts; // re-implement key
+    expect(a).toEqual({ "issue-7": 1, "review-issue-7": 1 });
   });
 
   // The Phase-3 gate counts consecutive full-suite failures per issue under a
-  // gate-<id> key (#25), distinct from the review (issue-id) and spec (spec-<id>)
-  // counters so the three caps never interfere for one issue.
-  test("gate-<id> counts independently of review and spec keys for one issue", () => {
+  // gate-<id> key (#25), distinct from the re-review (issue-id) and re-implement
+  // (review-<id>) counters so the three caps never interfere for one issue.
+  test("gate-<id> counts independently of the other two keys for one issue", () => {
     let a = {};
-    a = recordAttempt(a, "7").attempts; // review-retry key
-    a = recordAttempt(a, "spec-7").attempts; // spec re-implement key
+    a = recordAttempt(a, "7").attempts; // re-review key
+    a = recordAttempt(a, "review-7").attempts; // re-implement key
     a = recordAttempt(a, "gate-7").attempts; // gate-failure key
-    expect(a).toEqual({ "7": 1, "spec-7": 1, "gate-7": 1 });
+    expect(a).toEqual({ "7": 1, "review-7": 1, "gate-7": 1 });
   });
 
   test("gate-<id> escalates at cap 2 (second consecutive failure)", () => {
