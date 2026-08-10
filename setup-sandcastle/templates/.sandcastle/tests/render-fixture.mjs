@@ -79,6 +79,11 @@ export function preflightFixture(repoRoot, arm, { realTools = false } = {}) {
     // that need node absent delete this shim rather than stubbing it out.
     shim(bin, "node", `exec ${process.execPath} "$@"`);
     shim(bin, "npx", "exit 0");
+    // Only the rows that run past preflight reach step 3, and they are the ones
+    // asserting step 4's `.env` handling — a real `npm install` there would buy
+    // nothing and cost a network round trip. The end-to-end run keeps it real
+    // (#154), which is the render this fixture is deliberately not doing.
+    shim(bin, "npm", "exit 0");
   }
 
   mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
