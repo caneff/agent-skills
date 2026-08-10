@@ -52,6 +52,16 @@ describe("readAttempts / writeAttempts at the disk boundary", () => {
     writeFileSync(file, JSON.stringify([1, 2, 3]));
     expect(readAttempts(file)).toEqual({});
   });
+
+  test("a count that isn't a non-negative integer reads as empty", () => {
+    // A counter is a tally of failed attempts: whole and never below zero.
+    // A negative or fractional value is corruption, not a real count.
+    for (const bad of [{ k: -1 }, { k: 1.5 }]) {
+      const file = tmpFile();
+      writeFileSync(file, JSON.stringify(bad));
+      expect(readAttempts(file)).toEqual({});
+    }
+  });
 });
 
 describe("recordAttempt", () => {
