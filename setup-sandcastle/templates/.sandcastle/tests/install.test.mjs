@@ -1,6 +1,7 @@
 import { test, expect, describe } from "vitest";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { hasCopier, preflightFixture } from "./render-fixture.mjs";
@@ -246,6 +247,35 @@ describe("--env-from", () => {
     expect(r.stdout).toContain("already tracked by git");
     expect(readFileSync(join(f.repo, ".sandcastle", ".env"), "utf8")).toBe("");
   });
+
+  // Preflight can only ask whether the path is already tracked; the render has
+  // not written `.sandcastle/.gitignore` yet. This is the second, real answer,
+  // asked with that file in place — so it needs a run that reaches step 4. The
+  // fake copier writes no `.gitignore`, which is exactly the condition the gate
+  // exists for. `.sandcastle/` is pre-made so the `cp` would succeed if the
+  // gate were deleted: the absent file below is what makes this a regression
+  // test rather than a restatement.
+  test("a copy git would not ignore is refused after the render too", () => {
+    const f = preflightFixture(repoRoot, "python");
+    const source = join(f.root, "source.env");
+    writeFileSync(source, "GH_TOKEN=shh\n");
+    mkdirSync(join(f.repo, ".sandcastle"), { recursive: true });
+    const r = f.run(["python", "--env-from", source]);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toContain("step 4 (.env) failed");
+    expect(r.stdout).toContain("would not be ignored by git");
+    expect(existsSync(join(f.repo, ".sandcastle", ".env"))).toBe(false);
+  });
+
+  // The other branch of the handoff. The seeded branch is asserted against the
+  // real render below, where the ignore that permits the copy is the template's
+  // own rather than one this fixture wrote.
+  test("without the flag, the handoff leaves the .env to the human", () => {
+    const f = preflightFixture(repoRoot, "python");
+    const r = f.run(["python"]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("Fill .sandcastle/.env");
+  });
 });
 
 // One non-zero exit covers every failure (#151), so the message carries the
@@ -265,10 +295,20 @@ test("a failed render names the step and says re-running is not safe", () => {
 // The one end-to-end run: real copier, real `npm install`, real `npx tsc`. The
 // install is not stubbed anywhere — a flag that skipped the slow part would
 // mean the asserted path is not the shipped path (#154).
+// Compare the seed by digest, never by content: the script copies by path so
+// that a filled `.env` never reaches a transcript, and a failing `toEqual` on
+// the bytes would print the very thing that rule protects.
+const digest = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+
 describe.skipIf(!hasCopier())("a full install, python arm", () => {
   test("renders, wires the host runtime, typechecks and hands off", { timeout: 600_000 }, () => {
     const f = preflightFixture(repoRoot, "python", { realTools: true });
-    const r = f.run(["python"]);
+    // Seeded here rather than in a second full run: the copy is worth one `cp`,
+    // not another render. This is also the only place the ignore that permits
+    // it is the rendered `.sandcastle/.gitignore` rather than a fixture's.
+    const source = join(f.root, "source.env");
+    writeFileSync(source, "GH_TOKEN=not-a-real-token\n");
+    const r = f.run(["python", "--env-from", source]);
     expect(r.stdout).toContain("install complete");
     expect(r.status).toBe(0);
 
@@ -277,8 +317,14 @@ describe.skipIf(!hasCopier())("a full install, python arm", () => {
     expect(readFileSync(join(f.repo, "CLAUDE.md"), "utf8")).toBe(
       "@AGENTS.md\n@CODING_STANDARDS.md\n"
     );
-    // Run without `--env-from`, so the handoff owes the reader the `.env`.
-    expect(r.stdout).toContain(".sandcastle/.env");
+
+    const seeded = join(f.repo, ".sandcastle", ".env");
+    expect(digest(seeded)).toBe(digest(source));
+    // git's own answer, against the render's own ignore rules.
+    expect(spawnSync("git", ["-C", f.repo, "check-ignore", "-q", seeded]).status).toBe(0);
+    // Seeded, so the handoff names the source and stops asking for the file.
+    expect(r.stdout).toContain(`was seeded from ${source}`);
+    expect(r.stdout).not.toContain("Fill .sandcastle/.env");
 
     // Locked decision 13, asserted against a real render rather than a marker
     // file: the second run refuses instead of re-rendering over the first.
