@@ -11,8 +11,8 @@ export const REVIEW_RETRY_CAP = 2;
 const ATTEMPTS_FILE = ".sandcastle/review-attempts.json";
 
 // Per-key failed-attempt counters, persisted across runs. Keys are issue ids
-// (review-retry) or `spec-<id>` (spec re-implement), kept distinct so the two
-// caps count independently for the same issue.
+// (review-retry) or `review-<id>` (re-implement after a failed review axis),
+// kept distinct so the two caps count independently for the same issue.
 export type Attempts = Record<string, number>;
 
 export function readAttempts(file = ATTEMPTS_FILE): Attempts {

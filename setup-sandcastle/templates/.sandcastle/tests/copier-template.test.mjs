@@ -357,6 +357,12 @@ const ARC_REWRITTEN_PROSE = {
         "// Without a cap, a deterministically-broken branch would re-review/re-fail\n" +
         "// every run forever.",
     ],
+    [
+      "// (review-retry) or `spec-<id>` (spec re-implement), kept distinct so the two\n" +
+        "// caps count independently for the same issue.",
+      "// (review-retry) or `review-<id>` (re-implement after a failed review axis),\n" +
+        "// kept distinct so the two caps count independently for the same issue.",
+    ],
   ],
   // .sandcastle/Dockerfile — the header's ecosystem clause branches (#134), but
   // the two lines that only mention a toolchain in passing went neutral instead:
