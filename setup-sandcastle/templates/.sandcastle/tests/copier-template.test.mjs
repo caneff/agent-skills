@@ -411,7 +411,7 @@ const ARC_REWRITTEN_PROSE = {
     [
       "// Whether `branch` still merges into main without conflict.",
         "// Issue ids GitHub reports as CLOSED. Base resolution asks this before trusting\n" +
-        "// what a parent branch's commits look like (issue #127, ADR-0004), and the branch\n" +
+        "// what a parent branch's commits look like (issue #127), and the branch\n" +
         "// GC below asks it to clear the branches of shipped issues. Memoised over one\n" +
         "// fetch: the answer is read once per parent per issue per iteration, and the bot\n" +
         "// never closes an issue mid-run.\n" +
@@ -579,6 +579,16 @@ const ARC_REWRITTEN_PROSE = {
         "        : undefined;\n" +
         "    const plan = planOutcomeTransition({ kind, issue, attempts, failedAxes });",
     ],
+    // Two ADR pointers, dropped with the ADRs themselves (#182). What each
+    // comment explains stays; only the citation an adopter cannot follow goes.
+    [
+      "// tested planRetention (ADR-0002).",
+      "// tested planRetention.",
+    ],
+    [
+      "planOutcomeTransition's call (#102, ADR-0002); this",
+      "planOutcomeTransition's call (#102); this",
+    ],
   ],
   // .sandcastle/reconcile.mts and retry-policy.mts — the rest of #169. The
   // outcome kind is renamed and threaded with the axes that failed; the notes
@@ -678,6 +688,22 @@ const ARC_REWRITTEN_PROSE = {
   // Naming the recipe here would have meant templating a module 222 lines of
   // dev tests import by name, for comment prose — so they point at the rendered
   // command instead of repeating it (#146).
+  // .sandcastle/CODING_STANDARDS.md, .sandcastle/log-retention.mts,
+  // .sandcastle/main.mts — the ADRs stopped shipping (#182), so the citations
+  // pointing at them went with the files. Each rule and reason already stood on
+  // its own line; only the unfollowable pointer goes.
+  ".sandcastle/CODING_STANDARDS.md": [
+    [
+      "1. **`main.mts` is the entrypoint, not a module \u2014 never import from it** (ADR-0002).",
+      "1. **`main.mts` is the entrypoint, not a module \u2014 never import from it.**",
+    ],
+  ],
+  ".sandcastle/log-retention.mts": [
+    [
+      "// Pure log-retention decision, split out of main.mts per ADR-0002 so it can be",
+      "// Pure log-retention decision, split out of main.mts so it can be",
+    ],
+  ],
   ".sandcastle/review-verdict.mts": [
     [
       "// over `just check` (lint + typecheck + the whole test suite) and fails CLOSED:",
@@ -811,16 +837,22 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
       if (path === BREADCRUMB) continue;
       // A withdrawn file has no counterpart to compare; the set test above owns it.
       if (ARC_WITHDRAWN_RENDERS.includes(path)) continue;
-      if (ARC_APPENDED_RENDERS.includes(path)) {
-        expect(is.get(path)?.startsWith(body), `${path} changed above the appended text`).toBe(true);
-        continue;
-      }
+      // Rewrites first, then the append check reads what they left: a file can
+      // be edited in place AND appended to, and taking the append shortcut first
+      // would excuse every edit above the appended text in such a file.
       let expected = body;
       for (const [from, to] of ARC_REWRITTEN_PROSE[path] ?? []) {
         expect(expected, `${path}: declared rewrite no longer matches the pre-arc text`).toContain(
           from
         );
         expected = expected.replace(from, to);
+      }
+      if (ARC_APPENDED_RENDERS.includes(path)) {
+        expect(
+          is.get(path)?.startsWith(expected),
+          `${path} changed above the appended text`
+        ).toBe(true);
+        continue;
       }
       expect(is.get(path), path).toBe(expected);
     }

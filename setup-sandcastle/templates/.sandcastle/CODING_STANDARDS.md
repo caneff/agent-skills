@@ -11,7 +11,7 @@ project-specific rules those gates **can't** catch.
 
 ## Rules
 
-1. **`main.mts` is the entrypoint, not a module — never import from it** (ADR-0002).
+1. **`main.mts` is the entrypoint, not a module — never import from it.**
    `tsc` will happily let you `import { … } from "./main.mts"`; the design says
    don't. Shared logic belongs in its own module that both `main.mts` and the tests
    import.
