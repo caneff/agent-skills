@@ -191,17 +191,20 @@ while IFS= read -r -d '' answers; do
   crumbs=$((crumbs + 1))
   # Ours? Match the _src_path key, not any substring. Skip before any git work.
   grep -q '^_src_path:.*caneff/agent-skills' "$answers" || continue
-  mine=$((mine + 1))
   # The breadcrumb sits at the repo root, so its dir is the repo (up to symlinks).
   repo=$(git -C "$(dirname "$answers")" rev-parse --show-toplevel 2>/dev/null) || {
+    mine=$((mine + 1))
     echo "  $answers — not inside a git repo" >&2; failed=$((failed + 1)); continue
   }
   # A linked worktree carries a checked-out copy of the repo's own breadcrumb, and
   # `--show-toplevel` inside one answers with the worktree, so it reads as a repo
   # of its own — a sweep would push a branch and open a PR out of someone's
   # in-progress work (#194). The two git dirs differ in a linked worktree and
-  # nowhere else, so this catches one at any depth and under any layout.
+  # nowhere else, so this catches one at any depth and under any layout. Counted
+  # before `mine`, so passing over one never stands in for reaching an adopter: a
+  # search root narrowed onto worktrees alone has matched nobody, and says so.
   [ "$(git -C "$repo" rev-parse --git-dir)" = "$(git -C "$repo" rev-parse --git-common-dir)" ] || continue
+  mine=$((mine + 1))
   name=$(basename "$repo")
 
   lang=$(breadcrumb LANGUAGE "$answers")
@@ -307,7 +310,7 @@ if [ "$mine" -eq 0 ]; then
   if [ "$crumbs" -eq 0 ]; then
     echo "no .copier-answers.yml anywhere under $SEARCH_ROOT — wrong search root?" >&2
   else
-    echo "found $crumbs .copier-answers.yml under $SEARCH_ROOT, none naming caneff/agent-skills" >&2
+    echo "found $crumbs .copier-answers.yml under $SEARCH_ROOT, none of them an adopter of caneff/agent-skills" >&2
   fi
   exit 1
 fi
