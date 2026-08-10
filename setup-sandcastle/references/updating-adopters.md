@@ -102,6 +102,16 @@ The report is computed, never maintained: the script re-renders each repo's own
 template. The report never blocks: it exits 0 whatever drift it finds, and even
 when a repo faults under it — only a run that matched nobody fails.
 
+**Put a marker next to what it explains — within about three lines.** The diff
+runs at zero context, so it cuts a hunk at every run of changed lines: a marker
+comment with even one untouched line beneath it is a hunk of its own, and the
+divergence under it is another. The report carries a reason down to the next
+hunk when that hunk starts within three lines, which covers a marker sitting
+above its paragraph, blank line and all. Further away and nothing travels —
+otherwise one reason at the top of a file would excuse everything below it. A
+marker that ends up too far reads as `UNMARKED` no matter how good the reason
+is; move it, don't reword it.
+
 What the adopter's own git ignores never reaches the report. The orchestrator
 writes logs, `.env` and scratch JSON into `.sandcastle/`, and that runtime output
 is not drift from the template — it is the tool's exhaust. The filter asks
