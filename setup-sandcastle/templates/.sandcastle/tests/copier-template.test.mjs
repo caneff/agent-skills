@@ -711,6 +711,12 @@ const ARC_ADDED_RENDERS = [
   ".sandcastle/docs/adr/0004-issue-state-gates-parent-liveness.md",
 ];
 
+// The mirror: files the template deliberately WITHDRAWS since the pin. Without
+// it a withdrawal has only one way past the net — widening set-equality to "a
+// subset is fine" — which retires the net for every later ticket. Declared here,
+// the assertion stays exact in both directions.
+const ARC_WITHDRAWN_RENDERS = [];
+
 function renderedTree(root) {
   const files = new Map();
   for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
@@ -788,7 +794,10 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
 
   test("renders the same set of files as the pre-arc template", () => {
     expect([...renderedTree(after).keys()].sort()).toEqual(
-      [...renderedTree(before).keys(), ...ARC_ADDED_RENDERS].sort()
+      [
+        ...[...renderedTree(before).keys()].filter((p) => !ARC_WITHDRAWN_RENDERS.includes(p)),
+        ...ARC_ADDED_RENDERS,
+      ].sort()
     );
   });
 
@@ -796,6 +805,8 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
     const [was, is] = [renderedTree(before), renderedTree(after)];
     for (const [path, body] of was) {
       if (path === BREADCRUMB) continue;
+      // A withdrawn file has no counterpart to compare; the set test above owns it.
+      if (ARC_WITHDRAWN_RENDERS.includes(path)) continue;
       if (ARC_APPENDED_RENDERS.includes(path)) {
         expect(is.get(path)?.startsWith(body), `${path} changed above the appended text`).toBe(true);
         continue;
