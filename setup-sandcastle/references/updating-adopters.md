@@ -70,6 +70,14 @@ Safety properties:
 To confirm before running, `--dry-run` (`copier update --pretend`) shows the
 merge each repo would receive without touching it.
 
+## Upstream upgrades
+
+Bumping `@ai-hero/sandcastle` is a maintenance action on this skill's
+`templates/`, never on a target. In `templates/`: `npm outdated
+@ai-hero/sandcastle` → read its CHANGELOG → bump the pin → `npm run typecheck
+&& npm test` → commit. The next install carries it, and the sweep above pushes
+it to repos already installed.
+
 ## One-time: record `LANGUAGE=node` on a Node adopter
 
 `LANGUAGE` defaults to `python`, so a breadcrumb written before the answer
