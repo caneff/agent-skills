@@ -633,6 +633,13 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
     // Adopter-added: no counterpart in the render at all.
     writeFileSync(sand("extra.mts"), "export const local = 1;\n");
     diverged.publish();
+    // Written after the commit, so both are untracked — the orchestrator's own
+    // runtime output looks exactly like this. `logs/` the rendered `.gitignore`
+    // already ignores; `scratch.mts` it does not, and an unignored addition is
+    // still divergence whether or not git tracks it yet.
+    mkdirSync(sand("logs"), { recursive: true });
+    writeFileSync(sand("logs/run.log"), "noise the tool wrote itself\n");
+    writeFileSync(sand("scratch.mts"), "export const scratch = 1;\n");
 
     // Untouched, and deliberately left behind the newest tag.
     fixtureAdopter(searchRoot, "lagging", template.src, V1, "PYTHON_VERSION=3.14").publish();
@@ -685,6 +692,19 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
 
   test("reports an adopter-added file as its own NEW line", () => {
     expect(lineFor("extra.mts")).toMatch(/\.sandcastle\/extra\.mts\s+NEW\s+UNMARKED$/);
+  });
+
+  // The orchestrator writes logs, `.env` and scratch files into its own
+  // directory. Those are the adopter's runtime output, not its divergence from
+  // the template, and the repo's own git already says so.
+  test("says nothing about a file the adopter's git ignores", () => {
+    expect(lineFor("logs/run.log")).toBeUndefined();
+    // The real edits in the same repo survive the filter — it drops noise only.
+    expect(lineFor("CONTEXT.md")).toBeDefined();
+  });
+
+  test("reports an untracked file that is not ignored as NEW UNMARKED", () => {
+    expect(lineFor("scratch.mts")).toMatch(/\.sandcastle\/scratch\.mts\s+NEW\s+UNMARKED$/);
   });
 
   test("lists unmarked hunks before marked ones", () => {

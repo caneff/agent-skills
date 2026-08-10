@@ -60,7 +60,7 @@ breadcrumb() { sed -n "s/^$1: *//p" "$2" | tr -d "\"'"; }
 # is here to read. An adopter-ADDED file has no counterpart in the render, so it
 # arrives as a whole-file hunk and reports as NEW.
 divergence_report() {
-  local repo=$1 name=$2 answers=$3 commit src ref data
+  local repo=$1 name=$2 answers=$3 commit src ref data hunks ignored
   commit=$(breadcrumb _commit "$answers")
   src=$(breadcrumb _src_path "$answers")
   [ -n "$commit" ] && [ -n "$src" ] || { echo "  no _commit in $name's breadcrumb — no divergence report" >&2; return 0; }
@@ -78,7 +78,7 @@ divergence_report() {
 
   # `git diff` exits 1 when it finds a difference — the normal case here, and
   # under `set -e -o pipefail` an unhandled one would abort the whole sweep.
-  { git diff --no-index --no-prefix --unified=0 -- "$ref/.sandcastle" "$repo/.sandcastle" 2>/dev/null || true; } |
+  hunks=$({ git diff --no-index --no-prefix --unified=0 -- "$ref/.sandcastle" "$repo/.sandcastle" 2>/dev/null || true; } |
     awk -v name="$name" '
       # One pending hunk at a time; every boundary emits it before moving on.
       function emit() {
@@ -114,6 +114,22 @@ divergence_report() {
       }
       pending && /^-/ { dels++ }
       END { emit() }
+    ')
+
+  # The orchestrator writes its own runtime output — logs, `.env`, scratch JSON —
+  # into `.sandcastle/`, and the adopter's git already ignores all of it. Ask that
+  # git rather than parse `.sandcastle/.gitignore`: only the repo's own rules know
+  # its root ignores and the user's global file too. A tracked file is never
+  # reported ignored, so a rendered file that happens to match a pattern still
+  # reports. The temp render needs no such filter — built from the manifest, it
+  # holds no runtime output by construction.
+  # `|| true`: check-ignore exits 1 when nothing is ignored, the clean case.
+  ignored=$(printf '%s\n' "$hunks" | awk 'NF { p = $3; sub(/:[0-9]+$/, "", p); print p }' | sort -u |
+    { git -C "$repo" check-ignore --stdin 2>/dev/null || true; })
+
+  printf '%s\n' "$hunks" | awk -v ign="$ignored" '
+      BEGIN { n = split(ign, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") skip[a[i]] = 1 }
+      NF { p = $3; sub(/:[0-9]+$/, "", p); if (!(p in skip)) print }
     ' | sort -s -k1,1n | cut -f2-
 }
 

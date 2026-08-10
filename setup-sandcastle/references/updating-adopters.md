@@ -102,6 +102,14 @@ The report is computed, never maintained: the script re-renders each repo's own
 template. The report never blocks: it exits 0 whatever drift it finds, and even
 when a repo faults under it — only a run that matched nobody fails.
 
+What the adopter's own git ignores never reaches the report. The orchestrator
+writes logs, `.env` and scratch JSON into `.sandcastle/`, and that runtime output
+is not drift from the template — it is the tool's exhaust. The filter asks
+`git -C <repo> check-ignore`, so it honors every level of ignore the repo has:
+its root file, the `.sandcastle/` subtree, and your global one. A file git
+tracks is never reported ignored, so an adopter-added file that nothing ignores
+still reports as `NEW UNMARKED`.
+
 **Install it as a symlink, never a copy**
 (`ln -sf "$PWD/setup-sandcastle/sandcastle-propagate" ~/.local/bin/`). A copy goes
 stale, and a stale copy used to fail *silently*: the pre-#93 version searched
