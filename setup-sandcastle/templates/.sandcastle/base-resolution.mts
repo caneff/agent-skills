@@ -2,8 +2,9 @@
 //
 // Each issue's branch is cut from its "base" — the ref it forks from. The base
 // is decided purely from the issue's declared `parents` (the issue ids it builds
-// on, emitted by the planner) plus one fact about each parent: does its issue
-// branch exist locally with work not already in `main`?
+// on, emitted by the planner) plus two facts about each parent: is its issue
+// still open, and does its branch exist locally with work not already in `main`?
+// Both must hold for the parent to count as live work — see `isLiveParent`.
 //
 //   0 parents                          → `main` (a root chain off main).
 //   1 parent, branch present this run  → `sandcastle/issue-<parent>` (stack on it).
@@ -33,23 +34,42 @@ export interface ResolveBaseOptions {
   // `main` (i.e. it was built this run and hasn't been merged). False when the
   // branch is absent or its work already landed in main.
   branchExistsWithWork: (parentId: string) => boolean;
+  // True when the parent's ISSUE is closed — see `isLiveParent`. Optional so a
+  // caller that knows no issue state keeps the old content-only behaviour.
+  issueIsClosed?: (parentId: string) => boolean;
   // Invoked for the ≥2-parent (diamond) case. Builds and returns a base branch
   // containing all parents, or `null` if that merge conflicts. Defaults to a safe
   // fall back to `main` when no hook is supplied.
   onMultiParent?: (parents: string[]) => string | null;
 }
 
+// Is a parent's branch live work to build on? Two questions, and the issue's
+// state is asked first (issue #127). A closed issue's branch can still carry
+// commits absent from `main`: #101 shipped as a from-scratch reimplementation,
+// so nothing on main matched `ff2f3b6` by content and `git cherry` / patch-id
+// had nothing to match. Content alone cannot tell a superseded implementation
+// from a live one — it looks identical to "unmerged work" — so a branch of a
+// closed issue is dead by definition, whatever its commits say.
+const isLiveParent = (
+  parentId: string,
+  branchExistsWithWork: (id: string) => boolean,
+  issueIsClosed: (id: string) => boolean
+): boolean => !issueIsClosed(parentId) && branchExistsWithWork(parentId);
+
 // Resolve the base ref an issue's branch should be cut from, or `null` when a
 // multi-parent base could not be built (the caller skips the issue). See header.
 export function resolveBase({
   parents,
   branchExistsWithWork,
+  issueIsClosed = () => false,
   onMultiParent = () => "main",
 }: ResolveBaseOptions): string | null {
   if (parents.length === 0) return "main";
   if (parents.length === 1) {
     const [parent] = parents;
-    return branchExistsWithWork(parent) ? issueBranch(parent) : "main";
+    return isLiveParent(parent, branchExistsWithWork, issueIsClosed)
+      ? issueBranch(parent)
+      : "main";
   }
   // ≥2 parents (diamond): the caller's hook builds a temp base merging them.
   return onMultiParent(parents);
@@ -63,6 +83,8 @@ export interface MultiParentDeps {
   git: (args: string) => string | null;
   // Whether a parent's issue branch exists locally with unmerged work this run.
   branchExistsWithWork: (parentId: string) => boolean;
+  // Whether a parent's ISSUE is closed — see `isLiveParent`. Optional, as above.
+  issueIsClosed?: (parentId: string) => boolean;
 }
 
 // Build a temp base branch for a multi-parent (diamond) issue: one containing
@@ -79,9 +101,11 @@ export interface MultiParentDeps {
 export function buildMultiParentBase(
   issueId: string,
   parents: string[],
-  { git, branchExistsWithWork }: MultiParentDeps
+  { git, branchExistsWithWork, issueIsClosed = () => false }: MultiParentDeps
 ): string | null {
-  const present = parents.filter(branchExistsWithWork).map(issueBranch);
+  const present = parents
+    .filter((p) => isLiveParent(p, branchExistsWithWork, issueIsClosed))
+    .map(issueBranch);
   if (present.length === 0) return "main";
   const baseBranch = `sandcastle/base-${issueId}`;
   git(`branch -f ${baseBranch} main`);
@@ -101,4 +125,23 @@ export function buildMultiParentBase(
   }
   git(`worktree remove --force ${wt}`);
   return ok ? baseBranch : null;
+}
+
+// The other half of #127: stop the landmine being laid at all. Given the output
+// of `git for-each-ref --format=%(refname:short) refs/heads/sandcastle/issue-*`,
+// name the branches whose issue is closed — the sweep deletes them, so no later
+// diamond can find a shipped issue's branch and read it as live work.
+//
+// Local refs only, and only `sandcastle/issue-<n>`: the scratch `base-*`/`pr-*`
+// branches share the prefix but carry no issue id, and an id that does not parse
+// must never be looked up as issue "" and deleted on the answer.
+export function staleClosedBranches(
+  refListing: string | null,
+  issueIsClosed: (issueId: string) => boolean
+): string[] {
+  return (refListing ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((branch) => /^sandcastle\/issue-\d+$/.test(branch))
+    .filter((branch) => issueIsClosed(branch.slice("sandcastle/issue-".length)));
 }

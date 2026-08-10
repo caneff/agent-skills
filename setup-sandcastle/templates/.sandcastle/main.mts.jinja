@@ -52,6 +52,7 @@ import {
   resolveBase,
   issueBranch,
   buildMultiParentBase,
+  staleClosedBranches,
 } from "./base-resolution.mts";
 import {
   prComponents,
@@ -240,6 +241,52 @@ function branchExistsWithWork(parentId: string): boolean {
   // `rev-parse --verify` exits non-zero (git() → null) when the ref is missing.
   if (git(`rev-parse --verify --quiet ${branch}`) === null) return false;
   return branchHasWork(branch);
+}
+
+// Issue ids GitHub reports as CLOSED. Base resolution asks this before trusting
+// what a parent branch's commits look like (issue #127), and the branch GC below
+// asks it to clear the branches of shipped issues. Fetched once and memoised —
+// the answer changes only when a human merges something, and it is read once per
+// parent per issue per iteration.
+const closedIssueIdsSchema = z.array(z.number());
+let closedIds: Set<string> | null = null;
+function issueIsClosed(id: string): boolean {
+  if (closedIds === null) {
+    // --state closed spans the repo's whole history, so the limit matches
+    // getDeliveredParents' rather than the open-only fetches'.
+    const out = gh(
+      `issue list --state closed --limit 1000 --json number --jq '[.[].number]'`
+    );
+    if (out === null) {
+      // Failing OPEN (an empty set) is the pre-#127 behaviour: trust the branch
+      // content. Failing CLOSED would call every parent dead and base the whole
+      // forest on main, which is a far worse answer than the bug this fixes.
+      console.error(
+        "  ! could not list closed issues; base resolution falls back to branch content this run"
+      );
+    }
+    closedIds = new Set(
+      out ? closedIssueIdsSchema.parse(JSON.parse(out)).map(String) : []
+    );
+  }
+  return closedIds.has(id);
+}
+
+// Delete the local `sandcastle/issue-<n>` branches of closed issues, once per
+// run before any branch is cut. A closed issue's branch has no reader left: its
+// work either landed or was superseded, and leaving it on disk is what let a
+// diamond merge #101's dead implementation into #107's base every run (#127).
+// Local only — deleting a remote branch is a human's call, and base resolution
+// reads local refs anyway.
+function gcClosedIssueBranches(): void {
+  const stale = staleClosedBranches(
+    git(`for-each-ref --format=%(refname:short) refs/heads/sandcastle/issue-*`),
+    issueIsClosed
+  );
+  for (const branch of stale) {
+    git(`branch -D ${branch}`);
+    console.log(`  ${branch} — issue closed; stale branch deleted`);
+  }
 }
 
 // Whether `branch` still merges into main without conflict. merge-tree writes
@@ -570,6 +617,11 @@ if (process.env.SANDCASTLE_SKIP_ADDRESS !== "1") {
   await addressOpenPRs();
 }
 
+// Before the sweep, and before any branch is cut this run: clear the branches of
+// closed issues, so nothing downstream can mistake shipped work for live work.
+console.log("\n=== Stale branch GC: closed issues ===\n");
+gcClosedIssueBranches();
+
 // Pre-loop reconciliation sweep: restore in-review ⟺ open PR invariant before
 // the plan loop runs. Stranded branches are injected into allCompleted so Phase 3
 // opens their PRs; issues with no branch are relabeled ready-for-agent so the
@@ -722,8 +774,13 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       const base = resolveBase({
         parents,
         branchExistsWithWork,
+        issueIsClosed,
         onMultiParent: (ps) =>
-          buildMultiParentBase(issue.id, ps, { git, branchExistsWithWork }),
+          buildMultiParentBase(issue.id, ps, {
+            git,
+            branchExistsWithWork,
+            issueIsClosed,
+          }),
       });
       if (base === null) {
         // Deterministic conflict: the parents conflict with each other, so this

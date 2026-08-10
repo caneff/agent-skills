@@ -267,6 +267,111 @@ const ARC_APPENDED_RENDERS = [".sandcastle/CODING_STANDARDS.md"];
 //   The value under them now branches by ecosystem and supplies the specifics
 //   the prose dropped, which is why the comments did not branch as well.
 const ARC_REWRITTEN_PROSE = {
+  // .sandcastle/CONTEXT.md — #127 names the rule in the ubiquitous language, so
+  // "live parent" means one thing in the code, the comments, and the docs.
+  ".sandcastle/CONTEXT.md": [
+    [
+      "cross-run dependencies wait for a human merge.",
+      "cross-run dependencies wait for a human merge.\n" +
+        "\n" +
+        "**Live parent** — A parent an issue may stack on: its issue is still open\n" +
+        "_and_ its branch carries work not yet in `main`. State is asked first,\n" +
+        "because a closed issue's branch can still carry commits that never landed —\n" +
+        "the work shipped as a from-scratch reimplementation — and by content alone\n" +
+        "that is indistinguishable from live work.",
+    ],
+  ],
+  // .sandcastle/base-resolution.mts — #127, a fix rather than an arc ticket: a
+  // parent's ISSUE STATE now gates liveness ahead of its branch content, and a
+  // new export names the closed issues' branches for the sweep to delete.
+  ".sandcastle/base-resolution.mts": [
+    [
+      "// on, emitted by the planner) plus one fact about each parent: does its issue\n" +
+        "// branch exist locally with work not already in `main`?",
+      "// on, emitted by the planner) plus two facts about each parent: is its issue\n" +
+        "// still open, and does its branch exist locally with work not already in `main`?\n" +
+        "// Both must hold for the parent to count as live work — see `isLiveParent`.",
+    ],
+    [
+      "  branchExistsWithWork: (parentId: string) => boolean;\n" +
+        "  // Invoked for the ≥2-parent (diamond) case.",
+      "  branchExistsWithWork: (parentId: string) => boolean;\n" +
+        "  // True when the parent's ISSUE is closed — see `isLiveParent`. Optional so a\n" +
+        "  // caller that knows no issue state keeps the old content-only behaviour.\n" +
+        "  issueIsClosed?: (parentId: string) => boolean;\n" +
+        "  // Invoked for the ≥2-parent (diamond) case.",
+    ],
+    [
+      "// Resolve the base ref an issue's branch should be cut from",
+      "// Is a parent's branch live work to build on? Two questions, and the issue's\n" +
+        "// state is asked first (issue #127). A closed issue's branch can still carry\n" +
+        "// commits absent from `main`: #101 shipped as a from-scratch reimplementation,\n" +
+        "// so nothing on main matched `ff2f3b6` by content and `git cherry` / patch-id\n" +
+        "// had nothing to match. Content alone cannot tell a superseded implementation\n" +
+        "// from a live one — it looks identical to \"unmerged work\" — so a branch of a\n" +
+        "// closed issue is dead by definition, whatever its commits say.\n" +
+        "const isLiveParent = (\n" +
+        "  parentId: string,\n" +
+        "  branchExistsWithWork: (id: string) => boolean,\n" +
+        "  issueIsClosed: (id: string) => boolean\n" +
+        "): boolean => !issueIsClosed(parentId) && branchExistsWithWork(parentId);\n" +
+        "\n" +
+        "// Resolve the base ref an issue's branch should be cut from",
+    ],
+    [
+      "  branchExistsWithWork,\n  onMultiParent = () => \"main\",",
+      "  branchExistsWithWork,\n" +
+        "  issueIsClosed = () => false,\n" +
+        '  onMultiParent = () => "main",',
+    ],
+    [
+      '    return branchExistsWithWork(parent) ? issueBranch(parent) : "main";',
+      "    return isLiveParent(parent, branchExistsWithWork, issueIsClosed)\n" +
+        "      ? issueBranch(parent)\n" +
+        '      : "main";',
+    ],
+    [
+      "  branchExistsWithWork: (parentId: string) => boolean;\n}",
+      "  branchExistsWithWork: (parentId: string) => boolean;\n" +
+        "  // Whether a parent's ISSUE is closed — see `isLiveParent`. Optional, as above.\n" +
+        "  issueIsClosed?: (parentId: string) => boolean;\n}",
+    ],
+    [
+      "  { git, branchExistsWithWork }: MultiParentDeps\n" +
+        "): string | null {\n" +
+        "  const present = parents.filter(branchExistsWithWork).map(issueBranch);",
+      "  { git, branchExistsWithWork, issueIsClosed = () => false }: MultiParentDeps\n" +
+        "): string | null {\n" +
+        "  const present = parents\n" +
+        "    .filter((p) => isLiveParent(p, branchExistsWithWork, issueIsClosed))\n" +
+        "    .map(issueBranch);",
+    ],
+    [
+      "  git(`worktree remove --force ${wt}`);\n  return ok ? baseBranch : null;\n}",
+      "  git(`worktree remove --force ${wt}`);\n" +
+        "  return ok ? baseBranch : null;\n" +
+        "}\n" +
+        "\n" +
+        "// The other half of #127: stop the landmine being laid at all. Given the output\n" +
+        "// of `git for-each-ref --format=%(refname:short) refs/heads/sandcastle/issue-*`,\n" +
+        "// name the branches whose issue is closed — the sweep deletes them, so no later\n" +
+        "// diamond can find a shipped issue's branch and read it as live work.\n" +
+        "//\n" +
+        "// Local refs only, and only `sandcastle/issue-<n>`: the scratch `base-*`/`pr-*`\n" +
+        "// branches share the prefix but carry no issue id, and an id that does not parse\n" +
+        '// must never be looked up as issue "" and deleted on the answer.\n' +
+        "export function staleClosedBranches(\n" +
+        "  refListing: string | null,\n" +
+        "  issueIsClosed: (issueId: string) => boolean\n" +
+        "): string[] {\n" +
+        '  return (refListing ?? "")\n' +
+        '    .split("\\n")\n' +
+        "    .map((line) => line.trim())\n" +
+        "    .filter((branch) => /^sandcastle\\/issue-\\d+$/.test(branch))\n" +
+        '    .filter((branch) => issueIsClosed(branch.slice("sandcastle/issue-".length)));\n' +
+        "}",
+    ],
+  ],
   // .sandcastle/.env.example — #155 lifts visual-teach's GH_TOKEN note upstream.
   // The adopter's wording ("LEGACY — leave blank", key commented out) says what is
   // true THERE, where the bot App is already running; upstream it would strand a
@@ -285,6 +390,86 @@ const ARC_REWRITTEN_PROSE = {
     ],
   ],
   ".sandcastle/main.mts": [
+    // #127's orchestrator half: the closed-issue lookup base resolution now asks,
+    // the GC that deletes those issues' branches, and the two call sites.
+    [
+      '  buildMultiParentBase,\n} from "./base-resolution.mts";',
+      "  buildMultiParentBase,\n" +
+        "  staleClosedBranches,\n" +
+        '} from "./base-resolution.mts";',
+    ],
+    [
+      "// Whether `branch` still merges into main without conflict.",
+      "// Issue ids GitHub reports as CLOSED. Base resolution asks this before trusting\n" +
+        "// what a parent branch's commits look like (issue #127), and the branch GC below\n" +
+        "// asks it to clear the branches of shipped issues. Fetched once and memoised —\n" +
+        "// the answer changes only when a human merges something, and it is read once per\n" +
+        "// parent per issue per iteration.\n" +
+        "const closedIssueIdsSchema = z.array(z.number());\n" +
+        "let closedIds: Set<string> | null = null;\n" +
+        "function issueIsClosed(id: string): boolean {\n" +
+        "  if (closedIds === null) {\n" +
+        "    // --state closed spans the repo's whole history, so the limit matches\n" +
+        "    // getDeliveredParents' rather than the open-only fetches'.\n" +
+        "    const out = gh(\n" +
+        "      `issue list --state closed --limit 1000 --json number --jq '[.[].number]'`\n" +
+        "    );\n" +
+        "    if (out === null) {\n" +
+        "      // Failing OPEN (an empty set) is the pre-#127 behaviour: trust the branch\n" +
+        "      // content. Failing CLOSED would call every parent dead and base the whole\n" +
+        "      // forest on main, which is a far worse answer than the bug this fixes.\n" +
+        "      console.error(\n" +
+        '        "  ! could not list closed issues; base resolution falls back to branch content this run"\n' +
+        "      );\n" +
+        "    }\n" +
+        "    closedIds = new Set(\n" +
+        "      out ? closedIssueIdsSchema.parse(JSON.parse(out)).map(String) : []\n" +
+        "    );\n" +
+        "  }\n" +
+        "  return closedIds.has(id);\n" +
+        "}\n" +
+        "\n" +
+        "// Delete the local `sandcastle/issue-<n>` branches of closed issues, once per\n" +
+        "// run before any branch is cut. A closed issue's branch has no reader left: its\n" +
+        "// work either landed or was superseded, and leaving it on disk is what let a\n" +
+        "// diamond merge #101's dead implementation into #107's base every run (#127).\n" +
+        "// Local only — deleting a remote branch is a human's call, and base resolution\n" +
+        "// reads local refs anyway.\n" +
+        "function gcClosedIssueBranches(): void {\n" +
+        "  const stale = staleClosedBranches(\n" +
+        "    git(`for-each-ref --format=%(refname:short) refs/heads/sandcastle/issue-*`),\n" +
+        "    issueIsClosed\n" +
+        "  );\n" +
+        "  for (const branch of stale) {\n" +
+        "    git(`branch -D ${branch}`);\n" +
+        "    console.log(`  ${branch} — issue closed; stale branch deleted`);\n" +
+        "  }\n" +
+        "}\n" +
+        "\n" +
+        "// Whether `branch` still merges into main without conflict.",
+    ],
+    [
+      "// Pre-loop reconciliation sweep: restore in-review ⟺ open PR invariant before",
+      "// Before the sweep, and before any branch is cut this run: clear the branches of\n" +
+        "// closed issues, so nothing downstream can mistake shipped work for live work.\n" +
+        'console.log("\\n=== Stale branch GC: closed issues ===\\n");\n' +
+        "gcClosedIssueBranches();\n" +
+        "\n" +
+        "// Pre-loop reconciliation sweep: restore in-review ⟺ open PR invariant before",
+    ],
+    [
+      "        branchExistsWithWork,\n" +
+        "        onMultiParent: (ps) =>\n" +
+        "          buildMultiParentBase(issue.id, ps, { git, branchExistsWithWork }),",
+      "        branchExistsWithWork,\n" +
+        "        issueIsClosed,\n" +
+        "        onMultiParent: (ps) =>\n" +
+        "          buildMultiParentBase(issue.id, ps, {\n" +
+        "            git,\n" +
+        "            branchExistsWithWork,\n" +
+        "            issueIsClosed,\n" +
+        "          }),",
+    ],
     // #155, the other half of the same fix: the host-side `delete`, upstreamed
     // from visual-teach because nothing in it names that repo.
     [
