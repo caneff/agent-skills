@@ -15,6 +15,11 @@
 #
 # REF defaults to the newest sandcastle-template/v* tag in the skills checkout.
 #
+# Every adopter lands in one of four classes — updated, current, skipped (a
+# legitimate pass), failed (a fault) — and the run exits non-zero when anything
+# failed, or when it matched no adopter at all. See
+# references/updating-adopters.md.
+#
 # `--divergence` skips the update entirely and only reports how far each adopter
 # has drifted from the template it recorded — see `divergence_report` below. A
 # plain sweep prints that same report after each repo it updates.
@@ -127,13 +132,24 @@ else
   echo "Propagating $REF${PRETEND:+ (dry run)}"
 fi
 
-updated=0 skipped=0
+# Four classes, because two could not tell "every repo is already current" from
+# "I reached none of them" — both printed `updated=0 skipped=0`. `skipped` is a
+# legitimate pass (a human has work in that repo); `failed` is a fault, and it
+# alone decides the exit status. `inspected` belongs to the two modes that carry
+# nothing: neither may leave a repo uncounted either.
+updated=0 current=0 skipped=0 failed=0 inspected=0
+# Every breadcrumb the walk saw, and the subset naming this template. A sweep
+# that matched nothing is an error, and these two tell apart a search root
+# pointed at the wrong tree from a filter that excluded the whole fleet.
+crumbs=0 mine=0
 while IFS= read -r -d '' answers; do
+  crumbs=$((crumbs + 1))
   # Ours? Match the _src_path key, not any substring. Skip before any git work.
   grep -q '^_src_path:.*caneff/agent-skills' "$answers" || continue
+  mine=$((mine + 1))
   # The breadcrumb sits at the repo root, so its dir is the repo (up to symlinks).
   repo=$(git -C "$(dirname "$answers")" rev-parse --show-toplevel 2>/dev/null) || {
-    echo "  skip $answers — not inside a git repo"; skipped=$((skipped + 1)); continue
+    echo "  $answers — not inside a git repo" >&2; failed=$((failed + 1)); continue
   }
   name=$(basename "$repo")
 
@@ -144,7 +160,7 @@ while IFS= read -r -d '' answers; do
   # so a dirty tree is no obstacle — it is just more divergence to report.
   if [ -n "$REPORT_ONLY" ]; then
     divergence_report "$repo" "$name" "$answers"
-    continue
+    inspected=$((inspected + 1)); continue
   fi
 
   if [ -n "$(git -C "$repo" status --porcelain)" ]; then
@@ -158,8 +174,8 @@ while IFS= read -r -d '' answers; do
     # rate limit as an empty list is how the stacked PR gets opened anyway.
     if ! open_pr=$( cd "$repo" && gh pr list --state open --json url,headRefName \
         --jq 'map(select(.headRefName | startswith("sandcastle/update-to-")))[0].url // empty' ); then
-      echo "  skip $name — could not list its open PRs" >&2
-      skipped=$((skipped + 1)); continue
+      echo "  could not list $name's open PRs" >&2
+      failed=$((failed + 1)); continue
     fi
     if [ -n "$open_pr" ]; then
       echo "  skip $name — sweep PR already open: $open_pr"
@@ -177,22 +193,27 @@ while IFS= read -r -d '' answers; do
   # lookup comes back empty and injects a question the template stopped asking.
   if ! ( cd "$repo" && copier update --defaults --trust $PRETEND \
         --vcs-ref "$REF" ); then
-    echo "  copier failed for $name — skipping" >&2
-    skipped=$((skipped + 1)); continue
+    echo "  copier failed for $name" >&2
+    failed=$((failed + 1)); continue
   fi
 
-  [ -n "$PRETEND" ] && continue
+  # A pretend run wrote nothing, so there is no outcome to classify — only the
+  # fact that this repo was reached, which is the whole point of the flag.
+  if [ -n "$PRETEND" ]; then
+    inspected=$((inspected + 1)); continue
+  fi
 
   if [ -z "$(git -C "$repo" status --porcelain)" ]; then
     echo "  already at $REF, nothing to commit"
-    divergence_report "$repo" "$name" "$answers"; continue
+    divergence_report "$repo" "$name" "$answers"
+    current=$((current + 1)); continue
   fi
   # A real conflict (an adopter edited a file the template also changed) lands as
   # inline `<<<<<<<`/`>>>>>>>` markers — copier's default. Never commit those:
   # surface them for a human, don't push a half-merged tree.
   if grep -rIlE '^(<{7}|>{7}) ' "$repo/.sandcastle" >/dev/null 2>&1; then
-    echo "  update left inline conflict markers in $name — resolve by hand, skipping" >&2
-    skipped=$((skipped + 1)); continue
+    echo "  update left inline conflict markers in $name — resolve by hand" >&2
+    failed=$((failed + 1)); continue
   fi
   # Commit on the branch that is already checked out and push it under another
   # name by refspec — the local checkout never switches. Guard the whole thing:
@@ -217,18 +238,35 @@ while IFS= read -r -d '' answers; do
   git -C "$repo" reset -q --hard "$base"
   [ -n "$report" ] && printf '%s\n' "$report"
   if [ -z "$pushed" ]; then
-    echo "  commit/push failed for $name — skipping" >&2
-    skipped=$((skipped + 1)); continue
+    echo "  commit/push failed for $name" >&2
+    failed=$((failed + 1)); continue
   fi
   # The report a human is here to read, under the two refs it moved between.
   body=$(printf 'Sandcastle template: %s → %s\n\nDivergence after the update:\n\n%s\n' \
     "${from:-unknown}" "$REF" "${report:-none}")
   if ! url=$( cd "$repo" && gh pr create --head "$BRANCH" --title "$TITLE" --body "$body" ); then
     echo "  gh pr create failed for $name — branch $BRANCH is pushed, open it by hand" >&2
-    skipped=$((skipped + 1)); continue
+    failed=$((failed + 1)); continue
   fi
   echo "  $url"
   updated=$((updated + 1))
 done < <(find "$SEARCH_ROOT" -maxdepth 4 -name '.copier-answers.yml' -print0)
 
-echo "Done. updated=$updated skipped=$skipped"
+if [ "$mine" -eq 0 ]; then
+  if [ "$crumbs" -eq 0 ]; then
+    echo "no .copier-answers.yml anywhere under $SEARCH_ROOT — wrong search root?" >&2
+  else
+    echo "found $crumbs .copier-answers.yml under $SEARCH_ROOT, none naming caneff/agent-skills" >&2
+  fi
+  exit 1
+fi
+
+if [ -n "$REPORT_ONLY" ] || [ -n "$PRETEND" ]; then
+  echo "Done. inspected=$inspected skipped=$skipped failed=$failed"
+else
+  echo "Done. updated=$updated current=$current skipped=$skipped failed=$failed"
+fi
+
+# Only a fault. Exiting non-zero on a dirty tree would teach the reader to
+# ignore the status, which is how a fleet ends up read by summary again.
+[ "$failed" -eq 0 ] || exit 1
