@@ -20,6 +20,43 @@ sandcastle-propagate --divergence  # report local drift only — changes nothing
 Pass a ref to pin (`sandcastle-propagate sandcastle-template/v4`); the default
 is the newest `sandcastle-template/v*` tag.
 
+## What the summary line says, and what the exit status means
+
+A sweep sorts every adopter it claims into one of four classes and prints the
+tally on one line:
+
+```
+Done. updated=2 current=1 skipped=1 failed=0
+```
+
+- **updated** — the ref was carried and a PR is open for it.
+- **current** — the repo was already at the target ref, so there was nothing to
+  carry. This is the class the old two-counter summary had no word for.
+- **skipped** — a legitimate pass. The working tree was dirty, or a sweep PR is
+  already open and waiting for review. Someone chose this state; nothing is
+  wrong.
+- **failed** — a fault. copier could not render, the merge left inline conflict
+  markers, the commit or push did not land, `gh` could not answer whether a PR
+  was open or could not open one, or a breadcrumb turned out not to sit inside a
+  git repo at all.
+
+**The sweep exits non-zero exactly when `failed` is non-zero.** A fault never
+stops the sweep — the repos after it are still swept, and the exit code carries
+the fault out. A dirty tree deliberately does *not* fail the run: a status that
+goes red on the ordinary case is a status people learn to ignore, which is how a
+fleet ends up read by summary again.
+
+**Matching no adopter is an error**, whichever way it happens, and the two are
+worded apart because they send you to different places: finding no
+`.copier-answers.yml` at all names the search root you gave it, while finding
+breadcrumbs that none of them name this template says so instead. This is the
+case #93 got wrong.
+
+`--dry-run` and `--divergence` carry nothing, so they have no update to count.
+They report what they reached — `Done. inspected=2 skipped=0 failed=0` — and
+`--divergence` still exits 0 whatever drift it finds. The zero-adopter error
+applies to both.
+
 **Nothing reaches an adopter's default branch.** Every update goes up as a PR on
 a `sandcastle/update-to-<ref>` branch, whatever its size — a one-line change to
 the Dockerfile's base image is the most dangerous diff in the fleet and the
@@ -34,7 +71,8 @@ left behind would otherwise reject every later attempt. Nothing under review is
 at risk, because **an adopter that already has a sweep PR open is skipped by
 name** and counted with the other skips — stacking an update on an unreviewed
 one puts the second diff against a base nobody has accepted. If `gh` cannot say
-whether a PR is open, that repo is skipped too, rather than swept on a guess.
+whether a PR is open, that repo is left alone rather than swept on a guess, and
+counted as a failure: an unanswered question is not an answer of "none open".
 
 The local checkout never switches branches. The sweep commits on whatever branch
 is checked out, pushes that commit under the new name by refspec, then restores
@@ -61,14 +99,16 @@ The report is computed, never maintained: the script re-renders each repo's own
 `_commit` with that repo's own answers and diffs the live tree against it. An
 `UNMARKED` line is drift nobody explained — either mark it with a
 `sandcastle:local` reason (rule 5 of the standards doc) or lift it into the
-template. Exit status is 0 whatever the report finds.
+template. The report never blocks: exit status is 0 whatever it finds.
 
 **Install it as a symlink, never a copy**
 (`ln -sf "$PWD/setup-sandcastle/sandcastle-propagate" ~/.local/bin/`). A copy goes
-stale, and a stale copy fails *silently*: the pre-#93 version searched
+stale, and a stale copy used to fail *silently*: the pre-#93 version searched
 `*/.sandcastle/.copier-answers.yml`, so once adopters moved their breadcrumb to
 the repo root it reported `updated=0 skipped=0` — indistinguishable from "every
-repo is already current" while it swept past all of them.
+repo is already current" while it swept past all of them. That particular
+silence is now impossible: matching nothing is an error, and a fleet that really
+is current says `current=N`.
 
 **It is a real 3-way merge, not a re-render.** The script runs `copier update`
 (#93): template edits merge in and a file an adopter legitimately edited under

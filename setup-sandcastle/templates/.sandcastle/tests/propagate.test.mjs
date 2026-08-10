@@ -213,7 +213,7 @@ describe.skipIf(!hasCopier())("sandcastle-propagate sweeps the adopters it finds
   test("sweeps both adopters to the newest template tag", () => {
     expect(sweep.status, sweep.stderr).toBe(0);
     expect(sweep.stdout).toContain(`Propagating ${V2}`);
-    expect(sweep.stdout).toContain("updated=2 skipped=0");
+    expect(sweep.stdout).toContain("Done. updated=2 current=0 skipped=0 failed=0");
   });
 
   test("announces each repo by the ecosystem it recorded, not its Python version", () => {
@@ -322,7 +322,6 @@ describe.skipIf(!hasCopier())("sandcastle-propagate pushes onto an obstructed re
   );
 
   test("carries the update onto a sweep branch an earlier run left behind", () => {
-    expect(sweep.status, sweep.stderr).toBe(0);
     expect(answersOn(stale.remote, V2_BRANCH)).toContain(V2);
     expect(gitIn(stale.remote)("rev-parse", V2_BRANCH)).not.toBe(before.stale.head);
   });
@@ -336,8 +335,11 @@ describe.skipIf(!hasCopier())("sandcastle-propagate pushes onto an obstructed re
     expect(gh.callsTo("pr", "create")).toHaveLength(1);
   });
 
-  test("counts the push it could not make as a skip, and the one it made as an update", () => {
-    expect(sweep.stdout).toContain("updated=1 skipped=1");
+  // A push that could not land is a fault, not a legitimate pass: nobody chose
+  // it, and nothing in that repo will change until someone looks.
+  test("counts the push it could not make as a failure, and exits non-zero for it", () => {
+    expect(sweep.stdout).toContain("Done. updated=1 current=0 skipped=0 failed=1");
+    expect(sweep.status).not.toBe(0);
   });
 
   test("restores the checkout of the repo it did push", () => {
@@ -411,10 +413,16 @@ describe.skipIf(!hasCopier())("sandcastle-propagate refuses to sweep", () => {
     expect(shims.dry.calls()).toEqual([]);
   });
 
+  // A pretend run carries nothing, so it has no update to count — but counting
+  // nothing at all is exactly the silence this contract exists to end.
+  test("--dry-run reports how many repos it reached", () => {
+    expect(runs.dry.stdout).toContain("Done. inspected=1 skipped=0 failed=0");
+  });
+
   test("skips an adopter whose sweep PR is still open, naming it", () => {
     expect(runs.busy.status, runs.busy.stderr).toBe(0);
     expect(runs.busy.stdout).toContain(PR_URL);
-    expect(runs.busy.stdout).toContain("updated=0 skipped=1");
+    expect(runs.busy.stdout).toContain("Done. updated=0 current=0 skipped=1 failed=0");
     expect(shims.busy.callsTo("pr", "create")).toEqual([]);
   });
 
@@ -422,6 +430,125 @@ describe.skipIf(!hasCopier())("sandcastle-propagate refuses to sweep", () => {
     expect(stateOf(adopter.repo)).toEqual(before.local);
     expect(gitIn(adopter.remote)("branch", "--list")).toBe(before.branches);
     expect(answersIn(adopter.repo)).toContain(V1);
+  });
+});
+
+// One fleet holding one adopter of each class, swept once. The summary line and
+// the exit status are the whole contract: a reader who only sees `Done.` has to
+// be able to tell a fleet that was already current from one nothing reached.
+describe.skipIf(!hasCopier())("sandcastle-propagate sorts each adopter into a class", () => {
+  let template;
+  let searchRoot;
+  let sweep;
+  let gh;
+  let ok;
+  let dirty;
+  const V1 = "sandcastle-template/v1";
+  const V2 = "sandcastle-template/v2";
+
+  beforeAll(() => {
+    template = fixtureTemplate(V1);
+    searchRoot = mkdtempSync(join(tmpdir(), "sandcastle-classes-"));
+
+    ok = fixtureAdopter(searchRoot, "updates", template.src, V1, "PYTHON_VERSION=3.14");
+    ok.publish();
+
+    dirty = fixtureAdopter(searchRoot, "dirty", template.src, V1, "PYTHON_VERSION=3.14");
+    dirty.publish();
+    writeFileSync(join(dirty.repo, "uncommitted.txt"), "work in progress\n");
+
+    // A breadcrumb that still names our template — so the sweep claims it — but
+    // points at a path copier cannot render from. Committed, so the repo is
+    // clean and the run reaches copier rather than the dirty-tree skip.
+    const broken = fixtureAdopter(searchRoot, "copier-fails", template.src, V1, "PYTHON_VERSION=3.14");
+    broken.publish();
+    writeFileSync(
+      join(broken.repo, BREADCRUMB),
+      answersIn(broken.repo).replace(/^_src_path:.*$/m, "_src_path: /nonexistent/caneff/agent-skills")
+    );
+    broken.g("commit", "-q", "-am", "point the breadcrumb nowhere");
+
+    template.bump(V2);
+    // Installed at the tag the sweep is about to carry, so there is nothing to
+    // carry: current, not updated, and emphatically not silent.
+    fixtureAdopter(searchRoot, "already-current", template.src, V2, "PYTHON_VERSION=3.14").publish();
+
+    gh = ghShim(mkdtempSync(join(tmpdir(), "sandcastle-classes-gh-")));
+    sweep = propagate(template.src, searchRoot, [], { bin: gh.bin });
+  });
+  afterAll(() =>
+    [template?.root, searchRoot, gh?.dir].forEach((d) => d && rmSync(d, { recursive: true, force: true }))
+  );
+
+  // Spelled out rather than composed from counters, so the assertion cannot
+  // agree with the script by construction.
+  test("names all four classes in one summary line", () => {
+    expect(sweep.stdout).toContain("Done. updated=1 current=1 skipped=1 failed=1");
+  });
+
+  test("exits non-zero because one adopter faulted", () => {
+    expect(sweep.status).not.toBe(0);
+  });
+
+  // The fault is carried by the exit code, not by stopping: the adopter after it
+  // still got its PR.
+  test("sweeps the rest of the fleet past the fault", () => {
+    expect(() => gitIn(ok.remote)("rev-parse", `refs/heads/${V2_BRANCH}`)).not.toThrow();
+    expect(gh.callsTo("pr", "create")).toHaveLength(1);
+  });
+
+  test("leaves the dirty adopter's uncommitted work alone", () => {
+    expect(gitIn(dirty.repo)("status", "--porcelain")).toContain("uncommitted.txt");
+    expect(answersIn(dirty.repo)).toContain(V1);
+  });
+});
+
+// A sweep that matched nothing is the #93 stale-copy bug's signature: it printed
+// a clean summary and exited 0 while walking past every repo in the fleet. Both
+// ways of matching nothing are errors, and they are told apart — a wrong search
+// root and a wrong filter are different mistakes to go fix.
+describe("sandcastle-propagate matches no adopter", () => {
+  let template;
+  let empty;
+  let foreign;
+  let gh;
+
+  beforeAll(() => {
+    template = fixtureTemplate("sandcastle-template/v1");
+    empty = mkdtempSync(join(tmpdir(), "sandcastle-none-"));
+    // A breadcrumb, just not one of ours: the search root is right, the fleet is
+    // simply somebody else's.
+    foreign = mkdtempSync(join(tmpdir(), "sandcastle-foreign-"));
+    mkdirSync(join(foreign, "other-repo"));
+    writeFileSync(join(foreign, "other-repo", BREADCRUMB), "_src_path: gh:someone/other-template\n");
+    gh = ghShim(mkdtempSync(join(tmpdir(), "sandcastle-none-gh-")));
+  });
+  afterAll(() =>
+    [template?.root, empty, foreign, gh?.dir].forEach((d) => d && rmSync(d, { recursive: true, force: true }))
+  );
+
+  test("fails naming the search root when it finds no breadcrumb at all", () => {
+    const sweep = propagate(template.src, empty, [], { bin: gh.bin });
+    expect(sweep.status).not.toBe(0);
+    expect(sweep.stderr).toContain(empty);
+    expect(sweep.stderr).toMatch(/no \.copier-answers\.yml/);
+  });
+
+  // Distinct from the line above, because the fix is different: breadcrumbs are
+  // here, none of them are ours.
+  test("fails differently when it finds breadcrumbs but none name this template", () => {
+    const sweep = propagate(template.src, foreign, [], { bin: gh.bin });
+    expect(sweep.status).not.toBe(0);
+    expect(sweep.stderr).toContain("1 .copier-answers.yml");
+    expect(sweep.stderr).toContain("none naming caneff/agent-skills");
+  });
+
+  // `--divergence` exits 0 whatever it reports — but reporting on nobody is not
+  // a finding, it is the same broken search.
+  test("fails a --divergence run that matched nobody, needing no gh to do it", () => {
+    const report = propagate(template.src, empty, ["--divergence"]);
+    expect(report.status).not.toBe(0);
+    expect(report.stderr).toContain(empty);
   });
 });
 
@@ -471,6 +598,10 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
 
   test("exits 0 — the report reports, it never blocks", () => {
     expect(report.status, report.stderr).toBe(0);
+  });
+
+  test("says how many repos it reported on, both of them", () => {
+    expect(report.stdout).toContain("Done. inspected=2 skipped=0 failed=0");
   });
 
   test("leaves the adopter's git state exactly as it found it", () => {
