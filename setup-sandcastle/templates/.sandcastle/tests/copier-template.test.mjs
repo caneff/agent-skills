@@ -118,6 +118,26 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
     expect(existsSync(join(target, ".sandcastle", "tests"))).toBe(false);
   });
 
+  // A render carries what an adopter RUNS. The domain model and the ADRs behind
+  // it are maintainer reading, and the self-check is a developer's — all three
+  // keep their home in this repo, and none of them ships (#182).
+  test("withdraws the maintainer docs and the self-check from the render", () => {
+    for (const path of ["CONTEXT.md", "docs", "sandbox-identity.check.mts"]) {
+      expect(existsSync(join(target, ".sandcastle", path)), path).toBe(false);
+    }
+  });
+
+  // The counterweight, and the reason "looks like documentation" is the wrong
+  // test: each of these has a named runtime reader — the review verdict module
+  // and the standards judge load the standards, the token-minting script names
+  // bot-setup.md in the error it prints, and an adopter typechecks the
+  // orchestrator with that tsconfig.
+  test("keeps the documentation a runtime reader actually loads", () => {
+    for (const path of ["CODING_STANDARDS.md", "bot-setup.md", "tsconfig.json"]) {
+      expect(existsSync(join(target, ".sandcastle", path)), path).toBe(true);
+    }
+  });
+
   test("renders the PYTHON_VERSION answer into the Dockerfile", () => {
     const dockerfile = readFileSync(join(target, ".sandcastle", "Dockerfile"), "utf8");
     expect(dockerfile).toMatch(/^ARG PYTHON_VERSION=3\.14$/m);
@@ -266,20 +286,10 @@ const ARC_APPENDED_RENDERS = [".sandcastle/CODING_STANDARDS.md"];
 //   .sandcastle/main.mts — the two copyToWorktree comments went neutral (#135).
 //   The value under them now branches by ecosystem and supplies the specifics
 //   the prose dropped, which is why the comments did not branch as well.
+// A withdrawn file needs no entry here: the render has no counterpart to compare
+// it against, so the set net owns it alone. That is why #127's CONTEXT.md rewrite
+// and #146's self-check header no longer appear — both files left the render.
 const ARC_REWRITTEN_PROSE = {
-  // .sandcastle/CONTEXT.md — #127 names the rule in the ubiquitous language, so
-  // "live parent" means one thing in the code, the comments, and the docs.
-  ".sandcastle/CONTEXT.md": [
-    [
-      "cross-run dependencies wait for a human merge.",
-      "cross-run dependencies wait for a human merge.\n" +
-        "\n" +
-        "**Live parent** — A parent an issue may stack on: its issue is still open\n" +
-        "_and_ its branch carries work not yet in `main`. A closed parent is never\n" +
-        "live, however its branch looks. Opposite: a stale branch, which the run\n" +
-        "deletes.",
-    ],
-  ],
   // .sandcastle/base-resolution.mts — #127, a fix rather than an arc ticket: a
   // parent's ISSUE STATE now gates liveness ahead of its branch content, and a
   // new export names the closed issues' branches for the sweep to delete.
@@ -401,7 +411,7 @@ const ARC_REWRITTEN_PROSE = {
     [
       "// Whether `branch` still merges into main without conflict.",
         "// Issue ids GitHub reports as CLOSED. Base resolution asks this before trusting\n" +
-        "// what a parent branch's commits look like (issue #127, ADR-0004), and the branch\n" +
+        "// what a parent branch's commits look like (issue #127), and the branch\n" +
         "// GC below asks it to clear the branches of shipped issues. Memoised over one\n" +
         "// fetch: the answer is read once per parent per issue per iteration, and the bot\n" +
         "// never closes an issue mid-run.\n" +
@@ -569,6 +579,16 @@ const ARC_REWRITTEN_PROSE = {
         "        : undefined;\n" +
         "    const plan = planOutcomeTransition({ kind, issue, attempts, failedAxes });",
     ],
+    // Two ADR pointers, dropped with the ADRs themselves (#182). What each
+    // comment explains stays; only the citation an adopter cannot follow goes.
+    [
+      "// tested planRetention (ADR-0002).",
+      "// tested planRetention.",
+    ],
+    [
+      "planOutcomeTransition's call (#102, ADR-0002); this",
+      "planOutcomeTransition's call (#102); this",
+    ],
   ],
   // .sandcastle/reconcile.mts and retry-policy.mts — the rest of #169. The
   // outcome kind is renamed and threaded with the axes that failed; the notes
@@ -668,6 +688,22 @@ const ARC_REWRITTEN_PROSE = {
   // Naming the recipe here would have meant templating a module 222 lines of
   // dev tests import by name, for comment prose — so they point at the rendered
   // command instead of repeating it (#146).
+  // .sandcastle/CODING_STANDARDS.md, .sandcastle/log-retention.mts,
+  // .sandcastle/main.mts — the ADRs stopped shipping (#182), so the citations
+  // pointing at them went with the files. Each rule and reason already stood on
+  // its own line; only the unfollowable pointer goes.
+  ".sandcastle/CODING_STANDARDS.md": [
+    [
+      "1. **`main.mts` is the entrypoint, not a module \u2014 never import from it** (ADR-0002).",
+      "1. **`main.mts` is the entrypoint, not a module \u2014 never import from it.**",
+    ],
+  ],
+  ".sandcastle/log-retention.mts": [
+    [
+      "// Pure log-retention decision, split out of main.mts per ADR-0002 so it can be",
+      "// Pure log-retention decision, split out of main.mts so it can be",
+    ],
+  ],
   ".sandcastle/review-verdict.mts": [
     [
       "// over `just check` (lint + typecheck + the whole test suite) and fails CLOSED:",
@@ -683,19 +719,6 @@ const ARC_REWRITTEN_PROSE = {
         "// CODING_STANDARDS) — don't reword.",
     ],
   ],
-  // .sandcastle/sandbox-identity.check.mts — the header named `just check` to
-  // explain why the check runs under tsx (#146). The reason survives the
-  // rewrite; only the Python-only recipe name goes.
-  ".sandcastle/sandbox-identity.check.mts": [
-    [
-      "// Self-check for applyBotToken — no test runner in this repo (package.json\n" +
-        '// "test" is a stub, `just check` is Python-only), so this runs via `npx tsx`.\n' +
-        "//   npx tsx .sandcastle/sandbox-identity.check.mts",
-      "// Self-check for applyBotToken — no test runner ships inside `.sandcastle/`, so\n" +
-        "// this runs via `npx tsx`:\n" +
-        "//   npx tsx .sandcastle/sandbox-identity.check.mts",
-    ],
-  ],
 };
 
 // Answers each arc ticket deliberately ADDS to a Python adopter's breadcrumb.
@@ -706,9 +729,22 @@ const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 // Files the template deliberately ADDS since the pin. Same bargain as the
 // answers list: the set-equality net stays exact, and a new render is declared
 // rather than the assertion quietly widening to "a superset is fine".
-//   .sandcastle/docs/adr/0004-…  — issue state gates parent liveness (#127)
-const ARC_ADDED_RENDERS = [
-  ".sandcastle/docs/adr/0004-issue-state-gates-parent-liveness.md",
+//   (none — ADR 0004 arrived with #127 and left again with #182, below)
+const ARC_ADDED_RENDERS = [];
+
+// The mirror: files the template deliberately WITHDRAWS since the pin. Without
+// it a withdrawal has only one way past the net — widening set-equality to "a
+// subset is fine" — which retires the net for every later ticket. Declared here,
+// the assertion stays exact in both directions.
+//   CONTEXT.md, docs/adr/*  — the project's own domain model, maintainer reading
+//   sandbox-identity.check.mts — a developer's self-check, now in the dev suite
+// All three keep their home in this repo; only what an adopter receives changed.
+const ARC_WITHDRAWN_RENDERS = [
+  ".sandcastle/CONTEXT.md",
+  ".sandcastle/docs/adr/0001-dependency-forest-with-topic-grouped-prs.md",
+  ".sandcastle/docs/adr/0002-main-is-an-unimported-script.md",
+  ".sandcastle/docs/adr/0003-multi-parent-conflict-abort-not-resolve.md",
+  ".sandcastle/sandbox-identity.check.mts",
 ];
 
 function renderedTree(root) {
@@ -788,7 +824,10 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
 
   test("renders the same set of files as the pre-arc template", () => {
     expect([...renderedTree(after).keys()].sort()).toEqual(
-      [...renderedTree(before).keys(), ...ARC_ADDED_RENDERS].sort()
+      [
+        ...[...renderedTree(before).keys()].filter((p) => !ARC_WITHDRAWN_RENDERS.includes(p)),
+        ...ARC_ADDED_RENDERS,
+      ].sort()
     );
   });
 
@@ -796,16 +835,24 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
     const [was, is] = [renderedTree(before), renderedTree(after)];
     for (const [path, body] of was) {
       if (path === BREADCRUMB) continue;
-      if (ARC_APPENDED_RENDERS.includes(path)) {
-        expect(is.get(path)?.startsWith(body), `${path} changed above the appended text`).toBe(true);
-        continue;
-      }
+      // A withdrawn file has no counterpart to compare; the set test above owns it.
+      if (ARC_WITHDRAWN_RENDERS.includes(path)) continue;
+      // Rewrites first, then the append check reads what they left: a file can
+      // be edited in place AND appended to, and taking the append shortcut first
+      // would excuse every edit above the appended text in such a file.
       let expected = body;
       for (const [from, to] of ARC_REWRITTEN_PROSE[path] ?? []) {
         expect(expected, `${path}: declared rewrite no longer matches the pre-arc text`).toContain(
           from
         );
         expected = expected.replace(from, to);
+      }
+      if (ARC_APPENDED_RENDERS.includes(path)) {
+        expect(
+          is.get(path)?.startsWith(expected),
+          `${path} changed above the appended text`
+        ).toBe(true);
+        continue;
       }
       expect(is.get(path), path).toBe(expected);
     }
@@ -860,8 +907,14 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
   const V1 = "sandcastle-template/vnode1";
   const V2 = "sandcastle-template/vnode2";
   const V3 = "sandcastle-template/vnode3";
+  // A bump has to move the RENDER, not just the commit: CONTEXT.md no longer
+  // ships (#182), so appending there would leave every version identical to an
+  // adopter and the update under test with nothing to carry.
   const bump = (gsrc, tag) => {
-    appendFileSync(join(src, "setup-sandcastle", "templates", ".sandcastle", "CONTEXT.md"), "\n");
+    appendFileSync(
+      join(src, "setup-sandcastle", "templates", ".sandcastle", "CODING_STANDARDS.md"),
+      "\n"
+    );
     gsrc("commit", "-q", "-am", tag);
     gsrc("tag", tag);
   };
@@ -922,6 +975,13 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
     });
   });
   afterAll(() => discard(src, fresh, corrected));
+
+  // Withdrawing a file from the render is an `_exclude` rule, and a rule that
+  // matched one arm's path and not the other's would leave two fleets carrying
+  // different files. The twin is the python arm of the same template.
+  test("renders the same set of files as the python arm", () => {
+    expect([...renderedTree(fresh).keys()].sort()).toEqual([...renderedTree(twin).keys()].sort());
+  });
 
   test("records LANGUAGE as node in the breadcrumb", () => {
     expect(answersIn(fresh)).toMatch(recordedAnswer("LANGUAGE", "node"));
@@ -1131,8 +1191,11 @@ describe.skipIf(!hasCopier())("copier update round-trips from the git root", () 
   const TEMPLATE_V2 = "<!-- template-v2-change -->";
   const V1 = "sandcastle-template/vtest1";
   const V2 = "sandcastle-template/vtest2";
-  const contextInSrc = () => join(src, "setup-sandcastle", "templates", ".sandcastle", "CONTEXT.md");
-  const contextInTarget = () => join(target, ".sandcastle", "CONTEXT.md");
+  // The vehicle is a file the render actually carries: CONTEXT.md was withdrawn
+  // (#182), and a merge into a file no adopter receives proves nothing.
+  const docInSrc = () =>
+    join(src, "setup-sandcastle", "templates", ".sandcastle", "CODING_STANDARDS.md");
+  const docInTarget = () => join(target, ".sandcastle", "CODING_STANDARDS.md");
 
   beforeAll(() => {
     // --- fixture: a self-contained template repo built from the live files ---
@@ -1164,12 +1227,12 @@ describe.skipIf(!hasCopier())("copier update round-trips from the git root", () 
 
     // A legitimate adopter edit to a template-owned file — the thing a re-render
     // hack would silently clobber but a real 3-way merge must preserve.
-    appendFileSync(contextInTarget(), `\n${ADOPTER}\n`);
+    appendFileSync(docInTarget(), `\n${ADOPTER}\n`);
     gtgt("add", "-A");
     gtgt("commit", "-q", "-m", "adopter edit");
 
     // --- template evolves to v2 ---
-    appendFileSync(contextInSrc(), `\n${TEMPLATE_V2}\n`);
+    appendFileSync(docInSrc(), `\n${TEMPLATE_V2}\n`);
     gsrc("commit", "-q", "-am", "v2");
     gsrc("tag", V2);
 
@@ -1194,10 +1257,10 @@ describe.skipIf(!hasCopier())("copier update round-trips from the git root", () 
   });
 
   test("3-way merge preserves the adopter's local edit", () => {
-    expect(readFileSync(contextInTarget(), "utf8")).toContain(ADOPTER);
+    expect(readFileSync(docInTarget(), "utf8")).toContain(ADOPTER);
   });
 
   test("3-way merge lands the new template version's change", () => {
-    expect(readFileSync(contextInTarget(), "utf8")).toContain(TEMPLATE_V2);
+    expect(readFileSync(docInTarget(), "utf8")).toContain(TEMPLATE_V2);
   });
 });

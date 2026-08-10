@@ -1,4 +1,4 @@
-// Pure log-retention decision, split out of main.mts per ADR-0002 so it can be
+// Pure log-retention decision, split out of main.mts so it can be
 // tested without touching the filesystem. Given a log file's lines and a cutoff
 // (ms since epoch), decide what to keep. main.mts stays the thin file-IO caller.
 //
