@@ -133,10 +133,9 @@ else
 fi
 
 # Four classes, because two could not tell "every repo is already current" from
-# "I reached none of them" — both printed `updated=0 skipped=0`. `skipped` is a
-# legitimate pass (a human has work in that repo); `failed` is a fault, and it
-# alone decides the exit status. `inspected` belongs to the two modes that carry
-# nothing: neither may leave a repo uncounted either.
+# "I reached none of them" — both printed `updated=0 skipped=0`. `inspected`
+# belongs to the two modes that carry nothing, which may not leave a repo
+# uncounted either.
 updated=0 current=0 skipped=0 failed=0 inspected=0
 # Every breadcrumb the walk saw, and the subset naming this template. A sweep
 # that matched nothing is an error, and these two tell apart a search root
@@ -267,6 +266,8 @@ else
   echo "Done. updated=$updated current=$current skipped=$skipped failed=$failed"
 fi
 
-# Only a fault. Exiting non-zero on a dirty tree would teach the reader to
-# ignore the status, which is how a fleet ends up read by summary again.
-[ "$failed" -eq 0 ] || exit 1
+# Only a fault, and only from a run that was carrying something: exiting
+# non-zero on a dirty tree would teach the reader to ignore the status, and
+# `--divergence` changes nothing, so nothing it meets is worth blocking on. It
+# still counts the fault above.
+[ -n "$REPORT_ONLY" ] || [ "$failed" -eq 0 ] || exit 1

@@ -503,6 +503,56 @@ describe.skipIf(!hasCopier())("sandcastle-propagate sorts each adopter into a cl
   });
 });
 
+// The healthy fleet, asserted green. Every other fixture here proves the sweep
+// notices trouble; this one proves it stays quiet when there is none — the case
+// the two-counter summary could not express at all.
+describe.skipIf(!hasCopier())("sandcastle-propagate sweeps a fleet with nothing to do", () => {
+  let template;
+  let searchRoot;
+  let gh;
+  let idle;
+  const V1 = "sandcastle-template/v1";
+  const V2 = "sandcastle-template/v2";
+  let allCurrent;
+  let withDirty;
+
+  beforeAll(() => {
+    template = fixtureTemplate(V1);
+    searchRoot = mkdtempSync(join(tmpdir(), "sandcastle-idle-"));
+    template.bump(V2);
+    // Both installed at the tag the sweep will target: a fleet that is done.
+    fixtureAdopter(searchRoot, "current-one", template.src, V2, "PYTHON_VERSION=3.14").publish();
+    idle = fixtureAdopter(searchRoot, "current-two", template.src, V2, "PYTHON_VERSION=3.14");
+    idle.publish();
+
+    gh = ghShim(mkdtempSync(join(tmpdir(), "sandcastle-idle-gh-")));
+    allCurrent = propagate(template.src, searchRoot, [], { bin: gh.bin });
+    // Now one of them has a human mid-edit. Nothing else about the fleet moved,
+    // so the only difference between the two runs is the dirty tree.
+    writeFileSync(join(idle.repo, "wip.txt"), "mid-edit\n");
+    withDirty = propagate(template.src, searchRoot, [], { bin: gh.bin });
+  });
+  afterAll(() =>
+    [template?.root, searchRoot, gh?.dir].forEach((d) => d && rmSync(d, { recursive: true, force: true }))
+  );
+
+  test("reports an all-current fleet as current, and exits 0", () => {
+    expect(allCurrent.stdout).toContain("Done. updated=0 current=2 skipped=0 failed=0");
+    expect(allCurrent.status, allCurrent.stderr).toBe(0);
+  });
+
+  // Deliberate: a status that goes red because someone has work in progress is a
+  // status people learn to ignore.
+  test("still exits 0 when a working tree is dirty, counting it as a skip", () => {
+    expect(withDirty.stdout).toContain("Done. updated=0 current=1 skipped=1 failed=0");
+    expect(withDirty.status, withDirty.stderr).toBe(0);
+  });
+
+  test("opens no PR for a fleet that had nothing to carry", () => {
+    expect(gh.callsTo("pr", "create")).toEqual([]);
+  });
+});
+
 // A sweep that matched nothing is the #93 stale-copy bug's signature: it printed
 // a clean summary and exited 0 while walking past every repo in the fleet. Both
 // ways of matching nothing are errors, and they are told apart — a wrong search
@@ -602,6 +652,18 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
 
   test("says how many repos it reported on, both of them", () => {
     expect(report.stdout).toContain("Done. inspected=2 skipped=0 failed=0");
+  });
+
+  // A report changes nothing, so nothing it meets can be worth blocking on. It
+  // counts the fault and says so; the exit status stays 0 for the reader who
+  // runs this before deciding whether to sweep at all.
+  test("counts a breadcrumb outside any git repo without exiting non-zero", () => {
+    const orphan = mkdtempSync(join(tmpdir(), "sandcastle-orphan-"));
+    writeFileSync(join(orphan, BREADCRUMB), "_src_path: gh:caneff/agent-skills\n");
+    const run = propagate(template.src, orphan, ["--divergence"]);
+    expect(run.stdout).toContain("failed=1");
+    expect(run.status, run.stderr).toBe(0);
+    rmSync(orphan, { recursive: true, force: true });
   });
 
   test("leaves the adopter's git state exactly as it found it", () => {
