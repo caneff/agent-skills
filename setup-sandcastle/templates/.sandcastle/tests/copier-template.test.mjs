@@ -268,14 +268,17 @@ const ARC_APPENDED_RENDERS = [".sandcastle/CODING_STANDARDS.md"];
 //   the prose dropped, which is why the comments did not branch as well.
 const ARC_REWRITTEN_PROSE = {
   // .sandcastle/.env.example — #155 lifts visual-teach's GH_TOKEN note upstream.
-  // The key stays live (it is still the fallback for an adopter with no bot App);
-  // what is new is when to blank it and that main.mts drops it host-side.
+  // The adopter's wording ("LEGACY — leave blank", key commented out) says what is
+  // true THERE, where the bot App is already running; upstream it would strand a
+  // fresh adopter, for whom GH_TOKEN is still the only path until bot-setup.md is
+  // done. So the key stays live and the note keeps the two portable facts: blank
+  // it once the bot works, and main.mts drops it host-side either way.
   ".sandcastle/.env.example": [
     [
       "# Required repository permissions: Issues (Read and write) and Metadata (Read)\nGH_TOKEN=",
       "# Required repository permissions: Issues (Read and write) and Metadata (Read)\n" +
         "# Fallback only — the bot App below supersedes it. Once the bot works, blank this\n" +
-        "# line (bot-setup.md's last step) so runs can't attribute to your personal\n" +
+        "# line (bot-setup.md, end of Step 5) so runs can't attribute to your personal\n" +
         "# account. main.mts deletes it host-side either way, so a stale value here cannot\n" +
         "# shadow your ~/.config/gh credential; sandboxes still read it from this file.\n" +
         "GH_TOKEN=",
