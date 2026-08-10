@@ -2,9 +2,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 // Review-retry cap. A needs-review issue is re-reviewed (cheaply, on its
 // existing branch) up to this many times before we give up on review-only and
-// escalate to a full re-implement. A spec-fail issue is re-implemented up to
-// this many times before being handed to a human. Without a cap, a
-// deterministically-broken branch would re-review/re-fail every run forever.
+// escalate to a full re-implement. A review-fail issue (spec and/or standards)
+// is re-implemented up to this many times before being handed to a human.
+// Without a cap, a deterministically-broken branch would re-review/re-fail
+// every run forever.
 export const REVIEW_RETRY_CAP = 2;
 
 const ATTEMPTS_FILE = ".sandcastle/review-attempts.json";

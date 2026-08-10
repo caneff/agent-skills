@@ -843,8 +843,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           const combined = combineVerdicts(specVerdict, standardsVerdict);
           if (!combined.pass) {
             // Post the failing judges' findings so the re-implement pass — the
-            // sole writer — gets targeted context. Route through the existing
-            // spec-fail path (shared REVIEW_RETRY_CAP; escalates to
+            // sole writer — gets targeted context. Route through the review-fail
+            // path (both axes share one REVIEW_RETRY_CAP; escalates to
             // ready-for-human at the cap).
             const sections: string[] = [];
             if (!specVerdict.pass)
@@ -865,7 +865,11 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
                 ", "
               )})`
             );
-            return { issue, kind: "spec-fail" as const };
+            return {
+              issue,
+              kind: "review-fail" as const,
+              failedAxes: combined.failedAxes,
+            };
           }
           return { issue, kind: "done" as const };
         } catch (e) {
@@ -918,7 +922,12 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     const issue = outcome.status === "fulfilled" ? outcome.value.issue : work[i]!;
     const kind =
       outcome.status === "fulfilled" ? outcome.value.kind : ("nothing" as const);
-    const plan = planOutcomeTransition({ kind, issue, attempts });
+    // Only a review-fail outcome carries failedAxes; narrow before reading it.
+    const failedAxes =
+      outcome.status === "fulfilled" && "failedAxes" in outcome.value
+        ? outcome.value.failedAxes
+        : undefined;
+    const plan = planOutcomeTransition({ kind, issue, attempts, failedAxes });
     attempts = plan.attempts;
     if (plan.addLabel) relabel(issue.id, plan.addLabel, plan.removeLabels);
     if (plan.note) console.warn(`  ${plan.note}`);

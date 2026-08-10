@@ -638,11 +638,12 @@ describe("planOutcomeTransition", () => {
     );
   });
 
-  test("spec-fail below the cap → back to ready-for-agent on its own counter", () => {
+  test("review-fail below the cap → back to ready-for-agent on its own counter", () => {
     const plan = planOutcomeTransition({
-      kind: "spec-fail",
+      kind: "review-fail",
       issue: full,
       attempts: {},
+      failedAxes: ["spec"],
     });
     expect(plan.addLabel).toBe("ready-for-agent");
     expect([...plan.removeLabels].sort()).toEqual([
@@ -650,21 +651,63 @@ describe("planOutcomeTransition", () => {
       "needs-review",
     ]);
     expect(plan.escalated).toBe(false);
-    // Keyed spec-<id>, NOT <id>: the re-implement cap and the re-review cap
+    // Keyed review-<id>, NOT <id>: the re-implement cap and the re-review cap
     // count independently for the same issue.
-    expect(plan.attempts).toEqual({ "spec-42": 1 });
+    expect(plan.attempts).toEqual({ "review-42": 1 });
     // The note names the attempt out of the cap — it is the only place an
     // operator sees the count, since the plan's counters are internal.
     expect(plan.note).toBe(
-      `42 failed spec review; back to ready-for-agent to re-implement (attempt 1/${REVIEW_RETRY_CAP})`
+      `42 failed review (spec); back to ready-for-agent to re-implement (attempt 1/${REVIEW_RETRY_CAP})`
     );
   });
 
-  test("spec-fail at the cap → handed to a human", () => {
+  // The regression this fix exists for: a standards-only failure used to be
+  // reported as a spec failure, sending the reader to the wrong reviewer.
+  test("a standards-only failure names standards, not spec", () => {
     const plan = planOutcomeTransition({
-      kind: "spec-fail",
+      kind: "review-fail",
       issue: full,
-      attempts: { "spec-42": REVIEW_RETRY_CAP - 1 },
+      attempts: {},
+      failedAxes: ["standards"],
+    });
+    expect(plan.note).toBe(
+      `42 failed review (standards); back to ready-for-agent to re-implement (attempt 1/${REVIEW_RETRY_CAP})`
+    );
+  });
+
+  // Both axes share one cap, so a double failure is one attempt, named in full.
+  test("both axes failing names both", () => {
+    const plan = planOutcomeTransition({
+      kind: "review-fail",
+      issue: full,
+      attempts: {},
+      failedAxes: ["spec", "standards"],
+    });
+    expect(plan.attempts).toEqual({ "review-42": 1 });
+    expect(plan.note).toBe(
+      `42 failed review (spec, standards); back to ready-for-agent to re-implement (attempt 1/${REVIEW_RETRY_CAP})`
+    );
+  });
+
+  // `failedAxes` is optional on the input, so the note must still read as a
+  // sentence when a caller omits it rather than printing an empty bracket.
+  test("no axes given → the note says review", () => {
+    const plan = planOutcomeTransition({
+      kind: "review-fail",
+      issue: full,
+      attempts: {},
+    });
+    expect(plan.note).toBe(
+      `42 failed review (review); back to ready-for-agent to re-implement (attempt 1/${REVIEW_RETRY_CAP})`
+    );
+  });
+
+  test("review-fail at the cap → handed to a human", () => {
+    const plan = planOutcomeTransition({
+      kind: "review-fail",
+      issue: full,
+      attempts: { "review-42": REVIEW_RETRY_CAP - 1 },
+      failedAxes: ["standards"],
     });
     expect(plan.addLabel).toBe("ready-for-human");
     expect([...plan.removeLabels].sort()).toEqual([
@@ -674,6 +717,10 @@ describe("planOutcomeTransition", () => {
     ]);
     expect(plan.escalated).toBe(true);
     expect(plan.attempts).toEqual({});
+    // The escalation note names the axis too — it is what a human reads first.
+    expect(plan.note).toBe(
+      `42 failed review (standards) ${REVIEW_RETRY_CAP}x; handing to a human (ready-for-human)`
+    );
   });
 
   // The completed record is what Phase 3 groups PR sets from, so what a `done`
@@ -749,14 +796,15 @@ describe("planOutcomeTransition", () => {
     expect(plan.completed).toBeUndefined();
   });
 
-  // A re-review counter must not be spent by a spec failure, or vice versa.
+  // A re-review counter must not be spent by a failed review axis, or vice versa.
   test("the two caps do not consume each other's counter", () => {
     const plan = planOutcomeTransition({
-      kind: "spec-fail",
+      kind: "review-fail",
       issue: full,
       attempts: { 42: REVIEW_RETRY_CAP - 1 },
+      failedAxes: ["spec"],
     });
     expect(plan.escalated).toBe(false);
-    expect(plan.attempts).toEqual({ 42: REVIEW_RETRY_CAP - 1, "spec-42": 1 });
+    expect(plan.attempts).toEqual({ 42: REVIEW_RETRY_CAP - 1, "review-42": 1 });
   });
 });

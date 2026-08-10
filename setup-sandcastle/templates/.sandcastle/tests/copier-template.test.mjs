@@ -245,7 +245,8 @@ const PRE_ARC = "59c7941"; // last commit before the LANGUAGE arc (issue #131)
 //   .sandcastle/CODING_STANDARDS.md — the sandcastle:local rule (issue #136)
 const ARC_APPENDED_RENDERS = [".sandcastle/CODING_STANDARDS.md"];
 
-// Comment text an arc ticket deliberately REWRITES in place. Each pair is
+// Text deliberately REWRITTEN in place since the pin — comment prose from an
+// arc ticket, or code where a fix has to change what renders. Each pair is
 // applied to the pre-arc body before the diff, so the rewrite is spelled out
 // here and every other byte of the file stays pinned — the same bargain as
 // ARC_APPENDED_RENDERS, for an edit rather than an append. A pair that no longer
@@ -266,6 +267,95 @@ const ARC_REWRITTEN_PROSE = {
     [
       "copyToWorktree, // seed .venv so `just check` reuses deps, no re-resolve",
       "copyToWorktree, // seed the deps so the check reuses them, no re-resolve",
+    ],
+    // The three below are #169, a fix rather than an arc ticket: the outcome
+    // kind `spec-fail` reported a standards-only failure as a spec failure, so
+    // it became `review-fail` and now carries the axes that actually failed.
+    [
+      "// sole writer — gets targeted context. Route through the existing\n" +
+        "            // spec-fail path (shared REVIEW_RETRY_CAP; escalates to",
+      "// sole writer — gets targeted context. Route through the review-fail\n" +
+        "            // path (both axes share one REVIEW_RETRY_CAP; escalates to",
+    ],
+    [
+      'return { issue, kind: "spec-fail" as const };',
+      "return {\n" +
+        "              issue,\n" +
+        '              kind: "review-fail" as const,\n' +
+        "              failedAxes: combined.failedAxes,\n" +
+        "            };",
+    ],
+    [
+      "const plan = planOutcomeTransition({ kind, issue, attempts });",
+      "// Only a review-fail outcome carries failedAxes; narrow before reading it.\n" +
+        "    const failedAxes =\n" +
+        '      outcome.status === "fulfilled" && "failedAxes" in outcome.value\n' +
+        "        ? outcome.value.failedAxes\n" +
+        "        : undefined;\n" +
+        "    const plan = planOutcomeTransition({ kind, issue, attempts, failedAxes });",
+    ],
+  ],
+  // .sandcastle/reconcile.mts and retry-policy.mts — the rest of #169. The
+  // outcome kind is renamed and threaded with the axes that failed; the notes
+  // and the counter key follow it. Declared hunk by hunk rather than re-pinning
+  // PRE_ARC, because #119 has not rolled the arc out to the adopters yet and
+  // re-pinning would retire the net that proves what the rollout carries.
+  ".sandcastle/reconcile.mts": [
+    [
+      'import type { CheckVerdict } from "./review-verdict.mts";',
+      'import type { CheckVerdict, ReviewAxis } from "./review-verdict.mts";',
+    ],
+    [
+      "//   spec-fail    — reviewed, but the branch doesn't satisfy the issue.",
+      "//   review-fail  — reviewed, but a review axis (spec and/or standards) failed;\n" +
+        "//                  `failedAxes` names which. Re-implemented up to the cap.",
+    ],
+    [
+      'export type OutcomeKind = "done" | "needs-review" | "spec-fail" | "nothing";',
+      'export type OutcomeKind = "done" | "needs-review" | "review-fail" | "nothing";',
+    ],
+    [
+      "  attempts: Attempts;\n" +
+        "}): OutcomePlan {\n" +
+        "  const { kind, issue, attempts } = input;",
+      "  attempts: Attempts;\n" +
+        "  // The review axes that failed, for a review-fail outcome — names the axis in\n" +
+        '  // the operator note instead of always saying "spec". Absent otherwise.\n' +
+        "  failedAxes?: ReviewAxis[];\n" +
+        "}): OutcomePlan {\n" +
+        "  const { kind, issue, attempts, failedAxes } = input;",
+    ],
+    [
+      '  if (kind === "spec-fail") {\n' +
+        '    // Re-review cannot repair "built the wrong thing" — only re-implementing\n' +
+        "    // can. Counted under spec-<id> so a persistently-misunderstood issue burns\n" +
+        "    // its own cap rather than the re-review one.\n" +
+        "    const r = recordAttempt(attempts, `spec-${issue.id}`);",
+      '  if (kind === "review-fail") {\n' +
+        "    // Re-review cannot repair a failing review axis — only re-implementing can.\n" +
+        "    // Both axes share one cap, counted under review-<id> so a persistently-\n" +
+        "    // failing issue burns its own cap rather than the re-review one.\n" +
+        '    const axes = failedAxes?.length ? failedAxes.join(", ") : "review";\n' +
+        "    const r = recordAttempt(attempts, `review-${issue.id}`);",
+    ],
+    [
+      "note: `${issue.id} failed spec review ${REVIEW_RETRY_CAP}x; handing to a human (ready-for-human)`,",
+      "note: `${issue.id} failed review (${axes}) ${REVIEW_RETRY_CAP}x; handing to a human (ready-for-human)`,",
+    ],
+    [
+      "note: `${issue.id} failed spec review; back to ready-for-agent to re-implement (attempt ${r.count}/${REVIEW_RETRY_CAP})`,",
+      "note: `${issue.id} failed review (${axes}); back to ready-for-agent to re-implement (attempt ${r.count}/${REVIEW_RETRY_CAP})`,",
+    ],
+  ],
+  ".sandcastle/retry-policy.mts": [
+    [
+      "// escalate to a full re-implement. A spec-fail issue is re-implemented up to\n" +
+        "// this many times before being handed to a human. Without a cap, a\n" +
+        "// deterministically-broken branch would re-review/re-fail every run forever.",
+      "// escalate to a full re-implement. A review-fail issue (spec and/or standards)\n" +
+        "// is re-implemented up to this many times before being handed to a human.\n" +
+        "// Without a cap, a deterministically-broken branch would re-review/re-fail\n" +
+        "// every run forever.",
     ],
   ],
   // .sandcastle/Dockerfile — the header's ecosystem clause branches (#134), but

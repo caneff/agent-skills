@@ -6,7 +6,7 @@
 // planGateOutcome: decide open-vs-requeue from the Phase-3 full-suite verdict.
 // planOutcomeTransition: decide one issue's labels from its post-build outcome.
 
-import type { CheckVerdict } from "./review-verdict.mts";
+import type { CheckVerdict, ReviewAxis } from "./review-verdict.mts";
 import type { CompletedIssue } from "./pr-components.mts";
 import { recordAttempt, REVIEW_RETRY_CAP, type Attempts } from "./retry-policy.mts";
 
@@ -116,11 +116,12 @@ export function planGateOutcome(
 // What the execute+review pipeline concluded for one issue.
 //   done         — implemented and reviewed clean; belongs in a PR set.
 //   needs-review — the reviewer errored; the branch is fine, re-review it.
-//   spec-fail    — reviewed, but the branch doesn't satisfy the issue.
+//   review-fail  — reviewed, but a review axis (spec and/or standards) failed;
+//                  `failedAxes` names which. Re-implemented up to the cap.
 //   nothing      — no work happened: a multi-parent base conflict blocked the
 //                  issue, or the branch has no diff vs main. main.mts also maps
 //                  a rejected pipeline (sandbox crash, network) here.
-export type OutcomeKind = "done" | "needs-review" | "spec-fail" | "nothing";
+export type OutcomeKind = "done" | "needs-review" | "review-fail" | "nothing";
 
 // The issue as the execute loop knows it. A full-mode issue came from the
 // planner and carries its forest position (parents) and topic group; a
@@ -161,8 +162,11 @@ export function planOutcomeTransition(input: {
   kind: OutcomeKind;
   issue: OutcomeIssue;
   attempts: Attempts;
+  // The review axes that failed, for a review-fail outcome — names the axis in
+  // the operator note instead of always saying "spec". Absent otherwise.
+  failedAxes?: ReviewAxis[];
 }): OutcomePlan {
-  const { kind, issue, attempts } = input;
+  const { kind, issue, attempts, failedAxes } = input;
 
   if (kind === "done") {
     // Reviewed clean, so the retry counter is reset rather than incremented —
@@ -210,11 +214,12 @@ export function planOutcomeTransition(input: {
     };
   }
 
-  if (kind === "spec-fail") {
-    // Re-review cannot repair "built the wrong thing" — only re-implementing
-    // can. Counted under spec-<id> so a persistently-misunderstood issue burns
-    // its own cap rather than the re-review one.
-    const r = recordAttempt(attempts, `spec-${issue.id}`);
+  if (kind === "review-fail") {
+    // Re-review cannot repair a failing review axis — only re-implementing can.
+    // Both axes share one cap, counted under review-<id> so a persistently-
+    // failing issue burns its own cap rather than the re-review one.
+    const axes = failedAxes?.length ? failedAxes.join(", ") : "review";
+    const r = recordAttempt(attempts, `review-${issue.id}`);
     if (r.escalate)
       return {
         addLabel: "ready-for-human",
@@ -222,7 +227,7 @@ export function planOutcomeTransition(input: {
         attempts: r.attempts,
         attemptCount: r.count,
         escalated: true,
-        note: `${issue.id} failed spec review ${REVIEW_RETRY_CAP}x; handing to a human (ready-for-human)`,
+        note: `${issue.id} failed review (${axes}) ${REVIEW_RETRY_CAP}x; handing to a human (ready-for-human)`,
       };
     return {
       addLabel: "ready-for-agent",
@@ -230,7 +235,7 @@ export function planOutcomeTransition(input: {
       attempts: r.attempts,
       attemptCount: r.count,
       escalated: false,
-      note: `${issue.id} failed spec review; back to ready-for-agent to re-implement (attempt ${r.count}/${REVIEW_RETRY_CAP})`,
+      note: `${issue.id} failed review (${axes}); back to ready-for-agent to re-implement (attempt ${r.count}/${REVIEW_RETRY_CAP})`,
     };
   }
 
