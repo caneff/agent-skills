@@ -99,7 +99,8 @@ The report is computed, never maintained: the script re-renders each repo's own
 `_commit` with that repo's own answers and diffs the live tree against it. An
 `UNMARKED` line is drift nobody explained — either mark it with a
 `sandcastle:local` reason (rule 5 of the standards doc) or lift it into the
-template. The report never blocks: exit status is 0 whatever it finds.
+template. The report never blocks: it exits 0 whatever drift it finds, and even
+when a repo faults under it — only a run that matched nobody fails.
 
 **Install it as a symlink, never a copy**
 (`ln -sf "$PWD/setup-sandcastle/sandcastle-propagate" ~/.local/bin/`). A copy goes
