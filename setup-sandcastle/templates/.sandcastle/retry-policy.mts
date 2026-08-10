@@ -17,7 +17,10 @@ const ATTEMPTS_FILE = ".sandcastle/review-attempts.json";
 // Per-key failed-attempt counters, persisted across runs. Keys are issue ids
 // (review-retry) or `review-<id>` (re-implement after a failed review axis),
 // kept distinct so the two caps count independently for the same issue.
-const attemptsSchema = z.record(z.string(), z.number());
+// A value is a tally of failed attempts, so a whole number that never dips
+// below zero. A negative or fractional count is corruption, and the schema
+// treats it as such rather than letting it steer a cap.
+const attemptsSchema = z.record(z.string(), z.number().int().nonnegative());
 export type Attempts = z.infer<typeof attemptsSchema>;
 
 // The file is state this tool wrote last run, but a run can be killed mid-write

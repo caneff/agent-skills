@@ -911,7 +911,10 @@ const ARC_REWRITTEN_PROSE = {
         "    return {};\n" +
         "  }\n" +
         "}",
-      "const attemptsSchema = z.record(z.string(), z.number());\n" +
+      "// A value is a tally of failed attempts, so a whole number that never dips\n" +
+        "// below zero. A negative or fractional count is corruption, and the schema\n" +
+        "// treats it as such rather than letting it steer a cap.\n" +
+        "const attemptsSchema = z.record(z.string(), z.number().int().nonnegative());\n" +
         "export type Attempts = z.infer<typeof attemptsSchema>;\n" +
         "\n" +
         "// The file is state this tool wrote last run, but a run can be killed mid-write\n" +
