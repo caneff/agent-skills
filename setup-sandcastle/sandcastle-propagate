@@ -2,7 +2,7 @@
 # sandcastle-propagate [--dry-run] [--divergence] [REF]
 #
 # Carry the Sandcastle template into every adopter repo with a real 3-way
-# `copier update`, then commit + push each. Adopters are discovered, not listed:
+# `copier update`, then open a pull request on each. Adopters are discovered, not listed:
 # any repo under $SEARCH_ROOT with a root `.copier-answers.yml` breadcrumb
 # pointing at caneff/agent-skills.
 #
@@ -32,6 +32,14 @@ while [ -n "${1:-}" ] && [ "$1" != "${1#--}" ]; do
   esac
   shift
 done
+
+# Once, before any repo is touched. Discovering an unusable `gh` after the first
+# adopter is already committed would leave the fleet half-swept. `--dry-run`
+# never reaches `gh`, so it stays usable unauthenticated.
+if [ -z "$REPORT_ONLY" ] && [ -z "$PRETEND" ]; then
+  command -v gh >/dev/null 2>&1 || { echo "no gh on PATH — install it, or use --dry-run" >&2; exit 1; }
+  gh auth status >/dev/null 2>&1 || { echo "gh is not authenticated — run gh auth login" >&2; exit 1; }
+fi
 
 # One answer out of a breadcrumb, unquoted. Empty when the key isn't recorded.
 breadcrumb() { sed -n "s/^$1: *//p" "$2" | tr -d "\"'"; }
@@ -112,6 +120,10 @@ if [ -n "$REPORT_ONLY" ]; then
 else
   REF="${1:-$(git -C "$SKILLS_REPO" tag -l 'sandcastle-template/v*' | sort -V | tail -1)}"
   [ -n "$REF" ] || { echo "no sandcastle-template/v* tag in $SKILLS_REPO" >&2; exit 1; }
+  # Named for the ref, not the clock: a re-run at the same ref reuses the branch,
+  # where a timestamped name would litter every adopter with dead branches.
+  BRANCH="sandcastle/update-to-$(printf %s "$REF" | tr -c 'A-Za-z0-9._-' '-')"
+  TITLE="chore(sandcastle): update template to $REF"
   echo "Propagating $REF${PRETEND:+ (dry run)}"
 fi
 
@@ -139,6 +151,20 @@ while IFS= read -r -d '' answers; do
     echo "  skip $name — working tree dirty; commit or stash first"
     skipped=$((skipped + 1)); continue
   fi
+  # Stacking an update on an unreviewed one is the diamond-base failure #127
+  # tracks: the second PR's diff is read against a base nobody has accepted yet.
+  if [ -z "$PRETEND" ]; then
+    open_pr=$( cd "$repo" && gh pr list --state open --json url,headRefName \
+      --jq 'map(select(.headRefName | startswith("sandcastle/update-to-")))[0].url // empty' 2>/dev/null ) || open_pr=""
+    if [ -n "$open_pr" ]; then
+      echo "  skip $name — sweep PR already open: $open_pr"
+      skipped=$((skipped + 1)); continue
+    fi
+  fi
+  # Captured before copier writes anything: the ref this repo is moving FROM,
+  # for the PR body, and the commit the local checkout is restored to after.
+  from=$(breadcrumb _commit "$answers")
+  base=$(git -C "$repo" rev-parse HEAD)
   # `copier update` reads the template URL, the old ref, AND every recorded
   # answer from the breadcrumb, re-asserting them itself — so we steer the
   # target ref and nothing else. Feeding an answer back in is worse than
@@ -163,19 +189,36 @@ while IFS= read -r -d '' answers; do
     echo "  update left inline conflict markers in $name — resolve by hand, skipping" >&2
     skipped=$((skipped + 1)); continue
   fi
-  # Guard the whole commit+push: a stale branch or push reject skips this repo,
-  # it does not abort the sweep to every repo after it. Stage the subtree and the
-  # root breadcrumb.
-  if ! ( git -C "$repo" add .sandcastle .copier-answers.yml &&
-         git -C "$repo" commit -q -m "chore(sandcastle): update template to $REF" &&
-         git -C "$repo" push -q ); then
-    echo "  commit/push failed for $name — skipping (repo left with local commit)" >&2
+  # Commit on the branch that is already checked out and push it under another
+  # name by refspec — the local checkout never switches. Guard the whole thing:
+  # a push reject skips this repo, it does not abort the sweep to the repos
+  # after it.
+  pushed=""
+  report=""
+  if ( git -C "$repo" add .sandcastle .copier-answers.yml &&
+       git -C "$repo" commit -q -m "$TITLE" ); then
+    # Same report as `--divergence`, now that the breadcrumb records the new ref:
+    # what the merge could not carry is exactly what this repo holds locally.
+    report=$(divergence_report "$repo" "$name" "$answers")
+    git -C "$repo" push -q origin "HEAD:refs/heads/$BRANCH" && pushed=yes
+  fi
+  # Unconditional, so a failed push leaves the repo byte-identical to how the
+  # sweep found it. The commit object survives the reset; the pushed branch owns
+  # it now.
+  git -C "$repo" reset -q --hard "$base"
+  [ -n "$report" ] && printf '%s\n' "$report"
+  if [ -z "$pushed" ]; then
+    echo "  commit/push failed for $name — skipping" >&2
     skipped=$((skipped + 1)); continue
   fi
-  echo "  committed + pushed"
-  # Same report as `--divergence`, now that the breadcrumb records the new ref:
-  # what the merge could not carry is exactly what this repo holds locally.
-  divergence_report "$repo" "$name" "$answers"
+  # The report a human is here to read, under the two refs it moved between.
+  body=$(printf 'Sandcastle template: %s → %s\n\nDivergence after the update:\n\n%s\n' \
+    "${from:-unknown}" "$REF" "${report:-none}")
+  if ! url=$( cd "$repo" && gh pr create --head "$BRANCH" --title "$TITLE" --body "$body" ); then
+    echo "  gh pr create failed for $name — branch $BRANCH is pushed, open it by hand" >&2
+    skipped=$((skipped + 1)); continue
+  fi
+  echo "  $url"
   updated=$((updated + 1))
 done < <(find "$SEARCH_ROOT" -maxdepth 4 -name '.copier-answers.yml' -print0)
 

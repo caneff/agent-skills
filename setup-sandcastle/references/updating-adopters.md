@@ -9,16 +9,39 @@ Once a repo is installed, later `sandcastle-template/vN` tags reach it through
 the [`sandcastle-propagate`](../sandcastle-propagate) maintainer script. It
 discovers every adopter under `~/src` by its root `.copier-answers.yml`
 breadcrumb (no hardcoded list), lets `copier update` re-assert each repo's own
-recorded answers, then commits `.sandcastle` and pushes. Always dry-run first:
+recorded answers, then opens a pull request on each. Always dry-run first:
 
 ```bash
 sandcastle-propagate --dry-run     # show what each repo would receive
-sandcastle-propagate               # copier update, commit, push (skips dirty repos)
+sandcastle-propagate               # copier update, branch, PR (skips dirty repos)
 sandcastle-propagate --divergence  # report local drift only — changes nothing
 ```
 
 Pass a ref to pin (`sandcastle-propagate sandcastle-template/v4`); the default
 is the newest `sandcastle-template/v*` tag.
+
+**Nothing reaches an adopter's default branch.** Every update goes up as a PR on
+a `sandcastle/update-to-<ref>` branch, whatever its size — a one-line change to
+the Dockerfile's base image is the most dangerous diff in the fleet and the
+smallest, so diff size is no threshold to gate on. A PR CI workflow is an
+install prereq, so the PR is guaranteed to run checks. The sweep prints each PR
+URL and exits: no polling, no auto-merge, and merging is yours.
+
+The branch is named for the target ref, so a re-run at the same ref reuses it
+rather than littering the repo with dated branches. **An adopter that already
+has a sweep PR open is skipped by name**, counted with the other skips —
+stacking an update on an unreviewed one puts the second diff against a base
+nobody has accepted.
+
+The local checkout never switches branches. The sweep commits on whatever branch
+is checked out, pushes that commit under the new name by refspec, then restores
+the branch to the SHA it recorded first. That restore is unconditional: a failed
+push leaves the repo byte-identical to how the sweep found it, with the work
+still on the pushed branch if the push is what succeeded.
+
+`gh` is checked once, up front — missing or unauthenticated aborts the whole
+sweep before any repo is touched, rather than stranding a half-swept fleet.
+`--dry-run` stops short of `gh` entirely, so it stays usable before you log in.
 
 Both the sweep and `--divergence` report how far each repo has drifted from the
 template it recorded — one line per hunk, unmarked first:
@@ -27,6 +50,9 @@ template it recorded — one line per hunk, unmarked first:
 visual-teach   .sandcastle/Dockerfile:12    +6 -2   local: Playwright needs a browser binary
 visual-teach   .sandcastle/main.mts:479     +1 -1   UNMARKED
 ```
+
+That report is also the PR body, under the refs the repo moved between, so a
+reviewer reads what the update carried and what it could not in one place.
 
 The report is computed, never maintained: the script re-renders each repo's own
 `_commit` with that repo's own answers and diffs the live tree against it. An
@@ -59,8 +85,8 @@ Safety properties:
   deletes them.
 - **Uncommitted work is skipped.** The script refuses any repo with a dirty
   tree — commit or stash first. On a clean repo it commits `.sandcastle` and the
-  root breadcrumb before pushing, so every merged change is in that commit's
-  diff.
+  root breadcrumb onto the pushed branch, so every merged change is in that
+  commit's diff, and restores the checkout afterwards.
 - **A `tests/` directory an adopter carries never updates itself.** copier
   excludes `tests/` from the render, so a sweep cannot refresh one; an adopter
   installed before that exclusion is pinned to whatever API it copied. Copy the
