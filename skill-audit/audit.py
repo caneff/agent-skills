@@ -10,22 +10,43 @@ from datetime import datetime, timezone
 
 SKILLS_DIR = os.path.expanduser("~/.agents/skills")
 LOGS = os.path.expanduser("~/.claude/projects/**/*.jsonl")  # recurse: subagent logs nest deeper
+
+
+def parse_frontmatter(text):
+    # Leading ---...--- block, one `key: value` per line. Split on the FIRST
+    # colon so a value keeps any later colons (a description often has one).
+    fm, seen = {}, 0
+    for line in text.splitlines():
+        if line.strip() == "---":
+            seen += 1
+            if seen == 2:
+                break
+            continue
+        if seen == 1 and ":" in line:
+            k, v = line.split(":", 1)
+            fm[k.strip()] = v.strip()
+    return fm
+
+
+def _selfcheck():
+    # A description carrying its own colon must survive the first-colon split.
+    fm = parse_frontmatter("---\nname: grill\ndescription: Use when they say: stop.\n---\nbody\n")
+    assert fm["name"] == "grill", fm
+    assert fm["description"] == "Use when they say: stop.", fm
+    print("ok")
+
+
+if sys.argv[1:2] == ["--selfcheck"]:
+    _selfcheck()
+    sys.exit()
+
 STALE_DAYS = int(sys.argv[1]) if len(sys.argv) > 1 else 45  # ponytail: flag threshold, arg overrides
 
 # 1. Parse skills: name + whether model can auto-invoke it.
 skills = {}  # name -> model_invocable(bool)
 for sk in glob.glob(f"{SKILLS_DIR}/*/SKILL.md"):
-    fm, seen = {}, 0
     with open(sk, encoding="utf-8", errors="replace") as f:
-        for line in f:
-            if line.strip() == "---":
-                seen += 1
-                if seen == 2:
-                    break
-                continue
-            if seen == 1 and ":" in line:
-                k, v = line.split(":", 1)
-                fm[k.strip()] = v.strip()
+        fm = parse_frontmatter(f.read())
     name = fm.get("name") or os.path.basename(os.path.dirname(sk))
     disabled = fm.get("disable-model-invocation", "").lower() == "true"
     skills[name] = not disabled
