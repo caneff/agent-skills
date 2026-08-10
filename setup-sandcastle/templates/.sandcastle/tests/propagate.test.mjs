@@ -611,6 +611,10 @@ describe("sandcastle-propagate matches no adopter", () => {
 // apart: a marked hunk, an unmarked hunk, an adopter-added file, and — in a
 // second repo — the change that is NOT divergence, simply lagging a tag behind.
 const REASON = "the agent cache needs a Chromium binary";
+// A marker the author put a line or two above the divergence it explains, rather
+// than touching it. Wrapped prose produces this constantly: a marker comment,
+// then a line that happens to match the render, then the edited one.
+const REASON_APART = "the lesson pages need a browser to photograph";
 
 describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
   let template;
@@ -638,6 +642,26 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
       sand("CODING_STANDARDS.md"),
       "\nA local paragraph nobody marked.\n++ not a header\n-- nor this\n"
     );
+    // Marked at a distance, at exactly the reach. The marker goes in at line 3;
+    // lines 4 and 5 are left as rendered; line 6 is edited. `--unified=0` splits
+    // marker and divergence into separate hunks, three lines apart — the widest
+    // gap a reason crosses. Both positions are relative to the splice, so
+    // rewriting bot-setup.md upstream cannot move them.
+    const near = readFileSync(sand("bot-setup.md"), "utf8").split("\n");
+    near.splice(2, 0, `<!-- sandcastle:local — ${REASON_APART} -->`);
+    near[5] += " Locally edited.";
+    // A third edit three lines past that one. It is in reach of the hunk above
+    // it, but that hunk only borrowed its reason — so nothing should arrive
+    // here, and a reason cannot walk down a densely edited file.
+    near[8] += " Also unexplained.";
+    writeFileSync(sand("bot-setup.md"), near.join("\n"));
+    // One line further and the reason does not travel: same shape, gap of four.
+    // This is the pair that pins the reach — without it the distance could be
+    // any number at all and both tests would still pass.
+    const far = readFileSync(sand("pr-prompt.md"), "utf8").split("\n");
+    far.splice(2, 0, `<!-- sandcastle:local — ${REASON_APART} -->`);
+    far[6] += " Locally edited.";
+    writeFileSync(sand("pr-prompt.md"), far.join("\n"));
     // Adopter-added: no counterpart in the render at all.
     writeFileSync(sand("extra.mts"), "export const local = 1;\n");
     diverged.publish();
@@ -692,6 +716,42 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
   test("reports a marked hunk with its file, line, size and reason", () => {
     expect(lineFor("Dockerfile")).toMatch(/\.sandcastle\/Dockerfile:\d+\s+\+\d+ -\d+\s+local: /);
     expect(lineFor("Dockerfile")).toContain(REASON);
+  });
+
+  // `--unified=0` makes a hunk of every contiguous run of changed lines, so a
+  // marker with even one untouched line under it lands in a hunk of its own and
+  // the divergence below reads UNMARKED. The reason is right there in the file;
+  // a report that calls it unexplained sends a reader to look for something they
+  // already have.
+  test("carries a marker across the hunk boundary to the divergence below it", () => {
+    const botSetup = lines("diverged").filter((l) => l.includes("bot-setup.md"));
+    // Two hunks, not one — the split this is about really did happen.
+    expect(botSetup.length).toBeGreaterThan(1);
+    const edited = botSetup.find((l) => /bot-setup\.md:6\s/.test(l));
+    expect(edited).toBeDefined();
+    // `endsWith`, not `toContain`: the reason must stop at the end of the prose.
+    // A marker written as an HTML comment ends `-->`, and a report that prints
+    // the closer is showing the reader the syntax instead of the reason.
+    expect(edited.endsWith(REASON_APART)).toBe(true);
+  });
+
+  // The other half of the same rule, one line further out. A reason explains
+  // what is next to it, not the rest of the file — and this is the case that
+  // pins the reach to a number rather than to "somewhere between 2 and a lot".
+  test("does not carry it one line further than that", () => {
+    const prPrompt = lines("diverged").filter((l) => l.includes("pr-prompt.md"));
+    const edited = prPrompt.find((l) => /pr-prompt\.md:7\s/.test(l));
+    expect(edited).toBeDefined();
+    expect(edited.endsWith("UNMARKED")).toBe(true);
+  });
+
+  // A hunk that inherited a reason must not re-export it. Otherwise a file with
+  // an edit every couple of lines carries one marker to the bottom, which is
+  // exactly what the reach exists to prevent.
+  test("does not relay an inherited reason to the hunk after it", () => {
+    const relayed = lines("diverged").find((l) => /bot-setup\.md:9\s/.test(l));
+    expect(relayed).toBeDefined();
+    expect(relayed.endsWith("UNMARKED")).toBe(true);
   });
 
   test("reports an unmarked hunk with its file, line and size", () => {

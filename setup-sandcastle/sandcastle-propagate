@@ -80,12 +80,21 @@ divergence_report() {
   # under `set -e -o pipefail` an unhandled one would abort the whole sweep.
   hunks=$({ git diff --no-index --no-prefix --unified=0 -- "$ref/.sandcastle" "$repo/.sandcastle" 2>/dev/null || true; } |
     awk -v name="$name" '
+      BEGIN { carry = 3 }               # how far a reason reaches; see the @@ rule
       # One pending hunk at a time; every boundary emits it before moving on.
-      function emit() {
+      # `eff` is the reason this hunk reports: its own, or one carried down from
+      # the hunk above (see the @@ rule).
+      function emit(  eff) {
         if (!pending) return
-        printf "%d\t%-14s %-44s %-9s %s\n", (reason == "" ? 0 : 1), name, \
+        eff = (reason != "" ? reason : carried)
+        printf "%d\t%-14s %-44s %-9s %s\n", (eff == "" ? 0 : 1), name, \
           (isnew ? path : path ":" line), (isnew ? "NEW" : "+" adds " -" dels), \
-          (reason == "" ? "UNMARKED" : "local: " reason)
+          (eff == "" ? "UNMARKED" : "local: " eff)
+        # What the next hunk may inherit: where this one ended, and why. Only a
+        # hunk that carries its OWN marker exports one — `reason`, never `eff`.
+        # Exporting an inherited reason would let it hop hunk to hunk, and a file
+        # edited every few lines would carry one marker to its end.
+        prevpath = path; prevend = line + (adds > 0 ? adds - 1 : 0); prevreason = reason
         pending = 0
       }
       # Header rules only fire in a header. Inside a hunk, an added line reading
@@ -102,13 +111,30 @@ divergence_report() {
         emit(); header = 0
         split($3, plus, ",")           # the +N[,M] side of `@@ -a,b +c,d @@`
         line = substr(plus[1], 2); adds = 0; dels = 0; reason = ""; pending = 1
+        # A marker explains what sits next to it, and `--unified=0` cuts a hunk
+        # at every run of changed lines — so a marker with even one untouched
+        # line beneath it lands in a hunk of its own and the divergence below it
+        # would read UNMARKED with the reason two lines away. Carry the reason
+        # down when the next hunk starts within `carry` lines of where the last
+        # one ended: near enough that a reader sees them as one thing. Further
+        # than that the marker is not next to anything, and nothing travels —
+        # otherwise one reason at the top of a file would excuse all of it.
+        # `gap >= 0` because the next FILE opens at line 1, which is arbitrarily
+        # far below the last hunk yet subtracts to a negative; the path guard
+        # already stops that, and this makes "within three lines" literal.
+        gap = line - prevend
+        carried = (path == prevpath && prevreason != "" && gap >= 0 && gap <= carry) \
+          ? prevreason : ""
       }
       pending && /^\+/ {
         adds++
         i = index($0, "sandcastle:local")
         if (i > 0) {
           r = substr($0, i + 16)
-          sub(/^[ \t]*(—|--|-|:)?[ \t]*/, "", r); sub(/[ \t]*$/, "", r)
+          sub(/^[ \t]*(—|--|-|:)?[ \t]*/, "", r)
+          # A marker in a wrapping comment syntax — `<!-- … -->` in Markdown and
+          # SVG, `/* … */` in CSS — ends with a closer the reason must not keep.
+          sub(/[ \t]*(-->|\*\/)[ \t]*$/, "", r); sub(/[ \t]*$/, "", r)
           reason = r
         }
       }
