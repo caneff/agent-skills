@@ -292,13 +292,14 @@ test("a failed render names the step and says re-running is not safe", () => {
   expect(snapshot(f.repo)).toBe(before);
 });
 
-// The one end-to-end run: real copier, real `npm install`, real `npx tsc`. The
-// install is not stubbed anywhere — a flag that skipped the slow part would
-// mean the asserted path is not the shipped path (#154).
 // Compare the seed by digest, never by content: the script copies by path so
 // that a filled `.env` never reaches a transcript, and a failing `toEqual` on
 // the bytes would print the very thing that rule protects.
 const digest = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+
+// The one end-to-end run: real copier, real `npm install`, real `npx tsc`. The
+// install is not stubbed anywhere — a flag that skipped the slow part would
+// mean the asserted path is not the shipped path (#154).
 
 describe.skipIf(!hasCopier())("a full install, python arm", () => {
   test("renders, wires the host runtime, typechecks and hands off", { timeout: 600_000 }, () => {
