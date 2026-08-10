@@ -655,6 +655,121 @@ const ARC_REWRITTEN_PROSE = {
         "\n" +
         "    const plan = planGateOutcome(verdict, gateIds, counters.escalated);",
     ],
+    // #104 moved every `gh` JSON parser into github-parse.mts and put one
+    // failure policy behind them, so the call sites below shrank to the fetch
+    // plus a named parser, and the three inline result limits became two
+    // shared constants.
+    [
+      "import { parseOpenIssues, parsePrsClosingIssues } from \"./github-parse.mts\";",
+      "import {\n" +
+        "  ALL_ISSUE_LIMIT,\n" +
+        "  OPEN_ISSUE_LIMIT,\n" +
+        "  parseBlockedByRows,\n" +
+        "  parseIssueEdges,\n" +
+        "  parseIssueList,\n" +
+        "  parseOpenIssues,\n" +
+        "  parseParentEdges,\n" +
+        "  parsePrsClosingIssues,\n" +
+        "  type IssueEdgeRow,\n" +
+        "} from \"./github-parse.mts\";",
+    ],
+    [
+      "  const out = gh(\n" +
+        "    `issue list --state open --label \"${label}\" --limit 100 --json number,title`\n" +
+        "  );\n" +
+        "  return out ? JSON.parse(out) : [];",
+      "  return parseIssueList(\n" +
+        "    gh(\n" +
+        "      `issue list --state open --label \"${label}\" --limit ${OPEN_ISSUE_LIMIT} --json number,title`\n" +
+        "    )\n" +
+        "  );",
+    ],
+    [
+      "    gh(`issue list --state open --limit 200 --json number,title,labels`)",
+      "    gh(\n" +
+        "      `issue list --state open --limit ${OPEN_ISSUE_LIMIT} --json number,title,labels`\n" +
+        "    )",
+    ],
+    [
+      "const blockedByRowsSchema = z.array(\n" +
+        "  z.object({ number: z.number(), blockedBy: z.array(z.number()) })\n" +
+        ");\n" +
+        "\n" +
+        "function getBlockedByForInReview(): Map<number, number[]> {\n" +
+        "  const out = gh(\n" +
+        "    `issue list --state open --label \"in-review\" --limit 100 --json number,blockedBy --jq '[.[] | {number, blockedBy: [.blockedBy.nodes[].number]}]'`\n" +
+        "  );\n" +
+        "  const map = new Map<number, number[]>();\n" +
+        "  if (!out) return map;\n" +
+        "  for (const row of blockedByRowsSchema.parse(JSON.parse(out))) {\n" +
+        "    map.set(row.number, row.blockedBy);\n" +
+        "  }\n" +
+        "  return map;",
+      "function getBlockedByForInReview(): Map<number, number[]> {\n" +
+        "  return parseBlockedByRows(\n" +
+        "    gh(\n" +
+        "      `issue list --state open --label \"in-review\" --limit ${OPEN_ISSUE_LIMIT} --json number,blockedBy --jq '[.[] | {number, blockedBy: [.blockedBy.nodes[].number]}]'`\n" +
+        "    )\n" +
+        "  );",
+    ],
+    [
+      "const parentRowsSchema = z.array(\n" +
+        "  z.object({ number: z.number(), parent: z.number().nullable() })\n" +
+        ");\n" +
+        "\n" +
+        "function getParentEdges(): Map<string, string> {\n" +
+        "  // ponytail: --limit 100 matches every other issue fetch here; a repo with\n" +
+        "  // >100 open issues could miss a completed issue's parent edge (it then falls\n" +
+        "  // back to the planner-declared parents). Raise the limit if that ceiling bites.\n" +
+        "  const out = gh(\n" +
+        "    `issue list --state open --limit 100 --json number,parent --jq '[.[] | {number, parent: .parent.number}]'`\n" +
+        "  );\n" +
+        "  const map = new Map<string, string>();\n" +
+        "  if (!out) return map;\n" +
+        "  for (const row of parentRowsSchema.parse(JSON.parse(out))) {\n" +
+        "    if (row.parent !== null) map.set(String(row.number), String(row.parent));\n" +
+        "  }\n" +
+        "  return map;",
+      "function getParentEdges(): Map<string, string> {\n" +
+        "  // A repo with more open issues than OPEN_ISSUE_LIMIT could miss a completed\n" +
+        "  // issue's parent edge; it then falls back to the planner-declared parents.\n" +
+        "  return parseParentEdges(\n" +
+        "    gh(\n" +
+        "      `issue list --state open --limit ${OPEN_ISSUE_LIMIT} --json number,parent --jq '[.[] | {number, parent: .parent.number}]'`\n" +
+        "    )\n" +
+        "  );",
+    ],
+    [
+      "const issueEdgeRowsSchema = z.array(\n" +
+        "  z.object({\n" +
+        "    number: z.number(),\n" +
+        "    state: z.enum([\"OPEN\", \"CLOSED\"]),\n" +
+        "    parent: z.number().nullable(),\n" +
+        "  })\n" +
+        ");\n" +
+        "\n" +
+        "// Every issue's id, state and parent \u2014 the one query behind both the closed-set\n" +
+        "// `issueIsClosed` memoises (#127) and the spent-parent check below. Null when the\n" +
+        "// query fails; each caller decides what that means for it.",
+      "// The one query behind both the closed-set `issueIsClosed` memoises (#127) and\n" +
+        "// the spent-parent check below. Null when there is no usable answer; each\n" +
+        "// caller decides what that means for it.",
+    ],
+    [
+      "// suggestion. Raise the limit if that ceiling bites.\n" +
+        "function fetchIssueEdges(): z.infer<typeof issueEdgeRowsSchema> | null {\n" +
+        "  const out = gh(\n" +
+        "    `issue list --state all --limit 1000 --json number,state,parent --jq '[.[] | {number, state, parent: .parent.number}]'`\n" +
+        "  );\n" +
+        "  return out ? issueEdgeRowsSchema.parse(JSON.parse(out)) : null;",
+      "// suggestion.\n" +
+        "function fetchIssueEdges(): IssueEdgeRow[] | null {\n" +
+        "  return parseIssueEdges(\n" +
+        "    gh(\n" +
+        "      `issue list --state all --limit ${ALL_ISSUE_LIMIT} --json number,state,parent --jq '[.[] | {number, state, parent: .parent.number}]'`\n" +
+        "    )\n" +
+        "  );",
+    ],
   ],
   // .sandcastle/reconcile.mts and retry-policy.mts — the rest of #169. The
   // outcome kind is renamed and threaded with the axes that failed; the notes
@@ -834,6 +949,21 @@ const ARC_REWRITTEN_PROSE = {
   ],
 };
 
+// Files deliberately REWRITTEN end to end since the pin, where a from→to pair
+// per hunk would put a copy of the whole new file in this test — a ledger that
+// says only "the file equals this copy of the file", and that has to be
+// rewritten again on the next edit. Listing one drops the body from the byte
+// net; its presence stays pinned by the set net above, and its behaviour by its
+// own unit tests.
+//   .sandcastle/github-parse.mts — #104 made this the single home for `gh` JSON
+//   parsing: three parsers moved in from main.mts, the trust-casts became zod
+//   schemas, and one failure policy replaced two. Roughly 20 lines of the
+//   original survive. github-parse.test.mjs covers every parser, malformed
+//   input included.
+// Reach for a pair in ARC_REWRITTEN_PROSE first — this list is for a file the
+// ticket genuinely replaced, not a file it edited a lot.
+const ARC_REWRITTEN_RENDERS = [".sandcastle/github-parse.mts"];
+
 // Answers each arc ticket deliberately ADDS to a Python adopter's breadcrumb.
 // The net below demands the breadcrumb equal the pre-arc one plus exactly these,
 // so a ticket declares its addition instead of the assertion quietly widening.
@@ -950,6 +1080,8 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
       if (path === BREADCRUMB) continue;
       // A withdrawn file has no counterpart to compare; the set test above owns it.
       if (ARC_WITHDRAWN_RENDERS.includes(path)) continue;
+      // A file the ticket replaced outright — its own unit tests own it now.
+      if (ARC_REWRITTEN_RENDERS.includes(path)) continue;
       // Rewrites first, then the append check reads what they left: a file can
       // be edited in place AND appended to, and taking the append shortcut first
       // would excuse every edit above the appended text in such a file.
