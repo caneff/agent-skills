@@ -124,11 +124,15 @@ divergence_report() {
   # reports. The temp render needs no such filter — built from the manifest, it
   # holds no runtime output by construction.
   # `|| true`: check-ignore exits 1 when nothing is ignored, the clean case.
+  # `core.quotePath=false`: git C-quotes a non-ASCII path on the way out, and a
+  # quoted key would match none of the raw paths it is meant to filter.
   ignored=$(printf '%s\n' "$hunks" | awk 'NF { p = $3; sub(/:[0-9]+$/, "", p); print p }' | sort -u |
-    { git -C "$repo" check-ignore --stdin 2>/dev/null || true; })
+    { git -C "$repo" -c core.quotePath=false check-ignore --stdin 2>/dev/null || true; })
 
-  printf '%s\n' "$hunks" | awk -v ign="$ignored" '
-      BEGIN { n = split(ign, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") skip[a[i]] = 1 }
+  # Through the environment, not `-v`: awk expands backslash escapes in a `-v`
+  # value, so a path carrying one would arrive mangled and match nothing.
+  printf '%s\n' "$hunks" | IGNORED="$ignored" awk '
+      BEGIN { n = split(ENVIRON["IGNORED"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") skip[a[i]] = 1 }
       NF { p = $3; sub(/:[0-9]+$/, "", p); if (!(p in skip)) print }
     ' | sort -s -k1,1n | cut -f2-
 }
