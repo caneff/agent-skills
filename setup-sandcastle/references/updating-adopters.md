@@ -11,8 +11,8 @@ discovers every adopter under `~/src` by its root `.copier-answers.yml`
 breadcrumb (no hardcoded list), lets `copier update` re-assert each repo's own
 recorded answers, then opens a pull request on each. A linked git worktree holds
 a checked-out copy of its repo's breadcrumb, so the walk finds it too — the sweep
-passes over it in silence, because sweeping it would open a pull request out of
-someone's in-progress branch. Always dry-run first:
+passes over it in silence and counts it as nobody, because sweeping it would open
+a pull request out of someone's in-progress branch. Always dry-run first:
 
 ```bash
 sandcastle-propagate --dry-run     # show what each repo would receive
@@ -52,7 +52,8 @@ fleet ends up read by summary again.
 **Matching no adopter is an error**, whichever way it happens, and the two are
 worded apart because they send you to different places: finding no
 `.copier-answers.yml` at all names the search root you gave it, while finding
-breadcrumbs that none of them name this template says so instead. This is the
+breadcrumbs of which none belongs to an adopter — foreign templates, or nothing
+but linked worktrees — says so instead. This is the
 case #93 got wrong.
 
 `--dry-run` and `--divergence` carry nothing, so they have no update to count.

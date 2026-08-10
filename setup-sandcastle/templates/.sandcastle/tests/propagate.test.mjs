@@ -595,7 +595,7 @@ describe("sandcastle-propagate matches no adopter", () => {
     const sweep = propagate(template.src, foreign, [], { bin: gh.bin });
     expect(sweep.status).not.toBe(0);
     expect(sweep.stderr).toContain("1 .copier-answers.yml");
-    expect(sweep.stderr).toContain("none naming caneff/agent-skills");
+    expect(sweep.stderr).toContain("none of them an adopter of caneff/agent-skills");
   });
 
   // `--divergence` exits 0 whatever it reports — but reporting on nobody is not
@@ -832,5 +832,14 @@ describe.skipIf(!hasCopier())("sandcastle-propagate meets a linked worktree", ()
 
   test("never names the worktree as an adopter of its own", () => {
     expect(sweep.stdout).not.toContain("== wip ");
+  });
+
+  // The worktree is passed over, not counted — so a search root narrowed onto
+  // one alone has matched no adopter, and that is the error it already is. A
+  // clean all-zero summary here would be the #93 false green again.
+  test("fails a run whose search root holds only the worktree", () => {
+    const only = propagate(template.src, join(searchRoot, "has-worktree", "worktrees"), [], { bin: gh.bin });
+    expect(only.status).not.toBe(0);
+    expect(only.stderr).toContain("caneff/agent-skills");
   });
 });
