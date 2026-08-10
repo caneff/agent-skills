@@ -222,4 +222,5 @@ else
   echo "  - Fill .sandcastle/.env (copy .sandcastle/.env.example): CLAUDE_CODE_OAUTH_TOKEN, and GH_TOKEN or the GITHUB_APP_* block."
 fi
 echo "  - Grant the GitHub App bot access to THIS repo: https://github.com/settings/installations -> the bot App -> Configure -> Repository access -> add this repo -> Save. See .sandcastle/bot-setup.md step 3."
+echo "  - Exclude .sandcastle/ from this repo's formatters and linters (prettier, ruff, pre-commit hooks). The template owns how those files are formatted; a reflow shows up as unmarked divergence and collides with the next template update. See .sandcastle/CODING_STANDARDS.md rule 6."
 echo "  - Then build the sandbox image and run \`npm run sandcastle\`; the planner only selects issues labelled ready-for-agent."

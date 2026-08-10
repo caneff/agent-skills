@@ -77,6 +77,20 @@ const expectTheLocalMarkerRule = (doc) => {
   expect(doc).toMatch(/fails this axis/);
 };
 
+// The formatting rule (issue #183) renders on every arm too — a Python adopter's
+// formatter reflows a rendered file exactly as a Node one's does. Both arms
+// assert the instruction (exclude the subtree from the formatter) and both
+// consequences the rule exists to name: unmarked divergence now, and a merge
+// conflict on the next template update.
+const expectTheFormattingRule = (doc) => {
+  expect(doc).toMatch(/formatter/i);
+  // `[\s\S]` rather than `.` — the doc is wrapped prose, so the instruction and
+  // the path it names routinely land on different lines.
+  expect(doc).toMatch(/exclude[\s\S]{0,40}\.sandcastle/i);
+  expect(doc).toMatch(/divergence/i);
+  expect(doc).toMatch(/conflict/i);
+};
+
 // Answers are matched line-anchored. A bare substring would also match a value
 // commented out, indented under another key, or prefixing a longer line.
 const recordedAnswer = (name, value) =>
@@ -145,6 +159,10 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
 
   test("renders the sandcastle:local marker rule into the standards doc", () => {
     expectTheLocalMarkerRule(standardsIn(target));
+  });
+
+  test("renders the formatting rule into the standards doc", () => {
+    expectTheFormattingRule(standardsIn(target));
   });
 
   // Parameterizing the orchestrator meant renaming `main.mts` and `address.mts`
@@ -274,7 +292,8 @@ const PRE_ARC = "59c7941"; // last commit before the LANGUAGE arc (issue #131)
 // from "identical" to "the pre-arc body, still byte-for-byte, plus new text at
 // the end" — so the rest of the file stays pinned. Re-pinning PRE_ARC instead
 // would exempt every file at once and retire the net for the tickets to come.
-//   .sandcastle/CODING_STANDARDS.md — the sandcastle:local rule (issue #136)
+//   .sandcastle/CODING_STANDARDS.md — the sandcastle:local rule (issue #136) and
+//   the formatting rule below it (issue #183)
 const ARC_APPENDED_RENDERS = [".sandcastle/CODING_STANDARDS.md"];
 
 // Text deliberately REWRITTEN in place since the pin — comment prose from an
@@ -989,6 +1008,10 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
 
   test("gets the sandcastle:local marker rule too — it is not a python-arm rule", () => {
     expectTheLocalMarkerRule(standardsIn(fresh));
+  });
+
+  test("gets the formatting rule too — it is not a python-arm rule", () => {
+    expectTheFormattingRule(standardsIn(fresh));
   });
 
   test("is never asked for a Python version, so none is recorded", () => {
