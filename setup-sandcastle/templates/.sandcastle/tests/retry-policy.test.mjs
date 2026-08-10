@@ -96,12 +96,9 @@ describe("recordSetAttempt", () => {
     expect(r).toEqual({ attempts: {}, escalated: true });
   });
 
-  // The bug this function exists to make untestable-by-hand: fold with `=`
-  // instead of `||=` and the last key's verdict wins. The set fails and passes
-  // the gate in lockstep, so its counters normally move together — but
-  // recordAttempt deletes a key as it escalates, so counters that ever drifted
-  // apart would let a last-wins read miss the escalation and loop the set
-  // forever. Only the FIRST key here is at the cap.
+  // The case the neighbouring cap test cannot make: only the FIRST key is at the
+  // cap, so folding with `=` instead of `||=` reads the second key's `false` and
+  // loses the escalation.
   test("escalates when any key hits the cap, not only the last one", () => {
     const r = recordSetAttempt({ "gate-7": 1 }, keys, "test-fail");
     expect(r.escalated).toBe(true);

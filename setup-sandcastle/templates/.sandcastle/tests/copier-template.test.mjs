@@ -646,14 +646,14 @@ const ARC_REWRITTEN_PROSE = {
       "    // Consecutive gate-failure cap (#25): one counter per issue under key\n" +
         "    // gate-<id>, folded by recordSetAttempt — which owns what each verdict does\n" +
         "    // to the counters and when the set escalates (#103).\n" +
-        "    const set = recordSetAttempt(\n" +
+        "    const counters = recordSetAttempt(\n" +
         "      readAttempts(),\n" +
         "      gateIds.map((id) => `gate-${id}`),\n" +
         "      verdict.status\n" +
         "    );\n" +
-        "    writeAttempts(set.attempts);\n" +
+        "    writeAttempts(counters.attempts);\n" +
         "\n" +
-        "    const plan = planGateOutcome(verdict, gateIds, set.escalated);",
+        "    const plan = planGateOutcome(verdict, gateIds, counters.escalated);",
     ],
   ],
   // .sandcastle/reconcile.mts and retry-policy.mts — the rest of #169. The
@@ -754,8 +754,7 @@ const ARC_REWRITTEN_PROSE = {
         "export function recordSetAttempt(\n" +
         "  attempts: Attempts,\n" +
         "  keys: string[],\n" +
-        "  status: CheckStatus,\n" +
-        "  cap = REVIEW_RETRY_CAP\n" +
+        "  status: CheckStatus\n" +
         "): { attempts: Attempts; escalated: boolean } {\n" +
         "  let next = { ...attempts };\n" +
         '  if (status === "pass") {\n' +
@@ -765,7 +764,7 @@ const ARC_REWRITTEN_PROSE = {
         '  if (status !== "test-fail") return { attempts: next, escalated: false };\n' +
         "  let escalated = false;\n" +
         "  for (const key of keys) {\n" +
-        "    const r = recordAttempt(next, key, cap);\n" +
+        "    const r = recordAttempt(next, key);\n" +
         "    next = r.attempts;\n" +
         "    escalated ||= r.escalate;\n" +
         "  }\n" +

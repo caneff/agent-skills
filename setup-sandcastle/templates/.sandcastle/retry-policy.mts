@@ -62,8 +62,7 @@ export function recordAttempt(
 export function recordSetAttempt(
   attempts: Attempts,
   keys: string[],
-  status: CheckStatus,
-  cap = REVIEW_RETRY_CAP
+  status: CheckStatus
 ): { attempts: Attempts; escalated: boolean } {
   let next = { ...attempts };
   if (status === "pass") {
@@ -73,7 +72,7 @@ export function recordSetAttempt(
   if (status !== "test-fail") return { attempts: next, escalated: false };
   let escalated = false;
   for (const key of keys) {
-    const r = recordAttempt(next, key, cap);
+    const r = recordAttempt(next, key);
     next = r.attempts;
     escalated ||= r.escalate;
   }
