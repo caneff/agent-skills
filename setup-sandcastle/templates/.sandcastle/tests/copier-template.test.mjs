@@ -275,10 +275,9 @@ const ARC_REWRITTEN_PROSE = {
       "cross-run dependencies wait for a human merge.\n" +
         "\n" +
         "**Live parent** — A parent an issue may stack on: its issue is still open\n" +
-        "_and_ its branch carries work not yet in `main`. State is asked first,\n" +
-        "because a closed issue's branch can still carry commits that never landed —\n" +
-        "the work shipped as a from-scratch reimplementation — and by content alone\n" +
-        "that is indistinguishable from live work.",
+        "_and_ its branch carries work not yet in `main`. A closed parent is never\n" +
+        "live, however its branch looks. Opposite: a stale branch, which the run\n" +
+        "deletes.",
     ],
   ],
   // .sandcastle/base-resolution.mts — #127, a fix rather than an arc ticket: a
@@ -296,9 +295,10 @@ const ARC_REWRITTEN_PROSE = {
       "  branchExistsWithWork: (parentId: string) => boolean;\n" +
         "  // Invoked for the ≥2-parent (diamond) case.",
       "  branchExistsWithWork: (parentId: string) => boolean;\n" +
-        "  // True when the parent's ISSUE is closed — see `isLiveParent`. Optional so a\n" +
-        "  // caller that knows no issue state keeps the old content-only behaviour.\n" +
-        "  issueIsClosed?: (parentId: string) => boolean;\n" +
+        "  // True when the parent's ISSUE is closed — see `isLiveParent`. Required, not\n" +
+        "  // optional: a default would silently restore the content-only liveness that\n" +
+        "  // #127 exists to end.\n" +
+        "  issueIsClosed: (parentId: string) => boolean;\n" +
         "  // Invoked for the ≥2-parent (diamond) case.",
     ],
     [
@@ -321,7 +321,7 @@ const ARC_REWRITTEN_PROSE = {
     [
       "  branchExistsWithWork,\n  onMultiParent = () => \"main\",",
       "  branchExistsWithWork,\n" +
-        "  issueIsClosed = () => false,\n" +
+        "  issueIsClosed,\n" +
         '  onMultiParent = () => "main",',
     ],
     [
@@ -333,14 +333,14 @@ const ARC_REWRITTEN_PROSE = {
     [
       "  branchExistsWithWork: (parentId: string) => boolean;\n}",
       "  branchExistsWithWork: (parentId: string) => boolean;\n" +
-        "  // Whether a parent's ISSUE is closed — see `isLiveParent`. Optional, as above.\n" +
-        "  issueIsClosed?: (parentId: string) => boolean;\n}",
+        "  // Whether a parent's ISSUE is closed — see `isLiveParent`. Required, as above.\n" +
+        "  issueIsClosed: (parentId: string) => boolean;\n}",
     ],
     [
       "  { git, branchExistsWithWork }: MultiParentDeps\n" +
         "): string | null {\n" +
         "  const present = parents.filter(branchExistsWithWork).map(issueBranch);",
-      "  { git, branchExistsWithWork, issueIsClosed = () => false }: MultiParentDeps\n" +
+      "  { git, branchExistsWithWork, issueIsClosed }: MultiParentDeps\n" +
         "): string | null {\n" +
         "  const present = parents\n" +
         "    .filter((p) => isLiveParent(p, branchExistsWithWork, issueIsClosed))\n" +
@@ -400,30 +400,28 @@ const ARC_REWRITTEN_PROSE = {
     ],
     [
       "// Whether `branch` still merges into main without conflict.",
-      "// Issue ids GitHub reports as CLOSED. Base resolution asks this before trusting\n" +
-        "// what a parent branch's commits look like (issue #127), and the branch GC below\n" +
-        "// asks it to clear the branches of shipped issues. Fetched once and memoised —\n" +
-        "// the answer changes only when a human merges something, and it is read once per\n" +
-        "// parent per issue per iteration.\n" +
-        "const closedIssueIdsSchema = z.array(z.number());\n" +
+        "// Issue ids GitHub reports as CLOSED. Base resolution asks this before trusting\n" +
+        "// what a parent branch's commits look like (issue #127, ADR-0004), and the branch\n" +
+        "// GC below asks it to clear the branches of shipped issues. Memoised over one\n" +
+        "// fetch: the answer is read once per parent per issue per iteration, and the bot\n" +
+        "// never closes an issue mid-run.\n" +
         "let closedIds: Set<string> | null = null;\n" +
         "function issueIsClosed(id: string): boolean {\n" +
         "  if (closedIds === null) {\n" +
-        "    // --state closed spans the repo's whole history, so the limit matches\n" +
-        "    // getDeliveredParents' rather than the open-only fetches'.\n" +
-        "    const out = gh(\n" +
-        "      `issue list --state closed --limit 1000 --json number --jq '[.[].number]'`\n" +
-        "    );\n" +
-        "    if (out === null) {\n" +
-        "      // Failing OPEN (an empty set) is the pre-#127 behaviour: trust the branch\n" +
-        "      // content. Failing CLOSED would call every parent dead and base the whole\n" +
-        "      // forest on main, which is a far worse answer than the bug this fixes.\n" +
+        "    const rows = fetchIssueEdges();\n" +
+        "    if (rows === null) {\n" +
+        "      // Fail OPEN (an empty set): liveness falls back to branch content, the\n" +
+        "      // pre-#127 behaviour. Failing closed would call every parent dead and base\n" +
+        "      // the whole forest on main \u2014 a wrong answer for every issue, to avoid a\n" +
+        "      // wrong answer for one.\n" +
         "      console.error(\n" +
-        '        "  ! could not list closed issues; base resolution falls back to branch content this run"\n' +
+        "        \"  ! could not list issue states; base resolution falls back to branch content this run\"\n" +
         "      );\n" +
         "    }\n" +
         "    closedIds = new Set(\n" +
-        "      out ? closedIssueIdsSchema.parse(JSON.parse(out)).map(String) : []\n" +
+        "      (rows ?? [])\n" +
+        "        .filter((row) => row.state === \"CLOSED\")\n" +
+        "        .map((row) => String(row.number))\n" +
         "    );\n" +
         "  }\n" +
         "  return closedIds.has(id);\n" +
@@ -433,7 +431,7 @@ const ARC_REWRITTEN_PROSE = {
         "// run before any branch is cut. A closed issue's branch has no reader left: its\n" +
         "// work either landed or was superseded, and leaving it on disk is what let a\n" +
         "// diamond merge #101's dead implementation into #107's base every run (#127).\n" +
-        "// Local only — deleting a remote branch is a human's call, and base resolution\n" +
+        "// Local only \u2014 deleting a remote branch is a human's call, and base resolution\n" +
         "// reads local refs anyway.\n" +
         "function gcClosedIssueBranches(): void {\n" +
         "  const stale = staleClosedBranches(\n" +
@@ -441,12 +439,61 @@ const ARC_REWRITTEN_PROSE = {
         "    issueIsClosed\n" +
         "  );\n" +
         "  for (const branch of stale) {\n" +
-        "    git(`branch -D ${branch}`);\n" +
-        "    console.log(`  ${branch} — issue closed; stale branch deleted`);\n" +
+        "    // Only claim the delete git actually did: `branch -D` fails when the branch\n" +
+        "    // is checked out in a leftover worktree, and a log line saying otherwise\n" +
+        "    // would hide the exact landmine this GC exists to clear.\n" +
+        "    if (git(`branch -D ${branch}`) === null) {\n" +
+        "      console.error(`  ! ${branch} \u2014 issue closed but the branch would not delete`);\n" +
+        "    } else {\n" +
+        "      console.log(`  ${branch} \u2014 issue closed; stale branch deleted`);\n" +
+        "    }\n" +
         "  }\n" +
         "}\n" +
         "\n" +
         "// Whether `branch` still merges into main without conflict.",
+    ],
+    [
+      "// Open parents whose every sub-issue is closed: the spec is delivered and only\n" +
+        "// its umbrella issue lingers. The bot never closes an issue, so the run summary\n" +
+        "// surfaces these for a human to close (spent-parent hygiene).\n" +
+        "function getDeliveredParents(): Set<string> {\n" +
+        "  // ponytail: --state all spans every closed issue, so the limit is higher than\n" +
+        "  // the open-only fetches. gh returns newest-first, and a spec's children sit\n" +
+        "  // near it in numbering, so truncation rarely splits a family. If it ever does\n" +
+        "  // (a repo past the cap), the flag can be wrong in either direction \u2014 this is a\n" +
+        "  // human-verified close reminder, not an auto-close, so the harm is a stray\n" +
+        "  // suggestion. Raise the limit if that ceiling bites.\n" +
+        "  const out = gh(\n" +
+        "    `issue list --state all --limit 1000 --json number,state,parent --jq '[.[] | {number, state, parent: .parent.number}]'`\n" +
+        "  );\n" +
+        "  if (!out) return new Set<string>();\n" +
+        "  return deliveredParentIds(issueEdgeRowsSchema.parse(JSON.parse(out)));\n" +
+        "}",
+        "// Every issue's id, state and parent \u2014 the one query behind both the closed-set\n" +
+        "// `issueIsClosed` memoises (#127) and the spent-parent check below. Null when the\n" +
+        "// query fails; each caller decides what that means for it.\n" +
+        "//\n" +
+        "// ponytail: --state all spans every closed issue, so the limit is higher than\n" +
+        "// the open-only fetches. gh returns newest-first, and a spec's children sit\n" +
+        "// near it in numbering, so truncation rarely splits a family. If it ever does\n" +
+        "// (a repo past the cap), the flag can be wrong in either direction \u2014 this is a\n" +
+        "// human-verified close reminder, not an auto-close, so the harm is a stray\n" +
+        "// suggestion. Raise the limit if that ceiling bites.\n" +
+        "function fetchIssueEdges(): z.infer<typeof issueEdgeRowsSchema> | null {\n" +
+        "  const out = gh(\n" +
+        "    `issue list --state all --limit 1000 --json number,state,parent --jq '[.[] | {number, state, parent: .parent.number}]'`\n" +
+        "  );\n" +
+        "  return out ? issueEdgeRowsSchema.parse(JSON.parse(out)) : null;\n" +
+        "}\n" +
+        "\n" +
+        "// Open parents whose every sub-issue is closed: the spec is delivered and only\n" +
+        "// its umbrella issue lingers. The bot never closes an issue, so the run summary\n" +
+        "// surfaces these for a human to close (spent-parent hygiene). Fetched fresh at\n" +
+        "// the end of the run rather than reusing the start-of-run memo, so an issue a\n" +
+        "// human closed mid-run is counted.\n" +
+        "function getDeliveredParents(): Set<string> {\n" +
+        "  return deliveredParentIds(fetchIssueEdges() ?? []);\n" +
+        "}",
     ],
     [
       "// Pre-loop reconciliation sweep: restore in-review ⟺ open PR invariant before",
@@ -656,6 +703,14 @@ const ARC_REWRITTEN_PROSE = {
 // so a ticket declares its addition instead of the assertion quietly widening.
 const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 
+// Files the template deliberately ADDS since the pin. Same bargain as the
+// answers list: the set-equality net stays exact, and a new render is declared
+// rather than the assertion quietly widening to "a superset is fine".
+//   .sandcastle/docs/adr/0004-…  — issue state gates parent liveness (#127)
+const ARC_ADDED_RENDERS = [
+  ".sandcastle/docs/adr/0004-issue-state-gates-parent-liveness.md",
+];
+
 function renderedTree(root) {
   const files = new Map();
   for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
@@ -732,7 +787,9 @@ describe.skipIf(!hasCopier())("the delimiter switch is invisible to an adopter",
   afterAll(() => discard(src, before, after, adopter));
 
   test("renders the same set of files as the pre-arc template", () => {
-    expect([...renderedTree(after).keys()].sort()).toEqual([...renderedTree(before).keys()].sort());
+    expect([...renderedTree(after).keys()].sort()).toEqual(
+      [...renderedTree(before).keys(), ...ARC_ADDED_RENDERS].sort()
+    );
   });
 
   test("renders every file byte-identically to the pre-arc template", () => {

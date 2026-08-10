@@ -34,9 +34,10 @@ export interface ResolveBaseOptions {
   // `main` (i.e. it was built this run and hasn't been merged). False when the
   // branch is absent or its work already landed in main.
   branchExistsWithWork: (parentId: string) => boolean;
-  // True when the parent's ISSUE is closed — see `isLiveParent`. Optional so a
-  // caller that knows no issue state keeps the old content-only behaviour.
-  issueIsClosed?: (parentId: string) => boolean;
+  // True when the parent's ISSUE is closed — see `isLiveParent`. Required, not
+  // optional: a default would silently restore the content-only liveness that
+  // #127 exists to end.
+  issueIsClosed: (parentId: string) => boolean;
   // Invoked for the ≥2-parent (diamond) case. Builds and returns a base branch
   // containing all parents, or `null` if that merge conflicts. Defaults to a safe
   // fall back to `main` when no hook is supplied.
@@ -61,7 +62,7 @@ const isLiveParent = (
 export function resolveBase({
   parents,
   branchExistsWithWork,
-  issueIsClosed = () => false,
+  issueIsClosed,
   onMultiParent = () => "main",
 }: ResolveBaseOptions): string | null {
   if (parents.length === 0) return "main";
@@ -83,8 +84,8 @@ export interface MultiParentDeps {
   git: (args: string) => string | null;
   // Whether a parent's issue branch exists locally with unmerged work this run.
   branchExistsWithWork: (parentId: string) => boolean;
-  // Whether a parent's ISSUE is closed — see `isLiveParent`. Optional, as above.
-  issueIsClosed?: (parentId: string) => boolean;
+  // Whether a parent's ISSUE is closed — see `isLiveParent`. Required, as above.
+  issueIsClosed: (parentId: string) => boolean;
 }
 
 // Build a temp base branch for a multi-parent (diamond) issue: one containing
@@ -101,7 +102,7 @@ export interface MultiParentDeps {
 export function buildMultiParentBase(
   issueId: string,
   parents: string[],
-  { git, branchExistsWithWork, issueIsClosed = () => false }: MultiParentDeps
+  { git, branchExistsWithWork, issueIsClosed }: MultiParentDeps
 ): string | null {
   const present = parents
     .filter((p) => isLiveParent(p, branchExistsWithWork, issueIsClosed))

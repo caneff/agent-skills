@@ -244,29 +244,27 @@ function branchExistsWithWork(parentId: string): boolean {
 }
 
 // Issue ids GitHub reports as CLOSED. Base resolution asks this before trusting
-// what a parent branch's commits look like (issue #127), and the branch GC below
-// asks it to clear the branches of shipped issues. Fetched once and memoised —
-// the answer changes only when a human merges something, and it is read once per
-// parent per issue per iteration.
-const closedIssueIdsSchema = z.array(z.number());
+// what a parent branch's commits look like (issue #127, ADR-0004), and the branch
+// GC below asks it to clear the branches of shipped issues. Memoised over one
+// fetch: the answer is read once per parent per issue per iteration, and the bot
+// never closes an issue mid-run.
 let closedIds: Set<string> | null = null;
 function issueIsClosed(id: string): boolean {
   if (closedIds === null) {
-    // --state closed spans the repo's whole history, so the limit matches
-    // getDeliveredParents' rather than the open-only fetches'.
-    const out = gh(
-      `issue list --state closed --limit 1000 --json number --jq '[.[].number]'`
-    );
-    if (out === null) {
-      // Failing OPEN (an empty set) is the pre-#127 behaviour: trust the branch
-      // content. Failing CLOSED would call every parent dead and base the whole
-      // forest on main, which is a far worse answer than the bug this fixes.
+    const rows = fetchIssueEdges();
+    if (rows === null) {
+      // Fail OPEN (an empty set): liveness falls back to branch content, the
+      // pre-#127 behaviour. Failing closed would call every parent dead and base
+      // the whole forest on main — a wrong answer for every issue, to avoid a
+      // wrong answer for one.
       console.error(
-        "  ! could not list closed issues; base resolution falls back to branch content this run"
+        "  ! could not list issue states; base resolution falls back to branch content this run"
       );
     }
     closedIds = new Set(
-      out ? closedIssueIdsSchema.parse(JSON.parse(out)).map(String) : []
+      (rows ?? [])
+        .filter((row) => row.state === "CLOSED")
+        .map((row) => String(row.number))
     );
   }
   return closedIds.has(id);
@@ -284,8 +282,14 @@ function gcClosedIssueBranches(): void {
     issueIsClosed
   );
   for (const branch of stale) {
-    git(`branch -D ${branch}`);
-    console.log(`  ${branch} — issue closed; stale branch deleted`);
+    // Only claim the delete git actually did: `branch -D` fails when the branch
+    // is checked out in a leftover worktree, and a log line saying otherwise
+    // would hide the exact landmine this GC exists to clear.
+    if (git(`branch -D ${branch}`) === null) {
+      console.error(`  ! ${branch} — issue closed but the branch would not delete`);
+    } else {
+      console.log(`  ${branch} — issue closed; stale branch deleted`);
+    }
   }
 }
 
@@ -391,21 +395,30 @@ const issueEdgeRowsSchema = z.array(
   })
 );
 
-// Open parents whose every sub-issue is closed: the spec is delivered and only
-// its umbrella issue lingers. The bot never closes an issue, so the run summary
-// surfaces these for a human to close (spent-parent hygiene).
-function getDeliveredParents(): Set<string> {
-  // ponytail: --state all spans every closed issue, so the limit is higher than
-  // the open-only fetches. gh returns newest-first, and a spec's children sit
-  // near it in numbering, so truncation rarely splits a family. If it ever does
-  // (a repo past the cap), the flag can be wrong in either direction — this is a
-  // human-verified close reminder, not an auto-close, so the harm is a stray
-  // suggestion. Raise the limit if that ceiling bites.
+// Every issue's id, state and parent — the one query behind both the closed-set
+// `issueIsClosed` memoises (#127) and the spent-parent check below. Null when the
+// query fails; each caller decides what that means for it.
+//
+// ponytail: --state all spans every closed issue, so the limit is higher than
+// the open-only fetches. gh returns newest-first, and a spec's children sit
+// near it in numbering, so truncation rarely splits a family. If it ever does
+// (a repo past the cap), the flag can be wrong in either direction — this is a
+// human-verified close reminder, not an auto-close, so the harm is a stray
+// suggestion. Raise the limit if that ceiling bites.
+function fetchIssueEdges(): z.infer<typeof issueEdgeRowsSchema> | null {
   const out = gh(
     `issue list --state all --limit 1000 --json number,state,parent --jq '[.[] | {number, state, parent: .parent.number}]'`
   );
-  if (!out) return new Set<string>();
-  return deliveredParentIds(issueEdgeRowsSchema.parse(JSON.parse(out)));
+  return out ? issueEdgeRowsSchema.parse(JSON.parse(out)) : null;
+}
+
+// Open parents whose every sub-issue is closed: the spec is delivered and only
+// its umbrella issue lingers. The bot never closes an issue, so the run summary
+// surfaces these for a human to close (spent-parent hygiene). Fetched fresh at
+// the end of the run rather than reusing the start-of-run memo, so an issue a
+// human closed mid-run is counted.
+function getDeliveredParents(): Set<string> {
+  return deliveredParentIds(fetchIssueEdges() ?? []);
 }
 
 // ---------------------------------------------------------------------------
