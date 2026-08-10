@@ -68,8 +68,13 @@ function fixtureTemplate(tag) {
   return {
     root,
     src,
+    // Appended to a file the render CARRIES: CONTEXT.md was withdrawn (#182), so
+    // bumping it would tag a new version no adopter can see any difference in.
     bump(next) {
-      appendFileSync(join(src, "setup-sandcastle", "templates", ".sandcastle", "CONTEXT.md"), "\n");
+      appendFileSync(
+        join(src, "setup-sandcastle", "templates", ".sandcastle", "CODING_STANDARDS.md"),
+        "\n"
+      );
       g("commit", "-q", "-am", next);
       g("tag", next);
     },

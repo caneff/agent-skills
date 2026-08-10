@@ -703,7 +703,6 @@ const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 // Files the template deliberately ADDS since the pin. Same bargain as the
 // answers list: the set-equality net stays exact, and a new render is declared
 // rather than the assertion quietly widening to "a superset is fine".
-//   .sandcastle/docs/adr/0004-…  — issue state gates parent liveness (#127)
 //   (none — ADR 0004 arrived with #127 and left again with #182, below)
 const ARC_ADDED_RENDERS = [];
 
@@ -876,8 +875,14 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
   const V1 = "sandcastle-template/vnode1";
   const V2 = "sandcastle-template/vnode2";
   const V3 = "sandcastle-template/vnode3";
+  // A bump has to move the RENDER, not just the commit: CONTEXT.md no longer
+  // ships (#182), so appending there would leave every version identical to an
+  // adopter and the update under test with nothing to carry.
   const bump = (gsrc, tag) => {
-    appendFileSync(join(src, "setup-sandcastle", "templates", ".sandcastle", "CONTEXT.md"), "\n");
+    appendFileSync(
+      join(src, "setup-sandcastle", "templates", ".sandcastle", "CODING_STANDARDS.md"),
+      "\n"
+    );
     gsrc("commit", "-q", "-am", tag);
     gsrc("tag", tag);
   };
