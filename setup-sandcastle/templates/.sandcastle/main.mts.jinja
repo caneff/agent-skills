@@ -79,7 +79,17 @@ import {
   OpenIssue,
   PrRef,
 } from "./reconcile.mts";
-import { parseOpenIssues, parsePrsClosingIssues } from "./github-parse.mts";
+import {
+  ALL_ISSUE_LIMIT,
+  OPEN_ISSUE_LIMIT,
+  parseBlockedByRows,
+  parseIssueEdges,
+  parseIssueList,
+  parseOpenIssues,
+  parseParentEdges,
+  parsePrsClosingIssues,
+  type IssueEdgeRow,
+} from "./github-parse.mts";
 import { parseSandcastleWorktrees } from "./worktrees.mts";
 import { planRetention } from "./log-retention.mts";
 import {
@@ -146,10 +156,11 @@ function gh(args: string): string | null {
 }
 
 function listIssues(label: string): { number: number; title: string }[] {
-  const out = gh(
-    `issue list --state open --label "${label}" --limit 100 --json number,title`
+  return parseIssueList(
+    gh(
+      `issue list --state open --label "${label}" --limit ${OPEN_ISSUE_LIMIT} --json number,title`
+    )
   );
-  return out ? JSON.parse(out) : [];
 }
 
 function git(args: string): string | null {
@@ -316,7 +327,9 @@ function relabel(id: string, add: string, remove: string[]): void {
 // Fetch all open issues (all labels) for the bucketed run summary.
 function listAllOpenIssues(): OpenIssue[] {
   return parseOpenIssues(
-    gh(`issue list --state open --limit 200 --json number,title,labels`)
+    gh(
+      `issue list --state open --limit ${OPEN_ISSUE_LIMIT} --json number,title,labels`
+    )
   );
 }
 
@@ -342,20 +355,12 @@ function getPrsReferencingIssues(): Map<number, PrRef[]> {
 // parents (see `parentsFromBlockedBy`) instead of dropping the dependency graph.
 // One bulk query for the whole in-review set — no per-issue fetch — mirroring
 // the `blockedBy` pull the planner already does in plan-prompt.md.
-const blockedByRowsSchema = z.array(
-  z.object({ number: z.number(), blockedBy: z.array(z.number()) })
-);
-
 function getBlockedByForInReview(): Map<number, number[]> {
-  const out = gh(
-    `issue list --state open --label "in-review" --limit 100 --json number,blockedBy --jq '[.[] | {number, blockedBy: [.blockedBy.nodes[].number]}]'`
+  return parseBlockedByRows(
+    gh(
+      `issue list --state open --label "in-review" --limit ${OPEN_ISSUE_LIMIT} --json number,blockedBy --jq '[.[] | {number, blockedBy: [.blockedBy.nodes[].number]}]'`
+    )
   );
-  const map = new Map<number, number[]>();
-  if (!out) return map;
-  for (const row of blockedByRowsSchema.parse(JSON.parse(out))) {
-    map.set(row.number, row.blockedBy);
-  }
-  return map;
 }
 
 // GitHub's native sub-issue edge (each open issue's `parent` field), as a
@@ -366,50 +371,34 @@ function getBlockedByForInReview(): Map<number, number[]> {
 // ids match `CompletedIssue.parents`; `mergeParentEdges` only reads edges for
 // issues completed this run, and `prComponents` drops any parent not present, so
 // fetching the whole open set is harmless.
-const parentRowsSchema = z.array(
-  z.object({ number: z.number(), parent: z.number().nullable() })
-);
-
 function getParentEdges(): Map<string, string> {
-  // ponytail: --limit 100 matches every other issue fetch here; a repo with
-  // >100 open issues could miss a completed issue's parent edge (it then falls
-  // back to the planner-declared parents). Raise the limit if that ceiling bites.
-  const out = gh(
-    `issue list --state open --limit 100 --json number,parent --jq '[.[] | {number, parent: .parent.number}]'`
+  // A repo with more open issues than OPEN_ISSUE_LIMIT could miss a completed
+  // issue's parent edge; it then falls back to the planner-declared parents.
+  return parseParentEdges(
+    gh(
+      `issue list --state open --limit ${OPEN_ISSUE_LIMIT} --json number,parent --jq '[.[] | {number, parent: .parent.number}]'`
+    )
   );
-  const map = new Map<string, string>();
-  if (!out) return map;
-  for (const row of parentRowsSchema.parse(JSON.parse(out))) {
-    if (row.parent !== null) map.set(String(row.number), String(row.parent));
-  }
-  return map;
 }
 
 // Every issue's state and native parent, open AND closed — getParentEdges'
 // open-only fetch cannot see the closed children that make a parent "delivered".
-const issueEdgeRowsSchema = z.array(
-  z.object({
-    number: z.number(),
-    state: z.enum(["OPEN", "CLOSED"]),
-    parent: z.number().nullable(),
-  })
-);
-
-// Every issue's id, state and parent — the one query behind both the closed-set
-// `issueIsClosed` memoises (#127) and the spent-parent check below. Null when the
-// query fails; each caller decides what that means for it.
+// The one query behind both the closed-set `issueIsClosed` memoises (#127) and
+// the spent-parent check below. Null when there is no usable answer; each
+// caller decides what that means for it.
 //
 // ponytail: --state all spans every closed issue, so the limit is higher than
 // the open-only fetches. gh returns newest-first, and a spec's children sit
 // near it in numbering, so truncation rarely splits a family. If it ever does
 // (a repo past the cap), the flag can be wrong in either direction — this is a
 // human-verified close reminder, not an auto-close, so the harm is a stray
-// suggestion. Raise the limit if that ceiling bites.
-function fetchIssueEdges(): z.infer<typeof issueEdgeRowsSchema> | null {
-  const out = gh(
-    `issue list --state all --limit 1000 --json number,state,parent --jq '[.[] | {number, state, parent: .parent.number}]'`
+// suggestion.
+function fetchIssueEdges(): IssueEdgeRow[] | null {
+  return parseIssueEdges(
+    gh(
+      `issue list --state all --limit ${ALL_ISSUE_LIMIT} --json number,state,parent --jq '[.[] | {number, state, parent: .parent.number}]'`
+    )
   );
-  return out ? issueEdgeRowsSchema.parse(JSON.parse(out)) : null;
 }
 
 // Open parents whose every sub-issue is closed: the spec is delivered and only
