@@ -39,12 +39,10 @@ tell a user whether their repo is ready without committing to an install.
 you run (see below), and omit the flag if the user has not got the values yet.
 A full run repeats every preflight check, so there is no need to run both.
 
-Sandcastle consumes a gate command, PR CI, `CODING_STANDARDS.md` and
-`AGENTS.md`, and creates none of them. Preflight fails on whichever is absent
-and its message names the fix — on the Python arm that fix is usually
-[`/setup-python-repo`](../setup-python-repo/SKILL.md), which writes all three.
-A Node adopter has no equivalent skill, so there the check is the whole
-obligation: nothing creates the scripts it asks for.
+Sandcastle consumes the repo's gate command, its CI and its standards docs, and
+creates none of them, so preflight refuses until they exist. On the Python arm
+[`/setup-python-repo`](../setup-python-repo/SKILL.md) writes what is missing.
+On the Node arm nothing does — a refusal there is work for the user.
 
 ## What the script does
 
@@ -78,8 +76,9 @@ those credentials are account-level: nothing in the file changes, including
 the App's existing installation. Only a human can add it:
 <https://github.com/settings/installations> → the bot App → **Configure** →
 **Repository access** → *Only select repositories* → add this repo → **Save**.
-[`.sandcastle/bot-setup.md`](templates/.sandcastle/bot-setup.md) step 3 covers
-it, and is also where an optional bot identity is set up at all.
+[`.sandcastle/bot-setup.md`](templates/.sandcastle/bot-setup.md) step 3 is the
+same repository-access dialog; the rest of that file is how a bot identity gets
+created in the first place, if the user has no App yet.
 
 *Fallback — PAT mode*, where the `.env` sets `GH_TOKEN` instead of the
 `GITHUB_APP_*` block: a fine-grained PAT is repo-scoped, so the user mints a
@@ -108,6 +107,8 @@ the judgement is yours. Three classes:
 ## Updating adopters
 
 Installed repos receive later `sandcastle-template/vN` tags through the
-[`sandcastle-propagate`](sandcastle-propagate) sweep — runbook in
+[`sandcastle-propagate`](sandcastle-propagate) sweep. Its runbook — and how to
+bump the pinned `@ai-hero/sandcastle`, which is maintenance on this skill's
+`templates/` rather than on any target — is in
 [`references/updating-adopters.md`](references/updating-adopters.md), reasoning
 in [`references/design-decisions.md`](references/design-decisions.md).
