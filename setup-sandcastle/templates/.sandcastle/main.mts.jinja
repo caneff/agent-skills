@@ -105,6 +105,14 @@ import { z } from "zod";
 // GH_TOKEN. Load the env file here, before any sandboxIdentity() call.
 if (existsSync(".sandcastle/.env")) process.loadEnvFile(".sandcastle/.env");
 
+// …but not GH_TOKEN. The load above pulls EVERY key into the HOST process, and
+// `gh` prefers an env token over ~/.config/gh — so a stale GH_TOKEN in .env
+// shadows the working keyring credential and 401s every host-side gh call.
+// Dropping it restores what the load broke: sandboxes still get their token,
+// either from sandboxIdentity()'s minted App token or from the .env FILE
+// Sandcastle forwards independently of process.env.
+delete process.env.GH_TOKEN;
+
 // ---------------------------------------------------------------------------
 // Issue lifecycle labels (managed host-side, never by the agents)
 //

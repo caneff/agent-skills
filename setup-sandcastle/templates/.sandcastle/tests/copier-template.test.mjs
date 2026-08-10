@@ -161,6 +161,18 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
     }
   });
 
+  // Sandcastle forwards `.sandcastle/.env` into sandboxes as a FILE and never
+  // into the host process — until main.mts's loadEnvFile, which pulls EVERY key
+  // into the host so sandboxIdentity() can see GITHUB_APP_*. `gh` prefers an env
+  // token over ~/.config/gh, so a GH_TOKEN dragged along shadows the working
+  // keyring credential and 401s every host-side gh call. Dropping that one key
+  // restores what the load broke, and .env.example says so where the operator
+  // reads it (issue #155).
+  test("drops GH_TOKEN from the host process, and .env.example says why", () => {
+    expect(renderedIn(target, "main.mts")).toContain("delete process.env.GH_TOKEN;");
+    expect(renderedIn(target, ".env.example")).toMatch(/deletes it host-side/);
+  });
+
   test("breadcrumb lands at the repo root and pins a non-empty _commit", () => {
     expect(existsSync(join(target, ".copier-answers.yml"))).toBe(true);
     expect(answers()).toMatch(/^_commit: .+$/m);
@@ -255,7 +267,35 @@ const ARC_APPENDED_RENDERS = [".sandcastle/CODING_STANDARDS.md"];
 //   The value under them now branches by ecosystem and supplies the specifics
 //   the prose dropped, which is why the comments did not branch as well.
 const ARC_REWRITTEN_PROSE = {
+  // .sandcastle/.env.example — #155 lifts visual-teach's GH_TOKEN note upstream.
+  // The key stays live (it is still the fallback for an adopter with no bot App);
+  // what is new is when to blank it and that main.mts drops it host-side.
+  ".sandcastle/.env.example": [
+    [
+      "# Required repository permissions: Issues (Read and write) and Metadata (Read)\nGH_TOKEN=",
+      "# Required repository permissions: Issues (Read and write) and Metadata (Read)\n" +
+        "# Fallback only — the bot App below supersedes it. Once the bot works, blank this\n" +
+        "# line (bot-setup.md's last step) so runs can't attribute to your personal\n" +
+        "# account. main.mts deletes it host-side either way, so a stale value here cannot\n" +
+        "# shadow your ~/.config/gh credential; sandboxes still read it from this file.\n" +
+        "GH_TOKEN=",
+    ],
+  ],
   ".sandcastle/main.mts": [
+    // #155, the other half of the same fix: the host-side `delete`, upstreamed
+    // from visual-teach because nothing in it names that repo.
+    [
+      'if (existsSync(".sandcastle/.env")) process.loadEnvFile(".sandcastle/.env");',
+      'if (existsSync(".sandcastle/.env")) process.loadEnvFile(".sandcastle/.env");\n' +
+        "\n" +
+        "// …but not GH_TOKEN. The load above pulls EVERY key into the HOST process, and\n" +
+        "// `gh` prefers an env token over ~/.config/gh — so a stale GH_TOKEN in .env\n" +
+        "// shadows the working keyring credential and 401s every host-side gh call.\n" +
+        "// Dropping it restores what the load broke: sandboxes still get their token,\n" +
+        "// either from sandboxIdentity()'s minted App token or from the .env FILE\n" +
+        "// Sandcastle forwards independently of process.env.\n" +
+        "delete process.env.GH_TOKEN;",
+    ],
     [
       "// Copy the host's virtualenv into the worktree before each sandbox starts.\n" +
         "// Avoids resolving+downloading every dependency from scratch; sandboxConfig's\n" +
