@@ -47,3 +47,11 @@ project-specific rules those gates **can't** catch.
    template, not here. A branch that edits or adds a file in this repo's
    `.sandcastle/` without a marker fails this axis. Unmarked divergence drops the repo behind
    template improvements silently, and no mechanical gate catches it.
+
+6. **How these files are formatted belongs to the template — exclude
+   `.sandcastle/` from this repo's formatters and linters.** A formatter that
+   reflows a rendered file is doing what rule 5 forbids, by tool rather than by
+   hand: divergence with no reason attached. It costs twice — the divergence
+   report flags every reflowed file as unmarked drift, and the next template
+   update lands as a merge conflict on each one. Nothing checks this at install
+   time; a repo's formatter config is its own, so the report is the enforcement.
