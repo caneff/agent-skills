@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PR_STATES } from "./reconcile.mts";
 import type { OpenIssue, PrRef } from "./reconcile.mts";
 
 // Pure parsers from raw `gh` CLI output into the orchestrator's domain types.
@@ -145,7 +146,8 @@ export function parseParentEdges(raw: string | null): Map<string, string> {
 
 // The GraphQL envelope is optional the whole way down: `gh` answers a repo
 // with no PRs, and an errors-only response, with the outer keys missing rather
-// than empty. `state` is the PrState union itself, so an unrecognised state
+// than empty. `state` admits exactly the states reconcile.mts declares — the
+// schema reads that array rather than repeating it — so an unrecognised state
 // fails the whole response instead of reaching reconcile's branching.
 const prsClosingIssuesSchema = z.object({
   data: z
@@ -158,7 +160,7 @@ const prsClosingIssuesSchema = z.object({
                 .array(
                   z.object({
                     number: z.number(),
-                    state: z.enum(["OPEN", "CLOSED", "MERGED"]),
+                    state: z.enum(PR_STATES),
                     closingIssuesReferences: z
                       .object({
                         nodes: z.array(z.object({ number: z.number() })).optional(),

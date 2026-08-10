@@ -822,6 +822,16 @@ const ARC_REWRITTEN_PROSE = {
       "note: `${issue.id} failed spec review; back to ready-for-agent to re-implement (attempt ${r.count}/${REVIEW_RETRY_CAP})`,",
       "note: `${issue.id} failed review (${axes}); back to ready-for-agent to re-implement (attempt ${r.count}/${REVIEW_RETRY_CAP})`,",
     ],
+    // #104 — the PR states become values so github-parse.mts can build its zod
+    // schema from them instead of hand-copying the union.
+    [
+      'export type PrState = "OPEN" | "CLOSED" | "MERGED";',
+      "// Exported as values, not just as a union, because github-parse.mts builds the\n" +
+        "// zod schema that admits a PR state from this array. Written out twice instead,\n" +
+        "// the schema would reject a state this type accepts and nothing would say so.\n" +
+        'export const PR_STATES = ["OPEN", "CLOSED", "MERGED"] as const;\n' +
+        "export type PrState = (typeof PR_STATES)[number];",
+    ],
   ],
   ".sandcastle/retry-policy.mts": [
     [
