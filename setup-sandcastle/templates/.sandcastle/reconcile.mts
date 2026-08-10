@@ -14,7 +14,11 @@ import { recordAttempt, REVIEW_RETRY_CAP, type Attempts } from "./retry-policy.m
 // Reconciliation sweep — classifyInReviewIssue
 // ---------------------------------------------------------------------------
 
-export type PrState = "OPEN" | "CLOSED" | "MERGED";
+// Exported as values, not just as a union, because github-parse.mts builds the
+// zod schema that admits a PR state from this array. Written out twice instead,
+// the schema would reject a state this type accepts and nothing would say so.
+export const PR_STATES = ["OPEN", "CLOSED", "MERGED"] as const;
+export type PrState = (typeof PR_STATES)[number];
 
 export interface PrRef {
   number: number;
