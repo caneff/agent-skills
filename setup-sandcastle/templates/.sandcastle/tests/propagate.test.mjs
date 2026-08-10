@@ -789,3 +789,48 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
     expect(lines("lagging")).toEqual([]);
   });
 });
+
+// A linked worktree carries a checked-out copy of the repo's own breadcrumb, so
+// the walk finds it wherever that worktree happens to sit — nothing constrains
+// the depth. Sweeping it would open a pull request out of someone's in-progress
+// branch (#194).
+describe.skipIf(!hasCopier())("sandcastle-propagate meets a linked worktree", () => {
+  let template;
+  let searchRoot;
+  let sweep;
+  let gh;
+  const V1 = "sandcastle-template/v1";
+  const V2 = "sandcastle-template/v2";
+
+  beforeAll(() => {
+    template = fixtureTemplate(V1);
+    searchRoot = mkdtempSync(join(tmpdir(), "sandcastle-worktree-"));
+
+    const adopter = fixtureAdopter(searchRoot, "has-worktree", template.src, V1, "PYTHON_VERSION=3.14");
+    // Ignored the way an adopter ignores its own worktree dir. Unignored, it
+    // reads as an untracked file and the sweep skips the repo as dirty before it
+    // ever reaches the worktree.
+    writeFileSync(join(adopter.repo, ".gitignore"), "worktrees/\n");
+    adopter.publish();
+    // Two levels below the repo root, so its breadcrumb lands at the same depth
+    // the walk reaches for an adopter's own.
+    adopter.g("worktree", "add", "-q", "-b", "side", join(adopter.repo, "worktrees", "wip"));
+
+    template.bump(V2);
+    gh = ghShim(mkdtempSync(join(tmpdir(), "sandcastle-worktree-gh-")));
+    sweep = propagate(template.src, searchRoot, [], { bin: gh.bin });
+  });
+  afterAll(() =>
+    [template?.root, searchRoot, gh?.dir].forEach((d) => d && rmSync(d, { recursive: true, force: true }))
+  );
+
+  test("sweeps the repo once, as itself", () => {
+    expect(sweep.stdout).toContain("Done. updated=1 current=0 skipped=0 failed=0");
+    expect(sweep.status, sweep.stderr).toBe(0);
+    expect(gh.callsTo("pr", "create")).toHaveLength(1);
+  });
+
+  test("never names the worktree as an adopter of its own", () => {
+    expect(sweep.stdout).not.toContain("== wip ");
+  });
+});

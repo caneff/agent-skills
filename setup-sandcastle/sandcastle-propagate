@@ -196,6 +196,12 @@ while IFS= read -r -d '' answers; do
   repo=$(git -C "$(dirname "$answers")" rev-parse --show-toplevel 2>/dev/null) || {
     echo "  $answers — not inside a git repo" >&2; failed=$((failed + 1)); continue
   }
+  # A linked worktree carries a checked-out copy of the repo's own breadcrumb, and
+  # `--show-toplevel` inside one answers with the worktree, so it reads as a repo
+  # of its own — a sweep would push a branch and open a PR out of someone's
+  # in-progress work (#194). The two git dirs differ in a linked worktree and
+  # nowhere else, so this catches one at any depth and under any layout.
+  [ "$(git -C "$repo" rev-parse --git-dir)" = "$(git -C "$repo" rev-parse --git-common-dir)" ] || continue
   name=$(basename "$repo")
 
   lang=$(breadcrumb LANGUAGE "$answers")
