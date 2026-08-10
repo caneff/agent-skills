@@ -87,7 +87,9 @@ const expectTheFormattingRule = (doc) => {
   // `[\s\S]` rather than `.` — the doc is wrapped prose, so the instruction and
   // the path it names routinely land on different lines.
   expect(doc).toMatch(/exclude[\s\S]{0,40}\.sandcastle/i);
-  expect(doc).toMatch(/divergence/i);
+  // "divergence report", not bare "divergence" — rule 5 already says the latter,
+  // so the loose word would pass with rule 6 deleted.
+  expect(doc).toMatch(/divergence\s+report/i);
   expect(doc).toMatch(/conflict/i);
 };
 
