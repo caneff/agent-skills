@@ -154,8 +154,13 @@ while IFS= read -r -d '' answers; do
   # Stacking an update on an unreviewed one is the diamond-base failure #127
   # tracks: the second PR's diff is read against a base nobody has accepted yet.
   if [ -z "$PRETEND" ]; then
-    open_pr=$( cd "$repo" && gh pr list --state open --json url,headRefName \
-      --jq 'map(select(.headRefName | startswith("sandcastle/update-to-")))[0].url // empty' 2>/dev/null ) || open_pr=""
+    # A `gh` that could not answer is not an answer of "none open" — reading a
+    # rate limit as an empty list is how the stacked PR gets opened anyway.
+    if ! open_pr=$( cd "$repo" && gh pr list --state open --json url,headRefName \
+        --jq 'map(select(.headRefName | startswith("sandcastle/update-to-")))[0].url // empty' ); then
+      echo "  skip $name — could not list its open PRs" >&2
+      skipped=$((skipped + 1)); continue
+    fi
     if [ -n "$open_pr" ]; then
       echo "  skip $name — sweep PR already open: $open_pr"
       skipped=$((skipped + 1)); continue
@@ -200,7 +205,11 @@ while IFS= read -r -d '' answers; do
     # Same report as `--divergence`, now that the breadcrumb records the new ref:
     # what the merge could not carry is exactly what this repo holds locally.
     report=$(divergence_report "$repo" "$name" "$answers")
-    git -C "$repo" push -q origin "HEAD:refs/heads/$BRANCH" && pushed=yes
+    # Forced, because the branch is named for the ref and the sweep owns that
+    # namespace: a second run at the same ref regenerates the same update, and a
+    # branch an earlier run left behind would otherwise reject it forever. The
+    # skip above means no branch with a PR open for review is ever overwritten.
+    git -C "$repo" push -q --force origin "HEAD:refs/heads/$BRANCH" && pushed=yes
   fi
   # Unconditional, so a failed push leaves the repo byte-identical to how the
   # sweep found it. The commit object survives the reset; the pushed branch owns

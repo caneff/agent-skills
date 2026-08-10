@@ -23,15 +23,18 @@ is the newest `sandcastle-template/v*` tag.
 **Nothing reaches an adopter's default branch.** Every update goes up as a PR on
 a `sandcastle/update-to-<ref>` branch, whatever its size — a one-line change to
 the Dockerfile's base image is the most dangerous diff in the fleet and the
-smallest, so diff size is no threshold to gate on. A PR CI workflow is an
-install prereq, so the PR is guaranteed to run checks. The sweep prints each PR
+smallest, so diff size is no threshold to gate on. Install requires a CI
+workflow, so the PR is where that repo's checks run. The sweep prints each PR
 URL and exits: no polling, no auto-merge, and merging is yours.
 
 The branch is named for the target ref, so a re-run at the same ref reuses it
-rather than littering the repo with dated branches. **An adopter that already
-has a sweep PR open is skipped by name**, counted with the other skips —
-stacking an update on an unreviewed one puts the second diff against a base
-nobody has accepted.
+rather than littering the repo with dated branches. That push is forced: the
+sweep owns the `sandcastle/update-to-` namespace, and a branch an earlier run
+left behind would otherwise reject every later attempt. Nothing under review is
+at risk, because **an adopter that already has a sweep PR open is skipped by
+name** and counted with the other skips — stacking an update on an unreviewed
+one puts the second diff against a base nobody has accepted. If `gh` cannot say
+whether a PR is open, that repo is skipped too, rather than swept on a guess.
 
 The local checkout never switches branches. The sweep commits on whatever branch
 is checked out, pushes that commit under the new name by refspec, then restores

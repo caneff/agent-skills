@@ -134,13 +134,21 @@ function fixtureAdopter(searchRoot, name, src, ref, data) {
   } };
 }
 
-// The branch the sweep pushes, for a given target ref.
-const branchFor = (ref) => `sandcastle/update-to-${ref.replaceAll(/[^A-Za-z0-9._-]/g, "-")}`;
+// The branch the sweep pushes for `sandcastle-template/v2`, spelled out: the
+// contract is this name, not whatever the script's sanitizer happens to emit.
+const V2_BRANCH = "sandcastle/update-to-sandcastle-template-v2";
 
 // What the sweep proposed, read off the pushed branch — the local checkout is
 // restored, so the adopter's own working tree can no longer answer this.
-const answersOn = (remote, ref) =>
-  execFileSync("git", ["-C", remote, "show", `${branchFor(ref)}:${BREADCRUMB}`], { encoding: "utf8" });
+const answersOn = (remote, branch) =>
+  execFileSync("git", ["-C", remote, "show", `${branch}:${BREADCRUMB}`], { encoding: "utf8" });
+
+// One adopter's git state, for asserting the sweep handed it back unchanged.
+const stateOf = (dir) => ({
+  head: gitIn(dir)("rev-parse", "HEAD"),
+  branch: gitIn(dir)("rev-parse", "--abbrev-ref", "HEAD"),
+  status: gitIn(dir)("status", "--porcelain"),
+});
 
 // `bin` goes in front of `PATH` so the recording `gh` wins; `path` replaces
 // `PATH` outright, for the run that has to find no `gh` at all.
@@ -164,11 +172,6 @@ describe.skipIf(!hasCopier())("sandcastle-propagate sweeps the adopters it finds
   let before;
   const V1 = "sandcastle-template/v1";
   const V2 = "sandcastle-template/v2";
-  const stateOf = (dir) => ({
-    head: gitIn(dir)("rev-parse", "HEAD"),
-    branch: gitIn(dir)("rev-parse", "--abbrev-ref", "HEAD"),
-    status: gitIn(dir)("status", "--porcelain"),
-  });
 
   beforeAll(() => {
     template = fixtureTemplate(V1);
@@ -219,7 +222,7 @@ describe.skipIf(!hasCopier())("sandcastle-propagate sweeps the adopters it finds
   });
 
   test("leaves a python adopter's recorded version untouched", () => {
-    expect(answersOn(adopters["py-adopter"].remote, V2)).toMatch(recordedAnswer("PYTHON_VERSION", "3.14"));
+    expect(answersOn(adopters["py-adopter"].remote, V2_BRANCH)).toMatch(recordedAnswer("PYTHON_VERSION", "3.14"));
   });
 
   // The sweep carries the template and then says what it could not carry — the
@@ -231,7 +234,7 @@ describe.skipIf(!hasCopier())("sandcastle-propagate sweeps the adopters it finds
   // The harm the re-assert did: on a node adopter the lookup came back empty and
   // the script fed an answer back in that the template no longer asks for.
   test("never puts a Python version into a node adopter's breadcrumb", () => {
-    expect(answersOn(adopters["node-adopter"].remote, V2)).not.toMatch(/PYTHON_VERSION/);
+    expect(answersOn(adopters["node-adopter"].remote, V2_BRANCH)).not.toMatch(/PYTHON_VERSION/);
   });
 
   // The update goes up as a proposal. Every adopter runs PR CI, so a review and
@@ -239,7 +242,7 @@ describe.skipIf(!hasCopier())("sandcastle-propagate sweeps the adopters it finds
   test("pushes the update to a branch named for the ref, never to main", () => {
     for (const [name, a] of Object.entries(adopters)) {
       const g = gitIn(a.remote);
-      expect(() => g("rev-parse", `refs/heads/${branchFor(V2)}`), name).not.toThrow();
+      expect(() => g("rev-parse", `refs/heads/${V2_BRANCH}`), name).not.toThrow();
       expect(g("rev-parse", "main"), name).toBe(before[name].main);
     }
   });
@@ -260,7 +263,7 @@ describe.skipIf(!hasCopier())("sandcastle-propagate sweeps the adopters it finds
     expect(sweep.stdout).toContain(PR_URL);
     const create = gh.callsTo("pr", "create")[0];
     expect(create).toContain("--head");
-    expect(create[create.indexOf("--head") + 1]).toBe(branchFor(V2));
+    expect(create[create.indexOf("--head") + 1]).toBe(V2_BRANCH);
   });
 
   // The body is the divergence report under the two refs, so a reviewer reads
@@ -272,6 +275,73 @@ describe.skipIf(!hasCopier())("sandcastle-propagate sweeps the adopters it finds
     expect(body).toContain(V1);
     expect(body).toContain(V2);
     expect(body).toMatch(/\.sandcastle\/local-only\.mts\s+NEW\s+UNMARKED/);
+  });
+});
+
+// The two paths where the push itself is the problem, swept together: one
+// adopter whose sweep branch is already on the remote pointing somewhere else,
+// and one whose remote is gone.
+describe.skipIf(!hasCopier())("sandcastle-propagate pushes onto an obstructed remote", () => {
+  let template;
+  let searchRoot;
+  let sweep;
+  let gh;
+  let stale;
+  let broken;
+  let before;
+  const V1 = "sandcastle-template/v1";
+  const V2 = "sandcastle-template/v2";
+
+  beforeAll(() => {
+    template = fixtureTemplate(V1);
+    searchRoot = mkdtempSync(join(tmpdir(), "sandcastle-push-adopters-"));
+
+    // A sweep branch left behind by an earlier run — its PR merged or closed, so
+    // the open-PR skip does not catch it — sitting on an unrelated commit. A
+    // plain push of the new update is a non-fast-forward reject.
+    stale = fixtureAdopter(searchRoot, "stale-branch", template.src, V1, "PYTHON_VERSION=3.14");
+    stale.publish();
+    writeFileSync(join(stale.repo, "stale.txt"), "an earlier sweep\n");
+    stale.g("add", "-A");
+    stale.g("commit", "-q", "-m", "an earlier sweep");
+    stale.g("push", "-q", "origin", `HEAD:refs/heads/${V2_BRANCH}`);
+    stale.g("reset", "-q", "--hard", "HEAD~1");
+
+    // Nowhere to push at all.
+    broken = fixtureAdopter(searchRoot, "broken-remote", template.src, V1, "PYTHON_VERSION=3.14");
+    broken.publish();
+    broken.g("remote", "set-url", "origin", join(searchRoot, ".remotes", "gone.git"));
+
+    template.bump(V2);
+    before = { stale: stateOf(stale.repo), broken: stateOf(broken.repo) };
+    gh = ghShim(mkdtempSync(join(tmpdir(), "sandcastle-push-gh-")));
+    sweep = propagate(template.src, searchRoot, [], { bin: gh.bin });
+  });
+  afterAll(() =>
+    [template?.root, searchRoot, gh?.dir].forEach((d) => d && rmSync(d, { recursive: true, force: true }))
+  );
+
+  test("carries the update onto a sweep branch an earlier run left behind", () => {
+    expect(sweep.status, sweep.stderr).toBe(0);
+    expect(answersOn(stale.remote, V2_BRANCH)).toContain(V2);
+    expect(gitIn(stale.remote)("rev-parse", V2_BRANCH)).not.toBe(before.stale.head);
+  });
+
+  // The load-bearing property of the whole change: the restore runs on the
+  // failure path too, so a repo the sweep could not push is a repo it did not
+  // change either.
+  test("leaves a repo it could not push byte-identical, and opens nothing for it", () => {
+    expect(stateOf(broken.repo)).toEqual(before.broken);
+    expect(sweep.stderr).toContain("broken-remote");
+    expect(gh.callsTo("pr", "create")).toHaveLength(1);
+  });
+
+  test("counts the push it could not make as a skip, and the one it made as an update", () => {
+    expect(sweep.stdout).toContain("updated=1 skipped=1");
+  });
+
+  test("restores the checkout of the repo it did push", () => {
+    expect(stateOf(stale.repo)).toEqual(before.stale);
   });
 });
 
@@ -303,11 +373,7 @@ describe.skipIf(!hasCopier())("sandcastle-propagate refuses to sweep", () => {
     adopter = fixtureAdopter(searchRoot, "py-adopter", template.src, V1, "PYTHON_VERSION=3.14");
     adopter.publish();
     template.bump(V2);
-    before = {
-      head: gitIn(adopter.repo)("rev-parse", "HEAD"),
-      status: gitIn(adopter.repo)("status", "--porcelain"),
-      branches: gitIn(adopter.remote)("branch", "--list"),
-    };
+    before = { local: stateOf(adopter.repo), branches: gitIn(adopter.remote)("branch", "--list") };
 
     shims = { unauth: ghShim(shimDir(), { auth: 1 }), dry: ghShim(shimDir()), busy: ghShim(shimDir(), { openPr: PR_URL }) };
     runs = {
@@ -353,8 +419,7 @@ describe.skipIf(!hasCopier())("sandcastle-propagate refuses to sweep", () => {
   });
 
   test("leaves the adopter and its remote untouched throughout", () => {
-    expect(gitIn(adopter.repo)("rev-parse", "HEAD")).toBe(before.head);
-    expect(gitIn(adopter.repo)("status", "--porcelain")).toBe(before.status);
+    expect(stateOf(adopter.repo)).toEqual(before.local);
     expect(gitIn(adopter.remote)("branch", "--list")).toBe(before.branches);
     expect(answersIn(adopter.repo)).toContain(V1);
   });
