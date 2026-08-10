@@ -88,7 +88,7 @@ as inherited scaffold.
     copier copies them verbatim.
     `disable-model-invocation`, user-invoked.
 12. **`.env` seed copies by path, never reads.** Secrets never enter the agent's
-    context; the copy is verified gitignored before proceeding (SKILL.md step 3).
+    context; the copy is verified gitignored before proceeding (`install` step 4).
 13. **Never re-render over an adopter — migrate by merging.** `copier copy
     --overwrite` is the obvious shortcut for a layout shift `copier update`
     cannot bridge, and it is wrong: it replaces every file the adopter edited
@@ -130,10 +130,10 @@ as inherited scaffold.
   `@clack/prompts`. Without `@standard-schema/spec` installed, `Output.object<T>`
   collapses to `any` and `main.mts` throws implicit-any errors. The dev-home only
   typechecked clean *by accident* (vitest pulls the package transitively). Both the
-  dev-home package.json and SKILL.md step 3 now declare it explicitly. Re-check on
+  dev-home package.json and `install` step 3 now declare it explicitly. Re-check on
   every sandcastle bump — if upstream starts declaring it, this can drop.
 - **`@types/node` is required in the target.** `tsconfig` sets `types:["node"]`;
-  a Python target has no Node types otherwise. In SKILL.md step 3 devDeps.
+  a Python target has no Node types otherwise. In `install` step 3's devDeps.
 
 ## Retargeting map (what changed from the visual-teach fork)
 
