@@ -629,7 +629,10 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
     // `++ `/`-- ` lines are the trap: prefixed with the diff's own `+`, they
     // arrive looking exactly like the `+++ `/`--- ` file headers the report
     // parses, and prose under `.sandcastle/` really does quote diffs.
-    appendFileSync(sand("CONTEXT.md"), "\nA local paragraph nobody marked.\n++ not a header\n-- nor this\n");
+    appendFileSync(
+      sand("CODING_STANDARDS.md"),
+      "\nA local paragraph nobody marked.\n++ not a header\n-- nor this\n"
+    );
     // Adopter-added: no counterpart in the render at all.
     writeFileSync(sand("extra.mts"), "export const local = 1;\n");
     diverged.publish();
@@ -687,7 +690,9 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
   });
 
   test("reports an unmarked hunk with its file, line and size", () => {
-    expect(lineFor("CONTEXT.md")).toMatch(/\.sandcastle\/CONTEXT\.md:\d+\s+\+\d+ -\d+\s+UNMARKED$/);
+    expect(lineFor("CODING_STANDARDS.md")).toMatch(
+      /\.sandcastle\/CODING_STANDARDS\.md:\d+\s+\+\d+ -\d+\s+UNMARKED$/
+    );
   });
 
   test("reports an adopter-added file as its own NEW line", () => {
@@ -700,7 +705,7 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
   test("says nothing about a file the adopter's git ignores", () => {
     expect(lineFor("logs/run.log")).toBeUndefined();
     // The real edits in the same repo survive the filter — it drops noise only.
-    expect(lineFor("CONTEXT.md")).toBeDefined();
+    expect(lineFor("CODING_STANDARDS.md")).toBeDefined();
   });
 
   test("reports an untracked file that is not ignored as NEW UNMARKED", () => {

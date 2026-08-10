@@ -53,10 +53,11 @@ const withRender = test.skipIf(!hasCopier());
 let rendered;
 let sandboxIdentity;
 let sandboxConfig;
+let applyBotToken;
 beforeAll(async () => {
   if (!hasCopier()) return;
   rendered = renderPythonArm(repoRoot, { linkModules: true });
-  ({ sandboxIdentity, sandboxConfig } = await import(
+  ({ sandboxIdentity, sandboxConfig, applyBotToken } = await import(
     pathToFileURL(join(rendered, ".sandcastle", "sandbox-identity.mts")).href
   ));
 }, 60_000);
@@ -223,4 +224,29 @@ withRender("sandbox-identity: no-op when App creds not set and SANDCASTLE_BOT_GH
   const id = await sandboxIdentity(fakeTokenMinter);
   expect(id.env).toEqual({});
   expect(id.gitConfigCommands).toEqual([]);
+});
+
+// ── applyBotToken ─────────────────────────────────────────────────────────────
+//
+// These two ran as `sandbox-identity.check.mts`, a file the render shipped to
+// every adopter for a maintainer to invoke by hand. Nothing else in the suite
+// touched applyBotToken, so the coverage moved here rather than going out with
+// the file (#182).
+
+withRender("applyBotToken: a minted token overwrites both gh env vars", () => {
+  // gh() reads GH_TOKEN and git() GITHUB_TOKEN, so a bot run needs both — one
+  // set and the other stale would send half the host's calls as the maintainer.
+  const env = {};
+  applyBotToken({ env: { GH_TOKEN: "minted-123" }, gitConfigCommands: [] }, env);
+  expect(env.GH_TOKEN).toBe("minted-123");
+  expect(env.GITHUB_TOKEN).toBe("minted-123");
+});
+
+withRender("applyBotToken: personal-token mode leaves an ambient token untouched", () => {
+  // Identity carries no token, so there is no bot to act as — clobbering here
+  // would take the maintainer's own credentials out from under them.
+  const env = { GH_TOKEN: "personal", GITHUB_TOKEN: "personal" };
+  applyBotToken({ env: {}, gitConfigCommands: [] }, env);
+  expect(env.GH_TOKEN).toBe("personal");
+  expect(env.GITHUB_TOKEN).toBe("personal");
 });

@@ -21,7 +21,14 @@ as inherited scaffold.
    ABOVE the `_subdirectory` (`setup-sandcastle/templates`), so they are outside the
    render boundary and never ship; the `tests/` live under `templates/.sandcastle/`
    and are dropped by `_exclude`. Nobody edits the `.mts` in a target, so the tests
-   are dead weight there.
+   are dead weight there. The same rule withdrew `CONTEXT.md` and `docs/adr/` —
+   this project's own domain model, written for whoever maintains the template —
+   and the `applyBotToken` self-check, whose two cases now run in the dev suite
+   beside the module they cover. What a document looks like decides nothing; a
+   named runtime reader does. `CODING_STANDARDS.md` (loaded during review),
+   `bot-setup.md` (named in `mint-gh-token.mjs`'s error), `tsconfig.json` (what an
+   adopter typechecks with), the prompts, the Dockerfile and `.env.example` all
+   have one, so all of them ship.
 2. **Canonical home = this skill's `templates/.sandcastle/`.** No separate repo —
    that would re-create the drift it exists to avoid. You hack the `.mts` there, run
    `npm test` from `setup-sandcastle/` green, commit to the skills repo, and the next

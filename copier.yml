@@ -24,9 +24,19 @@ _subdirectory: setup-sandcastle/templates
 # drops the directory entry, the `/**` drops its contents (a lone trailing-slash
 # pattern leaves an empty tests/ behind). Paths are anchored at the subproject
 # root (`templates/`), so the tests under `.sandcastle/` need the prefix.
+# A render carries what an adopter RUNS, and nothing else. `CONTEXT.md` and the
+# ADRs beneath it are this project's own domain model — maintainer reading, kept
+# here, never copied. The test is the reader, not the file extension: the six
+# documents that DO ship each have a named runtime one — the review modules load
+# `CODING_STANDARDS.md`, `mint-gh-token.mjs` names `bot-setup.md` in the error it
+# prints, an adopter typechecks with `tsconfig.json`, and the prompts, Dockerfile
+# and `.env.example` are read every run.
 _exclude:
   - ".sandcastle/tests"
   - ".sandcastle/tests/**"
+  - ".sandcastle/CONTEXT.md"
+  - ".sandcastle/docs"
+  - ".sandcastle/docs/**"
 
 # The template fills its own blanks with `[[ ]]` / `[% %]`, not copier's default
 # `{{ }}` / `{% %}`. The prompt-drawer files under `.sandcastle/` carry their own
