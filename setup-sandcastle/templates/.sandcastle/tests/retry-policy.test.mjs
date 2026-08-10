@@ -1,5 +1,58 @@
-import { test, expect, describe } from "vitest";
-import { recordAttempt, recordSetAttempt, REVIEW_RETRY_CAP } from "../retry-policy.mts";
+import { test, expect, describe, afterEach } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  readAttempts,
+  writeAttempts,
+  recordAttempt,
+  recordSetAttempt,
+  REVIEW_RETRY_CAP,
+} from "../retry-policy.mts";
+
+describe("readAttempts / writeAttempts at the disk boundary", () => {
+  const dirs = [];
+  const tmpFile = () => {
+    const dir = mkdtempSync(join(tmpdir(), "attempts-"));
+    dirs.push(dir);
+    return join(dir, "review-attempts.json");
+  };
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop(), { recursive: true, force: true });
+  });
+
+  test("a missing file reads as empty", () => {
+    expect(readAttempts(tmpFile())).toEqual({});
+  });
+
+  test("write-then-read preserves the counters", () => {
+    const file = tmpFile();
+    const attempts = { "issue-7": 1, "review-issue-7": 2, "gate-8": 1 };
+    writeAttempts(attempts, file);
+    expect(readAttempts(file)).toEqual(attempts);
+  });
+
+  test("a file that isn't JSON reads as empty", () => {
+    const file = tmpFile();
+    writeFileSync(file, "not json{");
+    expect(readAttempts(file)).toEqual({});
+  });
+
+  test("a mistyped file reads as empty rather than passing bad data on", () => {
+    // A count that is a string, not a number — the corruption the standard
+    // means by "silently mis-typed". The whole file is rejected, not partly
+    // trusted: a validated map has no bad entries in it.
+    const file = tmpFile();
+    writeFileSync(file, JSON.stringify({ "issue-7": 1, "issue-8": "two" }));
+    expect(readAttempts(file)).toEqual({});
+  });
+
+  test("a JSON value of the wrong outer shape reads as empty", () => {
+    const file = tmpFile();
+    writeFileSync(file, JSON.stringify([1, 2, 3]));
+    expect(readAttempts(file)).toEqual({});
+  });
+});
 
 describe("recordAttempt", () => {
   test("first failure: counts 1, does not escalate, persists the counter", () => {

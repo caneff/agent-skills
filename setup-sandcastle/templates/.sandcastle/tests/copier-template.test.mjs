@@ -851,9 +851,12 @@ const ARC_REWRITTEN_PROSE = {
     ],
     // #103: the Phase-3 gate's set-level fold arrives here from main.mts, and
     // takes the verdict status by its own type rather than restating the union.
+    // #105 adds the zod import beside it — the attempts file is now validated.
     [
       'import { readFileSync, writeFileSync } from "node:fs";',
       'import { readFileSync, writeFileSync } from "node:fs";\n' +
+        "\n" +
+        'import { z } from "zod";\n' +
         "\n" +
         'import type { CheckStatus } from "./review-verdict.mts";',
     ],
@@ -894,6 +897,39 @@ const ARC_REWRITTEN_PROSE = {
         "    escalated ||= r.escalate;\n" +
         "  }\n" +
         "  return { attempts: next, escalated };\n" +
+        "}",
+    ],
+    // #105: the attempts type is now derived from a zod schema, and readAttempts
+    // validates the parsed file instead of casting it.
+    [
+      "export type Attempts = Record<string, number>;\n" +
+        "\n" +
+        "export function readAttempts(file = ATTEMPTS_FILE): Attempts {\n" +
+        "  try {\n" +
+        '    return JSON.parse(readFileSync(file, "utf8"));\n' +
+        "  } catch {\n" +
+        "    return {};\n" +
+        "  }\n" +
+        "}",
+      "const attemptsSchema = z.record(z.string(), z.number());\n" +
+        "export type Attempts = z.infer<typeof attemptsSchema>;\n" +
+        "\n" +
+        "// The file is state this tool wrote last run, but a run can be killed mid-write\n" +
+        "// and a human can edit it, so it is outside data like any other (CODING_STANDARDS\n" +
+        "// rule 2 names this very file). A missing, unparseable, or mis-typed file all\n" +
+        "// read as empty: the caps then start fresh, which at worst grants a few extra\n" +
+        "// retries — the safe direction. Reading a bad count as a real one is the outcome\n" +
+        "// the schema exists to forbid, so a partially-valid file is rejected whole rather\n" +
+        "// than trusted in part.\n" +
+        "export function readAttempts(file = ATTEMPTS_FILE): Attempts {\n" +
+        "  let json: unknown;\n" +
+        "  try {\n" +
+        '    json = JSON.parse(readFileSync(file, "utf8"));\n' +
+        "  } catch {\n" +
+        "    return {}; // missing file (first run) or non-JSON contents\n" +
+        "  }\n" +
+        "  const parsed = attemptsSchema.safeParse(json);\n" +
+        "  return parsed.success ? parsed.data : {};\n" +
         "}",
     ],
   ],

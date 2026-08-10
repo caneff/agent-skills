@@ -1,5 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
+import { z } from "zod";
+
 import type { CheckStatus } from "./review-verdict.mts";
 
 // Review-retry cap. A needs-review issue is re-reviewed (cheaply, on its
@@ -15,14 +17,25 @@ const ATTEMPTS_FILE = ".sandcastle/review-attempts.json";
 // Per-key failed-attempt counters, persisted across runs. Keys are issue ids
 // (review-retry) or `review-<id>` (re-implement after a failed review axis),
 // kept distinct so the two caps count independently for the same issue.
-export type Attempts = Record<string, number>;
+const attemptsSchema = z.record(z.string(), z.number());
+export type Attempts = z.infer<typeof attemptsSchema>;
 
+// The file is state this tool wrote last run, but a run can be killed mid-write
+// and a human can edit it, so it is outside data like any other (CODING_STANDARDS
+// rule 2 names this very file). A missing, unparseable, or mis-typed file all
+// read as empty: the caps then start fresh, which at worst grants a few extra
+// retries — the safe direction. Reading a bad count as a real one is the outcome
+// the schema exists to forbid, so a partially-valid file is rejected whole rather
+// than trusted in part.
 export function readAttempts(file = ATTEMPTS_FILE): Attempts {
+  let json: unknown;
   try {
-    return JSON.parse(readFileSync(file, "utf8"));
+    json = JSON.parse(readFileSync(file, "utf8"));
   } catch {
-    return {};
+    return {}; // missing file (first run) or non-JSON contents
   }
+  const parsed = attemptsSchema.safeParse(json);
+  return parsed.success ? parsed.data : {};
 }
 
 export function writeAttempts(a: Attempts, file = ATTEMPTS_FILE): void {
