@@ -30,7 +30,7 @@
   const pick = document.getElementById('pick'), hex = document.getElementById('hex'),
         sw = document.getElementById('sw'), fg = document.getElementById('fg');
   function lum(h){const n=parseInt(h.slice(1),16),r=(n>>16)/255,g=(n>>8&255)/255,b=(n&255)/255;
-    const f=v=>v>.03928?((v+.055)/1.055)**2.4:v/12.92; return .2126*f(r)+.7152*f(g)+.4152*f(b);}
+    const f=v=>v>.03928?((v+.055)/1.055)**2.4:v/12.92; return .2126*f(r)+.7152*f(g)+.0722*f(b);}
   function render(v){ hex.textContent=v; sw.style.background=v;
     const ink = lum(v)>.35 ? "#15141b" : "#f8f8f2"; sw.style.color=ink; fg.textContent=v; }
   pick.addEventListener('input', e => render(e.target.value));
