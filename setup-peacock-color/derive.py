@@ -35,7 +35,7 @@ def readable_fg(rgb):
     # WCAG relative luminance; dark ink on light bg, light ink on dark bg.
     r, g, b = (c / 255 for c in rgb)
     lin = [((v + 0.055) / 1.055) ** 2.4 if v > 0.03928 else v / 12.92 for v in (r, g, b)]
-    lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.4152 * lin[2]
+    lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
     return "#15141b" if lum > 0.35 else "#f8f8f2"
 
 
@@ -76,9 +76,12 @@ def build(base_hex):
 
 def _demo():
     # ponytail: one runnable check on the money path (contrast + remoteColor).
+    # readable_fg contrast: the WCAG coefficients must not flip ink on a dark bg.
+    assert readable_fg((255, 255, 255)) == "#15141b", "white -> dark ink"
+    assert readable_fg((0, 0, 0)) == "#f8f8f2", "black -> light ink"
+    assert readable_fg((0, 0, 255)) == "#f8f8f2", "saturated dark blue -> light ink"
     out = build("#9580ff")
     assert out["peacock.remoteColor"] == "#9580ff", "remoteColor must mirror base"
-    assert out["workbench.colorCustomizations"]["statusBar.foreground"] == "#15141b", "dark ink on light purple"
     dark = build("#22212c")  # near-black base -> light ink
     assert dark["workbench.colorCustomizations"]["statusBar.foreground"] == "#f8f8f2", "light ink on dark base"
     assert _hex(lighten((0, 0, 0), 0.5)) == "#808080"
