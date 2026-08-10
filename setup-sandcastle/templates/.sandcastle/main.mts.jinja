@@ -1168,14 +1168,14 @@ if (components.length === 0) {
     // Consecutive gate-failure cap (#25): one counter per issue under key
     // gate-<id>, folded by recordSetAttempt — which owns what each verdict does
     // to the counters and when the set escalates (#103).
-    const set = recordSetAttempt(
+    const counters = recordSetAttempt(
       readAttempts(),
       gateIds.map((id) => `gate-${id}`),
       verdict.status
     );
-    writeAttempts(set.attempts);
+    writeAttempts(counters.attempts);
 
-    const plan = planGateOutcome(verdict, gateIds, set.escalated);
+    const plan = planGateOutcome(verdict, gateIds, counters.escalated);
 
     if (plan.action === "retire") {
       // The set has failed the full suite REVIEW_RETRY_CAP times running.
