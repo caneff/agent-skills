@@ -86,7 +86,7 @@ import {
   REVIEW_RETRY_CAP,
   readAttempts,
   writeAttempts,
-  recordAttempt,
+  recordSetAttempt,
 } from "./retry-policy.mts";
 import { execSync } from "node:child_process";
 import {
@@ -1165,32 +1165,17 @@ if (components.length === 0) {
 
     const verdict = parseCheckVerdict(checkStdout, checkError);
 
-    // Consecutive gate-failure cap (#25): count one failure per issue under key
-    // gate-<id>. A real "test-fail" increments and may escalate at the cap; a
-    // "harness-error" is an infra fault and is NEVER counted (it can't retire a
-    // good set); a "pass" clears the counter so the cap is CONSECUTIVE failures.
-    // The set fails and passes the gate in lockstep, so all its gate-<id>
-    // counters move together and escalate on the same iteration.
-    let escalated = false;
-    {
-      let gateAttempts = readAttempts();
-      if (verdict.status === "pass") {
-        for (const id of gateIds) delete gateAttempts[`gate-${id}`];
-      } else if (verdict.status === "test-fail") {
-        for (const id of gateIds) {
-          const r = recordAttempt(gateAttempts, `gate-${id}`);
-          gateAttempts = r.attempts;
-          // OR-reduce, not last-wins: the set escalates if ANY member hit the
-          // cap. In lockstep every gate-<id> escalates together, but recordAttempt
-          // deletes a key when it escalates, so were the counters ever out of step
-          // a last-wins read could miss an escalation and loop the set forever.
-          escalated ||= r.escalate;
-        }
-      }
-      writeAttempts(gateAttempts);
-    }
+    // Consecutive gate-failure cap (#25): one counter per issue under key
+    // gate-<id>, folded by recordSetAttempt — which owns what each verdict does
+    // to the counters and when the set escalates (#103).
+    const set = recordSetAttempt(
+      readAttempts(),
+      gateIds.map((id) => `gate-${id}`),
+      verdict.status
+    );
+    writeAttempts(set.attempts);
 
-    const plan = planGateOutcome(verdict, gateIds, escalated);
+    const plan = planGateOutcome(verdict, gateIds, set.escalated);
 
     if (plan.action === "retire") {
       // The set has failed the full suite REVIEW_RETRY_CAP times running.

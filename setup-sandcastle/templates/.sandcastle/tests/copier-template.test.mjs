@@ -610,6 +610,51 @@ const ARC_REWRITTEN_PROSE = {
       "planOutcomeTransition's call (#102, ADR-0002); this",
       "planOutcomeTransition's call (#102); this",
     ],
+    // #103: the set-level fold moved out to retry-policy.mts, so the import
+    // follows it and the inline block collapses to the one call.
+    [
+      '  recordAttempt,\n} from "./retry-policy.mts";',
+      '  recordSetAttempt,\n} from "./retry-policy.mts";',
+    ],
+    [
+      "    // Consecutive gate-failure cap (#25): count one failure per issue under key\n" +
+        '    // gate-<id>. A real "test-fail" increments and may escalate at the cap; a\n' +
+        '    // "harness-error" is an infra fault and is NEVER counted (it can\'t retire a\n' +
+        '    // good set); a "pass" clears the counter so the cap is CONSECUTIVE failures.\n' +
+        "    // The set fails and passes the gate in lockstep, so all its gate-<id>\n" +
+        "    // counters move together and escalate on the same iteration.\n" +
+        "    let escalated = false;\n" +
+        "    {\n" +
+        "      let gateAttempts = readAttempts();\n" +
+        '      if (verdict.status === "pass") {\n' +
+        "        for (const id of gateIds) delete gateAttempts[`gate-${id}`];\n" +
+        '      } else if (verdict.status === "test-fail") {\n' +
+        "        for (const id of gateIds) {\n" +
+        "          const r = recordAttempt(gateAttempts, `gate-${id}`);\n" +
+        "          gateAttempts = r.attempts;\n" +
+        "          // OR-reduce, not last-wins: the set escalates if ANY member hit the\n" +
+        "          // cap. In lockstep every gate-<id> escalates together, but recordAttempt\n" +
+        "          // deletes a key when it escalates, so were the counters ever out of step\n" +
+        "          // a last-wins read could miss an escalation and loop the set forever.\n" +
+        "          escalated ||= r.escalate;\n" +
+        "        }\n" +
+        "      }\n" +
+        "      writeAttempts(gateAttempts);\n" +
+        "    }\n" +
+        "\n" +
+        "    const plan = planGateOutcome(verdict, gateIds, escalated);",
+      "    // Consecutive gate-failure cap (#25): one counter per issue under key\n" +
+        "    // gate-<id>, folded by recordSetAttempt — which owns what each verdict does\n" +
+        "    // to the counters and when the set escalates (#103).\n" +
+        "    const set = recordSetAttempt(\n" +
+        "      readAttempts(),\n" +
+        "      gateIds.map((id) => `gate-${id}`),\n" +
+        "      verdict.status\n" +
+        "    );\n" +
+        "    writeAttempts(set.attempts);\n" +
+        "\n" +
+        "    const plan = planGateOutcome(verdict, gateIds, set.escalated);",
+    ],
   ],
   // .sandcastle/reconcile.mts and retry-policy.mts — the rest of #169. The
   // outcome kind is renamed and threaded with the axes that failed; the notes
@@ -678,6 +723,54 @@ const ARC_REWRITTEN_PROSE = {
         "// caps count independently for the same issue.",
       "// (review-retry) or `review-<id>` (re-implement after a failed review axis),\n" +
         "// kept distinct so the two caps count independently for the same issue.",
+    ],
+    // #103: the Phase-3 gate's set-level fold arrives here from main.mts, and
+    // takes the verdict status by its own type rather than restating the union.
+    [
+      'import { readFileSync, writeFileSync } from "node:fs";',
+      'import { readFileSync, writeFileSync } from "node:fs";\n' +
+        "\n" +
+        'import type { CheckStatus } from "./review-verdict.mts";',
+    ],
+    [
+      "  next[key] = count;\n" +
+        "  return { attempts: next, count, escalate: false };\n" +
+        "}",
+      "  next[key] = count;\n" +
+        "  return { attempts: next, count, escalate: false };\n" +
+        "}\n" +
+        "\n" +
+        "// One gate verdict against a whole PR set: the Phase-3 full-suite gate judges\n" +
+        "// every member at once, under one counter per member (#25). A `test-fail`\n" +
+        "// counts one attempt against each key; a `pass` clears them, which is what makes\n" +
+        "// the cap count CONSECUTIVE failures; a `harness-error` is an infra fault and is\n" +
+        "// never counted, so a sandbox that failed to launch cannot retire a good set.\n" +
+        "//\n" +
+        "// `escalated` is an OR across every key, never last-one-wins. The set fails and\n" +
+        "// passes in lockstep, so its counters normally move together — but recordAttempt\n" +
+        "// deletes a key as it escalates, so counters that ever drifted apart would let a\n" +
+        "// last-wins read miss the escalation and requeue the set forever. Pure: the\n" +
+        "// input map is not mutated.\n" +
+        "export function recordSetAttempt(\n" +
+        "  attempts: Attempts,\n" +
+        "  keys: string[],\n" +
+        "  status: CheckStatus,\n" +
+        "  cap = REVIEW_RETRY_CAP\n" +
+        "): { attempts: Attempts; escalated: boolean } {\n" +
+        "  let next = { ...attempts };\n" +
+        '  if (status === "pass") {\n' +
+        "    for (const key of keys) delete next[key];\n" +
+        "    return { attempts: next, escalated: false };\n" +
+        "  }\n" +
+        '  if (status !== "test-fail") return { attempts: next, escalated: false };\n' +
+        "  let escalated = false;\n" +
+        "  for (const key of keys) {\n" +
+        "    const r = recordAttempt(next, key, cap);\n" +
+        "    next = r.attempts;\n" +
+        "    escalated ||= r.escalate;\n" +
+        "  }\n" +
+        "  return { attempts: next, escalated };\n" +
+        "}",
     ],
   ],
   // .sandcastle/Dockerfile — the header's ecosystem clause branches (#134), but

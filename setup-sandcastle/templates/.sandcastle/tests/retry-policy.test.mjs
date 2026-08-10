@@ -1,5 +1,5 @@
 import { test, expect, describe } from "vitest";
-import { recordAttempt, REVIEW_RETRY_CAP } from "../retry-policy.mts";
+import { recordAttempt, recordSetAttempt, REVIEW_RETRY_CAP } from "../retry-policy.mts";
 
 describe("recordAttempt", () => {
   test("first failure: counts 1, does not escalate, persists the counter", () => {
@@ -67,5 +67,57 @@ describe("recordAttempt", () => {
       count: 5,
       escalate: true,
     });
+  });
+});
+
+// The Phase-3 gate judges a whole PR set at once: one verdict, one counter per
+// member. `recordSetAttempt` folds those per-key results into the single answer
+// the caller acts on — did this set escalate (#103)?
+describe("recordSetAttempt", () => {
+  const keys = ["gate-7", "gate-8"];
+
+  test("a passing verdict clears every key in the set", () => {
+    const r = recordSetAttempt({ "gate-7": 1, "gate-8": 1 }, keys, "pass");
+    expect(r).toEqual({ attempts: {}, escalated: false });
+  });
+
+  test("a passing verdict leaves counters outside the set alone", () => {
+    const r = recordSetAttempt({ "gate-7": 1, "review-9": 1 }, keys, "pass");
+    expect(r.attempts).toEqual({ "review-9": 1 });
+  });
+
+  test("a failing verdict counts one attempt against every key", () => {
+    const r = recordSetAttempt({}, keys, "test-fail");
+    expect(r).toEqual({ attempts: { "gate-7": 1, "gate-8": 1 }, escalated: false });
+  });
+
+  test("reaching the cap escalates, and the escalating key is cleared", () => {
+    const r = recordSetAttempt({ "gate-7": 1, "gate-8": 1 }, keys, "test-fail");
+    expect(r).toEqual({ attempts: {}, escalated: true });
+  });
+
+  // The bug this function exists to make untestable-by-hand: fold with `=`
+  // instead of `||=` and the last key's verdict wins. The set fails and passes
+  // the gate in lockstep, so its counters normally move together — but
+  // recordAttempt deletes a key as it escalates, so counters that ever drifted
+  // apart would let a last-wins read miss the escalation and loop the set
+  // forever. Only the FIRST key here is at the cap.
+  test("escalates when any key hits the cap, not only the last one", () => {
+    const r = recordSetAttempt({ "gate-7": 1 }, keys, "test-fail");
+    expect(r.escalated).toBe(true);
+    expect(r.attempts).toEqual({ "gate-8": 1 });
+  });
+
+  // A harness error is an infra fault — a sandbox that never launched says
+  // nothing about the code, so it must not spend a retry from the cap.
+  test("a harness error counts nothing and escalates nothing", () => {
+    const r = recordSetAttempt({ "gate-7": 1 }, keys, "harness-error");
+    expect(r).toEqual({ attempts: { "gate-7": 1 }, escalated: false });
+  });
+
+  test("is pure — the input map is not mutated", () => {
+    const input = { "gate-7": 1, "gate-8": 1 };
+    recordSetAttempt(input, keys, "test-fail");
+    expect(input).toEqual({ "gate-7": 1, "gate-8": 1 });
   });
 });

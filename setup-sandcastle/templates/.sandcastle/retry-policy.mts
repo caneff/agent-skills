@@ -1,5 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
+import type { CheckStatus } from "./review-verdict.mts";
+
 // Review-retry cap. A needs-review issue is re-reviewed (cheaply, on its
 // existing branch) up to this many times before we give up on review-only and
 // escalate to a full re-implement. A review-fail issue (spec and/or standards)
@@ -44,4 +46,36 @@ export function recordAttempt(
   }
   next[key] = count;
   return { attempts: next, count, escalate: false };
+}
+
+// One gate verdict against a whole PR set: the Phase-3 full-suite gate judges
+// every member at once, under one counter per member (#25). A `test-fail`
+// counts one attempt against each key; a `pass` clears them, which is what makes
+// the cap count CONSECUTIVE failures; a `harness-error` is an infra fault and is
+// never counted, so a sandbox that failed to launch cannot retire a good set.
+//
+// `escalated` is an OR across every key, never last-one-wins. The set fails and
+// passes in lockstep, so its counters normally move together — but recordAttempt
+// deletes a key as it escalates, so counters that ever drifted apart would let a
+// last-wins read miss the escalation and requeue the set forever. Pure: the
+// input map is not mutated.
+export function recordSetAttempt(
+  attempts: Attempts,
+  keys: string[],
+  status: CheckStatus,
+  cap = REVIEW_RETRY_CAP
+): { attempts: Attempts; escalated: boolean } {
+  let next = { ...attempts };
+  if (status === "pass") {
+    for (const key of keys) delete next[key];
+    return { attempts: next, escalated: false };
+  }
+  if (status !== "test-fail") return { attempts: next, escalated: false };
+  let escalated = false;
+  for (const key of keys) {
+    const r = recordAttempt(next, key, cap);
+    next = r.attempts;
+    escalated ||= r.escalate;
+  }
+  return { attempts: next, escalated };
 }
