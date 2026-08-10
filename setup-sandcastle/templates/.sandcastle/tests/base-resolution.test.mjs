@@ -26,12 +26,15 @@ const parentsOf = {
 describe(".sandcastle base resolution — forest fixture 108→112, 120→119", () => {
   // Every issue branch from this run exists locally with work.
   const allBuiltThisRun = () => true;
+  // …and every parent issue is still open, so branch content decides alone.
+  const noneClosed = () => false;
 
   test("root 112 resolves to main (no parents)", () => {
     expect(
       resolveBase({
         parents: parentsOf["112"],
         branchExistsWithWork: allBuiltThisRun,
+        issueIsClosed: noneClosed,
       })
     ).toBe("main");
   });
@@ -41,6 +44,7 @@ describe(".sandcastle base resolution — forest fixture 108→112, 120→119", 
       resolveBase({
         parents: parentsOf["119"],
         branchExistsWithWork: allBuiltThisRun,
+        issueIsClosed: noneClosed,
       })
     ).toBe("main");
   });
@@ -50,6 +54,7 @@ describe(".sandcastle base resolution — forest fixture 108→112, 120→119", 
       resolveBase({
         parents: parentsOf["108"],
         branchExistsWithWork: allBuiltThisRun,
+        issueIsClosed: noneClosed,
       })
     ).toBe(issueBranch("112"));
   });
@@ -59,6 +64,7 @@ describe(".sandcastle base resolution — forest fixture 108→112, 120→119", 
       resolveBase({
         parents: parentsOf["120"],
         branchExistsWithWork: allBuiltThisRun,
+        issueIsClosed: noneClosed,
       })
     ).toBe(issueBranch("119"));
   });
@@ -69,6 +75,7 @@ describe(".sandcastle base resolution — forest fixture 108→112, 120→119", 
     const base = resolveBase({
       parents: ["112"],
       branchExistsWithWork: () => false,
+      issueIsClosed: noneClosed,
     });
     expect(base).toBe("main");
   });
@@ -103,6 +110,7 @@ describe(".sandcastle base resolution — forest fixture 108→112, 120→119", 
       resolveBase({
         parents: ["112", "119"],
         branchExistsWithWork: allBuiltThisRun,
+        issueIsClosed: noneClosed,
       })
     ).toBe("main");
   });
@@ -112,6 +120,7 @@ describe(".sandcastle base resolution — forest fixture 108→112, 120→119", 
     const base = resolveBase({
       parents: ["112", "119"],
       branchExistsWithWork: allBuiltThisRun,
+      issueIsClosed: noneClosed,
       onMultiParent: (ps) => {
         seen = ps;
         return "sandcastle/base-130";
@@ -126,6 +135,7 @@ describe(".sandcastle base resolution — forest fixture 108→112, 120→119", 
       resolveBase({
         parents: ["112", "119"],
         branchExistsWithWork: allBuiltThisRun,
+        issueIsClosed: noneClosed,
         onMultiParent: () => null,
       })
     ).toBeNull();
@@ -150,12 +160,14 @@ describe("buildMultiParentBase — temp base for a diamond", () => {
     return { git, calls };
   };
   const merges = (calls) => calls.filter((c) => c.includes("merge --no-edit"));
+  const noneClosed = () => false;
 
   test("all parents already merged → main, no git touched", () => {
     const { git, calls } = fakeGit();
     const base = buildMultiParentBase("130", ["112", "119"], {
       git,
       branchExistsWithWork: () => false,
+      issueIsClosed: noneClosed,
     });
     expect(base).toBe("main");
     expect(calls).toEqual([]);
@@ -166,6 +178,7 @@ describe("buildMultiParentBase — temp base for a diamond", () => {
     const base = buildMultiParentBase("130", ["112", "119"], {
       git,
       branchExistsWithWork: () => true,
+      issueIsClosed: noneClosed,
     });
     expect(base).toBe("sandcastle/base-130");
     expect(merges(calls).length).toBe(2);
@@ -183,6 +196,7 @@ describe("buildMultiParentBase — temp base for a diamond", () => {
     const base = buildMultiParentBase("130", ["112", "119"], {
       git,
       branchExistsWithWork: (id) => id === "112",
+      issueIsClosed: noneClosed,
     });
     expect(base).toBe("sandcastle/base-130");
     expect(merges(calls).length).toBe(1);
@@ -222,6 +236,7 @@ describe("buildMultiParentBase — temp base for a diamond", () => {
     const base = buildMultiParentBase("130", ["112", "119"], {
       git,
       branchExistsWithWork: () => true,
+      issueIsClosed: noneClosed,
     });
     expect(base).toBeNull();
     expect(calls.some((c) => c.includes("merge --abort"))).toBe(true);
