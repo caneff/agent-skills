@@ -17,9 +17,8 @@ import type { OpenIssue, PrRef } from "./reconcile.mts";
 // Degrade rather than throw because the orchestrator is a long unattended run.
 // A malformed response to one of a dozen queries would otherwise abort a run
 // that is mid-implementation on a real branch, and every caller here already
-// has a considered answer for missing data (see `issueIsClosed`, which fails
-// OPEN on purpose). Degrading is not the same as going quiet: a shape that
-// fails validation warns on stderr and lands in the run log.
+// has a considered answer for missing data. Degrading is not the same as going
+// quiet: a shape that fails validation warns on stderr and lands in the run log.
 
 // How many issues a query asks for. One convention, applied at every call
 // site, replacing the three ad-hoc limits (100, 200, 1000) that used to sit
@@ -120,8 +119,7 @@ const issueEdgeRowsSchema = z.array(
 export type IssueEdgeRow = z.infer<typeof issueEdgeRowsSchema>[number];
 
 // Every issue's state and native parent, open AND closed — the one query
-// behind both the closed-set `issueIsClosed` memoises and the
-// spent-parent check. Null when there is no usable answer; per the failure
+// behind the spent-parent check. Null when there is no usable answer; per the failure
 // policy that is the same null a failed `gh` call produces, and each caller
 // decides what it means. An empty array is a real answer (a repo with no
 // issues) and stays distinct from it.
