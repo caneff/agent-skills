@@ -112,7 +112,7 @@ Pick the pattern that fits the candidate. Mix them — don't make every diagram 
 
 ### Mermaid graph (the workhorse for dependencies / call flow)
 
-"X calls Y calls Z, and look at the mess" → a `flowchart`. Colour leakage edges and shallow nodes red with `classDef`; a sequence diagram works well for "before: 6 round-trips; after: 1." **Write one statement per line inside `vt-mermaid`** — a line wrapped mid-edge is a syntax error.
+"X calls Y calls Z, and look at the mess" → a `flowchart`. Fill leaking and shallow nodes solid red with `classDef` so the problem sites read at a glance; a sequence diagram works well for "before: 6 round-trips; after: 1." **Write one statement per line inside `vt-mermaid`** — a line wrapped mid-edge is a syntax error.
 
 ```html
 <div class="vt-mermaid">
@@ -120,7 +120,7 @@ flowchart LR
   A[OrderIntake] --> B[OrderRepo]
   B -.leaks pricing.-> C[PricingClient]
   B --> D[(orders db)]
-  classDef leak stroke:#c5221f,stroke-width:2px;
+  classDef leak fill:#c5221f,stroke:#c5221f,color:#ffffff;
   class B,C leak
 </div>
 ```
@@ -129,7 +129,7 @@ Mermaid bakes `classDef` colours at parse time and cannot read a `--vt-*` token,
 
 ### Call-graph collapse (before/after in two Mermaid panels)
 
-The default for a deepening. Before: a chain of shallow hops, each node red. After: one deep module, its old hops now internal and faded. Put one `vt-mermaid` in each panel of a `vt-split`.
+The default for a deepening. Before: a chain of shallow hops, each node filled solid red. After: one deep module, its old hops now internal and faded. Put one `vt-mermaid` in each panel of a `vt-split`.
 
 ```html
 <div class="vt-mermaid">

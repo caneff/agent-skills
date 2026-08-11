@@ -161,7 +161,7 @@ flowchart TB
   A[OrderHandler] --> B[OrderValidator]
   B --> C[OrderNormalizer]
   C --> D[OrderRepo]
-  classDef shallow stroke:#c5221f,stroke-width:2px;
+  classDef shallow fill:#c5221f,stroke:#c5221f,color:#ffffff;
   class A,B,C,D shallow
           </div>
         </div>
@@ -206,7 +206,7 @@ flowchart LR
   A[OrderIntake] --> B[OrderRepo]
   B -.leaks pricing.-> C[PricingClient]
   B --> D[(orders db)]
-  classDef leak stroke:#c5221f,stroke-width:2px;
+  classDef leak fill:#c5221f,stroke:#c5221f,color:#ffffff;
   class B,C leak
       </div>
       <p style="color: var(--vt-muted); font-size: 0.9rem; margin-top: 0.35rem">
