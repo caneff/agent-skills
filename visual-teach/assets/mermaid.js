@@ -30,6 +30,12 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
+  // Prefer a vendored mermaid.min.js sitting next to this bridge so reports and
+  // lessons render offline; the CDN is only a fallback if that copy is absent.
+  // currentScript is valid here — the UMD wrapper calls this factory during the
+  // bridge's own synchronous parse.
+  var here = (typeof document !== 'undefined' && document.currentScript && document.currentScript.src) || '';
+  var LOCAL = here ? here.replace(/[^/]*$/, 'mermaid.min.js') : '';
   var CDN = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
 
   // mermaid.initialize() config, brand-blue tint both sides. We use mermaid's
@@ -109,7 +115,7 @@
     if (!nodes.length) return;
 
     options = options || {};
-    var src = options.cdn || CDN;
+    var src = options.cdn || LOCAL || CDN;
 
     var list = Array.from(nodes);
     // Stash each diagram's source now; mermaid.run() replaces it with SVG, so we
@@ -133,16 +139,26 @@
       window.mermaid.run({ nodes: list });
     }
 
-    var script = doc.createElement('script');
-    script.src = src;
-    script.onload = function () {
+    function onLoaded() {
       render();
       // Re-render on data-theme toggle so diagrams follow the page palette.
       if (typeof MutationObserver !== 'undefined') {
         new MutationObserver(render).observe(doc.documentElement,
           { attributes: true, attributeFilter: ['data-theme'] });
       }
-    };
+    }
+
+    var script = doc.createElement('script');
+    script.src = src;
+    script.onload = onLoaded;
+    // Local copy missing (moved bundle, partial copy)? fall back to the CDN once.
+    if (src !== CDN) {
+      script.onerror = function () {
+        var f = doc.createElement('script');
+        f.src = CDN; f.onload = onLoaded;
+        doc.head.appendChild(f);
+      };
+    }
     doc.head.appendChild(script);
   }
 

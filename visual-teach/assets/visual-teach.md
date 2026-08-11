@@ -661,8 +661,9 @@ mermaid **only** when the graph needs auto-layout: sequence, state, ER.
 <!-- 1. Add the bridge script (after visual-teach.js, or just before </body>) -->
 <script src="../assets/mermaid.js"></script>
 
-<!-- 2. Write your diagram inside .vt-mermaid — mermaid CDN loads only if this
-     element is found on the page. -->
+<!-- 2. Write your diagram inside .vt-mermaid — mermaid loads only if this
+     element is found on the page. The bridge prefers the vendored
+     mermaid.min.js sitting next to it and falls back to the CDN if absent. -->
 <div class="vt-mermaid">
   sequenceDiagram Client->>Server: Request Server-->>Client: Response
 </div>
