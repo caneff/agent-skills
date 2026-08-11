@@ -47,27 +47,33 @@ each rots into a lie the moment the code changes underneath it:
   below`, a comment on every line of a self-evident block.
 - **Historical cruft.** `# changed from a list to a dict on 3/4`; `// used to
   call the old API`; a changelog living in the source. Git already holds this.
-- **Bare issue/ADR citation.** `# see JIRA-4521`, `# per ADR-012`, `// fixes
-  #88` sitting on self-explanatory code, pointing at a ticket for no reason the
-  reader can use. (Contrast the keeper below — a citation that carries a *why*
-  stays.)
+- **Issue/ticket/ADR/decision citation.** `# see JIRA-4521`, `# per ADR-012`,
+  `// fixes #88`, `// (issue #4, decision 3)`. Every such pointer sends the
+  reader off to reconstruct a reason that belongs right here. Cut the *whole*
+  citation, not one pointer out of it — dropping `#4` from `(issue #4, decision
+  3)` leaves a barer `decision 3`, worse than what you started with. If the
+  citation carried a *why*, keep the *why* as plain prose and delete every
+  number.
 - **Commented-out code.** Delete it. Git remembers; a graveyard block does not.
 - **Stale or wrong.** A comment the code has outgrown. If it no longer matches
   the code, it misleads — cut it (or fix it if the *why* is still true).
 
 ## Keep
 
-These earn their place — each carries a *why* the code cannot:
+These earn their place — each carries a *why* the code cannot. A keeper is not
+exempt from editing: rewrite it to the fewest words that still read clearly.
+Cut the throat-clearing, the restated code, the second sentence that repeats the
+first. A good comment is a note, not a paragraph.
 
 - **The why.** Why this approach over the obvious one; why this constant; why
-  this order matters. `# retry 3x — the upstream flushes its cache on a cold
-  read and the first call always 404s`.
+  this order matters. `# retry 3x — upstream 404s the first cold read`.
 - **The warning.** A non-obvious consequence, a sharp edge, a "do not touch
   unless you also change X."
-- **The workaround with its reference.** A pointer to a bug or decision *paired
-  with the reason it constrains this code*: `// upstream truncates payloads over
-  64KB — see github.com/x/y#123; chunk before sending`. The reference earns its
-  place because it explains, not because it cites.
+- **The workaround and the reason for it.** The constraint that forces the
+  code's shape, stated so the reader never leaves the file:
+  `// upstream truncates payloads over 64KB — chunk first`. Keep the reason;
+  never keep an issue number in its place — a `#123` promises the reason lives
+  elsewhere, and this audit puts it here instead.
 - **The domain rule the code can't make self-evident.** A business constraint or
   legal requirement whose *why* lives outside the codebase.
 - **Public API contract.** A docstring or doc-comment on a published interface,
@@ -96,8 +102,9 @@ These earn their place — each carries a *why* the code cannot:
    touch), keep (earns its place), or cut (default). Say the *why* to yourself
    for anything you keep — if you cannot, it is a cut.
 
-4. **Apply the changes.** Delete the cuts; where a comment's *why* is still true
-   but its text has gone stale, correct the text. Touch comments only — leave the
+4. **Apply the changes.** Delete the cuts. For every keeper, tighten the prose
+   to the fewest words that still read clearly, and correct any text that has
+   gone stale while its *why* stays true. Touch comments only — leave the
    code itself, its formatting, and every keeper that already reads true exactly
    as they are.
 
