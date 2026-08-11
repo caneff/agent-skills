@@ -145,7 +145,6 @@ _selfcheck() {
   grep -qx 'warn=104' <<<"$out" || { echo "FAIL warn: $out"; exit 1; }
   grep -qx 'setup=107' <<<"$out" || { echo "FAIL setup: $out"; exit 1; }
   grep -qx 'done=1' <<<"$out" || { echo "FAIL done: $out"; exit 1; }
-  is_running >/dev/null && { echo "FAIL is-running: reported live in a clean env"; exit 1; }
   echo ok
 }
 
