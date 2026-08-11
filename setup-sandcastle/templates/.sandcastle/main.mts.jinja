@@ -455,47 +455,28 @@ function reconciliationSweep(): {
     const branch = issueBranch(id);
     const branchExists = branchExistsWithWork(id);
     const mergesClean = branchExists && mergesCleanIntoMain(branch);
-    const action = decideInReviewAction(classification, {
+    // Rebuild the dependency graph from GitHub blockedBy edges (issue #50);
+    // prComponents drops any parent not also completed this run, so a stacked
+    // recovery collapses into one PR instead of one per tip.
+    const parents = parentsFromBlockedBy(
+      blockedByForIssues.get(issue.number) ?? []
+    );
+    const plan = decideInReviewAction(classification, {
+      id,
+      title: issue.title,
+      branch,
+      parents,
       branchExists,
       mergesClean,
     });
 
-    if (action === "leave") {
-      console.log(`  #${id} — human-gated (open PR exists); leaving untouched`);
-    } else if (action === "relabel-human") {
-      console.log(
-        `  #${id} — human-vetoed (closed/merged PR, no open PR) → ready-for-human`
-      );
-      relabel(id, "ready-for-human", ["in-review"]);
-    } else if (action === "inject") {
-      // Branch still applies to main — just never got a PR (e.g. a prior run
-      // crashed before Phase 3). Inject it for a cheap PR, no rebuild.
-      console.log(
-        `  #${id} — stranded; branch ${branch} merges clean → injecting into this run for PR`
-      );
-      sweepInjected.add(id);
-      completedFromSweep.push({
-        id,
-        title: issue.title,
-        branch,
-        // Rebuild the dependency graph from GitHub blockedBy edges (issue #50);
-        // prComponents drops any parent not also completed this run, so a
-        // stacked recovery collapses into one PR instead of one per tip.
-        parents: parentsFromBlockedBy(blockedByForIssues.get(issue.number) ?? []),
-      });
-    } else {
-      // requeue: no branch, no work, OR a stale branch that conflicts with main.
-      // Requeue NOW (before the plan loop) so this run rebuilds it from scratch —
-      // relabel ready-for-agent and delete any stale branch so Phase 2 recuts it
-      // fresh from main (a lingering branch is only rebased onto base, keeping its
-      // conflicting history).
-      console.log(
-        `  #${id} — stranded; no usable branch (missing or conflicts with main) → ready-for-agent for fresh rebuild`
-      );
-      git(`branch -D ${branch}`); // no-op (null) if the branch doesn't exist
-      relabel(id, "ready-for-agent", ["in-review"]);
-      sweepRequeued.add(id);
-    }
+    // Apply the plan; decideInReviewAction made every call, this loop only acts.
+    console.log(`  ${plan.note}`);
+    if (plan.deleteBranch) git(`branch -D ${branch}`); // no-op (null) if absent
+    if (plan.addLabel) relabel(id, plan.addLabel, plan.removeLabels);
+    if (plan.completed) completedFromSweep.push(plan.completed);
+    if (plan.bucket === "injected") sweepInjected.add(id);
+    if (plan.bucket === "requeued") sweepRequeued.add(id);
   }
 
   return { sweepInjected, sweepRequeued, completedFromSweep };

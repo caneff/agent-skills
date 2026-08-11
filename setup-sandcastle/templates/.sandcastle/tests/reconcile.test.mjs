@@ -507,58 +507,70 @@ describe("planGateOutcome", () => {
 // decideInReviewAction — truth table
 // ---------------------------------------------------------------------------
 describe("decideInReviewAction", () => {
-  test("human-gated → leave", () => {
-    expect(
-      decideInReviewAction("human-gated", {
-        branchExists: false,
-        mergesClean: false,
-      })
-    ).toBe("leave");
+  const issue = (over) => ({
+    id: "7",
+    title: "Widget",
+    branch: "sandcastle/issue-7",
+    parents: ["3"],
+    branchExists: false,
+    mergesClean: false,
+    ...over,
   });
 
-  test("human-vetoed → relabel-human", () => {
-    expect(
-      decideInReviewAction("human-vetoed", {
-        branchExists: true,
-        mergesClean: true,
-      })
-    ).toBe("relabel-human");
+  test("human-gated → leave; touches no label, no branch, no bucket", () => {
+    const plan = decideInReviewAction("human-gated", issue());
+    expect(plan.action).toBe("leave");
+    expect(plan.addLabel).toBe(null);
+    expect(plan.removeLabels).toEqual([]);
+    expect(plan.deleteBranch).toBe(false);
+    expect(plan.bucket).toBe(null);
+    expect(plan.completed).toBeUndefined();
   });
 
-  test("stranded, no branch → requeue", () => {
-    expect(
-      decideInReviewAction("stranded", {
-        branchExists: false,
-        mergesClean: false,
-      })
-    ).toBe("requeue");
+  test("human-vetoed → relabel ready-for-human off in-review", () => {
+    const plan = decideInReviewAction("human-vetoed", issue({ branchExists: true, mergesClean: true }));
+    expect(plan.action).toBe("relabel-human");
+    expect(plan.addLabel).toBe("ready-for-human");
+    expect(plan.removeLabels).toEqual(["in-review"]);
+    expect(plan.deleteBranch).toBe(false);
+    expect(plan.bucket).toBe(null);
+    expect(plan.completed).toBeUndefined();
+  });
+
+  test("stranded, no branch → requeue: delete branch, relabel ready-for-agent", () => {
+    const plan = decideInReviewAction("stranded", issue());
+    expect(plan.action).toBe("requeue");
+    expect(plan.addLabel).toBe("ready-for-agent");
+    expect(plan.removeLabels).toEqual(["in-review"]);
+    expect(plan.deleteBranch).toBe(true);
+    expect(plan.bucket).toBe("requeued");
+    expect(plan.completed).toBeUndefined();
   });
 
   test("stranded, branch exists but conflicts with main → requeue", () => {
-    expect(
-      decideInReviewAction("stranded", {
-        branchExists: true,
-        mergesClean: false,
-      })
-    ).toBe("requeue");
+    const plan = decideInReviewAction("stranded", issue({ branchExists: true, mergesClean: false }));
+    expect(plan.action).toBe("requeue");
+    expect(plan.deleteBranch).toBe(true);
+    expect(plan.bucket).toBe("requeued");
   });
 
-  test("stranded, branch exists and merges clean → inject", () => {
-    expect(
-      decideInReviewAction("stranded", {
-        branchExists: true,
-        mergesClean: true,
-      })
-    ).toBe("inject");
+  test("stranded, branch exists and merges clean → inject with the completed record", () => {
+    const plan = decideInReviewAction("stranded", issue({ branchExists: true, mergesClean: true }));
+    expect(plan.action).toBe("inject");
+    expect(plan.addLabel).toBe(null);
+    expect(plan.deleteBranch).toBe(false);
+    expect(plan.bucket).toBe("injected");
+    expect(plan.completed).toEqual({
+      id: "7",
+      title: "Widget",
+      branch: "sandcastle/issue-7",
+      parents: ["3"],
+    });
   });
 
   test("stranded, branch absent but mergesClean true (shouldn't inject without branch) → requeue", () => {
-    expect(
-      decideInReviewAction("stranded", {
-        branchExists: false,
-        mergesClean: true,
-      })
-    ).toBe("requeue");
+    const plan = decideInReviewAction("stranded", issue({ branchExists: false, mergesClean: true }));
+    expect(plan.action).toBe("requeue");
   });
 });
 
