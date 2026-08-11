@@ -34,7 +34,6 @@ PRE=$(git rev-parse HEAD)
 PRELOCK=$(mktemp)
 [ -f "$LOCK" ] && python3 -c "import json;d=json.load(open('$LOCK')).get('skills',{});[print(k+chr(9)+v.get('skillFolderHash','')) for k,v in d.items()]" > "$PRELOCK"
 
-# 3. update through the package manager
 echo "running: npx skills update -g"
 npx -y skills update -g
 

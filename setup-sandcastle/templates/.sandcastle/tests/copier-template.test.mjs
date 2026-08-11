@@ -57,10 +57,8 @@ const initRepo = (dir) => {
   return g;
 };
 
-// Every fixture reads the same file to ask what an adopter answered.
 const answersIn = (dir) => readFileSync(join(dir, BREADCRUMB), "utf8");
 
-// Any rendered file under the adopter's `.sandcastle/` subtree.
 const renderedIn = (dir, file) => readFileSync(join(dir, ".sandcastle", file), "utf8");
 
 const standardsIn = (dir) => renderedIn(dir, "CODING_STANDARDS.md");
@@ -750,7 +748,6 @@ describe.skipIf(!hasCopier())("copier update round-trips from the git root", () 
   const docInTarget = () => join(target, ".sandcastle", "CODING_STANDARDS.md");
 
   beforeAll(() => {
-    // --- fixture: a self-contained template repo built from the live files ---
     src = mkdtempSync(join(tmpdir(), "sandcastle-src-"));
     cpSync(join(repoRoot, "copier.yml"), join(src, "copier.yml"));
     cpSync(
@@ -763,7 +760,6 @@ describe.skipIf(!hasCopier())("copier update round-trips from the git root", () 
     gsrc("commit", "-q", "-m", "v1");
     gsrc("tag", V1);
 
-    // --- adopter installs v1 into its git root, then commits ---
     target = mkdtempSync(join(tmpdir(), "sandcastle-tgt-"));
     const gtgt = initRepo(target);
     writeFileSync(join(target, ".python-version"), "3.14\n");
@@ -783,7 +779,6 @@ describe.skipIf(!hasCopier())("copier update round-trips from the git root", () 
     gtgt("add", "-A");
     gtgt("commit", "-q", "-m", "adopter edit");
 
-    // --- template evolves to v2 ---
     appendFileSync(docInSrc(), `\n${TEMPLATE_V2}\n`);
     gsrc("commit", "-q", "-am", "v2");
     gsrc("tag", V2);

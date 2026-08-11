@@ -63,7 +63,6 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(() => rendered && rmSync(rendered, { recursive: true, force: true }));
 
-// ── sandboxConfig ─────────────────────────────────────────────────────────────
 
 withRender("sandboxConfig: calls dockerFn with identity.env and the read-only skills mount", () => {
   const identity = { env: { GH_TOKEN: "tok" }, gitConfigCommands: [] };
@@ -126,12 +125,10 @@ withRender("sandboxConfig: ALL git-config writes chain into ONE onSandboxReady e
     .onSandboxReady;
   const gitEntries = ready.filter((c) => c.command.includes("git config"));
   expect(gitEntries).toHaveLength(1);
-  // That one entry carries both the identity writes and the hooks-path write.
   expect(gitEntries[0].command).toContain("user.name");
   expect(gitEntries[0].command).toContain("core.hooksPath");
 });
 
-// ── no-op branch: bot vars unset ─────────────────────────────────────────────
 
 withRender("sandbox-identity: no-op when bot vars unset — env and gitConfigCommands are empty", async () => {
   const id = await sandboxIdentity();
@@ -139,7 +136,6 @@ withRender("sandbox-identity: no-op when bot vars unset — env and gitConfigCom
   expect(id.gitConfigCommands).toEqual([]);
 });
 
-// ── identity branch: all bot vars set ────────────────────────────────────────
 
 withRender("sandbox-identity: env and gitConfigCommands are fully populated when all bot vars set", async () => {
   process.env.SANDCASTLE_BOT_GH_TOKEN = "ghp_test_token";
@@ -169,7 +165,6 @@ withRender("sandbox-identity: name+email collapse into ONE chained command (no .
   );
 });
 
-// ── App creds branch: installation token minting ─────────────────────────────
 
 const fakeTokenMinter = async () => "ghs_minted_token";
 
@@ -226,8 +221,6 @@ withRender("sandbox-identity: no-op when App creds not set and SANDCASTLE_BOT_GH
   expect(id.gitConfigCommands).toEqual([]);
 });
 
-// ── applyBotToken ─────────────────────────────────────────────────────────────
-//
 // These two ran as `sandbox-identity.check.mts`, a file the render shipped to
 // every adopter for a maintainer to invoke by hand. Nothing else in the suite
 // touched applyBotToken, so the coverage moved here rather than going out with
