@@ -76,3 +76,34 @@ open PR` invariant. For each `in-review` issue: open PR → leave untouched;
 closed-unmerged PR → relabel `ready-for-human`; no PR + branch with work →
 inject into the run's completed set for Phase 3 to open its PR; no PR + no
 branch → relabel `ready-for-agent`.
+
+## Template packaging & render tests
+
+Terms for how the `.sandcastle/` orchestrator ships as a copier template and how
+its test suite guards the rendered output.
+
+**Arm** — One language variant the template renders from the same source, chosen
+by the `LANGUAGE` answer: the **python arm** (uv, just, pytest) or the **node
+arm** (npm, vitest). Same orchestrator logic, per-arm toolchain commands.
+
+**Breadcrumb** — The `.copier-answers` file copier writes at the adopter's repo
+root. Records the answers a render was built from (`LANGUAGE`, `PYTHON_VERSION`,
+the pinned `_commit`) so a later `copier update` can 3-way-merge a new template
+version onto the adopter's edits.
+
+**Arc** — A multi-issue change to the template large enough to name, e.g. the
+**LANGUAGE arc** that parameterized the single-language orchestrator into python
+and node arms. Used as a baseline marker in the test fixtures (`pre-arc`).
+
+**Set net** — A test that pins the *set* of rendered file paths (or breadcrumb
+answers), not their contents — the live render must produce exactly the expected
+paths, minus a declared withdrawn list, plus a declared added list. Cheap and
+load-bearing: catches an install broken by a rename or a withdrawal.
+_Avoid_: byte-pin, render pin (those pinned contents, and were retired — see
+ADR-0005).
+
+**Contract string** — A string in a rendered file whose *exact text* is an
+external contract, because a grep or an adopter depends on it. The canonical one
+is the **sentinel** `SANDCASTLE_CHECK:`, which the host greps to read a check's
+verdict. Pinned with a named allowlist (`toContain`), not by full-file equality —
+these are the only strings whose text is pinned at all.
