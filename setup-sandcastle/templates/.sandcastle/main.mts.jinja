@@ -90,6 +90,7 @@ import {
   parsePrsClosingIssues,
   type IssueEdgeRow,
 } from "./github-parse.mts";
+import { selectBuildable } from "./select-buildable.mts";
 import { parseSandcastleWorktrees } from "./worktrees.mts";
 import { planRetention } from "./log-retention.mts";
 import {
@@ -360,6 +361,25 @@ function getBlockedByForInReview(): Map<number, number[]> {
     gh(
       `issue list --state open --label "in-review" --limit ${OPEN_ISSUE_LIMIT} --json number,blockedBy --jq '[.[] | {number, blockedBy: [.blockedBy.nodes[].number]}]'`
     )
+  );
+}
+
+// The deterministic frontier the planner is handed (#242): every open
+// ready-for-agent issue whose native `blockedBy` edges have all closed. Blocker
+// openness is judged against ALL open issues (any label) — an open blocker still
+// blocks whether it is ready-for-agent, in-review, or anything else — so we pull
+// blockedBy for the whole open set, run the pure `selectBuildable`, then keep the
+// ready-for-agent survivors as the selectable set. A child whose parent issue is
+// still open never survives, which is the parent-merged-to-main rule in one line.
+function getBuildableFrontier(): OpenIssue[] {
+  const open = listAllOpenIssues();
+  const blockedBy = parseBlockedByRows(
+    gh(
+      `issue list --state open --limit ${OPEN_ISSUE_LIMIT} --json number,blockedBy --jq '[.[] | {number, blockedBy: [.blockedBy.nodes[].number]}]'`
+    )
+  );
+  return selectBuildable(open, blockedBy).filter((i) =>
+    i.labels.includes("ready-for-agent")
   );
 }
 
@@ -641,6 +661,13 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   //
   // It outputs a <plan> JSON block — Output.object parses and validates it.
   // -------------------------------------------------------------------------
+
+  // The deterministic frontier (#242): the host, not the planner, decides which
+  // issues have zero open blockers. The planner is handed this buildable set and
+  // may only select from it — it prunes it further for implicit same-file
+  // conflicts, but never resurrects an issue the blockedBy filter excluded.
+  const buildable = getBuildableFrontier();
+
   const plan = await sandcastle.run({
     ...sandboxConfig(identity),
     name: "planner",
@@ -684,6 +711,12 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
             )
             .join("\n")
         : "(none)",
+      // The host-computed buildable frontier (#242): open ready-for-agent issues
+      // whose every native `blockedBy` edge has closed. This is the ONLY set the
+      // planner may select from — the raw open list never reaches it.
+      BUILDABLE: buildable.length
+        ? buildable.map((i) => `- #${i.number} — ${i.title}`).join("\n")
+        : "(none — no unblocked issues this run)",
     },
     // Extract and validate the <plan> JSON into a typed object. Throws
     // StructuredOutputError if the tag is missing, the JSON is malformed, or
