@@ -10,9 +10,6 @@ import {
 } from "../reconcile.mts";
 import { REVIEW_RETRY_CAP } from "../retry-policy.mts";
 
-// ---------------------------------------------------------------------------
-// classifyInReviewIssue — four PR-state branches
-// ---------------------------------------------------------------------------
 describe("classifyInReviewIssue", () => {
   test("open PR → human-gated", () => {
     expect(classifyInReviewIssue([{ number: 5, state: "OPEN" }])).toBe(
@@ -52,10 +49,6 @@ describe("classifyInReviewIssue", () => {
     expect(classifyInReviewIssue(prs)).toBe("human-vetoed");
   });
 });
-
-// ---------------------------------------------------------------------------
-// bucketIssues — one bucket per type
-// ---------------------------------------------------------------------------
 
 const makeOpts = (overrides = {}) => ({
   openIssues: [],
@@ -278,9 +271,6 @@ describe("bucketIssues", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// deliveredParentIds — an open parent whose every child is closed
-// ---------------------------------------------------------------------------
 describe("deliveredParentIds", () => {
   test("open parent, every child closed → flagged", () => {
     const edges = [
@@ -314,9 +304,6 @@ describe("deliveredParentIds", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// buildRunSummary — format checks
-// ---------------------------------------------------------------------------
 describe("buildRunSummary", () => {
   test("includes section header", () => {
     expect(buildRunSummary([])).toContain("Run Summary");
@@ -503,9 +490,6 @@ describe("planGateOutcome", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// decideInReviewAction — truth table
-// ---------------------------------------------------------------------------
 describe("decideInReviewAction", () => {
   const issue = (over) => ({
     id: "7",
@@ -574,9 +558,6 @@ describe("decideInReviewAction", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// planOutcomeTransition — the post-build label decision (#102)
-// ---------------------------------------------------------------------------
 describe("planOutcomeTransition", () => {
   // The below-the-cap cases below build their fixtures as REVIEW_RETRY_CAP - 1.
   // At a cap of 1 that IS the cap, and those tests would quietly start

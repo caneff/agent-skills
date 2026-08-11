@@ -25,8 +25,6 @@ if [[ -n "$missing" ]]; then
   exit 1
 fi
 
-# ---------------------------------------------------------------- platform ---
-
 if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then
   platform=windows
 elif [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft /proc/version 2>/dev/null; then
@@ -124,8 +122,6 @@ process_alive() {
   fi
   return 1
 }
-
-# ------------------------------------------------------------ reachability ---
 
 gateway=""
 gateway_resolved=false
@@ -226,8 +222,6 @@ resolve_url() {
   return 1
 }
 
-# ------------------------------------------------------------------- scan ---
-
 live_files=()
 live_origins=()
 live_urls=()
@@ -271,8 +265,6 @@ for ((i = 0; i < ${#dirs[@]}; i++)); do
     live_count=$((live_count + 1))
   done
 done
-
-# ----------------------------------------------------------------- output ---
 
 entries=""
 for ((i = 0; i < live_count; i++)); do

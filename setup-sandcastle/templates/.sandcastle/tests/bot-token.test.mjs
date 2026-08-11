@@ -10,7 +10,6 @@ beforeAll(() => {
   testPrivateKeyPem = privateKey.export({ type: "pkcs1", format: "pem" });
 });
 
-// ── buildJwt ──────────────────────────────────────────────────────────────────
 
 describe("buildJwt", () => {
   test("returns a 3-part dot-separated JWT string", () => {
@@ -56,7 +55,6 @@ describe("buildJwt", () => {
   });
 });
 
-// ── loadCredentials ───────────────────────────────────────────────────────────
 
 describe("loadCredentials", () => {
   const VARS = {
