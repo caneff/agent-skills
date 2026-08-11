@@ -41,14 +41,85 @@ export type InReviewClassification =
 //   requeue       — stranded, no usable branch; relabel ready-for-agent, delete stale branch
 export type InReviewAction = "leave" | "relabel-human" | "inject" | "requeue";
 
+// The issue as the reconciliation sweep knows it: its identity, its branch, its
+// forest parents (rebuilt from GitHub blockedBy edges), and the two branch facts
+// the decision turns on.
+export interface InReviewIssue {
+  id: string;
+  title: string;
+  branch: string;
+  parents: string[];
+  branchExists: boolean;
+  mergesClean: boolean;
+}
+
+// The whole plan for one in-review issue, so the caller applies and decides
+// nothing. Mirrors planGateOutcome / planOutcomeTransition: the label move, the
+// branch move, the summary bucket, and (for inject) the PR-set record all come
+// out of here rather than being re-derived from a bare action enum.
+export interface InReviewPlan {
+  action: InReviewAction;
+  // Label to add and labels to strip, or null when the action touches no label.
+  addLabel: string | null;
+  removeLabels: string[];
+  // requeue only: delete the stale work branch so Phase 2 recuts it from main.
+  deleteBranch: boolean;
+  // inject only: the PR-set membership record main.mts accumulates for Phase 3.
+  completed?: CompletedIssue;
+  // Which end-of-run summary set this issue lands in, or null for none.
+  bucket: "injected" | "requeued" | null;
+  // Operator-facing line main.mts prints, unindented — the caller owns layout.
+  note: string;
+}
+
 export function decideInReviewAction(
   classification: InReviewClassification,
-  opts: { branchExists: boolean; mergesClean: boolean }
-): InReviewAction {
-  if (classification === "human-gated") return "leave";
-  if (classification === "human-vetoed") return "relabel-human";
-  // stranded
-  return opts.branchExists && opts.mergesClean ? "inject" : "requeue";
+  issue: InReviewIssue
+): InReviewPlan {
+  const { id, title, branch, parents, branchExists, mergesClean } = issue;
+
+  if (classification === "human-gated")
+    return {
+      action: "leave",
+      addLabel: null,
+      removeLabels: [],
+      deleteBranch: false,
+      bucket: null,
+      note: `#${id} — human-gated (open PR exists); leaving untouched`,
+    };
+
+  if (classification === "human-vetoed")
+    return {
+      action: "relabel-human",
+      addLabel: "ready-for-human",
+      removeLabels: ["in-review"],
+      deleteBranch: false,
+      bucket: null,
+      note: `#${id} — human-vetoed (closed/merged PR, no open PR) → ready-for-human`,
+    };
+
+  // stranded, branch still applies to main — inject it for a cheap PR, no rebuild.
+  if (branchExists && mergesClean)
+    return {
+      action: "inject",
+      addLabel: null,
+      removeLabels: [],
+      deleteBranch: false,
+      completed: { id, title, branch, parents },
+      bucket: "injected",
+      note: `#${id} — stranded; branch ${branch} merges clean → injecting into this run for PR`,
+    };
+
+  // stranded, no usable branch (missing or conflicts with main) — requeue: delete
+  // any stale branch and relabel ready-for-agent so this run rebuilds from scratch.
+  return {
+    action: "requeue",
+    addLabel: "ready-for-agent",
+    removeLabels: ["in-review"],
+    deleteBranch: true,
+    bucket: "requeued",
+    note: `#${id} — stranded; no usable branch (missing or conflicts with main) → ready-for-agent for fresh rebuild`,
+  };
 }
 
 export function classifyInReviewIssue(prs: PrRef[]): InReviewClassification {
