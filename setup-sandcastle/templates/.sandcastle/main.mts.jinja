@@ -48,12 +48,7 @@ import {
   sandboxConfig,
   applyBotToken,
 } from "./sandbox-identity.mts";
-import {
-  resolveBase,
-  issueBranch,
-  buildMultiParentBase,
-  staleClosedBranches,
-} from "./base-resolution.mts";
+import { resolveBase, issueBranch } from "./base-resolution.mts";
 import {
   prComponents,
   parentsFromBlockedBy,
@@ -255,56 +250,6 @@ function branchExistsWithWork(parentId: string): boolean {
   return branchHasWork(branch);
 }
 
-// Issue ids GitHub reports as CLOSED. Base resolution asks this before trusting
-// what a parent branch's commits look like (issue #127), and the branch
-// GC below asks it to clear the branches of shipped issues. Memoised over one
-// fetch: the answer is read once per parent per issue per iteration, and the bot
-// never closes an issue mid-run.
-let closedIds: Set<string> | null = null;
-function issueIsClosed(id: string): boolean {
-  if (closedIds === null) {
-    const rows = fetchIssueEdges();
-    if (rows === null) {
-      // Fail OPEN (an empty set): liveness falls back to branch content, the
-      // pre-#127 behaviour. Failing closed would call every parent dead and base
-      // the whole forest on main — a wrong answer for every issue, to avoid a
-      // wrong answer for one.
-      console.error(
-        "  ! could not list issue states; base resolution falls back to branch content this run"
-      );
-    }
-    closedIds = new Set(
-      (rows ?? [])
-        .filter((row) => row.state === "CLOSED")
-        .map((row) => String(row.number))
-    );
-  }
-  return closedIds.has(id);
-}
-
-// Delete the local `sandcastle/issue-<n>` branches of closed issues, once per
-// run before any branch is cut. A closed issue's branch has no reader left: its
-// work either landed or was superseded, and leaving it on disk is what let a
-// diamond merge #101's dead implementation into #107's base every run (#127).
-// Local only — deleting a remote branch is a human's call, and base resolution
-// reads local refs anyway.
-function gcClosedIssueBranches(): void {
-  const stale = staleClosedBranches(
-    git(`for-each-ref --format=%(refname:short) refs/heads/sandcastle/issue-*`),
-    issueIsClosed
-  );
-  for (const branch of stale) {
-    // Only claim the delete git actually did: `branch -D` fails when the branch
-    // is checked out in a leftover worktree, and a log line saying otherwise
-    // would hide the exact landmine this GC exists to clear.
-    if (git(`branch -D ${branch}`) === null) {
-      console.error(`  ! ${branch} — issue closed but the branch would not delete`);
-    } else {
-      console.log(`  ${branch} — issue closed; stale branch deleted`);
-    }
-  }
-}
-
 // Whether `branch` still merges into main without conflict. merge-tree writes
 // the merged tree and exits non-zero (git() → null) when the merge would
 // conflict — a read-only check, no worktree or index mutation. A stranded
@@ -403,8 +348,7 @@ function getParentEdges(): Map<string, string> {
 
 // Every issue's state and native parent, open AND closed — getParentEdges'
 // open-only fetch cannot see the closed children that make a parent "delivered".
-// The one query behind both the closed-set `issueIsClosed` memoises (#127) and
-// the spent-parent check below. Null when there is no usable answer; each
+// Backs the spent-parent check below. Null when there is no usable answer; each
 // caller decides what that means for it.
 //
 // ponytail: --state all spans every closed issue, so the limit is higher than
@@ -620,11 +564,6 @@ if (process.env.SANDCASTLE_SKIP_ADDRESS !== "1") {
   await addressOpenPRs();
 }
 
-// Before the sweep, and before any branch is cut this run: clear the branches of
-// closed issues, so nothing downstream can mistake shipped work for live work.
-console.log("\n=== Stale branch GC: closed issues ===\n");
-gcClosedIssueBranches();
-
 // Pre-loop reconciliation sweep: restore in-review ⟺ open PR invariant before
 // the plan loop runs. Stranded branches are injected into allCompleted so Phase 3
 // opens their PRs; issues with no branch are relabeled ready-for-agent so the
@@ -778,39 +717,10 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
 
   const settled = await Promise.allSettled(
     work.map(async (issue) => {
-      // Resolve this issue's base in the forest from its declared parents:
-      //   0 parents          → main
-      //   1 parent this run  → sandcastle/issue-<parent> (stack on the chain)
-      //   1 parent merged    → main (its work already landed earlier)
-      //   ≥2 parents (diamond) → a temp base branch merging all parents
-      //                          (buildMultiParentBase), or null if that merge
-      //                          conflicts — then skip the issue this iteration.
-      // review-only issues have no plan entry, so default their parents to [].
-      const parents = issue.mode === "full" ? issue.parents : [];
-      const base = resolveBase({
-        parents,
-        branchExistsWithWork,
-        issueIsClosed,
-        onMultiParent: (ps) =>
-          buildMultiParentBase(issue.id, ps, {
-            git,
-            branchExistsWithWork,
-            issueIsClosed,
-          }),
-      });
-      if (base === null) {
-        // Deterministic conflict: the parents conflict with each other, so this
-        // fails identically every iteration. Block the issue for the rest of the
-        // run (see blockedThisRun) instead of re-skipping to the iteration cap —
-        // it needs a human to merge the parents upstream first (#64).
-        blockedThisRun.set(issue.id, parents);
-        console.error(
-          `  ✗ ${issue.id} multi-parent base merge conflicted (${parents
-            .map((p) => `#${p}`)
-            .join(", ")}); blocked this run — merge parents upstream first`
-        );
-        return { issue, kind: "nothing" as const };
-      }
+      // Every issue's branch is cut from `main` (#243). A child is only selected
+      // once its parents' issues have closed, so their work is already in `main`
+      // — no stacking, no diamond base.
+      const base = resolveBase();
 
       // A pre-existing branch (a review-only re-review, or a ready-for-agent
       // issue whose stale worktree lingers from an earlier run) was built
@@ -824,9 +734,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       const cfg = sandboxConfig(identity);
       const sandbox = await sandcastle.createSandbox({
         branch: issue.branch,
-        // New branches are cut from the resolved base — the parent's branch (so
-        // they contain just that chain's work) or main. (Ignored if the branch
-        // already exists — the rebase hook above refreshes those.)
+        // New branches are cut from `main`. (Ignored if the branch already
+        // exists — the rebase hook above refreshes those.)
         baseBranch: base,
         ...cfg,
         hooks: {
@@ -885,13 +794,10 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         try {
           // Two read-only judges replace the single committing reviewer (#1):
           // a Spec judge and a Standards judge, each in its own isolated context
-          // so neither sees the other's working notes. Both diff against this
-          // issue's resolved base — its parent's branch or main. The base is
-          // immutable for the issue's lifetime in the forest, so the judges see
-          // only THIS issue's commits, not the parent chain it was stacked on.
-          // Can't reuse the built-in TARGET_BRANCH arg — sandcastle reserves it
-          // and pins it to the host branch (main), which would leak the parent
-          // chain's commits into the diff. Neither judge writes the branch; the
+          // so neither sees the other's working notes. Both diff against `main`,
+          // this issue's base, so the judges see only THIS issue's commits. Can't
+          // reuse the built-in TARGET_BRANCH arg — sandcastle reserves it and
+          // pins it to the host branch (main). Neither judge writes the branch; the
           // implementer is the sole writer. Run them sequentially — both are
           // read-only, so order is irrelevant.
           const specReview = await sandbox.run({
