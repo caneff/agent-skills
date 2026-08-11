@@ -110,6 +110,45 @@ first. A good comment is a note, not a paragraph.
   callers depend on. A docstring that only restates the signature is no
   contract; cut it like any other restatement.
 
+## The audit, worked
+
+Eight comments guard this test; one earns its place. Each of the other seven
+says what the code or the test's own name already says — so each is a whole cut,
+not a trim.
+
+```python
+def test_white_kropki_decode():
+    # --- type 200 white-kropki decode ---
+    # arrange
+    board = Board(size=9)  # default 9x9 grid
+    # build a puzzle with one white dot
+    puzzle = decode(WHITE_DOT_WIRE)
+    # act
+    result = puzzle.witness()
+    # assert
+    # white dot means the two cells differ by 1
+    assert result.pairs == [(a, b)]
+    # should have exactly one pair
+```
+
+The audited version keeps one line:
+
+```python
+def test_white_kropki_decode():
+    board = Board(size=9)
+    puzzle = decode(WHITE_DOT_WIRE)
+    result = puzzle.witness()
+    # white dot means the two cells differ by 1
+    assert result.pairs == [(a, b)]
+```
+
+Eight comments in, one out. The `--- ... ---` banner and the arrange/act/assert
+labels name blocks the reader already sees; `# default 9x9 grid`, `# build a
+puzzle with one white dot`, and `# should have exactly one pair` each restate the
+line beneath them. Only the domain rule survives — the code enforces that a white
+dot means the two cells differ by 1, but nothing in it says why that pair is the
+answer.
+
 ## Run
 
 1. **Start clean, scope tight.** Confirm a clean working tree first
@@ -128,8 +167,11 @@ first. A good comment is a note, not a paragraph.
    directory — but every comment in scope gets judged, never sampled.
 
 3. **Judge each into one bucket** against the one test: load-bearing (never
-   touch), keep (earns its place), or cut (default). Say the *why* to yourself
-   for anything you keep — if you cannot, it is a cut.
+   touch), keep (earns its place), or cut (default). For every keeper, write one
+   sentence naming the concrete mistake a reader makes once it is gone — a
+   specific wrong action (*"a reader assumes the retry is optional and deletes
+   it"*), not "adds context" or "explains the why." If you cannot name the
+   mistake, the comment is not load-bearing — cut it.
 
 4. **Apply the changes.** Delete the cuts. For every keeper, tighten the prose
    to the fewest words that still read clearly, and correct any text that has
