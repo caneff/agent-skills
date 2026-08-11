@@ -21,11 +21,14 @@ as inherited scaffold.
    ABOVE the `_subdirectory` (`setup-sandcastle/templates`), so they are outside the
    render boundary and never ship; the `tests/` live under `templates/.sandcastle/`
    and are dropped by `_exclude`. Nobody edits the `.mts` in a target, so the tests
-   are dead weight there. The same rule withdrew `CONTEXT.md` and `docs/adr/` —
-   this project's own domain model, written for whoever maintains the template —
-   and the `applyBotToken` self-check, whose two cases now run in the dev suite
-   beside the module they cover. What a document looks like decides nothing; a
-   named runtime reader does. `CODING_STANDARDS.md` (loaded during review),
+   are dead weight there. `CONTEXT.md` and `docs/adr/` — this project's own
+   domain model, written for whoever maintains the template — go one further:
+   they live OUTSIDE the render tree at `setup-sandcastle/docs/`, not `_exclude`d
+   from within it, so `copier update` carries their removal into every adopter
+   for free rather than leaving each adopter to keep a stale copy forever (issue
+   #196). The `applyBotToken` self-check left the render tree the same way, its
+   two cases now running in the dev suite beside the module they cover. What a
+   document looks like decides nothing; a named runtime reader does. `CODING_STANDARDS.md` (loaded during review),
    `bot-setup.md` (named in `mint-gh-token.mjs`'s error), `tsconfig.json` (what an
    adopter typechecks with), the prompts, the Dockerfile and `.env.example` all
    have one, so all of them ship.

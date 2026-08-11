@@ -20,23 +20,23 @@
 _subdirectory: setup-sandcastle/templates
 
 # The dev-only vitest suite guards the canonical `.mts`; a target never edits
-# the orchestrator, so it never ships. Both patterns are needed: the bare path
-# drops the directory entry, the `/**` drops its contents (a lone trailing-slash
-# pattern leaves an empty tests/ behind). Paths are anchored at the subproject
-# root (`templates/`), so the tests under `.sandcastle/` need the prefix.
-# A render carries what an adopter RUNS, and nothing else. `CONTEXT.md` and the
-# ADRs beneath it are this project's own domain model — maintainer reading, kept
-# here, never copied. The test is the reader, not the file extension: the six
-# documents that DO ship each have a named runtime one — the review modules load
-# `CODING_STANDARDS.md`, `mint-gh-token.mjs` names `bot-setup.md` in the error it
-# prints, an adopter typechecks with `tsconfig.json`, and the prompts, Dockerfile
-# and `.env.example` are read every run.
+# the orchestrator, so it never ships. `.sandcastle/tests/**` has never shipped,
+# so there is nothing to withdraw — it stays excluded in place. Both patterns
+# are needed: the bare path drops the directory entry, the `/**` drops its
+# contents (a lone trailing-slash pattern leaves an empty tests/ behind). Paths
+# are anchored at the subproject root (`templates/`), so the tests under
+# `.sandcastle/` need the prefix.
+#
+# The project's own domain model — `CONTEXT.md` and the ADRs beneath it — is
+# maintainer reading that no adopter runs, so it lives OUTSIDE the render tree
+# entirely, at `setup-sandcastle/docs/`, not excluded from within it (issue
+# #196). `_exclude` merely stops a file rendering; every adopter that already
+# received it keeps it forever, and `copier update` carries no deletion. Moving
+# the file out of `templates/` instead produces a real deletion in the render
+# diff, which `copier update` then carries into every adopter for free.
 _exclude:
   - ".sandcastle/tests"
   - ".sandcastle/tests/**"
-  - ".sandcastle/CONTEXT.md"
-  - ".sandcastle/docs"
-  - ".sandcastle/docs/**"
 
 # The template fills its own blanks with `[[ ]]` / `[% %]`, not copier's default
 # `{{ }}` / `{% %}`. The prompt-drawer files under `.sandcastle/` carry their own
