@@ -1,40 +1,28 @@
-// Parallel Planner with Review — dependency-forest orchestration loop
+// Parallel Planner with Review — one PR per issue, one planning pass per run
 //
-// This template drives a multi-phase workflow:
-//   Phase 1 (Plan):             An opus agent analyzes open issues, builds a
-//                               dependency graph, and outputs a <plan> JSON
-//                               listing unblocked issues with branch names AND
-//                               the `parents` each one builds on.
+// This template drives a single-pass workflow:
+//   Phase 1 (Plan):             An opus agent reads the host-computed buildable
+//                               frontier and outputs a <plan> JSON of the issues
+//                               to build concurrently, pruned for implicit
+//                               same-file conflicts.
 //   Phase 2 (Execute + Review): For each issue, a sandbox is created via
-//                               createSandbox(), cut from its RESOLVED BASE — its
-//                               parent's branch when it has one present this run,
-//                               otherwise `main`. Chains are independent off main
-//                               (the forest); a child branch carries its parent's
-//                               commits but never an unrelated chain's. The
-//                               implementer runs first (100 iterations); if
-//                               there's work on the branch two read-only judges
-//                               (Spec + Standards) run in the same sandbox (1
-//                               iteration each), committing nothing. All issue
+//                               createSandbox(), cut from `main`. The implementer
+//                               runs first; if there's work on the branch, two
+//                               read-only judges (Spec + Standards) run in the
+//                               same sandbox, committing nothing. All issue
 //                               pipelines run concurrently via
 //                               Promise.allSettled().
-//   Phase 3 (Open PRs):         The host splits the run's completed issues into
-//                               connected dependency components and opens ONE PR
-//                               per component: it merges each component's leaf
-//                               tips into a throwaway head off `main`,
-//                               force-pushes it, and an agent opens the PR into
-//                               main for manual review (no auto-merge).
+//   Phase 3 (Outcome):          Each issue's terminal outcome is applied inline.
+//                               A clean pass opens ONE ready PR from the issue's
+//                               own branch into `main` and labels it in-review in
+//                               the same step. A two-axis review-fail is binding:
+//                               no PR, the branch is preserved and the failure is
+//                               written into the issue body for a human.
 //
-// The outer loop repeats up to MAX_ITERATIONS times. Because a completed issue's
-// branch is immutable and the next iteration's dependent branches are cut from
-// it directly (base resolution), an issue blocked by an earlier one is picked up
-// and built on top once the earlier one lands — instead of deadlocking until a
-// human merges. There is no single integration tip and no per-issue fold: the
-// forest replaces the former one revisable stack.
-//
-// PRs are split by PR set (one run → several PRs): a connected component of
-// dependency edges, with independent same-topic components combined via a `group`
-// key the planner emits. A multi-parent (diamond) issue is built on a temp base
-// branch merging all its parents.
+// One planning pass per run: nothing merges to `main` mid-run, so there is no
+// second pass to re-select an in-review issue through GitHub's index lag. A
+// dependency chain drains one level per run-until-empty pass (`/sandcastle-watch`),
+// each gated by a human merge — that outer drain is the only loop.
 //
 // Usage:
 //   npx tsx .sandcastle/main.mts
@@ -48,52 +36,34 @@ import {
   sandboxConfig,
   applyBotToken,
 } from "./sandbox-identity.mts";
-import { resolveBase, issueBranch } from "./base-resolution.mts";
-import {
-  prComponents,
-  parentsFromBlockedBy,
-  mergeParentEdges,
-  landedIssues,
-  CompletedIssue,
-} from "./pr-components.mts";
+import { resolveBase } from "./base-resolution.mts";
 import {
   parseSpecVerdict,
   parseStandardsVerdict,
   combineVerdicts,
   isHarnessError,
-  parseCheckVerdict,
+  type ReviewAxis,
 } from "./review-verdict.mts";
 import {
-  classifyInReviewIssue,
-  decideInReviewAction,
   bucketIssues,
   buildRunSummary,
   deliveredParentIds,
-  planGateOutcome,
   planOutcomeTransition,
-  OpenIssue,
-  PrRef,
+  type OpenIssue,
+  type CompletedIssue,
 } from "./reconcile.mts";
+import { spliceReviewFailureSection } from "./issue-body.mts";
 import {
   ALL_ISSUE_LIMIT,
   OPEN_ISSUE_LIMIT,
   parseBlockedByRows,
   parseIssueEdges,
-  parseIssueList,
   parseOpenIssues,
-  parseParentEdges,
-  parsePrsClosingIssues,
   type IssueEdgeRow,
 } from "./github-parse.mts";
 import { selectBuildable } from "./select-buildable.mts";
 import { parseSandcastleWorktrees } from "./worktrees.mts";
 import { planRetention } from "./log-retention.mts";
-import {
-  REVIEW_RETRY_CAP,
-  readAttempts,
-  writeAttempts,
-  recordSetAttempt,
-} from "./retry-policy.mts";
 import { execSync } from "node:child_process";
 import {
   mkdirSync,
@@ -124,19 +94,16 @@ delete process.env.GH_TOKEN;
 // Issue lifecycle labels (managed host-side, never by the agents)
 //
 //   ready-for-agent → fresh, plannable. The planner only ever selects these.
-//   in-review       → implemented AND reviewed OK; PR pending a human merge.
-//   needs-review    → implemented, but the reviewer errored. The branch keeps
-//                     its commits; a later pass merges current main into the
-//                     branch and re-runs ONLY the reviewer. After
-//                     REVIEW_RETRY_CAP failed re-reviews it escalates back to
-//                     ready-for-agent for a full re-implement.
-//   ready-for-human → the reviewer found the branch doesn't meet the issue spec
-//                     (#130) REVIEW_RETRY_CAP times; re-implementing isn't
-//                     converging, so it's handed off for a human to take over.
+//   in-review       → implemented AND reviewed clean on both axes; its PR is
+//                     open, pending a human merge.
+//   ready-for-human → a two-axis review-fail (#244). Binding: no PR. The branch
+//                     is preserved and pushed, and the failure context is written
+//                     into the issue body for a human to re-drive with
+//                     `/implement`. There is no automatic retry.
 //
 // Transitioning out of ready-for-agent the moment an outcome is known (rather
 // than at the very end of the run) is what stops a finished issue from being
-// re-planned on the next iteration / next run.
+// re-planned on the next run.
 // ---------------------------------------------------------------------------
 function gh(args: string): string | null {
   try {
@@ -151,14 +118,6 @@ function gh(args: string): string | null {
   }
 }
 
-function listIssues(label: string): { number: number; title: string }[] {
-  return parseIssueList(
-    gh(
-      `issue list --state open --label "${label}" --limit ${OPEN_ISSUE_LIMIT} --json number,title`
-    )
-  );
-}
-
 function git(args: string): string | null {
   try {
     return execSync(`git ${args}`, { stdio: ["pipe", "pipe", "pipe"] })
@@ -169,13 +128,13 @@ function git(args: string): string | null {
   }
 }
 
-// Write a Markdown body to a log file, then comment it on each issue with
-// `--body-file` (not an inline `--body`) so a body with backticks or quotes
-// can't break shell escaping. One place owns that file-not-shell-string choice.
-function commentIssues(ids: string[], slug: string, body: string): void {
-  const file = `.sandcastle/logs/${slug}.md`;
+// Replace an issue's body, writing it through a file (not an inline `--body`) so
+// a body with backticks or quotes can't break shell escaping. One place owns
+// that file-not-shell-string choice.
+function editIssueBody(id: string, body: string): void {
+  const file = `.sandcastle/logs/issue-${id}-body.md`;
   writeFileSync(file, body);
-  for (const id of ids) gh(`issue comment ${id} --body-file ${file}`);
+  gh(`issue edit ${id} --body-file ${file}`);
 }
 
 // Log verbosity via SANDCASTLE_VERBOSE:
@@ -238,28 +197,6 @@ function branchHasWork(branch: string): boolean {
   return out !== null && out.length > 0;
 }
 
-// Predicate for base resolution: does a parent issue's branch exist locally with
-// work not yet in `main`? True only when `sandcastle/issue-<id>` is a real ref
-// AND its three-dot diff from main is non-empty (built this run, not yet merged).
-// A parent that already landed in an earlier run has no local branch (or one with
-// no unmerged work), so this returns false and the dependent issue bases on main.
-function branchExistsWithWork(parentId: string): boolean {
-  const branch = issueBranch(parentId);
-  // `rev-parse --verify` exits non-zero (git() → null) when the ref is missing.
-  if (git(`rev-parse --verify --quiet ${branch}`) === null) return false;
-  return branchHasWork(branch);
-}
-
-// Whether `branch` still merges into main without conflict. merge-tree writes
-// the merged tree and exits non-zero (git() → null) when the merge would
-// conflict — a read-only check, no worktree or index mutation. A stranded
-// branch that fails this is stale (main moved on while it sat in-review): it
-// must be rebuilt from scratch, not injected to Phase 3 where it would only
-// conflict again.
-function mergesCleanIntoMain(branch: string): boolean {
-  return git(`merge-tree --write-tree main ${branch}`) !== null;
-}
-
 // add/remove as separate calls so a no-op remove never blocks the add.
 function relabel(id: string, add: string, remove: string[]): void {
   gh(`issue edit ${id} --add-label "${add}"`);
@@ -267,7 +204,7 @@ function relabel(id: string, add: string, remove: string[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// Reconciliation sweep helpers
+// Issue queries
 // ---------------------------------------------------------------------------
 
 // Fetch all open issues (all labels) for the bucketed run summary.
@@ -275,36 +212,6 @@ function listAllOpenIssues(): OpenIssue[] {
   return parseOpenIssues(
     gh(
       `issue list --state open --limit ${OPEN_ISSUE_LIMIT} --json number,title,labels`
-    )
-  );
-}
-
-// Query GitHub for all PRs and build a map of issueNumber → PRs that close it.
-// Uses closingIssuesReferences (the field GitHub populates when a PR body
-// contains a closing keyword such as "Closes #N"). The gh calls are the IO; the
-// fragile response parsing lives in github-parse.mts (tested there).
-function getPrsReferencingIssues(): Map<number, PrRef[]> {
-  const nameWithOwner =
-    gh(`repo view --json nameWithOwner --jq .nameWithOwner`) ?? "";
-  const [owner, repo] = nameWithOwner.split("/");
-  if (!owner || !repo) return new Map();
-
-  return parsePrsClosingIssues(
-    gh(
-      `api graphql -f 'query={ repository(owner: "${owner}", name: "${repo}") { pullRequests(first: 100, states: [OPEN, CLOSED, MERGED]) { nodes { number state closingIssuesReferences(first: 20) { nodes { number } } } } } }'`
-    )
-  );
-}
-
-// Each in-review issue's `blockedBy` edge ids, keyed by issue number (issue
-// #50). The reconciliation sweep uses these to rebuild a recovered branch's
-// parents (see `parentsFromBlockedBy`) instead of dropping the dependency graph.
-// One bulk query for the whole in-review set — no per-issue fetch — mirroring
-// the `blockedBy` pull the planner already does in plan-prompt.md.
-function getBlockedByForInReview(): Map<number, number[]> {
-  return parseBlockedByRows(
-    gh(
-      `issue list --state open --label "in-review" --limit ${OPEN_ISSUE_LIMIT} --json number,blockedBy --jq '[.[] | {number, blockedBy: [.blockedBy.nodes[].number]}]'`
     )
   );
 }
@@ -328,26 +235,8 @@ function getBuildableFrontier(): OpenIssue[] {
   );
 }
 
-// GitHub's native sub-issue edge (each open issue's `parent` field), as a
-// childId → parentId map (issue #90). Folded into the PR-set graph via
-// `mergeParentEdges` at Phase 3 so a spec and a sub-issue that supersedes it
-// group into ONE PR instead of two — the durable backstop to the LLM planner,
-// which is told to honor `parent` (plan-prompt.md) but can still miss it. String
-// ids match `CompletedIssue.parents`; `mergeParentEdges` only reads edges for
-// issues completed this run, and `prComponents` drops any parent not present, so
-// fetching the whole open set is harmless.
-function getParentEdges(): Map<string, string> {
-  // A repo with more open issues than OPEN_ISSUE_LIMIT could miss a completed
-  // issue's parent edge; it then falls back to the planner-declared parents.
-  return parseParentEdges(
-    gh(
-      `issue list --state open --limit ${OPEN_ISSUE_LIMIT} --json number,parent --jq '[.[] | {number, parent: .parent.number}]'`
-    )
-  );
-}
-
-// Every issue's state and native parent, open AND closed — getParentEdges'
-// open-only fetch cannot see the closed children that make a parent "delivered".
+// Every issue's state and native parent, open AND closed — the open-only frontier
+// fetch cannot see the closed children that make a parent "delivered".
 // Backs the spent-parent check below. Null when there is no usable answer; each
 // caller decides what that means for it.
 //
@@ -374,84 +263,12 @@ function getDeliveredParents(): Set<string> {
   return deliveredParentIds(fetchIssueEdges() ?? []);
 }
 
-// ---------------------------------------------------------------------------
-// Reconciliation sweep: run once at run start to restore the invariant
-//   in-review ⟺ an open PR references the issue.
-//
-// For each in-review issue:
-//   • open PR exists              → human-gated; leave untouched
-//   • only closed/merged PR(s)   → human vetoed; relabel ready-for-human
-//   • no PR at all (stranded)    →
-//       branch exists with work   → inject into completedFromSweep for Phase 3
-//       no branch / no work       → relabel ready-for-agent
-//
-// Returns the sets needed by the end-of-run bucketed summary.
-// ---------------------------------------------------------------------------
-function reconciliationSweep(): {
-  sweepInjected: Set<string>;
-  sweepRequeued: Set<string>;
-  completedFromSweep: CompletedIssue[];
-} {
-  const inReview = listIssues("in-review");
-  if (inReview.length === 0) {
-    return {
-      sweepInjected: new Set(),
-      sweepRequeued: new Set(),
-      completedFromSweep: [],
-    };
-  }
-
-  console.log(
-    `\n=== Reconciliation sweep: ${inReview.length} in-review issue(s) ===\n`
-  );
-  const prsForIssues = getPrsReferencingIssues();
-  const blockedByForIssues = getBlockedByForInReview();
-
-  const sweepInjected = new Set<string>();
-  const sweepRequeued = new Set<string>();
-  const completedFromSweep: CompletedIssue[] = [];
-
-  for (const issue of inReview) {
-    const id = String(issue.number);
-    const prs = prsForIssues.get(issue.number) ?? [];
-    const classification = classifyInReviewIssue(prs);
-
-    const branch = issueBranch(id);
-    const branchExists = branchExistsWithWork(id);
-    const mergesClean = branchExists && mergesCleanIntoMain(branch);
-    // Rebuild the dependency graph from GitHub blockedBy edges (issue #50);
-    // prComponents drops any parent not also completed this run, so a stacked
-    // recovery collapses into one PR instead of one per tip.
-    const parents = parentsFromBlockedBy(
-      blockedByForIssues.get(issue.number) ?? []
-    );
-    const plan = decideInReviewAction(classification, {
-      id,
-      title: issue.title,
-      branch,
-      parents,
-      branchExists,
-      mergesClean,
-    });
-
-    // Apply the plan; decideInReviewAction made every call, this loop only acts.
-    console.log(`  ${plan.note}`);
-    if (plan.deleteBranch) git(`branch -D ${branch}`); // no-op (null) if absent
-    if (plan.addLabel) relabel(id, plan.addLabel, plan.removeLabels);
-    if (plan.completed) completedFromSweep.push(plan.completed);
-    if (plan.bucket === "injected") sweepInjected.add(id);
-    if (plan.bucket === "requeued") sweepRequeued.add(id);
-  }
-
-  return { sweepInjected, sweepRequeued, completedFromSweep };
-}
-
 // Ensure the lifecycle labels exist (idempotent — gh errors if present, swallowed).
 gh(
   `label create in-review --color FBCA04 --description "Implemented + reviewed by sandcastle; PR pending human merge"`
 );
 gh(
-  `label create needs-review --color D93F0B --description "Implemented but sandcastle review failed; re-review only"`
+  `label create ready-for-human --color D93F0B --description "Sandcastle review failed; branch preserved — continue with /implement"`
 );
 
 // The planner emits its plan as JSON inside <plan> tags; Output.object extracts
@@ -464,20 +281,11 @@ const planSchema = z.object({
       id: z.string(),
       title: z.string(),
       branch: z.string(),
-      // The issue ids this issue builds on — its parents in the dependency
-      // forest. Drawn from open blockers AND the completed-this-run list. The
-      // planner biases toward declaring a parent when unsure: a missed parent
-      // breaks the dependent's build, while a false parent only over-groups.
-      // Base resolution (below) cuts each issue's branch from its parent's
-      // branch (1 parent, present this run) or `main` (0 parents, or parent
-      // already merged). Empty array for a root.
+      // Vestigial in the one-PR-per-issue model (#244): every branch is cut from
+      // `main` and opens its own PR, so parents no longer stack branches and
+      // group no longer combines PRs. The planner emits `[]` and a theme slug;
+      // the fields are kept so the plan item and CompletedIssue stay one shape.
       parents: z.array(z.string()),
-      // Topic key (issue #129): a short slug grouping issues that belong in the
-      // same PR by feature/theme, even when no dependency links them. Issues
-      // sharing a group are combined into one PR; dependency edges still force
-      // same-PR regardless. The planner reuses an existing group from
-      // COMPLETED_THIS_RUN when an issue fits one, so keys stay stable across
-      // iterations.
       group: z.string(),
     })
   ),
@@ -487,20 +295,11 @@ const planSchema = z.object({
 // Configuration
 // ---------------------------------------------------------------------------
 
-// Maximum number of plan→execute cycles before stopping. This is only a backstop:
-// the loop already breaks the moment a plan yields no buildable work
-// (`work.length === 0`), so a run naturally drains the buildable backlog before
-// hitting the cap. Set high so iterate-to-drain is the norm and the cap only
-// guards against a pathological re-planning loop.
-const MAX_ITERATIONS = 20;
-
-// Resolve sandbox identity. No-op when bot env vars are unset.
-// GitHub caps App installation tokens at ~1h, so a token minted once dies on any
-// run that outlasts it (retries routinely push past the hour). We re-mint at the
-// top of each iteration (below) instead; `identity` is reassigned there, and
-// applyBotToken pushes each fresh token into process.env so the host gh()/git()
-// calls stay authenticated too. This first mint covers Phase 0 + the sweep.
-let identity = await sandboxIdentity();
+// Resolve sandbox identity. No-op when bot env vars are unset. Minted once: a
+// run is a single planning pass (#244), short enough to stay inside the ~1h App
+// installation token life. applyBotToken pushes the token into process.env so
+// the host gh()/git() calls stay authenticated too.
+const identity = await sandboxIdentity();
 applyBotToken(identity, process.env);
 
 // Copy the host's installed dependencies into the worktree before each sandbox
@@ -509,22 +308,23 @@ applyBotToken(identity, process.env);
 const copyToWorktree = ["[% if LANGUAGE == 'node' %]node_modules[% else %].venv[% endif %]"];
 
 // ---------------------------------------------------------------------------
-// Main loop
+// The run: one planning pass
 // ---------------------------------------------------------------------------
 
-// One run → one PR per PR set. We accumulate every completed issue across all
-// iterations and, at the end, partition them into PR sets (dependency components,
-// with same-topic components combined) and open one PR each.
+// A run plans the buildable frontier once, builds it concurrently, opens one PR
+// per issue that passes review, and exits (#244). Nothing merges to `main`
+// mid-run — a human merges each PR later — so there is no second planning pass to
+// re-select an in-review issue through GitHub's index lag. The dependency chain
+// drains one level per run-until-empty pass, each gated by a human merge; that
+// outer drain (`/sandcastle-watch`) is the only loop.
 //
-// There is no integration tip anymore: the forest builds each issue on its real
-// parent's branch (or main), so there is nothing to fold onto. `runId` survives
-// only to name the throwaway PR head branches the host builds at Phase 3.
+// Every issue's branch is cut from `main` and opens its own PR against `main`, so
+// nothing races on a shared merge target. `runId` names the per-run log file.
 const runId = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 
 // Branch refs and commits persist — only the checkout dirs go. Called at run
 // start (crash-recovery net for a run that died before cleanup) and at run end
-// (after Phase 3, once per-issue worktrees are dead). The onWorktreeReady
-// rebase re-aligns any branch that is recut from its resolved base.
+// (once per-issue worktrees are dead).
 function gcWorktrees(): void {
   for (const path of parseSandcastleWorktrees(
     git(`worktree list --porcelain`) ?? ""
@@ -535,78 +335,49 @@ function gcWorktrees(): void {
 }
 
 gcWorktrees();
-// Branch the top-level runs (planner, PR consolidator) report against — used
-// only to name their log files the way sandcastle would by default.
+// Branch the top-level runs (planner, PR author) report against — used only to
+// name their log files the way sandcastle would by default.
 const headBranch = git("rev-parse --abbrev-ref HEAD") ?? "main";
-// Every issue completed this run, with the parent edges the planner declared.
-// Parent branches are immutable once done, so recording an issue here is pure
-// bookkeeping — no git mutation. `parents` feeds back into the next planner
-// iteration (so dependent issues can declare these as parents) and drives the
-// Phase 3 head merge.
+// Every issue that built to a clean review and opened a PR this run — recorded
+// for the end-of-run summary.
 const allCompleted: CompletedIssue[] = [];
-
-// Issues aborted this run because their multi-parent base could not be built:
-// two declared parents conflict when merged (issue #64). Parent branches are
-// static across a run's iterations, so the merge fails identically every time —
-// re-attempting burns iterations for nothing. We block the issue for the rest of
-// THIS run (no GitHub label: the block evaporates next run, and self-heals once a
-// human merges the conflicting parents into main). Map value is the conflicting
-// parent ids, so the run summary can name them. Authoritative hard gate; the
-// planner is also told (BLOCKED_THIS_RUN) so it stops re-selecting them.
-const blockedThisRun = new Map<string, string[]>();
+// Issue id → PR number, one per issue, for the run summary.
+const prAssignments = new Map<string, number>();
 
 // Phase 0: clear pending review comments on open sandcastle PRs before taking
-// on new issue work. Once per run — humans don't comment mid-run, so a
-// per-iteration sweep would only re-scan the same set. Set SANDCASTLE_SKIP_ADDRESS=1
-// for an issues-only run.
+// on new issue work. Set SANDCASTLE_SKIP_ADDRESS=1 for an issues-only run.
 if (process.env.SANDCASTLE_SKIP_ADDRESS !== "1") {
   console.log("\n=== Phase 0: Address open sandcastle PR comments ===\n");
   await addressOpenPRs();
 }
 
-// Pre-loop reconciliation sweep: restore in-review ⟺ open PR invariant before
-// the plan loop runs. Stranded branches are injected into allCompleted so Phase 3
-// opens their PRs; issues with no branch are relabeled ready-for-agent so the
-// planner can re-build them.
-const { sweepInjected, sweepRequeued, completedFromSweep } =
-  reconciliationSweep();
-allCompleted.push(...completedFromSweep);
+// ---------------------------------------------------------------------------
+// Phase 1: Plan
+//
+// The planning agent (opus, for deeper reasoning) reads the buildable frontier
+// and reasons over issue content to prune it for implicit same-file conflicts —
+// two issues that would collide with no declared edge. It emits a <plan> JSON
+// block; Output.object parses and validates it. One planning pass per run.
+// ---------------------------------------------------------------------------
 
-// Track issue → PR number across all Phase 3 opens for the run summary.
-const prAssignments = new Map<string, number>();
+// The deterministic frontier (#242): the host, not the planner, decides which
+// issues have zero open blockers. The planner is handed this buildable set and
+// may only select from it — it prunes it further for implicit same-file
+// conflicts, but never resurrects an issue the blockedBy filter excluded.
+const buildable = getBuildableFrontier();
 
-// Issue id → bounded failing-test tail for sets retired by the Phase-3
-// consecutive gate-failure cap (#25). A retired set is relabeled ready-for-human,
-// has its work branch PRESERVED (skipped in the post-Phase-3 reconciliation
-// below), and is named — with its failing tests — in the run summary.
-const retiredByGate = new Map<string, string>();
+type WorkIssue = {
+  id: string;
+  title: string;
+  branch: string;
+  parents: string[];
+  group?: string;
+};
 
-for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
-  console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
-
-  // Re-mint before this iteration's sandboxes are cut: installation tokens
-  // expire ~1h after minting, so a long run's later iterations would otherwise
-  // bake a dead token into every sandbox (and the host gh() calls) and 401.
-  // Minting is one JWT sign + one REST call — cheap enough to do every pass.
-  identity = await sandboxIdentity();
-  applyBotToken(identity, process.env);
-
-  // -------------------------------------------------------------------------
-  // Phase 1: Plan
-  //
-  // The planning agent (opus, for deeper reasoning) reads the open issue list,
-  // builds a dependency graph, and selects the issues that can be worked in
-  // parallel right now (i.e., no blocking dependencies on other open issues).
-  //
-  // It outputs a <plan> JSON block — Output.object parses and validates it.
-  // -------------------------------------------------------------------------
-
-  // The deterministic frontier (#242): the host, not the planner, decides which
-  // issues have zero open blockers. The planner is handed this buildable set and
-  // may only select from it — it prunes it further for implicit same-file
-  // conflicts, but never resurrects an issue the blockedBy filter excluded.
-  const buildable = getBuildableFrontier();
-
+let work: WorkIssue[] = [];
+if (buildable.length === 0) {
+  console.log("\nNo unblocked issues this run.");
+} else {
   const plan = await sandcastle.run({
     ...sandboxConfig(identity),
     name: "planner",
@@ -617,94 +388,28 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     // Opus for planning: dependency analysis benefits from deeper reasoning.
     agent: sandcastle.claudeCode("claude-opus-4-8"),
     promptFile: "./.sandcastle/plan-prompt.md",
-    // Issues already completed earlier in THIS run. Their branches exist locally
-    // with work, so an issue depending only on these is unblocked — the planner
-    // must build on top of them (declare them as `parents`), not treat them as
-    // in-flight blockers. We surface each one's own parents AND its assigned group
-    // so the planner keeps declaring consistent edges and REUSES existing group
-    // keys (issue #129) instead of coining a new synonym that would split a topic
-    // across PRs.
     promptArgs: {
-      COMPLETED_THIS_RUN: allCompleted.length
-        ? allCompleted
-            .map((i) => {
-              const parents = i.parents.length
-                ? ` (builds on ${i.parents.map((p) => `#${p}`).join(", ")})`
-                : "";
-              const group = i.group ? ` [group: ${i.group}]` : "";
-              return `- #${i.id} — ${i.title}${parents}${group}`;
-            })
-            .join("\n")
-        : "(none yet — first iteration)",
-      // Issues aborted this run by a deterministic multi-parent conflict (#64).
-      // They cannot be built until a human merges their conflicting parents, so
-      // the planner must NOT re-select them this run. Belt-and-suspenders: the
-      // host also hard-drops them from `work` above.
-      BLOCKED_THIS_RUN: blockedThisRun.size
-        ? [...blockedThisRun]
-            .map(
-              ([id, parents]) =>
-                `- #${id} — parents ${parents
-                  .map((p) => `#${p}`)
-                  .join(", ")} conflict; do not select`
-            )
-            .join("\n")
-        : "(none)",
       // The host-computed buildable frontier (#242): open ready-for-agent issues
       // whose every native `blockedBy` edge has closed. This is the ONLY set the
       // planner may select from — the raw open list never reaches it.
-      BUILDABLE: buildable.length
-        ? buildable.map((i) => `- #${i.number} — ${i.title}`).join("\n")
-        : "(none — no unblocked issues this run)",
+      BUILDABLE: buildable.map((i) => `- #${i.number} — ${i.title}`).join("\n"),
     },
     // Extract and validate the <plan> JSON into a typed object. Throws
     // StructuredOutputError if the tag is missing, the JSON is malformed, or
-    // validation fails — which aborts the loop.
+    // validation fails — which aborts the run.
     output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
   });
 
-  // Fresh, unblocked issues from the planner run the full implement→review
-  // pipeline. Issues labelled needs-review (implemented earlier, review errored)
-  // skip the implementer and re-run ONLY the reviewer on their existing branch.
-  //
-  // Drop anything this run already completed in an earlier iteration. The
-  // planner sources its ready-for-agent list from GitHub's label SEARCH index,
-  // which is eventually consistent: an issue relabeled in-review at the end of
-  // iteration N can still surface as ready-for-agent when iteration N+1's
-  // planner queries a second later, so it gets re-selected and needlessly
-  // re-implemented (the implementer no-ops, but it still burns a sandbox + a
-  // reviewer pass that makes throwaway commits). allCompleted is authoritative
-  // local state with no index lag — filter against it.
-  const handled = new Set(allCompleted.map((i) => i.id));
-  const fresh = plan.output.issues
-    // Also drop issues blocked this run by a multi-parent conflict (#64) — the
-    // hard gate, in case the planner re-selects one despite BLOCKED_THIS_RUN.
-    .filter((i) => !handled.has(i.id) && !blockedThisRun.has(i.id))
-    .map((i) => ({
-      ...i,
-      mode: "full" as const,
-    }));
-  const needsReview = listIssues("needs-review").map((i) => ({
-    id: String(i.number),
-    title: i.title,
-    branch: `sandcastle/issue-${i.number}`,
-    mode: "review-only" as const,
-  }));
-  const work = [...fresh, ...needsReview];
-
-  if (work.length === 0) {
-    // No unblocked work and nothing awaiting re-review — done or all blocked.
-    console.log("No unblocked or review-pending issues. Exiting.");
-    break;
-  }
-
-  console.log(
-    `Planning complete. ${fresh.length} to implement, ${needsReview.length} to re-review:`
-  );
+  work = plan.output.issues;
+  console.log(`\nPlanning complete. ${work.length} issue(s) to build:`);
   for (const w of work) {
-    console.log(`  [${w.mode}] ${w.id}: ${w.title} → ${w.branch}`);
+    console.log(`  ${w.id}: ${w.title} → ${w.branch}`);
   }
+}
 
+// Build every selected issue concurrently, then open one PR per issue that
+// passes review. An empty frontier or empty plan skips straight to the summary.
+if (work.length > 0) {
   // -------------------------------------------------------------------------
   // Phase 2: Execute + Review
   //
@@ -722,15 +427,13 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       // — no stacking, no diamond base.
       const base = resolveBase();
 
-      // A pre-existing branch (a review-only re-review, or a ready-for-agent
-      // issue whose stale worktree lingers from an earlier run) was built
-      // against an older base. Bring it up to its resolved base by REBASING onto
-      // it (not merging) so the branch stays linear — a merge commit here would
-      // make the issue un-revisable later, and would also entangle the diff the
-      // reviewer sees. A fresh branch cut from the base rebases as a no-op; a
-      // stale branch replays its commits onto the base. Best-effort: abort on
-      // conflict and proceed; the retry cap escalates a branch that can't be
-      // salvaged.
+      // A pre-existing branch (a ready-for-human issue a human is re-driving, or
+      // a stale worktree lingering from an earlier run) was built against an
+      // older `main`. Bring it up to date by REBASING onto `main` (not merging)
+      // so the branch stays linear — a merge commit here would make the issue
+      // un-revisable later and entangle the diff the reviewer sees. A fresh
+      // branch cut from `main` rebases as a no-op; a stale branch replays its
+      // commits onto `main`. Best-effort: abort on conflict and proceed.
       const cfg = sandboxConfig(identity);
       const sandbox = await sandcastle.createSandbox({
         branch: issue.branch,
@@ -752,40 +455,34 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       });
 
       try {
-        // Implement (full mode only). review-only issues already have commits
-        // on their branch from an earlier run.
-        let implemented = false;
-        if (issue.mode === "full") {
-          const implement = await sandbox.run({
-            name: "implementer",
-            logging: logging("implementer", issue.branch),
-            maxIterations: 100,
-            agent: sandcastle.claudeCode("claude-sonnet-5"),
-            promptFile: "./.sandcastle/implement-prompt.md",
-            promptArgs: {
-              TASK_ID: issue.id,
-              ISSUE_TITLE: issue.title,
-              BRANCH: issue.branch,
-            },
-          });
-          implemented = implement.commits.length > 0;
-        }
+        const implement = await sandbox.run({
+          name: "implementer",
+          logging: logging("implementer", issue.branch),
+          maxIterations: 100,
+          agent: sandcastle.claudeCode("claude-sonnet-5"),
+          promptFile: "./.sandcastle/implement-prompt.md",
+          promptArgs: {
+            TASK_ID: issue.id,
+            ISSUE_TITLE: issue.title,
+            BRANCH: issue.branch,
+          },
+        });
+        const implemented = implement.commits.length > 0;
 
         // Decide whether to review by what's ON THE BRANCH, not by this run's
         // commit count. A resumed branch that's already complete yields zero
         // new commits but still has work to review; gating on this-run commits
-        // there left the issue ready-for-agent and re-planned it every
-        // iteration. Only a branch with no diff vs main is truly "nothing".
+        // would leave it unreviewed. Only a branch with no diff vs main is truly
+        // "nothing".
         if (!implemented && !branchHasWork(issue.branch)) {
           return { issue, kind: "nothing" as const };
         }
 
         // Review. A reviewer error (e.g. context blow-up) must NOT discard the
-        // implementer's commits — catch it and flag the issue needs-review so a
-        // later pass re-reviews the existing branch instead of re-implementing.
-        // The originating issue text, so the reviewer can judge spec-conformance
-        // (issue #130) independently — it sees ONLY the issue, the commits, and
-        // the diff, never the implementer's reasoning.
+        // implementer's commits — caught below. The originating issue text lets
+        // the reviewer judge spec-conformance (issue #130) independently — it
+        // sees ONLY the issue, the commits, and the diff, never the
+        // implementer's reasoning.
         const issueSpec =
           gh(
             `issue view ${issue.id} --json title,body --jq '.title + "\n\n" + .body'`
@@ -829,44 +526,37 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           const standardsVerdict = parseStandardsVerdict(standardsReview.stdout);
           const combined = combineVerdicts(specVerdict, standardsVerdict);
           if (!combined.pass) {
-            // Post the failing judges' findings so the re-implement pass — the
-            // sole writer — gets targeted context. Route through the review-fail
-            // path (both axes share one REVIEW_RETRY_CAP; escalates to
-            // ready-for-human at the cap).
-            const sections: string[] = [];
-            if (!specVerdict.pass)
-              sections.push(`### Spec axis — FAIL\n\n${specReview.stdout.trim()}`);
+            // Binding review-fail (#244): no PR. Carry each failing axis's
+            // findings so the outcome loop can write them into the issue body —
+            // the human's whole brief for re-driving the preserved branch with
+            // `/implement`. The verdict's `reasons` hold each axis's FAIL line;
+            // pass the fuller reviewer stdout so the body has real context.
+            const detail: Partial<Record<ReviewAxis, string>> = {};
+            if (!specVerdict.pass) detail.spec = specReview.stdout.trim();
             if (!standardsVerdict.pass)
-              sections.push(
-                `### Standards axis — FAIL\n\n${standardsReview.stdout.trim()}`
-              );
-            const body =
-              `## Sandcastle review — changes requested\n\n` +
-              `This branch was reviewed read-only on two axes; the axes below ` +
-              `failed. Re-implement to address the findings (don't just silence ` +
-              `the verdict line).\n\n` +
-              sections.join("\n\n");
-            commentIssues([issue.id], `review-findings-${issue.id}`, body);
+              detail.standards = standardsReview.stdout.trim();
             console.warn(
-              `  ⚠ ${issue.id} failed review (${combined.failedAxes.join(
-                ", "
-              )})`
+              `  ⚠ ${issue.id} failed review (${combined.failedAxes.join(", ")})`
             );
             return {
               issue,
               kind: "review-fail" as const,
               failedAxes: combined.failedAxes,
+              reasons: detail,
             };
           }
           return { issue, kind: "done" as const };
         } catch (e) {
           // A harness fault (the review prompt couldn't be assembled) is not a
           // bad branch — it fails identically for every issue, so swallowing it
-          // to needs-review would burn retry caps and mislabel good work.
-          // Rethrow so allSettled surfaces it and the run aborts (below).
+          // would mislabel good work. Rethrow so allSettled surfaces it and the
+          // run aborts (below).
           if (isHarnessError(e)) throw e;
-          console.error(`  ⚠ ${issue.id} review failed, will re-review: ${e}`);
-          return { issue, kind: "needs-review" as const };
+          // A per-issue reviewer error (context blow-up, agent gave up): with no
+          // re-review path, leave the issue untouched — "nothing" keeps its
+          // ready-for-agent label for a fresh single attempt next run.
+          console.error(`  ⚠ ${issue.id} review errored; leaving for next run: ${e}`);
+          return { issue, kind: "nothing" as const };
         }
       } finally {
         await sandbox.close();
@@ -898,322 +588,99 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     );
   }
 
-  // Transition each issue's label the moment its outcome is known, so the NEXT
-  // iteration's planner (and any future run) sees the right state. Which label
-  // each outcome lands on is planOutcomeTransition's call (#102); this
-  // loop only applies the plan it returns. A rejection carries no value, so its
-  // issue comes from `work` by index.
-  let attempts = readAttempts();
-  const completedIssues: CompletedIssue[] = [];
+  // -------------------------------------------------------------------------
+  // Phase 3: apply each issue's terminal outcome (#244).
+  //
+  // planOutcomeTransition owns the decision (labels, preserveBranch, the failure
+  // section); this loop does the git/gh IO. A clean pass opens ONE ready PR for
+  // the issue and labels it in-review IN THE SAME STEP — the PR opens first, so a
+  // failed open leaves the issue ready-for-agent rather than stranded in-review
+  // with no PR. A review-fail is binding: no PR, the branch is preserved and
+  // pushed, the issue goes ready-for-human, and the failure is written into its
+  // body for a human to re-drive with `/implement`. Anything else is left as it
+  // arrived. A rejection carries no value, so its issue comes from `work` by index.
+  // -------------------------------------------------------------------------
   for (const [i, outcome] of settled.entries()) {
     const issue = outcome.status === "fulfilled" ? outcome.value.issue : work[i]!;
     const kind =
       outcome.status === "fulfilled" ? outcome.value.kind : ("nothing" as const);
-    // Only a review-fail outcome carries failedAxes; narrow before reading it.
+    // Only a review-fail outcome carries these; narrow before reading them.
     const failedAxes =
       outcome.status === "fulfilled" && "failedAxes" in outcome.value
         ? outcome.value.failedAxes
         : undefined;
-    const plan = planOutcomeTransition({ kind, issue, attempts, failedAxes });
-    attempts = plan.attempts;
-    if (plan.addLabel) relabel(issue.id, plan.addLabel, plan.removeLabels);
+    const reasons =
+      outcome.status === "fulfilled" && "reasons" in outcome.value
+        ? outcome.value.reasons
+        : undefined;
+    const plan = planOutcomeTransition({ kind, issue, failedAxes, reasons });
     if (plan.note) console.warn(`  ${plan.note}`);
-    // A completed issue's branch IS its place in the forest; it was built on its
-    // real parent, so there is nothing to fold and the parent branch is
-    // immutable from here. Recording the edge is all Phase 3 needs.
-    if (plan.completed) completedIssues.push(plan.completed);
-  }
-  writeAttempts(attempts);
 
-  console.log(
-    `\nExecution complete. ${completedIssues.length} issue(s) reviewed and ready for PR:`
-  );
-  for (const issue of completedIssues) {
-    console.log(`  ${issue.branch}`);
-  }
-
-  if (completedIssues.length === 0) {
-    console.log("Nothing newly completed this iteration.");
-    continue;
-  }
-
-  // -------------------------------------------------------------------------
-  // Accumulate, do NOT open PRs yet. Phase 3 opens them after the outer loop
-  // ends — one per PR set (dependency component, with same-topic components
-  // combined).
-  // -------------------------------------------------------------------------
-  allCompleted.push(...completedIssues);
-  console.log(
-    `Accumulated ${completedIssues.length} issue(s) this iteration; ${allCompleted.length} total so far.`
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Phase 3: One PR per PR set
-//
-// The run built a forest; now open ONE pull request per PR set — a connected
-// component of `{parent edges} ∪ {same-group edges}` (prComponents). Dependency
-// links and shared topic both pull issues into the same set, but a dependency
-// edge always wins, so a chain is never split. Each set is independent off `main`
-// (no shared commits), so its PR merges in any order with no rebase surgery.
-//
-// Per set the host assembles a throwaway head off `main`
-// (`sandcastle/pr-<runId>-<n>`) by merging in the set's LEAF TIPS — issues no
-// fellow member builds on. A child branch already contains its ancestors, so
-// merging the leaves pulls in each chain exactly once (a fork or a topic-merged
-// set has several leaves; a diamond collapses to one). The host force-pushes each
-// head and an agent opens ONE PR from it into main (prose only — the agent runs
-// no git).
-// ---------------------------------------------------------------------------
-// Fold GitHub sub-issue (`parent`) edges into the graph before grouping (issue
-// #90), so a spec and a child that supersedes it land in one PR set even when the
-// planner declared no edge between them. One fetch covers every completed issue —
-// fresh-plan and sweep-injected alike — so this is the single deterministic
-// chokepoint the LLM planner can't slip past.
-const components = prComponents(mergeParentEdges(allCompleted, getParentEdges()));
-if (components.length === 0) {
-  console.log("\nNo completed issues across the run. No PR to open.");
-} else {
-  console.log(
-    `\nOpening ${components.length} PR(s), one per PR set, for ` +
-      `${allCompleted.length} completed issue(s).`
-  );
-  for (const [n, component] of components.entries()) {
-    const prBranch = `sandcastle/pr-${runId}-${n + 1}`;
-    const { issues, leaves } = component;
-    console.log(
-      `\nComponent ${n + 1}/${components.length}: ${issues.length} issue(s), ` +
-        `${leaves.length} leaf tip(s) → ${prBranch}`
-    );
-
-    // Build the head in a scratch worktree so the host's checkout is untouched.
-    // Start at main, then merge each leaf tip in. Conflicts between independent
-    // chains are not expected (the planner co-selects non-overlapping issues); a
-    // conflicting merge aborts and that leaf is logged and skipped rather than
-    // corrupting the head.
-    git(`branch -f ${prBranch} main`);
-    const wt = `.sandcastle/pr-head-${runId}-${n + 1}`;
-    git(`worktree remove --force ${wt}`); // clear any stale scratch worktree
-    git(`worktree add --force ${wt} ${prBranch}`);
-    for (const leaf of leaves) {
-      const ok = git(
-        `-C ${wt} merge --no-edit -m "Merge ${leaf.branch} into ${prBranch}" ${leaf.branch}`
-      );
-      if (ok === null) {
-        git(`-C ${wt} merge --abort`);
+    if (kind === "done") {
+      // Open one ready PR — head = the issue's own branch, base = main — then
+      // label in-review and record it. Order matters: opening before the label
+      // makes "in-review with no PR" structurally impossible.
+      git(`push -u --force-with-lease origin ${issue.branch}`);
+      await sandcastle.run({
+        ...sandboxConfig(identity),
+        name: `pr-author-${issue.id}`,
+        logging: logging(`pr-author-${issue.id}`, issue.branch),
+        maxIterations: 1,
+        agent: sandcastle.claudeCode("claude-sonnet-5"),
+        promptFile: "./.sandcastle/pr-prompt.md",
+        promptArgs: {
+          BRANCH: issue.branch,
+          ISSUE_ID: issue.id,
+          ISSUE_TITLE: issue.title,
+        },
+      });
+      const prNumRaw = gh(`pr view ${issue.branch} --json number --jq .number`);
+      const prNum = prNumRaw ? parseInt(prNumRaw, 10) : 0;
+      if (prNum > 0) {
+        if (plan.addLabel) relabel(issue.id, plan.addLabel, plan.removeLabels);
+        prAssignments.set(issue.id, prNum);
+        if (plan.completed) allCompleted.push(plan.completed);
+        console.log(`  ✓ #${issue.id} reviewed clean → PR #${prNum} (in-review)`);
+      } else {
         console.error(
-          `  ✗ ${leaf.id} (${leaf.branch}) conflicted merging into ${prBranch}; excluded from the PR head`
+          `  ✗ #${issue.id} passed review but no PR opened; left as-is for next run`
         );
-        // No requeue here: any issue left without a PR — a conflicting leaf, OR a
-        // non-leaf that a spurious parent edge made unmergeable — is repaired
-        // uniformly by the post-Phase-3 strand reconciliation below, which also
-        // deletes the stale branch so the rebuild cuts fresh. (Superseded #149's
-        // narrow sweepInjected-leaf-only check, which missed both those cases.)
       }
-    }
-    git(`worktree remove --force ${wt}`);
-
-    // If every leaf merge conflicted and aborted, the head is still bare `main`
-    // with nothing ahead — opening a PR from it would be an empty no-op. Skip the
-    // whole component in that case rather than pushing main-onto-main and asking
-    // the agent to open an empty PR.
-    const ahead = git(`rev-list --count main..${prBranch}`);
-    if (ahead === null || ahead === "0") {
-      console.error(
-        `  ✗ Component ${n + 1}: no commits landed on ${prBranch} ` +
-          `(all ${leaves.length} leaf merge(s) conflicted); skipping its PR.`
-      );
       continue;
     }
 
-    // -----------------------------------------------------------------------
-    // Full-suite gate (#22): before opening the PR, run the whole `[[ CHECK_COMMAND ]]`
-    // (lint + typecheck + tests) on the assembled head IN A SANDBOX — the same
-    // toolchain the target's CI runs, never the bare host worktree — so a red set
-    // never reaches a human as an open PR. A green verdict opens as today; any
-    // non-pass withholds the PR and requeues the whole set: the failing tail is
-    // commented on every issue, then the set flows into the post-Phase-3
-    // reconciliation below (which relabels ready-for-agent + deletes the stale
-    // branch) so the next iteration rebuilds it informed by the comment.
-    //
-    // The gate agent runs `[[ CHECK_COMMAND ]] && echo <sentinel>` and reports its raw
-    // stdout; parseCheckVerdict reads the sentinel and fails CLOSED — a crashed or
-    // garbled check is test-fail, and only a THROWN sandbox/harness fault (caught
-    // below, passed as `error`) classifies as harness-error. Both non-pass verdicts
-    // requeue; harness-error is retried next iteration without a real code failure.
-    // -----------------------------------------------------------------------
-    const gateIds = issues.map((i) => i.id);
-    let checkStdout = "";
-    let checkError: unknown;
-    try {
-      const gateCfg = sandboxConfig(identity);
-      const gate = await sandcastle.createSandbox({
-        branch: prBranch, // already built + local; checked out, not re-cut
-        ...gateCfg,
-        copyToWorktree, // seed the deps so the check reuses them, no re-resolve
-      });
-      try {
-        const check = await gate.run({
-          name: `check-gate-${n + 1}`,
-          logging: logging(`check-gate-${n + 1}`, prBranch),
-          maxIterations: 1,
-          agent: sandcastle.claudeCode("claude-sonnet-5"),
-          promptFile: "./.sandcastle/check-prompt.md",
-          promptArgs: { MERGE_HEAD: prBranch },
-        });
-        checkStdout = check.stdout;
-      } finally {
-        await gate.close();
+    if (kind === "review-fail") {
+      // Binding: no PR. Push the branch so its work survives sandbox teardown,
+      // relabel ready-for-human, and splice the failure section into the issue
+      // body (read-modify-write; the original ticket is preserved).
+      if (plan.preserveBranch)
+        git(`push -u --force-with-lease origin ${issue.branch}`);
+      if (plan.addLabel) relabel(issue.id, plan.addLabel, plan.removeLabels);
+      if (plan.failureSection) {
+        // Read-modify-write. Skip the edit if the read failed (gh → null): a
+        // transient fetch error must never overwrite the ticket with only the
+        // failure section, clobbering the original spec.
+        const body = gh(`issue view ${issue.id} --json body --jq .body`);
+        if (body === null) {
+          console.error(
+            `  ! #${issue.id} — could not read issue body; skipping failure-section write`
+          );
+        } else {
+          editIssueBody(
+            issue.id,
+            spliceReviewFailureSection(body, plan.failureSection)
+          );
+        }
       }
-    } catch (e) {
-      // The harness-error channel parseCheckVerdict reads via `error` — a thrown
-      // FiberFailure (prompt assembly, sandbox launch), never scanned from stdout.
-      // Requeue rather than abort: a bad head is not a broken run.
-      checkError = e;
+      continue;
     }
 
-    const verdict = parseCheckVerdict(checkStdout, checkError);
-
-    // Consecutive gate-failure cap (#25): one counter per issue under key
-    // gate-<id>, folded by recordSetAttempt — which owns what each verdict does
-    // to the counters and when the set escalates (#103).
-    const counters = recordSetAttempt(
-      readAttempts(),
-      gateIds.map((id) => `gate-${id}`),
-      verdict.status
-    );
-    writeAttempts(counters.attempts);
-
-    const plan = planGateOutcome(verdict, gateIds, counters.escalated);
-
-    if (plan.action === "retire") {
-      // The set has failed the full suite REVIEW_RETRY_CAP times running.
-      // Requeuing again would loop forever, so park it on a human: relabel
-      // ready-for-human, comment the failing tail, and — when the plan says so —
-      // PRESERVE the work branch. Recording the id in retiredByGate is what
-      // preserves it: the post-Phase-3 reconciliation below skips those ids, so
-      // the human inherits the actual failing tree instead of a deleted branch.
-      const body =
-        `## Sandcastle full-suite gate — retired to a human\n\n` +
-        `\`[[ CHECK_COMMAND ]]\` on this set's merged head (\`${prBranch}\`) failed the ` +
-        `full suite ${REVIEW_RETRY_CAP} times running, so the set is parked as ` +
-        `**ready-for-human** rather than requeued again. Its work branch is ` +
-        `preserved for you to inspect. Address the failure below.\n\n` +
-        "```\n" +
-        `${verdict.tail || "(no output captured)"}\n` +
-        "```\n";
-      commentIssues(plan.commentIssueIds, `check-gate-${runId}-${n + 1}`, body);
-      for (const id of plan.commentIssueIds) {
-        relabel(id, "ready-for-human", [
-          "ready-for-agent",
-          "needs-review",
-          "in-review",
-        ]);
-        if (plan.preserveBranch)
-          retiredByGate.set(id, plan.summaryNote ?? verdict.tail);
-      }
-      console.error(
-        `  ✗ Component ${n + 1}: full-suite gate failed ${REVIEW_RETRY_CAP}x; ` +
-          `set retired → ready-for-human (branch ${prBranch} preserved).`
-      );
-      continue; // skip push + PR open; reconciliation must not touch these
-    }
-
-    if (plan.action === "requeue") {
-      const body =
-        `## Sandcastle full-suite gate — PR withheld\n\n` +
-        `\`[[ CHECK_COMMAND ]]\` on this set's merged head (\`${prBranch}\`) came back ` +
-        `**${verdict.status}**, so no PR was opened. The set is requeued for a ` +
-        `fresh rebuild — address the failure below, don't just silence it.\n\n` +
-        "```\n" +
-        `${verdict.tail || "(no output captured)"}\n` +
-        "```\n";
-      commentIssues(plan.commentIssueIds, `check-gate-${runId}-${n + 1}`, body);
-      console.error(
-        `  ✗ Component ${n + 1}: full-suite gate ${verdict.status}; PR withheld, ` +
-          `${plan.commentIssueIds.length} issue(s) commented → requeued.`
-      );
-      continue; // skip push + PR open; post-Phase-3 reconciliation requeues them
-    }
-
-    // Which of this set's issues actually reached the head (#115) — see
-    // `landedIssues` for why ancestry rather than a set of failed leaf ids. The two
-    // consumers that speak for the PR read THIS list, never `issues`: the PR body
-    // below and `prAssignments` once the PR is open. An excluded issue is therefore
-    // neither named in the PR nor credited to it, which leaves the post-Phase-3
-    // reconciliation — it skips any issue already assigned — free to re-queue it.
-    // The gate paths above stay set-wide on purpose: no PR exists for them to lie
-    // about. Computed here, after the gate, so a withheld PR spends no subprocesses.
-    // `git` returns "" on success and null on failure, so compare against null —
-    // `--is-ancestor` reports its verdict through the exit code and prints nothing.
-    const landed = landedIssues(
-      issues,
-      (branch) => git(`merge-base --is-ancestor ${branch} ${prBranch}`) !== null
-    );
-
-    // Push the assembled head host-side so the agent only has to open the PR.
-    git(`push -u --force-with-lease origin ${prBranch}`);
-    await sandcastle.run({
-      ...sandboxConfig(identity),
-      name: `pr-consolidator-${n + 1}`,
-      logging: logging(`pr-consolidator-${n + 1}`, headBranch),
-      maxIterations: 1,
-      agent: sandcastle.claudeCode("claude-sonnet-5"),
-      promptFile: "./.sandcastle/pr-prompt.md",
-      promptArgs: {
-        MERGE_HEAD: prBranch,
-        // One markdown line per issue whose commits are IN this head: id, title,
-        // branch. Excluded issues are omitted — the PR must not claim work it
-        // does not carry (#115).
-        ISSUES: landed
-          .map((i) => `- #${i.id} — ${i.title} (branch \`${i.branch}\`)`)
-          .join("\n"),
-      },
-    });
-
-    // Capture the PR number so the end-of-run summary can show "→ PR #N".
-    const prNumRaw = gh(`pr view ${prBranch} --json number --jq .number`);
-    const prNum = prNumRaw ? parseInt(prNumRaw, 10) : 0;
-    if (prNum > 0) {
-      for (const issue of landed) prAssignments.set(issue.id, prNum);
-    }
+    // "nothing": leave the issue's labels exactly as they arrived.
   }
-  console.log(`\n${components.length} PR(s) opened.`);
 }
 
-// ---------------------------------------------------------------------------
-// Post-Phase-3 strand reconciliation: make "end a run in-review with no PR"
-// structurally impossible.
-//
-// Every completed issue should now carry a PR (its component opened one). Any
-// that does NOT — a leaf whose merge conflicted, or a non-leaf an unrelated
-// parent edge pulled in but never merged — would otherwise be left in-review
-// with a stale branch: a strand that loops forever (next run's sweep re-injects
-// the same branch, it re-conflicts, re-skips).
-//
-// Repair it outcome-based, blind to leaf/group/injection nuance: relabel
-// ready-for-agent, and DELETE the stale issue branch. Deletion is required, not
-// cosmetic — Phase 2 only cuts a fresh branch from main when one does not exist;
-// a lingering branch is merely rebased onto base and keeps its conflicting
-// history. Move it sweepInjected → sweepRequeued so the summary reports it
-// re-queued, never "PR opened".
-for (const issue of allCompleted) {
-  if (prAssignments.has(issue.id)) continue;
-  // Retired by the gate cap (#25): already relabeled ready-for-human, and its
-  // branch is deliberately preserved for the human — do NOT requeue or delete it.
-  if (retiredByGate.has(issue.id)) continue;
-  relabel(issue.id, "ready-for-agent", ["in-review", "needs-review"]);
-  git(`branch -D ${issue.branch}`);
-  sweepInjected.delete(issue.id);
-  sweepRequeued.add(issue.id);
-  console.error(
-    `  ✗ #${issue.id} (${issue.branch}) completed but no PR opened (stranded); ` +
-      `stale branch deleted → ready-for-agent for a fresh rebuild`
-  );
-}
-
-// End-of-run worktree GC: remove any issue checkout dirs that Phase 3 left
-// behind. PRs are open; the worktrees are dead.
+// End-of-run worktree GC: remove any issue checkout dirs left behind. PRs are
+// open; the worktrees are dead.
 gcWorktrees();
 
 // ---------------------------------------------------------------------------
@@ -1225,11 +692,7 @@ gcWorktrees();
   const bucketed = bucketIssues({
     openIssues: allOpenIssues,
     builtThisRun: new Set(allCompleted.map((i) => i.id)),
-    sweepInjected,
-    sweepRequeued,
     prAssignments,
-    blockedByParentConflict: blockedThisRun,
-    retiredByGate,
     deliveredParents: getDeliveredParents(),
   });
   const summary = buildRunSummary(bucketed);
@@ -1237,8 +700,6 @@ gcWorktrees();
   // Persist the summary — per-run filename so it survives the next run (the
   // per-agent logs overwrite). This is the run's ground-truth outcome and is
   // otherwise lost when the terminal scrolls.
-  // ponytail: summary only; tee the whole orchestrator stdout if the sweep
-  // trace is also needed for debugging.
   writeFileSync(`.sandcastle/logs/run-${runId}.log`, summary);
 }
 

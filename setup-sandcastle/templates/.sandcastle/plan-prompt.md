@@ -24,35 +24,13 @@ These issues are already implemented but not yet merged into `main` (in review, 
 
 <in-flight-json>
 
-!`gh issue list --search "label:in-review,needs-review state:open" --limit 100 --json number,title,body,labels,parent,blockedBy --jq '[.[] | {number, title, body, labels: [.labels[].name], parent: .parent.number, blockedBy: [.blockedBy.nodes[].number]}]'`
+!`gh issue list --search "label:in-review state:open" --limit 100 --json number,title,body,labels,parent,blockedBy --jq '[.[] | {number, title, body, labels: [.labels[].name], parent: .parent.number, blockedBy: [.blockedBy.nodes[].number]}]'`
 
 </in-flight-json>
 
-# ALREADY DONE THIS RUN (in your base — satisfied dependencies, NOT blockers)
-
-These issues were completed earlier in this same run. Their code is **already merged into the branch your work will be cut from**, so anything depending on them can build on top right now.
-
-<completed-this-run>
-
-{{COMPLETED_THIS_RUN}}
-
-</completed-this-run>
-
-**Override rule:** if an issue in the "in flight" list above _also_ appears here, it is in your base — treat it as a satisfied dependency, **not** a blocker. An issue whose only blockers are listed here is **UNBLOCKED**: select it and it will be stacked on top of that work.
-
-# BLOCKED THIS RUN (do NOT select — a human must act first)
-
-These issues have two or more parents whose branches conflict when merged. The conflict is deterministic — it fails identically every iteration — so they cannot be built this run until a human merges the conflicting parents upstream. **Do not select any issue listed here**, even if it otherwise looks unblocked.
-
-<blocked-this-run>
-
-{{BLOCKED_THIS_RUN}}
-
-</blocked-this-run>
-
 # TASK
 
-The host has already excluded every issue with an open native `blockedBy` blocker (see BUILDABLE). Your remaining job: for each **buildable** issue, determine whether it is **implicitly** blocked by any other open issue the declared edges missed — whether that other issue is `ready-for-agent` or already **in flight** (the list above) — **except** issues listed under "ALREADY DONE THIS RUN", which are satisfied dependencies you build on, never blockers.
+The host has already excluded every issue with an open native `blockedBy` blocker (see BUILDABLE). Your remaining job: for each **buildable** issue, determine whether it is **implicitly** blocked by any other open issue the declared edges missed — whether that other issue is `ready-for-agent` or already **in flight** (the list above).
 
 An issue B is **blocked by** issue A if:
 
@@ -67,39 +45,21 @@ An issue is **unblocked** if it has zero blocking dependencies on any other open
 
 For each unblocked issue, assign a branch name using the exact format `sandcastle/issue-{id}` (no slug or other suffix). This must be deterministic so that re-planning the same issue always produces the same branch name and accumulated progress is preserved.
 
-## Parents — what each issue builds on
+## `parents` and `group` — emit them, but keep them simple
 
-For each issue you select, also emit `parents`: the ids of the issues it **builds on** — the dependencies whose code it needs sitting underneath it. Each issue's branch will be cut directly from its parent's branch, so this is what wires up the dependency forest.
+Each issue's branch is cut from `main`, and every issue that passes review opens its **own** pull request — one issue, one PR. A run is a single planning pass, and a child issue is only ever selected once its parents' issues have **closed** (their PRs merged to `main`), so within one run there is nothing left to build on top of.
 
-Draw parents from **both**:
+So for every issue you select:
 
-- **Open blockers** that are listed under "ALREADY DONE THIS RUN" (their branches exist right now, so a dependent can stack on them this run).
-- Any "ALREADY DONE THIS RUN" issue this one builds on, even if you would not have called it a hard blocker.
-
-Rules:
-
-- A parent must be an issue id from the "ALREADY DONE THIS RUN" list. (An unbuilt blocker — `ready-for-agent` or in-flight — is **not** a parent; if a selectable issue is blocked by such an issue, leave it out of the plan entirely instead of listing it as a parent.)
-- **Bias toward declaring a parent when unsure.** A missed parent breaks the dependent's build (its code is cut without the dependency underneath); a falsely-declared parent only over-groups two changes that could have been independent. When in doubt, declare it.
-- A root issue that builds on nothing this run gets `"parents": []`.
-- Most issues have zero or one parent. Multiple parents are allowed but rare.
-
-## Topic group — which issues belong in the same PR
-
-For each issue you select, also emit a `group`: a short lowercase slug naming the feature or theme it belongs to (e.g. `"auth"`, `"dark-mode"`, `"perf"`). Issues sharing a `group` are combined into **one pull request**, even when no dependency links them — this is how a run produces a few coherent PRs by topic instead of one PR per issue.
-
-Rules:
-
-- **Reuse existing keys.** If an issue belongs to the same theme as one under "ALREADY DONE THIS RUN" (each is shown with its `[group: X]`), reuse that exact key — do not coin a synonym, or the topic splits across two PRs.
-- Issues you genuinely cannot group with anything else get their own unique slug.
-- `group` is about theme only; it does **not** override dependencies. A parent edge always forces same-PR regardless of group, so you never need a group to encode a dependency — use `parents` for that.
-- Keep groups meaningful: don't lump unrelated issues into one catch-all, and don't over-split a single feature.
+- Emit `"parents": []`. There is no in-run stacking anymore; a dependency you would once have listed here has already merged to `main` by the time the child is buildable.
+- Emit a short lowercase `group` slug naming the issue's theme (e.g. `"auth"`, `"perf"`). It no longer combines PRs — it is carried through for logging only — but the field is still required.
 
 # OUTPUT
 
-Output your plan as a JSON object wrapped in `<plan>` tags. Every issue MUST include a `parents` array (use `[]` for a root) and a `group` slug:
+Output your plan as a JSON object wrapped in `<plan>` tags. Every issue MUST include a `parents` array (always `[]`) and a `group` slug:
 
 <plan>
-{"issues": [{"id": "42", "title": "Fix auth bug", "branch": "sandcastle/issue-42", "parents": [], "group": "auth"}, {"id": "43", "title": "Add auth UI", "branch": "sandcastle/issue-43", "parents": ["42"], "group": "auth"}]}
+{"issues": [{"id": "42", "title": "Fix auth bug", "branch": "sandcastle/issue-42", "parents": [], "group": "auth"}, {"id": "43", "title": "Add dark mode", "branch": "sandcastle/issue-43", "parents": [], "group": "ui"}]}
 </plan>
 
 Include only issues from the BUILDABLE set that survive your implicit-conflict pruning. If every buildable issue would conflict on files with another buildable one, include the single highest-priority candidate (the one with the fewest or weakest such conflicts). But if the remaining issues are blocked by **in-flight** work, do NOT force-pick them — leave them out and emit an empty plan; they unblock once that work merges.

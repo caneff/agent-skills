@@ -188,29 +188,12 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
   // recipes and `uv run pytest` this ecosystem actually has — the values a
   // Python adopter runs, derived from LANGUAGE and not asked.
   test("derives the justfile recipes and uv commands for a python adopter", () => {
-    expect(renderedIn(target, "check-prompt.md")).toContain(
-      'just check && echo "SANDCASTLE_CHECK: PASS"'
-    );
     const prompt = renderedIn(target, "implement-prompt.md");
     expect(prompt).toContain("`just lint` and `just typecheck`");
     expect(prompt).toContain("uv run pytest <files>");
     for (const file of ["main.mts", "address.mts"]) {
       expect(renderedIn(target, file), file).toContain('[".venv"]');
     }
-  });
-
-  // The one render string with an external consumer: the gate echoes this
-  // sentinel on success and review-verdict.mts greps for it, across two
-  // separately-rendered files. A reword on either side fails every check CLOSED
-  // and silently — the PR diff would not flag it as wrong, so it is pinned here.
-  // This is the named allowlist that replaces the retired byte-identity net; the
-  // per-arm command SHAPE around it is proved next door (python) and in the node
-  // block, this proves only the arm-independent contract text.
-  test("pins the host-coupled SANDCASTLE_CHECK sentinel on both sides", () => {
-    expect(renderedIn(target, "check-prompt.md")).toContain(
-      'echo "SANDCASTLE_CHECK: PASS"'
-    );
-    expect(renderedIn(target, "review-verdict.mts")).toContain("SANDCASTLE_CHECK:\\s*PASS");
   });
 
   // Sandcastle forwards `.sandcastle/.env` into sandboxes as a FILE and never
@@ -246,8 +229,8 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
 // it buys — a run-time `{{ }}` placeholder passes through a render untouched.
 //
 // The live prompt drawer now carries both styles for real — `implement-prompt`
-// and `check-prompt` render `[[ CHECK_COMMAND ]]` while their `{{TASK_ID}}` and
-// `{{MERGE_HEAD}}` placeholders must survive untouched — but a probe still earns
+// renders `[[ CHECK_COMMAND ]]` while its `{{TASK_ID}}` (and `pr-prompt`'s
+// `{{BRANCH}}`) placeholders must survive untouched — but a probe still earns
 // its place: it isolates the delimiter behaviour to one throwaway `.jinja` that
 // fails on `_envops` alone, rather than only when a real prompt happens to
 // exercise both styles. It renders through the real `copier.yml`.
@@ -292,7 +275,7 @@ describe.skipIf(!hasCopier())("template delimiters do not collide with runtime p
 // pre-arc ADOPTER installed at this ref proves `copier update` still round-trips
 // from before the arc existed. The full-render byte-identity diff that used to
 // hang off it was retired as a change-detector with near-zero bug-yield. The
-// set nets and the SANDCASTLE_CHECK allowlist are its replacement.
+// set nets and the sentinel allowlist are its replacement.
 const PRE_ARC = "59c7941"; // last commit before the LANGUAGE arc
 
 // Answers each arc ticket deliberately ADDS to a Python adopter's breadcrumb.
@@ -304,7 +287,11 @@ const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 // answers list: the set-equality net stays exact, and a new render is declared
 // rather than the assertion quietly widening to "a superset is fine".
 //   select-buildable.mts — the deterministic frontier filter (#242)
-const ARC_ADDED_RENDERS = [".sandcastle/select-buildable.mts"];
+//   issue-body.mts        — the review-failure body-splice helper (#244)
+const ARC_ADDED_RENDERS = [
+  ".sandcastle/select-buildable.mts",
+  ".sandcastle/issue-body.mts",
+];
 
 // The mirror: files the template deliberately WITHDRAWS since the pin. Without
 // it a withdrawal has only one way past the net — widening set-equality to "a
@@ -312,13 +299,19 @@ const ARC_ADDED_RENDERS = [".sandcastle/select-buildable.mts"];
 // the assertion stays exact in both directions.
 //   CONTEXT.md, docs/adr/*  — the project's own domain model, maintainer reading
 //   sandbox-identity.check.mts — a developer's self-check, now in the dev suite
-// All three keep their home in this repo; only what an adopter receives changed.
+//   pr-components.mts, retry-policy.mts — the multi-issue-PR and retry machinery,
+//     deleted for one-PR-per-issue / run-plain (#244, #247)
+//   check-prompt.md — the Phase-3 full-suite gate, deleted with it (CI on the
+//     opened PR is the gate now)
 const ARC_WITHDRAWN_RENDERS = [
   ".sandcastle/CONTEXT.md",
   ".sandcastle/docs/adr/0001-dependency-forest-with-topic-grouped-prs.md",
   ".sandcastle/docs/adr/0002-main-is-an-unimported-script.md",
   ".sandcastle/docs/adr/0003-multi-parent-conflict-abort-not-resolve.md",
   ".sandcastle/sandbox-identity.check.mts",
+  ".sandcastle/pr-components.mts",
+  ".sandcastle/retry-policy.mts",
+  ".sandcastle/check-prompt.md",
 ];
 
 function renderedTree(root) {
@@ -607,14 +600,6 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
     }
   });
 
-  test("the check-gate runs npm scripts, not a justfile recipe", () => {
-    const gate = renderedIn(fresh, "check-prompt.md");
-    expect(gate).toContain(
-      'npm run lint && npm run typecheck && npm run test && echo "SANDCASTLE_CHECK: PASS"'
-    );
-    expect(gate).not.toContain("just check");
-  });
-
   // The two places the ecosystems genuinely differ in the image. Everything else
   // in the Dockerfile — apt deps, the gh block, the UID/GID args, the Claude CLI,
   // PATH, WORKDIR, ENTRYPOINT — stays shared; this test pins only the divergence.
@@ -685,19 +670,14 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
     expect(offenders).toEqual([]);
   });
 
-  // review-verdict.mts is NOT a template: its two Python-naming comments talk
-  // about the gate wrapper, whose command check-prompt.md already renders, so
-  // they point at it instead of repeating it. Templating a module that 222
-  // lines of dev tests import by name, for comment prose, was the worse trade.
-  // Both arms therefore get the same file, and this is what says so — if a
-  // later ticket does branch it, this fails and the choice gets made again.
+  // review-verdict.mts is NOT a template: it is a plain module both arms import
+  // by name, so it must name no arm-specific recipe. Both arms therefore get the
+  // same file, and this is what says so — if a later ticket does branch it, this
+  // fails and the choice gets made again.
   test("renders one review-verdict.mts for both arms, naming no recipe", () => {
     const gate = renderedIn(fresh, "review-verdict.mts");
     expect(gate).toBe(renderedIn(twin, "review-verdict.mts"));
     expect(gate).not.toMatch(/just (check|lint|typecheck)/);
-    // The sentinel is a host-coupled contract string (CODING_STANDARDS rule 3):
-    // the prose around it moved, the string itself must not.
-    expect(gate).toContain("SANDCASTLE_CHECK:");
   });
 
   // Guards the two below from passing vacuously: there is a recorded python

@@ -1,69 +1,21 @@
 import { test, expect, describe } from "vitest";
 import {
-  classifyInReviewIssue,
   bucketIssues,
   buildRunSummary,
-  decideInReviewAction,
   deliveredParentIds,
-  planGateOutcome,
   planOutcomeTransition,
 } from "../reconcile.mts";
-import { REVIEW_RETRY_CAP } from "../retry-policy.mts";
-
-describe("classifyInReviewIssue", () => {
-  test("open PR → human-gated", () => {
-    expect(classifyInReviewIssue([{ number: 5, state: "OPEN" }])).toBe(
-      "human-gated"
-    );
-  });
-
-  test("closed PR (no open PR) → human-vetoed", () => {
-    expect(classifyInReviewIssue([{ number: 3, state: "CLOSED" }])).toBe(
-      "human-vetoed"
-    );
-  });
-
-  test("merged PR (no open PR) → human-vetoed", () => {
-    expect(classifyInReviewIssue([{ number: 4, state: "MERGED" }])).toBe(
-      "human-vetoed"
-    );
-  });
-
-  test("no PRs at all → stranded", () => {
-    expect(classifyInReviewIssue([])).toBe("stranded");
-  });
-
-  test("open PR wins over a closed one → human-gated", () => {
-    const prs = [
-      { number: 3, state: "CLOSED" },
-      { number: 5, state: "OPEN" },
-    ];
-    expect(classifyInReviewIssue(prs)).toBe("human-gated");
-  });
-
-  test("mix of closed + merged, no open → human-vetoed", () => {
-    const prs = [
-      { number: 3, state: "CLOSED" },
-      { number: 4, state: "MERGED" },
-    ];
-    expect(classifyInReviewIssue(prs)).toBe("human-vetoed");
-  });
-});
 
 const makeOpts = (overrides = {}) => ({
   openIssues: [],
   builtThisRun: new Set(),
-  sweepInjected: new Set(),
-  sweepRequeued: new Set(),
   prAssignments: new Map(),
-  blockedByParentConflict: new Map(),
-  retiredByGate: new Map(),
   deliveredParents: new Set(),
   ...overrides,
 });
 
 describe("bucketIssues", () => {
-  test("issue built this run (not sweep) → built-this-run", () => {
+  test("issue built this run → built-this-run with its PR", () => {
     const result = bucketIssues(
       makeOpts({
         openIssues: [{ number: 10, title: "feat", labels: ["in-review"] }],
@@ -76,81 +28,6 @@ describe("bucketIssues", () => {
       number: 10,
       prNumber: 55,
     });
-  });
-
-  test("issue built this run via sweep → repaired-sweep-pr", () => {
-    const result = bucketIssues(
-      makeOpts({
-        openIssues: [{ number: 11, title: "repair", labels: ["in-review"] }],
-        builtThisRun: new Set(["11"]),
-        sweepInjected: new Set(["11"]),
-        prAssignments: new Map([["11", 56]]),
-      })
-    );
-    expect(result[0]).toMatchObject({
-      bucket: "repaired-sweep-pr",
-      prNumber: 56,
-    });
-  });
-
-  test("issue requeued by sweep → repaired-sweep-requeued", () => {
-    const result = bucketIssues(
-      makeOpts({
-        openIssues: [
-          { number: 12, title: "requeue", labels: ["ready-for-agent"] },
-        ],
-        sweepRequeued: new Set(["12"]),
-      })
-    );
-    expect(result[0]).toMatchObject({ bucket: "repaired-sweep-requeued" });
-  });
-
-  // Regression: a sweep-injected branch whose Phase-3 merge conflicted is moved
-  // to sweepRequeued (and may still be in builtThisRun + sweepInjected from the
-  // injection). It must report as re-queued, never "PR opened" (the requeue loop).
-  test("injected branch that conflicted (requeued, no PR) → repaired-sweep-requeued, not -pr", () => {
-    const result = bucketIssues(
-      makeOpts({
-        openIssues: [
-          { number: 114, title: "stale", labels: ["ready-for-agent"] },
-        ],
-        builtThisRun: new Set(["114"]),
-        sweepInjected: new Set(["114"]),
-        sweepRequeued: new Set(["114"]),
-        prAssignments: new Map(), // no PR landed
-      })
-    );
-    expect(result[0].bucket).toBe("repaired-sweep-requeued");
-    expect(result[0].prNumber).toBeUndefined();
-  });
-
-  // Requeued up front (stale branch), then rebuilt and PR'd in the SAME run:
-  // the fresh PR is the truth — report built-this-run with its PR, not re-queued.
-  test("requeued then rebuilt + PR'd this run → built-this-run with PR", () => {
-    const result = bucketIssues(
-      makeOpts({
-        openIssues: [{ number: 100, title: "rebuilt", labels: ["in-review"] }],
-        builtThisRun: new Set(["100"]),
-        sweepRequeued: new Set(["100"]),
-        prAssignments: new Map([["100", 200]]),
-      })
-    );
-    expect(result[0].bucket).toBe("built-this-run");
-    expect(result[0].prNumber).toBe(200);
-  });
-
-  // Honesty gate: injected, not requeued, but no PR assigned → don't claim a
-  // sweep repair PR; fall back to built-this-run rather than lying.
-  test("injected without a PR number → not repaired-sweep-pr", () => {
-    const result = bucketIssues(
-      makeOpts({
-        openIssues: [{ number: 13, title: "noPR", labels: ["in-review"] }],
-        builtThisRun: new Set(["13"]),
-        sweepInjected: new Set(["13"]),
-        prAssignments: new Map(),
-      })
-    );
-    expect(result[0].bucket).not.toBe("repaired-sweep-pr");
   });
 
   test("in-review issue not built this run → human-gated-pr", () => {
@@ -169,15 +46,6 @@ describe("bucketIssues", () => {
       })
     );
     expect(result[0]).toMatchObject({ bucket: "human-gated-ready-for-human" });
-  });
-
-  test("needs-review issue → in-flight-needs-review", () => {
-    const result = bucketIssues(
-      makeOpts({
-        openIssues: [{ number: 15, title: "nr", labels: ["needs-review"] }],
-      })
-    );
-    expect(result[0]).toMatchObject({ bucket: "in-flight-needs-review" });
   });
 
   test("no lifecycle label → human-gated-untriaged", () => {
@@ -215,55 +83,6 @@ describe("bucketIssues", () => {
       })
     );
     expect(result[0]).toMatchObject({ bucket: "ready-for-agent" });
-  });
-
-  test("multi-parent conflict block → blocked-parent-conflict, carries parents (#64)", () => {
-    // #62 still holds its ready-for-agent label but was aborted this run.
-    const result = bucketIssues(
-      makeOpts({
-        openIssues: [
-          { number: 62, title: "purge facts", labels: ["ready-for-agent"] },
-        ],
-        blockedByParentConflict: new Map([["62", ["60", "61"]]]),
-      })
-    );
-    expect(result[0]).toMatchObject({
-      bucket: "blocked-parent-conflict",
-      blockedParents: ["60", "61"],
-    });
-  });
-
-  test("block takes precedence over the ready-for-agent label (#64)", () => {
-    // Same issue NOT in the block map falls through to ready-for-agent — proves
-    // the block, not the label, is what redirects it.
-    const result = bucketIssues(
-      makeOpts({
-        openIssues: [
-          { number: 62, title: "purge facts", labels: ["ready-for-agent"] },
-        ],
-      })
-    );
-    expect(result[0]).toMatchObject({ bucket: "ready-for-agent" });
-  });
-
-  // A set retired by the consecutive gate-failure cap is relabeled
-  // ready-for-human and completed (in builtThisRun), yet must surface as its own
-  // retired bucket — not built-this-run and not the generic ready-for-human —
-  // carrying the failing tests so the summary can name them.
-  test("retired-by-gate issue → retired-gate-failure, carries failing tests (#25)", () => {
-    const result = bucketIssues(
-      makeOpts({
-        openIssues: [
-          { number: 30, title: "broken", labels: ["ready-for-human"] },
-        ],
-        builtThisRun: new Set(["30"]),
-        retiredByGate: new Map([["30", "FAIL foo.test.ts"]]),
-      })
-    );
-    expect(result[0]).toMatchObject({
-      bucket: "retired-gate-failure",
-      gateFailure: "FAIL foo.test.ts",
-    });
   });
 
   test("empty issue list → empty result", () => {
@@ -348,223 +167,10 @@ describe("buildRunSummary", () => {
     const out = buildRunSummary(bucketed);
     expect(out).toMatch(/all.+human.gated|nothing left for the bot/i);
   });
-
-  test("retired-gate-failure set names the set and its failing tests (#25)", () => {
-    const out = buildRunSummary([
-      {
-        number: 30,
-        title: "broken feature",
-        bucket: "retired-gate-failure",
-        gateFailure: "FAIL src/foo.test.ts > does the thing",
-      },
-    ]);
-    expect(out).toContain("#30");
-    expect(out).toContain("broken feature");
-    expect(out).toContain("FAIL src/foo.test.ts > does the thing");
-    expect(out).toMatch(/retired|ready.for.human/i);
-  });
-
-  test("a retired-gate-failure set counts as human-gated (nothing left for the bot) (#25)", () => {
-    const out = buildRunSummary([
-      {
-        number: 30,
-        title: "broken",
-        bucket: "retired-gate-failure",
-        gateFailure: "FAIL foo",
-      },
-    ]);
-    expect(out).toMatch(/all.+human.gated|nothing left for the bot/i);
-  });
-
-  test("parent-conflict block names the parents a human must merge (#64)", () => {
-    const out = buildRunSummary([
-      {
-        number: 62,
-        title: "purge facts",
-        bucket: "blocked-parent-conflict",
-        blockedParents: ["60", "61"],
-      },
-    ]);
-    expect(out).toContain("parents #60, #61 conflict");
-    expect(out).toMatch(/merge upstream first/);
-  });
-
-  test("a parent-conflict block counts as human-gated (nothing left for the bot) (#64)", () => {
-    const out = buildRunSummary([
-      {
-        number: 62,
-        title: "purge facts",
-        bucket: "blocked-parent-conflict",
-        blockedParents: ["60", "61"],
-      },
-    ]);
-    expect(out).toMatch(/all.+human.gated|nothing left for the bot/i);
-  });
-});
-
-// planGateOutcome — Phase-3 full-suite gate. pass opens; any non-pass
-// requeues and comments the failing tail on every issue in the set.
-describe("planGateOutcome", () => {
-  const set = ["101", "102", "103"];
-
-  test("pass → open, no comments", () => {
-    const plan = planGateOutcome({ status: "pass", tail: "" }, set);
-    expect(plan).toEqual({ action: "open", commentIssueIds: [] });
-  });
-
-  test("test-fail → requeue, comment on every issue in the set", () => {
-    const plan = planGateOutcome(
-      { status: "test-fail", tail: "FAIL foo.test.ts" },
-      set
-    );
-    expect(plan.action).toBe("requeue");
-    expect(plan.commentIssueIds).toEqual(set);
-  });
-
-  test("harness-error → requeue, comment on every issue in the set", () => {
-    const plan = planGateOutcome(
-      { status: "harness-error", tail: "sandbox unavailable" },
-      set
-    );
-    expect(plan.action).toBe("requeue");
-    expect(plan.commentIssueIds).toEqual(set);
-  });
-
-  test("a green single-issue set opens with no comments", () => {
-    expect(planGateOutcome({ status: "pass", tail: "" }, ["9"])).toEqual({
-      action: "open",
-      commentIssueIds: [],
-    });
-  });
-
-  test("does not alias the caller's set array", () => {
-    const plan = planGateOutcome({ status: "test-fail", tail: "" }, set);
-    expect(plan.commentIssueIds).not.toBe(set);
-  });
-
-  // An escalated (at-cap) test-fail retires the set to a human instead of
-  // requeuing it a third time. The plan preserves the work branch and carries
-  // the failing tail as a summary note.
-  test("escalated test-fail → retire, preserve branch, carry summary note", () => {
-    const plan = planGateOutcome(
-      { status: "test-fail", tail: "FAIL foo.test.ts" },
-      set,
-      true
-    );
-    expect(plan).toEqual({
-      action: "retire",
-      commentIssueIds: set,
-      preserveBranch: true,
-      summaryNote: "FAIL foo.test.ts",
-    });
-  });
-
-  test("non-escalated test-fail still requeues even with escalate=false", () => {
-    const plan = planGateOutcome(
-      { status: "test-fail", tail: "FAIL foo.test.ts" },
-      set,
-      false
-    );
-    expect(plan.action).toBe("requeue");
-  });
-
-  // harness-error is an infra fault, never the code's — it must NOT retire even
-  // if the caller (buggy) passes escalate=true. It always requeues.
-  test("escalated harness-error → requeue, never retire", () => {
-    const plan = planGateOutcome(
-      { status: "harness-error", tail: "sandbox died" },
-      set,
-      true
-    );
-    expect(plan.action).toBe("requeue");
-  });
-
-  test("a green gate never retires regardless of escalate", () => {
-    expect(planGateOutcome({ status: "pass", tail: "" }, set, true)).toEqual({
-      action: "open",
-      commentIssueIds: [],
-    });
-  });
-});
-
-describe("decideInReviewAction", () => {
-  const issue = (over) => ({
-    id: "7",
-    title: "Widget",
-    branch: "sandcastle/issue-7",
-    parents: ["3"],
-    branchExists: false,
-    mergesClean: false,
-    ...over,
-  });
-
-  test("human-gated → leave; touches no label, no branch, no bucket", () => {
-    const plan = decideInReviewAction("human-gated", issue());
-    expect(plan.action).toBe("leave");
-    expect(plan.addLabel).toBe(null);
-    expect(plan.removeLabels).toEqual([]);
-    expect(plan.deleteBranch).toBe(false);
-    expect(plan.bucket).toBe(null);
-    expect(plan.completed).toBeUndefined();
-  });
-
-  test("human-vetoed → relabel ready-for-human off in-review", () => {
-    const plan = decideInReviewAction("human-vetoed", issue({ branchExists: true, mergesClean: true }));
-    expect(plan.action).toBe("relabel-human");
-    expect(plan.addLabel).toBe("ready-for-human");
-    expect(plan.removeLabels).toEqual(["in-review"]);
-    expect(plan.deleteBranch).toBe(false);
-    expect(plan.bucket).toBe(null);
-    expect(plan.completed).toBeUndefined();
-  });
-
-  test("stranded, no branch → requeue: delete branch, relabel ready-for-agent", () => {
-    const plan = decideInReviewAction("stranded", issue());
-    expect(plan.action).toBe("requeue");
-    expect(plan.addLabel).toBe("ready-for-agent");
-    expect(plan.removeLabels).toEqual(["in-review"]);
-    expect(plan.deleteBranch).toBe(true);
-    expect(plan.bucket).toBe("requeued");
-    expect(plan.completed).toBeUndefined();
-  });
-
-  test("stranded, branch exists but conflicts with main → requeue", () => {
-    const plan = decideInReviewAction("stranded", issue({ branchExists: true, mergesClean: false }));
-    expect(plan.action).toBe("requeue");
-    expect(plan.deleteBranch).toBe(true);
-    expect(plan.bucket).toBe("requeued");
-  });
-
-  test("stranded, branch exists and merges clean → inject with the completed record", () => {
-    const plan = decideInReviewAction("stranded", issue({ branchExists: true, mergesClean: true }));
-    expect(plan.action).toBe("inject");
-    expect(plan.addLabel).toBe(null);
-    expect(plan.deleteBranch).toBe(false);
-    expect(plan.bucket).toBe("injected");
-    expect(plan.completed).toEqual({
-      id: "7",
-      title: "Widget",
-      branch: "sandcastle/issue-7",
-      parents: ["3"],
-    });
-  });
-
-  test("stranded, branch absent but mergesClean true (shouldn't inject without branch) → requeue", () => {
-    const plan = decideInReviewAction("stranded", issue({ branchExists: false, mergesClean: true }));
-    expect(plan.action).toBe("requeue");
-  });
 });
 
 describe("planOutcomeTransition", () => {
-  // The below-the-cap cases below build their fixtures as REVIEW_RETRY_CAP - 1.
-  // At a cap of 1 that IS the cap, and those tests would quietly start
-  // asserting the escalation path instead.
-  test("the cap leaves room for a below-the-cap attempt", () => {
-    expect(REVIEW_RETRY_CAP).toBeGreaterThan(1);
-  });
-
   const full = {
-    mode: "full",
     id: "42",
     title: "Add widget",
     branch: "sandcastle/issue-42",
@@ -572,156 +178,98 @@ describe("planOutcomeTransition", () => {
     group: "widgets",
   };
 
-  test("done → in-review, dropping both buildable labels", () => {
-    const plan = planOutcomeTransition({
-      kind: "done",
-      issue: full,
-      attempts: {},
-    });
+  test("done → in-review, dropping the buildable label; branch not preserved", () => {
+    const plan = planOutcomeTransition({ kind: "done", issue: full });
     expect(plan.addLabel).toBe("in-review");
-    expect([...plan.removeLabels].sort()).toEqual([
-      "needs-review",
-      "ready-for-agent",
-    ]);
-    expect(plan.escalated).toBe(false);
+    expect(plan.removeLabels).toEqual(["ready-for-agent"]);
+    expect(plan.preserveBranch).toBe(false);
+    expect(plan.failureSection).toBeUndefined();
   });
 
-  // The pre-extraction inline loop dropped only ready-for-agent here, leaving a
-  // stale in-review label on an issue that is demonstrably NOT reviewed clean.
-  // Its three sibling transitions all dropped in-review, and the downstream
-  // bucketer tests in-review BEFORE needs-review — so a survivor reported the
-  // issue as "human-gated: open PR pending merge" while it sat waiting to be
-  // re-reviewed. Corrected here: every transition clears the labels it
-  // contradicts.
-  test("needs-review below the cap → needs-review, clearing the contradicted labels", () => {
-    const plan = planOutcomeTransition({
-      kind: "needs-review",
-      issue: full,
-      attempts: {},
-    });
-    expect(plan.addLabel).toBe("needs-review");
-    expect([...plan.removeLabels].sort()).toEqual([
-      "in-review",
-      "ready-for-agent",
-    ]);
-    expect(plan.escalated).toBe(false);
-    expect(plan.attempts).toEqual({ 42: 1 });
-    expect(plan.attemptCount).toBe(1);
-  });
-
-  test("needs-review at the cap → escalates to a full re-implement", () => {
-    const plan = planOutcomeTransition({
-      kind: "needs-review",
-      issue: full,
-      attempts: { 42: REVIEW_RETRY_CAP - 1 },
-    });
-    expect(plan.addLabel).toBe("ready-for-agent");
-    expect([...plan.removeLabels].sort()).toEqual([
-      "in-review",
-      "needs-review",
-    ]);
-    expect(plan.escalated).toBe(true);
-    // Cleared at the cap: the next lifecycle counts from zero.
-    expect(plan.attempts).toEqual({});
-    expect(plan.note).toBe(
-      `42 hit review-retry cap (${REVIEW_RETRY_CAP}); back to ready-for-agent for a full re-implement`
-    );
-  });
-
-  test("review-fail below the cap → back to ready-for-agent on its own counter", () => {
+  test("review-fail → ready-for-human, branch preserved, no PR path", () => {
     const plan = planOutcomeTransition({
       kind: "review-fail",
       issue: full,
-      attempts: {},
       failedAxes: ["spec"],
     });
-    expect(plan.addLabel).toBe("ready-for-agent");
-    expect([...plan.removeLabels].sort()).toEqual([
-      "in-review",
-      "needs-review",
-    ]);
-    expect(plan.escalated).toBe(false);
-    // Keyed review-<id>, NOT <id>: the re-implement cap and the re-review cap
-    // count independently for the same issue.
-    expect(plan.attempts).toEqual({ "review-42": 1 });
-    // The note names the attempt out of the cap — it is the only place an
-    // operator sees the count, since the plan's counters are internal.
+    expect(plan.addLabel).toBe("ready-for-human");
+    expect(plan.removeLabels).toEqual(["ready-for-agent"]);
+    expect(plan.preserveBranch).toBe(true);
+    expect(plan.completed).toBeUndefined();
     expect(plan.note).toBe(
-      `42 failed review (spec); back to ready-for-agent to re-implement (attempt 1/${REVIEW_RETRY_CAP})`
+      "42 failed review (spec); no PR — branch preserved, handed to a human (ready-for-human)"
     );
   });
 
-  // The regression this fix exists for: a standards-only failure used to be
-  // reported as a spec failure, sending the reader to the wrong reviewer.
   test("a standards-only failure names standards, not spec", () => {
     const plan = planOutcomeTransition({
       kind: "review-fail",
       issue: full,
-      attempts: {},
       failedAxes: ["standards"],
     });
-    expect(plan.note).toBe(
-      `42 failed review (standards); back to ready-for-agent to re-implement (attempt 1/${REVIEW_RETRY_CAP})`
-    );
+    expect(plan.note).toContain("failed review (standards)");
+    expect(plan.failureSection).toContain("**standards**");
   });
 
-  // Both axes share one cap, so a double failure is one attempt, named in full.
-  test("both axes failing names both", () => {
+  test("both axes failing names both, in the note and the section", () => {
     const plan = planOutcomeTransition({
       kind: "review-fail",
       issue: full,
-      attempts: {},
       failedAxes: ["spec", "standards"],
     });
-    expect(plan.attempts).toEqual({ "review-42": 1 });
-    expect(plan.note).toBe(
-      `42 failed review (spec, standards); back to ready-for-agent to re-implement (attempt 1/${REVIEW_RETRY_CAP})`
-    );
+    expect(plan.note).toContain("failed review (spec, standards)");
+    expect(plan.failureSection).toContain("**spec**");
+    expect(plan.failureSection).toContain("**standards**");
   });
 
-  // `failedAxes` is optional on the input, so the note must still read as a
-  // sentence when a caller omits it rather than printing an empty bracket.
-  test("no axes given → the note says review", () => {
+  test("no axes given → reads as 'review' rather than an empty bracket", () => {
+    const plan = planOutcomeTransition({ kind: "review-fail", issue: full });
+    expect(plan.note).toContain("failed review (review)");
+    expect(plan.failureSection).toContain("**review**");
+  });
+
+  // The failure section is the human's whole brief: it must name the preserved
+  // branch and the exact `git worktree add` that continues it (not EnterWorktree),
+  // and point at /implement.
+  test("the failure section carries the continue-the-branch instruction", () => {
     const plan = planOutcomeTransition({
       kind: "review-fail",
       issue: full,
-      attempts: {},
+      failedAxes: ["spec"],
     });
-    expect(plan.note).toBe(
-      `42 failed review (review); back to ready-for-agent to re-implement (attempt 1/${REVIEW_RETRY_CAP})`
+    expect(plan.failureSection).toContain("/implement 42");
+    expect(plan.failureSection).toContain(
+      "git worktree add ../issue-42 sandcastle/issue-42"
     );
+    expect(plan.failureSection).toContain("sandcastle/issue-42");
   });
 
-  test("review-fail at the cap → handed to a human", () => {
+  // The reviewer's per-axis reason is embedded so the human sees why without
+  // opening the run log.
+  test("a per-axis reason is embedded in the failure section", () => {
     const plan = planOutcomeTransition({
       kind: "review-fail",
       issue: full,
-      attempts: { "review-42": REVIEW_RETRY_CAP - 1 },
-      failedAxes: ["standards"],
+      failedAxes: ["spec"],
+      reasons: { spec: "missing the idempotency requirement" },
     });
-    expect(plan.addLabel).toBe("ready-for-human");
-    expect([...plan.removeLabels].sort()).toEqual([
-      "in-review",
-      "needs-review",
-      "ready-for-agent",
-    ]);
-    expect(plan.escalated).toBe(true);
-    expect(plan.attempts).toEqual({});
-    // The escalation note names the axis too — it is what a human reads first.
-    expect(plan.note).toBe(
-      `42 failed review (standards) ${REVIEW_RETRY_CAP}x; handing to a human (ready-for-human)`
+    expect(plan.failureSection).toContain(
+      "missing the idempotency requirement"
     );
   });
 
-  // The completed record is what Phase 3 groups PR sets from, so what a `done`
-  // carries into it is a downstream decision, not bookkeeping.
+  test("nothing → touches no label, preserves no branch, records nothing", () => {
+    const plan = planOutcomeTransition({ kind: "nothing", issue: full });
+    expect(plan.addLabel).toBeNull();
+    expect(plan.removeLabels).toEqual([]);
+    expect(plan.preserveBranch).toBe(false);
+    expect(plan.completed).toBeUndefined();
+  });
+
+  // The completed record is what the run summary counts a build from.
   describe("the completed record a done outcome carries", () => {
     test("a full-mode issue keeps its forest position and topic group", () => {
-      const plan = planOutcomeTransition({
-        kind: "done",
-        issue: full,
-        attempts: {},
-      });
+      const plan = planOutcomeTransition({ kind: "done", issue: full });
       expect(plan.completed).toEqual({
         id: "42",
         title: "Add widget",
@@ -731,23 +279,16 @@ describe("planOutcomeTransition", () => {
       });
     });
 
-    // A review-only issue was picked up by label for a cheap re-review; it never
-    // went through the planner, so it has no parents and no topic group. Both
-    // are dropped rather than invented. `group` is absent, not "": prSets edges
-    // issues together on a shared group key, so the key this record carries
-    // decides PR grouping. (prSets also skips falsy keys, so "" would not fuse
-    // sets today — the point is that the record states "no topic" outright
-    // instead of leaning on that guard.)
-    test("a review-only issue drops parents and the group key entirely", () => {
+    test("an issue with no parents and an empty group carries neither", () => {
       const plan = planOutcomeTransition({
         kind: "done",
         issue: {
-          mode: "review-only",
           id: "43",
           title: "Re-reviewed",
           branch: "sandcastle/issue-43",
+          parents: [],
+          group: "",
         },
-        attempts: {},
       });
       expect(plan.completed).toEqual({
         id: "43",
@@ -758,43 +299,12 @@ describe("planOutcomeTransition", () => {
       expect("group" in plan.completed).toBe(false);
     });
 
-    // An empty group key from the planner is "no topic", not a topic named "".
-    test("a full-mode issue with an empty group key drops it too", () => {
+    test("an issue with an empty group key drops it too", () => {
       const plan = planOutcomeTransition({
         kind: "done",
         issue: { ...full, group: "" },
-        attempts: {},
       });
       expect("group" in plan.completed).toBe(false);
     });
-  });
-
-  // No work was produced (blocked parent base, empty branch, or a pipeline that
-  // threw). That says nothing about the branch, so the issue keeps the label it
-  // arrived with and burns no attempt — next iteration retries it cleanly.
-  test("nothing → touches no label and spends no attempt", () => {
-    const plan = planOutcomeTransition({
-      kind: "nothing",
-      issue: full,
-      attempts: { 42: 1 },
-    });
-    expect(plan.addLabel).toBeNull();
-    expect(plan.removeLabels).toEqual([]);
-    expect(plan.attempts).toEqual({ 42: 1 });
-    expect(plan.attemptCount).toBe(0);
-    expect(plan.escalated).toBe(false);
-    expect(plan.completed).toBeUndefined();
-  });
-
-  // A re-review counter must not be spent by a failed review axis, or vice versa.
-  test("the two caps do not consume each other's counter", () => {
-    const plan = planOutcomeTransition({
-      kind: "review-fail",
-      issue: full,
-      attempts: { 42: REVIEW_RETRY_CAP - 1 },
-      failedAxes: ["spec"],
-    });
-    expect(plan.escalated).toBe(false);
-    expect(plan.attempts).toEqual({ 42: REVIEW_RETRY_CAP - 1, "review-42": 1 });
   });
 });
