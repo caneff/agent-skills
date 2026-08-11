@@ -38,7 +38,7 @@ describe("the language arm", () => {
 });
 
 // Each row breaks exactly one prereq and names the message that must come
-// back. The messages belong to `install`, and #167 drops SKILL.md's copy of
+// back. The messages belong to `install`, which drops SKILL.md's copy of
 // them, so this table becomes the only thing holding them still — hence full
 // coverage with exact matches rather than a sample.
 const eachRow = (rows, arm) =>
@@ -205,7 +205,7 @@ describe.each(["python", "node"])("a ready repo, %s arm", (arm) => {
 });
 
 describe("a repo that already carries a render", () => {
-  // Locked decision 13 — never re-render over an adopter. Preflight enforces
+  // Locked decision: never re-render over an adopter. Preflight enforces
   // it rather than leaving it to prose, before copier is reached.
   test.each([".copier-answers.yml", join(".sandcastle", "main.mts")])(
     "is refused, naming the %s it found",
@@ -221,7 +221,7 @@ describe("a repo that already carries a render", () => {
   );
 });
 
-// Both checks are pulled forward into preflight (#151): a missing source found
+// Both checks are pulled forward into preflight: a missing source found
 // after the render costs a re-render to recover from, and a stageable `.env` is
 // the one failure that leaks credentials, so neither waits for copier.
 describe("--env-from", () => {
@@ -278,7 +278,7 @@ describe("--env-from", () => {
   });
 });
 
-// One non-zero exit covers every failure (#151), so the message carries the
+// One non-zero exit covers every failure, so the message carries the
 // whole classification — which step was reached, and whether re-running is
 // safe. Driven with the fake `copier`, so it needs nothing real installed.
 test("a failed render names the step and says re-running is not safe", () => {
@@ -299,7 +299,7 @@ const digest = (path) => createHash("sha256").update(readFileSync(path)).digest(
 
 // The one end-to-end run: real copier, real `npm install`, real `npx tsc`. The
 // install is not stubbed anywhere — a flag that skipped the slow part would
-// mean the asserted path is not the shipped path (#154).
+// mean the asserted path is not the shipped path.
 
 describe.skipIf(!hasCopier())("a full install, python arm", () => {
   test("renders, wires the host runtime, typechecks and hands off", { timeout: 600_000 }, () => {
@@ -327,7 +327,7 @@ describe.skipIf(!hasCopier())("a full install, python arm", () => {
     expect(r.stdout).toContain(`was seeded from ${source}`);
     expect(r.stdout).not.toContain("Fill .sandcastle/.env");
 
-    // Locked decision 13, asserted against a real render rather than a marker
+    // Locked decision, asserted against a real render rather than a marker
     // file: the second run refuses instead of re-rendering over the first.
     const again = f.run(["python"]);
     expect(again.status).not.toBe(0);

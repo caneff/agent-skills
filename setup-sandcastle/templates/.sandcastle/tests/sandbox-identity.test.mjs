@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 // The module became a template when its install hook and its sandbox env began
-// branching on LANGUAGE (#146), so there is no plain `.mts` beside this file to
+// branching on LANGUAGE, so there is no plain `.mts` beside this file to
 // import any more. Render the Python arm once and exercise THAT — the same move
 // copier-template.test.mjs makes to typecheck the orchestrator, and it covers
 // the module as an adopter will actually run it. The Node arm's two rendered
@@ -44,7 +44,7 @@ afterEach(() => {
 // The cost, stated plainly: without copier this whole file skips, so a machine
 // without it runs none of these checks. copier is a documented prereq of the
 // skill (`uv tool install copier`), and skipping beats a red the machine cannot
-// turn green — but see issue #112 on skips reading as a silent green.
+// turn green — but a skip reads as a silent green.
 const here = dirname(fileURLToPath(import.meta.url));
 // tests/ -> .sandcastle/ -> templates/ -> setup-sandcastle/ -> repo root
 const repoRoot = join(here, "..", "..", "..", "..");
@@ -92,7 +92,7 @@ withRender("sandboxConfig: gitConfigCommands fold into the chained git entry, be
   const cfg = sandboxConfig(identity, () => ({}));
   const ready = cfg.hooks.sandbox.onSandboxReady;
   // The identity write is chained into the single git-config entry (not its own
-  // entry — that would race the lock, #52), which still runs before uv sync.
+  // entry — that would race the lock), which still runs before uv sync.
   const gitIdx = ready.findIndex((c) => c.command.includes("git config"));
   const uvIdx = ready.findIndex((c) => c.command === "uv sync");
   expect(ready[gitIdx].command).toContain("git config user.name Bot");
@@ -224,7 +224,7 @@ withRender("sandbox-identity: no-op when App creds not set and SANDCASTLE_BOT_GH
 // These two ran as `sandbox-identity.check.mts`, a file the render shipped to
 // every adopter for a maintainer to invoke by hand. Nothing else in the suite
 // touched applyBotToken, so the coverage moved here rather than going out with
-// the file (#182).
+// the file.
 
 withRender("applyBotToken: a minted token overwrites both gh env vars", () => {
   // gh() reads GH_TOKEN and git() GITHUB_TOKEN, so a bot run needs both — one

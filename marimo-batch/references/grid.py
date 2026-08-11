@@ -34,8 +34,6 @@ from pathlib import Path
 import numpy as np
 from dotenv import load_dotenv
 
-# Hugging Face Jobs is just one compute provider — see the note in the
-# module docstring above. Replace this with your provider of choice.
 from huggingface_hub import run_uv_job
 
 
@@ -50,7 +48,6 @@ JOB_ENV = {
 }
 
 # The search space keys must match the ModelParams fields in starting-point.py.
-# Adjust the ranges and values to suit your experiment.
 SEARCH_SPACE = {
     "epochs": [10, 15, 20, 25, 30, 40, 50],
     "batch_size": [8, 16, 32, 64, 128, 256, 512],
@@ -136,8 +133,6 @@ def load_secrets() -> dict[str, str]:
     return secrets
 
 
-# This function uses huggingface_hub.run_uv_job to launch jobs.
-# Swap this out if you use a different compute provider.
 def launch_run(index: int, total: int, params: dict[str, str], secrets: dict[str, str]) -> None:
     print_run(index, total, params)
     job = run_uv_job(

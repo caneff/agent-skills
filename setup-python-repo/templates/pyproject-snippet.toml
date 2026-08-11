@@ -4,7 +4,6 @@
 [project]
 requires-python = ">=3.14"
 
-# --- ruff (lint + format) ---
 [tool.ruff]
 line-length = 88
 
@@ -26,7 +25,6 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "*_test.py" = ["S101"]  # asserts ARE pytest; annotations still required (types everywhere)
 
-# --- ty (type check) ---
 # No strict mode. error-on-warning is the churn-proof strictness lever (beta:
 # don't hardcode a per-rule bump list — new releases would break it).
 [tool.ty.environment]
@@ -42,7 +40,6 @@ include = ["**/*_test.py"]
 [tool.ty.overrides.rules]
 deprecated = "ignore"  # tests exercise deprecated APIs on purpose
 
-# --- pytest (hardened) ---
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers --strict-config"
 xfail_strict = true

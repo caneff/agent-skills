@@ -14,7 +14,6 @@
   --vt-warn: #f9ab00; /* caution callout */
 }
 
-/* derived tints */
 :root {
   --vt-soft: color-mix(in srgb, var(--vt-ink) 4%, var(--vt-paper));
   --vt-stripe: color-mix(in srgb, var(--vt-ink) 6%, var(--vt-paper));
@@ -75,7 +74,6 @@ main {
   padding: 3rem 1.5rem 5rem;
 }
 
-/* page shell */
 .vt-kicker {
   font-family: "Helvetica Neue", Arial, sans-serif;
   font-size: 0.8rem;
@@ -195,7 +193,6 @@ a code {
   --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J004LjMgM0gxNS43TDIxIDguM1YxNS43TDE1LjcgMjFIOC4zTDMgMTUuN1Y4LjNaJy8+PHBhdGggZD0nTTEyIDh2NCcvPjxwYXRoIGQ9J00xMiAxNmguMDEnLz48L3N2Zz4=");
 }
 
-/* table — base */
 .vt-table,
 table {
   width: 100%;
@@ -221,7 +218,6 @@ td {
   vertical-align: top;
 }
 
-/* table — responsive wrapper + zebra + density */
 .vt-table-wrap {
   overflow-x: auto;
   margin: 1rem 0;
@@ -238,7 +234,6 @@ td {
   padding: 0.3rem 0.5rem;
 }
 
-/* table — header column (first column = row headers) */
 .vt-table th[scope="row"] {
   text-align: left;
   text-transform: none;
@@ -323,7 +318,6 @@ td {
   margin-bottom: 0.18rem;
 }
 
-/* table — row emphasis */
 .vt-row-key {
   background: var(--vt-accent-soft);
 }
@@ -332,7 +326,6 @@ td {
   box-shadow: inset 3px 0 0 var(--vt-accent);
 }
 
-/* table — key/value reference */
 .vt-kv {
   width: 100%;
   border-collapse: collapse;
@@ -360,7 +353,6 @@ td {
   vertical-align: top;
 }
 
-/* pill — base (accent fill) */
 .vt-pill {
   display: inline-block;
   padding: 0.05rem 0.5rem;
@@ -372,7 +364,6 @@ td {
   vertical-align: middle;
 }
 
-/* pill — semantic fills */
 .vt-pill.neutral {
   background: var(--vt-neutral-soft);
   color: var(--vt-muted);
@@ -390,7 +381,6 @@ td {
   color: #000;
 }
 
-/* pill — outline */
 .vt-pill.outline {
   background: transparent;
   color: var(--vt-accent);
@@ -413,13 +403,11 @@ td {
   border-color: var(--vt-warn);
 }
 
-/* pill — size */
 .vt-pill.sm {
   font-size: 0.68rem;
   padding: 0.02rem 0.4rem;
 }
 
-/* pill — status dot */
 .vt-pill.dot::before {
   content: "●";
   margin-right: 0.35em;
@@ -428,7 +416,6 @@ td {
   color: currentColor;
 }
 
-/* pill — leading icon */
 .vt-pill.ic-check::before {
   content: "✓";
   margin-right: 0.3em;
@@ -438,7 +425,6 @@ td {
   margin-right: 0.3em;
 }
 
-/* difficulty / level pills */
 .vt-level {
   display: inline-block;
   padding: 0.07rem 0.6rem;
@@ -466,7 +452,6 @@ td {
   color: var(--vt-bad);
 }
 
-/* count / step badge */
 .vt-badge {
   display: inline-flex;
   align-items: center;
@@ -486,7 +471,6 @@ td {
   font-size: 0.7rem;
 }
 
-/* keyboard keycap */
 .vt-kbd {
   font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
   font-size: 0.8rem;
@@ -589,7 +573,6 @@ td {
   border-radius: 3px;
 }
 
-/* quiz */
 .vt-quiz {
   border: 1px solid var(--vt-rule);
   border-radius: 12px;
@@ -682,7 +665,6 @@ td {
   white-space: nowrap;
 }
 
-/* recap + next-CTA */
 .vt-recap {
   border-radius: 12px;
   border-left: 4px solid var(--vt-good);
@@ -706,7 +688,6 @@ td {
   color: var(--vt-ink);
 }
 
-/* code block */
 .vt-code {
   border: 1px solid var(--vt-rule);
   border-radius: 10px;
@@ -866,7 +847,6 @@ code.vt-pcode {
   margin-bottom: 0.2rem;
 }
 
-/* shell — meta bar: time / prereqs / difficulty / lesson position */
 .vt-metabar {
   display: flex;
   flex-wrap: wrap;
@@ -891,7 +871,6 @@ code.vt-pcode {
   font-weight: 600;
 }
 
-/* shell — objectives card */
 .vt-objectives {
   border-left: 3px solid var(--vt-accent);
   border-radius: 0 8px 8px 0;
@@ -912,7 +891,6 @@ code.vt-pcode {
   margin: 0.25rem 0;
 }
 
-/* shell — mission tie-in */
 .vt-mission {
   border-left: 3px solid var(--vt-accent);
   border-radius: 0 8px 8px 0;
@@ -925,7 +903,6 @@ code.vt-pcode {
   color: var(--vt-accent-dk);
 }
 
-/* teacher box (raised: SVG cap, question chips, self-explanation prompt, community pointer) */
 .vt-teacher {
   display: flex;
   gap: 0.85rem;
@@ -980,7 +957,6 @@ code.vt-pcode {
   opacity: 0.5;
 }
 
-/* footer / sources (source-type icons, companion slot, verified-date) */
 .vt-sources {
   margin-top: 3rem;
   border-top: 1px solid var(--vt-rule);
@@ -1055,9 +1031,7 @@ code.vt-pcode {
   color: var(--vt-muted);
 }
 
-/* ====== diagram vocabulary ====== */
 
-/* panel / canvas */
 .vt-diagram {
   background: var(--vt-soft);
   border: 1px solid var(--vt-rule);
@@ -1102,7 +1076,6 @@ code.vt-pcode {
   line-height: 1.35;
 }
 
-/* emphasis variants */
 .vt-node.em,
 .vt-box.em {
   background: var(--vt-accent-soft);
@@ -1185,7 +1158,6 @@ code.vt-pcode {
   white-space: nowrap;
 }
 
-/* justify-content modifiers */
 .vt-flex.jc-start {
   justify-content: flex-start;
 }
@@ -1205,7 +1177,6 @@ code.vt-pcode {
   justify-content: space-evenly;
 }
 
-/* align-items modifiers */
 .vt-flex.ai-start {
   align-items: flex-start;
 }
@@ -1219,7 +1190,6 @@ code.vt-pcode {
   align-items: stretch;
 }
 
-/* row / col — lane layout */
 .vt-row {
   display: flex;
   flex-wrap: wrap;
@@ -1260,7 +1230,6 @@ code.vt-pcode {
   margin-bottom: 0.2rem;
 }
 
-/* split — before / after two-panel */
 .vt-split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1300,7 +1269,6 @@ code.vt-pcode {
   color: var(--vt-good);
 }
 
-/* io — paired input→output code block */
 .vt-io {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1356,7 +1324,6 @@ code.vt-pcode {
   white-space: pre;
 }
 
-/* ====== math (KaTeX) ====== */
 /* Display math block — uses --vt-ink so dark/light theming is automatic. */
 .vt-math {
   margin: 1.2rem 0;
@@ -1391,7 +1358,6 @@ code.vt-pcode {
   height: auto;
 }
 
-/* ====== print ====== */
 @media print {
   .vt-quiz button,
   .vt-reset {
@@ -1410,7 +1376,6 @@ code.vt-pcode {
   }
 }
 
-/* ====== forced-colors (Windows High Contrast / any forced-colors mode) ====== */
 @media (forced-colors: active) {
   /* Callout tones: the SVG mask icon collapses to a single monochrome slab;
      add a distinct text label per tone so they remain semantically distinguishable. */
@@ -1480,7 +1445,6 @@ code.vt-pcode {
   }
 }
 
-/* ====== prefers-reduced-motion ====== */
 @media (prefers-reduced-motion: reduce) {
   /* Gate the progress-bar width animation so it does not run for users who opt out of motion. */
   .vt-progress-bar-fill {

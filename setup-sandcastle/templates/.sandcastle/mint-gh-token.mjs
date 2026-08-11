@@ -90,7 +90,6 @@ export async function mintInstallationToken(appId, privateKey, installationId) {
   return token;
 }
 
-// Run as a CLI: print the token to stdout.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { appId, privateKey, installationId } = loadCredentials();
   mintInstallationToken(appId, privateKey, installationId)

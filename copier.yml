@@ -8,8 +8,8 @@
 # `copier update` with no ref to diff from. So the config lives here and
 # `_subdirectory` reaches down to the template tree.
 #
-# `_subdirectory` is `setup-sandcastle/templates`, NOT `.../templates/.sandcastle`
-# (issue #93). The subproject root the template renders into is the TARGET's git
+# `_subdirectory` is `setup-sandcastle/templates`, NOT `.../templates/.sandcastle`.
+# The subproject root the template renders into is the TARGET's git
 # root, with `.sandcastle/` a subtree beneath it and the answers breadcrumb at
 # the root. That is what lets `copier update`, run from the target's git root,
 # resolve its diff and do a real 3-way merge — the old `.sandcastle`-as-root
@@ -29,8 +29,8 @@ _subdirectory: setup-sandcastle/templates
 #
 # The project's own domain model — `CONTEXT.md` and the ADRs beneath it — is
 # maintainer reading that no adopter runs, so it lives OUTSIDE the render tree
-# entirely, at `setup-sandcastle/docs/`, not excluded from within it (issue
-# #196). `_exclude` merely stops a file rendering; every adopter that already
+# entirely, at `setup-sandcastle/docs/`, not excluded from within it.
+# `_exclude` merely stops a file rendering; every adopter that already
 # received it keeps it forever, and `copier update` carries no deletion. Moving
 # the file out of `templates/` instead produces a real deletion in the render
 # diff, which `copier update` then carries into every adopter for free.

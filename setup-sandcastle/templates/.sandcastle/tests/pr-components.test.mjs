@@ -6,12 +6,12 @@ import {
   landedIssues,
 } from "../pr-components.mts";
 
-// One PR per connected dependency component (issue #127). Components are the
+// One PR per connected dependency component. Components are the
 // connected pieces of the parent-edge graph over the issues completed THIS run.
 // Only edges to parents also completed this run count — a parent already in main
 // is not part of this run's forest, so it does not join components.
 //
-// Fixture forest (from #126):
+// Fixture forest:
 //   108 → 112,  120 → 119,  112/119 independent roots
 //   →  main ─┬─ 112 ── 108     (component A, leaf 108)
 //            └─ 119 ── 120     (component B, leaf 120)
@@ -97,7 +97,7 @@ describe("prComponents — non-linear shapes", () => {
   });
 });
 
-// Topic grouping (issue #129): a PR set is a connected component of
+// Topic grouping: a PR set is a connected component of
 // {parent edges} ∪ {same-group-key edges}. Topic combines independent dependency
 // components into one PR; a parent edge still forces same-set (a component is the
 // atomic floor and can never be split). Leaf tips stay parent-based, so a
@@ -139,7 +139,7 @@ describe("prComponents — topic grouping", () => {
   });
 });
 
-// Issue #50: the reconciliation sweep recovered stranded branches with
+// The reconciliation sweep recovered stranded branches with
 // parents:[], discarding the dependency graph, so a stacked recovery
 // (#46 ← #47 ← #48) opened one redundant PR per tip. The fix rebuilds each
 // swept branch's parents from its GitHub blockedBy edges. Every blockedBy id is
@@ -172,7 +172,7 @@ describe("parentsFromBlockedBy — sweep rebuilds the parent graph (#50)", () =>
   });
 });
 
-// Issue #90: GitHub's native sub-issue edge (a child's `parent` field) must fold
+// GitHub's native sub-issue edge (a child's `parent` field) must fold
 // into the same graph as the planner-declared `parents`, so a parent spec and a
 // sub-issue that covers it never open as two independent PRs. mergeParentEdges is
 // the pure merge: given the completed set and a childId → parentId map from
@@ -212,7 +212,7 @@ describe("mergeParentEdges — fold GitHub sub-issue edges into the graph (#90)"
   });
 });
 
-// Issue #115: a leaf whose merge conflicts is excluded from the PR head, but the
+// A leaf whose merge conflicts is excluded from the PR head, but the
 // orchestrator credited it to the PR anyway — falsifying the run summary AND
 // suppressing the strand reconciliation meant to re-queue it. landedIssues asks
 // what actually landed rather than tracking which merges failed: an issue is

@@ -65,7 +65,7 @@ export function recordAttempt(
 }
 
 // One gate verdict against a whole PR set: the Phase-3 full-suite gate judges
-// every member at once, under one counter per member (#25). A `test-fail`
+// every member at once, under one counter per member. A `test-fail`
 // counts one attempt against each key; a `pass` clears them, which is what makes
 // the cap count CONSECUTIVE failures; a `harness-error` is an infra fault and is
 // never counted, so a sandbox that failed to launch cannot retire a good set.

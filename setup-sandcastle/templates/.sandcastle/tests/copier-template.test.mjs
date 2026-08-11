@@ -21,8 +21,8 @@ import { hasCopier, renderPythonArm } from "./render-fixture.mjs";
 // records `_commit` in the answers file when its source is the git root, and
 // without `_commit` the breadcrumb pins no version and `copier update` has no
 // ref to diff from. The subproject root the template installs into is the
-// TARGET's git root, with `.sandcastle/` rendered as a subtree beneath it
-// (issue #93) — that layout is what lets `copier update` resolve its diff and
+// TARGET's git root, with `.sandcastle/` rendered as a subtree beneath it —
+// that layout is what lets `copier update` resolve its diff and
 // do a real 3-way merge. We observe the generated files and update's exit
 // status, not copier internals.
 
@@ -75,7 +75,7 @@ const expectTheLocalMarkerRule = (doc) => {
   expect(doc).toMatch(/fails this axis/);
 };
 
-// The formatting rule (issue #183) renders on every arm too — a Python adopter's
+// The formatting rule renders on every arm too — a Python adopter's
 // formatter reflows a rendered file exactly as a Node one's does. Both arms
 // assert the instruction (exclude the subtree from the formatter) and both
 // consequences the rule exists to name: unmarked divergence now, and a merge
@@ -134,7 +134,7 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
 
   // A render carries what an adopter RUNS. The domain model and the ADRs behind
   // it are maintainer reading, and the self-check is a developer's — all three
-  // keep their home in this repo, and none of them ships (#182).
+  // keep their home in this repo, and none of them ships.
   test("withdraws the maintainer docs and the self-check from the render", () => {
     for (const path of ["CONTEXT.md", "docs", "sandbox-identity.check.mts"]) {
       expect(existsSync(join(target, ".sandcastle", path)), path).toBe(false);
@@ -219,7 +219,7 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
   // token over ~/.config/gh, so a GH_TOKEN dragged along shadows the working
   // keyring credential and 401s every host-side gh call. Dropping that one key
   // restores what the load broke, and .env.example says so where the operator
-  // reads it (issue #155).
+  // reads it.
   test("drops GH_TOKEN from the host process, and .env.example says why", () => {
     expect(renderedIn(target, "main.mts")).toContain("delete process.env.GH_TOKEN;");
     expect(renderedIn(target, ".env.example")).toMatch(/deletes it host-side/);
@@ -286,14 +286,14 @@ describe.skipIf(!hasCopier())("template delimiters do not collide with runtime p
   });
 });
 
-// The template as it stood BEFORE the LANGUAGE arc (issue #131). It anchors two
+// The template as it stood BEFORE the LANGUAGE arc. It anchors two
 // surviving nets: the SET of rendered files and the breadcrumb ANSWERS are
 // compared against this baseline (a rename there broke an install once), and the
 // pre-arc ADOPTER installed at this ref proves `copier update` still round-trips
 // from before the arc existed. The full-render byte-identity diff that used to
-// hang off it was retired as a change-detector with near-zero bug-yield — see
-// ADR-0005; the set nets and the SANDCASTLE_CHECK allowlist are its replacement.
-const PRE_ARC = "59c7941"; // last commit before the LANGUAGE arc (issue #131)
+// hang off it was retired as a change-detector with near-zero bug-yield. The
+// set nets and the SANDCASTLE_CHECK allowlist are its replacement.
+const PRE_ARC = "59c7941"; // last commit before the LANGUAGE arc
 
 // Answers each arc ticket deliberately ADDS to a Python adopter's breadcrumb.
 // The net below demands the breadcrumb equal the pre-arc one plus exactly these,
@@ -303,7 +303,7 @@ const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 // Files the template deliberately ADDS since the pin. Same bargain as the
 // answers list: the set-equality net stays exact, and a new render is declared
 // rather than the assertion quietly widening to "a superset is fine".
-//   (none — ADR 0004 arrived with #127 and left again with #182, below)
+//   (none)
 const ARC_ADDED_RENDERS = [];
 
 // The mirror: files the template deliberately WITHDRAWS since the pin. Without
@@ -455,7 +455,7 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
   const V2 = "sandcastle-template/vnode2";
   const V3 = "sandcastle-template/vnode3";
   // A bump has to move the RENDER, not just the commit: CONTEXT.md no longer
-  // ships (#182), so appending there would leave every version identical to an
+  // ships, so appending there would leave every version identical to an
   // adopter and the update under test with nothing to carry.
   const bump = (gsrc, tag) => {
     appendFileSync(
@@ -651,7 +651,7 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
   // Every sandbox runs this hook the moment it comes up. `uv sync` does not
   // exist on a Node image, so an unbranched hook means every sandbox starts with
   // a failed hook and no installed dependencies — the counterpart to the
-  // `node_modules` #135 seeds into the worktree.
+  // `node_modules` seeded into the worktree.
   test("installs dependencies with npm, not uv", () => {
     const identity = renderedIn(fresh, "sandbox-identity.mts");
     expect(identity).toContain('{ command: "npm install" }');
@@ -668,7 +668,7 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
     );
   });
 
-  // A sweep rather than a file list. The two ticketed sites (#135, #146) were
+  // A sweep rather than a file list. The two ticketed sites were
   // each found by reading, and reading is what misses the next one — a file
   // added later inherits this check for free. The Dockerfile is out of scope by
   // construction: it is the one place naming a toolchain is the point, and its
@@ -741,8 +741,8 @@ describe.skipIf(!hasCopier())("copier update round-trips from the git root", () 
   const TEMPLATE_V2 = "<!-- template-v2-change -->";
   const V1 = "sandcastle-template/vtest1";
   const V2 = "sandcastle-template/vtest2";
-  // The vehicle is a file the render actually carries: CONTEXT.md was withdrawn
-  // (#182), and a merge into a file no adopter receives proves nothing.
+  // The vehicle is a file the render actually carries: CONTEXT.md was withdrawn,
+  // and a merge into a file no adopter receives proves nothing.
   const docInSrc = () =>
     join(src, "setup-sandcastle", "templates", ".sandcastle", "CODING_STANDARDS.md");
   const docInTarget = () => join(target, ".sandcastle", "CODING_STANDARDS.md");

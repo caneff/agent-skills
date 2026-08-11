@@ -1,11 +1,11 @@
-// PR-set detection for per-set PRs (issues #127 + #129).
+// PR-set detection for per-set PRs.
 //
 // A run builds a dependency FOREST: each issue's branch is cut from its parent's
 // branch (or main). At PR time we open ONE pull request per PR SET — a connected
 // component of `{parent edges} ∪ {same-group edges}`. Dependency links and a
 // shared topic `group` both pull issues into one set; a dependency edge always
-// wins, so a chain is never split (a component is the atomic floor — #127), while
-// topic only combines otherwise-independent components (#129). Each set is
+// wins, so a chain is never split (a component is the atomic floor), while
+// topic only combines otherwise-independent components. Each set is
 // independent off main (no shared commits), so its PRs merge in any order with no
 // rebase surgery.
 //
@@ -21,7 +21,7 @@ export interface CompletedIssue {
   title: string;
   branch: string;
   parents: string[];
-  // Topic key from the planner (issue #129). Issues sharing a non-empty group are
+  // Topic key from the planner. Issues sharing a non-empty group are
   // combined into one PR even when no dependency links them. Undefined/empty means
   // "no topic" — the issue groups only by its dependency edges.
   group?: string;
@@ -37,8 +37,8 @@ export interface PrComponent {
   leaves: CompletedIssue[];
 }
 
-// Rebuild a swept branch's `parents` from its GitHub `blockedBy` edges (issue
-// #50). The reconciliation sweep recovers a stranded branch but used to inject
+// Rebuild a swept branch's `parents` from its GitHub `blockedBy` edges. The
+// reconciliation sweep recovers a stranded branch but used to inject
 // `parents: []`, discarding the dependency graph — a stacked recovery then
 // opened one redundant PR per tip. `blockedBy` is the durable ground truth on
 // the issues, so the sweep reconstructs parents from it. Every edge is kept as a
@@ -50,7 +50,7 @@ export function parentsFromBlockedBy(blockedBy: number[]): string[] {
   return blockedBy.map(String);
 }
 
-// Fold GitHub's native sub-issue edge into each issue's `parents` (issue #90).
+// Fold GitHub's native sub-issue edge into each issue's `parents`.
 // A child linked to a parent via GitHub's `parent` field — not `blockedBy`, and
 // regardless of what the LLM planner declared — carries that intent invisibly:
 // the planner (soft guidance) can still miss it, so a parent spec and a child
@@ -69,7 +69,7 @@ export function mergeParentEdges(
   });
 }
 
-// Which of a PR set's issues actually reached the assembled head (issue #115).
+// Which of a PR set's issues actually reached the assembled head.
 //
 // The head is built by merging the set's leaf tips; a tip whose merge conflicts is
 // aborted and excluded, and its commits never land. Crediting the whole set
@@ -115,7 +115,7 @@ export function prComponents(issues: CompletedIssue[]): PrComponent[] {
     }
   }
 
-  // Topic edges (issue #129): union all issues sharing a non-empty group key, so
+  // Topic edges: union all issues sharing a non-empty group key, so
   // independent dependency components on the same topic land in one PR set. Parent
   // edges already unioned above, so a dependency that crosses groups still wins —
   // a component is never split, only combined.

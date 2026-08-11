@@ -68,7 +68,7 @@ function fixtureTemplate(tag) {
   return {
     root,
     src,
-    // Appended to a file the render CARRIES: CONTEXT.md was withdrawn (#182), so
+    // Appended to a file the render CARRIES: CONTEXT.md was withdrawn, so
     // bumping it would tag a new version no adopter can see any difference in.
     bump(next) {
       appendFileSync(
@@ -560,7 +560,7 @@ describe.skipIf(!hasCopier())("sandcastle-propagate sweeps a fleet with nothing 
   });
 });
 
-// A sweep that matched nothing is the #93 stale-copy bug's signature: it printed
+// A sweep that matched nothing is the stale-copy bug's signature: it printed
 // a clean summary and exited 0 while walking past every repo in the fleet. Both
 // ways of matching nothing are errors, and they are told apart — a wrong search
 // root and a wrong filter are different mistakes to go fix.
@@ -737,7 +737,7 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
 // A linked worktree carries a checked-out copy of the repo's own breadcrumb, so
 // the walk finds it wherever that worktree happens to sit — nothing constrains
 // the depth. Sweeping it would open a pull request out of someone's in-progress
-// branch (#194).
+// branch.
 describe.skipIf(!hasCopier())("sandcastle-propagate meets a linked worktree", () => {
   let template;
   let searchRoot;
@@ -780,7 +780,7 @@ describe.skipIf(!hasCopier())("sandcastle-propagate meets a linked worktree", ()
 
   // The worktree is passed over, not counted — so a search root narrowed onto
   // one alone has matched no adopter, and that is the error it already is. A
-  // clean all-zero summary here would be the #93 false green again.
+  // clean all-zero summary here would be the false green again.
   test("fails a run whose search root holds only the worktree", () => {
     const only = propagate(template.src, join(searchRoot, "has-worktree", "worktrees"), [], { bin: gh.bin });
     expect(only.status).not.toBe(0);

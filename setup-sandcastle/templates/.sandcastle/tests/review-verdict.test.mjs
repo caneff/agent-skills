@@ -8,7 +8,7 @@ import {
 } from "../review-verdict.mts";
 
 // The reviewer emits a sentinel line because sandbox.run has no structured
-// output (issue #130). Gate on an EXPLICIT FAIL only; everything else passes.
+// output. Gate on an EXPLICIT FAIL only; everything else passes.
 describe("parseSpecVerdict", () => {
   test("explicit PASS → pass", () => {
     expect(parseSpecVerdict("work done\nSANDCASTLE_SPEC: PASS\n")).toEqual({
@@ -49,7 +49,7 @@ describe("parseSpecVerdict", () => {
 
 // The standards judge emits its own sentinel line, gated identically to spec:
 // only an explicit `SANDCASTLE_STANDARDS: FAIL` blocks; PASS or a missing
-// sentinel is fail-open. (Ticket #2 — additive parsing, nothing wired yet.)
+// sentinel is fail-open.
 describe("parseStandardsVerdict", () => {
   test("explicit PASS → pass", () => {
     expect(
@@ -216,7 +216,7 @@ describe("parseCheckVerdict", () => {
   // Regression: the harness signal must come from the thrown error, not the log.
   // A genuine test failure whose OUTPUT merely contains "PromptError" (a stack
   // frame, a test asserting on that string) must stay test-fail — else the gate
-  // suppresses the failure cap and retries a broken set forever (#22).
+  // suppresses the failure cap and retries a broken set forever.
   test("a real test failure whose log mentions PromptError is still test-fail", () => {
     const out = [
       " FAIL  tests/errors.test.mjs > isHarnessError detects a PromptError",

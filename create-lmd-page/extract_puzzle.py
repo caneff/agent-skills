@@ -15,7 +15,6 @@ import lzstring
 
 
 def puzzle_id(arg):
-    # accept full URL (with optional ?query) or a bare id
     m = re.search(r"sudokupad\.app/(?:puzzle/)?([^/?#]+)", arg)
     return m.group(1) if m else arg.split("?")[0].strip("/")
 
@@ -62,7 +61,7 @@ def main():
     url = f"https://sudokupad.app/api/puzzle/{pid}"
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     raw = urllib.request.urlopen(req, timeout=20).read().decode().strip()
-    body = re.sub(r"^scl", "", raw)  # strip format tag if present
+    body = re.sub(r"^scl", "", raw)
     data = lzstring.LZString().decompressFromBase64(body)
     if not data:
         sys.exit("decompress failed (unexpected blob format)")
@@ -79,8 +78,6 @@ def main():
 
 
 def _selfcheck():
-    # field() reads a single-quoted JS value through \' escapes (docstring case),
-    # stopping at the first UNescaped quote — not the escaped one mid-value.
     assert field("t:'it\\'s here',x:'y'", "t") == "it's here", "escaped quote mid-value"
     assert field("t:'plain',x:'y'", "t") == "plain", "plain value stops at closing quote"
     short = "Normal sudoku rules apply.\n\nHit Counts: short clue.\n\nHit Lines: short clue."

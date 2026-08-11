@@ -1,4 +1,4 @@
-// Parse the reviewer's spec-conformance verdict from its stdout (issue #130).
+// Parse the reviewer's spec-conformance verdict from its stdout.
 //
 // sandbox.run has no structured output, so the reviewer emits a sentinel line —
 // `SANDCASTLE_SPEC: PASS` or `SANDCASTLE_SPEC: FAIL — <reason>`. We gate on an
@@ -83,7 +83,7 @@ export function isHarnessError(e: unknown): boolean {
   return /PromptError/.test(String(e));
 }
 
-// The full-suite gate's verdict (issue #22). Unlike the spec/standards judges —
+// The full-suite gate's verdict. Unlike the spec/standards judges —
 // an agent OPINION that fails open on a missing sentinel — this is a safety gate
 // over the repo's check gate (lint + typecheck + the whole test suite) and fails
 // CLOSED:
@@ -109,7 +109,7 @@ export interface CheckVerdict {
 const CHECK_PASS = /^SANDCASTLE_CHECK:\s*PASS\s*$/m;
 
 // Bound the forwarded failure context so a huge suite log never floods the issue
-// or the requeued agent's context (issue #22). Two capped slices: the failing
+// or the requeued agent's context. Two capped slices: the failing
 // *names* the next attempt needs (vitest `FAIL …`, tsc `error TSxxxx`), followed
 // by the raw last-N lines that carry the actual error. Both halves are bounded,
 // so the total is bounded no matter how large the log is; names not already in
