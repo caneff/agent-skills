@@ -1,0 +1,19 @@
+=== Phase 0: reconciliation sweep ===
+No stranded issues.
+
+=== Iteration 1/20 ===
+  [full] 101: add the widget → sandcastle/issue-101
+  [full] 102: fix the flange → sandcastle/issue-102
+  [review] 104: polish the docs → sandcastle/issue-104
+  ✓ 101 (sandcastle/issue-101) merged
+  101 (sandcastle/issue-101) → PR #1
+  ✗ 103 (sandcastle/issue-103) failed: assertion in test_flange raised
+
+✗ 107 (sandcastle/issue-107) failed: (FiberFailure) ExecError: Command failed (exit 128): git config --global --add safe.directory "/home/agent/workspace"
+
+  ⚠ 104 (sandcastle/issue-104) failed review: reviewer requested changes
+
+=== Run Summary ===
+  merged:  101
+  failed:  103
+  in-review: 104
