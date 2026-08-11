@@ -89,40 +89,39 @@ sweep before any repo is touched, rather than stranding a half-swept fleet.
 `--dry-run` stops short of `gh` entirely, so it stays usable before you log in.
 
 Both the sweep and `--divergence` report how far each repo has drifted from the
-template it recorded — one line per hunk, unmarked first:
+template it recorded — a plain `git diff` of the re-render against the repo's
+live subtree:
 
 ```
-visual-teach   .sandcastle/Dockerfile:12    +6 -2   local: Playwright needs a browser binary
-visual-teach   .sandcastle/main.mts:479     +1 -1   UNMARKED
+diff --git .sandcastle/Dockerfile .sandcastle/Dockerfile
+--- .sandcastle/Dockerfile
++++ .sandcastle/Dockerfile
+@@ -12,0 +13,2 @@
++# sandcastle:local — Playwright needs a browser binary
++RUN echo local
 ```
 
 That report is also the PR body, under the refs the repo moved between, so a
 reviewer reads what the update carried and what it could not in one place.
 
 The report is computed, never maintained: the script re-renders each repo's own
-`_commit` with that repo's own answers and diffs the live tree against it. An
-`UNMARKED` line is drift nobody explained — either mark it with a
-`sandcastle:local` reason (rule 5 of the standards doc) or lift it into the
-template. The report never blocks: it exits 0 whatever drift it finds, and even
-when a repo faults under it — only a run that matched nobody fails.
-
-**Put a marker next to what it explains — within about three lines.** The diff
-runs at zero context, so it cuts a hunk at every run of changed lines: a marker
-comment with even one untouched line beneath it is a hunk of its own, and the
-divergence under it is another. The report carries a reason down to the next
-hunk when that hunk starts within three lines, which covers a marker sitting
-above its paragraph, blank line and all. Further away and nothing travels —
-otherwise one reason at the top of a file would excuse everything below it. A
-marker that ends up too far reads as `UNMARKED` no matter how good the reason
-is; move it, don't reword it.
+`_commit` with that repo's own answers and diffs the live tree against it. Drift
+you mean to keep gets a `sandcastle:local` reason next to it (rule 5 of the
+standards doc), and because the reason is a comment on the line it explains, the
+diff shows it right beside the change — no annotation layer, you read the reason
+in the hunk. Drift you did not mean to keep, lift into the template. The report
+never blocks: it exits 0 whatever drift it finds, and even when a repo faults
+under it — only a run that matched nobody fails.
 
 What the adopter's own git ignores never reaches the report. The orchestrator
 writes logs, `.env` and scratch JSON into `.sandcastle/`, and that runtime output
-is not drift from the template — it is the tool's exhaust. The filter asks
-`git -C <repo> check-ignore`, so it honors every level of ignore the repo has:
-its root file, the `.sandcastle/` subtree, and your global one. A file git
-tracks is never reported ignored, so an adopter-added file that nothing ignores
-still reports as `NEW UNMARKED`.
+is not drift from the template — it is the tool's exhaust. The diff runs against
+a copy of the subtree with those files pruned first, using
+`git -C <repo> ls-files --others --ignored --exclude-standard` — git's own answer
+to what the repo ignores, honoring every level: its root file, the `.sandcastle/`
+subtree, and your global one. `--others` lists only untracked files, so a
+rendered file that happens to match a pattern still reports; an adopter-added
+file that nothing ignores shows as an ordinary addition.
 
 **Install it as a symlink, never a copy**
 (`ln -sf "$PWD/setup-sandcastle/sandcastle-propagate" ~/.local/bin/`). A copy goes

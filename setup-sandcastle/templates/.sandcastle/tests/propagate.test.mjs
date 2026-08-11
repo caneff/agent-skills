@@ -233,7 +233,8 @@ describe.skipIf(!hasCopier())("sandcastle-propagate sweeps the adopters it finds
   // The sweep carries the template and then says what it could not carry — the
   // same report `--divergence` prints alone, per repo, after each update.
   test("prints each repo's divergence report after updating it", () => {
-    expect(sweep.stdout).toMatch(/py-adopter\s+\.sandcastle\/local-only\.mts\s+NEW\s+UNMARKED/);
+    expect(sweep.stdout).toContain(".sandcastle/local-only.mts");
+    expect(sweep.stdout).toContain("+export const x = 1;");
   });
 
   // The harm the re-assert did: on a node adopter the lookup came back empty and
@@ -279,7 +280,8 @@ describe.skipIf(!hasCopier())("sandcastle-propagate sweeps the adopters it finds
     const body = create[create.indexOf("--body") + 1];
     expect(body).toContain(V1);
     expect(body).toContain(V2);
-    expect(body).toMatch(/\.sandcastle\/local-only\.mts\s+NEW\s+UNMARKED/);
+    expect(body).toContain(".sandcastle/local-only.mts");
+    expect(body).toContain("+export const x = 1;");
   });
 });
 
@@ -607,14 +609,11 @@ describe("sandcastle-propagate matches no adopter", () => {
   });
 });
 
-// The divergence report. The fixture holds every shape the report has to tell
-// apart: a marked hunk, an unmarked hunk, an adopter-added file, and — in a
-// second repo — the change that is NOT divergence, simply lagging a tag behind.
+// The divergence report. The fixture holds every shape the report has to show:
+// a marked local edit, an unmarked local edit, an adopter-added file, runtime
+// exhaust the filter must drop, and — in a second repo — the change that is NOT
+// divergence, simply lagging a tag behind.
 const REASON = "the agent cache needs a Chromium binary";
-// A marker the author put a line or two above the divergence it explains, rather
-// than touching it. Wrapped prose produces this constantly: a marker comment,
-// then a line that happens to match the render, then the edited one.
-const REASON_APART = "the lesson pages need a browser to photograph";
 
 describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
   let template;
@@ -623,8 +622,16 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
   let before;
   const V1 = "sandcastle-template/v1";
   const V2 = "sandcastle-template/v2";
-  const lines = (name) => report.stdout.split("\n").filter((l) => l.startsWith(name));
-  const lineFor = (file) => lines("diverged").find((l) => l.includes(file));
+  // The report prints each repo's diff under its own `== name ==` header. Slice
+  // one repo's block out: from its header to the next header or the summary.
+  const section = (name) => {
+    const all = report.stdout.split("\n");
+    const start = all.findIndex((l) => l.startsWith(`== ${name} `));
+    if (start < 0) return "";
+    let end = all.findIndex((l, i) => i > start && (l.startsWith("== ") || l.startsWith("Done.")));
+    if (end < 0) end = all.length;
+    return all.slice(start + 1, end).join("\n");
+  };
 
   beforeAll(() => {
     template = fixtureTemplate(V1);
@@ -632,36 +639,12 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
 
     const diverged = fixtureAdopter(searchRoot, "diverged", template.src, V1, "PYTHON_VERSION=3.14");
     const sand = (f) => join(diverged.repo, ".sandcastle", f);
-    // Marked: a comment in the file's own syntax carrying the token and a reason.
+    // A marked local edit: a `sandcastle:local` comment in the file's own syntax
+    // carrying a reason, sitting right next to the change. The plain diff shows
+    // both, so the reason reaches the reviewer with no parsing.
     appendFileSync(sand("Dockerfile"), `\n# sandcastle:local — ${REASON}\nRUN echo local\n`);
-    // Unmarked: an edit to a rendered file with nothing said about it. The
-    // `++ `/`-- ` lines are the trap: prefixed with the diff's own `+`, they
-    // arrive looking exactly like the `+++ `/`--- ` file headers the report
-    // parses, and prose under `.sandcastle/` really does quote diffs.
-    appendFileSync(
-      sand("CODING_STANDARDS.md"),
-      "\nA local paragraph nobody marked.\n++ not a header\n-- nor this\n"
-    );
-    // Marked at a distance, at exactly the reach. The marker goes in at line 3;
-    // lines 4 and 5 are left as rendered; line 6 is edited. `--unified=0` splits
-    // marker and divergence into separate hunks, three lines apart — the widest
-    // gap a reason crosses. Both positions are relative to the splice, so
-    // rewriting bot-setup.md upstream cannot move them.
-    const near = readFileSync(sand("bot-setup.md"), "utf8").split("\n");
-    near.splice(2, 0, `<!-- sandcastle:local — ${REASON_APART} -->`);
-    near[5] += " Locally edited.";
-    // A third edit three lines past that one. It is in reach of the hunk above
-    // it, but that hunk only borrowed its reason — so nothing should arrive
-    // here, and a reason cannot walk down a densely edited file.
-    near[8] += " Also unexplained.";
-    writeFileSync(sand("bot-setup.md"), near.join("\n"));
-    // One line further and the reason does not travel: same shape, gap of four.
-    // This is the pair that pins the reach — without it the distance could be
-    // any number at all and both tests would still pass.
-    const far = readFileSync(sand("pr-prompt.md"), "utf8").split("\n");
-    far.splice(2, 0, `<!-- sandcastle:local — ${REASON_APART} -->`);
-    far[6] += " Locally edited.";
-    writeFileSync(sand("pr-prompt.md"), far.join("\n"));
+    // An unmarked local edit: nothing said about it, still real drift to report.
+    appendFileSync(sand("CODING_STANDARDS.md"), "\nA local paragraph nobody marked.\n");
     // Adopter-added: no counterpart in the render at all.
     writeFileSync(sand("extra.mts"), "export const local = 1;\n");
     diverged.publish();
@@ -713,80 +696,41 @@ describe.skipIf(!hasCopier())("sandcastle-propagate --divergence", () => {
     expect(answersIn(join(searchRoot, "diverged"))).toContain(V1);
   });
 
-  test("reports a marked hunk with its file, line, size and reason", () => {
-    expect(lineFor("Dockerfile")).toMatch(/\.sandcastle\/Dockerfile:\d+\s+\+\d+ -\d+\s+local: /);
-    expect(lineFor("Dockerfile")).toContain(REASON);
+  // Real drift shows as a plain diff, and a `sandcastle:local` marker next to
+  // the change carries its reason there in the diff a reviewer reads.
+  test("reports a marked local edit with its reason visible in the diff", () => {
+    const s = section("diverged");
+    expect(s).toContain("+RUN echo local");
+    expect(s).toContain(REASON);
   });
 
-  // `--unified=0` makes a hunk of every contiguous run of changed lines, so a
-  // marker with even one untouched line under it lands in a hunk of its own and
-  // the divergence below reads UNMARKED. The reason is right there in the file;
-  // a report that calls it unexplained sends a reader to look for something they
-  // already have.
-  test("carries a marker across the hunk boundary to the divergence below it", () => {
-    const botSetup = lines("diverged").filter((l) => l.includes("bot-setup.md"));
-    // Two hunks, not one — the split this is about really did happen.
-    expect(botSetup.length).toBeGreaterThan(1);
-    const edited = botSetup.find((l) => /bot-setup\.md:6\s/.test(l));
-    expect(edited).toBeDefined();
-    // `endsWith`, not `toContain`: the reason must stop at the end of the prose.
-    // A marker written as an HTML comment ends `-->`, and a report that prints
-    // the closer is showing the reader the syntax instead of the reason.
-    expect(edited.endsWith(REASON_APART)).toBe(true);
+  test("reports an unmarked local edit", () => {
+    expect(section("diverged")).toContain("+A local paragraph nobody marked.");
   });
 
-  // The other half of the same rule, one line further out. A reason explains
-  // what is next to it, not the rest of the file — and this is the case that
-  // pins the reach to a number rather than to "somewhere between 2 and a lot".
-  test("does not carry it one line further than that", () => {
-    const prPrompt = lines("diverged").filter((l) => l.includes("pr-prompt.md"));
-    const edited = prPrompt.find((l) => /pr-prompt\.md:7\s/.test(l));
-    expect(edited).toBeDefined();
-    expect(edited.endsWith("UNMARKED")).toBe(true);
-  });
-
-  // A hunk that inherited a reason must not re-export it. Otherwise a file with
-  // an edit every couple of lines carries one marker to the bottom, which is
-  // exactly what the reach exists to prevent.
-  test("does not relay an inherited reason to the hunk after it", () => {
-    const relayed = lines("diverged").find((l) => /bot-setup\.md:9\s/.test(l));
-    expect(relayed).toBeDefined();
-    expect(relayed.endsWith("UNMARKED")).toBe(true);
-  });
-
-  test("reports an unmarked hunk with its file, line and size", () => {
-    expect(lineFor("CODING_STANDARDS.md")).toMatch(
-      /\.sandcastle\/CODING_STANDARDS\.md:\d+\s+\+\d+ -\d+\s+UNMARKED$/
-    );
-  });
-
-  test("reports an adopter-added file as its own NEW line", () => {
-    expect(lineFor("extra.mts")).toMatch(/\.sandcastle\/extra\.mts\s+NEW\s+UNMARKED$/);
+  test("reports an adopter-added file", () => {
+    const s = section("diverged");
+    expect(s).toContain(".sandcastle/extra.mts");
+    expect(s).toContain("+export const local = 1;");
   });
 
   // The orchestrator writes logs, `.env` and scratch files into its own
-  // directory. Those are the adopter's runtime output, not its divergence from
-  // the template, and the repo's own git already says so.
+  // directory. Those are the adopter's runtime output, not divergence, and the
+  // repo's own git already says so — the filter drops them, real drift stays.
   test("says nothing about a file the adopter's git ignores", () => {
-    expect(lineFor("logs/run.log")).toBeUndefined();
-    // The real edits in the same repo survive the filter — it drops noise only.
-    expect(lineFor("CODING_STANDARDS.md")).toBeDefined();
+    const s = section("diverged");
+    expect(s).not.toContain("run.log");
+    expect(s).toContain("+A local paragraph nobody marked.");
   });
 
-  test("reports an untracked file that is not ignored as NEW UNMARKED", () => {
-    expect(lineFor("scratch.mts")).toMatch(/\.sandcastle\/scratch\.mts\s+NEW\s+UNMARKED$/);
-  });
-
-  test("lists unmarked hunks before marked ones", () => {
-    const verdicts = lines("diverged").map((l) => (l.includes("local: ") ? "marked" : "unmarked"));
-    expect(verdicts).toEqual([...verdicts].sort().reverse());
-    expect(new Set(verdicts)).toEqual(new Set(["unmarked", "marked"]));
+  test("reports an untracked file that is not ignored", () => {
+    expect(section("diverged")).toContain("+export const scratch = 1;");
   });
 
   // Diffing against the newest tag instead of the recorded `_commit` would make
   // this repo indistinguishable from one that had actually diverged.
   test("says nothing about an adopter that has only fallen behind the newest tag", () => {
-    expect(lines("lagging")).toEqual([]);
+    expect(section("lagging").trim()).toBe("");
   });
 });
 
