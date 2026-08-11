@@ -47,10 +47,13 @@ each rots into a lie the moment the code changes underneath it:
   below`, a comment on every line of a self-evident block.
 - **Historical cruft.** `# changed from a list to a dict on 3/4`; `// used to
   call the old API`; a changelog living in the source. Git already holds this.
-- **Issue/ticket/ADR citation.** `# see JIRA-4521`, `# per ADR-012`, `// fixes
-  #88`. The number is never the point — it sends the reader off to reconstruct a
-  reason that belongs right here. Cut the citation. If it carried a *why*, keep
-  the *why* as plain prose in the comment and drop the number.
+- **Issue/ticket/ADR/decision citation.** `# see JIRA-4521`, `# per ADR-012`,
+  `// fixes #88`, `// (issue #4, decision 3)`. Every such pointer sends the
+  reader off to reconstruct a reason that belongs right here. Cut the *whole*
+  citation, not one pointer out of it — dropping `#4` from `(issue #4, decision
+  3)` leaves a barer `decision 3`, worse than what you started with. If the
+  citation carried a *why*, keep the *why* as plain prose and delete every
+  number.
 - **Commented-out code.** Delete it. Git remembers; a graveyard block does not.
 - **Stale or wrong.** A comment the code has outgrown. If it no longer matches
   the code, it misleads — cut it (or fix it if the *why* is still true).
