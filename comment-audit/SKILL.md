@@ -20,6 +20,19 @@ The code already says **what** it does. A comment earns its place by saying
 **why** — the rationale, the constraint, the gotcha the code executes but cannot
 explain.
 
+Be ruthless about the *why*, because almost any comment can have one invented
+for it. A why survives only if it passes both gates:
+
+- **Not inferable.** A competent engineer reading this code and its names would
+  not already know it. If the why is obvious from the code, the comment is
+  restatement wearing a because-clause. Cut it.
+- **Load-bearing absence.** Delete the comment in your head — does a reader now
+  make a concrete mistake? If nothing breaks, nothing was holding it up. Cut it.
+
+When only a fragment of a comment passes, keep the fragment and cut the rest. A
+comment that is one clause of real *why* wrapped in three of restatement is not
+a keeper — it is a cut with one clause rescued.
+
 ## Load-bearing — never touch
 
 Some lines look like comments but change how code runs or how tools read it.
@@ -54,6 +67,13 @@ each rots into a lie the moment the code changes underneath it:
   3)` leaves a barer `decision 3`, worse than what you started with. If the
   citation carried a *why*, keep the *why* as plain prose and delete every
   number.
+- **The plausible-but-inferable why.** A because-clause a reader would already
+  know from the code: `# use a set for fast lookup`, `# sort so output is
+  stable`, `# cache to avoid recomputing`. It sounds like rationale, but the code
+  and the names already say it. Cut it.
+- **Filler and hedging.** `# helper function`, `# note:` with nothing after the
+  note, `# this is a bit hacky` with no fix, `# TODO` with no actionable next
+  step. A comment that gestures without informing is noise.
 - **Commented-out code.** Delete it. Git remembers; a graveyard block does not.
 - **Stale or wrong.** A comment the code has outgrown. If it no longer matches
   the code, it misleads — cut it (or fix it if the *why* is still true).
