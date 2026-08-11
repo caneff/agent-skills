@@ -6,7 +6,7 @@ import {
   staleClosedBranches,
 } from "../base-resolution.mts";
 
-// Fixture forest (from issue #126):
+// Fixture forest:
 //   108 builds on 112        → chain  main ─ 112 ─ 108
 //   120 builds on 119        → chain  main ─ 119 ─ 120
 //   112, 119 are independent roots off main
@@ -80,10 +80,10 @@ describe(".sandcastle base resolution — forest fixture 108→112, 120→119", 
     expect(base).toBe("main");
   });
 
-  // Issue #127. A closed parent's branch can carry real commits that never
-  // landed — #101 shipped as a from-scratch reimplementation, so its branch tip
-  // matched nothing on main by content and `branchExistsWithWork` called it
-  // live forever. Content cannot tell a superseded implementation from a live
+  // A closed parent's branch can carry real commits that never landed — a
+  // from-scratch reimplementation leaves a branch tip matching nothing on main
+  // by content, so `branchExistsWithWork` called it live forever. Content
+  // cannot tell a superseded implementation from a live
   // one; only the issue's state can, so the state overrides the content.
   test("a parent whose ISSUE is closed is not live work, however its branch looks", () => {
     expect(
@@ -142,7 +142,7 @@ describe(".sandcastle base resolution — forest fixture 108→112, 120→119", 
   });
 });
 
-// buildMultiParentBase — the git-touching half (issue #128), driven through a
+// buildMultiParentBase — the git-touching half, driven through a
 // fake `git` so the merge-loop logic (which parents get merged, conflict → abort
 // → null, all-merged → main) is verified without a real repository.
 describe("buildMultiParentBase — temp base for a diamond", () => {
@@ -203,11 +203,10 @@ describe("buildMultiParentBase — temp base for a diamond", () => {
     expect(merges(calls)[0]).toContain("sandcastle/issue-112");
   });
 
-  // The run of 2026-08-09, exactly: #107's parents were #101 (issue CLOSED, but
-  // `sandcastle/issue-101` still on disk carrying the superseded implementation)
-  // and #102 (no branch). Merging #101 built #107 on a dead version of the
-  // layers feature, which then collided with the real one at PR assembly — every
-  // run, until the branch was deleted by hand (issue #127).
+  // A closed parent whose branch is still on disk (carrying a superseded
+  // implementation) must be dropped from the merge: merging it builds the child
+  // on a dead version of the feature, which then collides with the real one at
+  // PR assembly — every run, until the branch is deleted by hand.
   test("a closed parent is dropped from the merge, however its branch looks", () => {
     const { git, calls } = fakeGit();
     const base = buildMultiParentBase("107", ["101", "102"], {
@@ -243,7 +242,7 @@ describe("buildMultiParentBase — temp base for a diamond", () => {
   });
 });
 
-// staleClosedBranches — the second half of #127: stop the landmine being laid.
+// staleClosedBranches — the second half of the closed-parent rule: stop the landmine being laid.
 // A closed issue's branch has no reader left, so the sweep deletes it and no
 // future diamond can find it. Local refs only: base resolution reads local refs
 // (`rev-parse --verify`), and deleting someone's remote branch is not the

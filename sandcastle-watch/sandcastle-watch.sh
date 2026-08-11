@@ -5,7 +5,7 @@
 # SKILL.md carries the judgement — when to watch, what to say — and calls these.
 set -uo pipefail
 
-# The live-run pattern, defined ONCE for the whole skill (issue #108). Every
+# The live-run pattern, defined ONCE for the whole skill. Every
 # check that names the orchestrator by command line reuses it, exclusion and all.
 LIVE_PAT='tsx \.sandcastle/main\.mts'
 TTL=180        # status-file freshness window (segment self-clears past it)
@@ -74,7 +74,7 @@ do_notify() {
 # one signal reaches all of it; --wait makes this return only when the
 # orchestrator truly exits (plain setsid returns at once and fakes completion).
 # On exit: one final digest, the run's own summary as the closing report, then
-# the temp stdout log is removed (issue #108) — it lived only for the watch.
+# the temp stdout log is removed — it lived only for the watch.
 do_start() {
   local log=$1 status
   setsid --wait npm run sandcastle >"$log" 2>&1
@@ -114,7 +114,7 @@ _frame() {  # render one status-bar line — digest is the single source of the 
 
 do_refresh() {  # refresh <log> <root> [once]
   local L=$1 F="$2/.sandcastle/logs/watch-status" once=${3:-}
-  mkdir -p "$(dirname "$F")"   # gitignored, so a fresh worktree lacks it (issue #108)
+  mkdir -p "$(dirname "$F")"   # gitignored, so a fresh worktree lacks it
   if [ "$once" = once ]; then _frame "$L"; return 0; fi
   while is_running >/dev/null; do _frame "$L" >"$F"; sleep "$INTERVAL"; done
   rm -f "$F"

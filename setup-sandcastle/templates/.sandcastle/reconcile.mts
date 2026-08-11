@@ -10,10 +10,6 @@ import type { CheckVerdict, ReviewAxis } from "./review-verdict.mts";
 import type { CompletedIssue } from "./pr-components.mts";
 import { recordAttempt, REVIEW_RETRY_CAP, type Attempts } from "./retry-policy.mts";
 
-// ---------------------------------------------------------------------------
-// Reconciliation sweep — classifyInReviewIssue
-// ---------------------------------------------------------------------------
-
 // Exported as values, not just as a union, because github-parse.mts builds the
 // zod schema that admits a PR state from this array. Written out twice instead,
 // the schema would reject a state this type accepts and nothing would say so.
@@ -129,10 +125,6 @@ export function classifyInReviewIssue(prs: PrRef[]): InReviewClassification {
   return "stranded";
 }
 
-// ---------------------------------------------------------------------------
-// Phase-3 full-suite gate — planGateOutcome (#22 / #24)
-// ---------------------------------------------------------------------------
-
 export type GateAction = "open" | "requeue" | "retire";
 
 export interface GatePlan {
@@ -142,7 +134,7 @@ export interface GatePlan {
   //             post-Phase-3 reconciliation relabels it ready-for-agent and
   //             deletes the stale branch for a fresh rebuild next iteration.
   //   retire  — a real test-fail that has now failed the gate REVIEW_RETRY_CAP
-  //             times running (#25). Do NOT requeue again — a deterministically
+  //             times running. Do NOT requeue again — a deterministically
   //             broken set would loop forever. main.mts relabels the set
   //             ready-for-human, PRESERVES the work branch (see preserveBranch),
   //             and names it + its failing tests in the run summary.
@@ -163,7 +155,7 @@ export interface GatePlan {
 // ("pass") opens the PR. A non-pass never opens it: normally the set is requeued
 // (every issue commented with the failing tail, then rebuilt next iteration),
 // but once a REAL "test-fail" has escalated — hit the consecutive-failure cap
-// the caller tracks per issue under key gate-<id> (#25) — the set is RETIRED to a
+// the caller tracks per issue under key gate-<id> — the set is RETIRED to a
 // human instead of looping forever. "harness-error" is an infra fault, never the
 // code's: it always requeues and is never counted toward the cap, so it can
 // never escalate here even if the caller passes escalated by mistake. Pure:
@@ -183,10 +175,6 @@ export function planGateOutcome(
     };
   return { action: "requeue", commentIssueIds: [...setIssueIds] };
 }
-
-// ---------------------------------------------------------------------------
-// Post-build outcome — planOutcomeTransition (#102)
-// ---------------------------------------------------------------------------
 
 // What the execute+review pipeline concluded for one issue.
 //   done         — implemented and reviewed clean; belongs in a PR set.
@@ -327,10 +315,6 @@ export function planOutcomeTransition(input: {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Bucketed run summary — bucketIssues + buildRunSummary
-// ---------------------------------------------------------------------------
-
 export interface OpenIssue {
   number: number;
   title: string;
@@ -347,8 +331,8 @@ export type BucketName =
   | "human-gated-delivered-parent" // open parent; every child closed → ready to close
   | "in-flight-needs-review" // implemented; reviewer errored; pending re-review
   | "ready-for-agent" // queued for agent; may be blocked by dependencies
-  | "blocked-parent-conflict" // ≥2 parents conflict; needs a human merge (#64)
-  | "retired-gate-failure" // failed the full-suite gate at the cap → human (#25)
+  | "blocked-parent-conflict" // ≥2 parents conflict; needs a human merge
+  | "retired-gate-failure" // failed the full-suite gate at the cap → human
   | "uncategorized"; // BUG: should not happen
 
 export interface BucketedIssue {
@@ -357,7 +341,7 @@ export interface BucketedIssue {
   bucket: BucketName;
   prNumber?: number; // set for built-this-run / repaired-sweep-pr
   blockedParents?: string[]; // conflicting parent ids, for blocked-parent-conflict
-  gateFailure?: string; // failing-test tail, for retired-gate-failure (#25)
+  gateFailure?: string; // failing-test tail, for retired-gate-failure
 }
 
 const HUMAN_GATED_BUCKETS = new Set<BucketName>([
@@ -371,7 +355,7 @@ const HUMAN_GATED_BUCKETS = new Set<BucketName>([
   // view it is gated on a human, so "nothing left for the bot" stays accurate.
   "blocked-parent-conflict",
   // A gate-retired set is parked on a human (ready-for-human); the bot won't
-  // touch it again this or next run, so it counts as human-gated too (#25).
+  // touch it again this or next run, so it counts as human-gated too.
   "retired-gate-failure",
 ]);
 const IN_FLIGHT_BUCKETS = new Set<BucketName>(["in-flight-needs-review"]);
@@ -421,11 +405,11 @@ export function bucketIssues(options: {
   // issue id → PR number, set during Phase 3
   prAssignments: Map<string, number>;
   // issue id → conflicting parent ids: aborted this run because its multi-parent
-  // base could not be built (#64). Still carries its ready-for-agent label, so it
+  // base could not be built. Still carries its ready-for-agent label, so it
   // must be caught before the label buckets below.
   blockedByParentConflict: Map<string, string[]>;
   // issue id → bounded failing-test tail: the set was retired by the Phase-3
-  // consecutive gate-failure cap (#25). Relabeled ready-for-human AND completed
+  // consecutive gate-failure cap. Relabeled ready-for-human AND completed
   // (in builtThisRun), so it must be caught before both those buckets below.
   retiredByGate: Map<string, string>;
   // parent issue ids (as strings) that are open with ≥1 sub-issue, all closed:
@@ -449,7 +433,7 @@ export function bucketIssues(options: {
       };
     }
 
-    // Retired by the gate cap (#25): caught before builtThisRun and the
+    // Retired by the gate cap: caught before builtThisRun and the
     // ready-for-human label bucket, both of which it would otherwise match.
     const gateFailure = options.retiredByGate.get(id);
     if (gateFailure != null) {
@@ -567,7 +551,7 @@ export function buildRunSummary(bucketed: BucketedIssue[]): string {
   section("Human-gated: open PR pending merge", "human-gated-pr");
   section("Human-gated: ready for human", "human-gated-ready-for-human");
 
-  // Gate-retired sets (#25): name the set AND its failing tests, so the human
+  // Gate-retired sets: name the set AND its failing tests, so the human
   // sees what broke without opening the issue. Custom render — the generic
   // section() helper drops the gateFailure tail.
   const retired = byBucket.get("retired-gate-failure") ?? [];

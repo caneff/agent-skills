@@ -98,9 +98,9 @@ const blockedByRowsSchema = z.array(
   z.object({ number: z.number(), blockedBy: z.array(z.number()) })
 );
 
-// Each in-review issue's `blockedBy` edge ids, keyed by issue number (issue
-// #50). The reconciliation sweep uses these to rebuild a recovered branch's
-// parents instead of dropping the dependency graph.
+// Each in-review issue's `blockedBy` edge ids, keyed by issue number. The
+// reconciliation sweep uses these to rebuild a recovered branch's parents
+// instead of dropping the dependency graph.
 export function parseBlockedByRows(raw: string | null): Map<number, number[]> {
   const map = new Map<number, number[]>();
   for (const row of decode(blockedByRowsSchema, raw, "blockedBy edges") ?? []) {
@@ -120,7 +120,7 @@ const issueEdgeRowsSchema = z.array(
 export type IssueEdgeRow = z.infer<typeof issueEdgeRowsSchema>[number];
 
 // Every issue's state and native parent, open AND closed — the one query
-// behind both the closed-set `issueIsClosed` memoises (#127) and the
+// behind both the closed-set `issueIsClosed` memoises and the
 // spent-parent check. Null when there is no usable answer; per the failure
 // policy that is the same null a failed `gh` call produces, and each caller
 // decides what it means. An empty array is a real answer (a repo with no
@@ -134,7 +134,7 @@ const parentRowsSchema = z.array(
 );
 
 // GitHub's native sub-issue edge (each open issue's `parent` field), as a
-// childId → parentId map (issue #90). String ids match
+// childId → parentId map. String ids match
 // `CompletedIssue.parents`; callers drop any parent they have no issue for.
 export function parseParentEdges(raw: string | null): Map<string, string> {
   const map = new Map<string, string>();

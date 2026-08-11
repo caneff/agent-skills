@@ -10,7 +10,7 @@ const repoRoot = join(here, "..", "..");
 const promptPath = join(repoRoot, ".sandcastle", "review-standards-prompt.md");
 
 // The standards judge loads each CODING_STANDARDS.md conditionally,
-// keyed on what the branch diff touches (issue #172). The conditional logic
+// keyed on what the branch diff touches. The conditional logic
 // lives in `!`bash`` snippets of the form
 //   git diff --name-only ... | grep -qE '<pattern>' && cat <file>
 // We test the OBSERVABLE behavior of those snippets: given a set of changed

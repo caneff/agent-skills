@@ -107,7 +107,7 @@ describe("bucketIssues", () => {
 
   // Regression: a sweep-injected branch whose Phase-3 merge conflicted is moved
   // to sweepRequeued (and may still be in builtThisRun + sweepInjected from the
-  // injection). It must report as re-queued, never "PR opened" (the #114 loop).
+  // injection). It must report as re-queued, never "PR opened" (the requeue loop).
   test("injected branch that conflicted (requeued, no PR) → repaired-sweep-requeued, not -pr", () => {
     const result = bucketIssues(
       makeOpts({
@@ -191,7 +191,7 @@ describe("bucketIssues", () => {
 
   // A spent parent (children all closed) surfaces as ready-to-close, and does so
   // even when it still carries a stray lifecycle label — the close reminder must
-  // win over that label. This is the #99 case that lingered open as ready-for-human.
+  // win over that label. This is the case that lingered open as ready-for-human.
   test("delivered parent with a stray label → human-gated-delivered-parent", () => {
     const result = bucketIssues(
       makeOpts({
@@ -246,7 +246,7 @@ describe("bucketIssues", () => {
     expect(result[0]).toMatchObject({ bucket: "ready-for-agent" });
   });
 
-  // A set retired by the consecutive gate-failure cap (#25) is relabeled
+  // A set retired by the consecutive gate-failure cap is relabeled
   // ready-for-human and completed (in builtThisRun), yet must surface as its own
   // retired bucket — not built-this-run and not the generic ready-for-human —
   // carrying the failing tests so the summary can name them.
@@ -402,10 +402,8 @@ describe("buildRunSummary", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// planGateOutcome — Phase-3 full-suite gate (#24). pass opens; any non-pass
+// planGateOutcome — Phase-3 full-suite gate. pass opens; any non-pass
 // requeues and comments the failing tail on every issue in the set.
-// ---------------------------------------------------------------------------
 describe("planGateOutcome", () => {
   const set = ["101", "102", "103"];
 
@@ -444,7 +442,6 @@ describe("planGateOutcome", () => {
     expect(plan.commentIssueIds).not.toBe(set);
   });
 
-  // --- Consecutive gate-failure cap (#25) ---------------------------------
   // An escalated (at-cap) test-fail retires the set to a human instead of
   // requeuing it a third time. The plan preserves the work branch and carries
   // the failing tail as a summary note.

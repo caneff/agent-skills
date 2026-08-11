@@ -3,7 +3,7 @@
 // render — copier-template.test.mjs to observe the install seam, and
 // sandbox-identity.test.mjs to import a module that only exists once rendered —
 // and both need the same answer to "is copier here at all". Keeping one copy
-// matters beyond tidiness: issue #112 tracks these skips reading as a silent
+// matters beyond tidiness: these skips can read as a silent
 // green, and whatever fixes it should be one edit, not one per test file.
 //
 // Not a `.test.mjs`, so vitest collects no suite from it; `tests/` is excluded
@@ -81,8 +81,8 @@ export function preflightFixture(repoRoot, arm, { realTools = false } = {}) {
     shim(bin, "npx", "exit 0");
     // Only the rows that run past preflight reach step 3, and they are the ones
     // asserting step 4's `.env` handling — a real `npm install` there would buy
-    // nothing and cost a network round trip. The end-to-end run keeps it real
-    // (#154), which is the render this fixture is deliberately not doing.
+    // nothing and cost a network round trip. The end-to-end run keeps it real,
+    // which is the render this fixture is deliberately not doing.
     shim(bin, "npm", "exit 0");
   }
 

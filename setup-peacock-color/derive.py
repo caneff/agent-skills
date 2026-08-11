@@ -23,7 +23,7 @@ def _rgb(hex_str):
 def _hex(rgb): return "#{:02x}{:02x}{:02x}".format(*(_clamp(c) for c in rgb))
 
 
-def _mix(rgb, target, t):  # t=0 -> rgb, t=1 -> target
+def _mix(rgb, target, t):
     return tuple(c + (target[i] - c) * t for i, c in enumerate(rgb))
 
 
@@ -42,15 +42,15 @@ def readable_fg(rgb):
 def build(base_hex):
     base = _rgb(base_hex)
     base_h = _hex(base)
-    activity = lighten(base, 0.20)          # activity bar a touch lighter
+    activity = lighten(base, 0.20)
     activity_h = _hex(activity)
-    hover_h = _hex(darken(base, 0.15))      # status item hover a touch darker
-    fg = readable_fg(base)                   # ink on the base color
-    fg_activity = readable_fg(activity)      # ink on the (lighter) activity bar
+    hover_h = _hex(darken(base, 0.15))
+    fg = readable_fg(base)
+    fg_activity = readable_fg(activity)
     fg99 = fg + "99"                         # inactive = 60% alpha
     return {
         "peacock.color": base_h,
-        "peacock.remoteColor": base_h,       # <-- the bit everyone forgets
+        "peacock.remoteColor": base_h,
         "peacock.showColorInStatusBar": True,
         "workbench.colorCustomizations": {
             "activityBar.activeBackground": activity_h,
@@ -75,14 +75,13 @@ def build(base_hex):
 
 
 def _demo():
-    # ponytail: one runnable check on the money path (contrast + remoteColor).
     # readable_fg contrast: the WCAG coefficients must not flip ink on a dark bg.
     assert readable_fg((255, 255, 255)) == "#15141b", "white -> dark ink"
     assert readable_fg((0, 0, 0)) == "#f8f8f2", "black -> light ink"
     assert readable_fg((0, 0, 255)) == "#f8f8f2", "saturated dark blue -> light ink"
     out = build("#9580ff")
     assert out["peacock.remoteColor"] == "#9580ff", "remoteColor must mirror base"
-    dark = build("#22212c")  # near-black base -> light ink
+    dark = build("#22212c")
     assert dark["workbench.colorCustomizations"]["statusBar.foreground"] == "#f8f8f2", "light ink on dark base"
     assert _hex(lighten((0, 0, 0), 0.5)) == "#808080"
     print("ok")

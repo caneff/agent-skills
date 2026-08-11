@@ -17,7 +17,7 @@
 // resolveBase can't build that itself (it touches no git), so callers inject
 // `onMultiParent`, which builds a temp base merging the parents and returns its
 // branch name — or `null` if that merge conflicts, so the caller skips the issue
-// this iteration instead of building on a wrong base (issue #128). The default
+// this iteration instead of building on a wrong base. The default
 // falls back to `main`, so a mis-declared extra parent degrades to "build on
 // main" rather than crashing a caller that didn't supply the hook.
 //
@@ -36,7 +36,7 @@ export interface ResolveBaseOptions {
   branchExistsWithWork: (parentId: string) => boolean;
   // True when the parent's ISSUE is closed — see `isLiveParent`. Required, not
   // optional: a default would silently restore the content-only liveness that
-  // #127 exists to end.
+  // this check exists to end.
   issueIsClosed: (parentId: string) => boolean;
   // Invoked for the ≥2-parent (diamond) case. Builds and returns a base branch
   // containing all parents, or `null` if that merge conflicts. Defaults to a safe
@@ -45,12 +45,11 @@ export interface ResolveBaseOptions {
 }
 
 // Is a parent's branch live work to build on? Two questions, and the issue's
-// state is asked first (issue #127). A closed issue's branch can still carry
-// commits absent from `main`: #101 shipped as a from-scratch reimplementation,
-// so nothing on main matched `ff2f3b6` by content and `git cherry` / patch-id
-// had nothing to match. Content alone cannot tell a superseded implementation
-// from a live one — it looks identical to "unmerged work" — so a branch of a
-// closed issue is dead by definition, whatever its commits say.
+// state is asked first. A closed issue's branch can still carry commits absent
+// from `main`, but content alone cannot tell a superseded implementation from a
+// live one: a from-scratch reimplementation leaves nothing on `main` for
+// `git cherry` / patch-id to match, yet it looks identical to "unmerged work".
+// So a branch of a closed issue is dead by definition, whatever its commits say.
 const isLiveParent = (
   parentId: string,
   branchExistsWithWork: (id: string) => boolean,
@@ -128,7 +127,7 @@ export function buildMultiParentBase(
   return ok ? baseBranch : null;
 }
 
-// The other half of #127: stop the landmine being laid at all. Given the output
+// The other half of the closed-parent rule: stop the landmine being laid at all. Given the output
 // of `git for-each-ref --format=%(refname:short) refs/heads/sandcastle/issue-*`,
 // name the branches whose issue is closed — the sweep deletes them, so no later
 // diamond can find a shipped issue's branch and read it as live work.

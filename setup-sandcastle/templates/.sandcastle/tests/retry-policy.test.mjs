@@ -100,7 +100,7 @@ describe("recordAttempt", () => {
   });
 
   // The Phase-3 gate counts consecutive full-suite failures per issue under a
-  // gate-<id> key (#25), distinct from the re-review (issue-id) and re-implement
+  // gate-<id> key, distinct from the re-review (issue-id) and re-implement
   // (review-<id>) counters so the three caps never interfere for one issue.
   test("gate-<id> counts independently of the other two keys for one issue", () => {
     let a = {};
@@ -135,7 +135,7 @@ describe("recordAttempt", () => {
 
 // The Phase-3 gate judges a whole PR set at once: one verdict, one counter per
 // member. `recordSetAttempt` folds those per-key results into the single answer
-// the caller acts on — did this set escalate (#103)?
+// the caller acts on — did this set escalate?
 describe("recordSetAttempt", () => {
   const keys = ["gate-7", "gate-8"];
 

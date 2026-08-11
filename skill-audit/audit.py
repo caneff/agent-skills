@@ -40,7 +40,7 @@ if sys.argv[1:2] == ["--selfcheck"]:
     _selfcheck()
     sys.exit()
 
-STALE_DAYS = int(sys.argv[1]) if len(sys.argv) > 1 else 45  # ponytail: flag threshold, arg overrides
+STALE_DAYS = int(sys.argv[1]) if len(sys.argv) > 1 else 45
 
 # 1. Parse skills: name + whether model can auto-invoke it.
 skills = {}  # name -> model_invocable(bool)
