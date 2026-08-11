@@ -2,8 +2,8 @@
 
 Glossary for the `.sandcastle/` dev-automation orchestrator that builds issues
 into PRs. Terms only — no implementation details, no decisions (those live in
-`docs/adr/`). Distinct from the repo-root `CONTEXT.md`, which describes the
-target project this orchestrator builds.
+`adr/` beside this file). Distinct from the repo-root `CONTEXT.md`, which
+describes the target project this orchestrator builds.
 
 ## Glossary
 

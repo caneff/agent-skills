@@ -525,7 +525,7 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
   });
   afterAll(() => discard(src, fresh, corrected));
 
-  // Withdrawing a file from the render is an `_exclude` rule, and a rule that
+  // Excluding a file from the render is an `_exclude` rule, and a rule that
   // matched one arm's path and not the other's would leave two fleets carrying
   // different files. The twin is the python arm of the same template.
   test("renders the same set of files as the python arm", () => {
