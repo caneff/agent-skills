@@ -1,4 +1,11 @@
 # Run `uv run pre-commit autoupdate` after copying to pin revs to current.
+
+# The .sandcastle/ subtree's formatting belongs to the template
+# (.sandcastle/CODING_STANDARDS.md rule 6), so no hook here may rewrite it. Inert
+# until a repo adopts sandcastle — the pattern matches nothing when there is no
+# such dir.
+exclude: ^\.sandcastle/
+
 repos:
   # Upstream, isolated: ruff runs in its own env (doesn't need your deps).
   - repo: https://github.com/astral-sh/ruff-pre-commit
