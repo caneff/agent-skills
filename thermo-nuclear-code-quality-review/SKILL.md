@@ -170,9 +170,9 @@ Prefer a smaller number of high-conviction comments over a long list of cosmetic
 
 Deliver the review as a **single self-contained HTML file**, the same way `/improve-codebase-architecture` does — not as a wall of terminal prose.
 
-Write the file to the OS temp directory so nothing lands in the repo. Resolve the temp dir from `$TMPDIR`, falling back to `/tmp` (or `%TEMP%` on Windows), and write to `<tmpdir>/code-quality-review-<timestamp>.html` so each run gets a fresh file. Open it for the user — `xdg-open <path>` on Linux, `open <path>` on macOS, `start <path>` on Windows — and tell them the absolute path.
+Write the file to the OS temp directory so nothing lands in the repo. Resolve the temp dir from `$TMPDIR`, falling back to `/tmp` (or `%TEMP%` on Windows), and write to `<tmpdir>/code-quality-review-<timestamp>/report.html` so each run gets a fresh folder. Copy the assets the report uses next to it (see HTML-REPORT.md), then open it for the user — `xdg-open <path>` on Linux, `open <path>` on macOS, `start <path>` on Windows — and tell them the absolute path.
 
-The report uses **Tailwind via CDN** for layout and **Mermaid via CDN** for the diagrams where a graph communicates the structure better than prose (a "3 writers → 1 canonical helper" fan-in, a duplicated-parser dependency, a coupling that should be split). Mix Mermaid with hand-built before/after **code blocks** — a code-judo move is usually shown best as `before` vs `after` source, side by side, not as a graph.
+The report is styled with the **visual-teach** design system — vendored `vt-*` components and `--vt-*` theme tokens, the same system the teaching lessons use. It loads **no external host**: the CSS, JS, Prism grammars, and Mermaid all come from local files copied beside the report, so it opens offline and carries a working light/dark mode (it follows the OS theme by default and offers a visible toggle). Use **Mermaid** for the diagrams where a graph communicates the structure better than prose (a "3 writers → 1 canonical helper" fan-in, a duplicated-parser dependency, a coupling that should be split), and mix it with hand-built before/after **code blocks** — a restructuring is usually shown best as `before` vs `after` source, side by side, not as a graph.
 
 The report leads with a one-line **verdict**, then a **headline** card for the single strongest code-judo move, then the ranked findings as cards (each with a severity badge, the files, the one-sentence problem, the before/after, and win bullets), and closes with a **Deliberately leaving alone** list so the reader sees what was considered and consciously kept.
 
@@ -187,16 +187,16 @@ Write every finding in Simplified Technical English (ASD-STE100), the same voice
 Rules:
 
 - Keep sentences short. One idea per sentence. Aim for 20 words or fewer.
-- Use active voice. Write "the digest drops the report", not "the report is dropped".
+- Use active voice. Write "the importer skips the row", not "the row is skipped".
 - Use the present tense.
 - Use the same word for the same thing every time. Do not swap in synonyms.
-- Use the domain terms from `CONTEXT.md` exactly (e.g. Vault, Capture, Inbox, Digest, Todo board, Todo id). Do not invent new names for them.
+- Use the **target repo's own domain terms** exactly — its `CONTEXT.md` names them if it has one. Do not invent new names for them.
 - Keep real technical terms — module, regex, parser, atomic write, race condition, dataclass. These are the correct names, not jargon.
 - Remove the figurative and insider terms from the written finding. **This skill uses metaphors to steer _you_ — "code judo", "spaghetti", "thermo-nuclear", "leaks across the seam" — but they must not appear in the review.** Translate each into plain words that say what is actually true:
   - "there's a code-judo move here" → "one change removes the extra code"
   - "this is spaghetti" → "this function does two jobs at once and is hard to follow"
   - "feature logic leaks across the seam" → "feature logic sits in a shared file where it does not belong"
-- State the cost plainly. Say what breaks, and when. "Change the comment format and the digest stops seeing stale todos."
+- State the cost plainly. Say what breaks, and when. "Change the row layout and the manifest stops matching the rows."
 
 Before / after:
 
