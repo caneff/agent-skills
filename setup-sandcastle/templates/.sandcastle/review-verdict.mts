@@ -18,22 +18,23 @@ export interface SpecVerdict {
 // A single judge's verdict — both axes share this shape.
 export type AxisVerdict = SpecVerdict;
 
-export function parseSpecVerdict(stdout: string): AxisVerdict {
-  const fail = stdout.match(/^SANDCASTLE_SPEC:\s*FAIL\b.*$/m);
-  if (fail) return { pass: false, reason: fail[0].trim() };
-  return { pass: true, reason: "" };
-}
-
-// The standards judge is gated identically to spec, on its own sentinel line
-// (`SANDCASTLE_STANDARDS: PASS` / `... FAIL — <reason>`). Same fail-open rule:
-// only an explicit FAIL blocks; a PASS or a missing sentinel passes.
-export function parseStandardsVerdict(stdout: string): AxisVerdict {
-  const fail = stdout.match(/^SANDCASTLE_STANDARDS:\s*FAIL\b.*$/m);
-  if (fail) return { pass: false, reason: fail[0].trim() };
-  return { pass: true, reason: "" };
-}
-
 export type ReviewAxis = "spec" | "standards";
+
+// Both judges gate the same way, differing only in their sentinel word: only an
+// explicit `SANDCASTLE_<AXIS>: FAIL` line blocks; a PASS or a missing sentinel
+// passes (fail-open). The axis name is upper-cased into the contract string —
+// host-coupled, see CODING_STANDARDS; don't reword the SANDCASTLE_… prefix.
+export function parseAxisVerdict(stdout: string, axis: ReviewAxis): AxisVerdict {
+  const sentinel = axis === "spec" ? "SPEC" : "STANDARDS";
+  const fail = stdout.match(new RegExp(`^SANDCASTLE_${sentinel}:\\s*FAIL\\b.*$`, "m"));
+  if (fail) return { pass: false, reason: fail[0].trim() };
+  return { pass: true, reason: "" };
+}
+
+export const parseSpecVerdict = (stdout: string): AxisVerdict =>
+  parseAxisVerdict(stdout, "spec");
+export const parseStandardsVerdict = (stdout: string): AxisVerdict =>
+  parseAxisVerdict(stdout, "standards");
 
 export interface CombinedVerdict {
   // Overall gate: passes only when both axes pass.

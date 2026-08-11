@@ -82,7 +82,6 @@ for name, model_inv in skills.items():
     rows.append((name, model_inv, used, days))
 
 # sort: model-invocable first, then never-used, then oldest.
-rows.sort(key=lambda r: (not r[1], r[3] is not None, r[3] if r[3] is not None else -1), reverse=False)
 rows.sort(key=lambda r: (r[1] is False, -(r[3] if r[3] is not None else 10**6)))
 
 def fmt(r):
