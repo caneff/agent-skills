@@ -16,12 +16,6 @@ what buys the survivors their authority.
 cannot.** Default is CUT: the burden of proof is on the comment, so when you are
 unsure whether one earns its place, it does not.
 
-Reach for the whole cut first. Most comments in scope are whole deletions;
-keepers are a minority, and a comment worth trimming down to a rescued clause is
-rarer still. Ask **"does this whole comment go?"** before you ask "what part
-earns its place?" — the first question is the one that clears a codebase, and
-the second is the trapdoor that turns every deletion into a trim.
-
 The code already says **what** it does. A comment earns its place by saying
 **why** — the rationale, the constraint, the gotcha the code executes but cannot
 explain.
@@ -34,6 +28,12 @@ for it. A why survives only if it passes both gates:
   restatement wearing a because-clause. Cut it.
 - **Load-bearing absence.** Delete the comment in your head — does a reader now
   make a concrete mistake? If nothing breaks, nothing was holding it up. Cut it.
+
+Reach for the whole cut first. Most comments in scope are whole deletions;
+keepers are a minority, and a comment worth trimming down to a rescued clause is
+rarer still. Ask **"does this whole comment go?"** before you ask "what part
+earns its place?" — the first question is the one that clears a codebase, and
+the second is the trapdoor that turns every deletion into a trim.
 
 When only a fragment of a comment passes, you may keep that fragment — but
 salvage clears a higher bar than a keeper does. Judge the surviving clause as if
