@@ -57,18 +57,20 @@ each rots into a lie the moment the code changes underneath it:
 
 ## Keep
 
-These earn their place — each carries a *why* the code cannot:
+These earn their place — each carries a *why* the code cannot. A keeper is not
+exempt from editing: rewrite it to the fewest words that still read clearly.
+Cut the throat-clearing, the restated code, the second sentence that repeats the
+first. A good comment is a note, not a paragraph.
 
 - **The why.** Why this approach over the obvious one; why this constant; why
-  this order matters. `# retry 3x — the upstream flushes its cache on a cold
-  read and the first call always 404s`.
+  this order matters. `# retry 3x — upstream 404s the first cold read`.
 - **The warning.** A non-obvious consequence, a sharp edge, a "do not touch
   unless you also change X."
 - **The workaround and the reason for it.** The constraint that forces the
-  code's shape, stated in full so the reader never has to leave the file:
-  `// upstream truncates payloads over 64KB, so chunk before sending`. Keep the
-  reason; never keep an issue number in its place — a `#123` is a promise the
-  reader will find the reason elsewhere, and this audit puts it here instead.
+  code's shape, stated so the reader never leaves the file:
+  `// upstream truncates payloads over 64KB — chunk first`. Keep the reason;
+  never keep an issue number in its place — a `#123` promises the reason lives
+  elsewhere, and this audit puts it here instead.
 - **The domain rule the code can't make self-evident.** A business constraint or
   legal requirement whose *why* lives outside the codebase.
 - **Public API contract.** A docstring or doc-comment on a published interface,
@@ -97,8 +99,9 @@ These earn their place — each carries a *why* the code cannot:
    touch), keep (earns its place), or cut (default). Say the *why* to yourself
    for anything you keep — if you cannot, it is a cut.
 
-4. **Apply the changes.** Delete the cuts; where a comment's *why* is still true
-   but its text has gone stale, correct the text. Touch comments only — leave the
+4. **Apply the changes.** Delete the cuts. For every keeper, tighten the prose
+   to the fewest words that still read clearly, and correct any text that has
+   gone stale while its *why* stays true. Touch comments only — leave the
    code itself, its formatting, and every keeper that already reads true exactly
    as they are.
 
