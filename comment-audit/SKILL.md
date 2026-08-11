@@ -29,9 +29,18 @@ for it. A why survives only if it passes both gates:
 - **Load-bearing absence.** Delete the comment in your head — does a reader now
   make a concrete mistake? If nothing breaks, nothing was holding it up. Cut it.
 
-When only a fragment of a comment passes, keep the fragment and cut the rest. A
-comment that is one clause of real *why* wrapped in three of restatement is not
-a keeper — it is a cut with one clause rescued.
+Reach for the whole cut first. Most comments in scope are whole deletions;
+keepers are a minority, and a comment worth trimming down to a rescued clause is
+rarer still. Ask **"does this whole comment go?"** before you ask "what part
+earns its place?" — the first question is the one that clears a codebase, and
+the second is the trapdoor that turns every deletion into a trim.
+
+When only a fragment of a comment passes, you may keep that fragment — but
+salvage clears a higher bar than a keeper does. Judge the surviving clause as if
+you were typing it onto a blank line today: does it, standing alone, pass both
+gates? If you would not write it into empty space, do not rescue it — delete the
+whole comment. A comment that is one clause of real *why* wrapped in three of
+restatement is a whole cut far more often than it is a rescue.
 
 ## Load-bearing — never touch
 
@@ -135,6 +144,11 @@ first. A good comment is a note, not a paragraph.
    open a pull request. Every cut is a judgment call, so a human reads the sweep
    before it merges — and the isolated commit means the whole audit reverts in
    one step if a call proves wrong.
+
+   Before you commit, count whole deletions against salvage-trims. This is a
+   mirror, not a rule: if the salvages outnumber the whole deletes, you
+   rationalized — go back and re-ask each salvage whether you would write that
+   clause onto a blank line today. Most of them are whole cuts you softened.
 
 ## When a comment props up unclear code
 
