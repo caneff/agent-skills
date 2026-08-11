@@ -1,318 +1,143 @@
-// Pure functions for reconciliation sweep and bucketed run summary.
+// Pure functions for the outcome→label engine and the bucketed run summary.
 //
-// classifyInReviewIssue: classify a single in-review issue based on its PRs.
+// planOutcomeTransition: decide one issue's terminal labels from its build outcome.
 // bucketIssues: bucket all open issues for the end-of-run summary.
 // buildRunSummary: format the bucketed summary as a printable string.
-// planGateOutcome: decide open-vs-requeue from the Phase-3 full-suite verdict.
-// planOutcomeTransition: decide one issue's labels from its post-build outcome.
 
-import type { CheckVerdict, ReviewAxis } from "./review-verdict.mts";
-import type { CompletedIssue } from "./pr-components.mts";
-import { recordAttempt, REVIEW_RETRY_CAP, type Attempts } from "./retry-policy.mts";
+import type { ReviewAxis } from "./review-verdict.mts";
 
-// Exported as values, not just as a union, because github-parse.mts builds the
-// zod schema that admits a PR state from this array. Written out twice instead,
-// the schema would reject a state this type accepts and nothing would say so.
-export const PR_STATES = ["OPEN", "CLOSED", "MERGED"] as const;
-export type PrState = (typeof PR_STATES)[number];
-
-export interface PrRef {
-  number: number;
-  state: PrState;
+// One issue the run built to a clean review — its identity and the branch its PR
+// is cut from. (Formerly in pr-components.mts, which the one-PR-per-issue rewrite
+// deleted; the record survives because the run summary counts what was built.)
+export interface CompletedIssue {
+  id: string;
+  title: string;
+  branch: string;
+  // Carried through from the planner but no longer used for PR grouping — one
+  // issue is one PR. Kept so the planner's work item and this record stay one
+  // shape.
+  parents: string[];
+  group?: string;
 }
 
-// How an in-review issue should be handled by the reconciliation sweep.
-//   human-gated  — an open PR references it; leave untouched.
-//   human-vetoed — only closed-unmerged PR(s) reference it; relabel ready-for-human.
-//   stranded     — no PR references it at all; route based on branch state.
-export type InReviewClassification =
-  | "human-gated"
-  | "human-vetoed"
-  | "stranded";
+// What the execute+review pipeline concluded for one issue.
+//   done        — implemented and reviewed clean on both axes; open its PR.
+//   review-fail — reviewed, but a review axis (spec and/or standards) failed;
+//                 `failedAxes` names which. Binding: no PR, handed to a human.
+//   nothing     — no work happened: the branch has no diff vs main, or main.mts
+//                 mapped a rejected pipeline (sandbox crash, network) here.
+export type OutcomeKind = "done" | "review-fail" | "nothing";
 
-// Action the sweep should take for a single in-review issue.
-//   leave         — human-gated (open PR exists); do nothing
-//   relabel-human — human-vetoed; relabel ready-for-human
-//   inject        — stranded, branch exists and merges clean; inject for Phase 3 PR
-//   requeue       — stranded, no usable branch; relabel ready-for-agent, delete stale branch
-export type InReviewAction = "leave" | "relabel-human" | "inject" | "requeue";
-
-// The issue as the reconciliation sweep knows it: its identity, its branch, its
-// forest parents (rebuilt from GitHub blockedBy edges), and the two branch facts
-// the decision turns on.
-export interface InReviewIssue {
+// The issue as the execute loop knows it — from the planner, carrying its forest
+// position (parents) and topic group. (parents and group are vestigial in the
+// one-PR-per-issue model — carried through, not acted on — but kept so the plan
+// item, this type, and CompletedIssue are one shape.)
+export interface OutcomeIssue {
   id: string;
   title: string;
   branch: string;
   parents: string[];
-  branchExists: boolean;
-  mergesClean: boolean;
+  group?: string;
 }
-
-// The whole plan for one in-review issue, so the caller applies and decides
-// nothing. Mirrors planGateOutcome / planOutcomeTransition: the label move, the
-// branch move, the summary bucket, and (for inject) the PR-set record all come
-// out of here rather than being re-derived from a bare action enum.
-export interface InReviewPlan {
-  action: InReviewAction;
-  // Label to add and labels to strip, or null when the action touches no label.
-  addLabel: string | null;
-  removeLabels: string[];
-  // requeue only: delete the stale work branch so Phase 2 recuts it from main.
-  deleteBranch: boolean;
-  // inject only: the PR-set membership record main.mts accumulates for Phase 3.
-  completed?: CompletedIssue;
-  // Which end-of-run summary set this issue lands in, or null for none.
-  bucket: "injected" | "requeued" | null;
-  // Operator-facing line main.mts prints, unindented — the caller owns layout.
-  note: string;
-}
-
-export function decideInReviewAction(
-  classification: InReviewClassification,
-  issue: InReviewIssue
-): InReviewPlan {
-  const { id, title, branch, parents, branchExists, mergesClean } = issue;
-
-  if (classification === "human-gated")
-    return {
-      action: "leave",
-      addLabel: null,
-      removeLabels: [],
-      deleteBranch: false,
-      bucket: null,
-      note: `#${id} — human-gated (open PR exists); leaving untouched`,
-    };
-
-  if (classification === "human-vetoed")
-    return {
-      action: "relabel-human",
-      addLabel: "ready-for-human",
-      removeLabels: ["in-review"],
-      deleteBranch: false,
-      bucket: null,
-      note: `#${id} — human-vetoed (closed/merged PR, no open PR) → ready-for-human`,
-    };
-
-  // stranded, branch still applies to main — inject it for a cheap PR, no rebuild.
-  if (branchExists && mergesClean)
-    return {
-      action: "inject",
-      addLabel: null,
-      removeLabels: [],
-      deleteBranch: false,
-      completed: { id, title, branch, parents },
-      bucket: "injected",
-      note: `#${id} — stranded; branch ${branch} merges clean → injecting into this run for PR`,
-    };
-
-  // stranded, no usable branch (missing or conflicts with main) — requeue: delete
-  // any stale branch and relabel ready-for-agent so this run rebuilds from scratch.
-  return {
-    action: "requeue",
-    addLabel: "ready-for-agent",
-    removeLabels: ["in-review"],
-    deleteBranch: true,
-    bucket: "requeued",
-    note: `#${id} — stranded; no usable branch (missing or conflicts with main) → ready-for-agent for fresh rebuild`,
-  };
-}
-
-export function classifyInReviewIssue(prs: PrRef[]): InReviewClassification {
-  if (prs.some((pr) => pr.state === "OPEN")) return "human-gated";
-  if (prs.some((pr) => pr.state === "CLOSED" || pr.state === "MERGED"))
-    return "human-vetoed";
-  return "stranded";
-}
-
-export type GateAction = "open" | "requeue" | "retire";
-
-export interface GatePlan {
-  //   open    — the suite is green; push the head and open the PR as today.
-  //   requeue — non-green; do NOT open the PR. main.mts posts the failing tail
-  //             on commentIssueIds and leaves the set PR-less, so the existing
-  //             post-Phase-3 reconciliation relabels it ready-for-agent and
-  //             deletes the stale branch for a fresh rebuild next iteration.
-  //   retire  — a real test-fail that has now failed the gate REVIEW_RETRY_CAP
-  //             times running. Do NOT requeue again — a deterministically
-  //             broken set would loop forever. main.mts relabels the set
-  //             ready-for-human, PRESERVES the work branch (see preserveBranch),
-  //             and names it + its failing tests in the run summary.
-  action: GateAction;
-  // Issues to comment the bounded failing tail on: every issue in the set on a
-  // non-pass, empty on pass. The tail itself rides on the verdict (verdict.tail);
-  // this only carries WHICH issues get it.
-  commentIssueIds: string[];
-  // retire only: keep the set's work branch instead of deleting it in the
-  // post-Phase-3 reconciliation, so the human inherits the actual failing tree.
-  preserveBranch?: boolean;
-  // retire only: the bounded failing tail, forwarded to the run summary so the
-  // retired set's failing tests are named there, not just on the issues.
-  summaryNote?: string;
-}
-
-// Gate a PR set on its merged head's full-suite CHECK verdict. A green suite
-// ("pass") opens the PR. A non-pass never opens it: normally the set is requeued
-// (every issue commented with the failing tail, then rebuilt next iteration),
-// but once a REAL "test-fail" has escalated — hit the consecutive-failure cap
-// the caller tracks per issue under key gate-<id> — the set is RETIRED to a
-// human instead of looping forever. "harness-error" is an infra fault, never the
-// code's: it always requeues and is never counted toward the cap, so it can
-// never escalate here even if the caller passes escalated by mistake. Pure:
-// main.mts executes the returned plan.
-export function planGateOutcome(
-  verdict: CheckVerdict,
-  setIssueIds: string[],
-  escalated = false
-): GatePlan {
-  if (verdict.status === "pass") return { action: "open", commentIssueIds: [] };
-  if (escalated && verdict.status === "test-fail")
-    return {
-      action: "retire",
-      commentIssueIds: [...setIssueIds],
-      preserveBranch: true,
-      summaryNote: verdict.tail,
-    };
-  return { action: "requeue", commentIssueIds: [...setIssueIds] };
-}
-
-// What the execute+review pipeline concluded for one issue.
-//   done         — implemented and reviewed clean; belongs in a PR set.
-//   needs-review — the reviewer errored; the branch is fine, re-review it.
-//   review-fail  — reviewed, but a review axis (spec and/or standards) failed;
-//                  `failedAxes` names which. Re-implemented up to the cap.
-//   nothing      — no work happened: a multi-parent base conflict blocked the
-//                  issue, or the branch has no diff vs main. main.mts also maps
-//                  a rejected pipeline (sandbox crash, network) here.
-export type OutcomeKind = "done" | "needs-review" | "review-fail" | "nothing";
-
-// The issue as the execute loop knows it. A full-mode issue came from the
-// planner and carries its forest position (parents) and topic group; a
-// review-only issue was picked up by label for a cheap re-review and has
-// neither.
-export type OutcomeIssue =
-  | {
-      mode: "full";
-      id: string;
-      title: string;
-      branch: string;
-      parents: string[];
-      group?: string;
-    }
-  | { mode: "review-only"; id: string; title: string; branch: string };
 
 export interface OutcomePlan {
   // Label to add, or null when the outcome touches no label at all.
   addLabel: string | null;
   removeLabels: string[];
-  // Counters to persist after this outcome — already incremented, cleared, or
-  // untouched. Never the caller's object: every path returns a fresh one.
-  attempts: Attempts;
-  // How many failed attempts this outcome makes, 0 when it records none. NOT
-  // readable back out of `attempts`: at the cap recordAttempt clears the
-  // counter, so an escalating outcome reports count 2 with the key gone.
-  attemptCount: number;
-  // This outcome hit REVIEW_RETRY_CAP and changed lifecycle because of it.
-  escalated: boolean;
-  // done only: the PR-set membership record main.mts accumulates.
+  // review-fail only: keep and push the work branch so the human inherits the
+  // actual failing tree, not a deleted branch.
+  preserveBranch: boolean;
+  // review-fail only: the section to splice into the issue body (via
+  // spliceReviewFailureSection) — the failing axes, why, and how to continue the
+  // preserved branch. Absent otherwise.
+  failureSection?: string;
+  // done only: the record main.mts accumulates for the run summary.
   completed?: CompletedIssue;
   // Operator-facing line main.mts prints, unindented — the caller owns layout.
   // Absent when there is nothing to say.
   note?: string;
 }
 
+// The review-failure section written into the issue body. It names the failing
+// axes and, per axis, the reviewer's reason, then tells a human how to re-drive
+// the ticket with `/implement`: continue the PRESERVED branch via
+// `git worktree add` (not `EnterWorktree`, which only branches fresh from main).
+function reviewFailureSection(
+  issue: OutcomeIssue,
+  failedAxes: ReviewAxis[] | undefined,
+  reasons: Partial<Record<ReviewAxis, string>> | undefined
+): string {
+  const axes = failedAxes?.length ? failedAxes : (["review"] as const);
+  const failing = axes
+    .map((axis) => {
+      const why = reasons?.[axis as ReviewAxis];
+      return why ? `- **${axis}** — ${why}` : `- **${axis}**`;
+    })
+    .join("\n");
+  return [
+    "## ⚠️ Sandcastle review failed — continue this branch, don't rebuild",
+    "",
+    "The two-axis review did not pass, so no PR was opened. The work branch " +
+      `\`${issue.branch}\` is preserved (pushed) — pick it up rather than starting over.`,
+    "",
+    "**Failing:**",
+    failing,
+    "",
+    `**To continue:** run \`/implement ${issue.id}\` — it reads this ticket as its ` +
+      "brief. Address the points above on the PRESERVED branch; do not branch fresh " +
+      "from `main`. Check it out with:",
+    "",
+    "```sh",
+    `git worktree add ../issue-${issue.id} ${issue.branch}`,
+    "```",
+  ].join("\n");
+}
+
 export function planOutcomeTransition(input: {
   kind: OutcomeKind;
   issue: OutcomeIssue;
-  attempts: Attempts;
   // The review axes that failed, for a review-fail outcome — names the axis in
-  // the operator note instead of always saying "spec". Absent otherwise.
+  // the note and the failure section. Absent otherwise.
   failedAxes?: ReviewAxis[];
+  // Per-axis reason from the combined verdict, embedded in the failure section
+  // so the human sees why without opening the run log. Absent otherwise.
+  reasons?: Partial<Record<ReviewAxis, string>>;
 }): OutcomePlan {
-  const { kind, issue, attempts, failedAxes } = input;
+  const { kind, issue, failedAxes, reasons } = input;
 
   if (kind === "done") {
-    // Reviewed clean, so the retry counter is reset rather than incremented —
-    // a later failure starts its count from zero.
-    const next = { ...attempts };
-    delete next[issue.id];
     return {
       addLabel: "in-review",
-      removeLabels: ["ready-for-agent", "needs-review"],
-      attempts: next,
-      attemptCount: 0,
-      escalated: false,
+      removeLabels: ["ready-for-agent"],
+      preserveBranch: false,
       completed: {
         id: issue.id,
         title: issue.title,
         branch: issue.branch,
-        parents: issue.mode === "full" ? issue.parents : [],
-        ...(issue.mode === "full" && issue.group
-          ? { group: issue.group }
-          : {}),
+        parents: issue.parents,
+        ...(issue.group ? { group: issue.group } : {}),
       },
     };
   }
 
-  if (kind === "needs-review") {
-    const r = recordAttempt(attempts, issue.id);
-    // At the cap, cheap re-review has provably failed to salvage the branch.
-    // Only a full implement pass can change the code, so hand it back to the
-    // implementer rather than queueing a re-review that will fail the same way.
-    if (r.escalate)
-      return {
-        addLabel: "ready-for-agent",
-        removeLabels: ["needs-review", "in-review"],
-        attempts: r.attempts,
-        attemptCount: r.count,
-        escalated: true,
-        note: `${issue.id} hit review-retry cap (${REVIEW_RETRY_CAP}); back to ready-for-agent for a full re-implement`,
-      };
-    return {
-      addLabel: "needs-review",
-      removeLabels: ["ready-for-agent", "in-review"],
-      attempts: r.attempts,
-      attemptCount: r.count,
-      escalated: false,
-    };
-  }
-
   if (kind === "review-fail") {
-    // Re-review cannot repair a failing review axis — only re-implementing can.
-    // Both axes share one cap, counted under review-<id> so a persistently-
-    // failing issue burns its own cap rather than the re-review one.
+    // Binding, no retry: a failing axis routes straight to a human. The branch
+    // is preserved and pushed, and the reasons are written into the issue body
+    // so `/implement` can re-drive it from where it stands.
     const axes = failedAxes?.length ? failedAxes.join(", ") : "review";
-    const r = recordAttempt(attempts, `review-${issue.id}`);
-    if (r.escalate)
-      return {
-        addLabel: "ready-for-human",
-        removeLabels: ["ready-for-agent", "needs-review", "in-review"],
-        attempts: r.attempts,
-        attemptCount: r.count,
-        escalated: true,
-        note: `${issue.id} failed review (${axes}) ${REVIEW_RETRY_CAP}x; handing to a human (ready-for-human)`,
-      };
     return {
-      addLabel: "ready-for-agent",
-      removeLabels: ["needs-review", "in-review"],
-      attempts: r.attempts,
-      attemptCount: r.count,
-      escalated: false,
-      note: `${issue.id} failed review (${axes}); back to ready-for-agent to re-implement (attempt ${r.count}/${REVIEW_RETRY_CAP})`,
+      addLabel: "ready-for-human",
+      removeLabels: ["ready-for-agent"],
+      preserveBranch: true,
+      failureSection: reviewFailureSection(issue, failedAxes, reasons),
+      note: `${issue.id} failed review (${axes}); no PR — branch preserved, handed to a human (ready-for-human)`,
     };
   }
 
-  // "nothing": no work was produced, which is a verdict on the run, not on the
-  // branch. Leave the issue exactly as it arrived — it keeps ready-for-agent
-  // and is retried cleanly. Counting an attempt here would spend a retry cap on
-  // an issue that was never actually reviewed.
-  return {
-    addLabel: null,
-    removeLabels: [],
-    attempts: { ...attempts },
-    attemptCount: 0,
-    escalated: false,
-  };
+  // "nothing": no work was produced, a verdict on the run, not the branch. Leave
+  // the issue exactly as it arrived — it keeps ready-for-agent and is a fresh
+  // single attempt next run.
+  return { addLabel: null, removeLabels: [], preserveBranch: false };
 }
 
 export interface OpenIssue {
@@ -323,25 +148,18 @@ export interface OpenIssue {
 
 export type BucketName =
   | "built-this-run" // implemented + reviewed + PR opened this run
-  | "repaired-sweep-pr" // stranded branch injected by sweep; PR opened this run
-  | "repaired-sweep-requeued" // stranded; no branch → relabeled ready-for-agent
   | "human-gated-pr" // in-review with an open PR (from a previous run)
   | "human-gated-ready-for-human" // handed off to human
   | "human-gated-untriaged" // open, no lifecycle label
   | "human-gated-delivered-parent" // open parent; every child closed → ready to close
-  | "in-flight-needs-review" // implemented; reviewer errored; pending re-review
   | "ready-for-agent" // queued for agent; may be blocked by dependencies
-  | "blocked-parent-conflict" // ≥2 parents conflict; needs a human merge
-  | "retired-gate-failure" // failed the full-suite gate at the cap → human
   | "uncategorized"; // BUG: should not happen
 
 export interface BucketedIssue {
   number: number;
   title: string;
   bucket: BucketName;
-  prNumber?: number; // set for built-this-run / repaired-sweep-pr
-  blockedParents?: string[]; // conflicting parent ids, for blocked-parent-conflict
-  gateFailure?: string; // failing-test tail, for retired-gate-failure
+  prNumber?: number; // set for built-this-run
 }
 
 const HUMAN_GATED_BUCKETS = new Set<BucketName>([
@@ -351,14 +169,7 @@ const HUMAN_GATED_BUCKETS = new Set<BucketName>([
   // A fully-delivered parent only a human can close (the bot never closes an
   // issue) — gated on a human, so "nothing left for the bot" stays accurate.
   "human-gated-delivered-parent",
-  // A parent-conflict block needs a human to merge the parents — from the bot's
-  // view it is gated on a human, so "nothing left for the bot" stays accurate.
-  "blocked-parent-conflict",
-  // A gate-retired set is parked on a human (ready-for-human); the bot won't
-  // touch it again this or next run, so it counts as human-gated too.
-  "retired-gate-failure",
 ]);
-const IN_FLIGHT_BUCKETS = new Set<BucketName>(["in-flight-needs-review"]);
 
 // A sub-issue edge: every issue's own state plus its native GitHub parent (null
 // if it has none). Fed from an all-state fetch so closed children are visible.
@@ -396,22 +207,10 @@ export function deliveredParentIds(edges: IssueEdge[]): Set<string> {
 
 export function bucketIssues(options: {
   openIssues: OpenIssue[];
-  // issue ids (as strings) completed this run — includes sweep-injected
+  // issue ids (as strings) that built to a clean review and opened a PR this run
   builtThisRun: Set<string>;
-  // subset of builtThisRun that came from the sweep (stranded branch)
-  sweepInjected: Set<string>;
-  // issue ids relabeled ready-for-agent by the sweep (no-branch case)
-  sweepRequeued: Set<string>;
-  // issue id → PR number, set during Phase 3
+  // issue id → PR number, set when its PR opened
   prAssignments: Map<string, number>;
-  // issue id → conflicting parent ids: aborted this run because its multi-parent
-  // base could not be built. Still carries its ready-for-agent label, so it
-  // must be caught before the label buckets below.
-  blockedByParentConflict: Map<string, string[]>;
-  // issue id → bounded failing-test tail: the set was retired by the Phase-3
-  // consecutive gate-failure cap. Relabeled ready-for-human AND completed
-  // (in builtThisRun), so it must be caught before both those buckets below.
-  retiredByGate: Map<string, string>;
   // parent issue ids (as strings) that are open with ≥1 sub-issue, all closed:
   // the spec is delivered and only its umbrella issue lingers. Caught before the
   // label buckets so a spent parent carrying a stray label (e.g. ready-for-human)
@@ -423,48 +222,13 @@ export function bucketIssues(options: {
     const labelSet = new Set(issue.labels);
     const prNumber = options.prAssignments.get(id);
 
-    const blockedParents = options.blockedByParentConflict.get(id);
-    if (blockedParents) {
-      return {
-        number: issue.number,
-        title: issue.title,
-        bucket: "blocked-parent-conflict",
-        blockedParents,
-      };
-    }
-
-    // Retired by the gate cap: caught before builtThisRun and the
-    // ready-for-human label bucket, both of which it would otherwise match.
-    const gateFailure = options.retiredByGate.get(id);
-    if (gateFailure != null) {
-      return {
-        number: issue.number,
-        title: issue.title,
-        bucket: "retired-gate-failure",
-        gateFailure,
-      };
-    }
-
-    // A requeued-but-not-PR'd issue reports re-queued. Requeue happens two ways:
-    // up front in the sweep (stale branch deleted) or post-Phase-3 (its merge
-    // conflicted). Either may also sit in builtThisRun. Gate on prNumber: if the
-    // run went on to rebuild it and open a PR, report THAT (fall through to
-    // built-this-run below) — only a genuinely PR-less requeue is "re-queued".
-    if (options.sweepRequeued.has(id) && prNumber == null) {
-      return {
-        number: issue.number,
-        title: issue.title,
-        bucket: "repaired-sweep-requeued",
-      };
-    }
-
     if (options.builtThisRun.has(id)) {
-      // Only claim a sweep repair "PR opened" when a PR actually landed.
-      const bucket =
-        options.sweepInjected.has(id) && prNumber != null
-          ? "repaired-sweep-pr"
-          : "built-this-run";
-      return { number: issue.number, title: issue.title, bucket, prNumber };
+      return {
+        number: issue.number,
+        title: issue.title,
+        bucket: "built-this-run",
+        prNumber,
+      };
     }
 
     // A delivered parent (open, every sub-issue closed) surfaces as ready-to-
@@ -489,13 +253,6 @@ export function bucketIssues(options: {
         number: issue.number,
         title: issue.title,
         bucket: "human-gated-ready-for-human",
-      };
-
-    if (labelSet.has("needs-review"))
-      return {
-        number: issue.number,
-        title: issue.title,
-        bucket: "in-flight-needs-review",
       };
 
     if (labelSet.has("ready-for-agent"))
@@ -527,13 +284,7 @@ export function buildRunSummary(bucketed: BucketedIssue[]): string {
     items
       .map((i) => {
         const pr = prSuffix && i.prNumber != null ? ` → PR #${i.prNumber}` : "";
-        // For a parent-conflict block, name the parents a human must merge.
-        const blocked = i.blockedParents?.length
-          ? ` — parents ${i.blockedParents
-              .map((p) => `#${p}`)
-              .join(", ")} conflict; merge upstream first`
-          : "";
-        return `  #${i.number} — ${i.title}${pr}${blocked}`;
+        return `  #${i.number} — ${i.title}${pr}`;
       })
       .join("\n");
 
@@ -546,33 +297,8 @@ export function buildRunSummary(bucketed: BucketedIssue[]): string {
   };
 
   section("Built this run", "built-this-run", true);
-  section("Repaired by sweep (PR opened)", "repaired-sweep-pr", true);
-  section("Repaired by sweep (re-queued)", "repaired-sweep-requeued");
   section("Human-gated: open PR pending merge", "human-gated-pr");
   section("Human-gated: ready for human", "human-gated-ready-for-human");
-
-  // Gate-retired sets: name the set AND its failing tests, so the human
-  // sees what broke without opening the issue. Custom render — the generic
-  // section() helper drops the gateFailure tail.
-  const retired = byBucket.get("retired-gate-failure") ?? [];
-  if (retired.length > 0) {
-    const items = retired
-      .map((i) => {
-        const tail = i.gateFailure?.trim();
-        const failing = tail
-          ? "\n" +
-            tail
-              .split("\n")
-              .map((l) => `      ${l}`)
-              .join("\n")
-          : "";
-        return `  #${i.number} — ${i.title}${failing}`;
-      })
-      .join("\n");
-    sections.push(
-      `Retired: full-suite gate failed ${retired.length > 1 ? "these sets" : "at the cap"} → ready-for-human (${retired.length}):\n${items}`
-    );
-  }
   section(
     "Human-gated: untriaged (needs ready-for-agent)",
     "human-gated-untriaged"
@@ -580,11 +306,6 @@ export function buildRunSummary(bucketed: BucketedIssue[]): string {
   section(
     "Human-gated: delivered (every child closed — ready to close)",
     "human-gated-delivered-parent"
-  );
-  section("In-flight: needs-review", "in-flight-needs-review");
-  section(
-    "Blocked: parent conflict (human must merge parents)",
-    "blocked-parent-conflict"
   );
   section("Available (queued / blocked)", "ready-for-agent");
 
@@ -595,14 +316,13 @@ export function buildRunSummary(bucketed: BucketedIssue[]): string {
     );
   }
 
-  const nonHumanNonFlight = bucketed.filter(
-    (i) =>
-      !HUMAN_GATED_BUCKETS.has(i.bucket) && !IN_FLIGHT_BUCKETS.has(i.bucket)
+  const nonHumanGated = bucketed.filter(
+    (i) => !HUMAN_GATED_BUCKETS.has(i.bucket)
   );
 
-  if (nonHumanNonFlight.length === 0) {
+  if (nonHumanGated.length === 0) {
     sections.push(
-      "All open issues are human-gated or in-flight. Nothing left for the bot."
+      "All open issues are human-gated. Nothing left for the bot."
     );
   }
 

@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { PR_STATES } from "./reconcile.mts";
-import type { OpenIssue, PrRef } from "./reconcile.mts";
+import type { OpenIssue } from "./reconcile.mts";
 
 // Pure parsers from raw `gh` CLI output into the orchestrator's domain types.
 // The IO (running `gh`) stays in main.mts; everything fragile — JSON shape,
@@ -61,19 +60,6 @@ function warn(what: string, why: string): null {
   return null;
 }
 
-const issueListSchema = z.array(
-  z.object({ number: z.number(), title: z.string() })
-);
-
-// Parse `gh issue list --json number,title` output — the query behind the
-// work list itself, so a shape change here silently empties the run's agenda
-// rather than corrupting it.
-export function parseIssueList(
-  raw: string | null
-): { number: number; title: string }[] {
-  return decode(issueListSchema, raw, "issue list") ?? [];
-}
-
 const openIssuesSchema = z.array(
   z.object({
     number: z.number(),
@@ -97,9 +83,9 @@ const blockedByRowsSchema = z.array(
   z.object({ number: z.number(), blockedBy: z.array(z.number()) })
 );
 
-// Each in-review issue's `blockedBy` edge ids, keyed by issue number. The
-// reconciliation sweep uses these to rebuild a recovered branch's parents
-// instead of dropping the dependency graph.
+// Each issue's `blockedBy` edge ids, keyed by issue number — the raw edges the
+// buildable-frontier filter (`selectBuildable`) reads to drop any issue with an
+// open blocker.
 export function parseBlockedByRows(raw: string | null): Map<number, number[]> {
   const map = new Map<number, number[]>();
   for (const row of decode(blockedByRowsSchema, raw, "blockedBy edges") ?? []) {
@@ -127,70 +113,4 @@ export function parseIssueEdges(raw: string | null): IssueEdgeRow[] | null {
   return decode(issueEdgeRowsSchema, raw, "issue edges");
 }
 
-const parentRowsSchema = z.array(
-  z.object({ number: z.number(), parent: z.number().nullable() })
-);
 
-// GitHub's native sub-issue edge (each open issue's `parent` field), as a
-// childId → parentId map. String ids match
-// `CompletedIssue.parents`; callers drop any parent they have no issue for.
-export function parseParentEdges(raw: string | null): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const row of decode(parentRowsSchema, raw, "parent edges") ?? []) {
-    if (row.parent !== null) map.set(String(row.number), String(row.parent));
-  }
-  return map;
-}
-
-// The GraphQL envelope is optional the whole way down: `gh` answers a repo
-// with no PRs, and an errors-only response, with the outer keys missing rather
-// than empty. `state` admits exactly the states reconcile.mts declares — the
-// schema reads that array rather than repeating it — so an unrecognised state
-// fails the whole response instead of reaching reconcile's branching.
-const prsClosingIssuesSchema = z.object({
-  data: z
-    .object({
-      repository: z
-        .object({
-          pullRequests: z
-            .object({
-              nodes: z
-                .array(
-                  z.object({
-                    number: z.number(),
-                    state: z.enum(PR_STATES),
-                    closingIssuesReferences: z
-                      .object({
-                        nodes: z.array(z.object({ number: z.number() })).optional(),
-                      })
-                      .optional(),
-                  })
-                )
-                .optional(),
-            })
-            .optional(),
-        })
-        .optional(),
-    })
-    .optional(),
-});
-
-// Parse the `closingIssuesReferences` GraphQL response into a map of
-// issueNumber → the PRs that close it. GitHub populates closingIssuesReferences
-// when a PR body carries a closing keyword such as "Closes #N".
-// Null/parse failure/missing nodes → empty Map.
-export function parsePrsClosingIssues(
-  raw: string | null
-): Map<number, PrRef[]> {
-  const map = new Map<number, PrRef[]>();
-  const data = decode(prsClosingIssuesSchema, raw, "PRs closing issues");
-  const prs = data?.data?.repository?.pullRequests?.nodes ?? [];
-  for (const pr of prs) {
-    for (const issue of pr.closingIssuesReferences?.nodes ?? []) {
-      const n = issue.number;
-      if (!map.has(n)) map.set(n, []);
-      map.get(n)!.push({ number: pr.number, state: pr.state });
-    }
-  }
-  return map;
-}

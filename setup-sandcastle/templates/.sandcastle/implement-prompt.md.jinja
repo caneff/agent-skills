@@ -56,9 +56,8 @@ Before each commit, run a **fast scoped check** — not the full `[[ CHECK_COMMA
 
 This is a git-diff heuristic, not a test-impact tool — when unsure whether a
 test is affected, include it. The full suite is **not** your per-commit gate:
-the Phase-3 gate runs `[[ CHECK_COMMAND ]]` on the set's merged head before any PR
-opens, and PR CI runs it again. Your job here is a fast local check, not the
-full run.
+CI runs `[[ CHECK_COMMAND ]]` on the pull request once it opens. Your job here is
+a fast local check, not the full run.
 
 # COMMIT
 
