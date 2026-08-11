@@ -108,11 +108,13 @@ first. A good comment is a note, not a paragraph.
    code itself, its formatting, and every keeper that already reads true exactly
    as they are.
 
-5. **Verify, then land it reversibly.** The final diff must touch comments and
+5. **Verify, then open a PR for review.** The final diff must touch comments and
    nothing else — confirm with `git diff`. Run the repo's build/lint/test so a
-   load-bearing line you misread turns the loop red before it merges, not after.
-   Then commit the audit on its own, with nothing else in the commit, so the whole
-   sweep undoes with a single `git revert` if a judgment call proves wrong.
+   load-bearing line you misread turns the loop red before review, not after.
+   Then commit the audit on its own branch, with nothing else in the commit, and
+   open a pull request. Every cut is a judgment call, so a human reads the sweep
+   before it merges — and the isolated commit means the whole audit reverts in
+   one step if a call proves wrong.
 
 ## When a comment props up unclear code
 
