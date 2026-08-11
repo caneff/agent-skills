@@ -303,8 +303,8 @@ const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 // Files the template deliberately ADDS since the pin. Same bargain as the
 // answers list: the set-equality net stays exact, and a new render is declared
 // rather than the assertion quietly widening to "a superset is fine".
-//   (none)
-const ARC_ADDED_RENDERS = [];
+//   select-buildable.mts — the deterministic frontier filter (#242)
+const ARC_ADDED_RENDERS = [".sandcastle/select-buildable.mts"];
 
 // The mirror: files the template deliberately WITHDRAWS since the pin. Without
 // it a withdrawal has only one way past the net — widening set-equality to "a

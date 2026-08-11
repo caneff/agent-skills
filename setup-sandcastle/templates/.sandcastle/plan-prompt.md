@@ -1,14 +1,22 @@
-# ISSUES
+# BUILDABLE (the only issues you may select)
 
-Here are the open issues in the repo:
+The host has already applied the deterministic frontier filter: every open issue whose native `blockedBy` edges have **all closed**, restricted to `ready-for-agent`. Issues with any still-open blocker have been removed before you ever see them. **Only ids in this set may appear in your plan** — never resurrect an issue absent from it.
+
+<buildable>
+
+{{BUILDABLE}}
+
+</buildable>
+
+# ISSUE DETAILS (reference — read for reasoning, not for selection)
+
+Full content for the open issues, so you can reason about implicit conflicts (two buildable issues that would collide on the same files). Selection is still governed by the BUILDABLE list above; this JSON is only the detail behind it.
 
 <issues-json>
 
 !`gh issue list --state open --label ready-for-agent --limit 100 --json number,title,body,labels,comments,parent,blockedBy,issueType --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body], parent: .parent.number, blockedBy: [.blockedBy.nodes[].number], issueType: .issueType.name}]'`
 
 </issues-json>
-
-The list above has already been filtered to issues ready for work. **Only these `ready-for-agent` issues may appear in your plan.**
 
 # ALREADY IN FLIGHT (context only — never select these)
 
@@ -44,7 +52,7 @@ These issues have two or more parents whose branches conflict when merged. The c
 
 # TASK
 
-Analyze the issues and build a dependency graph. For each `ready-for-agent` issue, determine whether it **is blocked by** any other open issue — whether that other issue is `ready-for-agent` or already **in flight** (the list above) — **except** issues listed under "ALREADY DONE THIS RUN", which are satisfied dependencies you build on, never blockers.
+The host has already excluded every issue with an open native `blockedBy` blocker (see BUILDABLE). Your remaining job: for each **buildable** issue, determine whether it is **implicitly** blocked by any other open issue the declared edges missed — whether that other issue is `ready-for-agent` or already **in flight** (the list above) — **except** issues listed under "ALREADY DONE THIS RUN", which are satisfied dependencies you build on, never blockers.
 
 An issue B is **blocked by** issue A if:
 
@@ -94,6 +102,6 @@ Output your plan as a JSON object wrapped in `<plan>` tags. Every issue MUST inc
 {"issues": [{"id": "42", "title": "Fix auth bug", "branch": "sandcastle/issue-42", "parents": [], "group": "auth"}, {"id": "43", "title": "Add auth UI", "branch": "sandcastle/issue-43", "parents": ["42"], "group": "auth"}]}
 </plan>
 
-Include only unblocked `ready-for-agent` issues. If every ready-for-agent issue is blocked **only** by other ready-for-agent issues (not by in-flight work), include the single highest-priority candidate (the one with the fewest or weakest dependencies). But if the remaining issues are blocked by **in-flight** work, do NOT force-pick them — leave them out and emit an empty plan; they unblock once that work merges.
+Include only issues from the BUILDABLE set that survive your implicit-conflict pruning. If every buildable issue would conflict on files with another buildable one, include the single highest-priority candidate (the one with the fewest or weakest such conflicts). But if the remaining issues are blocked by **in-flight** work, do NOT force-pick them — leave them out and emit an empty plan; they unblock once that work merges.
 
 Always emit the `<plan>` tags, even when there is nothing to do. If there are no issues to work on at all, output `<plan>{"issues": []}</plan>` so the run can exit cleanly.
