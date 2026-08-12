@@ -143,11 +143,10 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
 
   // The counterweight, and the reason "looks like documentation" is the wrong
   // test: each of these has a named runtime reader — the review verdict module
-  // and the standards judge load the standards, the token-minting script names
-  // bot-setup.md in the error it prints, and an adopter typechecks the
+  // and the standards judge load the standards, and an adopter typechecks the
   // orchestrator with that tsconfig.
   test("keeps the documentation a runtime reader actually loads", () => {
-    for (const path of ["CODING_STANDARDS.md", "bot-setup.md", "tsconfig.json"]) {
+    for (const path of ["CODING_STANDARDS.md", "tsconfig.json"]) {
       expect(existsSync(join(target, ".sandcastle", path)), path).toBe(true);
     }
   });
@@ -196,16 +195,14 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
     }
   });
 
-  // Sandcastle forwards `.sandcastle/.env` into sandboxes as a FILE and never
-  // into the host process — until main.mts's loadEnvFile, which pulls EVERY key
-  // into the host so sandboxIdentity() can see GITHUB_APP_*. `gh` prefers an env
-  // token over ~/.config/gh, so a GH_TOKEN dragged along shadows the working
-  // keyring credential and 401s every host-side gh call. Dropping that one key
-  // restores what the load broke, and .env.example says so where the operator
-  // reads it.
-  test("drops GH_TOKEN from the host process, and .env.example says why", () => {
-    expect(renderedIn(target, "main.mts")).toContain("delete process.env.GH_TOKEN;");
-    expect(renderedIn(target, ".env.example")).toMatch(/deletes it host-side/);
+  // The .env PAT is the whole auth story now (#245): Sandcastle forwards
+  // `.sandcastle/.env` into each sandbox as a FILE, so GH_TOKEN reaches the agent
+  // there; nothing host-side reads it. main.mts no longer loads .env into the
+  // host process or mints a bot token — so neither seam may reappear in it.
+  test("documents the .env PAT and mints no bot token", () => {
+    expect(renderedIn(target, ".env.example")).toMatch(/personal access token/);
+    expect(renderedIn(target, "main.mts")).not.toContain("loadEnvFile");
+    expect(renderedIn(target, "main.mts")).not.toContain("sandboxIdentity");
   });
 
   test("breadcrumb lands at the repo root and pins a non-empty _commit", () => {
@@ -291,6 +288,9 @@ const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 const ARC_ADDED_RENDERS = [
   ".sandcastle/select-buildable.mts",
   ".sandcastle/issue-body.mts",
+  // The sandbox plumbing that survived the bot-identity deletion, under its
+  // honest name (#245). sandbox-identity.mts is withdrawn below.
+  ".sandcastle/sandbox-config.mts",
 ];
 
 // The mirror: files the template deliberately WITHDRAWS since the pin. Without
@@ -303,6 +303,9 @@ const ARC_ADDED_RENDERS = [
 //     deleted for one-PR-per-issue / run-plain (#244, #247)
 //   check-prompt.md — the Phase-3 full-suite gate, deleted with it (CI on the
 //     opened PR is the gate now)
+//   sandbox-identity.mts, mint-gh-token.mjs, bot-setup.md — the bot-identity /
+//     GitHub-App token machinery, deleted for the plain .env PAT (#245); the
+//     surviving sandbox plumbing renders as sandbox-config.mts (added above)
 const ARC_WITHDRAWN_RENDERS = [
   ".sandcastle/CONTEXT.md",
   ".sandcastle/docs/adr/0001-dependency-forest-with-topic-grouped-prs.md",
@@ -312,6 +315,9 @@ const ARC_WITHDRAWN_RENDERS = [
   ".sandcastle/pr-components.mts",
   ".sandcastle/retry-policy.mts",
   ".sandcastle/check-prompt.md",
+  ".sandcastle/sandbox-identity.mts",
+  ".sandcastle/mint-gh-token.mjs",
+  ".sandcastle/bot-setup.md",
 ];
 
 function renderedTree(root) {
@@ -638,17 +644,17 @@ describe.skipIf(!hasCopier())("a node adopter", () => {
   // a failed hook and no installed dependencies — the counterpart to the
   // `node_modules` seeded into the worktree.
   test("installs dependencies with npm, not uv", () => {
-    const identity = renderedIn(fresh, "sandbox-identity.mts");
-    expect(identity).toContain('{ command: "npm install" }');
-    expect(identity).not.toContain("uv sync");
+    const config = renderedIn(fresh, "sandbox-config.mts");
+    expect(config).toContain('{ command: "npm install" }');
+    expect(config).not.toContain("uv sync");
   });
 
   // uv's own variable, telling it where to put the virtualenv. npm has no idea
   // what it means, so on this arm it is a dead env var pointing at a directory
   // that never exists.
   test("sets no UV_PROJECT_ENVIRONMENT, and the Python arm still does", () => {
-    expect(renderedIn(fresh, "sandbox-identity.mts")).not.toContain("UV_PROJECT_ENVIRONMENT");
-    expect(renderedIn(twin, "sandbox-identity.mts")).toContain(
+    expect(renderedIn(fresh, "sandbox-config.mts")).not.toContain("UV_PROJECT_ENVIRONMENT");
+    expect(renderedIn(twin, "sandbox-config.mts")).toContain(
       'UV_PROJECT_ENVIRONMENT: "/home/agent/.venv"'
     );
   });

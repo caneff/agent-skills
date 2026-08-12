@@ -1,4 +1,4 @@
-// Address PR review comments — reusable from main.mts and as a CLI.
+// Address PR review comments — a standalone CLI.
 //
 // For each PR it spins up a sandbox that checks out the PR branch, addresses
 // the unresolved review comments, pushes the fixes back to the same branch
@@ -7,16 +7,28 @@
 // Reply-only: it does NOT resolve threads and does NOT merge. You review the
 // replies and resolve/merge yourself.
 //
+// Sandboxes authenticate with the `.env` PAT Sandcastle forwards as a file; host
+// `gh`/`git` calls here use your ambient credential. No bot identity (#245/#250).
+//
 // Usage:
 //   npx tsx .sandcastle/address.mts <pr-number> [<pr-number> ...]  # specific PRs
 //   npx tsx .sandcastle/address.mts                                # sweep open sandcastle PRs with comments
-// Or import { addressOpenPRs } and call it (main.mts does this at run start).
 
 import { execSync } from "node:child_process";
 import * as sandcastle from "@ai-hero/sandcastle";
-import { sandboxIdentity, sandboxConfig } from "./sandbox-identity.mts";
+import { sandboxConfig } from "./sandbox-config.mts";
 
-const sh = (cmd: string) => execSync(cmd, { encoding: "utf8" }).trim();
+const defaultSh = (cmd: string) => execSync(cmd, { encoding: "utf8" }).trim();
+
+// From the swept `sandcastle/*` candidates, keep only the PRs that actually have
+// comments to address — a sandbox on a comment-free PR finds nothing and wastes
+// a run. `countComments` is injected so the selection is testable without gh.
+export function selectPrsWithComments(
+  candidates: string[],
+  countComments: (pr: string) => number
+): string[] {
+  return candidates.filter((pr) => countComments(pr) > 0);
+}
 
 // Address review comments on the given PRs. With no explicit numbers, sweep
 // every open PR that (a) sits on a `sandcastle/*` branch — the runner's own
@@ -24,7 +36,16 @@ const sh = (cmd: string) => execSync(cmd, { encoding: "utf8" }).trim();
 // (skipped otherwise so we don't burn a sandbox finding nothing).
 //
 // Explicit PR numbers bypass the branch filter: you asked for those specifically.
-export async function addressOpenPRs(prs?: string[]): Promise<void> {
+//
+// `sh` (shell) and `run` (sandbox launch) are injected so the sweep-and-select
+// entry point is exercisable with fakes — no live GitHub, no real sandbox.
+export async function addressOpenPRs(
+  prs?: string[],
+  {
+    sh = defaultSh,
+    run = sandcastle.run,
+  }: { sh?: (cmd: string) => string; run?: typeof sandcastle.run } = {}
+): Promise<void> {
   let list = prs ?? [];
 
   if (list.length === 0) {
@@ -34,22 +55,22 @@ export async function addressOpenPRs(prs?: string[]): Promise<void> {
     )
       .split("\n")
       .filter(Boolean);
-    list = open.filter((n) => {
+    // Inline diff comments, top-level issue comments, and review summaries live
+    // in three different endpoints — a review-only PR carries its text in
+    // pulls/reviews, not the two comment endpoints — so count all three.
+    list = selectPrsWithComments(open, (n) => {
       const inline = Number(
         sh(`gh api repos/${slug}/pulls/${n}/comments --jq 'length'`)
       );
       const top = Number(
         sh(`gh api repos/${slug}/issues/${n}/comments --jq 'length'`)
       );
-      // Review summaries (a "Comment"/"Request changes" review with a body) live
-      // in pulls/reviews, not the two comment endpoints above — count the ones
-      // that carry text so a review-only PR isn't skipped as comment-free.
       const reviews = Number(
         sh(
           `gh api repos/${slug}/pulls/${n}/reviews --jq '[.[] | select(.body | length > 0)] | length'`
         )
       );
-      return inline + top + reviews > 0;
+      return inline + top + reviews;
     });
     if (list.length === 0) {
       console.log("No open sandcastle PRs with comments to address.");
@@ -57,9 +78,6 @@ export async function addressOpenPRs(prs?: string[]): Promise<void> {
     }
     console.log(`Open sandcastle PR(s) with comments: ${list.join(", ")}`);
   }
-
-  // Mint once per run; installation tokens are valid ~1h, no caching needed.
-  const identity = await sandboxIdentity();
 
   // Sequential: each run pushes to a branch, so we avoid concurrent pushes and
   // keep token spend predictable. `branchStrategy: branch` fetches that branch
@@ -69,8 +87,8 @@ export async function addressOpenPRs(prs?: string[]): Promise<void> {
     console.log(
       `\n=== Addressing review comments on PR #${pr} (${branch}) ===\n`
     );
-    await sandcastle.run({
-      ...sandboxConfig(identity),
+    await run({
+      ...sandboxConfig(),
       copyToWorktree: ["[% if LANGUAGE == 'node' %]node_modules[% else %].venv[% endif %]"],
       branchStrategy: { type: "branch", branch },
       name: `address-pr-${pr}`,

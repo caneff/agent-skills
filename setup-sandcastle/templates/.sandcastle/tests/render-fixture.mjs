@@ -1,8 +1,8 @@
 // Shared fixtures for the dev-only suite: a real copier render, and a repo the
 // install script's preflight can be run against. Two test files need the
 // render — copier-template.test.mjs to observe the install seam, and
-// sandbox-identity.test.mjs to import a module that only exists once rendered —
-// and both need the same answer to "is copier here at all". Keeping one copy
+// sandbox-config.test.mjs / address.test.mjs to import modules that only exist
+// once rendered — and all need the same answer to "is copier here at all". Keeping one copy
 // matters beyond tidiness: these skips can read as a silent
 // green, and whatever fixes it should be one edit, not one per test file.
 //
