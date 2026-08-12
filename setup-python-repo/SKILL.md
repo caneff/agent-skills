@@ -101,7 +101,14 @@ Copy [`templates/ci.yml`](templates/ci.yml) → `.github/workflows/ci.yml`. Pin
 `astral-sh/setup-uv` to the current tag. CI = the same pre-commit config +
 pytest, so there's no bash mirror to keep in sync.
 
-**Done when:** the workflow file exists and references `setup-uv` + `pytest`.
+Also copy [`templates/clear-in-review.yml`](templates/clear-in-review.yml) →
+`.github/workflows/clear-in-review.yml`. It strips the `in-review` orchestration
+label when an issue closes, so a merged PR's `Closes #N` doesn't leave the label
+stranded on the closed issue. The job is gated on the label being present, so it
+sits inert until the `/implement` → `pushpr` flow starts using it.
+
+**Done when:** both workflow files exist; `ci.yml` references `setup-uv` +
+`pytest`.
 
 ## 7. Docs + task runner
 

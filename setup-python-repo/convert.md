@@ -47,6 +47,11 @@ retire both: install `templates/pre-commit-config.yaml`, move the CI to
 `pre-commit run --all-files`, delete the bash mirror and `core.hooksPath`. One
 source of truth now.
 
+Add `templates/clear-in-review.yml` → `.github/workflows/clear-in-review.yml` if
+absent (it's a new file, so non-clobbering). It strips the `in-review`
+orchestration label on issue close and sits inert until the flow uses the label
+— see SKILL.md step 6.
+
 ## 6. Docs + task runner
 
 Add `justfile`, `AGENTS.md`, `CODING_STANDARDS.md` if absent. If a `CLAUDE.md`
