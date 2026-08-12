@@ -1,6 +1,6 @@
 ---
 name: skill-audit
-description: Audit ~/.agents/skills for model-invocable skills that cost context but go unused, so you can flip stale ones to `disable-model-invocation: true`. Slash-only.
+description: "Audit ~/.agents/skills for model-invocable skills that cost context but go unused, so you can flip stale ones to `disable-model-invocation: true`. Slash-only."
 disable-model-invocation: true
 argument-hint: "[stale-days]"
 ---
