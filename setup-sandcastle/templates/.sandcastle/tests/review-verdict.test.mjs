@@ -3,6 +3,7 @@ import {
   parseSpecVerdict,
   parseStandardsVerdict,
   combineVerdicts,
+  classifyReviewedOutcome,
   isHarnessError,
 } from "../review-verdict.mts";
 
@@ -123,6 +124,66 @@ describe("combineVerdicts", () => {
     expect(v.failedAxes).toEqual(["spec", "standards"]);
     expect(v.reasons.spec).toContain("a");
     expect(v.reasons.standards).toContain("b");
+  });
+});
+
+// classifyReviewedOutcome folds the two verdicts into the terminal outcome the
+// run applies: `done` when both pass, or `review-fail` naming the failed axes
+// and carrying each failed axis's fuller reviewer stdout (the human's brief for
+// re-driving the branch). It absorbs combineVerdicts and the per-axis detail
+// assembly that used to sit inline in main's Phase-2 closure. A passing axis's
+// detail is dropped even when supplied.
+describe("classifyReviewedOutcome", () => {
+  const pass = { pass: true, reason: "" };
+  const fail = (reason) => ({ pass: false, reason });
+
+  test("both pass → done, no detail carried", () => {
+    expect(
+      classifyReviewedOutcome(pass, pass, {
+        spec: "spec log",
+        standards: "standards log",
+      })
+    ).toEqual({ kind: "done" });
+  });
+
+  test("spec fails → review-fail carrying only spec's stdout", () => {
+    const out = classifyReviewedOutcome(fail("SANDCASTLE_SPEC: FAIL — AC2"), pass, {
+      spec: "full spec reviewer output",
+      standards: "full standards output",
+    });
+    expect(out.kind).toBe("review-fail");
+    expect(out.failedAxes).toEqual(["spec"]);
+    expect(out.reasons).toEqual({ spec: "full spec reviewer output" });
+  });
+
+  test("standards fails → review-fail carrying only standards' stdout", () => {
+    const out = classifyReviewedOutcome(
+      pass,
+      fail("SANDCASTLE_STANDARDS: FAIL — no error handling"),
+      { spec: "spec log", standards: "full standards reviewer output" }
+    );
+    expect(out.kind).toBe("review-fail");
+    expect(out.failedAxes).toEqual(["standards"]);
+    expect(out.reasons).toEqual({ standards: "full standards reviewer output" });
+  });
+
+  test("both fail → both axes named spec-then-standards, both stdouts carried", () => {
+    const out = classifyReviewedOutcome(fail("SPEC FAIL"), fail("STD FAIL"), {
+      spec: "spec detail",
+      standards: "standards detail",
+    });
+    expect(out.kind).toBe("review-fail");
+    expect(out.failedAxes).toEqual(["spec", "standards"]);
+    expect(out.reasons).toEqual({
+      spec: "spec detail",
+      standards: "standards detail",
+    });
+  });
+
+  test("a missing detail for a failed axis is simply absent, not empty", () => {
+    const out = classifyReviewedOutcome(fail("SPEC FAIL"), pass, {});
+    expect(out.failedAxes).toEqual(["spec"]);
+    expect(out.reasons).toEqual({});
   });
 });
 
