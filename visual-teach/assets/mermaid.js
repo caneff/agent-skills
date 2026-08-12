@@ -1,5 +1,7 @@
 /* visual-teach — opt-in mermaid bridge.
-   Lazy-loads mermaid CDN only when .vt-mermaid elements are present.
+   Lazy-loads mermaid only when .vt-mermaid elements are present, preferring the
+   vendored mermaid.min.js sitting beside this file so diagrams render offline
+   over file://; the CDN is only a fallback if that local copy fails to load.
    Include this file in lessons that use computed graphs (sequence, state, ER);
    prefer the hand-composed CSS diagram vocabulary for everything else.
 
@@ -33,6 +35,20 @@
   "use strict";
 
   var CDN = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
+
+  // Where this script was served from, captured now (document.currentScript is
+  // null once we're inside init on DOMContentLoaded). The vendored mermaid.min.js
+  // sits beside it, so swapping the filename gives a path that resolves over
+  // file:// no matter where the page itself lives.
+  var SELF =
+    (typeof document !== "undefined" &&
+      document.currentScript &&
+      document.currentScript.src) ||
+    "";
+
+  function siblingMin(self) {
+    return self ? self.replace(/[^/]*$/, "mermaid.min.js") : "";
+  }
 
   // mermaid.initialize() config, brand-blue tint both sides. We use mermaid's
   // native 'base'/'dark' themes (coherent, tested palettes) rather than hand-
@@ -138,7 +154,9 @@
     if (!nodes.length) return;
 
     options = options || {};
-    var src = options.cdn || CDN;
+    // Prefer the vendored sibling; fall back to the CDN only when we can't
+    // derive a local path. options.cdn forces an exact URL (used by tests).
+    var src = options.cdn || siblingMin(options.self || SELF) || CDN;
 
     var list = Array.from(nodes);
     // Stash each diagram's source now; mermaid.run() replaces it with SVG, so we
@@ -177,8 +195,7 @@
     }
 
     var script = doc.createElement("script");
-    script.src = src;
-    script.onload = function () {
+    function onLoad() {
       render();
       // Re-render on data-theme toggle so diagrams follow the page palette.
       if (typeof MutationObserver !== "undefined") {
@@ -187,6 +204,18 @@
           attributeFilter: ["data-theme"],
         });
       }
+    }
+
+    script.src = src;
+    script.onload = onLoad;
+    // If the vendored copy is missing (e.g. a stale downstream sync), retry once
+    // over the CDN so online readers still get diagrams.
+    script.onerror = function () {
+      if (src === CDN) return;
+      var fb = doc.createElement("script");
+      fb.src = CDN;
+      fb.onload = onLoad;
+      doc.head.appendChild(fb);
     };
     doc.head.appendChild(script);
   }
