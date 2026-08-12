@@ -25,3 +25,19 @@ export function selectBuildable(
     )
   );
 }
+
+// The whole rule the planner is handed: buildable AND carrying the lifecycle
+// label that marks an issue plannable. selectBuildable answers "unblocked";
+// this adds "and labeled", so both halves of the frontier contract live in one
+// tested place instead of the label half leaking to the caller as an inline
+// filter. Buildability wins over the label — a labeled but still-blocked issue
+// is not selectable.
+export function selectableFrontier(
+  openIssues: OpenIssue[],
+  blockedByEdges: Map<number, number[]>,
+  requireLabel = "ready-for-agent"
+): OpenIssue[] {
+  return selectBuildable(openIssues, blockedByEdges).filter((issue) =>
+    issue.labels.includes(requireLabel)
+  );
+}
