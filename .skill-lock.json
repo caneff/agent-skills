@@ -444,6 +444,24 @@
       "pluginName": "visual-teach",
       "installedAt": "2026-08-12T13:40:56.662Z",
       "updatedAt": "2026-08-12T13:40:56.662Z"
+    },
+    "visual-plan": {
+      "source": "BuilderIO/agent-native",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/BuilderIO/agent-native.git",
+      "skillPath": "skills/visual-plans/SKILL.md",
+      "skillFolderHash": "9577a07a1a46ff956e5a04228e26c342eb76037c",
+      "installedAt": "2026-08-12T17:59:15.622Z",
+      "updatedAt": "2026-08-12T17:59:15.622Z"
+    },
+    "visual-recap": {
+      "source": "BuilderIO/agent-native",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/BuilderIO/agent-native.git",
+      "skillPath": "skills/visual-recap/SKILL.md",
+      "skillFolderHash": "7438776fc9ebc6c8c9ce342a06b64a3019f52906",
+      "installedAt": "2026-08-12T18:00:03.057Z",
+      "updatedAt": "2026-08-12T18:00:03.057Z"
     }
   },
   "dismissed": {
