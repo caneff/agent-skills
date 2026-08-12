@@ -1,0 +1,24 @@
+name: Clear in-review on close
+
+# `in-review` marks an issue whose PR is up and awaiting a human merge. Merging
+# that PR closes the issue via `Closes #N` but leaves the label behind, so it
+# accumulates on closed issues. Strip it the moment an issue closes.
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  issues: write
+
+jobs:
+  clear:
+    # Only act on issues that actually carry the label, so ordinary closes
+    # neither call the API nor fail on a missing label.
+    if: contains(github.event.issue.labels.*.name, 'in-review')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Strip the in-review label
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue edit "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --remove-label in-review
