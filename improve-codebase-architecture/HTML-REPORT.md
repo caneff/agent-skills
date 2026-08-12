@@ -12,8 +12,8 @@ The report renders to the OS temp dir, so it cannot relative-reference the skill
 
 Copy only what the report uses — never KaTeX:
 
-- `visual-teach.css` — the whole design system (styles + dark-mode token layer).
-- `visual-teach.js` — copy buttons, the theme toggle, Prism init.
+- `base/base.css` + `base/base.js` — the Base spine: page shell, prose, the dark-mode token layer, the theme toggle, and block measuring. Always copy both.
+- `components/<name>/<name>.css` — one per component the report uses; a deepening review reaches for `callout`, `chip`, `code`, and `diagram`. Copy `components/code/code.js` too — it drives the copy buttons and code highlighting.
 - `mermaid.js` + `mermaid.min.js` — for the diagrams. The bridge (`mermaid.js`) loads the full library (`mermaid.min.js`) from the file sitting next to it, so **copy both together**. A diagram-centric review almost always needs these.
 - `prism/` grammars — only if a before/after code block is highlighted. Copy `prism-core.min.js`, `prism-clike.min.js`, and the one grammar per language used (e.g. `prism-python.min.js`).
 
@@ -21,22 +21,24 @@ Sketch of the render step:
 
 ```sh
 tmp="${TMPDIR:-/tmp}/architecture-review-$(date +%s)"
-mkdir -p "$tmp/assets/prism"
-cp visual-teach/assets/visual-teach.css "$tmp/assets/"
-cp visual-teach/assets/visual-teach.js "$tmp/assets/"
+mkdir -p "$tmp/assets/prism" "$tmp/assets/components"
+cp -R visual-teach/assets/base "$tmp/assets/"                                         # the spine (base.css + base.js)
+for c in callout chip code diagram; do                                               # only the components used
+  cp -R "visual-teach/assets/components/$c" "$tmp/assets/components/"
+done
 cp visual-teach/assets/mermaid.js visual-teach/assets/mermaid.min.js "$tmp/assets/"   # the diagrams
-cp visual-teach/assets/prism/prism-core.min.js "$tmp/assets/prism/"                    # only with a code snippet
+cp visual-teach/assets/prism/prism-core.min.js "$tmp/assets/prism/"                   # only with a code snippet
 # ...one grammar per language used...
-# write the report to "$tmp/report.html" linking href="assets/visual-teach.css" etc.
+# write the report to "$tmp/report.html" linking href="assets/base/base.css" etc.
 ```
 
-The report then references `assets/visual-teach.css`, `assets/mermaid.js`, and so on. Because the bridge resolves `mermaid.min.js` relative to its own location, dropping both in the same folder is all it needs.
+The report then references `assets/base/base.css`, `assets/components/code/code.css`, `assets/mermaid.js`, and so on. Because the bridge resolves `mermaid.min.js` relative to its own location, dropping both in the same folder is all it needs.
 
 > The committed sample is the one exception: it lives in the repo, so it links the vendored copies at `../../visual-teach/assets/…` instead of copying them. Same relative-link model, fixed location.
 
 ## Scaffold
 
-`<!doctype html>` on line 1 is required. Link `visual-teach.css` in the `<head>`; load any Prism grammars **before** `visual-teach.js` so its auto-init can highlight code; add the `mermaid.js` bridge last.
+`<!doctype html>` on line 1 is required. Link `base/base.css` and each component's CSS in the `<head>`; load any Prism grammars **before** `base.js` / `code.js` so their auto-init can highlight code; add the `mermaid.js` bridge last.
 
 ```html
 <!doctype html>
@@ -46,14 +48,19 @@ The report then references `assets/visual-teach.css`, `assets/mermaid.js`, and s
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Architecture review — {{repo name}}</title>
 
-    <link rel="stylesheet" href="assets/visual-teach.css" />
+    <link rel="stylesheet" href="assets/base/base.css" />
+    <link rel="stylesheet" href="assets/components/callout/callout.css" />
+    <link rel="stylesheet" href="assets/components/chip/chip.css" />
+    <link rel="stylesheet" href="assets/components/code/code.css" />
+    <link rel="stylesheet" href="assets/components/diagram/diagram.css" />
 
-    <!-- Prism: one grammar per language used, before visual-teach.js.
+    <!-- Prism: one grammar per language used, before base.js / code.js.
          Only needed if a candidate carries a before/after code snippet. -->
     <script src="assets/prism/prism-core.min.js"></script>
     <script src="assets/prism/prism-clike.min.js"></script>
     <script src="assets/prism/prism-python.min.js"></script>
-    <script src="assets/visual-teach.js"></script>
+    <script src="assets/base/base.js"></script>
+    <script src="assets/components/code/code.js"></script>
 
     <!-- Mermaid bridge for the graph-shaped diagrams -->
     <script src="assets/mermaid.js"></script>
@@ -69,9 +76,9 @@ The report then references `assets/visual-teach.css`, `assets/mermaid.js`, and s
 </html>
 ```
 
-> **Never add `type="module"` to the `visual-teach.js` tag.** It is a plain script. `type="module"` makes the browser load it under CORS rules, which `file://` blocks — the toggle, copy buttons, and Prism then silently die. See the visual-teach cheatsheet.
+> **Never add `type="module"` to `base.js`, `code.js`, or the `mermaid.js` tag.** They are plain scripts. `type="module"` makes the browser load them under CORS rules, which `file://` blocks — the toggle, copy buttons, and Prism then silently die. See the visual-teach cheatsheet.
 
-The theme toggle and dark mode need no code of yours: `visual-teach.css` holds the `--vt-*` token layer (light `:root`, a `prefers-color-scheme` dark block, and a `[data-theme]` override), and `visual-teach.js` injects a fixed toggle that flips `data-theme`. The default view follows the OS theme; the toggle forces either. Mermaid re-themes on the flip through the bridge.
+The theme toggle and dark mode need no code of yours: `base/base.css` holds the `--vt-*` token layer (light `:root`, a `prefers-color-scheme` dark block, and a `[data-theme]` override), and `base/base.js` injects a fixed toggle that flips `data-theme`. The default view follows the OS theme; the toggle forces either. Mermaid re-themes on the flip through the bridge.
 
 ## Header
 
