@@ -425,6 +425,25 @@
       "pluginName": "mattpocock-skills",
       "installedAt": "2026-08-05T15:43:52.571Z",
       "updatedAt": "2026-08-05T15:43:52.571Z"
+    },
+    "thermo-nuclear-code-quality-review": {
+      "source": "cursor/plugins",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/cursor/plugins.git",
+      "skillPath": "cursor-team-kit/skills/thermo-nuclear-code-quality-review/SKILL.md",
+      "skillFolderHash": "d9c8935dd560b3b6f5941247d04a1843f8c7cc35",
+      "installedAt": "2026-08-12T13:40:26.011Z",
+      "updatedAt": "2026-08-12T13:40:26.011Z"
+    },
+    "visual-teach": {
+      "source": "caneff/visual-teach",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/caneff/visual-teach.git",
+      "skillPath": "skills/visual-teach/SKILL.md",
+      "skillFolderHash": "8e8f10ff8d8d930ae1ae724fa88d11990e35c10a",
+      "pluginName": "visual-teach",
+      "installedAt": "2026-08-12T13:40:56.662Z",
+      "updatedAt": "2026-08-12T13:40:56.662Z"
     }
   },
   "dismissed": {

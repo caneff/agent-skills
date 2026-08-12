@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Base — Page Shell, Theming & Sources Demo</title>
+    <link rel="stylesheet" href="base.css" />
+  </head>
+  <body>
+    <main>
+      <p class="vt-kicker">Docker basics · Lesson 3</p>
+      <h1>Build and run your first container</h1>
+      <p class="vt-lede">
+        The base layer: page shell, prose, dark-mode theming, and the sources
+        footer — everything a lesson links before any component.
+      </p>
+
+      <div class="vt-metabar">
+        <span class="item">⏱ <strong>~15 min</strong></span>
+        <span class="item"
+          >Needs: <strong>Docker installed from Lesson 1</strong></span
+        >
+        <span class="item">Lesson <strong>3</strong> of 9</span>
+      </div>
+
+      <div class="vt-objectives">
+        <p class="h">By the end of this lesson you'll be able to:</p>
+        <ul>
+          <li>Build an image from a Dockerfile and tag it</li>
+          <li>Run a container and map a port to your host</li>
+          <li>Inspect running containers and read their logs</li>
+        </ul>
+      </div>
+
+      <div class="vt-mission">
+        <strong>Why this matters for your goal:</strong> shipping your web app
+        to a server means handing over a reproducible image, not a folder of
+        files — you'll build that image here.
+      </div>
+
+      <h2>
+        <span class="vt-num">1</span>The idea<a
+          class="vt-anchor"
+          href="#idea"
+          aria-label="anchor"
+          >#</a
+        >
+      </h2>
+      <p>
+        An image is a frozen snapshot of your app and everything it needs to
+        run. A container is a running instance of that image. You write a
+        <code>Dockerfile</code>, then run <code>docker build -t app .</code> to
+        bake it into an image.
+      </p>
+
+      <h2>
+        <span class="vt-num">2</span>Theming<a
+          class="vt-anchor"
+          href="#theming"
+          aria-label="anchor"
+          >#</a
+        >
+      </h2>
+      <p>
+        Use the ◐ toggle (top-right, injected by <code>base.js</code>) to switch
+        light/dark. Every color token is defined with
+        <code>light-dark(light, dark)</code>, and
+        <code>:root[data-theme="dark"]</code> just flips
+        <code>color-scheme</code>. So a flat
+        <code>:root { --vt-accent: #hex }</code> override replaces
+        <em>both</em> sides at once and breaks dark mode — override with a
+        <code>light-dark()</code> pair instead.
+      </p>
+
+      <div class="vt-recap">
+        <p class="h">✦ What you earned</p>
+        You can now turn a project into a portable image and run it anywhere
+        Docker is installed, with the port wired up to your machine.
+      </div>
+      <p class="vt-upnext"><em>Up next:</em> volumes &amp; persistent data.</p>
+
+      <footer class="vt-sources">
+        <span class="lbl">Sources</span>
+        <ul class="vt-reflist">
+          <li>
+            <span class="vt-src-ic" data-type="spec"></span
+            ><a href="#">Dockerfile reference</a>
+            <span class="note">— every instruction, canonical.</span>
+          </li>
+          <li>
+            <span class="vt-src-ic" data-type="doc"></span
+            ><a href="#">Build cache concepts</a>
+            <span class="note">— layers and invalidation.</span>
+          </li>
+          <li>
+            <span class="vt-src-ic" data-type="video"></span
+            ><a href="#">Quick-start (video)</a>
+          </li>
+          <li>
+            <span class="vt-src-ic" data-type="forum"></span
+            ><a href="#">Docker community forum</a>
+          </li>
+        </ul>
+        <div class="vt-companion">
+          <span class="vt-src-ic" data-type="book"></span>Companion reference:
+          <a href="#">Docker CLI cheatsheet</a>
+        </div>
+        <div class="meta">Lesson 0003 · verified against docs 2026-06-11</div>
+      </footer>
+    </main>
+    <script src="base.js"></script>
+  </body>
+</html>

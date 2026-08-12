@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sandbox Component Demo</title>
+    <link rel="stylesheet" href="../../base/base.css" />
+    <link rel="stylesheet" href="sandbox.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Sandbox</h1>
+      <p class="vt-lede">
+        Free-input component: a labeled text input (or textarea) plus an output
+        region. The lesson author supplies the evaluation logic; the component
+        handles debounced wiring and error surfacing.
+      </p>
+
+      <h2>Regex tester</h2>
+      <p>
+        Type a JavaScript regex pattern. The sandbox calls the author-provided
+        <code>vtDemoTestRegex</code> function and renders the result live.
+      </p>
+
+      <div class="vt-sandbox" data-fn="vtDemoTestRegex">
+        <label for="sb-regex">Regex pattern</label>
+        <input
+          id="sb-regex"
+          type="text"
+          placeholder="e.g. ^[A-Z][a-z]+"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <div class="vt-sandbox-output" aria-live="polite"></div>
+      </div>
+
+      <h2>Temperature converter</h2>
+      <p>
+        Enter a Celsius value; the sandbox converts it to Fahrenheit using the
+        <code>vtDemoTempConvert</code> hook.
+      </p>
+
+      <div class="vt-sandbox" data-fn="vtDemoTempConvert">
+        <label for="sb-temp">Temperature (°C)</label>
+        <input id="sb-temp" type="text" placeholder="e.g. 100" />
+        <div class="vt-sandbox-output" aria-live="polite"></div>
+      </div>
+
+      <h2>Multi-line textarea</h2>
+      <p>
+        Enter one word per line; the sandbox counts distinct words via
+        <code>vtDemoWordCount</code>.
+      </p>
+
+      <div class="vt-sandbox" data-fn="vtDemoWordCount">
+        <label for="sb-words">Words (one per line)</label>
+        <textarea
+          id="sb-words"
+          rows="4"
+          placeholder="apple&#10;banana&#10;apple"
+        ></textarea>
+        <div class="vt-sandbox-output" aria-live="polite"></div>
+      </div>
+
+      <h2>Error surfacing</h2>
+      <p>
+        This sandbox uses <code>vtDemoMaybeThrow</code>, which throws when the
+        input is not a number. Try typing a letter.
+      </p>
+
+      <div class="vt-sandbox" data-fn="vtDemoMaybeThrow">
+        <label for="sb-throw">Number to double</label>
+        <input id="sb-throw" type="text" placeholder="e.g. 7" />
+        <div class="vt-sandbox-output" aria-live="polite"></div>
+      </div>
+    </main>
+    <script src="../../base/base.js"></script>
+    <script>
+      /* Author-provided eval hooks — written once per lesson, not part of the library */
+
+      function vtDemoTestRegex(pattern) {
+        if (!pattern) return "—";
+        var re = new RegExp(pattern);
+        var samples = ["Hello", "world", "Foo123", "bar", "UPPER"];
+        return samples
+          .map(function (s) {
+            return (re.test(s) ? "✓ " : "✗ ") + s;
+          })
+          .join("\n");
+      }
+
+      function vtDemoTempConvert(val) {
+        var c = parseFloat(val);
+        if (val === "" || val == null) return "—";
+        if (isNaN(c)) throw new Error("Enter a number.");
+        return c + " °C = " + ((c * 9) / 5 + 32).toFixed(1) + " °F";
+      }
+
+      function vtDemoWordCount(text) {
+        if (!text.trim()) return "—";
+        var words = text
+          .split("\n")
+          .map(function (w) {
+            return w.trim();
+          })
+          .filter(Boolean);
+        var unique = new Set(words);
+        return words.length + " words, " + unique.size + " unique";
+      }
+
+      function vtDemoMaybeThrow(val) {
+        if (!val) return "—";
+        var n = parseFloat(val);
+        if (isNaN(n)) throw new Error("Not a number: " + JSON.stringify(val));
+        return n + " × 2 = " + n * 2;
+      }
+    </script>
+    <script src="sandbox.js"></script>
+  </body>
+</html>

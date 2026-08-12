@@ -1,0 +1,124 @@
+/* pill — base (accent fill) */
+.vt-pill {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  font-family: var(--vt-ui-font);
+  font-size: 0.78rem;
+  color: var(--vt-accent-fg);
+  background: var(--vt-accent);
+  vertical-align: middle;
+}
+
+/* pill — semantic fills */
+.vt-pill.neutral {
+  background: var(--vt-neutral-soft);
+  color: var(--vt-muted);
+}
+.vt-pill.good {
+  background: var(--vt-good);
+  color: var(--vt-accent-fg);
+}
+.vt-pill.bad {
+  background: var(--vt-bad);
+  color: var(--vt-accent-fg);
+}
+.vt-pill.warn {
+  background: var(--vt-warn);
+  color: var(--vt-warn-fg);
+}
+
+/* pill — outline */
+.vt-pill.outline {
+  background: transparent;
+  color: var(--vt-accent);
+  border: 1px solid var(--vt-accent);
+}
+.vt-pill.outline.neutral {
+  color: var(--vt-muted);
+  border-color: var(--vt-muted);
+}
+.vt-pill.outline.good {
+  color: var(--vt-good);
+  border-color: var(--vt-good);
+}
+.vt-pill.outline.bad {
+  color: var(--vt-bad);
+  border-color: var(--vt-bad);
+}
+.vt-pill.outline.warn {
+  color: var(--vt-warn-dk);
+  border-color: var(--vt-warn);
+}
+
+/* pill — size */
+.vt-pill.sm {
+  font-size: 0.68rem;
+  padding: 0.02rem 0.4rem;
+}
+
+/* pill — status dot */
+.vt-pill.dot::before {
+  content: "●";
+  margin-right: 0.35em;
+  font-size: 0.8em;
+  vertical-align: baseline;
+  color: currentColor;
+}
+
+/* pill — leading icon */
+.vt-pill.ic-check::before {
+  content: "✓";
+  margin-right: 0.3em;
+}
+.vt-pill.ic-warn::before {
+  content: "⚠";
+  margin-right: 0.3em;
+}
+
+/* count / step badge */
+.vt-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: var(--vt-accent);
+  color: var(--vt-accent-fg);
+  font-family: var(--vt-ui-font);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.vt-badge.sm {
+  width: 1.2rem;
+  height: 1.2rem;
+  font-size: 0.7rem;
+}
+
+/* keyboard keycap */
+.vt-kbd {
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1;
+  display: inline-block;
+  padding: 0.25em 0.5em;
+  background: var(--vt-paper);
+  color: var(--vt-ink);
+  border: 1px solid var(--vt-rule);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  box-shadow: 0 1px 0 var(--vt-rule);
+}
+
+@media (forced-colors: active) {
+  .vt-pill.good::before {
+    content: "✓ ";
+  }
+  .vt-pill.bad::before {
+    content: "✗ ";
+  }
+  .vt-pill.warn::before {
+    content: "! ";
+  }
+}

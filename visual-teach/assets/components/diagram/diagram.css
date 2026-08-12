@@ -1,0 +1,281 @@
+/* ====== diagram vocabulary ====== */
+
+/* panel / canvas */
+.vt-diagram {
+  background: var(--vt-soft);
+  border: 1px solid var(--vt-rule);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin: 1.4rem 0;
+  overflow-x: auto;
+}
+
+/* inline SVG: responsive + inherit --vt-ink so currentColor strokes theme with light/dark */
+/* max-width:100% keeps normal (non-wide) diagrams shrink-to-fit on mobile.
+   Wide diagrams (auto-detected by wireBreakout()) get max-width:none + min-width:0 via
+   base.css so the SVG can scroll at full size instead of shrinking (#9, fixed in #203). */
+.vt-diagram svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  color: var(--vt-ink);
+}
+
+.vt-diagram-caption {
+  font-family: var(--vt-ui-font);
+  font-size: 0.8rem;
+  color: var(--vt-muted);
+  text-align: center;
+  margin-top: 0.9rem;
+  letter-spacing: 0.02em;
+}
+
+/* node — labeled card.
+   inline-block (not inline-flex column) so <sup>/<sub> stay as baseline-
+   shifted inline text rather than collapsing onto a separate flex-item row. */
+.vt-node {
+  display: inline-block;
+  vertical-align: middle;
+  background: var(--vt-paper);
+  border: 1.5px solid var(--vt-rule);
+  border-radius: 8px;
+  padding: 0.55rem 1rem;
+  font-family: var(--vt-ui-font);
+  font-size: 0.88rem;
+  text-align: center;
+  min-width: 5.5rem;
+  line-height: 1.35;
+}
+
+/* emphasis variants */
+.vt-node.em {
+  background: var(--vt-accent-soft);
+  border-color: var(--vt-accent);
+  font-weight: 600;
+  color: var(--vt-accent);
+}
+
+.vt-node.muted {
+  background: var(--vt-soft);
+  border-color: var(--vt-rule);
+  color: var(--vt-muted);
+}
+
+/* flow — row with auto arrow connectors between direct children.
+   Wraps to multiple rows for long sequences; the JS markFlowRows pass
+   suppresses the leading → on the first item of each wrapped row. */
+.vt-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 1rem 0;
+}
+
+.vt-flow > .vt-row-start {
+  margin-inline-start: 0;
+}
+
+.vt-flow > .vt-row-start::before {
+  content: none;
+}
+
+/* arrow before every child that follows another child */
+.vt-flow > * + * {
+  position: relative;
+  margin-inline-start: 1.6rem;
+}
+
+.vt-flow > * + *::before {
+  content: "→";
+  position: absolute;
+  inset-inline-start: -1.4rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1rem;
+  color: var(--vt-muted);
+  pointer-events: none;
+  line-height: 1;
+}
+
+[dir="rtl"] .vt-flow > * + *::before,
+.vt-flow[dir="rtl"] > * + *::before {
+  content: "←";
+}
+
+/* flex playground — pure display:flex container, no injected separators.
+   Use for layout demos (justify-content, align-items). vt-flow is for
+   sequences; vt-flex is for showing flex behavior. */
+.vt-flex {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin: 0.8rem 0;
+  padding: 0.6rem;
+  border: 1px dashed var(--vt-rule);
+  border-radius: 8px;
+  min-height: 3.2rem;
+}
+
+.vt-flex-item {
+  padding: 0.4rem 0.85rem;
+  background: var(--vt-soft);
+  border: 1px solid var(--vt-rule);
+  border-radius: 6px;
+  font-family: var(--vt-ui-font);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+/* justify-content modifiers */
+.vt-flex.jc-start {
+  justify-content: flex-start;
+}
+.vt-flex.jc-end {
+  justify-content: flex-end;
+}
+.vt-flex.jc-center {
+  justify-content: center;
+}
+.vt-flex.jc-between {
+  justify-content: space-between;
+}
+.vt-flex.jc-around {
+  justify-content: space-around;
+}
+.vt-flex.jc-evenly {
+  justify-content: space-evenly;
+}
+
+/* align-items modifiers */
+.vt-flex.ai-start {
+  align-items: flex-start;
+}
+.vt-flex.ai-end {
+  align-items: flex-end;
+}
+.vt-flex.ai-center {
+  align-items: center;
+}
+.vt-flex.ai-stretch {
+  align-items: stretch;
+}
+
+/* row / col — lane layout */
+.vt-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  align-items: flex-start;
+  margin: 0.8rem 0;
+}
+
+.vt-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  flex: 1 1 8rem;
+}
+
+/* row — keep items on one line (e.g. the five fields of a cron expression read
+   "* * * * *", never wrapped). Scrolls horizontally if it overflows. */
+.vt-row.nowrap {
+  flex-wrap: nowrap;
+  justify-content: center;
+  overflow-x: auto;
+}
+.vt-row.nowrap > .vt-col {
+  flex: 0 0 auto;
+}
+
+.vt-col-label,
+.vt-split-label {
+  font-family: var(--vt-ui-font);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--vt-muted);
+  overflow-wrap: break-word; /* prevent long labels from clipping at the panel edge */
+}
+
+.vt-col-label {
+  margin-bottom: 0.2rem;
+}
+
+/* split — before / after two-panel */
+.vt-split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.vt-split-panel {
+  background: var(--vt-paper);
+  border: 1px solid var(--vt-rule);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  min-width: 0; /* grid items default to min-width:auto; 0 lets them shrink so inner vt-code scrolls */
+}
+
+.vt-split-label {
+  margin-bottom: 0.5rem;
+  font-weight: 700;
+}
+
+.vt-split-panel.before {
+  border-color: var(--vt-bad);
+}
+.vt-split-panel.after {
+  border-color: var(--vt-good);
+}
+.vt-split-panel.before .vt-split-label {
+  color: var(--vt-bad);
+}
+.vt-split-panel.after .vt-split-label {
+  color: var(--vt-good);
+}
+
+/* io is in code component, skip here */
+
+/* mermaid computed-graph container (populated by assets/mermaid.js) */
+.vt-mermaid {
+  margin: 1.4rem 0;
+  overflow-x: auto;
+  text-align: center;
+  background: var(--vt-soft);
+  border: 1px solid var(--vt-rule);
+  border-radius: 10px;
+  padding: 1rem;
+}
+.vt-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+@media print {
+  .vt-diagram,
+  .vt-split {
+    break-inside: avoid;
+  }
+  .vt-diagram {
+    /* stylelint-disable-next-line color-no-hex */
+    border: 1px solid #ccc; /* neutral print grey, independent of theme tokens */
+    background: none;
+  }
+  .vt-node {
+    /* stylelint-disable-next-line color-no-hex */
+    border: 1px solid #ccc;
+  }
+  .vt-split {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (forced-colors: active) {
+  .vt-node.em {
+    outline: 2px solid ButtonText;
+    outline-offset: 2px;
+  }
+}
