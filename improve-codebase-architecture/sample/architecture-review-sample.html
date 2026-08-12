@@ -9,15 +9,33 @@
          skill copies these assets next to the report and links them relatively.
          This committed sample points at the vendored copies in the repo. Every
          reference is a local file, so the report opens offline. -->
-    <link rel="stylesheet" href="../../visual-teach/assets/visual-teach.css" />
+    <!-- Base spine first, then only the components this report uses. -->
+    <link rel="stylesheet" href="../../visual-teach/assets/base/base.css" />
+    <link
+      rel="stylesheet"
+      href="../../visual-teach/assets/components/callout/callout.css"
+    />
+    <link
+      rel="stylesheet"
+      href="../../visual-teach/assets/components/chip/chip.css"
+    />
+    <link
+      rel="stylesheet"
+      href="../../visual-teach/assets/components/code/code.css"
+    />
+    <link
+      rel="stylesheet"
+      href="../../visual-teach/assets/components/diagram/diagram.css"
+    />
 
     <!-- Prism grammars for the before/after Python snippets, loaded before
-         visual-teach.js so its auto-init can highlight them. Without Prism the
-         code degrades to readable plain text. -->
+         base.js / code.js so their auto-init can highlight them. Without Prism
+         the code degrades to readable plain text. -->
     <script src="../../visual-teach/assets/prism/prism-core.min.js"></script>
     <script src="../../visual-teach/assets/prism/prism-clike.min.js"></script>
     <script src="../../visual-teach/assets/prism/prism-python.min.js"></script>
-    <script src="../../visual-teach/assets/visual-teach.js"></script>
+    <script src="../../visual-teach/assets/base/base.js"></script>
+    <script src="../../visual-teach/assets/components/code/code.js"></script>
 
     <!-- Mermaid bridge. It loads the vendored mermaid.min.js sitting beside it
          (a local file, never remote) and re-themes every diagram on toggle. -->
