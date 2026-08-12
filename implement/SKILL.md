@@ -3,6 +3,18 @@ name: implement
 description: "Implement a piece of work based on a spec or set of tickets."
 ---
 
+When the work maps to a GitHub issue, claim it first, so a second client running
+this skill can't pick up the same ticket. Read its labels: if it isn't
+`ready-for-agent` — already `in-progress`, or handed to a human — stop and ask,
+since someone likely holds it. Otherwise take it:
+
+`gh issue edit <n> --remove-label ready-for-agent --add-label in-progress --add-assignee @me`
+
+That pulls it out of every other client's queue. The read-then-flip has a
+sub-second race if two clients start on the same ticket at the same instant; for
+a handful of clients it is enough. If you abandon the run before a PR is open,
+put it back: `gh issue edit <n> --remove-label in-progress --add-label ready-for-agent`.
+
 Before creating the worktree, check the original checkout is clean
 (`git status`). The worktree branches from the pushed main, so anything left
 uncommitted there is invisible inside it — and copying it across leaves two
@@ -36,3 +48,8 @@ Commit your work to the worktree's branch. When a ticket maps to a GitHub
 issue, put a closing keyword (`Closes #<n>`) in the final commit body — a bare
 `(#<n>)` mention links the issue but does not close it, so `pushpr`'s PR
 inherits the mention and merging leaves the issue open.
+
+Once the PR is open, move the ticket to review:
+`gh issue edit <n> --remove-label in-progress --add-label in-review`. `in-review`
+is the PR-pending-human-merge state the orchestrator also uses, so the issue
+reads as done-and-waiting rather than dropped.
