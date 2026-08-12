@@ -285,9 +285,13 @@ const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 // rather than the assertion quietly widening to "a superset is fine".
 //   select-buildable.mts — the deterministic frontier filter (#242)
 //   issue-body.mts        — the review-failure body-splice helper (#244)
+//   log-path.mts          — the per-run log-filename contract, lifted out of main
+//   pipeline-results.mts  — firstHarnessFault + normalizeSettled, lifted out of main
 const ARC_ADDED_RENDERS = [
   ".sandcastle/select-buildable.mts",
   ".sandcastle/issue-body.mts",
+  ".sandcastle/log-path.mts",
+  ".sandcastle/pipeline-results.mts",
   // The sandbox plumbing that survived the bot-identity deletion, under its
   // honest name (#245). sandbox-identity.mts is withdrawn below.
   ".sandcastle/sandbox-config.mts",

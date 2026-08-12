@@ -35,9 +35,8 @@ import { resolveBase } from "./base-resolution.mts";
 import {
   parseSpecVerdict,
   parseStandardsVerdict,
-  combineVerdicts,
+  classifyReviewedOutcome,
   isHarnessError,
-  type ReviewAxis,
 } from "./review-verdict.mts";
 import {
   bucketIssues,
@@ -56,9 +55,15 @@ import {
   parseOpenIssues,
   type IssueEdgeRow,
 } from "./github-parse.mts";
-import { selectBuildable } from "./select-buildable.mts";
+import { selectableFrontier } from "./select-buildable.mts";
+import {
+  firstHarnessFault,
+  normalizeSettled,
+  type IssueOutcome,
+} from "./pipeline-results.mts";
 import { parseSandcastleWorktrees } from "./worktrees.mts";
 import { planRetention } from "./log-retention.mts";
+import { logFilePath } from "./log-path.mts";
 import { execSync } from "node:child_process";
 import {
   mkdirSync,
@@ -157,16 +162,13 @@ try {
   );
 } catch {}
 
-// Build the per-run logging option, mirroring sandcastle's default filename
-// (<sanitized-branch>-<name>.log under .sandcastle/logs/) so existing
-// `tail -f` paths keep working, plus the chosen verbosity.
+// Build the per-run logging option: the filename contract lives in the pure,
+// tested logFilePath (it mirrors sandcastle's default so `tail -f` paths keep
+// working); here we just add the chosen verbosity.
 function logging(name: string, branch: string) {
-  const sanitized = branch.replace(/[/\\:*?"<>|]/g, "-");
-  const suffix = name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-");
-  const path = `.sandcastle/logs/${sanitized}-${suffix}.log`;
   return {
     type: "file" as const,
-    path,
+    path: logFilePath(name, branch),
     verbose: VERBOSE,
   };
 }
@@ -204,9 +206,9 @@ function listAllOpenIssues(): OpenIssue[] {
 // ready-for-agent issue whose native `blockedBy` edges have all closed. Blocker
 // openness is judged against ALL open issues (any label) — an open blocker still
 // blocks whether it is ready-for-agent, in-review, or anything else — so we pull
-// blockedBy for the whole open set, run the pure `selectBuildable`, then keep the
-// ready-for-agent survivors as the selectable set. A child whose parent issue is
-// still open never survives, which is the parent-merged-to-main rule in one line.
+// blockedBy for the whole open set and hand both halves of the rule to the pure
+// `selectableFrontier` (buildable ∩ ready-for-agent). A child whose parent issue
+// is still open never survives, which is the parent-merged-to-main rule in one line.
 function getBuildableFrontier(): OpenIssue[] {
   const open = listAllOpenIssues();
   const blockedBy = parseBlockedByRows(
@@ -214,9 +216,7 @@ function getBuildableFrontier(): OpenIssue[] {
       `issue list --state open --limit ${OPEN_ISSUE_LIMIT} --json number,blockedBy --jq '[.[] | {number, blockedBy: [.blockedBy.nodes[].number]}]'`
     )
   );
-  return selectBuildable(open, blockedBy).filter((i) =>
-    i.labels.includes("ready-for-agent")
-  );
+  return selectableFrontier(open, blockedBy);
 }
 
 // Every issue's state and native parent, open AND closed — the open-only frontier
@@ -391,7 +391,7 @@ if (work.length > 0) {
   // -------------------------------------------------------------------------
 
   const settled = await Promise.allSettled(
-    work.map(async (issue) => {
+    work.map(async (issue): Promise<IssueOutcome<WorkIssue>> => {
       // Every issue's branch is cut from `main` (#243). A child is only selected
       // once its parents' issues have closed, so their work is already in `main`
       // — no stacking, no diamond base.
@@ -494,28 +494,20 @@ if (work.length > 0) {
           // output, #130). Fail-open per axis: only an explicit FAIL blocks.
           const specVerdict = parseSpecVerdict(specReview.stdout);
           const standardsVerdict = parseStandardsVerdict(standardsReview.stdout);
-          const combined = combineVerdicts(specVerdict, standardsVerdict);
-          if (!combined.pass) {
-            // Binding review-fail (#244): no PR. Carry each failing axis's
-            // findings so the outcome loop can write them into the issue body —
-            // the human's whole brief for re-driving the preserved branch with
-            // `/implement`. The verdict's `reasons` hold each axis's FAIL line;
-            // pass the fuller reviewer stdout so the body has real context.
-            const detail: Partial<Record<ReviewAxis, string>> = {};
-            if (!specVerdict.pass) detail.spec = specReview.stdout.trim();
-            if (!standardsVerdict.pass)
-              detail.standards = standardsReview.stdout.trim();
+          // classifyReviewedOutcome owns the verdict→outcome decision (#244) and
+          // keeps only the failing axes' detail, so we hand it both reviewers'
+          // fuller stdout unconditionally — the human's brief for re-driving a
+          // preserved branch with `/implement`. A review-fail is binding: no PR.
+          const outcome = classifyReviewedOutcome(specVerdict, standardsVerdict, {
+            spec: specReview.stdout.trim(),
+            standards: standardsReview.stdout.trim(),
+          });
+          if (outcome.kind === "review-fail") {
             console.warn(
-              `  ⚠ ${issue.id} failed review (${combined.failedAxes.join(", ")})`
+              `  ⚠ ${issue.id} failed review (${outcome.failedAxes.join(", ")})`
             );
-            return {
-              issue,
-              kind: "review-fail" as const,
-              failedAxes: combined.failedAxes,
-              reasons: detail,
-            };
           }
-          return { issue, kind: "done" as const };
+          return { issue, ...outcome };
         } catch (e) {
           // A harness fault (the review prompt couldn't be assembled) is not a
           // bad branch — it fails identically for every issue, so swallowing it
@@ -535,15 +527,16 @@ if (work.length > 0) {
   );
 
   // Log any pipelines that threw outright (sandbox crash, network, etc.).
-  let harnessFault: unknown = null;
   for (const [i, outcome] of settled.entries()) {
     if (outcome.status === "rejected") {
       console.error(
         `  ✗ ${work[i]!.id} (${work[i]!.branch}) failed: ${outcome.reason}`
       );
-      if (isHarnessError(outcome.reason)) harnessFault ??= outcome.reason;
     }
   }
+  // The run-aborting decision — first rejected PromptError, if any — lives in
+  // the pure, tested firstHarnessFault.
+  const harnessFault = firstHarnessFault(settled);
 
   // A harness fault means a prompt's preprocessor command failed — the harness
   // itself is broken and will fail identically for every issue. Abort the whole
@@ -570,20 +563,21 @@ if (work.length > 0) {
   // body for a human to re-drive with `/implement`. Anything else is left as it
   // arrived. A rejection carries no value, so its issue comes from `work` by index.
   // -------------------------------------------------------------------------
-  for (const [i, outcome] of settled.entries()) {
-    const issue = outcome.status === "fulfilled" ? outcome.value.issue : work[i]!;
-    const kind =
-      outcome.status === "fulfilled" ? outcome.value.kind : ("nothing" as const);
-    // Only a review-fail outcome carries these; narrow before reading them.
-    const failedAxes =
-      outcome.status === "fulfilled" && "failedAxes" in outcome.value
-        ? outcome.value.failedAxes
-        : undefined;
-    const reasons =
-      outcome.status === "fulfilled" && "reasons" in outcome.value
-        ? outcome.value.reasons
-        : undefined;
-    const plan = planOutcomeTransition({ kind, issue, failedAxes, reasons });
+  // normalizeSettled folds the rejected/fulfilled cases into one typed union, so
+  // this loop reads a discriminated OutcomeRecord — no status check, no `in`
+  // narrowing, and a rejected pipeline is already `nothing` for its issue.
+  for (const record of normalizeSettled(settled, work)) {
+    const { issue, kind } = record;
+    const plan = planOutcomeTransition(
+      record.kind === "review-fail"
+        ? {
+            kind: record.kind,
+            issue,
+            failedAxes: record.failedAxes,
+            reasons: record.reasons,
+          }
+        : { kind: record.kind, issue }
+    );
     if (plan.note) console.warn(`  ${plan.note}`);
 
     if (kind === "done") {
