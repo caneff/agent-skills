@@ -1,0 +1,19 @@
+/* ====== math (KaTeX) ====== */
+/* Display math block — uses --vt-ink so dark/light theming is automatic. */
+.vt-math {
+  margin: 1.2rem 0;
+  overflow-x: auto;
+  color: var(--vt-ink);
+}
+
+/* vt-eq: centered display-equation variant with its own type sizing.
+   Combine with vt-math: class="vt-math vt-eq" for a prominent formula. */
+.vt-eq {
+  text-align: center;
+  font-size: 1.35rem;
+}
+
+/* KaTeX defaults to 1.21em; reset to match surrounding prose */
+.katex {
+  font-size: 1em;
+}

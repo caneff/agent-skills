@@ -1,0 +1,200 @@
+/* code block */
+.vt-code {
+  border: 1px solid var(--vt-rule);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 1.2rem 0;
+}
+.vt-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--vt-ui-font);
+  font-size: 0.78rem;
+  color: var(--vt-muted);
+  padding: 0.4rem 0.8rem;
+  background: var(--vt-soft);
+  border-bottom: 1px solid var(--vt-rule);
+}
+.vt-code-copy {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--vt-rule);
+  background: var(--vt-paper);
+  color: var(--vt-muted);
+  border-radius: 6px;
+  padding: 0.25rem;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+}
+/* Expand the hit area to 44×44 (WCAG 2.5.5) without growing the visible
+   ~22px button — the compact code-header keeps its tight look. */
+.vt-code-copy::after {
+  content: "";
+  position: absolute;
+  inset: -11px;
+}
+.vt-code-copy:hover {
+  color: var(--vt-accent);
+  border-color: var(--vt-accent);
+}
+.vt-code-copy svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.vt-code pre {
+  margin: 0;
+  overflow-x: auto;
+  background: none;
+}
+.vt-code pre code {
+  display: block;
+  padding: 0.9rem 1rem;
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  background: none;
+  color: var(--vt-ink);
+  text-shadow: none;
+  white-space: pre; /* block code keeps its newlines + scrolls (overrides inline nowrap) */
+}
+
+/* Prism token theme — written entirely in --vt-* tokens; flips with dark mode automatically */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: var(--vt-muted);
+  font-style: italic;
+}
+.token.punctuation,
+.token.operator {
+  color: var(--vt-muted);
+}
+.token.keyword,
+.token.tag,
+.token.boolean,
+.token.atrule {
+  color: var(--vt-accent);
+  font-weight: 600;
+}
+.token.string,
+.token.attr-value,
+.token.char,
+.token.inserted {
+  color: var(--vt-good);
+}
+.token.number,
+.token.constant {
+  color: color-mix(in srgb, var(--vt-warn) 70%, var(--vt-ink));
+}
+.token.function,
+.token.class-name {
+  color: color-mix(in srgb, var(--vt-accent) 50%, var(--vt-bad));
+}
+.token.builtin,
+.token.property,
+.token.attr-name,
+.token.symbol {
+  color: var(--vt-bad);
+}
+.token.deleted {
+  color: var(--vt-bad);
+  text-decoration: line-through;
+}
+.token.selector,
+.token.important,
+.token.bold {
+  font-weight: bold;
+}
+.token.italic {
+  font-style: italic;
+}
+.token.entity,
+.token.url {
+  color: var(--vt-good);
+  text-decoration: underline;
+}
+.token.regex {
+  color: color-mix(in srgb, var(--vt-good) 60%, var(--vt-accent));
+}
+
+/* manual token-emphasis inline variant (pcode) */
+code.vt-pcode {
+  background: var(--vt-accent-soft);
+  color: var(--vt-accent);
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--vt-accent) 25%, transparent);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+}
+
+/* io — paired input→output code block */
+.vt-io {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  margin: 1.2rem 0;
+}
+
+@media (max-width: 600px) {
+  .vt-io {
+    grid-template-columns: 1fr;
+  }
+}
+
+.vt-io-input,
+.vt-io-output {
+  border: 1px solid var(--vt-rule);
+  border-radius: 10px;
+  overflow: hidden;
+  min-width: 0; /* allow grid children to shrink so long lines scroll, not clip */
+}
+
+.vt-io-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--vt-ui-font);
+  font-size: 0.78rem;
+  color: var(--vt-muted);
+  padding: 0.4rem 0.8rem;
+  background: var(--vt-soft);
+  border-bottom: 1px solid var(--vt-rule);
+}
+
+.vt-io-output .vt-io-head {
+  background: var(--vt-good-soft);
+}
+
+.vt-io pre {
+  margin: 0;
+  overflow-x: auto;
+  background: none;
+}
+
+.vt-io pre code {
+  display: block;
+  padding: 0.9rem 1rem;
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  background: none;
+  color: var(--vt-ink);
+  text-shadow: none;
+  white-space: pre;
+}
+
+@media print {
+  .vt-code {
+    break-inside: avoid;
+  }
+  .vt-code-copy {
+    display: none;
+  }
+}

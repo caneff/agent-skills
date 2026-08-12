@@ -1,0 +1,170 @@
+/* table — base */
+.vt-table,
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.93rem;
+  margin: 1rem 0;
+}
+th {
+  text-align: start;
+  font-family: var(--vt-ui-font);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--vt-muted);
+  padding: 0.45rem 0.6rem;
+  border-bottom: 2px solid var(--vt-rule);
+  /* bottom-align so the recommended column's badge sits above without shoving its label out of line */
+  vertical-align: bottom;
+}
+td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--vt-rule);
+  vertical-align: top;
+}
+
+/* table — responsive wrapper + zebra + density */
+.vt-table-wrap {
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+.vt-table-wrap > .vt-table,
+.vt-table-wrap > table {
+  margin: 0;
+}
+.vt-table tbody tr:nth-child(even) {
+  background: var(--vt-stripe);
+}
+.vt-table.compact th,
+.vt-table.compact td {
+  padding: 0.3rem 0.5rem;
+}
+
+/* table — header column (first column = row headers) */
+.vt-table th[scope="row"] {
+  text-align: start;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.9rem;
+  color: var(--vt-ink);
+  font-weight: 600;
+  white-space: nowrap;
+  /* match td's divider — the generic `th` rule's 2px underline is for thead only */
+  border-bottom: 1px solid var(--vt-rule);
+}
+/* table — comparison-matrix: subdue the row-label column header so data columns read first */
+.vt-table thead th:first-child {
+  color: var(--vt-muted);
+  font-weight: 400;
+}
+
+/* table — cell status: ✓ / ✗ / ~ auto-rendered, tinted, themeable */
+.vt-ok,
+.vt-no,
+.vt-partial {
+  text-align: center;
+  font-weight: 700;
+}
+.vt-ok {
+  color: var(--vt-good);
+  background: var(--vt-good-soft);
+}
+.vt-no {
+  color: var(--vt-bad);
+  background: var(--vt-bad-soft);
+}
+.vt-partial {
+  color: var(--vt-warn);
+  background: var(--vt-warn-soft);
+}
+.vt-ok::before {
+  content: "✓";
+}
+.vt-no::before {
+  content: "✗";
+}
+.vt-partial::before {
+  content: "~";
+}
+/* optional flavor under an icon cell: e.g. ✗ / "rewrite the list" */
+.vt-ok .note,
+.vt-no .note,
+.vt-partial .note {
+  display: block;
+  font-weight: 400;
+  font-size: 0.82rem;
+  color: var(--vt-muted);
+  margin-top: 0.15rem;
+}
+
+/* table — comparison highlight: recommended column via <col> + .vt-th-pick header.
+   The soft background tints text-cell tables, but loses to zebra stripes and to
+   cell fills (.vt-ok/.vt-no) since <col> is the lowest paint layer. The accent
+   side+bottom rails are box-shadow, which paints ABOVE cell/row backgrounds, so
+   the column stays highlighted even when every cell is a status fill. Together
+   with .vt-th-pick's top border this frames the recommended column. */
+.vt-col-pick {
+  background: var(--vt-accent-soft);
+  box-shadow:
+    inset 2px 0 var(--vt-accent),
+    inset -2px 0 var(--vt-accent),
+    inset 0 -2px var(--vt-accent);
+}
+/* .vt-th-pick on the <th> adds the top accent border (border on <col> is unreliable with border-collapse) */
+.vt-th-pick {
+  background: var(--vt-accent-soft);
+  border-top: 3px solid var(--vt-accent);
+}
+.vt-pick-badge {
+  display: block;
+  font-family: var(--vt-ui-font);
+  font-size: 0.63rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--vt-accent);
+  margin-bottom: 0.18rem;
+}
+
+/* table — row emphasis */
+.vt-row-key {
+  background: var(--vt-accent-soft);
+}
+.vt-row-key th[scope="row"],
+.vt-row-key td:first-child {
+  box-shadow: inset 3px 0 0 var(--vt-accent);
+}
+
+/* table — key/value reference */
+.vt-kv {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.95rem;
+}
+.vt-kv th[scope="row"] {
+  text-align: start;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.92rem;
+  color: var(--vt-ink);
+  font-weight: 600;
+  width: 30%;
+  padding: 0.5rem 0.7rem 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--vt-rule);
+  border-right: 1px solid var(--vt-rule);
+  background: var(--vt-soft);
+  vertical-align: top;
+  white-space: nowrap;
+}
+.vt-kv td {
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--vt-rule);
+  vertical-align: top;
+}
+
+@media print {
+  .vt-table tr {
+    break-inside: avoid;
+  }
+}

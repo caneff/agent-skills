@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Callout — Component Demo</title>
+    <link rel="stylesheet" href="../../base/base.css" />
+    <link rel="stylesheet" href="callout.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Callout</h1>
+      <p class="vt-lede">
+        Five semantic tones for surfacing warnings, information, insights,
+        successes, and risks inline with prose.
+      </p>
+
+      <div class="vt-callout warn">
+        <strong>Warning (default)</strong> — Double-check your configuration
+        before deploying. Misconfigured environment variables can cause silent
+        failures in production.
+      </div>
+
+      <div class="vt-callout info">
+        <strong>Info</strong> — This API is available in all regions. Rate
+        limits apply per project, not per user account.
+      </div>
+
+      <div class="vt-callout insight">
+        <strong>Insight</strong> — Batching multiple writes into a single
+        transaction can reduce round-trips by up to 80% on high-latency
+        connections.
+      </div>
+
+      <div class="vt-callout success">
+        <strong>Success</strong> — Your migration completed without errors. All
+        42,000 rows were transferred and verified.
+      </div>
+
+      <div class="vt-callout risk">
+        <strong>Risk</strong> — Deleting this record will cascade to 17
+        dependent rows. This action cannot be undone.
+      </div>
+    </main>
+    <script src="../../base/base.js"></script>
+  </body>
+</html>

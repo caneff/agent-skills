@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Checklist Component Demo</title>
+    <link rel="stylesheet" href="../../base/base.css" />
+    <link rel="stylesheet" href="checklist.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Checklist</h1>
+      <p class="vt-lede">
+        A persisted step-by-step checklist with progress bar. State is saved to
+        <code>localStorage</code>.
+      </p>
+
+      <h2>Example: Set up a local dev environment</h2>
+
+      <ul class="vt-checklist" data-key="demo">
+        <li>
+          <input type="checkbox" />
+          <div>
+            <span class="vt-step-title">Install Node.js</span>
+            <span class="vt-step-body"
+              >Download the LTS release from
+              <a href="https://nodejs.org">nodejs.org</a> and run the installer.
+              Verify with <code>node -v</code>.</span
+            >
+          </div>
+        </li>
+        <li>
+          <input type="checkbox" />
+          <div>
+            <span class="vt-step-title">Clone the repository</span>
+            <span class="vt-step-body"
+              >Run
+              <code>git clone https://github.com/example/repo.git</code> and
+              <code>cd</code> into the project directory.</span
+            >
+          </div>
+        </li>
+        <li>
+          <input type="checkbox" />
+          <div>
+            <span class="vt-step-title">Install dependencies</span>
+            <span class="vt-step-body"
+              >Run <code>npm install</code> to fetch all packages listed in
+              <code>package.json</code>.</span
+            >
+          </div>
+        </li>
+      </ul>
+    </main>
+    <script src="../../base/base.js"></script>
+    <script src="checklist.js"></script>
+  </body>
+</html>

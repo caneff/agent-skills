@@ -1,0 +1,84 @@
+/* callout + tones (themeable SVG tone icons; ::before is decorative, aria-hidden by nature) */
+.vt-callout {
+  position: relative;
+  background: var(--vt-warn-soft);
+  border-left: 4px solid var(--cal-color, var(--vt-warn));
+  padding: 0.9rem 1.1rem 0.9rem 3rem;
+  margin: 1.4rem 0;
+  font-size: 0.97rem;
+  border-radius: 0 8px 8px 0;
+  --cal-color: var(--vt-warn);
+  --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J00xMiA5djQnLz48cGF0aCBkPSdNMTIgMTdoLjAxJy8+PHBhdGggZD0nTTEwLjMgNC4zIDEuOCAxOWEyIDIgMCAwIDAgMS43IDNoMTYuOWEyIDIgMCAwIDAgMS43IC0zTDEzLjcgNC4zYTIgMiAwIDAgMCAtMy40IDB6Jy8+PC9zdmc+");
+}
+.vt-callout::before {
+  content: "";
+  position: absolute;
+  left: 1.1rem;
+  top: 1rem;
+  width: 1.3rem;
+  height: 1.3rem;
+  background-color: var(--cal-color);
+  -webkit-mask: var(--cal-icon) no-repeat center / contain;
+  mask: var(--cal-icon) no-repeat center / contain;
+}
+.vt-callout.warn {
+  background: var(--vt-warn-soft);
+  --cal-color: var(--vt-warn);
+  --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J00xMiA5djQnLz48cGF0aCBkPSdNMTIgMTdoLjAxJy8+PHBhdGggZD0nTTEwLjMgNC4zIDEuOCAxOWEyIDIgMCAwIDAgMS43IDNoMTYuOWEyIDIgMCAwIDAgMS43IC0zTDEzLjcgNC4zYTIgMiAwIDAgMCAtMy40IDB6Jy8+PC9zdmc+");
+}
+.vt-callout.info {
+  background: var(--vt-accent-soft);
+  --cal-color: var(--vt-accent);
+  --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxjaXJjbGUgY3g9JzEyJyBjeT0nMTInIHI9JzknLz48cGF0aCBkPSdNMTIgOGguMDEnLz48cGF0aCBkPSdNMTEgMTJoMXY0aDEnLz48L3N2Zz4=");
+}
+.vt-callout.insight {
+  background: var(--vt-accent-soft);
+  --cal-color: var(--vt-accent);
+  --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J005IDE4aDYnLz48cGF0aCBkPSdNMTAgMjFoNCcvPjxwYXRoIGQ9J00xMiAzYTYgNiAwIDAgMSA0IDEwLjVjLS42LjYtMSAxLjUtMSAyLjVIOWMwLTEtLjQtMS45LTEtMi41QTYgNiAwIDAgMSAxMiAzeicvPjwvc3ZnPg==");
+}
+.vt-callout.success {
+  background: var(--vt-good-soft);
+  --cal-color: var(--vt-good);
+  --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxjaXJjbGUgY3g9JzEyJyBjeT0nMTInIHI9JzknLz48cGF0aCBkPSdNOSAxMmwyIDJsNCAtNCcvPjwvc3ZnPg==");
+}
+.vt-callout.risk {
+  background: var(--vt-bad-soft);
+  --cal-color: var(--vt-bad);
+  --cal-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J004LjMgM0gxNS43TDIxIDguM1YxNS43TDE1LjcgMjFIOC4zTDMgMTUuN1Y4LjNaJy8+PHBhdGggZD0nTTEyIDh2NCcvPjxwYXRoIGQ9J00xMiAxNmguMDEnLz48L3N2Zz4=");
+}
+
+@media (forced-colors: active) {
+  .vt-callout.warn::after,
+  .vt-callout.info::after,
+  .vt-callout.insight::after,
+  .vt-callout.success::after,
+  .vt-callout.risk::after {
+    position: absolute;
+    top: 0.8rem;
+    left: 0.45rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .vt-callout.warn::after {
+    content: "⚠";
+  }
+  .vt-callout.info::after {
+    content: "ℹ";
+  }
+  .vt-callout.insight::after {
+    content: "💡";
+  }
+  .vt-callout.success::after {
+    content: "✓";
+  }
+  .vt-callout.risk::after {
+    content: "⛔";
+  }
+}
+
+@media print {
+  .vt-callout {
+    break-inside: avoid;
+  }
+}

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Diagram Component Demo</title>
+    <link rel="stylesheet" href="../../base/base.css" />
+    <link rel="stylesheet" href="diagram.css" />
+    <script src="../../base/base.js"></script>
+    <script src="diagram.js"></script>
+  </head>
+  <body>
+    <main>
+      <h1>Diagram</h1>
+      <p class="vt-lede">
+        Flow pipelines, row/col lanes, before/after splits, and flex
+        playgrounds.
+      </p>
+
+      <h2>Flow pipeline</h2>
+
+      <div class="vt-diagram">
+        <div class="vt-flow">
+          <div class="vt-node">Request</div>
+          <div class="vt-node em">Auth</div>
+          <div class="vt-node">Router</div>
+          <div class="vt-node">Handler</div>
+          <div class="vt-node">Response</div>
+        </div>
+        <p class="vt-diagram-caption">
+          HTTP request lifecycle — auth is the critical step.
+        </p>
+      </div>
+
+      <h2>Flow with muted nodes</h2>
+
+      <div class="vt-diagram">
+        <div class="vt-flow">
+          <div class="vt-node muted">Source</div>
+          <div class="vt-node">Transform</div>
+          <div class="vt-node em">Validate</div>
+          <div class="vt-node muted">Sink</div>
+        </div>
+      </div>
+
+      <h2>Row / col lanes</h2>
+
+      <div class="vt-diagram">
+        <div class="vt-row">
+          <div class="vt-col">
+            <div class="vt-col-label">Frontend</div>
+            <div class="vt-node">React App</div>
+            <div class="vt-node">Vite</div>
+          </div>
+          <div class="vt-col">
+            <div class="vt-col-label">API</div>
+            <div class="vt-node em">GraphQL</div>
+            <div class="vt-node">REST</div>
+          </div>
+          <div class="vt-col">
+            <div class="vt-col-label">Storage</div>
+            <div class="vt-node">Postgres</div>
+            <div class="vt-node">Redis</div>
+          </div>
+        </div>
+      </div>
+
+      <h2>Before / after split</h2>
+
+      <div class="vt-split">
+        <div class="vt-split-panel before">
+          <div class="vt-split-label">Before</div>
+          <p>
+            Each service calls the database directly — N connections, no
+            pooling, tight coupling.
+          </p>
+        </div>
+        <div class="vt-split-panel after">
+          <div class="vt-split-label">After</div>
+          <p>
+            A connection pool sits in front — services share connections,
+            latency drops, coupling loosens.
+          </p>
+        </div>
+      </div>
+
+      <h2>Flex playground — justify-content</h2>
+
+      <p><strong>jc-between</strong></p>
+      <div class="vt-flex jc-between">
+        <div class="vt-flex-item">Alpha</div>
+        <div class="vt-flex-item">Beta</div>
+        <div class="vt-flex-item">Gamma</div>
+      </div>
+
+      <p><strong>jc-center</strong></p>
+      <div class="vt-flex jc-center">
+        <div class="vt-flex-item">Alpha</div>
+        <div class="vt-flex-item">Beta</div>
+        <div class="vt-flex-item">Gamma</div>
+      </div>
+
+      <p><strong>jc-evenly</strong></p>
+      <div class="vt-flex jc-evenly">
+        <div class="vt-flex-item">Alpha</div>
+        <div class="vt-flex-item">Beta</div>
+        <div class="vt-flex-item">Gamma</div>
+      </div>
+
+      <h2>Flex playground — align-items</h2>
+
+      <p><strong>ai-start</strong> (items of different heights)</p>
+      <div class="vt-flex ai-start" style="height: 5rem">
+        <div class="vt-flex-item">Short</div>
+        <div
+          class="vt-flex-item"
+          style="padding-top: 1.2rem; padding-bottom: 1.2rem"
+        >
+          Tall
+        </div>
+        <div class="vt-flex-item">Short</div>
+      </div>
+
+      <p><strong>ai-end</strong></p>
+      <div class="vt-flex ai-end" style="height: 5rem">
+        <div class="vt-flex-item">Short</div>
+        <div
+          class="vt-flex-item"
+          style="padding-top: 1.2rem; padding-bottom: 1.2rem"
+        >
+          Tall
+        </div>
+        <div class="vt-flex-item">Short</div>
+      </div>
+    </main>
+  </body>
+</html>

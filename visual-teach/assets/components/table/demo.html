@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Table — Component Demo</title>
+    <link rel="stylesheet" href="../../base/base.css" />
+    <link rel="stylesheet" href="table.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Table</h1>
+      <p class="vt-lede">
+        Comparison matrices, key/value references, and compact zebra tables —
+        all responsive and themeable.
+      </p>
+
+      <h2>Comparison matrix</h2>
+
+      <div class="vt-table-wrap">
+        <table class="vt-table">
+          <colgroup>
+            <col />
+            <col />
+            <col class="vt-col-pick" />
+            <col />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th>Option A</th>
+              <th class="vt-th-pick">
+                <span class="vt-pick-badge">Recommended</span>Option B
+              </th>
+              <th>Option C</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Dark mode</th>
+              <td class="vt-ok"></td>
+              <td class="vt-ok"></td>
+              <td class="vt-no"></td>
+            </tr>
+            <tr>
+              <th scope="row">Accessibility</th>
+              <td class="vt-partial"><span class="note">Needs review</span></td>
+              <td class="vt-ok"></td>
+              <td class="vt-partial"><span class="note">Partial ARIA</span></td>
+            </tr>
+            <tr>
+              <th scope="row">Responsive</th>
+              <td class="vt-no"></td>
+              <td class="vt-ok"></td>
+              <td class="vt-ok"></td>
+            </tr>
+            <tr class="vt-row-key">
+              <th scope="row">Bundle size</th>
+              <td>48 KB</td>
+              <td>12 KB</td>
+              <td>31 KB</td>
+            </tr>
+            <tr>
+              <th scope="row">Tree-shaking</th>
+              <td class="vt-no"></td>
+              <td class="vt-ok"></td>
+              <td class="vt-partial"><span class="note">Partial</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>Key / value reference</h2>
+
+      <table class="vt-kv">
+        <tbody>
+          <tr>
+            <th scope="row">Method</th>
+            <td>POST</td>
+          </tr>
+          <tr>
+            <th scope="row">Endpoint</th>
+            <td><code>/v1/messages</code></td>
+          </tr>
+          <tr>
+            <th scope="row">Auth</th>
+            <td>Bearer token via <code>Authorization</code> header</td>
+          </tr>
+          <tr>
+            <th scope="row">Rate limit</th>
+            <td>1 000 requests / minute per project</td>
+          </tr>
+          <tr>
+            <th scope="row">Max tokens</th>
+            <td>200 000 input · 8 192 output</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2>Compact + zebra table</h2>
+
+      <div class="vt-table-wrap">
+        <table class="vt-table compact">
+          <thead>
+            <tr>
+              <th>Status code</th>
+              <th>Meaning</th>
+              <th>Retryable</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>200</td>
+              <td>OK</td>
+              <td class="vt-ok"></td>
+            </tr>
+            <tr>
+              <td>400</td>
+              <td>Bad request</td>
+              <td class="vt-no"></td>
+            </tr>
+            <tr>
+              <td>429</td>
+              <td>Rate limit exceeded</td>
+              <td class="vt-ok"></td>
+            </tr>
+            <tr>
+              <td>500</td>
+              <td>Internal server error</td>
+              <td class="vt-partial"><span class="note">With backoff</span></td>
+            </tr>
+            <tr>
+              <td>529</td>
+              <td>Overloaded</td>
+              <td class="vt-ok"></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+    <script src="../../base/base.js"></script>
+  </body>
+</html>

@@ -1,0 +1,48 @@
+/* reveal — free-recall prompt + click-to-reveal answer, built on native
+   <details>/<summary>. No JS: the browser owns open/close state. Pairs with
+   quiz (recognition) as its self-graded recall counterpart. */
+.vt-reveal {
+  border: 1px solid var(--vt-rule);
+  border-radius: 8px;
+  background: var(--vt-soft);
+  margin: 1.4rem 0;
+  padding: 0 1rem;
+}
+.vt-reveal > summary {
+  font-family: var(--vt-ui-font);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.9rem 0.2rem 0.9rem 1.6rem;
+  list-style: none; /* hide default disclosure triangle; we draw our own */
+  position: relative; /* anchor the ▸ marker; summary text flows as prose
+                          so inline <code> wraps normally (not as flex items) */
+}
+.vt-reveal > summary::-webkit-details-marker {
+  display: none; /* Safari/Chrome legacy marker */
+}
+.vt-reveal > summary::before {
+  content: "▸";
+  position: absolute;
+  left: 0.3rem;
+  color: var(--vt-accent);
+  font-size: 0.9em;
+  transition: transform 0.15s;
+}
+.vt-reveal[open] > summary::before {
+  transform: rotate(90deg);
+}
+.vt-reveal > summary:hover {
+  color: var(--vt-accent);
+}
+.vt-reveal .answer {
+  padding: 0 0 1rem 1.4rem;
+  font-size: 0.97rem;
+}
+/* small "recall" hint chip authors can drop next to a group of prompts */
+.vt-reveal-hint {
+  font-family: var(--vt-ui-font);
+  font-size: 0.85rem;
+  color: var(--vt-muted);
+  font-style: italic;
+  margin: 1.4rem 0 0.6rem;
+}

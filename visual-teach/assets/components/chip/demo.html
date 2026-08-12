@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chip — Component Demo</title>
+    <link rel="stylesheet" href="../../base/base.css" />
+    <link rel="stylesheet" href="chip.css" />
+    <style>
+      .demo-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        align-items: center;
+        margin: 1rem 0 1.6rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Chip</h1>
+      <p class="vt-lede">
+        Pills, level indicators, step badges, and keyboard key caps — inline
+        labelling vocabulary.
+      </p>
+
+      <h2>Pill — fills</h2>
+      <div class="demo-row">
+        <span class="vt-pill">Default</span>
+        <span class="vt-pill neutral">Neutral</span>
+        <span class="vt-pill good">Good</span>
+        <span class="vt-pill bad">Bad</span>
+        <span class="vt-pill warn">Warn</span>
+      </div>
+
+      <h2>Pill — outlines</h2>
+      <div class="demo-row">
+        <span class="vt-pill outline">Default</span>
+        <span class="vt-pill outline neutral">Neutral</span>
+        <span class="vt-pill outline good">Good</span>
+        <span class="vt-pill outline bad">Bad</span>
+        <span class="vt-pill outline warn">Warn</span>
+      </div>
+
+      <h2>Pill — sizes</h2>
+      <div class="demo-row">
+        <span class="vt-pill">Regular</span>
+        <span class="vt-pill sm">Small</span>
+        <span class="vt-pill good sm">Small good</span>
+      </div>
+
+      <h2>Pill — status dot</h2>
+      <div class="demo-row">
+        <span class="vt-pill dot good">Online</span>
+        <span class="vt-pill dot warn">Degraded</span>
+        <span class="vt-pill dot bad">Offline</span>
+        <span class="vt-pill dot neutral">Unknown</span>
+      </div>
+
+      <h2>Pill — leading icons</h2>
+      <div class="demo-row">
+        <span class="vt-pill ic-check good">Verified</span>
+        <span class="vt-pill ic-warn warn">Caution</span>
+      </div>
+
+      <h2>Level pills</h2>
+      <div class="demo-row">
+        <span class="vt-level beginner">Beginner</span>
+        <span class="vt-level intermediate">Intermediate</span>
+        <span class="vt-level advanced">Advanced</span>
+      </div>
+
+      <h2>Badge</h2>
+      <div class="demo-row">
+        <span class="vt-badge">1</span>
+        <span class="vt-badge">2</span>
+        <span class="vt-badge">3</span>
+        <span class="vt-badge sm">1</span>
+        <span class="vt-badge sm">2</span>
+      </div>
+
+      <h2>Keyboard keys</h2>
+      <div class="demo-row">
+        <kbd class="vt-kbd">Ctrl</kbd>
+        <kbd class="vt-kbd">⌘</kbd>
+        <kbd class="vt-kbd">Shift</kbd>
+        <kbd class="vt-kbd">Alt</kbd>
+        <kbd class="vt-kbd">Enter</kbd>
+        <kbd class="vt-kbd">Esc</kbd>
+        <kbd class="vt-kbd">Tab</kbd>
+        <kbd class="vt-kbd">Space</kbd>
+      </div>
+    </main>
+    <script src="../../base/base.js"></script>
+  </body>
+</html>

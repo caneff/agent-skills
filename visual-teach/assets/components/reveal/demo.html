@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reveal — Component Demo</title>
+    <link rel="stylesheet" href="../../base/base.css" />
+    <link rel="stylesheet" href="reveal.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Reveal</h1>
+      <p class="vt-lede">
+        Free-recall prompts that hide their answer until clicked. Built on
+        native
+        <code>&lt;details&gt;</code> — no JS. Use for active recall, where the
+        learner produces the answer from memory, then checks it; reach for quiz
+        instead when you want checked recognition from fixed options.
+      </p>
+
+      <p class="vt-reveal-hint">
+        Retrieval is what makes it stick — try each before revealing.
+      </p>
+
+      <details class="vt-reveal">
+        <summary>What two parents does a merge commit have, and why?</summary>
+        <div class="answer">
+          The tip of each branch being merged. The merge commit records both
+          histories converging, so it points back at both.
+        </div>
+      </details>
+
+      <details class="vt-reveal">
+        <summary>Why do rebased commits get new hashes?</summary>
+        <div class="answer">
+          A hash is derived from the commit's content
+          <strong>plus its parent</strong>. Replay gives each commit a new
+          parent, so it's a new commit with a new hash.
+        </div>
+      </details>
+    </main>
+    <script src="../../base/base.js"></script>
+  </body>
+</html>

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Code Component Demo</title>
+    <link rel="stylesheet" href="../../base/base.css" />
+    <link rel="stylesheet" href="code.css" />
+    <script src="../../prism/prism-core.min.js"></script>
+    <script src="../../prism/prism-markup.min.js"></script>
+    <script src="../../prism/prism-css.min.js"></script>
+    <script src="../../prism/prism-clike.min.js"></script>
+    <script src="../../prism/prism-javascript.min.js"></script>
+    <script src="../../prism/prism-python.min.js"></script>
+    <script src="../../base/base.js"></script>
+    <script src="code.js"></script>
+  </head>
+  <body>
+    <main>
+      <h1>Code</h1>
+      <p class="vt-lede">
+        Syntax-highlighted code blocks, paired I/O blocks, and inline emphasis.
+      </p>
+
+      <h2>Python code block with copy button</h2>
+
+      <div class="vt-code">
+        <div class="vt-code-head">
+          <span>fibonacci.py</span>
+          <button class="vt-code-copy" type="button"></button>
+        </div>
+        <pre><code class="language-python">def fibonacci(n):
+    """Return the nth Fibonacci number."""
+    if n <= 1:
+        return n
+    a, b = 0, 1
+    for _ in range(2, n + 1):
+        a, b = b, a + b
+    return b
+
+# Print first 10 Fibonacci numbers
+for i in range(10):
+    print(f"fib({i}) = {fibonacci(i)}")</code></pre>
+      </div>
+
+      <h2>Input → Output pair</h2>
+
+      <div class="vt-io">
+        <div class="vt-io-input">
+          <div class="vt-io-head">
+            <span>Input</span>
+            <button class="vt-code-copy" type="button"></button>
+          </div>
+          <pre><code class="language-python">numbers = [3, 1, 4, 1, 5, 9, 2, 6]
+result = sorted(numbers)
+print(result)</code></pre>
+        </div>
+        <div class="vt-io-output">
+          <div class="vt-io-head">
+            <span>Output</span>
+          </div>
+          <pre><code>[1, 1, 2, 3, 4, 5, 6, 9]</code></pre>
+        </div>
+      </div>
+
+      <h2>Inline emphasis with <code>vt-pcode</code></h2>
+
+      <p>
+        Use <code class="vt-pcode">vt-pcode</code> for inline code that deserves
+        accent-level emphasis — for example, a key concept like
+        <code class="vt-pcode">list comprehension</code> or a primary API name
+        like <code class="vt-pcode">sorted()</code>. Regular inline
+        <code>code</code> stays muted by comparison.
+      </p>
+    </main>
+  </body>
+</html>

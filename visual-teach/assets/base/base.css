@@ -1,0 +1,418 @@
+/* base — the always-linked stylesheet spine (tokens, page shell, recap, metabar, difficulty level, objectives, mission, sources, print).
+   Component CSS (callout, table, chip/pill/badge/level/kbd, checklist, quiz,
+   code block, Prism tokens, diagram, math, teacher-box) lives in its own file —
+   every Component is self-contained so it can be copied on its own. */
+
+/* light-dark(light, dark) picks per the computed color-scheme — one definition
+   per token instead of a separate dark palette block. Theme control lives in
+   color-scheme alone (see below). */
+:root {
+  color-scheme: light dark; /* follow OS; [data-theme] forces a side */
+  --vt-ink: light-dark(#1a1f2b, #e6e9ee); /* body text */
+  --vt-muted: light-dark(#5b6472, #97a2b2); /* secondary text */
+  --vt-accent: light-dark(
+    #1a73e8,
+    #5b9dff
+  ); /* links, kicker, h2 rule, primary */
+  --vt-accent-fg: light-dark(#ffffff, #0b1220); /* text on accent fill */
+  --vt-rule: light-dark(#e3e6ea, #2b313b); /* borders, dividers */
+  --vt-paper: light-dark(#ffffff, #13171d); /* page / card background */
+  --vt-good: light-dark(#0d7d4d, #3ecf8e); /* quiz correct, checklist done */
+  --vt-bad: light-dark(#c5221f, #ff6b6b); /* quiz wrong */
+  --vt-warn: light-dark(#f9ab00, #f5c451); /* caution callout */
+  --vt-warn-fg: #000; /* text on warn fill (dark for contrast on amber) */
+  --vt-warn-dk: #9a6b00; /* dark amber for outline/foreground warn uses */
+  --vt-ui-font:
+    "Helvetica Neue", Arial, sans-serif; /* sans UI chrome: kickers, labels, metabar, component text (body stays Georgia serif) */
+}
+
+/* derived tints */
+:root {
+  /* neutral tints mix in srgb: the source (--vt-ink) is near-grey, so srgb
+     yields a flat clean grey — oklch would preserve ink's faint blue and tint them. */
+  --vt-neutral-soft: color-mix(in srgb, var(--vt-ink) 12%, var(--vt-paper));
+  --vt-soft: color-mix(in srgb, var(--vt-ink) 4%, var(--vt-paper));
+  --vt-stripe: color-mix(in srgb, var(--vt-ink) 6%, var(--vt-paper));
+  /* colored tints mix in oklch: mixing toward paper in srgb desaturates fast and
+     reads grey; oklch preserves chroma so the soft fills stay clean pastels. */
+  --vt-accent-dk: color-mix(in oklch, var(--vt-accent) 78%, #000);
+  --vt-accent-soft: color-mix(in oklch, var(--vt-accent) 8%, var(--vt-paper));
+  --vt-bad-soft: color-mix(in oklch, var(--vt-bad) 12%, var(--vt-paper));
+  --vt-good-soft: color-mix(in oklch, var(--vt-good) 12%, var(--vt-paper));
+  --vt-warn-soft: color-mix(in oklch, var(--vt-warn) 14%, var(--vt-paper));
+}
+
+/* Theme = which side of every light-dark() token resolves. Default follows the
+   OS; [data-theme] forces a side. Derived tints + masked icons follow the tokens. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.125rem;
+  color: var(--vt-ink);
+  margin: 0;
+  background: var(--vt-paper);
+  line-height: 1.6;
+}
+main {
+  --vt-measure: 700px;
+  --vt-frame: calc(var(--vt-measure) * 1.35);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) min(var(--vt-measure), 100%) minmax(
+      0,
+      1fr
+    );
+  max-width: var(--vt-frame);
+  margin: 0 auto;
+  padding: 3rem 1.5rem 5rem;
+}
+main > * {
+  grid-column: 2;
+}
+/* left-anchored breakout: left edge stays with prose, extends right into gutter */
+main > .vt-wide {
+  grid-column: 2 / -1;
+}
+/* small tables/code are content-sized — a barely-over-measure block won't sprawl */
+main > .vt-table-wrap.vt-wide,
+main > .vt-code.vt-wide {
+  width: max-content;
+  max-width: 100%;
+}
+/* diagrams fill their track */
+main > .vt-diagram.vt-wide {
+  width: 100%;
+  min-width: 0; /* grid items default to min-width:auto = SVG intrinsic width; 0 lets overflow-x:auto clip */
+}
+/* wide diagrams only: normal diagrams keep shrink-to-fit; wide ones scroll at full size */
+main > .vt-diagram.vt-wide svg {
+  max-width: none;
+}
+
+/* page shell */
+.vt-kicker {
+  font-family: var(--vt-ui-font);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--vt-accent);
+}
+h1 {
+  font-size: 2.1rem;
+  line-height: 1.2;
+  margin: 0.3rem 0 0.5rem;
+  letter-spacing: -0.01em;
+  text-wrap: balance; /* even multi-line headings */
+}
+.vt-lede {
+  font-size: 1.1rem;
+  color: var(--vt-muted);
+  font-style: italic;
+  margin-bottom: 0.5rem;
+}
+.vt-meta {
+  font-family: var(--vt-ui-font);
+  font-size: 0.85rem;
+  color: var(--vt-muted);
+  margin-bottom: 2.5rem;
+}
+h2 {
+  font-family: var(--vt-ui-font);
+  font-size: 1.25rem;
+  margin-top: 2.8rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 2px solid var(--vt-rule);
+  position: relative;
+  text-wrap: balance;
+}
+h2 .vt-num {
+  color: var(--vt-accent);
+  margin-right: 0.4rem;
+}
+/* section anchor: hidden until the heading is hovered or the link is focused */
+.vt-anchor {
+  margin-left: 0.35rem;
+  color: var(--vt-muted);
+  text-decoration: none;
+  font-weight: 400;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+h2:hover .vt-anchor,
+h3:hover .vt-anchor,
+.vt-anchor:focus-visible {
+  opacity: 1;
+}
+.vt-anchor:hover {
+  color: var(--vt-accent);
+}
+a {
+  color: var(--vt-accent);
+}
+code {
+  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-size: 0.88em;
+  background: var(--vt-soft);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  white-space: nowrap; /* inline code stays on one line — never break mid-token */
+}
+a code {
+  background: none;
+  padding-inline: 0.1em;
+}
+
+/* recap + next-CTA */
+.vt-recap {
+  border-radius: 12px;
+  border-left: 4px solid var(--vt-good);
+  background: var(--vt-good-soft);
+  padding: 1rem 1.2rem;
+  margin: 2rem 0 1rem;
+}
+.vt-recap .h {
+  font-family: var(--vt-ui-font);
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+/* up-next teaser — plain forward pointer, deliberately NOT a button/link */
+.vt-upnext {
+  color: var(--vt-muted);
+  font-size: 0.9rem;
+  margin: 1.5rem 0 1rem;
+}
+.vt-upnext em {
+  font-style: italic;
+  color: var(--vt-ink);
+}
+
+/* shell — meta bar: time / prereqs / difficulty / lesson position */
+.vt-metabar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+  font-family: var(--vt-ui-font);
+  font-size: 0.85rem;
+  color: var(--vt-muted);
+  margin: 0 0 2rem;
+}
+.vt-metabar .item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.vt-metabar .item + .item {
+  border-left: 1px solid var(--vt-rule);
+  padding-left: 0.9rem;
+}
+.vt-metabar strong {
+  color: var(--vt-ink);
+  font-weight: 600;
+}
+
+/* difficulty / level pill — lives in the shell (fixed metabar slot), not the
+   optional chip component, so every lesson styles it without loading chip.css */
+.vt-level {
+  display: inline-block;
+  padding: 0.07rem 0.6rem;
+  border-radius: 999px;
+  font-family: var(--vt-ui-font);
+  font-size: 0.75rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.vt-level::before {
+  content: "●";
+  margin-right: 0.4em;
+  font-size: 0.85em;
+}
+.vt-level.beginner {
+  background: var(--vt-good-soft);
+  color: var(--vt-good);
+}
+.vt-level.intermediate {
+  background: var(--vt-warn-soft);
+  color: var(--vt-warn-dk);
+}
+.vt-level.advanced {
+  background: var(--vt-bad-soft);
+  color: var(--vt-bad);
+}
+@media (forced-colors: active) {
+  .vt-level.beginner::before {
+    content: "○";
+  }
+  .vt-level.intermediate::before {
+    content: "◑";
+  }
+  .vt-level.advanced::before {
+    content: "●";
+  }
+}
+
+/* shell — intro card (objectives, why-it-matters, hook — author's call) */
+.vt-objectives {
+  border-left: 3px solid var(--vt-accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--vt-accent-soft);
+  padding: 0.8rem 1.1rem;
+  margin: 1.5rem 0;
+}
+.vt-objectives .h {
+  font-family: var(--vt-ui-font);
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+.vt-objectives ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+.vt-objectives li {
+  margin: 0.25rem 0;
+}
+.vt-objectives p {
+  margin: 0.4rem 0 0;
+}
+.vt-objectives p:first-child {
+  margin-top: 0;
+}
+.vt-objectives strong {
+  color: var(--vt-accent-dk);
+}
+
+/* footer / sources (source-type icons, companion slot, verified-date) */
+.vt-sources {
+  margin-top: 3rem;
+  border-top: 1px solid var(--vt-rule);
+  padding-top: 1rem;
+  color: var(--vt-muted);
+  font-size: 0.85rem;
+}
+.vt-sources .lbl {
+  font-family: var(--vt-ui-font);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.vt-reflist {
+  list-style: none;
+  margin: 0.6rem 0;
+  padding: 0;
+}
+.vt-reflist li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin: 0.4rem 0;
+  line-height: 1.4;
+}
+.vt-reflist .note {
+  color: var(--vt-muted);
+}
+.vt-src-ic {
+  flex: 0 0 auto;
+  width: 0.95rem;
+  height: 0.95rem;
+  align-self: center;
+  background-color: var(--vt-muted);
+  -webkit-mask: var(--src-icon) no-repeat center / contain;
+  mask: var(--src-icon) no-repeat center / contain;
+}
+.vt-src-ic[data-type="spec"] {
+  --src-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J003IDhsLTQgNGw0IDQnLz48cGF0aCBkPSdNMTcgOGw0IDRsLTQgNCcvPjxwYXRoIGQ9J00xNCA0bC00IDE2Jy8+PC9zdmc+");
+}
+.vt-src-ic[data-type="video"] {
+  --src-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxyZWN0IHg9JzMnIHk9JzUnIHdpZHRoPScxOCcgaGVpZ2h0PScxNCcgcng9JzInLz48cGF0aCBkPSdNMTAgOWw1IDNsLTUgM3onLz48L3N2Zz4=");
+}
+.vt-src-ic[data-type="forum"] {
+  --src-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J00yMSAxNGEyIDIgMCAwIDEgLTIgMkg3bC00IDRWNmEyIDIgMCAwIDEgMiAtMmgxNGEyIDIgMCAwIDEgMiAyeicvPjwvc3ZnPg==");
+}
+.vt-src-ic[data-type="doc"] {
+  --src-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J00xNCAzdjRhMSAxIDAgMCAwIDEgMWg0Jy8+PHBhdGggZD0nTTE3IDIxSDdhMiAyIDAgMCAxIC0yIC0yVjVhMiAyIDAgMCAxIDIgLTJoN2w1IDV2MTFhMiAyIDAgMCAxIC0yIDJ6Jy8+PHBhdGggZD0nTTkgMTNoNicvPjxwYXRoIGQ9J005IDE3aDYnLz48L3N2Zz4=");
+}
+.vt-src-ic[data-type="book"] {
+  --src-icon: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCcgZmlsbD0nbm9uZScgc3Ryb2tlPSdibGFjaycgc3Ryb2tlLXdpZHRoPScyJyBzdHJva2UtbGluZWNhcD0ncm91bmQnIHN0cm9rZS1saW5lam9pbj0ncm91bmQnPjxwYXRoIGQ9J00zIDZhOSA5IDAgMCAxIDkgMGE5IDkgMCAwIDEgOSAwdjEzYTkgOSAwIDAgMCAtOSAwYTkgOSAwIDAgMCAtOSAweicvPjxwYXRoIGQ9J00xMiA2djEzJy8+PC9zdmc+");
+}
+.vt-companion {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.9rem;
+  padding-top: 0.8rem;
+  border-top: 1px dashed var(--vt-rule);
+}
+.vt-companion .vt-src-ic {
+  width: 1.05rem;
+  height: 1.05rem;
+  background-color: var(--vt-accent);
+}
+.vt-companion a {
+  font-weight: 600;
+}
+.vt-sources .meta {
+  margin-top: 0.7rem;
+  font-size: 0.78rem;
+  color: var(--vt-muted);
+}
+
+/* ====== print ====== */
+@media print {
+  /* Force the light side of every light-dark() token — dark backgrounds are
+     near-black on paper and waste ink. color-scheme: light also reverts the
+     browser's own UA dark styles. Both selectors so this beats the forced-dark
+     :root[data-theme="dark"] rule (specificity 0,2,0) outside this media block. */
+  :root,
+  :root[data-theme="dark"] {
+    color-scheme: light;
+  }
+
+  /* Screen-only interactive chrome: hide the theme toggle (fixed, top-right)
+     and code copy buttons so they do not print over the lesson content. */
+  .vt-theme-toggle,
+  .vt-code-copy {
+    display: none;
+  }
+
+  /* Non-option quiz buttons (vt-quiz-check, vt-reset) are hidden —
+     interactivity is meaningless on paper.
+     Quiz options (.vt-quiz button.opt) intentionally still print: the
+     display:none here (spec 0,1,1) is overridden by
+     .vt-quiz button.opt { display:block } (spec 0,2,1) so all options
+     stay visible, making a printed quiz self-contained and answerable on paper. */
+  .vt-quiz button,
+  .vt-reset {
+    display: none;
+  }
+
+  .vt-diagram {
+    border: 1px solid #ccc;
+    background: none;
+  }
+  .vt-node,
+  .vt-box {
+    border: 1px solid #ccc;
+  }
+  .vt-split {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Honor reduced-motion globally so every component inherits it — no per-file
+   opt-in (WCAG 2.3.3). Kills transitions + animations site-wide. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

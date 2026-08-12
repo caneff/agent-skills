@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quiz Component Demo</title>
+    <link rel="stylesheet" href="../../base/base.css" />
+    <link rel="stylesheet" href="quiz.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Quiz</h1>
+      <p class="vt-lede">
+        Interactive single-answer and multi-select quiz blocks.
+      </p>
+
+      <div aria-live="polite" class="vt-quiz-live"></div>
+
+      <h2>Single-answer quiz</h2>
+      <p>
+        Pick one correct answer. Wrong picks show per-option feedback without
+        locking; you keep trying until you get it right.
+      </p>
+
+      <div class="vt-quiz" data-answer="1">
+        <p class="q">
+          Which CSS property controls the space between flex items?
+        </p>
+        <button class="opt">margin</button>
+        <button class="opt">gap</button>
+        <button class="opt">padding</button>
+        <button class="opt">spacing</button>
+
+        <template class="why-good">
+          <strong>gap</strong> is the correct property. It sets the space
+          between flex (and grid) items directly on the container.
+        </template>
+        <template class="why-bad">Not quite — try again.</template>
+        <template data-opt="0">
+          <strong>margin</strong> can push items apart, but it adds space
+          outside the item on all sides and isn't the idiomatic flexbox
+          approach.
+        </template>
+        <template data-opt="2">
+          <strong>padding</strong> adds space inside the element, not between
+          sibling items.
+        </template>
+        <template data-opt="3">
+          <strong>spacing</strong> isn't a CSS property — it's not valid here.
+        </template>
+
+        <div class="feedback"></div>
+        <div aria-live="polite" class="vt-quiz-live"></div>
+      </div>
+
+      <h2>Multi-select quiz</h2>
+      <p>Select all correct answers, then click "Check answer".</p>
+
+      <div class="vt-quiz" data-answer="0,2" data-multi>
+        <p class="q">
+          Which of the following are valid CSS length units? (Select all that
+          apply.)
+        </p>
+        <button class="opt">rem</button>
+        <button class="opt">px-ratio</button>
+        <button class="opt">vw</button>
+        <button class="opt">screen-percent</button>
+
+        <template class="why-good">
+          <strong>rem</strong> (root em) and <strong>vw</strong> (viewport
+          width) are both valid CSS length units.
+        </template>
+        <template class="why-bad">
+          Not all your selections are correct. <strong>px-ratio</strong> and
+          <strong>screen-percent</strong> are not real CSS units.
+        </template>
+
+        <div class="feedback"></div>
+        <div aria-live="polite" class="vt-quiz-live"></div>
+      </div>
+    </main>
+    <script src="../../base/base.js"></script>
+    <script src="quiz.js"></script>
+  </body>
+</html>

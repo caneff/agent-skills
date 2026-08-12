@@ -1,0 +1,117 @@
+/* quiz component */
+
+/* quiz */
+.vt-quiz {
+  border: 1px solid var(--vt-rule);
+  border-radius: 12px;
+  padding: 1.2rem 1.3rem;
+  margin: 1.3rem 0;
+}
+.vt-quiz p.q {
+  font-weight: bold;
+  margin: 0 0 0.7rem;
+}
+.vt-quiz button.opt {
+  display: block;
+  width: 100%;
+  text-align: start;
+  font: inherit;
+  font-size: 0.95rem;
+  background: var(--vt-soft);
+  border: 1px solid var(--vt-rule);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+  color: var(--vt-ink);
+}
+.vt-quiz button.opt:hover:not(:disabled) {
+  border-color: var(--vt-accent);
+}
+.vt-quiz button.opt:focus-visible {
+  outline: 3px solid var(--vt-accent);
+  outline-offset: 2px;
+}
+.vt-quiz button.opt:disabled {
+  cursor: default;
+}
+.vt-quiz button.opt.correct {
+  background: var(--vt-good-soft);
+  border-color: var(--vt-good);
+}
+.vt-quiz button.opt.wrong {
+  background: var(--vt-bad-soft);
+  border-color: var(--vt-bad);
+}
+.vt-quiz button.opt.selected {
+  border-color: var(--vt-accent);
+  background: var(--vt-accent-soft);
+}
+.vt-quiz .feedback {
+  font-size: 0.92rem;
+  margin-top: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  display: none;
+}
+.vt-quiz .feedback.show {
+  display: block;
+}
+.vt-quiz .feedback.good {
+  background: var(--vt-good-soft);
+}
+.vt-quiz .feedback.bad {
+  background: var(--vt-bad-soft);
+}
+.vt-fb-correct {
+  margin: 0.6rem -0.8rem -0.6rem;
+  padding: 0.55rem 0.8rem;
+  background: var(--vt-good-soft);
+  border-radius: 0 0 8px 8px;
+}
+.vt-quiz-check {
+  font-family: var(--vt-ui-font);
+  font-size: 0.9rem;
+  margin-top: 0.4rem;
+  padding: 0.45rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--vt-accent);
+  background: var(--vt-accent);
+  color: var(--vt-accent-fg);
+  cursor: pointer;
+}
+.vt-quiz-check:focus-visible {
+  outline: 3px solid var(--vt-accent);
+  outline-offset: 2px;
+}
+.vt-quiz-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+@media (forced-colors: active) {
+  .vt-quiz button.opt.correct::before {
+    content: "✓ ";
+  }
+  .vt-quiz button.opt.wrong::before {
+    content: "✗ ";
+  }
+}
+
+@media print {
+  /* .vt-quiz as a whole stays together across page breaks. */
+  .vt-quiz {
+    break-inside: avoid;
+  }
+  /* Non-option quiz buttons (vt-quiz-check, vt-reset) are hidden on paper.
+     Quiz options (.vt-quiz button.opt) intentionally still print: the
+     display:none here (spec 0,1,1) is overridden by
+     .vt-quiz button.opt { display:block } (spec 0,2,1) so options stay visible. */
+  .vt-quiz button {
+    display: none;
+  }
+}
