@@ -68,23 +68,13 @@ Ask before installing: *"Seed `.sandcastle/.env` from an existing one? Give me
 a path, or fill it by hand afterwards."* A path becomes `--env-from`; no path
 means the script leaves the file to the user and says so on the way out.
 
-**Then walk the user through granting the bot access to THIS repo.** A seeded
-`.env` almost always carries `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY`, and
-those credentials are account-level: nothing in the file changes, including
-`GITHUB_APP_INSTALLATION_ID` for a same-owner repo, and
-`CLAUDE_CODE_OAUTH_TOKEN` is account-level too. What is missing is this repo in
-the App's existing installation. Only a human can add it:
-<https://github.com/settings/installations> → the bot App → **Configure** →
-**Repository access** → *Only select repositories* → add this repo → **Save**.
-[`.sandcastle/bot-setup.md`](templates/.sandcastle/bot-setup.md) step 3 is the
-same repository-access dialog; the rest of that file is how a bot identity gets
-created in the first place, if the user has no App yet.
-
-*Fallback — PAT mode*, where the `.env` sets `GH_TOKEN` instead of the
-`GITHUB_APP_*` block: a fine-grained PAT is repo-scoped, so the user mints a
-fresh one for this repo at
-<https://github.com/settings/personal-access-tokens/new> (Issues R/W, Pull
-requests R/W, Contents R/W, Metadata R) and replaces `GH_TOKEN`.
+**Then walk the user through the repo-scoped PAT.** Sandboxes authenticate with
+`GH_TOKEN` from `.sandcastle/.env`, which Sandcastle forwards into each one as a
+file; `CLAUDE_CODE_OAUTH_TOKEN` is account-level, so a seeded `.env` already
+carries it. A fine-grained PAT is repo-scoped, so the user mints a fresh one for
+THIS repo at <https://github.com/settings/personal-access-tokens/new> (Issues
+R/W, Pull requests R/W, Contents R/W, Metadata R) and sets `GH_TOKEN`. Host-side
+`gh`/`git` calls use the user's ambient credential (`gh auth`), not this file.
 
 ## How to read a failure
 

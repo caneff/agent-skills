@@ -30,12 +30,7 @@
 //   "scripts": { "sandcastle": "npx tsx .sandcastle/main.mts" }
 
 import * as sandcastle from "@ai-hero/sandcastle";
-import { addressOpenPRs } from "./address.mts";
-import {
-  sandboxIdentity,
-  sandboxConfig,
-  applyBotToken,
-} from "./sandbox-identity.mts";
+import { sandboxConfig } from "./sandbox-config.mts";
 import { resolveBase } from "./base-resolution.mts";
 import {
   parseSpecVerdict,
@@ -69,26 +64,15 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
-  existsSync,
   readdirSync,
   unlinkSync,
 } from "node:fs";
 import { z } from "zod";
 
-// Sandcastle forwards .sandcastle/.env into sandboxes but never into the host
-// process (it has no process.env assignment). sandboxIdentity() runs host-side
-// and mints the bot token from GITHUB_APP_* — so without this, those vars are
-// undefined on the host, minting no-ops, and PRs fall back to the personal
-// GH_TOKEN. Load the env file here, before any sandboxIdentity() call.
-if (existsSync(".sandcastle/.env")) process.loadEnvFile(".sandcastle/.env");
-
-// …but not GH_TOKEN. The load above pulls EVERY key into the HOST process, and
-// `gh` prefers an env token over ~/.config/gh — so a stale GH_TOKEN in .env
-// shadows the working keyring credential and 401s every host-side gh call.
-// Dropping it restores what the load broke: sandboxes still get their token,
-// either from sandboxIdentity()'s minted App token or from the .env FILE
-// Sandcastle forwards independently of process.env.
-delete process.env.GH_TOKEN;
+// Auth model: sandboxes read GH_TOKEN (the .env PAT) from the `.sandcastle/.env`
+// file Sandcastle forwards into each one; host-side `gh`/`git` calls here use
+// your ambient credential (`gh auth`). Nothing host-side reads `.env`, so it is
+// not loaded into this process — no bot-token minting to feed (#245).
 
 // ---------------------------------------------------------------------------
 // Issue lifecycle labels (managed host-side, never by the agents)
@@ -295,13 +279,6 @@ const planSchema = z.object({
 // Configuration
 // ---------------------------------------------------------------------------
 
-// Resolve sandbox identity. No-op when bot env vars are unset. Minted once: a
-// run is a single planning pass (#244), short enough to stay inside the ~1h App
-// installation token life. applyBotToken pushes the token into process.env so
-// the host gh()/git() calls stay authenticated too.
-const identity = await sandboxIdentity();
-applyBotToken(identity, process.env);
-
 // Copy the host's installed dependencies into the worktree before each sandbox
 // starts. Avoids resolving+downloading every dependency from scratch;
 // sandboxConfig's install hook reconciles anything added since the copy.
@@ -344,13 +321,6 @@ const allCompleted: CompletedIssue[] = [];
 // Issue id → PR number, one per issue, for the run summary.
 const prAssignments = new Map<string, number>();
 
-// Phase 0: clear pending review comments on open sandcastle PRs before taking
-// on new issue work. Set SANDCASTLE_SKIP_ADDRESS=1 for an issues-only run.
-if (process.env.SANDCASTLE_SKIP_ADDRESS !== "1") {
-  console.log("\n=== Phase 0: Address open sandcastle PR comments ===\n");
-  await addressOpenPRs();
-}
-
 // ---------------------------------------------------------------------------
 // Phase 1: Plan
 //
@@ -379,7 +349,7 @@ if (buildable.length === 0) {
   console.log("\nNo unblocked issues this run.");
 } else {
   const plan = await sandcastle.run({
-    ...sandboxConfig(identity),
+    ...sandboxConfig(),
     name: "planner",
     logging: logging("planner", headBranch),
     // One iteration is enough: the planner just needs to read and reason,
@@ -434,7 +404,7 @@ if (work.length > 0) {
       // un-revisable later and entangle the diff the reviewer sees. A fresh
       // branch cut from `main` rebases as a no-op; a stale branch replays its
       // commits onto `main`. Best-effort: abort on conflict and proceed.
-      const cfg = sandboxConfig(identity);
+      const cfg = sandboxConfig();
       const sandbox = await sandcastle.createSandbox({
         branch: issue.branch,
         // New branches are cut from `main`. (Ignored if the branch already
@@ -622,7 +592,7 @@ if (work.length > 0) {
       // makes "in-review with no PR" structurally impossible.
       git(`push -u --force-with-lease origin ${issue.branch}`);
       await sandcastle.run({
-        ...sandboxConfig(identity),
+        ...sandboxConfig(),
         name: `pr-author-${issue.id}`,
         logging: logging(`pr-author-${issue.id}`, issue.branch),
         maxIterations: 1,

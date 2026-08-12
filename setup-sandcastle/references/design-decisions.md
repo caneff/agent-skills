@@ -86,10 +86,11 @@ as inherited scaffold.
 9. **Models:** planner = `claude-opus-4-8` (dependency reasoning); implementer +
    reviewer + pr + address = `claude-sonnet-5`. (Bumped from the stale
    `claude-sonnet-4-6`.) Haiku micro-opt for pr/address deferred.
-10. **Bot identity kept as-is.** `sandbox-identity.mts` + `mint-gh-token.mjs` +
-    `bot-setup.md` + the `GITHUB_APP_*` `.env` block. Wired into `main.mts`/`address.mts`,
-    no-ops when env unset — removing it is net work. `.env.example` only dropped the
-    Cloudflare/R2 block.
+10. **Bot identity deleted; default to the `.env` PAT (#245).** `sandbox-identity.mts`,
+    `mint-gh-token.mjs`, `bot-setup.md` and the `GITHUB_APP_*` `.env` block are gone;
+    the surviving sandbox plumbing renders as `sandbox-config.mts`. Sandboxes
+    authenticate with `GH_TOKEN` from the forwarded `.env`. Recoverable from git —
+    Spec #240 records the cut-commit SHA.
 11. **Prompts stored pre-retargeted; install renders with copier.** All templatization
     (`npm run test`→`just check`, Python grep paths in the review standards-loader,
     uv Dockerfile, `.venv` copyToWorktree) is baked into `templates/` at build time.
