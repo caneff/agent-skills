@@ -4,7 +4,7 @@
 // When a two-axis review fails, the orchestrator writes the failure context
 // (which axis, why, how to continue the preserved branch) INTO the issue body
 // so a human re-driving it with `/implement` reads the instruction as part of
-// its brief (#240 story 15a). That write is a read-modify-write: the section is
+// its brief. That write is a read-modify-write: the section is
 // fenced by two HTML-comment markers — invisible in rendered markdown, exact to
 // match — so a re-run REPLACES the block in place rather than stacking a second
 // copy, and the original spec text is never touched.

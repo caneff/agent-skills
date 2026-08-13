@@ -1,14 +1,9 @@
 // Pure functions for the outcome→label engine and the bucketed run summary.
-//
-// planOutcomeTransition: decide one issue's terminal labels from its build outcome.
-// bucketIssues: bucket all open issues for the end-of-run summary.
-// buildRunSummary: format the bucketed summary as a printable string.
 
 import type { ReviewAxis } from "./review-verdict.mts";
 
 // One issue the run built to a clean review — its identity and the branch its PR
-// is cut from. (Formerly in pr-components.mts, which the one-PR-per-issue rewrite
-// deleted; the record survives because the run summary counts what was built.)
+// is cut from.
 export interface CompletedIssue {
   id: string;
   title: string;
@@ -143,7 +138,7 @@ export function planOutcomeTransition(input: {
 export interface OpenIssue {
   number: number;
   title: string;
-  labels: string[]; // all label names on this issue
+  labels: string[];
 }
 
 export type BucketName =
@@ -231,9 +226,6 @@ export function bucketIssues(options: {
       };
     }
 
-    // A delivered parent (open, every sub-issue closed) surfaces as ready-to-
-    // close before any label bucket: a spent spec often still carries a stray
-    // lifecycle label, and the close reminder must win over it.
     if (options.deliveredParents.has(id))
       return {
         number: issue.number,
@@ -262,7 +254,6 @@ export function bucketIssues(options: {
         bucket: "ready-for-agent",
       };
 
-    // No lifecycle label → untriaged.
     return {
       number: issue.number,
       title: issue.title,

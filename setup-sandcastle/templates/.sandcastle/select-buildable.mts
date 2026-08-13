@@ -1,4 +1,4 @@
-// The deterministic frontier filter (#242).
+// The deterministic frontier filter.
 //
 // Given the open issues and their native GitHub `blockedBy` edges, return the
 // buildable set: the open issues whose every blocker has already closed. A

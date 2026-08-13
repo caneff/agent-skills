@@ -3,8 +3,7 @@ import { logFilePath } from "../log-path.mts";
 
 // logFilePath reproduces sandcastle's default per-run log filename so existing
 // `tail -f` paths keep working: <sanitized-branch>-<slugged-name>.log under the
-// logs dir. It is the pure half of main.mts's logging() — an external filename
-// contract with no test until now.
+// logs dir.
 describe("logFilePath", () => {
   test("a plain branch and name join under the logs dir", () => {
     expect(logFilePath("planner", "main")).toBe(

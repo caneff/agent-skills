@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Base hex -> full Peacock .vscode/settings.json fragment.
 
-Encodes the recipe so nobody has to rediscover it:
   - peacock.remoteColor is REQUIRED for WSL/SSH/remote windows; without it
     Peacock's cleanup strips workbench.colorCustomizations on every save.
   - foreground per element is chosen by luminance for contrast.
@@ -75,7 +74,6 @@ def build(base_hex):
 
 
 def _demo():
-    # readable_fg contrast: the WCAG coefficients must not flip ink on a dark bg.
     assert readable_fg((255, 255, 255)) == "#15141b", "white -> dark ink"
     assert readable_fg((0, 0, 0)) == "#f8f8f2", "black -> light ink"
     assert readable_fg((0, 0, 255)) == "#f8f8f2", "saturated dark blue -> light ink"

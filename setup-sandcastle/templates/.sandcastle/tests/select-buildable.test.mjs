@@ -1,7 +1,7 @@
 import { test, expect, describe } from "vitest";
 import { selectBuildable, selectableFrontier } from "../select-buildable.mts";
 
-// selectBuildable is the deterministic frontier filter (#242): given the open
+// selectBuildable is the deterministic frontier filter: given the open
 // issues and their native GitHub `blockedBy` edges, return the buildable set —
 // open issues whose every blocker has closed. A blocker counts as open only
 // when it is still in the open-issue set; a closed blocker has dropped off.

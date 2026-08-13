@@ -4,13 +4,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { hasCopier, renderPythonArm } from "./render-fixture.mjs";
 
-// address.mts's no-arg sweep selects open `sandcastle/*` PRs that actually carry
-// review comments, so a sandbox is never burned on a comment-free PR (#250). The
-// branch filter is a gh query; the comment-presence cut is this pure function,
-// exercised here with an injected counter — no live GitHub.
-//
-// address.mts is a template (it branches on LANGUAGE for the worktree copy), so
-// import the rendered Python arm, the same move the other suites make.
+// address.mts branches on LANGUAGE, so there is no plain `.mts` to import —
+// render the Python arm and import that, as the other suites do.
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..", "..", "..");
 const withRender = test.skipIf(!hasCopier());
@@ -27,8 +22,6 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(() => rendered && rmSync(rendered, { recursive: true, force: true }));
 
-// A fake `gh` for the no-arg sweep: two open sandcastle PRs, only #11 carries a
-// comment. Routes on the command substring so the test never shells out.
 function fakeGh(commentCounts) {
   return (cmd) => {
     if (cmd.includes("repo view")) return "acme/widgets";
@@ -50,7 +43,6 @@ withRender("addressOpenPRs (no-arg sweep): runs a sandbox only for PRs with comm
       return {};
     },
   });
-  // #12 has no comments → skipped; only #11 gets a sandbox.
   expect(runs).toHaveLength(1);
   expect(runs[0].name).toBe("address-pr-11");
   expect(runs[0].branchStrategy).toEqual({

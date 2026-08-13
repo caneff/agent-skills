@@ -47,7 +47,6 @@ banner() {
 }
 
 # stage "Name" — clear the screen, then announce a stage and show progress.
-# Clearing keeps only the current step on screen.
 stage() {
   _clear
   _STAGE_INDEX=$((_STAGE_INDEX + 1))
@@ -199,6 +198,5 @@ ask_secret STRIPE_SECRET_KEY "Paste the secret key:"
 write_env STRIPE_PUBLISHABLE_KEY "$STRIPE_PUBLISHABLE_KEY"
 write_env STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"
 set_secret STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"   # CI needs this one
-# ──────────────────────────────────────────────────────────────────────────
 
 finish

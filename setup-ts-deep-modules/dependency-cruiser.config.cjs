@@ -14,7 +14,6 @@
 /** Where packages live. One immediate child dir per package (flat, no nesting). */
 const PACKAGES_ROOT = "src/packages";
 
-// --- derived patterns (no need to edit) -------------------------------------
 const R = PACKAGES_ROOT;
 /**
  * A package's private internals: anything nested inside a package subfolder.

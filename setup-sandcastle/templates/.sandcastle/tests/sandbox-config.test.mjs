@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { hasCopier, renderPythonArm } from "./render-fixture.mjs";
 
 // sandbox-config.mts carries the sandbox plumbing that survived the bot-identity
-// deletion (#245): the read-only skills mount, the hooks-path isolation, and the
+// deletion: the read-only skills mount, the hooks-path isolation, and the
 // dependency-install hook. No token minting, no bot git identity — every sandbox
 // authenticates with the .env PAT Sandcastle forwards as a file.
 //
