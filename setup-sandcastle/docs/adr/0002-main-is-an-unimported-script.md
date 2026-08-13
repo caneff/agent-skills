@@ -60,3 +60,30 @@ break on reformatting.
   invariant is high-stakes (bot identity reaching every sandbox), introduce a
   single chokepoint in a pure module that every call site must route through,
   and test the chokepoint — do not regex `main.mts`.
+
+## Rejected alternatives
+
+### The `RunPorts` seam (considered 2026-08, rejected)
+
+An `/improve-codebase-architecture` review proposed lifting the Phase 2
+per-issue pipeline into `buildIssue(issue, ports)` and the Phase 3
+outcome-application loop into `applyOutcome(record, plan, ports)`, both behind a
+single injected `RunPorts` seam — `{ createSandbox, run, git, gh, resolveBase }`
+— with live sandcastle/`execSync` adapters in a Run and in-memory fakes in
+tests. The draw was unit coverage of three fragile spots: the harness-fault fork
+(abort the whole Run vs. swallow to `nothing`), the `prNum > 0` relabel gate
+that keeps "in-review with no PR" impossible, and the null-body guard that stops
+a transient `gh` fetch error from overwriting a ticket.
+
+We considered it and it does not earn its cost. Two of the three spots are pure
+decisions that already have, or can get, a pure-module home with no seam at all:
+the review verdicts and outcome transition are already extracted and tested, and
+the null-body guard belongs inside `spliceReviewFailureSection` as a null → no-op
+check. What is left — that a harness fault must *abort the Run* and that a
+relabel must happen *after* the PR opens — is sequencing, not a predicate. A
+`RunPorts` seam is the exact move this ADR rejects: it turns `main.mts`'s shared
+run state into a wide DI interface passed between shallower modules, trading the
+linear script's locality for unit coverage of wiring this ADR already assigns to
+integration runs. No Run incident has made that trade wrong. Reopen only with a
+concrete incident where the untested abort-ordering wiring actually misbehaved —
+not a coverage-for-its-own-sake argument.
