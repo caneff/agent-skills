@@ -1,0 +1,94 @@
+{
+    "editor.fontFamily": "'Fira Code', Consolas, 'Courier New', monospace",
+    "editor.fontLigatures": true,
+    "terminal.integrated.fontFamily": "'Fira Code', Consolas, monospace",
+    "terminal.integrated.fontLigatures.enabled": true,
+    "[python]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "charliermarsh.ruff"
+    },
+    "editor.formatOnSave": true,
+    "notebook.formatOnSave.enabled": true,
+    "notebook.formatOnCellExecution": true,
+    "inlineChat.notebookAgent": true,
+    "editor.autoIndentOnPaste": true,
+    "ruff.format.preview": true,
+    "git.autofetch": true,
+    "git.confirmSync": false,
+    "git.enableSmartCommit": true,
+    "python.analysis.typeCheckingMode": "standard",
+    "python.terminal.activateEnvironment": false,
+    "chatgpt.runCodexInWindowsSubsystemForLinux": true,
+    "chat.disableAIFeatures": true,
+    "security.workspace.trust.untrustedFiles": "open",
+    "git.openRepositoryInParentFolders": "always",
+    "git.autoRepositoryDetection": false,
+    "chatgpt.reviewDelivery": "detached",
+    "excalidraw.theme": "light",
+    "githubPullRequests.fileListLayout": "tree",
+    "workbench.colorTheme": "Dracula Theme Soft",
+    "claudeCode.useTerminal": true,
+    "remote.autoForwardPortsSource": "hybrid",
+    "editor.accessibilitySupport": "off",
+    "terminal.integrated.mouseWheelScrollSensitivity": 3,
+    "githubIssues.queries": [
+        {
+            "label": "✅ Ready now",
+            "query": "state:open label:ready-for-agent no:blocked-by repo:${owner}/${repository}"
+        },
+        {
+            "label": "🔥 Grilling",
+            "query": "state:open label:wayfinder:grilling repo:${owner}/${repository}"
+        },
+        {
+            "label": "🗺️ Maps",
+            "query": "state:open label:wayfinder:map repo:${owner}/${repository}"
+        },
+        {
+            "label": "🚧 In flight",
+            "query": "state:open label:in-progress,in-review,needs-review repo:${owner}/${repository}"
+        },
+        {
+            "label": "📋 Specs",
+            "query": "state:open label:spec repo:${owner}/${repository}"
+        },
+        {
+            "label": "💤 Backlog",
+            "query": "state:open label:backlog repo:${owner}/${repository}"
+        },
+        {
+            "label": "Created Issues",
+            "query": "author:${user} state:open repo:${owner}/${repository} sort:created-desc"
+        }
+    ],
+    "markdown-preview-enhanced.previewTheme": "vscode.css",
+    "security.allowedUNCHosts": [
+        "wsl.localhost"
+    ],
+    "githubPullRequests.queries": [
+        /*{
+            "label": "Local Pull Request Branches",
+            "query": "default"
+        },
+        {
+            "label": "Waiting For My Review",
+            "query": "repo:${owner}/${repository} is:open review-requested:${user}"
+        },
+        {
+            "label": "Created By Me",
+            "query": "repo:${owner}/${repository} is:open author:${user}"
+        },*/
+        {
+            "label": "All Open",
+            "query": "default"
+        }
+    ],
+    "githubPullRequests.showPullRequestNumberInTree": true,
+    "workbench.colorCustomizations": {
+        "sideBar.border": "#6272a4",
+        "panel.border": "#6272a4",
+        "editorGroup.border": "#6272a4",
+        "sash.hoverBorder": "#6272a4"
+    },
+    "githubIssues.showIssueNumberInTree": true
+}
