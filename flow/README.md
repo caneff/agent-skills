@@ -12,13 +12,21 @@ every commit here is a backup.
 |---|---|---|
 | `bin/ship` | `~/.local/bin/ship` | Merge a PR, wait for it to land, sync main |
 | `bin/pushpr` | `~/.local/bin/pushpr` | Push branch + open PR through the outward gate |
+| `bin/issue-counts` | `~/.local/bin/issue-counts` | Open-issue counts per wayfinder group for the current repo |
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Global instructions (hard rules, the two gates) |
 | `claude/RTK.md` | `~/.claude/RTK.md` | RTK proxy notes |
 | `claude/settings.json` | `~/.claude/settings.json` | Harness config: hooks, permissions |
 | `claude/settings.local.json` | `~/.claude/settings.local.json` | Machine-local overrides |
 | `claude/hooks/*` | `~/.claude/hooks/*` | git guardrail + main-sync hooks |
+| `ccstatusline/settings.json` | `~/.config/ccstatusline/settings.json` | ccstatusline layout + per-widget colors |
+| `ccstatusline/issue-counts-segment.sh` | `~/.config/ccstatusline/issue-counts-segment.sh` | Cached statusline widget calling `issue-counts` |
 
 `~/.claude/skills` is already this repo, so it isn't duplicated here.
+
+The other segments `ccstatusline/settings.json` references (`effort-abbrev.py`,
+`usage-segment.sh`, `sandcastle-segment.sh`, `publish-usage.sh`) are not backed
+up here yet — a fresh restore links the config but those widgets won't run until
+their scripts exist.
 
 ## Restore on a fresh machine
 

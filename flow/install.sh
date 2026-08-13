@@ -24,6 +24,7 @@ link() { # link <repo-relative-src> <live-dest>
 
 link bin/ship                   "$HOME/.local/bin/ship"
 link bin/pushpr                 "$HOME/.local/bin/pushpr"
+link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 link claude/RTK.md              "$HOME/.claude/RTK.md"
 link claude/settings.json       "$HOME/.claude/settings.json"
@@ -31,6 +32,9 @@ link claude/settings.local.json "$HOME/.claude/settings.local.json"
 for h in block-dangerous-git.sh sync-main-after-merge.sh sync-primary-main.sh package.json; do
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
 done
+
+link ccstatusline/settings.json          "$HOME/.config/ccstatusline/settings.json"
+link ccstatusline/issue-counts-segment.sh "$HOME/.config/ccstatusline/issue-counts-segment.sh"
 
 echo
 echo "Done. The live flow tooling now points at this repo; commit to back it up."
