@@ -28,7 +28,7 @@ STUB
 chmod +x "$stub/gh"
 
 got=$(PATH="$stub:$PATH" bash "$here/issue-counts" --status)
-want="✅1 🔥0 🗺1 🚧1 📋0 💤0 · bug1"
+want="✅1 🔥0 🗺️1 🚧1 📋0 💤0 · bug1"
 
 if [ "$got" != "$want" ]; then
   echo "FAIL"; echo "  want: $want"; echo "  got:  $got"; exit 1
