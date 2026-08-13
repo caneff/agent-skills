@@ -80,8 +80,6 @@ def _notify(session_id: str, cwd: str | None = None) -> None:
                 f"{REMINDER_MESSAGE}\n{proj} · {short_id}",
                 "-Duration",
                 "long",
-                "-Sound",
-                "ms-winsoundevent:Notification.Reminder",
             ],
             capture_output=True,
         )

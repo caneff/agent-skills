@@ -130,8 +130,6 @@ def test_notify_toast_is_long_loud_and_shows_project_and_short_id(monkeypatch):
     toast_call = calls[-1]
     assert "-Duration" in toast_call
     assert toast_call[toast_call.index("-Duration") + 1] == "long"
-    assert "-Sound" in toast_call
-    assert toast_call[toast_call.index("-Sound") + 1] == "ms-winsoundevent:Notification.Reminder"
     body = toast_call[toast_call.index("-Body") + 1]
     assert "my-proj" in body
     assert "sess-012" in body
