@@ -283,17 +283,24 @@ const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 // Files the template deliberately ADDS since the pin. Same bargain as the
 // answers list: the set-equality net stays exact, and a new render is declared
 // rather than the assertion quietly widening to "a superset is fine".
-//   select-buildable.mts — the deterministic frontier filter (#242)
-//   issue-body.mts        — the review-failure body-splice helper (#244)
+//   select-buildable.mts  — the deterministic frontier filter (#242)
+//   issue-body.mts        — the review-failure body-splice helper (#244); now a
+//                           thin re-export of issue-lifecycle.mts (#274)
 //   log-path.mts          — the per-run log-filename contract, lifted out of main
 //   pipeline-results.mts  — firstHarnessFault + normalizeSettled, lifted out of main
 //   markers.mts           — the status-bar sentinel contract, emitMarker + isSetupNoise (#270)
+//   issue-lifecycle.mts   — the issue-lifecycle vocabulary: ReviewAxis, the
+//                           done|review-fail|nothing outcome union,
+//                           planOutcomeTransition, planFailureBodyEdit and the
+//                           failure-section splice, consolidated from four
+//                           files into one (#274)
 const ARC_ADDED_RENDERS = [
   ".sandcastle/select-buildable.mts",
   ".sandcastle/issue-body.mts",
   ".sandcastle/log-path.mts",
   ".sandcastle/pipeline-results.mts",
   ".sandcastle/markers.mts",
+  ".sandcastle/issue-lifecycle.mts",
   // The sandbox plumbing that survived the bot-identity deletion, under its
   // honest name (#245). sandbox-identity.mts is withdrawn below.
   ".sandcastle/sandbox-config.mts",

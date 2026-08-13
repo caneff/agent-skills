@@ -3,8 +3,9 @@ import {
   bucketIssues,
   buildRunSummary,
   deliveredParentIds,
-  planOutcomeTransition,
 } from "../reconcile.mts";
+// planOutcomeTransition moved to issue-lifecycle.mts (#274) — its tests moved
+// with it, to tests/issue-lifecycle.test.mjs.
 
 const makeOpts = (overrides = {}) => ({
   openIssues: [],
@@ -166,145 +167,5 @@ describe("buildRunSummary", () => {
     ];
     const out = buildRunSummary(bucketed);
     expect(out).toMatch(/all.+human.gated|nothing left for the bot/i);
-  });
-});
-
-describe("planOutcomeTransition", () => {
-  const full = {
-    id: "42",
-    title: "Add widget",
-    branch: "sandcastle/issue-42",
-    parents: ["7"],
-    group: "widgets",
-  };
-
-  test("done → in-review, dropping the buildable label; branch not preserved", () => {
-    const plan = planOutcomeTransition({ kind: "done", issue: full });
-    expect(plan.addLabel).toBe("in-review");
-    expect(plan.removeLabels).toEqual(["ready-for-agent"]);
-    expect(plan.preserveBranch).toBe(false);
-    expect(plan.failureSection).toBeUndefined();
-  });
-
-  test("review-fail → ready-for-human, branch preserved, no PR path", () => {
-    const plan = planOutcomeTransition({
-      kind: "review-fail",
-      issue: full,
-      failedAxes: ["spec"],
-    });
-    expect(plan.addLabel).toBe("ready-for-human");
-    expect(plan.removeLabels).toEqual(["ready-for-agent"]);
-    expect(plan.preserveBranch).toBe(true);
-    expect(plan.completed).toBeUndefined();
-    expect(plan.note).toBe(
-      "42 failed review (spec); no PR — branch preserved, handed to a human (ready-for-human)"
-    );
-  });
-
-  test("a standards-only failure names standards, not spec", () => {
-    const plan = planOutcomeTransition({
-      kind: "review-fail",
-      issue: full,
-      failedAxes: ["standards"],
-    });
-    expect(plan.note).toContain("failed review (standards)");
-    expect(plan.failureSection).toContain("**standards**");
-  });
-
-  test("both axes failing names both, in the note and the section", () => {
-    const plan = planOutcomeTransition({
-      kind: "review-fail",
-      issue: full,
-      failedAxes: ["spec", "standards"],
-    });
-    expect(plan.note).toContain("failed review (spec, standards)");
-    expect(plan.failureSection).toContain("**spec**");
-    expect(plan.failureSection).toContain("**standards**");
-  });
-
-  test("no axes given → reads as 'review' rather than an empty bracket", () => {
-    const plan = planOutcomeTransition({ kind: "review-fail", issue: full });
-    expect(plan.note).toContain("failed review (review)");
-    expect(plan.failureSection).toContain("**review**");
-  });
-
-  // The failure section is the human's whole brief: it must name the preserved
-  // branch and the exact `git worktree add` that continues it (not EnterWorktree),
-  // and point at /implement.
-  test("the failure section carries the continue-the-branch instruction", () => {
-    const plan = planOutcomeTransition({
-      kind: "review-fail",
-      issue: full,
-      failedAxes: ["spec"],
-    });
-    expect(plan.failureSection).toContain("/implement 42");
-    expect(plan.failureSection).toContain(
-      "git worktree add ../issue-42 sandcastle/issue-42"
-    );
-    expect(plan.failureSection).toContain("sandcastle/issue-42");
-  });
-
-  // The reviewer's per-axis reason is embedded so the human sees why without
-  // opening the run log.
-  test("a per-axis reason is embedded in the failure section", () => {
-    const plan = planOutcomeTransition({
-      kind: "review-fail",
-      issue: full,
-      failedAxes: ["spec"],
-      reasons: { spec: "missing the idempotency requirement" },
-    });
-    expect(plan.failureSection).toContain(
-      "missing the idempotency requirement"
-    );
-  });
-
-  test("nothing → touches no label, preserves no branch, records nothing", () => {
-    const plan = planOutcomeTransition({ kind: "nothing", issue: full });
-    expect(plan.addLabel).toBeNull();
-    expect(plan.removeLabels).toEqual([]);
-    expect(plan.preserveBranch).toBe(false);
-    expect(plan.completed).toBeUndefined();
-  });
-
-  // The completed record is what the run summary counts a build from.
-  describe("the completed record a done outcome carries", () => {
-    test("a full-mode issue keeps its forest position and topic group", () => {
-      const plan = planOutcomeTransition({ kind: "done", issue: full });
-      expect(plan.completed).toEqual({
-        id: "42",
-        title: "Add widget",
-        branch: "sandcastle/issue-42",
-        parents: ["7"],
-        group: "widgets",
-      });
-    });
-
-    test("an issue with no parents and an empty group carries neither", () => {
-      const plan = planOutcomeTransition({
-        kind: "done",
-        issue: {
-          id: "43",
-          title: "Re-reviewed",
-          branch: "sandcastle/issue-43",
-          parents: [],
-          group: "",
-        },
-      });
-      expect(plan.completed).toEqual({
-        id: "43",
-        title: "Re-reviewed",
-        branch: "sandcastle/issue-43",
-        parents: [],
-      });
-      expect("group" in plan.completed).toBe(false);
-    });
-
-    test("an issue with an empty group key drops it too", () => {
-      const plan = planOutcomeTransition({
-        kind: "done",
-        issue: { ...full, group: "" },
-      });
-      expect("group" in plan.completed).toBe(false);
-    });
   });
 });

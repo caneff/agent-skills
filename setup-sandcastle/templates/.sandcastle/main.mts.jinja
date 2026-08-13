@@ -42,11 +42,14 @@ import {
   bucketIssues,
   buildRunSummary,
   deliveredParentIds,
-  planOutcomeTransition,
   type OpenIssue,
-  type CompletedIssue,
 } from "./reconcile.mts";
-import { spliceReviewFailureSection } from "./issue-body.mts";
+import {
+  planOutcomeTransition,
+  planFailureBodyEdit,
+  type CompletedIssue,
+  type IssueOutcome,
+} from "./issue-lifecycle.mts";
 import {
   ALL_ISSUE_LIMIT,
   OPEN_ISSUE_LIMIT,
@@ -56,11 +59,7 @@ import {
   type IssueEdgeRow,
 } from "./github-parse.mts";
 import { selectableFrontier } from "./select-buildable.mts";
-import {
-  firstHarnessFault,
-  normalizeSettled,
-  type IssueOutcome,
-} from "./pipeline-results.mts";
+import { firstHarnessFault, normalizeSettled } from "./pipeline-results.mts";
 import { parseSandcastleWorktrees } from "./worktrees.mts";
 import { planRetention } from "./log-retention.mts";
 import { logFilePath } from "./log-path.mts";
@@ -637,19 +636,19 @@ if (work.length > 0) {
         git(`push -u --force-with-lease origin ${issue.branch}`);
       if (plan.addLabel) relabel(issue.id, plan.addLabel, plan.removeLabels);
       if (plan.failureSection) {
-        // Read-modify-write. Skip the edit if the read failed (gh → null): a
-        // transient fetch error must never overwrite the ticket with only the
-        // failure section, clobbering the original spec.
+        // Read-modify-write. planFailureBodyEdit is the decision (edit vs.
+        // skip); this only does the gh read and the editIssueBody write it
+        // decided on. A skip means the read failed (gh → null) — a transient
+        // fetch error must never overwrite the ticket with only the failure
+        // section, clobbering the original spec.
         const body = gh(`issue view ${issue.id} --json body --jq .body`);
-        if (body === null) {
+        const bodyEdit = planFailureBodyEdit(body, plan.failureSection);
+        if (bodyEdit.kind === "skip") {
           console.error(
             `  ! #${issue.id} — could not read issue body; skipping failure-section write`
           );
         } else {
-          editIssueBody(
-            issue.id,
-            spliceReviewFailureSection(body, plan.failureSection)
-          );
+          editIssueBody(issue.id, bodyEdit.body);
         }
       }
       continue;
