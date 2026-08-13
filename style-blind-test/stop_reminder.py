@@ -81,7 +81,7 @@ def _notify(session_id: str, cwd: str | None = None) -> None:
                 "-Duration",
                 "long",
                 "-Sound",
-                "ms-winsoundevent:Notification.Looping.Alarm2",
+                "ms-winsoundevent:Notification.Reminder",
             ],
             capture_output=True,
         )
