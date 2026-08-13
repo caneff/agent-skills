@@ -28,33 +28,33 @@ is_running() { _pgrep "$LIVE_PAT"; }
 # --- digest: markers in, status object out (pure over log text) ----------------
 # digest <log> <fromOffset>  ->  key=value lines on stdout.
 # Reads bytes [fromOffset, EOF) so a tick sees only what is new, and reports the
-# markers found there plus the new EOF offset. Buckets a setup-noise failure
-# (ExecError exit code with an empty stderr under it) apart from a real one.
+# SANDCASTLE_MARK sentinels found there plus the new EOF offset. setup noise and
+# real failures arrive already split — the emitter classified them at the source.
+# The deduped ids from every `SANDCASTLE_MARK <kind> <id>` line in the slice,
+# space-joined. One id per marker (fail/warn/setup), so $3 is it.
+_mark_ids() { grep -E "^SANDCASTLE_MARK $1 " <<<"$2" | awk '{print $3}' | sort -u | tr '\n' ' ' | sed 's/ $//'; }
+
 digest() {
-  local log=$1 from=${2:-0} slice iter flight pr setup allfx fail warn finished
+  local log=$1 from=${2:-0} slice plan flight pr fail warn setup finished
   slice=$(tail -c "+$((from + 1))" "$log")
-  iter=$(grep -oE '=== Iteration [0-9]+/[0-9]+' <<<"$slice" | tail -1 | grep -oE '[0-9]+/[0-9]+')
-  # ids assigned work since the last iteration header: "  [full] 104: title → …"
-  flight=$(awk '/=== Iteration /{buf=""} /^  \[[a-z]+\] [0-9]+:/{buf=buf $2" "} END{print buf}' \
-    <(grep -E '=== Iteration |^  \[[a-z]+\] [0-9]+:' <<<"$slice") | tr -cd '0-9 ' | tr -s ' ' | sed 's/^ //;s/ $//')
-  pr=$(grep -c '→ PR #' <<<"$slice")
-  # setup noise: a ✗ line whose ExecError exit code is followed by a blank line.
-  # Git never fails silently, so the blank stderr is the tell the command never ran.
-  setup=$(awk '
-    /✗ [0-9]+.*ExecError: Command failed \(exit [0-9]+\)/ { id=$2; pend=1; next }
-    pend && /^[[:space:]]*$/ { print id; pend=0; next }
-    { pend=0 }' <<<"$slice" | tr -cd '0-9\n' | sort -u)
-  allfx=$(grep -oE '✗ #?[0-9]+' <<<"$slice" | grep -oE '[0-9]+' | sort -u)
-  # a real failure is any ✗ id that the setup-noise bucket did not claim
-  fail=$(comm -23 <(printf '%s\n' "$allfx") <(printf '%s\n' "$setup") | tr '\n' ' ' | sed 's/ $//')
-  warn=$(grep -oE '⚠ #?[0-9]+' <<<"$slice" | grep -oE '[0-9]+' | sort -u | tr '\n' ' ' | sed 's/ $//')
-  finished=0; grep -q '=== Run Summary ===' <<<"$slice" && finished=1
-  printf 'iter=%s\n' "${iter:-}"
+  # Every field comes from a SANDCASTLE_MARK sentinel the orchestrator prints
+  # (markers.mts). Human wording is never parsed — that coupling was the bug this
+  # rewrite closes (#268). The emitter already split setup noise from real
+  # failure, so there is no stderr-shape heuristic here anymore.
+  # $3 is the first arg after "SANDCASTLE_MARK <kind>": the id (or the count).
+  plan=$(grep -E '^SANDCASTLE_MARK plan ' <<<"$slice" | tail -1 | awk '{print $3}')
+  flight=$(grep -E '^SANDCASTLE_MARK flight ' <<<"$slice" | tail -1 | sed -E 's/^SANDCASTLE_MARK flight //')
+  pr=$(grep -cE '^SANDCASTLE_MARK pr ' <<<"$slice")
+  fail=$(_mark_ids fail "$slice")
+  warn=$(_mark_ids warn "$slice")
+  setup=$(_mark_ids setup "$slice")
+  finished=0; grep -q '^SANDCASTLE_MARK done' <<<"$slice" && finished=1
+  printf 'plan=%s\n' "${plan:-}"
   printf 'flight=%s\n' "$flight"
   printf 'pr=%s\n' "$pr"
   printf 'fail=%s\n' "$fail"
   printf 'warn=%s\n' "$warn"
-  printf 'setup=%s\n' "$(tr '\n' ' ' <<<"$setup" | sed 's/ $//')"
+  printf 'setup=%s\n' "$setup"
   printf 'offset=%s\n' "$(wc -c <"$log")"
   printf 'done=%s\n' "$finished"
 }
@@ -101,12 +101,12 @@ do_kill() {
 DIM=$'\033[2m'; RED=$'\033[31m'; YEL=$'\033[33m'; OFF=$'\033[0m'
 
 _frame() {  # render one status-bar line — digest is the single source of the numbers
-  local L=$1 iter='' flight='' pr='' fail='' warn='' k v nfx nwn line
+  local L=$1 plan='' flight='' pr='' fail='' warn='' k v nfx nwn line
   while IFS='=' read -r k v; do
-    case $k in iter) iter=$v;; flight) flight=$v;; pr) pr=$v;; fail) fail=$v;; warn) warn=$v;; esac
+    case $k in plan) plan=$v;; flight) flight=$v;; pr) pr=$v;; fail) fail=$v;; warn) warn=$v;; esac
   done < <(digest "$L" 0)   # setup-noise ids never reach the bar: digest already split them out
   nfx=$(wc -w <<<"$fail"); nwn=$(wc -w <<<"$warn")
-  line="${DIM}🏰 ${iter:-?} · ${flight:-—} · ${pr:-0} PR"
+  line="${DIM}🏰 ${plan:-?} · ${flight:-—} · ${pr:-0} PR"
   [ "$nfx" -gt 0 ] && line="$line ${OFF}${RED}· ${nfx}✗ ${fail}${OFF}${DIM}"
   [ "$nwn" -gt 0 ] && line="$line ${OFF}${YEL}· ${nwn}⚠ ${warn}${OFF}${DIM}"
   printf '%s%s\n' "$line" "$OFF"
@@ -138,10 +138,10 @@ _selfcheck() {
   local fx out
   fx="$SKILL_DIR/testdata/run.log"
   out=$(digest "$fx" 0)
-  grep -qx 'iter=1/20' <<<"$out" || { echo "FAIL iter: $out"; exit 1; }
-  grep -qx 'flight=101 102 104' <<<"$out" || { echo "FAIL flight: $out"; exit 1; }
+  grep -qx 'plan=4' <<<"$out" || { echo "FAIL plan: $out"; exit 1; }
+  grep -qx 'flight=101 102 104 107' <<<"$out" || { echo "FAIL flight: $out"; exit 1; }
   grep -qx 'pr=1' <<<"$out" || { echo "FAIL pr: $out"; exit 1; }
-  grep -qx 'fail=103' <<<"$out" || { echo "FAIL fail: $out"; exit 1; }
+  grep -qx 'fail=102' <<<"$out" || { echo "FAIL fail: $out"; exit 1; }
   grep -qx 'warn=104' <<<"$out" || { echo "FAIL warn: $out"; exit 1; }
   grep -qx 'setup=107' <<<"$out" || { echo "FAIL setup: $out"; exit 1; }
   grep -qx 'done=1' <<<"$out" || { echo "FAIL done: $out"; exit 1; }

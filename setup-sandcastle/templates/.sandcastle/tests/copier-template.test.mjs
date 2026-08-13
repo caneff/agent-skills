@@ -287,11 +287,13 @@ const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 //   issue-body.mts        — the review-failure body-splice helper (#244)
 //   log-path.mts          — the per-run log-filename contract, lifted out of main
 //   pipeline-results.mts  — firstHarnessFault + normalizeSettled, lifted out of main
+//   markers.mts           — the status-bar sentinel contract, emitMarker + isSetupNoise (#270)
 const ARC_ADDED_RENDERS = [
   ".sandcastle/select-buildable.mts",
   ".sandcastle/issue-body.mts",
   ".sandcastle/log-path.mts",
   ".sandcastle/pipeline-results.mts",
+  ".sandcastle/markers.mts",
   // The sandbox plumbing that survived the bot-identity deletion, under its
   // honest name (#245). sandbox-identity.mts is withdrawn below.
   ".sandcastle/sandbox-config.mts",

@@ -1,19 +1,25 @@
 === Phase 0: reconciliation sweep ===
 No stranded issues.
 
-=== Iteration 1/20 ===
-  [full] 101: add the widget → sandcastle/issue-101
-  [full] 102: fix the flange → sandcastle/issue-102
-  [review] 104: polish the docs → sandcastle/issue-104
-  ✓ 101 (sandcastle/issue-101) merged
-  101 (sandcastle/issue-101) → PR #1
-  ✗ 103 (sandcastle/issue-103) failed: assertion in test_flange raised
+Planning complete. 4 issue(s) to build:
+  101: add the widget → sandcastle/issue-101
+  102: fix the flange → sandcastle/issue-102
+  104: polish the docs → sandcastle/issue-104
+  107: tidy the config → sandcastle/issue-107
+SANDCASTLE_MARK plan 4
+SANDCASTLE_MARK flight 101 102 104 107
+  ⚠ 104 failed review (standards)
+SANDCASTLE_MARK warn 104
+  ✗ 102 (sandcastle/issue-102) failed: assertion in test_flange raised
+SANDCASTLE_MARK fail 102
+  ✗ 107 (sandcastle/issue-107) failed: (FiberFailure) ExecError: Command failed (exit 128): git config --global --add safe.directory "/home/agent/workspace"
 
-✗ 107 (sandcastle/issue-107) failed: (FiberFailure) ExecError: Command failed (exit 128): git config --global --add safe.directory "/home/agent/workspace"
-
-  ⚠ 104 (sandcastle/issue-104) failed review: reviewer requested changes
+SANDCASTLE_MARK setup 107
+  ✓ #101 reviewed clean → PR #1 (in-review)
+SANDCASTLE_MARK pr 101 1
 
 === Run Summary ===
-  merged:  101
-  failed:  103
-  in-review: 104
+  in-review: 101
+  ready-for-human: 104
+  failed:  102
+SANDCASTLE_MARK done

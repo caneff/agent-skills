@@ -64,6 +64,7 @@ import {
 import { parseSandcastleWorktrees } from "./worktrees.mts";
 import { planRetention } from "./log-retention.mts";
 import { logFilePath } from "./log-path.mts";
+import { emitMarker, isSetupNoise } from "./markers.mts";
 import { execSync } from "node:child_process";
 import {
   mkdirSync,
@@ -377,6 +378,12 @@ if (buildable.length === 0) {
   }
 }
 
+// Status-bar markers (#270): the build-set count fills the bar's lead slot, and
+// the in-flight ids follow. Emitted once — this config plans a single sweep, not
+// per-iteration. Human output above is unchanged; the skill reads only these.
+console.log(emitMarker("plan", work.length));
+if (work.length > 0) console.log(emitMarker("flight", ...work.map((w) => w.id)));
+
 // Build every selected issue concurrently, then open one PR per issue that
 // passes review. An empty frontier or empty plan skips straight to the summary.
 if (work.length > 0) {
@@ -506,6 +513,7 @@ if (work.length > 0) {
             console.warn(
               `  ⚠ ${issue.id} failed review (${outcome.failedAxes.join(", ")})`
             );
+            console.log(emitMarker("warn", issue.id));
           }
           return { issue, ...outcome };
         } catch (e) {
@@ -531,6 +539,12 @@ if (work.length > 0) {
     if (outcome.status === "rejected") {
       console.error(
         `  ✗ ${work[i]!.id} (${work[i]!.branch}) failed: ${outcome.reason}`
+      );
+      // A transient sandbox-setup hiccup retries clean next run; a real failure
+      // needs a human. isSetupNoise splits them at the source, where the error
+      // object lives, so the bar tags the right bucket.
+      console.log(
+        emitMarker(isSetupNoise(outcome.reason) ? "setup" : "fail", work[i]!.id)
       );
     }
   }
@@ -605,10 +619,12 @@ if (work.length > 0) {
         prAssignments.set(issue.id, prNum);
         if (plan.completed) allCompleted.push(plan.completed);
         console.log(`  ✓ #${issue.id} reviewed clean → PR #${prNum} (in-review)`);
+        console.log(emitMarker("pr", issue.id, prNum));
       } else {
         console.error(
           `  ✗ #${issue.id} passed review but no PR opened; left as-is for next run`
         );
+        console.log(emitMarker("fail", issue.id));
       }
       continue;
     }
@@ -661,6 +677,7 @@ gcWorktrees();
   });
   const summary = buildRunSummary(bucketed);
   console.log(summary);
+  console.log(emitMarker("done"));
   // Persist the summary — per-run filename so it survives the next run (the
   // per-agent logs overwrite). This is the run's ground-truth outcome and is
   // otherwise lost when the terminal scrolls.
