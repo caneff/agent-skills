@@ -19,7 +19,7 @@ wf=$(printf '%s' "$data" | jq -r '
   | def cnt(f): ([ $iss[] | select(f) ] | length);
     "\(cnt((.l|any(.=="ready-for-agent")) and .b==0))\t✅\tReady now",
     "\(cnt(.l|any(.=="wayfinder:grilling")))\t🔥\tGrilling",
-    "\(cnt(.l|any(.=="wayfinder:map")))\t🗺\tMaps",
+    "\(cnt(.l|any(.=="wayfinder:map")))\t🗺️\tMaps",
     "\(cnt(.l|any(.=="in-progress" or .=="in-review" or .=="needs-review")))\t🚧\tIn flight",
     "\(cnt(.l|any(.=="spec")))\t📋\tSpecs",
     "\(cnt(.l|any(.=="backlog")))\t💤\tBacklog"
