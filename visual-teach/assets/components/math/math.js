@@ -1,9 +1,6 @@
-/* visual-teach — math component.
-   Renders .vt-math display blocks and inline \(...\) / \[...\] delimiters
-   via KaTeX. Owns its own KaTeX dependency: if the katex global is absent,
-   it injects katex.min.css + katex.min.js + auto-render.min.js (in order)
-   from the assets/katex/ dir next to this component, then renders.
-   Consumers only need to include math.js — no KaTeX wiring required. */
+/* Owns its own KaTeX dependency: if the katex global is absent, injects
+   katex.min.css + katex.min.js + auto-render.min.js (in that order) from
+   assets/katex/. Consumers only need to include math.js. */
 
 /* Resolve assets/ base from this script's own URL while currentScript is
    still valid (it's null inside the async callbacks below). */
@@ -13,8 +10,6 @@ var _vtMathBase = (function () {
   return src.replace(/components\/math\/math\.js(\?.*)?$/, "");
 })();
 
-/* KaTeX math rendering: processes .vt-math display blocks and inline math
-   delimiters (\(...\) and \[...\]) in the document body. */
 function renderKatex() {
   if (typeof katex === "undefined") return;
 
@@ -47,8 +42,8 @@ function renderKatex() {
   }
 }
 
-/* Load a script once, resolving when ready. Reuses an existing tag if a
-   consumer already included it (idempotent — safe to double-wire). */
+/* Reuses an existing tag if a consumer already included it — idempotent,
+   safe to double-wire. */
 function _loadScript(src) {
   return new Promise(function (resolve) {
     var existing = document.querySelector('script[src="' + src + '"]');
@@ -71,7 +66,6 @@ function _loadScript(src) {
   });
 }
 
-/* Ensure KaTeX + auto-render are present, injecting them if needed. */
 function ensureKatex() {
   if (typeof katex !== "undefined") return Promise.resolve();
   var katexBase = _vtMathBase + "katex/";
@@ -93,7 +87,7 @@ function ensureKatex() {
 
 function initKatex() {
   if (typeof katex !== "undefined") {
-    renderKatex(); // already loaded — render synchronously
+    renderKatex();
     return;
   }
   ensureKatex().then(renderKatex);

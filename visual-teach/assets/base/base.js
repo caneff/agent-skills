@@ -1,12 +1,7 @@
-/* base — the always-linked spine: theme bridge/toggle, section anchors, init.
-   Block-level helpers (announce/ensure/verdict) and component behaviour (quiz,
-   checklist, code, Prism, KaTeX, diagrams) each live in their own component
-   file — every Component is self-contained so it can be copied on its own. */
+/* Each component file is self-contained so it can be copied on its own. */
 
-/* Theme bridge: let an embedding parent (e.g. an iframe-based before/after
-   compare page) set the lesson theme via postMessage({vtTheme:'dark'|'light'}).
-   Cross-origin-safe, so it works even when lessons are opened over file://,
-   where the parent cannot reach contentDocument. */
+/* Cross-origin-safe theme bridge: works even over file://, where a parent
+   iframe cannot reach contentDocument to set the theme directly. */
 function wireThemeBridge(win) {
   win.addEventListener("message", function (e) {
     var t = e.data && e.data.vtTheme;
@@ -15,12 +10,6 @@ function wireThemeBridge(win) {
   });
 }
 
-/* Standalone theme toggle: inject a fixed dark/light switch. Rendered whether
-   the lesson is opened directly or embedded in an iframe (e.g. a before/after
-   compare page), so the reader gets the same native control either way. Skipped
-   only when the page already ships its own .vt-theme-toggle. The postMessage
-   bridge (wireThemeBridge) stays available for a parent that prefers to drive
-   the theme programmatically instead. */
 function wireThemeToggle(win) {
   var doc = win.document;
   if (doc.querySelector(".vt-theme-toggle")) return;
@@ -62,8 +51,7 @@ function slugify(s) {
     .replace(/-+/g, "-");
 }
 
-/* Make every section heading linkable: slug -> id, inject a hover "#" anchor.
-   Skips headings that already carry an anchor (hand-authored demos). */
+/* Skips headings that already carry an anchor (hand-authored demos). */
 function wireAnchors() {
   var seen = {};
   document.querySelectorAll("h2, h3").forEach(function (h) {
@@ -93,10 +81,6 @@ function wireAnchors() {
   });
 }
 
-/* For each candidate block in <main> (table-wrap, code, diagram), measure its
-   natural (max-content) width via an off-screen clone — SVG max-width is lifted
-   on the clone so a wide SVG is not falsely capped to the column. Toggle
-   .vt-wide when the natural width exceeds the column width at rest. */
 function wireBreakout() {
   var doc = document;
   var main = doc.querySelector("main");
@@ -151,9 +135,8 @@ function init() {
   }
 }
 
-// UMD: expose the public API for tests (CommonJS) and as a browser global.
-// Plain-script export (no ESM `export`) lets lessons load this with a classic
-// <script src> that works from file:// — no module CORS, no local server.
+// Plain-script export (no ESM `export`) so lessons load via a classic
+// <script src> over file:// — no module CORS, no local server.
 var vtBase = {
   wireThemeBridge: wireThemeBridge,
   wireThemeToggle: wireThemeToggle,

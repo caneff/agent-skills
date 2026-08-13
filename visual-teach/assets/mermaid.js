@@ -1,20 +1,7 @@
-/* visual-teach — opt-in mermaid bridge.
-   Lazy-loads mermaid only when .vt-mermaid elements are present, preferring the
-   vendored mermaid.min.js sitting beside this file so diagrams render offline
-   over file://; the CDN is only a fallback if that local copy fails to load.
-   Include this file in lessons that use computed graphs (sequence, state, ER);
-   prefer the hand-composed CSS diagram vocabulary for everything else.
-
-   Browser auto-init fires on DOMContentLoaded (or immediately if already loaded).
-   In CommonJS/Node (tests) the factory is exported directly without auto-init.
-
-   Usage:
-     <div class="vt-mermaid">
-       sequenceDiagram
-         A->>B: Hello
-     </div>
-     <script src="../assets/mermaid.js"></script>
-*/
+/* Opt-in mermaid bridge. Prefers the vendored mermaid.min.js sitting beside
+   this file so diagrams render offline over file://; the CDN is only a fallback
+   if that local copy fails to load. Include this in lessons that use computed
+   graphs (sequence, state, ER); prefer the CSS diagram vocabulary otherwise. */
 (function (root, factory) {
   "use strict";
   if (typeof module !== "undefined" && module.exports) {
@@ -36,10 +23,8 @@
 
   var CDN = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
 
-  // Where this script was served from, captured now (document.currentScript is
-  // null once we're inside init on DOMContentLoaded). The vendored mermaid.min.js
-  // sits beside it, so swapping the filename gives a path that resolves over
-  // file:// no matter where the page itself lives.
+  // Captured now: document.currentScript is null once we're inside init on
+  // DOMContentLoaded. The vendored mermaid.min.js sits beside this script.
   var SELF =
     (typeof document !== "undefined" &&
       document.currentScript &&
@@ -50,11 +35,9 @@
     return self ? self.replace(/[^/]*$/, "mermaid.min.js") : "";
   }
 
-  // mermaid.initialize() config, brand-blue tint both sides. We use mermaid's
-  // native 'base'/'dark' themes (coherent, tested palettes) rather than hand-
-  // mapping vt-* tokens onto 'base' — that produced a monochromatic look and
-  // white-on-white state-node labels. labelBg matches the card the diagram sits
-  // on; see bgBehind().
+  // Use mermaid's native 'base'/'dark' themes rather than hand-mapping vt-*
+  // tokens onto 'base' — that produced a monochromatic look and white-on-white
+  // state-node labels.
   function darkTheme(labelBg) {
     // dark theme ignores primaryColor for node fills, so set mainBkg/secondary/
     // tertiary too. One light-grey token (tx) pins every text element: mermaid
@@ -99,8 +82,7 @@
     };
   }
 
-  // Walk up from a node to the first element with a non-transparent background.
-  // Used to match mermaid's edge-label boxes to the card the diagram sits on.
+  // Match mermaid's edge-label boxes to the card the diagram sits on.
   function bgBehind(node, gcs) {
     gcs =
       gcs ||
@@ -115,9 +97,8 @@
     return null;
   }
 
-  // Normalize any CSS color (incl. color-mix's color(srgb ...) form) to plain
-  // rgb()/hex via canvas — mermaid's color lib throws on the color(srgb ...)
-  // syntax, which breaks flowchart rendering.
+  // Normalize to plain rgb()/hex via canvas — mermaid's color lib throws on
+  // color-mix's color(srgb ...) syntax, which breaks flowchart rendering.
   function toRgb(c) {
     if (typeof document === "undefined") return c;
     var cv = document.createElement("canvas");
@@ -132,7 +113,6 @@
       : "rgba(" + d[0] + "," + d[1] + "," + d[2] + "," + d[3] / 255 + ")";
   }
 
-  // Detect dark mode from [data-theme] attribute, falling back to matchMedia.
   function isDark(docEl, mm) {
     var t = docEl.dataset && docEl.dataset.theme;
     if (t === "dark") return true;
@@ -145,8 +125,7 @@
     return !!(mq && mq("(prefers-color-scheme: dark)").matches);
   }
 
-  // No-ops when no .vt-mermaid elements are found — zero CDN cost for lessons
-  // that don't use computed graphs.
+  // No-ops when no .vt-mermaid elements are found — zero CDN cost.
   function init(doc, options) {
     doc = doc || (typeof document !== "undefined" ? document : null);
     if (!doc) return;
@@ -154,8 +133,7 @@
     if (!nodes.length) return;
 
     options = options || {};
-    // Prefer the vendored sibling; fall back to the CDN only when we can't
-    // derive a local path. options.cdn forces an exact URL (used by tests).
+    // options.cdn forces an exact URL (used by tests).
     var src = options.cdn || siblingMin(options.self || SELF) || CDN;
 
     var list = Array.from(nodes);
@@ -197,7 +175,6 @@
     var script = doc.createElement("script");
     function onLoad() {
       render();
-      // Re-render on data-theme toggle so diagrams follow the page palette.
       if (typeof MutationObserver !== "undefined") {
         new MutationObserver(render).observe(doc.documentElement, {
           attributes: true,
@@ -208,8 +185,8 @@
 
     script.src = src;
     script.onload = onLoad;
-    // If the vendored copy is missing (e.g. a stale downstream sync), retry once
-    // over the CDN so online readers still get diagrams.
+    // If the vendored copy is missing (e.g. a stale downstream sync), retry
+    // once over the CDN so online readers still get diagrams.
     script.onerror = function () {
       if (src === CDN) return;
       var fb = doc.createElement("script");

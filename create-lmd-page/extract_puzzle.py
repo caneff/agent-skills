@@ -8,7 +8,6 @@ The API returns an lz-string(base64) blob prefixed with a format tag ("scl").
 Two payload shapes exist: SudokuMaker exports are valid JSON with the fields
 under "metadata"; legacy SudokuPad blobs are a JS object literal (unquoted keys,
 `t`/`f` bools) — not strict JSON — so those we string-slice instead of parsing.
-ponytail: JSON first, slice as fallback; the slice missed on SudokuMaker's metadata.rules.
 """
 import json, re, sys, urllib.request
 import lzstring
@@ -44,7 +43,6 @@ def layout_hint(rules_text):
     Estimates the card's rendered height (~320px-wide column, ~52 chars/line,
     21px lines, a bold title line per rule) against a ~450px image block. Taller
     rules -> "one" column (rules fall below the image at full width).
-    ponytail: crude px estimate, not a real layout engine; nudge the constants if the flip lands wrong.
     """
     IMG_H, CPL, LINE, GAP, CHROME = 450, 52, 21, 14, 70
     h = CHROME

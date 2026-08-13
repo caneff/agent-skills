@@ -7,7 +7,6 @@
 // It stays a named function so the always-main rule has one obvious home and one
 // unit test.
 
-// The base ref an issue's branch is cut from: always `main`. See header.
 export function resolveBase(): string {
   return "main";
 }

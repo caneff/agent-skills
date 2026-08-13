@@ -1,5 +1,3 @@
-/* quiz component */
-
 function _announce(r, t) {
   if (r) r.textContent = t;
 }
@@ -117,7 +115,6 @@ function _wireSingle(ctx, answer) {
       fb.className = "feedback show bad";
       fb.innerHTML = _verdict(false, whyBad);
       _announce(liveRegion, fb.textContent);
-      // leave buttons enabled — learner keeps trying until correct.
     }
   }
 

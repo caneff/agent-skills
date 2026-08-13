@@ -6,10 +6,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { hasCopier, preflightFixture } from "./render-fixture.mjs";
 
-// `install` is driven end to end as an agent runs it — `spawnSync` against a
-// temp repo, asserting exit status, stdout, and the filesystem state it leaves
-// in the target, never internals. The fixture shims `PATH` and `HOME`, so
-// preflight runs on a machine with no Docker, no copier and no `tdd` skill.
+// The fixture shims `PATH` and `HOME`, so preflight runs on a machine with no
+// Docker, no copier and no `tdd` skill.
 const here = dirname(fileURLToPath(import.meta.url));
 // tests/ -> .sandcastle/ -> templates/ -> setup-sandcastle/ -> repo root
 const repoRoot = join(here, "..", "..", "..", "..");
@@ -323,7 +321,6 @@ describe.skipIf(!hasCopier())("a full install, python arm", () => {
     expect(digest(seeded)).toBe(digest(source));
     // git's own answer, against the render's own ignore rules.
     expect(spawnSync("git", ["-C", f.repo, "check-ignore", "-q", seeded]).status).toBe(0);
-    // Seeded, so the handoff names the source and stops asking for the file.
     expect(r.stdout).toContain(`was seeded from ${source}`);
     expect(r.stdout).not.toContain("Fill .sandcastle/.env");
 

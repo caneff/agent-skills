@@ -19,12 +19,8 @@ import type { OpenIssue } from "./reconcile.mts";
 // has a considered answer for missing data. Degrading is not the same as going
 // quiet: a shape that fails validation warns on stderr and lands in the run log.
 
-// How many issues a query asks for. One convention, applied at every call
-// site, replacing the three ad-hoc limits (100, 200, 1000) that used to sit
-// inline — where the planner saw a different slice of the backlog than the
-// sweep did, for no stated reason.
-//   OPEN_ISSUE_LIMIT covers every open-only query. Set to the largest of the
-//   old values, so no query lost rows in the consolidation.
+// How many issues a query asks for. One convention applied at every call site.
+//   OPEN_ISSUE_LIMIT covers every open-only query.
 //   ALL_ISSUE_LIMIT covers `--state all`, which spans every issue the repo has
 //   ever closed and so needs the higher ceiling.
 // ponytail: a fixed limit, not paging. A backlog past these is a backlog
@@ -68,8 +64,7 @@ const openIssuesSchema = z.array(
   })
 );
 
-// Parse `gh issue list --json number,title,labels` output. Tolerant of an
-// issue with no labels array.
+// Parse `gh issue list --json number,title,labels` output.
 export function parseOpenIssues(raw: string | null): OpenIssue[] {
   const rows = decode(openIssuesSchema, raw, "open issues") ?? [];
   return rows.map((i) => ({

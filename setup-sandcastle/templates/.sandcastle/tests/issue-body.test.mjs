@@ -14,14 +14,11 @@ describe("spliceReviewFailureSection", () => {
 
   test("appends the delimited block when the body has none, keeping the original", () => {
     const out = spliceReviewFailureSection(original, section);
-    // Original text survives verbatim.
     expect(out).toContain("# Fix the widget");
     expect(out).toContain("The widget must foo the bar.");
-    // The section is present, wrapped in the markers.
     expect(out).toContain(REVIEW_FAILURE_BEGIN);
     expect(out).toContain(REVIEW_FAILURE_END);
     expect(out).toContain("the bar was not fooed.");
-    // Original comes before the appended block.
     expect(out.indexOf("foo the bar")).toBeLessThan(
       out.indexOf(REVIEW_FAILURE_BEGIN)
     );
@@ -33,13 +30,10 @@ describe("spliceReviewFailureSection", () => {
       once,
       "## Review failed\n\nstandards: naming is off."
     );
-    // Exactly one delimited block after a re-run.
     expect(countOccurrences(refreshed, REVIEW_FAILURE_BEGIN)).toBe(1);
     expect(countOccurrences(refreshed, REVIEW_FAILURE_END)).toBe(1);
-    // New content in, stale content gone.
     expect(refreshed).toContain("naming is off.");
     expect(refreshed).not.toContain("the bar was not fooed.");
-    // Original ticket text still intact.
     expect(refreshed).toContain("The widget must foo the bar.");
   });
 

@@ -1,5 +1,3 @@
-/* checklist component */
-
 function _ensure(block, selectors) {
   var blockClass =
     Array.from(block.classList).find(function (c) {
@@ -68,7 +66,6 @@ function wireChecklist(list) {
   reset.type = "button";
   reset.textContent = "Reset";
 
-  // count label + compact reset share one row above the bar
   var head = document.createElement("div");
   head.className = "vt-progress-head";
   head.appendChild(progress);
