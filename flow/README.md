@@ -33,8 +33,9 @@ unless re-copied after you change them.
 |---|---|---|
 | `vscode/settings.json` | `/mnt/c/Users/<you>/AppData/Roaming/Code/User/settings.json` | Windows VS Code user settings (incl. GitHub-issue queries) |
 
-Re-copy into the repo after editing VS Code settings; restore with the reverse
-`cp`.
+`vscode/sync.sh` is the one command for it (finds the Windows path itself):
+`sync.sh` refreshes the repo copy from the live file (then commit); `sync.sh
+--restore` writes the backup back onto a machine.
 
 The other segments `ccstatusline/settings.json` references (`effort-abbrev.py`,
 `usage-segment.sh`, `sandcastle-segment.sh`, `publish-usage.sh`) are not backed
