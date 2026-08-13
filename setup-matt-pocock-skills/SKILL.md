@@ -48,13 +48,20 @@ Default posture: these skills were designed for GitHub. If a `git remote` points
 
 Record the choice in `docs/agents/issue-tracker.md`. The GitHub and GitLab templates carry a "PRs as a request surface" flag, defaulted **off** — leave it off and don't raise it; a user who wants external PRs in the triage queue can flip the flag in the file later.
 
-**Section B — Triage label vocabulary.** Skip this section entirely if the `triage` skill isn't installed (exploration told you) — an uninstalled skill needs no labels.
+**Section B — Triage label vocabulary.** The vocabulary *question* below only matters when the `triage` skill is installed (exploration told you). Skip it otherwise and go straight to provisioning — the pipeline labels still have to exist even when `triage` doesn't.
 
-If it is installed, ask exactly one question:
+If `triage` is installed, ask exactly one question:
 
 > Do you want to keep the default triage labels? (recommended: **yes**)
 
 The defaults are the six canonical roles, each label string equal to its name: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `backlog`, `wontfix`. On **yes**, write them as-is. Only if the user says no — usually because their tracker already uses other names (e.g. `bug:triage` for `needs-triage`) — collect the overrides so `triage` applies existing labels instead of creating duplicates.
+
+**Provision every label the skills apply.** The engineering skills only ever *apply* labels (`--add-label`); none of them creates one, so a label that doesn't exist yet fails the first `--add-label` call. Beyond the triage roles, the skills reach for:
+
+- **Pipeline** — `spec` (a parent spec from `to-spec`/`to-tickets`), `in-progress` and `in-review` (the `implement` claim→PR lifecycle), and `needs-review` (an automated review that failed and must be re-run).
+- **Wayfinder stages** — `wayfinder:map`, `wayfinder:grilling`, `wayfinder:research`, `wayfinder:prototype`, `wayfinder:task`.
+
+Step 4 creates these on a GitHub or GitLab tracker. Provision the group for each installed skill; an unused label costs nothing, so when in doubt create the lot. A local-markdown tracker has no label store — skip provisioning there.
 
 **Section C — Domain docs.** Default to **single-context** — one `CONTEXT.md` + `docs/adr/` at the repo root. This fits almost every repo; write it without asking.
 
@@ -110,6 +117,21 @@ Then write the docs files using the seed templates in this skill folder as a sta
 - [domain.md](./domain.md) — domain doc consumer rules + layout
 
 For "other" issue trackers, write `docs/agents/issue-tracker.md` from scratch using the user's description.
+
+**Provision the tracker labels (GitHub / GitLab only).** Create every label Section B named that isn't already present. The commands are idempotent, so re-running is safe:
+
+```bash
+# GitHub — --force upserts an existing label instead of erroring
+for l in needs-triage needs-info ready-for-agent ready-for-human backlog wontfix \
+         spec in-progress in-review needs-review; do
+  gh label create "$l" --force >/dev/null
+done
+for w in map grilling research prototype task; do
+  gh label create "wayfinder:$w" --force >/dev/null
+done
+```
+
+Use the triage strings the user settled on in Section B (any renames included); the pipeline and `wayfinder:*` strings are fixed — the skills match on them by name. On GitLab, swap in `glab label create --name "<label>"` and ignore an "already exists" error. Colours and descriptions are optional; the skills key off the name only.
 
 ### 5. Done
 
