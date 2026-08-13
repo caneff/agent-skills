@@ -9,8 +9,7 @@ param(
   [Parameter(ParameterSetName = 'File', Mandatory)][string]$BodyFile,
   # Opt-in only -- default preserves today's short, silent toast so
   # sandcastle-watch's per-milestone toasts are unaffected.
-  [ValidateSet('short', 'long')][string]$Duration = 'short',
-  [string]$Sound = ''
+  [ValidateSet('short', 'long')][string]$Duration = 'short'
 )
 if ($BodyFile) {
   if (-not (Test-Path -LiteralPath $BodyFile)) {
@@ -42,9 +41,3 @@ $xml.LoadXml("<toast duration='$(Clean $Duration)'><visual><binding template='To
 # "Windows PowerShell". A custom "Sandcastle" identity needs a registry write.
 $aumid = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($aumid).Show([Windows.UI.Notifications.ToastNotification]::new($xml))
-if ($Sound) {
-  # ponytail: WSL-fired toasts route to Action Center silently under the
-  # borrowed PowerShell AUMID, so the toast's <audio> never sounds. Play the
-  # alert directly instead -- this is the only path that reliably makes noise.
-  try { [System.Media.SystemSounds]::Exclamation.Play() } catch {}
-}
