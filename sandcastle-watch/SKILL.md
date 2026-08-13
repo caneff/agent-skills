@@ -101,6 +101,8 @@ Everything else is unchanged: a genuine `✗` and a failed review (`⚠ N failed
 ## 3. Finish
 When the `start` job exits, its final output already carries the last digest and Sandcastle's own `=== Run Summary ===` block — show that as the closing report. Send a final "run complete — N PRs, M failed" notification, delete the `.toast` body file you minted, and stop the loop. `start` has already removed `$LOG`, so there is nothing to clean up in `/tmp`.
 
+**Hand off the `ready-for-human` work.** The summary's `Human-gated: ready for human` bucket is the queue waiting on a human's judgment — an issue review-flagged this run, or one parked earlier. End the report with a **paste-ready `/implement <n>` line per issue in that bucket**, one per line, so the user picks which to take. Those lines are the point: on a `ready-for-human` ticket `/implement` means *stand in as the review* — diff the branch, fix the clear reviewer-grade issues, ask on any real judgment call — not a rebuild. Give the lines even when the bucket holds stale entries; the user ignores what they've already handled. (The `open PR pending merge` bucket is a merge, not a review — hand those a `! ship <PR#>` line instead, never `/implement`.)
+
 ## 4. Stopping a run early
 When the user asks you to stop the run, kill the **process group**, never a single pid — and never report it stopped on the strength of a process check alone.
 
