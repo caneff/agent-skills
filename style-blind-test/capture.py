@@ -126,7 +126,7 @@ def run_guess_wizard(
     turn_state_dir: Path | None = None,
 ) -> dict:
     session_id = _resolve_session_id(session_id)
-    print(f"Recording guess for session {session_id}")
+    print(f"Recording guess for session {session_id[:8]} ({session_id})")
     for i, style_slug in enumerate(STYLES):
         print(f"  {i + 1}. {NAMES[style_slug]} — {DESCRIPTIONS[style_slug]}")
     style = parse_style_choice(input_func(f"which style is active? [1-{len(STYLES)}] "))
