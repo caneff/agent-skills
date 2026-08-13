@@ -1,0 +1,38 @@
+# flow — the local tooling the dev flow depends on
+
+The scripts, hooks, and Claude config that the plan→build→ship flow runs on live
+outside any repo, at `~/.local/bin` and `~/.claude`. If this machine died, they
+would be gone. This directory is their backup: the repo holds the canonical
+copy, `install.sh` symlinks the live locations back to it, and from then on
+every commit here is a backup.
+
+## What's here
+
+| Repo path | Live location | What it is |
+|---|---|---|
+| `bin/ship` | `~/.local/bin/ship` | Merge a PR, wait for it to land, sync main |
+| `bin/pushpr` | `~/.local/bin/pushpr` | Push branch + open PR through the outward gate |
+| `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Global instructions (hard rules, the two gates) |
+| `claude/RTK.md` | `~/.claude/RTK.md` | RTK proxy notes |
+| `claude/settings.json` | `~/.claude/settings.json` | Harness config: hooks, permissions |
+| `claude/settings.local.json` | `~/.claude/settings.local.json` | Machine-local overrides |
+| `claude/hooks/*` | `~/.claude/hooks/*` | git guardrail + main-sync hooks |
+
+`~/.claude/skills` is already this repo, so it isn't duplicated here.
+
+## Restore on a fresh machine
+
+```sh
+git clone <agent-skills>  ~/.agents/skills   # or wherever it lives
+~/.agents/skills/flow/install.sh
+```
+
+`install.sh` is idempotent and moves any existing real file aside to
+`<file>.pre-flow` before linking, so nothing is overwritten silently.
+
+## Notes
+
+- `CLAUDE.md` `@`-imports the second-brain vault (`~/src/second-brain-v2`),
+  which is its own repo — back that up there, not here.
+- `settings.local.json` is machine-local by convention; it's kept for disaster
+  recovery, but review it before linking on a second machine.

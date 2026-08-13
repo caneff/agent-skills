@@ -1,0 +1,130 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "ENABLE_TOOL_SEARCH": "true",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION": "claude-opus-4-8[1m]",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "Opus 4.8 (1M)",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "Opus 4.8 with 1M context window"
+  },
+  "permissions": {
+    "allow": [
+      "Read(//home/caneff/.codex/**)",
+      "Read(//home/caneff/.codex/skills/**)",
+      "Read(//home/caneff/.claude/**)",
+      "Bash(gh auth *)",
+      "Bash(gh issue *)",
+      "Bash(gh issue edit:*)",
+      "Bash(gh label *)",
+      "Bash(python3 -)",
+      "Bash(node *)",
+      "Bash(git diff *)",
+      "Bash(git fetch *)",
+      "Bash(git fetch)",
+      "Bash(pushpr)",
+      "Bash(pushpr:*)",
+      "Read(//tmp/**)"
+    ],
+    "deny": [
+      "AskUserQuestion"
+    ],
+    "defaultMode": "auto"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/caneff/.claude/hooks/block-dangerous-git.sh"
+          },
+          {
+            "type": "command",
+            "command": "rtk hook claude"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/caneff/.claude/hooks/sync-primary-main.sh",
+            "if": "Bash(git push*)",
+            "statusMessage": "Syncing primary worktree main"
+          },
+          {
+            "type": "command",
+            "command": "/home/caneff/.claude/hooks/sync-main-after-merge.sh",
+            "if": "Bash(gh pr merge*)",
+            "statusMessage": "Syncing main + cleaning merged branches"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/caneff/.agents/skills/skills-sync/skills-sync.sh --fix >/dev/null 2>&1 || true",
+            "statusMessage": "Syncing skill symlinks"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"Output style: $(jq -r .outputStyle ~/.claude/settings.json). Stay in that voice; self-check before sending.\""
+          }
+        ]
+      }
+    ]
+  },
+  "worktree": {
+    "bgIsolation": "none"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "/home/caneff/.local/node-v24.15.0-linux-x64/bin/ccstatusline",
+    "padding": 0,
+    "refreshInterval": 10
+  },
+  "enabledPlugins": {
+    "caveman@caveman": false,
+    "ponytail@ponytail": true
+  },
+  "extraKnownMarketplaces": {
+    "caveman": {
+      "source": {
+        "source": "github",
+        "repo": "JuliusBrussee/caveman"
+      }
+    },
+    "ponytail": {
+      "source": {
+        "source": "github",
+        "repo": "DietrichGebert/ponytail"
+      }
+    },
+    "headroom-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "chopratejas/headroom"
+      }
+    }
+  },
+  "outputStyle": "Clarity and Grace",
+  "effortLevel": "medium",
+  "autoMemoryEnabled": false,
+  "skipWorkflowUsageWarning": true,
+  "theme": "dark-ansi",
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true,
+  "model": "claude-opus-4-8[1m]"
+}
