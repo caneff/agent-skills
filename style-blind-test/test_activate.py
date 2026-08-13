@@ -4,6 +4,7 @@ import json
 
 from activate import (
     SESSION_START_CMD,
+    STOP_CMD,
     USER_PROMPT_SUBMIT_CMD,
     install,
     main,
@@ -18,6 +19,9 @@ REALISTIC = {
         ],
         "UserPromptSubmit": [
             {"hooks": [{"type": "command", "command": "echo Output style: ..."}]}
+        ],
+        "Stop": [
+            {"hooks": [{"type": "command", "command": "bash some-other-stop-hook.sh"}]}
         ],
     },
 }
@@ -34,6 +38,15 @@ def test_install_appends_session_start_and_replaces_user_prompt_submit():
         {"hooks": [{"type": "command", "command": USER_PROMPT_SUBMIT_CMD}]}
     ]
     assert new["outputStyle"] == "default"
+
+
+def test_install_appends_stop_reminder_keeping_existing_stop_entries():
+    new, state = install(REALISTIC)
+
+    stop_commands = [
+        entry["hooks"][0]["command"] for entry in new["hooks"]["Stop"]
+    ]
+    assert stop_commands == ["bash some-other-stop-hook.sh", STOP_CMD]
 
 
 def test_install_captures_saved_state():
@@ -55,6 +68,7 @@ def test_install_is_structurally_idempotent():
     twice, _ = install(once)
     assert twice["hooks"]["SessionStart"] == once["hooks"]["SessionStart"]
     assert twice["hooks"]["UserPromptSubmit"] == once["hooks"]["UserPromptSubmit"]
+    assert twice["hooks"]["Stop"] == once["hooks"]["Stop"]
 
 
 def test_install_creates_missing_hooks_keys():
@@ -62,6 +76,9 @@ def test_install_creates_missing_hooks_keys():
     assert new["hooks"]["SessionStart"][0]["hooks"][0]["command"] == SESSION_START_CMD
     assert new["hooks"]["UserPromptSubmit"] == [
         {"hooks": [{"type": "command", "command": USER_PROMPT_SUBMIT_CMD}]}
+    ]
+    assert new["hooks"]["Stop"] == [
+        {"hooks": [{"type": "command", "command": STOP_CMD}]}
     ]
     assert state == {"prev_output_style": None, "prev_user_prompt_submit": []}
 

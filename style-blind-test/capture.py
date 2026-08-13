@@ -8,7 +8,7 @@ a pure local file append. The scorer (#298) reads the log later and
 recomputes ground truth via assignment(session_id).
 
 Schema (one JSON object per line, pinned -- #298 depends on it exactly):
-  guess:    {"kind": "guess", "session_id", "style", "confidence", "ts"}
+  guess:    {"kind": "guess", "session_id", "style", "confidence", "turn", "ts"}
   strength: {"kind": "strength", "session_id", "strength", "faded", "ts"}
 """
 import argparse
@@ -28,7 +28,9 @@ YES_VALUES = {"yes", "y", "true"}
 NO_VALUES = {"no", "n", "false"}
 
 
-def record_guess(session_id: str, style: str, confidence: str, ts: str) -> dict:
+def record_guess(
+    session_id: str, style: str, confidence: str, ts: str, turn: int | None = None
+) -> dict:
     if style not in STYLES:
         raise ValueError(f"invalid style {style!r}, must be one of {STYLES}")
     if confidence not in CONFIDENCE_TIERS:
@@ -40,6 +42,7 @@ def record_guess(session_id: str, style: str, confidence: str, ts: str) -> dict:
         "session_id": session_id,
         "style": style,
         "confidence": confidence,
+        "turn": turn,
         "ts": ts,
     }
 
@@ -72,6 +75,73 @@ def _parse_faded(value: str) -> bool:
     raise ValueError(f"invalid faded value {value!r}, expected yes/no/y/n/true/false")
 
 
+STYLE_CHOICES = {str(i + 1): style for i, style in enumerate(STYLES)}
+CONFIDENCE_CHOICES = dict(zip("lmh", CONFIDENCE_TIERS))
+
+
+def parse_style_choice(raw: str) -> str:
+    style = STYLE_CHOICES.get(raw.strip())
+    if style is None:
+        raise ValueError(f"invalid style choice {raw!r}, expected 1-{len(STYLES)}")
+    return style
+
+
+def parse_confidence_choice(raw: str) -> str:
+    confidence = CONFIDENCE_CHOICES.get(raw.strip().lower())
+    if confidence is None:
+        raise ValueError(f"invalid confidence choice {raw!r}, expected l/m/h")
+    return confidence
+
+
+def _current_turn(session_id: str, state_dir: Path | None = None) -> int | None:
+    # The turn a guess is logged on = the Stop reminder's per-session counter
+    # (issue #316), so a guess records where in the session it landed and drift
+    # can be tracked. None when the reminder hook isn't active / no counter yet.
+    from stop_reminder import DEFAULT_STATE_DIR, _read_state
+
+    state_dir = state_dir or DEFAULT_STATE_DIR
+    count, _ = _read_state(Path(state_dir) / session_id)
+    return count or None
+
+
+def run_guess_wizard(
+    input_func=input,
+    session_id: str | None = None,
+    log_path: Path = DEFAULT_LOG_PATH,
+    turn: int | None = None,
+    turn_state_dir: Path | None = None,
+) -> dict:
+    session_id = _resolve_session_id(session_id)
+    style = parse_style_choice(input_func(f"which style? [1-{len(STYLES)}] "))
+    confidence = parse_confidence_choice(input_func("confidence? [l/m/h] "))
+    if turn is None:
+        turn = _current_turn(session_id, turn_state_dir)
+    record = record_guess(
+        session_id, style, confidence, datetime.now(timezone.utc).isoformat(), turn=turn
+    )
+    append(record, log_path)
+    return record
+
+
+def run_strength_wizard(
+    input_func=input,
+    session_id: str | None = None,
+    log_path: Path = DEFAULT_LOG_PATH,
+) -> dict:
+    session_id = _resolve_session_id(session_id)
+    raw_strength = input_func("strength? [1-5] ")
+    try:
+        strength = int(raw_strength.strip())
+    except ValueError:
+        raise ValueError(f"invalid strength {raw_strength!r}, must be an int 1-5")
+    faded = _parse_faded(input_func("faded? [y/n] "))
+    record = record_strength(
+        session_id, strength, faded, datetime.now(timezone.utc).isoformat()
+    )
+    append(record, log_path)
+    return record
+
+
 def _resolve_session_id(cli_value: str | None) -> str:
     # #298 recomputes truth via assignment(session_id), so this value must
     # equal the session_id the SessionStart hook received on stdin --
@@ -96,18 +166,33 @@ def main(argv: list[str] | None = None) -> None:
     guess_parser = subparsers.add_parser("guess", parents=[common])
     guess_parser.add_argument("style")
     guess_parser.add_argument("confidence")
+    guess_parser.add_argument("--turn", type=int, default=None)
 
     strength_parser = subparsers.add_parser("strength", parents=[common])
     strength_parser.add_argument("strength", type=int)
     strength_parser.add_argument("faded")
 
+    subparsers.add_parser("gs", parents=[common])
+    subparsers.add_parser("fin", parents=[common])
+
     args = parser.parse_args(argv)
+
+    if args.command in ("gs", "fin"):
+        try:
+            if args.command == "gs":
+                run_guess_wizard(session_id=args.session_id, log_path=args.log_path)
+            else:
+                run_strength_wizard(session_id=args.session_id, log_path=args.log_path)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            raise SystemExit(1)
+        return
 
     try:
         session_id = _resolve_session_id(args.session_id)
         ts = datetime.now(timezone.utc).isoformat()
         if args.command == "guess":
-            record = record_guess(session_id, args.style, args.confidence, ts)
+            record = record_guess(session_id, args.style, args.confidence, ts, turn=args.turn)
         else:
             record = record_strength(session_id, args.strength, _parse_faded(args.faded), ts)
     except ValueError as e:

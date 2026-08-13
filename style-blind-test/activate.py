@@ -23,22 +23,27 @@ from pathlib import Path
 
 SESSION_START_CMD = "python3 /home/caneff/.agents/skills/style-blind-test/session_start.py"
 USER_PROMPT_SUBMIT_CMD = "python3 /home/caneff/.agents/skills/style-blind-test/user_prompt_submit.py"
+STOP_CMD = "python3 /home/caneff/.agents/skills/style-blind-test/stop_reminder.py"
 
 DEFAULT_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 DEFAULT_STATE_PATH = Path.home() / ".claude" / "style-blind-test" / "activation-state.json"
 
 _SS_ENTRY = {"hooks": [{"type": "command", "command": SESSION_START_CMD}]}
 _UPS_ENTRY = {"hooks": [{"type": "command", "command": USER_PROMPT_SUBMIT_CMD}]}
+_STOP_ENTRY = {"hooks": [{"type": "command", "command": STOP_CMD}]}
 
 
 def install(settings: dict) -> tuple[dict, dict]:
     new = copy.deepcopy(settings)
     hooks = new.setdefault("hooks", {})
     ss = hooks.setdefault("SessionStart", [])
+    stop = hooks.setdefault("Stop", [])
     prev_ups = copy.deepcopy(hooks.get("UserPromptSubmit", []))
 
     if not any(e["hooks"][0]["command"] == SESSION_START_CMD for e in ss):
         ss.append(copy.deepcopy(_SS_ENTRY))
+    if not any(e["hooks"][0]["command"] == STOP_CMD for e in stop):
+        stop.append(copy.deepcopy(_STOP_ENTRY))
     hooks["UserPromptSubmit"] = [copy.deepcopy(_UPS_ENTRY)]
 
     state = {
@@ -62,7 +67,14 @@ def uninstall(settings: dict, state: dict) -> dict:
     hooks["SessionStart"] = [
         e for e in hooks.get("SessionStart", []) if e["hooks"][0]["command"] != SESSION_START_CMD
     ]
-    if not hooks["SessionStart"] and not hooks["UserPromptSubmit"]:
+    hooks["Stop"] = [
+        e for e in hooks.get("Stop", []) if e["hooks"][0]["command"] != STOP_CMD
+    ]
+    if not hooks["Stop"]:
+        # ponytail: unlike SessionStart, most settings.json never had a Stop
+        # key before this hook existed -- don't leave a stray empty one.
+        hooks.pop("Stop", None)
+    if not hooks["SessionStart"] and not hooks["UserPromptSubmit"] and not hooks.get("Stop"):
         new.pop("hooks", None)
     return new
 

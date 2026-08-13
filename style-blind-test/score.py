@@ -18,7 +18,7 @@ DEFAULT_LOG_PATH = Path.home() / ".claude" / "style-blind-test" / "log.jsonl"
 DEFAULT_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 CONFIDENCE_TIERS = ("low", "med", "high")
-QUALIFYING_TURNS = 15
+QUALIFYING_TURNS = 25
 
 
 def count_assistant_turns(session_id: str, projects_dir: Path = DEFAULT_PROJECTS_DIR) -> int:
@@ -73,38 +73,93 @@ def tally(records: list[dict]) -> dict:
     }
 
 
-def _load_sessions(log_path: Path) -> dict:
-    sessions = defaultdict(dict)
+def _load_log(log_path: Path) -> tuple[dict, list[dict]]:
+    """Parse the JSONL log into (session_meta, guess_lines).
+
+    session_meta: session_id -> latest guess/strength fields seen (the old
+    per-session-latest view, kept as a cheap secondary lens).
+    guess_lines: every "guess" record in file order, unaggregated -- each is
+    its own detection trial (issue #316).
+    """
+    session_meta = defaultdict(dict)
+    guess_lines = []
     if not Path(log_path).exists():
-        return sessions
+        return session_meta, guess_lines
     for line in Path(log_path).read_text().splitlines():
         if not line.strip():
             continue
         record = json.loads(line)
-        session = sessions[record["session_id"]]
+        session_id = record["session_id"]
+        session = session_meta[session_id]
         if record["kind"] == "guess":
             session["guess"] = record["style"]
             session["confidence"] = record["confidence"]
+            guess_lines.append({
+                "session_id": session_id,
+                "style": record["style"],
+                "confidence": record["confidence"],
+                "turn": record.get("turn"),
+            })
         elif record["kind"] == "strength":
             session["strength"] = record["strength"]
             session["faded"] = record["faded"]
-    return sessions
+    return session_meta, guess_lines
+
+
+def _load_sessions(log_path: Path) -> dict:
+    # ponytail: thin wrapper kept for the per-session-latest secondary view.
+    session_meta, _ = _load_log(log_path)
+    return session_meta
 
 
 def build_records(log_path: Path, projects_dir: Path) -> list[dict]:
-    sessions = _load_sessions(log_path)
+    session_meta, guess_lines = _load_log(log_path)
+
+    turns_cache: dict = {}
+
+    def turns_for(session_id: str) -> int:
+        if session_id not in turns_cache:
+            turns_cache[session_id] = count_assistant_turns(session_id, projects_dir)
+        return turns_cache[session_id]
+
     records = []
-    for session_id, logged in sessions.items():
+    guessed_sessions = set()
+    for g in guess_lines:
+        session_id = g["session_id"]
+        guessed_sessions.add(session_id)
+        truth, hook_on = assignment(session_id)
+        meta = session_meta.get(session_id, {})
+        # ponytail: strength/faded/turns are session-level and get repeated
+        # across every guess row for a multi-guess session -- guesses within
+        # a session share one true style, so these trials are not fully
+        # independent (see issue #316 caveats).
+        records.append({
+            "session_id": session_id,
+            "truth": truth,
+            "hook_on": hook_on,
+            "guess": g["style"],
+            "confidence": g["confidence"],
+            "turn": g["turn"],
+            "strength": meta.get("strength"),
+            "faded": meta.get("faded"),
+            "turns": turns_for(session_id),
+        })
+
+    for session_id, meta in session_meta.items():
+        if session_id in guessed_sessions:
+            continue
+        # Abstention: strength/faded logged with no guess ever recorded.
         truth, hook_on = assignment(session_id)
         records.append({
             "session_id": session_id,
             "truth": truth,
             "hook_on": hook_on,
-            "guess": logged.get("guess"),
-            "confidence": logged.get("confidence"),
-            "strength": logged.get("strength"),
-            "faded": logged.get("faded"),
-            "turns": count_assistant_turns(session_id, projects_dir),
+            "guess": None,
+            "confidence": None,
+            "turn": None,
+            "strength": meta.get("strength"),
+            "faded": meta.get("faded"),
+            "turns": turns_for(session_id),
         })
     return records
 
