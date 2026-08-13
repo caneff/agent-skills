@@ -1,0 +1,21 @@
+# Answer key
+
+Ten test cases across three files, each tagged with the bucket `test-audit`
+must land it in and the one-line concrete-failure reason. Running the audit
+over `fixtures/` must reproduce this table exactly — every `Cut`/`Rewrite`
+must match, and every `Keep` must be left alone.
+
+| # | Test | File | Bucket | Smell | Concrete failure |
+|---|------|------|--------|-------|-------------------|
+| 1 | `test_apply_discount_computes_amount_off` | `test_pricing.py` | **Keep** | — | Fails for exactly one reason: `apply_discount` stops computing 10% off 100 as 90. Direct unit test, lowest layer that owns the math, survives an internal refactor of `apply_discount`. |
+| 2 | `test_apply_discount_handles_edge_cases` | `test_pricing.py` | **Cut** | conditional test logic | Branches on `percent_off > 100` and asserts something different in each branch, so it cannot fail no matter which branch the real behavior takes — both arms have an escape-hatch assertion (`>= 0` / `<= price`). Stays Cut even though it's the only test touching the over-100% case: the only-test warning protects a real signal aimed badly, and this test has no signal at all to protect. |
+| 3 | `test_checkout_flow_produces_receipt_with_payment_reference` | `test_checkout_e2e.py` | **Keep** | — | Owns the wiring this e2e layer exists to prove — checkout reaches payment and returns a receipt with a payment reference and paid status. Nothing at the unit layer touches this path, so this is the lowest layer that owns it. |
+| 4 | `test_checkout_flow_applies_discount_amount` | `test_checkout_e2e.py` | **Cut** | duplicate coverage across layers | Re-proves the same 100/10%→90 math that #1 already owns at the unit layer. The wiring this e2e layer uniquely owns is already proved by #3, in this same file, so deleting this one loses no coverage either layer uniquely holds. |
+| 5 | `test_user_repository_save_and_fetch` | `test_user_service.py` | **Rewrite** | mystery guest / resource optimism | Reads through the ambient `db` import instead of an explicit fixture, so it fails when test execution order changes (a prior test left different rows) though save/fetch never broke, and it cannot fail from a real save/fetch regression a clean row would catch. The round-trip behavior is real — rewrite against an explicit, isolated store. |
+| 6 | `test_user_onboarding_flow` | `test_user_service.py` | **Rewrite** | eager test | One run asserts create, profile update, email log, and audit log together; a failure only says "onboarding broke," never which of the four behaviors regressed. Each behavior is real and worth a test — split into four. |
+| 7 | `test_create_user_returns_expected_user` | `test_user_service.py` | **Rewrite** | sensitive equality | Asserts the whole object against a literal including `id` and `created_at`, values the caller doesn't control. Fails whenever the id sequence or clock changes, though nothing a user cares about broke. Keep the real behavior (name/email round-trip) by asserting only those fields. |
+| 8 | `test_rejects_invalid_email` | `test_user_service.py` | **Rewrite** | name/behavior mismatch + only test on this path | Body only checks `ValidationError().code == "default"` — it would still pass if `validate_email` stopped rejecting anything. Normally a mismatch this total is a Cut, but it is the sole test touching `validate_email`'s reject branch, so cutting opens a silent coverage gap — rewrite it to assert invalid input actually raises. |
+| 9 | `test_user_model_default_role_is_member` | `test_user_service.py` | **Cut** | library-default test | Proves the dataclass's own default argument works — a guarantee the standard library already gives, not app logic. Cannot fail from anything this codebase does; deleting it loses no coverage of behavior this app owns. |
+| 10 | `test_retry_eventually_succeeds` | `test_user_service.py` | **Rewrite** | flakiness-by-construction | Real `time.sleep` and unseeded `random.random()` decide the outcome run to run — it can fail when retry logic is correct (bad luck) and pass when retry logic is broken (good luck). The behavior (retry until success) is real; rewrite with a mocked clock and seeded/injected randomness. |
+
+Tally: 2 Keep, 2 Cut, 6 Rewrite.
