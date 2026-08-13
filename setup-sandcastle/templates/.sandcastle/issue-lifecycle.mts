@@ -6,7 +6,7 @@
 // re-unioned as pipeline-results.mts's IssueOutcome), ReviewAxis
 // (review-verdict.mts), the outcome→label transition (reconcile.mts's
 // planOutcomeTransition/OutcomeKind/OutcomePlan), and the failure-section
-// splice (issue-body.mts's spliceReviewFailureSection) — into one module.
+// splice (formerly in issue-body.mts) — into one module.
 // Adding a new outcome kind, or changing what the lifecycle does, now happens
 // in exactly one place.
 

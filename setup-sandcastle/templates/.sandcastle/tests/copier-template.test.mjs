@@ -284,8 +284,6 @@ const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 // answers list: the set-equality net stays exact, and a new render is declared
 // rather than the assertion quietly widening to "a superset is fine".
 //   select-buildable.mts  — the deterministic frontier filter (#242)
-//   issue-body.mts        — the review-failure body-splice helper (#244); now a
-//                           thin re-export of issue-lifecycle.mts (#274)
 //   log-path.mts          — the per-run log-filename contract, lifted out of main
 //   pipeline-results.mts  — firstHarnessFault + normalizeSettled, lifted out of main
 //   markers.mts           — the status-bar sentinel contract, emitMarker + isSetupNoise (#270)
@@ -296,7 +294,6 @@ const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 //                           files into one (#274)
 const ARC_ADDED_RENDERS = [
   ".sandcastle/select-buildable.mts",
-  ".sandcastle/issue-body.mts",
   ".sandcastle/log-path.mts",
   ".sandcastle/pipeline-results.mts",
   ".sandcastle/markers.mts",
