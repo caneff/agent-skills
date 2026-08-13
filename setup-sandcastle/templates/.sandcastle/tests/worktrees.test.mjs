@@ -52,13 +52,6 @@ describe("parseSandcastleWorktrees", () => {
     ]);
   });
 
-  test("pr-head worktrees are NOT returned (not under /worktrees/)", () => {
-    const paths = parseSandcastleWorktrees(WITH_MIXED_WORKTREES);
-    expect(paths.every((p) => p.includes("/.sandcastle/worktrees/"))).toBe(
-      true
-    );
-  });
-
   test("all issue worktrees are returned, main and pr-head skipped", () => {
     const paths = parseSandcastleWorktrees(WITH_MIXED_WORKTREES);
     expect(paths).toHaveLength(2);

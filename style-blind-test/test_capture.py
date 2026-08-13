@@ -57,7 +57,7 @@ def test_record_guess_rejects_bad_confidence(bad_confidence):
 
 def test_record_guess_all_styles_accepted():
     for style in STYLES:
-        record_guess("sess-1", style, "med", TS)
+        assert record_guess("sess-1", style, "med", TS)["style"] == style
 
 
 def test_record_strength_returns_normalized_record():

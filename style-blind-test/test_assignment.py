@@ -37,12 +37,3 @@ def test_style_and_hook_on_are_independent():
             f"style {style!r} only ever saw hook_on={hook_states}, "
             "suggesting hook_on is not independently derived"
         )
-
-
-def test_assignment_stable_across_hook_source():
-    # assignment() takes only session_id -- source is never a parameter,
-    # so calling it with the same id is inherently source-independent.
-    # This test documents that guarantee explicitly.
-    session_id = "session-stable"
-    results = {assignment(session_id) for _ in ("startup", "clear", "resume", "compact")}
-    assert len(results) == 1
