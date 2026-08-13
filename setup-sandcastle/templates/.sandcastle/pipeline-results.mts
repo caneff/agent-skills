@@ -1,17 +1,10 @@
 // Pure decisions over the Promise.allSettled array main's Phase 2 produces,
 // lifted out of the phase flow so they test without standing up a live sandbox.
 // main keeps the loop and all the git/gh IO; it just calls these.
-import { isHarnessError, type ReviewedOutcome } from "./review-verdict.mts";
-
-// One issue's terminal outcome, generic over the issue shape so this module
-// stays decoupled from main's WorkIssue. `done`/`review-fail` are the reviewed
-// outcomes classified in review-verdict.mts — reused here, not restated, so a new
-// outcome kind is added in one place; `nothing` (labels left as they arrived) is
-// the only kind this stage adds.
-export type IssueOutcome<I> = { issue: I } & (
-  | ReviewedOutcome
-  | { kind: "nothing" }
-);
+import { isHarnessError } from "./review-verdict.mts";
+// IssueOutcome lives in issue-lifecycle.mts — the lifecycle vocabulary's one
+// home — imported here only for this module's own signatures below.
+import type { IssueOutcome } from "./issue-lifecycle.mts";
 
 // The run-aborting decision. A rejected PromptError means a prompt's preprocessor
 // failed — it breaks review identically for every issue, so retrying per-issue
