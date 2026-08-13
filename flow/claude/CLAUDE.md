@@ -144,11 +144,17 @@ Worktree handling for the code lane:
 - Subagents: fire-and-return work → no `name`, `run_in_background: false`.
   Named + background = persistent teammate that parks idle and returns nothing.
   Test one before fanning out.
-- Subagent model: default `model: sonnet` for mechanical retrieval/
-  characterization (grep sweeps, surveys, counts, structured reports — no
-  judgment inside the agent). Keep Opus where the agent's own reasoning is
-  the deliverable: adversarial bug-hunting, diagnosis, design synthesis,
-  quality judgment.
+- Subagent model — pick the tier by how much the agent must do, not the topic:
+  - `haiku`: single-step, self-verifying, no navigation — classify/extract
+    against a rubric, reformat one given file, a lookup you hand the file to.
+  - `sonnet` (default for fan-out): multi-step mechanical work that navigates
+    but needs no judgment — grep sweeps, surveys, locating code, specified
+    codemods, `/research` doc-reading.
+  - `opus`: the agent's own reasoning is the deliverable — adversarial review,
+    diagnosis, security review, spec/ticket decomposition, deliverable prose.
+  The Sonnet/Haiku split is navigation, not reasoning: an Explore that must
+  navigate is Sonnet even when its judgment is nil. Tie-breaker: drop a tier
+  only when a cheap check (test, build, your review) catches the miss.
 - `.claude/worktrees/` must be gitignored. Untracked, it makes the main
   checkout read dirty, and `pushpr` then cuts a junk branch and commits the
   worktree back as a gitlink instead of pushing the worktree branch.
