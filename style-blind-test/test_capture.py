@@ -1,10 +1,19 @@
-"""Tests for the side-channel guess/strength capture CLI (issue #296)."""
+"""Tests for the side-channel guess/strength capture CLI (issue #296, #316)."""
 import json
 
 import pytest
 
 from assignment import STYLES
-from capture import append, main, record_guess, record_strength
+from capture import (
+    append,
+    main,
+    parse_confidence_choice,
+    parse_style_choice,
+    record_guess,
+    record_strength,
+    run_guess_wizard,
+    run_strength_wizard,
+)
 
 TS = "2026-08-13T12:00:00+00:00"
 
@@ -16,8 +25,14 @@ def test_record_guess_returns_normalized_record():
         "session_id": "sess-1",
         "style": "orwell-ste",
         "confidence": "high",
+        "turn": None,
         "ts": TS,
     }
+
+
+def test_record_guess_carries_turn_number_when_given():
+    record = record_guess("sess-1", "orwell-ste", "high", TS, turn=7)
+    assert record["turn"] == 7
 
 
 def test_record_guess_accepts_default_as_a_style():
@@ -141,3 +156,136 @@ def test_main_exits_nonzero_without_session_id(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as excinfo:
         main(["strength", "3", "no", "--log-path", str(log_path)])
     assert excinfo.value.code != 0
+
+
+def test_main_guess_with_turn_records_it(tmp_path):
+    log_path = tmp_path / "log.jsonl"
+    main([
+        "guess", "orwell-ste", "high",
+        "--session-id", "s", "--log-path", str(log_path), "--turn", "12",
+    ])
+    record = json.loads(log_path.read_text().splitlines()[0])
+    assert record["turn"] == 12
+
+
+# -- gs wizard: pure input parsing -----------------------------------------
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("1", "clarity-and-grace"),
+    ("2", "orwell-ste"),
+    ("3", "plain-speak"),
+    ("4", "default"),
+])
+def test_parse_style_choice_maps_1_to_4(raw, expected):
+    assert parse_style_choice(raw) == expected
+
+
+@pytest.mark.parametrize("bad", ["0", "5", "a", "", "1.5", " "])
+def test_parse_style_choice_rejects_bad_input(bad):
+    with pytest.raises(ValueError):
+        parse_style_choice(bad)
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("l", "low"), ("L", "low"),
+    ("m", "med"), ("M", "med"),
+    ("h", "high"), ("H", "high"),
+])
+def test_parse_confidence_choice_maps_l_m_h(raw, expected):
+    assert parse_confidence_choice(raw) == expected
+
+
+@pytest.mark.parametrize("bad", ["low", "x", "", "1"])
+def test_parse_confidence_choice_rejects_bad_input(bad):
+    with pytest.raises(ValueError):
+        parse_confidence_choice(bad)
+
+
+# -- gs wizard: interactive flows -------------------------------------------
+
+
+def test_run_guess_wizard_writes_record(tmp_path):
+    log_path = tmp_path / "log.jsonl"
+    answers = iter(["2", "h"])
+    run_guess_wizard(
+        input_func=lambda _prompt: next(answers),
+        session_id="sess-w",
+        log_path=log_path,
+        turn=9,
+    )
+    record = json.loads(log_path.read_text().splitlines()[0])
+    assert record == {
+        "kind": "guess",
+        "session_id": "sess-w",
+        "style": "orwell-ste",
+        "confidence": "high",
+        "turn": 9,
+        "ts": record["ts"],
+    }
+
+
+def test_run_guess_wizard_reads_turn_from_counter(tmp_path):
+    turns = tmp_path / "turns"
+    turns.mkdir()
+    (turns / "sess-w").write_text("7 0\n")  # stop_reminder state: count last_fired
+    log_path = tmp_path / "log.jsonl"
+    answers = iter(["2", "h"])
+    record = run_guess_wizard(
+        input_func=lambda _prompt: next(answers),
+        session_id="sess-w",
+        log_path=log_path,
+        turn_state_dir=turns,
+    )
+    assert record["turn"] == 7
+
+
+def test_run_guess_wizard_turn_is_none_without_counter(tmp_path):
+    log_path = tmp_path / "log.jsonl"
+    answers = iter(["2", "h"])
+    record = run_guess_wizard(
+        input_func=lambda _prompt: next(answers),
+        session_id="sess-w",
+        log_path=log_path,
+        turn_state_dir=tmp_path / "empty",
+    )
+    assert record["turn"] is None
+
+
+def test_run_guess_wizard_rejects_bad_choice_and_writes_nothing(tmp_path):
+    log_path = tmp_path / "log.jsonl"
+    answers = iter(["9", "h"])
+    with pytest.raises(ValueError):
+        run_guess_wizard(
+            input_func=lambda _prompt: next(answers),
+            session_id="sess-w",
+            log_path=log_path,
+            turn=None,
+        )
+    assert not log_path.exists()
+
+
+def test_run_strength_wizard_writes_record(tmp_path):
+    log_path = tmp_path / "log.jsonl"
+    answers = iter(["4", "y"])
+    run_strength_wizard(
+        input_func=lambda _prompt: next(answers),
+        session_id="sess-w",
+        log_path=log_path,
+    )
+    record = json.loads(log_path.read_text().splitlines()[0])
+    assert record["kind"] == "strength"
+    assert record["strength"] == 4
+    assert record["faded"] is True
+
+
+def test_run_strength_wizard_rejects_bad_choice(tmp_path):
+    log_path = tmp_path / "log.jsonl"
+    answers = iter(["7", "y"])
+    with pytest.raises(ValueError):
+        run_strength_wizard(
+            input_func=lambda _prompt: next(answers),
+            session_id="sess-w",
+            log_path=log_path,
+        )
+    assert not log_path.exists()

@@ -4,7 +4,7 @@ import json
 import pytest
 
 from assignment import assignment
-from score import count_assistant_turns, main, tally
+from score import build_records, count_assistant_turns, main, tally
 
 
 def _rec(session_id, truth, hook_on, guess=None, confidence=None,
@@ -58,13 +58,13 @@ def test_tally_by_confidence_breakdown():
 
 def test_tally_turn_gate_splits_hook_on_off_strength():
     records = [
-        _rec("s1", "orwell-ste", True, strength=4, turns=20),
+        _rec("s1", "orwell-ste", True, strength=4, turns=30),
         _rec("s2", "orwell-ste", True, strength=2, turns=5),  # below gate
-        _rec("s3", "orwell-ste", False, strength=1, turns=15),
-        _rec("s4", "orwell-ste", False, strength=3, turns=30),
+        _rec("s3", "orwell-ste", False, strength=1, turns=25),
+        _rec("s4", "orwell-ste", False, strength=3, turns=40),
     ]
     stats = tally(records)
-    assert stats["n_qualifying"] == 3  # s1, s3, s4 (turns >= 15)
+    assert stats["n_qualifying"] == 3  # s1, s3, s4 (turns >= 25)
     assert stats["hook_on_mean_strength"] == pytest.approx(4.0)
     assert stats["hook_off_mean_strength"] == pytest.approx(2.0)
 
@@ -161,6 +161,69 @@ def test_count_assistant_turns_finds_real_transcript_ignoring_subagents_sibling(
 
 def test_count_assistant_turns_missing_transcript_returns_zero(tmp_path):
     assert count_assistant_turns("no-such-session", projects_dir=tmp_path) == 0
+
+
+def _write_log(log_path, lines):
+    with open(log_path, "w") as f:
+        for line in lines:
+            f.write(json.dumps(line) + "\n")
+
+
+def test_build_records_emits_one_record_per_guess_line(tmp_path):
+    log_path = tmp_path / "log.jsonl"
+    projects_dir = tmp_path / "projects"
+    session_id = "multi-guess"
+    truth, _hook_on = assignment(session_id)
+
+    _write_log(log_path, [
+        {"kind": "guess", "session_id": session_id, "style": truth,
+         "confidence": "low", "turn": 5, "ts": "t"},
+        {"kind": "guess", "session_id": session_id, "style": truth,
+         "confidence": "high", "turn": 30, "ts": "t"},
+    ])
+
+    records = build_records(log_path, projects_dir)
+    assert len(records) == 2
+    turns_logged = sorted(r["turn"] for r in records)
+    assert turns_logged == [5, 30]
+    assert all(r["session_id"] == session_id for r in records)
+    assert all(r["guess"] == truth for r in records)
+
+
+def test_build_records_every_guess_counts_as_a_trial_in_tally(tmp_path):
+    log_path = tmp_path / "log.jsonl"
+    projects_dir = tmp_path / "projects"
+    session_id = "multi-guess-2"
+    truth, _hook_on = assignment(session_id)
+    wrong = next(s for s in ("clarity-and-grace", "orwell-ste", "plain-speak", "default")
+                 if s != truth)
+
+    _write_log(log_path, [
+        {"kind": "guess", "session_id": session_id, "style": truth,
+         "confidence": "low", "turn": 5, "ts": "t"},
+        {"kind": "guess", "session_id": session_id, "style": wrong,
+         "confidence": "high", "turn": 30, "ts": "t"},
+    ])
+
+    stats = tally(build_records(log_path, projects_dir))
+    assert stats["n_guesses"] == 2
+    assert stats["raw_hit_rate"] == pytest.approx(0.5)
+
+
+def test_build_records_abstention_session_still_yields_one_record(tmp_path):
+    log_path = tmp_path / "log.jsonl"
+    projects_dir = tmp_path / "projects"
+    session_id = "abstain-only"
+
+    _write_log(log_path, [
+        {"kind": "strength", "session_id": session_id, "strength": 3,
+         "faded": False, "ts": "t"},
+    ])
+
+    records = build_records(log_path, projects_dir)
+    assert len(records) == 1
+    assert records[0]["guess"] is None
+    assert records[0]["strength"] == 3
 
 
 def test_score_main_smoke(tmp_path, capsys):
