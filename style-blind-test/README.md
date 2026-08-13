@@ -37,11 +37,14 @@ gs()  { python3 /home/caneff/.agents/skills/style-blind-test/capture.py gs "$@";
 fin() { python3 /home/caneff/.agents/skills/style-blind-test/capture.py fin "$@"; }
 ```
 
-`gs` prompts "which style? [1-4]" (mapping to the four `STYLES`, in order)
-and "confidence? [l/m/h]", then logs the guess through the same side channel
-`capture.py guess` uses. `fin` prompts "strength? [1-5]" and "faded? [y/n]"
-for the end-of-session strength rating. Both reject bad input and write
-nothing on rejection.
+`gs` prints a numbered menu of the four `STYLES` with a one-line description
+of each, then prompts "which style is active? [1-4]" and "how confident are
+you in that guess? [l/m/h]  (low / medium / high)", then logs the guess
+through the same side channel `capture.py guess` uses. `fin` prompts "how
+strong was the voice this session? [1-5]  (1 = barely there, 5 =
+unmistakable)" and "did the voice fade as the session went on? [y/n]" for
+the end-of-session strength rating. Both reject bad input (still 1-4 /
+l/m/h / 1-5 / y-n tokens) and write nothing on rejection.
 
 Run these in a **separate terminal**, never through Claude's `!` -- the model
 must not see the guess or the blind breaks.

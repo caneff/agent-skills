@@ -129,8 +129,10 @@ def run_guess_wizard(
     print(f"Recording guess for session {session_id}")
     for i, style_slug in enumerate(STYLES):
         print(f"  {i + 1}. {NAMES[style_slug]} — {DESCRIPTIONS[style_slug]}")
-    style = parse_style_choice(input_func(f"which style? [1-{len(STYLES)}] "))
-    confidence = parse_confidence_choice(input_func("confidence? [l/m/h] "))
+    style = parse_style_choice(input_func(f"which style is active? [1-{len(STYLES)}] "))
+    confidence = parse_confidence_choice(
+        input_func("how confident are you in that guess? [l/m/h]  (low / medium / high) ")
+    )
     if turn is None:
         turn = _current_turn(session_id, turn_state_dir)
     record = record_guess(
@@ -146,12 +148,14 @@ def run_strength_wizard(
     log_path: Path = DEFAULT_LOG_PATH,
 ) -> dict:
     session_id = _resolve_session_id(session_id)
-    raw_strength = input_func("strength? [1-5] ")
+    raw_strength = input_func(
+        "how strong was the voice this session? [1-5]  (1 = barely there, 5 = unmistakable) "
+    )
     try:
         strength = int(raw_strength.strip())
     except ValueError:
         raise ValueError(f"invalid strength {raw_strength!r}, must be an int 1-5")
-    faded = _parse_faded(input_func("faded? [y/n] "))
+    faded = _parse_faded(input_func("did the voice fade as the session went on? [y/n] "))
     record = record_strength(
         session_id, strength, faded, datetime.now(timezone.utc).isoformat()
     )
