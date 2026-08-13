@@ -11,12 +11,23 @@ trains the reader to distrust the suite — when half the tests go red for
 nothing, a real failure gets waved through. Ruthless sorting is what buys the
 survivors their authority.
 
-This is the judgment pass: the smells only reading can find. `audit.py` in
-this skill's directory is pass one — a mechanical grep for the syntactically
-detectable smells (assertion-free tests, tautologies, mock-the-world,
-interaction-only assertions, empty/skipped tests). Run it first; its
-candidate list feeds the judgment sweep below instead of starting from a
-blank page.
+This is the judgment pass: the smells only reading can find. `audit.py` and
+`audit.mjs` in this skill's directory are pass one — a mechanical scan for
+the syntactically detectable smells (assertion-free tests, tautologies,
+mock-the-world, interaction-only assertions, empty/skipped tests). `audit.py`
+covers pytest; `audit.mjs` covers vitest and node:test. Run both first; their
+combined candidate list feeds the judgment sweep below instead of starting
+from a blank page.
+
+**JS/TS reach.** `audit.mjs` recognizes vitest (`describe`/`it`/`test` +
+`expect`) and node:test (`node:test` import + `assert.*`) — nothing else. A
+file it can't identify as one of those two is skipped, never flagged, so a
+homegrown or non-standard harness doesn't flood pass one with false
+assertion-free findings. Playwright `.spec` files are out of scope — they're
+e2e/visual specs, not unit tests, and auditing them by this yardstick would
+misjudge them. jest, mocha, ava, and chai are likewise out of scope. A
+missing `@babel/parser` prints a `run npm ci` message and exits — bootstrap
+with `npm ci` in `test-audit/` once.
 
 **Name collision.** This is `test-audit` — test-*file* quality. It is not
 `ponytail-audit` (production-code over-engineering) or `skill-audit`
@@ -199,12 +210,14 @@ just no longer this test's problem.
    `audit.py` prunes these directory names itself; the same skip applies to
    the judgment sweep.
 
-2. **Pass one — run the mechanical script.** `python3 test-audit/audit.py
-   <scope>` scans pytest test files in scope and emits `file:line: <smell>`
-   candidates for the five mechanically detectable smells (assertion-free,
-   tautology, mock-the-world, interaction-only assertion, empty/skipped).
-   This is a candidate list, not a verdict — every line still needs the
-   judgment pass below to confirm it and assign a bucket.
+2. **Pass one — run both mechanical scanners.** `python3 test-audit/audit.py
+   <scope>` scans pytest files; `node test-audit/audit.mjs <scope>` scans
+   vitest and node:test files. Run both and concatenate their output into one
+   `file:line: <smell>` candidate list for the five mechanically detectable
+   smells (assertion-free, tautology, mock-the-world, interaction-only
+   assertion, empty/skipped). This is a candidate list, not a verdict — every
+   line still needs the judgment pass below to confirm it and assign a
+   bucket.
 
 3. **Pass two — sweep every test, not a sample.** Walk the test files in
    scope and read each test beside the code it covers; judgment needs both,
