@@ -6,13 +6,14 @@
  * `file:line: <smell>` candidates audit.py does for pytest. This script never
  * classifies — it only surfaces candidates for the judgment pass (SKILL.md).
  *
- * Three shallow smells, on vitest and node:test alike —
+ * Five smells, on vitest and node:test alike —
  *   1. assertion-free   — the test body has no `expect(...)`/`assert.*` call.
  *   2. tautology        — `expect(x).toBe(x)` / `assert.equal(x, x)`.
  *   3. empty/skipped    — empty body, or `.skip`/`.todo`, or a bodyless `it`.
+ *   4. mock-the-world   — mock constructs exceed a ceiling, little real logic.
+ *   5. interaction-only — every assertion only checks that a spy was called.
  *
- * The two mock smells (#303) land in a follow-up; audit.py keeps the pytest
- * path untouched.
+ * audit.py keeps the pytest path untouched.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename, extname } from "node:path";
@@ -193,11 +194,26 @@ function assertionsIn(func) {
   walk(func.body, (n) => {
     const e = asExpectAssertion(n);
     if (e) {
-      out.push({ isEq: EQ_MATCHERS.has(e.matcher), actual: e.expectCall.arguments[0], expected: e.matcherCall.arguments[0] });
+      out.push({
+        kind: "expect",
+        matcher: e.matcher,
+        isEq: EQ_MATCHERS.has(e.matcher),
+        actual: e.expectCall.arguments[0],
+        expected: e.matcherCall.arguments[0],
+      });
       return;
     }
     const a = assertCallInfo(n);
-    if (a) out.push({ isEq: ASSERT_EQ_MATCHERS.has(a.matcher), actual: a.args[0], expected: a.args[1] });
+    if (a) {
+      out.push({
+        kind: "assert",
+        matcher: a.matcher,
+        isEq: ASSERT_EQ_MATCHERS.has(a.matcher),
+        actual: a.args[0],
+        expected: a.args[1],
+        args: a.args,
+      });
+    }
   });
   return out;
 }
@@ -242,10 +258,103 @@ function sameSource(a, b, source) {
   return source.slice(a.start, a.end) === source.slice(b.start, b.end);
 }
 
+// ponytail: 3 is the ceiling, matching audit.py's MOCK_CEILING. Below it, a
+// test with one or two mocked collaborators and real logic in between is
+// normal isolation, not a smell.
+const MOCK_CEILING = 3;
+
+/** The dotted name chain of a (possibly nested) MemberExpression callee, e.g.
+ * `t.mock.fn` -> ["t", "mock", "fn"]. Null if any link isn't a plain name. */
+function memberPath(node) {
+  const parts = [];
+  let n = node;
+  while (n && n.type === "MemberExpression") {
+    if (n.property.type !== "Identifier") return null;
+    parts.unshift(n.property.name);
+    n = n.object;
+  }
+  if (!n || n.type !== "Identifier") return null;
+  parts.unshift(n.name);
+  return parts;
+}
+
+const NODE_MOCK_ROOTS = new Set(["fn", "method", "module", "timers"]);
+
+/** A mock-construction call: vitest `vi.fn/vi.mock/vi.spyOn`, node:test
+ * `mock.fn/mock.method/mock.module/mock.timers`, or any `t.mock.*` call. Also
+ * matches a chained mock-config call on top of one of those (`vi.fn()
+ * .mockReturnValue(5)`), so the config half of the chain doesn't get counted
+ * as real logic. */
+function isMockConstructCall(node) {
+  if (node.type !== "CallExpression") return false;
+  const path = memberPath(node.callee);
+  if (path && path.length >= 2) {
+    if (path[0] === "vi" && ["fn", "mock", "spyOn"].includes(path[1])) return true;
+    if (path[0] === "mock" && NODE_MOCK_ROOTS.has(path[1])) return true;
+    if (path[0] === "t" && path[1] === "mock") return true;
+  }
+  const obj = node.callee.type === "MemberExpression" ? node.callee.object : null;
+  return !!(obj && obj.type === "CallExpression" && isMockConstructCall(obj));
+}
+
+function isAssertionCall(node) {
+  return calleeName(node) === "expect" || !!asExpectAssertion(node) || !!assertCallInfo(node);
+}
+
+function isMockTheWorld(call) {
+  const cb = testCallback(call);
+  if (!cb) return false;
+  let mockCalls = 0;
+  let realCalls = 0;
+  walk(cb.body, (n) => {
+    if (n.type !== "CallExpression") return;
+    if (isMockConstructCall(n)) {
+      mockCalls += 1;
+    } else if (!isAssertionCall(n)) {
+      realCalls += 1;
+    }
+  });
+  return mockCalls >= MOCK_CEILING && mockCalls > realCalls;
+}
+
+// vitest's spy-call-check matcher family, plus node:test's best-effort
+// equivalent: an `assert.*` whose argument source references `.mock.calls`
+// or `.mock.callCount(`.
+const INTERACTION_MATCHERS = new Set([
+  "toHaveBeenCalled",
+  "toHaveBeenCalledTimes",
+  "toHaveBeenCalledWith",
+  "toHaveBeenLastCalledWith",
+  "toHaveReturned",
+  "toHaveReturnedTimes",
+  "toHaveReturnedWith",
+  "toHaveLastReturnedWith",
+]);
+const MOCK_CALLS_RE = /\.mock\.(calls\b|callCount\s*\()/;
+
+function isSpyCheck(assertion, source) {
+  if (assertion.kind === "expect") return INTERACTION_MATCHERS.has(assertion.matcher);
+  return (assertion.args || []).some(
+    (arg) => arg && MOCK_CALLS_RE.test(source.slice(arg.start, arg.end)),
+  );
+}
+
+// Every assertion is a spy-call check (reuses assertionsIn() so an outcome
+// assertion mixed in with spy checks correctly stops this from firing).
+function isInteractionOnly(call, source) {
+  const cb = testCallback(call);
+  if (!cb) return false;
+  const assertions = assertionsIn(cb);
+  if (assertions.length === 0) return false;
+  return assertions.every((a) => isSpyCheck(a, source));
+}
+
 const DETECTORS = [
   ["assertion-free test", isAssertionFree],
   ["tautology", isTautology],
   ["empty/skipped test", isEmptyOrSkipped],
+  ["mock-the-world", isMockTheWorld],
+  ["interaction-only assertion", isInteractionOnly],
 ];
 
 // --- scan ------------------------------------------------------------------
@@ -388,6 +497,80 @@ function selfcheck() {
     !isVitestFile(foreignHarness) && !isNodeTestFile(foreignHarness),
     "combined gate skips a file that is neither vitest nor node:test",
   );
+
+  // 4. mock-the-world
+  assert(
+    isMockTheWorld(
+      testCallFrom(
+        "it('x', () => { const a = vi.fn(); const b = vi.fn(); const c = vi.spyOn(obj, 'm'); subject.run(); })",
+      ),
+    ),
+    "mock-the-world positive (vitest)",
+  );
+  assert(
+    !isMockTheWorld(
+      testCallFrom(
+        "it('x', () => { const a = vi.fn(); const result = subject.compute(1, 2); expect(result).toBe(3); })",
+      ),
+    ),
+    "mock-the-world negative (vitest)",
+  );
+  assert(
+    isMockTheWorld(
+      testCallFrom(
+        "test('x', (t) => { const a = t.mock.fn(); const b = t.mock.fn(); const c = t.mock.method(obj, 'm'); subject.run(); })",
+      ),
+    ),
+    "mock-the-world positive (node:test)",
+  );
+  assert(
+    isMockTheWorld(
+      testCallFrom(
+        "it('x', () => { const a = vi.fn().mockReturnValue(1); const b = vi.fn().mockReturnValue(2); const c = vi.spyOn(obj, 'm'); subject.run(); })",
+      ),
+    ),
+    "mock-the-world positive (vitest, chained mock config)",
+  );
+  assert(
+    !isMockTheWorld(
+      testCallFrom(
+        "test('x', () => { const a = mock.fn(); const result = subject.compute(1, 2); assert.equal(result, 3); })",
+      ),
+    ),
+    "mock-the-world negative (node:test)",
+  );
+
+  // 5. interaction-only assertion
+  assert(
+    isInteractionOnly(
+      testCallFrom("it('x', () => { fn(); expect(fn).toHaveBeenCalled(); })"),
+      "it('x', () => { fn(); expect(fn).toHaveBeenCalled(); })",
+    ),
+    "interaction-only positive (vitest)",
+  );
+  assert(
+    !isInteractionOnly(
+      testCallFrom("it('x', () => { const result = subject.run(); expect(result).toBe('ok'); })"),
+      "it('x', () => { const result = subject.run(); expect(result).toBe('ok'); })",
+    ),
+    "interaction-only negative (vitest)",
+  );
+  {
+    const src = "test('x', () => { fn(); assert.equal(fn.mock.calls.length, 1); })";
+    assert(isInteractionOnly(testCallFrom(src), src), "interaction-only positive (node:test, best-effort)");
+  }
+  {
+    const src = "test('x', () => { const result = subject.run(); assert.equal(result, 'ok'); })";
+    assert(!isInteractionOnly(testCallFrom(src), src), "interaction-only negative (node:test)");
+  }
+  {
+    // Mixing an outcome assertion in with a spy check must not fire — the
+    // constraint that isInteractionOnly reuse assertionsIn() so it doesn't
+    // misfire on a mixed set.
+    const src =
+      "it('x', () => { const result = subject.run(); expect(result).toBe('ok'); expect(fn).toHaveBeenCalled(); })";
+    assert(!isInteractionOnly(testCallFrom(src), src), "interaction-only negative (vitest, mixed assertions)");
+  }
 
   process.stdout.write("ok\n");
 }
