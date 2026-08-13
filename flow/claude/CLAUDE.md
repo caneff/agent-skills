@@ -144,6 +144,11 @@ Worktree handling for the code lane:
 - Subagents: fire-and-return work → no `name`, `run_in_background: false`.
   Named + background = persistent teammate that parks idle and returns nothing.
   Test one before fanning out.
+- Subagent model: default `model: sonnet` for mechanical retrieval/
+  characterization (grep sweeps, surveys, counts, structured reports — no
+  judgment inside the agent). Keep Opus where the agent's own reasoning is
+  the deliverable: adversarial bug-hunting, diagnosis, design synthesis,
+  quality judgment.
 - `.claude/worktrees/` must be gitignored. Untracked, it makes the main
   checkout read dirty, and `pushpr` then cuts a junk branch and commits the
   worktree back as a gitlink instead of pushing the worktree branch.
