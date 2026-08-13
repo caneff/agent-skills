@@ -24,11 +24,13 @@
     <script src="../../visual-teach/assets/mermaid.js"></script>
 
     <style>
-      /* visual-teach caps main at 760px for a prose reading column. A review
-         carries side-by-side before/after code, so widen it to give the two
-         columns room. */
+      /* visual-teach sizes main's content column from --vt-measure (the prose
+         reading width). A review carries side-by-side before/after code, so
+         raise --vt-measure to widen the content column itself — the frame follows
+         via --vt-frame: calc(--vt-measure * 1.35). Overriding max-width alone only
+         widens the frame/gutters, not the column the code sits in. */
       main {
-        max-width: 1080px;
+        --vt-measure: 1080px;
       }
 
       /* Small local layer: the severity legend row and the finding meta row.
