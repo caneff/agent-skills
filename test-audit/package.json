@@ -1,0 +1,10 @@
+{
+  "name": "test-audit-scanner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Node sibling scanner for test-audit pass one: JS/TS test smells via @babel/parser.",
+  "type": "module",
+  "dependencies": {
+    "@babel/parser": "^7.25.0"
+  }
+}
