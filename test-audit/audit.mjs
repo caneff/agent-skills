@@ -6,13 +6,13 @@
  * `file:line: <smell>` candidates audit.py does for pytest. This script never
  * classifies — it only surfaces candidates for the judgment pass (SKILL.md).
  *
- * Walking skeleton (#301): three shallow smells on vitest only —
- *   1. assertion-free   — the test body has no `expect(...)` assertion.
- *   2. tautology        — `expect(x).toBe(x)` (same expression both sides).
+ * Three shallow smells, on vitest and node:test alike —
+ *   1. assertion-free   — the test body has no `expect(...)`/`assert.*` call.
+ *   2. tautology        — `expect(x).toBe(x)` / `assert.equal(x, x)`.
  *   3. empty/skipped    — empty body, or `.skip`/`.todo`, or a bodyless `it`.
  *
- * node:test recognition + `assert.*` (#302) and the two mock smells (#303)
- * land in follow-ups; audit.py keeps the pytest path untouched.
+ * The two mock smells (#303) land in a follow-up; audit.py keeps the pytest
+ * path untouched.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename, extname } from "node:path";
@@ -134,6 +134,19 @@ function isVitestFile(tree) {
   return hasSuite && hasExpect;
 }
 
+// A file is audited as node:test only when it both imports from 'node:test'
+// AND uses `assert.*` — the same false-positive guard as the vitest gate,
+// applied to node's built-in runner instead of a `describe`/`it`/`expect` net.
+function isNodeTestFile(tree) {
+  let hasImport = false;
+  let hasAssert = false;
+  walk(tree, (n) => {
+    if (n.type === "ImportDeclaration" && n.source.value === "node:test") hasImport = true;
+    if (assertCallInfo(n)) hasAssert = true;
+  });
+  return hasImport && hasAssert;
+}
+
 // --- assertion vocabulary --------------------------------------------------
 
 const EQ_MATCHERS = new Set(["toBe", "toEqual", "toStrictEqual"]);
@@ -154,11 +167,37 @@ function asExpectAssertion(node) {
   return null;
 }
 
-function expectAssertions(func) {
+const ASSERT_EQ_MATCHERS = new Set(["equal", "strictEqual", "deepEqual", "deepStrictEqual"]);
+
+/**
+ * A `node:assert` call: `assert.equal(a, b)` (member form) or the bare
+ * `assert(x)` shorthand for `assert.ok(x)`. Returns { matcher, args } or null.
+ */
+function assertCallInfo(node) {
+  if (node.type !== "CallExpression") return null;
+  const c = node.callee;
+  if (c.type === "MemberExpression" && c.object.type === "Identifier" && c.object.name === "assert" && c.property.type === "Identifier") {
+    return { matcher: c.property.name, args: node.arguments };
+  }
+  if (c.type === "Identifier" && c.name === "assert") {
+    return { matcher: "ok", args: node.arguments };
+  }
+  return null;
+}
+
+// Every assertion in a test body, `expect(...)` chains and `assert.*` calls
+// alike, normalized to { isEq, actual, expected } — the shape both the
+// assertion-free and tautology detectors need, regardless of vocabulary.
+function assertionsIn(func) {
   const out = [];
   walk(func.body, (n) => {
-    const a = asExpectAssertion(n);
-    if (a) out.push(a);
+    const e = asExpectAssertion(n);
+    if (e) {
+      out.push({ isEq: EQ_MATCHERS.has(e.matcher), actual: e.expectCall.arguments[0], expected: e.matcherCall.arguments[0] });
+      return;
+    }
+    const a = assertCallInfo(n);
+    if (a) out.push({ isEq: ASSERT_EQ_MATCHERS.has(a.matcher), actual: a.args[0], expected: a.args[1] });
   });
   return out;
 }
@@ -174,16 +213,14 @@ function isAssertionFree(call) {
   const cb = testCallback(call);
   // No callback (a bodyless `it`) is empty/skipped's concern, not this one.
   if (!cb) return false;
-  return expectAssertions(cb).length === 0;
+  return assertionsIn(cb).length === 0;
 }
 
 function isTautology(call, source) {
   const cb = testCallback(call);
   if (!cb) return false;
-  for (const { expectCall, matcher, matcherCall } of expectAssertions(cb)) {
-    if (!EQ_MATCHERS.has(matcher)) continue;
-    const actual = expectCall.arguments[0];
-    const expected = matcherCall.arguments[0];
+  for (const { isEq, actual, expected } of assertionsIn(cb)) {
+    if (!isEq) continue;
     if (actual && expected && sameSource(actual, expected, source)) return true;
   }
   return false;
@@ -230,7 +267,7 @@ function scanFile(path) {
   } catch {
     return [];
   }
-  if (!isVitestFile(tree)) return [];
+  if (!isVitestFile(tree) && !isNodeTestFile(tree)) return [];
   const findings = [];
   for (const call of testCalls(tree)) {
     for (const [smell, detect] of DETECTORS) {
@@ -294,21 +331,62 @@ function selfcheck() {
   // 1. assertion-free
   assert(isAssertionFree(testCallFrom("it('x', () => { const y = compute(); })")), "assertion-free positive");
   assert(!isAssertionFree(testCallFrom("it('x', () => { expect(compute()).toBe(5); })")), "assertion-free negative");
+  assert(
+    isAssertionFree(testCallFrom("test('x', () => { const y = compute(); })")),
+    "assertion-free positive (node:test)",
+  );
+  assert(
+    !isAssertionFree(testCallFrom("test('x', () => { assert.equal(compute(), 5); })")),
+    "assertion-free negative (node:test)",
+  );
 
   // 2. tautology
   assert(tautologyOf("it('x', () => { expect(x).toBe(x); })"), "tautology positive");
   assert(!tautologyOf("it('x', () => { expect(x).toBe(5); })"), "tautology negative");
+  assert(tautologyOf("test('x', () => { assert.equal(x, x); })"), "tautology positive (node:test)");
+  assert(!tautologyOf("test('x', () => { assert.equal(x, 5); })"), "tautology negative (node:test)");
 
   // 3. empty/skipped
   assert(isEmptyOrSkipped(testCallFrom("it('x', () => {})")), "empty body positive");
   assert(isEmptyOrSkipped(testCallFrom("it.skip('x', () => { expect(a).toBe(b); })")), "skip positive");
   assert(!isEmptyOrSkipped(testCallFrom("it('x', () => { expect(a).toBe(b); })")), "empty/skipped negative");
+  assert(isEmptyOrSkipped(testCallFrom("test('x', () => {})")), "empty body positive (node:test)");
+  assert(
+    isEmptyOrSkipped(testCallFrom("test.skip('x', () => { assert.equal(a, b); })")),
+    "skip positive (node:test)",
+  );
+  assert(
+    !isEmptyOrSkipped(testCallFrom("test('x', () => { assert.equal(a, b); })")),
+    "empty/skipped negative (node:test)",
+  );
 
   // recognize-or-skip gate
   assert(isVitestFile(parseSource("it('x', () => { expect(a).toBe(b); })", "s.test.js")), "gate recognizes vitest");
   assert(
     !isVitestFile(parseSource("harness('x', () => { check(a, b); })", "s.test.js")),
     "gate skips homegrown harness",
+  );
+  const nodeTestSrc =
+    "import { test } from 'node:test';\nimport assert from 'node:assert';\ntest('x', () => { assert.equal(a, b); });\n";
+  assert(isNodeTestFile(parseSource(nodeTestSrc, "s.test.js")), "gate recognizes node:test");
+  assert(
+    !isNodeTestFile(parseSource("it('x', () => { expect(a).toBe(b); })", "s.test.js")),
+    "gate: vitest file is not node:test",
+  );
+  assert(
+    !isVitestFile(parseSource(nodeTestSrc, "s.test.js")),
+    "gate: node:test file is not vitest",
+  );
+  assert(
+    !isNodeTestFile(
+      parseSource("import { test } from 'node:test';\ntest('x', () => { doStuff(a, b); });\n", "s.test.js"),
+    ),
+    "gate skips node:test import without assert.* usage",
+  );
+  const foreignHarness = parseSource("harness('x', () => { check(a, b); })", "s.test.js");
+  assert(
+    !isVitestFile(foreignHarness) && !isNodeTestFile(foreignHarness),
+    "combined gate skips a file that is neither vitest nor node:test",
   );
 
   process.stdout.write("ok\n");
