@@ -185,9 +185,11 @@ just no longer this test's problem.
 
 1. **Start clean, scope tight.** Confirm a clean working tree first
    (`git status`). Then scope: audit `$ARGUMENTS` if given; with no argument,
-   default to the current branch's diff against its base
-   (`git diff --name-only main...HEAD`), not the whole tree — a repo-wide
-   sweep is an explicit opt-in the user asks for by name. Either way, skip
+   default to the current branch's diff against its base — resolve the base,
+   don't assume `main`
+   (`git diff --name-only $(git merge-base HEAD origin/HEAD)...HEAD`), not the
+   whole tree — a repo-wide sweep is an explicit opt-in the user asks for by
+   name. Either way, skip
    vendored, generated, and dependency trees (`node_modules`, `dist`,
    `.venv`, build output, lockfiles), and leave load-bearing scaffolding
    alone (see above).
