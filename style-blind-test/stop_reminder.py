@@ -45,7 +45,7 @@ def _write_state(path: Path, count: int, last_fired: int) -> None:
     path.write_text(f"{count} {last_fired}\n")
 
 
-def _notify() -> None:
+def _notify(session_id: str, cwd: str | None = None) -> None:
     # ponytail: fire-and-forget, best-effort. A dead notification is not a
     # reason to fail the Stop hook.
     try:
@@ -64,6 +64,8 @@ def _notify() -> None:
         )
         if wslpath.returncode != 0:
             return
+        proj = Path(cwd).name if cwd else "?"
+        short_id = session_id[:8]
         subprocess.run(
             [
                 "powershell.exe",
@@ -75,7 +77,11 @@ def _notify() -> None:
                 "-Title",
                 "Blind test",
                 "-Body",
-                REMINDER_MESSAGE,
+                f"{REMINDER_MESSAGE}\n{proj} · {short_id}",
+                "-Duration",
+                "long",
+                "-Sound",
+                "ms-winsoundevent:Notification.Reminder",
             ],
             capture_output=True,
         )
@@ -86,6 +92,7 @@ def _notify() -> None:
 def run(hook_input: str, state_dir: Path = DEFAULT_STATE_DIR) -> bool:
     payload = json.loads(hook_input)
     session_id = payload["session_id"]
+    cwd = payload.get("cwd")
     state_path = Path(state_dir) / session_id
 
     prev_count, last_fired = _read_state(state_path)
@@ -94,7 +101,7 @@ def run(hook_input: str, state_dir: Path = DEFAULT_STATE_DIR) -> bool:
     fired = should_fire(prev_count, new_count) and new_count > last_fired
     if fired:
         last_fired = new_count
-        _notify()
+        _notify(session_id, cwd)
 
     _write_state(state_path, new_count, last_fired)
     return fired
