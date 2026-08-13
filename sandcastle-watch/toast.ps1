@@ -36,13 +36,15 @@ if ($BodyFile) {
 function Clean([string]$s) {
   [System.Security.SecurityElement]::Escape($s) -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]', ''
 }
-$audioXml = ''
-if ($Sound) {
-  $audioXml = "<audio src='$(Clean $Sound)' loop='false'/>"
-}
 $xml = [Windows.Data.Xml.Dom.XmlDocument]::new()
-$xml.LoadXml("<toast duration='$(Clean $Duration)'><visual><binding template='ToastText02'><text id='1'>$(Clean $Title)</text><text id='2'>$(Clean $Body)</text></binding></visual>$audioXml</toast>")
+$xml.LoadXml("<toast duration='$(Clean $Duration)'><visual><binding template='ToastText02'><text id='1'>$(Clean $Title)</text><text id='2'>$(Clean $Body)</text></binding></visual></toast>")
 # ponytail: borrows PowerShell's AUMID, so Action Center attributes the toast to
 # "Windows PowerShell". A custom "Sandcastle" identity needs a registry write.
 $aumid = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($aumid).Show([Windows.UI.Notifications.ToastNotification]::new($xml))
+if ($Sound) {
+  # ponytail: WSL-fired toasts route to Action Center silently under the
+  # borrowed PowerShell AUMID, so the toast's <audio> never sounds. Play the
+  # alert directly instead -- this is the only path that reliably makes noise.
+  try { [System.Media.SystemSounds]::Exclamation.Play() } catch {}
+}

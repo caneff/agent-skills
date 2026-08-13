@@ -80,6 +80,8 @@ def _notify(session_id: str, cwd: str | None = None) -> None:
                 f"{REMINDER_MESSAGE}\n{proj} · {short_id}",
                 "-Duration",
                 "long",
+                # toast.ps1 no longer embeds this as <audio> (silent under WSL);
+                # any non-empty value here just flags "play the alert sound".
                 "-Sound",
                 "ms-winsoundevent:Notification.Reminder",
             ],
