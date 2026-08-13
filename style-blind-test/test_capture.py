@@ -212,6 +212,35 @@ def test_parse_confidence_choice_rejects_bad_input(bad):
 # -- gs wizard: interactive flows -------------------------------------------
 
 
+def test_run_guess_wizard_prints_style_menu(tmp_path, capsys):
+    log_path = tmp_path / "log.jsonl"
+    answers = iter(["2", "h"])
+    run_guess_wizard(
+        input_func=lambda _prompt: next(answers),
+        session_id="sess-w",
+        log_path=log_path,
+        turn=9,
+    )
+    out = capsys.readouterr().out
+    assert "Clear prose with range" in out
+    assert "Clear and direct" in out
+    assert "Plain-language default" in out
+    assert "No injected style" in out
+
+
+def test_run_guess_wizard_prints_resolved_session_id(tmp_path, capsys):
+    log_path = tmp_path / "log.jsonl"
+    answers = iter(["2", "h"])
+    run_guess_wizard(
+        input_func=lambda _prompt: next(answers),
+        session_id="sess-w",
+        log_path=log_path,
+        turn=9,
+    )
+    out = capsys.readouterr().out
+    assert "sess-w" in out
+
+
 def test_run_guess_wizard_writes_record(tmp_path):
     log_path = tmp_path / "log.jsonl"
     answers = iter(["2", "h"])
