@@ -26,7 +26,7 @@ If that prints a pid, a run is already going — you can't capture its stdout af
 **Done when:** preconditions pass and you know whether you're starting a run or attaching to a live one.
 
 ## 1. Start the run
-Sandcastle's milestone markers — phase/iteration headers, work assignments, `✓/✗/⚠` outcomes, `→ PR #N`, the final `=== Run Summary ===` — all go to **stdout**. Do **not** rely on a live `.sandcastle/logs/run-*.log`: this orchestrator writes `run-<id>.log` only once at the very end (just the summary), and its startup pruner deletes any header-less log you drop into `.sandcastle/logs` (a hand-made boot log included). So capture npm's stdout yourself, to a durable path **outside** `.sandcastle/logs` where the pruner can't touch it, and watch that:
+Sandcastle's progress — the human milestone lines (`✓/✗/⚠` outcomes, `→ PR #N`, the final `=== Run Summary ===`) and the machine-readable `SANDCASTLE_MARK` sentinels the skill actually parses — all go to **stdout**. Do **not** rely on a live `.sandcastle/logs/run-*.log`: this orchestrator writes `run-<id>.log` only once at the very end (just the summary), and its startup pruner deletes any header-less log you drop into `.sandcastle/logs` (a hand-made boot log included). So capture npm's stdout yourself, to a durable path **outside** `.sandcastle/logs` where the pruner can't touch it, and watch that:
 
     LOG=$(mktemp /tmp/sandcastle-watch-XXXXXX.log)
     ~/.claude/skills/sandcastle-watch/sandcastle-watch.sh start "$LOG"
@@ -45,10 +45,10 @@ The `refresh` verb rewrites `.sandcastle/logs/watch-status` on its own clock whi
 
 The format is settled — don't improvise a different one:
 
-    🏰 3/20 · 101 102 104 · 0 PR                       healthy: dim throughout
-    🏰 3/20 · 101 102 104 · 0 PR · 2✗ 103 105 · 1⚠ 104  trouble: only the tail lit
+    🏰 4 · 101 102 104 107 · 0 PR                       healthy: dim throughout
+    🏰 4 · 101 102 104 107 · 0 PR · 2✗ 103 105 · 1⚠ 104  trouble: only the tail lit
 
-Iteration, the ids in flight this iteration, PRs opened, then a marker per trouble kind with its own failing ids appended — `✗` in red, `⚠` in yellow. In-flight ids stay put when trouble appears; the failing ones are additive. `sandcastle-watch.sh refresh <log> <root> once` renders a single frame to stdout — use it to check the format against a finished run's log.
+The build-set count, the ids in flight this sweep, PRs opened, then a marker per trouble kind with its own failing ids appended — `✗` in red, `⚠` in yellow. The lead slot is a bare count, not `N/M`: this config plans one sweep, not a series of iterations. In-flight ids stay put when trouble appears; the failing ones are additive. `sandcastle-watch.sh refresh <log> <root> once` renders a single frame to stdout — use it to check the format against a finished run's log.
 
 **You do not own this segment's colour, so don't try to fix colour here.** With a powerline theme active, ccstatusline strips the script's ANSI *and* ignores the segment's `color`/`backgroundColor`, painting every background itself from the theme's five-colour cycle, indexed by segment position. Both were verified against a real render: `\033[2m`/`\033[22;39m` never reached the output, and `backgroundColor: green` left the segment on its theme colour. The script's own escapes are harmless leftovers — editing them changes nothing on screen.
 
@@ -75,10 +75,10 @@ Substitute that path into every command below — write to it with the Write too
 
        ~/.claude/skills/sandcastle-watch/sandcastle-watch.sh digest "$LOG" <N>
 
-   It reads `$LOG` from byte offset `<N>` to end and prints `key=value` lines: `iter`, `flight` (ids in flight this iteration), `pr`, `fail` (real failures), `warn`, `setup` (setup-noise ids, bucketed apart — see *Setup noise*), `offset` (the new end-of-file byte count), and `done` (1 once the run summary lands). It is a pure read of the markers Sandcastle prints — no subagent, no agent chatter on your context. When a specific failure needs colour, read the tail of that issue's `.sandcastle/logs/<branch>-<name>.log` yourself; digest gives you the *what*, that log the *why*.
-2. Advance `<N>` to the `offset` digest printed. Diff the fields against the last tick: if nothing changed, say nothing; if something moved, tell the user one or two lines — what moved. You hold the cross-tick state, so a `setup` id that reappears a later iteration is yours to catch.
+   It reads `$LOG` from byte offset `<N>` to end and prints `key=value` lines: `plan` (the build-set count), `flight` (ids in flight this sweep), `pr`, `fail` (real failures), `warn`, `setup` (setup-noise ids, bucketed apart — see *Setup noise*), `offset` (the new end-of-file byte count), and `done` (1 once the run summary lands). It is a pure read of the `SANDCASTLE_MARK` sentinels Sandcastle prints — no subagent, no agent chatter on your context. When a specific failure needs colour, read the tail of that issue's `.sandcastle/logs/<branch>-<name>.log` yourself; digest gives you the *what*, that log the *why*.
+2. Advance `<N>` to the `offset` digest printed. Diff the fields against the last tick: if nothing changed, say nothing; if something moved, tell the user one or two lines — what moved. You hold the cross-tick state, so a `setup` id that reappears a later run is yours to catch.
 3. Nothing to do for the status bar — the `refresh` job from step 1 owns `.sandcastle/logs/watch-status` and keeps it fresh on its own clock. The scoped ccstatusline segment (`sandcastle-segment.sh`, now a one-line shim into `sandcastle-watch.sh segment`; ccstatusline's `commandPath` still points at it) resolves the session's repo root and shows that repo's file only. With no fresh file it rests at a dim `🏰 idle` in any repo that has a `.sandcastle/` directory, and prints nothing anywhere else — so a blank segment means "not a Sandcastle repo," never "the watcher died." If the line goes missing while a run is live, check the refresher is still alive (`sandcastle-watch.sh refresher-running`) before touching the file by hand — it carries the same `bash -c` self-exclusion as `is-running`, from the same one definition, so the check is never retyped in prose.
-4. On a **headline milestone** — iteration boundary, an issue done or really failed (setup noise is not a milestone — see *Setup noise*), a PR opened, or the run finishing — also send the user a push notification. On WSL (`command -v powershell.exe`), fire a Windows desktop toast alongside it, so the milestone lands on the desktop the user is actually looking at:
+4. On a **headline milestone** — the plan landing, an issue done or really failed (setup noise is not a milestone — see *Setup noise*), a PR opened, or the run finishing — also send the user a push notification. On WSL (`command -v powershell.exe`), fire a Windows desktop toast alongside it, so the milestone lands on the desktop the user is actually looking at:
 
    Write the milestone text to the run's body file, then fire the toast:
 
@@ -88,11 +88,11 @@ Substitute that path into every command below — write to it with the Write too
 5. Reschedule the next check (~90s).
 
 ### Setup noise — mention it, don't headline it
-An issue that fails during **sandbox setup** with an `ExecError` whose exit code is followed by an empty stderr is **setup noise**: the exec transport hiccupped, the command never ran, and the next iteration retries the issue and normally gets clean through. Git never exits non-zero silently — every `fatal:` writes to stderr first — so the blank line under the exit code is the tell:
+An issue that fails during **sandbox setup** with an `ExecError` whose exit code is followed by an empty stderr is **setup noise**: the exec transport hiccupped, the command never ran, and the next run retries the issue and normally gets clean through. Git never exits non-zero silently — every `fatal:` writes to stderr first — so a silent nonzero git exec is the tell:
 
     ✗ 107 (sandcastle/issue-107) failed: (FiberFailure) ExecError: Command failed (exit 128): git config --global --add safe.directory "/home/agent/workspace"
 
-Report setup noise as "transient, iteration N+1 will retry" — one line in the tick, no notification, nothing asked of the user. Keep the `setup` ids digest bucketed; you persist across ticks and each digest run keeps no state, so you are the only one who can see a repeat. If an id you already noted comes back as setup noise in the **next** iteration, that repetition is real trouble — headline it and hand it to the user.
+You no longer sniff for this yourself. The orchestrator classifies it at the source — where the error object lives — and emits `SANDCASTLE_MARK setup <id>` instead of `fail`, so `digest` hands you the `setup` ids already split from real failures. Report them as "transient, next run will retry" — one line in the tick, no notification, nothing asked of the user. Keep the `setup` ids bucketed across ticks; each digest run keeps no state, so you are the only one who can see a repeat. If an id you already noted comes back as setup noise on the **next** run, that repetition is real trouble — headline it and hand it to the user.
 
 Everything else is unchanged: a genuine `✗` and a failed review (`⚠ N failed review`) both still headline, and both still need a human.
 
@@ -117,4 +117,14 @@ Prefer a stop at an **iteration boundary**. Sandcastle transitions each issue's 
 **Done when:** `$LOG` has been flat for 20s and the live-run check comes back empty.
 
 ## Markers `digest` keys off
-`=== Phase 0 … ===` / `=== Reconciliation sweep … ===` / `=== Iteration N/MAX ===` · `  [mode] id: title → branch` (work in flight) · `  ✓` / `  ✗ id …` / `  ⚠ id …` (outcomes) · `✗ … ExecError: Command failed (exit N): …` with a blank line under it, during sandbox setup (setup noise — see step 2) · `… → PR #N` · the final `=== Run Summary ===` bucketed block.
+`digest` reads **only** `SANDCASTLE_MARK` sentinel lines — never the human wording, whose drift per template version was the bug this closes (#268). The orchestrator prints them beside its human output from one helper (`markers.mts`, `emitMarker`); the grammar is `SANDCASTLE_MARK <kind> <args…>`:
+
+- `SANDCASTLE_MARK plan <N>` — build-set count, the bar's lead slot
+- `SANDCASTLE_MARK flight <id> <id> …` — ids in flight this sweep
+- `SANDCASTLE_MARK pr <id> <n>` — a PR opened; `digest` counts these
+- `SANDCASTLE_MARK fail <id>` — a real failure
+- `SANDCASTLE_MARK setup <id>` — a transient setup hiccup, classified by the emitter, not sniffed here (see *Setup noise*)
+- `SANDCASTLE_MARK warn <id>` — a review-fail needing a human
+- `SANDCASTLE_MARK done` — the run summary has landed
+
+The prefix and kind tokens are a host-coupled contract, matched verbatim on both sides — the emitter (`markers.mts`) and the parser (`sandcastle-watch.sh digest`). Reword one, break the bar; change them only in lockstep. The human `=== Run Summary ===` block is still tailed verbatim for the closing report — only *parsing* keys off the sentinels.
