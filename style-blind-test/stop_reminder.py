@@ -45,7 +45,7 @@ def _write_state(path: Path, count: int, last_fired: int) -> None:
     path.write_text(f"{count} {last_fired}\n")
 
 
-def _notify() -> None:
+def _notify(session_id: str) -> None:
     # ponytail: fire-and-forget, best-effort. A dead notification is not a
     # reason to fail the Stop hook.
     try:
@@ -75,7 +75,7 @@ def _notify() -> None:
                 "-Title",
                 "Blind test",
                 "-Body",
-                REMINDER_MESSAGE,
+                f"{REMINDER_MESSAGE}\nsession {session_id}",
             ],
             capture_output=True,
         )
@@ -94,7 +94,7 @@ def run(hook_input: str, state_dir: Path = DEFAULT_STATE_DIR) -> bool:
     fired = should_fire(prev_count, new_count) and new_count > last_fired
     if fired:
         last_fired = new_count
-        _notify()
+        _notify(session_id)
 
     _write_state(state_path, new_count, last_fired)
     return fired

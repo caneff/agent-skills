@@ -1,6 +1,7 @@
 """Tests for the Stop-event reminder hook (issue #316)."""
 import json
 
+import stop_reminder
 from stop_reminder import (
     REMINDER_MESSAGE,
     run,
@@ -73,6 +74,19 @@ def test_run_tracks_sessions_independently(tmp_path):
     assert result is False
     assert (state_dir / "a").read_text().strip().split()[0] == "1"
     assert (state_dir / "b").read_text().strip().split()[0] == "1"
+
+
+def test_run_notifies_with_the_firing_session_id(tmp_path, monkeypatch):
+    state_dir = tmp_path / "turns"
+    session_id = "sess-notify"
+    calls = []
+    monkeypatch.setattr(stop_reminder, "_notify", lambda sid: calls.append(sid))
+
+    for _ in range(24):
+        run(json.dumps({"session_id": session_id}), state_dir=state_dir)
+    run(json.dumps({"session_id": session_id}), state_dir=state_dir)
+
+    assert calls == [session_id]
 
 
 def test_reminder_message_reveals_no_style():
