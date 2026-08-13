@@ -193,8 +193,11 @@ just no longer this test's problem.
    whole tree — a repo-wide sweep is an explicit opt-in the user asks for by
    name. Either way, skip
    vendored, generated, and dependency trees (`node_modules`, `dist`,
-   `.venv`, build output, lockfiles), and leave load-bearing scaffolding
-   alone (see above).
+   `.venv`, build output, lockfiles) and any `worktrees/` tree — a git
+   worktree mirrors the whole repo, so scanning it multiplies every finding
+   once per worktree — and leave load-bearing scaffolding alone (see above).
+   `audit.py` prunes these directory names itself; the same skip applies to
+   the judgment sweep.
 
 2. **Pass one — run the mechanical script.** `python3 test-audit/audit.py
    <scope>` scans pytest test files in scope and emits `file:line: <smell>`

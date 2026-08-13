@@ -214,11 +214,20 @@ def scan_file(path):
     return findings
 
 
+# Trees that duplicate or vendor the source. Worktrees mirror the whole repo,
+# so scanning them multiplies every finding once per worktree.
+_PRUNE_DIRS = {".venv", "node_modules", "dist", "build", ".git", "worktrees"}
+
+
 def scan_path(root):
     if os.path.isfile(root):
         paths = [root]
     else:
-        paths = sorted(glob.glob(os.path.join(root, "**", "*.py"), recursive=True))
+        paths = [
+            p
+            for p in sorted(glob.glob(os.path.join(root, "**", "*.py"), recursive=True))
+            if not (_PRUNE_DIRS & set(p.split(os.sep)))
+        ]
     findings = []
     for path in paths:
         findings.extend(scan_file(path))
