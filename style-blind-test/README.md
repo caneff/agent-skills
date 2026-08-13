@@ -33,8 +33,8 @@ It never reveals the style and never touches the guess log.
 Add this to `~/.bashrc` (not done automatically):
 
 ```bash
-gs() { python3 /home/caneff/.agents/skills/style-blind-test/capture.py gs; }
-fin() { python3 /home/caneff/.agents/skills/style-blind-test/capture.py fin; }
+gs()  { python3 /home/caneff/.agents/skills/style-blind-test/capture.py gs "$@"; }
+fin() { python3 /home/caneff/.agents/skills/style-blind-test/capture.py fin "$@"; }
 ```
 
 `gs` prompts "which style? [1-4]" (mapping to the four `STYLES`, in order)
@@ -42,3 +42,14 @@ and "confidence? [l/m/h]", then logs the guess through the same side channel
 `capture.py guess` uses. `fin` prompts "strength? [1-5]" and "faded? [y/n]"
 for the end-of-session strength rating. Both reject bad input and write
 nothing on rejection.
+
+Run these in a **separate terminal**, never through Claude's `!` -- the model
+must not see the guess or the blind breaks.
+
+`gs` finds the session on its own, in this order: `--session-id <id>`, then
+`CLAUDE_CODE_SESSION_ID`, then the newest file in
+`~/.claude/style-blind-test/turns/` (the reminder hook writes one per turn).
+A side terminal doesn't inherit `CLAUDE_CODE_SESSION_ID`, so auto-detect is
+the usual path -- just type `gs` while the reminder hook is active. Caveat:
+"newest file wins" picks the wrong session if two run at once; pass
+`--session-id` to be explicit.
