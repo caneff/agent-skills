@@ -29,7 +29,6 @@ def parse_frontmatter(text):
 
 
 def _selfcheck():
-    # A description carrying its own colon must survive the first-colon split.
     fm = parse_frontmatter("---\nname: grill\ndescription: Use when they say: stop.\n---\nbody\n")
     assert fm["name"] == "grill", fm
     assert fm["description"] == "Use when they say: stop.", fm
@@ -42,7 +41,6 @@ if sys.argv[1:2] == ["--selfcheck"]:
 
 STALE_DAYS = int(sys.argv[1]) if len(sys.argv) > 1 else 45
 
-# 1. Parse skills: name + whether model can auto-invoke it.
 skills = {}  # name -> model_invocable(bool)
 for sk in glob.glob(f"{SKILLS_DIR}/*/SKILL.md"):
     with open(sk, encoding="utf-8", errors="replace") as f:
@@ -51,7 +49,6 @@ for sk in glob.glob(f"{SKILLS_DIR}/*/SKILL.md"):
     disabled = fm.get("disable-model-invocation", "").lower() == "true"
     skills[name] = not disabled
 
-# 2. One pass over transcripts: last-seen timestamp per skill name.
 last = {}  # name -> datetime
 skill_re = re.compile(r'"skill":"([^"]+)"')
 ts_re = re.compile(r'"timestamp":"([^"]+)"')
@@ -73,7 +70,6 @@ for log in glob.glob(LOGS, recursive=True):
                 if name not in last or ts > last[name]:
                     last[name] = ts
 
-# 3. Report, worst offenders first.
 now = datetime.now(timezone.utc)
 rows = []
 for name, model_inv in skills.items():

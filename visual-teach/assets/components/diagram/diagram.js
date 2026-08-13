@@ -1,8 +1,5 @@
-/* visual-teach — diagram component.
-   Handles .vt-flow row-break detection and ResizeObserver updates. */
-
-// Detect visual row breaks in a .vt-flow and mark the first item on each
-// wrapped row with vt-row-start so CSS can suppress the leading → arrow.
+// Mark the first item on each wrapped row with vt-row-start so CSS can
+// suppress the leading → arrow.
 function markFlowRows(flow) {
   var children = Array.from(flow.children);
   children.forEach(function (child) {

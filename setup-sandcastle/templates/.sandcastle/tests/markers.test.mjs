@@ -3,7 +3,7 @@ import { emitMarker, isSetupNoise, MARK_PREFIX } from "../markers.mts";
 
 // The sandcastle-watch skill reads a run's progress off machine-readable
 // sentinel lines the orchestrator prints beside its human output — the same
-// host-coupled contract idea as SANDCASTLE_SPEC (CODING_STANDARDS #3). emitMarker
+// host-coupled contract idea as SANDCASTLE_SPEC. emitMarker
 // owns the one wire format both the emitter and the skill's `digest` parser
 // agree on. These assert the exact strings, since a reworded prefix silently
 // blinds the status bar.
@@ -44,8 +44,8 @@ describe("emitMarker", () => {
 // rationale; the cases below pin the signature: a silent nonzero git ExecError
 // is noise, everything else is a real failure.
 describe("isSetupNoise", () => {
-  // The live evidence from issue #268: exit 128 on git config safe.directory,
-  // empty stderr (the line ends at the command).
+  // Live evidence: exit 128 on git config safe.directory, empty stderr (the
+  // line ends at the command).
   const gitSetupHiccup =
     '(FiberFailure) ExecError: Command failed (exit 128): git config --global --add safe.directory "/home/agent/workspace"\n';
 

@@ -16,7 +16,6 @@ SKILL_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # Naming: bare-named functions (is_running, digest) are reused internally AND
 # dispatched; do_* handlers are dispatch-only wrappers; _name are helpers.
 
-# --- process checks ------------------------------------------------------------
 # The `grep -v 'bash -c'` self-exclusion lives in exactly ONE place: you invoke
 # these from a `bash -c` whose command line carries the very pattern being
 # searched, so without it the check finds its own shell. Both the live run and
@@ -25,7 +24,6 @@ _pgrep() { pgrep -af "$1" | grep -v 'bash -c'; }
 # is-running: prints matching lines (pid + cmdline); exit 0 if a run is live, 1 if not.
 is_running() { _pgrep "$LIVE_PAT"; }
 
-# --- digest: markers in, status object out (pure over log text) ----------------
 # digest <log> <fromOffset>  ->  key=value lines on stdout.
 # Reads bytes [fromOffset, EOF) so a tick sees only what is new, and reports the
 # SANDCASTLE_MARK sentinels found there plus the new EOF offset. setup noise and
@@ -38,9 +36,8 @@ digest() {
   local log=$1 from=${2:-0} slice plan flight pr fail warn setup finished
   slice=$(tail -c "+$((from + 1))" "$log")
   # Every field comes from a SANDCASTLE_MARK sentinel the orchestrator prints
-  # (markers.mts). Human wording is never parsed — that coupling was the bug this
-  # rewrite closes (#268). The emitter already split setup noise from real
-  # failure, so there is no stderr-shape heuristic here anymore.
+  # (markers.mts). Human wording is never parsed. The emitter already split setup
+  # noise from real failure, so there is no stderr-shape heuristic here.
   # $3 is the first arg after "SANDCASTLE_MARK <kind>": the id (or the count).
   plan=$(grep -E '^SANDCASTLE_MARK plan ' <<<"$slice" | tail -1 | awk '{print $3}')
   flight=$(grep -E '^SANDCASTLE_MARK flight ' <<<"$slice" | tail -1 | sed -E 's/^SANDCASTLE_MARK flight //')
@@ -59,7 +56,6 @@ digest() {
   printf 'done=%s\n' "$finished"
 }
 
-# --- notify: the desktop-toast channel (WSL only) ------------------------------
 # notify <title> <bodyfile>. The push notification is the harness's job; this is
 # the Windows toast that lands on the desktop the user is actually looking at.
 # -BodyFile keeps log-derived text out of any shell. Off WSL it is a no-op.
@@ -69,7 +65,6 @@ do_notify() {
     -File "$(wslpath -w "$SKILL_DIR/toast.ps1")" -Title "$1" -BodyFile "$(wslpath -w "$2")"
 }
 
-# --- start: own the run's whole lifecycle --------------------------------------
 # start <log>. setsid puts the npm->tsx->node chain in its own process group so
 # one signal reaches all of it; --wait makes this return only when the
 # orchestrator truly exits (plain setsid returns at once and fakes completion).
@@ -97,7 +92,6 @@ do_kill() {
   [ "$a" = "$b" ] && echo "QUIET — dead" || echo "STILL GROWING — alive"
 }
 
-# --- refresh + segment: the status-bar file (folded in) ------------------------
 DIM=$'\033[2m'; RED=$'\033[31m'; YEL=$'\033[33m'; OFF=$'\033[0m'
 
 _frame() {  # render one status-bar line — digest is the single source of the numbers
@@ -133,7 +127,6 @@ do_segment() {  # segment — the ccstatusline entry, scoped to this session's r
   if [ $(( $(date +%s) - $(stat -c %Y "$f") )) -lt "$TTL" ]; then cat "$f"; else printf '\033[2m🏰 idle\033[0m\n'; fi
 }
 
-# --- self-check: digest over the captured fixture ------------------------------
 _selfcheck() {
   local fx out
   fx="$SKILL_DIR/testdata/run.log"

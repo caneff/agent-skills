@@ -63,11 +63,6 @@ const renderedIn = (dir, file) => readFileSync(join(dir, ".sandcastle", file), "
 
 const standardsIn = (dir) => renderedIn(dir, "CODING_STANDARDS.md");
 
-// The marker rule renders on every arm — divergence happens in a Python adopter
-// exactly as in a Node one — so both arms assert the same four things: the token
-// spelled exactly, the counter-example that gives the reason test its teeth,
-// adopter-ADDED files (which the review gate and the divergence report must
-// agree about), and the clause that makes an unmarked edit a review failure.
 const expectTheLocalMarkerRule = (doc) => {
   expect(doc).toContain("sandcastle:local");
   expect(doc).toMatch(/This repo is TypeScript/);
@@ -75,11 +70,6 @@ const expectTheLocalMarkerRule = (doc) => {
   expect(doc).toMatch(/fails this axis/);
 };
 
-// The formatting rule renders on every arm too — a Python adopter's
-// formatter reflows a rendered file exactly as a Node one's does. Both arms
-// assert the instruction (exclude the subtree from the formatter) and both
-// consequences the rule exists to name: unmarked divergence now, and a merge
-// conflict on the next template update.
 const expectTheFormattingRule = (doc) => {
   expect(doc).toMatch(/formatter/i);
   // `[\s\S]` rather than `.` — the doc is wrapped prose, so the instruction and
@@ -122,8 +112,6 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
   });
 
   test("scatters nothing across the target root except .sandcastle and the breadcrumb", () => {
-    // Only .sandcastle/ (and its breadcrumb) should land — no dev-home files
-    // (package.json, vitest.config.mjs) leaking into the adopter's root.
     expect(existsSync(join(target, "package.json"))).toBe(false);
     expect(existsSync(join(target, "vitest.config.mjs"))).toBe(false);
   });
@@ -182,10 +170,6 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
     expect(tsc.status, tsc.stdout + tsc.stderr).toBe(0);
   }, 60_000);
 
-  // The commands are derived from LANGUAGE rather than asked, so the Python arm
-  // needs the same proof the Node arm gets: the derived values are the justfile
-  // recipes and `uv run pytest` this ecosystem actually has — the values a
-  // Python adopter runs, derived from LANGUAGE and not asked.
   test("derives the justfile recipes and uv commands for a python adopter", () => {
     const prompt = renderedIn(target, "implement-prompt.md");
     expect(prompt).toContain("`just lint` and `just typecheck`");
@@ -195,7 +179,7 @@ describe.skipIf(!hasCopier())("copier copy renders the orchestrator at the git r
     }
   });
 
-  // The .env PAT is the whole auth story now (#245): Sandcastle forwards
+  // The .env PAT is the whole auth story now: Sandcastle forwards
   // `.sandcastle/.env` into each sandbox as a FILE, so GH_TOKEN reaches the agent
   // there; nothing host-side reads it. main.mts no longer loads .env into the
   // host process or mints a bot token — so neither seam may reappear in it.
@@ -283,15 +267,15 @@ const ARC_ADDED_ANSWERS = ["LANGUAGE: python"];
 // Files the template deliberately ADDS since the pin. Same bargain as the
 // answers list: the set-equality net stays exact, and a new render is declared
 // rather than the assertion quietly widening to "a superset is fine".
-//   select-buildable.mts  — the deterministic frontier filter (#242)
+//   select-buildable.mts  — the deterministic frontier filter
 //   log-path.mts          — the per-run log-filename contract, lifted out of main
 //   pipeline-results.mts  — firstHarnessFault + normalizeSettled, lifted out of main
-//   markers.mts           — the status-bar sentinel contract, emitMarker + isSetupNoise (#270)
+//   markers.mts           — the status-bar sentinel contract, emitMarker + isSetupNoise
 //   issue-lifecycle.mts   — the issue-lifecycle vocabulary: ReviewAxis, the
 //                           done|review-fail|nothing outcome union,
 //                           planOutcomeTransition, planFailureBodyEdit and the
 //                           failure-section splice, consolidated from four
-//                           files into one (#274)
+//                           files into one
 const ARC_ADDED_RENDERS = [
   ".sandcastle/select-buildable.mts",
   ".sandcastle/log-path.mts",
@@ -299,7 +283,7 @@ const ARC_ADDED_RENDERS = [
   ".sandcastle/markers.mts",
   ".sandcastle/issue-lifecycle.mts",
   // The sandbox plumbing that survived the bot-identity deletion, under its
-  // honest name (#245). sandbox-identity.mts is withdrawn below.
+  // honest name. sandbox-identity.mts is withdrawn below.
   ".sandcastle/sandbox-config.mts",
 ];
 
@@ -310,11 +294,11 @@ const ARC_ADDED_RENDERS = [
 //   CONTEXT.md, docs/adr/*  — the project's own domain model, maintainer reading
 //   sandbox-identity.check.mts — a developer's self-check, now in the dev suite
 //   pr-components.mts, retry-policy.mts — the multi-issue-PR and retry machinery,
-//     deleted for one-PR-per-issue / run-plain (#244, #247)
+//     deleted for one-PR-per-issue / run-plain
 //   check-prompt.md — the Phase-3 full-suite gate, deleted with it (CI on the
 //     opened PR is the gate now)
 //   sandbox-identity.mts, mint-gh-token.mjs, bot-setup.md — the bot-identity /
-//     GitHub-App token machinery, deleted for the plain .env PAT (#245); the
+//     GitHub-App token machinery, deleted for the plain .env PAT; the
 //     surviving sandbox plumbing renders as sandbox-config.mts (added above)
 const ARC_WITHDRAWN_RENDERS = [
   ".sandcastle/CONTEXT.md",

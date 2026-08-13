@@ -7,7 +7,6 @@ SKILLS="${SKILLS_DIR:-$HOME/.agents/skills}"
 cd "$SKILLS"
 git(){ command git -c user.email=skills@local -c user.name=skills "$@"; }
 
-# 1. git buffer — init on first run
 if [ ! -d .git ]; then
   git init -q && git add -A && git commit -qm "baseline: skills as of $(date +%F)"
   echo "initialized git buffer in $SKILLS"
@@ -75,7 +74,6 @@ if [ ${#restored[@]} -gt 0 ]; then
   for s in "${restored[@]}"; do echo "  git -C $SKILLS diff $PRE $POST -- $s"; done
 fi
 
-# 6. summary
 # Categorize every skill that changed upstream (PRE..POST). Restored ones net to
 # zero across PRE..HEAD, so they'd vanish from a PRE..HEAD stat — compute against
 # POST and label them explicitly instead.

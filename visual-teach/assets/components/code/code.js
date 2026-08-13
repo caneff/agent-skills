@@ -1,7 +1,3 @@
-/* visual-teach — code component.
-   Handles .vt-code blocks (with copy button), .vt-io paired input→output blocks,
-   and Prism syntax highlighting initialisation. */
-
 function _ensure(block, sels) {
   var blockClass =
     Array.from(block.classList).find(function (c) {

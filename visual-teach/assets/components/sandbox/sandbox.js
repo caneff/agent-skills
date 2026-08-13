@@ -1,5 +1,3 @@
-/* sandbox component */
-
 var DEBOUNCE_MS = 300;
 
 function _ensure(block, selectors) {
