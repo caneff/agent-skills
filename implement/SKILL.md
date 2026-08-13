@@ -15,15 +15,18 @@ sub-second race if two clients start on the same ticket at the same instant; for
 a handful of clients it is enough. If you abandon the run before a PR is open,
 put it back: `gh issue edit <n> --remove-label in-progress --add-label ready-for-agent`.
 
-**Then pick the model.** A `ready-for-agent` ticket that touches no engine or
-constraint-modeling logic — a doc edit, a rename, a boundary move, a
-tracer-bullet the spec already pins — is Sonnet work. Hand the build to a Sonnet
-subagent instead of running it here: `handoff sub` with `model: sonnet`, seeded
+**First, pick the model — before choosing a lane, and say the pick out loud.**
+Does this ticket touch engine or constraint-modeling logic? **No** (a doc edit,
+a rename, a boundary move, a tracer-bullet the spec already pins) → it is Sonnet
+work: hand it to a Sonnet subagent — `handoff sub` with `model: sonnet`, seeded
 with the issue reference, its spec, and the build steps below (worktree → TDD →
-`/code-review` → `pushpr`), so the subagent runs them directly rather than
-re-invoking this skill; it reports back when the PR is open. Run the current
-model only when the ticket reaches those subtle seams, where a wrong answer
-still passes the gate.
+`/code-review` → `pushpr`) so the subagent runs them directly rather than
+re-invoking this skill, and it reports back when the PR is open. Stop running it
+here. **This holds even for a docs-only ticket that auto-ships to main** — that
+lane skips the worktree flow below, so it is the one most likely to sail past
+this gate on the current model. **Yes** → run it on the current model, where a
+wrong answer at a subtle seam still passes the gate. State which model you
+picked and why before doing anything else.
 
 Before creating the worktree, check the original checkout is clean
 (`git status`). The worktree branches from the pushed main, so anything left
