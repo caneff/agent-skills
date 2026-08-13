@@ -4,9 +4,24 @@ description: "Implement a piece of work based on a spec or set of tickets."
 ---
 
 When the work maps to a GitHub issue, claim it first, so a second client running
-this skill can't pick up the same ticket. Read its labels: if it isn't
-`ready-for-agent` — already `in-progress`, or handed to a human — stop and ask,
-since someone likely holds it. Otherwise take it:
+this skill can't pick up the same ticket. Read its labels first:
+
+- **`ready-for-agent`** — yours to build from scratch. Take it (below).
+- **`ready-for-human`** — the work already exists and is waiting on a human's
+  judgment; running `/implement` on it means *you are standing in as that human
+  review*. Diff the branch and apply the clear reviewer-grade fixes yourself — a
+  wrong citation, a stale comment, a lint miss, anything with one right answer
+  and no ask needed. But any genuine **judgment call** the review surfaces — a
+  knowing deviation, a semantic-contract choice, anything with more than one
+  defensible answer — **stop and put it to the human before you act on it, and
+  before you open the PR.** Do not fold it into a "noted" line and ship past it;
+  being the review means asking the questions the review raises, not just the
+  legwork. Then claim it the same way, swapping `ready-for-human` for
+  `ready-for-agent` in the command below.
+- **`in-progress`, or otherwise actively held by someone** — stop and ask, since
+  someone likely holds it.
+
+To take it:
 
 `gh issue edit <n> --remove-label ready-for-agent --add-label in-progress --add-assignee @me`
 
