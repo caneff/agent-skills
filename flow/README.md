@@ -23,6 +23,20 @@ every commit here is a backup.
 
 `~/.claude/skills` is already this repo, so it isn't duplicated here.
 
+## Copy-only backups (not symlinked)
+
+These live on the Windows side of WSL, where a repo symlink won't hold, so
+they're plain snapshots — `install.sh` does not touch them, and they go stale
+unless re-copied after you change them.
+
+| Repo path | Live location | What it is |
+|---|---|---|
+| `vscode/settings.json` | `/mnt/c/Users/<you>/AppData/Roaming/Code/User/settings.json` | Windows VS Code user settings (incl. GitHub-issue queries) |
+
+`vscode/sync.sh` is the one command for it (finds the Windows path itself):
+`sync.sh` refreshes the repo copy from the live file (then commit); `sync.sh
+--restore` writes the backup back onto a machine.
+
 The other segments `ccstatusline/settings.json` references (`effort-abbrev.py`,
 `usage-segment.sh`, `sandcastle-segment.sh`, `publish-usage.sh`) are not backed
 up here yet — a fresh restore links the config but those widgets won't run until
