@@ -11,10 +11,12 @@ trains the reader to distrust the suite — when half the tests go red for
 nothing, a real failure gets waved through. Ruthless sorting is what buys the
 survivors their authority.
 
-This is the judgment pass: the smells only reading can find. A mechanical grep
-pass for the syntactically detectable smells (assertion-free tests,
-tautologies, mock-the-world, empty/skipped tests) is a separate script,
-tracked as its own follow-up — not built here.
+This is the judgment pass: the smells only reading can find. `audit.py` in
+this skill's directory is pass one — a mechanical grep for the syntactically
+detectable smells (assertion-free tests, tautologies, mock-the-world,
+interaction-only assertions, empty/skipped tests). Run it first; its
+candidate list feeds the judgment sweep below instead of starting from a
+blank page.
 
 **Name collision.** This is `test-audit` — test-*file* quality. It is not
 `ponytail-audit` (production-code over-engineering) or `skill-audit`
@@ -194,27 +196,35 @@ just no longer this test's problem.
    `.venv`, build output, lockfiles), and leave load-bearing scaffolding
    alone (see above).
 
-2. **Sweep — every test, not a sample.** Walk the test files in scope and
-   read each test beside the code it covers; judgment needs both, a grep of
-   `def test_` only tells you where to look. On a large tree, fan the sweep
-   across subagents by directory — but every test in scope gets judged,
-   never sampled.
+2. **Pass one — run the mechanical script.** `python3 test-audit/audit.py
+   <scope>` scans pytest test files in scope and emits `file:line: <smell>`
+   candidates for the five mechanically detectable smells (assertion-free,
+   tautology, mock-the-world, interaction-only assertion, empty/skipped).
+   This is a candidate list, not a verdict — every line still needs the
+   judgment pass below to confirm it and assign a bucket.
 
-3. **Judge each into one bucket** against the one test, checking the
+3. **Pass two — sweep every test, not a sample.** Walk the test files in
+   scope and read each test beside the code it covers; judgment needs both,
+   pass one's candidates tell you where to look first, but the sweep still
+   covers every test in scope, not just the flagged lines. On a large tree,
+   fan the sweep across subagents by directory — but every test in scope
+   gets judged, never sampled.
+
+4. **Judge each into one bucket** against the one test, checking the
    only-test warning before every Cut. For each Cut or Rewrite, write the
    one-line concrete failure it names — "cannot fail when X breaks" or
    "fails when Y is refactored though nothing broke." If you can't name it
    concretely, you haven't finished judging — don't bucket it yet.
 
-4. **Apply the changes.** Delete the cuts. Rewrite each Rewrite to assert
+5. **Apply the changes.** Delete the cuts. Rewrite each Rewrite to assert
    the real behavior correctly — new assertions, isolated setup, mocked
    time, whatever the smell called for. Leave every Keep untouched.
 
-5. **Run the repo's own test command.** A test you misjudged as crap should
+6. **Run the repo's own test command.** A test you misjudged as crap should
    turn the loop red here, before a human ever reviews the diff — not after
    it merges.
 
-6. **Commit on an isolated branch and open a PR.** Every cut and rewrite is
+7. **Commit on an isolated branch and open a PR.** Every cut and rewrite is
    a judgment call; a human reads the sweep before it merges, and the
    isolated commit means the whole audit reverts in one step if a call
    proves wrong.
