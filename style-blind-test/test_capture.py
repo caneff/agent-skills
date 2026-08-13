@@ -1,10 +1,13 @@
 """Tests for the side-channel guess/strength capture CLI (issue #296, #316)."""
 import json
+import os
 
 import pytest
 
 from assignment import STYLES
 from capture import (
+    _active_session,
+    _resolve_session_id,
     append,
     main,
     parse_confidence_choice,
@@ -152,6 +155,10 @@ def test_main_exits_nonzero_on_bad_style(tmp_path):
 
 def test_main_exits_nonzero_without_session_id(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    # No detectable session either: point auto-detect at an empty turns dir.
+    import stop_reminder
+
+    monkeypatch.setattr(stop_reminder, "DEFAULT_STATE_DIR", tmp_path / "no-turns")
     log_path = tmp_path / "log.jsonl"
     with pytest.raises(SystemExit) as excinfo:
         main(["strength", "3", "no", "--log-path", str(log_path)])
@@ -289,3 +296,47 @@ def test_run_strength_wizard_rejects_bad_choice(tmp_path):
             log_path=log_path,
         )
     assert not log_path.exists()
+
+
+# -- active-session resolver (issue #318) ----------------------------------
+
+
+def _touch(path, mtime):
+    path.write_text("1 0\n")
+    os.utime(path, (mtime, mtime))
+
+
+def test_active_session_picks_newest_turns_file(tmp_path):
+    _touch(tmp_path / "old-sess", 1000)
+    _touch(tmp_path / "new-sess", 2000)
+    assert _active_session(tmp_path) == "new-sess"
+
+
+def test_active_session_none_when_dir_absent(tmp_path):
+    assert _active_session(tmp_path / "nope") is None
+
+
+def test_active_session_none_when_dir_empty(tmp_path):
+    (tmp_path / "turns").mkdir()
+    assert _active_session(tmp_path / "turns") is None
+
+
+def test_resolve_session_id_falls_back_to_active_session(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    _touch(tmp_path / "detected-sess", 1500)
+    assert _resolve_session_id(None, turns_dir=tmp_path) == "detected-sess"
+
+
+def test_resolve_session_id_prefers_cli_over_detection(tmp_path):
+    _touch(tmp_path / "detected-sess", 1500)
+    assert _resolve_session_id("explicit", turns_dir=tmp_path) == "explicit"
+
+
+def test_resolve_session_id_error_names_all_three_sources(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    with pytest.raises(ValueError) as exc:
+        _resolve_session_id(None, turns_dir=tmp_path / "empty")
+    msg = str(exc.value)
+    assert "--session-id" in msg
+    assert "CLAUDE_CODE_SESSION_ID" in msg
+    assert "hook" in msg or "reminder" in msg

@@ -142,15 +142,38 @@ def run_strength_wizard(
     return record
 
 
-def _resolve_session_id(cli_value: str | None) -> str:
+def _active_session(turns_dir: Path | None = None) -> str | None:
+    # The Stop reminder writes turns/<session_id> every turn, so the newest
+    # file there names the session in play (issue #318). Lets `gs` run in a
+    # side terminal -- which never inherits CLAUDE_CODE_SESSION_ID -- with no
+    # id passed. None when the dir is absent/empty (reminder hook not active).
+    # ponytail: newest-mtime wins; picks wrong under two concurrent sessions,
+    # exact for solo use. Pass --session-id to override.
+    from stop_reminder import DEFAULT_STATE_DIR
+
+    turns_dir = Path(turns_dir or DEFAULT_STATE_DIR)
+    if not turns_dir.is_dir():
+        return None
+    files = [p for p in turns_dir.iterdir() if p.is_file()]
+    if not files:
+        return None
+    return max(files, key=lambda p: p.stat().st_mtime).name
+
+
+def _resolve_session_id(cli_value: str | None, turns_dir: Path | None = None) -> str:
     # #298 recomputes truth via assignment(session_id), so this value must
     # equal the session_id the SessionStart hook received on stdin --
     # i.e. CLAUDE_CODE_SESSION_ID must match the Claude Code session's own
     # id. Proving that equality end-to-end is wiring ticket #299's job.
-    session_id = cli_value or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    session_id = (
+        cli_value
+        or os.environ.get("CLAUDE_CODE_SESSION_ID")
+        or _active_session(turns_dir)
+    )
     if not session_id:
         raise ValueError(
-            "no session id: set CLAUDE_CODE_SESSION_ID or pass --session-id"
+            "no session id: pass --session-id, set CLAUDE_CODE_SESSION_ID, "
+            "or run with the reminder hook active so a session is detectable"
         )
     return session_id
 
