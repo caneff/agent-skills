@@ -144,7 +144,7 @@ Close with a short section — a `vt-callout` holding a plain list — of the th
 ## Style guidance
 
 - Lean on the `vt-*` components; add a small local `<style>` only for the few things they don't cover (the legend row, the finding meta row). Never hardcode a colour — use the `--vt-*` tokens so both themes stay correct.
-- **Widen the content column.** visual-teach caps `main` at 760px for a prose reading width; a review carries side-by-side before/after code, so override it to ~1080px (`main { max-width: 1080px; }`) in the local `<style>` to give the two columns room.
+- **Widen the content column.** visual-teach sizes `main`'s content column from `--vt-measure` (the prose reading width); a review carries side-by-side before/after code, so raise it to ~1080px (`main { --vt-measure: 1080px; }`) in the local `<style>` to give the two columns room. Override `--vt-measure`, **not** `max-width` — `base.css` pins the center grid column to `--vt-measure` and only widens the frame via `max-width`, so a `max-width` override alone just adds gutters and leaves the columns as narrow as before. The frame follows automatically (`--vt-frame: calc(var(--vt-measure) * 1.35)`).
 - The token roles: `--vt-bad` for defects/before, `--vt-good` for the fixed/after, `--vt-warn` for warnings and standards, `--vt-accent` for structure. The `vt-split` and `vt-pill` classes already map to these.
 - Keep before/after columns short enough to sit side by side without horizontal scroll on a laptop; long lines scroll inside their own `vt-code`.
 - Monospace every file path, symbol, and code fragment. Findings are about specific lines — cite them (`file.py:123`).
