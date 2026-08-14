@@ -28,6 +28,11 @@ plus a WSL desktop toast (via `sandcastle-watch/toast.ps1`, a no-op when
 `powershell.exe` isn't on PATH) reading "Blind test -- log your guess (gs)".
 It never reveals the style and never touches the guess log.
 
+Exactly when a toast fires, `stop_reminder.py` also writes a global marker
+file, `~/.claude/style-blind-test/last_toast`, naming that toast's session id
+and its `cwd`. Non-firing turns never touch the marker. This is what `gs`
+reads to know which session a toast was actually for -- see below.
+
 ## `gs` / `fin` quick-capture
 
 Add this to `~/.bashrc` (not done automatically):
@@ -50,9 +55,19 @@ Run these in a **separate terminal**, never through Claude's `!` -- the model
 must not see the guess or the blind breaks.
 
 `gs` finds the session on its own, in this order: `--session-id <id>`, then
-`CLAUDE_CODE_SESSION_ID`, then the newest file in
-`~/.claude/style-blind-test/turns/` (the reminder hook writes one per turn).
-A side terminal doesn't inherit `CLAUDE_CODE_SESSION_ID`, so auto-detect is
-the usual path -- just type `gs` while the reminder hook is active. Caveat:
-"newest file wins" picks the wrong session if two run at once; pass
-`--session-id` to be explicit.
+the global last-toast marker (`~/.claude/style-blind-test/last_toast`, written
+the instant a toast fires), then `CLAUDE_CODE_SESSION_ID`, then the newest
+file in `~/.claude/style-blind-test/turns/` (a fallback for when no toast has
+fired yet). A toast means "log your guess", so `gs` is anchored globally to
+whichever session's toast fired last, regardless of which terminal or
+directory `gs` is typed in -- the header names the session the last toast
+fired for, and that session's directory:
+
+```
+Recording guess for my-proj · a1b2c3d4 (a1b2c3d4-...)
+```
+
+The directory only shows when it genuinely belongs to the session being
+recorded (the resolved session equals the marker's session); otherwise it
+prints `?` rather than guessing. Pass `--session-id` to override the marker
+entirely.

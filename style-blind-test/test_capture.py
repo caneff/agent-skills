@@ -241,19 +241,65 @@ def test_run_guess_wizard_prints_resolved_session_id(tmp_path, capsys):
     assert "sess-w" in out
 
 
-def test_run_guess_wizard_prints_project_dir(tmp_path, monkeypatch, capsys):
-    monkeypatch.chdir(tmp_path)
+def test_run_guess_wizard_prints_last_toast_session_and_dir(tmp_path, capsys):
+    import stop_reminder
+
+    state_dir = tmp_path / "turns"
+    stop_reminder.write_last_toast(
+        "sess-toast", "/some/known/projX", path=state_dir.parent / "last_toast"
+    )
     log_path = tmp_path / "log.jsonl"
     answers = iter(["2", "h"])
     run_guess_wizard(
         input_func=lambda _prompt: next(answers),
-        session_id="sess-w",
         log_path=log_path,
         turn=9,
+        turn_state_dir=state_dir,
     )
     out = capsys.readouterr().out
-    assert tmp_path.name in out
+    assert "projX" in out
     assert " · " in out
+    assert "sess-toa" in out
+
+
+def test_run_guess_wizard_shows_unknown_dir_when_marker_cwd_blank(tmp_path, capsys):
+    import stop_reminder
+
+    state_dir = tmp_path / "turns"
+    stop_reminder.write_last_toast(
+        "sess-toast", "", path=state_dir.parent / "last_toast"
+    )
+    log_path = tmp_path / "log.jsonl"
+    answers = iter(["2", "h"])
+    run_guess_wizard(
+        input_func=lambda _prompt: next(answers),
+        log_path=log_path,
+        turn=9,
+        turn_state_dir=state_dir,
+    )
+    out = capsys.readouterr().out
+    assert "Recording guess for ? ·" in out
+
+
+def test_run_guess_wizard_shows_unknown_dir_when_session_overrides_marker(tmp_path, capsys):
+    import stop_reminder
+
+    state_dir = tmp_path / "turns"
+    stop_reminder.write_last_toast(
+        "sess-toast", "/some/known/projX", path=state_dir.parent / "last_toast"
+    )
+    log_path = tmp_path / "log.jsonl"
+    answers = iter(["2", "h"])
+    run_guess_wizard(
+        input_func=lambda _prompt: next(answers),
+        session_id="sess-explicit",
+        log_path=log_path,
+        turn=9,
+        turn_state_dir=state_dir,
+    )
+    out = capsys.readouterr().out
+    assert "Recording guess for ? ·" in out
+    assert "projX" not in out
 
 
 def test_run_guess_wizard_writes_record(tmp_path):
@@ -376,7 +422,18 @@ def test_resolve_session_id_prefers_cli_over_detection(tmp_path):
     assert _resolve_session_id("explicit", turns_dir=tmp_path) == "explicit"
 
 
-def test_resolve_session_id_error_names_all_three_sources(tmp_path, monkeypatch):
+def test_resolve_session_id_prefers_last_toast_over_env(tmp_path, monkeypatch):
+    import stop_reminder
+
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-env")
+    state_dir = tmp_path / "turns"
+    stop_reminder.write_last_toast(
+        "sess-toast", "/x/proj", path=state_dir.parent / "last_toast"
+    )
+    assert _resolve_session_id(None, turns_dir=state_dir) == "sess-toast"
+
+
+def test_resolve_session_id_error_names_all_sources(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     with pytest.raises(ValueError) as exc:
         _resolve_session_id(None, turns_dir=tmp_path / "empty")
