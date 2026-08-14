@@ -29,6 +29,11 @@ segment bar with a colored box-drawing grid.
 Frame color signals context fill: green <140k, yellow ≥140k, red ≥180k,
 purple when no transcript yet.
 
+The path cell shows the **project name** only — `Path(root).name`, matching the
+blind-test toast's `Path(cwd).name` convention. `root` is the main worktree
+(`git-common-dir`'s parent), so a linked worktree collapses to the project name
+too, never the worktree's.
+
 ## Dependencies
 
 Reads the session JSON on stdin, then fans it out to these helper scripts,

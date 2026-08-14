@@ -70,8 +70,15 @@ def pad(s: str, width: int) -> str:
     return s + " " * max(0, width - dwidth(s))
 
 
-def git(cwd: str) -> tuple[str, str]:
-    """Return (branch-cell, changes-cell) for the repo at cwd, blank if none."""
+def git(cwd: str) -> tuple[str, str, str]:
+    """Return (branch-cell, changes-cell, main-repo-root) for the repo at cwd.
+
+    The root is the *main* worktree's directory even when cwd is a linked
+    worktree (``.claude/worktrees/...``), so the path cell shows the repo, not
+    the worktree. git-common-dir points at the main repo's ``.git`` from any
+    worktree; its parent is that main root. Falls back to ``--show-toplevel``
+    (the sandcastle toast's convention). All blank if cwd is not a git repo.
+    """
     def g(args: list[str]) -> str:
         try:
             return subprocess.run(
@@ -84,14 +91,16 @@ def git(cwd: str) -> tuple[str, str]:
             return ""
 
     if not g(["rev-parse", "--git-dir"]):
-        return "", ""
+        return "", "", ""
     branch = g(["symbolic-ref", "--short", "HEAD"]) or g(["rev-parse", "--short", "HEAD"])
     ins = dele = 0
     for line in g(["diff", "HEAD", "--numstat"]).splitlines():
         a, d, *_ = (line.split("\t") + ["", ""])[:3]
         ins += int(a) if a.isdigit() else 0
         dele += int(d) if d.isdigit() else 0
-    return (f"⎇ {branch}" if branch else ""), f"+{ins},-{dele}"
+    common = g(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    root = str(Path(common).parent) if common else g(["rev-parse", "--show-toplevel"])
+    return (f"⎇ {branch}" if branch else ""), f"+{ins},-{dele}", root
 
 
 def context_tokens(transcript: str) -> int:
@@ -173,7 +182,7 @@ def main() -> None:
     breset = run([str(CFG / "usage-segment.sh"), "breset"], raw)
     sand = run([str(SANDCASTLE)], raw)
     issues = run([str(CFG / "issue-counts-segment.sh")], raw)
-    branch, changes = git(cwd)
+    branch, changes, root = git(cwd)
     tokens = context_tokens(transcript)
     ctx = f"Ctx {tokens / 1000:.1f}k" if tokens else ""
 
@@ -190,8 +199,10 @@ def main() -> None:
 
     usage = " · ".join(x for x in (win(weekly, wreset), win(session, breset)) if x)
 
-    home = str(Path.home())
-    cwd_disp = ("~" + cwd[len(home):]) if cwd.startswith(home) else cwd
+    # Project name only, matching the blind-test toast's `Path(cwd).name`
+    # convention; fed the main root so a linked worktree collapses to the
+    # project name too, not the worktree's.
+    cwd_disp = Path(root or cwd).name
 
     # "Opus 4.8" -> "O 4.8"; keep the effort suffix, e.g. "O 4.8 (M)"
     ver = re.search(r"\d[\d.]*", model)
