@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # issue-counts — open-issue counts for the current repo (gh infers repo from cwd):
-# the standard wayfinder frontier groups, then any other repo labels with open
-# issues (most first).
+# the six wayfinder frontier groups, then a single 🔖 Other bucket that lumps
+# every open issue carrying a non-frontier label (needs-triage, bug, and so on).
 #
-#   issue-counts            pretty two-section report
-#   issue-counts --status   one compact line, nonzero groups only (for a status line)
+#   issue-counts            pretty report (frontier groups + per-label other breakdown)
+#   issue-counts --status   one compact line: frontier groups then 🔖 Other total
 #
 # One gh call pulls every open issue with its labels + blockedBy; all counts are
 # tallied locally with jq. Ready-now uses the real blockedBy field (truer than
@@ -13,39 +13,45 @@
 data=$(gh issue list --state open --limit 500 --json labels,blockedBy 2>/dev/null)
 [ -z "$data" ] && data='[]'
 
+# Frontier labels. An open issue that carries NONE of these falls into the 🔖
+# Other bucket — the same rule as the vscode Other query's `-label:` exclusions,
+# so an unlabeled issue counts and an issue with any frontier label does not.
+# Keep this list in sync with the vscode githubIssues.queries Other query.
+core='["ready-for-agent","wayfinder:grilling","wayfinder:map","in-progress","in-review","needs-review","spec","backlog"]'
+
 # "count<TAB>emoji<TAB>label" in fixed frontier order
 wf=$(printf '%s' "$data" | jq -r '
   [ .[] | { l: [.labels[].name], b: (.blockedBy|length) } ] as $iss
   | def cnt(f): ([ $iss[] | select(f) ] | length);
-    "\(cnt(.l|any(.=="needs-triage")))\t🔍\tTriage",
     "\(cnt((.l|any(.=="ready-for-agent")) and .b==0))\t✅\tReady now",
     "\(cnt(.l|any(.=="wayfinder:grilling")))\t🔥\tGrilling",
     "\(cnt(.l|any(.=="wayfinder:map")))\t🗺️\tMaps",
-    "\(cnt(.l|any(.=="wayfinder:prototype")))\t🧪\tPrototypes",
     "\(cnt(.l|any(.=="in-progress" or .=="in-review" or .=="needs-review")))\t🚧\tIn flight",
     "\(cnt(.l|any(.=="spec")))\t📋\tSpecs",
-    "\(cnt(.l|any(.=="bug")))\t🐞\tBugs",
     "\(cnt(.l|any(.=="backlog")))\t💤\tBacklog"
 ')
 
-# "count<TAB>label" for every non-frontier label with open issues, most first
-others=$(printf '%s' "$data" | jq -r '
-  ["needs-triage","ready-for-agent","wayfinder:grilling","wayfinder:map","wayfinder:prototype","in-progress","in-review","needs-review","spec","bug","backlog"] as $wf
-  | [ .[].labels[].name | select(. as $x | $wf | any(. == $x) | not) ]
+# One lumped count: open issues that carry none of the frontier labels
+# (unlabeled included) — matches the vscode Other query.
+otherc=$(printf '%s' "$data" | jq --argjson core "$core" '
+  [ .[] | select([.labels[].name] | any(. as $x | $core | any(. == $x)) | not) ] | length')
+
+# "count<TAB>label" per label, over those same Other issues — the report
+# breakdown. Unlabeled issues add to the count above but list no label here.
+others=$(printf '%s' "$data" | jq -r --argjson core "$core" '
+  [ .[] | select([.labels[].name] | any(. as $x | $core | any(. == $x)) | not) | .labels[].name ]
   | group_by(.) | map("\(length)\t\(.[0])") | .[]
 ' | sort -rn)
 
 if [ "${1:-}" = "--status" ]; then
-  line=$(printf '%s\n' "$wf"     | awk -F'\t' '{printf "%s%s ",$2,$1}')
-  o=$(printf '%s\n' "$others"    | awk -F'\t' 'NF{printf "%s%s ",$2,$1}')
-  line="${line% }"; o="${o% }"
-  [ -n "$o" ] && line="${line}${line:+ · }$o"
-  printf '%s\n' "$line"
+  line=$(printf '%s\n' "$wf" | awk -F'\t' '{printf "%s%s ",$2,$1}')
+  printf '%s🔖%s\n' "$line" "$otherc"
 else
   echo "── wayfinder ──"
   printf '%s\n' "$wf" | while IFS=$'\t' read -r n emoji label; do printf "%4s  %s %s\n" "$n" "$emoji" "$label"; done
+  echo "── 🔖 other ──"
+  printf "%4s  total\n" "$otherc"
   if [ -n "$others" ]; then
-    echo "── other ──"
     printf '%s\n' "$others" | while IFS=$'\t' read -r n label; do printf "%4s  %s\n" "$n" "$label"; done
   fi
 fi

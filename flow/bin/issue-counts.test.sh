@@ -10,14 +10,12 @@ trap 'rm -rf "$stub"' EXIT
 cat > "$stub/gh" <<'STUB'
 #!/usr/bin/env bash
 # ignores args, emits a fixed open-issue set:
-#  - needs-triage                    -> Triage
 #  - ready-for-agent, unblocked      -> Ready now
 #  - ready-for-agent, blocked        -> NOT ready (blockedBy non-empty)
 #  - wayfinder:map                   -> Maps
-#  - wayfinder:prototype             -> Prototypes
 #  - in-review                       -> In flight
-#  - bug                             -> Bugs
-#  - documentation                   -> other (unmapped -> tail)
+#  - spec + bug                      -> Specs (a frontier label wins; NOT Other)
+#  - needs-triage, wayfinder:prototype, bug, [] (unlabeled) -> 🔖 Other (4 issues)
 cat <<'JSON'
 [
  {"labels":[{"name":"needs-triage"}],"blockedBy":[]},
@@ -26,15 +24,16 @@ cat <<'JSON'
  {"labels":[{"name":"wayfinder:map"}],"blockedBy":[]},
  {"labels":[{"name":"wayfinder:prototype"}],"blockedBy":[]},
  {"labels":[{"name":"in-review"}],"blockedBy":[]},
+ {"labels":[{"name":"spec"},{"name":"bug"}],"blockedBy":[]},
  {"labels":[{"name":"bug"}],"blockedBy":[]},
- {"labels":[{"name":"documentation"}],"blockedBy":[]}
+ {"labels":[],"blockedBy":[]}
 ]
 JSON
 STUB
 chmod +x "$stub/gh"
 
 got=$(PATH="$stub:$PATH" bash "$here/issue-counts" --status)
-want="🔍1 ✅1 🔥0 🗺️1 🧪1 🚧1 📋0 🐞1 💤0 · documentation1"
+want="✅1 🔥0 🗺️1 🚧1 📋1 💤0 🔖4"
 
 if [ "$got" != "$want" ]; then
   echo "FAIL"; echo "  want: $want"; echo "  got:  $got"; exit 1
