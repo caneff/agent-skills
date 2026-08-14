@@ -241,6 +241,21 @@ def test_run_guess_wizard_prints_resolved_session_id(tmp_path, capsys):
     assert "sess-w" in out
 
 
+def test_run_guess_wizard_prints_project_dir(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    log_path = tmp_path / "log.jsonl"
+    answers = iter(["2", "h"])
+    run_guess_wizard(
+        input_func=lambda _prompt: next(answers),
+        session_id="sess-w",
+        log_path=log_path,
+        turn=9,
+    )
+    out = capsys.readouterr().out
+    assert tmp_path.name in out
+    assert " · " in out
+
+
 def test_run_guess_wizard_writes_record(tmp_path):
     log_path = tmp_path / "log.jsonl"
     answers = iter(["2", "h"])
