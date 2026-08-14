@@ -289,6 +289,19 @@ a code {
   color: var(--vt-accent-dk);
 }
 
+/* mission — accent-bordered "do this first" callout */
+.vt-mission {
+  border-left: 3px solid var(--vt-accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--vt-soft);
+  padding: 0.7rem 0.9rem;
+  margin: 1.5rem 0;
+  font-size: 0.95rem;
+}
+.vt-mission strong {
+  color: var(--vt-accent-dk);
+}
+
 /* footer / sources (source-type icons, companion slot, verified-date) */
 .vt-sources {
   margin-top: 3rem;
