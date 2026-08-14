@@ -44,7 +44,7 @@ def test_run_increments_counter_file_and_fires_at_threshold(tmp_path):
     session_id = "sess-1"
 
     fired = []
-    for _ in range(24):
+    for _ in range(9):
         fired.append(run(json.dumps({"session_id": session_id}), state_dir=state_dir))
     assert all(f is False for f in fired)
 
@@ -52,18 +52,18 @@ def test_run_increments_counter_file_and_fires_at_threshold(tmp_path):
     assert result is True
 
     count_file = state_dir / session_id
-    assert count_file.read_text().split()[0] == "25"
+    assert count_file.read_text().split()[0] == "10"
 
 
 def test_run_does_not_refire_same_threshold_on_repeat(tmp_path):
     state_dir = tmp_path / "turns"
     session_id = "sess-2"
-    # drive straight to the file having last_fired=25, count=25
+    # drive straight to the file having last_fired=10, count=10
     (state_dir).mkdir(parents=True)
-    (state_dir / session_id).write_text("25 25")
+    (state_dir / session_id).write_text("10 10")
 
     result = run(json.dumps({"session_id": session_id}), state_dir=state_dir)
-    # next call increments to 26, no new threshold crossed
+    # next call increments to 11, no new threshold crossed
     assert result is False
 
 
@@ -84,7 +84,7 @@ def test_run_notifies_with_the_firing_session_id_and_cwd(tmp_path, monkeypatch):
         stop_reminder, "_notify", lambda sid, cwd=None: calls.append((sid, cwd))
     )
 
-    for _ in range(24):
+    for _ in range(9):
         run(json.dumps({"session_id": session_id, "cwd": "/x/proj"}), state_dir=state_dir)
     run(json.dumps({"session_id": session_id, "cwd": "/x/proj"}), state_dir=state_dir)
 
@@ -99,7 +99,7 @@ def test_run_notifies_with_no_cwd_when_absent(tmp_path, monkeypatch):
         stop_reminder, "_notify", lambda sid, cwd=None: calls.append((sid, cwd))
     )
 
-    for _ in range(24):
+    for _ in range(9):
         run(json.dumps({"session_id": session_id}), state_dir=state_dir)
     run(json.dumps({"session_id": session_id}), state_dir=state_dir)
 

@@ -60,11 +60,11 @@ def test_tally_turn_gate_splits_hook_on_off_strength():
     records = [
         _rec("s1", "orwell-ste", True, strength=4, turns=30),
         _rec("s2", "orwell-ste", True, strength=2, turns=5),  # below gate
-        _rec("s3", "orwell-ste", False, strength=1, turns=25),
+        _rec("s3", "orwell-ste", False, strength=1, turns=15),  # in 10-24 band
         _rec("s4", "orwell-ste", False, strength=3, turns=40),
     ]
     stats = tally(records)
-    assert stats["n_qualifying"] == 3  # s1, s3, s4 (turns >= 25)
+    assert stats["n_qualifying"] == 3  # s1, s3, s4 (turns >= 10)
     assert stats["hook_on_mean_strength"] == pytest.approx(4.0)
     assert stats["hook_off_mean_strength"] == pytest.approx(2.0)
 

@@ -18,7 +18,7 @@ DEFAULT_LOG_PATH = Path.home() / ".claude" / "style-blind-test" / "log.jsonl"
 DEFAULT_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 CONFIDENCE_TIERS = ("low", "med", "high")
-QUALIFYING_TURNS = 25
+QUALIFYING_TURNS = 10
 
 
 def count_assistant_turns(session_id: str, projects_dir: Path = DEFAULT_PROJECTS_DIR) -> int:
