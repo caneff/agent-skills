@@ -125,8 +125,15 @@ def run_guess_wizard(
     turn: int | None = None,
     turn_state_dir: Path | None = None,
 ) -> dict:
-    session_id = _resolve_session_id(session_id)
-    proj = Path.cwd().name or "?"
+    session_id = _resolve_session_id(session_id, turn_state_dir)
+    from stop_reminder import DEFAULT_STATE_DIR, read_last_toast, toast_marker_path
+
+    marker_dir = turn_state_dir or DEFAULT_STATE_DIR
+    marker = read_last_toast(toast_marker_path(marker_dir))
+    if marker is not None and marker[0] == session_id and marker[1]:
+        proj = Path(marker[1]).name or "?"
+    else:
+        proj = "?"
     print(f"Recording guess for {proj} · {session_id[:8]} ({session_id})")
     for i, style_slug in enumerate(STYLES):
         print(f"  {i + 1}. {NAMES[style_slug]} — {DESCRIPTIONS[style_slug]}")
@@ -182,6 +189,18 @@ def _active_session(turns_dir: Path | None = None) -> str | None:
     return max(files, key=lambda p: p.stat().st_mtime).name
 
 
+def _last_toast_session(turns_dir: Path | None = None) -> str | None:
+    # The Stop reminder writes a global last-toast marker exactly when it
+    # fires (issue after #318) -- a toast means "log your guess", so gs
+    # should target the session the toast was actually for, globally,
+    # regardless of which terminal/session `gs` is typed in.
+    from stop_reminder import DEFAULT_STATE_DIR, read_last_toast, toast_marker_path
+
+    turns_dir = Path(turns_dir or DEFAULT_STATE_DIR)
+    marker = read_last_toast(toast_marker_path(turns_dir))
+    return marker[0] if marker else None
+
+
 def _resolve_session_id(cli_value: str | None, turns_dir: Path | None = None) -> str:
     # #298 recomputes truth via assignment(session_id), so this value must
     # equal the session_id the SessionStart hook received on stdin --
@@ -189,6 +208,7 @@ def _resolve_session_id(cli_value: str | None, turns_dir: Path | None = None) ->
     # id. Proving that equality end-to-end is wiring ticket #299's job.
     session_id = (
         cli_value
+        or _last_toast_session(turns_dir)
         or os.environ.get("CLAUDE_CODE_SESSION_ID")
         or _active_session(turns_dir)
     )

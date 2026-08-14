@@ -20,6 +20,14 @@ REMINDER_MESSAGE = "Blind test -- log your guess (gs)"
 
 DEFAULT_STATE_DIR = Path.home() / ".claude" / "style-blind-test" / "turns"
 
+
+def toast_marker_path(state_dir: Path) -> Path:
+    """The last-toast marker lives as a sibling of the turns dir it's derived from."""
+    return Path(state_dir).parent / "last_toast"
+
+
+LAST_TOAST_PATH = toast_marker_path(DEFAULT_STATE_DIR)
+
 _SKILL_DIR = Path(__file__).resolve().parent.parent / "sandcastle-watch"
 _TOAST_SCRIPT = _SKILL_DIR / "toast.ps1"
 
@@ -43,6 +51,24 @@ def _read_state(path: Path) -> tuple[int, int]:
 def _write_state(path: Path, count: int, last_fired: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"{count} {last_fired}\n")
+
+
+def write_last_toast(session_id: str, cwd: str | None, path: Path = LAST_TOAST_PATH) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{session_id}\n{cwd or ''}\n")
+
+
+def read_last_toast(path: Path = LAST_TOAST_PATH) -> tuple[str, str | None] | None:
+    path = Path(path)
+    if not path.exists():
+        return None
+    lines = path.read_text().splitlines()
+    if not lines or not lines[0]:
+        return None
+    session_id = lines[0]
+    cwd = lines[1] if len(lines) > 1 and lines[1] else None
+    return session_id, cwd
 
 
 def _notify(session_id: str, cwd: str | None = None) -> None:
@@ -100,6 +126,7 @@ def run(hook_input: str, state_dir: Path = DEFAULT_STATE_DIR) -> bool:
     if fired:
         last_fired = new_count
         _notify(session_id, cwd)
+        write_last_toast(session_id, cwd, path=toast_marker_path(state_dir))
 
     _write_state(state_path, new_count, last_fired)
     return fired

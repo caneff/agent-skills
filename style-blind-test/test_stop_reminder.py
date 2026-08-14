@@ -4,6 +4,7 @@ import json
 import stop_reminder
 from stop_reminder import (
     REMINDER_MESSAGE,
+    read_last_toast,
     run,
     should_fire,
 )
@@ -133,6 +134,47 @@ def test_notify_toast_is_long_loud_and_shows_project_and_short_id(monkeypatch):
     body = toast_call[toast_call.index("-Body") + 1]
     assert "my-proj" in body
     assert "sess-012" in body
+
+
+def test_run_writes_last_toast_marker_when_a_toast_fires(tmp_path):
+    state_dir = tmp_path / "turns"
+    session_id = "sess-marker"
+
+    for _ in range(9):
+        run(json.dumps({"session_id": session_id, "cwd": "/x/proj"}), state_dir=state_dir)
+    fired = run(json.dumps({"session_id": session_id, "cwd": "/x/proj"}), state_dir=state_dir)
+
+    assert fired is True
+    assert read_last_toast(state_dir.parent / "last_toast") == (session_id, "/x/proj")
+
+
+def test_run_does_not_write_marker_on_non_firing_turns(tmp_path):
+    state_dir = tmp_path / "turns"
+    session_id = "sess-no-marker"
+
+    for _ in range(9):
+        run(json.dumps({"session_id": session_id, "cwd": "/x/proj"}), state_dir=state_dir)
+
+    assert read_last_toast(state_dir.parent / "last_toast") is None
+
+
+def test_run_does_not_overwrite_marker_on_non_firing_turn_after_a_prior_fire(tmp_path):
+    state_dir = tmp_path / "turns"
+    marker_path = state_dir.parent / "last_toast"
+    first_session = "sess-first"
+    second_session = "sess-second"
+
+    for _ in range(10):
+        run(json.dumps({"session_id": first_session, "cwd": "/x/first"}), state_dir=state_dir)
+    assert read_last_toast(marker_path) == (first_session, "/x/first")
+
+    # A non-firing turn for a different session must not touch the marker.
+    run(json.dumps({"session_id": second_session, "cwd": "/x/second"}), state_dir=state_dir)
+    assert read_last_toast(marker_path) == (first_session, "/x/first")
+
+
+def test_read_last_toast_none_when_file_absent(tmp_path):
+    assert read_last_toast(tmp_path / "nope") is None
 
 
 def test_reminder_message_reveals_no_style():
