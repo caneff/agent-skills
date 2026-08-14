@@ -74,16 +74,6 @@
           }
         ]
       }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo \"Output style: $(jq -r .outputStyle ~/.claude/settings.json). Stay in that voice; self-check before sending.\""
-          }
-        ]
-      }
     ]
   },
   "worktree": {
