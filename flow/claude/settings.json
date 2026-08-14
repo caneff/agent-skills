@@ -73,14 +73,6 @@
             "statusMessage": "Syncing skill symlinks"
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 /home/caneff/.agents/skills/style-blind-test/session_start.py"
-          }
-        ]
       }
     ],
     "UserPromptSubmit": [
@@ -88,17 +80,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 /home/caneff/.agents/skills/style-blind-test/user_prompt_submit.py"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 /home/caneff/.agents/skills/style-blind-test/stop_reminder.py"
+            "command": "echo \"Output style: $(jq -r .outputStyle ~/.claude/settings.json). Stay in that voice; self-check before sending.\""
           }
         ]
       }
@@ -137,7 +119,7 @@
       }
     }
   },
-  "outputStyle": "default",
+  "outputStyle": "Clarity and Grace",
   "effortLevel": "medium",
   "autoMemoryEnabled": false,
   "skipWorkflowUsageWarning": true,
