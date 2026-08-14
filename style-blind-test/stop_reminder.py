@@ -2,7 +2,7 @@
 """Stop hook: loud reminder to log a blind guess every N turns (issue #316).
 
 Reads hook JSON (session_id) on stdin, bumps a per-session assistant-turn
-counter file, and once per REMINDER_INTERVAL crossing (25/50/75...) fires a
+counter file, and once per REMINDER_INTERVAL crossing (10/20/30...) fires a
 desktop toast (WSL powershell.exe, sandcastle-watch/toast.ps1 pattern) and a
 terminal bell. Reveals no style and never touches the guess log -- this
 module never imports assignment or capture.
