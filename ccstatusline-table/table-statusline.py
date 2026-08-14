@@ -31,7 +31,7 @@ def paint(text: str, hex_: str) -> str:
     r, g, b = (int(hex_[i : i + 2], 16) for i in (0, 2, 4))
     return f"\x1b[38;2;{r};{g};{b}m{text}\x1b[0m"
 
-CFG = Path("~/.config/ccstatusline").expanduser()
+CFG = Path(__file__).resolve().parent / "helpers"
 SANDCASTLE = Path("~/.claude/skills/sandcastle-watch/sandcastle-segment.sh").expanduser()
 
 

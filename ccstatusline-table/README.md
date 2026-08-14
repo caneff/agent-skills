@@ -36,12 +36,16 @@ too, never the worktree's.
 
 ## Dependencies
 
-Reads the session JSON on stdin, then fans it out to these helper scripts,
-which must stay at these paths:
+Reads the session JSON on stdin, then fans it out to helper scripts. Three
+are vendored in `helpers/` (versioned here):
 
-- `~/.config/ccstatusline/effort-abbrev.py` — thinking-effort abbreviation
-- `~/.config/ccstatusline/usage-segment.sh` — weekly/session %, resets
-- `~/.config/ccstatusline/issue-counts-segment.sh` — repo issue counts
+- `helpers/effort-abbrev.py` — thinking-effort abbreviation
+- `helpers/usage-segment.sh` — weekly/session %, resets
+- `helpers/issue-counts-segment.sh` — repo issue counts
+
+The fourth is the sibling `sandcastle-watch` skill (already in this repo),
+resolved at its installed path:
+
 - `~/.claude/skills/sandcastle-watch/sandcastle-segment.sh` — sandcastle status
 
 Git branch/changes and context tokens are computed in-script.
