@@ -57,6 +57,12 @@ cp "$vt/prism/prism-python.min.js" "$tmp/assets/prism/"                        #
 # write the report to "$tmp/report.html" linking href="assets/base/base.css" etc.
 ```
 
+The tmp dir already resolves `${TMPDIR:-/tmp}` — a skill reusing this pattern names
+its own folder (`<tmpdir>/<skill>-<timestamp>/report.html`) and needs no separate
+fallback note. Once the report is written, **open it and hand off the path**:
+`xdg-open <path>` on Linux, `open <path>` on macOS, `start <path>` on Windows, then
+tell the user the absolute path.
+
 ## Scaffold
 
 `<!doctype html>` on line 1 is required. Link `base/base.css` and each
