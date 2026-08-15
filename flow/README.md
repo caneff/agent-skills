@@ -26,16 +26,23 @@ every commit here is a backup.
 ## Copy-only backups (not symlinked)
 
 These live on the Windows side of WSL, where a repo symlink won't hold, so
-they're plain snapshots — `install.sh` does not touch them, and they go stale
-unless re-copied after you change them.
+they're plain snapshots — `install.sh` does not touch them.
 
 | Repo path | Live location | What it is |
 |---|---|---|
 | `vscode/settings.json` | `/mnt/c/Users/<you>/AppData/Roaming/Code/User/settings.json` | Windows VS Code user settings (incl. GitHub-issue queries) |
 
-`vscode/sync.sh` is the one command for it (finds the Windows path itself):
-`sync.sh` refreshes the repo copy from the live file (then commit); `sync.sh
---restore` writes the backup back onto a machine.
+`backup-sync.sh` walks a manifest of these repo↔live pairs (one line per file,
+top of the script):
+
+- `backup-sync.sh` — refresh the repo copies from the live files.
+- `backup-sync.sh --commit` — refresh, then commit any that changed. A
+  SessionStart hook runs this, so the snapshots stay fresh on their own.
+- `backup-sync.sh --restore` — write the repo copies back onto a machine.
+
+The `--commit` path is scoped to the manifest paths, so it never sweeps an
+unrelated edit into its commit. It copies each file **whole**, so keep secrets
+out of the listed files.
 
 The other segments `ccstatusline/settings.json` references (`effort-abbrev.py`,
 `usage-segment.sh`, `sandcastle-segment.sh`, `publish-usage.sh`) are not backed
