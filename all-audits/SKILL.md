@@ -6,9 +6,9 @@ argument-hint: "[path]"
 ---
 
 Run the whole audit set over one repo in a single sweep. Six audit skills fan out
-in parallel, each into its own subagent; each writes a self-contained HTML report;
-the reports collect under one folder behind an `index.html` that links them and
-flags where they overlap. The sweep **reports only** — it applies nothing and
+in parallel, each into its own subagent; each writes a self-contained report;
+the reports collect under one folder behind an `index.html` that links them. The
+sweep **reports only** — it applies nothing and
 opens no PR. When it finishes it stops and hands you the index, so you decide what
 to grill.
 
@@ -51,7 +51,12 @@ this repo.
      - `audit` — the skill name.
      - `headline` — the one-line verdict from the report.
      - `count` — how many findings.
-     - `report_path` — absolute path to the report's `.html` file.
+     - `report_path` — absolute path to the report's `.html` file. For
+       `test-audit` and `comment-audit` this is the grouped summary page, not a
+       card-per-finding report.
+     - `log_path` — absolute path to `findings.jsonl`, for the audits that write
+       one (`test-audit`, `comment-audit`). Omit for the audits that render a
+       full HTML report. See `FINDINGS-LOG.md`.
      - `findings` — a short list, one entry per finding: `{ target, note }`, where
        `target` is the repo-relative file path the finding is about and `note` is
        a one-line summary.
@@ -87,6 +92,11 @@ report's findings**. Grill the findings toward decisions — which to act on, wh
 to drop, which need a closer look. Walk one audit at a time; do not merge the six
 into one grilling — a comment cut and an architecture deepening share no design
 tree.
+
+Read the findings from the audit's own record: for `test-audit` and
+`comment-audit`, the full list is in `findings.jsonl` (`log_path`) — read that,
+not the summary HTML, which holds only grouped counts. For the audits that render
+a full HTML report, the report is the record.
 
 **Dedup against audits already grilled this run.** You grill the audits one after
 another in the same session, so the decisions you have already reached are in

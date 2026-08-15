@@ -10,9 +10,9 @@ codebase full of comments that restate the code trains the reader to skip all
 comments — so the one comment that matters goes unread. Ruthless deletion is
 what buys the survivors their authority.
 
-The default deliverable is a **report**, not applied edits. The sweep renders an
-HTML report of every cut and keeper; it touches no code. Applying the cuts is a
-separate, opt-in step the user asks for by name.
+The default deliverable is a **report**, not applied edits. The sweep writes a
+machine-readable findings log and a grouped HTML summary; it touches no code.
+Applying the cuts is a separate, opt-in step the user asks for by name.
 
 ## The one test
 
@@ -174,34 +174,37 @@ answer.
    it"*), not "adds context" or "explains the why." If you cannot name the
    mistake, the comment is not load-bearing — cut it.
 
-4. **Render the HTML report — the default deliverable.** Draw the sweep as a
-   self-contained visual-teach report (see below). Touch no code. Print the
-   one-line verdict and the report's absolute path, nothing else.
+4. **Write the findings log and render the summary — the default deliverable.**
+   Write every judged cut and keeper to `findings.jsonl`, then draw a grouped
+   summary `report.html` from it (see below). Touch no code. Print the one-line
+   verdict and the summary's absolute path, nothing else.
 
-   Before you render, count whole deletions against salvage-trims. This is a
+   Before you write, count whole deletions against salvage-trims. This is a
    mirror, not a rule: if the salvages outnumber the whole deletes, you
    rationalized — go back and re-ask each salvage whether you would write that
    clause onto a blank line today. Most of them are whole cuts you softened.
 
-## Present the findings as an HTML report
+## Write the log and render the summary
 
-Render the sweep as a single self-contained HTML report, styled with the
-**visual-teach** design system. Follow `~/.agents/skills/ponytail-audit/HTML-REPORT.md`
-for the asset delivery (copy the `vt-*` assets beside the report and link them
-relatively), the scaffold, and the styling — this skill only differs in what the
-cards hold. Write to `<tmpdir>/comment-audit-<timestamp>/report.html`, then open
-it and hand off the path as HTML-REPORT.md's asset-delivery section describes.
+The sweep can judge hundreds of comments; do not render one HTML card each. Write
+the full record to `findings.jsonl` and a grouped summary to `report.html`,
+following `~/.agents/skills/all-audits/FINDINGS-LOG.md` for both — the JSONL
+schema and the summary's grouped-overview shape. Write both to
+`<tmpdir>/comment-audit-<timestamp>/`, then open the summary and hand off its
+path as `~/.agents/skills/ponytail-audit/HTML-REPORT.md`'s asset-delivery section
+describes.
 
-- **Header** — a one-line verdict ("Eight comments guard this file; one earns its
-  place"), then a `vt-metabar` with the count: `N judged · M cut · K kept`.
-- **Cut cards** — `vt-pill bad` (red). Each shows the comment as it stands beside
-  its replacement (`— gone —` for a whole cut, or the tightened keeper clause for
-  a salvage), plus the one-line reason it does not earn its place.
-- **Keep cards** — `vt-pill good` (green). The comment, and the one-sentence
-  concrete mistake a reader makes once it is gone.
-- **Load-bearing** — close with a `vt-callout` listing the lines you left
-  untouched (directives, pragmas, license headers), so the reader sees they were
-  considered, not missed.
+- **Log** — one JSONL line per judged comment. `bucket` is `cut` / `keep` /
+  `load-bearing`. `category` is the reason that named it — `restatement`,
+  `banner`, `historical`, `citation`, `inferable-why`, `filler`,
+  `commented-out-code`, `stale` for cuts; `why`, `warning`, `workaround`,
+  `domain-rule`, `api-contract` for keepers. A cut carries `before`/`after`
+  (`"— gone —"` for a whole delete, the tightened clause for a salvage).
+- **Summary** — the verdict, the `N judged · M cut · K kept` metabar, and the
+  findings grouped by bucket then category with counts (the shape a reader
+  wants: "80 restatement, 21 banner, 11 citation"). No per-comment cards. Close
+  with a `vt-callout` for the load-bearing lines left untouched (directives,
+  pragmas, license headers), so the reader sees they were considered, not missed.
 
 ## Applying the cuts (opt-in)
 

@@ -11,9 +11,9 @@ trains the reader to distrust the suite — when half the tests go red for
 nothing, a real failure gets waved through. Ruthless sorting is what buys the
 survivors their authority.
 
-The default deliverable is a **report**, not applied edits. The sweep renders an
-HTML report of every Cut, Rewrite, and Keep; it touches no test. Applying the
-changes is a separate, opt-in step the user asks for by name.
+The default deliverable is a **report**, not applied edits. The sweep writes a
+machine-readable findings log and a grouped HTML summary; it touches no test.
+Applying the changes is a separate, opt-in step the user asks for by name.
 
 This is the judgment pass: the smells only reading can find. `audit.py` and
 `audit.mjs` in this skill's directory are pass one — a mechanical scan for
@@ -236,30 +236,33 @@ just no longer this test's problem.
    "fails when Y is refactored though nothing broke." If you can't name it
    concretely, you haven't finished judging — don't bucket it yet.
 
-5. **Render the HTML report — the default deliverable.** Draw the sweep as a
-   self-contained visual-teach report (see below). Touch no test. Print the
-   one-line verdict and the report's absolute path, nothing else. The
-   mechanical scanners' `file:line: <smell>` candidate list from pass one
-   still prints to the terminal — it is a scan, not the report.
+5. **Write the findings log and render the summary — the default deliverable.**
+   Write every judged Cut/Rewrite/Keep to `findings.jsonl`, then draw a grouped
+   summary `report.html` from it (see below). Touch no test. Print the one-line
+   verdict and the summary's absolute path, nothing else. The mechanical
+   scanners' `file:line: <smell>` candidate list from pass one still prints to
+   the terminal — it is a scan, not the log.
 
-## Present the findings as an HTML report
+## Write the log and render the summary
 
-Render the sweep as a single self-contained HTML report, styled with the
-**visual-teach** design system. Follow `~/.agents/skills/ponytail-audit/HTML-REPORT.md`
-for the asset delivery (copy the `vt-*` assets beside the report and link them
-relatively), the scaffold, and the styling — this skill only differs in what the
-cards hold. Write to `<tmpdir>/test-audit-<timestamp>/report.html`, then open it
-and hand off the path as HTML-REPORT.md's asset-delivery section describes.
+The sweep can judge hundreds of tests; do not render one HTML card each. Write
+the full record to `findings.jsonl` and a grouped summary to `report.html`,
+following `~/.agents/skills/all-audits/FINDINGS-LOG.md` for both — the JSONL
+schema and the summary's grouped-overview shape. Write both to
+`<tmpdir>/test-audit-<timestamp>/`, then open the summary and hand off its path
+as `~/.agents/skills/ponytail-audit/HTML-REPORT.md`'s asset-delivery section
+describes.
 
-- **Header** — a one-line verdict, then a `vt-metabar` with the count:
-  `N judged · C cut · R rewrite · K kept`.
-- **Cut cards** — `vt-pill bad` (red). The test as it stands, and the one-line
-  concrete failure it names ("cannot fail when X breaks").
-- **Rewrite cards** — `vt-pill warn` (amber). A before/after `vt-split`: the test
-  as it stands beside the corrected assertions/setup, and the one-line reason the
-  behavior is real but checked wrong.
-- **Keep cards** — `vt-pill good` (green). Kept sparingly; lead with the
-  interaction-only tests that are green today, the highest-value find.
+- **Log** — one JSONL line per judged test. `bucket` is `cut` / `rewrite` /
+  `keep`. `category` is the smell that named it — `duplicate-coverage`,
+  `mystery-guest`, `eager`, `sensitive-equality`, `name-mismatch`,
+  `library-default`, `conditional-logic`, `flaky-by-construction`, `tautology`,
+  `interaction-only`. A rewrite carries `before`/`after`; a duplicate-coverage
+  cut carries `owner` (the stronger test's `file:line`).
+- **Summary** — the verdict, the `N judged · C cut · R rewrite · K kept`
+  metabar, and the findings grouped by bucket then category with counts. No
+  per-test cards. Call out the standouts in a `vt-callout`: the interaction-only
+  tests that are green today, the highest-value find.
 
 ## Applying the changes (opt-in)
 
