@@ -275,6 +275,47 @@ describe("buildRunSummary", () => {
     expect(out).not.toContain("Dammed");
     expect(out).not.toContain("Next");
   });
+
+  // A review-fail issue still carries its (relabeled) ready-for-human bucket,
+  // and a dammed issue still carries ready-for-agent — bucketIssues has no way
+  // to know either happened. Without a dedup pass here, both would render
+  // twice: once under Stuck/Dammed, once under the old human-gated/available
+  // sections. The prototype shows each issue exactly once (#344).
+  test("a stuck issue is not duplicated under its old human-gated bucket", () => {
+    const bucketed = [
+      {
+        number: 103,
+        title: "Validate config schema",
+        bucket: "human-gated-ready-for-human",
+      },
+    ];
+    const out = buildRunSummary(bucketed, {
+      stuck: [
+        {
+          kind: "review-fail",
+          number: 103,
+          title: "Validate config schema",
+          failedAxes: ["standards"],
+          branch: "sandcastle/issue-103",
+        },
+      ],
+    });
+    expect(out).toContain("[review-fail]");
+    expect(out).not.toContain("Human-gated: ready for human");
+  });
+
+  test("a dammed issue is not duplicated under Available", () => {
+    const bucketed = [
+      { number: 104, title: "Persist validated config", bucket: "ready-for-agent" },
+    ];
+    const out = buildRunSummary(bucketed, {
+      dammed: [
+        { number: 104, title: "Persist validated config", waitsOn: 103 },
+      ],
+    });
+    expect(out).toContain("Dammed behind a failure");
+    expect(out).not.toContain("Available (queued / blocked)");
+  });
 });
 
 describe("orderMergesBaseFirst", () => {

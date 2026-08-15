@@ -302,8 +302,23 @@ export function buildRunSummary(
 ): string {
   const sections: string[] = ["\n=== Run Summary ===\n"];
 
+  // A stuck or dammed issue still carries whatever label the earlier phases
+  // left it with (ready-for-human for a review-fail, ready-for-agent for a
+  // dammed child) — bucketIssues has no way to know either happened, so it
+  // buckets them same as any other open issue. Drop those numbers from the
+  // bucketed sections here so each issue renders exactly once: under Stuck or
+  // Dammed, never also under a stale human-gated/available bucket.
+  const stuckOrDammed = new Set<number>([
+    ...(run.stuck ?? []).map((s) => s.number),
+    ...(run.dammed ?? []).map((d) => d.number),
+  ]);
+  const effectiveBucketed =
+    stuckOrDammed.size > 0
+      ? bucketed.filter((b) => !stuckOrDammed.has(b.number))
+      : bucketed;
+
   const byBucket = new Map<BucketName, BucketedIssue[]>();
-  for (const issue of bucketed) {
+  for (const issue of effectiveBucketed) {
     if (!byBucket.has(issue.bucket)) byBucket.set(issue.bucket, []);
     byBucket.get(issue.bucket)!.push(issue);
   }
@@ -357,7 +372,7 @@ export function buildRunSummary(
     );
   }
 
-  const nonHumanGated = bucketed.filter(
+  const nonHumanGated = effectiveBucketed.filter(
     (i) => !HUMAN_GATED_BUCKETS.has(i.bucket)
   );
 
