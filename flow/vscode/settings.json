@@ -8,10 +8,8 @@
         "editor.defaultFormatter": "charliermarsh.ruff"
     },
     "[sql]": {
-        "editor.defaultFormatter": "sqlfluff.vscode-sqlfluff"
+        "editor.defaultFormatter": "inferrinizzard.prettier-sql-vscode"
     },
-    "sqlfluff.dialect": "postgres",
-    "sqlfluff.format.enabled": true,
     "editor.formatOnSave": true,
     "notebook.formatOnSave.enabled": true,
     "notebook.formatOnCellExecution": true,
