@@ -65,10 +65,23 @@ still missing.
 
 ## 5. Report
 
-- **Table**, one row per instruction: my line | verdict | why | Anthropic's line.
-- **Exact wording** to paste for each of the five missing instructions.
-- **Honest count** — "307 lines in. 4 deletes, 4 rewrites, 5 additions."
-- **NOT RUN** — everything you could not check, named. Never a clean bill you did not earn.
+The default deliverable is a self-contained HTML report, styled with the
+**visual-teach** design system. Follow `~/.agents/skills/ponytail-audit/HTML-REPORT.md`
+for the asset delivery (copy the `vt-*` assets beside the report and link them
+relatively), the scaffold, and the styling — this skill only differs in what the
+report holds. Write to `<tmpdir>/audit-instructions-<timestamp>/report.html`, then
+open it and hand off the path as HTML-REPORT.md's asset-delivery section describes
+— print only the honest count and the report's absolute path.
 
-If most of the file should go, say so plainly. The scaffolding the user is proudest of is
-the likeliest casualty.
+- **Header** — a one-line verdict, then a `vt-metabar` with the **honest count**:
+  "307 lines in · 4 delete · 4 rewrite · 5 additions."
+- **Verdict rows** — one per instruction, in a `vt-table`: my line | verdict | why |
+  Anthropic's line. Color the verdict `vt-pill bad` for DELETE, `vt-pill warn` for
+  REWRITE, `vt-pill good` for KEEP.
+- **Missing** — a section giving the **exact paste-ready wording** for each of the
+  five missing instructions still absent from the file.
+- **NOT RUN** — a `vt-callout warn` naming everything you could not check. Never a
+  clean bill you did not earn.
+
+If most of the file should go, say so plainly in the verdict. The scaffolding the
+user is proudest of is the likeliest casualty.

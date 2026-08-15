@@ -10,6 +10,10 @@ codebase full of comments that restate the code trains the reader to skip all
 comments — so the one comment that matters goes unread. Ruthless deletion is
 what buys the survivors their authority.
 
+The default deliverable is a **report**, not applied edits. The sweep renders an
+HTML report of every cut and keeper; it touches no code. Applying the cuts is a
+separate, opt-in step the user asks for by name.
+
 ## The one test
 
 **A comment earns its place only if it tells the reader something the code
@@ -151,14 +155,11 @@ answer.
 
 ## Run
 
-1. **Start clean, scope tight.** Confirm a clean working tree first
-   (`git status`) — the comments-only guarantee in step 5 only holds when nothing
-   else is uncommitted. Then scope: audit `$ARGUMENTS` if given; with no
-   argument, default to the current branch's diff against its base
-   (`git diff --name-only main...HEAD`), not the whole tree — a repo-wide sweep is
-   an explicit opt-in the user asks for by name. Either way, skip vendored,
-   generated, and dependency trees (`node_modules`, `dist`, `.venv`, build
-   output, lockfiles).
+1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, default to the
+   current branch's diff against its base (`git diff --name-only main...HEAD`),
+   not the whole tree — a repo-wide sweep is an explicit opt-in the user asks for
+   by name. Either way, skip vendored, generated, and dependency trees
+   (`node_modules`, `dist`, `.venv`, build output, lockfiles).
 
 2. **Sweep — every comment, not a sample.** Walk the files in scope and read
    every comment in the context of the code it sits on. Judgment needs the code
@@ -173,24 +174,55 @@ answer.
    it"*), not "adds context" or "explains the why." If you cannot name the
    mistake, the comment is not load-bearing — cut it.
 
-4. **Apply the changes.** Delete the cuts. For every keeper, tighten the prose
+4. **Render the HTML report — the default deliverable.** Draw the sweep as a
+   self-contained visual-teach report (see below). Touch no code. Print the
+   one-line verdict and the report's absolute path, nothing else.
+
+   Before you render, count whole deletions against salvage-trims. This is a
+   mirror, not a rule: if the salvages outnumber the whole deletes, you
+   rationalized — go back and re-ask each salvage whether you would write that
+   clause onto a blank line today. Most of them are whole cuts you softened.
+
+## Present the findings as an HTML report
+
+Render the sweep as a single self-contained HTML report, styled with the
+**visual-teach** design system. Follow `~/.agents/skills/ponytail-audit/HTML-REPORT.md`
+for the asset delivery (copy the `vt-*` assets beside the report and link them
+relatively), the scaffold, and the styling — this skill only differs in what the
+cards hold. Write to `<tmpdir>/comment-audit-<timestamp>/report.html`, then open
+it and hand off the path as HTML-REPORT.md's asset-delivery section describes.
+
+- **Header** — a one-line verdict ("Eight comments guard this file; one earns its
+  place"), then a `vt-metabar` with the count: `N judged · M cut · K kept`.
+- **Cut cards** — `vt-pill bad` (red). Each shows the comment as it stands beside
+  its replacement (`— gone —` for a whole cut, or the tightened keeper clause for
+  a salvage), plus the one-line reason it does not earn its place.
+- **Keep cards** — `vt-pill good` (green). The comment, and the one-sentence
+  concrete mistake a reader makes once it is gone.
+- **Load-bearing** — close with a `vt-callout` listing the lines you left
+  untouched (directives, pragmas, license headers), so the reader sees they were
+  considered, not missed.
+
+## Applying the cuts (opt-in)
+
+Only when the user asks to apply — never by default:
+
+1. **Start clean.** Confirm a clean working tree first (`git status`); the
+   comments-only guarantee below only holds when nothing else is uncommitted.
+
+2. **Apply the changes.** Delete the cuts. For every keeper, tighten the prose
    to the fewest words that still read clearly, and correct any text that has
    gone stale while its *why* stays true. Touch comments only — leave the
    code itself, its formatting, and every keeper that already reads true exactly
    as they are.
 
-5. **Verify, then open a PR for review.** The final diff must touch comments and
+3. **Verify, then open a PR for review.** The final diff must touch comments and
    nothing else — confirm with `git diff`. Run the repo's build/lint/test so a
    load-bearing line you misread turns the loop red before review, not after.
    Then commit the audit on its own branch, with nothing else in the commit, and
    open a pull request. Every cut is a judgment call, so a human reads the sweep
    before it merges — and the isolated commit means the whole audit reverts in
    one step if a call proves wrong.
-
-   Before you commit, count whole deletions against salvage-trims. This is a
-   mirror, not a rule: if the salvages outnumber the whole deletes, you
-   rationalized — go back and re-ask each salvage whether you would write that
-   clause onto a blank line today. Most of them are whole cuts you softened.
 
 ## When a comment props up unclear code
 

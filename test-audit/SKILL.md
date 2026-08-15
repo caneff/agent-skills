@@ -11,6 +11,10 @@ trains the reader to distrust the suite — when half the tests go red for
 nothing, a real failure gets waved through. Ruthless sorting is what buys the
 survivors their authority.
 
+The default deliverable is a **report**, not applied edits. The sweep renders an
+HTML report of every Cut, Rewrite, and Keep; it touches no test. Applying the
+changes is a separate, opt-in step the user asks for by name.
+
 This is the judgment pass: the smells only reading can find. `audit.py` and
 `audit.mjs` in this skill's directory are pass one — a mechanical scan for
 the syntactically detectable smells (assertion-free tests, tautologies,
@@ -232,15 +236,46 @@ just no longer this test's problem.
    "fails when Y is refactored though nothing broke." If you can't name it
    concretely, you haven't finished judging — don't bucket it yet.
 
-5. **Apply the changes.** Delete the cuts. Rewrite each Rewrite to assert
+5. **Render the HTML report — the default deliverable.** Draw the sweep as a
+   self-contained visual-teach report (see below). Touch no test. Print the
+   one-line verdict and the report's absolute path, nothing else. The
+   mechanical scanners' `file:line: <smell>` candidate list from pass one
+   still prints to the terminal — it is a scan, not the report.
+
+## Present the findings as an HTML report
+
+Render the sweep as a single self-contained HTML report, styled with the
+**visual-teach** design system. Follow `~/.agents/skills/ponytail-audit/HTML-REPORT.md`
+for the asset delivery (copy the `vt-*` assets beside the report and link them
+relatively), the scaffold, and the styling — this skill only differs in what the
+cards hold. Write to `<tmpdir>/test-audit-<timestamp>/report.html`, then open it
+and hand off the path as HTML-REPORT.md's asset-delivery section describes.
+
+- **Header** — a one-line verdict, then a `vt-metabar` with the count:
+  `N judged · C cut · R rewrite · K kept`.
+- **Cut cards** — `vt-pill bad` (red). The test as it stands, and the one-line
+  concrete failure it names ("cannot fail when X breaks").
+- **Rewrite cards** — `vt-pill warn` (amber). A before/after `vt-split`: the test
+  as it stands beside the corrected assertions/setup, and the one-line reason the
+  behavior is real but checked wrong.
+- **Keep cards** — `vt-pill good` (green). Kept sparingly; lead with the
+  interaction-only tests that are green today, the highest-value find.
+
+## Applying the changes (opt-in)
+
+Only when the user asks to apply — never by default:
+
+1. **Start clean.** Confirm a clean working tree first (`git status`).
+
+2. **Apply the changes.** Delete the cuts. Rewrite each Rewrite to assert
    the real behavior correctly — new assertions, isolated setup, mocked
    time, whatever the smell called for. Leave every Keep untouched.
 
-6. **Run the repo's own test command.** A test you misjudged as crap should
+3. **Run the repo's own test command.** A test you misjudged as crap should
    turn the loop red here, before a human ever reviews the diff — not after
    it merges.
 
-7. **Commit on an isolated branch and open a PR.** Every cut and rewrite is
+4. **Commit on an isolated branch and open a PR.** Every cut and rewrite is
    a judgment call; a human reads the sweep before it merges, and the
    isolated commit means the whole audit reverts in one step if a call
    proves wrong.
