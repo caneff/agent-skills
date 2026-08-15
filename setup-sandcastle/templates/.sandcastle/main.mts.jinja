@@ -638,9 +638,22 @@ while (true) {
     if (plan.note) console.warn(`  ${plan.note}`);
 
     if (kind === "done") {
-      // Open one ready PR — head = the issue's own branch, base = main — then
+      // Open one ready PR — head = the issue's own branch, base = resolveBase's
+      // pick (the parent's branch for a stacked child, else `main`, #343) — then
       // label in-review and record it. Order matters: opening before the label
       // makes "in-review with no PR" structurally impossible.
+      //
+      // Recomputed here rather than threaded through the outcome union: the
+      // build-time value (~line 444) isn't in scope in this loop, but
+      // `blockedBy` and `builtBranches` both are, and resolveBase is pure — the
+      // recompute is cheaper than plumbing base through normalizeSettled.
+      // builtBranches only grows within a run, and X's parent (built at an
+      // earlier level) is already in it while X itself and its same-level
+      // siblings are not X's parents, so this equals the build-time base.
+      const base = resolveBase(
+        blockedBy.get(Number(issue.id)) ?? [],
+        builtBranches
+      );
       git(`push -u --force-with-lease origin ${issue.branch}`);
       await sandcastle.run({
         ...sandboxConfig(),
@@ -653,6 +666,7 @@ while (true) {
           BRANCH: issue.branch,
           ISSUE_ID: issue.id,
           ISSUE_TITLE: issue.title,
+          BASE: base,
         },
       });
       const prNumRaw = gh(`pr view ${issue.branch} --json number --jq .number`);
