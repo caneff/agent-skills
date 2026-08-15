@@ -797,9 +797,10 @@ gcWorktrees();
   const usedAsBase = new Set(
     builtForMerges.map((b) => b.baseParent).filter((p): p is number => p !== null)
   );
+  const mergeInfoByIssue = new Map(builtForMerges.map((b) => [b.issue, b]));
   const nextMerges: NextMerge[] = orderMergesBaseFirst(builtForMerges).map(
     ({ issue, pr }) => {
-      const entry = builtForMerges.find((b) => b.issue === issue)!;
+      const entry = mergeInfoByIssue.get(issue)!;
       const note =
         entry.baseParent !== null
           ? `stacked on #${entry.baseParent}`
