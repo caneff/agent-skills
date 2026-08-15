@@ -42,16 +42,14 @@ import {
   bucketIssues,
   buildRunSummary,
   deliveredParentIds,
-  orderMergesBaseFirst,
+  buildNextMerges,
   deriveDammed,
   type OpenIssue,
   type StuckIssue,
-  type NextMerge,
 } from "./reconcile.mts";
 import {
   planOutcomeTransition,
   planFailureBodyEdit,
-  type CompletedIssue,
   type IssueOutcome,
 } from "./issue-lifecycle.mts";
 import {
@@ -251,7 +249,7 @@ function fetchIssueEdges(): IssueEdgeRow[] | null {
 // surfaces these for a human to close (spent-parent hygiene). Fetched fresh at
 // the end of the run rather than reusing the start-of-run memo, so an issue a
 // human closed mid-run is counted.
-function getDeliveredParents(): Set<string> {
+function getDeliveredParents(): Set<number> {
   return deliveredParentIds(fetchIssueEdges() ?? []);
 }
 
@@ -276,7 +274,7 @@ const planSchema = z.object({
       // Vestigial in the one-PR-per-issue model (#244): every branch is cut from
       // `main` and opens its own PR, so parents no longer stack branches and
       // group no longer combines PRs. The planner emits `[]` and a theme slug;
-      // the fields are kept so the plan item and CompletedIssue stay one shape.
+      // the fields are kept so the plan item and OutcomeIssue stay one shape.
       parents: z.array(z.string()),
       group: z.string(),
     })
@@ -327,18 +325,15 @@ gcWorktrees();
 // Branch the top-level runs (planner, PR author) report against — used only to
 // name their log files the way sandcastle would by default.
 const headBranch = git("rev-parse --abbrev-ref HEAD") ?? "main";
-// Every issue that built to a clean review and opened a PR this run — recorded
-// for the end-of-run summary.
-const allCompleted: CompletedIssue[] = [];
-// Issue id → PR number, one per issue, for the run summary.
-const prAssignments = new Map<string, number>();
+// Issue number → PR number, one per issue, for the run summary.
+const prAssignments = new Map<number, number>();
 // Issue number → its Stuck record — review-fail or a harness/reviewer error —
 // accumulated across every replan-loop iteration for the end-of-run "Stuck"
 // section (#344). A later iteration never revisits an id already attempted
 // this run (attemptedThisRun), so each entry is written at most once.
 const failedThisRun = new Map<number, StuckIssue>();
 
-// The plan item / CompletedIssue shape — declared once, shared by every iteration.
+// The plan item / OutcomeIssue shape — declared once, shared by every iteration.
 type WorkIssue = {
   id: string;
   title: string;
@@ -692,8 +687,7 @@ while (true) {
       const prNum = prNumRaw ? parseInt(prNumRaw, 10) : 0;
       if (prNum > 0) {
         if (plan.addLabel) relabel(issue.id, plan.addLabel, plan.removeLabels);
-        prAssignments.set(issue.id, prNum);
-        if (plan.completed) allCompleted.push(plan.completed);
+        prAssignments.set(Number(issue.id), prNum);
         // Enter the built-set (#342): the next loop pass treats this issue as a
         // satisfied parent (unblocking its children) and stacks a child on this
         // branch. Only the success terminal — commits pushed AND both review axes
@@ -770,52 +764,24 @@ gcWorktrees();
   // gh call.
   const { open: allOpenIssues, blockedBy: finalBlockedBy } =
     fetchFrontierInputs();
+  // The one truth for "built this run": builtBranches' key set. bucketIssues,
+  // buildNextMerges, and deriveDammed all read it.
+  const builtIds = new Set(builtBranches.keys());
   const bucketed = bucketIssues({
     openIssues: allOpenIssues,
-    builtThisRun: new Set(allCompleted.map((i) => i.id)),
+    builtThisRun: builtIds,
     prAssignments,
     deliveredParents: getDeliveredParents(),
   });
 
   // Next footer: base-first merge order for everything built this run.
-  // baseParent is the issue's single native parent that also built this run
-  // (via builtBranches' key set) — the same relation resolveBase used to pick
-  // the branch's base, recomputed here from blockedBy since builtBranches only
-  // gives branches, not the parent id itself.
-  const builtIssueNumbers = new Set(builtBranches.keys());
-  const builtForMerges = [...prAssignments.entries()].map(([idStr, pr]) => {
-    const issueNum = Number(idStr);
-    const builtParents = (finalBlockedBy.get(issueNum) ?? []).filter((p) =>
-      builtIssueNumbers.has(p)
-    );
-    return {
-      issue: issueNum,
-      pr,
-      baseParent: builtParents.length === 1 ? builtParents[0]! : null,
-    };
-  });
-  const usedAsBase = new Set(
-    builtForMerges.map((b) => b.baseParent).filter((p): p is number => p !== null)
-  );
-  const mergeInfoByIssue = new Map(builtForMerges.map((b) => [b.issue, b]));
-  const nextMerges: NextMerge[] = orderMergesBaseFirst(builtForMerges).map(
-    ({ issue, pr }) => {
-      const entry = mergeInfoByIssue.get(issue)!;
-      const note =
-        entry.baseParent !== null
-          ? `stacked on #${entry.baseParent}`
-          : usedAsBase.has(issue)
-            ? "base of the stack"
-            : "independent";
-      return { pr, issue, note, stackedOn: entry.baseParent ?? undefined };
-    }
-  );
+  const nextMerges = buildNextMerges(prAssignments, finalBlockedBy, builtIds);
 
   const dammed = deriveDammed(
     allOpenIssues,
     finalBlockedBy,
     new Set(failedThisRun.keys()),
-    builtIssueNumbers
+    builtIds
   );
 
   const summary = buildRunSummary(bucketed, {

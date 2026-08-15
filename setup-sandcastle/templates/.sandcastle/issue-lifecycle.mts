@@ -35,24 +35,10 @@ export type IssueOutcome<I> = { issue: I } & (
 
 export type OutcomeKind = "done" | "review-fail" | "nothing";
 
-// One issue the run built to a clean review — its identity and the branch its PR
-// is cut from. (Formerly in pr-components.mts, which the one-PR-per-issue rewrite
-// deleted; the record survives because the run summary counts what was built.)
-export interface CompletedIssue {
-  id: string;
-  title: string;
-  branch: string;
-  // Carried through from the planner but no longer used for PR grouping — one
-  // issue is one PR. Kept so the planner's work item and this record stay one
-  // shape.
-  parents: string[];
-  group?: string;
-}
-
 // The issue as the execute loop knows it — from the planner, carrying its forest
 // position (parents) and topic group. (parents and group are vestigial in the
 // one-PR-per-issue model — carried through, not acted on — but kept so the plan
-// item, this type, and CompletedIssue are one shape.)
+// item and this type are one shape.)
 export interface OutcomeIssue {
   id: string;
   title: string;
@@ -72,8 +58,6 @@ export interface OutcomePlan {
   // spliceReviewFailureSection, or planFailureBodyEdit below) — the failing
   // axes, why, and how to continue the preserved branch. Absent otherwise.
   failureSection?: string;
-  // done only: the record main.mts accumulates for the run summary.
-  completed?: CompletedIssue;
   // Operator-facing line main.mts prints, unindented — the caller owns layout.
   // Absent when there is nothing to say.
   note?: string;
@@ -131,13 +115,6 @@ export function planOutcomeTransition(input: {
       addLabel: "in-review",
       removeLabels: ["ready-for-agent"],
       preserveBranch: false,
-      completed: {
-        id: issue.id,
-        title: issue.title,
-        branch: issue.branch,
-        parents: issue.parents,
-        ...(issue.group ? { group: issue.group } : {}),
-      },
     };
   }
 

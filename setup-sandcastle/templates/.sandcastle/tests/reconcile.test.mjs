@@ -3,7 +3,7 @@ import {
   bucketIssues,
   buildRunSummary,
   deliveredParentIds,
-  orderMergesBaseFirst,
+  buildNextMerges,
   deriveDammed,
 } from "../reconcile.mts";
 // planOutcomeTransition moved to issue-lifecycle.mts (#274) — its tests moved
@@ -22,8 +22,8 @@ describe("bucketIssues", () => {
     const result = bucketIssues(
       makeOpts({
         openIssues: [{ number: 10, title: "feat", labels: ["in-review"] }],
-        builtThisRun: new Set(["10"]),
-        prAssignments: new Map([["10", 55]]),
+        builtThisRun: new Set([10]),
+        prAssignments: new Map([[10, 55]]),
       })
     );
     expect(result[0]).toMatchObject({
@@ -69,7 +69,7 @@ describe("bucketIssues", () => {
         openIssues: [
           { number: 99, title: "spec: nine fixes", labels: ["ready-for-human"] },
         ],
-        deliveredParents: new Set(["99"]),
+        deliveredParents: new Set([99]),
       })
     );
     expect(result[0]).toMatchObject({
@@ -100,7 +100,7 @@ describe("deliveredParentIds", () => {
       { number: 100, state: "CLOSED", parent: 99 },
       { number: 101, state: "CLOSED", parent: 99 },
     ];
-    expect(deliveredParentIds(edges)).toEqual(new Set(["99"]));
+    expect(deliveredParentIds(edges)).toEqual(new Set([99]));
   });
 
   test("one child still open → not flagged", () => {
@@ -350,22 +350,56 @@ describe("buildRunSummary", () => {
   });
 });
 
-describe("orderMergesBaseFirst", () => {
-  test("chain: parent before child", () => {
-    const result = orderMergesBaseFirst([
-      { issue: 102, pr: 341, baseParent: 101 },
-      { issue: 101, pr: 340, baseParent: null },
-    ]);
+describe("buildNextMerges", () => {
+  test("chain: parent before child, notes name the stack", () => {
+    const result = buildNextMerges(
+      new Map([
+        [101, 340],
+        [102, 341],
+      ]),
+      new Map([[102, [101]]]),
+      new Set([101, 102])
+    );
     expect(result.map((r) => r.issue)).toEqual([101, 102]);
+    expect(result[0]).toMatchObject({ issue: 101, note: "base of the stack" });
+    expect(result[1]).toMatchObject({
+      issue: 102,
+      note: "stacked on #101",
+      stackedOn: 101,
+    });
   });
 
   test("independent entries keep stable input order", () => {
-    const result = orderMergesBaseFirst([
-      { issue: 110, pr: 342, baseParent: null },
-      { issue: 101, pr: 340, baseParent: null },
-      { issue: 102, pr: 341, baseParent: 101 },
-    ]);
+    const result = buildNextMerges(
+      new Map([
+        [110, 342],
+        [101, 340],
+        [102, 341],
+      ]),
+      new Map([[102, [101]]]),
+      new Set([110, 101, 102])
+    );
     expect(result.map((r) => r.issue)).toEqual([110, 101, 102]);
+    expect(result[0]).toMatchObject({ issue: 110, note: "independent" });
+    expect(result[1]).toMatchObject({ issue: 101, note: "base of the stack" });
+    expect(result[2]).toMatchObject({ issue: 102, note: "stacked on #101" });
+  });
+
+  // Two built parents means resolveBase could not pick one branch to stack on,
+  // so the child bases on main — not stacked, note reads independent.
+  test("diamond: two built parents → not stacked, note independent", () => {
+    const result = buildNextMerges(
+      new Map([
+        [100, 1],
+        [101, 2],
+        [102, 3],
+      ]),
+      new Map([[102, [100, 101]]]),
+      new Set([100, 101, 102])
+    );
+    const child = result.find((r) => r.issue === 102);
+    expect(child).toMatchObject({ issue: 102, note: "independent" });
+    expect(child.stackedOn).toBeUndefined();
   });
 });
 
