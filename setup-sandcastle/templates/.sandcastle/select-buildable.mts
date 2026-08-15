@@ -14,14 +14,20 @@
 
 import type { OpenIssue } from "./reconcile.mts";
 
+// `satisfiedThisRun` holds ids of parents that built AND passed review this run
+// (the in-memory run-scoped built-set). A blocker in it counts as satisfied even
+// while its issue is still open, so a child advances to the next chain level
+// within one run. Empty or absent, selection is exactly the closed-blockers rule
+// above — the whole point of this argument's default.
 export function selectBuildable(
   openIssues: OpenIssue[],
-  blockedByEdges: Map<number, number[]>
+  blockedByEdges: Map<number, number[]>,
+  satisfiedThisRun: Set<number> = new Set()
 ): OpenIssue[] {
   const open = new Set(openIssues.map((i) => i.number));
   return openIssues.filter((issue) =>
     (blockedByEdges.get(issue.number) ?? []).every(
-      (blocker) => !open.has(blocker)
+      (blocker) => !open.has(blocker) || satisfiedThisRun.has(blocker)
     )
   );
 }
@@ -35,9 +41,10 @@ export function selectBuildable(
 export function selectableFrontier(
   openIssues: OpenIssue[],
   blockedByEdges: Map<number, number[]>,
-  requireLabel = "ready-for-agent"
+  requireLabel = "ready-for-agent",
+  satisfiedThisRun: Set<number> = new Set()
 ): OpenIssue[] {
-  return selectBuildable(openIssues, blockedByEdges).filter((issue) =>
-    issue.labels.includes(requireLabel)
+  return selectBuildable(openIssues, blockedByEdges, satisfiedThisRun).filter(
+    (issue) => issue.labels.includes(requireLabel)
   );
 }
