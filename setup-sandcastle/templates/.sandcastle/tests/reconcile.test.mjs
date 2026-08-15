@@ -266,6 +266,38 @@ describe("buildRunSummary", () => {
     expect(out).toContain("--squash --delete-branch");
   });
 
+  // #345 — a stacked child's merge line carries the two-tier rebased-parent
+  // recovery recipe (print-only, no orchestrator detection/cleanup).
+  test("a stacked child's merge line renders the two-tier rebase-then-re-drive recipe", () => {
+    const out = buildRunSummary([], {
+      nextMerges: [
+        { pr: 340, issue: 101, note: "base of the stack" },
+        { pr: 341, issue: 102, note: "stacked on #101", stackedOn: 101 },
+      ],
+    });
+    expect(out).toMatch(/git rebase/);
+    expect(out).toContain("#101");
+    expect(out).toContain("/implement #102");
+  });
+
+  test("a root PR's merge line renders no recipe", () => {
+    const out = buildRunSummary([], {
+      nextMerges: [{ pr: 342, issue: 110, note: "independent" }],
+    });
+    expect(out).not.toMatch(/git rebase/);
+    expect(out).not.toContain("/implement");
+  });
+
+  test("Next footer recipe lines carry no emoji", () => {
+    const out = buildRunSummary([], {
+      nextMerges: [
+        { pr: 340, issue: 101, note: "base of the stack" },
+        { pr: 341, issue: 102, note: "stacked on #101", stackedOn: 101 },
+      ],
+    });
+    expect(out).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
+  });
+
   test("empty run object omits Stuck/Dammed/Next blocks entirely", () => {
     const bucketed = [
       { number: 10, title: "feat", bucket: "built-this-run", prNumber: 55 },

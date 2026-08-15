@@ -807,7 +807,7 @@ gcWorktrees();
           : usedAsBase.has(issue)
             ? "base of the stack"
             : "independent";
-      return { pr, issue, note };
+      return { pr, issue, note, stackedOn: entry.baseParent ?? undefined };
     }
   );
 
