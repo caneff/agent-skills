@@ -48,3 +48,40 @@ export function selectableFrontier(
     (issue) => issue.labels.includes(requireLabel)
   );
 }
+
+// The replan loop's per-iteration work decision (#342). It is `selectableFrontier`
+// — buildable ∩ labeled, treating parents built this run as satisfied — minus
+// every issue already attempted this run. `attemptedThisRun` is the broader
+// "offered this run" set (built, review-failed, errored, or planner-pruned); it
+// guarantees progress and termination: an issue is offered at most once, so the
+// loop only gains new work when a built parent unblocks a child, and an empty
+// return is the fixpoint that ends the run. `satisfiedThisRun` is the narrower
+// built-AND-reviewed set that unblocks children; it is normally a subset of
+// `attemptedThisRun`.
+export function nextBuildable(
+  openIssues: OpenIssue[],
+  blockedByEdges: Map<number, number[]>,
+  satisfiedThisRun: Set<number>,
+  attemptedThisRun: Set<number>,
+  requireLabel = "ready-for-agent"
+): OpenIssue[] {
+  // In-run advancement stacks SINGLE-parent chains only (#342). A child with two
+  // or more parents is a diamond: it keeps today's behavior (spec #340 story 11)
+  // — it waits until ALL its parents have actually closed (merged to `main`), and
+  // never builds while a parent has merely built this run. `resolveBase` sends a
+  // diamond to `main`, so building it before its parents merge would put it on a
+  // base missing that unmerged parent's code. "Closed" = absent from the open set.
+  const open = new Set(openIssues.map((i) => i.number));
+  const diamondWaiting = (issue: OpenIssue): boolean => {
+    const blockers = blockedByEdges.get(issue.number) ?? [];
+    return blockers.length > 1 && blockers.some((b) => open.has(b));
+  };
+  return selectableFrontier(
+    openIssues,
+    blockedByEdges,
+    requireLabel,
+    satisfiedThisRun
+  ).filter(
+    (issue) => !attemptedThisRun.has(issue.number) && !diamondWaiting(issue)
+  );
+}
