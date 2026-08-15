@@ -57,6 +57,10 @@
             "query": "state:open label:backlog repo:${owner}/${repository}"
         },
         {
+            "label": "🔖 Other",
+            "query": "state:open -label:ready-for-agent -label:wayfinder:grilling -label:wayfinder:map -label:in-progress -label:in-review -label:needs-review -label:spec -label:backlog repo:${owner}/${repository}"
+        },
+        {
             "label": "Created Issues",
             "query": "author:${user} state:open repo:${owner}/${repository} sort:created-desc"
         }
