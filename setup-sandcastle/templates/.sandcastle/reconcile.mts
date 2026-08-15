@@ -134,7 +134,172 @@ export function bucketIssues(options: {
   });
 }
 
-export function buildRunSummary(bucketed: BucketedIssue[]): string {
+// A review-fail carries its failing axes and a one-line why (the first failed
+// axis's reason, truncated to one line by the caller) plus the preserved
+// branch a human re-drives with /implement. An error is a harness/sandbox
+// crash or a reviewer error — main.mts leaves the issue's labels untouched
+// either way, so the wording is shared, content-blind of the actual cause.
+export interface StuckReviewFail {
+  kind: "review-fail";
+  number: number;
+  title: string;
+  failedAxes: string[];
+  why?: string;
+  branch: string;
+}
+
+export interface StuckError {
+  kind: "error";
+  number: number;
+  title: string;
+}
+
+export type StuckIssue = StuckReviewFail | StuckError;
+
+// An open, not-built-this-run issue reachable (directly or transitively) from a
+// failed issue along blockedBy edges. waitsOn is its own immediate blocker —
+// the failed issue itself, or a dammed issue between it and the failed root.
+export interface DammedIssue {
+  number: number;
+  title: string;
+  waitsOn: number;
+}
+
+// One merge line for the copy-paste Next footer, already in base-first order.
+export interface NextMerge {
+  pr: number;
+  issue: number;
+  note?: string;
+}
+
+// The run-scoped extras buildRunSummary layers onto the bucketed sections.
+// Every field is optional so the 1-arg call (no run this pass) simply omits
+// the blocks.
+export interface RunExtras {
+  stuck?: StuckIssue[];
+  dammed?: DammedIssue[];
+  nextMerges?: NextMerge[];
+}
+
+function renderStuck(items: StuckIssue[]): string {
+  return items
+    .map((item) => {
+      if (item.kind === "review-fail") {
+        const axisLine = item.why
+          ? `${item.failedAxes[0] ?? "review"}: ${item.why}`
+          : item.failedAxes.join(", ");
+        return [
+          `  [review-fail] #${item.number} — ${item.title}`,
+          `      ${axisLine}`,
+          `      branch ${item.branch} pushed; review notes written to the issue.`,
+          `      → re-drive:  /implement #${item.number}   (continues the branch, see issue body)`,
+        ].join("\n");
+      }
+      return [
+        `  [error]       #${item.number} — ${item.title}`,
+        `      sandbox failed to launch (harness). Labels untouched —`,
+        `      picked up as a fresh attempt next run. No action needed unless it repeats.`,
+      ].join("\n");
+    })
+    .join("\n\n");
+}
+
+function renderDammed(items: DammedIssue[]): string {
+  return items
+    .map((i) => `  #${i.number} — ${i.title}   (waits on #${i.waitsOn})`)
+    .join("\n");
+}
+
+function renderNextFooter(nextMerges: NextMerge[]): string {
+  const lines = nextMerges.map(
+    (m) =>
+      `  gh pr merge ${m.pr} --squash --delete-branch    # #${m.issue}${
+        m.note ? `, ${m.note}` : ""
+      }`
+  );
+  lines.push(
+    `  /sandcastle-watch                           # re-run to continue the drain`
+  );
+  return `Next — copy-paste, bottom-up:\n${lines.join("\n")}`;
+}
+
+// Topologically order a run's built issues so a PR whose base is another PR
+// built this run always comes after that base's merge line. Roots and
+// independents (baseParent null, or not itself in the built set) keep their
+// input order — a stable sort on depth alone.
+export function orderMergesBaseFirst(
+  built: Array<{ issue: number; pr: number; baseParent: number | null }>
+): Array<{ issue: number; pr: number }> {
+  const byIssue = new Map(built.map((b) => [b.issue, b]));
+  const depthCache = new Map<number, number>();
+  const depth = (issue: number): number => {
+    const cached = depthCache.get(issue);
+    if (cached !== undefined) return cached;
+    const item = byIssue.get(issue);
+    const d =
+      item && item.baseParent !== null && byIssue.has(item.baseParent)
+        ? depth(item.baseParent) + 1
+        : 0;
+    depthCache.set(issue, d);
+    return d;
+  };
+  return built
+    .map((b, i) => ({ b, i, d: depth(b.issue) }))
+    .sort((x, y) => x.d - y.d || x.i - y.i)
+    .map(({ b }) => ({ issue: b.issue, pr: b.pr }));
+}
+
+// An open, not-built-this-run issue is dammed if any of its blockedBy edges is
+// itself in failedThisRun, OR is itself dammed (reachable transitively along
+// blockedBy back to a failed root). waitsOn is the immediate blocker that made
+// it dammed — the failed issue for a direct child, the dammed parent (not the
+// failed grandparent) for a grandchild.
+export function deriveDammed(
+  openIssues: OpenIssue[],
+  blockedBy: Map<number, number[]>,
+  failedThisRun: Set<number>,
+  builtThisRun: Set<number>
+): DammedIssue[] {
+  const waitsOnCache = new Map<number, number | null>();
+
+  const resolve = (issueNumber: number, seen: Set<number>): number | null => {
+    const cached = waitsOnCache.get(issueNumber);
+    if (cached !== undefined) return cached;
+    if (seen.has(issueNumber)) return null; // cycle guard
+    seen.add(issueNumber);
+
+    const blockers = blockedBy.get(issueNumber) ?? [];
+    for (const b of blockers) {
+      if (failedThisRun.has(b)) {
+        waitsOnCache.set(issueNumber, b);
+        return b;
+      }
+    }
+    for (const b of blockers) {
+      if (resolve(b, seen) !== null) {
+        waitsOnCache.set(issueNumber, b);
+        return b;
+      }
+    }
+    waitsOnCache.set(issueNumber, null);
+    return null;
+  };
+
+  const result: DammedIssue[] = [];
+  for (const issue of openIssues) {
+    if (builtThisRun.has(issue.number)) continue;
+    const waitsOn = resolve(issue.number, new Set());
+    if (waitsOn !== null) {
+      result.push({ number: issue.number, title: issue.title, waitsOn });
+    }
+  }
+  return result;
+}
+
+export function buildRunSummary(
+  bucketed: BucketedIssue[],
+  run: RunExtras = {}
+): string {
   const sections: string[] = ["\n=== Run Summary ===\n"];
 
   const byBucket = new Map<BucketName, BucketedIssue[]>();
@@ -160,6 +325,19 @@ export function buildRunSummary(bucketed: BucketedIssue[]): string {
   };
 
   section("Built this run", "built-this-run", true);
+
+  const stuck = run.stuck ?? [];
+  if (stuck.length > 0) {
+    sections.push(`Stuck — needs you (${stuck.length}):\n${renderStuck(stuck)}`);
+  }
+
+  const dammed = run.dammed ?? [];
+  if (dammed.length > 0) {
+    sections.push(
+      `Dammed behind a failure (${dammed.length}):\n${renderDammed(dammed)}`
+    );
+  }
+
   section("Human-gated: open PR pending merge", "human-gated-pr");
   section("Human-gated: ready for human", "human-gated-ready-for-human");
   section(
@@ -187,6 +365,11 @@ export function buildRunSummary(bucketed: BucketedIssue[]): string {
     sections.push(
       "All open issues are human-gated. Nothing left for the bot."
     );
+  }
+
+  const nextMerges = run.nextMerges ?? [];
+  if (nextMerges.length > 0) {
+    sections.push(renderNextFooter(nextMerges));
   }
 
   return sections.join("\n");
