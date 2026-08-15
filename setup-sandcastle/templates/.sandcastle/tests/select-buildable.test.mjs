@@ -60,6 +60,34 @@ describe("selectBuildable", () => {
       labels: ["ready-for-agent"],
     });
   });
+
+  // satisfiedThisRun holds ids of parents that built AND passed review this run.
+  // A blocker in that set counts as satisfied even though its issue is still
+  // open, so a child advances to the next chain level within one run. Absent or
+  // empty, selection is exactly as before.
+  test("a blocker in satisfiedThisRun no longer blocks though its issue is open", () => {
+    const open = [issue(1), issue(2)]; // 1 is open but built this run
+    const buildable = selectBuildable(open, edges({ 2: [1] }), new Set([1]));
+    expect(buildable.map((i) => i.number).sort()).toEqual([1, 2]);
+  });
+
+  test("a child with a still-open, not-satisfied blocker stays blocked", () => {
+    const open = [issue(1), issue(2)];
+    const buildable = selectBuildable(open, edges({ 2: [1] }), new Set([99]));
+    expect(buildable.map((i) => i.number)).toEqual([1]);
+  });
+
+  test("only every blocker satisfied makes a multi-parent child buildable", () => {
+    const open = [issue(1), issue(2), issue(3)]; // 3 blocked by 1 and 2
+    // just one parent satisfied — still blocked
+    expect(
+      selectBuildable(open, edges({ 3: [1, 2] }), new Set([1])).map((i) => i.number)
+    ).not.toContain(3);
+    // both parents satisfied this run — buildable
+    expect(
+      selectBuildable(open, edges({ 3: [1, 2] }), new Set([1, 2])).map((i) => i.number)
+    ).toContain(3);
+  });
 });
 
 // selectableFrontier is the whole rule the planner depends on: buildable AND
@@ -96,6 +124,16 @@ describe("selectableFrontier", () => {
     expect(
       selectableFrontier(open, edges({ 2: [1] })).map((i) => i.number)
     ).toEqual([1]);
+  });
+
+  test("satisfiedThisRun is threaded through to buildability", () => {
+    // 2 is ready and blocked only by open 1; 1 built this run → 2 selectable.
+    const open = [ready(1), ready(2)];
+    expect(
+      selectableFrontier(open, edges({ 2: [1] }), "ready-for-agent", new Set([1]))
+        .map((i) => i.number)
+        .sort()
+    ).toEqual([1, 2]);
   });
 
   test("the required label is overridable", () => {
