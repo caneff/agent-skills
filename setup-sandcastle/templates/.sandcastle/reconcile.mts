@@ -4,8 +4,8 @@
 // buildRunSummary: format the bucketed summary as a printable string.
 //
 // The outcome→label transition (planOutcomeTransition, OutcomeKind,
-// OutcomePlan, OutcomeIssue, CompletedIssue) moved to issue-lifecycle.mts —
-// the lifecycle vocabulary's one home.
+// OutcomePlan, OutcomeIssue) moved to issue-lifecycle.mts — the lifecycle
+// vocabulary's one home.
 
 export interface OpenIssue {
   number: number;
@@ -46,10 +46,10 @@ export interface IssueEdge {
   parent: number | null;
 }
 
-// The set of parent ids (as strings) that are open while every one of their
-// sub-issues is closed — a spec fully delivered, its umbrella issue lingering.
-// Pure so it is unit-tested; the gh fetch that feeds it lives in main.mts.
-export function deliveredParentIds(edges: IssueEdge[]): Set<string> {
+// The set of parent numbers that are open while every one of their sub-issues
+// is closed — a spec fully delivered, its umbrella issue lingering. Pure so it
+// is unit-tested; the gh fetch that feeds it lives in main.mts.
+export function deliveredParentIds(edges: IssueEdge[]): Set<number> {
   const stateById = new Map<number, "OPEN" | "CLOSED">();
   const childStates = new Map<number, ("OPEN" | "CLOSED")[]>();
   for (const e of edges) {
@@ -60,13 +60,13 @@ export function deliveredParentIds(edges: IssueEdge[]): Set<string> {
       childStates.set(e.parent, kids);
     }
   }
-  const delivered = new Set<string>();
+  const delivered = new Set<number>();
   for (const [parent, states] of childStates) {
     if (
       stateById.get(parent) === "OPEN" &&
       states.every((s) => s === "CLOSED")
     ) {
-      delivered.add(String(parent));
+      delivered.add(parent);
     }
   }
   return delivered;
@@ -74,22 +74,21 @@ export function deliveredParentIds(edges: IssueEdge[]): Set<string> {
 
 export function bucketIssues(options: {
   openIssues: OpenIssue[];
-  // issue ids (as strings) that built to a clean review and opened a PR this run
-  builtThisRun: Set<string>;
-  // issue id → PR number, set when its PR opened
-  prAssignments: Map<string, number>;
-  // parent issue ids (as strings) that are open with ≥1 sub-issue, all closed:
-  // the spec is delivered and only its umbrella issue lingers. Caught before the
-  // label buckets so a spent parent carrying a stray label (e.g. ready-for-human)
+  // issue numbers that built to a clean review and opened a PR this run
+  builtThisRun: Set<number>;
+  // issue number → PR number, set when its PR opened
+  prAssignments: Map<number, number>;
+  // parent issue numbers that are open with ≥1 sub-issue, all closed: the spec
+  // is delivered and only its umbrella issue lingers. Caught before the label
+  // buckets so a spent parent carrying a stray label (e.g. ready-for-human)
   // still surfaces as ready-to-close rather than hiding behind that label.
-  deliveredParents: Set<string>;
+  deliveredParents: Set<number>;
 }): BucketedIssue[] {
   return options.openIssues.map((issue) => {
-    const id = String(issue.number);
     const labelSet = new Set(issue.labels);
-    const prNumber = options.prAssignments.get(id);
+    const prNumber = options.prAssignments.get(issue.number);
 
-    if (options.builtThisRun.has(id)) {
+    if (options.builtThisRun.has(issue.number)) {
       return {
         number: issue.number,
         title: issue.title,
@@ -98,7 +97,7 @@ export function bucketIssues(options: {
       };
     }
 
-    if (options.deliveredParents.has(id))
+    if (options.deliveredParents.has(issue.number))
       return {
         number: issue.number,
         title: issue.title,
@@ -238,8 +237,8 @@ function renderNextFooter(nextMerges: NextMerge[]): string {
 // Topologically order a run's built issues so a PR whose base is another PR
 // built this run always comes after that base's merge line. Roots and
 // independents (baseParent null, or not itself in the built set) keep their
-// input order — a stable sort on depth alone.
-export function orderMergesBaseFirst(
+// input order — a stable sort on depth alone. Private helper of buildNextMerges.
+function orderMergesBaseFirst(
   built: Array<{ issue: number; pr: number; baseParent: number | null }>
 ): Array<{ issue: number; pr: number }> {
   const byIssue = new Map(built.map((b) => [b.issue, b]));
@@ -259,6 +258,40 @@ export function orderMergesBaseFirst(
     .map((b, i) => ({ b, i, d: depth(b.issue) }))
     .sort((x, y) => x.d - y.d || x.i - y.i)
     .map(({ b }) => ({ issue: b.issue, pr: b.pr }));
+}
+
+// Assemble the base-first Next-footer merge lines for everything built this run.
+// baseParent is an issue's single native parent that also built this run — the
+// same relation resolveBase used to pick the branch's base. Two built parents
+// (a diamond) means no single branch to stack on, so the child bases on main:
+// baseParent null, note "independent". A built issue used as someone's base is
+// "base of the stack"; one stacked on a parent carries stackedOn for the
+// two-tier rebase recipe.
+export function buildNextMerges(
+  prAssignments: Map<number, number>,
+  blockedBy: Map<number, number[]>,
+  builtIds: Set<number>
+): NextMerge[] {
+  const builtForMerges = [...prAssignments.entries()].map(([issue, pr]) => {
+    const builtParents = (blockedBy.get(issue) ?? []).filter((p) =>
+      builtIds.has(p)
+    );
+    return { issue, pr, baseParent: builtParents.length === 1 ? builtParents[0]! : null };
+  });
+  const usedAsBase = new Set(
+    builtForMerges.map((b) => b.baseParent).filter((p): p is number => p !== null)
+  );
+  const mergeInfoByIssue = new Map(builtForMerges.map((b) => [b.issue, b]));
+  return orderMergesBaseFirst(builtForMerges).map(({ issue, pr }) => {
+    const entry = mergeInfoByIssue.get(issue)!;
+    const note =
+      entry.baseParent !== null
+        ? `stacked on #${entry.baseParent}`
+        : usedAsBase.has(issue)
+          ? "base of the stack"
+          : "independent";
+    return { pr, issue, note, stackedOn: entry.baseParent ?? undefined };
+  });
 }
 
 // An open, not-built-this-run issue is dammed if any of its blockedBy edges is

@@ -104,46 +104,11 @@ describe("planOutcomeTransition", () => {
     expect(plan.completed).toBeUndefined();
   });
 
-  // The completed record is what the run summary counts a build from.
-  describe("the completed record a done outcome carries", () => {
-    test("a full-mode issue keeps its forest position and topic group", () => {
-      const plan = planOutcomeTransition({ kind: "done", issue: full });
-      expect(plan.completed).toEqual({
-        id: "42",
-        title: "Add widget",
-        branch: "sandcastle/issue-42",
-        parents: ["7"],
-        group: "widgets",
-      });
-    });
-
-    test("an issue with no parents and an empty group carries neither", () => {
-      const plan = planOutcomeTransition({
-        kind: "done",
-        issue: {
-          id: "43",
-          title: "Re-reviewed",
-          branch: "sandcastle/issue-43",
-          parents: [],
-          group: "",
-        },
-      });
-      expect(plan.completed).toEqual({
-        id: "43",
-        title: "Re-reviewed",
-        branch: "sandcastle/issue-43",
-        parents: [],
-      });
-      expect("group" in plan.completed).toBe(false);
-    });
-
-    test("an issue with an empty group key drops it too", () => {
-      const plan = planOutcomeTransition({
-        kind: "done",
-        issue: { ...full, group: "" },
-      });
-      expect("group" in plan.completed).toBe(false);
-    });
+  // The run built-set is now single-sourced from builtBranches in main; the
+  // done plan carries no completed record.
+  test("a done plan carries no completed record", () => {
+    const plan = planOutcomeTransition({ kind: "done", issue: full });
+    expect("completed" in plan).toBe(false);
   });
 });
 
