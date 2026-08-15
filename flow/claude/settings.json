@@ -71,6 +71,11 @@
             "type": "command",
             "command": "bash /home/caneff/.agents/skills/skills-sync/skills-sync.sh --fix >/dev/null 2>&1 || true",
             "statusMessage": "Syncing skill symlinks"
+          },
+          {
+            "type": "command",
+            "command": "bash /home/caneff/.agents/skills/flow/backup-sync.sh --commit >/dev/null 2>&1 || true",
+            "statusMessage": "Backing up VS Code settings"
           }
         ]
       }
@@ -81,21 +86,14 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "/home/caneff/.local/node-v24.15.0-linux-x64/bin/ccstatusline",
+    "command": "python3 /home/caneff/.agents/skills/ccstatusline-table/table-statusline.py",
     "padding": 0,
     "refreshInterval": 10
   },
   "enabledPlugins": {
-    "caveman@caveman": false,
     "ponytail@ponytail": true
   },
   "extraKnownMarketplaces": {
-    "caveman": {
-      "source": {
-        "source": "github",
-        "repo": "JuliusBrussee/caveman"
-      }
-    },
     "ponytail": {
       "source": {
         "source": "github",
