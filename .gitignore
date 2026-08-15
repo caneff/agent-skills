@@ -7,3 +7,5 @@
 node_modules
 # python bytecode, never source
 __pycache__/
+# local scratch: drafts, prototypes, throwaway notes — never committed
+.scratch/
