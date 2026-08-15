@@ -7,9 +7,6 @@
         "editor.formatOnSave": true,
         "editor.defaultFormatter": "charliermarsh.ruff"
     },
-    "[sql]": {
-        "editor.defaultFormatter": "inferrinizzard.prettier-sql-vscode"
-    },
     "editor.formatOnSave": true,
     "notebook.formatOnSave.enabled": true,
     "notebook.formatOnCellExecution": true,
