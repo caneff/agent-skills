@@ -170,6 +170,9 @@ export interface NextMerge {
   pr: number;
   issue: number;
   note?: string;
+  // The parent issue number this child is stacked on, when the PR's base is
+  // another PR built this run. Absent for a root/independent PR.
+  stackedOn?: number;
 }
 
 // The run-scoped extras buildRunSummary layers onto the bucketed sections.
@@ -211,12 +214,21 @@ function renderDammed(items: DammedIssue[]): string {
 }
 
 function renderNextFooter(nextMerges: NextMerge[]): string {
-  const lines = nextMerges.map(
-    (m) =>
-      `  gh pr merge ${m.pr} --squash --delete-branch    # #${m.issue}${
-        m.note ? `, ${m.note}` : ""
-      }`
-  );
+  const lines = nextMerges.flatMap((m) => {
+    const mergeLine = `  gh pr merge ${m.pr} --squash --delete-branch    # #${
+      m.issue
+    }${m.note ? `, ${m.note}` : ""}`;
+    if (m.stackedOn == null) return [mergeLine];
+    return [
+      mergeLine,
+      `      if #${m.stackedOn} bounces: merge the fixed/reworked parent to`,
+      `      main, then git rebase this child (#${m.issue}) onto main —`,
+      `      a small parent change usually applies clean and refreshes the`,
+      `      child PR with zero agent work.`,
+      `      only on a rebase conflict: /implement #${m.issue}   (re-drives`,
+      `      the child on its preserved branch to resolve)`,
+    ];
+  });
   lines.push(
     `  /sandcastle-watch                           # re-run to continue the drain`
   );
