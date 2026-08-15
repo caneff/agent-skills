@@ -27,7 +27,9 @@ link bin/pushpr                 "$HOME/.local/bin/pushpr"
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 link claude/RTK.md              "$HOME/.claude/RTK.md"
-link claude/settings.json       "$HOME/.claude/settings.json"
+# claude/settings.json is NOT symlinked — the harness rewrites it in place and
+# would break the link. It is a copy-only backup (see backup-sync.sh), written
+# by the --restore call below.
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
 for h in block-dangerous-git.sh sync-main-after-merge.sh sync-primary-main.sh package.json; do
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
@@ -35,6 +37,10 @@ done
 
 link ccstatusline/settings.json          "$HOME/.config/ccstatusline/settings.json"
 link ccstatusline/issue-counts-segment.sh "$HOME/.config/ccstatusline/issue-counts-segment.sh"
+
+# Lay down the copy-only backups (files a symlink can't hold): the Windows VS
+# Code settings and claude/settings.json.
+bash "$here/backup-sync.sh" --restore
 
 echo
 echo "Done. The live flow tooling now points at this repo; commit to back it up."
