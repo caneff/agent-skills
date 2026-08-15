@@ -1,6 +1,6 @@
 # BUILDABLE (the only issues you may select)
 
-The host has already applied the deterministic frontier filter: every open issue whose native `blockedBy` edges have **all closed**, restricted to `ready-for-agent`. Issues with any still-open blocker have been removed before you ever see them. **Only ids in this set may appear in your plan** — never resurrect an issue absent from it.
+The host has already applied the deterministic frontier filter: every open `ready-for-agent` issue whose native `blockedBy` edges have **all closed, or built successfully earlier in this same run**. Issues with any still-open, not-yet-built blocker have been removed before you ever see them. **Only ids in this set may appear in your plan** — never resurrect an issue absent from it. BUILDABLE is authoritative for declared dependencies: if an issue is here, the host has already cleared its native `blockedBy` edges (including any a parent satisfied by building this run). Your only remaining job is to prune **implicit** same-file conflicts.
 
 <buildable>
 
@@ -20,7 +20,10 @@ Full content for the open issues, so you can reason about implicit conflicts (tw
 
 # ALREADY IN FLIGHT (context only — never select these)
 
-These issues are already implemented but not yet merged into `main` (in review, or awaiting re-review). They are upcoming changes to `main`. **Do NOT put any of them in your plan** — they are not selectable. But you MUST treat each as a potential **blocker**: if a `ready-for-agent` issue depends on one of these (needs its code, or edits the same files), it is blocked this run and must be excluded until the in-flight issue merges.
+These issues are already implemented but not yet merged into `main` (in review, or awaiting re-review). They are upcoming changes to `main` — and some may be **parents built earlier in this very run** that a BUILDABLE child now stacks on top of. **Do NOT put any of them in your plan** — they are not selectable. Two rules keep declared and implicit dependencies apart:
+
+- **Declared edge → trust BUILDABLE.** Never exclude a BUILDABLE issue because it has a native `blockedBy`/`parent` edge to one of these. The host already resolved declared edges: a BUILDABLE child of an in-flight parent is one the host is deliberately stacking on that parent this run.
+- **Undeclared same-file collision → defer.** If a BUILDABLE issue would edit the **same files** as an in-flight issue with **no declared edge** between them, that is a real merge-conflict risk the host could not see — leave it out this run.
 
 <in-flight-json>
 
@@ -30,28 +33,25 @@ These issues are already implemented but not yet merged into `main` (in review, 
 
 # TASK
 
-The host has already excluded every issue with an open native `blockedBy` blocker (see BUILDABLE). Your remaining job: for each **buildable** issue, determine whether it is **implicitly** blocked by any other open issue the declared edges missed — whether that other issue is `ready-for-agent` or already **in flight** (the list above).
+The host already owns every **declared** edge: it excluded each issue whose native `blockedBy` blocker is still open and unbuilt, and it deliberately kept a child whose parent built this run (see BUILDABLE). So do **not** re-apply native `blockedBy` / `parent` edges as blockers — honoring them here would wrongly drop a child the host is stacking on its just-built parent. Your remaining job is narrower: for each **buildable** issue, determine whether it is **implicitly** blocked — a dependency the declared edges never recorded — on any other open issue, whether `ready-for-agent` or already **in flight** (the list above).
 
-An issue B is **blocked by** issue A if:
+An issue B is **implicitly blocked by** issue A if:
 
-- A is listed in B's native `blockedBy` field, or B is listed as a sub-issue of A via B's `parent` field (these GitHub-native relationships are **authoritative** — always honor them)
-- B requires code or infrastructure that A introduces
+- B requires code or infrastructure that A introduces, with no declared edge between them
 - B and A modify overlapping files or modules, making concurrent work likely to produce merge conflicts
 - B's requirements depend on a decision or API shape that A will establish
 
-The native `blockedBy` / `parent` fields are recorded by whoever authored the issues (e.g. the `/to-issues` skill) and are the ground truth for declared dependencies. Treat them as hard edges, then **infer additional** blockers from the prose/file-overlap heuristics above on top. When these fields are empty (a tracker without dependency support, or an issue authored before they were set), fall back entirely to inference from the issue text.
-
-An issue is **unblocked** if it has zero blocking dependencies on any other open issue, ready-for-agent or in-flight.
+Infer these from the issue prose and file overlap. An issue is **buildable** if it carries no such implicit block on any other open issue, ready-for-agent or in-flight.
 
 For each unblocked issue, assign a branch name using the exact format `sandcastle/issue-{id}` (no slug or other suffix). This must be deterministic so that re-planning the same issue always produces the same branch name and accumulated progress is preserved.
 
 ## `parents` and `group` — emit them, but keep them simple
 
-Each issue's branch is cut from `main`, and every issue that passes review opens its **own** pull request — one issue, one PR. A run is a single planning pass, and a child issue is only ever selected once its parents' issues have **closed** (their PRs merged to `main`), so within one run there is nothing left to build on top of.
+Every issue that passes review opens its **own** pull request — one issue, one PR. The host resolves each issue's build base from its native `blockedBy` edges (stacking a child on its parent's branch when the parent built this run), so you do **not** compute or emit real parents.
 
 So for every issue you select:
 
-- Emit `"parents": []`. There is no in-run stacking anymore; a dependency you would once have listed here has already merged to `main` by the time the child is buildable.
+- Emit `"parents": []`. The host derives the build base from the native edges, not from this field.
 - Emit a short lowercase `group` slug naming the issue's theme (e.g. `"auth"`, `"perf"`). It no longer combines PRs — it is carried through for logging only — but the field is still required.
 
 # OUTPUT

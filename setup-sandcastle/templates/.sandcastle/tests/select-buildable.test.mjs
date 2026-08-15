@@ -1,5 +1,9 @@
 import { test, expect, describe } from "vitest";
-import { selectBuildable, selectableFrontier } from "../select-buildable.mts";
+import {
+  selectBuildable,
+  selectableFrontier,
+  nextBuildable,
+} from "../select-buildable.mts";
 
 // selectBuildable is the deterministic frontier filter: given the open
 // issues and their native GitHub `blockedBy` edges, return the buildable set —
@@ -141,5 +145,112 @@ describe("selectableFrontier", () => {
     expect(
       selectableFrontier(open, edges({}), "queued").map((i) => i.number)
     ).toEqual([2]);
+  });
+});
+
+// nextBuildable is the replan loop's per-iteration work decision, pure. It is
+// selectableFrontier (buildable ∩ labeled, treating built-this-run parents as
+// satisfied) minus every issue already attempted this run — so the loop makes
+// progress and terminates: an issue is offered at most once, new offers appear
+// only when a built parent unblocks a child, and an empty return is the fixpoint
+// that ends the run.
+describe("nextBuildable", () => {
+  const ready = (n) => issue(n, { labels: ["ready-for-agent"] });
+
+  test("a linear chain drains one level per iteration to a fixpoint", () => {
+    // A(1) → B(2) → C(3): 2 blocked by 1, 3 blocked by 2, all ready-for-agent.
+    const open = [ready(1), ready(2), ready(3)];
+    const e = edges({ 2: [1], 3: [2] });
+
+    // Iteration 1: nothing built yet — only the root A is buildable.
+    let satisfied = new Set();
+    let attempted = new Set();
+    expect(
+      nextBuildable(open, e, satisfied, attempted).map((i) => i.number)
+    ).toEqual([1]);
+
+    // A built + attempted. Iteration 2: B unblocks (parent satisfied), A excluded.
+    satisfied = new Set([1]);
+    attempted = new Set([1]);
+    expect(
+      nextBuildable(open, e, satisfied, attempted).map((i) => i.number)
+    ).toEqual([2]);
+
+    // B built + attempted. Iteration 3: C unblocks; A, B excluded.
+    satisfied = new Set([1, 2]);
+    attempted = new Set([1, 2]);
+    expect(
+      nextBuildable(open, e, satisfied, attempted).map((i) => i.number)
+    ).toEqual([3]);
+
+    // C built + attempted. Iteration 4: nothing new — fixpoint.
+    satisfied = new Set([1, 2, 3]);
+    attempted = new Set([1, 2, 3]);
+    expect(nextBuildable(open, e, satisfied, attempted)).toEqual([]);
+  });
+
+  test("an offered-but-unbuilt issue is not re-offered (termination)", () => {
+    // Root A(1) was offered and attempted but did NOT build (not in satisfied),
+    // so its child B(2) never unblocks. A is excluded by attempted → fixpoint,
+    // the loop cannot spin on A forever.
+    const open = [ready(1), ready(2)];
+    const e = edges({ 2: [1] });
+    expect(
+      nextBuildable(open, e, new Set(), new Set([1])).map((i) => i.number)
+    ).toEqual([]);
+  });
+
+  test("independent roots are all offered in one iteration", () => {
+    const open = [ready(1), ready(2), ready(3)];
+    expect(
+      nextBuildable(open, edges({}), new Set(), new Set())
+        .map((i) => i.number)
+        .sort()
+    ).toEqual([1, 2, 3]);
+  });
+
+  test("the label filter still applies — an unlabeled buildable issue is dropped", () => {
+    const open = [ready(1), issue(2)]; // 2 has no lifecycle label
+    expect(
+      nextBuildable(open, edges({}), new Set(), new Set()).map((i) => i.number)
+    ).toEqual([1]);
+  });
+});
+
+// Diamond guard (#342, honoring spec #340 story 11): in-run advancement stacks
+// single-parent chains only. A child with 2+ parents keeps today's behavior — it
+// waits until ALL its parents have actually closed (merged to main), and never
+// builds while a parent has merely built this run, because resolveBase would send
+// a diamond to `main` without that unmerged parent's code.
+describe("nextBuildable — diamonds wait for real closure", () => {
+  const ready = (n) => issue(n, { labels: ["ready-for-agent"] });
+
+  test("a diamond child is withheld while a parent is only built-this-run", () => {
+    // 3 blocked by 1 and 2; both parents still open (in-review, built this run).
+    const open = [ready(1), ready(2), ready(3)];
+    const e = edges({ 3: [1, 2] });
+    // 1 and 2 built this run (satisfied) and attempted; 3 must NOT be offered.
+    expect(
+      nextBuildable(open, e, new Set([1, 2]), new Set([1, 2])).map((i) => i.number)
+    ).toEqual([]);
+  });
+
+  test("a diamond child is offered once every parent has actually closed", () => {
+    // 1 and 2 merged/closed → absent from the open set; 3 builds on main.
+    const open = [ready(3)];
+    const e = edges({ 3: [1, 2] });
+    expect(
+      nextBuildable(open, e, new Set(), new Set()).map((i) => i.number)
+    ).toEqual([3]);
+  });
+
+  test("a diamond with one merged and one built-this-run parent still waits", () => {
+    // 1 merged (closed, absent); 2 built this run (open, satisfied). 3 must wait
+    // for 2 to merge — resolveBase would otherwise send it to main without 2's code.
+    const open = [ready(2), ready(3)];
+    const e = edges({ 3: [1, 2] });
+    expect(
+      nextBuildable(open, e, new Set([2]), new Set([2])).map((i) => i.number)
+    ).toEqual([]);
   });
 });
