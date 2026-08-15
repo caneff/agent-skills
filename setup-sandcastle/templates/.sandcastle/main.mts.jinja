@@ -42,7 +42,11 @@ import {
   bucketIssues,
   buildRunSummary,
   deliveredParentIds,
+  orderMergesBaseFirst,
+  deriveDammed,
   type OpenIssue,
+  type StuckIssue,
+  type NextMerge,
 } from "./reconcile.mts";
 import {
   planOutcomeTransition,
@@ -328,6 +332,11 @@ const headBranch = git("rev-parse --abbrev-ref HEAD") ?? "main";
 const allCompleted: CompletedIssue[] = [];
 // Issue id → PR number, one per issue, for the run summary.
 const prAssignments = new Map<string, number>();
+// Issue number → its Stuck record — review-fail or a harness/reviewer error —
+// accumulated across every replan-loop iteration for the end-of-run "Stuck"
+// section (#344). A later iteration never revisits an id already attempted
+// this run (attemptedThisRun), so each entry is written at most once.
+const failedThisRun = new Map<number, StuckIssue>();
 
 // The plan item / CompletedIssue shape — declared once, shared by every iteration.
 type WorkIssue = {
@@ -569,6 +578,11 @@ while (true) {
           // re-review path, leave the issue untouched — "nothing" keeps its
           // ready-for-agent label for a fresh single attempt next run.
           console.error(`  ⚠ ${issue.id} review errored; leaving for next run: ${e}`);
+          failedThisRun.set(Number(issue.id), {
+            kind: "error",
+            number: Number(issue.id),
+            title: issue.title,
+          });
           return { issue, kind: "nothing" as const };
         }
       } finally {
@@ -589,6 +603,11 @@ while (true) {
       console.log(
         emitMarker(isSetupNoise(outcome.reason) ? "setup" : "fail", work[i]!.id)
       );
+      failedThisRun.set(Number(work[i]!.id), {
+        kind: "error",
+        number: Number(work[i]!.id),
+        title: work[i]!.title,
+      });
     }
   }
   // The run-aborting decision — first rejected PromptError, if any — lives in
@@ -692,6 +711,21 @@ while (true) {
     }
 
     if (kind === "review-fail") {
+      // Record for the end-of-run Stuck section (#344): the failing axes plus
+      // a one-line why — the first failed axis's reason, truncated to its
+      // first line so the summary stays a pointer, not a re-quote of the full
+      // review notes (those already live in the issue body, spliced above).
+      const firstAxis = record.failedAxes[0];
+      const reason = firstAxis ? record.reasons[firstAxis] : undefined;
+      failedThisRun.set(Number(issue.id), {
+        kind: "review-fail",
+        number: Number(issue.id),
+        title: issue.title,
+        failedAxes: record.failedAxes,
+        why: reason?.split("\n")[0],
+        branch: issue.branch,
+      });
+
       // Binding: no PR. Push the branch so its work survives sandbox teardown,
       // relabel ready-for-human, and splice the failure section into the issue
       // body (read-modify-write; the original ticket is preserved).
@@ -731,14 +765,63 @@ gcWorktrees();
 // bucket so nothing is silently hidden behind "no work to do".
 // ---------------------------------------------------------------------------
 {
-  const allOpenIssues = listAllOpenIssues();
+  // Fetched once more here rather than threading the loop-local blockedBy out
+  // (#344) — simpler, and end-of-run correctness matters more than the extra
+  // gh call.
+  const { open: allOpenIssues, blockedBy: finalBlockedBy } =
+    fetchFrontierInputs();
   const bucketed = bucketIssues({
     openIssues: allOpenIssues,
     builtThisRun: new Set(allCompleted.map((i) => i.id)),
     prAssignments,
     deliveredParents: getDeliveredParents(),
   });
-  const summary = buildRunSummary(bucketed);
+
+  // Next footer: base-first merge order for everything built this run.
+  // baseParent is the issue's single native parent that also built this run
+  // (via builtBranches' key set) — the same relation resolveBase used to pick
+  // the branch's base, recomputed here from blockedBy since builtBranches only
+  // gives branches, not the parent id itself.
+  const builtIssueNumbers = new Set(builtBranches.keys());
+  const builtForMerges = [...prAssignments.entries()].map(([idStr, pr]) => {
+    const issueNum = Number(idStr);
+    const builtParents = (finalBlockedBy.get(issueNum) ?? []).filter((p) =>
+      builtIssueNumbers.has(p)
+    );
+    return {
+      issue: issueNum,
+      pr,
+      baseParent: builtParents.length === 1 ? builtParents[0]! : null,
+    };
+  });
+  const usedAsBase = new Set(
+    builtForMerges.map((b) => b.baseParent).filter((p): p is number => p !== null)
+  );
+  const nextMerges: NextMerge[] = orderMergesBaseFirst(builtForMerges).map(
+    ({ issue, pr }) => {
+      const entry = builtForMerges.find((b) => b.issue === issue)!;
+      const note =
+        entry.baseParent !== null
+          ? `stacked on #${entry.baseParent}`
+          : usedAsBase.has(issue)
+            ? "base of the stack"
+            : "independent";
+      return { pr, issue, note };
+    }
+  );
+
+  const dammed = deriveDammed(
+    allOpenIssues,
+    finalBlockedBy,
+    new Set(failedThisRun.keys()),
+    builtIssueNumbers
+  );
+
+  const summary = buildRunSummary(bucketed, {
+    stuck: [...failedThisRun.values()],
+    dammed,
+    nextMerges,
+  });
   console.log(summary);
   console.log(emitMarker("done"));
   // Persist the summary — per-run filename so it survives the next run (the
