@@ -16,7 +16,7 @@ import json
 import re
 import sys
 
-_LINE = re.compile(r"^(?P<file>.+):(?P<line>\d+): unused (?P<kind>[\w ]+) '(?P<name>[^']+)' \((?P<confidence>\d+)% confidence\)$")
+_VULTURE_LINE_RE = re.compile(r"^(?P<file>.+):(?P<line>\d+): unused (?P<kind>[\w ]+) '(?P<name>[^']+)' \((?P<confidence>\d+)% confidence\)$")
 
 
 def parse_vulture(text):
@@ -29,7 +29,7 @@ def parse_vulture(text):
     """
     rows = []
     for line in text.splitlines():
-        m = _LINE.match(line.strip())
+        m = _VULTURE_LINE_RE.match(line.strip())
         if not m:
             continue
         kind = m.group("kind").strip()
