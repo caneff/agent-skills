@@ -44,9 +44,11 @@ carries jscpd's token count for a `token-clone` row; omit `extra` for
 
 2. **Pass one — run jscpd, parse it.**
    ```sh
-   npx --yes jscpd --reporters json --output /tmp/jscpd-out <scope>
+   npx --yes jscpd --reporters json --output /tmp/jscpd-out --min-tokens 20 <scope>
    python3 duplication/audit.py /tmp/jscpd-out/jscpd-report.json
    ```
+   `--min-tokens 20` lowers jscpd's default floor (50) so it catches
+   fixture-sized clones — tune it up for a large repo if 20 is too noisy.
    `audit.py`'s `parse_jscpd(json_str) -> list[dict]` is the tested seam
    (`duplication/fixtures/` + `answer-key.md` back it, mirroring
    `dead-code/fixtures/`) — pure, no subprocess inside it, fed jscpd's
