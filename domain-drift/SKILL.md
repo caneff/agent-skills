@@ -1,0 +1,112 @@
+---
+name: domain-drift
+description: Audit whether code names match the project's own domain vocabulary — a generic name standing in for a defined term, two names for one concept, or a term used for the wrong thing. Slash-only.
+disable-model-invocation: true
+argument-hint: "[path]"
+---
+
+Sweep the code in scope and check it against the project's own ubiquitous
+language — the terms `CONTEXT.md` and `docs/adr/` already define. Code that
+drifts from those terms makes every reader re-translate between what the docs
+call a thing and what the code calls it.
+
+The default deliverable is a **report**, not applied edits. The sweep writes
+a machine-readable findings log and a grouped HTML summary; it touches no
+code.
+
+## The one test
+
+**A finding fires only when a code name displaces a specific named domain
+term.** Default is NO FINDING: the burden of proof is on the finding, not the
+name. A name that is merely vague, generic, or not what you'd have chosen —
+with no defined term standing behind it — is not this audit's business. If
+you cannot point at the term the name displaces and where it's defined, there
+is no finding, no matter how bad the name is.
+
+This is not a style pass. `data`, `helper`, `process` in a file with no
+glossary are ugly, not drift — nothing has been displaced, because nothing
+was ever defined. The moment a term *is* defined and the code disagrees, that
+disagreement — and only that — is in scope.
+
+## Extract the term set first — and print it
+
+Before judging anything, read every `CONTEXT.md` in the repo (root and
+nested, e.g. `setup-sandcastle/docs/CONTEXT.md`) and every file under
+`docs/adr/`, and build the term set: each defined noun/verb, its definition,
+and its source file. Glossary entries (`**Term** — definition`) and ADR
+decision titles/bodies that name a concept both count.
+
+Print this term set at the top of the report, verbatim — term, one-line gloss,
+source. **A wrong or incomplete extraction must be visible in the report, not
+silent** — if the repo has no `CONTEXT.md`/`docs/adr/`, the term set is empty
+and the report says so plainly; that is a correct, boring result, not an
+error to paper over.
+
+## Buckets & categories
+
+- **`rename`** / `generic-standin` — a code name is generic where the project
+  has a specific defined term for exactly that thing (`data` where the domain
+  term is `Order`; `process()` where the term is `reconcile`).
+- **`consolidate`** / `synonym-sprawl` — two (or more) code names refer to the
+  same concept the glossary treats as one term (`job` and `task` both meaning
+  what `CONTEXT.md` calls a `Run`).
+- **`misuse`** / `term-misuse` — a defined term is used in code for something
+  the glossary says it is not (a variable named `parent` holding what the
+  glossary defines as a `blocker` — `CONTEXT.md`'s own `_Avoid_` note may name
+  the mix-up directly).
+
+`extra` carries `should_be` (the displaced/correct term) and `source` (where
+it's defined, e.g. `CONTEXT.md` or `docs/adr/0001-....md`). The displaced term
+must be named in both `failure` and `extra.should_be` — a finding that can't
+name the term it displaces is not a finding, per the one test above.
+
+## Out of scope
+
+Pure style naming — `snake_case` vs `camelCase`, unclear-but-undefined names,
+abbreviation style — is not domain drift and stays with ruff `N`. This audit
+only fires where a *defined* term exists and the code disagrees with it. Do
+not flag a name for being bad; flag it only for being wrong against a
+specific, sourced term.
+
+## Run
+
+1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, default to
+   the current branch's diff against its base (`git diff --name-only
+   main...HEAD`), not the whole tree — a repo-wide sweep is an explicit
+   opt-in the user asks for by name. Either way, skip vendored, generated,
+   and dependency trees (`node_modules`, `dist`, `.venv`, build output,
+   lockfiles) and any `worktrees/` tree.
+
+2. **Extract and print the term set** as above, before judging any code.
+
+3. **Sweep every name in scope against the term set** — identifiers, class
+   names, function names, key variable names, not a sample. For each one,
+   check: does a defined term describe exactly what this name refers to, and
+   does the code's name disagree with it (generic-standin), collide with
+   another name for the same concept (synonym-sprawl), or borrow the term for
+   something else (term-misuse)? A name with no term behind it is silently
+   fine — do not record it, do not almost-flag it.
+
+4. **Write the findings log and render the summary — the default
+   deliverable.** Write every finding to `findings.jsonl`, then draw a
+   grouped summary `report.html` from it, following
+   `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
+   JSONL schema and the summary's grouped-overview shape. Write both to
+   `<tmpdir>/domain-drift-<timestamp>/`, then open the summary and hand off
+   its path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s
+   asset-delivery section describes. Print the one-line verdict and the
+   summary's absolute path, nothing else.
+
+## Write the log and render the summary
+
+- **Log** — one JSONL line per finding. `bucket` is `rename` / `consolidate`
+  / `misuse`. `category` is `generic-standin` / `synonym-sprawl` /
+  `term-misuse`. `failure` names the displaced term and the concrete
+  confusion it causes ("reader sees `data` and can't tell this is the
+  `Order` `CONTEXT.md` defines without opening the file"). `extra` carries
+  `should_be` and `source`.
+- **Summary** — the term set (term, gloss, source) printed in full at the
+  top, then the verdict, the `N findings · R rename · C consolidate · M
+  misuse` metabar, findings grouped by bucket then category with counts, and
+  a `vt-callout` naming the highest-value finds by `file:line`. No
+  per-finding cards.
