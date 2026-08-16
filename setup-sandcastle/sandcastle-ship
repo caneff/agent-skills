@@ -53,16 +53,43 @@ ci_verdict() {
     return
   fi
 
+  # `is_red` is checked ahead of `is_pending`: a rollup with one failed check
+  # and others still queued is a settled "no" already, not a "wait and see" —
+  # reporting it as pending would tell `--watch` to sit and wait on a verdict
+  # that will never turn green. `is_green` is an explicit allowlist, not an
+  # `else` — an outcome GitHub adds later, or any shape this parsing didn't
+  # expect, falls to red and blocks the merge instead of silently passing it;
+  # the safety note this script was built under is "never weaken the gate,"
+  # and fail-open on an unrecognized outcome is exactly that.
   jq -r '
     def is_pending: (.status // "") as $s | (.state // "") as $t |
       ($s == "QUEUED" or $s == "IN_PROGRESS") or ($t == "PENDING" or $t == "EXPECTED");
     def outcome: .conclusion // .state // "UNKNOWN";
     def is_red: outcome | IN("FAILURE","ERROR","CANCELLED","TIMED_OUT","STARTUP_FAILURE");
-    if any(.[]; is_pending) then "pending"
-    elif any(.[]; is_red) then "red"
-    else "green"
+    def is_green: outcome | IN("SUCCESS","NEUTRAL","SKIPPED");
+    if any(.[]; is_red) then "red"
+    elif any(.[]; is_pending) then "pending"
+    elif all(.[]; is_green) then "green"
+    else "red"
     end
   '
+}
+
+# One `gh pr view` + `ci_verdict` pass, used both for the fresh read and, under
+# `--watch`, for the re-read once checks settle — factored out so those two
+# call sites can't drift on how a verdict gets read. Echoes the verdict;
+# returns non-zero (and prints nothing) on a `gh` fault, so the caller can
+# tell "green" apart from "couldn't ask."
+read_verdict() {
+  local repo=$1 num=$2 pr_json mergeable checks
+  pr_json=$( cd "$repo" && gh pr view "$num" --json mergeable,statusCheckRollup ) || return 1
+  mergeable=$(jq -r '.mergeable' <<<"$pr_json")
+  # `// []`: a PR can come back with a null rollup (no checks configured at
+  # all is not the same JSON shape as an empty array), and feeding null into
+  # `any(.[]; ...)` is a jq error that `set -euo pipefail` would turn into an
+  # aborted sweep instead of one skipped repo.
+  checks=$(jq -c '.statusCheckRollup // []' <<<"$pr_json")
+  printf '%s' "$checks" | ci_verdict "$mergeable"
 }
 
 selftest() {
@@ -96,6 +123,12 @@ selftest() {
   check "conflicting mergeable wins over green checks" \
     CONFLICTING '[{"status":"COMPLETED","conclusion":"SUCCESS","state":null}]' \
     conflicting
+  check "a failure wins over another check still queued (red, not pending)" \
+    MERGEABLE '[{"status":"COMPLETED","conclusion":"FAILURE","state":null},{"status":"QUEUED","conclusion":null,"state":null}]' \
+    red
+  check "an unrecognized outcome fails safe as red, not green by default" \
+    MERGEABLE '[{"status":"COMPLETED","conclusion":"STALE","state":null}]' \
+    red
 
   echo "selftest: $n checks, $fails failed"
   [ "$fails" -eq 0 ]
@@ -120,7 +153,14 @@ command -v jq >/dev/null 2>&1 || { echo "no jq on PATH — install it" >&2; exit
 
 echo "Shipping sweep PRs${DRY_RUN:+ (dry run)}"
 
+# Three classes, and a run that reaches no adopter must not read the same as
+# one that reached them all and merged nothing (`merged=0 skipped=0` either
+# way) — see `crumbs`/`mine` below, propagate's same fix for the same
+# ambiguity.
 merged=0 skipped=0 failed=0
+# Every breadcrumb the walk saw, and the subset naming this template — tells
+# apart a search root pointed at the wrong tree from a filter that excluded
+# the whole fleet, same as sandcastle-propagate.
 crumbs=0 mine=0
 while IFS= read -r -d '' answers; do
   crumbs=$((crumbs + 1))
@@ -148,13 +188,10 @@ while IFS= read -r -d '' answers; do
 
   echo "== $name (PR #$num) =="
 
-  if ! pr_json=$( cd "$repo" && gh pr view "$num" --json mergeable,statusCheckRollup ); then
+  if ! verdict=$(read_verdict "$repo" "$num"); then
     echo "  could not read PR #$num for $name" >&2
     failed=$((failed + 1)); continue
   fi
-  mergeable=$(jq -r '.mergeable' <<<"$pr_json")
-  checks=$(jq -c '.statusCheckRollup' <<<"$pr_json")
-  verdict=$(printf '%s' "$checks" | ci_verdict "$mergeable")
 
   # `--watch` trades a skip-and-rerun-later for waiting the run out here. It
   # only ever moves a `pending` verdict off pending — a conflict or a red
@@ -162,13 +199,10 @@ while IFS= read -r -d '' answers; do
   if [ "$verdict" = "pending" ] && [ -n "$WATCH" ]; then
     echo "  $name — checks still running, waiting (--watch)"
     ( cd "$repo" && gh pr checks "$num" --watch --fail-fast ) >/dev/null 2>&1 || true
-    if ! pr_json=$( cd "$repo" && gh pr view "$num" --json mergeable,statusCheckRollup ); then
+    if ! verdict=$(read_verdict "$repo" "$num"); then
       echo "  could not re-read PR #$num for $name after waiting" >&2
       failed=$((failed + 1)); continue
     fi
-    mergeable=$(jq -r '.mergeable' <<<"$pr_json")
-    checks=$(jq -c '.statusCheckRollup' <<<"$pr_json")
-    verdict=$(printf '%s' "$checks" | ci_verdict "$mergeable")
   fi
 
   case "$verdict" in
