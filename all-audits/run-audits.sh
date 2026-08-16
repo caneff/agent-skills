@@ -31,6 +31,17 @@ report_path_from_log() {
   grep -oE '/[^ ]+\.html' "$log" 2>/dev/null | head -1 || true
 }
 
+# audit_prompt NAME REPO — the prompt handed to `claude -p`: the slash
+# invocation plus a whole-repo override so diff-oriented audits scan the
+# entire tree, not a git diff (#397). Mirrors the fan-out sentence in
+# SKILL.md so the bash sweep and the agent-fan-out sweep agree on scope.
+# Takes repo as $2 (not the global $REPO) so it's callable from a sourced
+# test where $REPO is unset.
+audit_prompt() {
+  printf '/%s %s\n%s\n' "$1" "$2" \
+    "Audit the ENTIRE repository at $2 — every source file, not a git diff or recent-changes review. Override any branch-diff or hot-spot default the skill has."
+}
+
 # Guard the rest so a test can `source` this file to reach the functions
 # above without triggering a live sweep.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
@@ -132,7 +143,7 @@ run_one() {
   local name="$1"
   echo "[$name] starting"
   # The report path the skill prints lands in this log; grep it out afterward.
-  claude "${CLAUDE_FLAGS[@]}" "/$name $REPO" >"$OUTLOGS/$name.log" 2>&1
+  claude "${CLAUDE_FLAGS[@]}" "$(audit_prompt "$name" "$REPO")" >"$OUTLOGS/$name.log" 2>&1
   echo "[$name] done"
 }
 

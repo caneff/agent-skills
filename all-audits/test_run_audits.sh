@@ -69,3 +69,17 @@ got="$(report_path_from_log "$log")"
   || fail "marker precedence: got '$got', want the marker's path, not the earlier stray .html"
 
 echo "ok (report_path_from_log)"
+
+# --- audit_prompt (#397): the prompt handed to `claude -p` must carry the
+# same whole-repo override the SKILL.md fan-out gives its subagents, so a
+# diff-oriented audit's default doesn't silently mismatch the sweep's scope.
+got="$(audit_prompt dead-code /some/repo)"
+case "$got" in
+  '/dead-code /some/repo'*) : ;;
+  *) fail "audit_prompt: missing/misplaced slash line; got: $got" ;;
+esac
+echo "$got" | grep -q '/some/repo' || fail "audit_prompt: missing repo path; got: $got"
+echo "$got" | grep -qi 'ENTIRE repository' || fail "audit_prompt: missing whole-repo override marker; got: $got"
+echo "$got" | grep -qi 'not a git diff' || fail "audit_prompt: missing not-a-diff marker; got: $got"
+
+echo "ok (audit_prompt)"
