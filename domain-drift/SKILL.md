@@ -60,10 +60,34 @@ it's defined, e.g. `CONTEXT.md` or `docs/adr/0001-....md`). The displaced term
 must be named in both `failure` and `extra.should_be` — a finding that can't
 name the term it displaces is not a finding, per the one test above.
 
-## Out of scope
+## The audit, worked
 
-Pure style naming — `snake_case` vs `camelCase`, unclear-but-undefined names,
-abbreviation style — is not domain drift and stays with ruff `N`. This audit
+`CONTEXT.md` defines **Run** — "one orchestrator invocation, loops
+plan→execute until the backlog drains." The code has two names fighting over
+that concept:
+
+```ts
+function startJob(cfg: Config) { ... }      // job.ts
+function runTask(id: string) { ... }        // scheduler.ts — same invocation
+```
+
+Neither name is *wrong* on its own — `startJob` and `runTask` both read fine
+in isolation, which is exactly why a style pass would pass them. Set beside
+`CONTEXT.md`'s `Run`, they're two names for the one term the glossary already
+settled: a `consolidate` / `synonym-sprawl` finding, `should_be: "Run"`,
+`source: "CONTEXT.md"`.
+
+Contrast a name the audit leaves alone: `cfg` in the same file. Generic,
+sure — but nothing in `CONTEXT.md` or the ADRs defines a term `cfg` displaces.
+No finding.
+
+## Fold note & out of scope
+
+This skill absorbs the old naming-drift fold: two code names for one glossary
+concept is exactly `synonym-sprawl` above, so a separate naming-drift check
+would only double-report what this audit already catches. Pure style
+naming — `snake_case` vs `camelCase`, unclear-but-undefined names,
+abbreviation style — is a different axis and stays with ruff `N`. This audit
 only fires where a *defined* term exists and the code disagrees with it. Do
 not flag a name for being bad; flag it only for being wrong against a
 specific, sourced term.
@@ -99,12 +123,13 @@ specific, sourced term.
 
 ## Write the log and render the summary
 
-- **Log** — one JSONL line per finding. `bucket` is `rename` / `consolidate`
-  / `misuse`. `category` is `generic-standin` / `synonym-sprawl` /
-  `term-misuse`. `failure` names the displaced term and the concrete
-  confusion it causes ("reader sees `data` and can't tell this is the
-  `Order` `CONTEXT.md` defines without opening the file"). `extra` carries
-  `should_be` and `source`.
+- **Log** — one JSONL line per finding, the six required fields plus `extra`:
+  `file` and `line` where the drifting name sits, `summary` (one line, what
+  drifted), `bucket` (`rename` / `consolidate` / `misuse`), `category`
+  (`generic-standin` / `synonym-sprawl` / `term-misuse`), and `failure` naming
+  the displaced term and the concrete confusion it causes ("reader sees `data`
+  and can't tell this is the `Order` `CONTEXT.md` defines without opening the
+  file"). `extra` carries `should_be` and `source`.
 - **Summary** — the term set (term, gloss, source) printed in full at the
   top, then the verdict, the `N findings · R rename · C consolidate · M
   misuse` metabar, findings grouped by bucket then category with counts, and
