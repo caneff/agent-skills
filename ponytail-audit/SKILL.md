@@ -21,16 +21,29 @@ Same as ponytail-review:
 - `native:` dependency or code doing what the platform already does. Name the feature.
 - `yagni:` abstraction with one implementation, config nobody sets, layer with one caller.
 - `shrink:` same logic, fewer lines. Show the shorter form.
+- `bloat:` a function or class ruff's `PLR` rules flag as oversized —
+  too many branches (`PLR0912`), arguments (`PLR0913`), statements
+  (`PLR0915`), or public methods (`PLR0904`). Replacement: split it along
+  its actual seams.
 
 ## Hunt
 
 Deps the stdlib or platform already ships, single-implementation interfaces,
 factories with one product, wrappers that only delegate, files exporting one
-thing, dead flags and config, hand-rolled stdlib.
+thing, dead flags and config, hand-rolled stdlib, long-method/large-class
+bloaters.
 
 Verify before you list — grep the symbol across the tree (excluding tests) and
 confirm zero real callers, so a finding survives a skeptic. A dead export whose
 only caller is its own test still counts; say so.
+
+**Mechanical lead for `bloat:`.** Run
+`uvx ruff check --select PLR0912,PLR0913,PLR0915,PLR0904 --output-format json <scope>`
+first — a candidate list, not a verdict, the mechanical-scan role `audit.py`
+plays for `test-audit`. Read each hit same as any other tag: a large
+function whose branches are one honest dispatch, not tangled special-casing,
+is a `Deliberately leaving alone`. Card it the usual way — tag `bloat:`, the
+rule code named in the one-sentence problem, files, before/after.
 
 ## Present the audit as an HTML report
 
