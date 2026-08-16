@@ -14,6 +14,10 @@
 # not a fault — most repos are simply caught up — so it is silently skipped,
 # uncounted.
 #
+# The squash lands on origin, not on the adopter's local checkout, so after a
+# successful merge it also fast-forwards local main — but only when that's
+# safe (see local_ff_verdict). A feature branch or dirty tree is left alone.
+#
 # `--dry-run` reports what it WOULD merge and touches nothing; it still needs
 # `gh auth` because reading PR state requires it. `--watch` waits out checks
 # that are still running instead of skipping them for a later run.
@@ -75,6 +79,31 @@ ci_verdict() {
   '
 }
 
+# The local-fast-forward decision, isolated from `git` the same way
+# `ci_verdict` is isolated from `gh` — testable with canned branch/dirty
+# inputs instead of a real checkout. Takes the checked-out branch name as $1
+# (empty means detached) and a dirty flag as $2 (non-empty means dirty), and
+# prints `sync` or `leave:<reason>`.
+#
+# The squash landed on origin, not on this checkout, so a local main that's
+# simply behind is safe to fast-forward for convenience. But "safe" is
+# narrow on purpose: a feature branch or a dirty tree is the user's work in
+# progress, and this never switches branches, stashes, or forces to get out
+# of its way — it only acts when the checkout is already sitting on a clean
+# main.
+local_ff_verdict() {
+  local branch=$1 dirty=$2
+  if [ -z "$branch" ]; then
+    echo "leave:detached HEAD"
+  elif [ "$branch" != "main" ]; then
+    echo "leave:on $branch"
+  elif [ -n "$dirty" ]; then
+    echo "leave:dirty"
+  else
+    echo "sync"
+  fi
+}
+
 # One `gh pr view` + `ci_verdict` pass, used both for the fresh read and, under
 # `--watch`, for the re-read once checks settle — factored out so those two
 # call sites can't drift on how a verdict gets read. Echoes the verdict;
@@ -129,6 +158,23 @@ selftest() {
   check "an unrecognized outcome fails safe as red, not green by default" \
     MERGEABLE '[{"status":"COMPLETED","conclusion":"STALE","state":null}]' \
     red
+
+  check_ff() {
+    n=$((n + 1))
+    local desc=$1 branch=$2 dirty=$3 want=$4 got
+    got=$(local_ff_verdict "$branch" "$dirty")
+    if [ "$got" = "$want" ]; then
+      echo "ok - $desc"
+    else
+      echo "FAIL - $desc: want $want got $got" >&2
+      fails=$((fails + 1))
+    fi
+  }
+
+  check_ff "clean main syncs" main "" sync
+  check_ff "dirty main is left as-is" main dirty "leave:dirty"
+  check_ff "a feature branch is left as-is, clean or not" feature-x "" "leave:on feature-x"
+  check_ff "detached HEAD is left as-is" "" "" "leave:detached HEAD"
 
   echo "selftest: $n checks, $fails failed"
   [ "$fails" -eq 0 ]
@@ -228,6 +274,25 @@ while IFS= read -r -d '' answers; do
   if ( cd "$repo" && gh pr merge "$num" --squash --delete-branch ); then
     echo "  merged $name PR #$num"
     merged=$((merged + 1))
+
+    # The merge already succeeded on origin, so a local main that can't be
+    # fast-forwarded is a convenience miss, not a sweep failure — it never
+    # touches `failed`.
+    branch=$(git -C "$repo" symbolic-ref --quiet --short HEAD || true)
+    dirty=$(git -C "$repo" status --porcelain)
+    verdict=$(local_ff_verdict "$branch" "$dirty")
+    case $verdict in
+      sync)
+        if git -C "$repo" pull --ff-only -q; then
+          echo "  local main fast-forwarded to the merge"
+        else
+          echo "  local main not fast-forwarded (diverged from origin)" >&2
+        fi
+        ;;
+      leave:*)
+        echo "  local main left as-is (${verdict#leave:})"
+        ;;
+    esac
   else
     echo "  gh pr merge failed for $name PR #$num" >&2
     failed=$((failed + 1))
