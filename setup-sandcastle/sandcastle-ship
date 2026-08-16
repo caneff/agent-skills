@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+# sandcastle-ship [--dry-run] [--watch]
+#
+# Squash-merge the open Sandcastle sweep PR in every adopter repo, once its CI
+# is green. Companion to sandcastle-propagate: propagate opens the PR, ship
+# closes it out. Adopters are discovered the same way propagate finds them —
+# any repo under $SEARCH_ROOT with a root `.copier-answers.yml` breadcrumb
+# pointing at caneff/agent-skills — so the two scripts never drift on what
+# counts as an adopter.
+#
+# Per adopter: find the one open PR whose branch starts with
+# `sandcastle/update-to-` (propagate's own naming), gate on its CI, and
+# `gh pr merge --squash --delete-branch` when it's green. No sweep PR open is
+# not a fault — most repos are simply caught up — so it is silently skipped,
+# uncounted.
+#
+# `--dry-run` reports what it WOULD merge and touches nothing; it still needs
+# `gh auth` because reading PR state requires it. `--watch` waits out checks
+# that are still running instead of skipping them for a later run.
+#
+# Every adopter with an open sweep PR lands in one of three classes — merged,
+# skipped (conflicts, red CI, or still running under mode A), failed (gh
+# itself faulted) — and the run exits non-zero when anything failed. See
+# sandcastle-propagate for the sibling convention this mirrors.
+#
+# --selftest runs the CI-gate decision function against canned JSON, with no
+# `gh` and no network, and exits before touching anything else.
+set -euo pipefail
+
+SKILLS_REPO="${SKILLS_REPO:-$HOME/.agents/skills}"
+SEARCH_ROOT="${SEARCH_ROOT:-$HOME/src}"
+
+# The merge decision, isolated from `gh` entirely so it is testable with
+# canned JSON instead of live PRs. Takes the PR's `mergeable` string as $1,
+# reads a JSON array of check objects (gh's statusCheckRollup shape) on
+# stdin, and prints exactly one verdict: conflicting, red, pending, or green.
+#
+# gh's rollup mixes two shapes with different pending/outcome tells (verified
+# against a live PR, not the docs):
+#   check run:      {"status":"COMPLETED","conclusion":"SUCCESS","state":null}
+#   status context: {"state":"SUCCESS","status":null,"conclusion":null}
+# So pending is read off .status (QUEUED/IN_PROGRESS) for a check run, or off
+# .state (PENDING/EXPECTED) for a status context — never off .conclusion,
+# which is null on both shapes until settled. Once a check isn't pending, its
+# outcome is `.conclusion // .state`, whichever side of the pair is set.
+ci_verdict() {
+  local mergeable=$1
+
+  # A conflicting PR is never mergeable no matter what CI says — checked
+  # first so a green-but-conflicting PR can't slip past as green.
+  if [ "$mergeable" = "CONFLICTING" ]; then
+    echo conflicting
+    return
+  fi
+
+  jq -r '
+    def is_pending: (.status // "") as $s | (.state // "") as $t |
+      ($s == "QUEUED" or $s == "IN_PROGRESS") or ($t == "PENDING" or $t == "EXPECTED");
+    def outcome: .conclusion // .state // "UNKNOWN";
+    def is_red: outcome | IN("FAILURE","ERROR","CANCELLED","TIMED_OUT","STARTUP_FAILURE");
+    if any(.[]; is_pending) then "pending"
+    elif any(.[]; is_red) then "red"
+    else "green"
+    end
+  '
+}
+
+selftest() {
+  local n=0 fails=0
+  check() {
+    n=$((n + 1))
+    local desc=$1 mergeable=$2 checks=$3 want=$4 got
+    got=$(printf '%s' "$checks" | ci_verdict "$mergeable")
+    if [ "$got" = "$want" ]; then
+      echo "ok - $desc"
+    else
+      echo "FAIL - $desc: want $want got $got" >&2
+      fails=$((fails + 1))
+    fi
+  }
+
+  check "no checks at all is green" \
+    MERGEABLE '[]' green
+  check "all green (mix of check-run and status-context shapes)" \
+    MERGEABLE '[{"status":"COMPLETED","conclusion":"SUCCESS","state":null},{"state":"SUCCESS","status":null,"conclusion":null},{"status":"COMPLETED","conclusion":"NEUTRAL","state":null},{"state":"SKIPPED","status":null,"conclusion":null}]' \
+    green
+  check "one still-running check-run is pending, even with others green" \
+    MERGEABLE '[{"status":"COMPLETED","conclusion":"SUCCESS","state":null},{"status":"IN_PROGRESS","conclusion":null,"state":null}]' \
+    pending
+  check "one still-pending status-context is pending" \
+    MERGEABLE '[{"state":"PENDING","status":null,"conclusion":null}]' \
+    pending
+  check "one failing check-run is red" \
+    MERGEABLE '[{"status":"COMPLETED","conclusion":"SUCCESS","state":null},{"status":"COMPLETED","conclusion":"FAILURE","state":null}]' \
+    red
+  check "conflicting mergeable wins over green checks" \
+    CONFLICTING '[{"status":"COMPLETED","conclusion":"SUCCESS","state":null}]' \
+    conflicting
+
+  echo "selftest: $n checks, $fails failed"
+  [ "$fails" -eq 0 ]
+}
+
+DRY_RUN="" WATCH=""
+while [ -n "${1:-}" ] && [ "$1" != "${1#--}" ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=yes ;;
+    --watch) WATCH=yes ;;
+    --selftest) selftest; exit $? ;;
+    *) echo "unknown flag $1" >&2; exit 1 ;;
+  esac
+  shift
+done
+
+# Once, before any repo is touched. Even a dry run reads live PR state, so it
+# needs `gh` and auth too — only the merge itself is skipped.
+command -v gh >/dev/null 2>&1 || { echo "no gh on PATH — install it" >&2; exit 1; }
+gh auth status >/dev/null 2>&1 || { echo "gh is not authenticated — run gh auth login" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "no jq on PATH — install it" >&2; exit 1; }
+
+echo "Shipping sweep PRs${DRY_RUN:+ (dry run)}"
+
+merged=0 skipped=0 failed=0
+crumbs=0 mine=0
+while IFS= read -r -d '' answers; do
+  crumbs=$((crumbs + 1))
+  # Ours? Match the _src_path key, not any substring. Skip before any git work.
+  grep -q '^_src_path:.*caneff/agent-skills' "$answers" || continue
+  repo=$(git -C "$(dirname "$answers")" rev-parse --show-toplevel 2>/dev/null) || {
+    mine=$((mine + 1))
+    echo "  $answers — not inside a git repo" >&2; failed=$((failed + 1)); continue
+  }
+  # A linked worktree carries a checked-out copy of the repo's own breadcrumb,
+  # and would otherwise read as an adopter of its own — see sandcastle-propagate
+  # for why this is checked before counting into `mine`.
+  [ "$(git -C "$repo" rev-parse --git-dir)" = "$(git -C "$repo" rev-parse --git-common-dir)" ] || continue
+  mine=$((mine + 1))
+  name=$(basename "$repo")
+
+  # No open sweep PR is the common case, not an outcome worth counting — most
+  # adopters are simply caught up between sweeps.
+  if ! num=$( cd "$repo" && gh pr list --state open --json number,headRefName \
+      --jq 'map(select(.headRefName | startswith("sandcastle/update-to-")))[0].number // empty' ); then
+    echo "  $name — could not list open PRs" >&2
+    failed=$((failed + 1)); continue
+  fi
+  [ -n "$num" ] || continue
+
+  echo "== $name (PR #$num) =="
+
+  if ! pr_json=$( cd "$repo" && gh pr view "$num" --json mergeable,statusCheckRollup ); then
+    echo "  could not read PR #$num for $name" >&2
+    failed=$((failed + 1)); continue
+  fi
+  mergeable=$(jq -r '.mergeable' <<<"$pr_json")
+  checks=$(jq -c '.statusCheckRollup' <<<"$pr_json")
+  verdict=$(printf '%s' "$checks" | ci_verdict "$mergeable")
+
+  # `--watch` trades a skip-and-rerun-later for waiting the run out here. It
+  # only ever moves a `pending` verdict off pending — a conflict or a red
+  # check is already a settled answer, and waiting changes nothing about it.
+  if [ "$verdict" = "pending" ] && [ -n "$WATCH" ]; then
+    echo "  $name — checks still running, waiting (--watch)"
+    ( cd "$repo" && gh pr checks "$num" --watch --fail-fast ) >/dev/null 2>&1 || true
+    if ! pr_json=$( cd "$repo" && gh pr view "$num" --json mergeable,statusCheckRollup ); then
+      echo "  could not re-read PR #$num for $name after waiting" >&2
+      failed=$((failed + 1)); continue
+    fi
+    mergeable=$(jq -r '.mergeable' <<<"$pr_json")
+    checks=$(jq -c '.statusCheckRollup' <<<"$pr_json")
+    verdict=$(printf '%s' "$checks" | ci_verdict "$mergeable")
+  fi
+
+  case "$verdict" in
+    conflicting)
+      echo "  skip $name — PR #$num has merge conflicts"
+      skipped=$((skipped + 1)); continue
+      ;;
+    red)
+      echo "  skip $name — PR #$num has failing checks"
+      skipped=$((skipped + 1)); continue
+      ;;
+    pending)
+      echo "  skip $name — PR #$num checks still running, rerun later"
+      skipped=$((skipped + 1)); continue
+      ;;
+  esac
+
+  if [ -n "$DRY_RUN" ]; then
+    echo "  would merge $name PR #$num (green)"
+    merged=$((merged + 1)); continue
+  fi
+
+  if ( cd "$repo" && gh pr merge "$num" --squash --delete-branch ); then
+    echo "  merged $name PR #$num"
+    merged=$((merged + 1))
+  else
+    echo "  gh pr merge failed for $name PR #$num" >&2
+    failed=$((failed + 1))
+  fi
+done < <(find "$SEARCH_ROOT" -maxdepth 4 -name '.copier-answers.yml' -print0)
+
+if [ "$mine" -eq 0 ]; then
+  if [ "$crumbs" -eq 0 ]; then
+    echo "no .copier-answers.yml anywhere under $SEARCH_ROOT — wrong search root?" >&2
+  else
+    echo "found $crumbs .copier-answers.yml under $SEARCH_ROOT, none of them an adopter of caneff/agent-skills" >&2
+  fi
+  exit 1
+fi
+
+echo "Done. merged=$merged skipped=$skipped failed=$failed"
+[ "$failed" -eq 0 ] || exit 1
