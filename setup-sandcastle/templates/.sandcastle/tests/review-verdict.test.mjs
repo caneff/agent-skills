@@ -4,6 +4,7 @@ import {
   parseStandardsVerdict,
   combineVerdicts,
   classifyReviewedOutcome,
+  classifyRetryOutcome,
   isHarnessError,
 } from "../review-verdict.mts";
 
@@ -184,6 +185,75 @@ describe("classifyReviewedOutcome", () => {
     const out = classifyReviewedOutcome(fail("SPEC FAIL"), pass, {});
     expect(out.failedAxes).toEqual(["spec"]);
     expect(out.reasons).toEqual({});
+  });
+});
+
+// classifyRetryOutcome is classifyReviewedOutcome plus retry awareness (#389).
+// Given the two verdicts, the per-axis detail, how many fix-up passes have
+// already run (`attempt`, 0 on the first review), and the cap, it decides
+// whether to accept the branch, run another fix-up pass, or escalate to a
+// human. A pass accepts; a fail retries while attempts remain, else escalates —
+// carrying the failed axes and their detail through so the escalation body has
+// the human's brief. The re-review is the filter: only a fail the agent cannot
+// resolve reaches the cap and escalates.
+describe("classifyRetryOutcome", () => {
+  const pass = { pass: true, reason: "" };
+  const fail = (reason) => ({ pass: false, reason });
+  const detail = { spec: "spec log", standards: "standards log" };
+
+  test("both pass → accept, regardless of attempt/cap", () => {
+    expect(classifyRetryOutcome(pass, pass, detail, 0, 1)).toEqual({
+      kind: "accept",
+    });
+  });
+
+  test("a fail with attempts remaining → retry, carrying failed axes + detail", () => {
+    const out = classifyRetryOutcome(
+      pass,
+      fail("SANDCASTLE_STANDARDS: FAIL — bare #NNN citation"),
+      detail,
+      0,
+      1
+    );
+    expect(out.kind).toBe("retry");
+    expect(out.failedAxes).toEqual(["standards"]);
+    expect(out.reasons).toEqual({ standards: "standards log" });
+  });
+
+  test("a fail with the cap reached → escalate, carrying failed axes + detail", () => {
+    const out = classifyRetryOutcome(fail("SPEC FAIL"), pass, detail, 1, 1);
+    expect(out.kind).toBe("escalate");
+    expect(out.failedAxes).toEqual(["spec"]);
+    expect(out.reasons).toEqual({ spec: "spec log" });
+  });
+
+  test("cap of one: first review retries, the re-review after one fix-up escalates", () => {
+    const failed = fail("STD FAIL");
+    expect(classifyRetryOutcome(pass, failed, detail, 0, 1).kind).toBe("retry");
+    expect(classifyRetryOutcome(pass, failed, detail, 1, 1).kind).toBe(
+      "escalate"
+    );
+  });
+
+  test("cap of two allows a second fix-up pass before escalating", () => {
+    const failed = fail("STD FAIL");
+    expect(classifyRetryOutcome(pass, failed, detail, 1, 2).kind).toBe("retry");
+    expect(classifyRetryOutcome(pass, failed, detail, 2, 2).kind).toBe(
+      "escalate"
+    );
+  });
+
+  test("escalate names both axes and carries both details when both fail", () => {
+    const out = classifyRetryOutcome(
+      fail("SPEC FAIL"),
+      fail("STD FAIL"),
+      detail,
+      1,
+      1
+    );
+    expect(out.kind).toBe("escalate");
+    expect(out.failedAxes).toEqual(["spec", "standards"]);
+    expect(out.reasons).toEqual({ spec: "spec log", standards: "standards log" });
   });
 });
 

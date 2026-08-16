@@ -1,0 +1,49 @@
+# TASK
+
+The review of branch {{BRANCH}} failed. Fix exactly the findings below, commit
+the fixes to {{BRANCH}}, and stop. There is no PR yet — do NOT open, push, or
+touch one.
+
+# ORIENT
+
+You are already on {{BRANCH}} — this sandbox checked it out in an isolated
+worktree. Confirm with `git branch --show-current`. Every commit you make stays
+on this branch. Do NOT create a new branch, do NOT push, do NOT open a PR.
+
+# THE FINDINGS
+
+These are the reviewers' failure notes for this branch — each a concrete defect a
+judge blocked on (a citation to redirect, a stale comment to delete, a duplicated
+helper to factor, a misplaced definition to move, a small spec gap to close).
+Address every one.
+
+<review-findings>
+
+{{FINDINGS}}
+
+</review-findings>
+
+# SCOPE
+
+Stay inside the findings. Make the change each one asks for and nothing else. Do
+NOT refactor unrelated code, re-do work the branch already did, or re-open the
+ticket's design. The branch was otherwise accepted; you are closing the gap the
+review named, not rebuilding.
+
+If a finding is genuinely unclear, or you believe it is wrong, do NOT guess. Fix
+the ones you can and leave that finding's code as-is — the re-review catches it
+and escalates to a human. A wrong "fix" is worse than a skipped one.
+
+# VERIFY, COMMIT
+
+1. Run `[[ CHECK_COMMAND ]]`. It must pass.
+2. Stage everything and commit — use `git add -A`, not `git commit -am`, so a NEW
+   file a fix added still reaches the branch:
+   `git add -A && git commit -m "Address review findings on {{BRANCH}}"`.
+   (The pre-commit hook re-runs lint/format/tests — let it.)
+
+Do NOT push. Do NOT open, touch, or merge a PR. The orchestrator re-reviews the
+branch and decides what happens next.
+
+Once every finding you can address has a fix and the branch is committed, output
+<promise>COMPLETE</promise>.

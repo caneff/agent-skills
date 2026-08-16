@@ -35,7 +35,7 @@ import { resolveBase } from "./base-resolution.mts";
 import {
   parseSpecVerdict,
   parseStandardsVerdict,
-  classifyReviewedOutcome,
+  classifyRetryOutcome,
   isHarnessError,
 } from "./review-verdict.mts";
 import {
@@ -143,6 +143,11 @@ mkdirSync(".sandcastle/logs", { recursive: true });
 // A log with no run inside the window is emptied (all its runs are stale).
 // ponytail: parse the header we already emit; no run-index/db needed.
 const LOG_RETENTION_DAYS = 14;
+// Fix-up passes a review-fail gets before it escalates to a human (#389). One
+// clears every fixable fail observed so far; bump to 2 only if a second pass is
+// shown to rescue work. Read by classifyRetryOutcome.
+// ponytail: a single constant, not a config knob — no env override until wanted.
+const FIXUP_CAP = 1;
 // Thin file-IO caller; the keep/empty/keep-from decision lives in the pure,
 // tested planRetention.
 function pruneOldRuns(dir: string, cutoffMs: number) {
@@ -520,49 +525,99 @@ while (true) {
           // reuse the built-in TARGET_BRANCH arg — sandcastle reserves it and
           // pins it to the host branch (main). Neither judge writes the branch; the
           // implementer is the sole writer. Run them sequentially — both are
-          // read-only, so order is irrelevant.
-          const specReview = await sandbox.run({
-            name: "spec-reviewer",
-            logging: logging("spec-reviewer", issue.branch),
-            maxIterations: 1,
-            agent: sandcastle.claudeCode("claude-sonnet-5"),
-            promptFile: "./.sandcastle/review-spec-prompt.md",
-            promptArgs: {
-              BRANCH: issue.branch,
-              REVIEW_BASE: base,
-              ISSUE_SPEC: `#${issue.id} ${issueSpec}`,
-            },
-          });
-          const standardsReview = await sandbox.run({
-            name: "standards-reviewer",
-            logging: logging("standards-reviewer", issue.branch),
-            maxIterations: 1,
-            agent: sandcastle.claudeCode("claude-sonnet-5"),
-            promptFile: "./.sandcastle/review-standards-prompt.md",
-            promptArgs: {
-              BRANCH: issue.branch,
-              REVIEW_BASE: base,
-            },
-          });
-          // Each judge emits a sentinel line (sandbox.run has no structured
-          // output, #130). Fail-open per axis: only an explicit FAIL blocks.
-          const specVerdict = parseSpecVerdict(specReview.stdout);
-          const standardsVerdict = parseStandardsVerdict(standardsReview.stdout);
-          // classifyReviewedOutcome owns the verdict→outcome decision (#244) and
-          // keeps only the failing axes' detail, so we hand it both reviewers'
-          // fuller stdout unconditionally — the human's brief for re-driving a
-          // preserved branch with `/implement`. A review-fail is binding: no PR.
-          const outcome = classifyReviewedOutcome(specVerdict, standardsVerdict, {
-            spec: specReview.stdout.trim(),
-            standards: standardsReview.stdout.trim(),
-          });
-          if (outcome.kind === "review-fail") {
-            console.warn(
-              `  ⚠ ${issue.id} failed review (${outcome.failedAxes.join(", ")})`
+          // read-only, so order is irrelevant. Both re-run after each fix-up pass
+          // (#389), so a fix that repairs one axis but breaks the other is caught.
+          const runJudges = async () => {
+            const specReview = await sandbox.run({
+              name: "spec-reviewer",
+              logging: logging("spec-reviewer", issue.branch),
+              maxIterations: 1,
+              agent: sandcastle.claudeCode("claude-sonnet-5"),
+              promptFile: "./.sandcastle/review-spec-prompt.md",
+              promptArgs: {
+                BRANCH: issue.branch,
+                REVIEW_BASE: base,
+                ISSUE_SPEC: `#${issue.id} ${issueSpec}`,
+              },
+            });
+            const standardsReview = await sandbox.run({
+              name: "standards-reviewer",
+              logging: logging("standards-reviewer", issue.branch),
+              maxIterations: 1,
+              agent: sandcastle.claudeCode("claude-sonnet-5"),
+              promptFile: "./.sandcastle/review-standards-prompt.md",
+              promptArgs: {
+                BRANCH: issue.branch,
+                REVIEW_BASE: base,
+              },
+            });
+            // Each judge emits a sentinel line (sandbox.run has no structured
+            // output, #130). Fail-open per axis: only an explicit FAIL blocks.
+            // detail is the full reviewer stdout per axis — the human's brief and
+            // the fix-up agent's findings input; classifyRetryOutcome keeps only
+            // the failing axes'.
+            return {
+              spec: parseSpecVerdict(specReview.stdout),
+              standards: parseStandardsVerdict(standardsReview.stdout),
+              detail: {
+                spec: specReview.stdout.trim(),
+                standards: standardsReview.stdout.trim(),
+              },
+            };
+          };
+
+          // Bounded fix-up retry (#389): on a review-fail, run one fix-up pass
+          // against the judges' findings and re-review, before escalating to a
+          // human. The re-review is the filter — a fail the fix-up cannot resolve
+          // reaches the cap and escalates; an agent-fixable one passes and ships.
+          // A fix-up sandbox.run that raises a harness fault propagates to the
+          // catch below and aborts the run, exactly as a judge harness fault does
+          // — no attempt is masked.
+          // `attempt` counts fix-up passes already run (0 on the first review).
+          let attempt = 0;
+          while (true) {
+            const review = await runJudges();
+            const decision = classifyRetryOutcome(
+              review.spec,
+              review.standards,
+              review.detail,
+              attempt,
+              FIXUP_CAP
             );
-            console.log(emitMarker("warn", issue.id));
+            if (decision.kind === "accept") return { issue, kind: "done" as const };
+            if (decision.kind === "escalate") {
+              // review-fail (binding: no PR). Carry the last review's failed axes
+              // and their stdout as the human's brief for re-driving.
+              console.warn(
+                `  ⚠ ${issue.id} failed review (${decision.failedAxes.join(", ")})`
+              );
+              console.log(emitMarker("warn", issue.id));
+              return {
+                issue,
+                kind: "review-fail" as const,
+                failedAxes: decision.failedAxes,
+                reasons: decision.reasons,
+              };
+            }
+            // retry: one fix-up pass against the findings, then re-review at the
+            // loop top. Runs in the SAME sandbox, already on this branch, so its
+            // commits land where the implementer's did.
+            console.log(
+              `  ↻ ${issue.id} fix-up pass ${attempt + 1}/${FIXUP_CAP} (${decision.failedAxes.join(", ")})`
+            );
+            await sandbox.run({
+              name: "fixup",
+              logging: logging("fixup", issue.branch),
+              maxIterations: 100,
+              agent: sandcastle.claudeCode("claude-sonnet-5"),
+              promptFile: "./.sandcastle/address-findings-prompt.md",
+              promptArgs: {
+                BRANCH: issue.branch,
+                FINDINGS: Object.values(decision.reasons).join("\n\n"),
+              },
+            });
+            attempt++;
           }
-          return { issue, ...outcome };
         } catch (e) {
           // A harness fault (the review prompt couldn't be assembled) is not a
           // bad branch — it fails identically for every issue, so swallowing it
