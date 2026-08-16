@@ -93,17 +93,27 @@ do_kill() {
 }
 
 DIM=$'\033[2m'; RED=$'\033[31m'; YEL=$'\033[33m'; OFF=$'\033[0m'
+MAXW=34   # visible-width budget; over it the bar drops id lists for counts so the powerline row stays aligned
+
+_visw() { local s; s=$(sed -E $'s/\033\\[[0-9;]*m//g' <<<"$1"); printf '%s' "${#s}"; }
 
 _frame() {  # render one status-bar line — digest is the single source of the numbers
-  local L=$1 plan='' flight='' pr='' fail='' warn='' k v nfx nwn line
+  local L=$1 plan='' flight='' pr='' fail='' warn='' k v nfx nwn rich fxr wnr
   while IFS='=' read -r k v; do
     case $k in plan) plan=$v;; flight) flight=$v;; pr) pr=$v;; fail) fail=$v;; warn) warn=$v;; esac
   done < <(digest "$L" 0)   # setup-noise ids never reach the bar: digest already split them out
   nfx=$(wc -w <<<"$fail"); nwn=$(wc -w <<<"$warn")
-  line="${DIM}🏰 ${plan:-?} · ${flight:-—} · ${pr:-0} PR"
-  [ "$nfx" -gt 0 ] && line="$line ${OFF}${RED}· ${nfx}✗ ${fail}${OFF}${DIM}"
-  [ "$nwn" -gt 0 ] && line="$line ${OFF}${YEL}· ${nwn}⚠ ${warn}${OFF}${DIM}"
-  printf '%s%s\n' "$line" "$OFF"
+  # Rich form lists ids; compact form keeps only counts. Pick the widest that fits MAXW
+  # so a big build set can't stretch the row past the neighbouring one and break alignment.
+  fxr=" ${OFF}${RED}· ${nfx}✗ ${fail}${OFF}${DIM}"; [ "$nfx" -gt 0 ] || fxr=""
+  wnr=" ${OFF}${YEL}· ${nwn}⚠ ${warn}${OFF}${DIM}"; [ "$nwn" -gt 0 ] || wnr=""
+  rich="${DIM}🏰 ${plan:-?} · ${flight:-—} · ${pr:-0} PR${fxr}${wnr}"
+  if [ "$(_visw "$rich")" -gt "$MAXW" ]; then
+    fxr=" ${OFF}${RED}· ${nfx}✗${OFF}${DIM}"; [ "$nfx" -gt 0 ] || fxr=""
+    wnr=" ${OFF}${YEL}· ${nwn}⚠${OFF}${DIM}"; [ "$nwn" -gt 0 ] || wnr=""
+    rich="${DIM}🏰 ${plan:-?} · ${pr:-0} PR${fxr}${wnr}"
+  fi
+  printf '%s%s\n' "$rich" "$OFF"
 }
 
 do_refresh() {  # refresh <log> <root> [once]
