@@ -42,14 +42,17 @@ the same number on every row, not per-symbol.
 1. **Scope tight.** Audit `$ARGUMENTS` if given, else the current working
    directory. Target the package's public modules — skip tests,
    vendored/generated/dependency trees (`node_modules`, `dist`, `.venv`,
-   build output, lockfiles), and any `worktrees/` tree.
+   `vendor`, build output, lockfiles), and any `.git/` or `worktrees/` tree.
 
 2. **Pass one — run ruff D1xx and interrogate over the SAME scope, parse
    them.**
    ```sh
    scope="$(realpath "${ARGUMENTS:-.}")"
    uvx ruff check --select D100,D101,D102,D103,D104,D105,D106,D107 --output-format json "$scope" > /tmp/ruff-out.json
-   uvx interrogate -v "$scope" > /tmp/interrogate-out.txt
+   uvx interrogate -v "$scope" \
+     -e "$scope/node_modules" -e "$scope/.venv" -e "$scope/dist" -e "$scope/vendor" \
+     -e "$scope/.git" -e "$scope/build" -e "$scope/worktrees" \
+     > /tmp/interrogate-out.txt
    python3 docstring-coverage/audit.py /tmp/ruff-out.json /tmp/interrogate-out.txt
    ```
    Only the D1xx "missing docstring" codes are selected — not the D2xx/D4xx

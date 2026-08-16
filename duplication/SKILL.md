@@ -40,15 +40,20 @@ carries jscpd's token count for a `token-clone` row; omit `extra` for
 
 1. **Scope tight.** Audit `$ARGUMENTS` if given, else the current working
    directory. Skip vendored, generated, and dependency trees (`node_modules`,
-   `dist`, `.venv`, build output, lockfiles) and any `worktrees/` tree.
+   `dist`, `.venv`, `vendor`, build output, lockfiles) and any `.git/` or
+   `worktrees/` tree.
 
 2. **Pass one — run jscpd, parse it.**
    ```sh
-   npx --yes jscpd --reporters json --output /tmp/jscpd-out --min-tokens 20 <scope>
+   npx --yes jscpd --reporters json --output /tmp/jscpd-out --min-tokens 20 -s \
+     --ignore "**/node_modules/**,**/.venv/**,**/dist/**,**/vendor/**,**/.git/**,**/build/**,**/worktrees/**" \
+     <scope>
    python3 duplication/audit.py /tmp/jscpd-out/jscpd-report.json
    ```
-   `--min-tokens 20` lowers jscpd's default floor (50) so it catches
-   fixture-sized clones — tune it up for a large repo if 20 is too noisy.
+   `-s` silences jscpd's progress/promo footer so it doesn't share stdout
+   with the JSON report. `--min-tokens 20` lowers jscpd's default floor
+   (50) so it catches fixture-sized clones — tune it up for a large repo
+   if 20 is too noisy.
    `audit.py`'s `parse_jscpd(json_str) -> list[dict]` is the tested seam
    (`duplication/fixtures/` + `answer-key.md` back it, mirroring
    `dead-code/fixtures/`) — pure, no subprocess inside it, fed jscpd's
