@@ -41,7 +41,8 @@ for the facts: the summary is drawn from this file, never the reverse. Fields:
   (`bucket`, `file`, `line`, `category`, `summary`, `failure`) are fixed
   across all audits; `extra` is where a skill puts its own axis without
   bending the shared schema to fit it. Examples: dead-code audits carry
-  `{"confidence": "high"}`; a type-tightness audit carries
+  `{"confidence": 60}` (vulture's own confidence percentage, unmodified);
+  a type-tightness audit carries
   `{"suggested_type": "Sequence[int]", "severity": "blanket"}`; a domain-drift audit carries
   `{"should_be": "Order", "source": "CONTEXT.md"}`; a duplication audit
   carries `{"clone_tokens": 42}`; a mutation-testing audit carries
