@@ -40,7 +40,7 @@ Running `python3 docstring-coverage/audit.py` over the captured output
 produces:
 
 ```json
-{"bucket": "document", "file": "sample.py", "line": 9, "category": "missing-function-docstring", "summary": "Missing docstring in public function", "failure": "Missing docstring in public function (D103) at sample.py:9", "extra": {"coverage": 50.0}}
+{"bucket": "document", "file": "sample.py", "line": 9, "category": "missing-function-docstring", "summary": "missing function docstring at sample.py:9", "failure": "Missing docstring in public function (D103)", "extra": {"coverage": 50.0}}
 ```
 
 ## Expected findings table
