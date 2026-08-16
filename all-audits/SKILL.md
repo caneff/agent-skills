@@ -1,12 +1,12 @@
 ---
 name: all-audits
-description: Run every repo audit at once — six audit skills in parallel, one HTML index linking each report, then grill through them one at a time. Slash-only.
+description: Run every repo audit at once — twelve audit skills in parallel, one HTML index linking each report, then grill through them one at a time. Slash-only.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---
 
-Run the whole audit set over one repo in a single sweep. Six audit skills fan out
-in parallel, each into its own subagent; each writes a self-contained report;
+Run the whole audit set over one repo in a single sweep. Twelve audit skills fan
+out in parallel, each into its own subagent; each writes a self-contained report;
 the reports collect under one folder behind an `index.html` that links them. The
 sweep **reports only** — it applies nothing and
 opens no PR. When it finishes it stops and hands you the index, so you decide what
@@ -15,7 +15,7 @@ to grill.
 Scope: `$ARGUMENTS` if given, else the current working directory — the repo you
 are standing in. The whole repo, not a branch diff.
 
-## The set — six skills
+## The set — twelve skills
 
 Each audits the whole repo and renders a visual-teach HTML report:
 
@@ -25,9 +25,43 @@ Each audits the whole repo and renders a visual-teach HTML report:
 - `thermo-nuclear-code-quality-review` — abstraction quality, giant files, spaghetti growth.
 - `improve-codebase-architecture` — shallow modules and deepening opportunities.
 - `audit-instructions` — instruction files (`CLAUDE.md`, `SKILL.md`) against Anthropic's current guidance.
+- `dead-code` — functions, classes, imports nobody calls.
+- `duplication` — one behavior with two homes, token clones and same-data-two-ways.
+- `error-handling` — swallowed errors against the repo's fail-loud rule.
+- `docstring-coverage` — undocumented public API on a `py.typed` surface.
+- `domain-drift` — code vocabulary that drifts from the project's domain terms.
+- `type-tightness` — loose `Any`, unexplained `# type: ignore`, fake boundaries.
 
 `skill-audit` is **not** in the set — it scans the global skills directory, not
-this repo.
+this repo. `mutation-audit` is **not** in the set either — it is opt-in and
+targeted at one module (never a whole-repo sweep); invoke it by name.
+
+## The runnable sweep — `run-audits.sh`
+
+`run-audits.sh` is the bash orchestrator that runs each guarded audit as its own
+`claude -p "/name"` process and collects the reports. Flags:
+
+- **`run-audits.sh [REPO]`** — a fresh sweep of all twelve into a new run dir.
+- **`--out DIR`** — write into `DIR` instead of a fresh dir, accumulating (no
+  wipe). Re-running with the same `--out` refreshes that dir.
+- **`--only NAME[,NAME]`** — run just the named audits, leaving any other audit's
+  prior output in the dir in place.
+- **`--index`** (with `--out DIR`) — run no audits; rebuild `index.html` + the
+  synthesis lede over whatever reports already sit in `DIR`. Point several
+  `--only` runs at one `--out DIR`, then `--index` it, for a complete index with
+  no full re-sweep.
+- **`--force` / `--all`** — bypass the staleness cache below and run everything.
+
+**Staleness cache.** The two expensive LLM passes — `domain-drift` and
+`type-tightness` — are gated: while the repo is materially unchanged since their
+last run, they are skipped and their cached report is reused in the index, marked
+"unchanged since `<sha>`". `should_run` (`should_run.py`) owns the skip/run
+decision; `cache.py` gathers git state, reads/writes the per-repo record at
+`~/.cache/all-audits/<repo-key>.json`, and persists each gated report to a stable
+location that survives the run-dir TTL prune. Skip holds only when the tree is
+clean, fewer than `N` files (default 10) changed since the last-run SHA, no
+change touched `domain-drift`'s ground-truth (`CONTEXT.md`, `docs/adr/`), and the
+last run is within the time backstop (default 30 days).
 
 ## Run
 
