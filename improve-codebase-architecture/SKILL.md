@@ -38,10 +38,9 @@ Apply the **deletion test** to anything you suspect is shallow: would deleting i
 the scoped area and let confirmed hits pull attention the same way a hot spot
 does — leads, not verdicts:
 
-- **Complexity** — `uvx ruff check --select C901 --output-format json <scope>`.
-  A high-complexity function is a shallowness signal: the interface hides
-  branching the caller can't see, which is exactly what the deletion test
-  should be run against.
+- **Complexity** — `uvx radon cc --json --min C <scope>`. A block radon ranks
+  C or worse is a shallowness signal: the interface hides branching the caller
+  can't see, which is exactly what the deletion test should be run against.
 - **Coupling / import cycles** — `uvx import-linter`. If the target repo
   already declares a config (`.importlinter`, or `[tool.importlinter]` in
   `pyproject.toml`), run it as-is. If it doesn't, write a minimal temp config
@@ -51,8 +50,8 @@ does — leads, not verdicts:
   same as the report itself. A reported cycle or forbidden import is a
   tightly-coupled-seam candidate for the leaking-across-seams question above.
 
-Both feed the same candidate cards below — name the tool finding (`C901`, an
-import-linter cycle) in the card's **Problem**, the same way an organically
+Both feed the same candidate cards below — name the tool finding (a radon
+rank, an import-linter cycle) in the card's **Problem**, the same way an organically
 spotted seam would be; no separate report.
 
 ### 2. Present candidates as an HTML report
