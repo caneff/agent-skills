@@ -87,7 +87,10 @@ what the orchestrator collects into the index, regardless of which audit ran:
 - `count` — how many findings.
 - `report_path` — absolute path to the report's `.html` file. For the
   grouped-summary audits (`test-audit`, `comment-audit`) this is the grouped
-  summary page above, not a card-per-finding report.
+  summary page above, not a card-per-finding report. Reflect it on stdout as
+  `ALL_AUDITS_REPORT=<report_path>` on its own line — `run-audits.sh` greps
+  stdout logs for this marker to collect each report (see
+  [`HTML-REPORT.md`](HTML-REPORT.md)).
 - `log_path` — absolute path to `findings.jsonl`, for the audits that write
   one (the grouped-summary audits). Omit for audits that render a full
   card-per-finding HTML report instead.
