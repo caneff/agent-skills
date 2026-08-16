@@ -20,6 +20,21 @@
 # last run, they are skipped and their cached report is reused in the index.
 set -euo pipefail
 
+# report_path_from_log LOGFILE — pull the audit's report path out of its
+# stdout log. Prefers the machine-readable `ALL_AUDITS_REPORT=/abs/path`
+# marker (see all-audits/harness/HTML-REPORT.md); falls back to the legacy
+# bare single-line path grep for audits that haven't adopted the marker yet.
+report_path_from_log() {
+  local log="$1" found
+  found="$(grep -oP 'ALL_AUDITS_REPORT=\K/[^ ]+\.html' "$log" 2>/dev/null | head -1 || true)"
+  [ -n "$found" ] && { printf '%s\n' "$found"; return; }
+  grep -oE '/[^ ]+\.html' "$log" 2>/dev/null | head -1 || true
+}
+
+# Guard the rest so a test can `source` this file to reach the functions
+# above without triggering a live sweep.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+
 # --- Parse args --------------------------------------------------------------
 REPO=""
 OUT=""
@@ -176,7 +191,7 @@ fi
 # report folder out of the log path, and — if gated — persist it to the stable
 # per-repo cache and record this run, so a later sweep can skip and reuse it.
 for name in "${TO_RUN[@]}"; do
-  report="$(grep -oE '/[^ ]+\.html' "$OUTLOGS/$name.log" | head -1 || true)"
+  report="$(report_path_from_log "$OUTLOGS/$name.log")"
   if [ -n "$report" ] && [ -f "$report" ]; then
     replace_dir "$(dirname "$report")" "$COLLECTION/$name"
     if is_gated "$name"; then
@@ -269,3 +284,5 @@ echo "logs: $OUTLOGS"
 
 # Open the index (Linux). Swap for `open` on macOS.
 command -v xdg-open >/dev/null && xdg-open "$index" >/dev/null 2>&1 || true
+
+fi

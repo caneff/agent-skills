@@ -35,3 +35,37 @@ if compgen -G "$tmp/logs/*.log" >/dev/null; then
 fi
 
 echo "ok"
+
+# --- report_path_from_log (#391): marker line wins over a split path in prose,
+# and a legacy bare single-line path still works with no marker present. ---
+source "$SCRIPT"
+
+log="$tmp/split-with-marker.log"
+cat >"$log" <<'EOF'
+Artifacts in `/tmp/dead-code-1786905848/`:
+- `report.html` (opened) — grouped summary.
+ALL_AUDITS_REPORT=/tmp/dead-code-1786905848/report.html
+EOF
+got="$(report_path_from_log "$log")"
+[ "$got" = "/tmp/dead-code-1786905848/report.html" ] \
+  || fail "marker extraction: got '$got', want '/tmp/dead-code-1786905848/report.html'"
+
+log="$tmp/legacy-bare-path.log"
+cat >"$log" <<'EOF'
+some preamble
+report written to /tmp/ponytail-audit-123/report.html
+EOF
+got="$(report_path_from_log "$log")"
+[ "$got" = "/tmp/ponytail-audit-123/report.html" ] \
+  || fail "legacy fallback: got '$got', want '/tmp/ponytail-audit-123/report.html'"
+
+log="$tmp/competing-path-plus-marker.log"
+cat >"$log" <<'EOF'
+See /tmp/other-dir/unrelated.html for background info.
+ALL_AUDITS_REPORT=/tmp/dead-code-1786905848/report.html
+EOF
+got="$(report_path_from_log "$log")"
+[ "$got" = "/tmp/dead-code-1786905848/report.html" ] \
+  || fail "marker precedence: got '$got', want the marker's path, not the earlier stray .html"
+
+echo "ok (report_path_from_log)"
