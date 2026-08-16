@@ -14,6 +14,7 @@
 #   run-audits.sh [REPO] --only a,b      run just these audits (into the run dir)
 #   run-audits.sh [REPO] --index --out DIR   rebuild index only, over DIR's reports
 #   run-audits.sh [REPO] --force         bypass the staleness cache, run everything
+#   run-audits.sh --mutation a.py,b.py   select mutation targets only (stub, #401 runs them)
 #
 # The two expensive LLM passes (domain-drift, type-tightness) are gated by a
 # per-repo staleness cache: while the repo is materially unchanged since their
@@ -52,18 +53,40 @@ OUT=""
 ONLY=""
 INDEX_ONLY=0
 FORCE=0
+MUTATION=0
+MUTATION_LIST=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --out) OUT="$2"; shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
     --index) INDEX_ONLY=1; shift ;;
     --force|--all) FORCE=1; shift ;;
+    --mutation) MUTATION=1; MUTATION_LIST="$2"; shift 2 ;;
     -*) echo "unknown flag: $1" >&2; exit 2 ;;
     *) REPO="$1"; shift ;;
   esac
 done
 REPO="${REPO:-$PWD}"
 REPO="$(cd "$REPO" && pwd)"   # absolute
+
+# --mutation is its own short-circuit mode, mirroring --index: parse the
+# explicit target list, echo the selection observably, and return WITHOUT
+# running the twelve-audit claude sweep. Entirely offline — invokes no claude.
+# ponytail: the actual mutmut run is stubbed here (selection + echo only);
+# the real run lands in #401.
+if [ "$MUTATION" = 1 ]; then
+  MUTATION_TARGETS=()
+  IFS=',' read -r -a _mutation_raw <<< "$MUTATION_LIST"
+  for t in "${_mutation_raw[@]:-}"; do
+    t="${t#"${t%%[![:space:]]*}"}"   # trim leading whitespace
+    t="${t%"${t##*[![:space:]]}"}"   # trim trailing whitespace
+    [ -n "$t" ] && MUTATION_TARGETS+=("$t")
+  done
+  for t in "${MUTATION_TARGETS[@]:-}"; do
+    [ -n "$t" ] && printf 'mutation-target: %s\n' "$t"
+  done
+  exit 0
+fi
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 

@@ -83,3 +83,42 @@ echo "$got" | grep -qi 'ENTIRE repository' || fail "audit_prompt: missing whole-
 echo "$got" | grep -qi 'not a git diff' || fail "audit_prompt: missing not-a-diff marker; got: $got"
 
 echo "ok (audit_prompt)"
+
+# --- --mutation flag (#399): explicit-list selection, offline, no sweep ---
+
+out="$(bash "$SCRIPT" --mutation a.py,b.py 2>&1)" || fail "--mutation a.py,b.py exited non-zero"
+printf '%s\n' "$out" | grep -q '^mutation-target: a.py$' || fail "--mutation: missing target a.py; got: $out"
+printf '%s\n' "$out" | grep -q '^mutation-target: b.py$' || fail "--mutation: missing target b.py; got: $out"
+first_line="$(printf '%s\n' "$out" | grep -n '^mutation-target: a\.py$' | cut -d: -f1)"
+second_line="$(printf '%s\n' "$out" | grep -n '^mutation-target: b\.py$' | cut -d: -f1)"
+[ -n "$first_line" ] && [ -n "$second_line" ] && [ "$first_line" -lt "$second_line" ] \
+  || fail "--mutation: a.py must be emitted before b.py; got: $out"
+
+# --mutation must short-circuit before any audit sweep runs (mirrors --index test).
+mtmp="$(mktemp -d)"
+trap 'rm -rf "$mtmp"' RETURN 2>/dev/null || true
+AUDITS_NO_SYNTH=1 bash "$SCRIPT" --mutation a.py,b.py --out "$mtmp" >"$mtmp/run.log" 2>&1 \
+  || fail "--mutation --out exited non-zero; see: $(cat "$mtmp/run.log")"
+if compgen -G "$mtmp/logs/*.log" >/dev/null; then
+  fail "--mutation ran audits (found logs) — it must short-circuit before the sweep"
+fi
+rm -rf "$mtmp"
+
+echo "ok (--mutation basic selection)"
+
+out="$(bash "$SCRIPT" --mutation " a.py , , b.py " 2>&1)" || fail "--mutation with whitespace exited non-zero"
+lines="$(printf '%s\n' "$out" | grep '^mutation-target: ')"
+want="$(printf 'mutation-target: a.py\nmutation-target: b.py')"
+[ "$lines" = "$want" ] || fail "--mutation whitespace trim: got '$lines', want '$want'"
+
+echo "ok (--mutation whitespace trim + empty-drop)"
+
+out="$(bash "$SCRIPT" --mutation "" 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || fail "--mutation \"\" must exit 0, got $rc"
+printf '%s\n' "$out" | grep -q '^mutation-target: ' && fail "--mutation \"\" must emit zero targets; got: $out"
+
+out="$(bash "$SCRIPT" --mutation "  " 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || fail "--mutation \"  \" must exit 0, got $rc"
+printf '%s\n' "$out" | grep -q '^mutation-target: ' && fail "--mutation \"  \" must emit zero targets; got: $out"
+
+echo "ok (--mutation empty list is a no-op)"
