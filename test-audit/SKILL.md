@@ -247,11 +247,11 @@ just no longer this test's problem.
 
 The sweep can judge hundreds of tests; do not render one HTML card each. Write
 the full record to `findings.jsonl` and a grouped summary to `report.html`,
-following `~/.agents/skills/all-audits/FINDINGS-LOG.md` for both — the JSONL
-schema and the summary's grouped-overview shape. Write both to
+following `~/.agents/skills/all-audits/harness/findings-schema.md` for both —
+the JSONL schema and the summary's grouped-overview shape. Write both to
 `<tmpdir>/test-audit-<timestamp>/`, then open the summary and hand off its path
-as `~/.agents/skills/ponytail-audit/HTML-REPORT.md`'s asset-delivery section
-describes.
+as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s asset-delivery
+section describes.
 
 - **Log** — one JSONL line per judged test. `bucket` is `cut` / `rewrite` /
   `keep`. `category` is the smell that named it — `duplicate-coverage`,

@@ -36,6 +36,17 @@ for the facts: the summary is drawn from this file, never the reverse. Fields:
   tightened clause for a salvage). Omit for a plain keep.
 - `owner` (optional) — for a duplicate-coverage cut, the `file:line` of the
   stronger test that already owns the behavior.
+- `extra` (optional) — a flat object for signal specific to the auditing
+  skill, beyond the six fields every audit shares. Only the six above
+  (`bucket`, `file`, `line`, `category`, `summary`, `failure`) are fixed
+  across all audits; `extra` is where a skill puts its own axis without
+  bending the shared schema to fit it. Examples: dead-code audits carry
+  `{"confidence": "high"}`; a type-tightness audit carries
+  `{"suggested_type": "Sequence[int]", "severity": "blanket"}`; a domain-drift audit carries
+  `{"should_be": "Order", "source": "CONTEXT.md"}`; a duplication audit
+  carries `{"clone_tokens": 42}`; a mutation-testing audit carries
+  `{"mutant": "flip <", "killed": false, "survived": true}`. Omit entirely
+  when a skill has nothing extra to say.
 
 ```jsonl
 {"bucket":"cut","file":"layers/group_sum_test.py","line":111,"category":"duplicate-coverage","summary":"count=3 example subsumed by the arity hypothesis test","failure":"cannot fail for any reason line 261 doesn't already catch faster","owner":"layers/group_sum_test.py:261"}
@@ -45,9 +56,10 @@ for the facts: the summary is drawn from this file, never the reverse. Fields:
 
 ## The summary — `report.html`
 
-A single self-contained visual-teach page. Use `HTML-REPORT.md` (in this repo's
-`ponytail-audit/`) for the scaffold and asset delivery — same `vt-*` spine, same
-copy-assets-alongside step. The body differs: grouped overview, not cards.
+A single self-contained visual-teach page. Use `HTML-REPORT.md` (in this
+repo's `all-audits/harness/`) for the scaffold and asset delivery — same
+`vt-*` spine, same copy-assets-alongside step. The body differs: grouped
+overview, not cards.
 
 - **Header** — `vt-kicker` skill label, `<h1>` repo, `vt-lede` one-line verdict,
   then a `vt-metabar` with the count (`N judged · C cut · R rewrite · K kept`).
@@ -63,3 +75,24 @@ copy-assets-alongside step. The body differs: grouped overview, not cards.
   complete list.
 
 Do not list every finding here. The log is the list; the summary is the map.
+
+## The fan-out return struct
+
+Every audit subagent `all-audits` spawns returns the same shape — this is
+what the orchestrator collects into the index, regardless of which audit ran:
+
+- `audit` — the skill name.
+- `headline` — the one-line verdict from the report.
+- `count` — how many findings.
+- `report_path` — absolute path to the report's `.html` file. For the
+  grouped-summary audits (`test-audit`, `comment-audit`) this is the grouped
+  summary page above, not a card-per-finding report.
+- `log_path` — absolute path to `findings.jsonl`, for the audits that write
+  one (the grouped-summary audits). Omit for audits that render a full
+  card-per-finding HTML report instead.
+- `findings` — a short list, one entry per finding: `{ target, note }`, where
+  `target` is the repo-relative file path the finding is about and `note` is
+  a one-line summary.
+
+See `all-audits/SKILL.md` for how the orchestrator collects these into
+`index.html`.

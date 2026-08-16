@@ -47,19 +47,12 @@ this repo.
      the report's absolute path.
    - The default mode is report-only. Do **not** apply changes or open a PR, even
      if the skill offers it.
-   - Return this structure and nothing else:
-     - `audit` — the skill name.
-     - `headline` — the one-line verdict from the report.
-     - `count` — how many findings.
-     - `report_path` — absolute path to the report's `.html` file. For
-       `test-audit` and `comment-audit` this is the grouped summary page, not a
-       card-per-finding report.
-     - `log_path` — absolute path to `findings.jsonl`, for the audits that write
-       one (`test-audit`, `comment-audit`). Omit for the audits that render a
-       full HTML report. See `FINDINGS-LOG.md`.
-     - `findings` — a short list, one entry per finding: `{ target, note }`, where
-       `target` is the repo-relative file path the finding is about and `note` is
-       a one-line summary.
+   - Return the fan-out struct and nothing else — see
+     [`harness/findings-schema.md`](harness/findings-schema.md#the-fan-out-return-struct)
+     for the fields (`audit`/`headline`/`count`/`report_path`/`log_path`/
+     `findings[{target,note}]`). `report_path`/`log_path` behave differently
+     for `test-audit`/`comment-audit` (grouped summary + log) versus the
+     other four (a full card-per-finding HTML report, no log).
 
 3. **Collect the reports.** Each skill writes a self-contained folder (report plus
    its copied `vt-*` assets). Move each whole folder into
@@ -71,7 +64,7 @@ this repo.
 4. **Build `index.html` at the collection root.** Style it with the visual-teach
    base spine — copy `~/.agents/skills/visual-teach/assets/base/` into
    `<collection>/assets/base/` and link it, the same asset pattern the reports use
-   (see `~/.agents/skills/ponytail-audit/HTML-REPORT.md`). The page holds:
+   (see `~/.agents/skills/all-audits/harness/HTML-REPORT.md`). The page holds:
 
    - A **synthesized lede** (`vt-lede`) under the title: 2–3 sentences on the
      repo's overall state, drawn from reading all six reports — the shared verdict,
