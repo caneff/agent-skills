@@ -91,6 +91,43 @@ export function classifyReviewedOutcome(
   return { kind: "review-fail", failedAxes: combined.failedAxes, reasons };
 }
 
+// The retry-aware outcome (#389). Layered over ReviewedOutcome: `done` becomes
+// `accept`; `review-fail` splits by how many fix-up passes remain into `retry`
+// (run another fix-up pass) or `escalate` (hand to a human). `retry` and
+// `escalate` carry the same failed-axis detail a `review-fail` does, so the
+// escalation body still has the human's brief.
+export type RetryOutcome =
+  | { kind: "accept" }
+  | {
+      kind: "retry" | "escalate";
+      failedAxes: ReviewAxis[];
+      reasons: Partial<Record<ReviewAxis, string>>;
+    };
+
+// classifyReviewedOutcome plus retry awareness. `attempt` is how many fix-up
+// passes have already run when this review was produced — 0 on the first review,
+// 1 after the first fix-up, and so on. A pass accepts. A fail retries while
+// `attempt < cap`, else escalates. The re-review is the filter that enforces
+// "only retry what needs no human": a fail the fix-up pass cannot resolve fails
+// again and, at the cap, escalates. Reuses classifyReviewedOutcome so the
+// verdict→outcome fold stays in one home.
+export function classifyRetryOutcome(
+  spec: AxisVerdict,
+  standards: AxisVerdict,
+  detail: Partial<Record<ReviewAxis, string>>,
+  attempt: number,
+  cap: number
+): RetryOutcome {
+  const outcome = classifyReviewedOutcome(spec, standards, detail);
+  if (outcome.kind === "done") return { kind: "accept" };
+  const { failedAxes, reasons } = outcome;
+  return {
+    kind: attempt < cap ? "retry" : "escalate",
+    failedAxes,
+    reasons,
+  };
+}
+
 // Distinguish a broken-harness fault from a genuine review failure.
 //
 // A reviewer can fail two ways. Either the review RAN and the branch couldn't

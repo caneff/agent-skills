@@ -285,6 +285,8 @@ const ARC_ADDED_RENDERS = [
   // The sandbox plumbing that survived the bot-identity deletion, under its
   // honest name. sandbox-identity.mts is withdrawn below.
   ".sandcastle/sandbox-config.mts",
+  // The fix-up agent's prompt for the bounded review-fail retry (#389).
+  ".sandcastle/address-findings-prompt.md",
 ];
 
 // The mirror: files the template deliberately WITHDRAWS since the pin. Without
