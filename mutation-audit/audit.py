@@ -27,10 +27,14 @@ statuses (`timeout`, `suspicious`, `skipped`) aren't in the ticket's contract;
 they're counted towards neither killed_count nor survived_count and are
 otherwise ignored here.
 """
+import contextlib
+import io
 import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 
 _RESULT_LINE_RE = re.compile(
     r"^\s*(?P<module>[\w.]+)\.x_(?P<func>\w+?)__mutmut_(?P<id>\d+):\s*(?P<status>\w+)\s*$"
@@ -90,12 +94,13 @@ def suggest_candidates(paths, limit=5):
     """Suggest candidate modules to mutation-test from repo state.
 
     Pure: a list of repo-relative `.py` paths in, up to `limit` candidate
-    module paths out (sorted). A path is a candidate when it's a plain
-    module — not `__init__.py`, not a test file, not under a skip/fixture
-    dir — AND a sibling test file exists for it in `paths` (mutmut needs a
-    test suite to mutate against; a module with no tests is not a useful
-    target). Never errors, never falls back to "everything" — an empty
-    input or a repo with no testable module returns `[]`.
+    module paths out (sorted). `limit=None` means no cap — all candidates
+    are returned. A path is a candidate when it's a plain module — not
+    `__init__.py`, not a test file, not under a skip/fixture dir — AND a
+    sibling test file exists for it in `paths` (mutmut needs a test suite
+    to mutate against; a module with no tests is not a useful target).
+    Never errors, never falls back to "everything" — an empty input or a
+    repo with no testable module returns `[]`.
     """
     pathset = set(paths)
     candidates = []
@@ -171,6 +176,26 @@ def _selfcheck():
     limited = suggest_candidates(paths, limit=1)
     assert limited == ["pkg/gadget.py"], limited
 
+    tmpdir = tempfile.mkdtemp()
+    try:
+        pkg_dir = os.path.join(tmpdir, "pkg")
+        os.mkdir(pkg_dir)
+        pair_count = 7
+        for i in range(pair_count):
+            with open(os.path.join(pkg_dir, f"mod_{i}.py"), "w", encoding="utf-8") as f:
+                f.write("# module\n")
+            with open(os.path.join(pkg_dir, f"test_mod_{i}.py"), "w", encoding="utf-8") as f:
+                f.write("# test\n")
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            main(["audit.py", "--suggest", tmpdir])
+        lines = [line for line in buf.getvalue().splitlines() if line.strip()]
+        printed = [json.loads(line)["candidate"] for line in lines]
+        assert len(printed) == pair_count, printed  # --suggest must not cap output (#395)
+    finally:
+        shutil.rmtree(tmpdir)
+
     print("ok")
 
 
@@ -187,7 +212,7 @@ def main(argv):
                 if filename.endswith(".py"):
                     rel = os.path.relpath(os.path.join(dirpath, filename), root)
                     paths.append(rel.replace(os.sep, "/"))
-        for candidate in suggest_candidates(paths):
+        for candidate in suggest_candidates(paths, limit=None):
             print(json.dumps({"candidate": candidate}))
         return
     text = sys.stdin.read() if len(argv) < 2 else open(argv[1], encoding="utf-8").read()
