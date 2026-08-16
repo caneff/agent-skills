@@ -53,8 +53,8 @@ def parse_coverage(ruff_json, interrogate_text):
                 "file": item["filename"],
                 "line": item["location"]["row"],
                 "category": category,
-                "summary": item["message"],
-                "failure": f"{item['message']} ({item['code']}) at {item['filename']}:{item['location']['row']}",
+                "summary": f"{category.replace('-', ' ')} at {item['filename']}:{item['location']['row']}",
+                "failure": f"{item['message']} ({item['code']})",
                 "extra": {"coverage": coverage},
             }
         )
@@ -82,7 +82,8 @@ def _selfcheck():
     assert rows[0]["line"] == 9
     assert rows[0]["category"] == "missing-function-docstring"
     assert rows[0]["extra"]["coverage"] == 50.0
-    assert "Missing docstring" in rows[0]["summary"]
+    assert rows[0]["summary"] == "missing function docstring at sample.py:9"
+    assert "Missing docstring" in rows[0]["failure"]
 
     empty = parse_coverage(json.dumps([]), interrogate_text)
     assert empty == []
