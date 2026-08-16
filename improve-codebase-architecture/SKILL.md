@@ -34,6 +34,27 @@ Then spawn a sub-agent to walk the codebase. Don't follow rigid heuristics — e
 
 Apply the **deletion test** to anything you suspect is shallow: would deleting it concentrate complexity, or just move it? A "yes, concentrates" is the signal you want.
 
+**Mechanical signals.** Alongside the organic walk, run two tool passes over
+the scoped area and let confirmed hits pull attention the same way a hot spot
+does — leads, not verdicts:
+
+- **Complexity** — `uvx ruff check --select C901 --output-format json <scope>`.
+  A high-complexity function is a shallowness signal: the interface hides
+  branching the caller can't see, which is exactly what the deletion test
+  should be run against.
+- **Coupling / import cycles** — `uvx import-linter`. If the target repo
+  already declares a config (`.importlinter`, or `[tool.importlinter]` in
+  `pyproject.toml`), run it as-is. If it doesn't, write a minimal temp config
+  to the OS temp dir (root package = the top-level package directory, one
+  broad `independence` contract over its immediate subpackages), run
+  import-linter against that, then discard it — nothing lands in the repo,
+  same as the report itself. A reported cycle or forbidden import is a
+  tightly-coupled-seam candidate for the leaking-across-seams question above.
+
+Both feed the same candidate cards below — name the tool finding (`C901`, an
+import-linter cycle) in the card's **Problem**, the same way an organically
+spotted seam would be; no separate report.
+
 ### 2. Present candidates as an HTML report
 
 Write a self-contained HTML file to the OS temp directory so nothing lands in the repo. Resolve the temp dir from `$TMPDIR`, falling back to `/tmp` (or `%TEMP%` on Windows), and write to `<tmpdir>/architecture-review-<timestamp>.html` so each run gets a fresh file. Open it for the user — `xdg-open <path>` on Linux, `open <path>` on macOS, `start <path>` on Windows — and tell them the absolute path.

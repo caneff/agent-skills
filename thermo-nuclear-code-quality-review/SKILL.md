@@ -68,6 +68,26 @@ Apply the baseline prompt above, plus these explicit review rules:
    - If related updates can leave state half-applied, push for a more atomic structure.
    - Do not over-index on micro-optimizations, but do flag avoidable orchestration complexity that makes the implementation more brittle.
 
+## Mechanical Inputs
+
+Before the manual read-through, run two ruff passes over the changed files as
+lead-generation — not verdicts, the judgment above still decides what's worth
+a card:
+
+- `uvx ruff check --select C901 --output-format json <scope>` — cyclomatic
+  complexity. A hit is a candidate for "did the diff add branching
+  complexity where a better abstraction should exist?", not an automatic
+  finding — read the function before you flag it.
+- `uvx ruff check --select PLR0912,PLR0913,PLR0915,PLR0904 --output-format json <scope>` —
+  long-method / large-class bloaters (too many branches, arguments,
+  statements, or public methods). Feeds the file-size and decomposition
+  questions the same way a manually-spotted 1000-line file would.
+
+A confirmed hit becomes a normal card — name the rule (`C901`, `PLR0915`,
+etc.) in the one-sentence problem, and rank it in the existing severity order
+(Output Expectations) alongside every other finding. A mechanical hit doesn't
+jump the queue just because a tool found it first.
+
 ## Primary Review Questions
 
 For every meaningful change, ask:
