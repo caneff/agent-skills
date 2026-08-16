@@ -67,8 +67,9 @@ that matters — `net: -<N> lines, -<M> deps possible` — and each card its own
 line count. Nothing to cut: a one-card report whose verdict is `Lean already.
 Ship.`
 
-See [HTML-REPORT.md](HTML-REPORT.md) for the full scaffold, asset recipe, card
-anatomy, and the tag→badge palette.
+See [HTML-REPORT.md](HTML-REPORT.md) for the card anatomy and the tag→badge
+palette, and [all-audits/harness/HTML-REPORT.md](../all-audits/harness/HTML-REPORT.md)
+for the shared scaffold and asset-delivery recipe.
 
 ## Write the findings in plain language
 

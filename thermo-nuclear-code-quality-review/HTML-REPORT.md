@@ -6,38 +6,20 @@ The centrepiece of most findings is a **before/after code block**, not a graph �
 
 A committed sample lives at [`sample/code-quality-review-sample.html`](sample/code-quality-review-sample.html). Open it, toggle the theme, and read it as the reference for everything below.
 
-## Asset delivery — copy alongside at render time
+For the shared asset-delivery mechanism (copy the `vt-*` assets beside the
+report, scaffold rules, the `type="module"` warning, theme toggle) see
+[`all-audits/harness/HTML-REPORT.md`](../all-audits/harness/HTML-REPORT.md).
 
-The report renders to the OS temp dir, so it cannot relative-reference the skills folder. **Copy the assets the report uses next to the report at render time and link them relatively.** Do not inline them, and do not point at a remote host.
-
-visual-teach has **no aggregate bundle**: copy the always-linked Base spine, then one folder per component the report uses. Copy only what the report uses — never KaTeX:
-
-- `base/base.css` + `base/base.js` — the always-linked spine: tokens, the dark-mode layer, the page shell, and the theme toggle. Always copy both.
-- `components/callout/callout.css`, `components/chip/chip.css` (the severity `vt-pill`s), `components/code/code.{css,js}` (before/after blocks, copy buttons, Prism init), `components/diagram/diagram.{css,js}` (static `vt-flow` diagrams). Copy the folder for each component the report actually uses.
-- `mermaid.js` + `mermaid.min.js` — only if the report has a mermaid diagram. The bridge (`mermaid.js`) loads the full library (`mermaid.min.js`) from the file sitting next to it, so **copy both together**. Mermaid is separate from the `diagram` component; `diagram.js` only lays out the static `vt-flow` picture.
-- `prism/` grammars — only if code is highlighted. Copy `prism-core.min.js`, `prism-clike.min.js`, and the one grammar per language used (e.g. `prism-python.min.js`).
-
-Sketch of the render step:
-
-```sh
-tmp="${TMPDIR:-/tmp}/code-quality-review-$(date +%s)"
-mkdir -p "$tmp/assets/base" "$tmp/assets/components/code" "$tmp/assets/prism"
-cp visual-teach/assets/base/base.css visual-teach/assets/base/base.js "$tmp/assets/base/"
-cp -r visual-teach/assets/components/callout visual-teach/assets/components/chip "$tmp/assets/components/"
-cp -r visual-teach/assets/components/code visual-teach/assets/components/diagram "$tmp/assets/components/"
-cp visual-teach/assets/mermaid.js visual-teach/assets/mermaid.min.js "$tmp/assets/"   # only with a mermaid diagram
-cp visual-teach/assets/prism/prism-core.min.js "$tmp/assets/prism/"                    # only with highlighting
-# ...one grammar per language used...
-# write the report to "$tmp/report.html" linking href="assets/base/base.css" etc.
-```
-
-The report then references `assets/base/base.css`, `assets/components/code/code.css`, `assets/mermaid.js`, and so on. Because the bridge resolves `mermaid.min.js` relative to its own location, dropping both in the same folder is all it needs.
-
-> The committed sample is the one exception: it lives in the repo, so it links the vendored copies at `../../visual-teach/assets/base/…` and `../../visual-teach/assets/components/…` instead of copying them. Same relative-link model, fixed location.
+> The committed sample is the one exception to copy-at-render-time: it lives
+> in the repo, so it links the vendored copies at
+> `../../visual-teach/assets/base/…` and
+> `../../visual-teach/assets/components/…` instead of copying them. Same
+> relative-link model, fixed location.
 
 ## Scaffold
 
-`<!doctype html>` on line 1 is required. Link `base/base.css` and the component CSS files in the `<head>`; load the Prism grammars **before** `code.js` so its auto-init can highlight the code; add the `mermaid.js` bridge last.
+See the harness's "Scaffold basics" for the doctype/script-order rules — this
+skill's concrete scaffold, with its own title, kicker, and component set:
 
 ```html
 <!doctype html>
@@ -75,9 +57,8 @@ The report then references `assets/base/base.css`, `assets/components/code/code.
 </html>
 ```
 
-> **Never add `type="module"` to the `base.js`, `code.js`, or `diagram.js` tags.** They are plain scripts. `type="module"` makes the browser load them under CORS rules, which `file://` blocks — the toggle, copy buttons, and Prism then silently die. See the visual-teach cheatsheet.
-
-The theme toggle and dark mode need no code of yours: `base.css` holds the `--vt-*` token layer (light `:root`, a `prefers-color-scheme` dark block, and a `[data-theme]` override), and `base.js` injects a fixed toggle that flips `data-theme`. The default view follows the OS theme; the toggle forces either. Mermaid re-themes on the flip through the bridge.
+See the harness for the `type="module"` warning and the theme-toggle behavior
+— both apply here unchanged.
 
 ## Header
 
