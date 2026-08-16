@@ -49,11 +49,14 @@ still `dynamic`, not `unsure`, once the entrypoint evidence is concrete.
 
 1. **Scope tight.** Audit `$ARGUMENTS` if given, else the current working
    directory. Skip vendored, generated, and dependency trees (`node_modules`,
-   `dist`, `.venv`, build output, lockfiles) and any `worktrees/` tree.
+   `dist`, `.venv`, `vendor`, build output, lockfiles) and any `.git/` or
+   `worktrees/` tree.
 
 2. **Pass one — run vulture, parse it.**
    ```sh
-   uvx vulture <scope> > /tmp/vulture-out.txt
+   uvx vulture <scope> \
+     --exclude "*/node_modules/*,*/.venv/*,*/dist/*,*/vendor/*,*/.git/*,*/build/*,*/worktrees/*" \
+     > /tmp/vulture-out.txt
    python3 dead-code/audit.py /tmp/vulture-out.txt
    ```
    `audit.py`'s `parse_vulture(text) -> list[dict]` is the tested seam

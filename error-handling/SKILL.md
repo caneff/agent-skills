@@ -43,14 +43,17 @@ lists every code that fired, so pass two sees the full mechanical picture.
 
 1. **Scope tight.** Audit `$ARGUMENTS` if given, else the current working
    directory. Skip vendored, generated, and dependency trees (`node_modules`,
-   `dist`, `.venv`, build output, lockfiles) and any `worktrees/` tree.
+   `dist`, `.venv`, `vendor`, build output, lockfiles) and any `.git/` or
+   `worktrees/` tree.
 
 2. **Pass one — run ruff and bandit over the SAME absolute scope, parse
    them.**
    ```sh
    scope="$(realpath "${ARGUMENTS:-.}")"
    uvx ruff check --select BLE,TRY,B904,SIM105 --output-format json "$scope" > /tmp/ruff-out.json
-   uvx bandit -r "$scope" -f json -t B110,B112 > /tmp/bandit-out.json
+   uvx bandit -r "$scope" -f json -t B110,B112 -q \
+     --exclude "$scope/node_modules,$scope/.venv,$scope/dist,$scope/vendor,$scope/.git,$scope/build,$scope/worktrees" \
+     > /tmp/bandit-out.json
    python3 error-handling/audit.py /tmp/ruff-out.json /tmp/bandit-out.json
    ```
    Using the same absolute path for both tools matters: ruff's JSON always
