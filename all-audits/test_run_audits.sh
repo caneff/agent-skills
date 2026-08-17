@@ -132,15 +132,15 @@ echo "ok (--mutation empty list under AUDITS_NO_SYNTH=1 skips the pre-pass, no c
 # skipped_count), offline, no subprocess/claude. ---
 
 out="$(mutation_cap 3 a b c d e)"
-skipped="$(printf '%s\n' "$out" | grep '^SKIPPED:' | cut -d: -f2)"
-capped="$(printf '%s\n' "$out" | grep -v '^SKIPPED:')"
+skipped="$(printf '%s\n' "$out" | mutation_cap_skipped)"
+capped="$(printf '%s\n' "$out" | mutation_cap_targets)"
 [ "$skipped" = "2" ] || fail "mutation_cap: want skipped=2 for 5 candidates capped at 3, got '$skipped'"
 want="$(printf 'a\nb\nc')"
 [ "$capped" = "$want" ] || fail "mutation_cap: want capped='$want', got '$capped'"
 
 out="$(mutation_cap 5 a b c)"
-skipped="$(printf '%s\n' "$out" | grep '^SKIPPED:' | cut -d: -f2)"
-capped="$(printf '%s\n' "$out" | grep -v '^SKIPPED:')"
+skipped="$(printf '%s\n' "$out" | mutation_cap_skipped)"
+capped="$(printf '%s\n' "$out" | mutation_cap_targets)"
 [ "$skipped" = "0" ] || fail "mutation_cap: want skipped=0 when list <= N, got '$skipped'"
 want="$(printf 'a\nb\nc')"
 [ "$capped" = "$want" ] || fail "mutation_cap: list <= N must pass through unchanged, got '$capped'"
