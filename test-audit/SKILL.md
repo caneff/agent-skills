@@ -69,6 +69,28 @@ coverage there to lose, only-test or not, so it stays a Cut. The warning is
 for tests that *can* fail, just for the wrong reason or on the wrong
 grounds — a real signal aimed badly, which is worth salvaging.
 
+## Documented intent — the author already answered
+
+Before you Cut or Rewrite a test, read its own comments and docstring. When a
+test carries an in-code comment or docstring stating *why* it exists — "a
+worked example the property already owns," "a tripwire / deliberate
+change-detector," an ADR reference — that is a documented-intent signal, and
+evidence the test earns its place. A finding whose objection the test's own
+comment already answers is arguing with the author, not naming a defect.
+
+Default such a test to **Keep**. You may still disagree — but then surface it
+as the `documented-intent` category, "author declares intent — confirm before
+acting," naming the comment you would override, never a cold Cut or Rewrite.
+
+One carve-out: a comment cannot rescue a test that *structurally* cannot
+fail — one no input can turn red (assertion-free, or an escape-valve in every
+branch), the same limit the only-test warning draws. A tripwire that *does* go
+red when its guarded line changes is not this case; that is
+change-detection-by-design, which documented intent moves to Keep. Documented
+intent downgrades a judgment-call smell — duplicate coverage,
+change-detection-by-design, an equality the author calls deliberate; it does
+not resurrect coverage that was never there.
+
 ## Load-bearing — never touch
 
 Some files aren't tests, they're scaffolding the tests run on. Leave these
@@ -231,10 +253,11 @@ just no longer this test's problem.
    gets judged, never sampled.
 
 4. **Judge each into one bucket** against the one test, checking the
-   only-test warning before every Cut. For each Cut or Rewrite, write the
-   one-line concrete failure it names — "cannot fail when X breaks" or
-   "fails when Y is refactored though nothing broke." If you can't name it
-   concretely, you haven't finished judging — don't bucket it yet.
+   only-test warning and the documented-intent rule before every Cut or
+   Rewrite. For each Cut or Rewrite, write the one-line concrete failure it
+   names — "cannot fail when X breaks" or "fails when Y is refactored though
+   nothing broke." If you can't name it concretely, you haven't finished
+   judging — don't bucket it yet.
 
 5. **Write the findings log and render the summary — the default deliverable.**
    Write every judged Cut/Rewrite/Keep to `findings.jsonl`, then draw a grouped
@@ -257,8 +280,10 @@ section describes.
   `keep`. `category` is the smell that named it — `duplicate-coverage`,
   `mystery-guest`, `eager`, `sensitive-equality`, `name-mismatch`,
   `library-default`, `conditional-logic`, `flaky-by-construction`, `tautology`,
-  `interaction-only`. A rewrite carries `before`/`after`; a duplicate-coverage
-  cut carries `owner` (the stronger test's `file:line`).
+  `interaction-only`, `documented-intent`. A rewrite carries `before`/`after`;
+  a duplicate-coverage cut carries `owner` (the stronger test's `file:line`);
+  a `documented-intent` row carries the comment it defers to in
+  `extra.author_intent`.
 - **Summary** — the verdict, the `N judged · C cut · R rewrite · K kept`
   metabar, and the findings grouped by bucket then category with counts. No
   per-test cards. Call out the standouts in a `vt-callout`: the interaction-only
