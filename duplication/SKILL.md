@@ -65,8 +65,13 @@ carries jscpd's token count for a `token-clone` row; omit `extra` for
    duplicates.**
    - For each `token-clone` row, read both homes in context. Reassign
      `bucket` per the rules above when the clone is boilerplate or
-     intentionally-parallel test code, and rewrite `summary` / `failure` to
-     say why when you do.
+     intentionally-parallel test code. Then write `summary` / `failure`
+     from what THESE two cited sites actually share (or differ on) — quote
+     the shared line or name the concrete shape you just read (the function
+     both define, the field both decode), never a per-category template. A
+     rationale you could paste onto every `keep` without reading the code
+     isn't evidence; if you can't cite the real shared shape, you haven't
+     read the pair.
    - Separately, read through the scope for pairs jscpd's token matcher
      structurally cannot catch: the same source data (same field, same
      external shape) decoded, validated, or walked by differently-shaped
@@ -75,7 +80,8 @@ carries jscpd's token count for a `token-clone` row; omit `extra` for
      pair found, emit a new row: `bucket: consolidate` (or `unsure` if
      genuinely ambiguous), `category: semantic-duplicate`, `file`/`line` at
      the first home, `summary` and `failure` naming both homes by
-     `file:line` and the shared fact they both compute, no `extra`.
+     `file:line` and the shared fact they both compute — read from the two
+     sites, never a per-category template — no `extra`.
 
 4. **Write the findings log and render the summary — the default
    deliverable.** Write every judged row (both passes) to `findings.jsonl`,
