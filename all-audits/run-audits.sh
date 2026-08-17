@@ -14,7 +14,8 @@
 #   run-audits.sh [REPO] --only a,b      run just these audits (into the run dir)
 #   run-audits.sh [REPO] --index --out DIR   rebuild index only, over DIR's reports
 #   run-audits.sh [REPO] --force         bypass the staleness cache, run everything
-#   run-audits.sh --mutation a.py,b.py   select mutation targets only (stub, #401 runs them)
+#   run-audits.sh --mutation a.py,b.py   run mutation-audit on each module, one
+#                                         fresh git worktree at a time
 #
 # The two expensive LLM passes (domain-drift, type-tightness) are gated by a
 # per-repo staleness cache: while the repo is materially unchanged since their
@@ -63,6 +64,45 @@ mutation_prepass_prompt() {
 # repeating the grep/cut pair at every call site.
 mutation_cap_targets() { grep -v '^SKIPPED:' || true; }
 mutation_cap_skipped() { grep '^SKIPPED:' | cut -d: -f2; }
+
+replace_dir() {  # replace_dir SRC DEST — drop DEST's slot, refill it from SRC
+  rm -rf "$2"
+  cp -r "$1" "$2"
+}
+
+# module_slug MODULE — a module path (e.g. "foo/bar.py") becomes one safe,
+# flat collection-dir name ("foo_bar.py"). ponytail: slashes -> underscores is
+# the whole scheme — good enough to keep a nested module's report in a single
+# dir without collisions between sibling-named files in different dirs, and
+# simple enough to read back by eye in the collection listing.
+module_slug() { printf '%s\n' "$1" | tr '/' '_'; }
+
+# collect_module_report LOGFILE COLLECTION_DIR MODULE — THE hermetic seam
+# (#401): pull the report path out of a mutation-audit log via #391's path
+# contract, then copy its whole directory (report.html, findings.jsonl, any
+# assets/) into COLLECTION_DIR/<module_slug>/. No-ops (silently) if the log
+# names no report — the caller is expected to have already recorded a setup
+# failure in that case.
+collect_module_report() {
+  local log="$1" collection_dir="$2" module="$3" report
+  report="$(report_path_from_log "$log")"
+  [ -n "$report" ] && [ -f "$report" ] || return 0
+  replace_dir "$(dirname "$report")" "$collection_dir/$(module_slug "$module")"
+}
+
+# write_setup_failure_report COLLECTION_DIR MODULE REASON — when a module's
+# worktree or env setup fails before mutmut can even run, record that
+# explicitly instead of leaving an absent/empty report a later reader could
+# mistake for "ran clean, zero survivors." Minimal, self-contained, honors the
+# same collection/<module_slug>/ contract a real mutation-audit report uses.
+write_setup_failure_report() {
+  local collection_dir="$1" module="$2" reason="$3" dir
+  dir="$collection_dir/$(module_slug "$module")"
+  mkdir -p "$dir"
+  printf '<!doctype html><html><body><h1>mutation-audit setup failure</h1><p>Module: %s</p><p>Reason: %s</p></body></html>\n' \
+    "$module" "$reason" >"$dir/report.html"
+  printf '{"status":"setup_failure","module":"%s","reason":"%s"}\n' "$module" "$reason" >"$dir/findings.jsonl"
+}
 
 mutation_cap() {
   local n="$1"; shift
@@ -115,8 +155,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_FLAGS=(-p --dangerously-skip-permissions)
 
 # --mutation is its own short-circuit mode, mirroring --index: parse the
-# target list, echo the selection observably, and return WITHOUT running the
-# twelve-audit claude sweep.
+# target list, echo the selection observably, and run each selected module
+# through mutation-audit in its own disposable git worktree — WITHOUT running
+# the twelve-audit claude sweep.
 #
 # An explicit list (--mutation a.py,b.py) bypasses BOTH the pre-pass and the
 # cap below — that's the current behavior, entirely offline.
@@ -129,8 +170,11 @@ CLAUDE_FLAGS=(-p --dangerously-skip-permissions)
 # candidate list instead of calling claude, so the cap/skip-line behavior is
 # testable offline without a subprocess.
 #
-# ponytail: the actual mutmut run is stubbed here (selection + echo only);
-# the real run lands in #401.
+# MUTATION_DRY_RUN=1 stops right after the selection echo — no worktree, no
+# claude — the same offline seam #400 gave the empty-list case via
+# AUDITS_NO_SYNTH=1. The test suite sets it so selection stays hermetic; the
+# per-module worktree/mutmut lifecycle itself is manual/integration-verified
+# (non-hermetic, environment-dependent), per the ticket.
 if [ "$MUTATION" = 1 ]; then
   MUTATION_TARGETS=()
   IFS=',' read -r -a _mutation_raw <<< "$MUTATION_LIST"
@@ -140,38 +184,152 @@ if [ "$MUTATION" = 1 ]; then
     [ -n "$t" ] && MUTATION_TARGETS+=("$t")
   done
 
+  FINAL_TARGETS=()
+  skipped=0
   if [ "${#MUTATION_TARGETS[@]}" -gt 0 ]; then
     # Explicit list: bypass the pre-pass and the cap entirely.
-    for t in "${MUTATION_TARGETS[@]}"; do
-      printf 'mutation-target: %s\n' "$t"
-    done
+    FINAL_TARGETS=("${MUTATION_TARGETS[@]}")
+  else
+    # No explicit list: auto-select the candidates.
+    CANDIDATES=()
+    if [ -n "${MUTATION_CANDIDATES:-}" ]; then
+      while IFS= read -r line; do
+        [ -n "$line" ] && CANDIDATES+=("$line")
+      done <<< "$MUTATION_CANDIDATES"
+    elif [ "${AUDITS_NO_SYNTH:-0}" != 1 ]; then
+      prepass_out="$(claude "${CLAUDE_FLAGS[@]}" "$(mutation_prepass_prompt "$REPO")" 2>/dev/null || true)"
+      while IFS= read -r line; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [ -n "$line" ] && CANDIDATES+=("$line")
+      done <<< "$prepass_out"
+    fi
+    # else: AUDITS_NO_SYNTH=1 and no injection — CANDIDATES stays empty, no
+    # claude invoked.
+
+    MUTATION_MAX_N="${MUTATION_MAX:-10}"
+    cap_out="$(mutation_cap "$MUTATION_MAX_N" "${CANDIDATES[@]:-}")"
+    skipped="$(printf '%s\n' "$cap_out" | mutation_cap_skipped)"
+    while IFS= read -r line; do
+      [ -n "$line" ] && FINAL_TARGETS+=("$line")
+    done < <(printf '%s\n' "$cap_out" | mutation_cap_targets)
+  fi
+
+  for t in "${FINAL_TARGETS[@]:-}"; do
+    [ -n "$t" ] && printf 'mutation-target: %s\n' "$t"
+  done
+  [ "${skipped:-0}" -gt 0 ] && printf '… %s more modules skipped (raise MUTATION_MAX to include them)\n' "$skipped"
+
+  if [ "${MUTATION_DRY_RUN:-0}" = 1 ]; then
     exit 0
   fi
 
-  # No explicit list: auto-select the candidates.
-  CANDIDATES=()
-  if [ -n "${MUTATION_CANDIDATES:-}" ]; then
-    while IFS= read -r line; do
-      [ -n "$line" ] && CANDIDATES+=("$line")
-    done <<< "$MUTATION_CANDIDATES"
-  elif [ "${AUDITS_NO_SYNTH:-0}" != 1 ]; then
-    prepass_out="$(claude "${CLAUDE_FLAGS[@]}" "$(mutation_prepass_prompt "$REPO")" 2>/dev/null || true)"
-    while IFS= read -r line; do
-      line="${line#"${line%%[![:space:]]*}"}"
-      line="${line%"${line##*[![:space:]]}"}"
-      [ -n "$line" ] && CANDIDATES+=("$line")
-    done <<< "$prepass_out"
+  if [ "${#FINAL_TARGETS[@]}" -eq 0 ]; then
+    exit 0
   fi
-  # else: AUDITS_NO_SYNTH=1 and no injection — CANDIDATES stays empty, no
-  # claude invoked.
 
-  MUTATION_MAX_N="${MUTATION_MAX:-10}"
-  cap_out="$(mutation_cap "$MUTATION_MAX_N" "${CANDIDATES[@]:-}")"
-  skipped="$(printf '%s\n' "$cap_out" | mutation_cap_skipped)"
-  while IFS= read -r line; do
-    [ -n "$line" ] && printf 'mutation-target: %s\n' "$line"
-  done < <(printf '%s\n' "$cap_out" | mutation_cap_targets)
-  [ "${skipped:-0}" -gt 0 ] && printf '… %s more modules skipped (raise MUTATION_MAX to include them)\n' "$skipped"
+  # --- Real per-module run: sequential, one worktree live at a time --------
+  BASE="${XDG_CACHE_HOME:-$HOME/.cache}/all-audits"
+  mkdir -p "$BASE"
+  if [ -n "$OUT" ]; then
+    RUN="$(mkdir -p "$OUT" && cd "$OUT" && pwd)"
+  else
+    RUN="$BASE/run-$(date +%Y%m%d-%H%M%S)"
+  fi
+  export TMPDIR="$RUN"        # relocate mutation-audit reports off fixed /tmp paths
+  OUTLOGS="$RUN/logs"
+  COLLECTION="$RUN/collection"
+  WORKTREES="$RUN/worktrees"
+  mkdir -p "$OUTLOGS" "$COLLECTION" "$WORKTREES"
+  echo "run dir: $RUN"
+  echo "collecting under: $COLLECTION"
+  echo
+
+  # Backstop: if the script crashes mid-loop, sweep any worktree dirs still
+  # registered under $WORKTREES on exit. The per-module cleanup below is the
+  # normal path; this only catches an abnormal exit between iterations.
+  mutation_worktrees_cleanup() {
+    local d
+    for d in "$WORKTREES"/*/; do
+      [ -d "$d" ] || continue
+      git -C "$REPO" worktree remove --force "$d" >/dev/null 2>&1 || true
+    done
+    git -C "$REPO" worktree prune >/dev/null 2>&1 || true
+  }
+  trap mutation_worktrees_cleanup EXIT
+
+  # cleanup_worktree WT — remove one worktree and prune. Called explicitly on
+  # every exit path of run_mutation_module below, NOT via `trap ... RETURN` —
+  # bash's RETURN trap fires on every subsequent function return anywhere in
+  # the shell (not just the function that set it), so a trap set here would
+  # misfire on later helper calls (e.g. module_slug) with stale/unset locals
+  # under `set -u`, aborting the whole sweep. Explicit calls avoid that.
+  cleanup_worktree() {
+    git -C "$REPO" worktree remove --force "$1" >/dev/null 2>&1 || true
+    git -C "$REPO" worktree prune >/dev/null 2>&1 || true
+  }
+
+  # run_mutation_module MODULE — one module's full lifecycle: fresh worktree,
+  # env resolution, `/mutation-audit <module>` scoped to that one module, copy
+  # the report into the collection, then always tear the worktree down
+  # (success or failure) before returning. Wrapped in `|| true` at every call
+  # site's loop so one module's unexpected failure (e.g. a `cp` error inside
+  # collect_module_report, under `set -e`) can't abort the rest of the sweep.
+  run_mutation_module() {
+    local module="$1" slug wt log
+    slug="$(module_slug "$module")"
+    wt="$WORKTREES/$slug"
+    log="$OUTLOGS/mutation-$slug.log"
+
+    echo "[mutation:$module] creating worktree"
+    if ! git -C "$REPO" worktree add --detach "$wt" HEAD >"$log" 2>&1; then
+      echo "[mutation:$module] worktree creation failed — see $log" >&2
+      write_setup_failure_report "$COLLECTION" "$module" "git worktree add failed"
+      cleanup_worktree "$wt"
+      return 0
+    fi
+
+    # ponytail: env-resolution heuristic ceiling — only the uv-managed case
+    # (uv.lock / pyproject.toml -> `uv sync`) is handled. A repo on another
+    # toolchain (poetry, requirements.txt-only, non-Python) has no resolution
+    # path here, so it's reported as an unresolved env rather than silently
+    # skipped — never let an unrecognized toolchain fall through to mutmut
+    # running against an unresolved env. Widen this when a new toolchain
+    # needs support.
+    if [ -f "$wt/uv.lock" ] || [ -f "$wt/pyproject.toml" ]; then
+      echo "[mutation:$module] resolving env (uv sync)"
+      if ! (cd "$wt" && uv sync) >>"$log" 2>&1; then
+        echo "[mutation:$module] env resolution failed — see $log" >&2
+        write_setup_failure_report "$COLLECTION" "$module" "uv sync failed"
+        cleanup_worktree "$wt"
+        return 0
+      fi
+    else
+      echo "[mutation:$module] no recognized env manifest (uv.lock/pyproject.toml) — see $log" >&2
+      write_setup_failure_report "$COLLECTION" "$module" "no recognized env manifest (uv.lock/pyproject.toml); env resolution heuristic ceiling"
+      cleanup_worktree "$wt"
+      return 0
+    fi
+
+    echo "[mutation:$module] running /mutation-audit $module"
+    (cd "$wt" && claude "${CLAUDE_FLAGS[@]}" "$(printf '/mutation-audit %s\n' "$module")") >>"$log" 2>&1 || true
+
+    collect_module_report "$log" "$COLLECTION" "$module" || true
+    if [ ! -d "$COLLECTION/$slug" ]; then
+      echo "[mutation:$module] no report found — see $log" >&2
+      write_setup_failure_report "$COLLECTION" "$module" "mutation-audit produced no report"
+    fi
+    cleanup_worktree "$wt"
+    echo "[mutation:$module] done"
+  }
+
+  for t in "${FINAL_TARGETS[@]:-}"; do
+    [ -n "$t" ] || continue
+    run_mutation_module "$t" || true
+  done
+
+  echo
+  echo "collection: $COLLECTION"
   exit 0
 fi
 
@@ -236,11 +394,6 @@ echo "run dir: $RUN"
 echo "collecting under: $COLLECTION"
 echo "repo: $REPO"
 echo
-
-replace_dir() {  # replace_dir SRC DEST — drop DEST's slot, refill it from SRC
-  rm -rf "$2"
-  cp -r "$1" "$2"
-}
 
 run_one() {
   local name="$1"

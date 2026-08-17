@@ -86,7 +86,7 @@ echo "ok (audit_prompt)"
 
 # --- --mutation flag (#399): explicit-list selection, offline, no sweep ---
 
-out="$(bash "$SCRIPT" --mutation a.py,b.py 2>&1)" || fail "--mutation a.py,b.py exited non-zero"
+out="$(MUTATION_DRY_RUN=1 bash "$SCRIPT" --mutation a.py,b.py 2>&1)" || fail "--mutation a.py,b.py exited non-zero"
 printf '%s\n' "$out" | grep -q '^mutation-target: a.py$' || fail "--mutation: missing target a.py; got: $out"
 printf '%s\n' "$out" | grep -q '^mutation-target: b.py$' || fail "--mutation: missing target b.py; got: $out"
 first_line="$(printf '%s\n' "$out" | grep -n '^mutation-target: a\.py$' | cut -d: -f1)"
@@ -97,7 +97,7 @@ second_line="$(printf '%s\n' "$out" | grep -n '^mutation-target: b\.py$' | cut -
 # --mutation must short-circuit before any audit sweep runs (mirrors --index test).
 mtmp="$(mktemp -d)"
 trap 'rm -rf "$mtmp"' RETURN 2>/dev/null || true
-AUDITS_NO_SYNTH=1 bash "$SCRIPT" --mutation a.py,b.py --out "$mtmp" >"$mtmp/run.log" 2>&1 \
+MUTATION_DRY_RUN=1 AUDITS_NO_SYNTH=1 bash "$SCRIPT" --mutation a.py,b.py --out "$mtmp" >"$mtmp/run.log" 2>&1 \
   || fail "--mutation --out exited non-zero; see: $(cat "$mtmp/run.log")"
 if compgen -G "$mtmp/logs/*.log" >/dev/null; then
   fail "--mutation ran audits (found logs) — it must short-circuit before the sweep"
@@ -106,7 +106,7 @@ rm -rf "$mtmp"
 
 echo "ok (--mutation basic selection)"
 
-out="$(bash "$SCRIPT" --mutation " a.py , , b.py " 2>&1)" || fail "--mutation with whitespace exited non-zero"
+out="$(MUTATION_DRY_RUN=1 bash "$SCRIPT" --mutation " a.py , , b.py " 2>&1)" || fail "--mutation with whitespace exited non-zero"
 lines="$(printf '%s\n' "$out" | grep '^mutation-target: ')"
 want="$(printf 'mutation-target: a.py\nmutation-target: b.py')"
 [ "$lines" = "$want" ] || fail "--mutation whitespace trim: got '$lines', want '$want'"
@@ -118,11 +118,11 @@ echo "ok (--mutation whitespace trim + empty-drop)"
 # pre-pass itself is skipped (mirrors the synthesis-pass gate), so empty list
 # + AUDITS_NO_SYNTH=1 = no pre-pass = zero targets, and no `claude` ever runs
 # — keeping this suite hermetic.
-out="$(AUDITS_NO_SYNTH=1 bash "$SCRIPT" --mutation "" 2>&1)"; rc=$?
+out="$(MUTATION_DRY_RUN=1 AUDITS_NO_SYNTH=1 bash "$SCRIPT" --mutation "" 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] || fail "--mutation \"\" (AUDITS_NO_SYNTH=1) must exit 0, got $rc"
 printf '%s\n' "$out" | grep -q '^mutation-target: ' && fail "--mutation \"\" under AUDITS_NO_SYNTH=1 must emit zero targets; got: $out"
 
-out="$(AUDITS_NO_SYNTH=1 bash "$SCRIPT" --mutation "  " 2>&1)"; rc=$?
+out="$(MUTATION_DRY_RUN=1 AUDITS_NO_SYNTH=1 bash "$SCRIPT" --mutation "  " 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] || fail "--mutation \"  \" (AUDITS_NO_SYNTH=1) must exit 0, got $rc"
 printf '%s\n' "$out" | grep -q '^mutation-target: ' && fail "--mutation \"  \" under AUDITS_NO_SYNTH=1 must emit zero targets; got: $out"
 
@@ -153,14 +153,14 @@ echo "ok (mutation_cap pure function)"
 
 # > N candidates: capped to default N=10, visible skip line naming the count.
 twelve="$(for i in $(seq 1 12); do printf 'm%d.py\n' "$i"; done)"
-out="$(MUTATION_CANDIDATES="$twelve" bash "$SCRIPT" --mutation 2>&1)"
+out="$(MUTATION_DRY_RUN=1 MUTATION_CANDIDATES="$twelve" bash "$SCRIPT" --mutation 2>&1)"
 count="$(printf '%s\n' "$out" | grep -c '^mutation-target: ')"
 [ "$count" -eq 10 ] || fail "--mutation auto-select: want 10 capped targets, got $count; out: $out"
 printf '%s\n' "$out" | grep -q '2 more modules skipped (raise MUTATION_MAX to include them)' \
   || fail "--mutation auto-select: missing visible skip line; got: $out"
 
 # <= N candidates: unchanged, no skip line.
-out="$(MUTATION_CANDIDATES=$'m1.py\nm2.py' bash "$SCRIPT" --mutation 2>&1)"
+out="$(MUTATION_DRY_RUN=1 MUTATION_CANDIDATES=$'m1.py\nm2.py' bash "$SCRIPT" --mutation 2>&1)"
 count="$(printf '%s\n' "$out" | grep -c '^mutation-target: ')"
 [ "$count" -eq 2 ] || fail "--mutation auto-select: want 2 targets for a 2-candidate list, got $count; out: $out"
 printf '%s\n' "$out" | grep -q 'more modules skipped' \
@@ -169,7 +169,7 @@ printf '%s\n' "$out" | grep -q 'more modules skipped' \
 echo "ok (--mutation auto-select pre-pass: cap truncates, skip line, no line under cap)"
 
 # MUTATION_MAX overrides the default N=10.
-out="$(MUTATION_CANDIDATES=$'m1.py\nm2.py\nm3.py' MUTATION_MAX=2 bash "$SCRIPT" --mutation 2>&1)"
+out="$(MUTATION_DRY_RUN=1 MUTATION_CANDIDATES=$'m1.py\nm2.py\nm3.py' MUTATION_MAX=2 bash "$SCRIPT" --mutation 2>&1)"
 count="$(printf '%s\n' "$out" | grep -c '^mutation-target: ')"
 [ "$count" -eq 2 ] || fail "MUTATION_MAX=2: want 2 targets, got $count; out: $out"
 printf '%s\n' "$out" | grep -q '1 more modules skipped (raise MUTATION_MAX to include them)' \
@@ -196,3 +196,43 @@ OPEN_SENTINEL="$gtmp/opened" PATH="$gtmp/bin:$PATH" \
 [ -f "$gtmp/opened" ] && fail "xdg-open fired despite AUDITS_NO_OPEN=1"
 
 echo "ok (--index honors AUDITS_NO_OPEN)"
+
+# --- module_slug (#401): a module path becomes one safe, collision-free
+# collection dir name — no nested dirs, no traversal. ---
+[ "$(module_slug 'foo/bar.py')" = "foo_bar.py" ] || fail "module_slug: nested path; got '$(module_slug 'foo/bar.py')'"
+[ "$(module_slug 'bar.py')" = "bar.py" ] || fail "module_slug: bare path; got '$(module_slug 'bar.py')'"
+[ "$(module_slug 'a/b/c.py')" = "a_b_c.py" ] || fail "module_slug: deep path; got '$(module_slug 'a/b/c.py')'"
+
+echo "ok (module_slug)"
+
+# --- collect_module_report (#401, THE hermetic seam): given a worktree
+# containing a mutation report, it lands at collection/<module>/ with its
+# assets, honoring #391's path contract — both the ALL_AUDITS_REPORT= marker
+# form and the legacy bare-path form. Offline, no claude, no real worktree. ---
+ctmp="$(mktemp -d)"
+trap 'rm -rf "$tmp" "$gtmp" "$ctmp"' EXIT
+
+# Marker form.
+wt="$ctmp/fake-worktree-marker"
+mkdir -p "$wt/assets"
+echo '<html>report</html>' >"$wt/report.html"
+echo '{"finding":1}' >"$wt/findings.jsonl"
+echo 'marker-asset' >"$wt/assets/base.css"
+log="$ctmp/marker.log"
+printf 'some prose\nALL_AUDITS_REPORT=%s/report.html\n' "$wt" >"$log"
+coll="$ctmp/collection"
+mkdir -p "$coll"
+collect_module_report "$log" "$coll" "foo/bar.py"
+[ -f "$coll/foo_bar.py/report.html" ] || fail "collect_module_report (marker): report.html missing"
+[ -f "$coll/foo_bar.py/findings.jsonl" ] || fail "collect_module_report (marker): findings.jsonl missing"
+[ -f "$coll/foo_bar.py/assets/base.css" ] || fail "collect_module_report (marker): assets not carried"
+
+# Bare-path (legacy) form — same worktree, different module name to avoid
+# clobbering the prior assertion's directory.
+log2="$ctmp/bare.log"
+printf 'report written to %s/report.html\n' "$wt" >"$log2"
+collect_module_report "$log2" "$coll" "baz.py"
+[ -f "$coll/baz.py/report.html" ] || fail "collect_module_report (bare path): report.html missing"
+[ -f "$coll/baz.py/findings.jsonl" ] || fail "collect_module_report (bare path): findings.jsonl missing"
+
+echo "ok (collect_module_report)"
