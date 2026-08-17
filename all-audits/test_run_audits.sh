@@ -236,3 +236,78 @@ collect_module_report "$log2" "$coll" "baz.py"
 [ -f "$coll/baz.py/findings.jsonl" ] || fail "collect_module_report (bare path): findings.jsonl missing"
 
 echo "ok (collect_module_report)"
+
+# --- mutation sub-index + main-index mutation row (#402): with mutation
+# report dirs present in the collection, the index build renders exactly one
+# `mutation` row on the main index (linking to mutation/index.html, not to
+# any single module) plus a mutation/index.html sub-index listing one row
+# per module with killed/total, survivor count, and a working relative link
+# to that module's report.html. No mutation reports -> no row, no sub-index.
+# Offline throughout (AUDITS_NO_SYNTH=1, AUDITS_NO_OPEN=1, --index runs no
+# audits and no claude).
+mutmp="$(mktemp -d)"
+trap 'rm -rf "$tmp" "$gtmp" "$ctmp" "$mutmp"' EXIT
+
+for name in dead-code test-audit; do
+  mkdir -p "$mutmp/collection/$name"
+  echo "<html><body>$name report</body></html>" >"$mutmp/collection/$name/report.html"
+done
+
+mkdir -p "$mutmp/collection/solver.py"
+echo '<html><body>solver report</body></html>' >"$mutmp/collection/solver.py/report.html"
+cat >"$mutmp/collection/solver.py/findings.jsonl" <<'EOF'
+{"bucket": "rewrite", "file": "solver.py", "line": 12, "category": "surviving-mutant", "summary": "s1", "failure": "f1", "extra": {"mutant": "solver.x__mutmut_1", "killed": false, "survived": true, "killed_count": 8, "survived_count": 2, "no_coverage_count": 0}}
+EOF
+
+mkdir -p "$mutmp/collection/oracle.py"
+echo '<html><body>oracle report</body></html>' >"$mutmp/collection/oracle.py/report.html"
+cat >"$mutmp/collection/oracle.py/findings.jsonl" <<'EOF'
+{"bucket": "rewrite", "file": "oracle.py", "line": 3, "category": "surviving-mutant", "summary": "s2", "failure": "f2", "extra": {"mutant": "oracle.y__mutmut_1", "killed": false, "survived": true, "killed_count": 5, "survived_count": 1, "no_coverage_count": 2}}
+EOF
+
+AUDITS_NO_OPEN=1 AUDITS_NO_SYNTH=1 bash "$SCRIPT" --index --out "$mutmp" >"$mutmp/run.log" 2>&1 \
+  || fail "--index (with mutation dirs) exited non-zero; see: $(cat "$mutmp/run.log")"
+
+muindex="$mutmp/collection/index.html"
+[ -f "$muindex" ] || fail "index.html was not built at $muindex"
+
+mutation_rows="$(grep -c '<td>mutation</td>' "$muindex" || true)"
+[ "$mutation_rows" = "1" ] || fail "main index must have exactly ONE mutation row, got $mutation_rows"
+grep -q 'href="mutation/index.html"' "$muindex" || fail "main index mutation row must link to mutation/index.html"
+grep -q 'href="solver.py/report.html"' "$muindex" && fail "main index must not link directly to a single module's report"
+
+subindex="$mutmp/collection/mutation/index.html"
+[ -f "$subindex" ] || fail "mutation/index.html sub-index was not built at $subindex"
+grep -q 'solver.py' "$subindex" || fail "sub-index missing solver.py row"
+grep -q 'oracle.py' "$subindex" || fail "sub-index missing oracle.py row"
+grep -q 'href="../solver.py/report.html"' "$subindex" || fail "sub-index missing working link to solver.py's report.html"
+grep -q 'href="../oracle.py/report.html"' "$subindex" || fail "sub-index missing working link to oracle.py's report.html"
+grep -q '8/10' "$subindex" || fail "sub-index missing solver.py killed/total tally (8/10)"
+grep -q '5/8' "$subindex" || fail "sub-index missing oracle.py killed/total tally (5/8)"
+grep -q '../assets/base/base.css' "$subindex" || fail "sub-index must reuse the base spine (relative assets path)"
+
+# --index must not have invoked any audit for the mutation-index build either.
+if compgen -G "$mutmp/logs/*.log" >/dev/null; then
+  fail "--index (mutation) ran audits (found logs) — it must rebuild over existing reports only"
+fi
+
+echo "ok (mutation sub-index + single main-index mutation row)"
+
+# --- negative: no mutation report dirs -> no mutation row, no sub-index ---
+negtmp="$(mktemp -d)"
+trap 'rm -rf "$tmp" "$gtmp" "$ctmp" "$mutmp" "$negtmp"' EXIT
+
+for name in dead-code test-audit; do
+  mkdir -p "$negtmp/collection/$name"
+  echo "<html><body>$name report</body></html>" >"$negtmp/collection/$name/report.html"
+done
+
+AUDITS_NO_OPEN=1 AUDITS_NO_SYNTH=1 bash "$SCRIPT" --index --out "$negtmp" >"$negtmp/run.log" 2>&1 \
+  || fail "--index (no mutation dirs) exited non-zero; see: $(cat "$negtmp/run.log")"
+
+negindex="$negtmp/collection/index.html"
+[ -f "$negindex" ] || fail "index.html was not built at $negindex"
+grep -q '<td>mutation</td>' "$negindex" && fail "no mutation reports present but main index has a mutation row"
+[ -e "$negtmp/collection/mutation" ] && fail "no mutation reports present but mutation/ sub-index was created"
+
+echo "ok (no mutation reports -> no row, no sub-index)"
