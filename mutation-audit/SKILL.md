@@ -5,9 +5,12 @@ disable-model-invocation: true
 argument-hint: "<target-module.py>"
 ---
 
-Run mutmut against one target module and report which mutants survive — a
-surviving mutant is proof that some test exercises that code but doesn't
-assert hard enough to notice the behavior changed. This is expensive (it
+Run mutmut against one target module and report which mutants survive. A
+surviving mutant means one of two things: a test runs that line but doesn't
+assert hard enough to notice the behavior changed (`rewrite`), or no test
+reaches that line at all (`no-coverage`). mutmut runs every mutant against
+the whole suite whether or not a test covers the mutated line, so a survivor
+is never proof of coverage. This is expensive (it
 reruns the test suite once per mutant) and only meaningful pointed at a
 single module you're actually worried about, so it is **never** part of
 `all-audits`' default sweep — it runs only when asked for by name, and it
@@ -15,20 +18,30 @@ never mutates a whole repo.
 
 **Two passes**, mirroring `dead-code`. `audit.py` in this skill's directory
 is pass one — mechanical: run mutmut, parse `mutmut results`' stable text
-format into candidate rows. It never decides `rewrite` vs `cut` beyond the
-default, and it never knows the real source line — `mutmut show <mutant>`
-diffs the isolated mutant, not the real file, so the line comes from reading
-the target module. Pass two below does that reading and finalizes each row.
+format into candidate rows. It reads the bucket straight off mutmut's status
+— `survived` -> `rewrite`, `no tests` -> `no-coverage` — but never upgrades a
+`rewrite` to `cut`, and never knows the real source line (`mutmut show
+<mutant>` diffs the isolated mutant, not the real file, so the line comes
+from reading the target module). Pass two below does that reading and
+finalizes each row.
 
-## Buckets — test-audit vocabulary
+## Buckets
 
-Findings use `test-audit`'s buckets so they're ingestible by a later
-`test-audit` grill (see `test-audit/SKILL.md` for the full definitions):
+A survivor **with** a covering test gets a `test-audit` verdict — `rewrite`
+or `cut` — ingestible by a later `test-audit` grill (see `test-audit/SKILL.md`
+for the full definitions). A survivor with **no** covering test is
+`no-coverage` — mutation-audit's own bucket, because there is no existing
+test for `test-audit` to judge; the fix is to write one.
 
-- **`rewrite`** — the default. A test already exercises the mutated code
-  path (that's *why* mutmut could run a mutant there at all) but doesn't
-  assert hard enough to catch the mutation. Give a concrete `before`/`after`:
-  the test as it stands, and the added/changed assertion that would kill it.
+- **`rewrite`** — the default for a covered survivor. A test runs the
+  mutated line but doesn't assert hard enough to catch the mutation. Give a
+  concrete `before`/`after`: the test as it stands, and the added/changed
+  assertion that would kill it.
+- **`no-coverage`** — no test reaches the mutated line or branch at all: the
+  survivor is a coverage hole, not a weak assertion. There is no covering
+  test to edit, so it carries no `before`/`after`. Instead name the test to
+  write and the concrete behavior it must exercise and assert. This is the
+  sharper finding — a genuine gap, not a test that under-asserts.
 - **`cut`** — only when the covering test is independently a Cut by
   `test-audit`'s own smells (assertion-free, tautological, mystery guest) —
   i.e. the fix isn't "assert harder," it's "this test proves nothing,
@@ -91,24 +104,27 @@ covered without re-running mutmut.
    `parse_mutmut_results(text) -> list[dict]` is the tested seam
    (`fixtures/mutmut-results.txt` + `fixtures/answer-key.md` back it,
    mirroring `dead-code/fixtures/`) — pure, no subprocess inside it, fed
-   mutmut's captured text. It returns one candidate row per **surviving**
-   mutant only; killed mutants are counted into `killed_count` and dropped
-   — they aren't findings. `main()` wraps it: reads a file argument or
-   stdin, prints one JSON row per survivor. `file` is a best-effort guess
-   from the dotted module name and `line` is `null` — step 5 overwrites
-   both.
+   mutmut's captured text. It returns one row per mutant that isn't killed —
+   a `survived` mutant as a `rewrite`, a `no tests` mutant as a `no-coverage`;
+   killed mutants are counted into `killed_count` and dropped, they aren't
+   findings. `main()` wraps it: reads a file argument or stdin, prints one
+   JSON row per finding. `file` is a best-effort guess from the dotted module
+   name and `line` is `null` — step 5 overwrites both.
 
-5. **Pass two — read each survivor, finalize the row.** For every candidate
-   row: run `uvx mutmut show <mutant>` to see the diff (the specific
-   operator/literal flip), then read the target module to find the real
-   line the diff's `-` side matches and the test file to see what it
-   actually asserts. Rewrite `failure` to name the concrete mutation —
-   "the `<` → `<=` mutation at line 14 survives — no test fails when
-   `value` sits exactly at `low`" — never the placeholder pass one wrote.
-   Fill `line` with the real number, set `before`/`after` to the covering
-   test as it stands and the assertion that would kill the mutant. Confirm
-   `bucket`: `rewrite` unless the covering test is independently a Cut by
-   `test-audit`'s own smells (see Buckets above).
+5. **Pass two — read each row, finalize it.** Pass one already set `bucket`
+   from mutmut's status; this pass fills the detail. For every row: run `uvx
+   mutmut show <mutant>` to see the diff (the specific operator/literal flip),
+   then read the target module to find the real line the diff's `-` side
+   matches. Fill `line` with the real number and rewrite `failure` to name
+   the concrete mutation — never the placeholder pass one wrote. Then:
+   - **`no-coverage`** — read the test file to confirm no test reaches the
+     line. Leave `before`/`after` empty; name the test to write and what it
+     must assert. "the `kind=='invalid'` branch at line 42 has no test — add
+     one that renders an invalid `LinkView` and asserts the error row."
+   - **`rewrite`** — read the covering test to see what it asserts. Set
+     `before`/`after` to the test as it stands and the assertion that would
+     kill the mutant. Upgrade to **`cut`** only when that test is
+     independently a Cut by `test-audit`'s own smells (see Buckets above).
 
 6. **Write the findings log and render the summary — the default
    deliverable.** Write every finalized row to `findings.jsonl`, then draw
@@ -120,22 +136,27 @@ covered without re-running mutmut.
    asset-delivery section describes. This audit touches no test — rewriting
    a weak assertion is a separate, opt-in step the user asks for by name.
 
-   - **Log** — one JSONL line per surviving mutant. `bucket` is `rewrite`
-     (almost always) or `cut`. `category` is always `surviving-mutant`.
-     `extra.mutant`/`killed`/`survived`/`killed_count`/`survived_count`
-     carry the mutation-testing signal.
+   - **Log** — one JSONL line per surviving mutant. `bucket` is `rewrite`,
+     `no-coverage`, or `cut`. `category` is always `surviving-mutant`.
+     `extra.mutant`/`killed`/`survived` plus the run tally
+     `killed_count`/`survived_count`/`no_coverage_count` carry the
+     mutation-testing signal.
    - **Summary** — the verdict, an `N mutants · K killed · S survived ·
-     R rewrite · C cut` metabar, findings grouped by bucket with counts. No
+     R rewrite · NC no-coverage · C cut` metabar, findings grouped by bucket
+     with counts. No
      per-mutant cards. Call out in a `vt-callout` the module's overall kill
-     rate (`killed_count / (killed_count + survived_count)`) — the single
-     number that says how trustworthy this module's suite is.
+     rate (`killed_count / (killed_count + survived_count +
+     no_coverage_count)`) — the single number that says how trustworthy this
+     module's suite is. Uncovered mutants belong in the denominator: a
+     coverage hole is a caught-nothing line, not a free pass.
 
 ## Verify against the fixture
 
 `mutation-audit/fixtures/sample.py` + `test_sample.py` is a real mutmut run
-(not a hand-built guess): `is_adult` is tested at and around its boundary
-(both mutants die), `clamp` is only tested in-range (both boundary mutants
-survive). `fixtures/mutmut-results.txt` has the captured `mutmut results
---all true` output; `fixtures/answer-key.md` has the expected pass-one
-candidate rows and the pass-two finalized findings. Running this skill over
-`fixtures/sample.py` should reproduce that table.
+(not a hand-built guess), covering all three buckets: `is_adult` is tested at
+and around its boundary (both mutants die), `clamp` is only tested in-range
+(both boundary mutants `survived` → `rewrite`), and `scale` has no test at
+all (its mutant is `no tests` → `no-coverage`). `fixtures/mutmut-results.txt`
+has the captured `mutmut results --all true` output; `fixtures/answer-key.md`
+has the expected pass-one candidate rows and the pass-two finalized findings.
+Running this skill over `fixtures/sample.py` should reproduce that table.

@@ -1,6 +1,8 @@
-"""Fixture for mutation-audit: one function with weak test coverage (mutants
-survive) and one with strong coverage (mutants killed) — the mix
-fixtures/answer-key.md documents."""
+"""Fixture for mutation-audit: three coverage regimes the mix
+fixtures/answer-key.md documents — a strongly-tested function (mutants
+killed), a weakly-tested one (boundary mutants survive as `rewrite`), and
+an untested one (its mutant survives as `no-coverage` — no test reaches it
+at all)."""
 
 
 def is_adult(age):
@@ -16,3 +18,10 @@ def clamp(value, low, high):
     if value > high:
         return high
     return value
+
+
+def scale(x):
+    """Untested: no test in the suite calls scale, so mutmut's mutant on
+    this line survives with no covering test at all — a no-coverage
+    survivor, not a weak assertion."""
+    return x * 2
