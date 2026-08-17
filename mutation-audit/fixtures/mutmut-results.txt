@@ -2,3 +2,5 @@
     sample.x_is_adult__mutmut_2: killed
     sample.x_clamp__mutmut_1: survived
     sample.x_clamp__mutmut_2: survived
+    sample.x_scale__mutmut_1: no tests
+    sample.x_scale__mutmut_2: no tests

@@ -5,10 +5,11 @@ and suggest target modules when none is given.
 mutmut 3.x has no clean structured export (see spec #365's recon) — `mutmut
 results --all true` text is the stable contract: one line per mutant,
 `    <module>.x_<func>__mutmut_<N>: <status>`. `parse_mutmut_results`
-extracts the SURVIVING mutants mechanically into test-audit-vocabulary
-candidate rows; a killed mutant proves a test caught it and isn't a finding,
-so only survivors turn into rows (killed/survived counts still ride along in
-`extra` for context). This parser never re-runs mutmut and never fills in the
+extracts every non-killed mutant mechanically into candidate rows — a
+`survived` mutant as a `rewrite`, a `no tests` mutant as a `no-coverage`. A
+killed mutant proves a test caught it and isn't a finding, so it is counted
+and dropped; the killed/survived/no-coverage counts ride along in `extra` for
+context. This parser never re-runs mutmut and never fills in the
 real source line or a concrete before/after — `mutmut show <mutant>` gives a
 diff normalized to the isolated mutant, not the file's real line numbers, so
 resolving the real line means reading the target module. That's the judgment
@@ -22,10 +23,11 @@ filesystem walk inside it; the caller collects `paths` (via `os.walk` or
 similar) and hands them in. Never returns "everything" — an empty list is a
 valid answer when nothing in scope looks testable.
 
-ponytail: only `killed`/`survived` statuses feed rows — mutmut's other
-statuses (`timeout`, `suspicious`, `skipped`) aren't in the ticket's contract;
-they're counted towards neither killed_count nor survived_count and are
-otherwise ignored here.
+ponytail: `survived` and `no tests` statuses feed rows — `survived` as a
+`rewrite` candidate, `no tests` as a `no-coverage` one (mutmut's own marker
+that no test reaches the mutant). `killed` is counted and dropped. mutmut's
+remaining statuses (`timeout`, `suspicious`, `skipped`) aren't in the
+ticket's contract and are ignored here.
 """
 import contextlib
 import io
@@ -37,7 +39,7 @@ import sys
 import tempfile
 
 _RESULT_LINE_RE = re.compile(
-    r"^\s*(?P<module>[\w.]+)\.x_(?P<func>\w+?)__mutmut_(?P<id>\d+):\s*(?P<status>\w+)\s*$"
+    r"^\s*(?P<module>[\w.]+)\.x_(?P<func>\w+?)__mutmut_(?P<id>\d+):\s*(?P<status>.+?)\s*$"
 )
 
 _SKIP_DIRS = {"node_modules", "dist", "build", ".venv", "venv", "vendor", "worktrees", "mutants"}
@@ -47,10 +49,13 @@ def parse_mutmut_results(text):
     """Parse `mutmut results --all true` text into surviving-mutant candidate rows.
 
     Pure: raw `mutmut results` stdout in, a list of findings-schema dict rows
-    out — one per SURVIVING mutant. `bucket` defaults to "rewrite" (test-audit's
-    default-when-unsure bucket: a surviving mutant means a test already
-    exercises that path, just not hard enough — deciding `cut` instead needs
-    the judgment pass confirming the covering test proves nothing at all).
+    out — one per surviving mutant. mutmut's status IS the coverage signal:
+    `survived` means a test runs the line but under-asserts (`bucket:
+    rewrite`); `no tests` means no test reaches it at all (`bucket:
+    no-coverage`). `killed` mutants are counted and dropped — they aren't
+    findings. The judgment pass still reads the module to fill the real `line`
+    and, for a `rewrite`, the before/after (and may re-bucket a `rewrite` to
+    `cut`); it never re-derives coverage, since mutmut already marked it.
     `file`/`line` are best-effort here (`file` guessed from the dotted module
     name, `line` unknown) — SKILL.md's judgment pass overwrites both with the
     real target path and line once it reads `mutmut show <mutant>` against
@@ -59,6 +64,7 @@ def parse_mutmut_results(text):
     rows = []
     killed_count = 0
     survived_count = 0
+    no_coverage_count = 0
     for line in text.splitlines():
         m = _RESULT_LINE_RE.match(line)
         if not m:
@@ -67,26 +73,43 @@ def parse_mutmut_results(text):
         if status == "killed":
             killed_count += 1
             continue
-        if status != "survived":
-            continue  # ponytail: timeout/suspicious/skipped out of scope
-        survived_count += 1
         module = m.group("module")
         func = m.group("func")
         mutant = f"{module}.x_{func}__mutmut_{m.group('id')}"
-        rows.append(
-            {
+        if status == "survived":
+            # A test runs the line but doesn't assert hard enough — a covered
+            # survivor. Pass two decides rewrite (default) vs cut.
+            survived_count += 1
+            row = {
                 "bucket": "rewrite",
+                "failure": f"the mutation at {mutant} survives — no test fails when {func}() is mutated",
+                "extra": {"mutant": mutant, "killed": False, "survived": True},
+            }
+        elif status == "no tests":
+            # mutmut's own marker that no test reaches this mutant — a genuine
+            # coverage hole, not a weak assertion. The fix is a new test, so
+            # this bucket carries no before/after.
+            no_coverage_count += 1
+            row = {
+                "bucket": "no-coverage",
+                "failure": f"the mutation at {mutant} survives — no test covers {func}(), so nothing can catch it",
+                "extra": {"mutant": mutant, "killed": False, "survived": False},
+            }
+        else:
+            continue  # ponytail: timeout/suspicious/skipped out of scope
+        row.update(
+            {
                 "file": module.replace(".", "/") + ".py",
                 "line": None,
                 "category": "surviving-mutant",
                 "summary": f"mutant survives in {func}() ({mutant})",
-                "failure": f"the mutation at {mutant} survives — no test fails when {func}() is mutated",
-                "extra": {"mutant": mutant, "killed": False, "survived": True},
             }
         )
+        rows.append(row)
     for row in rows:
         row["extra"]["killed_count"] = killed_count
         row["extra"]["survived_count"] = survived_count
+        row["extra"]["no_coverage_count"] = no_coverage_count
     return rows
 
 
@@ -132,10 +155,11 @@ def _selfcheck():
             "    sample.x_is_adult__mutmut_2: killed",
             "    sample.x_clamp__mutmut_1: survived",
             "    sample.x_clamp__mutmut_2: survived",
+            "    sample.x_scale__mutmut_1: no tests",
         ]
     )
     rows = parse_mutmut_results(sample)
-    assert len(rows) == 2, rows
+    assert len(rows) == 3, rows
 
     assert rows[0]["file"] == "sample.py"
     assert rows[0]["line"] is None
@@ -146,10 +170,20 @@ def _selfcheck():
     assert rows[0]["extra"]["survived"] is True
     assert rows[0]["extra"]["killed_count"] == 2
     assert rows[0]["extra"]["survived_count"] == 2
+    assert rows[0]["extra"]["no_coverage_count"] == 1
     assert "sample.x_clamp__mutmut_1" in rows[0]["failure"]
     assert "clamp" in rows[0]["failure"]
 
     assert rows[1]["extra"]["mutant"] == "sample.x_clamp__mutmut_2"
+
+    # `no tests` is mutmut's own marker that no test reaches the mutant —
+    # a no-coverage survivor, distinct from a covered-but-under-asserted one.
+    nc = rows[2]
+    assert nc["bucket"] == "no-coverage", nc
+    assert nc["extra"]["mutant"] == "sample.x_scale__mutmut_1"
+    assert nc["extra"]["survived"] is False
+    assert nc["extra"]["no_coverage_count"] == 1
+    assert "no test" in nc["failure"]
 
     no_survivors = parse_mutmut_results("    sample.x_is_adult__mutmut_1: killed")
     assert no_survivors == []
