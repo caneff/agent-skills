@@ -113,39 +113,64 @@ def parse_mutmut_results(text):
     return rows
 
 
+def _sibling_tests(p):
+    """The sibling-test paths for a mutation-worthy source module `p`, or
+    `None` when `p` is not a worthy source module at all — an `__init__.py`, a
+    test file, or anything under a skip/fixture dir. The single predicate both
+    `suggest_candidates` (keep when a sibling exists) and `no_test_modules`
+    (keep when none does) share, so the two can never drift apart.
+    """
+    parts = p.split("/")
+    dirs, name = parts[:-1], parts[-1]
+    if _SKIP_DIRS & set(dirs):
+        return None
+    if "fixtures" in dirs or "conftest" in name:
+        return None
+    if name == "__init__.py" or name.startswith("test_") or name.endswith("_test.py"):
+        return None
+    if not name.endswith(".py"):
+        return None
+    stem = name[: -len(".py")]
+    return {
+        "/".join([*dirs, f"test_{name}"]),
+        "/".join([*dirs, f"{stem}_test.py"]),
+    }
+
+
 def suggest_candidates(paths, limit=5):
     """Suggest candidate modules to mutation-test from repo state.
 
     Pure: a list of repo-relative `.py` paths in, up to `limit` candidate
     module paths out (sorted). `limit=None` means no cap — all candidates
-    are returned. A path is a candidate when it's a plain module — not
-    `__init__.py`, not a test file, not under a skip/fixture dir — AND a
-    sibling test file exists for it in `paths` (mutmut needs a test suite
-    to mutate against; a module with no tests is not a useful target).
-    Never errors, never falls back to "everything" — an empty input or a
-    repo with no testable module returns `[]`.
+    are returned. A path is a candidate when it's a worthy source module (see
+    `_sibling_tests`) AND a sibling test file exists for it in `paths` (mutmut
+    needs a test suite to mutate against; a module with no tests is not a
+    useful target — `no_test_modules` reports those instead). Never errors,
+    never falls back to "everything" — an empty input or a repo with no
+    testable module returns `[]`.
     """
     pathset = set(paths)
     candidates = []
     for p in paths:
-        parts = p.split("/")
-        dirs, name = parts[:-1], parts[-1]
-        if _SKIP_DIRS & set(dirs):
-            continue
-        if "fixtures" in dirs or "conftest" in name:
-            continue
-        if name == "__init__.py" or name.startswith("test_") or name.endswith("_test.py"):
-            continue
-        if not name.endswith(".py"):
-            continue
-        stem = name[: -len(".py")]
-        sibling_tests = {
-            "/".join([*dirs, f"test_{name}"]),
-            "/".join([*dirs, f"{stem}_test.py"]),
-        }
-        if sibling_tests & pathset:
+        siblings = _sibling_tests(p)
+        if siblings is not None and siblings & pathset:
             candidates.append(p)
     return sorted(candidates)[:limit]
+
+
+def no_test_modules(paths):
+    """The worthy source modules in `paths` that have NO sibling test — the
+    strict inverse of `suggest_candidates`' sibling filter over the same
+    worthy universe. A worthy module with zero tests can't be mutated (mutmut
+    has nothing to run), so it is the worst case — 0% coverage — not something
+    to drop silently. Pure, sorted, uncapped; `[]` when every worthy module
+    has a test.
+    """
+    pathset = set(paths)
+    return sorted(
+        p for p in paths
+        if (siblings := _sibling_tests(p)) is not None and not (siblings & pathset)
+    )
 
 
 def _selfcheck():
@@ -207,6 +232,17 @@ def _selfcheck():
     assert suggest_candidates([]) == []
     assert suggest_candidates(["only.py"]) == []  # no sibling test -> no candidates, not an error
 
+    # no_test_modules is the strict inverse of suggest_candidates' sibling
+    # filter: the same worthy-module set, kept only when NO sibling test
+    # exists. widget/gadget have tests; helper is worthy but testless; the
+    # rest (init, fixture, vendor, test files) aren't worthy modules at all.
+    assert no_test_modules(paths) == ["pkg/helper.py"], no_test_modules(paths)
+    assert no_test_modules([]) == []
+    assert no_test_modules(["only.py"]) == ["only.py"]  # worthy, no sibling test
+    assert no_test_modules(["pkg/test_only.py"]) == []  # a test file is not worthy
+    # The two partition the worthy universe: no module is in both.
+    assert not (set(suggest_candidates(paths, limit=None)) & set(no_test_modules(paths)))
+
     limited = suggest_candidates(paths, limit=1)
     assert limited == ["pkg/gadget.py"], limited
 
@@ -220,6 +256,11 @@ def _selfcheck():
                 f.write("# module\n")
             with open(os.path.join(pkg_dir, f"test_mod_{i}.py"), "w", encoding="utf-8") as f:
                 f.write("# test\n")
+        # Two worthy modules with no sibling test — the no-test case.
+        lonely_count = 2
+        for i in range(lonely_count):
+            with open(os.path.join(pkg_dir, f"lonely_{i}.py"), "w", encoding="utf-8") as f:
+                f.write("# module, no test\n")
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -227,10 +268,32 @@ def _selfcheck():
         lines = [line for line in buf.getvalue().splitlines() if line.strip()]
         printed = [json.loads(line)["candidate"] for line in lines]
         assert len(printed) == pair_count, printed  # --suggest must not cap output (#395)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            main(["audit.py", "--no-tests", tmpdir])
+        report = json.loads(buf.getvalue())
+        assert report["no_tests"] == ["pkg/lonely_0.py", "pkg/lonely_1.py"], report
+        # total = worthy source modules = tested pairs + the testless ones.
+        assert report["total"] == pair_count + lonely_count, report
     finally:
         shutil.rmtree(tmpdir)
 
     print("ok")
+
+
+def _walk_py(root):
+    """Repo-relative `.py` paths under `root`, skipping the same vendored/build
+    dirs `_SKIP_DIRS` and `suggest_candidates` skip. Shared by `--suggest` and
+    `--no-tests` so both see the identical file universe."""
+    paths = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+        for filename in filenames:
+            if filename.endswith(".py"):
+                rel = os.path.relpath(os.path.join(dirpath, filename), root)
+                paths.append(rel.replace(os.sep, "/"))
+    return paths
 
 
 def main(argv):
@@ -239,15 +302,16 @@ def main(argv):
         return
     if argv[1:2] == ["--suggest"]:
         root = argv[2] if len(argv) > 2 else "."
-        paths = []
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
-            for filename in filenames:
-                if filename.endswith(".py"):
-                    rel = os.path.relpath(os.path.join(dirpath, filename), root)
-                    paths.append(rel.replace(os.sep, "/"))
-        for candidate in suggest_candidates(paths, limit=None):
+        for candidate in suggest_candidates(_walk_py(root), limit=None):
             print(json.dumps({"candidate": candidate}))
+        return
+    if argv[1:2] == ["--no-tests"]:
+        # The worthy source modules with no sibling test, plus the worthy-module
+        # total, for the repo-wide "N of M source modules have no tests" stat.
+        root = argv[2] if len(argv) > 2 else "."
+        paths = _walk_py(root)
+        worthy = sum(1 for p in paths if _sibling_tests(p) is not None)
+        print(json.dumps({"no_tests": no_test_modules(paths), "total": worthy}))
         return
     text = sys.stdin.read() if len(argv) < 2 else open(argv[1], encoding="utf-8").read()
     for row in parse_mutmut_results(text):

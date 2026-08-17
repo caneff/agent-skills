@@ -224,10 +224,6 @@ if [ "$MUTATION" = 1 ]; then
     exit 0
   fi
 
-  if [ "${#FINAL_TARGETS[@]}" -eq 0 ]; then
-    exit 0
-  fi
-
   # --- Real per-module run: sequential, one worktree live at a time --------
   BASE="${XDG_CACHE_HOME:-$HOME/.cache}/all-audits"
   mkdir -p "$BASE"
@@ -244,6 +240,40 @@ if [ "$MUTATION" = 1 ]; then
   echo "run dir: $RUN"
   echo "collecting under: $COLLECTION"
   echo
+
+  # --- No-test modules: a pure repo walk (no mutmut, no claude) names
+  # the worthy source modules with zero tests — the extreme 0%-coverage case.
+  # Persist them into the collection so the --index build surfaces them, and
+  # drop any from the run list: mutmut is never run on a testless module.
+  notest_json="$COLLECTION/mutation-no-tests.json"
+  python3 "$HERE/../mutation-audit/audit.py" --no-tests "$REPO" >"$notest_json" 2>/dev/null \
+    || printf '{"no_tests": [], "total": 0}\n' >"$notest_json"
+  notest_paths="$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["no_tests"]))' "$notest_json" 2>/dev/null || true)"
+  if [ -n "$notest_paths" ]; then
+    KEPT_TARGETS=()
+    for t in "${FINAL_TARGETS[@]:-}"; do
+      [ -n "$t" ] || continue
+      is_notest=0
+      while IFS= read -r nt; do [ "$t" = "$nt" ] && is_notest=1; done <<< "$notest_paths"
+      [ "$is_notest" = 0 ] && KEPT_TARGETS+=("$t")
+    done
+    FINAL_TARGETS=("${KEPT_TARGETS[@]:-}")
+    printf 'no-test modules (0%% coverage, reported not mutated): %s\n' \
+      "$(printf '%s\n' "$notest_paths" | grep -c . || true)"
+  fi
+
+  # Nothing left to mutmut-run — no candidate had a test, or all were testless.
+  # The no-test json is already written, so a later --index still renders the
+  # no-test section and the "N of M" stat; only the per-module run is skipped.
+  # (A repo whose every worthy module lacks a test is the loudest 0%-coverage
+  # case, so it must NOT exit before the json lands.)
+  real_targets=0
+  for t in "${FINAL_TARGETS[@]:-}"; do [ -n "$t" ] && real_targets=$((real_targets + 1)); done
+  if [ "$real_targets" -eq 0 ]; then
+    echo
+    echo "collection: $COLLECTION"
+    exit 0
+  fi
 
   # Backstop: if the script crashes mid-loop, sweep any worktree dirs still
   # registered under $WORKTREES on exit. The per-module cleanup below is the
@@ -500,9 +530,12 @@ for d in "$COLLECTION"/*/; do
   [ -f "$d/findings.jsonl" ] && MUTATION_MODULES+=("$base")
 done
 
-# mutation_tally FINDINGS_JSONL — prints "killed total survivors" from the
-# first row carrying the run's tally in `extra`, or nothing if no row does
-# (e.g. a setup-failure stub with no tally — the caller renders "—" then).
+# mutation_tally FINDINGS_JSONL — prints "killed total weak no_coverage" from
+# the first row carrying the run's tally in `extra`, or nothing if no row does
+# (e.g. a setup-failure stub with no tally — the caller renders "—" then). The
+# two survivor kinds stay separate: `weak` (survived — a test runs the line but
+# under-asserts) vs `no_coverage` (no test reaches the line at all). They mean
+# different fixes, so the sub-index shows them in their own columns.
 mutation_tally() {
   python3 -c '
 import json, sys
@@ -515,23 +548,50 @@ try:
             extra = (json.loads(line) or {}).get("extra") or {}
             if {"killed_count", "survived_count", "no_coverage_count"} <= extra.keys():
                 k, s, n = extra["killed_count"], extra["survived_count"], extra["no_coverage_count"]
-                print(k, k + s + n, s + n)
+                print(k, k + s + n, s, n)
                 break
 except Exception:
     pass
 ' "$1"
 }
 
-declare -A mutation_killed mutation_total mutation_survivors
+declare -A mutation_killed mutation_total mutation_weak mutation_nocov
 mutation_survivors_sum=0
 for base in "${MUTATION_MODULES[@]}"; do
-  read -r k t s < <(mutation_tally "$COLLECTION/$base/findings.jsonl") || true
+  read -r k t s n < <(mutation_tally "$COLLECTION/$base/findings.jsonl") || true
   if [ -n "${t:-}" ]; then
-    mutation_killed["$base"]="$k"; mutation_total["$base"]="$t"; mutation_survivors["$base"]="$s"
-    mutation_survivors_sum=$((mutation_survivors_sum + s))
+    mutation_killed["$base"]="$k"; mutation_total["$base"]="$t"
+    mutation_weak["$base"]="$s"; mutation_nocov["$base"]="$n"
+    mutation_survivors_sum=$((mutation_survivors_sum + s + n))
   fi
-  k=""; t=""; s=""
+  k=""; t=""; s=""; n=""
 done
+
+# --- No-test modules ------------------------------------------------------
+# Worthy source modules with zero tests can't be mutated (mutmut has nothing to
+# run), so the --mutation run records them into the collection as a
+# mutation-no-tests.json { "no_tests": [...], "total": M } instead of dropping
+# them. Read it back here — the extreme 0%-coverage case the index must surface
+# loudly. Absent file (a run without the no-test pass) leaves the list empty.
+NOTEST_MODULES=()
+notest_total=0
+if [ -f "$COLLECTION/mutation-no-tests.json" ]; then
+  first=1
+  while IFS= read -r line; do
+    if [ "$first" = 1 ]; then notest_total="$line"; first=0; continue; fi
+    [ -n "$line" ] && NOTEST_MODULES+=("$line")
+  done < <(python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+print(int(d.get("total", 0)))
+for m in d.get("no_tests", []):
+    print(m)
+' "$COLLECTION/mutation-no-tests.json")
+fi
+notest_count="${#NOTEST_MODULES[@]}"
 
 # --- Synthesis pass ----------------------------------------------------------
 # One claude -p reads the collected reports and writes a short synthesis for the
@@ -592,9 +652,11 @@ HEAD
         "$name" "$note"
     fi
   done
-  if [ "${#MUTATION_MODULES[@]}" -gt 0 ]; then
-    printf '<tr><td>mutation</td><td><a href="mutation/index.html">open report</a></td><td>%s modules run, %s total survivors</td></tr>\n' \
-      "${#MUTATION_MODULES[@]}" "$mutation_survivors_sum"
+  if [ "${#MUTATION_MODULES[@]}" -gt 0 ] || [ "$notest_count" -gt 0 ]; then
+    mutation_verdict="$(printf '%s modules run, %s total survivors' "${#MUTATION_MODULES[@]}" "$mutation_survivors_sum")"
+    [ "$notest_count" -gt 0 ] && mutation_verdict="$(printf '%s · %s with no tests' "$mutation_verdict" "$notest_count")"
+    printf '<tr><td>mutation</td><td><a href="mutation/index.html">open report</a></td><td>%s</td></tr>\n' \
+      "$mutation_verdict"
   fi
   echo '</tbody></table></div></main></body></html>'
 } >"$index"
@@ -603,7 +665,7 @@ HEAD
 # One row per mutation module: killed/total tally, survivor count, a working
 # relative link to that module's report.html. Reuses the same base spine as
 # the main index, one level deeper (assets and module links are ../-relative).
-if [ "${#MUTATION_MODULES[@]}" -gt 0 ]; then
+if [ "${#MUTATION_MODULES[@]}" -gt 0 ] || [ "$notest_count" -gt 0 ]; then
   mkdir -p "$COLLECTION/mutation"
   subindex="$COLLECTION/mutation/index.html"
   {
@@ -624,26 +686,45 @@ if [ "${#MUTATION_MODULES[@]}" -gt 0 ]; then
 HEAD
     printf '<p class="vt-kicker">Mutation sweep</p>\n'
     printf '<h1>%s <span style="color:var(--vt-muted)">· %s mutation modules</span></h1>\n' "$REPO" "${#MUTATION_MODULES[@]}"
-    echo '<h2>Modules</h2><div class="vt-table-wrap"><table class="audit-table">'
-    echo '<thead><tr><th>Module</th><th>Killed/total</th><th>Survivors</th><th>Report</th></tr></thead><tbody>'
-    for base in "${MUTATION_MODULES[@]}"; do
-      t="${mutation_total[$base]:-}"
-      if [ -n "$t" ]; then
-        tally="${mutation_killed[$base]}/${mutation_total[$base]}"
-        survivors="${mutation_survivors[$base]}"
-      else
-        tally="—"
-        survivors="—"
-      fi
-      if [ -f "$COLLECTION/$base/report.html" ]; then
-        link="<a href=\"../$base/report.html\">open report</a>"
-      else
-        link='<span style="color:var(--vt-muted)">no report</span>'
-      fi
-      printf '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n' \
-        "$base" "$tally" "$survivors" "$link"
-    done
-    echo '</tbody></table></div></main></body></html>'
+    [ "$notest_total" -gt 0 ] && printf '<p class="vt-lede">%s of %s source modules have no tests.</p>\n' "$notest_count" "$notest_total"
+    if [ "${#MUTATION_MODULES[@]}" -gt 0 ]; then
+      echo '<h2>Modules</h2><div class="vt-table-wrap"><table class="audit-table">'
+      # Weak-assertion and no-coverage survivors stay in their own columns — a
+      # weak survivor needs a tighter assertion, a no-coverage one needs a new
+      # test that reaches the line. Merging them hides which fix a module needs.
+      echo '<thead><tr><th>Module</th><th>Killed/total</th><th>Weak-assertion</th><th>No-coverage</th><th>Report</th></tr></thead><tbody>'
+      for base in "${MUTATION_MODULES[@]}"; do
+        t="${mutation_total[$base]:-}"
+        if [ -n "$t" ]; then
+          tally="${mutation_killed[$base]}/${mutation_total[$base]}"
+          weak="${mutation_weak[$base]}"
+          nocov="${mutation_nocov[$base]}"
+        else
+          tally="—"
+          weak="—"
+          nocov="—"
+        fi
+        if [ -f "$COLLECTION/$base/report.html" ]; then
+          link="<a href=\"../$base/report.html\">open report</a>"
+        else
+          link='<span style="color:var(--vt-muted)">no report</span>'
+        fi
+        printf '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n' \
+          "$base" "$tally" "$weak" "$nocov" "$link"
+      done
+      echo '</tbody></table></div>'
+    fi
+    if [ "$notest_count" -gt 0 ]; then
+      echo '<h2>No tests</h2>'
+      printf '<div class="vt-callout warn">These %s worthy source modules have no test at all — 0%% mutation coverage, the worst case. No mutant can be caught here until a test exists.</div>\n' "$notest_count"
+      echo '<div class="vt-table-wrap"><table class="audit-table">'
+      echo '<thead><tr><th>Module</th><th>Mutation coverage</th></tr></thead><tbody>'
+      for m in "${NOTEST_MODULES[@]}"; do
+        printf '<tr><td>%s</td><td>0%% — no tests</td></tr>\n' "$m"
+      done
+      echo '</tbody></table></div>'
+    fi
+    echo '</main></body></html>'
   } >"$subindex"
 fi
 

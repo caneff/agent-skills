@@ -293,9 +293,58 @@ fi
 
 echo "ok (mutation sub-index + single main-index mutation row)"
 
+# --- no-test modules: a worthy source module with zero tests can't be
+# mutated, so the --mutation run records it into the collection as a
+# mutation-no-tests.json entry (no mutmut run). The index build must surface it
+# LOUDLY: a distinct "no tests" section in the sub-index, the repo-wide
+# "N of M source modules have no tests" stat, the main-index mutation-row
+# verdict reflecting the no-test count, and — for a module that WAS mutated —
+# the killed / weak-assertion / no-coverage counts kept separable, not merged
+# into one survivor number. Offline throughout.
+nttmp="$(mktemp -d)"
+trap 'rm -rf "$tmp" "$gtmp" "$ctmp" "$mutmp" "$nttmp"' EXIT
+
+mkdir -p "$nttmp/collection/solver.py"
+echo '<html><body>solver report</body></html>' >"$nttmp/collection/solver.py/report.html"
+# solver: 8 killed, 2 weak-assertion survivors, 3 no-coverage survivors.
+cat >"$nttmp/collection/solver.py/findings.jsonl" <<'EOF'
+{"bucket": "rewrite", "file": "solver.py", "line": 12, "category": "surviving-mutant", "summary": "s1", "failure": "f1", "extra": {"mutant": "solver.x__mutmut_1", "killed": false, "survived": true, "killed_count": 8, "survived_count": 2, "no_coverage_count": 3}}
+EOF
+# Two worthy modules with no tests at all, plus the repo-wide worthy total.
+cat >"$nttmp/collection/mutation-no-tests.json" <<'EOF'
+{"no_tests": ["widget.py", "gadget.py"], "total": 6}
+EOF
+
+AUDITS_NO_OPEN=1 AUDITS_NO_SYNTH=1 bash "$SCRIPT" --index --out "$nttmp" >"$nttmp/run.log" 2>&1 \
+  || fail "--index (no-test modules) exited non-zero; see: $(cat "$nttmp/run.log")"
+
+ntindex="$nttmp/collection/index.html"
+ntsub="$nttmp/collection/mutation/index.html"
+[ -f "$ntsub" ] || fail "no-test: sub-index was not built at $ntsub"
+
+# Main-index mutation-row verdict reflects the no-test count.
+grep -q 'with no tests' "$ntindex" || fail "main index mutation row must report the no-test count"
+grep -qE '2 with no tests' "$ntindex" || fail "main index must count both no-test modules (2)"
+
+# Repo-wide stat.
+grep -qE '2 of 6 source modules have no tests' "$ntsub" || fail "sub-index missing repo-wide 'N of M source modules have no tests' stat"
+
+# Distinct no-test section listing each testless module.
+grep -q 'widget.py' "$ntsub" || fail "sub-index missing no-test module widget.py"
+grep -q 'gadget.py' "$ntsub" || fail "sub-index missing no-test module gadget.py"
+grep -qi 'no tests' "$ntsub" || fail "sub-index missing a distinct 'no tests' section"
+
+# solver was mutated: killed/total (8/13) present, and weak (2) vs no-coverage
+# (3) kept SEPARABLE — not merged into a single '5 survivors'.
+grep -q '8/13' "$ntsub" || fail "sub-index missing solver killed/total (8/13)"
+grep -qiE 'weak' "$ntsub" || fail "sub-index must label a weak-assertion column"
+grep -qiE 'no.?coverage' "$ntsub" || fail "sub-index must label a no-coverage column distinctly from weak-assertion"
+
+echo "ok (no-test modules: distinct section, stat, verdict, weak/no-coverage split)"
+
 # --- negative: no mutation report dirs -> no mutation row, no sub-index ---
 negtmp="$(mktemp -d)"
-trap 'rm -rf "$tmp" "$gtmp" "$ctmp" "$mutmp" "$negtmp"' EXIT
+trap 'rm -rf "$tmp" "$gtmp" "$ctmp" "$mutmp" "$nttmp" "$negtmp"' EXIT
 
 for name in dead-code test-audit; do
   mkdir -p "$negtmp/collection/$name"
