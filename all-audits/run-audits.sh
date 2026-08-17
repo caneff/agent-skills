@@ -483,6 +483,56 @@ for name in "${AUDITS[@]}"; do
   fi
 done
 
+# --- Mutation report discovery (#402) -----------------------------------------
+# A COLLECTION subdir is a mutation-module report — not a regular audit —
+# when its name isn't one of the fixed AUDITS entries and it carries a
+# findings.jsonl (the mutation-audit's report marker; collect_module_report
+# lands report.html + findings.jsonl there, named by module_slug).
+MUTATION_MODULES=()
+for d in "$COLLECTION"/*/; do
+  [ -d "$d" ] || continue
+  base="$(basename "$d")"
+  is_audit=0
+  for name in "${AUDITS[@]}"; do
+    [ "$base" = "$name" ] && { is_audit=1; break; }
+  done
+  [ "$is_audit" = 1 ] && continue
+  [ -f "$d/findings.jsonl" ] && MUTATION_MODULES+=("$base")
+done
+
+# mutation_tally FINDINGS_JSONL — prints "killed total survivors" from the
+# first row carrying the run's tally in `extra`, or nothing if no row does
+# (e.g. a setup-failure stub with no tally — the caller renders "—" then).
+mutation_tally() {
+  python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            extra = (json.loads(line) or {}).get("extra") or {}
+            if {"killed_count", "survived_count", "no_coverage_count"} <= extra.keys():
+                k, s, n = extra["killed_count"], extra["survived_count"], extra["no_coverage_count"]
+                print(k, k + s + n, s + n)
+                break
+except Exception:
+    pass
+' "$1"
+}
+
+declare -A mutation_killed mutation_total mutation_survivors
+mutation_survivors_sum=0
+for base in "${MUTATION_MODULES[@]}"; do
+  read -r k t s < <(mutation_tally "$COLLECTION/$base/findings.jsonl") || true
+  if [ -n "${t:-}" ]; then
+    mutation_killed["$base"]="$k"; mutation_total["$base"]="$t"; mutation_survivors["$base"]="$s"
+    mutation_survivors_sum=$((mutation_survivors_sum + s))
+  fi
+  k=""; t=""; s=""
+done
+
 # --- Synthesis pass ----------------------------------------------------------
 # One claude -p reads the collected reports and writes a short synthesis for the
 # index lede. Non-fatal — a missing lede beats no index. AUDITS_NO_SYNTH=1 skips
@@ -501,7 +551,7 @@ fi
 synthesis="$(printf '%s' "$synthesis" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')"
 
 # --- Build index.html (visual-teach styling, matching the reports) -----------
-for name in "${AUDITS[@]}"; do
+for name in "${AUDITS[@]}" "${MUTATION_MODULES[@]}"; do
   if [ -d "$COLLECTION/$name/assets" ]; then
     cp -r "$COLLECTION/$name/assets" "$COLLECTION/assets"
     break
@@ -542,8 +592,60 @@ HEAD
         "$name" "$note"
     fi
   done
+  if [ "${#MUTATION_MODULES[@]}" -gt 0 ]; then
+    printf '<tr><td>mutation</td><td><a href="mutation/index.html">open report</a></td><td>%s modules run, %s total survivors</td></tr>\n' \
+      "${#MUTATION_MODULES[@]}" "$mutation_survivors_sum"
+  fi
   echo '</tbody></table></div></main></body></html>'
 } >"$index"
+
+# --- Build mutation/index.html sub-index (#402) -------------------------------
+# One row per mutation module: killed/total tally, survivor count, a working
+# relative link to that module's report.html. Reuses the same base spine as
+# the main index, one level deeper (assets and module links are ../-relative).
+if [ "${#MUTATION_MODULES[@]}" -gt 0 ]; then
+  mkdir -p "$COLLECTION/mutation"
+  subindex="$COLLECTION/mutation/index.html"
+  {
+    cat <<'HEAD'
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mutation sub-index</title>
+<link rel="stylesheet" href="../assets/base/base.css">
+<link rel="stylesheet" href="../assets/components/callout/callout.css">
+<script src="../assets/base/base.js"></script>
+<style>
+  main { --vt-measure: 1080px; }
+  .audit-table { width:100%; border-collapse:collapse; }
+  .audit-table th, .audit-table td { border:1px solid var(--vt-rule); padding:.6rem .8rem; text-align:left; vertical-align:top; }
+  .audit-table th { background:var(--vt-soft); font-weight:600; }
+  .audit-table tr:nth-child(even) td { background:var(--vt-stripe); }
+</style></head><body><main>
+HEAD
+    printf '<p class="vt-kicker">Mutation sweep</p>\n'
+    printf '<h1>%s <span style="color:var(--vt-muted)">· %s mutation modules</span></h1>\n' "$REPO" "${#MUTATION_MODULES[@]}"
+    echo '<h2>Modules</h2><div class="vt-table-wrap"><table class="audit-table">'
+    echo '<thead><tr><th>Module</th><th>Killed/total</th><th>Survivors</th><th>Report</th></tr></thead><tbody>'
+    for base in "${MUTATION_MODULES[@]}"; do
+      t="${mutation_total[$base]:-}"
+      if [ -n "$t" ]; then
+        tally="${mutation_killed[$base]}/${mutation_total[$base]}"
+        survivors="${mutation_survivors[$base]}"
+      else
+        tally="—"
+        survivors="—"
+      fi
+      if [ -f "$COLLECTION/$base/report.html" ]; then
+        link="<a href=\"../$base/report.html\">open report</a>"
+      else
+        link='<span style="color:var(--vt-muted)">no report</span>'
+      fi
+      printf '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n' \
+        "$base" "$tally" "$survivors" "$link"
+    done
+    echo '</tbody></table></div></main></body></html>'
+  } >"$subindex"
+fi
 
 echo
 echo "index: $index"
