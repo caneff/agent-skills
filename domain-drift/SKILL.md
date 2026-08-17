@@ -111,6 +111,24 @@ specific, sourced term.
    something else (term-misuse)? A name with no term behind it is silently
    fine — do not record it, do not almost-flag it.
 
+   **Then, for each confirmed drifted word, enumerate every site — grep, do
+   not eyeball.** A rename executed from this finding must be safe and total,
+   so the site list has to be both exhaustive and clean. `grep` the whole
+   repo — not just the audit scope; a drifted word's occurrences straddle
+   files the diff never touched, and a rename touches all of them — for the
+   word in every form it takes: identifiers, string literals, dict keys, CSS
+   class names, filenames. Then re-check each hit against the term's meaning
+   before you emit it — the same one test as above, applied per site: a hit
+   that uses the word in a different, correct sense is not drift (`invalid
+   puzzle document` covering broken JSON, when the glossary excludes that from
+   `malformed`, is a defensible clear, not a rename target). Emit one finding
+   row per real drift site, all sharing the same `should_be` and `source`.
+   Miss a real site and the rename half-applies — renaming the dispatch call
+   but not the constructor literal it dispatches to breaks the code; sweep in
+   a defensible clear and the rename corrupts a correct use. If you cannot
+   confirm the list is complete, flag the term `partial coverage` in the
+   summary rather than presenting a half-list as the finding.
+
 4. **Write the findings log and render the summary — the default
    deliverable.** Write every finding to `findings.jsonl`, then draw a
    grouped summary `report.html` from it, following
@@ -134,4 +152,5 @@ specific, sourced term.
   top, then the verdict, the `N findings · R rename · C consolidate · M
   misuse` metabar, findings grouped by bucket then category with counts, and
   a `vt-callout` naming the highest-value finds by `file:line`. No
-  per-finding cards.
+  per-finding cards. Any term whose site list isn't confirmed exhaustive
+  carries a `partial coverage` flag here.
