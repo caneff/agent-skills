@@ -196,7 +196,8 @@ answer.
 The sweep can judge hundreds of comments; do not render one HTML card each. Write
 the full record to `findings.jsonl` and a grouped summary to `report.html`,
 following `~/.agents/skills/all-audits/harness/findings-schema.md` for both —
-the JSONL schema and the summary's grouped-overview shape. Write both to
+the JSONL schema and the summary's grouped-overview shape.
+Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
 `<tmpdir>/comment-audit-<timestamp>/`, then open the summary and hand off its
 path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s asset-delivery
 section describes.

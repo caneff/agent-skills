@@ -133,7 +133,8 @@ specific, sourced term.
    deliverable.** Write every finding to `findings.jsonl`, then draw a
    grouped summary `report.html` from it, following
    `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
-   JSONL schema and the summary's grouped-overview shape. Write both to
+   JSONL schema and the summary's grouped-overview shape.
+   Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
    `<tmpdir>/domain-drift-<timestamp>/`, then open the summary and hand off
    its path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s
    asset-delivery section describes. Print the one-line verdict and the

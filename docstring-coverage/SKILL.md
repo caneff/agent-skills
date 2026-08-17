@@ -83,7 +83,8 @@ the same number on every row, not per-symbol.
    deliverable.** Write every judged row to `findings.jsonl`, then draw a
    grouped summary `report.html` from it, following
    `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
-   JSONL schema and the summary's grouped-overview shape. Write both to
+   JSONL schema and the summary's grouped-overview shape.
+   Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
    `<tmpdir>/docstring-coverage-<timestamp>/`, then open the summary and hand
    off its path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s
    asset-delivery section describes. This audit touches no code — writing the

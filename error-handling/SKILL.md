@@ -83,7 +83,8 @@ lists every code that fired, so pass two sees the full mechanical picture.
    deliverable.** Write every judged row to `findings.jsonl`, then draw a
    grouped summary `report.html` from it, following
    `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
-   JSONL schema and the summary's grouped-overview shape. Write both to
+   JSONL schema and the summary's grouped-overview shape.
+   Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
    `<tmpdir>/error-handling-<timestamp>/`, then open the summary and hand off
    its path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s
    asset-delivery section describes. This audit touches no code — fixing a
