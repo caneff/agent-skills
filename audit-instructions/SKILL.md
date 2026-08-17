@@ -90,8 +90,8 @@ open it and hand off the path as the harness's asset-delivery section describes
 - **Verdict rows** — one per instruction, in a `vt-table`: my line | verdict | why |
   Anthropic's line. Color the verdict `vt-pill bad` for DELETE, `vt-pill warn` for
   REWRITE, `vt-pill good` for KEEP.
-- **Missing** — a section giving the **exact paste-ready wording** for each of the
-  five missing instructions still absent from the file.
+- **Missing** — a section giving the **exact paste-ready wording** for each repo-specific
+  gap section 4 surfaced. Often there are none; say so plainly rather than padding to five.
 - **NOT RUN** — a `vt-callout warn` naming everything you could not check. Never a
   clean bill you did not earn.
 
