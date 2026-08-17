@@ -20,7 +20,7 @@ for name in dead-code test-audit; do
 done
 
 # --index over the dir: rebuild the index, run nothing.
-AUDITS_NO_SYNTH=1 bash "$SCRIPT" --index --out "$tmp" >"$tmp/run.log" 2>&1 \
+AUDITS_NO_OPEN=1 AUDITS_NO_SYNTH=1 bash "$SCRIPT" --index --out "$tmp" >"$tmp/run.log" 2>&1 \
   || fail "--index run exited non-zero; see: $(cat "$tmp/run.log")"
 
 index="$tmp/collection/index.html"
@@ -122,3 +122,23 @@ out="$(bash "$SCRIPT" --mutation "  " 2>&1)"; rc=$?
 printf '%s\n' "$out" | grep -q '^mutation-target: ' && fail "--mutation \"  \" must emit zero targets; got: $out"
 
 echo "ok (--mutation empty list is a no-op)"
+
+# --- auto-open guard: --index must not launch a browser under AUDITS_NO_OPEN=1.
+# A fake `xdg-open` on PATH records that it fired; with the guard set it must
+# never run, so the index rebuild in tests (and unattended sweeps) stops
+# hijacking the user's window.
+gtmp="$(mktemp -d)"
+trap 'rm -rf "$tmp" "$gtmp"' EXIT
+mkdir -p "$gtmp/collection/dead-code" "$gtmp/bin"
+echo '<html>x</html>' >"$gtmp/collection/dead-code/report.html"
+cat >"$gtmp/bin/xdg-open" <<'SH'
+#!/usr/bin/env bash
+echo fired >>"$OPEN_SENTINEL"
+SH
+chmod +x "$gtmp/bin/xdg-open"
+OPEN_SENTINEL="$gtmp/opened" PATH="$gtmp/bin:$PATH" \
+  AUDITS_NO_OPEN=1 AUDITS_NO_SYNTH=1 bash "$SCRIPT" --index --out "$gtmp" >/dev/null 2>&1 \
+  || fail "guarded --index run exited non-zero"
+[ -f "$gtmp/opened" ] && fail "xdg-open fired despite AUDITS_NO_OPEN=1"
+
+echo "ok (--index honors AUDITS_NO_OPEN)"
