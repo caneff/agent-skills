@@ -317,6 +317,10 @@ echo "index: $index"
 echo "logs: $OUTLOGS"
 
 # Open the index (Linux). Swap for `open` on macOS.
-command -v xdg-open >/dev/null && xdg-open "$index" >/dev/null 2>&1 || true
+# AUDITS_NO_OPEN=1 suppresses the launch — the test suite and unattended
+# sweeps set it so an index rebuild does not hijack the user's browser.
+if [ "${AUDITS_NO_OPEN:-0}" != 1 ] && command -v xdg-open >/dev/null; then
+  xdg-open "$index" >/dev/null 2>&1 || true
+fi
 
 fi
