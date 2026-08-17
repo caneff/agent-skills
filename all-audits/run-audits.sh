@@ -57,6 +57,13 @@ mutation_prepass_prompt() {
 # truncated. ponytail: encoding both outputs on stdout (instead of a nameref
 # or a second output stream) is the shortest seam that stays testable via a
 # plain `$(...)` capture.
+# mutation_cap_targets / mutation_cap_skipped — decode mutation_cap's stdout.
+# Both callers of mutation_cap (the script and its tests) need the same two
+# facts out of the sentinel-tagged stream; factored here once instead of
+# repeating the grep/cut pair at every call site.
+mutation_cap_targets() { grep -v '^SKIPPED:' || true; }
+mutation_cap_skipped() { grep '^SKIPPED:' | cut -d: -f2; }
+
 mutation_cap() {
   local n="$1"; shift
   local total="$#" skipped=0 i=0
@@ -160,13 +167,10 @@ if [ "$MUTATION" = 1 ]; then
 
   MUTATION_MAX_N="${MUTATION_MAX:-10}"
   cap_out="$(mutation_cap "$MUTATION_MAX_N" "${CANDIDATES[@]:-}")"
-  skipped="$(printf '%s\n' "$cap_out" | grep '^SKIPPED:' | cut -d: -f2)"
+  skipped="$(printf '%s\n' "$cap_out" | mutation_cap_skipped)"
   while IFS= read -r line; do
-    case "$line" in
-      SKIPPED:*|'') continue ;;
-      *) printf 'mutation-target: %s\n' "$line" ;;
-    esac
-  done <<< "$cap_out"
+    [ -n "$line" ] && printf 'mutation-target: %s\n' "$line"
+  done < <(printf '%s\n' "$cap_out" | mutation_cap_targets)
   [ "${skipped:-0}" -gt 0 ] && printf '… %s more modules skipped (raise MUTATION_MAX to include them)\n' "$skipped"
   exit 0
 fi
