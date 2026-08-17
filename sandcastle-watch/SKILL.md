@@ -25,6 +25,17 @@ If that prints a pid, a run is already going — you can't capture its stdout af
 
 **Done when:** preconditions pass and you know whether you're starting a run or attaching to a live one.
 
+## AFK mode — low compute, no watching
+When the user asks for **AFK / hands-off / low-compute** mode, they want the run started and the summary at the end, nothing in between. The `start` verb already does exactly this: under `setsid --wait` it blocks until the orchestrator exits, then prints the final digest and Sandcastle's `=== Run Summary ===` and removes `$LOG`. So AFK mode is steps 0 → start → finish, with the refresher, the watch loop, and every mid-run notification dropped — the watch loop is what wakes the model every ~90s, so dropping it is the whole compute saving.
+
+1. Do step 0 preconditions.
+2. Mint `$LOG` and launch `start` with `run_in_background` — the same two lines as step 1. Do **not** start the refresher and do **not** enter the watch loop. Nothing polls; the status bar rests at `🏰 idle`.
+3. When the harness reports the job exited, read its output — it already carries the closing digest and the run summary. Do step 3 (Finish): show the summary, hand off the `/implement <n>` ready-for-human lines, send one final "run complete" notification. No mid-run toasts.
+
+Stopping early (step 4) still works.
+
+**Switching to AFK mid-run.** If a normal watched run is already going and the user asks to go AFK, just stop scheduling the ~90s checks — the watch loop is your timer, not a process, so dropping it needs no cleanup. The `start` job runs on regardless and still prints the final digest and summary on exit, so nothing is lost; wait for the harness exit notification and report then. To silence the log-poller too, kill the refresher (`pkill -f 'sandcastle-watch.sh refresh'`); the bar drops to `🏰 idle`. One exception: if you **attached** to a live run in step 0 (no `start` job, no captured stdout), there is no harness exit notification — poll `is-running` instead and rebuild the summary from `.sandcastle/logs/run-<id>.log`, which the orchestrator writes at the end.
+
 ## 1. Start the run
 Sandcastle's progress — the human milestone lines (`✓/✗/⚠` outcomes, `→ PR #N`, the final `=== Run Summary ===`) and the machine-readable `SANDCASTLE_MARK` sentinels the skill actually parses — all go to **stdout**. Do **not** rely on a live `.sandcastle/logs/run-*.log`: this orchestrator writes `run-<id>.log` only once at the very end (just the summary), and its startup pruner deletes any header-less log you drop into `.sandcastle/logs` (a hand-made boot log included). So capture npm's stdout yourself, to a durable path **outside** `.sandcastle/logs` where the pruner can't touch it, and watch that:
 
