@@ -113,15 +113,69 @@ want="$(printf 'mutation-target: a.py\nmutation-target: b.py')"
 
 echo "ok (--mutation whitespace trim + empty-drop)"
 
-out="$(bash "$SCRIPT" --mutation "" 2>&1)"; rc=$?
-[ "$rc" -eq 0 ] || fail "--mutation \"\" must exit 0, got $rc"
-printf '%s\n' "$out" | grep -q '^mutation-target: ' && fail "--mutation \"\" must emit zero targets; got: $out"
+# #400 changes what an empty list means: it now triggers the auto-select
+# pre-pass instead of a silent zero-target no-op. Under AUDITS_NO_SYNTH=1 the
+# pre-pass itself is skipped (mirrors the synthesis-pass gate), so empty list
+# + AUDITS_NO_SYNTH=1 = no pre-pass = zero targets, and no `claude` ever runs
+# — keeping this suite hermetic.
+out="$(AUDITS_NO_SYNTH=1 bash "$SCRIPT" --mutation "" 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || fail "--mutation \"\" (AUDITS_NO_SYNTH=1) must exit 0, got $rc"
+printf '%s\n' "$out" | grep -q '^mutation-target: ' && fail "--mutation \"\" under AUDITS_NO_SYNTH=1 must emit zero targets; got: $out"
 
-out="$(bash "$SCRIPT" --mutation "  " 2>&1)"; rc=$?
-[ "$rc" -eq 0 ] || fail "--mutation \"  \" must exit 0, got $rc"
-printf '%s\n' "$out" | grep -q '^mutation-target: ' && fail "--mutation \"  \" must emit zero targets; got: $out"
+out="$(AUDITS_NO_SYNTH=1 bash "$SCRIPT" --mutation "  " 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || fail "--mutation \"  \" (AUDITS_NO_SYNTH=1) must exit 0, got $rc"
+printf '%s\n' "$out" | grep -q '^mutation-target: ' && fail "--mutation \"  \" under AUDITS_NO_SYNTH=1 must emit zero targets; got: $out"
 
-echo "ok (--mutation empty list is a no-op)"
+echo "ok (--mutation empty list under AUDITS_NO_SYNTH=1 skips the pre-pass, no claude)"
+
+# --- mutation_cap pure function (#400): (candidates, N) -> (capped,
+# skipped_count), offline, no subprocess/claude. ---
+
+out="$(mutation_cap 3 a b c d e)"
+skipped="$(printf '%s\n' "$out" | grep '^SKIPPED:' | cut -d: -f2)"
+capped="$(printf '%s\n' "$out" | grep -v '^SKIPPED:')"
+[ "$skipped" = "2" ] || fail "mutation_cap: want skipped=2 for 5 candidates capped at 3, got '$skipped'"
+want="$(printf 'a\nb\nc')"
+[ "$capped" = "$want" ] || fail "mutation_cap: want capped='$want', got '$capped'"
+
+out="$(mutation_cap 5 a b c)"
+skipped="$(printf '%s\n' "$out" | grep '^SKIPPED:' | cut -d: -f2)"
+capped="$(printf '%s\n' "$out" | grep -v '^SKIPPED:')"
+[ "$skipped" = "0" ] || fail "mutation_cap: want skipped=0 when list <= N, got '$skipped'"
+want="$(printf 'a\nb\nc')"
+[ "$capped" = "$want" ] || fail "mutation_cap: list <= N must pass through unchanged, got '$capped'"
+
+echo "ok (mutation_cap pure function)"
+
+# --- --mutation auto-select pre-pass, offline via MUTATION_CANDIDATES injection
+# (#400): the real candidate source is claude, but the cap + skip-line
+# behavior around it must be testable without a subprocess. ---
+
+# > N candidates: capped to default N=10, visible skip line naming the count.
+twelve="$(for i in $(seq 1 12); do printf 'm%d.py\n' "$i"; done)"
+out="$(MUTATION_CANDIDATES="$twelve" bash "$SCRIPT" --mutation 2>&1)"
+count="$(printf '%s\n' "$out" | grep -c '^mutation-target: ')"
+[ "$count" -eq 10 ] || fail "--mutation auto-select: want 10 capped targets, got $count; out: $out"
+printf '%s\n' "$out" | grep -q '2 more modules skipped (raise MUTATION_MAX to include them)' \
+  || fail "--mutation auto-select: missing visible skip line; got: $out"
+
+# <= N candidates: unchanged, no skip line.
+out="$(MUTATION_CANDIDATES=$'m1.py\nm2.py' bash "$SCRIPT" --mutation 2>&1)"
+count="$(printf '%s\n' "$out" | grep -c '^mutation-target: ')"
+[ "$count" -eq 2 ] || fail "--mutation auto-select: want 2 targets for a 2-candidate list, got $count; out: $out"
+printf '%s\n' "$out" | grep -q 'more modules skipped' \
+  && fail "--mutation auto-select: unexpected skip line for a list <= N; got: $out"
+
+echo "ok (--mutation auto-select pre-pass: cap truncates, skip line, no line under cap)"
+
+# MUTATION_MAX overrides the default N=10.
+out="$(MUTATION_CANDIDATES=$'m1.py\nm2.py\nm3.py' MUTATION_MAX=2 bash "$SCRIPT" --mutation 2>&1)"
+count="$(printf '%s\n' "$out" | grep -c '^mutation-target: ')"
+[ "$count" -eq 2 ] || fail "MUTATION_MAX=2: want 2 targets, got $count; out: $out"
+printf '%s\n' "$out" | grep -q '1 more modules skipped (raise MUTATION_MAX to include them)' \
+  || fail "MUTATION_MAX=2: missing skip line naming 1 skipped; got: $out"
+
+echo "ok (MUTATION_MAX overrides default cap)"
 
 # --- auto-open guard: --index must not launch a browser under AUDITS_NO_OPEN=1.
 # A fake `xdg-open` on PATH records that it fired; with the guard set it must
