@@ -43,6 +43,32 @@ audit_prompt() {
     "Audit the ENTIRE repository at $2 — every source file, not a git diff or recent-changes review. Override any branch-diff or hot-spot default the skill has."
 }
 
+# mutation_prepass_prompt REPO — the prompt for the mutation auto-select
+# pre-pass (#400): mirrors audit_prompt's plain, one-job tone. Asks claude to
+# name the mutation-worthy core modules (solver/oracle modules with a sibling
+# test where a silently-passing test is dangerous), one path per line.
+mutation_prepass_prompt() {
+  printf 'Read the repository at %s and identify the mutation-worthy core modules: solver/oracle modules that have a sibling test, where a silently-passing test would be dangerous. Print ONLY the module file paths, one per line — no prose, no numbering, no markdown.\n' "$1"
+}
+
+# mutation_cap N CANDIDATE... — pure (candidates, N) -> (capped, skipped_count)
+# step (#400), no subprocess/claude involved. Prints the first N candidates
+# (one per line), then a final "SKIPPED:<count>" line — 0 when nothing was
+# truncated. ponytail: encoding both outputs on stdout (instead of a nameref
+# or a second output stream) is the shortest seam that stays testable via a
+# plain `$(...)` capture.
+mutation_cap() {
+  local n="$1"; shift
+  local total="$#" skipped=0 i=0
+  [ "$total" -gt "$n" ] && skipped=$((total - n))
+  for c in "$@"; do
+    i=$((i + 1))
+    [ "$i" -gt "$n" ] && break
+    printf '%s\n' "$c"
+  done
+  printf 'SKIPPED:%s\n' "$skipped"
+}
+
 # Guard the rest so a test can `source` this file to reach the functions
 # above without triggering a live sweep.
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
@@ -61,7 +87,12 @@ while [ $# -gt 0 ]; do
     --only) ONLY="$2"; shift 2 ;;
     --index) INDEX_ONLY=1; shift ;;
     --force|--all) FORCE=1; shift ;;
-    --mutation) MUTATION=1; MUTATION_LIST="$2"; shift 2 ;;
+    --mutation)
+      MUTATION=1
+      # "$2" may be absent (--mutation is the last arg = no list, i.e.
+      # trigger the auto-select pre-pass) — guard under set -u.
+      if [ $# -ge 2 ]; then MUTATION_LIST="$2"; shift 2; else MUTATION_LIST=""; shift 1; fi
+      ;;
     -*) echo "unknown flag: $1" >&2; exit 2 ;;
     *) REPO="$1"; shift ;;
   esac
@@ -69,9 +100,28 @@ done
 REPO="${REPO:-$PWD}"
 REPO="$(cd "$REPO" && pwd)"   # absolute
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+# ponytail: --dangerously-skip-permissions because these run unattended in the
+# background and each needs Read/Grep/Bash/Write to produce its HTML report.
+# Drop the flag to run one interactively if you'd rather approve tools by hand.
+CLAUDE_FLAGS=(-p --dangerously-skip-permissions)
+
 # --mutation is its own short-circuit mode, mirroring --index: parse the
-# explicit target list, echo the selection observably, and return WITHOUT
-# running the twelve-audit claude sweep. Entirely offline — invokes no claude.
+# target list, echo the selection observably, and return WITHOUT running the
+# twelve-audit claude sweep.
+#
+# An explicit list (--mutation a.py,b.py) bypasses BOTH the pre-pass and the
+# cap below — that's the current behavior, entirely offline.
+#
+# No list (--mutation with nothing, or "") triggers the auto-select pre-pass
+# (#400): one `claude -p` reads the repo and names the mutation-worthy core
+# modules, one per line. AUDITS_NO_SYNTH=1 skips the pre-pass — the mutation
+# analogue of the existing synthesis-pass gate — leaving zero candidates and
+# invoking no claude. ponytail: MUTATION_CANDIDATES lets a test inject a
+# candidate list instead of calling claude, so the cap/skip-line behavior is
+# testable offline without a subprocess.
+#
 # ponytail: the actual mutmut run is stubbed here (selection + echo only);
 # the real run lands in #401.
 if [ "$MUTATION" = 1 ]; then
@@ -82,18 +132,44 @@ if [ "$MUTATION" = 1 ]; then
     t="${t%"${t##*[![:space:]]}"}"   # trim trailing whitespace
     [ -n "$t" ] && MUTATION_TARGETS+=("$t")
   done
-  for t in "${MUTATION_TARGETS[@]:-}"; do
-    [ -n "$t" ] && printf 'mutation-target: %s\n' "$t"
-  done
+
+  if [ "${#MUTATION_TARGETS[@]}" -gt 0 ]; then
+    # Explicit list: bypass the pre-pass and the cap entirely.
+    for t in "${MUTATION_TARGETS[@]}"; do
+      printf 'mutation-target: %s\n' "$t"
+    done
+    exit 0
+  fi
+
+  # No explicit list: auto-select the candidates.
+  CANDIDATES=()
+  if [ -n "${MUTATION_CANDIDATES:-}" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && CANDIDATES+=("$line")
+    done <<< "$MUTATION_CANDIDATES"
+  elif [ "${AUDITS_NO_SYNTH:-0}" != 1 ]; then
+    prepass_out="$(claude "${CLAUDE_FLAGS[@]}" "$(mutation_prepass_prompt "$REPO")" 2>/dev/null || true)"
+    while IFS= read -r line; do
+      line="${line#"${line%%[![:space:]]*}"}"
+      line="${line%"${line##*[![:space:]]}"}"
+      [ -n "$line" ] && CANDIDATES+=("$line")
+    done <<< "$prepass_out"
+  fi
+  # else: AUDITS_NO_SYNTH=1 and no injection — CANDIDATES stays empty, no
+  # claude invoked.
+
+  MUTATION_MAX_N="${MUTATION_MAX:-10}"
+  cap_out="$(mutation_cap "$MUTATION_MAX_N" "${CANDIDATES[@]:-}")"
+  skipped="$(printf '%s\n' "$cap_out" | grep '^SKIPPED:' | cut -d: -f2)"
+  while IFS= read -r line; do
+    case "$line" in
+      SKIPPED:*|'') continue ;;
+      *) printf 'mutation-target: %s\n' "$line" ;;
+    esac
+  done <<< "$cap_out"
+  [ "${skipped:-0}" -gt 0 ] && printf '… %s more modules skipped (raise MUTATION_MAX to include them)\n' "$skipped"
   exit 0
 fi
-
-HERE="$(cd "$(dirname "$0")" && pwd)"
-
-# ponytail: --dangerously-skip-permissions because these run unattended in the
-# background and each needs Read/Grep/Bash/Write to produce its HTML report.
-# Drop the flag to run one interactively if you'd rather approve tools by hand.
-CLAUDE_FLAGS=(-p --dangerously-skip-permissions)
 
 # The full set — six original + six added (spec #365, T5). mutation-audit is
 # deliberately NOT here: it is opt-in, targeted at one module, never swept.
