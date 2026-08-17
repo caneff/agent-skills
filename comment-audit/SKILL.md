@@ -73,13 +73,19 @@ each rots into a lie the moment the code changes underneath it:
   below`, a comment on every line of a self-evident block.
 - **Historical cruft.** `# changed from a list to a dict on 3/4`; `// used to
   call the old API`; a changelog living in the source. Git already holds this.
-- **Issue/ticket/ADR/decision citation.** `# see JIRA-4521`, `# per ADR-012`,
-  `// fixes #88`, `// (issue #4, decision 3)`. Every such pointer sends the
-  reader off to reconstruct a reason that belongs right here. Cut the *whole*
-  citation, not one pointer out of it — dropping `#4` from `(issue #4, decision
-  3)` leaves a barer `decision 3`, worse than what you started with. If the
-  citation carried a *why*, keep the *why* as plain prose and delete every
-  number.
+- **Bare issue/ticket/decision/spec citation.** `# see JIRA-4521`, `// fixes
+  #88`, `// (issue #4, decision 3)`, `# spec #99`, a naked forward-ref
+  `(#399)`, `(decisions #382, #385)`. A bare number counts even with no verb
+  or keyword beside it — a lone `(#399)` is still a pointer to cut. Every such
+  pointer sends the reader off to reconstruct a reason that belongs right here.
+  Cut the *whole* citation, not one pointer out of it — dropping `#4` from
+  `(issue #4, decision 3)` leaves a barer `decision 3`, worse than what you
+  started with. If the citation carried a *why*, keep the *why* as plain prose
+  and delete every number. **One exception — an `ADR-NNNN` reference stays.**
+  An ADR is a durable, addressable decision record, not an ephemeral ticket,
+  so the reason it points to genuinely lives elsewhere and stays reachable —
+  keep it, the way a domain-rule keeper does. Still drop a bare number riding
+  beside an ADR: `per ADR-0007 (#412)` → `per ADR-0007`.
 - **The plausible-but-inferable why.** A because-clause a reader would already
   know from the code: `# use a set for fast lookup`, `# sort so output is
   stable`, `# cache to avoid recomputing`. It sounds like rationale, but the code
@@ -106,7 +112,8 @@ first. A good comment is a note, not a paragraph.
   code's shape, stated so the reader never leaves the file:
   `// upstream truncates payloads over 64KB — chunk first`. Keep the reason;
   never keep an issue number in its place — a `#123` promises the reason lives
-  elsewhere, and this audit puts it here instead.
+  elsewhere, and this audit puts it here instead (a durable `ADR-NNNN` is the
+  exception — keep it; see Cut).
 - **The domain rule the code can't make self-evident.** A business constraint or
   legal requirement whose *why* lives outside the codebase.
 - **Public API contract.** A docstring or doc-comment on a published interface,
