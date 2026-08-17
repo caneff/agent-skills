@@ -95,6 +95,29 @@ covered without re-running mutmut.
      artifact: remove what you added (and mutmut's own `mutants/` and
      `.mutmut-cache`) once the run finishes.
 
+**Speed knobs.** `source_paths` (step 3, above) is the one big zero-risk
+speed knob and it's already applied — mutate only the target module, never
+the whole repo. Two other mutmut config keys sound like speed knobs but trade
+away accuracy, so neither is set by default here:
+
+- **`mutate_only_covered_lines`** (default `false`) skips lines
+  `coverage.py` says no test reaches. Leave it **off**. Turning it on drops
+  the `no-coverage` bucket entirely — there's nothing left to mislabel a
+  no-coverage line as, mutmut just never mutates it. If a future fast,
+  coverage-only mode gets offered, it must be explicit opt-in and say up
+  front that it drops the no-coverage findings.
+- **`max_stack_depth`** (default none) trims how deep mutmut looks for a
+  killing test, which is faster but accuracy-risky: a mutant killed only by
+  a test several stack frames down can get mislabeled `no-coverage` or
+  `rewrite` — a false finding. It's an opt-in knob the user reaches for by
+  name, never a default here.
+
+Incremental caching (git change detection) is on by default — there's no
+config key for it. When `all-audits` runs this per module, each module gets
+its own disposable git worktree, so every run starts with a cold
+`.mutmut-cache` — caching stays active but its cross-run benefit is limited
+in that setup.
+
 4. **Run mutmut, capture results.**
    ```sh
    uvx --with pytest mutmut run          # add --with <pkg> for the target's own test deps
