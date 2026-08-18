@@ -93,9 +93,9 @@ reads as done-and-waiting rather than dropped.
 
 ## Worktree/ship mechanics
 
-`pushpr` and `ship` are the owner's scripts in `~/.local/bin`. The agent may
-run `pushpr` (the outward gate makes it self-limiting); it may never run
-`ship` — merge is the owner's gate, always.
+`pushpr` and `ship` are the owner's scripts in `~/.local/bin` (see the global
+hard rules for the ship prohibition). The agent may run `pushpr` — the outward
+gate makes it self-limiting.
 
 - After `pushpr`, immediately `ExitWorktree` with `keep` — the worktree stays
   on disk (no confirm needed) and the session returns to repo root, so the
