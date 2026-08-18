@@ -36,6 +36,10 @@ Each audits the whole repo and renders a visual-teach HTML report:
 this repo. `mutation-audit` is **not** in the set either — it is opt-in and
 targeted at one module (never a whole-repo sweep); invoke it by name.
 
+**Every audit skill in the set reports by default.** Applying edits is opt-in —
+the user asks by name — and lands as a reviewable PR on its own branch, never a
+direct commit to main. Carry this contract into any new audit skill you add here.
+
 ## The runnable sweep — `run-audits.sh`
 
 `run-audits.sh` is the bash orchestrator that runs each guarded audit as its own
