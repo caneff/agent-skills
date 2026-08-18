@@ -1,5 +1,6 @@
 ---
 name: jupyter-to-marimo
+disable-model-invocation: true
 description: Convert a Jupyter notebook (.ipynb) to a marimo notebook (.py).
 ---
 
