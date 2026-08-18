@@ -1,5 +1,6 @@
 ---
 name: visual-teach
+disable-model-invocation: true
 description: "`visual-teach` is the styling + behavior floor under every teaching lesson — link its Base first, then use ready-made `vt-*` blocks for the standard parts. The floor goes under any lesson HTML (especially `/teach`), including heavily custom or interactive ones: use the blocks for the commodity parts and build your bespoke exercise on top, never instead of it."
 ---
 
