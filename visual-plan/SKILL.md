@@ -1,5 +1,6 @@
 ---
 name: visual-plan
+disable-model-invocation: true
 description: >-
   Turn ordinary text plans into rich interactive visual plans with diagrams,
   file maps, annotated code, open questions, and UI/prototype review when
