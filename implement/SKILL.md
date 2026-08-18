@@ -90,3 +90,22 @@ Once the PR is open, move the ticket to review:
 `gh issue edit <n> --remove-label in-progress --add-label in-review`. `in-review`
 is the PR-pending-human-merge state the orchestrator also uses, so the issue
 reads as done-and-waiting rather than dropped.
+
+## Worktree/ship mechanics
+
+`pushpr` and `ship` are the owner's scripts in `~/.local/bin`. The agent may
+run `pushpr` (the outward gate makes it self-limiting); it may never run
+`ship` — merge is the owner's gate, always.
+
+- After `pushpr`, immediately `ExitWorktree` with `keep` — the worktree stays
+  on disk (no confirm needed) and the session returns to repo root, so the
+  owner's later `ship` line runs clean. `ship` must run from repo root: `!`
+  commands run in the agent's cwd, and if the agent is still inside the
+  worktree, ship's "remove the worktree first" guard sees itself, skips, and
+  `gh --delete-branch` then dies on `'main' is already used by worktree`. Do
+  the `ExitWorktree` silently — no need to narrate it each time.
+- If the owner asks "why don't I see any edits", the answer is "they're in the
+  worktree" — not a reason to merge anything. Tests run in the worktree; their
+  checkout sees the change when the PR ships, not before.
+- A repo with no `origin` can't run the code lane. Say so and offer
+  `gh repo create`; don't silently fall back to merging locally.
