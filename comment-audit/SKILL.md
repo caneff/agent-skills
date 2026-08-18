@@ -186,10 +186,18 @@ answer.
    summary `report.html` from it (see below). Touch no code. Print the one-line
    verdict and the summary's absolute path, nothing else.
 
-   Before you write, count whole deletions against salvage-trims. This is a
-   mirror, not a rule: if the salvages outnumber the whole deletes, you
-   rationalized — go back and re-ask each salvage whether you would write that
-   clause onto a blank line today. Most of them are whole cuts you softened.
+   Before you write, hold up two mirrors — each catches a different way the
+   sweep goes timid. Neither is a rule; both are a prompt to go back and re-judge.
+
+   - **Salvage vs whole-delete.** If the salvages outnumber the whole deletes,
+     you rationalized — re-ask each salvage whether you would write that clause
+     onto a blank line today. Most are whole cuts you softened.
+   - **Keep vs cut.** Keepers are a minority — a small one. If they run past a
+     fraction of the comments judged, you rationalized the other way: you let
+     "there might be a why" promote restatement to a keep. Re-ask each keeper
+     the not-inferable gate — would a competent reader already know this from
+     the code and its names? Over-keeping is over-salvaging one level up, and it
+     is the easier miss to miss, because a keep leaves no trim to notice.
 
 ## Write the log and render the summary
 
