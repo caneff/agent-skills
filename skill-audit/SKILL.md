@@ -16,8 +16,23 @@ uv run --no-project python ~/.agents/skills/skill-audit/audit.py [stale-days]
 ```
 
 `stale-days` defaults to 45. Prints a table of every skill under `~/.agents/skills`:
-invoke type (model / slash-only), last-used date, age. Model-invocable skills unused
-past the threshold are flagged `<-- FLIP` and listed at the bottom.
+invoke type (model / slash-only), last-used date, age. Below the table it prints a
+**numbered list** of the model-invocable skills unused past the threshold — the
+stale candidates, nothing auto-decided.
+
+## Flip the ones you pick
+
+Staleness is a signal, not a verdict, so the report never flips anything on its own.
+Read the numbered list, then re-run with the numbers you choose:
+
+```bash
+uv run --no-project python ~/.agents/skills/skill-audit/audit.py [stale-days] --flip 1,3
+```
+
+That adds `disable-model-invocation: true` to each picked skill's frontmatter (keeps
+`/slash`, drops it from every context window). It is idempotent — a skill already
+slash-only is left alone. The numbers come from the current report; pass the same
+`stale-days` so they line up. Re-run without `--flip` to see the updated table.
 
 ## How it reads usage
 
@@ -27,12 +42,16 @@ which is why the scan recurses. Last-used = newest timestamp on any line naming 
 "NEVER" means no invocation in retained transcript history (logs get pruned, so treat
 NEVER as "not lately", not "not ever").
 
-## Acting on results
+## Which numbers to pick
 
 Don't blanket-flip. Per candidate, ask: *would I want the model to auto-fire this?*
-- **No — I'll call it by hand** (setup/convert/niche skills): flip it. Add
-  `disable-model-invocation: true` to its frontmatter.
+- **No — I'll call it by hand** (setup/convert/niche skills): pick its number.
 - **Yes — broadly useful, just hasn't come up** (`uv`, `diagnosing-bugs`,
-  `resolving-merge-conflicts`, `read-the-damn-docs`): keep model-invocable. Unused ≠ useless.
+  `resolving-merge-conflicts`, `read-the-damn-docs`): leave it. Unused ≠ useless.
+
+Also leave anything the model *chains* — a skill another skill invokes by name
+(`tdd`/`code-review` under `/implement`, `grilling`/`research` under `/wayfinder`,
+`wait-what` under `/ww`). `disable-model-invocation: true` blocks that call, so
+flipping a chained skill breaks its caller even if the skill itself looks unused.
 
 Flipping = add one frontmatter line; no symlink or reinstall change needed.
