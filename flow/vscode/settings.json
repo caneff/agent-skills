@@ -94,5 +94,6 @@
         "editorGroup.border": "#6272a4",
         "sash.hoverBorder": "#6272a4"
     },
-    "githubIssues.showIssueNumberInTree": true
+    "githubIssues.showIssueNumberInTree": true,
+    "editor.minimap.enabled": false
 }
