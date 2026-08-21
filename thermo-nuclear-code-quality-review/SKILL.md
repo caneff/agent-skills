@@ -72,7 +72,10 @@ Apply the baseline prompt above, plus these explicit review rules:
 
 Before the manual read-through, run two mechanical passes over the changed
 files as lead-generation — not verdicts, the judgment above still decides
-what's worth a card:
+what's worth a card. Point `<scope>` at the project's own tracked source only:
+skip vendored, generated, and dependency trees (`node_modules`, `dist`,
+`.venv`, `vendor`, build output, lockfiles) and any `.git/` or `worktrees/`
+tree.
 
 - `uvx radon cc --json --min C <scope>` — cyclomatic complexity, ranked A–F
   (A simplest, F worst). A block ranked C or worse is a candidate for "did the
