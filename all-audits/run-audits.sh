@@ -41,7 +41,7 @@ report_path_from_log() {
 # test where $REPO is unset.
 audit_prompt() {
   printf '/%s %s\n%s\n' "$1" "$2" \
-    "Audit the ENTIRE repository at $2 — every source file, not a git diff or recent-changes review. Override any branch-diff or hot-spot default the skill has. Exclude vendored, generated, and dependency trees (node_modules, .venv, dist, vendor, build output, lockfiles), any .git/ tree, and any worktrees/ tree — audit only the project's own tracked source."
+    "Audit the ENTIRE repository at $2 — every source file, not a git diff or recent-changes review. Override any branch-diff or hot-spot default the skill has. Exclude vendored, generated, and dependency trees (node_modules, .venv, dist, vendor, build output, lockfiles), any .git/ tree, and any worktrees/ tree — audit only the project's own tracked source. Do NOT open the report: skip every xdg-open/open/start step the skill would run. You are one audit inside an all-audits sweep, and the sweep opens only the final index — twelve reports opening at once would bury it. Just write the report and print its absolute path."
 }
 
 # mutation_prepass_prompt REPO — the prompt for the mutation auto-select
