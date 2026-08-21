@@ -10,7 +10,9 @@ description: >
 ---
 
 ponytail-review, repo-wide. Scan the whole tree instead of a diff. Rank
-findings biggest cut first.
+findings biggest cut first. Skip vendored, generated, and dependency trees
+(`node_modules`, `dist`, `.venv`, `vendor`, build output, lockfiles) and any
+`.git/` or `worktrees/` tree — audit only the project's own tracked source.
 
 ## Tags
 

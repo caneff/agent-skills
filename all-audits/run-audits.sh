@@ -41,7 +41,7 @@ report_path_from_log() {
 # test where $REPO is unset.
 audit_prompt() {
   printf '/%s %s\n%s\n' "$1" "$2" \
-    "Audit the ENTIRE repository at $2 — every source file, not a git diff or recent-changes review. Override any branch-diff or hot-spot default the skill has."
+    "Audit the ENTIRE repository at $2 — every source file, not a git diff or recent-changes review. Override any branch-diff or hot-spot default the skill has. Exclude vendored, generated, and dependency trees (node_modules, .venv, dist, vendor, build output, lockfiles), any .git/ tree, and any worktrees/ tree — audit only the project's own tracked source."
 }
 
 # mutation_prepass_prompt REPO — the prompt for the mutation auto-select
