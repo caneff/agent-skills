@@ -67,7 +67,7 @@ covered without re-running mutmut.
    `venv`, `vendor`, `worktrees`, `mutants`, and any dotdir) collecting
    `.py` paths, then:
    ```sh
-   python3 mutation-audit/audit.py --suggest <scope>
+   python3 ~/.agents/skills/mutation-audit/audit.py --suggest <scope>
    ```
    This calls `suggest_candidates` — the tested pure seam: a module is a
    candidate when it's a plain module (not `__init__.py`, not a test file,
@@ -121,8 +121,8 @@ in that setup.
 4. **Run mutmut, capture results.**
    ```sh
    uvx --with pytest mutmut run          # add --with <pkg> for the target's own test deps
-   uvx mutmut results --all true > /tmp/mutmut-results.txt
-   python3 mutation-audit/audit.py /tmp/mutmut-results.txt
+   uvx mutmut results --all true > "${TMPDIR:-/tmp}/mutmut-results.txt"
+   python3 ~/.agents/skills/mutation-audit/audit.py "${TMPDIR:-/tmp}/mutmut-results.txt"
    ```
    `parse_mutmut_results(text) -> list[dict]` is the tested seam
    (`fixtures/mutmut-results.txt` + `fixtures/answer-key.md` back it,
@@ -154,11 +154,10 @@ in that setup.
    a grouped summary `report.html` from it, following
    `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
    JSONL schema and the summary's grouped-overview shape.
-   Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
-   `<tmpdir>/mutation-audit-<timestamp>/`, then open the summary and hand
-   off its path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s
-   asset-delivery section describes. This audit touches no test — rewriting
-   a weak assertion is a separate, opt-in step the user asks for by name.
+   Write both to `<tmpdir>/mutation-audit-<timestamp>/` and deliver the summary
+   per `~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir resolution,
+   opening, and handing off the path all live there. This audit touches no test —
+   rewriting a weak assertion is a separate, opt-in step the user asks for by name.
 
    - **Log** — one JSONL line per surviving mutant. `bucket` is `rewrite`,
      `no-coverage`, or `cut`. `category` is always `surviving-mutant`.

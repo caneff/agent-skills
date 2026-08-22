@@ -69,12 +69,18 @@ last run is within the time backstop (default 30 days).
 
 ## Run
 
+Two front doors reach the same sweep. Run `run-audits.sh` from a terminal for the
+cached, flag-driven version above (`--only`, `--index`, `--force`, the staleness
+cache). When you are invoked in-session as `/all-audits`, drive the fan-out
+yourself with the steps below — no staleness cache on this path. Both write the
+same per-report folders and the same `index.html`.
+
 1. **Make the collection folder.** Resolve the temp dir from `$TMPDIR`, fall back
    to `/tmp`. Create `<tmpdir>/all-audits-<timestamp>/` — this holds every
    report and the index.
 
-2. **Fan out six subagents in parallel — one message, all six at once.** Spawn one
-   general-purpose subagent per skill. These are judgment-heavy audits, so give
+2. **Fan out the subagents in parallel — one message, all of them at once.** Spawn one
+   general-purpose subagent per skill in the set above. These are judgment-heavy audits, so give
    each a capable model. Each subagent's instructions:
 
    - Invoke your one skill **by name** with the `Skill` tool (the slash-only flag
@@ -90,7 +96,7 @@ last run is within the time backstop (default 30 days).
      for the fields (`audit`/`headline`/`count`/`report_path`/`log_path`/
      `findings[{target,note}]`). `report_path`/`log_path` behave differently
      for `test-audit`/`comment-audit` (grouped summary + log) versus the
-     other four (a full card-per-finding HTML report, no log).
+     card-per-finding audits (a full HTML report, no log).
 
 3. **Collect the reports.** Each skill writes a self-contained folder (report plus
    its copied `vt-*` assets). Move each whole folder into
@@ -105,7 +111,7 @@ last run is within the time backstop (default 30 days).
    (see `~/.agents/skills/all-audits/harness/HTML-REPORT.md`). The page holds:
 
    - A **synthesized lede** (`vt-lede`) under the title: 2–3 sentences on the
-     repo's overall state, drawn from reading all six reports — the shared verdict,
+     repo's overall state, drawn from reading every report — the shared verdict,
      the loudest signal, the one or two files that carry the most weight.
    - A **table**, one row per audit: audit name · one-line verdict · finding count ·
      a link to that audit's report — relative, `<audit-name>/` plus the report
@@ -113,14 +119,14 @@ last run is within the time backstop (default 30 days).
 
 5. **Open the index, then stop.** Open `index.html` — `xdg-open` on Linux, `open`
    on macOS, `start` on Windows — and print its absolute path. This is the only
-   page that opens. List the six audits and tell the user they can grill any one
+   page that opens. List the audits and tell the user they can grill any one
    of them by name. **Do not start grilling on your own.**
 
 ## Grilling a report
 
 When the user picks an audit to grill, run the `grilling` skill over **that one
 report's findings**. Grill the findings toward decisions — which to act on, which
-to drop, which need a closer look. Walk one audit at a time; do not merge the six
+to drop, which need a closer look. Walk one audit at a time; do not merge them
 into one grilling — a comment cut and an architecture deepening share no design
 tree.
 

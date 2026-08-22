@@ -163,10 +163,13 @@ answer.
 ## Run
 
 1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, default to the
-   current branch's diff against its base (`git diff --name-only main...HEAD`),
-   not the whole tree — a repo-wide sweep is an explicit opt-in the user asks for
-   by name. Either way, skip vendored, generated, and dependency trees
-   (`node_modules`, `dist`, `.venv`, build output, lockfiles).
+   current branch's diff against its base — resolve the base, don't assume `main`
+   (`git diff --name-only $(git merge-base HEAD origin/HEAD)...HEAD`), not the
+   whole tree — a repo-wide sweep is an explicit opt-in the user asks for by
+   name. Either way, skip vendored, generated, and dependency trees
+   (`node_modules`, `dist`, `.venv`, build output, lockfiles) and any `.git/` or
+   `worktrees/` tree — a git worktree mirrors the whole repo, so scanning it
+   multiplies every finding once per worktree.
 
 2. **Sweep — every comment, not a sample.** Walk the files in scope and read
    every comment in the context of the code it sits on. Judgment needs the code
@@ -205,10 +208,9 @@ The sweep can judge hundreds of comments; do not render one HTML card each. Writ
 the full record to `findings.jsonl` and a grouped summary to `report.html`,
 following `~/.agents/skills/all-audits/harness/findings-schema.md` for both —
 the JSONL schema and the summary's grouped-overview shape.
-Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
-`<tmpdir>/comment-audit-<timestamp>/`, then open the summary and hand off its
-path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s asset-delivery
-section describes.
+Write both to `<tmpdir>/comment-audit-<timestamp>/` and deliver the summary per
+`~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir resolution,
+opening, and handing off the path all live there.
 
 - **Log** — one JSONL line per judged comment. `bucket` is `cut` / `keep` /
   `load-bearing`. `category` is the reason that named it — `restatement`,
