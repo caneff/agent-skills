@@ -1,10 +1,12 @@
 # TASK
 
-Open ONE pull request against `{{BASE}}` for a single issue that just passed
-review. Do NOT merge the PR. Open it **ready for review**, never as a draft —
-two agent reviewers already vetted this branch; it is waiting on a human.
+Open ONE pull request against `{{BASE}}` for the work on `{{BRANCH}}` that just
+passed review. Do NOT merge the PR. Open it **ready for review**, never as a
+draft — two agent reviewers already vetted this branch; it is waiting on a human.
 
-- Issue: **#{{ISSUE_ID}} — {{ISSUE_TITLE}}**
+- Headline issue: **#{{ISSUE_ID}} — {{ISSUE_TITLE}}**
+- Delivers (auto-closed on merge): see the `Closes` lines under **Summary**. One
+  PR may deliver several issues — a whole spec's tickets land on one branch.
 - PR head branch: `{{BRANCH}}` (already built and pushed to `origin`)
 - PR base branch: `{{BASE}}`
 
@@ -50,11 +52,15 @@ Build the body in `.sandcastle/logs/pr-body-{{ISSUE_ID}}.md` with these sections
 
 ## Summary
 
-One or two sentences on what this issue delivered — describe behavior, not a
-file list. If `{{BASE}}` is not `main`, open with a note that this PR is
-**STACKED on `{{BASE}}`** and that the stack merges bottom-up — the base PR
-first, this one after. End with a `Closes #{{ISSUE_ID}}` line so the
-squash-merge auto-closes the issue and unblocks its children on the next run.
+One or two sentences on what this PR delivered — describe behavior, not a file
+list. If it delivers more than one issue (a whole spec), say so and cover each.
+If `{{BASE}}` is not `main`, open with a note that this PR is **STACKED on
+`{{BASE}}`** and that the stack merges bottom-up — the base PR first, this one
+after. End with the closing lines below, each on its own line and exactly as
+given, so the squash-merge auto-closes every issue this PR delivers and unblocks
+their children on the next run:
+
+{{CLOSES}}
 
 ## QA checklist
 
@@ -74,7 +80,7 @@ altitude (adapt to the real changes):
 # AFTER OPENING
 
 Do NOT push to `{{BASE}}`. Do NOT merge the PR. Do NOT touch issue labels — the
-orchestrator manages issue lifecycle state host-side. The `Closes #{{ISSUE_ID}}`
-line closes the issue when I squash-merge the PR manually.
+orchestrator manages issue lifecycle state host-side. The `Closes` lines close
+their issues when I squash-merge the PR manually.
 
 Once the PR is open, output <promise>COMPLETE</promise>.
