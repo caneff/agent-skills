@@ -139,10 +139,11 @@ const VERBOSE =
 // PR grouping via SANDCASTLE_PR_GROUPING:
 //   unset/issue  one PR per issue — the default, historical behavior.
 //   spec         one PR per spec — issues built this run that share a native
-//                GitHub sub-issue parent open as a single PR from their stack's
-//                tip. A spec whose tickets are not one stack (flat siblings or a
-//                diamond) falls back to one PR per issue, with a warning. See the
-//                end-of-run spec-PR assembly below.
+//                GitHub sub-issue parent open as a single PR. A linear spec
+//                opens from its stack's tip; a non-linear one (flat siblings or
+//                a diamond) is merged onto one integration branch. Only a merge
+//                conflict between siblings falls back to one PR per issue, with
+//                a warning. See the end-of-run spec-PR assembly below.
 const PR_GROUPING: PrGrouping =
   process.env.SANDCASTLE_PR_GROUPING === "spec" ? "spec" : "issue";
 mkdirSync(".sandcastle/logs", { recursive: true });
@@ -884,10 +885,12 @@ gcWorktrees();
 // spec). A run stacks a linear spec level by level, so the last ticket's branch
 // already contains the whole spec — chooseTip finds that tip branch and opens
 // ONE PR from it, closing every ticket in the group. A group with no single tip
-// branch (a flat spec of independent siblings, or a diamond) cannot become one
-// clean PR without a merge, so it falls back to one PR per issue with a warning
-// — a visible partial, never a silent one. A lone-ticket spec or an orphan (no
-// parent) is a group of one: one PR, exactly as in issue mode.
+// branch (a flat spec of independent siblings, or a diamond) is merged onto one
+// integration branch cut from `main`, which opens the group's single PR. Only a
+// merge conflict between siblings — the exception for disjoint tracer bullets —
+// falls back to one PR per issue, with a warning; never a silent partial. A
+// lone-ticket spec or an orphan (no parent) is a group of one: one PR, as in
+// issue mode.
 //
 // Deferred until here because a spec's tickets build across several replan-loop
 // levels, so the group is only complete once the loop ends. This runs on local
@@ -941,6 +944,37 @@ if (PR_GROUPING === "spec" && builtForSpec.length > 0) {
     }
   };
 
+  // Assemble a non-linear spec (flat siblings, or a diamond — no single tip
+  // branch) onto ONE integration branch: cut it from `main` and merge each
+  // member's branch in build order (parents before children, so a partial
+  // sub-stack merges as a fast-forward). Returns true when every merge is clean
+  // — the branch is then ready to open one PR from — and false when a merge
+  // conflicts, so the caller falls back to one PR per issue. Tracer-bullet
+  // slices are meant to be disjoint, so a conflict here is the exception.
+  //
+  // The merge runs in a throwaway worktree under `.sandcastle/worktrees/` (so a
+  // crash mid-merge is swept by the next run's startup gcWorktrees), removed
+  // either way. On success the branch ref it built persists the worktree
+  // removal, for openBranchPr to push; on failure the branch is deleted.
+  const assembleSpecBranch = (
+    intBranch: string,
+    memberBranches: string[]
+  ): boolean => {
+    const dir = `.sandcastle/worktrees/integrate-${intBranch.replace(/[^\w.-]/g, "-")}`;
+    git(`worktree add --force -B ${intBranch} ${dir} main`);
+    let clean = true;
+    for (const branch of memberBranches) {
+      if (git(`-C ${dir} merge --no-edit ${branch}`) === null) {
+        git(`-C ${dir} merge --abort`);
+        clean = false;
+        break;
+      }
+    }
+    git(`worktree remove --force ${dir}`);
+    if (!clean) git(`branch -D ${intBranch}`);
+    return clean;
+  };
+
   const groups = prGroups(
     builtForSpec.map((b) => ({
       id: b.id,
@@ -970,23 +1004,41 @@ if (PR_GROUPING === "spec" && builtForSpec.length > 0) {
         solo ? `#${tip.id}` : `spec #${group.key}`
       );
     } else {
-      // No single tip: a flat or diamond spec. Fall back to one PR per issue,
-      // each on its own resolveBase base — byte-for-byte what issue mode does.
-      console.warn(
-        `  ⚠ spec #${group.key}: ${members.length} tickets are not one stack — opening one PR per issue`
-      );
-      for (const b of members) {
+      // No single tip: a flat or diamond spec. Assemble its members onto one
+      // integration branch and open one PR from that. Only a merge conflict
+      // between siblings forces the fallback to one PR per issue.
+      const intBranch = `sandcastle/spec-${group.key}`;
+      if (assembleSpecBranch(intBranch, members.map((m) => m.branch))) {
         await openAndRecord(
           {
-            branch: b.branch,
-            issueId: String(b.id),
-            issueTitle: b.title,
-            base: b.base,
-            closes: [b.id],
+            branch: intBranch,
+            issueId: String(group.key),
+            issueTitle: `spec #${group.key} (${members.length} tickets)`,
+            base: "main",
+            closes: members.map((m) => m.id),
           },
-          [b],
-          `#${b.id}`
+          members,
+          `spec #${group.key}`
         );
+      } else {
+        // Siblings touch the same lines — no one clean PR. Fall back to one PR
+        // per issue, each on its own resolveBase base (as issue mode would).
+        console.warn(
+          `  ⚠ spec #${group.key}: ${members.length} tickets conflict on merge — opening one PR per issue`
+        );
+        for (const b of members) {
+          await openAndRecord(
+            {
+              branch: b.branch,
+              issueId: String(b.id),
+              issueTitle: b.title,
+              base: b.base,
+              closes: [b.id],
+            },
+            [b],
+            `#${b.id}`
+          );
+        }
       }
     }
   }
