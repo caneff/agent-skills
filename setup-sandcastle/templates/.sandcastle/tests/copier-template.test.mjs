@@ -287,6 +287,10 @@ const ARC_ADDED_RENDERS = [
   ".sandcastle/sandbox-config.mts",
   // The fix-up agent's prompt for the bounded review-fail retry (#389).
   ".sandcastle/address-findings-prompt.md",
+  // The pure PR-grouping seams for the SANDCASTLE_PR_GROUPING=spec option:
+  // prGroups buckets a run's built issues by their native spec parent, and
+  // chooseTip picks the one stack branch that opens as the spec's single PR.
+  ".sandcastle/pr-groups.mts",
 ];
 
 // The mirror: files the template deliberately WITHDRAWS since the pin. Without

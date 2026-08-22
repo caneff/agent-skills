@@ -60,6 +60,7 @@ import {
   parseOpenIssues,
   type IssueEdgeRow,
 } from "./github-parse.mts";
+import { prGroups, chooseTip, type PrGrouping } from "./pr-groups.mts";
 import { nextBuildable } from "./select-buildable.mts";
 import { firstHarnessFault, normalizeSettled } from "./pipeline-results.mts";
 import { parseSandcastleWorktrees } from "./worktrees.mts";
@@ -134,6 +135,16 @@ function editIssueBody(id: string, body: string): void {
 const VERBOSE =
   process.env.SANDCASTLE_VERBOSE != null &&
   process.env.SANDCASTLE_VERBOSE !== "0";
+
+// PR grouping via SANDCASTLE_PR_GROUPING:
+//   unset/issue  one PR per issue — the default, historical behavior.
+//   spec         one PR per spec — issues built this run that share a native
+//                GitHub sub-issue parent open as a single PR from their stack's
+//                tip. A spec whose tickets are not one stack (flat siblings or a
+//                diamond) falls back to one PR per issue, with a warning. See the
+//                end-of-run spec-PR assembly below.
+const PR_GROUPING: PrGrouping =
+  process.env.SANDCASTLE_PR_GROUPING === "spec" ? "spec" : "issue";
 mkdirSync(".sandcastle/logs", { recursive: true });
 
 // Logs are append-only and gitignored. Sandcastle delimits each run with a
@@ -355,6 +366,56 @@ type WorkIssue = {
 // built issue's `in-review` label backs the no-double-build guard across runs.
 const builtBranches = new Map<number, string>();
 const attemptedThisRun = new Set<number>();
+
+// SANDCASTLE_PR_GROUPING=spec only: issues built AND reviewed this run whose PR
+// is deferred to the end-of-run spec assembly. Each carries the branch (already
+// pushed) and the label transition a `done` issue earns, applied when its spec
+// PR opens — so an issue is never labeled in-review before its PR exists.
+type BuiltForSpec = {
+  id: number;
+  title: string;
+  branch: string;
+  // The base this issue built on (resolveBase). The spec's tip PR opens against
+  // `main` (the whole spec's diff), but a fallback per-issue PR opens against
+  // this base — so a fallback is byte-for-byte what issue mode would have done,
+  // stacked base and all.
+  base: string;
+  addLabel: string | null;
+  removeLabels: string[];
+};
+const builtForSpec: BuiltForSpec[] = [];
+
+// Open ONE pull request from an already-built branch and return its number (0
+// if the open failed). The single home for the pr-author call: the per-issue
+// path, the spec-tip PR, and the flat-spec fallback all go through it, so PR
+// prose and the `Closes` set are wired one way. `closes` is every issue the PR
+// delivers — one for a per-issue PR, all of a spec's tickets for a tip PR.
+async function openBranchPr(opts: {
+  branch: string;
+  issueId: string;
+  issueTitle: string;
+  base: string;
+  closes: number[];
+}): Promise<number> {
+  git(`push -u --force-with-lease origin ${opts.branch}`);
+  await sandcastle.run({
+    ...sandboxConfig(),
+    name: `pr-author-${opts.issueId}`,
+    logging: logging(`pr-author-${opts.issueId}`, opts.branch),
+    maxIterations: 1,
+    agent: sandcastle.claudeCode("claude-sonnet-5"),
+    promptFile: "./.sandcastle/pr-prompt.md",
+    promptArgs: {
+      BRANCH: opts.branch,
+      ISSUE_ID: opts.issueId,
+      ISSUE_TITLE: opts.issueTitle,
+      BASE: opts.base,
+      CLOSES: opts.closes.map((n) => `Closes #${n}`).join("\n"),
+    },
+  });
+  const raw = gh(`pr view ${opts.branch} --json number --jq .number`);
+  return raw ? parseInt(raw, 10) : 0;
+}
 
 // ---------------------------------------------------------------------------
 // Phase 1–3, one level of the chain per iteration.
@@ -707,39 +768,46 @@ while (true) {
     if (plan.note) console.warn(`  ${plan.note}`);
 
     if (kind === "done") {
-      // Open one ready PR — head = the issue's own branch, base = resolveBase's
-      // pick (the parent's branch for a stacked child, else `main`, #343) — then
-      // label in-review and record it. Order matters: opening before the label
-      // makes "in-review with no PR" structurally impossible.
-      //
-      // Recomputed here rather than threaded through the outcome union: the
-      // build-time value (~line 444) isn't in scope in this loop, but
-      // `blockedBy` and `builtBranches` both are, and resolveBase is pure — the
-      // recompute is cheaper than plumbing base through normalizeSettled.
-      // builtBranches only grows within a run, and X's parent (built at an
-      // earlier level) is already in it while X itself and its same-level
-      // siblings are not X's parents, so this equals the build-time base.
+      // The base this issue built on — resolveBase's pick (a stacked child's
+      // parent branch, else `main`, #343), recomputed here from `blockedBy` and
+      // `builtBranches` (both in scope, resolveBase pure) rather than threaded
+      // through the outcome union. builtBranches only grows within a run, and X's
+      // parent (built at an earlier level) is already in it while X and its
+      // same-level siblings are not X's parents, so this equals the build-time base.
       const base = resolveBase(
         blockedBy.get(Number(issue.id)) ?? [],
         builtBranches
       );
-      git(`push -u --force-with-lease origin ${issue.branch}`);
-      await sandcastle.run({
-        ...sandboxConfig(),
-        name: `pr-author-${issue.id}`,
-        logging: logging(`pr-author-${issue.id}`, issue.branch),
-        maxIterations: 1,
-        agent: sandcastle.claudeCode("claude-sonnet-5"),
-        promptFile: "./.sandcastle/pr-prompt.md",
-        promptArgs: {
-          BRANCH: issue.branch,
-          ISSUE_ID: issue.id,
-          ISSUE_TITLE: issue.title,
-          BASE: base,
-        },
+
+      // Spec grouping (SANDCASTLE_PR_GROUPING=spec): defer the PR. Push the
+      // branch (durable), record it as a stackable base so this run's children
+      // still advance, and queue the issue for the end-of-run spec assembly. The
+      // label waits for that PR — so "in-review with no PR" never persists.
+      if (PR_GROUPING === "spec") {
+        git(`push -u --force-with-lease origin ${issue.branch}`);
+        builtBranches.set(Number(issue.id), issue.branch);
+        builtForSpec.push({
+          id: Number(issue.id),
+          title: issue.title,
+          branch: issue.branch,
+          base,
+          addLabel: plan.addLabel,
+          removeLabels: plan.removeLabels,
+        });
+        console.log(`  ✓ #${issue.id} reviewed clean → queued for its spec PR`);
+        continue;
+      }
+
+      // Issue grouping (default): open one ready PR now — head = the issue's own
+      // branch, base = the resolved base — then label in-review and record it.
+      // Opening before the label makes "in-review with no PR" impossible.
+      const prNum = await openBranchPr({
+        branch: issue.branch,
+        issueId: issue.id,
+        issueTitle: issue.title,
+        base,
+        closes: [Number(issue.id)],
       });
-      const prNumRaw = gh(`pr view ${issue.branch} --json number --jq .number`);
-      const prNum = prNumRaw ? parseInt(prNumRaw, 10) : 0;
       if (prNum > 0) {
         if (plan.addLabel) relabel(issue.id, plan.addLabel, plan.removeLabels);
         prAssignments.set(Number(issue.id), prNum);
@@ -808,6 +876,121 @@ while (true) {
 // End-of-run worktree GC: remove any issue checkout dirs left behind. PRs are
 // open; the worktrees are dead.
 gcWorktrees();
+
+// ---------------------------------------------------------------------------
+// Spec-PR assembly (SANDCASTLE_PR_GROUPING=spec): open one PR per spec.
+//
+// Group the issues built this run by their native GitHub sub-issue parent (the
+// spec). A run stacks a linear spec level by level, so the last ticket's branch
+// already contains the whole spec — chooseTip finds that tip branch and opens
+// ONE PR from it, closing every ticket in the group. A group with no single tip
+// branch (a flat spec of independent siblings, or a diamond) cannot become one
+// clean PR without a merge, so it falls back to one PR per issue with a warning
+// — a visible partial, never a silent one. A lone-ticket spec or an orphan (no
+// parent) is a group of one: one PR, exactly as in issue mode.
+//
+// Deferred until here because a spec's tickets build across several replan-loop
+// levels, so the group is only complete once the loop ends. This runs on local
+// branch refs, which persist gcWorktrees (only checkout dirs go), so the
+// ancestry check is valid. The label + prAssignments for each member are set
+// here, when its PR exists — preserving the "no in-review without a PR" rule.
+//
+// Only THIS run's built issues are grouped, so a spec whose tickets span more
+// than one run lands as one PR per run — the same incremental delivery issue
+// mode gives, one level coarser.
+//
+// ponytail: a run that dies between build and here leaves built issues queued
+// but PR-less and unlabeled (still in-progress, branch pushed). That is
+// recoverable by hand and rare; the alternative — assembling a merge PR mid-run
+// per spec — is the far larger machinery this option was scoped to avoid.
+if (PR_GROUPING === "spec" && builtForSpec.length > 0) {
+  // A null edges fetch (transient gh error) would leave every issue parentless,
+  // silently fragmenting real specs into per-issue PRs. Req: never a silent
+  // partial — so warn loudly and let the run degrade visibly to issue-like PRs.
+  const edges = fetchIssueEdges();
+  if (edges === null)
+    console.warn(
+      `  ⚠ SANDCASTLE_PR_GROUPING=spec: could not read sub-issue parents (gh error) — this run opens one PR per issue`
+    );
+  const parentOf = new Map<number, number | null>(
+    (edges ?? []).map((e) => [e.number, e.parent])
+  );
+  const byId = new Map(builtForSpec.map((b) => [b.id, b]));
+  const isAncestor = (ancestor: string, descendant: string): boolean =>
+    git(`merge-base --is-ancestor ${ancestor} ${descendant}`) !== null;
+
+  // Open one PR and record every issue it delivers: label each in-review (the
+  // deferred `done` transition) and note the assignment for the run summary.
+  // The tip PR delivers a whole group; a fallback PR delivers one issue.
+  const openAndRecord = async (
+    opts: Parameters<typeof openBranchPr>[0],
+    delivered: BuiltForSpec[],
+    label: string
+  ): Promise<void> => {
+    const prNum = await openBranchPr(opts);
+    if (prNum > 0) {
+      for (const b of delivered) {
+        if (b.addLabel) relabel(String(b.id), b.addLabel, b.removeLabels);
+        prAssignments.set(b.id, prNum);
+        console.log(emitMarker("pr", String(b.id), prNum));
+      }
+      console.log(`  ✓ ${label} → PR #${prNum} (in-review)`);
+    } else {
+      console.error(`  ✗ ${label} PR failed to open; left for next run`);
+      for (const b of delivered) console.log(emitMarker("fail", String(b.id)));
+    }
+  };
+
+  const groups = prGroups(
+    builtForSpec.map((b) => ({
+      id: b.id,
+      branch: b.branch,
+      parent: parentOf.get(b.id) ?? null,
+    })),
+    "spec"
+  );
+  for (const group of groups) {
+    const members = group.members.map((gm) => byId.get(gm.id)!);
+    const tip = chooseTip(members, isAncestor);
+    if (tip) {
+      // One PR from the tip branch (which contains the whole stack), against
+      // `main` so its diff is the whole spec. A group of one is just this PR.
+      const solo = members.length === 1;
+      await openAndRecord(
+        {
+          branch: tip.branch,
+          issueId: String(tip.id),
+          issueTitle: solo
+            ? tip.title
+            : `spec #${group.key} (${members.length} tickets)`,
+          base: "main",
+          closes: members.map((m) => m.id),
+        },
+        members,
+        solo ? `#${tip.id}` : `spec #${group.key}`
+      );
+    } else {
+      // No single tip: a flat or diamond spec. Fall back to one PR per issue,
+      // each on its own resolveBase base — byte-for-byte what issue mode does.
+      console.warn(
+        `  ⚠ spec #${group.key}: ${members.length} tickets are not one stack — opening one PR per issue`
+      );
+      for (const b of members) {
+        await openAndRecord(
+          {
+            branch: b.branch,
+            issueId: String(b.id),
+            issueTitle: b.title,
+            base: b.base,
+            closes: [b.id],
+          },
+          [b],
+          `#${b.id}`
+        );
+      }
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // End-of-run bucketed summary: account for every open issue in exactly one
