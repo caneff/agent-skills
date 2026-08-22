@@ -31,7 +31,7 @@ assertion-free findings. Playwright `.spec` files are out of scope — they're
 e2e/visual specs, not unit tests, and auditing them by this yardstick would
 misjudge them. jest, mocha, ava, and chai are likewise out of scope. A
 missing `@babel/parser` prints a `run npm ci` message and exits — bootstrap
-with `npm ci` in `test-audit/` once.
+with `npm ci` in `~/.agents/skills/test-audit/` once.
 
 **Name collision.** This is `test-audit` — test-*file* quality. It is not
 `ponytail-audit` (production-code over-engineering) or `skill-audit`
@@ -83,8 +83,7 @@ as the `documented-intent` category, "author declares intent — confirm before
 acting," naming the comment you would override, never a cold Cut or Rewrite.
 
 One carve-out: a comment cannot rescue a test that *structurally* cannot
-fail — one no input can turn red (assertion-free, or an escape-valve in every
-branch), the same limit the only-test warning draws. A tripwire that *does* go
+fail — the same limit the only-test warning draws above. A tripwire that *does* go
 red when its guarded line changes is not this case; that is
 change-detection-by-design, which documented intent moves to Keep. Documented
 intent downgrades a judgment-call smell — duplicate coverage,
@@ -236,8 +235,9 @@ just no longer this test's problem.
    `audit.py` prunes these directory names itself; the same skip applies to
    the judgment sweep.
 
-2. **Pass one — run both mechanical scanners.** `python3 test-audit/audit.py
-   <scope>` scans pytest files; `node test-audit/audit.mjs <scope>` scans
+2. **Pass one — run both mechanical scanners.** `python3
+   ~/.agents/skills/test-audit/audit.py <scope>` scans pytest files; `node
+   ~/.agents/skills/test-audit/audit.mjs <scope>` scans
    vitest and node:test files. Run both and concatenate their output into one
    `file:line: <smell>` candidate list for the five mechanically detectable
    smells (assertion-free, tautology, mock-the-world, interaction-only
@@ -272,10 +272,9 @@ The sweep can judge hundreds of tests; do not render one HTML card each. Write
 the full record to `findings.jsonl` and a grouped summary to `report.html`,
 following `~/.agents/skills/all-audits/harness/findings-schema.md` for both —
 the JSONL schema and the summary's grouped-overview shape.
-Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
-`<tmpdir>/test-audit-<timestamp>/`, then open the summary and hand off its path
-as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s asset-delivery
-section describes.
+Write both to `<tmpdir>/test-audit-<timestamp>/` and deliver the summary per
+`~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir resolution,
+opening, and handing off the path all live there.
 
 - **Log** — one JSONL line per judged test. `bucket` is `cut` / `rewrite` /
   `keep`. `category` is the smell that named it — `duplicate-coverage`,

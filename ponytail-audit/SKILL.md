@@ -53,12 +53,10 @@ Deliver the audit as a **single self-contained HTML file**, the same way
 `/improve-codebase-architecture` and `/thermo-nuclear-code-quality-review` do —
 not as a wall of terminal one-liners.
 
-Write the file to the OS temp directory so nothing lands in the repo. Resolve
-the temp dir from `$TMPDIR`, falling back to `/tmp` (or `%TEMP%` on Windows),
-and write to `<tmpdir>/ponytail-audit-<timestamp>/report.html` so each run gets
-a fresh folder. Copy the assets the report uses next to it (see HTML-REPORT.md),
-then open it — `xdg-open <path>` on Linux, `open <path>` on macOS, `start
-<path>` on Windows — and tell the user the absolute path.
+Write the report to a fresh `<tmpdir>/ponytail-audit-<timestamp>/report.html` so
+nothing lands in the repo, then deliver it per HTML-REPORT.md — tmpdir
+resolution, copying the assets beside it, opening it, and handing off the
+absolute path all live there.
 
 The report is styled with the **visual-teach** design system — vendored `vt-*`
 components and `--vt-*` theme tokens, the same system the teaching lessons and

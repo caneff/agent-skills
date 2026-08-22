@@ -78,13 +78,12 @@ when zero is true; do not manufacture five.
 ## 5. Report
 
 The default deliverable is a self-contained HTML report, styled with the
-**visual-teach** design system. Follow `~/.agents/skills/all-audits/harness/HTML-REPORT.md`
-for the asset delivery (copy the `vt-*` assets beside the report and link them
-relatively), the scaffold, and the styling — this skill only differs in what the
-report holds. Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write to
-`<tmpdir>/audit-instructions-<timestamp>/report.html`, then
-open it and hand off the path as the harness's asset-delivery section describes
-— print only the honest count and the report's absolute path.
+**visual-teach** design system. Render it per
+`~/.agents/skills/all-audits/harness/HTML-REPORT.md` — asset delivery, scaffold,
+tmpdir resolution, and the open-and-hand-off step all live there; this skill only
+differs in what the report holds. Write to
+`<tmpdir>/audit-instructions-<timestamp>/report.html`, and print only the honest
+count and the report's absolute path.
 
 - **Header** — a one-line verdict, then a `vt-metabar` with the **honest count**:
   "307 lines in · 4 delete · 4 rewrite · 5 additions."
