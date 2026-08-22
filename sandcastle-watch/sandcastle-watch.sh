@@ -70,9 +70,15 @@ do_notify() {
 # orchestrator truly exits (plain setsid returns at once and fakes completion).
 # On exit: one final digest, the run's own summary as the closing report, then
 # the temp stdout log is removed — it lived only for the watch.
+#
+# A watched run defaults to one PR per spec (SANDCASTLE_PR_GROUPING=spec): a
+# whole spec lands as one reviewable PR instead of one per ticket. `:-spec`
+# makes it a default only — an explicit SANDCASTLE_PR_GROUPING in the
+# environment (e.g. `issue`) still wins.
 do_start() {
   local log=$1 status
-  setsid --wait npm run sandcastle >"$log" 2>&1
+  SANDCASTLE_PR_GROUPING="${SANDCASTLE_PR_GROUPING:-spec}" \
+    setsid --wait npm run sandcastle >"$log" 2>&1
   status=$?
   digest "$log" 0
   sed -n '/=== Run Summary ===/,$p' "$log"
