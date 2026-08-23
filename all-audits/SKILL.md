@@ -6,7 +6,7 @@ argument-hint: "[path]"
 ---
 
 Run the whole audit set over one repo in a single sweep. Twelve audit skills fan
-out in parallel, each into its own subagent; each writes a self-contained report;
+out in parallel, each as its own process; each writes a self-contained report;
 the reports collect under one folder behind an `index.html` that links them. The
 sweep **reports only** — it applies nothing and
 opens no PR. When it finishes it stops and hands you the index, so you decide what
@@ -73,63 +73,35 @@ last run is within the time backstop (default 30 days).
 
 ## Run
 
-Two front doors reach the same sweep. Run `run-audits.sh` from a terminal for the
-cached, flag-driven version above (`--only`, `--index`, `--force`, the staleness
-cache). When you are invoked in-session as `/all-audits`, drive the fan-out
-yourself with the steps below — no staleness cache on this path. Both write the
-same per-report folders and the same `index.html`.
+Two front doors, one engine. `run-audits.sh` runs the whole sweep — it fans each
+audit out as its own `claude -p "/name"` process, collects the report folders,
+and builds `index.html` with the synthesis lede. Both front doors call it.
 
-If the invocation says `short` (`/all-audits short`), fan out only the short
-set — `thermo-nuclear-code-quality-review`, `improve-codebase-architecture`,
-and `ponytail-audit` — instead of the full twelve. Everything else stays the
-same: report-only, one index, stop and hand it back.
+The `claude -p "/name"` path is why the script, not a subagent, runs the audits.
+Several audit skills set `disable-model-invocation`, so the `Skill` tool refuses
+them from any agent — a subagent fan-out silently loses them. A `-p "/name"`
+process is an explicit slash invocation, which the gate honors, so every audit
+runs the same way.
 
-1. **Make the collection folder.** Resolve the temp dir from `$TMPDIR`, fall back
-   to `/tmp`. Create `<tmpdir>/all-audits-<timestamp>/` — this holds every
-   report and the index.
+From a terminal, run `run-audits.sh` directly for the flags above (`--only`,
+`--index`, `--force`, `--short`, the staleness cache).
 
-2. **Fan out the subagents in parallel — one message, all of them at once.** Spawn one
-   general-purpose subagent per skill in the set above. These are judgment-heavy audits, so give
-   each a capable model. Each subagent's instructions:
+When you are invoked in-session as `/all-audits [path]`:
 
-   - Invoke your one skill **by name** with the `Skill` tool (the slash-only flag
-     does not block an explicit call), passing the repo path so it audits the
-     **entire repo** — override any branch-diff or hot-spot default the skill has.
-   - **Do not open the report.** Skip every `xdg-open` / `open` / `start` step the
-     skill would run — only the orchestrator opens the final index. Just capture
-     the report's absolute path.
-   - The default mode is report-only. Do **not** apply changes or open a PR, even
-     if the skill offers it.
-   - Return the fan-out struct and nothing else — see
-     [`harness/findings-schema.md`](harness/findings-schema.md#the-fan-out-return-struct)
-     for the fields (`audit`/`headline`/`count`/`report_path`/`log_path`/
-     `findings[{target,note}]`). `report_path`/`log_path` behave differently
-     for `test-audit`/`comment-audit` (grouped summary + log) versus the
-     card-per-finding audits (a full HTML report, no log).
+1. **Resolve the repo.** Use `$ARGUMENTS` if given, else the current directory. If
+   the argument is `short` (`/all-audits short [path]`), add `--short` to run only
+   the three structural audits.
 
-3. **Collect the reports.** Each skill writes a self-contained folder (report plus
-   its copied `vt-*` assets). Move each whole folder into
-   `<collection>/<audit-name>/` so its relative asset links survive. The report
-   file keeps its own name — skills vary (`report.html`,
-   `architecture-review-<ts>.html`, `code-quality-review-<ts>.html`), so take the
-   filename from the returned `report_path`, never assume `report.html`.
+2. **Run the script in the background.** Run
+   `run-audits.sh [--short] <repo>`. It does the fan-out, the collection, the
+   `index.html`, and the lede. It reports only — it applies nothing and opens no
+   PR. Do not fan out subagents yourself and do not invoke any audit through the
+   `Skill` tool; that is the broken path this replaces.
 
-4. **Build `index.html` at the collection root.** Style it with the visual-teach
-   base spine — copy `~/.agents/skills/visual-teach/assets/base/` into
-   `<collection>/assets/base/` and link it, the same asset pattern the reports use
-   (see `~/.agents/skills/all-audits/harness/HTML-REPORT.md`). The page holds:
-
-   - A **synthesized lede** (`vt-lede`) under the title: 2–3 sentences on the
-     repo's overall state, drawn from reading every report — the shared verdict,
-     the loudest signal, the one or two files that carry the most weight.
-   - A **table**, one row per audit: audit name · one-line verdict · finding count ·
-     a link to that audit's report — relative, `<audit-name>/` plus the report
-     file's own name from `report_path` (not always `report.html`).
-
-5. **Open the index, then stop.** Open `index.html` — `xdg-open` on Linux, `open`
-   on macOS, `start` on Windows — and print its absolute path. This is the only
-   page that opens. List the audits and tell the user they can grill any one
-   of them by name. **Do not start grilling on your own.**
+3. **Report the index, then stop.** The script prints `index: <path>` and opens
+   that page itself — do not open it again. Print its absolute path, list the
+   audits, and tell the user they can grill any one by name. **Do not start
+   grilling on your own.**
 
 ## Grilling a report
 
