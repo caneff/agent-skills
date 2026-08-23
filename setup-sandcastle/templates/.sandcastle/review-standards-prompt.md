@@ -35,6 +35,18 @@ with your findings — you never refactor or fix it yourself.
    - Unsafe casts, `any` types, or unchecked assumptions
    - Injection vulnerabilities, credential leaks, or other security issues
 
+   Then run the **over-engineering pass** (the `ponytail-review` lens): hunt what
+   to **delete**, not what to rename. Only a *material* over-engineering problem
+   fails this axis — name it in the verdict reason; minor cuts are not worth
+   failing a branch over. The balance guard in step 3 still binds. Five tags:
+   - `delete:` dead code, unused flexibility, a speculative feature — replace with nothing.
+   - `stdlib:` a hand-rolled thing the standard library ships — name the function.
+   - `native:` a dependency or code doing what the platform already does — name the feature.
+   - `yagni:` an abstraction with one implementation, config nobody sets, a layer with one caller — inline it until a second caller exists.
+   - `shrink:` the same logic in materially fewer lines — show the shorter form.
+
+   A single smoke test or `assert`-based self-check is the minimum, never a cut.
+
 3. **Maintain balance**: do NOT demand over-simplification that would reduce
    clarity, create clever-but-opaque solutions, combine too many concerns into
    one unit, remove helpful abstractions, or make the code harder to debug or
