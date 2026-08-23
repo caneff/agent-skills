@@ -27,7 +27,14 @@
       "Read(//tmp/**)"
     ],
     "deny": [
-      "AskUserQuestion"
+      "AskUserQuestion",
+      "NotebookEdit",
+      "DesignSync",
+      "EnterPlanMode",
+      "ExitPlanMode",
+      "RemoteTrigger",
+      "ReportFindings",
+      "ScheduleWakeup"
     ],
     "defaultMode": "auto"
   },
