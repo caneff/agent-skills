@@ -1,4 +1,17 @@
 {
+  "skillOverrides": {
+    "dataviz": "off",
+    "design": "off",
+    "artifact-capabilities": "off",
+    "artifact-diagramming": "off",
+    "schedule": "off",
+    "run": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "init": "off"
+  },
   "disableClaudeAiConnectors": true,
   "disableWorkflows": true,
   "env": {

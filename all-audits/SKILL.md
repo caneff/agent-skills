@@ -50,6 +50,10 @@ direct commit to main. Carry this contract into any new audit skill you add here
   wipe). Re-running with the same `--out` refreshes that dir.
 - **`--only NAME[,NAME]`** — run just the named audits, leaving any other audit's
   prior output in the dir in place.
+- **`--short`** — the short set: run only the three widest-reaching structural
+  audits — `thermo-nuclear-code-quality-review`, `improve-codebase-architecture`,
+  and `ponytail-audit`. A named alias for that `--only` list, for a fast pass
+  when the full twelve is more than you want.
 - **`--index`** (with `--out DIR`) — run no audits; rebuild `index.html` + the
   synthesis lede over whatever reports already sit in `DIR`. Point several
   `--only` runs at one `--out DIR`, then `--index` it, for a complete index with
@@ -74,6 +78,11 @@ cached, flag-driven version above (`--only`, `--index`, `--force`, the staleness
 cache). When you are invoked in-session as `/all-audits`, drive the fan-out
 yourself with the steps below — no staleness cache on this path. Both write the
 same per-report folders and the same `index.html`.
+
+If the invocation says `short` (`/all-audits short`), fan out only the short
+set — `thermo-nuclear-code-quality-review`, `improve-codebase-architecture`,
+and `ponytail-audit` — instead of the full twelve. Everything else stays the
+same: report-only, one index, stop and hand it back.
 
 1. **Make the collection folder.** Resolve the temp dir from `$TMPDIR`, fall back
    to `/tmp`. Create `<tmpdir>/all-audits-<timestamp>/` — this holds every

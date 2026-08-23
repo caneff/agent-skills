@@ -40,6 +40,21 @@ export const parseSpecVerdict = (stdout: string): AxisVerdict =>
 export const parseStandardsVerdict = (stdout: string): AxisVerdict =>
   parseAxisVerdict(stdout, "standards");
 
+// Strip the harness scaffolding from a reviewer's stdout so what gets embedded
+// in the human's issue body (and handed to the fix-up agent as findings) reads
+// as the judge's report, not the plumbing: the `SANDCASTLE_<AXIS>:` verdict
+// sentinel line and the `<promise>…</promise>` completion tag the prompt
+// requires. The findings prose is left untouched. Parse the RAW stdout for the
+// verdict first (the sentinel must survive for parseAxisVerdict) — this only
+// cleans the copy that becomes `detail`. Pure; unit-tested.
+export function stripReviewNoise(stdout: string): string {
+  return stdout
+    .replace(/^SANDCASTLE_(?:SPEC|STANDARDS):.*$/gm, "")
+    .replace(/<promise>[\s\S]*?<\/promise>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export interface CombinedVerdict {
   // Overall gate: passes only when both axes pass.
   pass: boolean;

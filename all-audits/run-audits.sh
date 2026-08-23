@@ -132,6 +132,11 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --out) OUT="$2"; shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
+    # ponytail: --short is just a named --only list. The "short set" — the three
+    # widest-reaching structural audits (thermo, architecture, over-engineering)
+    # — is the fast pass when you don't want the full twelve. Add a name here if
+    # the short set grows; no new machinery.
+    --short) ONLY="thermo-nuclear-code-quality-review,improve-codebase-architecture,ponytail-audit"; shift ;;
     --index) INDEX_ONLY=1; shift ;;
     --force|--all) FORCE=1; shift ;;
     --mutation)

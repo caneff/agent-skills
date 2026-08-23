@@ -76,9 +76,12 @@ function reviewFailureSection(
   const failing = axes
     .map((axis) => {
       const why = reasons?.[axis as ReviewAxis];
-      return why ? `- **${axis}** — ${why}` : `- **${axis}**`;
+      // Titled block, not an inline bullet: the reviewer's report can run many
+      // lines, so it sits on its own lines under the bolded axis rather than
+      // trailing an em dash where a multi-line report would break the list.
+      return why ? `**${axis}**\n\n${why}` : `**${axis}**`;
     })
-    .join("\n");
+    .join("\n\n");
   return [
     "## ⚠️ Sandcastle review failed — continue this branch, don't rebuild",
     "",

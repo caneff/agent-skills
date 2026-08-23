@@ -66,6 +66,22 @@ describe("planOutcomeTransition", () => {
     expect(plan.failureSection).toContain("**review**");
   });
 
+  test("a per-axis reason renders as a titled block, not an inline bullet", () => {
+    const plan = planOutcomeTransition({
+      kind: "review-fail",
+      issue: full,
+      failedAxes: ["standards"],
+      reasons: { standards: "The retry wrapper adds nothing.\nInline it." },
+    });
+    // The report sits on its own lines under the bolded axis, so a multi-line
+    // review keeps its shape in the issue body.
+    expect(plan.failureSection).toContain(
+      "**standards**\n\nThe retry wrapper adds nothing.\nInline it."
+    );
+    // Not squashed onto the axis line behind an em dash.
+    expect(plan.failureSection).not.toContain("**standards** — ");
+  });
+
   // The failure section is the human's whole brief: it must name the preserved
   // branch and the exact `git worktree add` that continues it (not EnterWorktree),
   // and point at /implement.

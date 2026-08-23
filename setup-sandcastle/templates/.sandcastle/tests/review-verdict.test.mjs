@@ -6,6 +6,7 @@ import {
   classifyReviewedOutcome,
   classifyRetryOutcome,
   isHarnessError,
+  stripReviewNoise,
 } from "../review-verdict.mts";
 
 // The reviewer emits a sentinel line because sandbox.run has no structured
@@ -278,6 +279,45 @@ describe("isHarnessError", () => {
   test("null / undefined are not harness faults", () => {
     expect(isHarnessError(null)).toBe(false);
     expect(isHarnessError(undefined)).toBe(false);
+  });
+});
+
+// The reviewer's stdout is embedded verbatim into the human's issue body and the
+// fix-up agent's findings. stripReviewNoise removes the harness scaffolding — the
+// SANDCASTLE_<AXIS>: sentinel line and the <promise>…</promise> completion tag —
+// so what the human reads is the judge's findings, not the plumbing.
+describe("stripReviewNoise", () => {
+  test("drops the standards sentinel line, keeps the findings", () => {
+    const out = stripReviewNoise(
+      "The retry wrapper adds nothing.\nSANDCASTLE_STANDARDS: FAIL — over-engineered\n<promise>COMPLETE</promise>"
+    );
+    expect(out).toBe("The retry wrapper adds nothing.");
+  });
+
+  test("drops the spec sentinel line too", () => {
+    const out = stripReviewNoise(
+      "Requirement 3 is missing.\nSANDCASTLE_SPEC: FAIL — incomplete"
+    );
+    expect(out).toBe("Requirement 3 is missing.");
+  });
+
+  test("removes the promise tag even when inline", () => {
+    expect(stripReviewNoise("done <promise>COMPLETE</promise> here")).toBe(
+      "done  here"
+    );
+  });
+
+  test("collapses the blank lines left by removed scaffolding", () => {
+    const out = stripReviewNoise(
+      "Finding A.\n\nSANDCASTLE_STANDARDS: PASS\n\n<promise>COMPLETE</promise>\n\nFinding B."
+    );
+    expect(out).toBe("Finding A.\n\nFinding B.");
+  });
+
+  test("a clean report passes through untouched (bar trimming)", () => {
+    expect(stripReviewNoise("  Just findings, no plumbing.  ")).toBe(
+      "Just findings, no plumbing."
+    );
   });
 });
 
