@@ -360,3 +360,17 @@ grep -q '<td>mutation</td>' "$negindex" && fail "no mutation reports present but
 [ -e "$negtmp/collection/mutation" ] && fail "no mutation reports present but mutation/ sub-index was created"
 
 echo "ok (no mutation reports -> no row, no sub-index)"
+
+# --- --short alias: the short-set flag is a named --only list of the three
+# widest-reaching structural audits. The failure it guards is name drift — an
+# audit named in the alias that isn't a real member of AUDITS. Static check
+# over the script text, hermetic, no claude and no sweep.
+short_line="$(grep -E '^\s*--short\)' "$SCRIPT")"
+[ -n "$short_line" ] || fail "--short flag missing from run-audits.sh arg parser"
+for a in thermo-nuclear-code-quality-review improve-codebase-architecture ponytail-audit; do
+  printf '%s\n' "$short_line" | grep -q "$a" || fail "--short alias missing audit '$a'"
+  # Each aliased name must be a real audit line in the AUDITS array block.
+  grep -qE "^  $a\$" "$SCRIPT" || fail "--short names '$a', which is not a member of AUDITS"
+done
+
+echo "ok (--short alias names only real audits)"
