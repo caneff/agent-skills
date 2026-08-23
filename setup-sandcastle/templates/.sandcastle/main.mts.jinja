@@ -37,6 +37,7 @@ import {
   parseStandardsVerdict,
   classifyRetryOutcome,
   isHarnessError,
+  stripReviewNoise,
 } from "./review-verdict.mts";
 import {
   bucketIssues,
@@ -615,15 +616,17 @@ while (true) {
             });
             // Each judge emits a sentinel line (sandbox.run has no structured
             // output, #130). Fail-open per axis: only an explicit FAIL blocks.
-            // detail is the full reviewer stdout per axis — the human's brief and
+            // detail is the reviewer's report per axis — the human's brief and
             // the fix-up agent's findings input; classifyRetryOutcome keeps only
-            // the failing axes'.
+            // the failing axes'. Parse the RAW stdout for the verdict, then strip
+            // the sentinel line and promise tag from the copy that becomes detail
+            // so the embedded report reads as findings, not plumbing.
             return {
               spec: parseSpecVerdict(specReview.stdout),
               standards: parseStandardsVerdict(standardsReview.stdout),
               detail: {
-                spec: specReview.stdout.trim(),
-                standards: standardsReview.stdout.trim(),
+                spec: stripReviewNoise(specReview.stdout),
+                standards: stripReviewNoise(standardsReview.stdout),
               },
             };
           };
