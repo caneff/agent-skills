@@ -43,22 +43,58 @@ Do this in order, in one pass:
    dirty, which breaks tooling that treats a clean tree as its go signal. The
    `mkdir` matters because `logs/` is gitignored and so is absent from a fresh
    worktree or clone.
-2. `gh pr create --base {{BASE}} --head {{BRANCH}} --title "Sandcastle: #{{ISSUE_ID}} {{ISSUE_TITLE}}" --body-file .sandcastle/logs/pr-body-{{ISSUE_ID}}.md`
+2. Write the PR title (one line, see **Title** below) to
+   `.sandcastle/logs/pr-title-{{ISSUE_ID}}.txt`.
+3. `gh pr create --base {{BASE}} --head {{BRANCH}} --title "$(cat .sandcastle/logs/pr-title-{{ISSUE_ID}}.txt)" --body-file .sandcastle/logs/pr-body-{{ISSUE_ID}}.md`
 
-**Use `--body-file`, never inline `--body`.** The body contains backticks and
-`#`; passed inline they trigger shell command substitution and corrupt the PR.
+**Use `--body-file` and the title file, never inline `--body` or a raw
+`--title` string.** Both can contain backticks and `#`; passed inline they
+trigger shell command substitution and corrupt the PR. `"$(cat ...)"` keeps the
+title's own characters intact.
+
+## Title
+
+Write ONE line to `.sandcastle/logs/pr-title-{{ISSUE_ID}}.txt`. Start it with
+`Sandcastle: ` (this marks the PR's origin), then write a specific, readable
+synopsis of what the whole branch does — not the raw headline ticket title.
+Read the diff first and name the real change. If the PR delivers several
+tickets, the title covers the shared theme, not one ticket.
+
+- Good: `Sandcastle: stack PRs bottom-up and resolve each child's base branch`
+- Bad: `Sandcastle: #343 fix base` (just the ticket title)
+
+Keep it under ~70 characters. Use plain words and an active verb.
 
 Build the body in `.sandcastle/logs/pr-body-{{ISSUE_ID}}.md` with these sections:
 
 ## Summary
 
-One or two sentences on what this PR delivered — describe behavior, not a file
-list. If it delivers more than one issue (a whole spec), say so and cover each.
-If `{{BASE}}` is not `main`, open with a note that this PR is **STACKED on
-`{{BASE}}`** and that the stack merges bottom-up — the base PR first, this one
-after. End with the closing lines below, each on its own line and exactly as
-given, so the squash-merge auto-closes every issue this PR delivers and unblocks
-their children on the next run:
+A full synopsis of what this PR does — a short paragraph, not one line, and not
+a file list. Describe the behavior a reviewer will see: what changed, why, and
+what the branch delivers as a whole. Write it so someone who never read the
+tickets understands the PR from this paragraph alone.
+
+If `{{BASE}}` is not `main`, open the paragraph with a note that this PR is
+**STACKED on `{{BASE}}`** and that the stack merges bottom-up — the base PR
+first, this one after.
+
+## What's included
+
+A numbered list, one item per ticket this PR delivers. For each ticket, write
+the issue number and a one-sentence description of what it added or fixed —
+readable prose, not the bare ticket title. Read the issue numbers off the
+`Closes` lines below; run `gh issue view <n> --json title,body` on each if you
+need its intent. Example:
+
+1. **#343** — Resolve each child PR's base to its parent branch, so a stacked
+   child no longer targets `main` by mistake.
+2. **#344** — Note the stack order in the body so a reviewer merges bottom-up.
+
+## Closes
+
+End with the closing lines below, each on its own line and exactly as given, so
+the squash-merge auto-closes every issue this PR delivers and unblocks their
+children on the next run:
 
 {{CLOSES}}
 
