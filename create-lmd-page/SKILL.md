@@ -50,7 +50,7 @@ Fill the template below, then:
 2. Load it onto the clipboard: `clip.exe < FILE` (WSL) / `pbcopy < FILE` (macOS) / `xclip -selection clipboard < FILE` (Linux).
 3. Tell the user it's on the clipboard AND state the file path, so they can re-copy it later without regenerating.
 
-**Never have the user copy the HTML out of the terminal.** Drag-selecting long soft-wrapped lines in the TUI silently drops chunks mid-line (screen-cell copy during redraws) — this corrupted rule text and tags repeatedly before the clipboard workflow was adopted. Also show the HTML in a code block for review, but the clipboard is the source of truth.
+**Never have the user copy the HTML out of the terminal.** Drag-selecting long soft-wrapped lines in the TUI silently drops chunks mid-line (screen-cell copy during redraws) — this corrupted rule text and tags repeatedly before the clipboard workflow was adopted. **Never print the HTML to the terminal at all** — not even in a code block for review. The clipboard and the saved file are the whole deliverable; point the user at the file path if they want to read it.
 
 Formatting rules:
 
