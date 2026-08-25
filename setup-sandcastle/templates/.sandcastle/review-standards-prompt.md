@@ -78,6 +78,11 @@ This axis judges **coding standards only** — whether the change satisfies the
 originating issue is judged separately by the Spec judge, so do not fail the
 branch here for missing features.
 
+Present your findings as a numbered list (`1.`, `2.`, `3.`, …), one number per
+distinct finding, above the verdict line. The number is how a later fix-up pass
+cites and accounts for each finding, so give every distinct defect its own
+number — do not fold two defects into one.
+
 Emit your verdict on its own line, exactly one of the two forms below. The line
 MUST start at column zero with `SANDCASTLE_STANDARDS:` — no leading `- `, no
 backticks, no markdown, nothing before or after it on the line. The host greps
