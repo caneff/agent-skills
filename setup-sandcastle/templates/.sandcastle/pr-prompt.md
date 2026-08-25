@@ -69,14 +69,14 @@ Build the body in `.sandcastle/logs/pr-body-{{ISSUE_ID}}.md` with these sections
 
 ## Summary
 
-A full synopsis of what this PR does — a short paragraph, not one line, and not
-a file list. Describe the behavior a reviewer will see: what changed, why, and
-what the branch delivers as a whole. Write it so someone who never read the
-tickets understands the PR from this paragraph alone.
+Two or three sentences that pitch the change. Say what the branch now does that
+it did not do before, and why it matters to a reviewer. Nothing else — no file
+names, no per-ticket breakdown (that is the next section), no listing of every
+edit. Someone who never read the tickets should get the point in one read.
 
-If `{{BASE}}` is not `main`, open the paragraph with a note that this PR is
-**STACKED on `{{BASE}}`** and that the stack merges bottom-up — the base PR
-first, this one after.
+If `{{BASE}}` is not `main`, open with a note that this PR is **STACKED on
+`{{BASE}}`** and that the stack merges bottom-up — the base PR first, this one
+after.
 
 ## What's included
 
