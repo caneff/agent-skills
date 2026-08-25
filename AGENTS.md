@@ -14,7 +14,4 @@ Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agent
 
 ### After cutting a `sandcastle-template/v*` tag
 
-The tag does not reach installed repos on its own. Once you cut a new
-`sandcastle-template/v*` tag, prompt the maintainer to sweep it out with
-`sandcastle-propagate` (dry-run first). See
-`setup-sandcastle/references/updating-adopters.md`.
+The tag does not reach installed repos on its own — prompt the maintainer to run `sandcastle-propagate`. See `setup-sandcastle/references/updating-adopters.md`.
