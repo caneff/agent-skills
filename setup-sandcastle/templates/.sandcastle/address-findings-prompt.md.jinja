@@ -45,5 +45,18 @@ and escalates to a human. A wrong "fix" is worse than a skipped one.
 Do NOT push. Do NOT open, touch, or merge a PR. The orchestrator re-reviews the
 branch and decides what happens next.
 
-Once every finding you can address has a fix and the branch is committed, output
-<promise>COMPLETE</promise>.
+# LEDGER
+
+Before you finish, account for every finding. List each distinct finding from
+the reports above on its own line, in this form:
+
+- [fixed]   <short name of the finding>
+- [skipped] <short name of the finding> — <one-line reason you left it>
+
+Split finely: two separate defects are two rows, even under one heading. Every
+`file:line` and every distinct defect in the reports must appear as a row,
+including ones you left exactly as they were. Then, on its own line, confirm:
+"Every finding above is a row."
+
+Only after the branch is committed and the ledger and that confirmation line
+are written, output <promise>COMPLETE</promise>.
