@@ -47,15 +47,18 @@ branch and decides what happens next.
 
 # LEDGER
 
-Before you finish, account for every finding. List each distinct finding from
-the reports above on its own line, in this form:
+Before you finish, account for every finding. The findings above are numbered
+by their reviewer(s) — you may receive two numbered runs (spec starting at 1,
+then standards starting at 1), in that order. List each distinct finding from
+the reports above on its own line, citing its number, in this form:
 
-- [fixed]   <short name of the finding>
-- [skipped] <short name of the finding> — <one-line reason you left it>
+- [fixed]   #2 <short name of the finding>
+- [skipped] #1 <short name of the finding> — <one-line reason you left it>
 
 Split finely: two separate defects are two rows, even under one heading. Every
-`file:line` and every distinct defect in the reports must appear as a row,
-including ones you left exactly as they were. Then, on its own line, confirm:
+numbered finding, every `file:line`, and every distinct defect in the reports
+must appear as a row, including ones you left exactly as they were — reproduce
+the numbers in the order given. Then, on its own line, confirm:
 "Every finding above is a row."
 
 Only after the branch is committed and the ledger and that confirmation line

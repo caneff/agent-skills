@@ -86,6 +86,11 @@ Quote the specific acceptance-criterion line for each finding. This axis judges
 **spec conformance only** — coding-standards quality is judged separately by the
 Standards judge, so do not fail the branch here for style or refactor nits.
 
+Present your findings as a numbered list (`1.`, `2.`, `3.`, …), one number per
+distinct finding, above the verdict line. The number is how a later fix-up pass
+cites and accounts for each finding, so give every distinct defect its own
+number — do not fold two defects into one.
+
 Do NOT try to implement missing requirements yourself; that is a re-implement,
 which the orchestrator routes back to a fresh implementer. Judge and report only.
 
