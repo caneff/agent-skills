@@ -1,19 +1,4 @@
 {
-  "skillOverrides": {
-    "dataviz": "off",
-    "design": "off",
-    "artifact-capabilities": "off",
-    "artifact-diagramming": "off",
-    "schedule": "off",
-    "run": "off",
-    "loop": "off",
-    "keybindings-help": "off",
-    "simplify": "off",
-    "fewer-permission-prompts": "off",
-    "init": "off"
-  },
-  "disableClaudeAiConnectors": true,
-  "disableWorkflows": true,
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "ENABLE_TOOL_SEARCH": "true",
@@ -50,6 +35,21 @@
       "ScheduleWakeup"
     ],
     "defaultMode": "auto"
+  },
+  "model": "claude-fable-5[1m]",
+  "disableClaudeAiConnectors": true,
+  "skillOverrides": {
+    "dataviz": "off",
+    "design": "off",
+    "artifact-capabilities": "off",
+    "artifact-diagramming": "off",
+    "schedule": "off",
+    "run": "off",
+    "loop": "off",
+    "keybindings-help": "off",
+    "simplify": "off",
+    "fewer-permission-prompts": "off",
+    "init": "off"
   },
   "hooks": {
     "PreToolUse": [
@@ -106,6 +106,7 @@
   "worktree": {
     "bgIsolation": "none"
   },
+  "disableWorkflows": true,
   "statusLine": {
     "type": "command",
     "command": "python3 /home/caneff/.agents/skills/ccstatusline-table/table-statusline.py",
@@ -135,6 +136,5 @@
   "skipWorkflowUsageWarning": true,
   "theme": "dark-ansi",
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true,
-  "model": "claude-opus-4-8[1m]"
+  "agentPushNotifEnabled": true
 }
