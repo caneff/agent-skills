@@ -67,6 +67,8 @@ This lens **owns** the three smells above that are really over-engineering — S
 
 ### 4. Spawn both sub-agents in parallel
 
+Pass `model: opus` to both. Review is Opus-tier and the user reads every line before merge, so a miss is caught downstream — do not let them inherit the session model.
+
 Both prompts carry only the **diff, the commit list, and the spec/standards sources** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
 
 **Standards sub-agent prompt** — include:
