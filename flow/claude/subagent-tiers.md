@@ -33,6 +33,11 @@ Pick the tier by how much the agent must *do*, not by the topic:
   prose.
   - Example: "Review this migration for concurrency safety" — the value is in
     the judgment call, not in finding the file.
+- **`fable`** — the rung above Opus, for the same "reasoning is the
+  deliverable" work when Opus has visibly fallen short and nothing downstream
+  would catch a wrong answer. Costs about double Opus and a single turn can run
+  many minutes, so reach for it only when that price buys correctness you
+  can't verify any other way.
 
 The Sonnet/Haiku split is about navigation, not reasoning depth: an Explore
 task that must navigate the repo is Sonnet-tier even when the judgment it
