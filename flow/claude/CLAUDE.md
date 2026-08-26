@@ -81,8 +81,9 @@ its format check run first (formatters read fences; `uv run ruff format
 
 # Gotchas
 
-- Fanning out subagents? Read `~/.agents/skills/flow/claude/subagent-tiers.md`
-  for the tier rubric and the fire-and-return/named-background split.
+- **Every Agent call passes `model`** — the session is Fable and a bare call
+  inherits it. Explore/lookup → `sonnet`, review/diagnosis → `opus`. Rubric:
+  `~/.agents/skills/flow/claude/subagent-tiers.md`.
 - `.claude/worktrees/` must be gitignored — untracked, `pushpr` cuts a junk
   branch and commits the worktree back as a gitlink instead of pushing it.
 - `head`/`tail` are for looking, not measuring — use `wc -l`/`grep -c` before
