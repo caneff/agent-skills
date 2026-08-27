@@ -73,15 +73,19 @@ for _ in 1 2 3 4 5; do
   sleep 2
   mergeable="$(gh pr view "$pr" --json mergeable -q .mergeable)"
 done
-if [ "$mergeable" = CONFLICTING ]; then
-  echo "ship: PR #$pr conflicts with its base — not merging, worktree left in place." >&2
-  echo "  resolve in the branch's worktree, then re-run ship:" >&2
-  echo "    cd <worktree-for-$head> && git fetch origin main && git merge origin/main" >&2
-  exit 1
-fi
 
 wt="$(git worktree list --porcelain \
   | awk -v b="refs/heads/$head" '/^worktree /{p=$2} /^branch /{if ($2==b) print p}')"
+if [ "$mergeable" = CONFLICTING ]; then
+  # Rebase, never merge main in: ship rebase-merges a PR with no post-creation
+  # commits (see strategy above), and a merge commit in the branch is what
+  # makes that replay messy.
+  echo "ship: PR #$pr conflicts with its base — not merging, worktree left in place." >&2
+  echo "  resolve in the branch's worktree, then re-run ship:" >&2
+  echo "    cd ${wt:-<worktree-for-$head>} && git fetch origin main && git rebase origin/main && git push --force-with-lease" >&2
+  exit 1
+fi
+
 if [ -n "$wt" ] && [ "$wt" != "$(git rev-parse --show-toplevel)" ]; then
   echo "ship: removing worktree $wt (branch $head about to merge)"
   git worktree remove "$wt"
