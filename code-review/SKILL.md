@@ -67,9 +67,13 @@ This lens **owns** the three smells above that are really over-engineering — S
 
 ### 4. Spawn both sub-agents in parallel
 
+Spawn both with the plain `Agent` tool, fire-and-return: no `name`, not background, no teammate messaging. This is what makes the result reach *you* as the agent's completion notification — even when you yourself are a subagent of some other caller. A named background teammate parks its report for `SendMessage`/`ListAgents` instead, and when you're a subagent nothing is polling for that: the report idles or lands nowhere.
+
 Pass `model: opus` to both. Review is Opus-tier and the user reads every line before merge, so a miss is caught downstream — do not let them inherit the session model.
 
 Both prompts carry only the **diff, the commit list, and the spec/standards sources** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
+
+Belt and braces: append to **both** prompts — "Also write your full report to `$CLAUDE_JOB_DIR/tmp/review-<axis>-<n>.md` (use `./.scratch/review-<axis>-<n>.md` if that variable is unset), `<axis>` being `standards` or `spec`." If the completion notification comes back missing or empty, read that file before treating the report as absent.
 
 **Standards sub-agent prompt** — include:
 
@@ -84,6 +88,8 @@ Both prompts carry only the **diff, the commit list, and the spec/standards sour
 - The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Under 400 words."
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report.
+
+Once both agents finish, if an axis has neither a completion notification nor a fallback file, don't block or self-review in its place — report that axis in step 5 as `## Standards — NO REPORT RECEIVED` (or `## Spec — NO REPORT RECEIVED`) and move on.
 
 ### 5. Aggregate
 
