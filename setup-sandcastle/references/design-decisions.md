@@ -133,6 +133,16 @@ as inherited scaffold.
     `updated=0 skipped=0` while it swept past every adopter, which reads exactly
     like a fleet that was already current.
 
+16. **uv cache: mounted from the host, not baked into the image (#453).** The
+    Python arm bind-mounts `~/.cache/uv` into `/home/agent/.cache/uv` and sets
+    `UV_CACHE_DIR`/`UV_LINK_MODE=copy` (hardlinks can't cross a bind mount) so
+    `uv sync` in `onSandboxReady` reuses wheels the host already downloaded.
+    Without it the cache starts empty every run and a big wheel (OR-Tools) can
+    blow the hook's 60s timeout before the planner even starts. Baking the
+    cache into the Dockerfile instead would need a rebuild on every lockfile
+    change to stay current; the mount never goes stale because it reads the
+    live host cache. Proven first in gridfind#743.
+
 ## Gotchas found in the live rag-bootcamp install
 
 - **`@standard-schema/spec` is an undeclared upstream dep.**

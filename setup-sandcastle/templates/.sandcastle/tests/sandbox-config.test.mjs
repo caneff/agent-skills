@@ -36,9 +36,12 @@ withRender("sandboxConfig: passes the sandbox env and the read-only skills mount
     return {};
   });
   // No bot token merged in any more — the .env PAT reaches the sandbox as a
-  // forwarded file, not through this env map. The Python arm keeps only uv's var.
+  // forwarded file, not through this env map. The Python arm keeps uv's vars,
+  // including the cache dir and link mode the host cache mount below needs.
   expect(captured.env).toEqual({
     UV_PROJECT_ENVIRONMENT: "/home/agent/.venv",
+    UV_CACHE_DIR: "/home/agent/.cache/uv",
+    UV_LINK_MODE: "copy",
   });
   // The host's global Claude skills are mounted read-only so the in-sandbox
   // agent has /tdd etc. — not vendored into the repo.
@@ -46,6 +49,12 @@ withRender("sandboxConfig: passes the sandbox env and the read-only skills mount
     hostPath: "~/.claude/skills",
     sandboxPath: "~/.claude/skills",
     readonly: true,
+  });
+  // The host's uv cache is mounted so `uv sync` reuses wheels the host already
+  // holds instead of pulling every package cold — see design-decisions.md.
+  expect(captured.mounts).toContainEqual({
+    hostPath: "~/.cache/uv",
+    sandboxPath: "/home/agent/.cache/uv",
   });
 });
 
