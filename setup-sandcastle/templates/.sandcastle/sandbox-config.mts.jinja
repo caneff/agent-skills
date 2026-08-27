@@ -51,6 +51,8 @@ export function sandboxConfig(dockerFn: typeof docker = docker) {
     sandbox: dockerFn({
       env: {[% if LANGUAGE != 'node' %]
         UV_PROJECT_ENVIRONMENT: "/home/agent/.venv",
+        // Must match the uv cache mount's sandboxPath below — this is where
+        // uv is told to look, the mount is what makes it real.
         UV_CACHE_DIR: "/home/agent/.cache/uv",
         UV_LINK_MODE: "copy", // hardlinks can't cross the bind mount
       [% endif %]},
@@ -63,9 +65,7 @@ export function sandboxConfig(dockerFn: typeof docker = docker) {
           sandboxPath: "~/.claude/skills",
           readonly: true,
         },[% if LANGUAGE != 'node' %]
-        // Share the host's uv cache so `uv sync` reuses wheels it already
-        // holds instead of pulling every package cold — big downloads
-        // (e.g. OR-Tools) can blow the onSandboxReady hook timeout otherwise.
+        // Share the host's uv cache — see design-decisions.md #16.
         {
           hostPath: "~/.cache/uv",
           sandboxPath: "/home/agent/.cache/uv",
