@@ -30,18 +30,22 @@ sub-second race if two clients start on the same ticket at the same instant; for
 a handful of clients it is enough. If you abandon the run before a PR is open,
 put it back: `gh issue edit <n> --remove-label in-progress --add-label ready-for-agent`.
 
-**First, pick the model — before choosing a lane, and say the pick out loud.**
+**Always hand the build to a subagent — you pick its model, not whether to
+delegate.** The driver session never runs the worktree flow itself. Its job is
+to claim the ticket, seed the subagent, relay the result, and hold the human's
+approval for any gated step (below). Owning the build here is the drift to
+resist: delegate every time, then say the model pick out loud.
+
 Does this ticket touch engine or constraint-modeling logic? **No** (a doc edit,
-a rename, a boundary move, a tracer-bullet the spec already pins) → it is Sonnet
-work: hand it to a Sonnet subagent — `handoff sub` with `model: sonnet`, seeded
-with the issue reference, its spec, and the build steps below (worktree → TDD →
-`/code-review` → `pushpr`) so the subagent runs them directly rather than
-re-invoking this skill, and it reports back when the PR is open. Stop running it
-here. **This holds even for a docs-only ticket that auto-ships to main** — that
-lane skips the worktree flow below, so it is the one most likely to sail past
-this gate on the current model. **Yes** → run it on the current model, where a
-wrong answer at a subtle seam still passes the gate. State which model you
-picked and why before doing anything else.
+a rename, a boundary move, a tracer-bullet the spec already pins) → `sonnet`.
+**Yes** (a subtle seam where a wrong answer still passes the review gate) →
+`opus`. Either way, `handoff sub` with that `model`, seeded with the issue
+reference, its spec, and the build steps below (worktree → TDD → `/code-review`
+→ `pushpr`) so the subagent runs them directly rather than re-invoking this
+skill, and it reports back when the PR is open. Then stop — the build runs in
+the subagent, not here. **This holds even for a docs-only ticket that auto-ships
+to main:** that lane skips the worktree flow below, so it is the one most likely
+to tempt you back into running it inline. Delegate it too.
 
 **A subagent can't accept an approval you relay.** If mid-build the ticket hits
 a step that needs a stop-and-ask sign-off (an irreversible deletion, a new
