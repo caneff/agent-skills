@@ -136,5 +136,7 @@
   "skipWorkflowUsageWarning": true,
   "theme": "dark-ansi",
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true
+  "agentPushNotifEnabled": true,
+  "disableRemoteControl": true,
+  "remoteControlAtStartup": false
 }
