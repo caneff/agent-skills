@@ -17,6 +17,8 @@ export type BucketName =
   | "built-this-run" // implemented + reviewed + PR opened this run
   | "human-gated-pr" // in-review with an open PR (from a previous run)
   | "human-gated-ready-for-human" // handed off to human
+  | "human-gated-parked" // backlog: parked on purpose, not awaiting triage
+  | "human-gated-in-pipeline" // wayfinder:* / spec: mid-planning, not yet sliced to tickets
   | "human-gated-untriaged" // open, no lifecycle label
   | "human-gated-delivered-parent" // open parent; every child closed → ready to close
   | "ready-for-agent" // queued for agent; may be blocked by dependencies
@@ -32,6 +34,8 @@ export interface BucketedIssue {
 const HUMAN_GATED_BUCKETS = new Set<BucketName>([
   "human-gated-pr",
   "human-gated-ready-for-human",
+  "human-gated-parked",
+  "human-gated-in-pipeline",
   "human-gated-untriaged",
   // A fully-delivered parent only a human can close (the bot never closes an
   // issue) — gated on a human, so "nothing left for the bot" stays accurate.
@@ -123,6 +127,23 @@ export function bucketIssues(options: {
         number: issue.number,
         title: issue.title,
         bucket: "ready-for-agent",
+      };
+
+    // Parked and mid-pipeline issues carry their state on the label (CLAUDE.md:
+    // "never a bare open issue"); only a label-less or needs-triage issue is
+    // genuinely untriaged.
+    if (labelSet.has("backlog"))
+      return {
+        number: issue.number,
+        title: issue.title,
+        bucket: "human-gated-parked",
+      };
+
+    if (labelSet.has("spec") || issue.labels.some((l) => l.startsWith("wayfinder:")))
+      return {
+        number: issue.number,
+        title: issue.title,
+        bucket: "human-gated-in-pipeline",
       };
 
     return {
@@ -404,6 +425,8 @@ export function buildRunSummary(
     "Human-gated: untriaged (needs ready-for-agent)",
     "human-gated-untriaged"
   );
+  section("Human-gated: in pipeline (wayfinder / spec)", "human-gated-in-pipeline");
+  section("Human-gated: parked (backlog)", "human-gated-parked");
   section(
     "Human-gated: delivered (every child closed — ready to close)",
     "human-gated-delivered-parent"

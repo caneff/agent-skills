@@ -60,6 +60,47 @@ describe("bucketIssues", () => {
     expect(result[0]).toMatchObject({ bucket: "human-gated-untriaged" });
   });
 
+  test("needs-triage label → human-gated-untriaged", () => {
+    const result = bucketIssues(
+      makeOpts({
+        openIssues: [{ number: 17, title: "prd", labels: ["needs-triage"] }],
+      })
+    );
+    expect(result[0]).toMatchObject({ bucket: "human-gated-untriaged" });
+  });
+
+  // backlog and spec/wayfinder:* are the issue's own state (CLAUDE.md: "never
+  // a bare open issue"), not the absence of one — they must not fall through
+  // to untriaged.
+  test("backlog label → human-gated-parked", () => {
+    const result = bucketIssues(
+      makeOpts({
+        openIssues: [{ number: 18, title: "parked idea", labels: ["backlog"] }],
+      })
+    );
+    expect(result[0]).toMatchObject({ bucket: "human-gated-parked" });
+  });
+
+  test("spec label → human-gated-in-pipeline", () => {
+    const result = bucketIssues(
+      makeOpts({
+        openIssues: [{ number: 19, title: "sliced spec", labels: ["spec"] }],
+      })
+    );
+    expect(result[0]).toMatchObject({ bucket: "human-gated-in-pipeline" });
+  });
+
+  test("wayfinder:* label → human-gated-in-pipeline", () => {
+    const result = bucketIssues(
+      makeOpts({
+        openIssues: [
+          { number: 20, title: "mid-plan", labels: ["wayfinder:grilling"] },
+        ],
+      })
+    );
+    expect(result[0]).toMatchObject({ bucket: "human-gated-in-pipeline" });
+  });
+
   // A spent parent (children all closed) surfaces as ready-to-close, and does so
   // even when it still carries a stray lifecycle label — the close reminder must
   // win over that label. This is the case that lingered open as ready-for-human.
@@ -160,6 +201,18 @@ describe("buildRunSummary", () => {
     const out = buildRunSummary(bucketed);
     expect(out).toContain("BUG");
     expect(out).toContain("#77");
+  });
+
+  test("parked and in-pipeline buckets render under their own sections", () => {
+    const bucketed = [
+      { number: 30, title: "parked idea", bucket: "human-gated-parked" },
+      { number: 31, title: "sliced spec", bucket: "human-gated-in-pipeline" },
+    ];
+    const out = buildRunSummary(bucketed);
+    expect(out).toContain("Human-gated: parked (backlog)");
+    expect(out).toContain("#30");
+    expect(out).toContain("Human-gated: in pipeline (wayfinder / spec)");
+    expect(out).toContain("#31");
   });
 
   test("all-human-gated run reports that nothing is left for the bot", () => {
