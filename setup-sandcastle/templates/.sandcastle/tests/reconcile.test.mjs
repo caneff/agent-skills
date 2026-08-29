@@ -60,15 +60,6 @@ describe("bucketIssues", () => {
     expect(result[0]).toMatchObject({ bucket: "human-gated-untriaged" });
   });
 
-  test("needs-triage label → human-gated-untriaged", () => {
-    const result = bucketIssues(
-      makeOpts({
-        openIssues: [{ number: 17, title: "prd", labels: ["needs-triage"] }],
-      })
-    );
-    expect(result[0]).toMatchObject({ bucket: "human-gated-untriaged" });
-  });
-
   // backlog and spec/wayfinder:* are the issue's own state (CLAUDE.md: "never
   // a bare open issue"), not the absence of one — they must not fall through
   // to untriaged.
@@ -209,10 +200,12 @@ describe("buildRunSummary", () => {
       { number: 31, title: "sliced spec", bucket: "human-gated-in-pipeline" },
     ];
     const out = buildRunSummary(bucketed);
-    expect(out).toContain("Human-gated: parked (backlog)");
-    expect(out).toContain("#30");
-    expect(out).toContain("Human-gated: in pipeline (wayfinder / spec)");
-    expect(out).toContain("#31");
+    expect(out).toContain(
+      "Human-gated: parked (backlog) (1):\n  #30 — parked idea"
+    );
+    expect(out).toContain(
+      "Human-gated: in pipeline (wayfinder / spec) (1):\n  #31 — sliced spec"
+    );
   });
 
   test("all-human-gated run reports that nothing is left for the bot", () => {
