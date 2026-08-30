@@ -1,22 +1,20 @@
 #!/bin/bash
 # Git guardrails (PreToolUse, Bash).
 #
-# Policy the agent lives under:
-#   - Feature-branch pushes go through `pushpr` (it pushes in a child process
-#     the hook never sees, and it carries the outward gate: no PR to a repo you
-#     don't own). A RAW `git push` of a feature branch is blocked so nothing
-#     can skip that gate.
-#   - The DEFAULT branch may be pushed by the agent ONLY when every change is
-#     documentation (the auto-ship "doc lane"). Any code on the default branch
-#     is blocked and handed off — you land code on main yourself via `ship`.
-#   - Merges and history/worktree destroyers are always blocked.
-#   - Force-push: a bare `--force` / `-f` is always blocked. A
-#     `--force-with-lease` is allowed ONLY to UPDATE a branch that already
-#     exists on origin and is not the default branch — i.e. a PR branch pushpr
-#     already put out through the outward gate (amend-then-update). New b
-#     still route through pushpr; the lease refuses to clobber unseen commits.
-# The user lands code via the `!` prefix, which runs in the user's own sh
-# never passes through this hook.
+# Two narrow guards; everything else about a push is the agent's business.
+#   - PUSH is gated on OWNERSHIP, not on branch or file type. If origin's owner
+#     is the `gh` login (resolving a fork to its parent, the way `pushpr` does),
+#     every push is allowed — any branch, any content, default branch included.
+#     A repo someone else owns is blocked and handed off to `pushpr`, which
+#     carries the outward gate (it pushes the branch but leaves the PR to the
+#     user). The ownership lookup FAILS CLOSED: gh erroring or the network
+#     being down means "not owned" means blocked.
+#   - `gh pr merge` is blocked everywhere. When a PR exists, only the user
+#     finishes it — via `! gh pr merge ...` in their own shell, or the web UI.
+#   - History/worktree destroyers and bare force-pushes stay blocked; those
+#     guard against losing work, not against skipping a review lane.
+# The user lands anything via the `!` prefix, which runs in the user's own
+# shell and never passes through this hook.
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
@@ -42,45 +40,8 @@ strip_heredocs() {
 }
 SCAN=$(printf '%s\n' "$COMMAND" | strip_heredocs)
 
-# What counts as documentation (safe to auto-push to the default branch).
-# Anything not matching is treated as code -> blocked. Fail toward blocking.
-is_doc() {
-  case "$1" in
-    *.md|*.mdx|*.markdown|*.txt|*.rst|docs/*|*/docs/*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-# Read newline-separated paths on stdin. Succeed iff there is at least one path
-# and EVERY path is documentation. Empty input fails (can't prove docs-only).
-all_docs() {
-  local f found=1
-  while IFS= read -r f; do
-    [ -z "$f" ] && continue
-    found=0
-    is_doc "$f" || return 1
-  done
-  return $found
-}
-
-# --- Force-push carve-out: allow --force-with-lease to UPDATE an existing PR
-# branch (one pushpr already put out through the outward gate). Bare --fo
-# is not matched here and stays blocked below. ---
-if echo "$SCAN" | grep -q 'force-with-lease'; then
-  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-  default=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
-  [ -z "$default" ] && default=main
-  if [ "$branch" != "$default" ] && git rev-parse --verify "origin/$branch" >/dev/null 2>&1; then
-    exit 0   # updating an already-pushed feature/PR branch — allowed
-  fi
-  echo "BLOCKED: force-with-lease only updates an existing PR branch (oriot be '$default'). New branch -> 'pushpr'; never force-push '$default'.">&2
-  exit 2
-fi
-
-# --- Always-blocked: merges, force-pushes, history/worktree destroyers. ---
+# --- Always-blocked: PR merges and history/worktree destroyers. ---
 DANGEROUS_PATTERNS=(
-  "push .*--force"
-  "push .*-f($|[[:space:]])"
-  "push --force"
   "gh pr merge"
   "git ctm"
   "git-ctm"
@@ -94,45 +55,62 @@ DANGEROUS_PATTERNS=(
 )
 for pattern in "${DANGEROUS_PATTERNS[@]}"; do
   if echo "$SCAN" | grep -qE "$pattern"; then
-    echo "BLOCKED: '$COMMAND' matches protected pattern '$pattern'. You d-push or merge. To land changes on main, HAND OFF to the user: print theexact '! gh pr merge <num> ...' (or '! git push ...') line for THEM to run via the ! prefix. Do not attempt it yourself." >&2
+    echo "BLOCKED: '$COMMAND' matches protected pattern '$pattern'. Merging a PR and destroying history are the user's, not yours. HAND OFF: print the exact '! gh pr merge <num> ...' (or other) line for THEM to run via the ! prefix. Do not attempt it yourself." >&2
     exit 2
   fi
 done
 
-# --- Push policy: doc lane on default branch = allow, everything else = block. ---
+# --- Bare force-push: blocked. `--force-with-lease` is fine (the lease refuses
+# to clobber commits this clone hasn't seen), and still goes through the
+# ownership gate below like any other push. ---
+if echo "$SCAN" | grep -qE 'push([[:space:]].*)?[[:space:]](--force([[:space:]]|$)|-f([[:space:]]|$))' \
+   && ! echo "$SCAN" | grep -q 'force-with-lease'; then
+  echo "BLOCKED: bare force-push in '$COMMAND' can destroy commits on origin. Use '--force-with-lease', or hand the user the exact '! git push --force ...' line." >&2
+  exit 2
+fi
+
+# --- Ownership of this repo, cached. ---
+# Verdict is keyed on the repo's toplevel path. Only the OWNED verdict is
+# cached: it's the hot path (allow), so caching it keeps `gh` off every
+# subsequent Bash call, while a not-owned/lookup-failed verdict is never
+# written — a block is rare, so re-asking costs nothing and a stale "no" (or a
+# cached network blip) can never harden into a permanent block. Delete
+# $cache_dir if a repo's origin changes hands.
+repo_is_owned() {
+  local toplevel origin cache_dir key me target
+  toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
+  origin=$(git remote get-url origin 2>/dev/null)
+
+  # Non-github origins — a local path, a private host, or no remote at all —
+  # are the user's own experiments. There is no outward gate to enforce.
+  case "$origin" in
+    *github.com*) ;;
+    *) return 0 ;;
+  esac
+
+  cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-git-guard"
+  key=$(printf '%s' "$toplevel" | tr -c 'A-Za-z0-9' '_')
+  [ -f "$cache_dir/$key" ] && return 0
+
+  # Same resolution as pushpr: evaluate ORIGIN explicitly (a bare `gh repo
+  # view` would resolve to an `upstream` remote instead), and a fork's real
+  # base repo is its parent. Any failure here returns non-zero -> blocked.
+  me=$(gh api user -q .login 2>/dev/null) || return 1
+  target=$(gh repo view "$origin" --json owner,name,isFork,parent \
+      -q 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' 2>/dev/null) || return 1
+  [ -n "$me" ] && [ -n "$target" ] || return 1
+  [ "${target%%/*}" = "$me" ] || return 1
+
+  mkdir -p "$cache_dir" 2>/dev/null && printf '%s\n' "$target" > "$cache_dir/$key" 2>/dev/null
+  return 0
+}
+
+# --- Push policy: your repo = allowed, anyone else's = handed off. ---
 if echo "$SCAN" | grep -qE '(^|[;&|[:space:]])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push([[:space:]]|$)'; then
-  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-  default=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
-  [ -z "$default" ] && default=main
-
-  if [ "$branch" != "$default" ]; then
-    echo "BLOCKED: raw 'git push' of feature branch '$branch'. Use 'pushpPR through the outward gate (no PR to a repo you don't own). Code lands onmain via 'ship'." >&2
-    exit 2
+  if repo_is_owned; then
+    exit 0
   fi
-  # Personal repos the agent may push the default branch directly (skills
-  # not PR-gated code — same character as the vault). Feature-branch pushes above
-  # still route through pushpr; this only relaxes the docs-only rule on m
-  ALLOWLIST_MAIN_PUSH=(
-    "/home/caneff/.agents/skills"
-  )
-  toplevel=$(git rev-parse --show-toplevel 2>/dev/null)
-  for allowed in "${ALLOWLIST_MAIN_PUSH[@]}"; do
-    [ "$toplevel" = "$allowed" ] && exit 0
-  done
-
-  # On the default branch. Allow only if every commit ahead of origin is docs.
-  if ! git rev-parse --verify "origin/$default" >/dev/null 2>&1; then
-    echo "BLOCKED: can't verify this push (origin/$default missing — new repo?). The initial push is yours: run it via the ! prefix." >&2
-    exit 2
-  fi
-  files=$(git diff --name-only "origin/$default..HEAD" 2>/dev/null)
-  if [ -z "$files" ]; then
-    exit 0   # nothing ahead of origin — a no-op push, harmless
-  fi
-  if echo "$files" | all_docs; then
-    exit 0   # doc lane: docs-only on the default branch
-  fi
-  echo "BLOCKED: pushing code to '$default'. This push changes non-doc fimain. HAND OFF: open a PR with 'pushpr' and let the user 'ship' it afterreview." >&2
+  echo "BLOCKED: pushing to a repo you don't own (or ownership couldn't be verified — gh down?). Use 'pushpr': it pushes the branch and stops before the PR, leaving the outward-facing step to the user." >&2
   exit 2
 fi
 
