@@ -76,6 +76,12 @@
             "command": "/home/caneff/.claude/hooks/sync-primary-main.sh",
             "if": "Bash(git push*)",
             "statusMessage": "Syncing primary worktree main"
+          },
+          {
+            "type": "command",
+            "command": "/home/caneff/.claude/hooks/sync-main-after-merge.sh",
+            "if": "Bash(gh pr merge*)",
+            "statusMessage": "Syncing main + cleaning merged branches"
           }
         ]
       }
