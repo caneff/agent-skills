@@ -24,6 +24,9 @@ case "$cmd" in
   *) exit 0 ;;
 esac
 
+# Any push: refresh the landed review page in the background (~1s, 0 tokens).
+python3 /home/caneff/.agents/skills/landed/generate.py >/dev/null 2>&1 &
+
 # Only act when the push destination is `main`. Matches a refspec ending in
 # `:main` (e.g. `HEAD:main`, `main:main`) or `main` as a standalone pushed ref
 # (e.g. `origin main`), each bounded by whitespace or end-of-string so that
