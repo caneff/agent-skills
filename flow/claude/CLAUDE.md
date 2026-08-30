@@ -1,21 +1,22 @@
 # Hard rules — never violate
 
-- **NEVER run `ship`.** Merge is my gate. After I've looked, hand me the exact
-  `! ship ...` line — always.
-- **NEVER merge or fast-forward `main` onto a worktree branch.** It empties the
-  PR the code lane is built around.
+- **Agents never merge a PR.** When a PR exists, I review and I merge
+  (`! gh pr merge ...`) — hand me the exact line.
 - **STOP and ask before** an *irreversible* deletion (untracked/uncommitted
   file, history-rewriting git op) and before adding a dependency or changing a
   database schema. A *tracked* file removed in a commit is undoable — delete it
   in place, no ask needed. The bar is "can I undo it," not "is it a deletion."
-- **Gate 1 — whose repo?** My repo → agent may open the PR. Anyone else's →
-  push the branch, stop before the PR, hand me the PR command.
-- **Gate 2 — code or decision?** Any code file touched → code lane (`/implement`
-  → `pushpr` → I run `ship`). Zero code files → auto-ship docs/decisions to main.
-- Code-lane mechanics (worktree, `pushpr`, `ship`) live in `/implement`.
+- **Gate 1 — whose repo?** Mine (origin owner = my gh login) → agents land
+  directly. Anyone else's → push the branch, stop before the PR, hand me the
+  PR command.
+- **Gate 2 — code or decision?** Code file touched on my repo → code lane
+  (`/implement` → worktree → `land` onto main). Zero code files → auto-ship
+  docs/decisions to main. If I say "make this a PR" → `pushpr`, and I merge.
+- Code-lane mechanics (worktree, `land`, `pushpr`) live in `/implement`.
 
 Gates detailed under "How work lands"; the principle behind both: **I see it
-before another human does.**
+before any OTHER human does.** My own repos land unreviewed — I read the log
+after; revert is the undo.
 
 **Progressive disclosure governs this file:** pointer inline, detail in a
 read-on-demand doc read via the Read tool. A rule stays inline only if it
@@ -77,7 +78,9 @@ CI config, and any skill/agent `.md`; a mixed diff is code. Auto-ship: commit
 to main, push, report what landed — except a fenced code block still needs
 its format check run first (formatters read fences; `uv run ruff format
 --check <file>` or equivalent). Code lane: `/implement` drives worktree → TDD
-→ `/code-review` → `pushpr`; I read every code line before it merges.
+→ `/code-review` → `land`. My insight is after the fact: small honest commits,
+`/landed` or `git log -p`, revert if wrong. The ownership-gated git hook, not
+prose, is what blocks pushes to repos I don't own.
 
 # Gotchas
 
@@ -91,6 +94,8 @@ its format check run first (formatters read fences; `uv run ruff format
 
 @RTK.md
 
+<!-- retro flag: the memory rule about staying quiet when `ship` fails after a
+push is stale — `ship` was deleted for the land lane (issues #461–#465). -->
 # second-brain vault memory (auto-imported by the weekly retro)
 @/home/caneff/src/second-brain-v2/Memory/RULES.md
 @/home/caneff/src/second-brain-v2/Memory/SOUL.md
