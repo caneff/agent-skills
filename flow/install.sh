@@ -22,7 +22,7 @@ link() { # link <repo-relative-src> <live-dest>
   echo "linked $dest -> $src"
 }
 
-link bin/ship                   "$HOME/.local/bin/ship"
+link bin/land                   "$HOME/.local/bin/land"
 link bin/pushpr                 "$HOME/.local/bin/pushpr"
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
@@ -31,7 +31,7 @@ link claude/RTK.md              "$HOME/.claude/RTK.md"
 # would break the link. It is a copy-only backup (see backup-sync.sh), written
 # by the --restore call below.
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
-for h in block-dangerous-git.sh sync-main-after-merge.sh sync-primary-main.sh package.json; do
+for h in block-dangerous-git.sh sync-primary-main.sh package.json; do
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
 done
 

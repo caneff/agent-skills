@@ -1,6 +1,6 @@
 # flow — the local tooling the dev flow depends on
 
-The scripts, hooks, and Claude config that the plan→build→ship flow runs on live
+The scripts, hooks, and Claude config that the plan→build→land flow runs on live
 outside any repo, at `~/.local/bin` and `~/.claude`. If this machine died, they
 would be gone. This directory is their backup: the repo holds the canonical
 copy, `install.sh` symlinks the live locations back to it, and from then on
@@ -10,7 +10,7 @@ every commit here is a backup.
 
 | Repo path | Live location | What it is |
 |---|---|---|
-| `bin/ship` | `~/.local/bin/ship` | Merge a PR, wait for it to land, sync main |
+| `bin/land` | `~/.local/bin/land` | Land the current branch on main and push |
 | `bin/pushpr` | `~/.local/bin/pushpr` | Push branch + open PR through the outward gate |
 | `bin/issue-counts` | `~/.local/bin/issue-counts` | Open-issue counts per wayfinder group for the current repo |
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Global instructions (hard rules, the two gates) |
