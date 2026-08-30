@@ -18,9 +18,10 @@ PRIMARY=/home/caneff/src/talk-to-your-data-slackbot
 # The command that just ran (empty string if absent / jq missing).
 cmd="$(jq -r '.tool_input.command // ""' 2>/dev/null)"
 
-# Cheap pre-filter: bail unless this was a push.
+# Cheap pre-filter: bail unless this was a push, or `land` (which pushes
+# internally). A stray match (e.g. "landed") only costs a ~1s regen.
 case "$cmd" in
-  *push*) ;;
+  *push* | *land*) ;;
   *) exit 0 ;;
 esac
 

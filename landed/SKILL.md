@@ -1,6 +1,6 @@
 ---
 name: landed
-description: Render recent commits across the workspace's repos as a local HTML review page. Use when the user asks what landed, what was committed recently, or wants to review recent agent work.
+description: Render recent commits across the workspace's repos as a local HTML review page, and open it in the browser. Use when the user asks what landed, what was committed recently, wants to review recent agent work, or asks to open the landed page.
 ---
 
 # Landed
@@ -24,8 +24,11 @@ instead of a PR queue.
    `~/.claude/landed.html`. It prints the path, tab count, and size — or says
    so and writes nothing when the range is empty everywhere.
 
-2. Report the path and the per-run counts. The page regenerates only when this
-   skill runs — it is a snapshot, cheap to rebuild, never appended to.
+2. Open it: `wslview ~/.claude/landed.html`. Report the per-run counts.
+
+The page is a snapshot, cheap to rebuild, never appended to. Every `git push`
+(and `land`) also regenerates it in the background via the push-sync hook, so
+regenerating here just guarantees freshness before opening.
 
 Page anatomy (all in `generate.py`, edit there): agent-built commits are the
 ones with a `Co-Authored-By: Claude` trailer; `Closes #n` trailers link to the
