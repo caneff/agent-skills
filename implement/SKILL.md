@@ -14,9 +14,9 @@ this skill can't pick up the same ticket. Read its labels first:
   and no ask needed. But any genuine **judgment call** the review surfaces — a
   knowing deviation, a semantic-contract choice, anything with more than one
   defensible answer — **stop and put it to the human before you act on it, and
-  before you open the PR.** Do not fold it into a "noted" line and ship past it;
-  being the review means asking the questions the review raises, not just the
-  legwork. Then claim it the same way, swapping `ready-for-human` for
+  before the work lands.** Being the review means asking the questions the
+  review raises, not folding them into a "noted" line and moving on. Then claim
+  it the same way, swapping `ready-for-human` for
   `ready-for-agent` in the command below.
 - **`in-progress`, or otherwise actively held by someone** — stop and ask, since
   someone likely holds it.
@@ -27,8 +27,8 @@ To take it:
 
 That pulls it out of every other client's queue. The read-then-flip has a
 sub-second race if two clients start on the same ticket at the same instant; for
-a handful of clients it is enough. If you abandon the run before a PR is open,
-put it back: `gh issue edit <n> --remove-label in-progress --add-label ready-for-agent`.
+a handful of clients it is enough. If you abandon the run before the work
+lands, put it back: `gh issue edit <n> --remove-label in-progress --add-label ready-for-agent`.
 
 **Always hand the build to a subagent — you pick its model, not whether to
 delegate.** The driver session never runs the worktree flow itself. Its job is
@@ -41,8 +41,8 @@ a rename, a boundary move, a tracer-bullet the spec already pins) → `sonnet`.
 **Yes** (a subtle seam where a wrong answer still passes the review gate) →
 `opus`. Either way, `handoff sub` with that `model`, seeded with the issue
 reference, its spec, and the build steps below (worktree → TDD → `/code-review`
-→ `pushpr`) so the subagent runs them directly rather than re-invoking this
-skill, and it reports back when the PR is open. Then stop — the build runs in
+→ land) so the subagent runs them directly rather than re-invoking this skill,
+and it reports back once the work has landed. Then stop — the build runs in
 the subagent, not here. **This holds even for a docs-only ticket that auto-ships
 to main:** that lane skips the worktree flow below, so it is the one most likely
 to tempt you back into running it inline. Delegate it too.
@@ -59,7 +59,7 @@ approval came from the human, and trying is permission-laundering.
 Before creating the worktree, check the original checkout is clean
 (`git status`). The worktree branches from the pushed main, so anything left
 uncommitted there is invisible inside it — and copying it across leaves two
-copies of the same file to diverge and collide when the branch ships.
+copies of the same file to diverge and collide when the branch lands.
 
 Tracker and spec files are the usual offenders, since editing a ticket is not
 itself worktree work. Commit those to main and push them before starting; they
@@ -87,29 +87,30 @@ Once done, use /code-review to review the work.
 
 Commit your work to the worktree's branch. When a ticket maps to a GitHub
 issue, put a closing keyword (`Closes #<n>`) in the final commit body — a bare
-`(#<n>)` mention links the issue but does not close it, so `pushpr`'s PR
-inherits the mention and merging leaves the issue open.
+`(#<n>)` mention links the issue but does not close it. **That trailer is the
+only thing that closes the ticket**, and it fires when the commit reaches the
+default branch.
 
-Once the PR is open, move the ticket to review:
-`gh issue edit <n> --remove-label in-progress --add-label in-review`. `in-review`
-is the PR-pending-human-merge state the orchestrator also uses, so the issue
-reads as done-and-waiting rather than dropped.
+## Landing
 
-## Worktree/ship mechanics
+`land` and `pushpr` are the owner's scripts in `~/.local/bin`; who owns
+`origin` picks between them.
 
-`pushpr` and `ship` are the owner's scripts in `~/.local/bin` (see the global
-hard rules for the ship prohibition). The agent may run `pushpr` — the outward
-gate makes it self-limiting.
+- **Your repo** (origin's owner is your `gh` login) → **`land`**, from inside
+  the worktree, once `/code-review` passes and the work is committed. It
+  fetches, rebases onto origin's default branch, runs `git config
+  land.testcmd`, pushes the commits onto the default branch (linear, no PR),
+  and removes the worktree; nothing reaches origin unless those tests pass.
+  The session ends when `land` succeeds — until then the edits are visible
+  only inside the worktree.
+- **Someone else's repo** (a fork, or any origin not yours) → **`pushpr`**,
+  which `land` refuses by design. Push the branch, stop before the PR, hand
+  the owner the `gh pr create` line; `pushpr` enforces that gate itself.
+- **A PR the owner asked for on their own repo** → **`pushpr`** anyway. The
+  *owner* merges (`! gh pr merge`); the agent never does.
+- **No `origin`** → no code lane: say so, offer `gh repo create`, merge nothing.
 
-- After `pushpr`, immediately `ExitWorktree` with `keep` — the worktree stays
-  on disk (no confirm needed) and the session returns to repo root, so the
-  owner's later `ship` line runs clean. `ship` must run from repo root: `!`
-  commands run in the agent's cwd, and if the agent is still inside the
-  worktree, ship's "remove the worktree first" guard sees itself, skips, and
-  `gh --delete-branch` then dies on `'main' is already used by worktree`. Do
-  the `ExitWorktree` silently — no need to narrate it each time.
-- If the owner asks "why don't I see any edits", the answer is "they're in the
-  worktree" — not a reason to merge anything. Tests run in the worktree; their
-  checkout sees the change when the PR ships, not before.
-- A repo with no `origin` can't run the code lane. Say so and offer
-  `gh repo create`; don't silently fall back to merging locally.
+A `land` rebase conflict aborts the rebase and pushes nothing. Mechanical —
+imports, lockfiles, adjacent-line noise? Resolve it by hand with the
+`resolving-merge-conflicts` skill, then run `land` again. Both sides changed
+the same logic? **STOP**: report it to the owner and let them decide.
