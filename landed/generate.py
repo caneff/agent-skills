@@ -157,11 +157,9 @@ def main():
 <title>Landed</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
-:root {{ --bg:#fafafa; --card:#ffffff; --ink:#24292f; --mut:#656d76; --line:#d8dce1;
-  --accent:#0969da; --add:#1a7f37; --rem:#cf222e; --chip:#eef1f4; --dhbg:#f4f6f8; }}
-@media (prefers-color-scheme: dark) {{ :root {{
-  --bg:#0d1117; --card:#161b22; --ink:#e6edf3; --mut:#8b949e; --line:#30363d;
-  --accent:#4493f8; --add:#3fb950; --rem:#f85149; --chip:#21262d; --dhbg:#1c2128; }} }}
+/* Dracula Theme Soft — the user's VS Code theme (dark-only, so no light mode). */
+:root {{ --bg:#191A21; --card:#282A36; --ink:#F6F6F4; --mut:#7B7F8B; --line:#44475A;
+  --accent:#BF9EEE; --add:#62E884; --rem:#EE6666; --chip:#343746; --dhbg:#21222C; }}
 body {{ background:var(--bg); color:var(--ink); font:15px/1.55 "IBM Plex Sans",system-ui,sans-serif;
   max-width:1400px; margin:0 auto; padding:2.5rem 1.25rem 5rem; }}
 h1 {{ font:600 1.7rem/1.2 "IBM Plex Mono",monospace; margin:0; }}
