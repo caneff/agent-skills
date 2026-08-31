@@ -69,6 +69,38 @@ esac
 echo "land: fetching origin"
 git fetch --quiet origin
 
+# --- sweep spent worktrees --------------------------------------------------
+#
+# A worktree whose every commit is already on origin/$base is spent: the work
+# reached the default branch, so deleting it loses nothing. They pile up when a
+# land can't remove its own worktree, or when a session exits and keeps one.
+# Sweeping here means the next land clears them; nobody removes them by hand.
+#
+# Clean and merged is not enough on its own — a builder's brand-new worktree
+# has no commits yet, so its HEAD is an ancestor of origin/$base too, and
+# sweeping it would delete a live agent's working directory. The index mtime
+# separates the two: git touches it on checkout, add, commit and status, so a
+# worktree idle for an hour is abandoned, not busy.
+#
+# ponytail: an hour is a guess, not a liveness check. If an agent ever gets
+# swept mid-think, replace the mtime test with a real one.
+git worktree list --porcelain \
+    | awk '/^worktree /{w=substr($0,10)} /^branch /{print w"\t"substr($0,8)}' \
+    | while IFS=$(printf '\t') read -r w ref; do
+    [ "$w" != "$wt" ] && [ "$w" != "$main_wt" ] || continue
+    idx=$(git -C "$w" rev-parse --absolute-git-dir 2>/dev/null)/index
+    [ -z "$(find "$idx" -mmin -60 2>/dev/null)" ] || continue
+    git merge-base --is-ancestor "$ref" "origin/$base" 2>/dev/null || continue
+    git -C "$w" diff --quiet 2>/dev/null \
+        && git -C "$w" diff --cached --quiet 2>/dev/null \
+        && [ -z "$(git -C "$w" ls-files --others --exclude-standard 2>/dev/null)" ] \
+        || continue
+    if git -C "$main_wt" worktree remove "$w" 2>/dev/null; then
+        echo "land: swept spent worktree $w"
+        git -C "$main_wt" branch -q -d "${ref#refs/heads/}" 2>/dev/null || true
+    fi
+done
+
 start=$(git rev-parse HEAD)
 echo "land: rebasing $branch onto origin/$base"
 if ! git rebase "origin/$base" >/dev/null; then
@@ -123,10 +155,12 @@ fi
 # Plain remove, never --force: an unexpectedly dirty worktree should block the
 # delete, not lose work. The push already succeeded, so a failure here is a
 # warning — the work is landed either way.
-if git -C "$main_wt" worktree remove "$wt" 2>/dev/null; then
+if git -C "$main_wt" worktree remove "$wt"; then
     echo "land: landed $branch on origin/$base; worktree removed."
+    git -C "$main_wt" branch -q -d "$branch" 2>/dev/null || true
 else
     echo "land: landed $branch on origin/$base."
-    echo "land: WARNING — couldn't remove the worktree at $wt; remove it yourself:"
+    echo "land: WARNING — couldn't remove the worktree at $wt (git's reason is above)."
+    echo "land: the next land sweeps it once it has been idle an hour. To remove it now:"
     echo "  git -C $main_wt worktree remove $wt"
 fi

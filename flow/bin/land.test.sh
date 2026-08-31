@@ -117,6 +117,57 @@ check "origin main untouched" "$before" "$(git -C "$origin" rev-parse main)"
 check "refusal mentions uncommitted work" refused \
     "$(echo "$out" | grep -qiE 'dirty|uncommitted|clean' && echo refused)"
 
+# A second linked worktree on branch `other`, to be swept or spared. `idle`
+# backdates its index past the sweep's one-hour cutoff.
+add_other() {
+    other="$root/$1/other"
+    git -C "$clone" worktree add -q -b other "$other" main
+}
+idle() { touch -d '2 hours ago' "$clone/.git/worktrees/other/index"; }
+
+echo "case: sweeps a spent, idle worktree"
+setup sweep
+add_other sweep
+idle
+commit_on_feature feat.txt one
+out=$(run_land); rc=$?
+check "exit 0" 0 "$rc"
+check "spent worktree gone" gone "$([ -d "$other" ] || echo gone)"
+check "its branch deleted" "" "$(git -C "$clone" branch --list other)"
+check "says what it swept" said \
+    "$(echo "$out" | grep -qi 'swept' && echo said)"
+[ "$rc" -eq 0 ] || echo "$out" | sed 's/^/    /'
+
+echo "case: leaves a busy worktree alone"
+setup busy
+add_other busy
+# no idle: its index was just written, so an agent may be working in it
+commit_on_feature feat.txt one
+out=$(run_land)
+check "busy worktree kept" here "$([ -d "$other" ] && echo here)"
+
+echo "case: leaves unmerged work alone"
+setup unmerged
+add_other unmerged
+printf 'x\n' > "$other/own.txt"
+git -C "$other" add -A
+git -C "$other" commit -qm "other: own work"
+idle
+commit_on_feature feat.txt one
+out=$(run_land)
+check "unmerged worktree kept" here "$([ -d "$other" ] && echo here)"
+check "its commit survives" x "$(git -C "$clone" show other:own.txt 2>/dev/null)"
+
+echo "case: leaves a dirty worktree alone"
+setup dirtysweep
+add_other dirtysweep
+echo scribble > "$other/untracked.txt"
+idle
+commit_on_feature feat.txt one
+out=$(run_land)
+check "dirty worktree kept" here "$([ -d "$other" ] && echo here)"
+check "untracked file survives" scribble "$(cat "$other/untracked.txt" 2>/dev/null)"
+
 echo
 if [ "$fails" -eq 0 ]; then
     echo "PASS: all land contract cases"
