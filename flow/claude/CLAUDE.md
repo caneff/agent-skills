@@ -56,6 +56,12 @@ One sentence before your first tool call on what you're about to do; brief
 updates only on something important or a direction change; on finish, lead
 with the outcome, detail after.
 
+## Subagent relay
+
+Relay the **delta**, not the report. When a subagent finishes, say only what it
+added that you had not already said; if it confirms what you told me, that is
+one sentence. Never answer a question and delegate the same question — pick one.
+
 # Planning/build workflow (Matt Pocock skills)
 
 Pipeline for non-trivial work: **`/wayfinder` (grill out the fog) →
