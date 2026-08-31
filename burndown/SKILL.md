@@ -18,12 +18,28 @@ later builds rebase onto earlier ones instead of colliding.
    each candidate's blocking edges (native blocking link, or the "Blocked by"
    section in the body); skip any with an open blocker. Among unblocked
    tickets, take the lowest number.
-3. Run the [`implement`](../implement/SKILL.md) skill on it — claim, delegate
-   the build to a subagent, land. Every gate in that skill applies unchanged.
-4. Append one line (`#<n> landed <sha>`, or `#<n> parked: <why>`) to a
+3. **Build.** Run the [`implement`](../implement/SKILL.md) skill on it —
+   claim, delegate the build to a subagent — with one change to that skill's
+   sequencing: seed the builder to stop after committing, report its branch,
+   and wait. The driver owns review and land (next steps); everything else in
+   `implement`, including its gates, applies unchanged.
+4. **Review.** The driver runs `/code-review` on the builder's branch against
+   the issue spec and reads the report itself. Findings → message them to the
+   builder to fix, then re-review. The driver decides when the review is
+   clean; the builder never certifies its own work.
+5. **Land.** Tell the builder to land, per `implement`'s landing section.
+6. Append one line (`#<n> landed <sha>`, or `#<n> parked: <why>`) to a
    progress file in scratch — never in the repo.
-5. Go to 1. Re-list every pass: a landing can unblock tickets, and a human
+7. Go to 1. Re-list every pass: a landing can unblock tickets, and a human
    may have added more.
+
+## Driver context stays thin
+
+The tracker and the progress file are the state, not this conversation:
+re-derive the queue every pass, and keep one line per finished ticket in
+context — build detail lives with the builder, review detail in the review
+report. A burn survives summarization this way, and a fresh session can
+resume a half-done queue from the tracker and progress file alone.
 
 ## When a ticket can't land
 
