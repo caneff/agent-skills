@@ -231,6 +231,11 @@ function applyAge(days) {{
     h.hidden = !h.parentElement.querySelector(
       `.commit[data-day="${{h.dataset.day}}"]:not([hidden])`);
   }});
+  tabs.forEach(t => {{
+    const pane = document.getElementById("pane-" + t.dataset.pane);
+    t.querySelector(".tn").textContent =
+      pane.querySelectorAll(".commit:not([hidden])").length;
+  }});
   try {{ localStorage.setItem("landed-age", days); }} catch (e) {{}}
 }}
 ages.forEach(b => b.addEventListener("click", () => applyAge(+b.dataset.days)));
