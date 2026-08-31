@@ -116,7 +116,8 @@ def render_repo(commits, gh):
                 f'<tr><td class="fp">{esc(f)}</td><td class="fa">+{a}</td><td class="fr">−{r}</td></tr>'
                 for f, a, r in c["files"])
             if c["diff"]:
-                dsec = f'<pre class="diff">{diff_html(c["diff"])}</pre>'
+                dsec = (f'<details class="dwrap"><summary>diff · +{c["add"]} −{c["rem"]}</summary>'
+                        f'<pre class="diff">{diff_html(c["diff"])}</pre></details>')
             else:
                 where = f' — <a href="{gh}/commit/{c["H"]}">read it on GitHub</a>' if gh else ''
                 dsec = f'<p class="skip">Diff skipped for size ({c["add"] + c["rem"]} changed lines){where}.</p>'
@@ -203,6 +204,10 @@ h2 {{ font:500 .85rem/1 'Fira Code',Consolas,'Courier New',monospace; text-trans
 .files {{ margin:.8rem .9rem; border-collapse:collapse; font:400 .78rem/1.6 'Fira Code',Consolas,'Courier New',monospace; }}
 .files td {{ padding:0 .9rem 0 0; }} .fa {{ color:var(--add); }} .fr {{ color:var(--rem); }}
 .fp {{ color:var(--ink); }}
+.dwrap summary {{ cursor:pointer; list-style:none; color:var(--accent); font-size:.78rem;
+  padding:.5rem .9rem; border-top:1px solid var(--line); }}
+.dwrap summary::-webkit-details-marker {{ display:none; }}
+.dwrap summary::before {{ content:"▸ "; }} .dwrap[open] summary::before {{ content:"▾ "; }}
 .diff {{ margin:0; padding:.8rem .9rem; overflow-x:auto; background:var(--dhbg);
   font:400 .75rem/1.5 'Fira Code',Consolas,'Courier New',monospace; border-radius:0 0 6px 6px; }}
 .da {{ color:var(--add); }} .dr {{ color:var(--rem); }} .dh {{ color:var(--accent); }}
