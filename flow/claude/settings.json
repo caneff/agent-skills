@@ -77,6 +77,15 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "EnterWorktree",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/caneff/.agents/skills/flow/claude/hooks/block-cross-repo-worktree.sh"
+          }
+        ]
+      },
+      {
         "matcher": "Edit|Write",
         "hooks": [
           {
