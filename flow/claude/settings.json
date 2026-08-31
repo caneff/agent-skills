@@ -161,6 +161,5 @@
   "theme": "dark-ansi",
   "remoteControlAtStartup": false,
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true,
-  "model": "opus[1m]"
+  "agentPushNotifEnabled": true
 }
