@@ -11,8 +11,11 @@ a list: their blocking edges say which ones are independent, so the driver
 builds the whole unblocked **frontier** at once and lands the results one at a
 time.
 
-**Argument:** the maximum number of live builders. Default 3. `/burndown 1`
-builds strictly one ticket at a time.
+**Arguments:** `/burndown [builders] [tickets]` — the maximum number of live
+builders (default 3) and the maximum number of tickets this burn will settle
+(default 10). `/burndown 1` builds strictly one ticket at a time. A burn stops
+at the ticket cap even with the queue non-empty; run it again to continue,
+since the tracker and the progress file hold all the state.
 
 ## The loop
 
@@ -24,9 +27,11 @@ builds strictly one ticket at a time.
    numbers first, up to the number of free builder slots. That set is this
    pass's **batch**.
 3. **Explore once per burn — first pass only.** On the first pass, spawn one
-   exploration subagent (`sonnet`) over **every ticket step 1 listed**, not
-   just this pass's frontier. Blocked tickets are in scope: each one can land
-   before the burn ends, so the explorer covers the whole burn in one read.
+   exploration subagent (`sonnet`) over **the tickets this burn can reach** —
+   step 1's listing in dependency order, cut at the ticket cap — not just this
+   pass's frontier. Blocked tickets are in scope: each one can land before the
+   burn ends, so the explorer covers the whole burn in one read. The cap is
+   what keeps that one read from going thin over a long queue.
    It reads the code and docs those tickets touch and writes its notes to
    `~/.cache/burndown/<repo dir name>.notes.md` — outside the repo, so every
    builder and every worktree can read it. Builders **wait** for it: a builder
@@ -82,7 +87,8 @@ builds strictly one ticket at a time.
    lockstep.
 8. When a ticket settles, refill its slot: go to 1, skipping step 3. Re-list
    every pass — a landing can unblock tickets, and a human may have added
-   more.
+   more. At the ticket cap — landed plus parked — start no new builders, let
+   the live ones settle, and stop.
 
 ## Driver context stays thin
 
@@ -105,4 +111,6 @@ getting through is not.)
 ## Report
 
 When the loop stops, tally: tickets landed (issue → commit), tickets parked
-and why, tickets still open and what blocks them.
+and why, tickets still open and what blocks them. Say why the loop stopped —
+queue empty, ticket cap, or two parks with no landing — and if the queue is
+not empty, say to run `/burndown` again.
