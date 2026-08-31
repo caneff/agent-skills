@@ -73,7 +73,7 @@ Pass `model: opus` to both. Review is Opus-tier and the user reads every line be
 
 Both prompts carry only the **diff, the commit list, and the spec/standards sources** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
 
-Belt and braces: append to **both** prompts — "Also write your full report to `$CLAUDE_JOB_DIR/tmp/review-<axis>-<n>.md` (use `./.scratch/review-<axis>-<n>.md` if that variable is unset), `<axis>` being `standards` or `spec`, `<n>` the issue number from step 2 (or the branch name if there is none)." If the completion notification comes back missing or empty, read that file before treating the report as absent.
+Belt and braces: append to **both** prompts — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards` or `spec`, `<n>` the issue number from step 2 (or the branch name if there is none). **Expand `<dir>` yourself before writing the prompt**: `$CLAUDE_JOB_DIR/tmp` if that variable is set in your session, else `/tmp`. Sub-agents do not inherit the variable, and a fallback inside the checkout leaves an untracked file that blocks `git worktree remove` (and so `ship`). Never point the report at `./.scratch/` or anywhere under the repo. If the completion notification comes back missing or empty, read that file before treating the report as absent.
 
 **Standards sub-agent prompt** — include:
 
