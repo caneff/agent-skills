@@ -23,14 +23,18 @@ builds strictly one ticket at a time.
    section in the body); skip any with an open blocker. Take the lowest
    numbers first, up to the number of free builder slots. That set is this
    pass's **batch**.
-3. **Explore once for the batch.** Spawn one exploration subagent (`sonnet`)
-   over the batch's tickets. It reads the code and docs those tickets touch
-   and writes its notes to
-   `~/.cache/burndown/<repo dir name>.notes/<lowest ticket number in the
-   batch>.md` — outside the repo, so
-   every builder and every worktree can read it. Builders **wait** for it: a
-   builder that starts early has already done the reading the explorer was
+3. **Explore once per burn — first pass only.** On the first pass, spawn one
+   exploration subagent (`sonnet`) over the whole open queue, not just the
+   first batch. It reads the code and docs those tickets touch and writes its
+   notes to `~/.cache/burndown/<repo dir name>.notes.md` — outside the repo,
+   so every builder and every worktree can read it. Builders **wait** for it:
+   a builder that starts early has already done the reading the explorer was
    meant to save. Notes are kept after the burn.
+
+   Every later pass **skips this step** and points its builders at the same
+   file. A refill batch is usually one ticket, and one explorer per ticket
+   costs more than it saves. A builder that finds the notes thin for its
+   ticket reads the code itself.
 4. **Build.** Run the [`implement`](../implement/SKILL.md) skill on each ticket
    in the batch — claim, delegate the build to a subagent — with one change to
    that skill's sequencing: seed the builder to stop after committing, report
@@ -70,8 +74,9 @@ builds strictly one ticket at a time.
    live; the line grammar is a contract with
    `ccstatusline-table/helpers/burndown-segment.sh` — change the two only in
    lockstep.
-8. When a ticket settles, refill its slot: go to 1. Re-list every pass — a
-   landing can unblock tickets, and a human may have added more.
+8. When a ticket settles, refill its slot: go to 1, skipping step 3. Re-list
+   every pass — a landing can unblock tickets, and a human may have added
+   more.
 
 ## Driver context stays thin
 
