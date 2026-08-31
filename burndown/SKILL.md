@@ -13,9 +13,15 @@ time.
 
 **Arguments:** `/burndown [builders] [tickets]` — the maximum number of live
 builders (default 3) and the maximum number of tickets this burn will settle
-(default 10). `/burndown 1` builds strictly one ticket at a time. A burn stops
+(default 15). `/burndown 1` builds strictly one ticket at a time. A burn stops
 at the ticket cap even with the queue non-empty; run it again to continue,
 since the tracker and the progress file hold all the state.
+
+The ticket cap is sized for the explorer in step 3, not for the driver: one
+`sonnet` agent reads each ticket's issue and the files it touches, then writes
+the notes. At 15 tickets that fits a 200k window with room to think; past 20 it
+skims, and skimmed notes read the same as good ones. Raise it when you have
+watched a burn and the notes held up.
 
 ## The loop
 
