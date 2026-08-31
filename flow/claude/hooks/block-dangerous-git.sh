@@ -55,7 +55,7 @@ DANGEROUS_PATTERNS=(
 )
 for pattern in "${DANGEROUS_PATTERNS[@]}"; do
   if echo "$SCAN" | grep -qE "$pattern"; then
-    echo "BLOCKED: '$COMMAND' matches protected pattern '$pattern'. Merging a PR and destroying history are the user's, not yours. HAND OFF: print the exact '! gh pr merge <num> ...' (or other) line for THEM to run via the ! prefix. Do not attempt it yourself." >&2
+    echo "BLOCKED: '$COMMAND' matches protected pattern '$pattern'. That operation is the user's, not yours. HAND OFF: run it alone, then give the user the exact line so they can run it themselves via the ! prefix. Do not attempt it yourself." >&2
     exit 2
   fi
 done

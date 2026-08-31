@@ -75,6 +75,20 @@ run "gh pr merge blocked on owned repo" 2 "gh pr merge 12 --squash" "gh pr merge
 run "history destroyer still blocked" 2 "git reset --hard HEAD~3" "BLOCKED"
 run "bare force-push still blocked" 2 "git push --force origin main" "BLOCKED"
 
+# The rejection message must name the matched pattern generically — not lean
+# on gh-pr-merge-specific wording for a different pattern — and state the
+# escape hatch: run the operation alone, hand off via the ! prefix.
+run "history destroyer message names its own pattern, not gh pr merge" 2 \
+  "git reset --hard HEAD~3" "protected pattern 'git reset --hard'"
+run "history destroyer message states the escape hatch" 2 \
+  "git reset --hard HEAD~3" "run it alone"
+
+# A protected pattern anywhere in a compound chain still blocks the whole
+# chain (whole-command matching, unchanged), and the message names the
+# specific segment that tripped it.
+run "chain blocked names the tripping segment's pattern" 2 \
+  "ls -la && git branch -D foo" "protected pattern 'git branch -D'"
+
 # Reading git is untouched.
 run "ordinary git command allowed" 0 "git status"
 
