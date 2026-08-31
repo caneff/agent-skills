@@ -43,5 +43,17 @@ if [ "$mode" = --commit ]; then
   if ! git -C "$here" diff --cached --quiet -- "${rels[@]}" 2>/dev/null; then
     git -C "$here" commit -q -m "chore(flow): auto-backup copy-only settings" -- "${rels[@]}"
     echo "committed backup snapshot"
+    # A commit that never leaves the machine is not a backup, and it leaves main
+    # ahead of origin, which is what makes the next `land` refuse to
+    # fast-forward. Push only from main: the commit above went onto whatever
+    # HEAD is, so pushing main from another branch would push the wrong thing.
+    # ponytail: a rejected push only warns. Rebasing the user's main from a
+    # SessionStart hook is worse than leaving the drift visible.
+    if [ "$(git -C "$here" symbolic-ref --quiet --short HEAD)" = main ]; then
+      timeout 20 git -C "$here" push -q origin main ||
+        echo "backup commit not pushed: it is on this machine only" >&2
+    else
+      echo "backup commit not pushed: HEAD is not main" >&2
+    fi
   fi
 fi

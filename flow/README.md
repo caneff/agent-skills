@@ -36,8 +36,10 @@ they're plain snapshots — `install.sh` does not touch them.
 top of the script):
 
 - `backup-sync.sh` — refresh the repo copies from the live files.
-- `backup-sync.sh --commit` — refresh, then commit any that changed. A
-  SessionStart hook runs this, so the snapshots stay fresh on their own.
+- `backup-sync.sh --commit` — refresh, commit any that changed, then push main.
+  A SessionStart hook runs this, so the snapshots stay fresh on their own. It
+  pushes only when the checkout is on main, and a rejected push warns rather
+  than failing: fix that drift by hand with `git pull --rebase`.
 - `backup-sync.sh --restore` — write the repo copies back onto a machine.
 
 The `--commit` path is scoped to the manifest paths, so it never sweeps an
