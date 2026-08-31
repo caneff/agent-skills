@@ -155,27 +155,27 @@ def main():
     page = f'''<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Landed</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&display=swap">
 <style>
 /* Dracula Theme Soft — the user's VS Code theme (dark-only, so no light mode). */
 :root {{ --bg:#191A21; --card:#282A36; --ink:#F6F6F4; --mut:#7B7F8B; --line:#44475A;
   --accent:#BF9EEE; --add:#62E884; --rem:#EE6666; --chip:#343746; --dhbg:#21222C; }}
-body {{ background:var(--bg); color:var(--ink); font:15px/1.55 "IBM Plex Sans",system-ui,sans-serif;
+body {{ background:var(--bg); color:var(--ink); font:15px/1.55 'Fira Code',Consolas,'Courier New',monospace;
   max-width:1400px; margin:0 auto; padding:2.5rem 1.25rem 5rem; }}
-h1 {{ font:600 1.7rem/1.2 "IBM Plex Mono",monospace; margin:0; }}
+h1 {{ font:600 1.7rem/1.2 'Fira Code',Consolas,'Courier New',monospace; margin:0; }}
 .range {{ color:var(--mut); margin:.4rem 0 1.2rem; }}
 .tabs {{ display:flex; gap:.4rem; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:.6rem; }}
-.tab {{ font:500 .82rem/1 "IBM Plex Mono",monospace; color:var(--mut); background:var(--chip);
+.tab {{ font:500 .82rem/1 'Fira Code',Consolas,'Courier New',monospace; color:var(--mut); background:var(--chip);
   border:1px solid var(--line); border-radius:99px; padding:.45rem .8rem; cursor:pointer; }}
 .tab.on {{ color:var(--bg); background:var(--accent); border-color:var(--accent); }}
 .tab.on .tn {{ color:var(--bg); }}
 .tab.zero {{ opacity:.4; }}
-.age {{ font:500 .75rem/1 "IBM Plex Mono",monospace; color:var(--mut); background:var(--chip);
+.age {{ font:500 .75rem/1 'Fira Code',Consolas,'Courier New',monospace; color:var(--mut); background:var(--chip);
   border:1px solid var(--line); border-radius:4px; padding:.25rem .5rem; cursor:pointer; margin-left:.25rem; }}
 .age.on {{ color:var(--bg); background:var(--accent); border-color:var(--accent); }}
 .tn {{ color:var(--accent); }}
 .sub {{ color:var(--mut); margin:1rem 0 0; }} .sub b {{ color:var(--accent); font-weight:600; }}
-h2 {{ font:500 .85rem/1 "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.08em;
+h2 {{ font:500 .85rem/1 'Fira Code',Consolas,'Courier New',monospace; text-transform:uppercase; letter-spacing:.08em;
   color:var(--mut); border-bottom:1px solid var(--line); padding-bottom:.5rem; margin:2.4rem 0 1rem; }}
 .commit {{ background:var(--card); border:1px solid var(--line); border-radius:6px; margin:0 0 .6rem; }}
 .commit summary {{ cursor:pointer; padding:.7rem .9rem; list-style:none;
@@ -188,7 +188,7 @@ h2 {{ font:500 .85rem/1 "IBM Plex Mono",monospace; text-transform:uppercase; let
 .commit[open] summary {{ border-bottom:1px solid var(--line); }}
 .subj {{ font-weight:500; display:block; }}
 .meta {{ display:flex; align-items:center; gap:.6rem; margin-top:.35rem; flex-wrap:wrap;
-  font:400 .78rem/1 "IBM Plex Mono",monospace; color:var(--mut); }}
+  font:400 .78rem/1 'Fira Code',Consolas,'Courier New',monospace; color:var(--mut); }}
 .hash {{ color:var(--accent); text-decoration:none; background:var(--chip); padding:.2rem .4rem; border-radius:4px; }}
 .hash:hover, .issue:hover {{ text-decoration:underline; }}
 .badge {{ color:var(--accent); border:1px solid var(--accent); border-radius:99px; padding:.15rem .5rem; }}
@@ -197,11 +197,11 @@ h2 {{ font:500 .85rem/1 "IBM Plex Mono",monospace; text-transform:uppercase; let
 .ba {{ background:var(--add); }} .br {{ background:var(--rem); }}
 .counts {{ font-variant-numeric:tabular-nums; }}
 .cbody {{ color:var(--mut); margin:.8rem .9rem 0; max-width:65ch; }}
-.files {{ margin:.8rem .9rem; border-collapse:collapse; font:400 .78rem/1.6 "IBM Plex Mono",monospace; }}
+.files {{ margin:.8rem .9rem; border-collapse:collapse; font:400 .78rem/1.6 'Fira Code',Consolas,'Courier New',monospace; }}
 .files td {{ padding:0 .9rem 0 0; }} .fa {{ color:var(--add); }} .fr {{ color:var(--rem); }}
 .fp {{ color:var(--ink); }}
 .diff {{ margin:0; padding:.8rem .9rem; overflow-x:auto; background:var(--dhbg);
-  font:400 .75rem/1.5 "IBM Plex Mono",monospace; border-radius:0 0 6px 6px; }}
+  font:400 .75rem/1.5 'Fira Code',Consolas,'Courier New',monospace; border-radius:0 0 6px 6px; }}
 .da {{ color:var(--add); }} .dr {{ color:var(--rem); }} .dh {{ color:var(--accent); }}
 .dg,.df {{ color:var(--mut); font-weight:600; }}
 .skip {{ color:var(--mut); margin:.8rem .9rem; }} .skip a {{ color:var(--accent); }}
