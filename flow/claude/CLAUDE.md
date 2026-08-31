@@ -9,9 +9,13 @@
 - **Gate 1 — whose repo?** Mine (origin owner = my gh login) → agents land
   directly. Anyone else's → push the branch, stop before the PR, hand me the
   PR command.
+- **Touch repo files only from a linked worktree** — never the primary
+  checkout, docs included. The require-worktree hook blocks Edit/Write there:
+  EnterWorktree first, work, then `land`.
 - **Gate 2 — code or decision?** Code file touched on my repo → code lane
-  (`/implement` → worktree → `land` onto main). Zero code files → auto-ship
-  docs/decisions to main. If I say "make this a PR" → `pushpr`, and I merge.
+  (`/implement` → worktree → `land` onto main). Zero code files → auto-ship:
+  same worktree → `land`, just no ticket/TDD/review ceremony. If I say "make
+  this a PR" → `pushpr`, and I merge.
 - Code-lane mechanics (worktree, `land`, `pushpr`) live in `/implement`.
 
 Gates detailed under "How work lands"; the principle behind both: **I see it
@@ -74,8 +78,8 @@ and a compare command; `pushpr` enforces this itself.
 
 **Gate 2 detail:** a **code file** is anything executed, imported, or that
 changes runtime/tool behavior — `.py/.ts/.js/.sh/.rs`, `settings.json`, hooks,
-CI config, and any skill/agent `.md`; a mixed diff is code. Auto-ship: commit
-to main, push, report what landed — except a fenced code block still needs
+CI config, and any skill/agent `.md`; a mixed diff is code. Auto-ship: edit in
+a worktree, commit, `land`, report — except a fenced code block still needs
 its format check run first (formatters read fences; `uv run ruff format
 --check <file>` or equivalent). Code lane: `/implement` drives worktree → TDD
 → `/code-review` → `land`. My insight is after the fact: small honest commits,

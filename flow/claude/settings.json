@@ -54,6 +54,15 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/caneff/.claude/hooks/require-worktree.sh"
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -97,7 +106,7 @@
     ]
   },
   "worktree": {
-    "bgIsolation": "none"
+    "bgIsolation": "worktree"
   },
   "disableWorkflows": true,
   "statusLine": {
