@@ -23,11 +23,15 @@ later builds rebase onto earlier ones instead of colliding.
    sequencing: seed the builder to stop after committing, report its branch,
    and wait. The driver owns review and land (next steps); everything else in
    `implement`, including its gates, applies unchanged.
-4. **Review.** The driver runs `/code-review` on the builder's branch against
-   the issue spec and reads the report itself. Findings → message them to the
-   builder to fix, then re-review. The driver decides when the review is
-   clean; the builder never certifies its own work.
-5. **Land.** Tell the builder to land, per `implement`'s landing section.
+4. **Review.** Spawn a fresh reviewer subagent (`opus`) for this ticket,
+   seeded with only the issue reference and the branch — never the burn
+   history. It runs `/code-review` against the issue spec and owns the
+   verdict: **clean** or **can't get clean**. Findings pass through the
+   driver to the builder verbatim; the builder fixes, the reviewer
+   re-reviews. The driver carries mail and acts on the verdict — it judges
+   nothing, and the builder never certifies its own work.
+5. **Land.** On **clean**, tell the builder to land, per `implement`'s
+   landing section. On **can't get clean**, park the ticket (below).
 6. Append one line (`#<n> landed <sha>`, or `#<n> parked: <why>`) to a
    progress file in scratch — never in the repo.
 7. Go to 1. Re-list every pass: a landing can unblock tickets, and a human
