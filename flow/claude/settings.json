@@ -12,14 +12,13 @@
       "Bash(gh issue *)",
       "Bash(gh issue edit:*)",
       "Bash(gh label *)",
+      "Bash(git -C:*)",
       "Bash(git branch -d *)",
       "Bash(git diff *)",
       "Bash(git fetch *)",
       "Bash(git fetch)",
       "Bash(git worktree *)",
       "Bash(git worktree:*)",
-      "Bash(git -C * worktree *)",
-      "Bash(git -C * worktree:*)",
       "Bash(land)",
       "Bash(node *)",
       "Bash(pushpr)",
@@ -42,7 +41,13 @@
       "ReportFindings",
       "ScheduleWakeup"
     ],
-    "defaultMode": "auto"
+    "defaultMode": "auto",
+    "autoMode": {
+      "allow": [
+        "$defaults",
+        "Git worktree commands in any repository, including the `git -C <path> worktree ...` form: add, list, lock, unlock, prune, remove."
+      ]
+    }
   },
   "disableClaudeAiConnectors": true,
   "skillOverrides": {
