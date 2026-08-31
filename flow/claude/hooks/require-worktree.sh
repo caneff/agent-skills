@@ -45,5 +45,5 @@ if [ "$git_dir" != "$common" ]; then
   exit 0
 fi
 
-echo "BLOCKED: '$path' is in a repo's PRIMARY checkout. Agents touch repo files only from a linked worktree — run EnterWorktree first, do the work there, then land it. This applies to docs too." >&2
+echo "BLOCKED: '$path' is in a repo's PRIMARY checkout. Agents touch repo files only from a linked worktree — run EnterWorktree first, do the work there, then land it. This applies to docs too. If that repo is NOT the repo your current worktree is in, do NOT EnterWorktree into it — that always prompts the user; spawn an Agent with cwd set to that repo and let it do the work there." >&2
 exit 2
