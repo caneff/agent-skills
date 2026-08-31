@@ -39,7 +39,6 @@
     ],
     "defaultMode": "auto"
   },
-  "model": "claude-fable-5[1m]",
   "disableClaudeAiConnectors": true,
   "skillOverrides": {
     "dataviz": "off",
@@ -120,6 +119,7 @@
   "worktree": {
     "bgIsolation": "worktree"
   },
+  "disableRemoteControl": true,
   "disableWorkflows": true,
   "statusLine": {
     "type": "command",
@@ -149,8 +149,7 @@
   "autoMemoryEnabled": false,
   "skipWorkflowUsageWarning": true,
   "theme": "dark-ansi",
+  "remoteControlAtStartup": false,
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true,
-  "disableRemoteControl": true,
-  "remoteControlAtStartup": false
+  "agentPushNotifEnabled": true
 }
