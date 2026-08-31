@@ -157,11 +157,11 @@ def main():
 <title>Landed</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
-:root {{ --bg:#f6f8f6; --card:#ffffff; --ink:#1d2721; --mut:#5f6f66; --line:#dde5df;
-  --accent:#2e7d5b; --add:#1a7f37; --rem:#b0342b; --chip:#eef3ef; --dhbg:#f0f4f1; }}
+:root {{ --bg:#fafafa; --card:#ffffff; --ink:#24292f; --mut:#656d76; --line:#d8dce1;
+  --accent:#0969da; --add:#1a7f37; --rem:#cf222e; --chip:#eef1f4; --dhbg:#f4f6f8; }}
 @media (prefers-color-scheme: dark) {{ :root {{
-  --bg:#12171a; --card:#1a2126; --ink:#dfe7e2; --mut:#8ea198; --line:#2a343a;
-  --accent:#57b48c; --add:#4cc272; --rem:#e0716a; --chip:#232d2a; --dhbg:#20282c; }} }}
+  --bg:#0d1117; --card:#161b22; --ink:#e6edf3; --mut:#8b949e; --line:#30363d;
+  --accent:#4493f8; --add:#3fb950; --rem:#f85149; --chip:#21262d; --dhbg:#1c2128; }} }}
 body {{ background:var(--bg); color:var(--ink); font:15px/1.55 "IBM Plex Sans",system-ui,sans-serif;
   max-width:1400px; margin:0 auto; padding:2.5rem 1.25rem 5rem; }}
 h1 {{ font:600 1.7rem/1.2 "IBM Plex Mono",monospace; margin:0; }}
