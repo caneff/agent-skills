@@ -11,8 +11,6 @@ Actions, justfile, AGENTS.md.** Works on an empty dir (new) or an existing repo
 (convert). The **target state is identical** either way — only the starting
 point differs.
 
-Scope: tooling only. Sandcastle is a separate skill; don't set it up here.
-
 ## 0. Detect: new or convert
 
 Run `git remote -v`, `ls`, and read any `pyproject.toml`.
@@ -117,7 +115,7 @@ Copy these templates, filling `<pkg>` / project one-liner:
 - [`templates/AGENTS.md`](templates/AGENTS.md) → `AGENTS.md` — thin router:
   overview + commands + pointers. No CLAUDE.md.
 - [`templates/CODING_STANDARDS.md`](templates/CODING_STANDARDS.md) →
-  `CODING_STANDARDS.md` — the standards (also what a Sandcastle reviewer loads).
+  `CODING_STANDARDS.md` — the standards a reviewer loads to judge a diff.
 - [`templates/justfile`](templates/justfile) → `justfile` — `just check` runs
   the whole gate.
 - [`templates/gitignore`](templates/gitignore) → `.gitignore`.

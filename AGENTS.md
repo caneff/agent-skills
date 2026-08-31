@@ -11,7 +11,3 @@ Six canonical roles, all mapped to their default label strings (`needs-triage`, 
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
-
-### After cutting a `sandcastle-template/v*` tag
-
-The tag does not reach installed repos on its own — prompt the maintainer to run `sandcastle-propagate`. See `setup-sandcastle/references/updating-adopters.md`.

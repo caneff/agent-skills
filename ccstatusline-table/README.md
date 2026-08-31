@@ -42,11 +42,8 @@ are vendored in `helpers/` (versioned here):
 - `helpers/effort-abbrev.py` — thinking-effort abbreviation
 - `helpers/usage-segment.sh` — weekly/session %, resets
 - `helpers/issue-counts-segment.sh` — repo issue counts
-
-The fourth is the sibling `sandcastle-watch` skill (already in this repo),
-resolved at its installed path:
-
-- `~/.claude/skills/sandcastle-watch/sandcastle-segment.sh` — sandcastle status
+- `helpers/burndown-segment.sh` — live burndown progress (see the
+  `burndown` skill for the progress-file grammar it renders)
 
 Git branch/changes and context tokens are computed in-script.
 

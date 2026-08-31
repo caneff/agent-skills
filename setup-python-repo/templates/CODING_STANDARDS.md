@@ -1,6 +1,6 @@
 # Coding standards
 
-The rules a change must satisfy. A reviewer (human or Sandcastle) loads this
+The rules a change must satisfy. A reviewer (human or agent) loads this
 file to judge a diff. The gate (`just check`) enforces the mechanical parts;
 this doc covers the parts a linter can't.
 

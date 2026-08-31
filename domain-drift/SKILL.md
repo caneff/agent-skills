@@ -31,7 +31,7 @@ disagreement — and only that — is in scope.
 ## Extract the term set first — and print it
 
 Before judging anything, read every `CONTEXT.md` in the repo (root and
-nested, e.g. `setup-sandcastle/docs/CONTEXT.md`) and every file under
+nested, e.g. `<some-skill>/docs/CONTEXT.md`) and every file under
 `docs/adr/`, and build the term set: each defined noun/verb, its definition,
 and its source file. Glossary entries (`**Term** — definition`) and ADR
 decision titles/bodies that name a concept both count.

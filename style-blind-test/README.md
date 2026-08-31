@@ -24,7 +24,7 @@ run `uninstall` when done.
 `install` also wires a `Stop` hook (`stop_reminder.py`) that counts assistant
 turns per session in `~/.claude/style-blind-test/turns/<session_id>`. Every
 `QUALIFYING_TURNS`-th turn (10, 20, 30, ...) it fires once: a terminal bell
-plus a WSL desktop toast (via `sandcastle-watch/toast.ps1`, a no-op when
+plus a WSL desktop toast (via this skill's `toast.ps1`, a no-op when
 `powershell.exe` isn't on PATH) reading "Blind test -- log your guess (gs)".
 It never reveals the style and never touches the guess log.
 

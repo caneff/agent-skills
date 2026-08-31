@@ -3,7 +3,7 @@
 
 Reads hook JSON (session_id) on stdin, bumps a per-session assistant-turn
 counter file, and once per REMINDER_INTERVAL crossing (10/20/30...) fires a
-desktop toast (WSL powershell.exe, sandcastle-watch/toast.ps1 pattern) and a
+desktop toast (WSL powershell.exe, via the local toast.ps1) and a
 terminal bell. Reveals no style and never touches the guess log -- this
 module never imports assignment or capture.
 """
@@ -28,8 +28,7 @@ def toast_marker_path(state_dir: Path) -> Path:
 
 LAST_TOAST_PATH = toast_marker_path(DEFAULT_STATE_DIR)
 
-_SKILL_DIR = Path(__file__).resolve().parent.parent / "sandcastle-watch"
-_TOAST_SCRIPT = _SKILL_DIR / "toast.ps1"
+_TOAST_SCRIPT = Path(__file__).resolve().parent / "toast.ps1"
 
 
 def should_fire(prev_count: int, new_count: int, interval: int = REMINDER_INTERVAL) -> bool:

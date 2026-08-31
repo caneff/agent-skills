@@ -76,7 +76,7 @@ def git(cwd: str) -> tuple[str, str, str]:
     worktree (``.claude/worktrees/...``), so the path cell shows the repo, not
     the worktree. git-common-dir points at the main repo's ``.git`` from any
     worktree; its parent is that main root. Falls back to ``--show-toplevel``
-    (the sandcastle toast's convention). All blank if cwd is not a git repo.
+    (the blind-test toast's convention). All blank if cwd is not a git repo.
     """
     def g(args: list[str]) -> str:
         try:

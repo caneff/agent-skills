@@ -45,7 +45,7 @@ unrelated edit into its commit. It copies each file **whole**, so keep secrets
 out of the listed files.
 
 The other segments `ccstatusline/settings.json` references (`effort-abbrev.py`,
-`usage-segment.sh`, `sandcastle-segment.sh`, `publish-usage.sh`) are not backed
+`usage-segment.sh`, `publish-usage.sh`) are not backed
 up here yet — a fresh restore links the config but those widgets won't run until
 their scripts exist.
 
