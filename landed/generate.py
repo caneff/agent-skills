@@ -122,11 +122,14 @@ def render_repo(commits, gh):
                 dsec = f'<p class="skip">Diff skipped for size ({c["add"] + c["rem"]} changed lines){where}.</p>'
             bodyp = (f'<p class="cbody">{esc(c["body"]).replace(chr(10)+chr(10), "</p><p class=cbody>").replace(chr(10), " ")}</p>'
                      if c["body"] else '')
+            preview = (f'<span class="preview">{esc(c["body"])}</span>' if c["body"]
+                       else '<span class="preview nobody">(no description)</span>')
             parts.append(f'''<details class="commit" data-dt="{c["date"]}" data-day="{c["date"][:10]}"><summary>
-<span class="subj">{esc(c["s"])}</span>
+<span class="lhs"><span class="subj">{esc(c["s"])}</span>
 <span class="meta">{hash_} <span class="when">{c["date"]}</span>{badge}{closes}
 <span class="bar"><i class="ba" style="width:{aw}px"></i><i class="br" style="width:{w-aw}px"></i></span>
-<span class="counts">+{c["add"]} −{c["rem"]}</span></span></summary>
+<span class="counts">+{c["add"]} −{c["rem"]}</span></span></span>
+{preview}</summary>
 {bodyp}<table class="files">{flist}</table>{dsec}</details>''')
     return "".join(parts)
 
@@ -160,7 +163,7 @@ def main():
   --bg:#12171a; --card:#1a2126; --ink:#dfe7e2; --mut:#8ea198; --line:#2a343a;
   --accent:#57b48c; --add:#4cc272; --rem:#e0716a; --chip:#232d2a; --dhbg:#20282c; }} }}
 body {{ background:var(--bg); color:var(--ink); font:15px/1.55 "IBM Plex Sans",system-ui,sans-serif;
-  max-width:900px; margin:0 auto; padding:2.5rem 1.25rem 5rem; }}
+  max-width:1400px; margin:0 auto; padding:2.5rem 1.25rem 5rem; }}
 h1 {{ font:600 1.7rem/1.2 "IBM Plex Mono",monospace; margin:0; }}
 .range {{ color:var(--mut); margin:.4rem 0 1.2rem; }}
 .tabs {{ display:flex; gap:.4rem; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:.6rem; }}
@@ -176,8 +179,13 @@ h1 {{ font:600 1.7rem/1.2 "IBM Plex Mono",monospace; margin:0; }}
 h2 {{ font:500 .85rem/1 "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.08em;
   color:var(--mut); border-bottom:1px solid var(--line); padding-bottom:.5rem; margin:2.4rem 0 1rem; }}
 .commit {{ background:var(--card); border:1px solid var(--line); border-radius:6px; margin:0 0 .6rem; }}
-.commit summary {{ cursor:pointer; padding:.7rem .9rem; list-style:none; }}
+.commit summary {{ cursor:pointer; padding:.7rem .9rem; list-style:none;
+  display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:.3rem 1.5rem; align-items:start; }}
 .commit summary::-webkit-details-marker {{ display:none; }}
+.preview {{ color:var(--mut); font-size:.85rem; line-height:1.45; white-space:pre-line;
+  display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }}
+.nobody {{ font-style:italic; opacity:.6; }}
+@media (max-width:900px) {{ .commit summary {{ grid-template-columns:1fr; }} }}
 .commit[open] summary {{ border-bottom:1px solid var(--line); }}
 .subj {{ font-weight:500; display:block; }}
 .meta {{ display:flex; align-items:center; gap:.6rem; margin-top:.35rem; flex-wrap:wrap;
