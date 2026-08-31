@@ -16,6 +16,8 @@
       "Bash(git diff *)",
       "Bash(git fetch *)",
       "Bash(git fetch)",
+      "Bash(git worktree *)",
+      "Bash(land)",
       "Bash(node *)",
       "Bash(pushpr)",
       "Bash(pushpr:*)",
@@ -60,6 +62,15 @@
           {
             "type": "command",
             "command": "/home/caneff/.claude/hooks/require-worktree.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/caneff/.agents/skills/flow/claude/hooks/require-agent-model.sh"
           }
         ]
       },
