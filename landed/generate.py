@@ -171,6 +171,7 @@ h1 {{ font:600 1.7rem/1.2 "IBM Plex Mono",monospace; margin:0; }}
   border:1px solid var(--line); border-radius:99px; padding:.45rem .8rem; cursor:pointer; }}
 .tab.on {{ color:var(--bg); background:var(--accent); border-color:var(--accent); }}
 .tab.on .tn {{ color:var(--bg); }}
+.tab.zero {{ opacity:.4; }}
 .age {{ font:500 .75rem/1 "IBM Plex Mono",monospace; color:var(--mut); background:var(--chip);
   border:1px solid var(--line); border-radius:4px; padding:.25rem .5rem; cursor:pointer; margin-left:.25rem; }}
 .age.on {{ color:var(--bg); background:var(--accent); border-color:var(--accent); }}
@@ -241,8 +242,9 @@ function applyAge(days) {{
   }});
   tabs.forEach(t => {{
     const pane = document.getElementById("pane-" + t.dataset.pane);
-    t.querySelector(".tn").textContent =
-      pane.querySelectorAll(".commit:not([hidden])").length;
+    const n = pane.querySelectorAll(".commit:not([hidden])").length;
+    t.querySelector(".tn").textContent = n;
+    t.classList.toggle("zero", n === 0);
   }});
   try {{ localStorage.setItem("landed-age", days); }} catch (e) {{}}
 }}
