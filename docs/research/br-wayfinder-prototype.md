@@ -52,6 +52,11 @@ br list -s ready_human -s ready_agent --unassigned \
 Run against the mirrored map it returned exactly the GitHub frontier —
 #469, #471, #475, #476 — in map order.
 
+It is also the **fast** side. Three `br` calls take 61 ms against local SQLite,
+and they work offline. The same frontier from GitHub is one API call — the
+`sub_issues` endpoint embeds `issue_dependencies_summary` — and takes 489 ms.
+The pipeline costs shell written once, never latency.
+
 Two traps in that pipeline, both load-bearing:
 
 - **Sort by `created_at`, never by id.** Ids sort as text, so `.10` comes
@@ -94,8 +99,53 @@ The cap protects agent swarms, not wayfinder claims.
 | the human's own queue | `br list -s ready_human` |
 
 `br list --pretty` is **not** a tree — it prints a flat list with each ticket's
-fields on branch characters, children not nested under the epic. There is no
-view that renders the map as a hierarchy.
+fields on branch characters, children not nested under the epic. No built-in
+view renders the map as a hierarchy.
+
+## The missing view is 16 lines of shell
+
+Nothing in `br` shows a map whole, so this does. It runs in 109 ms and it is
+the one thing a human opens instead of the GitHub issue page.
+
+```sh
+#!/usr/bin/env bash
+# br-map <epic-id> — render a wayfinder map: children in map order, frontier marked.
+set -euo pipefail
+MAP="${1:?usage: br-map <epic-id>}"
+blocked=$(br blocked --format json | jq -r '.issues[].id')
+br epic status --json | jq -r --arg m "$MAP" '.[] | select(.epic.id==$m) | "\(.epic.id)  \(.epic.title)  —  \(.closed_children)/\(.total_children) closed"'
+br list -s all --sort created_at --reverse --format json \
+  | jq -r --arg m "$MAP." '.issues[] | select(.id|startswith($m)) | "\(.id)\t\(.status)\t\(.assignee // "-")\t\(.issue_type)\t\(.title)"' \
+  | awk -F'\t' -v B="$blocked" '
+      BEGIN { n=split(B,L,"\n"); for(i=1;i<=n;i++) b[L[i]]=1 }
+      { mark = "."
+        if ($2=="closed") mark="x"
+        else if ($1 in b) mark="-"
+        else if ($3=="-") mark=">"
+        printf "  %s %-14s %-12s %-10s %s\n", mark, $1, $2, $4, $5 }'
+echo "  legend: > frontier   - blocked   x closed   . claimed"
+```
+
+Output against the mirrored map:
+
+```
+brmap-pdx  Move planning off GitHub issues onto br?  —  4/10 closed
+  x brmap-pdx.1    closed       research   Verify what br actually does
+  x brmap-pdx.2    closed       task       Inventory every GitHub call site and what br would replace it with
+  > brmap-pdx.3    ready_human  prototype  Run one wayfinder map end to end on br
+  x brmap-pdx.4    closed       prototype  Two worktrees, one base: does br sync --merge hold?
+  > brmap-pdx.5    ready_human  grilling   What happens to the 50 open GitHub issues?
+  - brmap-pdx.6    ready_human  grilling   Which repos move, in what order?
+  - brmap-pdx.7    ready_human  grilling   Go or no-go, and write the route
+  x brmap-pdx.8    closed       grilling   Labels or statuses: how does the routing scheme port to br?
+  > brmap-pdx.9    ready_human  grilling   How does br get installed and pinned?
+  > brmap-pdx.10   ready_human  grilling   Ticket writes land in the primary checkout, which agents may not touch
+  legend: > frontier   - blocked   x closed   . claimed
+```
+
+It subsumes the frontier query — the `>` rows **are** the frontier — so a
+migration installs one script, `flow/bin/br-map`, not two. That install is code
+and belongs to the go decision, not to this prototype.
 
 ## Defect: `br close --suggest-next` reports nothing
 
@@ -110,8 +160,10 @@ $ br close brmap-pdx.3 --suggest-next --json
 `brmap-pdx.6` was blocked by `brmap-pdx.3` alone, was `ready_agent`, and
 dropped out of `br blocked` on that very close — yet `unblocked` was empty.
 Reproduced twice: once for an epic child, once for two standalone tickets with
-a single `blocks` edge and no parent. Treat `--suggest-next` as unavailable and
-re-run the frontier query after every close.
+a single `blocks` edge and no parent. Treat `--suggest-next` as unavailable.
+
+It costs little. With `br-map` below, a close is followed by one command that
+shows the new frontier, so the dead flag saves a keystroke, not a step.
 
 ## Cost of the exercise
 
