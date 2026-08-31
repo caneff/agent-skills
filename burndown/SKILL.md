@@ -31,7 +31,12 @@ later builds rebase onto earlier ones instead of colliding.
    re-reviews. The driver carries mail and acts on the verdict — it judges
    nothing, and the builder never certifies its own work.
 5. **Land.** On **clean**, tell the builder to land, per `implement`'s
-   landing section. On **can't get clean**, park the ticket (below).
+   landing section. On **can't get clean**, park the ticket (below). Either
+   way the builder is spent: **release it** — `TaskStop` with its name — once
+   the ticket settles. A burndown builder waits for review, so it must be a
+   named background agent, and a named agent parks idle forever unless the
+   driver stops it. One live builder at a time; a queue of ten tickets must
+   not leave ten idle agents behind.
 6. Append to the progress file at
    `~/.cache/burndown/<repo dir name>.progress` (never in the repo):
    `burning #<n>` when claiming in step 3, then `#<n> landed <sha>` or
