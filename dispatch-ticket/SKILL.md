@@ -1,9 +1,9 @@
 ---
 name: dispatch-ticket
-description: "PROTOTYPE — emit the standard delegated-build brief from a ticket id. Use when the coordinator is about to seed a builder subagent for a claimed ticket and wants the brief generated instead of hand-written."
+description: "Emit the standard delegated-build brief from a ticket id. Use when the coordinator is about to seed a builder subagent for a claimed ticket and wants the brief generated instead of hand-written."
 ---
 
-# dispatch-ticket — PROTOTYPE, throwaway
+# dispatch-ticket
 
 > Assumption (from the br-transfer map, agent-skills #466): this skill never
 > names a tracker CLI. Every tracker read/write goes through the repo's
@@ -62,7 +62,11 @@ Build steps (run directly; do not invoke /implement):
    / stop after commit and report branch (burndown) / pushpr (foreign or
    PR-requested)>. Mechanical rebase conflict: resolve, retry once;
    logic conflict: stop and report.
-8. Append a one-line milestone to <progress file path> after each step.
+8. Append a one-line milestone to <progress file path> after each step —
+   commit work in progress rather than sitting on an uncommitted tree; the
+   progress file plus your branch is the resume point if you stall.
+9. If a permission prompt or hook blocks a step, do not work around it —
+   report the exact denial and stop.
 
 Hazards:
 <verbatim bullets from docs/agents/hazards.md, then coordinator extras>
@@ -81,9 +85,8 @@ any deviation from the brief.
 - Never include tracker CLI commands in the emitted brief beyond "per that
   repo's tracker doc" — the builder resolves them there.
 
-## Prototype status
+## Worked examples
 
-Throwaway. The question under test: does this skeleton + a hazards file
-reproduce the hand-written briefs (5 real dispatches, 2026-08-31, all of
-which landed)? Samples in `sample-126.md` and `sample-128.md` beside this
-file. Verdict goes on second-brain-v2#130.
+`sample-126.md` (cross-repo, target-repo override) and `sample-128.md`
+(hazards in play) beside this file — generated from real dispatches that
+landed on 2026-08-31.
