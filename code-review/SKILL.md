@@ -16,7 +16,21 @@ The issue tracker should have been provided to you — run `/setup-matt-pocock-s
 
 ### 1. Pin the fixed point
 
-Whatever the user said is the fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. If they didn't specify one, ask for it.
+Whatever the user said is the fixed point — a commit SHA, branch name, tag, `HEAD~5`, etc. If they gave one, use it as-is and skip straight to capturing the diff command below.
+
+If they didn't specify one, don't default to the local default branch — in a long-lived worktree it can sit far behind the remote, and a diff against it pulls in commits that were already squash-merged upstream, producing findings on code that isn't part of this change. Instead, resolve the fixed point fresh:
+
+1. `git fetch origin` — if this fails (no network, no remote, auth error), say so explicitly to the user before continuing: "fetch failed, falling back to the local default branch — findings may include already-merged commits." Then use the local default branch as the fixed point and skip to capturing the diff command.
+2. On a successful fetch, discover the remote's default branch — don't hard-code `main`: `git remote show origin | sed -n 's/.*HEAD branch: //p'` (or `git symbolic-ref refs/remotes/origin/HEAD` if already set).
+3. Use `origin/<default>` (e.g. `origin/main`) as the fixed point.
+
+Command sequence for the no-argument case:
+
+```
+git fetch origin
+default=$(git remote show origin | sed -n 's/.*HEAD branch: //p')
+fixed_point="origin/$default"
+```
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
