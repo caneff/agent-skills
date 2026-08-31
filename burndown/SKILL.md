@@ -32,8 +32,13 @@ later builds rebase onto earlier ones instead of colliding.
    nothing, and the builder never certifies its own work.
 5. **Land.** On **clean**, tell the builder to land, per `implement`'s
    landing section. On **can't get clean**, park the ticket (below).
-6. Append one line (`#<n> landed <sha>`, or `#<n> parked: <why>`) to a
-   progress file in scratch — never in the repo.
+6. Append to the progress file at
+   `~/.cache/burndown/<repo dir name>.progress` (never in the repo):
+   `burning #<n>` when claiming in step 3, then `#<n> landed <sha>` or
+   `#<n> parked: <why>` when the ticket settles, and `done` when the loop
+   stops. The statusline renders this file live; the line grammar is a
+   contract with `ccstatusline-table/helpers/burndown-segment.sh` — change
+   the two only in lockstep.
 7. Go to 1. Re-list every pass: a landing can unblock tickets, and a human
    may have added more.
 

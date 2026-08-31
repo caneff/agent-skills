@@ -32,7 +32,6 @@ def paint(text: str, hex_: str) -> str:
     return f"\x1b[38;2;{r};{g};{b}m{text}\x1b[0m"
 
 CFG = Path(__file__).resolve().parent / "helpers"
-SANDCASTLE = Path("~/.claude/skills/sandcastle-watch/sandcastle-segment.sh").expanduser()
 
 
 def run(cmd: list[str], stdin: bytes) -> str:
@@ -180,7 +179,7 @@ def main() -> None:
     session = run([str(CFG / "usage-segment.sh"), "session"], raw)
     wreset = run([str(CFG / "usage-segment.sh"), "wreset"], raw)
     breset = run([str(CFG / "usage-segment.sh"), "breset"], raw)
-    sand = run([str(SANDCASTLE)], raw)
+    burn = run([str(CFG / "burndown-segment.sh")], raw)
     issues = run([str(CFG / "issue-counts-segment.sh")], raw)
     branch, changes, root = git(cwd)
     tokens = context_tokens(transcript)
@@ -211,7 +210,7 @@ def main() -> None:
         (f"{short} {effort}".strip(), PURPLE),
         (ctx, CYAN),
         (f"{branch} {changes}".strip(), GREEN),
-        (sand, ORANGE),
+        (burn, ORANGE),
     ]
     row_b = [
         (cwd_disp, CYAN),
