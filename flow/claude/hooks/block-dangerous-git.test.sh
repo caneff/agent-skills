@@ -76,12 +76,17 @@ run "history destroyer still blocked" 2 "git reset --hard HEAD~3" "BLOCKED"
 run "bare force-push still blocked" 2 "git push --force origin main" "BLOCKED"
 
 # The rejection message must name the matched pattern generically — not lean
-# on gh-pr-merge-specific wording for a different pattern — and state the
-# escape hatch: run the operation alone, hand off via the ! prefix.
+# on gh-pr-merge-specific wording for a different pattern — and state an
+# escape hatch that is actually reachable: the hook blocks the protected
+# pattern unconditionally, so "run it alone" is a dead end (it's blocked the
+# same way). The real hatch is: drop the protected part, hand the user the
+# exact "! <pattern> ..." line to run themselves.
 run "history destroyer message names its own pattern, not gh pr merge" 2 \
   "git reset --hard HEAD~3" "protected pattern 'git reset --hard'"
-run "history destroyer message states the escape hatch" 2 \
-  "git reset --hard HEAD~3" "run it alone"
+run "history destroyer message tells the agent to drop the protected part" 2 \
+  "git reset --hard HEAD~3" "re-run the command without it"
+run "history destroyer message hands the user a runnable ! line" 2 \
+  "git reset --hard HEAD~3" "! git reset --hard ..."
 
 # A protected pattern anywhere in a compound chain still blocks the whole
 # chain (whole-command matching, unchanged), and the message names the
