@@ -179,12 +179,15 @@ h2 {{ font:500 .85rem/1 'Fira Code',Consolas,'Courier New',monospace; text-trans
   color:var(--mut); border-bottom:1px solid var(--line); padding-bottom:.5rem; margin:2.4rem 0 1rem; }}
 .commit {{ background:var(--card); border:1px solid var(--line); border-radius:6px; margin:0 0 .6rem; }}
 .commit summary {{ cursor:pointer; padding:.7rem .9rem; list-style:none;
-  display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:.3rem 1.5rem; align-items:start; }}
+  display:grid; grid-template-columns:fit-content(55%) minmax(0,1fr); gap:.3rem 1rem; align-items:start; }}
 .commit summary::-webkit-details-marker {{ display:none; }}
+.subj {{ overflow-wrap:break-word; }}
 .preview {{ color:var(--mut); font-size:.85rem; line-height:1.45; white-space:pre-line;
+  border-left:1px solid var(--line); padding-left:1rem; align-self:stretch;
   display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }}
 .nobody {{ font-style:italic; opacity:.6; }}
-@media (max-width:900px) {{ .commit summary {{ grid-template-columns:1fr; }} }}
+@media (max-width:900px) {{ .commit summary {{ grid-template-columns:1fr; }}
+  .preview {{ border-left:none; padding-left:0; }} }}
 .commit[open] summary {{ border-bottom:1px solid var(--line); }}
 .subj {{ font-weight:500; display:block; }}
 .meta {{ display:flex; align-items:center; gap:.6rem; margin-top:.35rem; flex-wrap:wrap;
