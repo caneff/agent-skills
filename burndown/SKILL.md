@@ -6,46 +6,72 @@ disable-model-invocation: true
 
 # Burn down the ticket queue
 
-Work the repo's `ready-for-agent` queue to empty, one ticket at a time.
-Strictly sequential: each ticket lands on main before the next starts, so
-later builds rebase onto earlier ones instead of colliding.
+Work the repo's `ready-for-agent` queue to empty. The tickets are a graph, not
+a list: their blocking edges say which ones are independent, so the driver
+builds the whole unblocked **frontier** at once and lands the results one at a
+time.
+
+**Argument:** the maximum number of live builders. Default 3. `/burndown 1`
+builds strictly one ticket at a time.
 
 ## The loop
 
 1. List the queue: `gh issue list --label ready-for-agent --state open`.
-   Empty → report and stop.
-2. Pick from the **frontier**: a ticket whose blockers are all closed. Check
+   Empty, with nothing in flight → report and stop.
+2. Take the **frontier**: every ticket whose blockers are all closed. Check
    each candidate's blocking edges (native blocking link, or the "Blocked by"
-   section in the body); skip any with an open blocker. Among unblocked
-   tickets, take the lowest number.
-3. **Build.** Run the [`implement`](../implement/SKILL.md) skill on it —
-   claim, delegate the build to a subagent — with one change to that skill's
-   sequencing: seed the builder to stop after committing, report its branch,
-   and wait. The driver owns review and land (next steps); everything else in
-   `implement`, including its gates, applies unchanged.
-4. **Review.** Spawn a fresh reviewer subagent (`opus`) for this ticket,
-   seeded with only the issue reference and the branch — never the burn
-   history. It runs `/code-review` against the issue spec and owns the
-   verdict: **clean** or **can't get clean**. Findings pass through the
-   driver to the builder verbatim; the builder fixes, the reviewer
-   re-reviews. The driver carries mail and acts on the verdict — it judges
-   nothing, and the builder never certifies its own work.
-5. **Land.** On **clean**, tell the builder to land, per `implement`'s
-   landing section. On **can't get clean**, park the ticket (below). Either
-   way the builder is spent: **release it** — `TaskStop` with its name — once
-   the ticket settles. A burndown builder waits for review, so it must be a
-   named background agent, and a named agent parks idle forever unless the
-   driver stops it. One live builder at a time; a queue of ten tickets must
-   not leave ten idle agents behind.
-6. Append to the progress file at
+   section in the body); skip any with an open blocker. Take the lowest
+   numbers first, up to the number of free builder slots. That set is this
+   pass's **batch**.
+3. **Explore once for the batch.** Spawn one exploration subagent (`sonnet`)
+   over the batch's tickets. It reads the code and docs those tickets touch
+   and writes its notes to
+   `~/.cache/burndown/<repo dir name>.notes/<lowest ticket number in the
+   batch>.md` — outside the repo, so
+   every builder and every worktree can read it. Builders **wait** for it: a
+   builder that starts early has already done the reading the explorer was
+   meant to save. Notes are kept after the burn.
+4. **Build.** Run the [`implement`](../implement/SKILL.md) skill on each ticket
+   in the batch — claim, delegate the build to a subagent — with one change to
+   that skill's sequencing: seed the builder to stop after committing, report
+   its branch, and wait. The driver owns review and land (next steps);
+   everything else in `implement`, including its gates, applies unchanged.
+
+   **Seed by pointer.** A builder gets the issue reference, the notes path,
+   and the branch base — never a summary of something it can read itself.
+5. **Review.** Spawn a fresh reviewer subagent (`opus`) for each finished
+   ticket, seeded with only the issue reference and the branch — never the
+   burn history, and never the explorer's notes. A reviewer that re-reads the
+   code independently is the point of having one. It runs `/code-review`
+   against the issue spec and owns the verdict: **clean** or **can't get
+   clean**. Findings pass through the driver to the builder verbatim; the
+   builder fixes, the reviewer re-reviews. The driver carries mail and acts on
+   the verdict — it judges nothing, and the builder never certifies its own
+   work. Reviewers run concurrently and do not count against the builder cap.
+6. **Land, one at a time**, in the order reviews come back clean. On
+   **clean**, tell the builder to land, per `implement`'s landing section. On
+   **can't get clean**, park the ticket (below).
+
+   A builder still mid-build on a stale base needs no warning: `land` fetches,
+   rebases onto the pushed default branch, and runs the test command, so a
+   real collision surfaces there and parks the ticket.
+
+   Either way the settled ticket's builder is spent: **release it** —
+   `TaskStop` with its name. A burndown builder waits for review, so it must
+   be a named background agent, and a named agent parks idle forever unless
+   the driver stops it. Stop each builder as its ticket settles; a queue of
+   ten tickets must not leave ten idle agents behind.
+7. Append to the progress file at
    `~/.cache/burndown/<repo dir name>.progress` (never in the repo):
-   `burning #<n>` when claiming in step 3, then `#<n> landed <sha>` or
+   `burning #<n>` when claiming in step 4, then `#<n> landed <sha>` or
    `#<n> parked: <why>` when the ticket settles, and `done` when the loop
-   stops. The statusline renders this file live; the line grammar is a
-   contract with `ccstatusline-table/helpers/burndown-segment.sh` — change
-   the two only in lockstep.
-7. Go to 1. Re-list every pass: a landing can unblock tickets, and a human
-   may have added more.
+   stops. Several `burning` lines are open at once while a batch runs — that
+   is how the file expresses parallelism. The statusline renders this file
+   live; the line grammar is a contract with
+   `ccstatusline-table/helpers/burndown-segment.sh` — change the two only in
+   lockstep.
+8. When a ticket settles, refill its slot: go to 1. Re-list every pass — a
+   landing can unblock tickets, and a human may have added more.
 
 ## Driver context stays thin
 
@@ -59,9 +85,11 @@ resume a half-done queue from the tracker and progress file alone.
 
 A build that hits a stop-and-ask gate or a non-mechanical conflict, with no
 human answering: **park it** — comment the open question on the issue, swap
-`in-progress` for `ready-for-human`, and move on to the next ticket. Two
-parks in a row means the problem is systemic, not per-ticket: stop the burn
-and report instead of parking the whole queue.
+`in-progress` for `ready-for-human`, and move on to the next ticket. Two parks
+with no landing between them means the problem is systemic, not per-ticket:
+stop the burn and report instead of parking the whole queue. (Two parks in a
+row is a coincidence when three builders run at once; two parks with nothing
+getting through is not.)
 
 ## Report
 

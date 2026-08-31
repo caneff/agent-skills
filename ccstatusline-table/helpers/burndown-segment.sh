@@ -9,24 +9,67 @@
 #   #<n> landed <sha>     ticket landed on main
 #   #<n> parked: <why>    ticket handed to a human
 #   done                  the loop stopped
-if [ -n "$1" ]; then
-  f=$1
-else
-  cwd=$(jq -r '.workspace.current_dir // .cwd // empty' 2>/dev/null)
-  [ -z "$cwd" ] && exit 0
-  common=$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
-  [ -z "$common" ] && exit 0
-  f="$HOME/.cache/burndown/$(basename "$(dirname "$common")").progress"
+# A burn builds several tickets at once, so several `burning` lines are open
+# at the same time. In flight = every `burning #n` with no later `#n landed`
+# or `#n parked` line.
+render() {
+  local f=$1
+  [ -f "$f" ] || return 0
+  # a file untouched for 12h is an abandoned burn, not a live one
+  [ -n "$(find "$f" -mmin -720 2>/dev/null)" ] || return 0
+  [ "$(tail -n 1 "$f")" = done ] && return 0
+  awk '
+    $1 == "burning"  { flight[$2] = 1; next }
+    $2 == "landed"   { delete flight[$1]; landed++; next }
+    $2 == "parked:"  { delete flight[$1]; parked++; next }
+    END {
+      for (k in flight) building++
+      out = "🔥 "
+      if (building) out = out building "🔨 · "
+      out = out landed + 0 "✓"
+      if (parked) out = out " " parked "⚠"
+      printf "%s", out
+    }
+  ' "$f"
+}
+
+if [ "$1" = --self-check ]; then
+  fail=0
+  check() { # check <name> <expected> <progress file body>
+    local got
+    printf '%s\n' "$3" > "$tmp"
+    got=$(render "$tmp")
+    [ "$got" = "$2" ] && return 0
+    printf 'FAIL %s\n  want: %s\n  got:  %s\n' "$1" "$2" "$got" >&2
+    fail=1
+  }
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' EXIT
+  check "nothing in flight" '🔥 1✓' 'burning #1
+#1 landed abc1234'
+  check "several in flight" '🔥 3🔨 · 0✓' 'burning #1
+burning #2
+burning #3'
+  check "one landed, one still building" '🔥 1🔨 · 1✓' 'burning #1
+burning #2
+#1 landed abc1234'
+  check "a park counts once, not as in flight" '🔥 1✓ 1⚠' 'burning #1
+#1 parked: needs a human
+burning #2
+#2 landed abc1234'
+  check "done renders nothing" '' 'burning #1
+#1 landed abc1234
+done'
+  [ "$fail" = 0 ] && echo "burndown-segment: all checks pass"
+  exit "$fail"
 fi
-[ -f "$f" ] || exit 0
-# a file untouched for 12h is an abandoned burn, not a live one
-[ -n "$(find "$f" -mmin -720 2>/dev/null)" ] || exit 0
-last=$(tail -n 1 "$f")
-[ "$last" = done ] && exit 0
-landed=$(grep -c ' landed ' "$f")
-parked=$(grep -c ' parked:' "$f")
-cur=""
-case $last in "burning #"*) cur="${last#burning } · " ;; esac
-out="🔥 ${cur}${landed}✓"
-[ "$parked" -gt 0 ] && out="$out ${parked}⚠"
-printf '%s' "$out"
+
+if [ -n "$1" ]; then
+  render "$1"
+  exit 0
+fi
+cwd=$(jq -r '.workspace.current_dir // .cwd // empty' 2>/dev/null)
+[ -z "$cwd" ] && exit 0
+common=$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+[ -z "$common" ] && exit 0
+render "$HOME/.cache/burndown/$(basename "$(dirname "$common")").progress"
