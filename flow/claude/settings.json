@@ -22,6 +22,8 @@
       "Bash(pushpr)",
       "Bash(pushpr:*)",
       "Bash(python3 -)",
+      "EnterWorktree",
+      "ExitWorktree",
       "Read(//home/caneff/.claude/**)",
       "Read(//home/caneff/.codex/**)",
       "Read(//home/caneff/.codex/skills/**)",
