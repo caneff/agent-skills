@@ -138,13 +138,36 @@ check "says what it swept" said \
     "$(echo "$out" | grep -qi 'swept' && echo said)"
 [ "$rc" -eq 0 ] || echo "$out" | sed 's/^/    /'
 
+echo "case: removes its own locked worktree"
+# An agent session locks the worktree it works in; land must release that lock,
+# or landing leaves the directory behind.
+setup locked
+git -C "$clone" worktree lock "$wt"
+commit_on_feature feat.txt one
+out=$(run_land); rc=$?
+check "exit 0" 0 "$rc"
+check "locked worktree removed" gone "$([ -d "$wt" ] || echo gone)"
+[ "$rc" -eq 0 ] || echo "$out" | sed 's/^/    /'
+
+echo "case: sweeps a locked but abandoned worktree"
+setup sweeplocked
+add_other sweeplocked
+git -C "$clone" worktree lock "$other"
+idle
+commit_on_feature feat.txt one
+out=$(run_land)
+check "abandoned locked worktree gone" gone "$([ -d "$other" ] || echo gone)"
+
 echo "case: leaves a busy worktree alone"
 setup busy
 add_other busy
-# no idle: its index was just written, so an agent may be working in it
+git -C "$clone" worktree lock "$other"
+# no idle: its index was just written, so a live session is working in it
 commit_on_feature feat.txt one
 out=$(run_land)
 check "busy worktree kept" here "$([ -d "$other" ] && echo here)"
+check "its lock survives" locked \
+    "$(git -C "$clone" worktree list --porcelain | grep -q '^locked' && echo locked)"
 
 echo "case: leaves unmerged work alone"
 setup unmerged

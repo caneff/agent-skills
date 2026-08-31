@@ -82,8 +82,14 @@ git fetch --quiet origin
 # separates the two: git touches it on checkout, add, commit and status, so a
 # worktree idle for an hour is abandoned, not busy.
 #
-# ponytail: an hour is a guess, not a liveness check. If an agent ever gets
-# swept mid-think, replace the mtime test with a real one.
+# An agent session locks its worktree, and `worktree remove` refuses a locked
+# one — which is why leftovers accumulated in the first place. A lock on a
+# worktree that is clean, merged and idle for an hour belongs to a session that
+# is gone, so the sweep releases it. Unlock, then remove *without* --force, so
+# an unexpectedly dirty tree still blocks the delete.
+#
+# ponytail: an hour is a guess. If an agent ever gets swept mid-think, raise it
+# or ask the harness which sessions are live.
 git worktree list --porcelain \
     | awk '/^worktree /{w=substr($0,10)} /^branch /{print w"\t"substr($0,8)}' \
     | while IFS=$(printf '\t') read -r w ref; do
@@ -95,6 +101,7 @@ git worktree list --porcelain \
         && git -C "$w" diff --cached --quiet 2>/dev/null \
         && [ -z "$(git -C "$w" ls-files --others --exclude-standard 2>/dev/null)" ] \
         || continue
+    git -C "$main_wt" worktree unlock "$w" 2>/dev/null || true
     if git -C "$main_wt" worktree remove "$w" 2>/dev/null; then
         echo "land: swept spent worktree $w"
         git -C "$main_wt" branch -q -d "${ref#refs/heads/}" 2>/dev/null || true
@@ -152,9 +159,15 @@ elif git show-ref --quiet --verify "refs/heads/$base"; then
     fi
 fi
 
-# Plain remove, never --force: an unexpectedly dirty worktree should block the
-# delete, not lose work. The push already succeeded, so a failure here is a
-# warning — the work is landed either way.
+# An agent session locks the worktree it is standing in, and `worktree remove`
+# refuses a locked one — that lock is why landing used to leave the directory
+# behind and ask for it by hand. Running land IS the request to remove it, so
+# release the lock first.
+#
+# Plain remove after that, never --force: an unexpectedly dirty worktree should
+# block the delete, not lose work. The push already succeeded, so a failure
+# here is a warning — the work is landed either way.
+git -C "$main_wt" worktree unlock "$wt" 2>/dev/null || true
 if git -C "$main_wt" worktree remove "$wt"; then
     echo "land: landed $branch on origin/$base; worktree removed."
     git -C "$main_wt" branch -q -d "$branch" 2>/dev/null || true
