@@ -102,7 +102,7 @@ def render_repo(commits, gh):
         days.setdefault(c["date"][:10], []).append(c)
     parts = []
     for day, cs in days.items():
-        parts.append(f'<h2>{datetime.date.fromisoformat(day).strftime("%A, %B %-d")}</h2>')
+        parts.append(f'<h2 class="day" data-day="{day}">{datetime.date.fromisoformat(day).strftime("%A, %B %-d")}</h2>')
         for c in cs:
             w = max(2, round(56 * (c["add"] + c["rem"]) / maxtotal))
             aw = round(w * c["add"] / (c["add"] + c["rem"])) if c["add"] + c["rem"] else 0
@@ -122,7 +122,7 @@ def render_repo(commits, gh):
                 dsec = f'<p class="skip">Diff skipped for size ({c["add"] + c["rem"]} changed lines){where}.</p>'
             bodyp = (f'<p class="cbody">{esc(c["body"]).replace(chr(10)+chr(10), "</p><p class=cbody>").replace(chr(10), " ")}</p>'
                      if c["body"] else '')
-            parts.append(f'''<details class="commit"><summary>
+            parts.append(f'''<details class="commit" data-dt="{c["date"]}" data-day="{c["date"][:10]}"><summary>
 <span class="subj">{esc(c["s"])}</span>
 <span class="meta">{hash_} <span class="when">{c["date"]}</span>{badge}{closes}
 <span class="bar"><i class="ba" style="width:{aw}px"></i><i class="br" style="width:{w-aw}px"></i></span>
@@ -168,6 +168,9 @@ h1 {{ font:600 1.7rem/1.2 "IBM Plex Mono",monospace; margin:0; }}
   border:1px solid var(--line); border-radius:99px; padding:.45rem .8rem; cursor:pointer; }}
 .tab.on {{ color:var(--bg); background:var(--accent); border-color:var(--accent); }}
 .tab.on .tn {{ color:var(--bg); }}
+.age {{ font:500 .75rem/1 "IBM Plex Mono",monospace; color:var(--mut); background:var(--chip);
+  border:1px solid var(--line); border-radius:4px; padding:.25rem .5rem; cursor:pointer; margin-left:.25rem; }}
+.age.on {{ color:var(--bg); background:var(--accent); border-color:var(--accent); }}
 .tn {{ color:var(--accent); }}
 .sub {{ color:var(--mut); margin:1rem 0 0; }} .sub b {{ color:var(--accent); font-weight:600; }}
 h2 {{ font:500 .85rem/1 "IBM Plex Mono",monospace; text-transform:uppercase; letter-spacing:.08em;
@@ -199,7 +202,10 @@ a {{ color:var(--accent); }}
 [hidden] {{ display:none !important; }}
 </style></head><body>
 <h1>Landed</h1>
-<p class="range">range: {esc(range_arg)} · generated {datetime.datetime.now():%Y-%m-%d %H:%M}</p>
+<p class="range">range: {esc(range_arg)} · generated {datetime.datetime.now():%Y-%m-%d %H:%M} ·
+show last <span class="ages"><button class="age" data-days="1">24h</button><button
+class="age" data-days="2">2d</button><button class="age" data-days="3">3d</button><button
+class="age" data-days="0">all</button></span></p>
 <nav class="tabs">{"".join(tabs)}</nav>
 {"".join(panes)}
 <script>
@@ -213,6 +219,24 @@ tabs.forEach(t => t.addEventListener("click", () => show(t.dataset.pane)));
 let last = null;
 try {{ last = localStorage.getItem("landed-tab"); }} catch (e) {{}}
 show([...tabs].some(t => t.dataset.pane === last) ? last : tabs[0].dataset.pane);
+
+const ages = document.querySelectorAll(".age");
+function applyAge(days) {{
+  const cutoff = days > 0 ? Date.now() - days * 864e5 : 0;
+  ages.forEach(b => b.classList.toggle("on", +b.dataset.days === days));
+  document.querySelectorAll(".commit").forEach(c => {{
+    c.hidden = cutoff > 0 && new Date(c.dataset.dt.replace(" ", "T")) < cutoff;
+  }});
+  document.querySelectorAll("h2.day").forEach(h => {{
+    h.hidden = !h.parentElement.querySelector(
+      `.commit[data-day="${{h.dataset.day}}"]:not([hidden])`);
+  }});
+  try {{ localStorage.setItem("landed-age", days); }} catch (e) {{}}
+}}
+ages.forEach(b => b.addEventListener("click", () => applyAge(+b.dataset.days)));
+let age = 0;
+try {{ age = +localStorage.getItem("landed-age") || 0; }} catch (e) {{}}
+applyAge(age);
 </script></body></html>'''
     OUT.write_text(page)
     print(f"{OUT} · {len(tabs)} repo tabs · {len(page)} bytes")
