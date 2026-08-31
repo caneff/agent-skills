@@ -8,20 +8,21 @@
   },
   "permissions": {
     "allow": [
-      "Read(//home/caneff/.codex/**)",
-      "Read(//home/caneff/.codex/skills/**)",
-      "Read(//home/caneff/.claude/**)",
       "Bash(gh auth *)",
       "Bash(gh issue *)",
       "Bash(gh issue edit:*)",
       "Bash(gh label *)",
-      "Bash(python3 -)",
-      "Bash(node *)",
+      "Bash(git branch -d *)",
       "Bash(git diff *)",
       "Bash(git fetch *)",
       "Bash(git fetch)",
+      "Bash(node *)",
       "Bash(pushpr)",
       "Bash(pushpr:*)",
+      "Bash(python3 -)",
+      "Read(//home/caneff/.claude/**)",
+      "Read(//home/caneff/.codex/**)",
+      "Read(//home/caneff/.codex/skills/**)",
       "Read(//tmp/**)"
     ],
     "deny": [
