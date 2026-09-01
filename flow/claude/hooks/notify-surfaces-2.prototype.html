@@ -1,0 +1,412 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Notify surfaces, round 2 — prototype</title>
+<!--
+  PROTOTYPE — throwaway. Round 2. Not wired to notify.sh.
+
+  Round 1 left two survivors: B (something always on screen) and E (hold
+  events, interrupt once). This page opens each of them into three.
+
+  B1 panel · B2 pip rail · B3 one-line bar   — all cost zero interruptions
+  E1 quiet window · E2 heartbeat · E3 idle only — differ only in WHEN they fire
+
+  One feed drives all six: a burst of four, a gap, then four more. The counter
+  at the bottom left is the number that decides this — how many times the
+  surface took your attention.
+-->
+<style>
+  :root {
+    --ink: #e8e8ea; --dim: #a0a0a8; --line: #3a3a42;
+    --ok: #4ec9a0; --bad: #ff6b6b; --wait: #f0c674; --run: #6d7280;
+    --accent: #d97757;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; overflow: hidden;
+    font: 14px/1.45 "Segoe UI", system-ui, sans-serif; color: var(--ink);
+    background: radial-gradient(120% 100% at 20% 0%, #3a4a6b 0%, #1b1f2a 55%, #14161c 100%);
+  }
+  .work { position: absolute; inset: 0 0 48px 0; display: grid; place-items: center; }
+  .work-hint { color: #ffffff33; font-size: 13px; user-select: none; }
+  .taskbar {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 48px;
+    background: #1a1a1ecc; border-top: 1px solid #ffffff14;
+    display: flex; align-items: center; gap: 10px; padding: 0 12px;
+  }
+  .tb-icon { width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center; background: #ffffff10; font-size: 15px; }
+  .clock { margin-left: auto; font-size: 12px; text-align: right; line-height: 1.15; color: var(--dim); }
+
+  /* toasts, shared by the E family */
+  .toast-stack { position: absolute; right: 14px; bottom: 60px; display: flex; flex-direction: column-reverse; gap: 10px; width: 372px; }
+  .toast {
+    background: #2c2c31f2; border: 1px solid #ffffff1f; border-radius: 8px;
+    box-shadow: 0 12px 28px #0009; padding: 12px 14px; animation: slide .22s ease-out;
+  }
+  @keyframes slide { from { transform: translateX(390px); opacity: 0; } }
+  .toast.leaving { animation: out .3s ease-in forwards; }
+  @keyframes out { to { transform: translateX(390px); opacity: 0; } }
+  .toast-app { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--dim); margin-bottom: 7px; }
+  .toast-app .badge { width: 15px; height: 15px; border-radius: 3px; display: grid; place-items: center; background: var(--accent); font-size: 9px; color: #1b1b1b; }
+  .toast h4 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+  .toast ul { margin: 6px 0 0; padding: 0; }
+  .toast li { list-style: none; display: flex; gap: 8px; font-size: 13px; padding: 2px 0; }
+  .mark { font-weight: 700; }
+  .mark.ok { color: var(--ok); } .mark.bad { color: var(--bad); } .mark.wait { color: var(--wait); }
+
+  /* B1 — the panel */
+  .panel {
+    position: absolute; top: 14px; right: 14px; width: 300px;
+    background: #191a1fe8; border: 1px solid #ffffff1a; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 10px 30px #0007;
+  }
+  .panel header { padding: 8px 12px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+  .panel ul { list-style: none; margin: 0; padding: 4px 0; }
+  .panel li { display: flex; align-items: center; gap: 9px; padding: 7px 12px; font-size: 13px; border-left: 3px solid transparent; }
+  .panel li.fresh { background: #ffffff0d; border-left-color: var(--accent); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--run); }
+  .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .state { font-size: 11px; color: var(--dim); }
+  .pulse { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+
+  /* B2 — the pip rail */
+  .rail {
+    position: absolute; top: 50%; right: 0; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 6px; padding: 9px 6px;
+    background: #14141ab8; border: 1px solid #ffffff14; border-right: 0;
+    border-radius: 9px 0 0 9px;
+  }
+  .rail .pip { width: 9px; height: 9px; border-radius: 50%; background: var(--run); }
+  .rail-flyout {
+    position: absolute; top: 50%; right: 34px; transform: translateY(-50%);
+    width: 260px; background: #202026f2; border: 1px solid #ffffff1a;
+    border-radius: 9px; padding: 7px 0; box-shadow: 0 12px 30px #000a;
+  }
+  .rail-flyout li { list-style: none; display: flex; align-items: center; gap: 9px; padding: 5px 13px; font-size: 13px; }
+  .hoverhint { position: absolute; top: calc(50% + 118px); right: 30px; font-size: 11px; color: #ffffff44; }
+
+  /* B3 — one line across the top */
+  .bar {
+    position: absolute; top: 0; left: 0; right: 0; height: 30px;
+    display: flex; align-items: center; gap: 16px; padding: 0 14px;
+    background: #16171ce8; border-bottom: 2px solid var(--run); font-size: 12.5px;
+  }
+  .bar .grp { display: flex; align-items: center; gap: 6px; color: var(--dim); }
+  .bar .grp b { color: var(--ink); font-weight: 600; }
+  .bar .worst { margin-left: auto; font-weight: 600; }
+
+  /* the E family's queue readout */
+  .queue {
+    position: absolute; left: 14px; bottom: 60px; width: 300px;
+    background: #191a1fdd; border: 1px solid #ffffff14; border-radius: 8px;
+    padding: 10px 12px; font-size: 12px; color: var(--dim);
+  }
+  .queue b { color: var(--ink); font-weight: 600; }
+  .queue .rule { color: #ffffff55; margin-bottom: 6px; }
+  .queue .track { height: 3px; background: #ffffff1a; border-radius: 2px; margin-top: 8px; }
+  .queue .track i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+
+  /* the number that decides it */
+  .score {
+    position: fixed; left: 14px; bottom: 14px; z-index: 98;
+    background: #101014e6; border: 1px solid #ffffff1a; border-radius: 8px;
+    padding: 8px 12px; font-size: 12px; color: var(--dim);
+  }
+  .score b { font-size: 19px; color: var(--ink); font-weight: 600; vertical-align: -2px; }
+
+  /* switcher — obviously not part of the design */
+  .switcher {
+    position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; z-index: 99;
+    background: #f4f4f5; color: #17171a; border-radius: 999px;
+    box-shadow: 0 6px 24px #000a; padding: 5px 6px; font: 500 13px/1 "Segoe UI", system-ui, sans-serif;
+  }
+  .switcher button { border: 0; background: #17171a; color: #fff; width: 26px; height: 26px; border-radius: 999px; cursor: pointer; }
+  .switcher .name { padding: 0 10px; white-space: nowrap; }
+  .switcher .replay { width: auto; padding: 0 11px; background: var(--accent); color: #1b1b1b; font-weight: 600; }
+  .cost {
+    position: fixed; left: 14px; top: 42px; max-width: 292px; z-index: 99;
+    background: #101014e8; border: 1px solid #ffffff1a; border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 11px 13px; font-size: 12px; color: #c8c8d0;
+  }
+  .cost h6 { margin: 0 0 5px; font-size: 12px; color: var(--ink); }
+  .cost p { margin: 0 0 6px; }
+  .cost p:last-child { margin: 0; color: var(--dim); }
+</style>
+
+<div id="stage"></div>
+<div class="taskbar"><span class="tb-icon">⊞</span><span class="tb-icon">🗔</span><span class="tb-icon">▤</span><span class="clock">2:41 PM<br>9/1/2026</span></div>
+<div class="cost" id="cost"></div>
+<div class="score" id="score"></div>
+<div class="switcher">
+  <button id="prev">‹</button><span class="name" id="vname"></span><button id="next">›</button>
+  <button class="replay" id="replay">replay feed</button>
+</div>
+
+<script>
+// A burst of four, a gap, then four more. The gap is what separates the three
+// digest rules — a quiet window fires in it, a heartbeat does not care, and
+// an idle rule waits out the whole run.
+const FEED = [
+  { at:  600, job: "gridfind-ring-decode", state: "done" },
+  { at: 1500, job: "notify-hook-payload",  state: "done" },
+  { at: 2300, job: "sudoku-custom-ring",   state: "fail" },
+  { at: 3000, job: "landed-page-rebuild",  state: "done" },
+  { at: 3600, job: "burndown-42",          state: "wait", detail: "approve the push?" },
+  { at: 8000, job: "second-brain-retro",   state: "done" },
+  { at: 8600, job: "rtk-proxy-cache",      state: "done" },
+  { at: 9200, job: "teach-lesson-base",    state: "wait", detail: "which title?" },
+  { at: 9800, job: "statusline-table",     state: "done" },
+];
+const WORD  = { done: "finished", fail: "failed", wait: "needs you", run: "running" };
+const COLOR = { done: "var(--ok)", fail: "var(--bad)", wait: "var(--wait)", run: "var(--run)" };
+const MARK  = { done: "✔", fail: "✖", wait: "▲" };
+
+const stage = document.getElementById("stage");
+let timers = [], intervals = [], interruptions = 0;
+const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+const every = (ms, fn) => intervals.push(setInterval(fn, ms));
+function bump() {
+  interruptions++;
+  document.getElementById("score").innerHTML =
+    `<b>${interruptions}</b> interruption${interruptions === 1 ? "" : "s"} so far`;
+}
+
+/* ============ B family — always there, never interrupts ============ */
+
+const B1 = {
+  name: "B1 — the panel",
+  cost: ["Every job on its own row, with its state spelled out in words. The most it can show, and the most space it takes.",
+         "Cost: a real always-on-top window, laid out and scrolling once the fleet is big.",
+         "Weakness: at twenty jobs it is a wall. You stop reading walls."],
+  run() {
+    const p = mk("div", "panel");
+    p.innerHTML = `<header><span>Claude Code · fleet</span><span id="pn"></span></header><ul id="pl"></ul>`;
+    stage.append(p);
+    FEED.forEach(e => {
+      const li = mk("li"); li.id = "p-" + e.job;
+      li.innerHTML = `<span class="dot pulse"></span><span class="lbl">${e.job}</span><span class="state">running</span>`;
+      p.querySelector("#pl").append(li);
+    });
+    const count = () => p.querySelector("#pn").textContent = `${settled()} / ${FEED.length}`;
+    count();
+    FEED.forEach(e => at(e.at, () => {
+      const li = document.getElementById("p-" + e.job);
+      const d = li.querySelector(".dot"); d.className = "dot"; d.style.background = COLOR[e.state];
+      li.querySelector(".state").textContent = e.detail || WORD[e.state];
+      li.classList.add("fresh"); at(2200, () => li.classList.remove("fresh"));
+      mark(e); count();
+    }));
+  }
+};
+
+const B2 = {
+  name: "B2 — the pip rail",
+  cost: ["One coloured dot per job, hugging the right edge. No words at all until you put the pointer on it, and then the list slides out.",
+         "Cost: the same always-on-top window as B1, but far less of it to lay out.",
+         "Strength: it survives a big fleet — twenty dots still read at a glance, twenty rows do not. Weakness: a dot cannot tell you <i>which</i> job wants you."],
+  run() {
+    const rail = mk("div", "rail");
+    FEED.forEach(e => {
+      const pip = mk("span", "pip pulse"); pip.id = "r-" + e.job; rail.append(pip);
+    });
+    stage.append(rail);
+    const fly = mk("div", "rail-flyout");
+    fly.innerHTML = "<ul id='fl'></ul>";
+    FEED.forEach(e => {
+      const li = mk("li"); li.id = "f-" + e.job;
+      li.innerHTML = `<span class="dot"></span><span class="lbl">${e.job}</span><span class="state">running</span>`;
+      fly.querySelector("#fl").append(li);
+    });
+    fly.style.display = "none";
+    stage.append(fly);
+    rail.onmouseenter = () => fly.style.display = "";
+    rail.onmouseleave = () => fly.style.display = "none";
+    const hint = mk("div", "hoverhint"); hint.textContent = "hover the rail →"; stage.append(hint);
+    // Show what hovering reveals, once the run has settled down.
+    at(10600, () => { fly.style.display = ""; hint.textContent = "(shown hovered)"; });
+    FEED.forEach(e => at(e.at, () => {
+      const pip = document.getElementById("r-" + e.job);
+      pip.classList.remove("pulse"); pip.style.background = COLOR[e.state];
+      const li = document.getElementById("f-" + e.job);
+      li.querySelector(".dot").style.background = COLOR[e.state];
+      li.querySelector(".state").textContent = e.detail || WORD[e.state];
+      mark(e);
+    }));
+  }
+};
+
+const B3 = {
+  name: "B3 — one line across the top",
+  cost: ["No list. One strip of counts along the top edge, and its underline takes the colour of the worst thing in the fleet — grey running, green all well, red something failed.",
+         "Cost: the smallest window of the three, and the least to keep in step.",
+         "Weakness: it tells you the shape of the fleet, never which job. You still have to open agent view to act."],
+  run() {
+    const bar = mk("div", "bar");
+    bar.innerHTML = `
+      <span class="grp"><span class="dot" style="background:var(--run)"></span><b id="c-run">0</b> running</span>
+      <span class="grp"><span class="dot" style="background:var(--ok)"></span><b id="c-done">0</b> finished</span>
+      <span class="grp"><span class="dot" style="background:var(--bad)"></span><b id="c-fail">0</b> failed</span>
+      <span class="grp"><span class="dot" style="background:var(--wait)"></span><b id="c-wait">0</b> want you</span>
+      <span class="worst" id="worst">all running</span>`;
+    stage.append(bar);
+    const seen = {};
+    const paint = () => {
+      const n = s => FEED.filter(e => seen[e.job] === s).length;
+      bar.querySelector("#c-done").textContent = n("done");
+      bar.querySelector("#c-fail").textContent = n("fail");
+      bar.querySelector("#c-wait").textContent = n("wait");
+      bar.querySelector("#c-run").textContent = FEED.length - settled();
+      const worst = n("fail") ? "fail" : n("wait") ? "wait" : settled() === FEED.length ? "done" : "run";
+      bar.style.borderBottomColor = COLOR[worst];
+      const w = bar.querySelector("#worst");
+      w.style.color = COLOR[worst];
+      w.textContent = worst === "fail" ? "a job failed" : worst === "wait" ? "a job wants you"
+                    : worst === "done" ? "all clear" : "all running";
+    };
+    paint();
+    FEED.forEach(e => at(e.at, () => { seen[e.job] = e.state; mark(e); paint(); }));
+  }
+};
+
+/* ============ E family — hold events, interrupt once ============ */
+
+// Shared toast plumbing for the three rules below.
+function digestSurface(rule, opts) {
+  const wrap = mk("div", "toast-stack"); stage.append(wrap);
+  const q = mk("div", "queue");
+  q.innerHTML = `<div class="rule">${opts.rule}</div>
+    <div><b id="qn">0</b> events held · <span id="qw">${opts.wait}</span></div>
+    <div class="track"><i id="qb" style="width:0"></i></div>`;
+  stage.append(q);
+  let held = [];
+  const flush = (why) => {
+    if (!held.length) return;
+    const done = held.filter(e => e.state === "done");
+    const fail = held.filter(e => e.state === "fail");
+    const wait = held.filter(e => e.state === "wait");
+    const li = [];
+    if (done.length) li.push(`<li><span class="mark ok">✔</span> ${done.length} finished</li>`);
+    fail.forEach(e => li.push(`<li><span class="mark bad">✖</span> ${e.job} failed</li>`));
+    wait.forEach(e => li.push(`<li><span class="mark wait">▲</span> ${e.job}: ${e.detail}</li>`));
+    const t = mk("div", "toast");
+    t.innerHTML = `<div class="toast-app"><span class="badge">✳</span> Claude Code</div>
+      <h4>${held.length} update${held.length === 1 ? "" : "s"}${why ? " · " + why : ""}</h4>
+      <ul>${li.join("")}</ul>`;
+    wrap.append(t);
+    bump();
+    at(7000, () => { t.classList.add("leaving"); at(300, () => t.remove()); });
+    held = [];
+  };
+  const paint = (frac, waitText) => {
+    document.getElementById("qn").textContent = held.length;
+    document.getElementById("qb").style.width = (held.length ? frac * 100 : 0) + "%";
+    if (waitText) document.getElementById("qw").textContent = waitText;
+  };
+  rule({ push: e => held.push(e), held: () => held, flush, paint });
+}
+
+const E1 = {
+  name: "E1 — fire when it goes quiet",
+  cost: ["Events pile up. The toast goes out once nothing new has arrived for a few seconds, so a burst of six becomes one toast. A failure does not wait its turn — it fires at once.",
+         "Cost: the hook has to remember things between calls — a small file it appends to, plus a timer.",
+         "Weakness: a busy fleet never goes quiet, so the toast can keep sliding."],
+  run() {
+    const QUIET = 2600;
+    digestSurface(({ push, held, flush, paint }) => {
+      let deadline = 0;
+      FEED.forEach(e => at(e.at, () => {
+        push(e);
+        deadline = Date.now() + QUIET;
+        if (e.state === "fail") { flush("a job failed"); deadline = 0; }
+        mark(e);
+      }));
+      every(80, () => {
+        const left = deadline - Date.now();
+        paint(held().length && left > 0 ? 1 - left / QUIET : 0,
+              held().length ? `quiet in ${Math.max(0, left / 1000).toFixed(1)}s` : "waiting for events");
+        if (held().length && left <= 0) flush("");
+      });
+    }, { rule: "RULE — 2.6s with no new event, or at once on a failure", wait: "waiting for events" });
+  }
+};
+
+const E2 = {
+  name: "E2 — a heartbeat",
+  cost: ["One toast every five seconds, and never more. If nothing happened in that window, nothing pops. The rhythm is fixed, so you learn it and stop bracing for a surprise.",
+         "Cost: the same held file as E1, but the timer is a single repeating one — the simplest of the three to get right.",
+         "Weakness: a failure sits in the queue for up to a full window. In this run it waited about three seconds."],
+  run() {
+    const BEAT = 5000;
+    digestSurface(({ push, held, flush, paint }) => {
+      const t0 = Date.now();
+      FEED.forEach(e => at(e.at, () => { push(e); mark(e); }));
+      every(80, () => {
+        const into = (Date.now() - t0) % BEAT;
+        paint(into / BEAT, `next beat in ${((BEAT - into) / 1000).toFixed(1)}s`);
+      });
+      for (let k = 1; k <= 4; k++) at(BEAT * k, () => flush(""));
+    }, { rule: "RULE — one toast every 5s, empty windows stay silent", wait: "next beat" });
+  }
+};
+
+const E3 = {
+  name: "E3 — only when the fleet stops",
+  cost: ["Silence while anything is still working. The toast goes out the moment no job is running any more — everything either finished, failed, or is waiting on you. One toast per burn.",
+         "Cost: the hook must know what is still running, not just what just happened. It needs the fleet's state, not one event.",
+         "Weakness: the sharpest trade here. A job that wants you sits unannounced until the rest of the burn finishes — in this run, six seconds."],
+  run() {
+    digestSurface(({ push, held, flush, paint }) => {
+      let running = FEED.length;
+      FEED.forEach(e => at(e.at, () => {
+        push(e); running--; mark(e);
+        if (running === 0) flush("the fleet is idle");
+      }));
+      every(90, () => paint(1 - running / FEED.length, `${running} still running`));
+    }, { rule: "RULE — nothing until no job is running", wait: "jobs running" });
+  }
+};
+
+/* ---- helpers ---- */
+const settledSet = new Set();
+function settled() { return settledSet.size; }
+function mark(e) { settledSet.add(e.job); }
+function mk(tag, cls) { const n = document.createElement(tag); if (cls) n.className = cls; return n; }
+
+/* ---- switcher ---- */
+const VARIANTS = { B1, B2, B3, E1, E2, E3 };
+const keys = Object.keys(VARIANTS);
+const current = () => {
+  const k = (new URLSearchParams(location.search).get("variant") || "B1").toUpperCase();
+  return keys.includes(k) ? k : "B1";
+};
+function render() {
+  timers.forEach(clearTimeout); timers = [];
+  intervals.forEach(clearInterval); intervals = [];
+  settledSet.clear();
+  interruptions = 0;
+  stage.innerHTML = "";
+  const work = mk("div", "work");
+  work.innerHTML = `<p class="work-hint">your editor, your terminal, whatever you were actually doing</p>`;
+  stage.append(work);
+  const v = VARIANTS[current()];
+  document.getElementById("vname").textContent = v.name;
+  document.getElementById("cost").innerHTML = `<h6>${v.name}</h6>` + v.cost.map(c => `<p>${c}</p>`).join("");
+  document.getElementById("score").innerHTML = `<b>0</b> interruptions so far`;
+  v.run();
+}
+function go(step) {
+  const i = (keys.indexOf(current()) + step + keys.length) % keys.length;
+  history.replaceState(null, "", "?variant=" + keys[i]);
+  render();
+}
+document.getElementById("prev").onclick = () => go(-1);
+document.getElementById("next").onclick = () => go(1);
+document.getElementById("replay").onclick = render;
+addEventListener("keydown", e => {
+  if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable) return;
+  if (e.key === "ArrowLeft") go(-1);
+  if (e.key === "ArrowRight") go(1);
+});
+render();
+</script>
