@@ -1,0 +1,396 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>What the card and the hover say — prototype</title>
+<!--
+  PROTOTYPE — throwaway. Round 8. Not wired to notify.sh.
+
+  Settled: side rail of dots, a beat every N minutes, a standing job wears a
+  tab, and the tab slides out once (T2) and is then still.
+
+  Open question: what do the two surfaces actually SAY?
+
+    THE CARD fires on the beat, uninvited, and closes itself. It is read in a
+    glance, possibly out of the corner of your eye. It must survive being
+    half-read.
+
+    THE HOVER you asked for. It can be as long as it is useful, because you
+    went looking for it.
+
+  Four pairs, C1 to C4, from thinnest card to richest. Hovering the RAIL shows
+  the fleet; hovering ONE TAB shows that job.
+
+  The "show" button forces either surface open so you can compare them.
+-->
+<style>
+  :root {
+    --ink: #e8e8ea; --dim: #a0a0a8; --line: #3a3a42;
+    --ok: #4ec9a0; --bad: #ff6b6b; --wait: #f0c674; --run: #6d7280;
+    --accent: #d97757;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; overflow: hidden;
+    font: 14px/1.45 "Segoe UI", system-ui, sans-serif; color: var(--ink);
+    background: radial-gradient(120% 100% at 20% 0%, #3a4a6b 0%, #1b1f2a 55%, #14161c 100%);
+  }
+  .work { position: absolute; inset: 0 0 48px 0; display: grid; place-items: center; }
+  .work-hint { color: #ffffff33; font-size: 13px; user-select: none; }
+  .taskbar {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 48px;
+    background: #1a1a1ecc; border-top: 1px solid #ffffff14;
+    display: flex; align-items: center; gap: 10px; padding: 0 12px;
+  }
+  .tb-icon { width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center; background: #ffffff10; font-size: 15px; }
+  .clock { margin-left: auto; font-size: 12px; text-align: right; line-height: 1.15; color: var(--dim); }
+  .clock b { color: var(--ink); font-weight: 600; }
+
+  .rail {
+    position: absolute; top: 50%; right: 0; transform: translateY(-50%);
+    display: flex; flex-direction: column; align-items: flex-end; gap: 7px;
+    padding: 10px 7px; cursor: pointer; z-index: 40;
+    background: #14141ab8; border: 1px solid #ffffff14; border-right: 0;
+    border-radius: 10px 0 0 10px;
+  }
+  .rail .pip { width: 9px; height: 9px; border-radius: 999px; background: var(--run); transition: background .4s; }
+  .pip.tab { height: 11px; border-radius: 6px 0 0 6px; margin-right: -7px; }
+  .pip.slide { transition: width .42s cubic-bezier(.2,.8,.3,1), background .4s; }
+
+  /* both surfaces share a shell, so only the CONTENT is being judged */
+  .panel {
+    position: absolute; right: 42px; width: 330px;
+    background: #23242bfa; border: 1px solid #ffffff22; border-radius: 10px;
+    padding: 12px 15px; box-shadow: 0 14px 34px #000b; z-index: 45;
+  }
+  .panel.card { top: 50%; transform: translateY(-50%); }
+  .panel.hover { top: 50%; transform: translateY(-50%); border-color: #ffffff33; }
+  .tag {
+    position: absolute; top: -9px; left: 13px; font-size: 10px; letter-spacing: .09em;
+    text-transform: uppercase; padding: 1px 7px; border-radius: 4px; font-weight: 700;
+  }
+  .tag.card  { background: var(--accent); color: #17171a; }
+  .tag.hover { background: #6b8fd9; color: #10131c; }
+
+  .headline { font-size: 15px; font-weight: 600; }
+  .sub { font-size: 12.5px; color: var(--dim); margin-top: 2px; }
+  .panel ul { margin: 8px 0 0; padding: 0; }
+  .panel li { list-style: none; padding: 3px 0; font-size: 13px; display: flex; gap: 8px; align-items: baseline; }
+  .mark { font-weight: 700; flex: none; }
+  .mark.ok { color: var(--ok); } .mark.bad { color: var(--bad); } .mark.wait { color: var(--wait); }
+  .job { color: var(--ink); }
+  .q { color: #cfcfd6; }
+  .meta { color: var(--dim); font-size: 11.5px; margin-left: auto; white-space: nowrap; }
+  .rule { border-top: 1px solid var(--line); margin: 9px 0 0; padding-top: 7px; font-size: 11.5px; color: #ffffff55; }
+  .big-q { font-size: 15px; color: var(--wait); font-weight: 600; }
+  .quiet { color: var(--dim); font-size: 12px; }
+  .out {
+    font: 11.5px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace;
+    color: #9fb6a8; background: #14161b; border-radius: 5px;
+    padding: 6px 8px; margin-top: 6px; white-space: pre-wrap;
+  }
+
+  .beatbar {
+    position: absolute; left: 14px; bottom: 108px; width: 330px;
+    background: #191a1fdd; border: 1px solid #ffffff14; border-radius: 8px;
+    padding: 10px 12px; font-size: 12px; color: var(--dim);
+  }
+  .beatbar b { color: var(--ink); font-weight: 600; }
+  .beatbar .track { height: 3px; background: #ffffff1a; border-radius: 2px; margin-top: 8px; }
+  .beatbar .track i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+  .ack { position: absolute; right: 34px; bottom: 96px; font-size: 11px; color: #ffffff55; }
+
+  .score {
+    position: fixed; left: 14px; bottom: 14px; z-index: 98; max-width: 340px;
+    background: #101014e6; border: 1px solid #ffffff1a; border-radius: 8px;
+    padding: 8px 12px; font-size: 12px; color: var(--dim);
+  }
+  .score b { color: var(--ink); font-weight: 600; }
+
+  .switcher {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; z-index: 99;
+    background: #f4f4f5; color: #17171a; border-radius: 999px;
+    box-shadow: 0 6px 24px #000a; padding: 5px 6px; font: 500 13px/1 "Segoe UI", system-ui, sans-serif;
+  }
+  .switcher button { border: 0; background: #17171a; color: #fff; width: 26px; height: 26px; border-radius: 999px; cursor: pointer; }
+  .switcher .name { padding: 0 10px; white-space: nowrap; }
+  .switcher .wide { width: auto; padding: 0 11px; font-weight: 600; }
+  .switcher .show { background: #6b8fd9; color: #10131c; }
+  .switcher .replay { background: var(--accent); color: #1b1b1b; }
+  .cost {
+    position: fixed; left: 14px; top: 14px; max-width: 300px; z-index: 99;
+    background: #101014e8; border: 1px solid #ffffff1a; border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 11px 13px; font-size: 12px; color: #c8c8d0;
+  }
+  .cost h6 { margin: 0 0 5px; font-size: 12px; color: var(--ink); }
+  .cost p { margin: 0 0 6px; }
+  .cost p:last-child { margin: 0; color: var(--dim); }
+</style>
+
+<div id="stage"></div>
+<div class="taskbar">
+  <span class="tb-icon">⊞</span><span class="tb-icon">🗔</span><span class="tb-icon">▤</span>
+  <span class="clock" id="clock"></span>
+</div>
+<div class="cost" id="cost"></div>
+<div class="score" id="score"></div>
+<div class="switcher">
+  <button id="prev">‹</button><span class="name" id="vname"></span><button id="next">›</button>
+  <button class="wide show" id="show"></button>
+  <button class="wide replay" id="replay">replay</button>
+</div>
+
+<script>
+const COLOR = { done: "#4ec9a0", fail: "#ff6b6b", wait: "#f0c674", run: "#6d7280" };
+const MARK  = { done: "✔", fail: "✖", wait: "▲" };
+
+// Everything a real hook could know about a job, so the content variants have
+// something honest to choose from.
+const FEED = [
+  { m: 0.7, job: "gridfind-ring-decode", state: "done", took: "4m 12s", last: "ALL PASS — 31 cases" },
+  { m: 1.4, job: "notify-hook-payload",  state: "done", took: "2m 03s", last: "landed on main" },
+  { m: 2.3, job: "sudoku-custom-ring",   state: "fail", took: "6m 40s",
+    last: "AssertionError: ring cell 4 was a given\n  at test_ring.py:88" },
+  { m: 3.1, job: "landed-page-rebuild",  state: "done", took: "1m 31s", last: "wrote landed.html (5.4M)" },
+  { m: 4.6, job: "burndown-42",          state: "wait", detail: "approve the push?", took: "8m 55s",
+    last: "3 commits ready on worktree-burndown-42" },
+  { m: 6.2, job: "second-brain-retro",   state: "done", took: "3m 18s", last: "12 memories written" },
+  { m: 7.0, job: "rtk-proxy-cache",      state: "done", took: "0m 47s", last: "cache hit rate 82%" },
+  { m: 9.5, job: "teach-lesson-base",    state: "wait", detail: "which title?", took: "5m 02s",
+    last: "two candidates: 'Ring Basics' / 'Reading the Ring'" },
+];
+
+const stage = document.getElementById("stage");
+let timers = [], ticker = null, rail = null, V = null;
+let settled = [], held = [], standing = [], beats = 0, hoverJob = null;
+let t0 = Date.now();
+const N = 5;
+const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+const now = () => (Date.now() - t0) / 1000;
+const waited = e => Math.max(0, now() - e.m).toFixed(1);
+
+/* ============ the four content pairs ============ */
+const VARIANTS = {
+  C1: {
+    name: "C1 — counts on the card, list on hover",
+    cost: ["The card is two numbers and nothing else. It is one glance, and it cannot be half-read, because there is no half of it.",
+           "Everything by name waits for the hover, which you only open when you have decided to deal with it.",
+           "Weakness: the card never tells you whether the thing waiting is urgent. Two jobs wanting you reads the same whether one wants a yes or has died."],
+    card(open, done) {
+      return `<div class="headline">${open.length} want${open.length === 1 ? "s" : ""} you</div>
+              <div class="sub">${done} finished since the last beat</div>`;
+    },
+    hover(list) {
+      return `<div class="headline">The fleet</div>` + rows(list, { meta: true }) +
+             `<div class="rule">${settled.filter(e => e.state === "done").length} finished · click a tab to open that session</div>`;
+    }
+  },
+  C2: {
+    name: "C2 — named list on both",
+    cost: ["The card names every job that wants you and what it wants. The hover is the same list with the finished work added under a line.",
+           "One thing to learn, shown twice. You never have to work out which surface you are reading.",
+           "Weakness: at five standing jobs the card is a wall of text arriving uninvited — the thing you disliked about toasts, rebuilt."],
+    card(open, done) {
+      return `<div class="headline">${open.length} want${open.length === 1 ? "s" : ""} you</div>` +
+             rows(open, {}) + (done ? `<div class="rule">${done} finished since the last beat</div>` : "");
+    },
+    hover(list) {
+      const open = list.filter(e => e.state !== "done");
+      const fin  = list.filter(e => e.state === "done");
+      return `<div class="headline">The fleet</div>` + rows(open, { meta: true }) +
+             `<div class="rule">Finished</div>` + rows(fin, { meta: true });
+    }
+  },
+  C3: {
+    name: "C3 — the question first",
+    cost: ["The card leads with the question itself, in the job's colour, and drops the job name to a subtitle. What is being asked of you is the thing you must read; which job asked is the detail.",
+           "It survives being half-read better than anything else here — the first four words are the whole point.",
+           "Weakness: it does not scale past two or three. Four questions stacked lose the advantage and it becomes C2 with bigger type."],
+    card(open, done) {
+      if (!open.length) return `<div class="headline" style="color:var(--ok)">All clear</div>
+                                <div class="sub">${done} finished since the last beat</div>`;
+      return open.slice(0, 3).map(e => `
+        <div class="big-q" style="color:${COLOR[e.state]}">${e.detail || "it failed"}</div>
+        <div class="sub">${e.job} · waiting ${waited(e)} min</div>`).join(`<div class="rule"></div>`) +
+        (open.length > 3 ? `<div class="rule">+ ${open.length - 3} more</div>` : "") +
+        (done ? `<div class="rule">${done} finished</div>` : "");
+    },
+    hover(list) {
+      const open = list.filter(e => e.state !== "done");
+      return `<div class="headline">Waiting on you</div>` +
+        open.map(e => `<div style="padding:5px 0">
+          <div class="big-q" style="color:${COLOR[e.state]};font-size:13.5px">${e.detail || "it failed"}</div>
+          <div class="sub">${e.job} · ${waited(e)} min</div></div>`).join("") +
+        `<div class="rule">${list.filter(e => e.state === "done").length} finished · nothing else needs you</div>`;
+    }
+  },
+  C4: {
+    name: "C4 — thin card, deep hover",
+    cost: ["The card is one line. The hover carries everything a real answer needs: how long the job ran, how long it has been waiting, and its last line of output.",
+           "The split matches how you actually use them. The card exists to make you look; the hover exists to let you decide without opening the session.",
+           "Weakness: the most to build. The hook has to keep the last line of every job's output, not just its final state."],
+    card(open, done) {
+      const worst = open.find(e => e.state === "fail");
+      return `<div class="headline" style="color:${open.length ? COLOR[worst ? "fail" : "wait"] : "var(--ok)"}">
+        ${open.length ? `${open.length} want${open.length === 1 ? "s" : ""} you${worst ? " · one failed" : ""}` : "All clear"}</div>
+        <div class="sub">${done} finished since the last beat · hover the rail</div>`;
+    },
+    hover(list) {
+      const open = list.filter(e => e.state !== "done");
+      return `<div class="headline">Waiting on you — ${open.length}</div>` +
+        open.map(e => `<div style="padding:7px 0 3px">
+          <div><span class="mark ${e.state === "fail" ? "bad" : "wait"}">${MARK[e.state]}</span>
+            <span class="job">${e.job}</span>
+            <span class="meta">ran ${e.took} · waiting ${waited(e)} min</span></div>
+          <div class="q" style="padding-left:18px">${e.detail || "failed"}</div>
+          <div class="out">${e.last}</div></div>`).join("") +
+        `<div class="rule">${list.filter(e => e.state === "done").length} finished · click a tab to open that session</div>`;
+    }
+  },
+};
+
+// One job, hovered on its own tab. Same in every variant — this is the detail
+// view, and it is the same question every time: what does THIS one want?
+function oneJob(e) {
+  return `<div class="headline" style="color:${COLOR[e.state]}">${e.job}</div>
+    <div class="sub">${e.state === "fail" ? "failed" : e.detail} · ran ${e.took} · waiting ${waited(e)} min</div>
+    <div class="out">${e.last}</div>
+    <div class="rule">click to open this session</div>`;
+}
+function rows(list, opt) {
+  return `<ul>${list.map(e => `<li>
+    <span class="mark ${e.state === "fail" ? "bad" : e.state === "wait" ? "wait" : "ok"}">${MARK[e.state]}</span>
+    <span class="job">${e.job}</span>
+    <span class="q">${e.state === "done" ? "" : e.detail ? "· " + e.detail : "· failed"}</span>
+    ${opt.meta ? `<span class="meta">${e.state === "done" ? e.took : waited(e) + " min"}</span>` : ""}
+  </li>`).join("")}</ul>`;
+}
+
+/* ============ surfaces ============ */
+function panel(kind, html) {
+  document.querySelectorAll(".panel").forEach(p => p.remove());
+  const p = document.createElement("div");
+  p.className = "panel " + kind;
+  p.innerHTML = `<span class="tag ${kind}">${kind === "card" ? "the beat card" : "hover"}</span>` + html;
+  stage.append(p);
+  return p;
+}
+function showCard() {
+  const open = settled.filter(e => e.state !== "done");
+  const done = held.filter(e => e.state === "done").length;
+  panel("card", V.card(open, done));
+  beats++;
+  at(4200, () => { if (!forced()) document.querySelector(".panel.card")?.remove(); });
+}
+function showHover() {
+  panel("hover", hoverJob ? oneJob(hoverJob) : V.hover(settled));
+}
+function beat() {
+  const open = settled.filter(e => e.state !== "done");
+  open.filter(e => !standing.includes(e)).forEach(e => {
+    const p = document.getElementById("pip" + e.i);
+    p.style.width = "34px";
+    p.classList.add("slide");
+    requestAnimationFrame(() => p.classList.add("tab"));
+    standing.push(e);
+  });
+  showCard();
+  held = [];
+  score();
+}
+function score() {
+  document.getElementById("score").innerHTML =
+    `<b>${beats}</b> beat${beats === 1 ? "" : "s"} · <b>${standing.length}</b> standing · ` +
+    `card closes itself after 4s; hover lasts as long as you point at it`;
+}
+
+/* ---- run ---- */
+const keys = Object.keys(VARIANTS);
+const params = () => new URLSearchParams(location.search);
+const current = () => {
+  const k = (params().get("variant") || "C1").toUpperCase();
+  return keys.includes(k) ? k : "C1";
+};
+const forced = () => ["card", "hover", "tab"].includes(params().get("show")) ? params().get("show") : null;
+
+function render() {
+  timers.forEach(clearTimeout); timers = [];
+  clearInterval(ticker);
+  settled = []; held = []; standing = []; beats = 0; hoverJob = null;
+  stage.innerHTML = "";
+  const work = document.createElement("div");
+  work.className = "work";
+  work.innerHTML = `<p class="work-hint">your editor, your terminal, whatever you were actually doing</p>`;
+  stage.append(work);
+  V = VARIANTS[current()];
+  rail = document.createElement("div");
+  rail.className = "rail";
+  FEED.forEach((e, i) => {
+    const p = document.createElement("span");
+    p.className = "pip"; p.id = "pip" + i;
+    p.onmouseenter = ev => {
+      if (!p.classList.contains("tab")) return;
+      ev.stopPropagation();
+      hoverJob = settled.find(s => s.i === i);
+      showHover();
+    };
+    rail.append(p);
+  });
+  rail.onmouseenter = () => { hoverJob = null; showHover(); };
+  rail.onmouseleave = () => { if (!forced()) document.querySelector(".panel.hover")?.remove(); };
+  stage.append(rail);
+
+  const bar = document.createElement("div");
+  bar.className = "beatbar";
+  bar.innerHTML = `<div>Beat every ${N} min · tab slides out once (T2) · <b id="bh">0</b> held</div>
+    <div class="track"><i id="bt" style="width:0"></i></div>`;
+  stage.append(bar);
+  const a = document.createElement("div");
+  a.className = "ack"; a.textContent = "hover the rail, or one tab"; stage.append(a);
+
+  document.getElementById("vname").textContent = V.name;
+  document.getElementById("show").textContent = "show: " + (forced() || "live");
+  document.getElementById("cost").innerHTML = `<h6>${V.name}</h6>` + V.cost.map(c => `<p>${c}</p>`).join("");
+  score();
+
+  t0 = Date.now();
+  FEED.forEach((e, i) => at(e.m * 1000, () => {
+    const ev = { ...e, i };
+    settled.push(ev); held.push(ev);
+    document.getElementById("pip" + i).style.background = COLOR[e.state];
+  }));
+  for (let k = 1; k * N <= 20; k++) at(k * N * 1000, beat);
+
+  // The forced views, for comparing the two surfaces side by side.
+  const f = forced();
+  if (f) at(10400, () => {
+    if (f === "card") showCard();
+    else { hoverJob = f === "tab" ? settled.find(e => e.state !== "done") : null; showHover(); }
+  });
+
+  ticker = setInterval(() => {
+    const m = now();
+    const next = Math.ceil(m / N) * N;
+    document.getElementById("clock").innerHTML = `<b>${m.toFixed(0)} min</b><br>60× speed`;
+    document.getElementById("bh").textContent = held.length;
+    document.getElementById("bt").style.width = (1 - (next - m) / N) * 100 + "%";
+  }, 100);
+}
+function nav(patch) {
+  const p = params();
+  Object.entries(patch).forEach(([k, v]) => p.set(k, v));
+  history.replaceState(null, "", "?" + p);
+  render();
+}
+const go = s => nav({ variant: keys[(keys.indexOf(current()) + s + keys.length) % keys.length] });
+document.getElementById("prev").onclick = () => go(-1);
+document.getElementById("next").onclick = () => go(1);
+document.getElementById("show").onclick = () =>
+  nav({ show: { live: "card", card: "hover", hover: "tab", tab: "live" }[forced() || "live"] });
+document.getElementById("replay").onclick = render;
+addEventListener("keydown", e => {
+  if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable) return;
+  if (e.key === "ArrowLeft") go(-1);
+  if (e.key === "ArrowRight") go(1);
+});
+render();
+</script>
