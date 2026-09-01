@@ -1,0 +1,352 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>How the rail stands — prototype</title>
+<!--
+  PROTOTYPE — throwaway. Round 6. Not wired to notify.sh.
+
+  Settled: the side rail of dots is the surface; the alert is batched on a
+  beat every N minutes; and after the beat, anything that wants you keeps
+  showing until you clear it (V3 from round 5).
+
+  Open question: pulsing may be the wrong way to hold that standing state.
+
+  So the rail, the beat, and the card are all FIXED here. The only thing that
+  varies is what the rail does to keep saying "this one still wants you":
+
+  S1 pulse (the baseline) · S2 grow · S3 stack to the top · S4 light the edge ·
+  S5 grow a tab
+
+  Four of the five use no motion at all. Click the rail to clear.
+-->
+<style>
+  :root {
+    --ink: #e8e8ea; --dim: #a0a0a8; --line: #3a3a42;
+    --ok: #4ec9a0; --bad: #ff6b6b; --wait: #f0c674; --run: #6d7280;
+    --accent: #d97757;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; overflow: hidden;
+    font: 14px/1.45 "Segoe UI", system-ui, sans-serif; color: var(--ink);
+    background: radial-gradient(120% 100% at 20% 0%, #3a4a6b 0%, #1b1f2a 55%, #14161c 100%);
+  }
+  .work { position: absolute; inset: 0 0 48px 0; display: grid; place-items: center; }
+  .work-hint { color: #ffffff33; font-size: 13px; user-select: none; }
+  .taskbar {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 48px;
+    background: #1a1a1ecc; border-top: 1px solid #ffffff14;
+    display: flex; align-items: center; gap: 10px; padding: 0 12px;
+  }
+  .tb-icon { width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center; background: #ffffff10; font-size: 15px; }
+  .clock { margin-left: auto; font-size: 12px; text-align: right; line-height: 1.15; color: var(--dim); }
+  .clock b { color: var(--ink); font-weight: 600; }
+
+  /* ---- the rail: same in every variant ---- */
+  .rail {
+    position: absolute; top: 50%; right: 0; transform: translateY(-50%);
+    display: flex; flex-direction: column; align-items: flex-end; gap: 7px;
+    padding: 10px 7px; cursor: pointer; z-index: 40;
+    background: #14141ab8; border: 1px solid #ffffff14; border-right: 0;
+    border-radius: 10px 0 0 10px;
+    transition: background .4s, box-shadow .4s;
+  }
+  .rail .pip {
+    width: 9px; height: 9px; border-radius: 999px; background: var(--run);
+    transition: width .35s, height .35s, background .4s, margin .35s, opacity .4s;
+  }
+  .rail .gap { height: 9px; width: 100%; border-top: 1px dashed #ffffff26; margin: 2px 0; }
+
+  /* S1 — the baseline: it moves */
+  .pip.stand-pulse { animation: pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+
+  /* S2 — it gets fat, and the settled ones shrink away */
+  .pip.stand-grow { width: 17px; height: 17px; }
+  .rail.grow-mode .pip:not(.stand-grow) { width: 5px; height: 5px; opacity: .5; }
+
+  /* S4 — a lit strip behind the whole rail */
+  .rail.lit { background: #2a1c1cf0; box-shadow: -30px 0 80px -4px var(--flash), inset 5px 0 0 0 var(--flash); }
+
+  /* S5 — a tab pushes out into the screen */
+  .pip.stand-tab { width: 34px; height: 11px; border-radius: 6px 0 0 6px; margin-right: -7px; }
+
+  /* the beat card — fixed */
+  .card {
+    position: absolute; right: 40px; top: 50%; transform: translateY(-50%);
+    width: 310px; background: #23242bfa; border: 1px solid #ffffff22;
+    border-radius: 10px; padding: 12px 15px; box-shadow: 0 14px 34px #000b; z-index: 45;
+  }
+  .card .headline { font-size: 14px; font-weight: 600; }
+  .card ul { margin: 5px 0 0; padding: 0; }
+  .card li { list-style: none; display: flex; gap: 8px; font-size: 13px; padding: 1px 0; }
+  .mark { font-weight: 700; }
+  .mark.ok { color: var(--ok); } .mark.bad { color: var(--bad); } .mark.wait { color: var(--wait); }
+
+  .beatbar {
+    position: absolute; left: 14px; bottom: 62px; width: 330px;
+    background: #191a1fdd; border: 1px solid #ffffff14; border-radius: 8px;
+    padding: 10px 12px; font-size: 12px; color: var(--dim);
+  }
+  .beatbar .rule { color: #ffffff55; margin-bottom: 6px; }
+  .beatbar b { color: var(--ink); font-weight: 600; }
+  .beatbar .track { height: 3px; background: #ffffff1a; border-radius: 2px; margin-top: 8px; }
+  .beatbar .track i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+  .ack { position: absolute; right: 34px; bottom: 96px; font-size: 11px; color: #ffffff55; }
+
+  .score {
+    position: fixed; left: 14px; bottom: 14px; z-index: 98;
+    background: #101014e6; border: 1px solid #ffffff1a; border-radius: 8px;
+    padding: 8px 12px; font-size: 12px; color: var(--dim);
+  }
+  .score b { color: var(--ink); font-weight: 600; }
+
+  .switcher {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; z-index: 99;
+    background: #f4f4f5; color: #17171a; border-radius: 999px;
+    box-shadow: 0 6px 24px #000a; padding: 5px 6px; font: 500 13px/1 "Segoe UI", system-ui, sans-serif;
+  }
+  .switcher button { border: 0; background: #17171a; color: #fff; width: 26px; height: 26px; border-radius: 999px; cursor: pointer; }
+  .switcher .name { padding: 0 10px; white-space: nowrap; }
+  .switcher .wide { width: auto; padding: 0 11px; font-weight: 600; }
+  .switcher .n { background: #2f5f8c; }
+  .switcher .replay { background: var(--accent); color: #1b1b1b; }
+  .cost {
+    position: fixed; left: 14px; top: 14px; max-width: 300px; z-index: 99;
+    background: #101014e8; border: 1px solid #ffffff1a; border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 11px 13px; font-size: 12px; color: #c8c8d0;
+  }
+  .cost h6 { margin: 0 0 5px; font-size: 12px; color: var(--ink); }
+  .cost p { margin: 0 0 6px; }
+  .cost p:last-child { margin: 0; color: var(--dim); }
+</style>
+
+<div id="stage"></div>
+<div class="taskbar">
+  <span class="tb-icon">⊞</span><span class="tb-icon">🗔</span><span class="tb-icon">▤</span>
+  <span class="clock" id="clock"></span>
+</div>
+<div class="cost" id="cost"></div>
+<div class="score" id="score"></div>
+<div class="switcher">
+  <button id="prev">‹</button><span class="name" id="vname"></span><button id="next">›</button>
+  <button class="wide n" id="n"></button>
+  <button class="wide replay" id="replay">replay</button>
+</div>
+
+<script>
+const SPEED_NOTE = "60×";            // one simulated minute per real second
+const COLOR = { done: "#4ec9a0", fail: "#ff6b6b", wait: "#f0c674", run: "#6d7280" };
+const MARK  = { done: "✔", fail: "✖", wait: "▲" };
+
+const FEED = [
+  { m:  0.7, job: "gridfind-ring-decode", state: "done" },
+  { m:  1.4, job: "notify-hook-payload",  state: "done" },
+  { m:  2.3, job: "sudoku-custom-ring",   state: "fail" },
+  { m:  3.1, job: "landed-page-rebuild",  state: "done" },
+  { m:  4.6, job: "burndown-42",          state: "wait", detail: "approve the push?" },
+  { m:  6.2, job: "second-brain-retro",   state: "done" },
+  { m:  7.0, job: "rtk-proxy-cache",      state: "done" },
+  { m:  9.5, job: "teach-lesson-base",    state: "wait", detail: "which title?" },
+  { m: 11.0, job: "spec-slicer",          state: "fail" },
+  { m: 12.3, job: "statusline-table",     state: "done" },
+  { m: 13.1, job: "worktree-sweeper",     state: "done" },
+  { m: 15.4, job: "memory-retro",         state: "done" },
+  { m: 17.2, job: "visual-recap",         state: "wait", detail: "pick a base ref" },
+  { m: 18.0, job: "ponytail-audit",       state: "done" },
+];
+
+const stage = document.getElementById("stage");
+let timers = [], ticker = null, rail = null, V = null;
+let settled = [], held = [], standing = [], beats = 0, worstWait = 0;
+let t0 = Date.now();
+const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+const now = () => (Date.now() - t0) / 1000;
+
+/* ---------------- the five ways to stand ---------------- */
+const VARIANTS = {
+  S1: {
+    name: "S1 — pulse (the baseline)",
+    cost: ["What you have been looking at: the dots that want you fade in and out, forever, until you clear them.",
+           "Motion is the strongest pull the eye has, so it works — and it keeps working from the corner of your eye.",
+           "Weakness: it is the only one here that moves, and movement beside your work is the thing you end up resenting at 11pm."],
+    apply(pip) { pip.classList.add("stand-pulse"); },
+    clear(pip) { pip.classList.remove("stand-pulse"); }
+  },
+  S2: {
+    name: "S2 — grow",
+    cost: ["The dots that want you swell to nearly twice the size, and every settled dot shrinks to a faint speck. Nothing moves.",
+           "The rail stops being a list and becomes a shape: two fat dots among specks reads instantly, and holds still.",
+           "Weakness: it costs you the finished work. Once the settled dots are specks you cannot read the fleet's history off the rail."],
+    railClass: "grow-mode",
+    apply(pip) { pip.classList.add("stand-grow"); },
+    clear(pip) { pip.classList.remove("stand-grow"); }
+  },
+  S3: {
+    name: "S3 — stack to the top",
+    cost: ["The dots that want you leave their place in the fleet and gather at the top of the rail, above a dividing line. Everything else sinks below it.",
+           "The rail turns into a queue you can count. Position does the work, so there is no motion and no size change at all.",
+           "Weakness: a dot no longer keeps its home, so you cannot learn where a given job lives — the same cost the corner cluster paid."],
+    reorders: true,
+    apply() {}, clear() {}
+  },
+  S4: {
+    name: "S4 — light the edge",
+    cost: ["The dots do not change. The rail itself lights up behind them in the colour of the worst thing standing, and stays lit until you clear it.",
+           "A soft glow at the edge of the screen is peripheral by nature — you feel it without looking straight at it, and it never twitches.",
+           "Weakness: it tells you something stands, not how many or which. You have to look at the dots for that."],
+    lights: true,
+    apply() {}, clear() {}
+  },
+  S5: {
+    name: "S5 — grow a tab",
+    cost: ["A standing dot stretches into a small tab that pushes out past the rail and into the screen, like a bookmark in the edge of a book.",
+           "The rail's outline changes shape, so it reads at a glance and in the corner of your eye, with no motion and no colour trick.",
+           "Weakness: it pokes into the window under it. With three standing at once the edge starts to look like a comb."],
+    apply(pip) { pip.classList.add("stand-tab"); },
+    clear(pip) { pip.classList.remove("stand-tab"); }
+  },
+};
+
+/* ---------------- the rail, the beat, the card: fixed ---------------- */
+function buildRail() {
+  const r = document.createElement("div");
+  r.className = "rail" + (V.railClass ? " " + V.railClass : "");
+  FEED.forEach((e, i) => {
+    const p = document.createElement("span");
+    p.className = "pip"; p.id = "pip" + i;
+    r.append(p);
+  });
+  r.onclick = clearStanding;
+  stage.append(r);
+  return r;
+}
+function order() {
+  if (!V.reorders) return;
+  // S3 only: standing dots gather above a dividing line.
+  const stand = standing.map(e => document.getElementById("pip" + e.i));
+  const rest = FEED.map((_, i) => document.getElementById("pip" + i))
+                   .filter(p => p && !stand.includes(p));
+  rail.querySelectorAll(".gap").forEach(g => g.remove());
+  stand.forEach(p => rail.append(p));
+  if (stand.length) {
+    const gap = document.createElement("span");
+    gap.className = "gap";
+    rail.append(gap);
+  }
+  rest.forEach(p => rail.append(p));
+}
+function light() {
+  if (!V.lights) return;
+  const worst = standing.some(e => e.state === "fail") ? "fail" : standing.length ? "wait" : null;
+  rail.classList.toggle("lit", !!worst);
+  if (worst) rail.style.setProperty("--flash", COLOR[worst]);
+}
+function stand(list) {
+  standing = list;
+  list.forEach(e => V.apply(document.getElementById("pip" + e.i), e));
+  order(); light();
+}
+function clearStanding() {
+  standing.forEach(e => V.clear(document.getElementById("pip" + e.i), e));
+  standing = [];
+  order(); light();
+  document.querySelector(".card")?.remove();
+}
+function beat() {
+  const open = settled.filter(e => e.state !== "done");
+  if (!held.length && !open.length) { held = []; return; }
+  beats++;
+  const done = held.filter(e => e.state === "done").length;
+  document.querySelector(".card")?.remove();
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<span class="headline" style="color:${open.length ? "#f0c674" : "#4ec9a0"}">
+      ${open.length ? open.length + " want" + (open.length === 1 ? "s" : "") + " you now" : "All clear"}</span>
+    <ul>${(done ? `<li><span class="mark ok">✔</span> ${done} finished since the last beat</li>` : "") +
+      open.map(e => `<li><span class="mark ${e.state === "fail" ? "bad" : "wait"}">${MARK[e.state]}</span>
+        ${e.job}${e.detail ? ": " + e.detail : " failed"}</li>`).join("")}</ul>`;
+  stage.append(card);
+  held = [];
+  at(4200, () => card.remove());
+  stand(open);       // the standing state outlives the card
+  score();
+}
+function score() {
+  document.getElementById("score").innerHTML =
+    `<b>${beats}</b> beat${beats === 1 ? "" : "s"} in ${now().toFixed(0)} min · ` +
+    `<b>${standing.length}</b> standing · worst wait: <b>${worstWait.toFixed(1)} min</b>`;
+}
+
+/* ---- run ---- */
+const keys = Object.keys(VARIANTS);
+const params = () => new URLSearchParams(location.search);
+const current = () => {
+  const k = (params().get("variant") || "S1").toUpperCase();
+  return keys.includes(k) ? k : "S1";
+};
+const N = () => [2, 5, 15].includes(+params().get("n")) ? +params().get("n") : 5;
+
+function render() {
+  timers.forEach(clearTimeout); timers = [];
+  clearInterval(ticker);
+  settled = []; held = []; standing = []; beats = 0; worstWait = 0;
+  stage.innerHTML = "";
+  const work = document.createElement("div");
+  work.className = "work";
+  work.innerHTML = `<p class="work-hint">your editor, your terminal, whatever you were actually doing</p>`;
+  stage.append(work);
+  V = VARIANTS[current()];
+  rail = buildRail();
+  const bar = document.createElement("div");
+  bar.className = "beatbar";
+  bar.innerHTML = `<div class="rule">BEAT — every N minutes; whatever wants you keeps showing until cleared</div>
+    <div><b id="bh">0</b> held · next beat in <b id="bn">–</b></div>
+    <div class="track"><i id="bt" style="width:0"></i></div>`;
+  stage.append(bar);
+  const a = document.createElement("div");
+  a.className = "ack"; a.textContent = "click the rail to clear"; stage.append(a);
+  document.getElementById("vname").textContent = V.name;
+  document.getElementById("n").textContent = "N = " + N() + " min";
+  document.getElementById("cost").innerHTML = `<h6>${V.name}</h6>` + V.cost.map(c => `<p>${c}</p>`).join("");
+  score();
+
+  t0 = Date.now();
+  FEED.forEach((e, i) => at(e.m * 1000, () => {
+    const ev = { ...e, i };
+    settled.push(ev); held.push(ev);
+    const p = document.getElementById("pip" + i);
+    p.style.background = COLOR[e.state];      // the rail updates silently between beats
+  }));
+  for (let k = 1; k * N() <= 20; k++) at(k * N() * 1000, beat);
+
+  ticker = setInterval(() => {
+    const m = now();
+    const next = Math.ceil(m / N()) * N();
+    document.getElementById("clock").innerHTML = `<b>${m.toFixed(0)} min</b><br>${SPEED_NOTE} speed`;
+    document.getElementById("bh").textContent = held.length;
+    document.getElementById("bn").textContent = (next - m).toFixed(1) + " min";
+    document.getElementById("bt").style.width = (1 - (next - m) / N()) * 100 + "%";
+    settled.filter(e => e.state !== "done").forEach(e => worstWait = Math.max(worstWait, m - e.m));
+    score();
+  }, 100);
+}
+function nav(patch) {
+  const p = params();
+  Object.entries(patch).forEach(([k, v]) => p.set(k, v));
+  history.replaceState(null, "", "?" + p);
+  render();
+}
+const go = s => nav({ variant: keys[(keys.indexOf(current()) + s + keys.length) % keys.length] });
+document.getElementById("prev").onclick = () => go(-1);
+document.getElementById("next").onclick = () => go(1);
+document.getElementById("n").onclick = () => nav({ n: { 2: 5, 5: 15, 15: 2 }[N()] });
+document.getElementById("replay").onclick = render;
+addEventListener("keydown", e => {
+  if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable) return;
+  if (e.key === "ArrowLeft") go(-1);
+  if (e.key === "ArrowRight") go(1);
+  if (e.key === "n") nav({ n: { 2: 5, 5: 15, 15: 2 }[N()] });
+});
+render();
+</script>
