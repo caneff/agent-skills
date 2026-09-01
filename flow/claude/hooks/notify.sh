@@ -29,30 +29,10 @@ msg=$(printf '%s' "$INPUT" | jq -r '.message // .notification_type // "needs you
 dir=$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
 [ -n "${msg:-}" ] || msg="needs you"
 
-# The payload's cwd is the session that raised the notification, not the
-# background job it is about, so it names the same project every time. The job
-# is named in the message instead: the CLI builds "<label> finished",
-# "<label> failed" and "<label> needs your input: <detail>". Split there, so
-# the toast's first line says which job and what happened to it.
-where="Claude Code"
-[ -n "${dir:-}" ] && where="Claude Code · $(basename "$dir")"
-
-case "$msg" in
-  *" needs your input: "*)
-    title="${msg%% needs your input: *} needs you"
-    msg="${msg#* needs your input: }" ;;
-  *" needs your input")
-    title="${msg% needs your input} needs you"
-    msg="$where" ;;
-  *" finished" | *" failed")
-    title="$msg"
-    msg="$where" ;;
-  *)
-    title="$where" ;;
-esac
+title="Claude Code"
+[ -n "${dir:-}" ] && title="Claude Code · $(basename "$dir")"
 
 # A toast shows two short lines and nothing more, so flatten and bound the text.
-title=$(printf '%s' "$title" | tr '\n\r\t' '   ' | cut -c1-70)
 msg=$(printf '%s' "$msg" | tr '\n\r\t' '   ' | cut -c1-180)
 
 # PowerShell single-quoted literals escape a quote by doubling it.
