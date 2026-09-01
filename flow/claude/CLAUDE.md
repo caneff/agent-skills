@@ -9,9 +9,9 @@
 - **Gate 1 — whose repo?** Mine (origin owner = my gh login) → agents land
   directly. Anyone else's → push the branch, stop before the PR, hand me the
   PR command.
-- **Touch repo files only from a linked worktree** — never the primary
-  checkout, docs included. The require-worktree hook blocks Edit/Write there:
-  EnterWorktree first, work, then `land`.
+- **One Orca workspace per task** — each is its own worktree and branch, made
+  from the `+` on the project row. Agents never share a tree, so nothing
+  guards the primary checkout; a terminal opened on `main` means you meant it.
 - **Gate 2 — code or decision?** Code file touched on my repo → code lane
   (`/implement` → worktree → `land` onto main). Zero code files → auto-ship:
   same worktree → `land`, just no ticket/TDD/review ceremony. If I say "make
