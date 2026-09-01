@@ -12,11 +12,11 @@
 - **One Orca workspace per task** — each is its own worktree and branch, made
   from the `+` on the project row. Agents never share a tree, so nothing
   guards the primary checkout; a terminal opened on `main` means you meant it.
-- **Gate 2 — code or decision?** Code file touched on my repo → code lane
-  (`/implement` → worktree → `land` onto main). Zero code files → auto-ship:
-  same worktree → `land`, just no ticket/TDD/review ceremony. If I say "make
-  this a PR" → `pushpr`, and I merge.
-- Code-lane mechanics (worktree, `land`, `pushpr`) live in `/implement`.
+- **Gate 2 — code or decision?** Code file touched on my repo → code lane: a
+  workspace made from the ticket, `/implement` inside it, PR at the end, and I
+  merge. Zero code files → auto-ship: edit on `main`, commit, push, no
+  ticket/TDD/review ceremony.
+- Code-lane mechanics live in `/implement`.
 
 Gates detailed under "How work lands"; the principle behind both: **I see it
 before any OTHER human does.** My own repos land unreviewed — I read the log
@@ -80,25 +80,28 @@ merged) gets closed, not relabeled.
 
 **Gate 1 detail:** base repo = upstream parent for a fork, else this repo.
 Anyone else's repo → hand me the drafted title/body, `gh pr create ...` line,
-and a compare command; `pushpr` enforces this itself.
+and a compare command. The ownership-gated git hook, not prose, is what blocks
+pushes to repos I don't own.
 
 **Gate 2 detail:** a **code file** is anything executed, imported, or that
 changes runtime/tool behavior — `.py/.ts/.js/.sh/.rs`, `settings.json`, hooks,
-CI config, and any skill/agent `.md`; a mixed diff is code. Auto-ship: edit in
-a worktree, commit, `land`, report — except a fenced code block still needs
-its format check run first (formatters read fences; `uv run ruff format
---check <file>` or equivalent). Code lane: `/implement` drives worktree → TDD
-→ `/code-review` → `land`. My insight is after the fact: small honest commits,
-`/landed` or `git log -p`, revert if wrong. The ownership-gated git hook, not
-prose, is what blocks pushes to repos I don't own.
+CI config, and any skill/agent `.md`; a mixed diff is code. Auto-ship: edit on
+`main`, commit, push, report — except a fenced code block still needs its
+format check run first (formatters read fences; `uv run ruff format --check
+<file>` or equivalent). Code lane: one workspace per ticket, then `/implement`
+drives TDD → `/code-review` → commit with `Closes #<n>` → PR. My insight is
+after the fact: small honest commits, `/landed` or `git log -p`, revert if
+wrong.
 
 # Gotchas
 
 - **Every Agent call passes `model`** — the session is Fable and a bare call
   inherits it. Explore/lookup → `sonnet`, review/diagnosis → `opus`. Rubric:
   `~/.agents/skills/flow/claude/subagent-tiers.md`.
-- `.claude/worktrees/` must be gitignored — untracked, `pushpr` cuts a junk
-  branch and commits the worktree back as a gitlink instead of pushing it.
+- **Never bare `orca` on Linux** — it resolves to the GNOME screen reader and
+  starts speech. Use `orca-ide`, or `$ORCA_CLI_COMMAND` where Orca exports it.
+- Orca does not clean up after a merge — `orca-ide worktree rm` the workspace
+  yourself, or merged branches pile up in the sidebar.
 - `head`/`tail` are for looking, not measuring — use `wc -l`/`grep -c` before
   treating file contents as a premise.
 
