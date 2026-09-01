@@ -1,0 +1,365 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>The heartbeat — prototype</title>
+<!--
+  PROTOTYPE — throwaway. Round 5. Not wired to notify.sh.
+
+  Settled so far: an always-there dot widget, and a batched alert rather than
+  one per event. You do not want to hear as soon as possible. You want to hear
+  every N minutes.
+
+  So this page holds two things FIXED — the widget, and what a beat looks like
+  when it lands (the widget swells into a card and pulses). The only thing
+  that varies is the RULE for when a beat fires:
+
+  V1 strict · V2 skip empty beats · V3 beat then stand · V4 report the present
+
+  Two controls: N (2 / 5 / 15 minutes) and replay. Time runs at 60x — one
+  simulated minute per second — so a 5-minute beat lands every 5 seconds.
+
+  The number that decides this is bottom left: the longest a job that wanted
+  you sat unannounced.
+-->
+<style>
+  :root {
+    --ink: #e8e8ea; --dim: #a0a0a8; --line: #3a3a42;
+    --ok: #4ec9a0; --bad: #ff6b6b; --wait: #f0c674; --run: #6d7280;
+    --accent: #d97757;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; overflow: hidden;
+    font: 14px/1.45 "Segoe UI", system-ui, sans-serif; color: var(--ink);
+    background: radial-gradient(120% 100% at 20% 0%, #3a4a6b 0%, #1b1f2a 55%, #14161c 100%);
+  }
+  .work { position: absolute; inset: 0 0 48px 0; display: grid; place-items: center; }
+  .work-hint { color: #ffffff33; font-size: 13px; user-select: none; }
+  .taskbar {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 48px;
+    background: #1a1a1ecc; border-top: 1px solid #ffffff14;
+    display: flex; align-items: center; gap: 10px; padding: 0 12px;
+  }
+  .tb-icon { width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center; background: #ffffff10; font-size: 15px; }
+  .clock { margin-left: auto; font-size: 12px; text-align: right; line-height: 1.15; color: var(--dim); }
+  .clock b { color: var(--ink); font-weight: 600; }
+
+  /* ---- the widget: same in every variant, silent between beats ---- */
+  .widget {
+    position: absolute; right: 18px; bottom: 62px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 13px; border-radius: 999px;
+    background: #191a1fee; border: 1px solid #ffffff1f;
+    box-shadow: 0 8px 22px #0008; cursor: pointer; z-index: 40;
+    transition: border-radius .3s, padding .3s, background .3s, width .3s;
+  }
+  .widget .pips { display: flex; gap: 5px; }
+  .widget .pip { width: 8px; height: 8px; border-radius: 50%; background: var(--run); transition: background .4s; }
+  .widget .count { font-size: 12px; color: var(--dim); white-space: nowrap; }
+  .widget .count b { color: var(--ink); font-weight: 600; }
+  .breathe { animation: breathe 1.6s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .35; } }
+
+  /* what a beat looks like — fixed across the four rules */
+  .widget.card {
+    flex-direction: column; align-items: flex-start; gap: 5px;
+    width: 310px; border-radius: 10px; padding: 12px 15px; background: #23242bfa;
+  }
+  .widget.card .headline { font-size: 14px; font-weight: 600; }
+  .widget.card ul { margin: 4px 0 0; padding: 0; }
+  .widget.card li { list-style: none; display: flex; gap: 8px; font-size: 13px; padding: 1px 0; }
+  .mark { font-weight: 700; }
+  .mark.ok { color: var(--ok); } .mark.bad { color: var(--bad); } .mark.wait { color: var(--wait); }
+  .widget.beat { animation: beat .9s ease-out 2; }
+  @keyframes beat {
+    0%   { box-shadow: 0 8px 22px #0008, 0 0 0 0 var(--flash); }
+    75%  { box-shadow: 0 8px 22px #0008, 0 0 0 24px transparent; }
+    100% { box-shadow: 0 8px 22px #0008, 0 0 0 0 transparent; }
+  }
+  /* V3 only: it keeps going after the beat until you click it */
+  .widget.stand { animation: stand 1.9s ease-in-out infinite; }
+  @keyframes stand {
+    0%, 100% { box-shadow: 0 8px 22px #0008, 0 0 0 0 transparent; }
+    50%      { box-shadow: 0 8px 22px #0008, 0 0 0 11px var(--flash); }
+  }
+
+  /* the beat timer, so you can see the rule working */
+  .beatbar {
+    position: absolute; left: 14px; bottom: 62px; width: 320px;
+    background: #191a1fdd; border: 1px solid #ffffff14; border-radius: 8px;
+    padding: 10px 12px; font-size: 12px; color: var(--dim);
+  }
+  .beatbar .rule { color: #ffffff55; margin-bottom: 6px; }
+  .beatbar b { color: var(--ink); font-weight: 600; }
+  .beatbar .track { height: 3px; background: #ffffff1a; border-radius: 2px; margin-top: 8px; }
+  .beatbar .track i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+
+  .ack { position: absolute; right: 18px; bottom: 104px; font-size: 11px; color: #ffffff55; }
+
+  .score {
+    position: fixed; left: 14px; bottom: 14px; z-index: 98;
+    background: #101014e6; border: 1px solid #ffffff1a; border-radius: 8px;
+    padding: 8px 12px; font-size: 12px; color: var(--dim);
+  }
+  .score b { color: var(--ink); font-weight: 600; }
+
+  .switcher {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; z-index: 99;
+    background: #f4f4f5; color: #17171a; border-radius: 999px;
+    box-shadow: 0 6px 24px #000a; padding: 5px 6px; font: 500 13px/1 "Segoe UI", system-ui, sans-serif;
+  }
+  .switcher button { border: 0; background: #17171a; color: #fff; width: 26px; height: 26px; border-radius: 999px; cursor: pointer; }
+  .switcher .name { padding: 0 10px; white-space: nowrap; }
+  .switcher .wide { width: auto; padding: 0 11px; font-weight: 600; }
+  .switcher .n { background: #2f5f8c; }
+  .switcher .replay { background: var(--accent); color: #1b1b1b; }
+  .cost {
+    position: fixed; left: 14px; top: 14px; max-width: 300px; z-index: 99;
+    background: #101014e8; border: 1px solid #ffffff1a; border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 11px 13px; font-size: 12px; color: #c8c8d0;
+  }
+  .cost h6 { margin: 0 0 5px; font-size: 12px; color: var(--ink); }
+  .cost p { margin: 0 0 6px; }
+  .cost p:last-child { margin: 0; color: var(--dim); }
+</style>
+
+<div id="stage"></div>
+<div class="taskbar">
+  <span class="tb-icon">⊞</span><span class="tb-icon">🗔</span><span class="tb-icon">▤</span>
+  <span class="clock" id="clock"></span>
+</div>
+<div class="cost" id="cost"></div>
+<div class="score" id="score"></div>
+<div class="switcher">
+  <button id="prev">‹</button><span class="name" id="vname"></span><button id="next">›</button>
+  <button class="wide n" id="n"></button>
+  <button class="wide replay" id="replay">replay</button>
+</div>
+
+<script>
+const SPEED = 60;                    // one simulated minute per real second
+const COLOR = { done: "#4ec9a0", fail: "#ff6b6b", wait: "#f0c674", run: "#6d7280" };
+const WORD  = { done: "finished", fail: "failed", wait: "needs you" };
+const MARK  = { done: "✔", fail: "✖", wait: "▲" };
+
+// Twenty simulated minutes of a working fleet. `m` is the simulated minute.
+const FEED = [
+  { m:  0.7, job: "gridfind-ring-decode", state: "done" },
+  { m:  1.4, job: "notify-hook-payload",  state: "done" },
+  { m:  2.3, job: "sudoku-custom-ring",   state: "fail" },
+  { m:  3.1, job: "landed-page-rebuild",  state: "done" },
+  { m:  4.6, job: "burndown-42",          state: "wait", detail: "approve the push?" },
+  { m:  6.2, job: "second-brain-retro",   state: "done" },
+  { m:  7.0, job: "rtk-proxy-cache",      state: "done" },
+  { m:  9.5, job: "teach-lesson-base",    state: "wait", detail: "which title?" },
+  { m: 11.0, job: "spec-slicer",          state: "fail" },
+  { m: 12.3, job: "statusline-table",     state: "done" },
+  { m: 13.1, job: "worktree-sweeper",     state: "done" },
+  { m: 15.4, job: "memory-retro",         state: "done" },
+  { m: 17.2, job: "visual-recap",         state: "wait", detail: "pick a base ref" },
+  { m: 18.0, job: "ponytail-audit",       state: "done" },
+];
+
+const stage = document.getElementById("stage");
+let timers = [], ticker = null, W = null, V = null;
+let held = [], settled = [], beats = 0, worstWait = 0, standing = false;
+const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+const now = () => (Date.now() - t0) / 1000;         // simulated minutes
+let t0 = Date.now();
+const openWants = () => settled.filter(e => e.state !== "done" && !e.told);
+
+function widget() {
+  const w = document.createElement("div");
+  w.className = "widget";
+  w.innerHTML = `<span class="pips" id="pips"></span><span class="count" id="wc"><b>0</b> done</span>`;
+  for (let i = 0; i < 8; i++) {
+    const p = document.createElement("span");
+    p.className = "pip breathe"; p.id = "wp" + i;
+    w.querySelector("#pips").append(p);
+  }
+  w.onclick = () => {
+    if (standing) { standing = false; w.classList.remove("stand"); openWants().forEach(e => e.told = true); }
+    w.classList.remove("card"); paintWidget();
+  };
+  stage.append(w);
+  return w;
+}
+// Between beats the widget updates silently. This is the ambient half.
+function paintWidget() {
+  if (W.classList.contains("card")) return;
+  W.innerHTML = `<span class="pips" id="pips"></span><span class="count" id="wc"></span>`;
+  const recent = settled.slice(-8);
+  for (let i = 0; i < 8; i++) {
+    const p = document.createElement("span");
+    const e = recent[i];
+    p.className = "pip" + (e ? "" : " breathe");
+    if (e) p.style.background = COLOR[e.state];
+    W.querySelector("#pips").append(p);
+  }
+  const w = settled.filter(e => e.state !== "done").length;
+  W.querySelector("#wc").innerHTML = w
+    ? `<b>${w}</b> want${w === 1 ? "s" : ""} you`
+    : `<b>${settled.length}</b> done`;
+}
+
+// What a beat looks like is fixed. Only the rule for firing one changes.
+function deliver(list, headline, colour) {
+  beats++;
+  const done = list.filter(e => e.state === "done").length;
+  const rest = list.filter(e => e.state !== "done");
+  W.classList.add("card");
+  W.style.setProperty("--flash", colour);
+  W.innerHTML = `<span class="headline" style="color:${colour}">${headline}</span>
+    <ul>${(done ? `<li><span class="mark ok">✔</span> ${done} finished</li>` : "") +
+      rest.map(e => `<li><span class="mark ${e.state === "fail" ? "bad" : "wait"}">${MARK[e.state]}</span>
+        ${e.job}${e.detail ? ": " + e.detail : " failed"}</li>`).join("")}</ul>`;
+  W.classList.remove("beat"); void W.offsetWidth; W.classList.add("beat");
+  list.forEach(e => { if (e.state !== "done") e.told = true; });
+  at(4200, () => { if (!standing) { W.classList.remove("card"); paintWidget(); } });
+  score();
+}
+function skip() { score(); }
+function score() {
+  document.getElementById("score").innerHTML =
+    `<b>${beats}</b> alert${beats === 1 ? "" : "s"} in ${now().toFixed(0)} min · ` +
+    `worst wait for a blocked job: <b>${worstWait.toFixed(1)} min</b>`;
+}
+
+/* ---------------- the four rules ---------------- */
+
+const V1 = {
+  name: "V1 — strict beat",
+  rule: "every N minutes, whatever happened",
+  cost: ["The beat fires on the clock and reports everything since the last one. Nothing ever jumps it — not a failure, not a job that wants you.",
+         "Completely predictable. You know exactly when you will next be interrupted, and it is never more often than that.",
+         "Weakness: a blocked job can sit for the whole interval. At N = 15 that is a quarter of an hour of a job waiting on a yes."],
+  beat() {
+    if (!held.length) { deliver([], "Nothing since the last beat", "#a0a0a8"); return; }
+    deliver(held, `${held.length} update${held.length === 1 ? "" : "s"}`, "#e8e8ea");
+    held = [];
+  }
+};
+
+const V2 = {
+  name: "V2 — skip the empty beats",
+  rule: "every N minutes, but only if something needs you",
+  cost: ["Same clock, but the beat is skipped when the only news is finished work. You are told on the beat, and only when there is something to do about it.",
+         "Far fewer alerts, and every one you get is worth reading. Finished jobs still turn the dots green quietly.",
+         "Weakness: silence stops meaning anything. You cannot tell 'nothing needs you' from 'the notifier died'."],
+  beat() {
+    const act = held.filter(e => e.state !== "done");
+    if (!act.length) { held = []; skip(); return; }
+    deliver(held, `${act.length} need${act.length === 1 ? "s" : ""} you`, "#f0c674");
+    held = [];
+  }
+};
+
+const V3 = {
+  name: "V3 — beat, then stand",
+  rule: "every N minutes; keeps pulsing until you clear it",
+  cost: ["The beat fires on the clock like V1, but if anything in it wants you the widget keeps pulsing afterwards instead of settling. Clicking it clears the pulse.",
+         "This is the one you cannot miss by being away from the desk when the beat lands — the alert is still going when you come back.",
+         "Weakness: a pulse you have not cleared is a pulse you stop seeing. It only works if you actually clear it."],
+  beat() {
+    if (!held.length) { skip(); return; }
+    const act = held.filter(e => e.state !== "done");
+    deliver(held, `${held.length} update${held.length === 1 ? "" : "s"}`, act.length ? "#f0c674" : "#4ec9a0");
+    held = [];
+    if (act.length) {
+      standing = true;
+      at(4200, () => { W.classList.remove("card"); paintWidget(); W.classList.add("stand"); });
+    }
+  }
+};
+
+const V4 = {
+  name: "V4 — report the present",
+  rule: "every N minutes, what is true now — not what happened",
+  cost: ["The beat does not read out a history. It says what is true at this moment: how many jobs want you, how many failed, how many are still running.",
+         "A job that finished and was replaced never gets mentioned. The alert is the same length whether you last looked one minute ago or an hour ago.",
+         "Weakness: you lose the record. If something failed and you dealt with it, the beat has nothing to say about it, ever."],
+  beat() {
+    const open = settled.filter(e => e.state !== "done");
+    held = [];
+    if (!open.length) { deliver([], `All clear · ${settled.length} finished`, "#4ec9a0"); return; }
+    deliver(open, `${open.length} want${open.length === 1 ? "s" : ""} you now`, "#f0c674");
+  }
+};
+
+/* ---- run ---- */
+const VARIANTS = { V1, V2, V3, V4 };
+const keys = Object.keys(VARIANTS);
+const params = () => new URLSearchParams(location.search);
+const current = () => {
+  const k = (params().get("variant") || "V1").toUpperCase();
+  return keys.includes(k) ? k : "V1";
+};
+const N = () => [2, 5, 15].includes(+params().get("n")) ? +params().get("n") : 5;
+
+function render() {
+  timers.forEach(clearTimeout); timers = [];
+  clearInterval(ticker);
+  held = []; settled = []; beats = 0; worstWait = 0; standing = false;
+  stage.innerHTML = "";
+  const work = document.createElement("div");
+  work.className = "work";
+  work.innerHTML = `<p class="work-hint">your editor, your terminal, whatever you were actually doing</p>`;
+  stage.append(work);
+  V = VARIANTS[current()];
+  W = widget();
+  const bar = document.createElement("div");
+  bar.className = "beatbar";
+  bar.innerHTML = `<div class="rule">RULE — ${V.rule}</div>
+    <div><b id="bh">0</b> held · next beat in <b id="bn">–</b></div>
+    <div class="track"><i id="bt" style="width:0"></i></div>`;
+  stage.append(bar);
+  if (current() === "V3") {
+    const a = document.createElement("div");
+    a.className = "ack"; a.textContent = "click the widget to clear it"; stage.append(a);
+  }
+  document.getElementById("vname").textContent = V.name;
+  document.getElementById("n").textContent = "N = " + N() + " min";
+  document.getElementById("cost").innerHTML = `<h6>${V.name}</h6>` + V.cost.map(c => `<p>${c}</p>`).join("");
+  paintWidget();
+  score();
+
+  t0 = Date.now();
+  FEED.forEach(e => at(e.m * 1000, () => {
+    const ev = { ...e, at: e.m, told: false };
+    settled.push(ev); held.push(ev);
+    paintWidget();
+  }));
+  for (let k = 1; k * N() <= 20; k++) at(k * N() * 1000, () => V.beat());
+
+  ticker = setInterval(() => {
+    const m = now();
+    const next = Math.ceil(m / N()) * N();
+    document.getElementById("clock").innerHTML =
+      `<b>${m.toFixed(0)} min</b><br>60× speed`;
+    document.getElementById("bh").textContent = held.length;
+    document.getElementById("bn").textContent = (next - m).toFixed(1) + " min";
+    document.getElementById("bt").style.width = (1 - (next - m) / N()) * 100 + "%";
+    // The honest cost of batching: how long an unheard blocked job has waited.
+    openWants().forEach(e => worstWait = Math.max(worstWait, m - e.at));
+    score();
+  }, 100);
+}
+function nav(patch) {
+  const p = params();
+  Object.entries(patch).forEach(([k, v]) => p.set(k, v));
+  history.replaceState(null, "", "?" + p);
+  render();
+}
+const go = s => nav({ variant: keys[(keys.indexOf(current()) + s + keys.length) % keys.length] });
+document.getElementById("prev").onclick = () => go(-1);
+document.getElementById("next").onclick = () => go(1);
+document.getElementById("n").onclick = () => nav({ n: { 2: 5, 5: 15, 15: 2 }[N()] });
+document.getElementById("replay").onclick = render;
+addEventListener("keydown", e => {
+  if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable) return;
+  if (e.key === "ArrowLeft") go(-1);
+  if (e.key === "ArrowRight") go(1);
+  if (e.key === "n") nav({ n: { 2: 5, 5: 15, 15: 2 }[N()] });
+});
+render();
+</script>
