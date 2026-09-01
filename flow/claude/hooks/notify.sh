@@ -23,9 +23,7 @@ command -v "$PS" >/dev/null 2>&1 || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 
 INPUT=$(cat)
-# Payload shape (from the CLI's own hook schema): hook_event_name, message,
-# title (optional), notification_type. It is flat — there is no nested object.
-msg=$(printf '%s' "$INPUT" | jq -r '.message // .notification_type // "needs you"' 2>/dev/null)
+msg=$(printf '%s' "$INPUT" | jq -r '.notification.message // .notification_type // "needs you"' 2>/dev/null)
 dir=$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)
 [ -n "${msg:-}" ] || msg="needs you"
 

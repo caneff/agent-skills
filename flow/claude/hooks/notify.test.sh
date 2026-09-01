@@ -40,11 +40,11 @@ run() {
 }
 
 run "message and project name reach the toast" \
-  '{"hook_event_name":"Notification","notification_type":"agent_needs_input","cwd":"/home/me/src/gridfind","message":"Needs your approval to push"}' \
+  '{"notification_type":"agent_needs_input","cwd":"/home/me/src/gridfind","notification":{"message":"Needs your approval to push"}}' \
   "Claude Code · gridfind" "Needs your approval to push"
 
 run "a quote in the message is doubled, keeping the literal closed" \
-  '{"cwd":"/tmp/x","message":"don'"'"'t stop"}' \
+  '{"cwd":"/tmp/x","notification":{"message":"don'"'"'t stop"}}' \
   "don''t stop"
 
 run "no message falls back to the notification type" \
@@ -52,11 +52,11 @@ run "no message falls back to the notification type" \
   "agent_completed"
 
 run "a multi-line message is flattened to one line" \
-  '{"cwd":"/tmp/x","message":"first\nsecond"}' \
+  '{"cwd":"/tmp/x","notification":{"message":"first\nsecond"}}' \
   "first second"
 
 run "no cwd still toasts, without a project name" \
-  '{"message":"hello"}' \
+  '{"notification":{"message":"hello"}}' \
   "Claude Code" "hello"
 
 run "an unparseable payload still toasts rather than failing" \
@@ -66,7 +66,7 @@ run "an unparseable payload still toasts rather than failing" \
 # A missing powershell.exe is the ordinary case on any non-WSL machine: the
 # hook must go quiet, not error.
 rm -f "$cap"
-printf '%s' '{"message":"x"}' | NOTIFY_PS="$tmp/no-such-ps" "$hook" >/dev/null 2>&1
+printf '%s' '{"notification":{"message":"x"}}' | NOTIFY_PS="$tmp/no-such-ps" "$hook" >/dev/null 2>&1
 rc=$?
 if [ "$rc" = 0 ] && [ ! -f "$cap" ]; then
   echo "PASS: a missing powershell.exe exits quietly"
