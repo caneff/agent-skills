@@ -31,8 +31,8 @@ Build steps (run directly; do not invoke /implement):
    configured; none otherwise.
 5. Self-review the diff against each acceptance criterion.
 6. Commit with body trailer `Closes caneff/second-brain-v2#128`.
-7. Land: from inside the worktree run `land`. Mechanical rebase conflict:
-   resolve, retry once; logic conflict: stop and report.
+7. Finish: push the branch and open a PR for the owner to merge. Mechanical
+   rebase conflict: resolve, retry once; logic conflict: stop and report.
 8. Append a one-line milestone to
    /home/caneff/.claude/jobs/<job>/tmp/progress-128.md after each step.
 
@@ -41,7 +41,7 @@ Hazards:
   ~/.claude/hooks symlinks — edit only worktree copies, never the primary
   checkout.
 - Other agents may land on this repo's main concurrently — branch after a
-  fresh fetch; a land conflict usually clears on one fetch-and-retry.
+  fresh fetch; a rebase conflict usually clears on one fetch-and-retry.
 - Session extra: main just received a commit touching code-review/SKILL.md
   (report-routing paragraph) — branch from origin/main after fetching so
   you include it; your change is a different section of the same file.

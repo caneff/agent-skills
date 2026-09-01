@@ -58,10 +58,10 @@ Build steps (run directly; do not invoke /implement):
 5. Self-review the diff against each acceptance criterion.
 6. Commit with body trailer `Closes <full cross-repo ref if the ticket
    lives outside the target repo, else #<n>>`.
-7. <Land per the landing lane: `land` from inside the worktree (own repo)
-   / stop after commit and report branch (burndown) / pushpr (foreign or
-   PR-requested)>. Mechanical rebase conflict: resolve, retry once;
-   logic conflict: stop and report.
+7. <Finish per the landing lane: push the branch and open a PR for the owner
+   to merge (own repo) / stop after commit and report the branch (burndown) /
+   push and hand the owner the `gh pr create` line (foreign)>. Mechanical
+   rebase conflict: resolve, retry once; logic conflict: stop and report.
 8. Append a one-line milestone to <progress file path> after each step —
    commit work in progress rather than sitting on an uncommitted tree; the
    progress file plus your branch is the resume point if you stall.

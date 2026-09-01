@@ -3,12 +3,12 @@
 #
 # Two narrow guards; everything else about a push is the agent's business.
 #   - PUSH is gated on OWNERSHIP, not on branch or file type. If origin's owner
-#     is the `gh` login (resolving a fork to its parent, the way `pushpr` does),
-#     every push is allowed — any branch, any content, default branch included.
-#     A repo someone else owns is blocked and handed off to `pushpr`, which
-#     carries the outward gate (it pushes the branch but leaves the PR to the
-#     user). The ownership lookup FAILS CLOSED: gh erroring or the network
-#     being down means "not owned" means blocked.
+#     is the `gh` login (resolving a fork to its parent), every push is allowed
+#     — any branch, any content, default branch included. A repo someone else
+#     owns is blocked, and the agent hands the user the push and PR lines to
+#     run themselves: the outward-facing step is the user's. The ownership
+#     lookup FAILS CLOSED: gh erroring or the network being down means "not
+#     owned" means blocked.
 #   - `gh pr merge` is blocked everywhere. When a PR exists, only the user
 #     finishes it — via `! gh pr merge ...` in their own shell, or the web UI.
 #   - History/worktree destroyers and bare force-pushes stay blocked; those
@@ -92,9 +92,9 @@ repo_is_owned() {
   key=$(printf '%s' "$toplevel" | tr -c 'A-Za-z0-9' '_')
   [ -f "$cache_dir/$key" ] && return 0
 
-  # Same resolution as pushpr: evaluate ORIGIN explicitly (a bare `gh repo
-  # view` would resolve to an `upstream` remote instead), and a fork's real
-  # base repo is its parent. Any failure here returns non-zero -> blocked.
+  # Evaluate ORIGIN explicitly (a bare `gh repo view` would resolve to an
+  # `upstream` remote instead), and a fork's real base repo is its parent.
+  # Any failure here returns non-zero -> blocked.
   me=$(gh api user -q .login 2>/dev/null) || return 1
   target=$(gh repo view "$origin" --json owner,name,isFork,parent \
       -q 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' 2>/dev/null) || return 1
@@ -110,7 +110,7 @@ if echo "$SCAN" | grep -qE '(^|[;&|[:space:]])git([[:space:]]+-C[[:space:]]+[^[:
   if repo_is_owned; then
     exit 0
   fi
-  echo "BLOCKED: pushing to a repo you don't own (or ownership couldn't be verified — gh down?). Use 'pushpr': it pushes the branch and stops before the PR, leaving the outward-facing step to the user." >&2
+  echo "BLOCKED: pushing to a repo you don't own (or ownership couldn't be verified — gh down?). Hand the user the exact '! git push -u origin <branch>' line and a drafted 'gh pr create' line to run in their own shell — the outward-facing step is theirs, not yours." >&2
   exit 2
 fi
 

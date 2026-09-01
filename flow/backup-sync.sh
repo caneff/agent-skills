@@ -44,7 +44,7 @@ if [ "$mode" = --commit ]; then
     git -C "$here" commit -q -m "chore(flow): auto-backup copy-only settings" -- "${rels[@]}"
     echo "committed backup snapshot"
     # A commit that never leaves the machine is not a backup, and it leaves main
-    # ahead of origin, which is what makes the next `land` refuse to
+    # ahead of origin, which is what makes the next push refuse to
     # fast-forward. Push only from main: the commit above went onto whatever
     # HEAD is, so pushing main from another branch would push the wrong thing.
     # ponytail: a rejected push only warns. Rebasing the user's main from a

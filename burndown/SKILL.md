@@ -53,9 +53,9 @@ watched a burn and the notes held up.
    queue — a human added it mid-burn — explore that ticket alone and append to
    the same notes file.
 4. **Build.** Run the [`implement`](../implement/SKILL.md) skill on each ticket
-   in the batch — claim, delegate the build to a subagent — with one change to
-   that skill's sequencing: seed the builder to stop after committing, report
-   its branch, and wait. The driver owns review and land (next steps);
+   in the batch — claim, one workspace per ticket — with one change to that
+   skill's sequencing: seed the builder to stop after committing, report its
+   branch, and wait. The driver owns review and the PR (next steps);
    everything else in `implement`, including its gates, applies unchanged.
 
    **Seed by pointer.** A builder gets the issue reference, the notes path,
@@ -73,9 +73,9 @@ watched a burn and the notes held up.
    **clean**, tell the builder to land, per `implement`'s landing section. On
    **can't get clean**, park the ticket (below).
 
-   A builder still mid-build on a stale base needs no warning: `land` fetches,
-   rebases onto the pushed default branch, and runs the test command, so a
-   real collision surfaces there and parks the ticket.
+   A builder still mid-build on a stale base needs no warning: the PR reports
+   the conflict against the pushed default branch, so a real collision
+   surfaces there and parks the ticket.
 
    Either way the settled ticket's builder is spent: **release it** —
    `TaskStop` with its name. A burndown builder waits for review, so it must

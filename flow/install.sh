@@ -22,8 +22,6 @@ link() { # link <repo-relative-src> <live-dest>
   echo "linked $dest -> $src"
 }
 
-link bin/land                   "$HOME/.local/bin/land"
-link bin/pushpr                 "$HOME/.local/bin/pushpr"
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 link claude/RTK.md              "$HOME/.claude/RTK.md"
