@@ -3,7 +3,7 @@
 # installed deps, never committed. No trailing slash: also catches a
 # `node_modules` symlink (a worktree pointing at the root install), which a
 # dir-only `node_modules/` pattern would miss and leave untracked — that stray
-# symlink is what blocks `land`'s worktree removal.
+# symlink is what blocks removing the worktree afterwards.
 node_modules
 # python bytecode, never source
 __pycache__/
