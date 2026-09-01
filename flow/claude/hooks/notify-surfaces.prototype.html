@@ -1,0 +1,449 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Notify surfaces — prototype</title>
+<!--
+  PROTOTYPE — throwaway. Not wired to notify.sh, not shipped, no tests.
+
+  Question: what should tell me a background job wants me again?
+
+  Five variants of the notify surface on one page, switchable with ?variant=
+  and the bar at the bottom. They are different CHANNELS, not different skins:
+  A interrupts per event, B sits there all the time, C says nothing and waits
+  to be looked at, D uses only sound, E collects events and speaks once.
+
+  All five run off the same scripted feed of job events, so the thing you are
+  judging is the interruption, not the wording.
+-->
+<style>
+  :root {
+    --ink: #e8e8ea;
+    --dim: #a0a0a8;
+    --panel: #2b2b30;
+    --panel-2: #202024;
+    --line: #3a3a42;
+    --ok: #4ec9a0;
+    --bad: #ff6b6b;
+    --wait: #f0c674;
+    --accent: #d97757;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; overflow: hidden;
+    font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    /* A fake desktop. The variants are judged against something, not in a void. */
+    background: radial-gradient(120% 100% at 20% 0%, #3a4a6b 0%, #1b1f2a 55%, #14161c 100%);
+  }
+
+  /* ---- the desktop we are pinning notifications onto ---- */
+  .work {
+    position: absolute; inset: 0 0 48px 0;
+    display: grid; place-items: center;
+  }
+  .work-hint {
+    max-width: 30rem; text-align: center; color: #ffffff33;
+    font-size: 13px; user-select: none;
+  }
+  .taskbar {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 48px;
+    background: #1a1a1ecc; backdrop-filter: blur(12px);
+    border-top: 1px solid #ffffff14;
+    display: flex; align-items: center; gap: 10px; padding: 0 12px;
+  }
+  .tb-icon {
+    width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center;
+    background: #ffffff10; font-size: 15px;
+  }
+  .tray { margin-left: auto; display: flex; align-items: center; gap: 12px; color: var(--dim); }
+  .clock { font-size: 12px; text-align: right; line-height: 1.15; }
+
+  /* ---- shared toast look (variants A and E) ---- */
+  .toast-stack {
+    position: absolute; right: 14px; bottom: 60px;
+    display: flex; flex-direction: column-reverse; gap: 10px;
+    width: 364px;
+  }
+  .toast {
+    background: #2c2c31ee; backdrop-filter: blur(20px);
+    border: 1px solid #ffffff1f; border-radius: 8px;
+    box-shadow: 0 12px 28px #0009;
+    padding: 12px 14px;
+    animation: slide .22s ease-out;
+  }
+  @keyframes slide { from { transform: translateX(380px); opacity: 0; } }
+  .toast.leaving { animation: out .3s ease-in forwards; }
+  @keyframes out { to { transform: translateX(380px); opacity: 0; } }
+  .toast-app {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 11px; color: var(--dim); margin-bottom: 7px;
+  }
+  .toast-app .badge {
+    width: 15px; height: 15px; border-radius: 3px; display: grid; place-items: center;
+    background: var(--accent); font-size: 9px; color: #1b1b1b;
+  }
+  .toast h4 { margin: 0 0 3px; font-size: 14px; font-weight: 600; }
+  .toast p { margin: 0; font-size: 13px; color: #cfcfd6; }
+  .mark { font-weight: 700; }
+  .mark.ok { color: var(--ok); } .mark.bad { color: var(--bad); } .mark.wait { color: var(--wait); }
+
+  /* ---- variant B: a strip that is always there ---- */
+  .hud {
+    position: absolute; top: 14px; right: 14px; width: 300px;
+    background: #191a1fe8; border: 1px solid #ffffff1a; border-radius: 10px;
+    box-shadow: 0 10px 30px #0007; overflow: hidden;
+  }
+  .hud header {
+    padding: 8px 12px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--dim); border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between;
+  }
+  .hud ul { list-style: none; margin: 0; padding: 4px 0; max-height: 320px; overflow: auto; }
+  .hud li {
+    display: flex; align-items: center; gap: 9px; padding: 7px 12px; font-size: 13px;
+    border-left: 3px solid transparent;
+  }
+  .hud li.fresh { background: #ffffff0d; border-left-color: var(--accent); }
+  .hud .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .hud .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hud .state { font-size: 11px; color: var(--dim); }
+  .pulse { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+
+  /* ---- variant C: nothing but a tray badge ---- */
+  .tray-app { position: relative; }
+  .tray-badge {
+    position: absolute; top: -5px; right: -6px; min-width: 17px; height: 17px;
+    border-radius: 9px; background: var(--bad); color: #fff;
+    font-size: 10px; font-weight: 700; display: grid; place-items: center; padding: 0 4px;
+  }
+  .flyout {
+    position: absolute; right: 12px; bottom: 56px; width: 300px;
+    background: #202026f2; border: 1px solid #ffffff1a; border-radius: 10px;
+    box-shadow: 0 12px 30px #000a; padding: 6px 0;
+  }
+  .flyout h5 { margin: 0; padding: 9px 13px 7px; font-size: 12px; color: var(--dim); font-weight: 500; }
+  .flyout li { list-style: none; padding: 6px 13px; font-size: 13px; display: flex; gap: 8px; }
+
+  /* ---- variant D: sound only ---- */
+  .sound {
+    position: absolute; inset: 0 0 48px 0; display: grid; place-items: center;
+  }
+  .sound-card { width: 420px; text-align: center; }
+  .ear {
+    height: 74px; display: flex; align-items: center; justify-content: center; gap: 4px;
+    margin-bottom: 18px;
+  }
+  .ear i {
+    display: block; width: 5px; background: var(--accent); border-radius: 3px;
+    height: 6px; transition: height .1s;
+  }
+  .said { font-size: 15px; min-height: 3em; color: #cfcfd6; }
+  .said b { color: var(--ink); }
+
+  /* ---- variant E: one digest, on a timer ---- */
+  .queue {
+    position: absolute; left: 14px; bottom: 60px; width: 280px;
+    background: #191a1fcc; border: 1px solid #ffffff14; border-radius: 8px; padding: 10px 12px;
+    font-size: 12px; color: var(--dim);
+  }
+  .queue b { color: var(--ink); font-weight: 600; }
+  .queue .bar { height: 3px; background: #ffffff1a; border-radius: 2px; margin-top: 8px; }
+  .queue .bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+  .digest li { list-style: none; display: flex; gap: 8px; font-size: 13px; padding: 2px 0; }
+
+  /* ---- the switcher: obviously not part of the design ---- */
+  .switcher {
+    position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; z-index: 99;
+    background: #f4f4f5; color: #17171a; border-radius: 999px;
+    box-shadow: 0 6px 24px #000a; padding: 5px 6px;
+    font: 500 13px/1 "Segoe UI", system-ui, sans-serif;
+  }
+  .switcher button {
+    border: 0; background: #17171a; color: #fff; width: 26px; height: 26px;
+    border-radius: 999px; cursor: pointer; font-size: 13px;
+  }
+  .switcher .name { padding: 0 10px; white-space: nowrap; }
+  .switcher .replay {
+    width: auto; padding: 0 11px; background: var(--accent); color: #1b1b1b; font-weight: 600;
+  }
+  .cost {
+    position: fixed; left: 14px; top: 14px; max-width: 290px; z-index: 99;
+    background: #101014e0; border: 1px solid #ffffff1a; border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 11px 13px; font-size: 12px; color: #c8c8d0;
+  }
+  .cost h6 { margin: 0 0 5px; font-size: 12px; color: var(--ink); }
+  .cost p { margin: 0 0 6px; }
+  .cost p:last-child { margin: 0; color: var(--dim); }
+</style>
+
+<div id="stage"></div>
+
+<div class="taskbar" id="taskbar">
+  <span class="tb-icon">⊞</span>
+  <span class="tb-icon">🗔</span>
+  <span class="tb-icon">▤</span>
+  <span class="tray" id="tray">
+    <span class="clock">2:41 PM<br>9/1/2026</span>
+  </span>
+</div>
+
+<div class="cost" id="cost"></div>
+
+<div class="switcher">
+  <button id="prev" title="previous variant">‹</button>
+  <span class="name" id="vname"></span>
+  <button id="next" title="next variant">›</button>
+  <button class="replay" id="replay">replay feed</button>
+</div>
+
+<script>
+// One scripted feed. Every variant reacts to the same events, so the
+// difference you see is the channel, not the traffic.
+const FEED = [
+  { at:  600, job: "gridfind-ring-decode",  state: "done" },
+  { at: 2200, job: "burndown-42",           state: "wait", detail: "approve the push?" },
+  { at: 3400, job: "sudoku-custom-ring",    state: "fail" },
+  { at: 4300, job: "notify-hook-payload",   state: "done" },
+  { at: 5600, job: "second-brain-retro",    state: "wait", detail: "which memory wins?" },
+  { at: 7000, job: "landed-page-rebuild",   state: "done" },
+];
+const WORD = { done: "finished", fail: "failed", wait: "needs you" };
+const COLOR = { done: "var(--ok)", fail: "var(--bad)", wait: "var(--wait)" };
+const MARK = { done: "✔", fail: "✖", wait: "▲" };
+
+const stage = document.getElementById("stage");
+const tray = document.getElementById("tray");
+const clock = tray.innerHTML;
+let timers = [];
+const stop = () => { timers.forEach(clearTimeout); timers = []; };
+const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+
+/* ---------------- A — a toast for every event ---------------- */
+const A = {
+  name: "A — one toast per event",
+  cost: ["Closest to what you have now. The fix is the frame: raise it under a registered Claude Code app id so Windows stops writing <b>Windows PowerShell</b> above your text and drawing that icon.",
+         "Cost: register one app id in the Windows registry, once. The hook itself barely changes.",
+         "Weakness: six jobs, six interruptions. Miss one and it is gone into the action centre."],
+  run() {
+    const wrap = el("div", "toast-stack");
+    stage.append(wrap);
+    FEED.forEach(e => at(e.at, () => {
+      const t = el("div", "toast");
+      t.innerHTML = `<div class="toast-app"><span class="badge">✳</span> Claude Code</div>
+        <h4><span class="mark ${cls(e.state)}">${MARK[e.state]}</span> ${e.job} ${WORD[e.state]}</h4>
+        <p>${e.detail || "sudokumaker-custom-constraints"}</p>`;
+      wrap.append(t);
+      at(5200, () => { t.classList.add("leaving"); at(300, () => t.remove()); });
+    }));
+  }
+};
+
+/* ---------------- B — a strip that is always on screen ---------------- */
+const B = {
+  name: "B — always-on-top strip",
+  cost: ["No popup at all. A small window sits in the corner over everything and lists every job with its state. You do not get told; you glance.",
+         "Cost: a real window that must run somewhere — a tiny always-on-top app reading the same events. The largest build of the five.",
+         "Strength: nothing can be missed, because nothing disappears. Weakness: it is on your screen forever."],
+  run() {
+    const hud = el("div", "hud");
+    hud.innerHTML = `<header><span>Claude Code · fleet</span><span id="hudn">6 jobs</span></header><ul id="hudl"></ul>`;
+    stage.append(hud);
+    const list = hud.querySelector("#hudl");
+    // Everything starts as running, then each event settles one row in place.
+    FEED.forEach(e => {
+      const li = el("li");
+      li.id = "hud-" + e.job;
+      li.innerHTML = `<span class="dot pulse" style="background:#6d7280"></span>
+        <span class="lbl">${e.job}</span><span class="state">running</span>`;
+      list.append(li);
+    });
+    FEED.forEach(e => at(e.at, () => {
+      const li = document.getElementById("hud-" + e.job);
+      li.querySelector(".dot").className = "dot";
+      li.querySelector(".dot").style.background = COLOR[e.state];
+      li.querySelector(".state").textContent = e.detail || WORD[e.state];
+      li.classList.add("fresh");
+      at(2500, () => li.classList.remove("fresh"));
+    }));
+  }
+};
+
+/* ---------------- C — silent badge, look when you look ---------------- */
+const C = {
+  name: "C — silent tray badge",
+  cost: ["Nothing pops, nothing sounds. A tray icon carries a count of jobs that want you, coloured by the worst one. You see it the next time your eye passes the taskbar.",
+         "Cost: a small tray program. Less than B — no window to lay out, just an icon and a menu.",
+         "Strength: zero interruption. Weakness: zero interruption — a failure can sit there for an hour."],
+  run() {
+    const app = el("span", "tray-app tb-icon");
+    app.textContent = "✳";
+    app.innerHTML += `<span class="tray-badge" id="badge" style="display:none">0</span>`;
+    tray.prepend(app);
+    let pending = 0, worst = "done";
+    const flyout = el("div", "flyout");
+    flyout.innerHTML = `<h5>Waiting on you</h5><ul id="flyl"></ul>`;
+    flyout.style.display = "none";
+    stage.append(flyout);
+    app.onclick = () => flyout.style.display = flyout.style.display === "none" ? "" : "none";
+    FEED.forEach(e => at(e.at, () => {
+      if (e.state === "done") return;               // only trouble raises the count
+      pending++;
+      if (e.state === "fail") worst = "fail";
+      const b = document.getElementById("badge");
+      b.style.display = ""; b.textContent = pending;
+      b.style.background = worst === "fail" ? "var(--bad)" : "var(--wait)";
+      flyout.querySelector("#flyl").innerHTML +=
+        `<li><span style="color:${COLOR[e.state]}">${MARK[e.state]}</span>
+         <span>${e.job} — ${e.detail || WORD[e.state]}</span></li>`;
+    }));
+    at(FEED.at(-1).at + 900, () => flyout.style.display = "");   // show what a click reveals
+  }
+};
+
+/* ---------------- D — sound only ---------------- */
+const D = {
+  name: "D — sound and a spoken line",
+  cost: ["Nothing on screen. A short two-note earcon marks the outcome — rising for finished, falling for failed, a repeated knock when a job wants you — and the job's name is spoken.",
+         "Cost: the smallest of the five. The hook already runs PowerShell; a beep and a spoken line are two more lines in it.",
+         "Strength: it reaches you when you are not looking at the screen at all. Weakness: useless with headphones off, and unrepeatable — miss it and it is gone."],
+  run() {
+    const card = el("div", "sound");
+    card.innerHTML = `<div class="sound-card">
+      <div class="ear" id="ear">${"<i></i>".repeat(21)}</div>
+      <div class="said" id="said">Sound only. Nothing is drawn.<br><span style="color:var(--dim)">Turn the volume up and press replay.</span></div></div>`;
+    stage.append(card);
+    const bars = [...card.querySelectorAll(".ear i")];
+    FEED.forEach(e => at(e.at, () => {
+      earcon(e.state, bars);
+      const line = `${e.job.replace(/-/g, " ")} ${WORD[e.state]}`;
+      document.getElementById("said").innerHTML =
+        `<b>♪ ${MARK[e.state]}</b> spoken: “${line}”`;
+      speak(line);
+    }));
+  }
+};
+
+/* ---------------- E — hold them, then say it once ---------------- */
+const E = {
+  name: "E — one digest, not six toasts",
+  cost: ["Events go into a queue. One toast goes out when the queue has been quiet for a stretch, or when a job fails — a failure never waits.",
+         "Cost: the hook must keep state between calls — a small file it appends to, and a timer that fires the summary. No new program, but the hook stops being a one-shot.",
+         "Strength: six events, one or two interruptions. Weakness: a job that wants you sits in the queue for up to the whole window."],
+  run() {
+    const wrap = el("div", "toast-stack"); stage.append(wrap);
+    const q = el("div", "queue");
+    q.innerHTML = `<div id="qn"><b>0</b> events held</div><div class="bar"><i id="qb" style="width:0"></i></div>`;
+    stage.append(q);
+    let held = [];
+    const QUIET = 2600;
+    let deadline = 0;
+    const flush = (why) => {
+      if (!held.length) return;
+      const n = c => held.filter(e => e.state === c).length;
+      const parts = [];
+      if (n("done")) parts.push(`<li><span class="mark ok">✔</span> ${n("done")} finished</li>`);
+      if (n("fail")) parts.push(`<li><span class="mark bad">✖</span> ${held.filter(e=>e.state==="fail").map(e=>e.job).join(", ")} failed</li>`);
+      held.filter(e => e.state === "wait").forEach(e =>
+        parts.push(`<li><span class="mark wait">▲</span> ${e.job}: ${e.detail}</li>`));
+      const t = el("div", "toast");
+      t.innerHTML = `<div class="toast-app"><span class="badge">✳</span> Claude Code</div>
+        <h4>${held.length} updates${why === "fail" ? " · a job failed" : ""}</h4>
+        <ul class="digest" style="margin:6px 0 0;padding:0">${parts.join("")}</ul>`;
+      wrap.append(t);
+      at(6000, () => { t.classList.add("leaving"); at(300, () => t.remove()); });
+      held = [];
+    };
+    FEED.forEach(e => at(e.at, () => {
+      held.push(e);
+      deadline = Date.now() + QUIET;
+      if (e.state === "fail") { flush("fail"); deadline = 0; }   // failure jumps the queue
+    }));
+    const tick = setInterval(() => {
+      const left = deadline - Date.now();
+      document.getElementById("qn").innerHTML = `<b>${held.length}</b> events held`;
+      document.getElementById("qb").style.width =
+        held.length && left > 0 ? `${100 - (left / QUIET) * 100}%` : "0";
+      if (held.length && left <= 0) flush("quiet");
+    }, 90);
+    stage._interval = tick;
+  }
+};
+
+const VARIANTS = { A, B, C, D, E };
+
+/* ---- little helpers ---- */
+function el(tag, cls) { const n = document.createElement(tag); if (cls) n.className = cls; return n; }
+function cls(s) { return s === "done" ? "ok" : s === "fail" ? "bad" : "wait"; }
+
+let audio;
+function earcon(state, bars) {
+  audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+  // rising = finished, falling = failed, a repeated knock = wants you
+  const notes = state === "done" ? [[660, 0], [880, .12]]
+              : state === "fail" ? [[440, 0], [294, .14]]
+              : [[560, 0], [560, .13], [560, .26]];
+  notes.forEach(([hz, delay]) => {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = "sine"; o.frequency.value = hz;
+    const t0 = audio.currentTime + delay;
+    g.gain.setValueAtTime(.0001, t0);
+    g.gain.exponentialRampToValueAtTime(.22, t0 + .02);
+    g.gain.exponentialRampToValueAtTime(.0001, t0 + .13);
+    o.connect(g).connect(audio.destination);
+    o.start(t0); o.stop(t0 + .16);
+  });
+  // A crude level meter, so you can see that something sounded.
+  let f = 0;
+  const iv = setInterval(() => {
+    bars.forEach((b, i) => {
+      const fade = Math.max(0, 1 - f / 14);
+      b.style.height = 6 + Math.abs(Math.sin(i * .7 + f * .5)) * 52 * fade + "px";
+    });
+    if (++f > 14) { clearInterval(iv); bars.forEach(b => b.style.height = "6px"); }
+  }, 40);
+}
+function speak(line) {
+  if (!window.speechSynthesis) return;
+  const u = new SpeechSynthesisUtterance(line);
+  u.rate = 1.05; u.volume = .9;
+  speechSynthesis.speak(u);
+}
+
+/* ---- switcher ---- */
+const keys = Object.keys(VARIANTS);
+function current() {
+  const k = (new URLSearchParams(location.search).get("variant") || "A").toUpperCase();
+  return keys.includes(k) ? k : "A";
+}
+function render() {
+  stop();
+  if (stage._interval) { clearInterval(stage._interval); stage._interval = null; }
+  speechSynthesis && speechSynthesis.cancel();
+  stage.innerHTML = "";
+  stage.className = "";
+  tray.innerHTML = clock;
+  const k = current(), v = VARIANTS[k];
+  const work = el("div", "work");
+  work.innerHTML = `<p class="work-hint">your editor, your terminal, whatever you were actually doing</p>`;
+  stage.append(work);
+  document.getElementById("vname").textContent = v.name;
+  document.getElementById("cost").innerHTML =
+    `<h6>${v.name}</h6>` + v.cost.map(c => `<p>${c}</p>`).join("");
+  v.run();
+}
+function go(step) {
+  const i = (keys.indexOf(current()) + step + keys.length) % keys.length;
+  history.replaceState(null, "", "?variant=" + keys[i]);
+  render();
+}
+document.getElementById("prev").onclick = () => go(-1);
+document.getElementById("next").onclick = () => go(1);
+document.getElementById("replay").onclick = render;
+addEventListener("keydown", e => {
+  if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable) return;
+  if (e.key === "ArrowLeft") go(-1);
+  if (e.key === "ArrowRight") go(1);
+});
+render();
+</script>
