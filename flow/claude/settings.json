@@ -19,7 +19,10 @@
       "Bash(git fetch)",
       "Bash(git worktree *)",
       "Bash(git worktree:*)",
+      "Bash(land)",
       "Bash(node *)",
+      "Bash(pushpr)",
+      "Bash(pushpr:*)",
       "Bash(python3 -)",
       "EnterWorktree",
       "ExitWorktree",
@@ -275,10 +278,11 @@
   "outputStyle": "Orwell STE",
   "effortLevel": "medium",
   "autoMemoryEnabled": false,
+  "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
   "theme": "dark-ansi",
   "remoteControlAtStartup": false,
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true,
-  "skipDangerousModePermissionPrompt": true
+  "model": "claude-fable-5-1[1m]"
 }
