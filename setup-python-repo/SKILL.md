@@ -103,7 +103,7 @@ Also copy [`templates/clear-in-review.yml`](templates/clear-in-review.yml) →
 `.github/workflows/clear-in-review.yml`. It strips the `in-review` orchestration
 label when an issue closes, so a merged PR's `Closes #N` doesn't leave the label
 stranded on the closed issue. The job is gated on the label being present, so it
-sits inert until the `/implement` → `pushpr` flow starts using it.
+sits inert until the `/implement` → PR flow starts using it.
 
 **Done when:** both workflow files exist; `ci.yml` references `setup-uv` +
 `pytest`.

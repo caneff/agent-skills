@@ -56,10 +56,11 @@ run "owned repo: force-with-lease allowed" 0 "git push --force-with-lease origin
 export STUB_LOGIN= STUB_OWNER=
 run "cached owned verdict survives gh failing" 0 "git push origin main"
 
-# Not owned: same push, different origin owner -> blocked, hand-off names pushpr.
+# Not owned: same push, different origin owner -> blocked, and the message
+# hands the outward step back to the user rather than dead-ending.
 rm -rf "$XDG_CACHE_HOME"
 export STUB_LOGIN=caneff STUB_OWNER=someone-else
-run "unowned repo: push blocked, names pushpr" 2 "git push origin main" "pushpr"
+run "unowned repo: push blocked, hands the user the line" 2 "git push origin main" "gh pr create"
 
 # gh unavailable (errors / no network) -> fail closed, block.
 rm -rf "$XDG_CACHE_HOME"

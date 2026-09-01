@@ -7,7 +7,7 @@ description: Render recent commits across the workspace's repos as a local HTML 
 
 One local HTML page of what recently landed across the workspace — a tab per
 repo, commits grouped by day, diffs collapsed behind each commit. This is the
-after-the-fact review surface for the `land` lane — the page the owner reads
+after-the-fact review surface for merged work — the page the owner reads
 instead of a PR queue.
 
 ## Steps
@@ -27,7 +27,7 @@ instead of a PR queue.
 2. Open it: `wslview ~/.claude/landed.html`. Report the per-run counts.
 
 The page is a snapshot, cheap to rebuild, never appended to. Every `git push`
-(and `land`) also regenerates it in the background via the push-sync hook, so
+also regenerates it in the background via the push-sync hook, so
 regenerating here just guarantees freshness before opening.
 
 Page anatomy (all in `generate.py`, edit there): agent-built commits are the

@@ -29,8 +29,8 @@ Build steps (run directly; do not invoke /implement):
 4. Run the repo's full test/check suite: npm test.
 5. Self-review the diff against each acceptance criterion.
 6. Commit with body trailer `Closes caneff/second-brain-v2#126`.
-7. Land: from inside the worktree run `land`. Mechanical rebase conflict:
-   resolve, retry once; logic conflict: stop and report.
+7. Finish: push the branch and open a PR for the owner to merge. Mechanical
+   rebase conflict: resolve, retry once; logic conflict: stop and report.
 8. Append a one-line milestone to
    /home/caneff/.claude/jobs/<job>/tmp/progress-126.md after each step.
 
