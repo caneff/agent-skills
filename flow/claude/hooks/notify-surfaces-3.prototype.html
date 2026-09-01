@@ -1,0 +1,391 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Pip rail variations — prototype</title>
+<!--
+  PROTOTYPE — throwaway. Round 3. Not wired to notify.sh.
+
+  B2 (the pip rail) won its family, so this page opens it into five.
+
+  The question under all of them: what happens when the fleet grows? A rail
+  that reads well at nine jobs can be a smear at forty. So every variant has a
+  fleet-size toggle — 9 or 40 — and you judge it at both.
+
+  R1 rail · R2 one proportional bar · R3 corner cluster · R4 in the taskbar ·
+  R5 a single dot
+
+  All five cost zero interruptions. They differ in footprint and in how much
+  they can say.
+-->
+<style>
+  :root {
+    --ink: #e8e8ea; --dim: #a0a0a8; --line: #3a3a42;
+    --ok: #4ec9a0; --bad: #ff6b6b; --wait: #f0c674; --run: #6d7280;
+    --accent: #d97757;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; overflow: hidden;
+    font: 14px/1.45 "Segoe UI", system-ui, sans-serif; color: var(--ink);
+    background: radial-gradient(120% 100% at 20% 0%, #3a4a6b 0%, #1b1f2a 55%, #14161c 100%);
+  }
+  .work { position: absolute; inset: 0 0 48px 0; display: grid; place-items: center; }
+  .work-hint { color: #ffffff33; font-size: 13px; user-select: none; }
+  .taskbar {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 48px;
+    background: #1a1a1ecc; border-top: 1px solid #ffffff14;
+    display: flex; align-items: center; gap: 10px; padding: 0 12px;
+  }
+  .tb-icon { width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center; background: #ffffff10; font-size: 15px; }
+  .tray { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+  .clock { font-size: 12px; text-align: right; line-height: 1.15; color: var(--dim); }
+
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--run); }
+  .pulse { animation: pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+
+  /* the expanded list every variant reveals on hover — only what still wants you */
+  .reveal {
+    position: absolute; width: 288px; background: #202026f5;
+    border: 1px solid #ffffff1f; border-radius: 9px; padding: 7px 0;
+    box-shadow: 0 14px 34px #000b;
+  }
+  .reveal h6 { margin: 0; padding: 7px 13px 6px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--dim); font-weight: 500; }
+  .reveal li { list-style: none; display: flex; align-items: center; gap: 9px; padding: 5px 13px; font-size: 13px; }
+  .reveal .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .reveal .state { font-size: 11px; color: var(--dim); }
+  .reveal .rest { padding: 6px 13px 4px; font-size: 11px; color: #ffffff44; border-top: 1px solid var(--line); margin-top: 4px; }
+
+  /* R1 — the rail, one pip per job */
+  .rail {
+    position: absolute; top: 50%; right: 0; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 6px; padding: 9px 6px;
+    background: #14141ab8; border: 1px solid #ffffff14; border-right: 0;
+    border-radius: 9px 0 0 9px; max-height: calc(100vh - 80px); flex-wrap: wrap;
+  }
+  .rail .pip { width: 9px; height: 9px; border-radius: 50%; background: var(--run); }
+
+  /* R2 — one bar, split by proportion */
+  .propbar {
+    position: absolute; top: 24px; bottom: 78px; right: 12px; width: 13px;
+    border-radius: 7px; overflow: hidden; box-shadow: 0 0 0 4px #ffffff08;
+    background: #14141ab8; border: 1px solid #ffffff14;
+  }
+  .propbar { transition: background .3s; }
+  .propcap { position: absolute; right: 22px; top: 50%; transform: translateY(-50%) rotate(180deg); writing-mode: vertical-rl; font-size: 10px; color: #ffffff40; letter-spacing: .08em; }
+
+  /* R3 — a cluster in the corner */
+  .cluster {
+    position: absolute; top: 14px; right: 14px; padding: 9px;
+    background: #14141ac8; border: 1px solid #ffffff14; border-radius: 9px;
+    display: grid; grid-template-columns: repeat(8, 9px); gap: 5px;
+  }
+  .cluster .pip { width: 9px; height: 9px; border-radius: 50%; background: var(--run); }
+
+  /* R4 — pips living in the taskbar */
+  .tbpips { display: flex; align-items: center; gap: 4px; max-width: 420px; flex-wrap: wrap; height: 30px; align-content: center; }
+  .tbpips .pip { width: 7px; height: 7px; border-radius: 50%; background: var(--run); }
+
+  /* R5 — one dot for the whole fleet */
+  .onedot {
+    position: absolute; right: 18px; bottom: 62px;
+    width: 15px; height: 15px; border-radius: 50%; background: var(--run);
+    box-shadow: 0 0 0 5px #ffffff0d;
+  }
+  .onedot-n {
+    position: absolute; right: 8px; bottom: 78px; min-width: 17px; height: 17px;
+    border-radius: 9px; background: var(--bad); color: #fff; font-size: 10px;
+    font-weight: 700; display: grid; place-items: center; padding: 0 4px;
+  }
+
+  .hint { position: absolute; font-size: 11px; color: #ffffff40; }
+
+  /* footprint readout — the number this round turns on */
+  .score {
+    position: fixed; left: 14px; bottom: 14px; z-index: 98;
+    background: #101014e6; border: 1px solid #ffffff1a; border-radius: 8px;
+    padding: 8px 12px; font-size: 12px; color: var(--dim);
+  }
+  .score b { color: var(--ink); font-weight: 600; }
+
+  .switcher {
+    position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px; z-index: 99;
+    background: #f4f4f5; color: #17171a; border-radius: 999px;
+    box-shadow: 0 6px 24px #000a; padding: 5px 6px; font: 500 13px/1 "Segoe UI", system-ui, sans-serif;
+  }
+  .switcher button { border: 0; background: #17171a; color: #fff; width: 26px; height: 26px; border-radius: 999px; cursor: pointer; }
+  .switcher .name { padding: 0 10px; white-space: nowrap; }
+  .switcher .wide { width: auto; padding: 0 11px; }
+  .switcher .size { background: #2f6f5a; font-weight: 600; }
+  .switcher .replay { background: var(--accent); color: #1b1b1b; font-weight: 600; }
+  .cost {
+    position: fixed; left: 14px; top: 14px; max-width: 292px; z-index: 99;
+    background: #101014e8; border: 1px solid #ffffff1a; border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 11px 13px; font-size: 12px; color: #c8c8d0;
+  }
+  .cost h6 { margin: 0 0 5px; font-size: 12px; color: var(--ink); }
+  .cost p { margin: 0 0 6px; }
+  .cost p:last-child { margin: 0; color: var(--dim); }
+</style>
+
+<div id="stage"></div>
+<div class="taskbar">
+  <span class="tb-icon">⊞</span><span class="tb-icon">🗔</span><span class="tb-icon">▤</span>
+  <span class="tray" id="tray"><span class="clock">2:41 PM<br>9/1/2026</span></span>
+</div>
+<div class="cost" id="cost"></div>
+<div class="score" id="score"></div>
+<div class="switcher">
+  <button id="prev">‹</button><span class="name" id="vname"></span><button id="next">›</button>
+  <button class="wide size" id="size"></button>
+  <button class="wide replay" id="replay">replay feed</button>
+</div>
+
+<script>
+// A fleet of n jobs that settle over about ten seconds. Fixed seed, so the
+// same run replays every time and the variants stay comparable.
+let seed = 20260901;
+const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+const NAMES = ["gridfind-ring-decode","notify-hook-payload","sudoku-custom-ring","landed-page-rebuild",
+  "burndown-42","second-brain-retro","rtk-proxy-cache","teach-lesson-base","statusline-table",
+  "wayfinder-triage","spec-slicer","pushpr-gate","worktree-sweeper","memory-retro","sm-link-decode",
+  "isofill-batch","ponytail-audit","visual-recap","code-review-lane","dispatch-brief"];
+const ASK = ["approve the push?","which title?","merge or rebase?","pick a base ref","confirm the delete"];
+
+function buildFleet(n) {
+  seed = 20260901;
+  const jobs = [];
+  for (let i = 0; i < n; i++) {
+    const r = rnd();
+    const state = r < .12 ? "fail" : r < .32 ? "wait" : "done";
+    jobs.push({
+      id: "j" + i,
+      job: NAMES[i % NAMES.length] + (i >= NAMES.length ? "-" + (1 + ((i / NAMES.length) | 0)) : ""),
+      state,
+      detail: state === "wait" ? ASK[i % ASK.length] : "",
+      at: 500 + rnd() * 9000,
+      settled: false,
+    });
+  }
+  // A few never finish inside the run, so "running" is visible at the end.
+  jobs.slice(0, Math.max(1, (n * .1) | 0)).forEach(j => j.at = 1e9);
+  return jobs;
+}
+const COLOR = { done: "var(--ok)", fail: "var(--bad)", wait: "var(--wait)", run: "var(--run)" };
+const WORD  = { done: "finished", fail: "failed", wait: "needs you", run: "running" };
+const MARK  = { done: "✔", fail: "✖", wait: "▲" };
+
+const stage = document.getElementById("stage");
+const tray = document.getElementById("tray");
+const trayHTML = tray.innerHTML;
+let timers = [], fleet = [];
+const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+const of = s => fleet.filter(j => j.settled && j.state === s).length;
+const running = () => fleet.filter(j => !j.settled).length;
+const worst = () => of("fail") ? "fail" : of("wait") ? "wait" : running() ? "run" : "done";
+const wanted = () => fleet.filter(j => j.settled && j.state !== "done");
+
+// Every variant reveals the same thing on hover: only what still wants you.
+function reveal(pos) {
+  const box = mk("div", "reveal");
+  Object.assign(box.style, pos);
+  const paint = () => {
+    const w = wanted();
+    box.innerHTML = `<h6>Wants you — ${w.length}</h6>` +
+      w.slice(0, 9).map(j =>
+        `<li><span class="dot" style="background:${COLOR[j.state]}"></span>
+         <span class="lbl">${j.job}</span>
+         <span class="state">${j.detail || WORD[j.state]}</span></li>`).join("") +
+      (w.length > 9 ? `<div class="rest">+ ${w.length - 9} more</div>` : "") +
+      `<div class="rest">${of("done")} finished · ${running()} still running</div>`;
+  };
+  paint();
+  box.style.display = "none";
+  stage.append(box);
+  return { box, paint, show: () => box.style.display = "", hide: () => box.style.display = "none" };
+}
+function footprint(text) {
+  document.getElementById("score").innerHTML =
+    `footprint: <b>${text}</b> · <b>0</b> interruptions`;
+}
+
+/* ---------------- R1 — the rail ---------------- */
+const R1 = {
+  name: "R1 — the rail",
+  cost: ["What you saw: one pip per job, stacked down the right edge. Order is fleet order, so a job keeps its place and you learn where things sit.",
+         "At forty jobs it wraps into a second column and starts to look like a wall on its side. Try the toggle.",
+         "Best when the fleet is small enough that position means something."],
+  run() {
+    const rail = mk("div", "rail");
+    fleet.forEach(j => { const p = mk("span", "pip pulse"); p.id = "p-" + j.id; rail.append(p); });
+    stage.append(rail);
+    const r = reveal({ right: "40px", top: "50%", transform: "translateY(-50%)" });
+    rail.onmouseenter = r.show; rail.onmouseleave = r.hide;
+    hint("hover the rail →", { right: "36px", bottom: "70px" });
+    play(j => {
+      const p = document.getElementById("p-" + j.id);
+      p.classList.remove("pulse"); p.style.background = COLOR[j.state];
+      r.paint();
+    });
+    at(10600, r.show);
+    footprint("one pip per job — grows with the fleet");
+  }
+};
+
+/* ---------------- R2 — one bar, by proportion ---------------- */
+const R2 = {
+  name: "R2 — one bar, by proportion",
+  cost: ["No pips at all. One thin strip down the edge, cut into bands sized by how many jobs are in each state — grey still running, green finished, amber wanting you, red failed.",
+         "Its size never changes. Nine jobs and four hundred jobs draw exactly the same strip, so it cannot ever become a wall.",
+         "Weakness: you lose the individual. One job among forty moves the band by a sliver."],
+  run() {
+    const bar = mk("div", "propbar");
+    stage.append(bar);
+    const cap = mk("div", "propcap"); cap.textContent = "FLEET"; stage.append(cap);
+    const r = reveal({ right: "26px", top: "50%", transform: "translateY(-50%)" });
+    bar.onmouseenter = r.show; bar.onmouseleave = r.hide;
+    const paint = () => {
+      const n = fleet.length;
+      const seg = [["run", running()], ["wait", of("wait")], ["fail", of("fail")], ["done", of("done")]];
+      let top = 0;
+      const stops = seg.map(([s, v]) => {
+        const a = top, b = top + (v / n) * 100;
+        top = b;
+        return `${COLOR[s]} ${a}% ${b}%`;
+      });
+      bar.style.background = `linear-gradient(to bottom, ${stops.join(", ")})`;
+    };
+    paint();
+    play(j => { paint(); r.paint(); });
+    at(10600, r.show);
+    footprint("13px wide, fixed — never grows");
+  }
+};
+
+/* ---------------- R3 — a cluster in the corner ---------------- */
+const R3 = {
+  name: "R3 — a cluster in the corner",
+  cost: ["The same pips, packed eight to a row instead of one to a line, and sorted so failures come first and finished work sinks to the bottom.",
+         "Forty jobs fit in a thumbnail. The shape itself tells you the fleet's health — a red band across the top is bad news before you read anything.",
+         "Weakness: sorting moves the pips, so no job keeps a fixed home. You cannot learn where yours lives."],
+  run() {
+    const c = mk("div", "cluster"); stage.append(c);
+    const order = { fail: 0, wait: 1, run: 2, done: 3 };
+    const paint = () => {
+      const sorted = [...fleet].sort((a, b) =>
+        order[a.settled ? a.state : "run"] - order[b.settled ? b.state : "run"]);
+      c.innerHTML = sorted.map(j =>
+        `<span class="pip${j.settled ? "" : " pulse"}" style="background:${COLOR[j.settled ? j.state : "run"]}"></span>`).join("");
+    };
+    paint();
+    const r = reveal({ right: "14px", top: "auto", marginTop: "0" });
+    r.box.style.top = (18 + Math.ceil(fleet.length / 8) * 14 + 20) + "px";
+    c.onmouseenter = r.show; c.onmouseleave = r.hide;
+    play(() => { paint(); r.paint(); });
+    at(10600, r.show);
+    footprint("fixed 8 columns — 40 jobs in a thumbnail");
+  }
+};
+
+/* ---------------- R4 — pips inside the taskbar ---------------- */
+const R4 = {
+  name: "R4 — inside the taskbar",
+  cost: ["No floating window at all. The pips sit in the taskbar beside the clock, in chrome Windows already draws and already keeps on top of everything.",
+         "Nothing covers your work, and nothing has to be pinned, moved, or remembered. It is where your eye already goes for the time.",
+         "Weakness: the taskbar is the one strip you hide when you go full screen, and it can only be so wide."],
+  run() {
+    const strip = mk("span", "tbpips");
+    fleet.forEach(j => { const p = mk("span", "pip pulse"); p.id = "p-" + j.id; strip.append(p); });
+    tray.prepend(strip);
+    const r = reveal({ right: "14px", bottom: "58px" });
+    strip.onmouseenter = r.show; strip.onmouseleave = r.hide;
+    play(j => {
+      const p = document.getElementById("p-" + j.id);
+      p.classList.remove("pulse"); p.style.background = COLOR[j.state];
+      r.paint();
+    });
+    at(10600, r.show);
+    footprint("no window at all — lives in the taskbar");
+  }
+};
+
+/* ---------------- R5 — one dot for the whole fleet ---------------- */
+const R5 = {
+  name: "R5 — one dot",
+  cost: ["The whole fleet collapses to a single dot, coloured by the worst thing in it, with a count on it only when something is actually waiting on you. Finished work leaves no trace.",
+         "The smallest thing that can still be true. It does not grow, it does not scroll, and there is nothing to read.",
+         "Weakness: it answers one question — is anything wrong — and nothing else. Everything past that needs the hover."],
+  run() {
+    const d = mk("div", "onedot"); stage.append(d);
+    const n = mk("div", "onedot-n"); n.style.display = "none"; stage.append(n);
+    const r = reveal({ right: "44px", bottom: "56px" });
+    d.onmouseenter = r.show; d.onmouseleave = r.hide;
+    hint("hover the dot", { right: "44px", bottom: "40px" });
+    const paint = () => {
+      const w = worst();
+      d.style.background = COLOR[w];
+      d.className = "onedot" + (running() ? " pulse" : "");
+      const c = of("fail") + of("wait");
+      n.style.display = c ? "" : "none";
+      n.textContent = c;
+      n.style.background = of("fail") ? "var(--bad)" : "var(--wait)";
+    };
+    paint();
+    play(() => { paint(); r.paint(); });
+    at(10600, r.show);
+    footprint("one dot — constant, whatever the fleet size");
+  }
+};
+
+/* ---- helpers ---- */
+function mk(t, c) { const n = document.createElement(t); if (c) n.className = c; return n; }
+function hint(text, pos) { const h = mk("div", "hint"); h.textContent = text; Object.assign(h.style, pos); stage.append(h); }
+function play(onSettle) {
+  fleet.forEach(j => {
+    if (j.at > 1e8) return;                 // this one is still running when the run ends
+    at(j.at, () => { j.settled = true; onSettle(j); });
+  });
+}
+
+/* ---- switcher ---- */
+const VARIANTS = { R1, R2, R3, R4, R5 };
+const keys = Object.keys(VARIANTS);
+const params = () => new URLSearchParams(location.search);
+const current = () => {
+  const k = (params().get("variant") || "R1").toUpperCase();
+  return keys.includes(k) ? k : "R1";
+};
+const size = () => (params().get("n") === "40" ? 40 : 9);
+function render() {
+  timers.forEach(clearTimeout); timers = [];
+  stage.innerHTML = "";
+  tray.innerHTML = trayHTML;
+  fleet = buildFleet(size());
+  const work = mk("div", "work");
+  work.innerHTML = `<p class="work-hint">your editor, your terminal, whatever you were actually doing</p>`;
+  stage.append(work);
+  const v = VARIANTS[current()];
+  document.getElementById("vname").textContent = v.name;
+  document.getElementById("size").textContent = size() + " jobs";
+  document.getElementById("cost").innerHTML = `<h6>${v.name}</h6>` + v.cost.map(c => `<p>${c}</p>`).join("");
+  v.run();
+}
+function nav(patch) {
+  const p = params();
+  Object.entries(patch).forEach(([k, v]) => p.set(k, v));
+  history.replaceState(null, "", "?" + p);
+  render();
+}
+const go = step => nav({ variant: keys[(keys.indexOf(current()) + step + keys.length) % keys.length] });
+document.getElementById("prev").onclick = () => go(-1);
+document.getElementById("next").onclick = () => go(1);
+document.getElementById("size").onclick = () => nav({ n: size() === 9 ? 40 : 9 });
+document.getElementById("replay").onclick = render;
+addEventListener("keydown", e => {
+  if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName) || e.target.isContentEditable) return;
+  if (e.key === "ArrowLeft") go(-1);
+  if (e.key === "ArrowRight") go(1);
+  if (e.key === "n") nav({ n: size() === 9 ? 40 : 9 });
+});
+render();
+</script>
