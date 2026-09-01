@@ -64,17 +64,6 @@
     "init": "off"
   },
   "hooks": {
-    "Notification": [
-      {
-        "matcher": "agent_needs_input|agent_completed",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/caneff/.agents/skills/flow/claude/hooks/notify.sh"
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
         "matcher": "EnterWorktree",
