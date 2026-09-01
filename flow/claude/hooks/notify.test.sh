@@ -39,9 +39,32 @@ run() {
   echo "PASS: $name"
 }
 
-run "message and project name reach the toast" \
-  '{"hook_event_name":"Notification","notification_type":"agent_needs_input","cwd":"/home/me/src/gridfind","message":"Needs your approval to push"}' \
-  "Claude Code · gridfind" "Needs your approval to push"
+# The four message shapes the CLI emits for background jobs. cwd is the session
+# that raised the notification, so it never names the job — the job's label is
+# the front of the message, and it must reach the toast's first line.
+run "a finished job names itself in the title" \
+  '{"notification_type":"agent_completed","cwd":"/home/me/src/sudoku","message":"gridfind-ring-decode finished"}' \
+  "Item(0).AppendChild(\$t.CreateTextNode('gridfind-ring-decode finished')" \
+  "Item(1).AppendChild(\$t.CreateTextNode('Claude Code · sudoku')"
+
+run "a failed job names itself in the title" \
+  '{"notification_type":"agent_completed","cwd":"/home/me/src/sudoku","message":"gridfind-ring-decode failed"}' \
+  "Item(0).AppendChild(\$t.CreateTextNode('gridfind-ring-decode failed')"
+
+run "a blocked job puts its label in the title and the detail in the body" \
+  '{"notification_type":"agent_needs_input","cwd":"/home/me/src/sudoku","message":"burndown-42 needs your input: approve the push?"}' \
+  "Item(0).AppendChild(\$t.CreateTextNode('burndown-42 needs you')" \
+  "Item(1).AppendChild(\$t.CreateTextNode('approve the push?')"
+
+run "a blocked job with no detail still names itself" \
+  '{"notification_type":"agent_needs_input","cwd":"/home/me/src/sudoku","message":"burndown-42 needs your input"}' \
+  "Item(0).AppendChild(\$t.CreateTextNode('burndown-42 needs you')" \
+  "Item(1).AppendChild(\$t.CreateTextNode('Claude Code · sudoku')"
+
+run "any other message keeps the project title and shows the message" \
+  '{"hook_event_name":"Notification","notification_type":"permission_prompt","cwd":"/home/me/src/gridfind","message":"Needs your approval to push"}' \
+  "Item(0).AppendChild(\$t.CreateTextNode('Claude Code · gridfind')" \
+  "Item(1).AppendChild(\$t.CreateTextNode('Needs your approval to push')"
 
 run "a quote in the message is doubled, keeping the literal closed" \
   '{"cwd":"/tmp/x","message":"don'"'"'t stop"}' \
