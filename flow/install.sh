@@ -31,7 +31,7 @@ link claude/RTK.md              "$HOME/.claude/RTK.md"
 # would break the link. It is a copy-only backup (see backup-sync.sh), written
 # by the --restore call below.
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
-for h in block-dangerous-git.sh require-worktree.sh sync-primary-main.sh package.json; do
+for h in block-dangerous-git.sh sync-primary-main.sh package.json; do
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
 done
 
