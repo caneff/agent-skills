@@ -276,6 +276,7 @@
       }
     }
   },
+  "feedbackDrafts": "off",
   "outputStyle": "Orwell STE",
   "effortLevel": "medium",
   "autoMemoryEnabled": false,
