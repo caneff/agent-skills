@@ -25,6 +25,8 @@ client cannot pick up the same one. Read its labels first:
   comment, a lint miss. Put every genuine **judgment call** to the owner before
   you act on it and before the work lands. Then claim it the same way, swapping
   `ready-for-human` for `ready-for-agent` below.
+- **`needs-info`** — open questions block the build. Run `/grill-with-docs`
+  to resolve them with the owner first; only then relabel and build.
 - **`in-progress`, or otherwise held** — stop and ask.
 
 ```
