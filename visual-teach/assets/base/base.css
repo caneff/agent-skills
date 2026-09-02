@@ -40,6 +40,13 @@
   --vt-bad-soft: color-mix(in oklch, var(--vt-bad) 12%, var(--vt-paper));
   --vt-good-soft: color-mix(in oklch, var(--vt-good) 12%, var(--vt-paper));
   --vt-warn-soft: color-mix(in oklch, var(--vt-warn) 14%, var(--vt-paper));
+  /* a further-diluted accent-soft — large fill areas (e.g. bpmn task shapes)
+     that need to stay lighter than accent-soft's own fill. */
+  --vt-accent-faint: color-mix(
+    in oklch,
+    var(--vt-accent-soft),
+    var(--vt-paper) 40%
+  );
 }
 
 /* Theme = which side of every light-dark() token resolves. Default follows the

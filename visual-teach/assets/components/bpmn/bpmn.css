@@ -1,0 +1,166 @@
+/* ====== bpmn vocabulary — hand-built SVG, true BPMN notation ======
+   No JS: each diagram is static SVG authored per lesson. Classes style the
+   SVG parts; the vt- prefix is load-bearing per the component convention
+   even though no JS scans for it here. */
+
+/* scroll wrap — wide diagrams scroll instead of shrinking to mush */
+.vt-bpmn {
+  display: flex;
+  align-items: flex-start;
+  overflow-x: auto;
+  border: 1px solid var(--vt-rule);
+  border-radius: 8px;
+}
+
+/* lane rail — the actor labels live in HTML, not the SVG, so they can pin
+   to the left edge (position: sticky) while the diagram scrolls under them.
+   Each <span> gets flex:<lane height in svg units> so the rail tracks the
+   lane fractions at any rendered scale. */
+.vt-bpmn-lanes {
+  position: sticky;
+  left: 0;
+  align-self: stretch;
+  flex: 0 0 34px;
+  display: flex;
+  flex-direction: column;
+  background: var(--vt-stripe);
+  border-right: 1px solid var(--vt-rule);
+}
+.vt-bpmn-lanes span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  writing-mode: sideways-lr;
+  font: 600 12px var(--vt-ui-font);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--vt-muted);
+}
+.vt-bpmn-lanes span + span {
+  border-top: 1px solid var(--vt-rule);
+}
+
+.vt-bpmn-svg {
+  /* as a flex item the svg would shrink to the wrap; keep natural width so
+     wide diagrams overflow and scroll */
+  flex-shrink: 0;
+}
+
+.vt-bpmn-svg text {
+  font: 500 13px var(--vt-ui-font);
+  fill: var(--vt-ink);
+}
+
+/* task shape — the default fill/stroke shared by tasks, events, gateways */
+.vt-bpmn-svg .vt-bpmn-shape {
+  stroke: var(--vt-ink);
+  stroke-width: 1.5;
+  fill: var(--vt-accent-faint);
+}
+
+/* start/end event — thin circle by default, thick (.end) marks the end event */
+.vt-bpmn-svg .vt-bpmn-event {
+  fill: var(--vt-paper);
+}
+.vt-bpmn-svg .vt-bpmn-event.end {
+  stroke-width: 3.5;
+}
+
+/* exclusive gateway — the diamond carries only its marker (×); the question
+   that decides the branch is a separate flow-label text placed outside it */
+.vt-bpmn-svg .vt-bpmn-gateway {
+  stroke: var(--vt-warn-dk);
+  fill: var(--vt-warn-soft);
+}
+.vt-bpmn-svg .vt-bpmn-gateway-marker {
+  font: 700 14px var(--vt-ui-font);
+  fill: var(--vt-warn-dk);
+}
+
+/* pool/lane structure — divider lines only; the actor labels are the sticky
+   HTML .vt-bpmn-lanes rail */
+.vt-bpmn-svg .vt-bpmn-lane-line {
+  stroke: var(--vt-rule);
+  stroke-width: 1;
+  fill: none;
+}
+
+/* sequence flow — the connecting arrow; pair with a <marker id="arrow"> in the
+   diagram's own <defs> (see demo.html) since SVG markers can't live in an
+   external stylesheet */
+.vt-bpmn-svg .vt-bpmn-flow {
+  stroke: var(--vt-muted);
+  stroke-width: 1.5;
+  fill: none;
+  marker-end: url(#arrow);
+}
+.vt-bpmn-svg .vt-bpmn-flow-label {
+  font: 600 11px var(--vt-ui-font);
+  fill: var(--vt-muted);
+}
+
+/* breakout — native popover lifts the diagram into the top layer, free of any
+   column width. Still no JS: <button popovertarget> opens it, Esc/outside-click
+   closes it, and the popover's <svg><use href="#…"> re-renders the inline
+   diagram scaled to the viewport (see demo.html). */
+.vt-bpmn-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--vt-rule);
+  background: var(--vt-paper);
+  color: var(--vt-muted);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  margin-top: 0.5rem;
+  font: 500 12px var(--vt-ui-font);
+  cursor: pointer;
+}
+.vt-bpmn-expand:hover {
+  color: var(--vt-ink);
+}
+
+.vt-bpmn-pop {
+  width: min(96vw, 1800px);
+  max-height: 92vh;
+  overflow: auto;
+  border: 1px solid var(--vt-rule);
+  border-radius: 10px;
+  background: var(--vt-paper);
+  /* no left/vertical padding: the sticky lane rail runs edge to edge of the
+     frame — no diagram to its left, no paper strip above or below it. The
+     svg carries the breathing room instead. */
+  padding: 0 1rem 0 0;
+}
+.vt-bpmn-pop:popover-open svg {
+  margin: 1rem 0;
+}
+/* flex only while open — a plain display on [popover] would override the
+   UA's display:none and paint the closed popover over the page */
+.vt-bpmn-pop:popover-open {
+  display: flex;
+  align-items: flex-start;
+}
+.vt-bpmn-pop svg {
+  display: block;
+  flex: 1 0 auto;
+  height: auto;
+  /* never scale below natural size: a diagram wider than the viewport
+     scrolls inside the breakout instead of shrinking to mush. Needs the
+     width/height attributes on the popover copy for an intrinsic size. */
+  min-width: max-content;
+}
+.vt-bpmn-pop::backdrop {
+  /* neutral scrim; works over both themes, so no token needed */
+  background: oklch(0% 0 0 / 55%);
+}
+
+@media print {
+  .vt-bpmn {
+    /* stylelint-disable-next-line color-no-hex */
+    border: 1px solid #ccc;
+  }
+  .vt-bpmn-expand {
+    display: none;
+  }
+}
