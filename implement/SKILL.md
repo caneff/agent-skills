@@ -8,9 +8,10 @@ checkout, and terminal, so this skill never creates, switches, or removes one.
 If you are sitting on the repo's default branch and the work needs a branch,
 stop and say so — the workspace should have been made from the ticket.
 
-Do the build yourself. Do not hand it to a subagent: the workspace is already
-the isolation that delegation used to buy, and Orca's own guidance is not to
-substitute other agent-spawn tools for its dispatch.
+You are the **driver**: claim, brief, review, commit, PR. The build itself
+runs as an Orca worker so the model is chosen per ticket — see Build. Orca
+dispatch is the only spawn path; Claude Code's own subagent tools give a build
+no task, no preamble, and no `worker_done`.
 
 ## Claim the ticket
 
@@ -42,21 +43,25 @@ orca-ide worktree set --worktree active --workspace-status in-progress --json
 orca-ide worktree set --worktree active --comment "repro'd; writing the failing test" --json
 ```
 
-Use `$ORCA_CLI_COMMAND` when Orca exports it. On Linux never run bare `orca` —
-it resolves to the GNOME screen reader.
+Use `$ORCA_CLI_COMMAND` when Orca exports it.
 
 ## Build
 
-Invoke the `tdd` skill before writing any implementation code. Each ticket names
-its seams under test; those are the pre-agreed seams. If a ticket names none,
-ask for them before starting.
+Dispatch the build as one Orca worker in this workspace — one Run, one Task —
+with the model chosen for this ticket: `sonnet` for an ordinary one, `opus` for
+a subtle seam. The loop mechanics (guide to load, waiting, release) are
+`implement-spec/SKILL.md`; read it. A change of a few lines with no seam to
+test: build it inline, following the same rules.
 
-For each acceptance criterion: write the failing test first, run it, show it
-failing, then write the code that makes it pass. Never write implementation
-ahead of a red test.
+The brief is pointers, not prose — the ticket URL and its named seams — and
+these rules, which bind the worker, or you when you build inline:
 
-Run typechecking and single test files as you go, and the full suite once at the
-end.
+- Invoke the `tdd` skill before any implementation code. The ticket's seams
+  under test are the pre-agreed seams; if it names none, ask before starting.
+- For each acceptance criterion: failing test first, shown red, then the code
+  that makes it pass. Implementation follows a red test.
+- Typecheck and single test files as you go, the full suite once at the end.
+- Commit to this branch; the driver pushes.
 
 ## Finish
 
