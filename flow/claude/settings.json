@@ -19,6 +19,15 @@
       "Bash(git fetch)",
       "Bash(git worktree *)",
       "Bash(git worktree:*)",
+      "Bash(rtk gh issue *)",
+      "Bash(rtk gh issue edit:*)",
+      "Bash(rtk git -C:*)",
+      "Bash(rtk git branch -d *)",
+      "Bash(rtk git diff *)",
+      "Bash(rtk git fetch *)",
+      "Bash(rtk git fetch)",
+      "Bash(rtk git worktree *)",
+      "Bash(rtk git worktree:*)",
       "Bash(land)",
       "Bash(node *)",
       "Bash(pushpr)",
@@ -226,6 +235,15 @@
       }
     ],
     "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -c '{time:(now|todate), cwd, session_id, tool:.tool_name, input:.tool_input}' >> ~/.claude/permission-prompts.jsonl 2>/dev/null || true",
+            "timeout": 5
+          }
+        ]
+      },
       {
         "matcher": "*",
         "hooks": [
