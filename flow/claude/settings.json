@@ -50,6 +50,7 @@
     }
   },
   "model": "claude-fable-5[1m]",
+  "disableAgentView": true,
   "disableClaudeAiConnectors": true,
   "skillOverrides": {
     "dataviz": "off",
