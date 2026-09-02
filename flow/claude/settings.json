@@ -1,5 +1,6 @@
 {
   "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "ENABLE_TOOL_SEARCH": "true",
     "ANTHROPIC_CUSTOM_MODEL_OPTION": "claude-opus-4-8[1m]",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "Opus 4.8 (1M)",
@@ -31,8 +32,6 @@
       "Read(//tmp/**)"
     ],
     "deny": [
-      "Agent",
-      "Task",
       "AskUserQuestion",
       "NotebookEdit",
       "DesignSync",
