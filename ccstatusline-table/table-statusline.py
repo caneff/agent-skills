@@ -170,7 +170,6 @@ def main() -> None:
         data = {}
 
     model = (data.get("model") or {}).get("display_name", "")
-    sid = (data.get("session_id") or "")[:8]
     cwd = (data.get("workspace") or {}).get("current_dir") or data.get("cwd") or "."
     transcript = data.get("transcript_path", "")
 
@@ -179,11 +178,9 @@ def main() -> None:
     session = run([str(CFG / "usage-segment.sh"), "session"], raw)
     wreset = run([str(CFG / "usage-segment.sh"), "wreset"], raw)
     breset = run([str(CFG / "usage-segment.sh"), "breset"], raw)
-    burn = run([str(CFG / "burndown-segment.sh")], raw)
-    issues = run([str(CFG / "issue-counts-segment.sh")], raw)
     branch, changes, root = git(cwd)
     tokens = context_tokens(transcript)
-    ctx = f"Ctx {tokens / 1000:.1f}k" if tokens else ""
+    ctx = f"Ctx {tokens / 1000:.1f}k" if tokens else "Ctx —"
 
     frame = frame_color(tokens)
 
@@ -206,24 +203,16 @@ def main() -> None:
     # "Opus 4.8" -> "O 4.8"; keep the effort suffix, e.g. "O 4.8 (M)"
     ver = re.search(r"\d[\d.]*", model)
     short = (f"{model[:1]} {ver.group()}") if model and ver else model
-    row_a = [
+    row = [
         (f"{short} {effort}".strip(), PURPLE),
-        (ctx, CYAN),
-        (f"{branch} {changes}".strip(), GREEN),
-        (burn, ORANGE),
-    ]
-    row_b = [
         (cwd_disp, CYAN),
+        (ctx, ORANGE),
         (usage, PINK),
-        (sid, GRAY),
-        (issues, FG),
+        (f"{branch} {changes}".strip(), GREEN),
     ]
-    # keep only columns where at least one row has content
-    keep = [c for c in range(4) if (row_a[c][0] or row_b[c][0])]
-    row_a = [row_a[c] for c in keep] or [(model, PURPLE)]
-    row_b = [row_b[c] for c in keep]
+    row = [c for c in row if c[0]] or [(model, PURPLE)]
 
-    print(table([row_a, row_b], frame))
+    print(table([row], frame))
 
 
 if __name__ == "__main__":
