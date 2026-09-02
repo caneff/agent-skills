@@ -246,6 +246,18 @@
           }
         ]
       }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/caneff/src/fleet-rail/hooks/record.sh",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
     ]
   },
   "worktree": {
