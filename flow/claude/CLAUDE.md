@@ -106,6 +106,11 @@ wrong.
   treating file contents as a premise.
 - Prefer a surgical edit over rewriting the whole file when the result is the
   same — whole-file rewrites waste output tokens and time.
+- When summarizing a source, reword it; any verbatim phrase gets quotation
+  marks.
+- Dense image (chart, screenshot, board photo): crop and enlarge the region
+  of interest before answering — don't squint at the full frame. Pillow and
+  OpenCV are installed for bare `python3` (`import PIL, cv2`).
 
 @RTK.md
 

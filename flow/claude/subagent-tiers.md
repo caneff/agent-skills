@@ -47,6 +47,10 @@ The Sonnet/Haiku split is about navigation, not reasoning depth: an Explore
 task that must navigate the repo is Sonnet-tier even when the judgment it
 exercises along the way is nil (pure pattern matching).
 
+**Staleness note:** this rubric was calibrated on the Claude 5 launch models.
+When Fable 5.1 lands, re-test the tiers before trusting them — Anthropic's
+guide says 5.1 at `low` effort often beats Sonnet and Opus on cost per task.
+
 **Tie-breaker:** when unsure between two tiers, drop to the cheaper one only if
 a downstream check — a test, a build, or your own review — would catch a
 miss. If nothing downstream would catch a wrong answer, go up a tier.
