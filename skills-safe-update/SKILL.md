@@ -17,6 +17,22 @@ bash scripts/safe-update.sh     # do the update, preserving edits
 
 Both run against `~/.agents/skills` (override with `SKILLS_DIR=...`).
 
+## Hand-installed skills (.extra-skills.json)
+
+Skills not installed via `npx skills` are invisible to the lockfile. Register
+them in `~/.agents/skills/.extra-skills.json` and both scripts cover them —
+status rows get an `[extra]` tag, and `safe-update.sh` syncs them from their
+github upstream inside the same git buffer, with the same edit protection:
+
+```json
+{ "prompt-master": { "repo": "nidhinjs/prompt-master", "path": "", "treeSha": "<tree sha of installed upstream version>" } }
+```
+
+`path` is the skill's folder inside the repo (`""` = repo root). `treeSha` is
+the git tree SHA of that folder at the version you installed (get it from
+`gh api repos/<repo>/commits/<ref> --jq .commit.tree.sha` for root skills);
+the update script bumps it on every sync.
+
 ## Always digest the result (required)
 
 `safe-update.sh` prints raw name-lists and a `--stat`. That is NOT the deliverable. After it finishes, **read the actual diffs and give the user a plain-English digest** — this step runs every time, not on request.
