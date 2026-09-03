@@ -71,7 +71,29 @@
     "keybindings-help": "off",
     "simplify": "off",
     "fewer-permission-prompts": "off",
-    "init": "off"
+    "init": "off",
+    "add-molab-badge": "off",
+    "anywidget-generator": "off",
+    "auto-paper-demo": "off",
+    "claude-handoff": "off",
+    "find-skills": "off",
+    "implement-paper-auto": "off",
+    "loop-me": "off",
+    "marimo-batch": "off",
+    "marimo-notebook": "off",
+    "marimo-pair": "off",
+    "migrate-to-shoehorn": "off",
+    "orchestration": "off",
+    "scaffold-exercises": "off",
+    "setup-ts-deep-modules": "off",
+    "streamlit-to-marimo": "off",
+    "to-questionnaire": "off",
+    "uv": "off",
+    "wasm-compatibility": "off",
+    "wizard": "off",
+    "writing-beats": "off",
+    "writing-fragments": "off",
+    "writing-shape": "off"
   },
   "hooks": {
     "PreToolUse": [
@@ -298,12 +320,6 @@
       "source": {
         "source": "github",
         "repo": "DietrichGebert/ponytail"
-      }
-    },
-    "headroom-marketplace": {
-      "source": {
-        "source": "github",
-        "repo": "chopratejas/headroom"
       }
     }
   },
