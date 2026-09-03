@@ -104,6 +104,8 @@ wrong.
   yourself, or merged branches pile up in the sidebar.
 - `head`/`tail` are for looking, not measuring — use `wc -l`/`grep -c` before
   treating file contents as a premise.
+- Prefer a surgical edit over rewriting the whole file when the result is the
+  same — whole-file rewrites waste output tokens and time.
 
 @RTK.md
 
