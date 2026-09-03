@@ -1,0 +1,72 @@
+{
+    "status": "failed",
+    "threshold": 6,
+    "methods": [
+        {
+            "status": "failed",
+            "crap": 24.432000000000002,
+            "cc": 6,
+            "cov": 20,
+            "covKind": "branch",
+            "method": "inner",
+            "src": "src/sample.ts",
+            "lineStart": 2,
+            "lineEnd": 19
+        },
+        {
+            "status": "failed",
+            "crap": 20,
+            "cc": 4,
+            "cov": 0,
+            "covKind": "stmt",
+            "method": "uncoveredFn",
+            "src": "src/sample.ts",
+            "lineStart": 23,
+            "lineEnd": 34
+        },
+        {
+            "status": "passed",
+            "crap": 6,
+            "cc": 2,
+            "cov": 0,
+            "covKind": "stmt",
+            "method": "entirelyUncovered",
+            "src": "src/untested.ts",
+            "lineStart": 1,
+            "lineEnd": 6
+        },
+        {
+            "status": "passed",
+            "crap": 2,
+            "cc": 2,
+            "cov": 100,
+            "covKind": "stmt",
+            "method": "arrowFn",
+            "src": "src/sample.ts",
+            "lineStart": 36,
+            "lineEnd": 41
+        },
+        {
+            "status": "passed",
+            "crap": 1,
+            "cc": 1,
+            "cov": 100,
+            "covKind": "stmt",
+            "method": "outer",
+            "src": "src/sample.ts",
+            "lineStart": 1,
+            "lineEnd": 21
+        },
+        {
+            "status": "passed",
+            "crap": 1,
+            "cc": 1,
+            "cov": 100,
+            "covKind": "stmt",
+            "method": "branchlessFn",
+            "src": "src/sample.ts",
+            "lineStart": 43,
+            "lineEnd": 45
+        }
+    ]
+}

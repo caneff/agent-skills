@@ -77,6 +77,53 @@ def normalize(radon_json, coverage_json):
     return rows
 
 
+def normalize_ts(report_json):
+    """Captured `@barney-media/crap-typescript-core` `--format json` report ->
+    the same language-neutral function rows `normalize` produces.
+
+    The report only exposes the already-combined `cov`/`covKind` per method
+    (`covKind` names which axis -- stmt or branch -- was the lower/measured
+    one), never both raw percentages, because the package's own
+    `combineCoverageMetrics` does exactly `min(measured percents)` (verified
+    by reading `coverageNormalization.js` in the published package), the same
+    rule `score()`'s `_effective_coverage` applies. So a row's non-dominant
+    axis is filled with 100.0 (does not affect the min) rather than
+    reconstructed -- reusing `score()` unchanged still reproduces the tool's
+    own `crap` value exactly.
+
+    `cov is None` (`covKind == "N/A"` for a missing/unparseable/ambiguous
+    coverage report) is the same missing-data rule as `normalize`'s Python
+    path: 0% both axes. `cov == 100` with `covKind == "N/A"` is the other
+    "N/A" case -- structural_na, nothing to instrument at all (e.g. an
+    ambient signature) -- trivially satisfied, 100% both axes, same
+    treatment as a branchless Python function reporting 100% branch
+    coverage.
+    """
+    rows = []
+    for method in report_json["methods"]:
+        cov = method["cov"]
+        kind = method["covKind"]
+        if cov is None:
+            stmt_cov = branch_cov = 0.0
+        elif kind == "stmt":
+            stmt_cov, branch_cov = float(cov), 100.0
+        elif kind == "branch":
+            stmt_cov, branch_cov = 100.0, float(cov)
+        else:  # "N/A" with cov not None -> structural_na
+            stmt_cov = branch_cov = 100.0
+        rows.append(
+            {
+                "file": method["src"],
+                "name": method["method"],
+                "line": method["lineStart"],
+                "complexity": method["cc"],
+                "statement_coverage": stmt_cov,
+                "branch_coverage": branch_cov,
+            }
+        )
+    return rows
+
+
 def _effective_coverage(row):
     """min(statement, branch) as a 0-1 fraction — the ticket's coverage rule."""
     return min(row["statement_coverage"], row["branch_coverage"]) / 100.0
@@ -165,9 +212,13 @@ def main(argv):
     if argv[1:2] == ["--selfcheck"]:
         _selfcheck()
         return
-    radon_json = json.load(open(argv[1], encoding="utf-8"))
-    coverage_json = json.load(open(argv[2], encoding="utf-8"))
-    rows = normalize(radon_json, coverage_json)
+    if argv[1:2] == ["--ts"]:
+        report_json = json.load(open(argv[2], encoding="utf-8"))
+        rows = normalize_ts(report_json)
+    else:
+        radon_json = json.load(open(argv[1], encoding="utf-8"))
+        coverage_json = json.load(open(argv[2], encoding="utf-8"))
+        rows = normalize(radon_json, coverage_json)
     for finding in score(rows)["findings"]:
         print(json.dumps(finding))
 
