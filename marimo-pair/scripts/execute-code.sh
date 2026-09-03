@@ -109,7 +109,6 @@ case "$url_host" in
     ;;
 esac
 
-# Build optional auth header
 auth_args=()
 if [[ -n "$token" ]]; then
   auth_args+=(-H "Authorization: Bearer ${token}")
