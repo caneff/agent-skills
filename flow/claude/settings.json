@@ -283,7 +283,7 @@
   },
   "disableAgentView": true,
   "disableRemoteControl": true,
-  "disableWorkflows": true,
+  "disableWorkflows": false,
   "statusLine": {
     "type": "command",
     "command": "python3 /home/caneff/.agents/skills/ccstatusline-table/table-statusline.py",
