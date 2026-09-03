@@ -25,6 +25,8 @@ if [[ -n "$missing" ]]; then
   exit 1
 fi
 
+# ---------------------------------------------------------------- platform ---
+
 if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then
   platform=windows
 elif [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft /proc/version 2>/dev/null; then
@@ -47,6 +49,8 @@ windows_exe() {
   printf '%s\n' "$sys32/$name"
 }
 
+# ------------------------------------------------------- registry locations ---
+#
 # Origin is tracked per directory, not guessed from an entry's path: a Linux box
 # may well keep its home under a mount point.
 
@@ -74,6 +78,8 @@ if [[ "$platform" == wsl ]] && cmd_exe=$(windows_exe cmd.exe); then
   fi
 fi
 
+# ---------------------------------------------------------------- liveness ---
+#
 # A server is live if its process is running or something answers at its
 # address. Neither signal is reliable alone — Windows recycles PIDs, and a
 # healthy server can be unreachable across the WSL boundary — so an entry is
@@ -118,6 +124,8 @@ process_alive() {
   fi
   return 1
 }
+
+# ------------------------------------------------------------ reachability ---
 
 gateway=""
 gateway_resolved=false
@@ -201,6 +209,7 @@ candidate_hosts() {
   esac
 }
 
+# Print a base URL that answered, or nothing.
 resolve_url() {
   local host=$1 port=$2 base_url=$3 origin=$4 candidate url
   while IFS= read -r candidate; do
@@ -216,6 +225,8 @@ resolve_url() {
   done <<<"$(candidate_hosts "$host" "$port" "$origin")"
   return 1
 }
+
+# ------------------------------------------------------------------- scan ---
 
 live_files=()
 live_origins=()
@@ -260,6 +271,8 @@ for ((i = 0; i < ${#dirs[@]}; i++)); do
     live_count=$((live_count + 1))
   done
 done
+
+# ----------------------------------------------------------------- output ---
 
 entries=""
 for ((i = 0; i < live_count; i++)); do
