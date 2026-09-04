@@ -40,8 +40,9 @@ alone and appends to the same file.
 
 Exploration is read-only and needs no worktree, terminal, or Orca task: run it
 as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`) and read
-its result directly. Only builders and reviewers — the tasks that write code
-and own verdicts — are Orca tasks.
+its result directly. **Only builders are Orca tasks** — they are the only
+workers that write code and need their own worktree and branch. Everything
+read-only, exploration and review both, is an in-process subagent.
 
 ## The loop
 
@@ -58,14 +59,15 @@ and own verdicts — are Orca tasks.
    issue reference, the notes path, and the branch base, never a summary.
    Seed the worker to stop after committing, report its branch, and wait; the
    coordinator owns review and the PR.
-5. **Review.** Once a worker reports its branch, dispatch a review task
-   seeded with only the issue reference and the branch — never the burn
-   history or the explorer's notes — running the
-   `~/.agents/skills/code-review/SKILL.md` skill by pointer, not by slash
-   invocation. It owns the verdict: **clean** or **can't get clean**.
+5. **Review.** Once a worker reports its branch, `git fetch` it and review it
+   with an in-process subagent (`Agent` tool, `model: opus`) — no Orca task,
+   no terminal, no worktree; review is read-only. Seed it with only the issue
+   reference and the branch — never the burn history or the explorer's notes —
+   running the `~/.agents/skills/code-review/SKILL.md` skill by pointer, not by
+   slash invocation. It owns the verdict: **clean** or **can't get clean**.
    Findings pass through the coordinator to the builder verbatim; the builder
-   fixes, the reviewer re-reviews. Review tasks run concurrently and do not
-   count against the builder cap.
+   fixes, the reviewer re-reviews. Reviews run concurrently and do not count
+   against the builder cap.
 6. **Land, one at a time**, in the order reviews come back clean, per the
    Finish section of `~/.agents/skills/implement/SKILL.md`. On **can't get
    clean**, park the ticket
