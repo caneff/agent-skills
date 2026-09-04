@@ -11,6 +11,9 @@ an Orca verb: run `orca-ide skills get orchestration` and
 which is version-matched to the binary. This is supervised orchestration; a
 full handoff is a different lane, and the two stay apart.
 
+A mixed-origin queue — several tickets from different specs, not one spec's
+slices — is [`burndown`](../burndown/SKILL.md)'s job, not this skill's.
+
 ## Shape
 
 One Run for the spec. One Task per ticket, plus an **exploration** task first
@@ -22,8 +25,9 @@ Workers run in this workspace, agent `claude`, model `sonnet` unless the ticket
 names opus. The frontier is Orca's ready-task query. Start every ready worker,
 then wait.
 
-Set the workspace comment at every checkpoint. It is the progress line the
-owner reads, and the only surface that shows a gate.
+Set the workspace comment at every checkpoint — a task dispatched, a ticket
+landed, a gate raised or resolved, and the Run's end. It is the progress line
+the owner reads, and the only surface that shows a gate.
 
 ## The brief
 
@@ -47,11 +51,11 @@ rejected — ack it.
 ## Gates
 
 A gate is the owner's decision. Gate the Run: `gate-create --task` flips a
-completed task to `blocked` and its resolve leaves it `ready`. Surface it three
-ways — the workspace comment, the question in your terminal — then **end your
-turn**. Orca's NEEDS YOU column stays empty for a gate; the comment and your idle
-prompt are the only signals. Resolve the gate after the owner answers in your
-terminal.
+completed task to `blocked` and its resolve leaves it `ready`. Surface it two
+ways — the workspace comment and the question in your terminal — then **end
+your turn**. Orca's NEEDS YOU column stays empty for a gate; the comment and
+your idle prompt are the only signals. Resolve the gate after the owner
+answers in your terminal.
 
 ## Landing
 

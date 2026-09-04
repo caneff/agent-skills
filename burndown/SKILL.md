@@ -1,87 +1,72 @@
 ---
 name: burndown
-description: "Burn down the ticket queue: loop /implement over every open ready-for-agent issue, frontier-first, until the queue is empty."
+description: "Drain a mixed-origin ticket queue to empty as one supervised Orca run, frontier-first, one PR per ticket."
 disable-model-invocation: true
 ---
 
-# Burn down the ticket queue
+You are the **coordinator**: a top-level Claude session in the queue's repo,
+started against the `ready-for-agent` label. This file is policy. Every
+command is an Orca verb: run `orca-ide skills get orchestration` and
+`orca-ide skills get orca-cli` before the first one and follow that grammar,
+which is version-matched to the binary.
 
-Work the repo's `ready-for-agent` queue to empty. The tickets are a graph, not
-a list: their blocking edges say which ones are independent, so the driver
-builds the whole unblocked **frontier** at once and lands the results one at a
-time.
+A single spec's slices in one Orca workspace are
+[`implement-spec`](../implement-spec/SKILL.md)'s job, not this skill's — use
+that instead when every ticket traces to the same spec issue.
 
 **Arguments:** `/burndown [builders] [tickets]` — the maximum number of live
-builders (default 3) and the maximum number of tickets this burn will settle
-(default 15). `/burndown 1` builds strictly one ticket at a time. A burn stops
-at the ticket cap even with the queue non-empty; run it again to continue,
-since the tracker and the progress file hold all the state.
+worker tasks (default 3) and the maximum number of tickets this burn will
+settle (default 15). `/burndown 1` builds strictly one ticket at a time. A
+burn stops at the ticket cap even with the queue non-empty; run it again to
+continue, since the tracker and the progress file hold all the state.
 
-The ticket cap is sized for the explorer in step 3, not for the driver: one
-`sonnet` agent reads each ticket's issue and the files it touches, then writes
-the notes. At 15 tickets that fits a 200k window with room to think; past 20 it
-skims, and skimmed notes read the same as good ones. Raise it when you have
-watched a burn and the notes held up.
+## Shape
+
+Mirrors `implement-spec`: one Run, one Task per ticket, dependencies as
+blocking edges, workers via Orca `claude`/`sonnet` (or `opus` if the ticket
+names it), frontier = Orca's ready-task query. Unlike `implement-spec`, the
+ticket set is not fixed up front — the queue is mixed-origin and re-listed
+every pass, so a task is created for a ticket only once it enters the
+frontier, and a landing or a human adding tickets can grow the queue mid-burn.
+
+One **exploration** task, first pass only, covering every ticket this burn
+can reach — step 1's listing in dependency order, cut at the ticket cap, not
+just the first pass's frontier — that every ticket task depends on. The cap is
+sized for this read: at 15 tickets it fits a 200k window with room to think;
+past 20 it skims. Notes go to `~/.cache/burndown/<repo dir name>.notes.md`,
+outside the repo so every worker can read them, and are kept after the burn.
+A later pass that lists a ticket not in the pass-1 queue explores that ticket
+alone and appends to the same file.
 
 ## The loop
 
 1. List the queue: `gh issue list --label ready-for-agent --state open`.
    Empty, with nothing in flight → report and stop.
-2. Take the **frontier**: every ticket whose blockers are all closed. Check
-   each candidate's blocking edges (native blocking link, or the "Blocked by"
-   section in the body); skip any with an open blocker. Take the lowest
-   numbers first, up to the number of free builder slots. That set is this
-   pass's **batch**.
-3. **Explore once per burn — first pass only.** On the first pass, spawn one
-   exploration subagent (`sonnet`) over **the tickets this burn can reach** —
-   step 1's listing in dependency order, cut at the ticket cap — not just this
-   pass's frontier. Blocked tickets are in scope: each one can land before the
-   burn ends, so the explorer covers the whole burn in one read. The cap is
-   what keeps that one read from going thin over a long queue.
-   It reads the code and docs those tickets touch and writes its notes to
-   `~/.cache/burndown/<repo dir name>.notes.md` — outside the repo, so every
-   builder and every worktree can read it. Builders **wait** for it: a builder
-   that starts early has already done the reading the explorer was meant to
-   save. Notes are kept after the burn.
-
-   Every later pass **skips this step** and points its builders at the same
-   file. A refill batch is usually one ticket, and one explorer per ticket
-   costs more than it saves. A builder that finds the notes thin for its
-   ticket reads the code itself.
-
-   One exception: if a later pass lists a ticket that was **not** in the pass-1
-   queue — a human added it mid-burn — explore that ticket alone and append to
-   the same notes file.
-4. **Build.** Run the [`implement`](../implement/SKILL.md) skill on each ticket
-   in the batch — claim, one workspace per ticket — with one change to that
-   skill's sequencing: seed the builder to stop after committing, report its
-   branch, and wait. The driver owns review and the PR (next steps);
-   everything else in `implement`, including its gates, applies unchanged.
-
-   **Seed by pointer.** A builder gets the issue reference, the notes path,
-   and the branch base — never a summary of something it can read itself.
-5. **Review.** Spawn a fresh reviewer subagent (`opus`) for each finished
-   ticket, seeded with only the issue reference and the branch — never the
-   burn history, and never the explorer's notes. A reviewer that re-reads the
-   code independently is the point of having one. It runs `/code-review`
-   against the issue spec and owns the verdict: **clean** or **can't get
-   clean**. Findings pass through the driver to the builder verbatim; the
-   builder fixes, the reviewer re-reviews. The driver carries mail and acts on
-   the verdict — it judges nothing, and the builder never certifies its own
-   work. Reviewers run concurrently and do not count against the builder cap.
-6. **Land, one at a time**, in the order reviews come back clean. On
-   **clean**, tell the builder to land, per `implement`'s landing section. On
-   **can't get clean**, park the ticket (below).
-
-   A builder still mid-build on a stale base needs no warning: the PR reports
-   the conflict against the pushed default branch, so a real collision
-   surfaces there and parks the ticket.
-
-   Either way the settled ticket's builder is spent: **release it** —
-   `TaskStop` with its name. A burndown builder waits for review, so it must
-   be a named background agent, and a named agent parks idle forever unless
-   the driver stops it. Stop each builder as its ticket settles; a queue of
-   ten tickets must not leave ten idle agents behind.
+2. Take the **frontier** via Orca's ready-task query: every ticket whose
+   blockers are all closed, lowest numbers first, up to the free worker
+   slots. That set is this pass's batch.
+3. First pass only: run exploration (above). Every later pass skips this and
+   points its workers at the same notes file.
+4. **Build.** Dispatch one Orca task per ticket in the batch, running the
+   [`implement`](../implement/SKILL.md) skill's § Build by pointer — the
+   issue reference, the notes path, and the branch base, never a summary.
+   Seed the worker to stop after committing, report its branch, and wait; the
+   coordinator owns review and the PR.
+5. **Review.** Once a worker reports its branch, dispatch a review task
+   seeded with only the issue reference and the branch — never the burn
+   history or the explorer's notes — running the
+   [`code-review`](../code-review/SKILL.md) skill by pointer, not by slash
+   invocation. It owns the verdict: **clean** or **can't get clean**.
+   Findings pass through the coordinator to the builder verbatim; the builder
+   fixes, the reviewer re-reviews. Review tasks run concurrently and do not
+   count against the builder cap.
+6. **Land, one at a time**, in the order reviews come back clean, per
+   `implement`'s landing section. On **can't get clean**, park the ticket
+   (below). A worker still mid-build on a stale base needs no warning: the PR
+   reports the conflict against the pushed default branch, so a real
+   collision surfaces there and parks the ticket. Either way the settled
+   ticket's task is done — an Orca task ends with its worker, so there is no
+   separate release step.
 7. Append to the progress file at
    `~/.cache/burndown/<repo dir name>.progress` (never in the repo):
    `burning #<n>` when claiming in step 4, then `#<n> landed <sha>` or
@@ -92,14 +77,14 @@ watched a burn and the notes held up.
    `flow/ccstatusline-table/helpers/burndown-segment.sh`.
 8. When a ticket settles, refill its slot: go to 1, skipping step 3. Re-list
    every pass — a landing can unblock tickets, and a human may have added
-   more. At the ticket cap — landed plus parked — start no new builders, let
-   the live ones settle, and stop.
+   more. At the ticket cap — landed plus parked — start no new tasks, let the
+   live ones settle, and stop.
 
-## Driver context stays thin
+## Coordinator context stays thin
 
 The tracker and the progress file are the state, not this conversation:
 re-derive the queue every pass, and keep one line per finished ticket in
-context — build detail lives with the builder, review detail in the review
+context — build detail lives with the worker, review detail in the review
 report. A burn survives summarization this way, and a fresh session can
 resume a half-done queue from the tracker and progress file alone.
 
@@ -110,7 +95,7 @@ human answering: **park it** — comment the open question on the issue, swap
 `in-progress` for `ready-for-human`, and move on to the next ticket. Two parks
 with no landing between them means the problem is systemic, not per-ticket:
 stop the burn and report instead of parking the whole queue. (Two parks in a
-row is a coincidence when three builders run at once; two parks with nothing
+row is a coincidence when three workers run at once; two parks with nothing
 getting through is not.)
 
 ## Report
