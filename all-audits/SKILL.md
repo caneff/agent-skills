@@ -1,11 +1,11 @@
 ---
 name: all-audits
-description: Run every repo audit at once — twelve audit skills in parallel, one HTML index linking each report, then grill through them one at a time.
+description: Run every repo audit at once — thirteen audit skills in parallel, one HTML index linking each report, then grill through them one at a time.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---
 
-Run the whole audit set over one repo in a single sweep. Twelve audit skills fan
+Run the whole audit set over one repo in a single sweep. Thirteen audit skills fan
 out in parallel, each as its own process; each writes a self-contained report;
 the reports collect under one folder behind an `index.html` that links them. The
 sweep **reports only** — it applies nothing and
@@ -23,7 +23,7 @@ launches. This is the one place the rule is stated: an audit that takes an
 explicit branch scope instead resolves it via `git merge-base` against the
 origin's default branch — never an assumed `main`.
 
-## The set — twelve skills
+## The set — thirteen skills
 
 Each audits the whole repo and writes a `findings.jsonl` + grouped-summary
 `report.html` pair (see `harness/findings-schema.md`):
@@ -40,6 +40,7 @@ Each audits the whole repo and writes a `findings.jsonl` + grouped-summary
 - `docstring-coverage` — undocumented public API on a `py.typed` surface.
 - `domain-drift` — code vocabulary that drifts from the project's domain terms.
 - `type-tightness` — loose `Any`, unexplained `# type: ignore`, fake boundaries.
+- `crap-audit` — per-function CRAP score (complexity² × uncovered fraction³ + complexity), real risk hotspots.
 
 `skill-audit` is **not** in the set — it scans the global skills directory, not
 this repo. `mutation-audit` is **not** in the set either — it is opt-in and

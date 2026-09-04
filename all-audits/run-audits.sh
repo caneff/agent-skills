@@ -9,7 +9,7 @@
 # into a live session.
 #
 # Usage:
-#   run-audits.sh [REPO]                 fresh sweep of all twelve audits (default)
+#   run-audits.sh [REPO]                 fresh sweep of all thirteen audits (default)
 #   run-audits.sh [REPO] --out DIR       write into DIR, accumulating (no wipe)
 #   run-audits.sh [REPO] --only a,b      run just these audits (into the run dir)
 #   run-audits.sh [REPO] --short         run only the three structural audits
@@ -45,7 +45,7 @@ report_path_from_log() {
 # test where $REPO is unset.
 audit_prompt() {
   printf '/%s %s\n%s\n' "$1" "$2" \
-    "Audit the ENTIRE repository at $2 — every source file, not a git diff or recent-changes review. Override any branch-diff or hot-spot default the skill has. Exclude vendored, generated, and dependency trees (node_modules, .venv, dist, vendor, build output, lockfiles), any .git/ tree, and any worktrees/ tree — audit only the project's own tracked source. Do NOT open the report: skip every xdg-open/open/start step the skill would run. You are one audit inside an all-audits sweep, and the sweep opens only the final index — twelve reports opening at once would bury it. Just write the report and print its absolute path."
+    "Audit the ENTIRE repository at $2 — every source file, not a git diff or recent-changes review. Override any branch-diff or hot-spot default the skill has. Exclude vendored, generated, and dependency trees (node_modules, .venv, dist, vendor, build output, lockfiles), any .git/ tree, and any worktrees/ tree — audit only the project's own tracked source. Do NOT open the report: skip every xdg-open/open/start step the skill would run. You are one audit inside an all-audits sweep, and the sweep opens only the final index — thirteen reports opening at once would bury it. Just write the report and print its absolute path."
 }
 
 # mutation_prepass_prompt REPO — the prompt for the mutation auto-select
@@ -138,7 +138,7 @@ while [ $# -gt 0 ]; do
     --only) ONLY="$2"; shift 2 ;;
     # ponytail: --short is just a named --only list. The "short set" — the three
     # widest-reaching structural audits (thermo, architecture, over-engineering)
-    # — is the fast pass when you don't want the full twelve. Add a name here if
+    # — is the fast pass when you don't want the full thirteen. Add a name here if
     # the short set grows; no new machinery.
     --short) ONLY="thermo-nuclear-code-quality-review,improve-codebase-architecture,ponytail-audit"; shift ;;
     --index) INDEX_ONLY=1; shift ;;
@@ -166,7 +166,7 @@ CLAUDE_FLAGS=(-p --dangerously-skip-permissions)
 # --mutation is its own short-circuit mode, mirroring --index: parse the
 # target list, echo the selection observably, and run each selected module
 # through mutation-audit in its own disposable git worktree — WITHOUT running
-# the twelve-audit claude sweep.
+# the thirteen-audit claude sweep.
 #
 # An explicit list (--mutation a.py,b.py) bypasses BOTH the pre-pass and the
 # cap below — that's the current behavior, entirely offline.
@@ -372,8 +372,9 @@ if [ "$MUTATION" = 1 ]; then
   exit 0
 fi
 
-# The full set — six original + six added (spec #365, T5). mutation-audit is
-# deliberately NOT here: it is opt-in, targeted at one module, never swept.
+# The full set — six original + six added (spec #365, T5) + crap-audit
+# (#508). mutation-audit is deliberately NOT here: it is opt-in, targeted at
+# one module, never swept.
 AUDITS=(
   ponytail-audit
   test-audit
@@ -387,6 +388,7 @@ AUDITS=(
   docstring-coverage
   domain-drift
   type-tightness
+  crap-audit
 )
 
 # The two expensive LLM passes gated by the staleness cache, and each one's

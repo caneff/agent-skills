@@ -44,9 +44,11 @@ The worker rules in `implement/SKILL.md` § Build, by pointer, plus the
 
 Wait for a worker to finish, escalate, or ask. Known failure: the wait verb
 returns `waiter_exists` for a waiter nobody can see, and its retry flag does not
-attach. Fall back to a 30-second poll on the plain check; kill the old loop
-before arming a new one. A duplicate finish message after release arrives
-rejected — ack it.
+attach. Don't use it — use `orca-wait --terminal <handle> --for exit|tui-idle
+[--timeout-ms N]` (in `~/.local/bin`), which polls `terminal show` and never
+registers a server-side waiter. Exit 0 = condition met, 2 = timeout. Kill any
+old wait loop before arming a new one. A duplicate finish message after release
+arrives rejected — ack it.
 
 ## Gates
 

@@ -374,3 +374,24 @@ for a in thermo-nuclear-code-quality-review improve-codebase-architecture ponyta
 done
 
 echo "ok (--short alias names only real audits)"
+
+# --- crap-audit joins the sweep set (#508): thirteenth AUDITS member, same
+# report-discovery/index-link path every other audit gets. Static membership
+# check plus a functional --index run with a pre-landed crap-audit report. ---
+grep -qE '^  crap-audit$' "$SCRIPT" || fail "crap-audit is not a member of the AUDITS array"
+
+catmp="$(mktemp -d)"
+trap 'rm -rf "$tmp" "$gtmp" "$ctmp" "$mutmp" "$nttmp" "$negtmp" "$catmp"' EXIT
+
+mkdir -p "$catmp/collection/crap-audit"
+echo '<html><body>crap-audit report</body></html>' >"$catmp/collection/crap-audit/report.html"
+
+AUDITS_NO_OPEN=1 AUDITS_NO_SYNTH=1 bash "$SCRIPT" --index --out "$catmp" >"$catmp/run.log" 2>&1 \
+  || fail "--index (crap-audit) exited non-zero; see: $(cat "$catmp/run.log")"
+
+caindex="$catmp/collection/index.html"
+[ -f "$caindex" ] || fail "index.html was not built at $caindex"
+grep -q '<td>crap-audit</td>' "$caindex" || fail "index missing crap-audit row"
+grep -q 'href="crap-audit/report.html"' "$caindex" || fail "index missing link to crap-audit report"
+
+echo "ok (crap-audit joins the sweep set)"
