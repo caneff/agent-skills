@@ -100,4 +100,3 @@ Complexity only. Correctness bugs, security holes, and performance go to a
 normal review pass, not this one. A single smoke test or `assert`-based
 self-check is the ponytail minimum, not bloat — never flag it for deletion.
 Lists findings, applies nothing. One-shot.
-"stop ponytail-audit" or "normal mode" to revert.

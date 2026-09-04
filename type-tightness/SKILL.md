@@ -128,13 +128,12 @@ value = external_api.fetch()  # type: ignore[no-any-return]  # boundary — SDK 
 
 ## Run
 
-1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, default to
-   the current branch's diff against its base (`git diff --name-only
-   main...HEAD`), not the whole tree — a repo-wide sweep is an explicit
-   opt-in the user asks for by name. Either way, skip vendored, generated,
-   and dependency trees (`node_modules`, `dist`, `.venv`, build output,
-   lockfiles) and any `worktrees/` tree. Python only — this audit has
-   nothing to say about a non-Python file.
+1. **Scope.** Audit `$ARGUMENTS` if given; with no argument, default to the
+   whole repo — see `all-audits/SKILL.md`'s Scope section for the shared
+   default-scope rule. Skip vendored, generated, and dependency trees
+   (`node_modules`, `dist`, `.venv`, build output, lockfiles) and any
+   `worktrees/` tree. Python only — this audit has nothing to say about a
+   non-Python file.
 
 2. **Run the gate and subtract.** `uvx ruff check --select ANN
    --output-format json <scope>` plus the repo's type-checker (`ty`/mypy/
