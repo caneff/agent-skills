@@ -1,6 +1,6 @@
 ---
 name: comment-audit
-description: Ruthlessly audit a repo's comments — delete every one that doesn't earn its place, keep only what the code cannot say. Slash-only.
+description: Ruthlessly audit a repo's comments — delete every one that doesn't earn its place, keep only what the code cannot say.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---

@@ -1,6 +1,6 @@
 ---
 name: domain-drift
-description: Audit whether code names match the project's own domain vocabulary — a generic name standing in for a defined term, two names for one concept, or a term used for the wrong thing. Slash-only.
+description: Audit whether code names match the project's own domain vocabulary — a generic name standing in for a defined term, two names for one concept, or a term used for the wrong thing.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---

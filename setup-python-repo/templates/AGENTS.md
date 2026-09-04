@@ -17,6 +17,6 @@
 
 ## Conventions (summary — full rules in CODING_STANDARDS.md)
 
-- Package manager is **uv**. Never `pip` or `poetry`.
+- Package manager is **uv**. Never `pip`, `pip-tools`, `poetry`, or `conda`.
 - Type checker is **ty**, linter/formatter is **ruff** — both gate CI.
 - Test files use the **`*_test.py`** suffix, never `test_*.py`.

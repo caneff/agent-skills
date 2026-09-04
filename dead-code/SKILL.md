@@ -1,6 +1,6 @@
 ---
 name: dead-code
-description: Find code nobody calls — dead functions, classes, unreachable branches, stray imports — and sort real dead code from code that only looks unused. Slash-only.
+description: Find code nobody calls — dead functions, classes, unreachable branches, stray imports — and sort real dead code from code that only looks unused.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---

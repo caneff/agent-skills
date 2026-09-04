@@ -1,6 +1,6 @@
 ---
 name: mutation-audit
-description: Point at ONE module to learn which of its tests pass without actually catching a bug — run mutmut, scrape the survivors, emit test-audit findings. Opt-in, never in the default sweep. Slash-only.
+description: Point at ONE module to learn which of its tests pass without actually catching a bug — run mutmut, scrape the survivors, emit test-audit findings. Opt-in, never in the default sweep.
 disable-model-invocation: true
 argument-hint: "<target-module.py>"
 ---

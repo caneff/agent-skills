@@ -1,6 +1,6 @@
 ---
 name: error-handling
-description: "Find swallowed errors — bare excepts, `except Exception: pass`, silent drops — and sort a justified silence from an unjustified one, enforcing the repo's fail-loud rule where a plain linter stops short. Slash-only."
+description: "Find swallowed errors — bare excepts, `except Exception: pass`, silent drops — and sort a justified silence from an unjustified one, enforcing the repo's fail-loud rule where a plain linter stops short."
 disable-model-invocation: true
 argument-hint: "[path]"
 ---

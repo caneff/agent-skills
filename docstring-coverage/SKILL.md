@@ -1,6 +1,6 @@
 ---
 name: docstring-coverage
-description: Find public functions and classes with no docstring on a typed (py.typed) library, so consumers get docs on the surface they build against. Slash-only.
+description: Find public functions and classes with no docstring on a typed (py.typed) library, so consumers get docs on the surface they build against.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---

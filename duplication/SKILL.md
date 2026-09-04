@@ -1,6 +1,6 @@
 ---
 name: duplication
-description: Find the same logic written twice — exact copy-paste and "same data decoded two ways" semantic duplicates — so a second home for one behavior gets caught before it drifts. Slash-only.
+description: Find the same logic written twice — exact copy-paste and "same data decoded two ways" semantic duplicates — so a second home for one behavior gets caught before it drifts.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---

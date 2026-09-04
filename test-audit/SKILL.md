@@ -1,6 +1,6 @@
 ---
 name: test-audit
-description: Ruthlessly audit a repo's tests — cut the ones that prove nothing, rewrite the ones checking the wrong thing, keep only what earns its place. Slash-only.
+description: Ruthlessly audit a repo's tests — cut the ones that prove nothing, rewrite the ones checking the wrong thing, keep only what earns its place.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---

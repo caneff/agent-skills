@@ -1,6 +1,6 @@
 ---
 name: type-tightness
-description: Audit loose typing the type-checker still accepts — Any where a real type is knowable, ignore-comments with no reason, and fake "boundary" excuses. Slash-only.
+description: Audit loose typing the type-checker still accepts — Any where a real type is knowable, ignore-comments with no reason, and fake "boundary" excuses.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---
