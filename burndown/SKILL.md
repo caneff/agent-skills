@@ -29,7 +29,7 @@ ticket set is not fixed up front — the queue is mixed-origin and re-listed
 every pass, so a task is created for a ticket only once it enters the
 frontier, and a landing or a human adding tickets can grow the queue mid-burn.
 
-One **exploration** task, first pass only, covering every ticket this burn
+One **exploration** pass, first pass only, covering every ticket this burn
 can reach — step 1's listing in dependency order, cut at the ticket cap, not
 just the first pass's frontier — that every ticket task depends on. The cap is
 sized for this read: at 15 tickets it fits a 200k window with room to think;
@@ -38,6 +38,11 @@ outside the repo so every worker can read them, and are kept after the burn.
 A later pass that lists a ticket not in the pass-1 queue explores that ticket
 alone and appends to the same file.
 
+Exploration is read-only and needs no worktree, terminal, or Orca task: run it
+as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`) and read
+its result directly. Only builders and reviewers — the tasks that write code
+and own verdicts — are Orca tasks.
+
 ## The loop
 
 1. List the queue: `gh issue list --label ready-for-agent --state open`.
@@ -45,8 +50,9 @@ alone and appends to the same file.
 2. Take the **frontier** via Orca's ready-task query: every ticket whose
    blockers are all closed, lowest numbers first, up to the free worker
    slots. That set is this pass's batch.
-3. First pass only: run exploration (above). Every later pass skips this and
-   points its workers at the same notes file.
+3. First pass only: run exploration (above) as a subagent and wait for its
+   result before dispatching builders. Every later pass skips this and points
+   its workers at the same notes file.
 4. **Build.** Dispatch one Orca task per ticket in the batch, running the
    [`implement`](~/.agents/skills/implement/SKILL.md) skill's § Build by pointer — the
    issue reference, the notes path, and the branch base, never a summary.
@@ -77,6 +83,15 @@ alone and appends to the same file.
    every pass — a landing can unblock tickets, and a human may have added
    more. At the ticket cap — landed plus parked — start no new tasks, let the
    live ones settle, and stop.
+
+## Waiting on Orca workers
+
+Never the Orca wait verb — it returns `waiter_exists` for a waiter nobody can
+see and its retry flag does not attach. Use `orca-wait --terminal <handle>
+--for exit|tui-idle [--timeout-ms N]` (in `~/.local/bin`), which polls
+`terminal show`: exit 0 = met, 2 = timeout. Always pass a timeout, and kill an
+old wait loop before arming a new one. Subagents are not waited on this way —
+the `Agent` call returns when the subagent finishes.
 
 ## Coordinator context stays thin
 
