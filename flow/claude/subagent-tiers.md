@@ -32,6 +32,12 @@ Pick the tier by how much the agent must *do*, not by the topic:
   - Example: "Find every call site of `parseConfig` across the repo and list
     the files." The agent must search and navigate, but there's no judgment
     call in what counts as a match.
+- **`sonnet` is also the implementation tier** — ticket-sized, spec'd coding
+  with tests. The code lane's downstream nets (TDD red-green, `/code-review`,
+  the after-the-fact log read) are exactly the tie-breaker's "a check would
+  catch a miss", so builds default down, not up. Escalate a build to Opus
+  only when the ticket itself is a judgment call: design still fuzzy, gnarly
+  concurrency, or no test can express the requirement.
 - **`opus`** — the agent's own reasoning *is* the deliverable. Adversarial
   review, diagnosis, security review, spec/ticket decomposition, deliverable
   prose.
@@ -47,9 +53,9 @@ The Sonnet/Haiku split is about navigation, not reasoning depth: an Explore
 task that must navigate the repo is Sonnet-tier even when the judgment it
 exercises along the way is nil (pure pattern matching).
 
-**Staleness note:** this rubric was calibrated on the Claude 5 launch models.
-When Fable 5.1 lands, re-test the tiers before trusting them — Anthropic's
-guide says 5.1 at `low` effort often beats Sonnet and Opus on cost per task.
+**Fable 5.1 at low effort is not a subagent tier here**, despite Anthropic's
+cost-per-task claims: Fable draws from a separate quota, so routing subagent
+work to it spends the budget reserved for the live session.
 
 **Tie-breaker:** when unsure between two tiers, drop to the cheaper one only if
 a downstream check — a test, a build, or your own review — would catch a
