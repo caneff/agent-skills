@@ -180,17 +180,27 @@ def score(rows, floor=FLOOR):
     for row in rows:
         coverage = _effective_coverage(row)
         crap = _crap(row["complexity"], coverage)
-        ranking.append({**row, "coverage": coverage, "crap": crap})
+        # `coverage_axis` (TS rows only) names which axis was actually
+        # measured — the other was filled with a synthetic 100.0 so it
+        # can't win score()'s min(); that synthetic number must never be
+        # reported as a real percentage anywhere the row is emitted, ranking
+        # included, so it's nulled here rather than only at the findings step.
+        axis = row.get("coverage_axis", "both")
+        ranking.append(
+            {
+                **row,
+                "statement_coverage": row["statement_coverage"] if axis in ("both", "stmt") else None,
+                "branch_coverage": row["branch_coverage"] if axis in ("both", "branch") else None,
+                "coverage": coverage,
+                "crap": crap,
+            }
+        )
     ranking.sort(key=lambda r: r["crap"], reverse=True)
 
     findings = []
     under_floor = []
     for r in ranking:
         if r["crap"] >= floor:
-            # `coverage_axis` (TS rows only) names which axis was actually
-            # measured — the other was filled with a synthetic 100.0 that
-            # must never be reported as a real percentage in the findings log.
-            axis = r.get("coverage_axis", "both")
             findings.append(
                 {
                     "bucket": _bucket(r["crap"]),
@@ -203,8 +213,8 @@ def score(rows, floor=FLOOR):
                     "something and unlikely to be caught by a test",
                     "extra": {
                         "complexity": r["complexity"],
-                        "statement_coverage": r["statement_coverage"] if axis in ("both", "stmt") else None,
-                        "branch_coverage": r["branch_coverage"] if axis in ("both", "branch") else None,
+                        "statement_coverage": r["statement_coverage"],
+                        "branch_coverage": r["branch_coverage"],
                         "coverage": r["coverage"],
                         "crap": r["crap"],
                     },

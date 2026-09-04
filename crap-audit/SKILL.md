@@ -119,7 +119,11 @@ suite isn't watching it at all.
    relative path to both; an absolute `<scope>` here (e.g. from
    `$ARGUMENTS`) makes every radon key miss every coverage key, and
    `normalize` now raises loudly on that rather than silently scoring
-   everything 0%/0%:
+   everything 0%/0%. That guard catches a *total* mismatch only — if some
+   keys join and some don't (radon's scope is wider than coverage.py's
+   `source`/`omit`, say), the unmatched files score 0%/0% silently and read
+   as real findings. Compare the two key sets yourself when radon's scope
+   and the coverage config were not derived from the same path:
    ```sh
    uvx radon cc -j <scope> \
      --exclude "*/node_modules/*,*/.venv/*,*/dist/*,*/vendor/*,*/.git/*,*/build/*,*/worktrees/*,test_*,*_test.py,*/test_*,*/*_test.py,tests/*,*/tests/*,fixtures/*,*/fixtures/*" \
@@ -162,11 +166,20 @@ suite isn't watching it at all.
      `score()` result's `findings` list verbatim, each row already carrying
      the required `bucket`/`file`/`line`/`category`/`summary`/`failure`
      fields plus `extra.{complexity,statement_coverage,branch_coverage,
-     coverage,crap}`.
+     coverage,crap}`. On the TypeScript path the tool reports only the
+     lower of the two axes, so **the unmeasured one is `null` here** —
+     never the synthetic `100.0` `normalize_ts` uses internally to keep
+     `min()` honest. Read `extra.coverage` for the effective figure.
    - **`ranking.jsonl`** — the full-ranking asset: every scored function,
      `score()`'s `ranking` list, one line each, sorted by CRAP descending.
      This is the calibration asset — what a repo re-scores against if it
-     adopts a different gate later. Not filtered by the floor.
+     adopts a different gate later. Not filtered by the floor. These are
+     `normalize`/`normalize_ts`'s raw rows, so unlike `findings.jsonl` a
+     TypeScript row still carries the synthetic `100.0` on its unmeasured
+     axis — it also carries `coverage_axis` (`stmt`, `branch`, or `both`)
+     naming which axis was really measured, so read that before trusting
+     either percentage. Python rows have no `coverage_axis`; both their
+     axes are measured.
    - **`report.html`** — a grouped visual-teach summary, following
      `~/.agents/skills/all-audits/harness/findings-schema.md` (the shared
      JSONL/summary contract) and

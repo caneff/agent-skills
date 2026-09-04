@@ -112,7 +112,20 @@ def test_line1_function_does_not_inherit_module_summary():
     start_line 1 and is emitted last in `functions`. A real function that
     also starts on line 1 must join on its own summary, not the module's --
     else a 0%-covered function silently reads as 100% covered and its
-    CRAP score vanishes from the findings."""
+    CRAP score vanishes from the findings.
+
+    The synthetic JSON below only varies the coverage percentages; its
+    *shape* is not assumed, it is first checked against the committed real
+    coverage.py 7.16.0 capture, which already exhibits the collision
+    (`outer` and `""` both at start_line 1, `""` emitted last). That
+    fixture cannot catch the bug on its own because both summaries there
+    happen to be 100/100 -- hence the synthetic pair."""
+    _, real_coverage = _load_fixture()
+    real_functions = real_coverage["files"]["sample.py"]["functions"]
+    assert real_functions[""]["start_line"] == 1, "module-scope entry is not at line 1"
+    assert list(real_functions)[-1] == "", "module-scope entry is not emitted last"
+    assert real_functions["outer"]["start_line"] == 1, "fixture lost its line-1 collision"
+
     radon_json = {
         "m.py": [
             {"type": "function", "name": "first", "lineno": 1, "complexity": 4, "closures": []}
@@ -207,20 +220,26 @@ def test_under_floor_is_count_and_sample_not_full_rows():
     assert len(result["findings"]) + result["under_floor"]["count"] == len(result["ranking"])
 
 
-def test_under_floor_sample_caps_at_the_constant_not_the_full_count():
-    """Regression witness: with more under-floor rows than
-    UNDER_FLOOR_SAMPLE, the sample must stay capped -- the fixture only has
-    3 under-floor rows, too few for `sample[:N]` to ever bind, so raising
-    the cap left the fixture-driven test green with no cap at all."""
+def test_under_floor_sample_caps_at_five_not_the_full_count():
+    """Regression witness: with more under-floor rows than the cap, the
+    sample must stay capped -- the fixture only has 3 under-floor rows, too
+    few for `sample[:N]` to ever bind, so raising the cap left the
+    fixture-driven test green with no cap at all.
+
+    Both the input size and the expected sample size are literals on
+    purpose. Sizing either off `audit.UNDER_FLOOR_SAMPLE` makes the
+    assertion true for every value of the constant, which is how the first
+    version of this test still passed with the cap set to 100000."""
+    assert audit.UNDER_FLOOR_SAMPLE == 5
     rows = [
         {"file": "m.py", "name": f"clean_{i}", "line": i, "complexity": 1,
          "statement_coverage": 100.0, "branch_coverage": 100.0}
-        for i in range(audit.UNDER_FLOOR_SAMPLE + 3)
+        for i in range(8)
     ]
     result = audit.score(rows)
 
-    assert result["under_floor"]["count"] == len(rows)
-    assert len(result["under_floor"]["sample"]) == audit.UNDER_FLOOR_SAMPLE
+    assert result["under_floor"]["count"] == 8
+    assert len(result["under_floor"]["sample"]) == 5
 
 
 def test_gate_suggestions_present_and_correct():
