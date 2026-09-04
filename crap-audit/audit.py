@@ -19,6 +19,7 @@ suggests the two gate values. The judgment pass (bucket beyond score-band,
 real prose) is a later skill, not this file.
 """
 import json
+import os
 import sys
 
 FLOOR = 15
@@ -89,6 +90,25 @@ def normalize(radon_json, coverage_json):
             "likely an absolute-vs-relative path mismatch between the two tool "
             "invocations. Every function would silently read as 0% covered; "
             "refusing to score on that."
+        )
+    # A *partial* mismatch: some radon files didn't match, but not all did.
+    # Two legal reasons a radon file has no coverage.json entry: it was never
+    # imported by the test run (real 0%, e.g. this repo's own untested.py
+    # fixture) or it's outside coverage's `source` scope on purpose. Neither
+    # of those leftover coverage-only files shares a basename with the
+    # unmatched radon file — a real distinct file has no reason to. If a
+    # basename does collide, it's the same file spelled two ways (one
+    # radon's, one coverage's), not a genuinely untested one, and every
+    # function in it would silently read as 0% covered.
+    unmatched_radon = set(radon_json) - set(files)
+    unmatched_coverage_basenames = {os.path.basename(f) for f in set(files) - set(radon_json)}
+    collided = {f for f in unmatched_radon if os.path.basename(f) in unmatched_coverage_basenames}
+    if collided:
+        raise ValueError(
+            f"radon file(s) {sorted(collided)} share a basename with an "
+            "unmatched coverage.json file but not the exact key — likely "
+            "the same file under two path spellings between the two tool "
+            "invocations. Refusing to silently score it 0% covered."
         )
     return rows
 

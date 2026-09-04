@@ -104,6 +104,10 @@ suite isn't watching it at all.
    at all, the complexity tool errors out, or (Python) radon and
    coverage.json share no file keys at all — `normalize` raises `ValueError`
    for that last case rather than silently scoring every function 0%/0%.
+   `normalize` also raises when only *some* radon files fail to join and the
+   failure looks like the same file under two path spellings (its basename
+   collides with an otherwise-unmatched coverage file) rather than a file
+   that's genuinely never imported by the test run.
    Report exactly what failed and why; this audit needs real inputs to mean
    anything.
 
@@ -173,13 +177,14 @@ suite isn't watching it at all.
    - **`ranking.jsonl`** — the full-ranking asset: every scored function,
      `score()`'s `ranking` list, one line each, sorted by CRAP descending.
      This is the calibration asset — what a repo re-scores against if it
-     adopts a different gate later. Not filtered by the floor. These are
-     `normalize`/`normalize_ts`'s raw rows, so unlike `findings.jsonl` a
-     TypeScript row still carries the synthetic `100.0` on its unmeasured
-     axis — it also carries `coverage_axis` (`stmt`, `branch`, or `both`)
-     naming which axis was really measured, so read that before trusting
-     either percentage. Python rows have no `coverage_axis`; both their
-     axes are measured.
+     adopts a different gate later. Not filtered by the floor. Carries the
+     same null convention as `findings.jsonl`: on a TypeScript row, the
+     unmeasured axis is `null` here too, not the synthetic `100.0`
+     `normalize_ts` uses internally to keep `min()` honest — `score()`
+     nulls it once, in `ranking`, before deriving `findings` from it. A TS
+     row also carries `coverage_axis` (`stmt`, `branch`, or `both`) naming
+     which axis was really measured; Python rows have no `coverage_axis`
+     and both their axes are always measured.
    - **`report.html`** — a grouped visual-teach summary, following
      `~/.agents/skills/all-audits/harness/findings-schema.md` (the shared
      JSONL/summary contract) and

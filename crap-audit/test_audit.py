@@ -170,6 +170,41 @@ def test_normalize_raises_on_zero_matched_files_when_both_sides_nonempty():
         pass
 
 
+def test_normalize_raises_on_partial_basename_collision_between_unmatched_files():
+    """P2 fix: a *partial* key mismatch -- some radon files join fine, one
+    doesn't, and the failure is the same file spelled two ways (its
+    basename collides with a leftover, otherwise-unmatched coverage file)
+    -- must fail loudly too, not just score that one file 0%/0% silently.
+    A genuinely-never-imported file must NOT raise -- see
+    test_nested_uncovered_and_branchless_score_per_spec's untested.py,
+    whose basename collides with nothing on the coverage side."""
+    radon_json = {
+        "a.py": [{"type": "function", "name": "f", "lineno": 1, "complexity": 1, "closures": []}],
+        "/abs/path/b.py": [{"type": "function", "name": "g", "lineno": 1, "complexity": 1, "closures": []}],
+    }
+    coverage_json = {
+        "files": {
+            "a.py": {"functions": {"f": {"start_line": 1, "summary": {"percent_covered": 100.0, "percent_branches_covered": 100.0}}}},
+            "b.py": {"functions": {"g": {"start_line": 1, "summary": {"percent_covered": 100.0, "percent_branches_covered": 100.0}}}},
+        }
+    }
+    try:
+        audit.normalize(radon_json, coverage_json)
+        assert False, "expected ValueError on partial basename collision"
+    except ValueError:
+        pass
+
+
+def test_normalize_does_not_raise_when_unmatched_file_shares_no_basename():
+    """The legal case the partial-mismatch guard must leave alone: a radon
+    file genuinely has no coverage data (never imported) and its basename
+    doesn't collide with any leftover coverage file -- 0%/0% is correct,
+    not an error."""
+    radon_json, coverage_json = _load_fixture()
+    rows = audit.normalize(radon_json, coverage_json)  # must not raise
+    assert any(r["file"] == "untested.py" for r in rows)
+
+
 def test_findings_validate_against_findings_schema():
     """AC3: findings rows carry every required findings-schema field."""
     radon_json, coverage_json = _load_fixture()
@@ -422,6 +457,25 @@ def test_ts_findings_never_report_the_synthetic_unmeasured_axis():
     uncovered = by_name["src/sample.ts:23"]  # measured stmt (cov=0)
     assert uncovered["extra"]["statement_coverage"] == 0.0
     assert uncovered["extra"]["branch_coverage"] is None
+
+
+def test_ts_ranking_never_reports_the_synthetic_unmeasured_axis():
+    """P2 fix: ranking.jsonl carries every row, not just findings -- the
+    synthetic 100.0 filler must be nulled there too, not only in the
+    findings extra. Otherwise ranking.jsonl (which score() emits verbatim
+    as the calibration asset) leaks a fabricated coverage percentage."""
+    report = _load_ts_fixture()
+    rows = audit.normalize_ts(report)
+    result = audit.score(rows)
+    by_name = {r["name"]: r for r in result["ranking"]}
+
+    inner = by_name["inner"]  # measured branch (cov=20)
+    assert inner["branch_coverage"] == 20.0
+    assert inner["statement_coverage"] is None
+
+    uncovered = by_name["uncoveredFn"]  # measured stmt (cov=0)
+    assert uncovered["statement_coverage"] == 0.0
+    assert uncovered["branch_coverage"] is None
 
 
 def test_cli_main_ts_mode_prints_findings_jsonl():
