@@ -188,6 +188,23 @@ def _bucket(crap):
     return "critical" if crap >= CLASSIC_GATE else "hotspot"
 
 
+def _crap_at_full_coverage(complexity):
+    """CRAP with coverage=1.0: the (1-cov)^3 penalty term vanishes, so this
+    collapses to bare complexity — the remediation ceiling testing alone can
+    reach, no matter how undertested the function is today."""
+    return _crap(complexity, 1.0)
+
+
+def _recommend(complexity):
+    """Per-finding remediation leverage: 'write tests' when full coverage
+    would drop CRAP under the classic gate (testing alone gets there), else
+    'refactor' (complexity itself already meets/exceeds the gate, so no
+    coverage improvement escapes it — the fix has to shrink complexity)."""
+    projected = _crap_at_full_coverage(complexity)
+    action = "write tests" if projected < CLASSIC_GATE else "refactor"
+    return {"action": action, "projected_crap": projected}
+
+
 def score(rows, floor=FLOOR):
     """Score every row; split into findings (>= floor) vs under-floor;
     suggest two adoptable gate values off the full ranking.
@@ -237,6 +254,7 @@ def score(rows, floor=FLOOR):
                         "branch_coverage": r["branch_coverage"],
                         "coverage": r["coverage"],
                         "crap": r["crap"],
+                        "recommendation": _recommend(r["complexity"]),
                     },
                 }
             )

@@ -170,7 +170,12 @@ suite isn't watching it at all.
      `score()` result's `findings` list verbatim, each row already carrying
      the required `bucket`/`file`/`line`/`category`/`summary`/`failure`
      fields plus `extra.{complexity,statement_coverage,branch_coverage,
-     coverage,crap}`. On the TypeScript path the tool reports only the
+     coverage,crap,recommendation}` — `recommendation` is `{action:
+     "write tests"|"refactor", projected_crap}`, the CRAP the function
+     would have at full coverage (coverage's penalty term vanishes at
+     `cov=1`, so this is just `complexity`); `action` is `"write tests"`
+     when that projection clears the classic gate, `"refactor"` when
+     complexity alone already meets or exceeds it. On the TypeScript path the tool reports only the
      lower of the two axes, so **the unmeasured one is `null` here** —
      never the synthetic `100.0` `normalize_ts` uses internally to keep
      `min()` honest. Read `extra.coverage` for the effective figure.
@@ -196,6 +201,18 @@ suite isn't watching it at all.
      - **Header** — `vt-kicker` "crap-audit", `<h1>` repo name, `vt-lede`
        one-line verdict, `vt-metabar`: `"N scored · F findings (C critical ·
        H hotspot) · U under floor"`.
+     - **What to fix first**, right after the lede — the top offenders
+       (findings sorted by CRAP descending, same order as `ranking.jsonl`;
+       5-10 is plenty) each as one line built from
+       `extra.recommendation`: **`low-coverage`/write-tests** — `"write
+       tests for <name> — full coverage drops CRAP from <crap> to
+       <projected_crap>"`; **`high-complexity`/refactor** — `"refactor
+       <name> — even full coverage leaves CRAP at <projected_crap>, above
+       the gate"` (or "below the gate" if `projected_crap < gates.classic` —
+       a refactor recommendation with `projected_crap` under the classic
+       gate still means shrinking complexity, just not urgently). This is
+       the action list; the grouped overview and standouts below it are the
+       supporting detail, not the other way around.
      - **Gate values, named explicitly in the lede or a `vt-callout`** —
        both `gates.classic` (30, the fixed Uncle Bob gate) and
        `gates.above_current_max` (the smallest integer strictly above this

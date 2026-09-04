@@ -277,6 +277,43 @@ def test_under_floor_sample_caps_at_five_not_the_full_count():
     assert len(result["under_floor"]["sample"]) == 5
 
 
+def test_crap_at_full_coverage_collapses_to_complexity():
+    """Coverage=1.0 zeroes the penalty term -- CRAP reduces to bare complexity."""
+    assert audit._crap_at_full_coverage(6) == 6.0
+    assert audit._crap_at_full_coverage(30) == 30.0
+
+
+def test_recommend_write_tests_when_full_coverage_would_clear_the_gate():
+    rec = audit._recommend(6)
+    assert rec == {"action": "write tests", "projected_crap": 6.0}
+
+
+def test_recommend_refactor_when_complexity_alone_meets_or_exceeds_the_gate():
+    """Complexity >= the classic gate (30): no amount of coverage escapes it,
+    since full coverage still leaves CRAP == complexity."""
+    rec = audit._recommend(30)
+    assert rec == {"action": "refactor", "projected_crap": 30.0}
+    rec = audit._recommend(35)
+    assert rec == {"action": "refactor", "projected_crap": 35.0}
+
+
+def test_findings_carry_a_recommendation_in_extra():
+    """AC: findings.jsonl rows gain a recommendation without losing any
+    existing extra field -- schema-compatible extension, not a breaking change."""
+    radon_json, coverage_json = _load_fixture()
+    rows = audit.normalize(radon_json, coverage_json)
+    result = audit.score(rows)
+    by_line = {f["line"]: f for f in result["findings"]}
+
+    inner = by_line[2]
+    for field in ("complexity", "statement_coverage", "branch_coverage", "coverage", "crap"):
+        assert field in inner["extra"], field
+    assert inner["extra"]["recommendation"] == {"action": "write tests", "projected_crap": 6.0}
+
+    uncovered_fn = by_line[17]
+    assert uncovered_fn["extra"]["recommendation"] == {"action": "write tests", "projected_crap": 4.0}
+
+
 def test_gate_suggestions_present_and_correct():
     """AC5: both suggested gate values are present and correct for the fixture."""
     radon_json, coverage_json = _load_fixture()
