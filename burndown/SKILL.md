@@ -11,7 +11,7 @@ command is an Orca verb: run `orca-ide skills get orchestration` and
 which is version-matched to the binary.
 
 A single spec's slices in one Orca workspace are
-[`implement-spec`](../implement-spec/SKILL.md)'s job, not this skill's — use
+[`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this skill's — use
 that instead when every ticket traces to the same spec issue.
 
 **Arguments:** `/burndown [builders] [tickets]` — the maximum number of live
@@ -48,7 +48,7 @@ alone and appends to the same file.
 3. First pass only: run exploration (above). Every later pass skips this and
    points its workers at the same notes file.
 4. **Build.** Dispatch one Orca task per ticket in the batch, running the
-   [`implement`](../implement/SKILL.md) skill's § Build by pointer — the
+   [`implement`](~/.agents/skills/implement/SKILL.md) skill's § Build by pointer — the
    issue reference, the notes path, and the branch base, never a summary.
    Seed the worker to stop after committing, report its branch, and wait; the
    coordinator owns review and the PR.
