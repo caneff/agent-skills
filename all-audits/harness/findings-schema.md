@@ -1,6 +1,6 @@
 # Findings Log + Summary Format
 
-For an audit that finds many things — `test-audit`, `comment-audit` — do **not**
+For an audit that finds many things, do **not**
 render every finding as its own HTML card. A hundred cards is slow to build, and
 a later grill has to parse the findings back out of HTML to act on them. Write
 two artifacts instead:
@@ -85,15 +85,15 @@ what the orchestrator collects into the index, regardless of which audit ran:
 - `audit` — the skill name.
 - `headline` — the one-line verdict from the report.
 - `count` — how many findings.
-- `report_path` — absolute path to the report's `.html` file. For the
-  grouped-summary audits (`test-audit`, `comment-audit`) this is the grouped
-  summary page above, not a card-per-finding report. Reflect it on stdout as
+- `report_path` — absolute path to the report's `.html` file. For an audit
+  that writes `findings.jsonl`, this is the grouped summary page above, not a
+  card-per-finding report. Reflect it on stdout as
   `ALL_AUDITS_REPORT=<report_path>` on its own line — `run-audits.sh` greps
   stdout logs for this marker to collect each report (see
   [`HTML-REPORT.md`](HTML-REPORT.md)).
-- `log_path` — absolute path to `findings.jsonl`, for the audits that write
-  one (the grouped-summary audits). Omit for audits that render a full
-  card-per-finding HTML report instead.
+- `log_path` — absolute path to `findings.jsonl`, for any audit that writes
+  one. Omit for an audit that renders a full card-per-finding HTML report
+  instead.
 - `findings` — a short list, one entry per finding: `{ target, note }`, where
   `target` is the repo-relative file path the finding is about and `note` is
   a one-line summary.

@@ -1,6 +1,6 @@
 ---
 name: all-audits
-description: Run every repo audit at once — twelve audit skills in parallel, one HTML index linking each report, then grill through them one at a time. Slash-only.
+description: Run every repo audit at once — twelve audit skills in parallel, one HTML index linking each report, then grill through them one at a time.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---
@@ -12,8 +12,16 @@ sweep **reports only** — it applies nothing and
 opens no PR. When it finishes it stops and hands you the index, so you decide what
 to grill.
 
-Scope: `$ARGUMENTS` if given, else the current working directory — the repo you
-are standing in. The whole repo, not a branch diff.
+## Scope
+
+`$ARGUMENTS` names the repo path if given, else the current working directory.
+
+Whole-repo is the default for every audit — the tree, not a git diff or
+recent-changes review, and not any audit's own hot-spot default;
+`run-audits.sh`'s `audit_prompt` enforces this on each audit process it
+launches. This is the one place the rule is stated: an audit that takes an
+explicit branch scope instead resolves it via `git merge-base` against the
+origin's default branch — never an assumed `main`.
 
 ## The set — twelve skills
 
@@ -43,22 +51,10 @@ direct commit to main. Carry this contract into any new audit skill you add here
 ## The runnable sweep — `run-audits.sh`
 
 `run-audits.sh` is the bash orchestrator that runs each guarded audit as its own
-`claude -p "/name"` process and collects the reports. Flags:
-
-- **`run-audits.sh [REPO]`** — a fresh sweep of all twelve into a new run dir.
-- **`--out DIR`** — write into `DIR` instead of a fresh dir, accumulating (no
-  wipe). Re-running with the same `--out` refreshes that dir.
-- **`--only NAME[,NAME]`** — run just the named audits, leaving any other audit's
-  prior output in the dir in place.
-- **`--short`** — the short set: run only the three widest-reaching structural
-  audits — `thermo-nuclear-code-quality-review`, `improve-codebase-architecture`,
-  and `ponytail-audit`. A named alias for that `--only` list, for a fast pass
-  when the full twelve is more than you want.
-- **`--index`** (with `--out DIR`) — run no audits; rebuild `index.html` + the
-  synthesis lede over whatever reports already sit in `DIR`. Point several
-  `--only` runs at one `--out DIR`, then `--index` it, for a complete index with
-  no full re-sweep.
-- **`--force` / `--all`** — bypass the staleness cache below and run everything.
+`claude -p "/name"` process and collects the reports. Its own `# Usage:` header
+comment is the flag reference (`[REPO]`, `--out`, `--only`, `--short`,
+`--index`, `--force`/`--all`, `--mutation`) — this doc doesn't restate it, so
+the two can't drift apart.
 
 **Staleness cache.** The two expensive LLM passes — `domain-drift` and
 `type-tightness` — are gated: while the repo is materially unchanged since their
@@ -83,8 +79,8 @@ them from any agent — a subagent fan-out silently loses them. A `-p "/name"`
 process is an explicit slash invocation, which the gate honors, so every audit
 runs the same way.
 
-From a terminal, run `run-audits.sh` directly for the flags above (`--only`,
-`--index`, `--force`, `--short`, the staleness cache).
+From a terminal, run `run-audits.sh` directly for its flags and the staleness
+cache.
 
 When you are invoked in-session as `/all-audits [path]`:
 
@@ -103,53 +99,9 @@ When you are invoked in-session as `/all-audits [path]`:
    audits, and tell the user they can grill any one by name. **Do not start
    grilling on your own.**
 
-## Grilling a report
+## After the sweep
 
-When the user picks an audit to grill, run the `grilling` skill over **that one
-report's findings**. Grill the findings toward decisions — which to act on, which
-to drop, which need a closer look. Walk one audit at a time; do not merge them
-into one grilling — a comment cut and an architecture deepening share no design
-tree.
-
-Read the findings from the audit's own record: for `test-audit` and
-`comment-audit`, the full list is in `findings.jsonl` (`log_path`) — read that,
-not the summary HTML, which holds only grouped counts. For the audits that render
-a full HTML report, the report is the record.
-
-**Dedup against audits already grilled this run.** You grill the audits one after
-another in the same session, so the decisions you have already reached are in
-context — use them. For every finding in the current report, check it against what
-you already decided. A match is **semantic**, not same-file: the same underlying
-issue or fix, even if two reports word it differently or name different files; two
-audits touching one file for unrelated reasons are *not* a match. For a finding
-that repeats a settled one, do not grill it cold — surface it: "already decided
-`<decision>` while grilling `<audit>` — carry it forward, or re-open?" Grill only
-the fresh findings from scratch. Grilling the widest-reaching audit first
-(architecture, thermo) settles the most before the narrower passes run.
-
-A grill ends at **decisions**. Do not chain into `/to-spec`, `/to-tickets`, or any
-build step — handing a decision off to the build pipeline is a separate call the
-user makes when ready.
-
-## Turn the decisions into a map
-
-The sweep's decisions land on the tracker as **one `wayfinder:map` issue for the
-run**, with each audit's decisions a cluster of decision tickets under it. The map
-is an index, not a store: each decision lives in its own child ticket; the map
-gists and links. The map is self-contained and ephemeral — once `/to-spec` and
-`/to-tickets` slice the ACT items into build tickets, its job is done. Do **not**
-point the map or its tickets at the HTML reports; the context and decisions live
-in the map and tickets, and the reports are throwaway scaffolding.
-
-At the end of each audit's grill, produce the filing command — never run it, the
-map pipeline is the user's to drive:
-
-- **First audit grilled** — write the brief to a file in the run's collection dir
-  (destination, then the settled decisions), and emit **`/wayfinder read @<file>`**
-  for the user to run — a file reference, not a wall of inline text. Seed the brief
-  so wayfinder records the decisions rather than re-grilling: mark each ACT item as
-  build-bound, each DROP as a recorded rejection (so a later audit does not
-  resurface it), and flag any `ADR-NNNN` a decision revisits.
-- **Later audits** — the map already exists. Emit the instruction to add each new
-  decision as a **child ticket under that map** (`#NNN`), not a fresh `/wayfinder`
-  — a second `/wayfinder` starts a second map.
+The sweep reports only and never grills on its own. For what to do once the
+user picks a report — running the `grilling` skill over its findings, deduping
+against decisions already reached this run, and filing the results as a
+`wayfinder:map` — see [`harness/GRILLING.md`](harness/GRILLING.md).
