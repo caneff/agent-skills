@@ -219,6 +219,14 @@ def test_create_user_returns_expected_user():
 Two fields instead of four. `id` and `created_at` are still generated —
 just no longer this test's problem.
 
+## Verify against the fixture
+
+`~/.agents/skills/test-audit/fixtures/` carries five files spanning the Cut/
+Rewrite/Keep buckets and the mechanical smells above (pytest and vitest).
+`~/.agents/skills/test-audit/fixtures/answer-key.md` has the expected pass-one
+candidate list and the pass-two bucket for each test. Running this skill over
+`~/.agents/skills/test-audit/fixtures/` should reproduce that table.
+
 ## Run
 
 1. **Start clean, scope.** Confirm a clean working tree first (`git status`).

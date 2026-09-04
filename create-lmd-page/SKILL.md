@@ -82,5 +82,5 @@ Layout — pick by the `layout` field (see the two variants under Template):
 ## Template
 
 One shared skeleton with four values that differ by `layout` — see
-[reference/template.md](reference/template.md) for the HTML and the
+`~/.agents/skills/create-lmd-page/reference/template.md` for the HTML and the
 two-column/one-column delta table.

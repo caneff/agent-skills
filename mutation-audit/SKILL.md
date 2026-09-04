@@ -122,7 +122,8 @@ in that setup.
    python3 ~/.agents/skills/mutation-audit/audit.py "${TMPDIR:-/tmp}/mutmut-results.txt"
    ```
    `parse_mutmut_results(text) -> list[dict]` is the tested seam
-   (`fixtures/mutmut-results.txt` + `fixtures/answer-key.md` back it,
+   (`~/.agents/skills/mutation-audit/fixtures/mutmut-results.txt` +
+   `~/.agents/skills/mutation-audit/fixtures/answer-key.md` back it,
    mirroring `~/.agents/skills/dead-code/fixtures/`) — pure, no subprocess inside it, fed
    mutmut's captured text. It returns one row per mutant that isn't killed —
    a `survived` mutant as a `rewrite`, a `no tests` mutant as a `no-coverage`;
@@ -184,7 +185,9 @@ in that setup.
 (not a hand-built guess), covering all three buckets: `is_adult` is tested at
 and around its boundary (both mutants die), `clamp` is only tested in-range
 (both boundary mutants `survived` → `rewrite`), and `scale` has no test at
-all (its mutant is `no tests` → `no-coverage`). `fixtures/mutmut-results.txt`
-has the captured `mutmut results --all true` output; `fixtures/answer-key.md`
-has the expected pass-one candidate rows and the pass-two finalized findings.
-Running this skill over `fixtures/sample.py` should reproduce that table.
+all (its mutant is `no tests` → `no-coverage`).
+`~/.agents/skills/mutation-audit/fixtures/mutmut-results.txt` has the captured
+`mutmut results --all true` output;
+`~/.agents/skills/mutation-audit/fixtures/answer-key.md` has the expected
+pass-one candidate rows and the pass-two finalized findings.
+Running this skill over `~/.agents/skills/mutation-audit/fixtures/sample.py` should reproduce that table.

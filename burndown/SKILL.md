@@ -55,13 +55,13 @@ alone and appends to the same file.
 5. **Review.** Once a worker reports its branch, dispatch a review task
    seeded with only the issue reference and the branch — never the burn
    history or the explorer's notes — running the
-   [`code-review`](../code-review/SKILL.md) skill by pointer, not by slash
+   `~/.agents/skills/code-review/SKILL.md` skill by pointer, not by slash
    invocation. It owns the verdict: **clean** or **can't get clean**.
    Findings pass through the coordinator to the builder verbatim; the builder
    fixes, the reviewer re-reviews. Review tasks run concurrently and do not
    count against the builder cap.
-6. **Land, one at a time**, in the order reviews come back clean, per
-   `implement`'s [Finish](../implement/SKILL.md) section. On **can't get
+6. **Land, one at a time**, in the order reviews come back clean, per the
+   Finish section of `~/.agents/skills/implement/SKILL.md`. On **can't get
    clean**, park the ticket
    (below). A worker still mid-build on a stale base needs no warning: the PR
    reports the conflict against the pushed default branch, so a real
@@ -72,7 +72,7 @@ alone and appends to the same file.
    `~/.cache/burndown/<repo dir name>.progress` (never in the repo) as the
    loop claims, settles, and finishes tickets. The statusline renders this
    file live; the line grammar is documented once, in
-   [`flow/ccstatusline-table/helpers/burndown-segment.sh`](../flow/ccstatusline-table/helpers/burndown-segment.sh).
+   `~/.agents/skills/flow/ccstatusline-table/helpers/burndown-segment.sh`.
 8. When a ticket settles, refill its slot: go to 1, skipping step 3. Re-list
    every pass — a landing can unblock tickets, and a human may have added
    more. At the ticket cap — landed plus parked — start no new tasks, let the

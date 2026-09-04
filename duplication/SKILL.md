@@ -57,7 +57,8 @@ carries jscpd's token count for a `token-clone` row; omit `extra` for
 
    **No node/npx.** jscpd needs `npx`. When it isn't on `PATH`, skip this
    pass instead of failing the whole audit: report pass one as `NOT-RUN` in
-   the report's `vt-lede` verdict (see `findings-schema.md`) and fall
+   the report's `vt-lede` verdict (see
+   `~/.agents/skills/all-audits/harness/findings-schema.md`) and fall
    straight to pass two's semantic sweep — a token-clone miss is better than
    no report at all.
 
