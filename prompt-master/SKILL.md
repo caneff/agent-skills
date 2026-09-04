@@ -2,7 +2,7 @@
 name: prompt-master
 disable-model-invocation: true
 version: 1.8.0
-description: Generates optimized prompts for AI tools. Activates only when the user explicitly asks to write, fix, improve, or adapt a prompt for a specific AI tool (LLM, Cursor, Midjourney, image AI, video AI, coding agents, etc.). Does not activate for general conversation, coding tasks, document writing, or other non-prompt-engineering work.
+description: Generates optimized prompts for a specific AI tool (LLM, Cursor, Midjourney, image AI, video AI, coding agents, etc.).
 ---
 
 ## PRIMACY ZONE — Identity, Hard Rules, Output Lock

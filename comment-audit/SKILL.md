@@ -1,6 +1,6 @@
 ---
 name: comment-audit
-description: Ruthlessly audit a repo's comments — delete every one that doesn't earn its place, keep only what the code cannot say. Slash-only.
+description: Ruthlessly audit a repo's comments — delete every one that doesn't earn its place, keep only what the code cannot say.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---
@@ -162,11 +162,8 @@ answer.
 
 ## Run
 
-1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, default to the
-   current branch's diff against its base — resolve the base, don't assume `main`
-   (`git diff --name-only $(git merge-base HEAD origin/HEAD)...HEAD`), not the
-   whole tree — a repo-wide sweep is an explicit opt-in the user asks for by
-   name. Either way, skip vendored, generated, and dependency trees
+1. **Scope.** Audit `$ARGUMENTS` if given; with no argument, scope defaults
+   per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Skip vendored, generated, and dependency trees
    (`node_modules`, `dist`, `.venv`, build output, lockfiles) and any `.git/` or
    `worktrees/` tree — a git worktree mirrors the whole repo, so scanning it
    multiplies every finding once per worktree.
@@ -204,10 +201,10 @@ answer.
 
 ## Write the log and render the summary
 
-The sweep can judge hundreds of comments; do not render one HTML card each. Write
-the full record to `findings.jsonl` and a grouped summary to `report.html`,
-following `~/.agents/skills/all-audits/harness/findings-schema.md` for both —
-the JSONL schema and the summary's grouped-overview shape.
+Write the full record to `findings.jsonl` and a grouped summary to
+`report.html`, following `~/.agents/skills/all-audits/harness/findings-schema.md`
+for both — the JSONL schema, the grouped-overview shape, and why it's two
+files instead of one card per comment.
 Write both to `<tmpdir>/comment-audit-<timestamp>/` and deliver the summary per
 `~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir resolution,
 opening, and handing off the path all live there.
@@ -226,24 +223,20 @@ opening, and handing off the path all live there.
 
 ## Applying the cuts (opt-in)
 
-Only when the user asks to apply — never by default:
+Only when the user asks to apply — see `~/.agents/skills/all-audits/SKILL.md`'s
+"Opt-in edits" section for the shared opt-in contract
+(reviewable PR on its own branch, never a direct commit). Start from a clean
+working tree — the comments-only guarantee below only holds when nothing else
+is uncommitted.
 
-1. **Start clean.** Confirm a clean working tree first (`git status`); the
-   comments-only guarantee below only holds when nothing else is uncommitted.
+Apply: delete the cuts. For every keeper, tighten the prose to the fewest
+words that still read clearly, and correct any text that has gone stale while
+its *why* stays true. Touch comments only — leave the code itself, its
+formatting, and every keeper that already reads true exactly as they are.
 
-2. **Apply the changes.** Delete the cuts. For every keeper, tighten the prose
-   to the fewest words that still read clearly, and correct any text that has
-   gone stale while its *why* stays true. Touch comments only — leave the
-   code itself, its formatting, and every keeper that already reads true exactly
-   as they are.
-
-3. **Verify, then open a PR for review.** The final diff must touch comments and
-   nothing else — confirm with `git diff`. Run the repo's build/lint/test so a
-   load-bearing line you misread turns the loop red before review, not after.
-   Then commit the audit on its own branch, with nothing else in the commit, and
-   open a pull request. Every cut is a judgment call, so a human reads the sweep
-   before it merges — and the isolated commit means the whole audit reverts in
-   one step if a call proves wrong.
+Verify before the PR: the final diff must touch comments and nothing else —
+confirm with `git diff`. Run the repo's build/lint/test so a load-bearing
+line you misread turns the loop red before review, not after.
 
 ## When a comment props up unclear code
 

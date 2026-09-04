@@ -1,6 +1,6 @@
 ---
 name: docstring-coverage
-description: Find public functions and classes with no docstring on a typed (py.typed) library, so consumers get docs on the surface they build against. Slash-only.
+description: Find public functions and classes with no docstring on a typed (py.typed) library, so consumers get docs on the surface they build against.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---
@@ -39,8 +39,9 @@ the same number on every row, not per-symbol.
 
 ## Run
 
-1. **Scope tight.** Audit `$ARGUMENTS` if given, else the current working
-   directory. Target the package's public modules — skip tests,
+1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, scope
+   defaults per `~/.agents/skills/all-audits/SKILL.md`'s Scope section.
+   Target the package's public modules — skip tests,
    vendored/generated/dependency trees (`node_modules`, `dist`, `.venv`,
    `vendor`, build output, lockfiles), and any `.git/` or `worktrees/` tree.
 
@@ -53,7 +54,7 @@ the same number on every row, not per-symbol.
      -e "$scope/node_modules" -e "$scope/.venv" -e "$scope/dist" -e "$scope/vendor" \
      -e "$scope/.git" -e "$scope/build" -e "$scope/worktrees" \
      > /tmp/interrogate-out.txt
-   python3 docstring-coverage/audit.py /tmp/ruff-out.json /tmp/interrogate-out.txt
+   python3 ~/.agents/skills/docstring-coverage/audit.py /tmp/ruff-out.json /tmp/interrogate-out.txt
    ```
    Only the D1xx "missing docstring" codes are selected — not the D2xx/D4xx
    style-convention codes (blank-line placement, summary formatting). Those
@@ -62,8 +63,8 @@ the same number on every row, not per-symbol.
    out of scope here.
 
    `audit.py`'s `parse_coverage(ruff_json, interrogate_text) -> list[dict]`
-   is the tested seam (`docstring-coverage/fixtures/` + `answer-key.md` back
-   it, mirroring `dead-code/fixtures/`) — pure, no subprocess inside it, fed
+   is the tested seam (`~/.agents/skills/docstring-coverage/fixtures/` + `answer-key.md` back
+   it, mirroring `~/.agents/skills/dead-code/fixtures/`) — pure, no subprocess inside it, fed
    ruff's captured JSON and interrogate's captured text. `main()` wraps it:
    reads the two file paths as argv, prints one JSON row per ruff D1xx hit.
    This is a candidate list, not a verdict — every row still needs the
@@ -84,11 +85,11 @@ the same number on every row, not per-symbol.
    grouped summary `report.html` from it, following
    `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
    JSONL schema and the summary's grouped-overview shape.
-   Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
-   `<tmpdir>/docstring-coverage-<timestamp>/`, then open the summary and hand
-   off its path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s
-   asset-delivery section describes. This audit touches no code — writing the
-   docstrings is a separate, opt-in step the user asks for by name.
+   Write both to `<tmpdir>/docstring-coverage-<timestamp>/` and deliver the
+   summary per `~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir
+   resolution, opening, and handing off the path all live there. This audit
+   touches no code — writing the docstrings is a separate, opt-in step the
+   user asks for by name.
 
    - **Log** — one JSONL line per ruff D1xx hit. `bucket` is `document` /
      `skip` / `unsure`. `category` is the D-code slug (see above).
@@ -101,11 +102,11 @@ the same number on every row, not per-symbol.
 
 ## Verify against the fixture
 
-`docstring-coverage/fixtures/sample.py` carries one undocumented public
+`~/.agents/skills/docstring-coverage/fixtures/sample.py` carries one undocumented public
 function (`undocumented_public`, no docstring — ruff D103 flags it), one
 documented public function (`documented_public` — not flagged), and one
 private function (`_helper`, no docstring but not public — not flagged by
-D1xx). `docstring-coverage/fixtures/answer-key.md` has the captured ruff +
+D1xx). `~/.agents/skills/docstring-coverage/fixtures/answer-key.md` has the captured ruff +
 interrogate output and the expected finding. Running this skill over
-`docstring-coverage/fixtures/` should reproduce that table: one row,
+`~/.agents/skills/docstring-coverage/fixtures/` should reproduce that table: one row,
 `undocumented_public` at line 9, `bucket: document`, `extra.coverage: 50.0`.

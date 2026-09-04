@@ -1,6 +1,6 @@
 # Findings Log + Summary Format
 
-For an audit that finds many things — `test-audit`, `comment-audit` — do **not**
+For an audit that finds many things, do **not**
 render every finding as its own HTML card. A hundred cards is slow to build, and
 a later grill has to parse the findings back out of HTML to act on them. Write
 two artifacts instead:
@@ -19,8 +19,9 @@ Both land in the skill's output folder side by side
 One JSON object per line (JSONL), one line per finding, in scan order. One home
 for the facts: the summary is drawn from this file, never the reverse. Fields:
 
-- `bucket` (required) — the skill's verdict bucket. `test-audit`: `cut` |
-  `rewrite` | `keep`. `comment-audit`: `cut` | `keep` | `load-bearing`.
+- `bucket` (required) — the skill's verdict bucket, a small closed set the
+  skill names (e.g. `cut` / `rewrite` / `keep`, or `cut` / `keep` /
+  `load-bearing`).
 - `file` (required) — repo-relative path.
 - `line` (required) — integer line number the finding sits on.
 - `category` (required) — the smell/reason slug from the skill's own vocabulary
@@ -40,13 +41,12 @@ for the facts: the summary is drawn from this file, never the reverse. Fields:
   skill, beyond the six fields every audit shares. Only the six above
   (`bucket`, `file`, `line`, `category`, `summary`, `failure`) are fixed
   across all audits; `extra` is where a skill puts its own axis without
-  bending the shared schema to fit it. Examples: dead-code audits carry
-  `{"confidence": 60}` (vulture's own confidence percentage, unmodified);
-  a type-tightness audit carries
-  `{"suggested_type": "Sequence[int]", "severity": "blanket"}`; a domain-drift audit carries
-  `{"should_be": "Order", "source": "CONTEXT.md"}`; a duplication audit
-  carries `{"clone_tokens": 42}`; a mutation-testing audit carries
-  `{"mutant": "flip <", "killed": false, "survived": true}`. Omit entirely
+  bending the shared schema to fit it. Examples: a tool-confidence percentage
+  carried through unmodified (`{"confidence": 60}`), a suggested replacement
+  value (`{"suggested_type": "Sequence[int]", "severity": "blanket"}`), a
+  ground-truth citation (`{"should_be": "Order", "source": "CONTEXT.md"}`), a
+  clone-size metric (`{"clone_tokens": 42}`), or a mutation-test outcome
+  (`{"mutant": "flip <", "killed": false, "survived": true}`). Omit entirely
   when a skill has nothing extra to say.
 
 ```jsonl
@@ -70,8 +70,8 @@ overview, not cards.
   shape — "80 restatement, 21 banner, 11 citation" — without scrolling a hundred
   cards.
 - **Standouts** — a short `vt-callout` naming the few highest-value finds by
-  `file:line`, not every keep: for `test-audit` the interaction-only keepers that
-  are green today; for `comment-audit` the load-bearing keepers. A handful.
+  `file:line`, not every keep — the ones that would mislead a naive read of
+  the tool output alone. A handful.
 - **Full record** — one line pointing at `findings.jsonl` beside the page for the
   complete list.
 
@@ -85,15 +85,15 @@ what the orchestrator collects into the index, regardless of which audit ran:
 - `audit` — the skill name.
 - `headline` — the one-line verdict from the report.
 - `count` — how many findings.
-- `report_path` — absolute path to the report's `.html` file. For the
-  grouped-summary audits (`test-audit`, `comment-audit`) this is the grouped
-  summary page above, not a card-per-finding report. Reflect it on stdout as
+- `report_path` — absolute path to the report's `.html` file. For an audit
+  that writes `findings.jsonl`, this is the grouped summary page above, not a
+  card-per-finding report. Reflect it on stdout as
   `ALL_AUDITS_REPORT=<report_path>` on its own line — `run-audits.sh` greps
   stdout logs for this marker to collect each report (see
   [`HTML-REPORT.md`](HTML-REPORT.md)).
-- `log_path` — absolute path to `findings.jsonl`, for the audits that write
-  one (the grouped-summary audits). Omit for audits that render a full
-  card-per-finding HTML report instead.
+- `log_path` — absolute path to `findings.jsonl`, for any audit that writes
+  one. Omit for an audit that renders a full card-per-finding HTML report
+  instead.
 - `findings` — a short list, one entry per finding: `{ target, note }`, where
   `target` is the repo-relative file path the finding is about and `note` is
   a one-line summary.

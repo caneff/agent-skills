@@ -1,6 +1,6 @@
 ---
 name: audit-instructions
-description: Audit instruction text against Anthropic's current published guidance and report what to delete. Slash-only.
+description: Audit instruction text against Anthropic's current published guidance and report what to delete.
 disable-model-invocation: true
 argument-hint: "[path ...]"
 ---
@@ -74,6 +74,9 @@ next model change.
 
 On a lean, owner-written chain, the honest result here is often **0 additions**. Report zero
 when zero is true; do not manufacture five.
+
+Done when every candidate is either classified (repo-specific gap or generic steering) or
+dropped as already covered.
 
 ## 5. Report
 

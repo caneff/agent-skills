@@ -1,6 +1,6 @@
 ---
 name: mutation-audit
-description: Point at ONE module to learn which of its tests pass without actually catching a bug — run mutmut, scrape the survivors, emit test-audit findings. Opt-in, never in the default sweep. Slash-only.
+description: Point at ONE module to learn which of its tests pass without actually catching a bug — run mutmut, scrape the survivors, emit test-audit findings. Opt-in, never in the default sweep.
 disable-model-invocation: true
 argument-hint: "<target-module.py>"
 ---
@@ -47,9 +47,6 @@ test for `test-audit` to judge; the fix is to write one.
   i.e. the fix isn't "assert harder," it's "this test proves nothing,
   remove it." Still name what a replacement test would need to assert; a
   Cut here is not "no test needed."
-- **`keep`** — not used by this audit. A killed mutant means the covering
-  test already earns its place; killed mutants are dropped before findings
-  are written, not reported as keeps (see below).
 
 `category` is always `surviving-mutant`. `extra` carries
 `{"mutant": "<module>.x_<func>__mutmut_<N>", "killed": false, "survived": true,
@@ -125,8 +122,9 @@ in that setup.
    python3 ~/.agents/skills/mutation-audit/audit.py "${TMPDIR:-/tmp}/mutmut-results.txt"
    ```
    `parse_mutmut_results(text) -> list[dict]` is the tested seam
-   (`fixtures/mutmut-results.txt` + `fixtures/answer-key.md` back it,
-   mirroring `dead-code/fixtures/`) — pure, no subprocess inside it, fed
+   (`~/.agents/skills/mutation-audit/fixtures/mutmut-results.txt` +
+   `~/.agents/skills/mutation-audit/fixtures/answer-key.md` back it,
+   mirroring `~/.agents/skills/dead-code/fixtures/`) — pure, no subprocess inside it, fed
    mutmut's captured text. It returns one row per mutant that isn't killed —
    a `survived` mutant as a `rewrite`, a `no tests` mutant as a `no-coverage`;
    killed mutants are counted into `killed_count` and dropped, they aren't
@@ -173,13 +171,23 @@ in that setup.
      module's suite is. Uncovered mutants belong in the denominator: a
      coverage hole is a caught-nothing line, not a free pass.
 
+7. **Verify the cleanup.** Confirm every transient artifact from step 3 is
+   actually gone: the `mutants/` directory, `.mutmut-cache`, and — if you
+   added one — the `[mutmut]`/`[tool.mutmut]` config section (leave it alone
+   if it pre-existed). Check with `test -e mutants` / `test -e .mutmut-cache`
+   and `git status --porcelain` or `git diff` on `setup.cfg`/`pyproject.toml`,
+   not by assuming the removal worked — a failed cleanup leaves
+   mutation-testing state for the next run to trip over.
+
 ## Verify against the fixture
 
-`mutation-audit/fixtures/sample.py` + `test_sample.py` is a real mutmut run
+`~/.agents/skills/mutation-audit/fixtures/sample.py` + `test_sample.py` is a real mutmut run
 (not a hand-built guess), covering all three buckets: `is_adult` is tested at
 and around its boundary (both mutants die), `clamp` is only tested in-range
 (both boundary mutants `survived` → `rewrite`), and `scale` has no test at
-all (its mutant is `no tests` → `no-coverage`). `fixtures/mutmut-results.txt`
-has the captured `mutmut results --all true` output; `fixtures/answer-key.md`
-has the expected pass-one candidate rows and the pass-two finalized findings.
-Running this skill over `fixtures/sample.py` should reproduce that table.
+all (its mutant is `no tests` → `no-coverage`).
+`~/.agents/skills/mutation-audit/fixtures/mutmut-results.txt` has the captured
+`mutmut results --all true` output;
+`~/.agents/skills/mutation-audit/fixtures/answer-key.md` has the expected
+pass-one candidate rows and the pass-two finalized findings.
+Running this skill over `~/.agents/skills/mutation-audit/fixtures/sample.py` should reproduce that table.

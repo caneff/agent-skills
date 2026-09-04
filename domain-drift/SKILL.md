@@ -1,6 +1,6 @@
 ---
 name: domain-drift
-description: Audit whether code names match the project's own domain vocabulary — a generic name standing in for a defined term, two names for one concept, or a term used for the wrong thing. Slash-only.
+description: Audit whether code names match the project's own domain vocabulary — a generic name standing in for a defined term, two names for one concept, or a term used for the wrong thing.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---
@@ -81,12 +81,9 @@ Contrast a name the audit leaves alone: `cfg` in the same file. Generic,
 sure — but nothing in `CONTEXT.md` or the ADRs defines a term `cfg` displaces.
 No finding.
 
-## Fold note & out of scope
+## Out of scope
 
-This skill absorbs the old naming-drift fold: two code names for one glossary
-concept is exactly `synonym-sprawl` above, so a separate naming-drift check
-would only double-report what this audit already catches. Pure style
-naming — `snake_case` vs `camelCase`, unclear-but-undefined names,
+Pure style naming — `snake_case` vs `camelCase`, unclear-but-undefined names,
 abbreviation style — is a different axis and stays with ruff `N`. This audit
 only fires where a *defined* term exists and the code disagrees with it. Do
 not flag a name for being bad; flag it only for being wrong against a
@@ -94,12 +91,10 @@ specific, sourced term.
 
 ## Run
 
-1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, default to
-   the current branch's diff against its base (`git diff --name-only
-   main...HEAD`), not the whole tree — a repo-wide sweep is an explicit
-   opt-in the user asks for by name. Either way, skip vendored, generated,
-   and dependency trees (`node_modules`, `dist`, `.venv`, build output,
-   lockfiles) and any `worktrees/` tree.
+1. **Scope.** Audit `$ARGUMENTS` if given; with no argument, scope defaults
+   per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Skip vendored, generated, and dependency trees
+   (`node_modules`, `dist`, `.venv`, build output, lockfiles) and any
+   `worktrees/` tree.
 
 2. **Extract and print the term set** as above, before judging any code.
 

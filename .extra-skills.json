@@ -3,5 +3,15 @@
     "repo": "nidhinjs/prompt-master",
     "path": "",
     "treeSha": "e6f8879b688c827fb0ed7e1fc43dc5f0977a8b80"
+  },
+  "humanizer": {
+    "repo": "blader/humanizer",
+    "path": "",
+    "treeSha": "b8a8804ed9210e539531fc26c2d84fdb603960f4"
+  },
+  "read-the-damn-docs": {
+    "repo": "BuilderIO/skills",
+    "path": "skills/read-the-damn-docs",
+    "treeSha": "bdcaa95189bb3fad84fccb0e71ae02336e7ba85d"
   }
 }

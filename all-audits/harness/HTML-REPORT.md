@@ -1,9 +1,10 @@
 # HTML Report Harness — asset delivery and scaffold
 
-Every audit that renders a visual-teach HTML report — `ponytail-audit`,
-`thermo-nuclear-code-quality-review`, `improve-codebase-architecture`, and the
-grouped-summary audits (`test-audit`, `comment-audit`) via
-[`findings-schema.md`](findings-schema.md) — shares one render mechanism: copy
+Every audit that renders a visual-teach HTML report — a full card-per-finding
+audit (e.g. `ponytail-audit`, `thermo-nuclear-code-quality-review`,
+`improve-codebase-architecture`) or any audit writing `findings.jsonl` for a
+grouped summary via [`findings-schema.md`](findings-schema.md) — shares one
+render mechanism: copy
 the `vt-*` assets beside the report and link them relatively, follow the same
 scaffold rules, and get the same theme toggle for free. This doc pins that
 shared mechanism only. Each skill's own `HTML-REPORT.md` covers what is
@@ -96,5 +97,5 @@ vocabulary, card anatomy, diagram patterns, and tone — read the skill's own
 - [`thermo-nuclear-code-quality-review/HTML-REPORT.md`](../../thermo-nuclear-code-quality-review/HTML-REPORT.md)
 - [`improve-codebase-architecture/HTML-REPORT.md`](../../improve-codebase-architecture/HTML-REPORT.md)
 
-For the grouped-summary shape used by `test-audit` and `comment-audit`, see
+For the grouped-summary shape used by any audit writing `findings.jsonl`, see
 [`findings-schema.md`](findings-schema.md).

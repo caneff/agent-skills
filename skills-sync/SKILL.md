@@ -1,6 +1,6 @@
 ---
 name: skills-sync
-description: Report and optionally repair drift between the two skill directories (~/.agents/skills canonical bodies, ~/.claude/skills symlinks). Use when a skill seems half-installed, a ~/.claude/skills entry is a real dir instead of a symlink, after manually adding/moving a skill, or to audit that every canonical body is exposed to Claude.
+description: Report and optionally repair drift between the two skill directories (~/.agents/skills canonical bodies, ~/.claude/skills symlinks).
 disable-model-invocation: true
 ---
 
@@ -21,7 +21,7 @@ Reconciles the hand-wired skill layout:
 ~/.agents/skills/skills-sync/skills-sync.sh --self-test
 ```
 
-A "skill" = a directory containing `SKILL.md`. Non-dir files (`skills-lock.json`)
+A "skill" = a directory containing `SKILL.md`. Non-dir files (`.skill-lock.json`)
 and dot-dirs (`.system`, `.agents`) are skipped. Matching is by directory name
 only.
 

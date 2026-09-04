@@ -9,7 +9,8 @@ description: >
   not apply fixes.
 ---
 
-ponytail-review, repo-wide. Scan the whole tree instead of a diff. Rank
+ponytail-review, repo-wide. Scan the whole tree instead of a diff — scope
+defaults per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Rank
 findings biggest cut first. Skip vendored, generated, and dependency trees
 (`node_modules`, `dist`, `.venv`, `vendor`, build output, lockfiles) and any
 `.git/` or `worktrees/` tree — audit only the project's own tracked source.
@@ -54,7 +55,8 @@ Deliver the audit as a **single self-contained HTML file**, the same way
 not as a wall of terminal one-liners.
 
 Write the report to a fresh `<tmpdir>/ponytail-audit-<timestamp>/report.html` so
-nothing lands in the repo, then deliver it per HTML-REPORT.md — tmpdir
+nothing lands in the repo, then deliver it per
+`~/.agents/skills/ponytail-audit/HTML-REPORT.md` — tmpdir
 resolution, copying the assets beside it, opening it, and handing off the
 absolute path all live there.
 
@@ -80,9 +82,10 @@ that matters — `net: -<N> lines, -<M> deps possible` — and each card its own
 line count. Nothing to cut: a one-card report whose verdict is `Lean already.
 Ship.`
 
-See [HTML-REPORT.md](HTML-REPORT.md) for the card anatomy and the tag→badge
-palette, and [all-audits/harness/HTML-REPORT.md](../all-audits/harness/HTML-REPORT.md)
-for the shared scaffold and asset-delivery recipe.
+See `~/.agents/skills/ponytail-audit/HTML-REPORT.md` for the card anatomy and
+the tag→badge palette, and
+`~/.agents/skills/all-audits/harness/HTML-REPORT.md` for the shared scaffold
+and asset-delivery recipe.
 
 ## Write the findings in plain language
 
@@ -100,4 +103,3 @@ Complexity only. Correctness bugs, security holes, and performance go to a
 normal review pass, not this one. A single smoke test or `assert`-based
 self-check is the ponytail minimum, not bloat — never flag it for deletion.
 Lists findings, applies nothing. One-shot.
-"stop ponytail-audit" or "normal mode" to revert.

@@ -4,7 +4,8 @@
 # progress file, or nothing when no burn is live. Pass a file path as $1 to
 # render that file directly (the self-check below uses this).
 #
-# Line grammar — a contract with burndown/SKILL.md, change in lockstep:
+# Line grammar for the progress file (the single documented home — burndown/SKILL.md
+# points here instead of restating it):
 #   burning #<n>          claimed, build in flight
 #   #<n> landed <sha>     ticket landed on main
 #   #<n> parked: <why>    ticket handed to a human

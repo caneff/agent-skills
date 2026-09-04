@@ -151,8 +151,8 @@ suite isn't watching it at all.
 5. **Score.** Feed the captured JSON to the tested pure core — same
    `score()` either way:
    ```sh
-   python3 crap-audit/audit.py <tmpdir>/radon.json coverage.json          # Python
-   python3 crap-audit/audit.py --ts <tmpdir>/crap_typescript.json         # TypeScript
+   python3 ~/.agents/skills/crap-audit/audit.py <tmpdir>/radon.json coverage.json          # Python
+   python3 ~/.agents/skills/crap-audit/audit.py --ts <tmpdir>/crap_typescript.json         # TypeScript
    ```
    `audit.py`'s `main()` only prints `findings` (bucket ≥ floor) as JSONL —
    for the full ranking asset and gate values, call `score()` directly (a
@@ -248,10 +248,10 @@ statement and branch, same rule, and its `crapScore.js` computes
 matches — no fallback needed for the arithmetic.** The one real gap is
 shape, not math: the CLI's `--format json` report exposes only the
 already-combined `cov`/`covKind` per method (which axis was lower), never
-both raw percentages — `normalize_ts` (`crap-audit/audit.py`) fills the
+both raw percentages — `normalize_ts` (`~/.agents/skills/crap-audit/audit.py`) fills the
 non-dominant axis with `100.0` (can't be the minimum), so `score()` —
 ticket 1's, unmodified — still reproduces the package's own `crap` value
-exactly. See `crap-audit/fixtures/ts_sample_project/answer-key.md` for the
+exactly. See `~/.agents/skills/crap-audit/fixtures/ts_sample_project/answer-key.md` for the
 full worked verification, including both `covKind: "N/A"` cases (missing
 coverage data vs. structural_na).
 
@@ -270,17 +270,17 @@ provider non-equivalence), in `docs/research/crap-ts-tooling.md`
 
 ## Verify against the fixtures
 
-**Python** — `crap-audit/fixtures/sample_project/` (`radon.json` +
+**Python** — `~/.agents/skills/crap-audit/fixtures/sample_project/` (`radon.json` +
 `coverage.json`, real captured tool output) plus
-`crap-audit/fixtures/sample_project/answer-key.md` (the worked-by-hand CRAP arithmetic) is
+`~/.agents/skills/crap-audit/fixtures/sample_project/answer-key.md` (the worked-by-hand CRAP arithmetic) is
 the acceptance fixture: `inner` at 32.244 (`critical`), `uncovered_fn` at
 20.0 (`hotspot`), three functions under the floor (`entirely_uncovered`,
 `outer`, `branchless_fn`), gates `classic=30` / `above_current_max=33`.
 
-**TypeScript** — `crap-audit/fixtures/ts_sample_project/`
+**TypeScript** — `~/.agents/skills/crap-audit/fixtures/ts_sample_project/`
 (`crap_typescript.json`, real captured `crap-typescript` `--format json`
 output, plus the small Vitest project it was captured from) and
-`crap-audit/fixtures/ts_sample_project/answer-key.md`: `inner` (nested,
+`~/.agents/skills/crap-audit/fixtures/ts_sample_project/answer-key.md`: `inner` (nested,
 radon-closures-equivalent) at 24.432 and `uncoveredFn` at 20.0, both
 `hotspot`; `arrowFn` (the arrow-function attribution case) at 2.0, under
 floor along with `entirelyUncovered`/`outer`/`branchlessFn`; gates
@@ -288,7 +288,7 @@ floor along with `entirelyUncovered`/`outer`/`branchlessFn`; gates
 
 Running this skill's steps 5–6 directly against either fixture's captured
 JSON (skipping the test-run/tool-run steps, since it's already captured)
-should reproduce its table exactly — `crap-audit/test_audit.py` already
+should reproduce its table exactly — `~/.agents/skills/crap-audit/test_audit.py` already
 asserts this programmatically for both scoring paths; this skill's own dry
 run confirms the report-writing step reproduces the same numbers end to
 end.

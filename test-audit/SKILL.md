@@ -1,6 +1,6 @@
 ---
 name: test-audit
-description: Ruthlessly audit a repo's tests — cut the ones that prove nothing, rewrite the ones checking the wrong thing, keep only what earns its place. Slash-only.
+description: Ruthlessly audit a repo's tests — cut the ones that prove nothing, rewrite the ones checking the wrong thing, keep only what earns its place.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---
@@ -219,21 +219,24 @@ def test_create_user_returns_expected_user():
 Two fields instead of four. `id` and `created_at` are still generated —
 just no longer this test's problem.
 
+## Verify against the fixture
+
+`~/.agents/skills/test-audit/fixtures/` carries five files spanning the Cut/
+Rewrite/Keep buckets and the mechanical smells above (pytest and vitest).
+`~/.agents/skills/test-audit/fixtures/answer-key.md` has the expected pass-one
+candidate list and the pass-two bucket for each test. Running this skill over
+`~/.agents/skills/test-audit/fixtures/` should reproduce that table.
+
 ## Run
 
-1. **Start clean, scope tight.** Confirm a clean working tree first
-   (`git status`). Then scope: audit `$ARGUMENTS` if given; with no argument,
-   default to the current branch's diff against its base — resolve the base,
-   don't assume `main`
-   (`git diff --name-only $(git merge-base HEAD origin/HEAD)...HEAD`), not the
-   whole tree — a repo-wide sweep is an explicit opt-in the user asks for by
-   name. Either way, skip
-   vendored, generated, and dependency trees (`node_modules`, `dist`,
-   `.venv`, build output, lockfiles) and any `worktrees/` tree — a git
-   worktree mirrors the whole repo, so scanning it multiplies every finding
-   once per worktree — and leave load-bearing scaffolding alone (see above).
-   `audit.py` prunes these directory names itself; the same skip applies to
-   the judgment sweep.
+1. **Start clean, scope.** Confirm a clean working tree first (`git status`).
+   Then scope: audit `$ARGUMENTS` if given; with no argument, scope defaults
+   per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Either way, skip vendored, generated, and dependency
+   trees (`node_modules`, `dist`, `.venv`, build output, lockfiles) and any
+   `worktrees/` tree — a git worktree mirrors the whole repo, so scanning it
+   multiplies every finding once per worktree — and leave load-bearing
+   scaffolding alone (see above). `audit.py` prunes these directory names
+   itself; the same skip applies to the judgment sweep.
 
 2. **Pass one — run both mechanical scanners.** `python3
    ~/.agents/skills/test-audit/audit.py <scope>` scans pytest files; `node
@@ -268,10 +271,10 @@ just no longer this test's problem.
 
 ## Write the log and render the summary
 
-The sweep can judge hundreds of tests; do not render one HTML card each. Write
-the full record to `findings.jsonl` and a grouped summary to `report.html`,
-following `~/.agents/skills/all-audits/harness/findings-schema.md` for both —
-the JSONL schema and the summary's grouped-overview shape.
+Write the full record to `findings.jsonl` and a grouped summary to
+`report.html`, following `~/.agents/skills/all-audits/harness/findings-schema.md`
+for both — the JSONL schema, the grouped-overview shape, and why it's two
+files instead of one card per test.
 Write both to `<tmpdir>/test-audit-<timestamp>/` and deliver the summary per
 `~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir resolution,
 opening, and handing off the path all live there.
@@ -291,19 +294,15 @@ opening, and handing off the path all live there.
 
 ## Applying the changes (opt-in)
 
-Only when the user asks to apply — never by default:
+Only when the user asks to apply — see `~/.agents/skills/all-audits/SKILL.md`'s
+"Opt-in edits" section for the shared opt-in contract
+(reviewable PR on its own branch, never a direct commit). Start from a clean
+working tree.
 
-1. **Start clean.** Confirm a clean working tree first (`git status`).
+Apply: delete the cuts. Rewrite each Rewrite to assert the real behavior
+correctly — new assertions, isolated setup, mocked time, whatever the smell
+called for. Leave every Keep untouched.
 
-2. **Apply the changes.** Delete the cuts. Rewrite each Rewrite to assert
-   the real behavior correctly — new assertions, isolated setup, mocked
-   time, whatever the smell called for. Leave every Keep untouched.
-
-3. **Run the repo's own test command.** A test you misjudged as crap should
-   turn the loop red here, before a human ever reviews the diff — not after
-   it merges.
-
-4. **Commit on an isolated branch and open a PR.** Every cut and rewrite is
-   a judgment call; a human reads the sweep before it merges, and the
-   isolated commit means the whole audit reverts in one step if a call
-   proves wrong.
+Verify before the PR: run the repo's own test command. A test you misjudged
+as crap should turn the loop red here, before a human ever reviews the diff —
+not after it merges.
