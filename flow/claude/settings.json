@@ -48,7 +48,8 @@
       "ExitPlanMode",
       "RemoteTrigger",
       "ReportFindings",
-      "ScheduleWakeup"
+      "ScheduleWakeup",
+      "Skill(ponytail:ponytail-audit)"
     ],
     "defaultMode": "auto",
     "autoMode": {
