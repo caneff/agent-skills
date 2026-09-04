@@ -53,7 +53,7 @@ the same number on every row, not per-symbol.
      -e "$scope/node_modules" -e "$scope/.venv" -e "$scope/dist" -e "$scope/vendor" \
      -e "$scope/.git" -e "$scope/build" -e "$scope/worktrees" \
      > /tmp/interrogate-out.txt
-   python3 docstring-coverage/audit.py /tmp/ruff-out.json /tmp/interrogate-out.txt
+   python3 ~/.agents/skills/docstring-coverage/audit.py /tmp/ruff-out.json /tmp/interrogate-out.txt
    ```
    Only the D1xx "missing docstring" codes are selected — not the D2xx/D4xx
    style-convention codes (blank-line placement, summary formatting). Those
@@ -84,11 +84,11 @@ the same number on every row, not per-symbol.
    grouped summary `report.html` from it, following
    `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
    JSONL schema and the summary's grouped-overview shape.
-   Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
-   `<tmpdir>/docstring-coverage-<timestamp>/`, then open the summary and hand
-   off its path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s
-   asset-delivery section describes. This audit touches no code — writing the
-   docstrings is a separate, opt-in step the user asks for by name.
+   Write both to `<tmpdir>/docstring-coverage-<timestamp>/` and deliver the
+   summary per `~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir
+   resolution, opening, and handing off the path all live there. This audit
+   touches no code — writing the docstrings is a separate, opt-in step the
+   user asks for by name.
 
    - **Log** — one JSONL line per ruff D1xx hit. `bucket` is `document` /
      `skip` / `unsure`. `category` is the D-code slug (see above).

@@ -48,12 +48,18 @@ carries jscpd's token count for a `token-clone` row; omit `extra` for
    npx --yes jscpd --reporters json --output /tmp/jscpd-out --min-tokens 20 -s \
      --ignore "**/node_modules/**,**/.venv/**,**/dist/**,**/vendor/**,**/.git/**,**/build/**,**/worktrees/**" \
      <scope>
-   python3 duplication/audit.py /tmp/jscpd-out/jscpd-report.json
+   python3 ~/.agents/skills/duplication/audit.py /tmp/jscpd-out/jscpd-report.json
    ```
    `-s` silences jscpd's progress/promo footer so it doesn't share stdout
    with the JSON report. `--min-tokens 20` lowers jscpd's default floor
    (50) so it catches fixture-sized clones — tune it up for a large repo
    if 20 is too noisy.
+
+   **No node/npx.** jscpd needs `npx`. When it isn't on `PATH`, skip this
+   pass instead of failing the whole audit: report pass one as `NOT-RUN` in
+   the summary's verdict line and fall straight to pass two's semantic
+   sweep — a token-clone miss is better than no report at all.
+
    `audit.py`'s `parse_jscpd(json_str) -> list[dict]` is the tested seam
    (`duplication/fixtures/` + `answer-key.md` back it, mirroring
    `dead-code/fixtures/`) — pure, no subprocess inside it, fed jscpd's
@@ -88,12 +94,11 @@ carries jscpd's token count for a `token-clone` row; omit `extra` for
    then draw a grouped summary `report.html` from it, following
    `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
    JSONL schema and the summary's grouped-overview shape.
-   Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
-   `<tmpdir>/duplication-<timestamp>/`, then open the summary and hand off
-   its path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s
-   asset-delivery section describes. This audit touches no code —
-   consolidating a duplicate is a separate, opt-in step the user asks for by
-   name.
+   Write both to `<tmpdir>/duplication-<timestamp>/` and deliver the summary
+   per `~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir
+   resolution, opening, and handing off the path all live there. This audit
+   touches no code — consolidating a duplicate is a separate, opt-in step the
+   user asks for by name.
 
    - **Log** — one JSONL line per clone pair or semantic-duplicate pair.
      `bucket` is `consolidate` / `keep` / `unsure`. `category` is

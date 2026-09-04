@@ -57,7 +57,7 @@ still `dynamic`, not `unsure`, once the entrypoint evidence is concrete.
    uvx vulture <scope> \
      --exclude "*/node_modules/*,*/.venv/*,*/dist/*,*/vendor/*,*/.git/*,*/build/*,*/worktrees/*" \
      > /tmp/vulture-out.txt
-   python3 dead-code/audit.py /tmp/vulture-out.txt
+   python3 ~/.agents/skills/dead-code/audit.py /tmp/vulture-out.txt
    ```
    `audit.py`'s `parse_vulture(text) -> list[dict]` is the tested seam
    (`dead-code/fixtures/` + `answer-key.md` back it, mirroring
@@ -79,11 +79,11 @@ still `dynamic`, not `unsure`, once the entrypoint evidence is concrete.
    grouped summary `report.html` from it, following
    `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
    JSONL schema and the summary's grouped-overview shape.
-   Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
-   `<tmpdir>/dead-code-<timestamp>/`, then open the summary and hand off its
-   path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s
-   asset-delivery section describes. This audit touches no code — deleting
-   dead code is a separate, opt-in step the user asks for by name.
+   Write both to `<tmpdir>/dead-code-<timestamp>/` and deliver the summary per
+   `~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir resolution,
+   opening, and handing off the path all live there. This audit touches no
+   code — deleting dead code is a separate, opt-in step the user asks for by
+   name.
 
    - **Log** — one JSONL line per vulture hit. `bucket` is `dead` / `dynamic`
      / `unsure`. `category` is the vulture kind, slugged (see above).

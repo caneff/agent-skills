@@ -47,9 +47,6 @@ test for `test-audit` to judge; the fix is to write one.
   i.e. the fix isn't "assert harder," it's "this test proves nothing,
   remove it." Still name what a replacement test would need to assert; a
   Cut here is not "no test needed."
-- **`keep`** — not used by this audit. A killed mutant means the covering
-  test already earns its place; killed mutants are dropped before findings
-  are written, not reported as keeps (see below).
 
 `category` is always `surviving-mutant`. `extra` carries
 `{"mutant": "<module>.x_<func>__mutmut_<N>", "killed": false, "survived": true,
@@ -172,6 +169,14 @@ in that setup.
      no_coverage_count)`) — the single number that says how trustworthy this
      module's suite is. Uncovered mutants belong in the denominator: a
      coverage hole is a caught-nothing line, not a free pass.
+
+7. **Verify the cleanup.** Confirm every transient artifact from step 3 is
+   actually gone: the `mutants/` directory, `.mutmut-cache`, and — if you
+   added one — the `[mutmut]`/`[tool.mutmut]` config section (leave it alone
+   if it pre-existed). Check with `test -e mutants` / `test -e .mutmut-cache`
+   and `git status --porcelain` or `git diff` on `setup.cfg`/`pyproject.toml`,
+   not by assuming the removal worked — a failed cleanup leaves
+   mutation-testing state for the next run to trip over.
 
 ## Verify against the fixture
 

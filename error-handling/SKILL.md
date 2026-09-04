@@ -54,7 +54,7 @@ lists every code that fired, so pass two sees the full mechanical picture.
    uvx bandit -r "$scope" -f json -t B110,B112 -q \
      --exclude "$scope/node_modules,$scope/.venv,$scope/dist,$scope/vendor,$scope/.git,$scope/build,$scope/worktrees" \
      > /tmp/bandit-out.json
-   python3 error-handling/audit.py /tmp/ruff-out.json /tmp/bandit-out.json
+   python3 ~/.agents/skills/error-handling/audit.py /tmp/ruff-out.json /tmp/bandit-out.json
    ```
    Using the same absolute path for both tools matters: ruff's JSON always
    reports absolute `filename`s; bandit's mirrors whatever scope you gave it.
@@ -84,11 +84,11 @@ lists every code that fired, so pass two sees the full mechanical picture.
    grouped summary `report.html` from it, following
    `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
    JSONL schema and the summary's grouped-overview shape.
-   Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
-   `<tmpdir>/error-handling-<timestamp>/`, then open the summary and hand off
-   its path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s
-   asset-delivery section describes. This audit touches no code — fixing a
-   swallowed error is a separate, opt-in step the user asks for by name.
+   Write both to `<tmpdir>/error-handling-<timestamp>/` and deliver the
+   summary per `~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir
+   resolution, opening, and handing off the path all live there. This audit
+   touches no code — fixing a swallowed error is a separate, opt-in step the
+   user asks for by name.
 
    - **Log** — one JSONL line per merged hit. `bucket` is `fix` / `justified`
      / `unsure`. `category` is the tool-code slug (see above). `extra.codes`
@@ -100,12 +100,7 @@ lists every code that fired, so pass two sees the full mechanical picture.
 
 ## Verify against the fixture
 
-`error-handling/fixtures/sample.py` carries one unjustified swallow
-(`load_config`, catches `Exception` and drops it with no comment) and one
-justified one (`notify_best_effort`, catches `Exception` too but a comment
-documents that best-effort notification failures must never break the
-caller). `error-handling/fixtures/answer-key.md` has the captured ruff +
-bandit output and the expected bucket for each. Running this skill over
-`error-handling/fixtures/` should reproduce that table: the parser flags
-both the same way (`bucket: fix`, both `bare-except`/`try-except-pass`), and
-pass two is what tells them apart.
+`error-handling/fixtures/answer-key.md` is the fixture's spec — the captured
+ruff + bandit output, the parser's mechanical rows, and the pass-two verdict
+for each. Running this skill over `error-handling/fixtures/` must reproduce
+it exactly.
