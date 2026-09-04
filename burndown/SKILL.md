@@ -88,9 +88,8 @@ watched a burn and the notes held up.
    `#<n> parked: <why>` when the ticket settles, and `done` when the loop
    stops. Several `burning` lines are open at once while a batch runs — that
    is how the file expresses parallelism. The statusline renders this file
-   live; the line grammar is a contract with
-   `ccstatusline-table/helpers/burndown-segment.sh` — change the two only in
-   lockstep.
+   live; the line grammar is documented once, in
+   `flow/ccstatusline-table/helpers/burndown-segment.sh`.
 8. When a ticket settles, refill its slot: go to 1, skipping step 3. Re-list
    every pass — a landing can unblock tickets, and a human may have added
    more. At the ticket cap — landed plus parked — start no new builders, let

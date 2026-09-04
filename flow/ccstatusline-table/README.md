@@ -10,7 +10,7 @@ segment bar with a colored box-drawing grid.
 ```json
 "statusLine": {
   "type": "command",
-  "command": "python3 /home/caneff/.agents/skills/ccstatusline-table/table-statusline.py",
+  "command": "python3 $HOME/.agents/skills/flow/ccstatusline-table/table-statusline.py",
   "padding": 0,
   "refreshInterval": 10
 }
