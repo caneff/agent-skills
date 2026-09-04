@@ -101,12 +101,23 @@ suite isn't watching it at all.
    it). **Fail loudly and stop** — no partial score, no silent fallback to a
    stale file — if: the test command exits non-zero for reasons other than
    the CRAP threshold itself, coverage collection produces no coverage data
-   at all, or the complexity tool errors out. Report exactly what failed
-   and why; this audit needs real inputs to mean anything.
+   at all, the complexity tool errors out, or (Python) radon and
+   coverage.json share no file keys at all — `normalize` raises `ValueError`
+   for that last case rather than silently scoring every function 0%/0%.
+   Report exactly what failed and why; this audit needs real inputs to mean
+   anything.
 
 4. **Run the language's complexity+coverage tool:**
 
-   Python — radon for complexity, joined to the coverage.json from step 3:
+   Python — radon for complexity, joined to the coverage.json from step 3.
+   **`<scope>` here must be cwd-relative, exactly matching what step 3's
+   `coverage json` wrote its file keys as** — coverage.py's keys are always
+   cwd-relative, and radon's `cc -j` keys mirror whatever path string it was
+   invoked with verbatim. Run both from the same directory and pass the same
+   relative path to both; an absolute `<scope>` here (e.g. from
+   `$ARGUMENTS`) makes every radon key miss every coverage key, and
+   `normalize` now raises loudly on that rather than silently scoring
+   everything 0%/0%:
    ```sh
    uvx radon cc -j <scope> \
      --exclude "*/node_modules/*,*/.venv/*,*/dist/*,*/vendor/*,*/.git/*,*/build/*,*/worktrees/*,test_*,*_test.py,*/test_*,*/*_test.py,tests/*,*/tests/*,fixtures/*,*/fixtures/*" \

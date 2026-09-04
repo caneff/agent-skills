@@ -23,6 +23,25 @@ def _load_fixture():
     return radon_json, coverage_json
 
 
+def _parse_answer_key(path):
+    """Pull {name: (crap, bucket)} out of the answer key's markdown table so
+    the test binds to the doc itself, not a hand-retyped copy of its
+    numbers that can silently drift from it."""
+    import re
+
+    rows = {}
+    for line in open(path, encoding="utf-8"):
+        if not line.startswith("| `"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        name = re.match(r"`([^`]+)`", cells[0]).group(1)
+        crap = float(re.search(r"\*\*([\d.]+)\*\*", cells[-2]).group(1))
+        bucket_match = re.match(r"`([^`]+)`", cells[-1])
+        bucket = bucket_match.group(1) if bucket_match else "under-floor"
+        rows[name] = (crap, bucket)
+    return rows
+
+
 def test_reproduces_answer_key_exactly():
     """AC1: running the script over the fixture JSON reproduces the answer key."""
     radon_json, coverage_json = _load_fixture()
@@ -44,6 +63,26 @@ def test_reproduces_answer_key_exactly():
         "outer",
         "branchless_fn",
     ], ranked_names
+
+
+def test_matches_answer_key_md_table():
+    """Binds the assertions to fixtures/answer-key.md itself (parsed, not
+    retyped) so the doc and the code can't silently drift apart."""
+    radon_json, coverage_json = _load_fixture()
+    rows = audit.normalize(radon_json, coverage_json)
+    result = audit.score(rows)
+    by_name = {r["name"]: r for r in result["ranking"]}
+    findings_by_line = {f["line"]: f for f in result["findings"]}
+
+    key = _parse_answer_key(os.path.join(FIXTURES, "..", "answer-key.md"))
+    assert key, "answer-key.md table did not parse to any rows"
+    for name, (crap, bucket) in key.items():
+        assert round(by_name[name]["crap"], 3) == crap, name
+        if bucket == "under-floor":
+            assert by_name[name]["crap"] < audit.FLOOR, name
+        else:
+            finding = findings_by_line[by_name[name]["line"]]
+            assert finding["bucket"] == bucket, name
 
 
 def test_nested_uncovered_and_branchless_score_per_spec():
@@ -68,6 +107,56 @@ def test_nested_uncovered_and_branchless_score_per_spec():
     assert eff == 1.0
 
 
+def test_line1_function_does_not_inherit_module_summary():
+    """P0 regression: coverage.py's `""` module-scope entry is always
+    start_line 1 and is emitted last in `functions`. A real function that
+    also starts on line 1 must join on its own summary, not the module's --
+    else a 0%-covered function silently reads as 100% covered and its
+    CRAP score vanishes from the findings."""
+    radon_json = {
+        "m.py": [
+            {"type": "function", "name": "first", "lineno": 1, "complexity": 4, "closures": []}
+        ]
+    }
+    coverage_json = {
+        "files": {
+            "m.py": {
+                "functions": {
+                    "first": {
+                        "start_line": 1,
+                        "summary": {"percent_covered": 0.0, "percent_branches_covered": 0.0},
+                    },
+                    # module-scope summary: same start_line, listed after
+                    # `first` -- exactly how coverage.py 7.16.0 emits it.
+                    "": {
+                        "start_line": 1,
+                        "summary": {"percent_covered": 100.0, "percent_branches_covered": 100.0},
+                    },
+                }
+            }
+        }
+    }
+    rows = audit.normalize(radon_json, coverage_json)
+    assert rows[0]["statement_coverage"] == 0.0
+    assert rows[0]["branch_coverage"] == 0.0
+
+    result = audit.score(rows, floor=1)
+    assert result["findings"][0]["extra"]["crap"] == 20.0
+
+
+def test_normalize_raises_on_zero_matched_files_when_both_sides_nonempty():
+    """P1 fix: a radon-vs-coverage.json file-key mismatch (e.g. absolute vs.
+    repo-relative paths) must fail loudly, not silently score every function
+    0%/0% and emit a page of fabricated `critical` findings."""
+    radon_json = {"/abs/path/m.py": [{"type": "function", "name": "f", "lineno": 1, "complexity": 2, "closures": []}]}
+    coverage_json = {"files": {"m.py": {"functions": {"f": {"start_line": 1, "summary": {"percent_covered": 50.0, "percent_branches_covered": 50.0}}}}}}
+    try:
+        audit.normalize(radon_json, coverage_json)
+        assert False, "expected ValueError on zero matched file keys"
+    except ValueError:
+        pass
+
+
 def test_findings_validate_against_findings_schema():
     """AC3: findings rows carry every required findings-schema field."""
     radon_json, coverage_json = _load_fixture()
@@ -81,6 +170,26 @@ def test_findings_validate_against_findings_schema():
         assert finding["bucket"] in ("critical", "hotspot")
         assert isinstance(finding["line"], int)
         assert "extra" in finding and isinstance(finding["extra"], dict)
+
+    by_line = {f["line"]: f for f in result["findings"]}
+    # pinned against fixtures/answer-key.md, not just schema membership
+    assert by_line[2]["bucket"] == "critical"  # inner
+    assert by_line[2]["category"] == "low-coverage"
+    assert by_line[17]["bucket"] == "hotspot"  # uncovered_fn
+    assert by_line[17]["category"] == "low-coverage"
+
+
+def test_bucket_gate_is_the_classic_30_boundary():
+    assert audit._bucket(29.999) == "hotspot"
+    assert audit._bucket(30.0) == "critical"
+    assert audit._bucket(15.0) == "hotspot"
+
+
+def test_category_dominant_ingredient_boundary():
+    # complexity=4: penalty >= complexity when coverage <= 0 (penalty=64 at cov=0)
+    assert audit._category(4, 0.0) == "low-coverage"
+    # complexity=4, coverage=1.0 -> penalty=0 < complexity=4
+    assert audit._category(4, 1.0) == "high-complexity"
 
 
 def test_under_floor_is_count_and_sample_not_full_rows():
@@ -201,6 +310,7 @@ def test_normalize_ts_missing_coverage_report_counts_as_zero_both_axes():
             "complexity": 3,
             "statement_coverage": 0.0,
             "branch_coverage": 0.0,
+            "coverage_axis": "both",
         }
     ]
 
@@ -244,6 +354,24 @@ def test_ts_findings_validate_against_findings_schema():
         for field in ("bucket", "file", "line", "category", "summary", "failure"):
             assert field in finding and finding[field], finding
         assert finding["bucket"] in ("critical", "hotspot")
+
+
+def test_ts_findings_never_report_the_synthetic_unmeasured_axis():
+    """P1 fix: normalize_ts fills the non-dominant axis with a synthetic
+    100.0 so score()'s min() ignores it -- that number must never leak into
+    a finding's extra as if it were measured. The unmeasured axis is null."""
+    report = _load_ts_fixture()
+    rows = audit.normalize_ts(report)
+    result = audit.score(rows)
+    by_name = {f["file"] + ":" + str(f["line"]): f for f in result["findings"]}
+
+    inner = by_name["src/sample.ts:2"]  # measured branch (cov=20)
+    assert inner["extra"]["branch_coverage"] == 20.0
+    assert inner["extra"]["statement_coverage"] is None
+
+    uncovered = by_name["src/sample.ts:23"]  # measured stmt (cov=0)
+    assert uncovered["extra"]["statement_coverage"] == 0.0
+    assert uncovered["extra"]["branch_coverage"] is None
 
 
 def test_cli_main_ts_mode_prints_findings_jsonl():

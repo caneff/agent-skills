@@ -55,11 +55,19 @@ def normalize(radon_json, coverage_json):
     """
     rows = []
     files = coverage_json.get("files", {})
+    matched_files = 0
     for file, entries in radon_json.items():
+        # coverage.py's `""` entry is the whole-module summary, always
+        # `start_line: 1`, emitted last — join on it and every function
+        # defined on line 1 silently inherits the module's coverage instead
+        # of its own.
         by_line = {
             func["start_line"]: func["summary"]
-            for func in files.get(file, {}).get("functions", {}).values()
+            for cov_name, func in files.get(file, {}).get("functions", {}).items()
+            if cov_name
         }
+        if file in files:
+            matched_files += 1
         for name, lineno, complexity in _flatten_radon(entries):
             summary = by_line.get(lineno)
             stmt_cov = summary["percent_covered"] if summary else 0.0
@@ -74,6 +82,14 @@ def normalize(radon_json, coverage_json):
                     "branch_coverage": branch_cov,
                 }
             )
+    if radon_json and files and matched_files == 0:
+        raise ValueError(
+            "radon and coverage.json share no file keys — "
+            f"radon: {sorted(radon_json)[:3]}..., coverage: {sorted(files)[:3]}...; "
+            "likely an absolute-vs-relative path mismatch between the two tool "
+            "invocations. Every function would silently read as 0% covered; "
+            "refusing to score on that."
+        )
     return rows
 
 
@@ -103,14 +119,21 @@ def normalize_ts(report_json):
     for method in report_json["methods"]:
         cov = method["cov"]
         kind = method["covKind"]
+        # `axis` names which of stmt/branch was actually measured; the other
+        # is filled with 100.0 only so it can't win min() in score() — it is
+        # not a real number and score() must not report it as one.
         if cov is None:
             stmt_cov = branch_cov = 0.0
+            axis = "both"
         elif kind == "stmt":
             stmt_cov, branch_cov = float(cov), 100.0
+            axis = "stmt"
         elif kind == "branch":
             stmt_cov, branch_cov = 100.0, float(cov)
+            axis = "branch"
         else:  # "N/A" with cov not None -> structural_na
             stmt_cov = branch_cov = 100.0
+            axis = "both"
         rows.append(
             {
                 "file": method["src"],
@@ -119,6 +142,7 @@ def normalize_ts(report_json):
                 "complexity": method["cc"],
                 "statement_coverage": stmt_cov,
                 "branch_coverage": branch_cov,
+                "coverage_axis": axis,
             }
         )
     return rows
@@ -163,6 +187,10 @@ def score(rows, floor=FLOOR):
     under_floor = []
     for r in ranking:
         if r["crap"] >= floor:
+            # `coverage_axis` (TS rows only) names which axis was actually
+            # measured — the other was filled with a synthetic 100.0 that
+            # must never be reported as a real percentage in the findings log.
+            axis = r.get("coverage_axis", "both")
             findings.append(
                 {
                     "bucket": _bucket(r["crap"]),
@@ -175,8 +203,8 @@ def score(rows, floor=FLOOR):
                     "something and unlikely to be caught by a test",
                     "extra": {
                         "complexity": r["complexity"],
-                        "statement_coverage": r["statement_coverage"],
-                        "branch_coverage": r["branch_coverage"],
+                        "statement_coverage": r["statement_coverage"] if axis in ("both", "stmt") else None,
+                        "branch_coverage": r["branch_coverage"] if axis in ("both", "branch") else None,
                         "coverage": r["coverage"],
                         "crap": r["crap"],
                     },

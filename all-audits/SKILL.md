@@ -1,11 +1,11 @@
 ---
 name: all-audits
-description: Run every repo audit at once — twelve audit skills in parallel, one HTML index linking each report, then grill through them one at a time. Slash-only.
+description: Run every repo audit at once — thirteen audit skills in parallel, one HTML index linking each report, then grill through them one at a time. Slash-only.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---
 
-Run the whole audit set over one repo in a single sweep. Twelve audit skills fan
+Run the whole audit set over one repo in a single sweep. Thirteen audit skills fan
 out in parallel, each as its own process; each writes a self-contained report;
 the reports collect under one folder behind an `index.html` that links them. The
 sweep **reports only** — it applies nothing and
@@ -15,7 +15,7 @@ to grill.
 Scope: `$ARGUMENTS` if given, else the current working directory — the repo you
 are standing in. The whole repo, not a branch diff.
 
-## The set — twelve skills
+## The set — thirteen skills
 
 Each audits the whole repo and renders a visual-teach HTML report:
 
@@ -31,6 +31,7 @@ Each audits the whole repo and renders a visual-teach HTML report:
 - `docstring-coverage` — undocumented public API on a `py.typed` surface.
 - `domain-drift` — code vocabulary that drifts from the project's domain terms.
 - `type-tightness` — loose `Any`, unexplained `# type: ignore`, fake boundaries.
+- `crap-audit` — per-function CRAP score (complexity² × uncovered fraction³ + complexity), real risk hotspots.
 
 `skill-audit` is **not** in the set — it scans the global skills directory, not
 this repo. `mutation-audit` is **not** in the set either — it is opt-in and
@@ -45,7 +46,7 @@ direct commit to main. Carry this contract into any new audit skill you add here
 `run-audits.sh` is the bash orchestrator that runs each guarded audit as its own
 `claude -p "/name"` process and collects the reports. Flags:
 
-- **`run-audits.sh [REPO]`** — a fresh sweep of all twelve into a new run dir.
+- **`run-audits.sh [REPO]`** — a fresh sweep of all thirteen into a new run dir.
 - **`--out DIR`** — write into `DIR` instead of a fresh dir, accumulating (no
   wipe). Re-running with the same `--out` refreshes that dir.
 - **`--only NAME[,NAME]`** — run just the named audits, leaving any other audit's
@@ -53,7 +54,7 @@ direct commit to main. Carry this contract into any new audit skill you add here
 - **`--short`** — the short set: run only the three widest-reaching structural
   audits — `thermo-nuclear-code-quality-review`, `improve-codebase-architecture`,
   and `ponytail-audit`. A named alias for that `--only` list, for a fast pass
-  when the full twelve is more than you want.
+  when the full thirteen is more than you want.
 - **`--index`** (with `--out DIR`) — run no audits; rebuild `index.html` + the
   synthesis lede over whatever reports already sit in `DIR`. Point several
   `--only` runs at one `--out DIR`, then `--index` it, for a complete index with
