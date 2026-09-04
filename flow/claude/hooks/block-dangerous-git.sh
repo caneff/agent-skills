@@ -50,12 +50,32 @@ DANGEROUS_PATTERNS=(
   "git clean -fd"
   "git clean -f"
   "git branch -D"
-  "git checkout \."
-  "git restore \."
 )
+# `git checkout .` / `git restore .` throw away every uncommitted change in the
+# tree. Match on the whole command, not on the two words being adjacent:
+# `git restore --worktree .` and `git checkout -- .` are the same destruction
+# with a flag in between, and an adjacency pattern misses both.
+#
+# The one safe form is `git restore --staged` without `--worktree`: that only
+# unstages, and leaves the working tree alone.
+has_dot_pathspec() { echo "$SCAN" | grep -qE '(^|[[:space:]])\.([[:space:]]|$)'; }
+restore_is_unstage_only() {
+  echo "$SCAN" | grep -q -- '--staged' && ! echo "$SCAN" | grep -q -- '--worktree'
+}
+git_verb() {
+  echo "$SCAN" | grep -qE "(^|[;&|[:space:]])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+$1([[:space:]]|\$)"
+}
+
+if has_dot_pathspec && { git_verb checkout || { git_verb restore && ! restore_is_unstage_only; }; }; then
+  echo "BLOCKED: '$COMMAND' discards every uncommitted change under '.'. That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact line to run themselves. Do not attempt it yourself." >&2
+  exit 2
+fi
+
 for pattern in "${DANGEROUS_PATTERNS[@]}"; do
   if echo "$SCAN" | grep -qE "$pattern"; then
-    echo "BLOCKED: '$COMMAND' matches protected pattern '$pattern'. That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact '! $pattern ...' line to run themselves. Do not attempt it yourself." >&2
+    hint=""
+    [ "$pattern" = "git branch -D" ] && hint=" FIRST try 'git branch -d' (lowercase), which is allowed: git itself refuses it on an unmerged branch, so it deletes the safe ones and needs no hand-off. Hand off only what -d refuses."
+    echo "BLOCKED: '$COMMAND' matches protected pattern '$pattern'. That part is the user's, not yours.${hint} HAND OFF: re-run the command without it, then give the user the exact '! $pattern ...' line to run themselves. Do not attempt it yourself." >&2
     exit 2
   fi
 done
