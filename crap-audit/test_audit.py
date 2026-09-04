@@ -66,7 +66,7 @@ def test_reproduces_answer_key_exactly():
 
 
 def test_matches_answer_key_md_table():
-    """Binds the assertions to fixtures/answer-key.md itself (parsed, not
+    """Binds the assertions to fixtures/sample_project/answer-key.md itself (parsed, not
     retyped) so the doc and the code can't silently drift apart."""
     radon_json, coverage_json = _load_fixture()
     rows = audit.normalize(radon_json, coverage_json)
@@ -74,7 +74,7 @@ def test_matches_answer_key_md_table():
     by_name = {r["name"]: r for r in result["ranking"]}
     findings_by_line = {f["line"]: f for f in result["findings"]}
 
-    key = _parse_answer_key(os.path.join(FIXTURES, "..", "answer-key.md"))
+    key = _parse_answer_key(os.path.join(FIXTURES, "answer-key.md"))
     assert key, "answer-key.md table did not parse to any rows"
     for name, (crap, bucket) in key.items():
         assert round(by_name[name]["crap"], 3) == crap, name
@@ -172,7 +172,7 @@ def test_findings_validate_against_findings_schema():
         assert "extra" in finding and isinstance(finding["extra"], dict)
 
     by_line = {f["line"]: f for f in result["findings"]}
-    # pinned against fixtures/answer-key.md, not just schema membership
+    # pinned against fixtures/sample_project/answer-key.md, not just schema membership
     assert by_line[2]["bucket"] == "critical"  # inner
     assert by_line[2]["category"] == "low-coverage"
     assert by_line[17]["bucket"] == "hotspot"  # uncovered_fn
@@ -205,6 +205,22 @@ def test_under_floor_is_count_and_sample_not_full_rows():
 
     assert len(result["ranking"]) == 5
     assert len(result["findings"]) + result["under_floor"]["count"] == len(result["ranking"])
+
+
+def test_under_floor_sample_caps_at_the_constant_not_the_full_count():
+    """Regression witness: with more under-floor rows than
+    UNDER_FLOOR_SAMPLE, the sample must stay capped -- the fixture only has
+    3 under-floor rows, too few for `sample[:N]` to ever bind, so raising
+    the cap left the fixture-driven test green with no cap at all."""
+    rows = [
+        {"file": "m.py", "name": f"clean_{i}", "line": i, "complexity": 1,
+         "statement_coverage": 100.0, "branch_coverage": 100.0}
+        for i in range(audit.UNDER_FLOOR_SAMPLE + 3)
+    ]
+    result = audit.score(rows)
+
+    assert result["under_floor"]["count"] == len(rows)
+    assert len(result["under_floor"]["sample"]) == audit.UNDER_FLOOR_SAMPLE
 
 
 def test_gate_suggestions_present_and_correct():
@@ -277,6 +293,21 @@ def test_normalize_ts_attributes_the_arrow_function():
     assert row["complexity"] == 2
     assert row["statement_coverage"] == 100.0
     assert row["branch_coverage"] == 100.0
+
+
+def test_normalize_ts_branch_axis_lands_on_branch_not_statement():
+    """Regression witness: the `kind == "branch"` arm must put the measured
+    `cov` in branch_coverage and the synthetic 100.0 in statement_coverage,
+    not the reverse -- with the fixture's only asymmetric branch row
+    (`inner`, cov=20), swapping the two assignments changes both fields, so
+    this fails if they're ever transposed."""
+    report = _load_ts_fixture()
+    rows = audit.normalize_ts(report)
+    by_name = {r["name"]: r for r in rows}
+
+    inner = by_name["inner"]
+    assert inner["branch_coverage"] == 20.0
+    assert inner["statement_coverage"] == 100.0
 
 
 def test_normalize_ts_missing_coverage_report_counts_as_zero_both_axes():

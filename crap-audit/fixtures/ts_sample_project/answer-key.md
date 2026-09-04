@@ -37,8 +37,7 @@ function entirely absent from `coverage.json`. `cov: 100` / `covKind: "N/A"`
 other "N/A" case: 100% both axes, same treatment as a branchless Python
 function. Neither case appears in this fixture's captured methods (every
 method here has real statements to cover); both are covered instead by two
-small synthetic rows in `crap-audit/test_audit.py`, in the same spirit as
-`audit.py`'s own `_selfcheck()`.
+small synthetic rows in `crap-audit/test_audit.py`.
 
 | Function | File:line | Complexity | Captured `cov`/`covKind` | Effective coverage | CRAP | Bucket |
 |---|---|---|---|---|---|---|

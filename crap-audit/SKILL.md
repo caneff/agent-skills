@@ -107,7 +107,9 @@ suite isn't watching it at all.
    Report exactly what failed and why; this audit needs real inputs to mean
    anything.
 
-4. **Run the language's complexity+coverage tool:**
+4. **Run the language's complexity+coverage tool.** Resolve `<tmpdir>` from
+   `$TMPDIR`, fall back to `/tmp` — same resolution as step 6, done once and
+   reused for every scratch file below.
 
    Python — radon for complexity, joined to the coverage.json from step 3.
    **`<scope>` here must be cwd-relative, exactly matching what step 3's
@@ -121,7 +123,7 @@ suite isn't watching it at all.
    ```sh
    uvx radon cc -j <scope> \
      --exclude "*/node_modules/*,*/.venv/*,*/dist/*,*/vendor/*,*/.git/*,*/build/*,*/worktrees/*,test_*,*_test.py,*/test_*,*/*_test.py,tests/*,*/tests/*,fixtures/*,*/fixtures/*" \
-     > /tmp/radon.json
+     > <tmpdir>/radon.json
    ```
 
    TypeScript — `@barney-media/crap-typescript`, exact-pinned via `npx`
@@ -129,11 +131,11 @@ suite isn't watching it at all.
    `latest` resolves to on the day the audit runs):
    ```sh
    npx --yes -p @barney-media/crap-typescript@0.5.1 crap-typescript \
-     --format json --test-runner auto <scope> > /tmp/crap_typescript.json
+     --format json --test-runner auto <scope> > <tmpdir>/crap_typescript.json
    ```
    Exit code `2` means "CRAP threshold exceeded" (the package's *own* 6.0
    default gate, unrelated to this skill's floor/gates) — not a failure of
-   the run; still read `/tmp/crap_typescript.json`, it's valid. Exit code
+   the run; still read `<tmpdir>/crap_typescript.json`, it's valid. Exit code
    `1` is a real failure (bad args, IO, parse error) — fail loudly per step
    3. See "TypeScript path" below for the fallback if the package can't run
    at all.
@@ -141,8 +143,8 @@ suite isn't watching it at all.
 5. **Score.** Feed the captured JSON to the tested pure core — same
    `score()` either way:
    ```sh
-   python3 crap-audit/audit.py /tmp/radon.json coverage.json          # Python
-   python3 crap-audit/audit.py --ts /tmp/crap_typescript.json         # TypeScript
+   python3 crap-audit/audit.py <tmpdir>/radon.json coverage.json          # Python
+   python3 crap-audit/audit.py --ts <tmpdir>/crap_typescript.json         # TypeScript
    ```
    `audit.py`'s `main()` only prints `findings` (bucket ≥ floor) as JSONL —
    for the full ranking asset and gate values, call `score()` directly (a
@@ -235,7 +237,7 @@ provider non-equivalence), in `docs/research/crap-ts-tooling.md`
 
 **Python** — `crap-audit/fixtures/sample_project/` (`radon.json` +
 `coverage.json`, real captured tool output) plus
-`crap-audit/fixtures/answer-key.md` (the worked-by-hand CRAP arithmetic) is
+`crap-audit/fixtures/sample_project/answer-key.md` (the worked-by-hand CRAP arithmetic) is
 the acceptance fixture: `inner` at 32.244 (`critical`), `uncovered_fn` at
 20.0 (`hotspot`), three functions under the floor (`entirely_uncovered`,
 `outer`, `branchless_fn`), gates `classic=30` / `above_current_max=33`.

@@ -6,8 +6,9 @@ already-captured JSON, which is what makes them fixture-testable offline.
 
 `normalize` joins radon's per-function complexity to coverage.py's
 per-function coverage on (file, start line) — coverage.py's
-`functions[*].start_line` matches radon's `lineno` exactly (verified via
-`docs/research/crap-python-tooling.md`), so no name-matching is needed even
+`functions[*].start_line` matches radon's `lineno` exactly (verified in
+`docs/research/crap-python-tooling.md`, `research/crap-python-tooling`
+branch, commit `a95d390`), so no name-matching is needed even
 though the two tools spell nested-function names differently (radon: a bare
 name inside `closures`; coverage.py: a dotted qualname). A function entirely
 absent from coverage.json (its file was never imported by the test run)
@@ -18,7 +19,6 @@ suggests the two gate values. The judgment pass (bucket beyond score-band,
 real prose) is a later skill, not this file.
 """
 import json
-import math
 import sys
 
 FLOOR = 15
@@ -214,7 +214,7 @@ def score(rows, floor=FLOOR):
             under_floor.append(r)
 
     max_crap = ranking[0]["crap"] if ranking else 0
-    gates = {"classic": CLASSIC_GATE, "above_current_max": math.floor(max_crap) + 1}
+    gates = {"classic": CLASSIC_GATE, "above_current_max": int(max_crap) + 1}
 
     return {
         "findings": findings,
@@ -224,26 +224,17 @@ def score(rows, floor=FLOOR):
     }
 
 
-def _selfcheck():
-    radon_json = {"a.py": [{"type": "function", "name": "f", "lineno": 1, "complexity": 4, "closures": []}]}
-    coverage_json = {"files": {"a.py": {"functions": {"f": {"start_line": 1, "summary": {"percent_covered": 50.0, "percent_branches_covered": 50.0}}}}}}
-    rows = normalize(radon_json, coverage_json)
-    assert rows == [
-        {"file": "a.py", "name": "f", "line": 1, "complexity": 4, "statement_coverage": 50.0, "branch_coverage": 50.0}
-    ], rows
-    result = score(rows, floor=1)
-    assert round(result["findings"][0]["extra"]["crap"], 3) == 6.0, result
-    print("ok")
-
-
 def main(argv):
-    if argv[1:2] == ["--selfcheck"]:
-        _selfcheck()
-        return
     if argv[1:2] == ["--ts"]:
+        if len(argv) < 3:
+            print("usage: audit.py --ts <crap_typescript.json>", file=sys.stderr)
+            sys.exit(1)
         report_json = json.load(open(argv[2], encoding="utf-8"))
         rows = normalize_ts(report_json)
     else:
+        if len(argv) < 3:
+            print("usage: audit.py <radon.json> <coverage.json>", file=sys.stderr)
+            sys.exit(1)
         radon_json = json.load(open(argv[1], encoding="utf-8"))
         coverage_json = json.load(open(argv[2], encoding="utf-8"))
         rows = normalize(radon_json, coverage_json)
