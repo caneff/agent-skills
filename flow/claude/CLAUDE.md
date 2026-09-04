@@ -95,6 +95,11 @@ wrong.
 
 # Gotchas
 
+- **Never `ORCA terminal wait`** — stale server-side waiters make it fail with
+  `waiter_exists` and the replace flag doesn't attach. Use `orca-wait
+  --terminal <handle> --for exit|tui-idle [--timeout-ms N]` (script in
+  `~/.local/bin`, polls `terminal show`, no server waiter; exit 0 = met,
+  2 = timeout).
 - **Every Agent call passes `model`** — the session is Fable and a bare call
   inherits it. Explore/lookup → `sonnet`, review/diagnosis → `opus`. Rubric:
   `~/.agents/skills/flow/claude/subagent-tiers.md`.
