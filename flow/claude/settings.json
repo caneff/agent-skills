@@ -59,6 +59,7 @@
       ]
     }
   },
+  "model": "opus",
   "disableClaudeAiConnectors": true,
   "skillOverrides": {
     "dataviz": "off",
@@ -337,6 +338,5 @@
   "theme": "dark-ansi",
   "remoteControlAtStartup": false,
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true,
-  "model": "opus"
+  "agentPushNotifEnabled": true
 }
