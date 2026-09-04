@@ -1,6 +1,6 @@
 ---
 name: create-lmd-page
-description: Generate a Logic Masters Deutschland puzzle page (HTML) from a ruleset, a SudokuPad link, and an image id. Use when the user wants to create/format an LMD puzzle post, says "create lmd page", "/create-lmd-page", or gives a new ruleset + sudokupad link for a puzzle page.
+description: Generate a Logic Masters Deutschland puzzle page (HTML) from a ruleset, a SudokuPad link, and an image id.
 disable-model-invocation: true
 ---
 
@@ -27,11 +27,10 @@ single prompt. Skip any input the user already supplied. Order:
 After the link, run:
 
 ```
-skills/create-lmd-page/extract_puzzle.py "<sudokupad-url-or-id>"
+~/.agents/skills/create-lmd-page/extract_puzzle.py "<sudokupad-url-or-id>"
 ```
 
-(absolute path: `~/.claude/skills/create-lmd-page/extract_puzzle.py`; needs `uv`,
-shebang pulls `lzstring`). It prints JSON `{title, author, rules, layout}` pulled
+(needs `uv`, shebang pulls `lzstring`). It prints JSON `{title, author, rules, layout}` pulled
 from the puzzle's `metadata`. The `rules` field is the ruleset — one named rule
 per paragraph, `\n\n`-separated — use it as if the user pasted it. Show the
 extracted rules and let the user correct them before building. `layout`
@@ -82,69 +81,6 @@ Layout — pick by the `layout` field (see the two variants under Template):
 
 ## Template
 
-Two variants below — two-column and one-column. The `<section>` max-width, the image
-`width`, and the `<aside>` flex line are the only things that differ between them; the
-epigraph, `#ddf` bar, and rule blocks are identical in both.
-
-### Two-column (`layout == "two"`)
-
-```html
-<section style="max-width: 820px; margin: 20px auto; background: #fafaff; border: 1px solid #ddf; border-radius: 8px; padding: 26px 30px;">
-  <!-- Intro: only when notes given. Omit this whole <p> (no header, no placeholder) if there are none.
-       Author's-note epigraph — italic, centered, muted, hairline divider beneath.
-       Text is capped at 620px and centered; the divider rule spans the full column. -->
-  <p style="margin: 0 auto 20px; padding-bottom: 15px; border-bottom: 1px solid #ccd; font-style: italic; text-align: center; color: #555; line-height: 1.6;">
-    <span style="display: block; max-width: 620px; margin: 0 auto;">{{NOTES}}</span>
-  </p>
-
-  <!-- Image left, Rules card right. flex-wrap stacks them on narrow screens.
-       The flex: 2 1 280px card hugs its own column, so its 18px side gutters stay balanced. -->
-  <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: stretch;">
-    <div style="flex: 3 1 320px; text-align: center;">
-      <a href="{{SUDOKUPAD_LINK}}"><img:{{IMAGE_ID}} width="420" style="max-width: 100%; display: block; margin: 0 auto;"></a>
-      <div style="margin-top: 8px;"><a href="{{SUDOKUPAD_LINK}}" style="color: #557; font-weight: bold; text-decoration: none;">Play Now! &rarr;</a></div>
-    </div>
-    <aside style="flex: 2 1 280px; background: #eef; border: 1px solid #ddf; border-radius: 5px; overflow: hidden;">
-      <div style="background: #ddf; padding: 8px 18px; font-weight: bold;">Rules</div>
-      <div style="padding: 16px 18px;">
-        <div style="margin-bottom: 14px; line-height: 1.5;"><strong style="display: block;">{{RULE_NAME}}</strong><ul style="color: #444; margin: 4px 0 0; padding-left: 18px; max-width: none;"><li style="max-width: none;">{{RULE_POINT}}</li></ul></div>
-        <!-- one block per rule (last uses margin-bottom: 0). One <li> per bullet point.
-             A single-statement rule is still a <ul> with one <li> — always bullet. -->
-      </div>
-    </aside>
-  </div>
-</section>
-```
-
-### One-column (`layout == "one"`, long rules)
-
-The image and Rules card each take a full row (card falls below the image instead of
-towering beside it). Frame is **wide** (`max-width: 840px`): a large centered image
-(`width="600"`) up top, and a wide rules card (`flex: 1 1 100%; max-width: 780px;
-margin: 0 auto`) below. The card is wide *and* gutter-free because the `<ul>`/`<li>`
-carry `max-width: none` (the gutter gotcha above) — the text fills the full card width
-instead of wrapping short. The image column is also `flex: 1 1 100%` so it stacks.
-Everything else is identical to two-column.
-
-```html
-<section style="max-width: 840px; margin: 20px auto; background: #fafaff; border: 1px solid #ddf; border-radius: 8px; padding: 26px 30px;">
-  <p style="margin: 0 auto 20px; padding-bottom: 15px; border-bottom: 1px solid #ccd; font-style: italic; text-align: center; color: #555; line-height: 1.6;">
-    <span style="display: block; max-width: 620px; margin: 0 auto;">{{NOTES}}</span>
-  </p>
-
-  <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: stretch;">
-    <div style="flex: 1 1 100%; text-align: center;">
-      <a href="{{SUDOKUPAD_LINK}}"><img:{{IMAGE_ID}} width="600" style="max-width: 100%; display: block; margin: 0 auto;"></a>
-      <div style="margin-top: 8px;"><a href="{{SUDOKUPAD_LINK}}" style="color: #557; font-weight: bold; text-decoration: none;">Play Now! &rarr;</a></div>
-    </div>
-    <aside style="flex: 1 1 100%; max-width: 780px; margin: 0 auto; background: #eef; border: 1px solid #ddf; border-radius: 5px; overflow: hidden;">
-      <div style="background: #ddf; padding: 8px 18px; font-weight: bold;">Rules</div>
-      <div style="padding: 16px 18px;">
-        <div style="margin-bottom: 14px; line-height: 1.5;"><strong style="display: block;">{{RULE_NAME}}</strong><ul style="color: #444; margin: 4px 0 0; padding-left: 18px; max-width: none;"><li style="max-width: none;">{{RULE_POINT}}</li></ul></div>
-        <!-- one block per rule (last uses margin-bottom: 0). One <li> per bullet point.
-             A single-statement rule is still a <ul> with one <li> — always bullet. -->
-      </div>
-    </aside>
-  </div>
-</section>
-```
+One shared skeleton with four values that differ by `layout` — see
+[reference/template.md](reference/template.md) for the HTML and the
+two-column/one-column delta table.

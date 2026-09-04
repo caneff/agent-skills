@@ -1,6 +1,6 @@
 ---
 name: extract-coding-standards
-description: Mine a repo's recent history — merged PRs, review comments, commits, and the current code — for the conventions the team actually enforces, and write them into CODING_STANDARDS.md in the house rule format. Slash-only.
+description: Mine a repo's recent history — merged PRs, review comments, commits, and the current code — for the conventions the team actually enforces, and write them into CODING_STANDARDS.md in the house rule format.
 disable-model-invocation: true
 argument-hint: "[N | all]"
 ---
@@ -73,9 +73,11 @@ that break something silently.
 
 ### 1. Set the scope and gather evidence
 
-Resolve `$ARGUMENTS` to a range. Then gather, in one read-only sweep — delegate
-it to a sub-agent so the raw output stays out of your context and you keep only
-the findings:
+Resolve `$ARGUMENTS` to a range, capped at 50 PRs/commits even when `all`
+resolves larger — re-run with a narrower `$ARGUMENTS` for older history. Then
+gather, in one read-only sweep — delegate it to a `sonnet` sub-agent (Agent
+tool, `model: sonnet`) so the raw output stays out of your context and you
+keep only the findings:
 
 - **PR review comments** — the richest source; about a third of review comments
   are about conventions. `gh pr list --state merged --limit N`, then for each PR

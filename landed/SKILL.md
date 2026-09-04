@@ -30,7 +30,5 @@ The page is a snapshot, cheap to rebuild, never appended to. Every `git push`
 also regenerates it in the background via the push-sync hook, so
 regenerating here just guarantees freshness before opening.
 
-Page anatomy (all in `generate.py`, edit there): agent-built commits are the
-ones with a `Co-Authored-By: Claude` trailer; `Closes #n` trailers link to the
-repo's GitHub issues; commits over 400 changed lines link out instead of
-inlining their diff; the selected tab persists per browser via localStorage.
+Page anatomy lives in `generate.py` itself — read it there, don't restate it
+here.

@@ -1,6 +1,6 @@
 ---
 name: skills-safe-update
-description: Update agent skills installed via the `npx skills` package manager without losing local edits — including following upstream renames, folder moves, and rewrites that a plain update would drop as orphans. A git buffer makes every update reviewable and reversible; edited skills keep their customizations instead of being silently overwritten; renamed/moved skills get their successors installed and edits judged (replay vs subsumed). Use when the user wants to update/refresh installed skills, pull the latest versions, safely run `npx skills update`, or reconcile a source's skills (e.g. `/skills-safe-update mattpocock`).
+description: Update agent skills installed via the `npx skills` package manager without losing local edits — including following upstream renames, folder moves, and rewrites that a plain update would drop as orphans.
 disable-model-invocation: true
 ---
 
@@ -16,6 +16,22 @@ bash scripts/safe-update.sh     # do the update, preserving edits
 ```
 
 Both run against `~/.agents/skills` (override with `SKILLS_DIR=...`).
+
+## Check status first (read-only)
+
+`safe-update.sh` only knows the **edit** axis (your copy vs the lock) and learns it mid-update. `scripts/skills-status.sh` adds the second axis the lockfile alone hides — your copy vs **current upstream** — and mutates nothing, so run it before deciding to update:
+
+```bash
+bash scripts/skills-status.sh
+```
+
+It classifies each lock-tracked skill by comparing three tree SHAs (`local` = your working copy, `lock` = the version you installed from, `upstream` = the source repo now):
+
+- **clean** — matches upstream, untouched.
+- **edited, on latest** — your edits sit on the current upstream; nothing to rebase.
+- **OUT OF DATE** — upstream moved past your installed version; `safe-update.sh` will pull it.
+- **EDITED+STALE (merge needed)** — your edits sit on an *old* upstream; updating will need the hand-merge `safe-update.sh` prints.
+- **ORPHAN** — installed but gone from its recorded `skillPath` upstream. Could be a rename, a move between category folders, or a real removal — the script can't tell. Resolve with [reference/renames-and-moves.md](reference/renames-and-moves.md) after the pull.
 
 ## Hand-installed skills (.extra-skills.json)
 
@@ -69,22 +85,6 @@ If step 2 drops every kept skill (all upstream did was strip your customizations
 
 Keep it tight. The user wants to know what changed in the pipeline, not read a diff.
 
-## Check status first (read-only)
-
-`safe-update.sh` only knows the **edit** axis (your copy vs the lock) and learns it mid-update. `scripts/skills-status.sh` adds the second axis the lockfile alone hides — your copy vs **current upstream** — and mutates nothing, so run it before deciding to update:
-
-```bash
-bash scripts/skills-status.sh
-```
-
-It classifies each lock-tracked skill by comparing three tree SHAs (`local` = your working copy, `lock` = the version you installed from, `upstream` = the source repo now):
-
-- **clean** — matches upstream, untouched.
-- **edited, on latest** — your edits sit on the current upstream; nothing to rebase.
-- **OUT OF DATE** — upstream moved past your installed version; `safe-update.sh` will pull it.
-- **EDITED+STALE (merge needed)** — your edits sit on an *old* upstream; updating will need the hand-merge `safe-update.sh` prints.
-- **ORPHAN** — installed but gone from its recorded `skillPath` upstream. Could be a rename, a move between category folders, or a real removal — the script can't tell. Resolve with [Follow renames & moves](#after-the-pull-follow-renames--moves) after the pull.
-
 ## What it does
 
 1. Ensures the skills dir is a git repo; commits a **pre-update snapshot** (`PRE`).
@@ -97,39 +97,12 @@ Unedited skills update normally. Nothing is ever lost — `PRE` is always in git
 
 ## After the pull: follow renames & moves
 
-`safe-update.sh` handles the two axes a script can see — *clean-behind* (pulled) and *edited-stale* (your version restored, merge diff printed). It **cannot** follow a skill upstream renamed, moved between category folders, or rewrote under a new name: those surface as **ORPHAN** in `skills-status.sh`. Resolving them is model judgment — do it after the pull.
-
-Optional source scope: invoked as `/skills-safe-update <owner-or-source>` (e.g. `mattpocock`), restrict the ORPHAN sweep and re-adds to skills whose lock `source` matches, leaving other sources untouched.
-
-For each ORPHAN:
-
-1. **Rename, move, or gone?** List the upstream tree and look for the same skill under a new name or path:
-   ```bash
-   gh api repos/<owner>/<repo>/git/trees/<branch>?recursive=1 --jq '.tree[].path' | grep SKILL.md
-   ```
-   Compare against the orphan's lock `skillPath` (`~/.agents/.skill-lock.json`):
-   - **Same name, new folder** (e.g. `in-progress/x` → `engineering/x`) = **move**. Re-add it — `npx skills add <src> -g -s <name> -y` updates the lock `skillPath` in place. Done, no edit to judge.
-   - **New name, same job** (e.g. `to-issues` → `to-tickets`) = **rename**. Install the successor (`-s <new-name>`), then step 2. Remove the old one last.
-   - **Nowhere upstream** = genuinely **removed**. Keep it if you still use it (it's yours now — add it to `.protected-skills`); else `npx skills remove <name> -g -y`.
-
-2. **Judge the local edit (renames only).** If the orphan carried a local edit, diff it against the successor before replaying:
-   ```bash
-   diff <old>/SKILL.md <successor>/SKILL.md
-   ```
-   A rename is often a **rewrite that already covers your edit's intent** — then the edit is *subsumed*; don't replay it. Only graft it forward if the successor genuinely lacks it. When unsure, show the user the old edit + the successor and ask.
-
-3. **Remove the old skill** once the successor is in and any edit is settled: `npx skills remove <old> -g -y` drops the dir, lock entry, and `~/.claude` symlink together.
-
-Then reconcile symlinks and commit the git buffer:
-
-```bash
-bash ~/.agents/skills/skills-sync/skills-sync.sh --fix   # link new bodies, relink moved ones
-cd ~/.agents/skills && git add -A && git commit -m "update: follow renames/moves"
-```
-
-## Why auto-detect (not a pre-edit prompt)
-
-"Protect a skill when I edit it" is tempting to wire as a hook on Edit/Write, but it's unnecessary: a skill *is* edited exactly when its content diverges from the lock's recorded upstream hash. Detecting that at update time needs no list, no event hook, and can't be forgotten. Edit freely; protection is computed for you.
+`safe-update.sh` cannot follow a skill upstream renamed, moved between
+category folders, or rewrote under a new name — those surface as **ORPHAN**
+in `skills-status.sh`. See
+[reference/renames-and-moves.md](reference/renames-and-moves.md) for the
+resolution steps and the `/skills-safe-update <owner-or-source>` scoping
+form.
 
 ## Optional manual override
 
@@ -140,6 +113,6 @@ If you want to force-protect a skill the auto-detector can't see (e.g. a hand-ma
 - This skill is hand-maintained, not installed via `npx skills`, so it has no lockfile entry and the package manager leaves it alone.
 - The live lockfile lives outside the skills repo (npx writes it to the skills-dir parent). `safe-update.sh` mirrors it into the repo as a tracked `.skill-lock.json` at each snapshot — PRE the old lock, POST the new — so a run reconstructs fully from the git remote. The live file stays authoritative; the in-repo copy is backup only.
 - After a clean review, you're already committed — the git buffer stays current for next time.
-- Lockfile drift (entries for deleted skills, or skills you added by hand) is a separate one-time cleanup, not handled here: drop dead entries and add untracked ones in `~/.agents/.skill-lock.json`. `skills-status.sh` flags the **ORPHAN** case; [Follow renames & moves](#after-the-pull-follow-renames--moves) resolves it (rename/move/removal) instead of leaving it for hand-cleanup.
+- Lockfile drift (entries for deleted skills, or skills you added by hand) is a separate one-time cleanup, not handled here: drop dead entries and add untracked ones in `~/.agents/.skill-lock.json`. `skills-status.sh` flags the **ORPHAN** case; [reference/renames-and-moves.md](reference/renames-and-moves.md) resolves it (rename/move/removal) instead of leaving it for hand-cleanup.
 - Distinct from `skills-sync` — that skill only reconciles `~/.agents/skills` bodies ↔ `~/.claude/skills` symlinks. It knows nothing about upstream; it's the final symlink-repair step here, not the updater.
 - `skills-status.sh` needs `gh` (authenticated) + network to read upstream; offline it reports `upstream UNKNOWN` and only the edit axis is trustworthy.

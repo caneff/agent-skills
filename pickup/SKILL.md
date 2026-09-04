@@ -1,13 +1,13 @@
 ---
 name: pickup
-description: Pick up work from the most recent handoff document left in the OS temp dir. Use after a /clear or in a fresh session to resume where a /handoff left off.
+description: Pick up work from the most recent handoff document left in /tmp. Use after a /clear or in a fresh session to resume where a /handoff left off.
 argument-hint: "Optional: a word to match if several handoffs exist"
 disable-model-invocation: true
 ---
 
 Resume work from the most recent handoff document.
 
-1. Find it — newest handoff doc in the temp dir:
+1. Find it — newest handoff doc in `/tmp`:
 
    ```bash
    ls -t /tmp/*handoff*.md 2>/dev/null | head -1
