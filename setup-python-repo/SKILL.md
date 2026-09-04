@@ -153,14 +153,11 @@ Invoke `setup-matt-pocock-skills` (issue tracker / triage labels / domain docs).
 It runs **after** AGENTS.md exists (it writes its `## Agent skills` block there)
 and after the remote exists (it inspects `git remote` for the issue tracker).
 
-**Don't ask its three questions — my answers are always the same. Pass these and
-proceed non-interactively:**
+**Don't ask its three questions — my answers are always the same: this
+repo's own `AGENTS.md` (root) states them. Pass those and proceed
+non-interactively.**
 
-- **Issue tracker:** GitHub. **External PRs are NOT a triage surface.**
-- **Triage labels:** defaults (each role's string = its name).
-- **Domain docs:** single-context (`CONTEXT.md` + `docs/adr/` at root).
-
-Only stop to ask if the repo state contradicts these (e.g. no GitHub remote).
+Only stop to ask if the repo state contradicts them (e.g. no GitHub remote).
 
 **Done when:** `docs/agents/*` exist and AGENTS.md has an `## Agent skills` block.
 

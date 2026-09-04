@@ -1,15 +1,7 @@
 ---
 name: humanizer
 disable-model-invocation: true
-version: 2.8.0
 description: Remove signs of AI-generated writing from text so it reads as natural, human-written prose.
-allowed-tools:
-  - Read
-  - Write
-  - Edit
-  - Grep
-  - Glob
-  - AskUserQuestion
 ---
 
 # Humanizer: Remove AI Writing Patterns
@@ -87,7 +79,4 @@ Avoiding AI patterns is only half the job. Sterile, voiceless writing is just as
 
 **Deliver only the final rewrite plus a short audit** (a few bullets naming the patterns you fixed). The intermediate draft and a full change-by-change summary are internal working steps — share them only if asked.
 
-
-## Reference
-
-This skill is based on [Wikipedia:Signs of AI writing](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing), maintained by WikiProject AI Cleanup. The full pattern catalogue with before/after examples lives in `PATTERNS.md`.
+See `PATTERNS.md`'s Reference section for the source this skill is based on.

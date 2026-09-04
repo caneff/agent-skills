@@ -14,27 +14,8 @@ description: >-
 
 Do not guess where authoritative docs can answer the question. Web-search for
 the current official docs, open the relevant pages, and read them before
-coding.
-
-**Anthropic or Claude API questions go to the `claude-api` skill**, not this
-one — it already carries current model IDs, pricing, and API specifics.
-
-## Docs-First Triggers
-
-Read docs before proceeding when any of these are true:
-
-- **Version-sensitive install/upgrade.** Adding, upgrading, or configuring a
-  package, SDK, framework, plugin, or CLI. Check the current version first
-  (`npm view <pkg> version` or the ecosystem equivalent), then read the docs
-  for that version before writing imports, config, or install commands.
-- **Auth, billing, migration, or security-sensitive flow.** OAuth scopes,
-  permissions, secrets, webhooks, payments, PII, encryption, data retention,
-  database migrations, or compliance. Ground the implementation in what the
-  provider's or framework's docs actually say.
-- **Error suggesting API drift.** Deprecation warnings, unknown options,
-  missing exports, invalid config, unsupported fields, or a changed default.
-  Read the migration guide or changelog for the installed version before
-  patching around the symptom.
+coding. See the description above for the trigger conditions and the
+Anthropic/Claude API carve-out.
 
 ## What Counts As Docs
 

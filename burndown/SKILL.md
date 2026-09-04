@@ -61,20 +61,18 @@ alone and appends to the same file.
    fixes, the reviewer re-reviews. Review tasks run concurrently and do not
    count against the builder cap.
 6. **Land, one at a time**, in the order reviews come back clean, per
-   `implement`'s landing section. On **can't get clean**, park the ticket
+   `implement`'s [Finish](../implement/SKILL.md) section. On **can't get
+   clean**, park the ticket
    (below). A worker still mid-build on a stale base needs no warning: the PR
    reports the conflict against the pushed default branch, so a real
    collision surfaces there and parks the ticket. Either way the settled
    ticket's task is done — an Orca task ends with its worker, so there is no
    separate release step.
 7. Append to the progress file at
-   `~/.cache/burndown/<repo dir name>.progress` (never in the repo):
-   `burning #<n>` when claiming in step 4, then `#<n> landed <sha>` or
-   `#<n> parked: <why>` when the ticket settles, and `done` when the loop
-   stops. Several `burning` lines are open at once while a batch runs — that
-   is how the file expresses parallelism. The statusline renders this file
-   live; the line grammar is documented once, in
-   `flow/ccstatusline-table/helpers/burndown-segment.sh`.
+   `~/.cache/burndown/<repo dir name>.progress` (never in the repo) as the
+   loop claims, settles, and finishes tickets. The statusline renders this
+   file live; the line grammar is documented once, in
+   [`flow/ccstatusline-table/helpers/burndown-segment.sh`](../flow/ccstatusline-table/helpers/burndown-segment.sh).
 8. When a ticket settles, refill its slot: go to 1, skipping step 3. Re-list
    every pass — a landing can unblock tickets, and a human may have added
    more. At the ticket cap — landed plus parked — start no new tasks, let the

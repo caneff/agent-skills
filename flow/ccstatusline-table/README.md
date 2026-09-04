@@ -42,8 +42,8 @@ are vendored in `helpers/` (versioned here):
 - `helpers/effort-abbrev.py` — thinking-effort abbreviation
 - `helpers/usage-segment.sh` — weekly/session %, resets
 - `helpers/issue-counts-segment.sh` — repo issue counts
-- `helpers/burndown-segment.sh` — live burndown progress (see the
-  `burndown` skill for the progress-file grammar it renders)
+- `helpers/burndown-segment.sh` — live burndown progress; the progress-file
+  grammar it renders is documented in its own header comment
 
 Git branch/changes and context tokens are computed in-script.
 
