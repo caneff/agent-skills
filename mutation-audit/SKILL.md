@@ -123,7 +123,7 @@ in that setup.
    ```
    `parse_mutmut_results(text) -> list[dict]` is the tested seam
    (`fixtures/mutmut-results.txt` + `fixtures/answer-key.md` back it,
-   mirroring `dead-code/fixtures/`) — pure, no subprocess inside it, fed
+   mirroring `~/.agents/skills/dead-code/fixtures/`) — pure, no subprocess inside it, fed
    mutmut's captured text. It returns one row per mutant that isn't killed —
    a `survived` mutant as a `rewrite`, a `no tests` mutant as a `no-coverage`;
    killed mutants are counted into `killed_count` and dropped, they aren't
@@ -180,7 +180,7 @@ in that setup.
 
 ## Verify against the fixture
 
-`mutation-audit/fixtures/sample.py` + `test_sample.py` is a real mutmut run
+`~/.agents/skills/mutation-audit/fixtures/sample.py` + `test_sample.py` is a real mutmut run
 (not a hand-built guess), covering all three buckets: `is_adult` is tested at
 and around its boundary (both mutants die), `clamp` is only tested in-range
 (both boundary mutants `survived` → `rewrite`), and `scale` has no test at

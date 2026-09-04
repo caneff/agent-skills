@@ -9,7 +9,8 @@ description: >
   not apply fixes.
 ---
 
-ponytail-review, repo-wide. Scan the whole tree instead of a diff. Rank
+ponytail-review, repo-wide. Scan the whole tree instead of a diff — scope
+defaults per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Rank
 findings biggest cut first. Skip vendored, generated, and dependency trees
 (`node_modules`, `dist`, `.venv`, `vendor`, build output, lockfiles) and any
 `.git/` or `worktrees/` tree — audit only the project's own tracked source.

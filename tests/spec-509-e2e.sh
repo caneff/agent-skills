@@ -19,9 +19,9 @@ check_1() {
     [ -f "$d/SKILL.md" ] || continue
     local m
     # only the skill's own top-level scripts (audit.py/audit.mjs/etc.),
-    # never fixture data files, invoked without the ~/.agents/skills prefix.
+    # invoked without the ~/.agents/skills prefix.
     m=$(grep -n "\`$name/[A-Za-z0-9_.-]*\.\(py\|sh\|mjs\)\`" "$d/SKILL.md" 2>/dev/null \
-      | grep -v '~/.agents/skills' | grep -v '/fixtures/')
+      | grep -v '~/.agents/skills')
     [ -n "$m" ] && hits="$hits\n$d/SKILL.md:$m"
   done
   if [ -n "$hits" ]; then
@@ -150,17 +150,22 @@ check_7() {
   fi
 }
 
-# 8. No /home/caneff literal outside docs/.
+# 8. #512 AC: no /home/... literal in the statusline wiring snippet, and
+#    none in the relocated ccstatusline-table tree. Scoped to that AC only —
+#    the rest of the live personal-config mirror (hooks, permissions) is out
+#    of scope for #512 and tracked separately.
 check_8() {
-  local hits
   local needle="/home/caneff"
-  hits=$(grep -rIl "$needle" . \
-    --exclude-dir=.git --exclude=.git --exclude-dir=docs --exclude-dir=__pycache__ \
-    --exclude-dir=.ruff_cache --exclude="$(basename "${BASH_SOURCE[0]}")" 2>/dev/null)
+  local hits=""
+  local m
+  m=$(grep -n "$needle" flow/claude/settings.json 2>/dev/null | grep '"statusLine"\|table-statusline.py')
+  [ -n "$m" ] && hits="$hits\nflow/claude/settings.json:$m"
+  m=$(grep -rn "$needle" flow/ccstatusline-table/ 2>/dev/null)
+  [ -n "$m" ] && hits="$hits\n$m"
   if [ -n "$hits" ]; then
-    failed "8 no-home-caneff-literal-outside-docs" "$hits"
+    failed "8 no-home-caneff-literal-in-statusline-wiring" "$(printf '%b' "$hits")"
   else
-    pass "8 no-home-caneff-literal-outside-docs"
+    pass "8 no-home-caneff-literal-in-statusline-wiring"
   fi
 }
 

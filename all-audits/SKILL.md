@@ -25,7 +25,8 @@ origin's default branch — never an assumed `main`.
 
 ## The set — twelve skills
 
-Each audits the whole repo and renders a visual-teach HTML report:
+Each audits the whole repo and writes a `findings.jsonl` + grouped-summary
+`report.html` pair (see `harness/findings-schema.md`):
 
 - `ponytail-audit` — over-engineering: what to delete, shrink, or replace with stdlib.
 - `test-audit` — tests that prove nothing or check the wrong thing.
@@ -42,7 +43,10 @@ Each audits the whole repo and renders a visual-teach HTML report:
 
 `skill-audit` is **not** in the set — it scans the global skills directory, not
 this repo. `mutation-audit` is **not** in the set either — it is opt-in and
-targeted at one module (never a whole-repo sweep); invoke it by name.
+targeted at one module (never a whole-repo sweep); invoke it by name, or run
+`run-audits.sh --mutation a.py,b.py` for the scripted per-module form.
+
+## Opt-in edits
 
 **Every audit skill in the set reports by default.** Applying edits is opt-in —
 the user asks by name — and lands as a reviewable PR on its own branch, never a

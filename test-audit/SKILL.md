@@ -222,9 +222,8 @@ just no longer this test's problem.
 ## Run
 
 1. **Start clean, scope.** Confirm a clean working tree first (`git status`).
-   Then scope: audit `$ARGUMENTS` if given; with no argument, default to the
-   whole repo — see `all-audits/SKILL.md`'s Scope section for the shared
-   default-scope rule. Either way, skip vendored, generated, and dependency
+   Then scope: audit `$ARGUMENTS` if given; with no argument, scope defaults
+   per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Either way, skip vendored, generated, and dependency
    trees (`node_modules`, `dist`, `.venv`, build output, lockfiles) and any
    `worktrees/` tree — a git worktree mirrors the whole repo, so scanning it
    multiplies every finding once per worktree — and leave load-bearing
@@ -287,8 +286,8 @@ opening, and handing off the path all live there.
 
 ## Applying the changes (opt-in)
 
-Only when the user asks to apply — see `all-audits/SKILL.md`'s "Every audit
-skill in the set reports by default" line for the shared opt-in contract
+Only when the user asks to apply — see `~/.agents/skills/all-audits/SKILL.md`'s
+"Opt-in edits" section for the shared opt-in contract
 (reviewable PR on its own branch, never a direct commit). Start from a clean
 working tree.
 

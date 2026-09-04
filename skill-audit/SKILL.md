@@ -46,12 +46,15 @@ NEVER as "not lately", not "not ever").
 
 Don't blanket-flip. Per candidate, ask: *would I want the model to auto-fire this?*
 - **No — I'll call it by hand** (setup/convert/niche skills): pick its number.
-- **Yes — broadly useful, just hasn't come up** (`uv`, `diagnosing-bugs`,
+- **Yes — broadly useful, just hasn't come up** (`diagnosing-bugs`,
   `resolving-merge-conflicts`, `read-the-damn-docs`): leave it. Unused ≠ useless.
 
-Also leave anything the model *chains* — a skill another skill invokes by name
-(`tdd`/`code-review` under `/implement`, `grilling`/`research` under `/wayfinder`,
-`wait-what` under `/ww`). `disable-model-invocation: true` blocks that call, so
-flipping a chained skill breaks its caller even if the skill itself looks unused.
+Also leave anything the model *chains* — a skill another skill invokes by
+name. Check the candidate's name against every other skill's body, not just
+its own frontmatter: `implement`, `wayfinder`, and `ww` are the current
+callers, but the roster changes as skills change, so grep for the name
+rather than trusting a fixed list. `disable-model-invocation: true` blocks
+that call, so flipping a chained skill breaks its caller even if the skill
+itself looks unused.
 
 Flipping = add one frontmatter line; no symlink or reinstall change needed.

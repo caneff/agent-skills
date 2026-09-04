@@ -39,8 +39,9 @@ the same number on every row, not per-symbol.
 
 ## Run
 
-1. **Scope tight.** Audit `$ARGUMENTS` if given, else the current working
-   directory. Target the package's public modules — skip tests,
+1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, scope
+   defaults per `~/.agents/skills/all-audits/SKILL.md`'s Scope section.
+   Target the package's public modules — skip tests,
    vendored/generated/dependency trees (`node_modules`, `dist`, `.venv`,
    `vendor`, build output, lockfiles), and any `.git/` or `worktrees/` tree.
 
@@ -62,8 +63,8 @@ the same number on every row, not per-symbol.
    out of scope here.
 
    `audit.py`'s `parse_coverage(ruff_json, interrogate_text) -> list[dict]`
-   is the tested seam (`docstring-coverage/fixtures/` + `answer-key.md` back
-   it, mirroring `dead-code/fixtures/`) — pure, no subprocess inside it, fed
+   is the tested seam (`~/.agents/skills/docstring-coverage/fixtures/` + `answer-key.md` back
+   it, mirroring `~/.agents/skills/dead-code/fixtures/`) — pure, no subprocess inside it, fed
    ruff's captured JSON and interrogate's captured text. `main()` wraps it:
    reads the two file paths as argv, prints one JSON row per ruff D1xx hit.
    This is a candidate list, not a verdict — every row still needs the
@@ -101,11 +102,11 @@ the same number on every row, not per-symbol.
 
 ## Verify against the fixture
 
-`docstring-coverage/fixtures/sample.py` carries one undocumented public
+`~/.agents/skills/docstring-coverage/fixtures/sample.py` carries one undocumented public
 function (`undocumented_public`, no docstring — ruff D103 flags it), one
 documented public function (`documented_public` — not flagged), and one
 private function (`_helper`, no docstring but not public — not flagged by
-D1xx). `docstring-coverage/fixtures/answer-key.md` has the captured ruff +
+D1xx). `~/.agents/skills/docstring-coverage/fixtures/answer-key.md` has the captured ruff +
 interrogate output and the expected finding. Running this skill over
-`docstring-coverage/fixtures/` should reproduce that table: one row,
+`~/.agents/skills/docstring-coverage/fixtures/` should reproduce that table: one row,
 `undocumented_public` at line 9, `bucket: document`, `extra.coverage: 50.0`.

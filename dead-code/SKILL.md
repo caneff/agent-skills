@@ -47,10 +47,10 @@ still `dynamic`, not `unsure`, once the entrypoint evidence is concrete.
 
 ## Run
 
-1. **Scope tight.** Audit `$ARGUMENTS` if given, else the current working
-   directory. Skip vendored, generated, and dependency trees (`node_modules`,
-   `dist`, `.venv`, `vendor`, build output, lockfiles) and any `.git/` or
-   `worktrees/` tree.
+1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, scope
+   defaults per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Skip
+   vendored, generated, and dependency trees (`node_modules`, `dist`, `.venv`,
+   `vendor`, build output, lockfiles) and any `.git/` or `worktrees/` tree.
 
 2. **Pass one — run vulture, parse it.**
    ```sh
@@ -60,8 +60,8 @@ still `dynamic`, not `unsure`, once the entrypoint evidence is concrete.
    python3 ~/.agents/skills/dead-code/audit.py /tmp/vulture-out.txt
    ```
    `audit.py`'s `parse_vulture(text) -> list[dict]` is the tested seam
-   (`dead-code/fixtures/` + `answer-key.md` back it, mirroring
-   `test-audit/fixtures/`) — pure, no subprocess inside it, fed vulture's
+   (`~/.agents/skills/dead-code/fixtures/` + `answer-key.md` back it, mirroring
+   `~/.agents/skills/test-audit/fixtures/`) — pure, no subprocess inside it, fed vulture's
    captured text. `main()` wraps it: reads a file argument or stdin, prints
    one JSON row per hit. This is a candidate list, not a verdict — every row
    still needs the judgment pass.
@@ -96,9 +96,9 @@ still `dynamic`, not `unsure`, once the entrypoint evidence is concrete.
 
 ## Verify against the fixture
 
-`dead-code/fixtures/sample.py` carries four dead symbols (an unused import,
+`~/.agents/skills/dead-code/fixtures/sample.py` carries four dead symbols (an unused import,
 an uncalled function, an uncalled class, and its uncalled method) and two
 dynamically-reached ones (a `main()` entrypoint, a `@pytest.fixture`).
-`dead-code/fixtures/answer-key.md` has the captured vulture output and the
-expected bucket for each. Running this skill over `dead-code/fixtures/`
+`~/.agents/skills/dead-code/fixtures/answer-key.md` has the captured vulture output and the
+expected bucket for each. Running this skill over `~/.agents/skills/dead-code/fixtures/`
 should reproduce that table.

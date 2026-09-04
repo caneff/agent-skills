@@ -12,8 +12,10 @@
 #   run-audits.sh [REPO]                 fresh sweep of all twelve audits (default)
 #   run-audits.sh [REPO] --out DIR       write into DIR, accumulating (no wipe)
 #   run-audits.sh [REPO] --only a,b      run just these audits (into the run dir)
+#   run-audits.sh [REPO] --short         run only the three structural audits
 #   run-audits.sh [REPO] --index --out DIR   rebuild index only, over DIR's reports
 #   run-audits.sh [REPO] --force         bypass the staleness cache, run everything
+#   run-audits.sh [REPO] --all           alias for --force
 #   run-audits.sh --mutation a.py,b.py   run mutation-audit on each module, one
 #                                         fresh git worktree at a time
 #
@@ -35,8 +37,10 @@ report_path_from_log() {
 
 # audit_prompt NAME REPO — the prompt handed to `claude -p`: the slash
 # invocation plus a whole-repo override so diff-oriented audits scan the
-# entire tree, not a git diff (#397). Mirrors the fan-out sentence in
-# SKILL.md so the bash sweep and the agent-fan-out sweep agree on scope.
+# entire tree, not a git diff (#397). This is the runtime enforcement of the
+# scope rule that SKILL.md's Scope section states once, in prose — not a
+# second copy of the rule, just where a `claude -p` process (which never
+# reads SKILL.md) gets told the same thing.
 # Takes repo as $2 (not the global $REPO) so it's callable from a sourced
 # test where $REPO is unset.
 audit_prompt() {

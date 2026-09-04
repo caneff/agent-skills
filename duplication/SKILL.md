@@ -38,10 +38,10 @@ carries jscpd's token count for a `token-clone` row; omit `extra` for
 
 ## Run
 
-1. **Scope tight.** Audit `$ARGUMENTS` if given, else the current working
-   directory. Skip vendored, generated, and dependency trees (`node_modules`,
-   `dist`, `.venv`, `vendor`, build output, lockfiles) and any `.git/` or
-   `worktrees/` tree.
+1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, scope
+   defaults per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Skip
+   vendored, generated, and dependency trees (`node_modules`, `dist`, `.venv`,
+   `vendor`, build output, lockfiles) and any `.git/` or `worktrees/` tree.
 
 2. **Pass one — run jscpd, parse it.**
    ```sh
@@ -57,12 +57,13 @@ carries jscpd's token count for a `token-clone` row; omit `extra` for
 
    **No node/npx.** jscpd needs `npx`. When it isn't on `PATH`, skip this
    pass instead of failing the whole audit: report pass one as `NOT-RUN` in
-   the summary's verdict line and fall straight to pass two's semantic
-   sweep — a token-clone miss is better than no report at all.
+   the report's `vt-lede` verdict (see `findings-schema.md`) and fall
+   straight to pass two's semantic sweep — a token-clone miss is better than
+   no report at all.
 
    `audit.py`'s `parse_jscpd(json_str) -> list[dict]` is the tested seam
-   (`duplication/fixtures/` + `answer-key.md` back it, mirroring
-   `dead-code/fixtures/`) — pure, no subprocess inside it, fed jscpd's
+   (`~/.agents/skills/duplication/fixtures/` + `answer-key.md` back it, mirroring
+   `~/.agents/skills/dead-code/fixtures/`) — pure, no subprocess inside it, fed jscpd's
    captured JSON text. `main()` wraps it: reads a file argument or stdin,
    prints one JSON row per duplicate pair. This is a candidate list, not a
    verdict — every row still needs the judgment pass.
@@ -112,12 +113,12 @@ carries jscpd's token count for a `token-clone` row; omit `extra` for
 
 ## Verify against the fixture
 
-`duplication/fixtures/sample_a.py` and `sample_b.py` carry one copy-pasted
+`~/.agents/skills/duplication/fixtures/sample_a.py` and `sample_b.py` carry one copy-pasted
 validation block (`validate_order` / `validate_shipment`, byte-identical)
 and one semantic duplicate (`user_age_years` / `user_age_in_years` — same
 `birth_date` field decoded into an age two different ways: plain year
-subtraction vs. `dateutil.relativedelta`). `duplication/fixtures/answer-key.md`
+subtraction vs. `dateutil.relativedelta`). `~/.agents/skills/duplication/fixtures/answer-key.md`
 has the captured jscpd JSON and the expected row for each. Running this
-skill over `duplication/fixtures/` should reproduce that table: pass one
+skill over `~/.agents/skills/duplication/fixtures/` should reproduce that table: pass one
 catches the validation clone as `token-clone`, pass two's semantic sweep
 catches the age-decode pair as `semantic-duplicate`.

@@ -91,9 +91,8 @@ specific, sourced term.
 
 ## Run
 
-1. **Scope.** Audit `$ARGUMENTS` if given; with no argument, default to the
-   whole repo — see `all-audits/SKILL.md`'s Scope section for the shared
-   default-scope rule. Skip vendored, generated, and dependency trees
+1. **Scope.** Audit `$ARGUMENTS` if given; with no argument, scope defaults
+   per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Skip vendored, generated, and dependency trees
    (`node_modules`, `dist`, `.venv`, build output, lockfiles) and any
    `worktrees/` tree.
 

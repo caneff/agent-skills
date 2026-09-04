@@ -41,10 +41,10 @@ lists every code that fired, so pass two sees the full mechanical picture.
 
 ## Run
 
-1. **Scope tight.** Audit `$ARGUMENTS` if given, else the current working
-   directory. Skip vendored, generated, and dependency trees (`node_modules`,
-   `dist`, `.venv`, `vendor`, build output, lockfiles) and any `.git/` or
-   `worktrees/` tree.
+1. **Scope tight.** Audit `$ARGUMENTS` if given; with no argument, scope
+   defaults per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Skip
+   vendored, generated, and dependency trees (`node_modules`, `dist`, `.venv`,
+   `vendor`, build output, lockfiles) and any `.git/` or `worktrees/` tree.
 
 2. **Pass one — run ruff and bandit over the SAME absolute scope, parse
    them.**
@@ -62,8 +62,8 @@ lists every code that fired, so pass two sees the full mechanical picture.
    from the two tools won't merge into one row.
 
    `audit.py`'s `parse_findings(ruff_json, bandit_json) -> list[dict]` is the
-   tested seam (`error-handling/fixtures/` + `answer-key.md` back it,
-   mirroring `dead-code/fixtures/`) — pure, no subprocess inside it, fed both
+   tested seam (`~/.agents/skills/error-handling/fixtures/` + `answer-key.md` back it,
+   mirroring `~/.agents/skills/dead-code/fixtures/`) — pure, no subprocess inside it, fed both
    tools' captured JSON text. `main()` wraps it: reads the two file paths as
    argv, prints one JSON row per merged hit. This is a candidate list, not a
    verdict — every row still needs the judgment pass.
@@ -100,7 +100,7 @@ lists every code that fired, so pass two sees the full mechanical picture.
 
 ## Verify against the fixture
 
-`error-handling/fixtures/answer-key.md` is the fixture's spec — the captured
+`~/.agents/skills/error-handling/fixtures/answer-key.md` is the fixture's spec — the captured
 ruff + bandit output, the parser's mechanical rows, and the pass-two verdict
-for each. Running this skill over `error-handling/fixtures/` must reproduce
+for each. Running this skill over `~/.agents/skills/error-handling/fixtures/` must reproduce
 it exactly.
