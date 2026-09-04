@@ -17,10 +17,11 @@ Run `git remote -v`, `ls`, and read any `pyproject.toml`.
 
 - **Empty / greenfield** → follow the steps below.
 - **Existing project** (has `pyproject.toml`, source, or history) → **read
-  [`convert.md`](convert.md) and follow it instead**, then rejoin at step 7.
-  Convert is non-clobbering; the steps below assume a clean slate.
+  [`convert.md`](convert.md) and follow it instead**, then rejoin at step 8
+  (Verify). Convert is non-clobbering; the steps below assume a clean slate.
 
-**Done when:** you've classified the repo and, if converting, loaded `convert.md`.
+**Done when:** you've classified the repo and, if converting, loaded
+`convert.md` (which itself rejoins here at step 8).
 
 ## 1. Init + structure
 
