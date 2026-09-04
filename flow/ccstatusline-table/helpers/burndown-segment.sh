@@ -7,12 +7,14 @@
 # Line grammar for the progress file (the single documented home — burndown/SKILL.md
 # points here instead of restating it):
 #   burning #<n>          claimed, build in flight
+#   #<n> pr <ref>         PR open, awaiting a human merge
 #   #<n> landed <sha>     ticket landed on main
 #   #<n> parked: <why>    ticket handed to a human
 #   done                  the loop stopped
 # A burn builds several tickets at once, so several `burning` lines are open
-# at the same time. In flight = every `burning #n` with no later `#n landed`
-# or `#n parked` line.
+# at the same time. A ticket's state is its last line: later lines supersede
+# earlier ones, so `pr` then `landed` is one ticket that ended up merged.
+# Where a human owns the merge, `pr` is where a ticket stops.
 render() {
   local f=$1
   [ -f "$f" ] || return 0
@@ -20,15 +22,17 @@ render() {
   [ -n "$(find "$f" -mmin -720 2>/dev/null)" ] || return 0
   [ "$(tail -n 1 "$f")" = done ] && return 0
   awk '
-    $1 == "burning"  { flight[$2] = 1; next }
-    $2 == "landed"   { delete flight[$1]; landed++; next }
-    $2 == "parked:"  { delete flight[$1]; parked++; next }
+    $1 == "burning"  { st[$2] = "build";  next }
+    $2 == "pr"       { st[$1] = "pr";     next }
+    $2 == "landed"   { st[$1] = "landed"; next }
+    $2 == "parked:"  { st[$1] = "parked"; next }
     END {
-      for (k in flight) building++
+      for (k in st) n[st[k]]++
       out = "🔥 "
-      if (building) out = out building "🔨 · "
-      out = out landed + 0 "✓"
-      if (parked) out = out " " parked "⚠"
+      if (n["build"]) out = out n["build"] "🔨 · "
+      if (n["pr"])    out = out n["pr"] "⏳ · "
+      out = out n["landed"] + 0 "✓"
+      if (n["parked"]) out = out " " n["parked"] "⚠"
       printf "%s", out
     }
   ' "$f"
@@ -58,6 +62,18 @@ burning #2
 #1 parked: needs a human
 burning #2
 #2 landed abc1234'
+  check "a pr awaits a human" '🔥 1⏳ · 0✓' 'burning #1
+#1 pr 331'
+  check "pr then landed counts once" '🔥 1✓' 'burning #1
+#1 pr 331
+#1 landed abc1234'
+  check "one building, one at pr, one landed" '🔥 1🔨 · 1⏳ · 1✓' 'burning #1
+burning #2
+burning #3
+#2 pr 331
+#3 landed abc1234'
+  check "prose is not a state change" '🔥 1🔨 · 0✓' 'burning #1
+#1 review CANNOT GET CLEAN, 6 findings'
   check "done renders nothing" '' 'burning #1
 #1 landed abc1234
 done'
