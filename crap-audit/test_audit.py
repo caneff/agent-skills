@@ -42,32 +42,12 @@ def _parse_answer_key(path):
     return rows
 
 
-def test_reproduces_answer_key_exactly():
-    """AC1: running the script over the fixture JSON reproduces the answer key."""
-    radon_json, coverage_json = _load_fixture()
-    rows = audit.normalize(radon_json, coverage_json)
-    result = audit.score(rows)
-
-    by_name = {r["name"]: r for r in result["ranking"]}
-    assert round(by_name["inner"]["crap"], 3) == 32.244, by_name["inner"]
-    assert by_name["uncovered_fn"]["crap"] == 20.0, by_name["uncovered_fn"]
-    assert by_name["entirely_uncovered"]["crap"] == 12.0, by_name["entirely_uncovered"]
-    assert by_name["outer"]["crap"] == 1.0, by_name["outer"]
-    assert by_name["branchless_fn"]["crap"] == 1.0, by_name["branchless_fn"]
-
-    ranked_names = [r["name"] for r in result["ranking"]]
-    assert ranked_names == [
-        "inner",
-        "uncovered_fn",
-        "entirely_uncovered",
-        "outer",
-        "branchless_fn",
-    ], ranked_names
-
-
 def test_matches_answer_key_md_table():
-    """Binds the assertions to fixtures/sample_project/answer-key.md itself (parsed, not
-    retyped) so the doc and the code can't silently drift apart."""
+    """AC1: running the script over the fixture JSON reproduces the answer
+    key, parsed live from fixtures/sample_project/answer-key.md (not
+    retyped) so the doc and the code can't silently drift apart. The table's
+    row order is also the doc's ranking order, so this doubles as the
+    ranking-order assertion."""
     radon_json, coverage_json = _load_fixture()
     rows = audit.normalize(radon_json, coverage_json)
     result = audit.score(rows)
@@ -76,6 +56,10 @@ def test_matches_answer_key_md_table():
 
     key = _parse_answer_key(os.path.join(FIXTURES, "answer-key.md"))
     assert key, "answer-key.md table did not parse to any rows"
+
+    ranked_names = [r["name"] for r in result["ranking"]]
+    assert ranked_names == list(key), ranked_names
+
     for name, (crap, bucket) in key.items():
         assert round(by_name[name]["crap"], 3) == crap, name
         if bucket == "under-floor":
@@ -205,6 +189,15 @@ def test_normalize_does_not_raise_when_unmatched_file_shares_no_basename():
     assert any(r["file"] == "untested.py" for r in rows)
 
 
+def _assert_findings_schema(findings):
+    """The six required findings-schema fields, non-empty, on every row —
+    the one home both the Python-path and TS-path tests assert against."""
+    for finding in findings:
+        for field in ("bucket", "file", "line", "category", "summary", "failure"):
+            assert field in finding and finding[field], finding
+        assert finding["bucket"] in ("critical", "hotspot")
+
+
 def test_findings_validate_against_findings_schema():
     """AC3: findings rows carry every required findings-schema field."""
     radon_json, coverage_json = _load_fixture()
@@ -212,10 +205,8 @@ def test_findings_validate_against_findings_schema():
     result = audit.score(rows)
 
     assert len(result["findings"]) == 2
+    _assert_findings_schema(result["findings"])
     for finding in result["findings"]:
-        for field in ("bucket", "file", "line", "category", "summary", "failure"):
-            assert field in finding and finding[field], finding
-        assert finding["bucket"] in ("critical", "hotspot")
         assert isinstance(finding["line"], int)
         assert "extra" in finding and isinstance(finding["extra"], dict)
 
@@ -470,28 +461,31 @@ def test_ts_findings_validate_against_findings_schema():
     result = audit.score(rows)
 
     assert len(result["findings"]) == 2
-    for finding in result["findings"]:
-        for field in ("bucket", "file", "line", "category", "summary", "failure"):
-            assert field in finding and finding[field], finding
-        assert finding["bucket"] in ("critical", "hotspot")
+    _assert_findings_schema(result["findings"])
+
+
+def _assert_axis_nulled(row, measured_axis, measured_value):
+    """The one home for the synthetic-axis-nulling assertion: whichever axis
+    normalize_ts actually measured keeps its value, the other reads None —
+    never the synthetic 100.0 filler `score()`'s min() ignores. Shared by
+    the findings-extra and ranking-row variants of the same check."""
+    axes = {"statement_coverage", "branch_coverage"}
+    assert row[measured_axis] == measured_value
+    unmeasured = (axes - {measured_axis}).pop()
+    assert row[unmeasured] is None
 
 
 def test_ts_findings_never_report_the_synthetic_unmeasured_axis():
     """P1 fix: normalize_ts fills the non-dominant axis with a synthetic
     100.0 so score()'s min() ignores it -- that number must never leak into
-    a finding's extra as if it were measured. The unmeasured axis is null."""
+    a finding's extra as if it were measured."""
     report = _load_ts_fixture()
     rows = audit.normalize_ts(report)
     result = audit.score(rows)
     by_name = {f["file"] + ":" + str(f["line"]): f for f in result["findings"]}
 
-    inner = by_name["src/sample.ts:2"]  # measured branch (cov=20)
-    assert inner["extra"]["branch_coverage"] == 20.0
-    assert inner["extra"]["statement_coverage"] is None
-
-    uncovered = by_name["src/sample.ts:23"]  # measured stmt (cov=0)
-    assert uncovered["extra"]["statement_coverage"] == 0.0
-    assert uncovered["extra"]["branch_coverage"] is None
+    _assert_axis_nulled(by_name["src/sample.ts:2"]["extra"], "branch_coverage", 20.0)
+    _assert_axis_nulled(by_name["src/sample.ts:23"]["extra"], "statement_coverage", 0.0)
 
 
 def test_ts_ranking_never_reports_the_synthetic_unmeasured_axis():
@@ -504,13 +498,8 @@ def test_ts_ranking_never_reports_the_synthetic_unmeasured_axis():
     result = audit.score(rows)
     by_name = {r["name"]: r for r in result["ranking"]}
 
-    inner = by_name["inner"]  # measured branch (cov=20)
-    assert inner["branch_coverage"] == 20.0
-    assert inner["statement_coverage"] is None
-
-    uncovered = by_name["uncoveredFn"]  # measured stmt (cov=0)
-    assert uncovered["statement_coverage"] == 0.0
-    assert uncovered["branch_coverage"] is None
+    _assert_axis_nulled(by_name["inner"], "branch_coverage", 20.0)
+    _assert_axis_nulled(by_name["uncoveredFn"], "statement_coverage", 0.0)
 
 
 def test_cli_main_ts_mode_prints_whole_score_result():
