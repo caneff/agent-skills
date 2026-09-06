@@ -9,9 +9,9 @@ Run the whole audit set over one repo in a single sweep. Thirteen audit skills f
 out in parallel, each as its own process; each writes a self-contained report;
 the reports collect under one folder behind an `index.html` that links them. The
 sweep **reports only** — it applies nothing and
-opens no PR. When it finishes it stops and hands you the index, so you decide
-whether to grill — and if you do, the grill walks every report in the fixed
-order.
+opens no PR. When it finishes it stops and hands you the index; grilling is a
+separate, opt-in step — ask for it and the grill walks every report in the
+fixed order, then lands the whole run as one spec.
 
 ## Scope
 
@@ -113,5 +113,6 @@ When you are invoked in-session as `/all-audits [path]`:
 ## After the sweep
 
 The sweep reports only and never grills on its own. For the grill's walk of
-every report — order, per-report grilling, and the auto-carry rule — see
+every report — order, per-report grilling, the auto-carry rule, and how the
+run lands as one spec with its rejections written to `.audit-ignore.md` — see
 [`harness/GRILLING.md`](harness/GRILLING.md).

@@ -1,8 +1,8 @@
 # Post-sweep grilling workflow
 
-`all-audits/SKILL.md` points here after it reports the index and stops. This
-is the grill's own walk of every report the sweep produced — the user never
-names one for it to start.
+`all-audits/SKILL.md` points here for the grill. This is the grill's own walk
+of every report the sweep produced — the user never names one for it to
+start.
 
 ## Grilling a report
 
@@ -51,31 +51,46 @@ it to the user as a question — surface it as carried forward: "already decided
 it re-opened instead)." Grill only the fresh, non-matching findings from
 scratch.
 
-A grill ends at **decisions**. Do not chain into `/to-spec`, `/to-tickets`, or any
-build step — handing a decision off to the build pipeline is a separate call the
-user makes when ready. Grilling changes no code and opens no PR — the sweep and
-its grill are report-and-decide only; applying anything is a separate, opt-in
-step outside this workflow.
+Grilling changes no code and opens no PR — the sweep and its grill are
+report-and-decide-and-file only; applying any finding's fix is a separate,
+opt-in step outside this workflow.
 
-## Turn the decisions into a map
+## Land one spec for the whole sweep
 
-The sweep's decisions land on the tracker as **one `wayfinder:map` issue for the
-run**, with each audit's decisions a cluster of decision tickets under it. The map
-is an index, not a store: each decision lives in its own child ticket; the map
-gists and links. The map is self-contained and ephemeral — once `/to-spec` and
-`/to-tickets` slice the ACT items into build tickets, its job is done. Do **not**
-point the map or its tickets at the HTML reports; the context and decisions live
-in the map and tickets, and the reports are throwaway scaffolding.
+Once every report in the run is grilled, land the sweep's decisions as **one
+spec, sliced into tickets** — never one spec per audit, and never a map.
+Per-audit structure survives as a section per audit inside that one spec, so a
+later audit's amendment or overrule of an earlier one stays readable in the
+same document.
 
-At the end of each audit's grill, produce the filing command — never run it, the
-map pipeline is the user's to drive:
+1. **Draft the spec.** Follow `/to-spec`'s template and process, but skip its
+   interview — every decision needed is already settled from grilling. Each
+   ACT item becomes a user story and an implementation decision, grouped under
+   its audit's section; a DROP is not included in the spec (see below for
+   where it goes). Note any `ADR-NNNN` a decision revisits.
+2. **One confirmation, then file.** Show the user the drafted spec and the
+   list of proposed ticket titles `/to-tickets` would slice it into. Wait for
+   one approval. This is the only point in the whole sweep where the agent
+   writes something the user would otherwise have to delete by hand — a
+   thirteen-audit sweep can propose twenty-plus tickets in one go, so ask
+   once, before any of it exists on the tracker.
+3. **Nothing is written until that approval lands.** If the user asks for
+   changes, redraft and show again — still nothing is filed. If the user
+   declines outright, stop; the decisions stay in this session only.
+4. **On approval, publish.** Run `/to-spec` to publish the spec issue —
+   labelled `spec`, never `ready-for-agent`, so nothing starts building it
+   unsliced — then `/to-tickets` to slice it into the approved tickets.
 
-- **First audit grilled** — write the brief to a file in the run's collection dir
-  (destination, then the settled decisions), and emit **`/wayfinder read @<file>`**
-  for the user to run — a file reference, not a wall of inline text. Seed the brief
-  so wayfinder records the decisions rather than re-grilling: mark each ACT item as
-  build-bound, each DROP as a recorded rejection (so a later audit does not
-  resurface it), and flag any `ADR-NNNN` a decision revisits.
-- **Later audits** — the map already exists. Emit the instruction to add each new
-  decision as a **child ticket under that map** (`#NNN`), not a fresh `/wayfinder`
-  — a second `/wayfinder` starts a second map.
+## Write down every rejection
+
+At the same point — after approval, alongside filing the spec — append every
+DROP decision from the whole sweep to the audited repo's `.audit-ignore.md`,
+one entry per rejection, in the format `harness/IGNORE-FILE.md` defines
+(finding, reason, date, audit). This runs whether or not any ACT item existed;
+a sweep that only rejected findings still writes its rejections down.
+
+A DROP that is a standing architectural decision — not just "not now" but "not
+ever, and here's why" — also gets an ADR written in the audited repo (its
+existing `docs/adr/` convention), and that ignore entry's `adr:` field links to
+it. Most rejections are too small for this; reserve it for the ones worth
+prose on their own.
