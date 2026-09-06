@@ -5,14 +5,36 @@ behavior broke; audit.py's parser module no longer imports contextlib, io,
 shutil, or tempfile — those live only here now.
 """
 import contextlib
+import importlib.util
 import io
 import json
 import os
-import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(__file__))
-import audit  # noqa: E402
+
+def _load_audit():
+    """Load audit.py by path under a name unique to this package, not a
+    bare `import audit` — a second cases module doing the same bare import
+    would silently reuse whichever `audit` won `sys.modules` first (#556
+    plans more migrations onto this same runner)."""
+    path = os.path.join(os.path.dirname(__file__), "audit.py")
+    spec = importlib.util.spec_from_file_location("mutation_audit__audit", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+audit = _load_audit()
+
+
+def check_audit_module_is_not_globally_shared():
+    """Regression witness for the sys.modules collision this file's loader
+    fix prevents: a bare `import audit` would leave "audit" in sys.modules
+    for the next cases module to wrongly reuse."""
+    import sys
+
+    assert "audit" not in sys.modules
+    assert audit.__name__ == "mutation_audit__audit"
 
 
 def check_parsing():
