@@ -84,6 +84,32 @@ echo "$got" | grep -qi 'not a git diff' || fail "audit_prompt: missing not-a-dif
 
 echo "ok (audit_prompt)"
 
+# --- audit_prompt ignore-file injection (#525): a repo with no ignore file
+# gets today's prompt unchanged; a repo with one gets its entries appended
+# alongside (not instead of) the whole-repo override. Reuses $tmp (already
+# cleaned up by the EXIT trap set above) in its own subdirectory. ---
+itmp="$tmp/ignore-file-repo"
+mkdir -p "$itmp"
+
+no_file="$(audit_prompt dead-code "$itmp")"
+echo "$no_file" | grep -qi 'ENTIRE repository' || fail "audit_prompt: no-ignore-file case lost the whole-repo override"
+echo "$no_file" | grep -q 'rejected' && fail "audit_prompt: no-ignore-file case must not mention rejected findings"
+
+cat >"$itmp/.audit-ignore.md" <<'EOF'
+### god object in solver.py
+- reason: intentional single-file oracle, see ADR
+- date: 2026-01-15
+- audit: dead-code
+- adr: docs/adr/0009-solver-shape.md
+EOF
+
+with_file="$(audit_prompt dead-code "$itmp")"
+echo "$with_file" | grep -qi 'ENTIRE repository' || fail "audit_prompt: ignore-file case lost the whole-repo override"
+echo "$with_file" | grep -q 'god object in solver.py' || fail "audit_prompt: ignore-file case missing injected finding"
+echo "$with_file" | grep -q '0009-solver-shape.md' || fail "audit_prompt: ignore-file case missing ADR link"
+
+echo "ok (audit_prompt ignore-file)"
+
 # --- --mutation flag (#399): explicit-list selection, offline, no sweep ---
 
 out="$(MUTATION_DRY_RUN=1 bash "$SCRIPT" --mutation a.py,b.py 2>&1)" || fail "--mutation a.py,b.py exited non-zero"

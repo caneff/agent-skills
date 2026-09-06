@@ -90,7 +90,9 @@ uv run pre-commit install
 
 Pattern: upstream isolated hooks (ruff, hygiene) + one `local` system hook for
 `ty` (ty needs your venv to resolve imports). **pytest is NOT a hook** — too
-slow for every commit; it lives in CI only.
+slow for every commit; it lives in CI only. (For a JS/TS repo, use
+`setup-pre-commit` instead — its hook does run tests, a reasonable tradeoff
+for faster JS/TS suites.)
 
 **Done when:** `uv run pre-commit run --all-files` executes end to end.
 

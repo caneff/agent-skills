@@ -43,9 +43,17 @@ report_path_from_log() {
 # reads SKILL.md) gets told the same thing.
 # Takes repo as $2 (not the global $REPO) so it's callable from a sourced
 # test where $REPO is unset.
+# If $2/.audit-ignore.md exists (#525, format: all-audits/harness/IGNORE-FILE.md),
+# its entries ride along on the same prompt so the audit stops re-raising
+# findings the repo already rejected. Absent the file, the prompt is unchanged.
 audit_prompt() {
-  printf '/%s %s\n%s\n' "$1" "$2" \
-    "Audit the ENTIRE repository at $2 — every source file, not a git diff or recent-changes review. Override any branch-diff or hot-spot default the skill has. Exclude vendored, generated, and dependency trees (node_modules, .venv, dist, vendor, build output, lockfiles), any .git/ tree, and any worktrees/ tree — audit only the project's own tracked source. Do NOT open the report: skip every xdg-open/open/start step the skill would run. You are one audit inside an all-audits sweep, and the sweep opens only the final index — thirteen reports opening at once would bury it. Just write the report and print its absolute path."
+  local ignore_file="$2/.audit-ignore.md" ignore_block=""
+  if [ -f "$ignore_file" ]; then
+    ignore_block="$(printf '\nThe repo has already reviewed and rejected these findings — do not raise them again:\n%s' "$(cat "$ignore_file")")"
+  fi
+  printf '/%s %s\n%s%s\n' "$1" "$2" \
+    "Audit the ENTIRE repository at $2 — every source file, not a git diff or recent-changes review. Override any branch-diff or hot-spot default the skill has. Exclude vendored, generated, and dependency trees (node_modules, .venv, dist, vendor, build output, lockfiles), any .git/ tree, and any worktrees/ tree — audit only the project's own tracked source. Do NOT open the report: skip every xdg-open/open/start step the skill would run. You are one audit inside an all-audits sweep, and the sweep opens only the final index — thirteen reports opening at once would bury it. Just write the report and print its absolute path." \
+    "$ignore_block"
 }
 
 # mutation_prepass_prompt REPO — the prompt for the mutation auto-select
