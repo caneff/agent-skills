@@ -173,15 +173,8 @@ def main() -> None:
     cwd = (data.get("workspace") or {}).get("current_dir") or data.get("cwd") or "."
     transcript = data.get("transcript_path", "")
 
-    effort = run(["python3", str(CFG / "effort-abbrev.py")], raw)
-    weekly = run([str(CFG / "usage-segment.sh"), "weekly"], raw)
-    session = run([str(CFG / "usage-segment.sh"), "session"], raw)
-    wreset = run([str(CFG / "usage-segment.sh"), "wreset"], raw)
-    breset = run([str(CFG / "usage-segment.sh"), "breset"], raw)
     branch, changes, root = git(cwd)
     tokens = context_tokens(transcript)
-    ctx = f"Ctx {tokens / 1000:.1f}k" if tokens else "Ctx —"
-
     frame = frame_color(tokens)
 
     # Two windows, "percent reset" each (reset = leading unit), 7d then 5h:
@@ -193,24 +186,32 @@ def main() -> None:
     def win(pct: str, reset: str) -> str:
         return " ".join(x for x in (pct, lead(reset)) if x)
 
-    usage = " · ".join(x for x in (win(weekly, wreset), win(session, breset)) if x)
+    def model_cell() -> str:
+        # "Opus 4.8" -> "O 4.8"; keep the effort suffix, e.g. "O 4.8 (M)"
+        effort = run(["python3", str(CFG / "effort-abbrev.py")], raw)
+        ver = re.search(r"\d[\d.]*", model)
+        short = (f"{model[:1]} {ver.group()}") if model and ver else model
+        return f"{short} {effort}".strip()
 
-    # Project name only, matching the blind-test toast's `Path(cwd).name`
-    # convention; fed the main root so a linked worktree collapses to the
-    # project name too, not the worktree's.
-    cwd_disp = Path(root or cwd).name
+    def usage_cell() -> str:
+        weekly = run([str(CFG / "usage-segment.sh"), "weekly"], raw)
+        session = run([str(CFG / "usage-segment.sh"), "session"], raw)
+        wreset = run([str(CFG / "usage-segment.sh"), "wreset"], raw)
+        breset = run([str(CFG / "usage-segment.sh"), "breset"], raw)
+        return " · ".join(x for x in (win(weekly, wreset), win(session, breset)) if x)
 
-    # "Opus 4.8" -> "O 4.8"; keep the effort suffix, e.g. "O 4.8 (M)"
-    ver = re.search(r"\d[\d.]*", model)
-    short = (f"{model[:1]} {ver.group()}") if model and ver else model
-    row = [
-        (f"{short} {effort}".strip(), PURPLE),
-        (cwd_disp, CYAN),
-        (ctx, ORANGE),
-        (usage, PINK),
-        (f"{branch} {changes}".strip(), GREEN),
+    cells = [
+        (PURPLE, model_cell),
+        # Project name only, matching the blind-test toast's `Path(cwd).name`
+        # convention; fed the main root so a linked worktree collapses to the
+        # project name too, not the worktree's.
+        (CYAN, lambda: Path(root or cwd).name),
+        (ORANGE, lambda: f"Ctx {tokens / 1000:.1f}k" if tokens else "Ctx —"),
+        (PINK, usage_cell),
+        (GREEN, lambda: f"{branch} {changes}".strip()),
     ]
-    row = [c for c in row if c[0]] or [(model, PURPLE)]
+    row = [(text, color) for color, build in cells if (text := build())]
+    row = row or [(model, PURPLE)]
 
     print(table([row], frame))
 

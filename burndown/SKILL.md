@@ -131,8 +131,10 @@ read-only, exploration and review both, is an in-process subagent.
    Anything else is counted as nothing: a burn that writes prose here shows as
    permanently building on the statusline. Write `landed` only for a merge that
    happened — when the human owns the merge, `pr` is where the ticket stops.
-   Full grammar and the renderer:
-   `~/.agents/skills/flow/ccstatusline-table/helpers/burndown-segment.sh`.
+   Several `burning` lines can be open at once, one per ticket in flight; a
+   ticket's state is its last line, so a later line supersedes an earlier one
+   for that ticket — `pr` followed by `landed` is one ticket, merged.
+   This is the single documented home for the grammar — nothing else restates it.
 8. When a ticket settles, refill its slot: go to 1, skipping step 3. Re-list
    every pass — a landing can unblock tickets, and a human may have added
    more. At the ticket cap — landed plus parked — start no new tasks, let the

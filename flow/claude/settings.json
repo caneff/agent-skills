@@ -103,7 +103,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/caneff/.agents/skills/flow/claude/hooks/require-agent-model.sh"
+            "command": "/home/caneff/.claude/hooks/require-agent-model.sh"
           }
         ]
       },
