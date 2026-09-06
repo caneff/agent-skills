@@ -9,6 +9,10 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
 - **Comment on an issue**: `gh issue comment <number> --body "..."`
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
+- **Relationships (parent, dependencies, type)**: record these as first-class GitHub fields, not as body prose, so automation reads structured data via the `--json` fields above:
+  - Sub-issue of a parent: `gh issue create ... --parent <#>` (or `gh issue edit <#> --parent <#>` / `--remove-parent`).
+  - Dependencies: `gh issue create ... --blocked-by <#,#> --blocking <#>` (or `gh issue edit <#> --add-blocked-by <#>` / `--remove-blocked-by <#>`, plus the `--add-blocking` / `--remove-blocking` pair).
+  - Type: `gh issue create ... --type <name>` — only a type the org defines. `gh` errors on an unknown name, and types are unavailable on user-account repos, so omit `--type` when none exist.
 - **Close**: `gh issue close <number> --comment "..."`
 
 Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
@@ -28,6 +32,8 @@ When filing a ticket, route it to whoever acts on it next, using two questions.
 - **No** — specified, but it needs a human touch (a delicate change, a taste call, credentials or secrets, something you want to write yourself): label it `ready-for-human`.
 
 So `ready-for-human` covers both a standalone grilling ticket and any specified ticket a human should build. `ready-for-agent` is only for work the agent can take unattended.
+
+Never file a ticket label-less. A bare issue reads as *untriaged / unknown*, not as a signal to anyone — so every ticket leaves the gate with exactly one routing label: a `ready-*` label, a `wayfinder:*` label when a map owns it, or `backlog` when the work is real and its turn has not come. Wanting a human to see or grill it is `ready-for-human`, never the absence of a label.
 
 A quick sanity check the implementer can do while building (read the code, confirm one behavior) is neither grilling nor a human touch — write the constraint into the ticket and still mark it `ready-for-agent`.
 
