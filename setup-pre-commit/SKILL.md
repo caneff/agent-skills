@@ -6,6 +6,12 @@ description: Set up Husky pre-commit hooks with lint-staged (Prettier), type che
 
 # Setup Pre-Commit Hooks
 
+**Scope: JS/TS repos only** (Husky is a JS-ecosystem tool). For a Python repo,
+use `setup-python-repo` instead — its pre-commit gate keeps tests out of the
+hook (CI only, too slow per-commit); this skill's hook runs `test` on every
+commit, which is the right tradeoff for JS/TS's faster suites but not for
+Python's.
+
 ## What This Sets Up
 
 - **Husky** pre-commit hook
