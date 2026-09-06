@@ -1,108 +1,105 @@
 /* Owns its own KaTeX dependency: if the katex global is absent, injects
    katex.min.css + katex.min.js + auto-render.min.js (in that order) from
    assets/katex/. Consumers only need to include math.js. */
+(function () {
+  /* Resolve assets/ base from this script's own URL while currentScript is
+     still valid (it's null inside the async callbacks below). */
+  var mathBase = (function () {
+    var s = typeof document !== "undefined" && document.currentScript;
+    var src = (s && s.src) || "";
+    return src.replace(/components\/math\/math\.js(\?.*)?$/, "");
+  })();
 
-/* Resolve assets/ base from this script's own URL while currentScript is
-   still valid (it's null inside the async callbacks below). */
-var _vtMathBase = (function () {
-  var s = typeof document !== "undefined" && document.currentScript;
-  var src = (s && s.src) || "";
-  return src.replace(/components\/math\/math\.js(\?.*)?$/, "");
-})();
+  function renderKatex() {
+    if (typeof katex === "undefined") return;
 
-function renderKatex() {
-  if (typeof katex === "undefined") return;
+    document.querySelectorAll(".vt-math").forEach(function (el) {
+      var tex = el.textContent.trim();
+      try {
+        el.innerHTML = katex.renderToString(tex, {
+          displayMode: true,
+          throwOnError: false,
+        });
+      } catch (e) {
+        // leave raw text intact on parse error
+      }
+    });
 
-  document.querySelectorAll(".vt-math").forEach(function (el) {
-    var tex = el.textContent.trim();
-    try {
-      el.innerHTML = katex.renderToString(tex, {
-        displayMode: true,
-        throwOnError: false,
-      });
-    } catch (e) {
-      // leave raw text intact on parse error
-    }
-  });
-
-  if (typeof renderMathInElement === "function") {
-    try {
-      renderMathInElement(document.body, {
-        delimiters: [
-          { left: "\\(", right: "\\)", display: false },
-          { left: "\\[", right: "\\]", display: true },
-        ],
-        // katex: skip already-rendered output; vt-math: renderToString owns those
-        ignoredClasses: ["katex", "vt-math"],
-        throwOnError: false,
-      });
-    } catch (e) {
-      // leave inline math as-is on failure
+    if (typeof renderMathInElement === "function") {
+      try {
+        renderMathInElement(document.body, {
+          delimiters: [
+            { left: "\\(", right: "\\)", display: false },
+            { left: "\\[", right: "\\]", display: true },
+          ],
+          // katex: skip already-rendered output; vt-math: renderToString owns those
+          ignoredClasses: ["katex", "vt-math"],
+          throwOnError: false,
+        });
+      } catch (e) {
+        // leave inline math as-is on failure
+      }
     }
   }
-}
 
-/* Reuses an existing tag if a consumer already included it — idempotent,
-   safe to double-wire. */
-function _loadScript(src) {
-  return new Promise(function (resolve) {
-    var existing = document.querySelector('script[src="' + src + '"]');
-    if (existing) {
-      if (existing.dataset.vtLoaded) return resolve();
-      return existing.addEventListener("load", function () {
+  /* Reuses an existing tag if a consumer already included it — idempotent,
+     safe to double-wire. */
+  function loadScript(src) {
+    return new Promise(function (resolve) {
+      var existing = document.querySelector('script[src="' + src + '"]');
+      if (existing) {
+        if (existing.dataset.vtLoaded) return resolve();
+        return existing.addEventListener("load", function () {
+          resolve();
+        });
+      }
+      var el = document.createElement("script");
+      el.src = src;
+      el.addEventListener("load", function () {
+        el.dataset.vtLoaded = "1";
         resolve();
       });
-    }
-    var el = document.createElement("script");
-    el.src = src;
-    el.addEventListener("load", function () {
-      el.dataset.vtLoaded = "1";
-      resolve();
+      el.addEventListener("error", function () {
+        resolve();
+      }); // renderKatex() no-ops if katex never loaded
+      document.head.appendChild(el);
     });
-    el.addEventListener("error", function () {
-      resolve();
-    }); // renderKatex() no-ops if katex never loaded
-    document.head.appendChild(el);
-  });
-}
-
-function ensureKatex() {
-  if (typeof katex !== "undefined") return Promise.resolve();
-  var katexBase = _vtMathBase + "katex/";
-
-  if (!document.querySelector('link[href="' + katexBase + 'katex.min.css"]')) {
-    var link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = katexBase + "katex.min.css";
-    // Insert at head START: katex.min.css sets .katex{font:…1.21em…} at the
-    // same specificity as math.css's 1em reset — the reset only wins if the
-    // KaTeX sheet loads first. Appending it last silently oversizes all math.
-    document.head.insertBefore(link, document.head.firstChild);
   }
 
-  return _loadScript(katexBase + "katex.min.js").then(function () {
-    return _loadScript(katexBase + "auto-render.min.js");
-  });
-}
+  function ensureKatex() {
+    if (typeof katex !== "undefined") return Promise.resolve();
+    var katexBase = mathBase + "katex/";
 
-function initKatex() {
-  if (typeof katex !== "undefined") {
-    renderKatex();
-    return;
+    if (!document.querySelector('link[href="' + katexBase + 'katex.min.css"]')) {
+      var link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = katexBase + "katex.min.css";
+      // Insert at head START: katex.min.css sets .katex{font:…1.21em…} at the
+      // same specificity as math.css's 1em reset — the reset only wins if the
+      // KaTeX sheet loads first. Appending it last silently oversizes all math.
+      document.head.insertBefore(link, document.head.firstChild);
+    }
+
+    return loadScript(katexBase + "katex.min.js").then(function () {
+      return loadScript(katexBase + "auto-render.min.js");
+    });
   }
-  ensureKatex().then(renderKatex);
-}
 
-if (typeof document !== "undefined") {
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initKatex);
-  } else {
-    initKatex();
+  function initKatex() {
+    if (typeof katex !== "undefined") {
+      renderKatex();
+      return;
+    }
+    ensureKatex().then(renderKatex);
   }
-}
 
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = { initKatex: initKatex, renderKatex: renderKatex };
-} else if (typeof window !== "undefined") {
-  window.vtMath = { initKatex: initKatex, renderKatex: renderKatex };
-}
+  if (typeof window !== "undefined" && window.vtBase) {
+    window.vtBase.register(null, initKatex, "math");
+  }
+
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { initKatex: initKatex, renderKatex: renderKatex };
+  } else if (typeof window !== "undefined") {
+    window.vtMath = { initKatex: initKatex, renderKatex: renderKatex };
+  }
+})();

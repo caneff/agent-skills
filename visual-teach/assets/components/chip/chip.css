@@ -98,7 +98,7 @@
 
 /* keyboard keycap */
 .vt-kbd {
-  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-family: var(--vt-mono-font);
   font-size: 0.8rem;
   line-height: 1;
   display: inline-block;
