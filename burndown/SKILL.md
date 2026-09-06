@@ -64,7 +64,17 @@ read-only, exploration and review both, is an in-process subagent.
    [`implement`](~/.agents/skills/implement/SKILL.md) skill's § Build by pointer — the
    issue reference, the notes path, and the branch base, never a summary.
    Seed the worker to stop after committing, report its branch, and wait; the
-   coordinator owns review and the PR.
+   coordinator owns review and the PR. One rule goes in every seed: a question
+   to the coordinator that times out is not a stop — take the safe option, the
+   one a reviewer can reverse in a single commit, keep building, and put the
+   question and the choice you made at the top of `worker_done`. The
+   coordinator's attention is not a dependency a build may block on.
+
+   The coordinator's wait covers `question` and `escalation`, not just
+   `worker_done`. Task status runs `pending → ready → dispatched →
+   completed` and carries no messages, so a blocking question is invisible to a
+   status poll: a coordinator polling `task-list` must check the mailbox for
+   pending questions on every poll.
 5. **Review.** Once a worker reports its branch, `git fetch` it and review it
    with an in-process subagent (`Agent` tool, `model: opus`) — no Orca task,
    no terminal, no worktree; review is read-only. Seed it with only the issue
@@ -145,6 +155,12 @@ re-derive the queue every pass, and keep one line per finished ticket in
 context — build detail lives with the worker, review detail in the review
 report. A burn survives summarization this way, and a fresh session can
 resume a half-done queue from the tracker and progress file alone.
+
+The same holds one level down: the work is in the worktree, not in the worker.
+An Orca restart that kills a builder and stales its terminal handle leaves the
+diff on disk, so re-dispatch a fresh worker into that same worktree, seeded to
+judge the uncommitted diff it adopts — accept it, fix it, or throw it out —
+rather than to restart the ticket.
 
 ## When a ticket can't land
 
