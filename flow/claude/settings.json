@@ -59,7 +59,7 @@
       ]
     }
   },
-  "model": "opus",
+  "model": "claude-fable-5-1[1m]",
   "disableClaudeAiConnectors": true,
   "skillOverrides": {
     "dataviz": "off",
