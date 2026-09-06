@@ -39,7 +39,10 @@
       "Read(//home/caneff/.codex/**)",
       "Read(//home/caneff/.codex/skills/**)",
       "Read(//tmp/**)",
-      "mcp__exa__web_search_exa"
+      "mcp__exa__web_search_exa",
+      "mcp__c4ai__md",
+      "mcp__c4ai__execute_js",
+      "mcp__c4ai__screenshot"
     ],
     "deny": [
       "AskUserQuestion",
@@ -50,7 +53,11 @@
       "RemoteTrigger",
       "ReportFindings",
       "ScheduleWakeup",
-      "Skill(ponytail:ponytail-audit)"
+      "Skill(ponytail:ponytail-audit)",
+      "mcp__c4ai__crawl",
+      "mcp__c4ai__html",
+      "mcp__c4ai__pdf",
+      "mcp__c4ai__ask"
     ],
     "defaultMode": "auto",
     "autoMode": {
