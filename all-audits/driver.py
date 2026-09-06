@@ -223,13 +223,7 @@ def audit_prompt(name, repo, manifest_path=None):
         "sweep opens only the final index — thirteen reports opening at once would bury it. Just write the "
         "report."
     )
-    manifest_block = ""
-    if manifest_path:
-        manifest_block = (
-            f"\nAfter writing the report, write a manifest to {manifest_path} — a JSON object with "
-            '"report_path" (the report\'s absolute path), "count" (how many findings), and "headline" '
-            "(the one-line verdict). This is how the sweep finds your report; it does not scan your output."
-        )
+    manifest_block = manifest_instruction(manifest_path) if manifest_path else ""
     return f"/{name} {repo}\n{override}{manifest_block}{ignore_block}\n"
 
 
@@ -257,13 +251,6 @@ def write_setup_failure_report(collection_dir, module, reason):
         f.write(json.dumps({"status": "setup_failure", "module": module, "reason": reason}) + "\n")
 
 
-def collect_module_report(log, collection_dir, module):
-    report = report_path_from_log(log)
-    if not report or not os.path.isfile(report):
-        return
-    replace_dir(os.path.dirname(report), os.path.join(collection_dir, module_slug(module)))
-
-
 def manifest_path_for(manifests_dir, name):
     return os.path.join(manifests_dir, name, "manifest.json")
 
@@ -282,6 +269,22 @@ def read_manifest(manifests_dir, name):
     if not data.get("report_path"):
         return None
     return data
+
+
+def collect_from_manifest(manifests_dir, name, collection_dir, dest_name):
+    """Read `name`'s manifest and copy its report dir into
+    `collection_dir/dest_name`. Returns None on success, else a failure
+    reason: "no manifest" or a manifest naming a missing report. The one
+    seam both the audit sweep and mutation mode use to find a report —
+    never a log-grepping fallback (#559, and #580 for mutation mode)."""
+    manifest = read_manifest(manifests_dir, name)
+    if manifest is None:
+        return "no manifest"
+    report = manifest["report_path"]
+    if not os.path.isfile(report):
+        return f"manifest names a missing report: {report}"
+    replace_dir(os.path.dirname(report), os.path.join(collection_dir, dest_name))
+    return None
 
 
 def run_one(name, repo, outlogs, manifests_dir):
@@ -471,15 +474,13 @@ def sweep(repo, out, only, short, index_only, force):
 
     manifest_note = {}
     for name in to_run:
-        manifest = read_manifest(manifests_dir, name)
-        if manifest is None:
+        reason = collect_from_manifest(manifests_dir, name, collection, name)
+        if reason == "no manifest":
             manifest_note[name] = f"no manifest — see {os.path.join(outlogs, name + '.log')}"
             continue
-        report = manifest["report_path"]
-        if not os.path.isfile(report):
-            manifest_note[name] = f"manifest names a missing report: {report}"
+        if reason:
+            manifest_note[name] = reason
             continue
-        replace_dir(os.path.dirname(report), os.path.join(collection, name))
         if name in GATED:
             os.makedirs(stable, exist_ok=True)
             replace_dir(os.path.join(collection, name), os.path.join(stable, name))
@@ -590,7 +591,8 @@ def mutation_mode(repo, mutation_list, out):
     outlogs = os.path.join(run_dir, "logs")
     collection = os.path.join(run_dir, "collection")
     worktrees = os.path.join(run_dir, "worktrees")
-    for d in (outlogs, collection, worktrees):
+    manifests_dir = os.path.join(run_dir, "manifests")
+    for d in (outlogs, collection, worktrees, manifests_dir):
         os.makedirs(d, exist_ok=True)
     print(f"run dir: {run_dir}")
     print(f"collecting under: {collection}\n")
@@ -621,7 +623,7 @@ def mutation_mode(repo, mutation_list, out):
 
     try:
         for module in final_targets:
-            _run_mutation_module(repo, module, outlogs, collection, worktrees)
+            _run_mutation_module(repo, module, outlogs, collection, worktrees, manifests_dir)
     finally:
         for d in os.listdir(worktrees):
             _run(["git", "-C", repo, "worktree", "remove", "--force", os.path.join(worktrees, d)])
@@ -630,10 +632,12 @@ def mutation_mode(repo, mutation_list, out):
     print(f"\ncollection: {collection}")
 
 
-def _run_mutation_module(repo, module, outlogs, collection, worktrees):
+def _run_mutation_module(repo, module, outlogs, collection, worktrees, manifests_dir):
     slug = module_slug(module)
     wt = os.path.join(worktrees, slug)
     log = os.path.join(outlogs, f"mutation-{slug}.log")
+    manifest = manifest_path_for(manifests_dir, slug)
+    os.makedirs(os.path.dirname(manifest), exist_ok=True)
 
     def cleanup():
         _run(["git", "-C", repo, "worktree", "remove", "--force", wt])
@@ -664,13 +668,14 @@ def _run_mutation_module(repo, module, outlogs, collection, worktrees):
         return
 
     print(f"[mutation:{module}] running /mutation-audit {module}")
+    prompt = f"/mutation-audit {module}\n{manifest_instruction(manifest)}"
     with open(log, "a", encoding="utf-8") as f:
-        subprocess.run(["claude", *CLAUDE_FLAGS, f"/mutation-audit {module}\n"], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False)
+        subprocess.run(["claude", *CLAUDE_FLAGS, prompt], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False)
 
-    collect_module_report(log, collection, module)
-    if not os.path.isdir(os.path.join(collection, slug)):
-        print(f"[mutation:{module}] no report found — see {log}", file=sys.stderr)
-        write_setup_failure_report(collection, module, "mutation-audit produced no report")
+    reason = collect_from_manifest(manifests_dir, slug, collection, slug)
+    if reason:
+        print(f"[mutation:{module}] {reason} — see {log}", file=sys.stderr)
+        write_setup_failure_report(collection, module, reason)
     cleanup()
     print(f"[mutation:{module}] done")
 

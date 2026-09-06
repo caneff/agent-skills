@@ -63,17 +63,35 @@ def test_index_rerun_replaces_assets_without_nesting():
         assert not os.path.isdir(os.path.join(tmp, "collection", "assets", "assets")), "assets/assets nesting"
 
 
-def test_report_path_from_log_marker_wins_over_legacy():
-    with tempfile.TemporaryDirectory() as tmp:
-        log = os.path.join(tmp, "log")
-        with open(log, "w") as f:
-            f.write("See /tmp/other-dir/unrelated.html for background.\nALL_AUDITS_REPORT=/tmp/dead-code-1/report.html\n")
-        assert driver.report_path_from_log(log) == "/tmp/dead-code-1/report.html"
+def test_collect_from_manifest_mutation_style():
+    """#580: mutation mode now finds its report the same way the sweep does
+    — through a manifest, never by grepping a log for a stray .html path
+    (the marker this replaced, `ALL_AUDITS_REPORT=`, is gone from every
+    doc)."""
+    with tempfile.TemporaryDirectory() as manifests_dir, tempfile.TemporaryDirectory() as collection, tempfile.TemporaryDirectory() as reportdir:
+        report = os.path.join(reportdir, "report.html")
+        with open(report, "w") as f:
+            f.write("<html>module report</html>")
+        manifest = driver.manifest_path_for(manifests_dir, "solver_py")
+        os.makedirs(os.path.dirname(manifest), exist_ok=True)
+        with open(manifest, "w") as f:
+            json.dump({"report_path": report, "count": 1, "headline": "one finding"}, f)
 
-        log2 = os.path.join(tmp, "log2")
-        with open(log2, "w") as f:
-            f.write("report written to /tmp/ponytail-audit-123/report.html\n")
-        assert driver.report_path_from_log(log2) == "/tmp/ponytail-audit-123/report.html"
+        reason = driver.collect_from_manifest(manifests_dir, "solver_py", collection, "solver_py")
+        assert reason is None, reason
+        assert os.path.isfile(os.path.join(collection, "solver_py", "report.html"))
+
+
+def test_collect_from_manifest_no_manifest_or_missing_report():
+    with tempfile.TemporaryDirectory() as manifests_dir, tempfile.TemporaryDirectory() as collection:
+        assert driver.collect_from_manifest(manifests_dir, "missing", collection, "missing") == "no manifest"
+
+        manifest = driver.manifest_path_for(manifests_dir, "ghost")
+        os.makedirs(os.path.dirname(manifest), exist_ok=True)
+        with open(manifest, "w") as f:
+            json.dump({"report_path": "/no/such/report.html", "count": 0, "headline": "x"}, f)
+        reason = driver.collect_from_manifest(manifests_dir, "ghost", collection, "ghost")
+        assert reason == "manifest names a missing report: /no/such/report.html"
 
 
 def test_audit_prompt_whole_repo_override_and_ignore_file():
@@ -260,6 +278,44 @@ def test_cache_decision_clean_recent_repo_skips():
         d = driver.decide(repo, "domain-drift", ["CONTEXT.md"], base=cache_dir)
         assert d.run is False, d
         assert d.report_dir == report_dir
+
+
+def test_corrupt_cache_record_forces_run():
+    """#580: a truncated/corrupt record file must read as "no cached run",
+    never crash the sweep — matches the old bash cache.py, whose crashing
+    subprocess printed nothing, failed the `= "SKIP"` check, and let the
+    audit run."""
+    with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as cache_dir:
+        _init_git_repo(repo)
+        record_path = driver._record_file(repo, cache_dir)
+        os.makedirs(os.path.dirname(record_path), exist_ok=True)
+        with open(record_path, "w") as f:
+            f.write('{"domain-drift": {"last_s')  # truncated mid-write
+        d = driver.decide(repo, "domain-drift", ["CONTEXT.md"], base=cache_dir)
+        assert d.run is True, d
+
+
+def test_legacy_cache_entry_missing_report_dir_forces_run():
+    with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as cache_dir:
+        _init_git_repo(repo)
+        sha = driver.head_sha(repo)
+        driver.save_record(driver._record_file(repo, cache_dir), {
+            "domain-drift": {
+                "last_sha": sha,
+                "timestamp": driver._dt.datetime.now(driver._dt.timezone.utc).isoformat(),
+                # no "report_dir" — a legacy/incomplete entry
+            }
+        })
+        d = driver.decide(repo, "domain-drift", ["CONTEXT.md"], base=cache_dir)
+        assert d.run is True, d
+
+
+def test_save_record_is_atomic_no_tmp_left_behind():
+    with tempfile.TemporaryDirectory() as cache_dir:
+        path = os.path.join(cache_dir, "sub", "record.json")
+        driver.save_record(path, {"a": 1})
+        assert json.load(open(path)) == {"a": 1}
+        assert not os.path.exists(path + ".tmp")
 
 
 def test_crashed_no_tests_probe_renders_could_not_determine_not_zero():
