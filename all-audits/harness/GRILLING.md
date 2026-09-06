@@ -7,7 +7,8 @@ names one for it to start.
 ## Grilling a report
 
 Grill every report the sweep produced, one after another, without waiting to
-be told which one. Run the `grilling` skill over **one report's findings at a
+be told which one. When the user asks to grill the sweep, start at the top of
+the order below and work down. Run the `grilling` skill over **one report's findings at a
 time**. Grill the findings toward decisions — which to act on, which to drop,
 which need a closer look. Walk one audit at a time; never merge two reports
 into one grilling — a comment cut and an architecture deepening share no
