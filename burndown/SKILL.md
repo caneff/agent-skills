@@ -216,3 +216,17 @@ When the loop stops, tally: tickets landed (issue → commit), tickets parked
 and why, tickets still open and what blocks them. Say why the loop stopped —
 queue empty, ticket cap, or two parks with no landing — and if the queue is
 not empty, say to run `/burndown` again.
+
+Where a human owns the merge, the report ends with **one pasteable line** that
+merges every open PR from this burn, in stack-safe order — each base PR before
+the PR stacked on it:
+
+```
+! for n in <PR numbers in that order>; do gh pr merge $n --squash --delete-branch; done
+```
+
+Before handing it over, dry-run merge every branch in that order onto the
+default branch in a detached throwaway worktree and run the repo's test seam;
+say the result in one line. Never split the merges into per-PR commands. Any
+post-merge step a human must do on the live machine follows the line, in
+order.
