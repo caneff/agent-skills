@@ -63,7 +63,7 @@ separate fallback note. Once the report is written, **open it and hand off the
 path**: `xdg-open <path>` on Linux, `open <path>` on macOS, `start <path>` on
 Windows, then tell the user the absolute path.
 
-**Print the marker line.** `run-audits.sh` collects each report by scanning
+**Print the marker line.** `driver.py` collects each report by scanning
 the audit's stdout for `ALL_AUDITS_REPORT=/abs/path/to/report.html` on its own
 line — print exactly that, with the absolute path, after the report is
 written. Don't only describe the path in prose (e.g. across two lines, a

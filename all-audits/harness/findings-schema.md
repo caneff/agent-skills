@@ -88,7 +88,7 @@ what the orchestrator collects into the index, regardless of which audit ran:
 - `report_path` — absolute path to the report's `.html` file. For an audit
   that writes `findings.jsonl`, this is the grouped summary page above, not a
   card-per-finding report. Reflect it on stdout as
-  `ALL_AUDITS_REPORT=<report_path>` on its own line — `run-audits.sh` greps
+  `ALL_AUDITS_REPORT=<report_path>` on its own line — `driver.py` greps
   stdout logs for this marker to collect each report (see
   [`HTML-REPORT.md`](HTML-REPORT.md)).
 - `log_path` — absolute path to `findings.jsonl`, for any audit that writes

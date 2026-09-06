@@ -8,7 +8,7 @@ restating either paragraph below.
 ## Scope
 
 Whole-repo is the default — the tree, not a git diff or recent-changes
-review, and not any audit's own hot-spot default; `run-audits.sh`'s
+review, and not any audit's own hot-spot default; `driver.py`'s
 `audit_prompt` enforces this on each audit process it launches. This is the
 one place the rule is stated: an audit that takes an explicit branch scope
 instead resolves it via `git merge-base` against the origin's default

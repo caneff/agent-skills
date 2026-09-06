@@ -42,7 +42,7 @@ Each audits the whole repo and writes a `findings.jsonl` + grouped-summary
 `skill-audit` is **not** in the set — it scans the global skills directory, not
 this repo. `mutation-audit` is **not** in the set either — it is opt-in and
 targeted at one module (never a whole-repo sweep); invoke it by name, or run
-`run-audits.sh --mutation a.py,b.py` for the scripted per-module form.
+`driver.py --mutation a.py,b.py` for the scripted per-module form.
 
 ## Opt-in edits
 
@@ -50,19 +50,20 @@ targeted at one module (never a whole-repo sweep); invoke it by name, or run
 the user asks by name — and lands as a reviewable PR on its own branch, never a
 direct commit to main. Carry this contract into any new audit skill you add here.
 
-## The runnable sweep — `run-audits.sh`
+## The runnable sweep — `driver.py`
 
-`run-audits.sh` is the bash orchestrator that runs each guarded audit as its own
-`claude -p "/name"` process and collects the reports. Its own `# Usage:` header
-comment is the flag reference (`[REPO]`, `--out`, `--only`, `--short`,
-`--index`, `--force`/`--all`, `--mutation`) — this doc doesn't restate it, so
-the two can't drift apart.
+`driver.py` is the Python orchestrator that runs each guarded audit as its own
+`claude -p "/name"` process and collects the reports. Its own module docstring
+is the flag reference (`[REPO]`, `--out`, `--only`, `--short`,
+`--index`, `--force`, `--mutation`) — this doc doesn't restate it, so
+the two can't drift apart. `audits_data.py` holds the audit set — adding an
+audit is one entry there.
 
 **Staleness cache.** The two expensive LLM passes — `domain-drift` and
 `type-tightness` — are gated: while the repo is materially unchanged since their
 last run, they are skipped and their cached report is reused in the index, marked
-"unchanged since `<sha>`". `should_run` (`should_run.py`) owns the skip/run
-decision; `cache.py` gathers git state, reads/writes the per-repo record at
+"unchanged since `<sha>`". `should_run()` in `driver.py` owns the skip/run
+decision; `driver.decide`/`driver.update_cache` gather git state, read/write the per-repo record at
 `~/.cache/all-audits/<repo-key>.json`, and persists each gated report to a stable
 location that survives the run-dir TTL prune. Skip holds only when the tree is
 clean, fewer than `N` files (default 10) changed since the last-run SHA, no
@@ -75,7 +76,7 @@ them. Opt-in per repo — see [`harness/IGNORE-FILE.md`](harness/IGNORE-FILE.md)
 
 ## Run
 
-Two front doors, one engine. `run-audits.sh` runs the whole sweep — it fans each
+Two front doors, one engine. `driver.py` runs the whole sweep — it fans each
 audit out as its own `claude -p "/name"` process, collects the report folders,
 and builds `index.html` with the synthesis lede. Both front doors call it.
 
@@ -85,7 +86,7 @@ them from any agent — a subagent fan-out silently loses them. A `-p "/name"`
 process is an explicit slash invocation, which the gate honors, so every audit
 runs the same way.
 
-From a terminal, run `run-audits.sh` directly for its flags and the staleness
+From a terminal, run `driver.py` directly for its flags and the staleness
 cache.
 
 When you are invoked in-session as `/all-audits [path]`:
@@ -95,7 +96,7 @@ When you are invoked in-session as `/all-audits [path]`:
    the three structural audits.
 
 2. **Run the script in the background.** Run
-   `run-audits.sh [--short] <repo>`. It does the fan-out, the collection, the
+   `driver.py [--short] <repo>`. It does the fan-out, the collection, the
    `index.html`, and the lede. It reports only — it applies nothing and opens no
    PR. Do not fan out subagents yourself and do not invoke any audit through the
    `Skill` tool; that is the broken path this replaces.
