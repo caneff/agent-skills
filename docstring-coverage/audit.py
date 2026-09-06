@@ -12,8 +12,12 @@ scrapes interrogate's overall coverage percentage onto every row's
 """
 
 import json
+import os
 import re
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "all-audits", "harness"))
+import auditlib  # noqa: E402
 
 _CATEGORY = {
     "D100": "missing-module-docstring",
@@ -36,8 +40,9 @@ def parse_coverage(ruff_json, interrogate_text):
     of findings-schema dict rows out. No subprocess, no filesystem. `bucket`
     defaults to "document" — a ruff D1xx hit is a real missing-docstring
     candidate by construction, same reasoning error-handling's parser uses
-    for a caught-and-dropped exception. Every row carries the same
-    `extra.coverage`, scraped once from interrogate's summary line.
+    for a caught-and-dropped exception. `failure` is empty — the
+    document-vs-skip verdict is the judgment pass's job. Every row carries
+    the same `extra.coverage`, scraped once from interrogate's summary line.
     """
     m = _COVERAGE_RE.search(interrogate_text)
     coverage = float(m.group(1)) if m else None
@@ -48,15 +53,14 @@ def parse_coverage(ruff_json, interrogate_text):
         if category is None:
             continue
         rows.append(
-            {
-                "bucket": "document",
-                "file": item["filename"],
-                "line": item["location"]["row"],
-                "category": category,
-                "summary": f"{category.replace('-', ' ')} at {item['filename']}:{item['location']['row']}",
-                "failure": f"{item['message']} ({item['code']})",
-                "extra": {"coverage": coverage},
-            }
+            auditlib.finding(
+                "document",
+                item["filename"],
+                item["location"]["row"],
+                category,
+                f"{category.replace('-', ' ')} at {item['filename']}:{item['location']['row']}",
+                coverage=coverage,
+            )
         )
     return rows
 
@@ -83,7 +87,7 @@ def _selfcheck():
     assert rows[0]["category"] == "missing-function-docstring"
     assert rows[0]["extra"]["coverage"] == 50.0
     assert rows[0]["summary"] == "missing function docstring at sample.py:9"
-    assert "Missing docstring" in rows[0]["failure"]
+    assert rows[0]["failure"] == ""
 
     empty = parse_coverage(json.dumps([]), interrogate_text)
     assert empty == []
@@ -92,19 +96,10 @@ def _selfcheck():
 
 
 def main(argv):
-    if argv[1:2] == ["--selfcheck"]:
-        _selfcheck()
-        return
-    if len(argv) < 3:
-        print(
-            "usage: audit.py <ruff.json> <interrogate.txt> | --selfcheck",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    ruff_json = open(argv[1], encoding="utf-8").read()
-    interrogate_text = open(argv[2], encoding="utf-8").read()
-    for row in parse_coverage(ruff_json, interrogate_text):
-        print(json.dumps(row))
+    auditlib.run_cli(
+        argv, _selfcheck, parse_coverage, nargs=2,
+        usage="usage: audit.py <ruff.json> <interrogate.txt> | --selfcheck",
+    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,11 @@
+[
+  ".git",
+  ".venv",
+  "build",
+  "dist",
+  "mutants",
+  "node_modules",
+  "vendor",
+  "venv",
+  "worktrees"
+]

@@ -38,11 +38,14 @@ import shutil
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "all-audits", "harness"))
+import auditlib  # noqa: E402
+
 _RESULT_LINE_RE = re.compile(
     r"^\s*(?P<module>[\w.]+)\.x_(?P<func>\w+?)__mutmut_(?P<id>\d+):\s*(?P<status>.+?)\s*$"
 )
 
-_SKIP_DIRS = {"node_modules", "dist", "build", ".venv", "venv", "vendor", "worktrees", "mutants"}
+_SKIP_DIRS = auditlib.EXCLUDED_DIRS
 
 
 def parse_mutmut_results(text):
@@ -80,30 +83,22 @@ def parse_mutmut_results(text):
             # A test runs the line but doesn't assert hard enough — a covered
             # survivor. Pass two decides rewrite (default) vs cut.
             survived_count += 1
-            row = {
-                "bucket": "rewrite",
-                "failure": f"the mutation at {mutant} survives — no test fails when {func}() is mutated",
-                "extra": {"mutant": mutant, "killed": False, "survived": True},
-            }
+            bucket, extra = "rewrite", {"mutant": mutant, "killed": False, "survived": True}
         elif status == "no tests":
             # mutmut's own marker that no test reaches this mutant — a genuine
             # coverage hole, not a weak assertion. The fix is a new test, so
             # this bucket carries no before/after.
             no_coverage_count += 1
-            row = {
-                "bucket": "no-coverage",
-                "failure": f"the mutation at {mutant} survives — no test covers {func}(), so nothing can catch it",
-                "extra": {"mutant": mutant, "killed": False, "survived": False},
-            }
+            bucket, extra = "no-coverage", {"mutant": mutant, "killed": False, "survived": False}
         else:
             continue  # ponytail: timeout/suspicious/skipped out of scope
-        row.update(
-            {
-                "file": module.replace(".", "/") + ".py",
-                "line": None,
-                "category": "surviving-mutant",
-                "summary": f"mutant survives in {func}() ({mutant})",
-            }
+        row = auditlib.finding(
+            bucket,
+            module.replace(".", "/") + ".py",
+            None,
+            "surviving-mutant",
+            f"mutant survives in {func}() ({mutant})",
+            **extra,
         )
         rows.append(row)
     for row in rows:
@@ -196,8 +191,7 @@ def _selfcheck():
     assert rows[0]["extra"]["killed_count"] == 2
     assert rows[0]["extra"]["survived_count"] == 2
     assert rows[0]["extra"]["no_coverage_count"] == 1
-    assert "sample.x_clamp__mutmut_1" in rows[0]["failure"]
-    assert "clamp" in rows[0]["failure"]
+    assert rows[0]["failure"] == ""
 
     assert rows[1]["extra"]["mutant"] == "sample.x_clamp__mutmut_2"
 
@@ -208,7 +202,7 @@ def _selfcheck():
     assert nc["extra"]["mutant"] == "sample.x_scale__mutmut_1"
     assert nc["extra"]["survived"] is False
     assert nc["extra"]["no_coverage_count"] == 1
-    assert "no test" in nc["failure"]
+    assert nc["failure"] == ""
 
     no_survivors = parse_mutmut_results("    sample.x_is_adult__mutmut_1: killed")
     assert no_survivors == []
@@ -282,40 +276,22 @@ def _selfcheck():
     print("ok")
 
 
-def _walk_py(root):
-    """Repo-relative `.py` paths under `root`, skipping the same vendored/build
-    dirs `_SKIP_DIRS` and `suggest_candidates` skip. Shared by `--suggest` and
-    `--no-tests` so both see the identical file universe."""
-    paths = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
-        for filename in filenames:
-            if filename.endswith(".py"):
-                rel = os.path.relpath(os.path.join(dirpath, filename), root)
-                paths.append(rel.replace(os.sep, "/"))
-    return paths
-
-
 def main(argv):
-    if argv[1:2] == ["--selfcheck"]:
-        _selfcheck()
-        return
     if argv[1:2] == ["--suggest"]:
         root = argv[2] if len(argv) > 2 else "."
-        for candidate in suggest_candidates(_walk_py(root)):
+        for candidate in suggest_candidates(auditlib.walk_source(root)):
             print(json.dumps({"candidate": candidate}))
         return
     if argv[1:2] == ["--no-tests"]:
         # The worthy source modules with no sibling test, plus the worthy-module
         # total, for the repo-wide "N of M source modules have no tests" stat.
         root = argv[2] if len(argv) > 2 else "."
-        paths = _walk_py(root)
+        paths = auditlib.walk_source(root)
         worthy = sum(1 for p in paths if _sibling_tests(p) is not None)
         print(json.dumps({"no_tests": no_test_modules(paths), "total": worthy}))
         return
-    text = sys.stdin.read() if len(argv) < 2 else open(argv[1], encoding="utf-8").read()
-    for row in parse_mutmut_results(text):
-        print(json.dumps(row))
+    # supports `--selfcheck` via auditlib.run_cli
+    auditlib.run_cli(argv, _selfcheck, parse_mutmut_results)
 
 
 if __name__ == "__main__":
