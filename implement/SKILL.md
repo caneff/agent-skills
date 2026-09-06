@@ -82,6 +82,12 @@ Run both reviews and fix what they raise:
 
 Neither one produces the other's findings. Both run, every time.
 
+Then, only if the diff pushes a file from under 1000 lines to over, run
+`~/.agents/skills/thermo-nuclear-code-quality-review/SKILL.md` by pointer —
+it carries `disable-model-invocation`, so the slash form will not fire for
+you. That threshold is the whole trigger: it is a structural review that
+will propose restructuring beyond the ticket, so it stays off by default.
+
 Commit to the workspace's branch. When the ticket maps to a GitHub issue, put a
 closing keyword (`Closes #<n>`) in the final commit body — a bare `(#<n>)` links
 the issue but does not close it. **That trailer is the only thing that closes
