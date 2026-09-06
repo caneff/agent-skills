@@ -7,7 +7,7 @@ argument-hint: "[N | all]"
 
 Read what a repo's history reveals about how its people write code, and turn the
 conventions the team actually enforces into rules a future contributor — human
-or agent — can follow. The output is a `CODING_STANDARDS.md` that `/code-review`
+or agent — can follow. The output is a `CODING_STANDARDS.md` that `/spec-standards-review`
 reads as its Standards axis, so every rule you write becomes a check on future
 diffs.
 
@@ -99,7 +99,7 @@ label it **rule**, **contested**, or **candidate**.
 
 ### 3. Write CODING_STANDARDS.md
 
-Choose the target so the output slots into what `/code-review` already reads:
+Choose the target so the output slots into what `/spec-standards-review` already reads:
 
 - If the repo already documents standards in `CODING_STANDARDS.md` or
   `CONTRIBUTING.md`, append there.

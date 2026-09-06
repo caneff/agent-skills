@@ -1,6 +1,6 @@
 ---
-name: code-review
-description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes — Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to "review since X".
+name: spec-standards-review
+description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the ponytail over-engineering lens?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. It does NOT hunt runtime correctness bugs — the built-in `/code-review` does that, and the two are meant to run back to back. Use when the user wants a branch, PR, or work-in-progress diff checked against its spec and the repo's standards.
 ---
 
 Two-axis review of the diff between `HEAD` and a fixed point the user supplies:

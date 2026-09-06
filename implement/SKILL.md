@@ -72,7 +72,15 @@ these rules, which bind the worker, or you when you build inline:
 
 ## Finish
 
-Use `/code-review`, and fix what it raises.
+Run both reviews and fix what they raise:
+
+1. `/code-review` — the built-in correctness review (bugs, reuse, efficiency,
+   CLAUDE.md conventions). It runs at the session's effort level; no argument
+   needed.
+2. `/spec-standards-review` — this repo's two-axis review (documented coding
+   standards + the originating spec).
+
+Neither one produces the other's findings. Both run, every time.
 
 Commit to the workspace's branch. When the ticket maps to a GitHub issue, put a
 closing keyword (`Closes #<n>`) in the final commit body — a bare `(#<n>)` links
