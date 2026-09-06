@@ -36,6 +36,11 @@ done
 link ccstatusline/settings.json          "$HOME/.config/ccstatusline/settings.json"
 link ccstatusline/issue-counts-segment.sh "$HOME/.config/ccstatusline/issue-counts-segment.sh"
 
+# Pre-push hook: refuse a push when tests/all.sh fails. Hooks are shared
+# across worktrees, so resolve the common git dir rather than assuming ".git".
+git_common_dir="$(git -C "$here/.." rev-parse --path-format=absolute --git-common-dir)"
+link ../tests/all.sh "$git_common_dir/hooks/pre-push"
+
 # Lay down the copy-only backups (files a symlink can't hold): the Windows VS
 # Code settings and claude/settings.json.
 bash "$here/backup-sync.sh" --restore
