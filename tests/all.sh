@@ -3,7 +3,8 @@
 # that implements --selfcheck, and every test_audit.py. One line per suite;
 # exits non-zero on the first failure (and prints that suite's output).
 set -u
-cd "$(git rev-parse --show-toplevel)" || exit 1
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
 
 count=0
 
