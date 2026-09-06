@@ -17,47 +17,13 @@ report, scaffold rules, the `type="module"` warning, theme toggle) see
 
 ## Scaffold
 
-See the harness's "Scaffold basics" for the doctype/script-order rules — this
-skill's concrete scaffold, with its own title, kicker, and component set:
-
-```html
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Architecture review — {{repo name}}</title>
-
-    <link rel="stylesheet" href="assets/base/base.css" />
-    <link rel="stylesheet" href="assets/components/callout/callout.css" />
-    <link rel="stylesheet" href="assets/components/chip/chip.css" />
-    <link rel="stylesheet" href="assets/components/code/code.css" />
-    <link rel="stylesheet" href="assets/components/diagram/diagram.css" />
-
-    <!-- Prism: one grammar per language used, before base.js / code.js.
-         Only needed if a candidate carries a before/after code snippet. -->
-    <script src="assets/prism/prism-core.min.js"></script>
-    <script src="assets/prism/prism-clike.min.js"></script>
-    <script src="assets/prism/prism-python.min.js"></script>
-    <script src="assets/base/base.js"></script>
-    <script src="assets/components/code/code.js"></script>
-
-    <!-- Mermaid bridge for the graph-shaped diagrams -->
-    <script src="assets/mermaid.js"></script>
-  </head>
-  <body>
-    <main>
-      <p class="vt-kicker">Improve codebase architecture</p>
-      <h1>{{repo}} · deepening review</h1>
-      <p class="vt-lede">{{one-line verdict — the shape of the code in a sentence}}</p>
-      <!-- top recommendation, candidate cards, leaving-alone -->
-    </main>
-  </body>
-</html>
-```
-
-See the harness for the `type="module"` warning and the theme-toggle behavior
-— both apply here unchanged.
+Fills the harness's page shell (see `all-audits/harness/HTML-REPORT.md`
+"Page shell") with: `{{title}}` = `Architecture review — {{repo name}}`,
+`{{kicker}}` = `Improve codebase architecture`, `{{h1}}` = `{{repo}} ·
+deepening review`, verdict = the shape of the code in one sentence.
+Components: `callout`, `chip`, `code`, `diagram` — plus Prism grammars
+(before `base.js`/`code.js`) when a candidate carries a before/after
+snippet, and the `mermaid.js` bridge for the graph-shaped diagrams.
 
 ## Header
 

@@ -12,9 +12,12 @@ parsed — vulture's other line shape (`unreachable code after 'return' (100%
 confidence)`, no quoted name) isn't in the ticket's stable-format contract and
 is out of scope here.
 """
-import json
+import os
 import re
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "all-audits", "harness"))
+import auditlib  # noqa: E402
 
 _VULTURE_LINE_RE = re.compile(r"^(?P<file>.+):(?P<line>\d+): unused (?P<kind>[\w ]+) '(?P<name>[^']+)' \((?P<confidence>\d+)% confidence\)$")
 
@@ -23,9 +26,9 @@ def parse_vulture(text):
     """Parse vulture's text output into findings rows.
 
     Pure: raw vulture stdout in, a list of findings-schema dict rows out. No
-    subprocess, no filesystem. `bucket` defaults to "unsure" and `failure`
-    names only what vulture itself found — the dead/dynamic/unsure verdict is
-    the LLM-triage pass's job, not this parser's.
+    subprocess, no filesystem. `bucket` defaults to "unsure" and `failure` is
+    empty — the dead/dynamic/unsure verdict is the LLM-triage pass's job, not
+    this parser's.
     """
     rows = []
     for line in text.splitlines():
@@ -36,15 +39,14 @@ def parse_vulture(text):
         name = m.group("name")
         confidence = int(m.group("confidence"))
         rows.append(
-            {
-                "bucket": "unsure",
-                "file": m.group("file"),
-                "line": int(m.group("line")),
-                "category": f"unused-{kind.replace(' ', '-')}",
-                "summary": f"unused {kind} '{name}'",
-                "failure": f"vulture flags '{name}' as an unused {kind} at {confidence}% confidence",
-                "extra": {"confidence": confidence},
-            }
+            auditlib.finding(
+                "unsure",
+                m.group("file"),
+                int(m.group("line")),
+                f"unused-{kind.replace(' ', '-')}",
+                f"unused {kind} '{name}'",
+                confidence=confidence,
+            )
         )
     return rows
 
@@ -62,6 +64,7 @@ def _selfcheck():
     assert rows[0]["category"] == "unused-function"
     assert rows[0]["extra"]["confidence"] == 60
     assert rows[0]["bucket"] == "unsure"
+    assert rows[0]["failure"] == ""
     assert "helper" in rows[0]["summary"]
 
     assert rows[1]["file"] == "bar.py"
@@ -74,12 +77,8 @@ def _selfcheck():
 
 
 def main(argv):
-    if argv[1:2] == ["--selfcheck"]:
-        _selfcheck()
-        return
-    text = sys.stdin.read() if len(argv) < 2 else open(argv[1], encoding="utf-8").read()
-    for row in parse_vulture(text):
-        print(json.dumps(row))
+    # supports `--selfcheck` via auditlib.run_cli
+    auditlib.run_cli(argv, _selfcheck, parse_vulture)
 
 
 if __name__ == "__main__":

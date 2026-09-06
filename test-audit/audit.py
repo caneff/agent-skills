@@ -24,6 +24,9 @@ import glob
 import os
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "all-audits", "harness"))
+import auditlib  # noqa: E402
+
 MOCK_NAMES = {"Mock", "MagicMock", "patch"}
 # ponytail: 3 is the ceiling. Below it, a test with one or two mocked
 # collaborators and real logic in between is normal isolation, not a smell.
@@ -214,11 +217,6 @@ def scan_file(path):
     return findings
 
 
-# Trees that duplicate or vendor the source. Worktrees mirror the whole repo,
-# so scanning them multiplies every finding once per worktree.
-_PRUNE_DIRS = {".venv", "node_modules", "dist", "build", ".git", "worktrees"}
-
-
 def scan_path(root):
     if os.path.isfile(root):
         paths = [root]
@@ -226,7 +224,7 @@ def scan_path(root):
         paths = [
             p
             for p in sorted(glob.glob(os.path.join(root, "**", "*.py"), recursive=True))
-            if not (_PRUNE_DIRS & set(p.split(os.sep)))
+            if not (auditlib.EXCLUDED_DIRS & set(p.split(os.sep)))
         ]
     findings = []
     for path in paths:

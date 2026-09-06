@@ -160,9 +160,9 @@ suite isn't watching it at all.
    row, sorted) — nothing further to call.
 
 6. **Write the deliverables and render the report — the default output.**
-   This audit touches no code: it's a report, not a fix. Resolve
-   `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write to
-   `<tmpdir>/crap-audit-<timestamp>/`:
+   This audit touches no code: it's a report, not a fix. Resolve `<tmpdir>`
+   per `~/.agents/skills/all-audits/harness/AUDIT-RUN.md`'s write-and-deliver
+   step. Write to `<tmpdir>/crap-audit-<timestamp>/`:
 
    - **`findings.jsonl`** — one line per finding (CRAP ≥ floor), the
      `score()` result's `findings` list verbatim, each row already carrying
@@ -230,10 +230,11 @@ suite isn't watching it at all.
      - **Full record** — one line pointing at `findings.jsonl` and one at
        `ranking.jsonl`, both beside the report.
 
-   Print the marker on its own line after writing:
-   `ALL_AUDITS_REPORT=/abs/path/to/report.html`. Then open the report
-   (`xdg-open`/`open`/`start`) and print its absolute path, unless invoked
-   from inside an `all-audits` sweep, which says not to.
+   Then open the report (`xdg-open`/`open`/`start`) and print its absolute
+   path — unless invoked from inside an `all-audits` sweep, which instead
+   names a manifest path in its prompt to write to (see
+   `~/.agents/skills/all-audits/harness/AUDIT-RUN.md#the-manifest-559`)
+   and says not to open anything.
 
 ## TypeScript path
 

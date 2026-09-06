@@ -54,7 +54,6 @@ cp "$vt/prism/prism-core.min.js" "$vt/prism/prism-clike.min.js" "$tmp/assets/pri
 cp "$vt/prism/prism-python.min.js" "$tmp/assets/prism/"                        # one grammar per language shown
 # cp "$vt/mermaid.js" "$vt/mermaid.min.js" "$tmp/assets/"                      # only with a diagram
 # write the report to "$tmp/report.html" linking href="assets/base/base.css" etc.
-echo "ALL_AUDITS_REPORT=$tmp/report.html"                                     # machine-readable marker, own line
 ```
 
 The tmp dir already resolves `${TMPDIR:-/tmp}` — a skill reusing this pattern
@@ -63,11 +62,11 @@ separate fallback note. Once the report is written, **open it and hand off the
 path**: `xdg-open <path>` on Linux, `open <path>` on macOS, `start <path>` on
 Windows, then tell the user the absolute path.
 
-**Print the marker line.** `run-audits.sh` collects each report by scanning
-the audit's stdout for `ALL_AUDITS_REPORT=/abs/path/to/report.html` on its own
-line — print exactly that, with the absolute path, after the report is
-written. Don't only describe the path in prose (e.g. across two lines, a
-directory then a filename): the collector greps for the marker, not English.
+**Inside a sweep, write the manifest.** When the prompt names a manifest
+path, `driver.py` finds your report there — a JSON object naming
+`report_path`, not a stdout scan. See
+[`AUDIT-RUN.md`](AUDIT-RUN.md#the-manifest-559)'s "The manifest" section for
+the exact shape.
 
 ## Scaffold basics
 
@@ -86,6 +85,41 @@ the `--vt-*` token layer (light `:root`, a `prefers-color-scheme` dark block,
 and a `[data-theme]` override) and `base/base.js` injects a fixed toggle that
 flips `data-theme`. The default view follows the OS theme; the toggle forces
 either. Mermaid re-themes on the flip through the bridge.
+
+## Page shell — the one skeleton every report fills in
+
+`<!doctype html>` on line 1, `base/base.css` + `base/base.js` always linked,
+Prism grammars (if any) loaded before `base.js`/`code.js`, the `mermaid.js`
+bridge last (if used). A skill's own `HTML-REPORT.md` fills in `{{title}}`,
+`{{kicker}}`, `{{h1}}`, its component `<link>`/`<script>` tags, and its body
+— it does not restate this skeleton:
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{title}}</title>
+
+    <link rel="stylesheet" href="assets/base/base.css" />
+    <!-- one <link> per component used, e.g. assets/components/callout/callout.css -->
+
+    <!-- Prism grammars (only if a card highlights code), before base.js/code.js -->
+    <script src="assets/base/base.js"></script>
+    <!-- assets/components/code/code.js — only if code blocks are used -->
+    <!-- assets/mermaid.js — only if a diagram is used, added last -->
+  </head>
+  <body>
+    <main>
+      <p class="vt-kicker">{{kicker}}</p>
+      <h1>{{h1}}</h1>
+      <p class="vt-lede">{{one-line verdict}}</p>
+      <!-- the skill's own body: cards, groups, standouts -->
+    </main>
+  </body>
+</html>
+```
 
 ## Beyond this doc
 

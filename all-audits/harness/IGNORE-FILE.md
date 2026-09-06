@@ -42,9 +42,9 @@ back in scope on the next sweep — that's the whole undo mechanism.
 ## How it reaches the audit
 
 Every audit in a sweep runs as its own non-interactive `claude -p` process
-that never reads this skill's instructions, which is why `run-audits.sh`
+that never reads this skill's instructions, which is why `driver.py`
 already appends a whole-repo scope override to each audit's prompt (see
-`audit_prompt()` in `all-audits/run-audits.sh`). When the audited repo has an
+`audit_prompt()` in `all-audits/driver.py`). When the audited repo has an
 ignore file, its raw contents ride along on that same prompt, appended after
 the override — not instead of it. No second channel, and no per-audit
 filtering: every audit sees the whole file.

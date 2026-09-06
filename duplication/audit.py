@@ -8,7 +8,11 @@ pair; it never judges consolidate vs keep — that's the judgment pass
 (SKILL.md) reading these rows and re-bucketing them.
 """
 import json
+import os
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "all-audits", "harness"))
+import auditlib  # noqa: E402
 
 
 def parse_jscpd(json_str):
@@ -17,7 +21,8 @@ def parse_jscpd(json_str):
     Pure: raw jscpd JSON text in, a list of findings-schema dict rows out. No
     subprocess, no filesystem. `bucket` defaults to "consolidate" — a token
     clone is a real clone by construction — the judgment pass can downgrade
-    it to "keep" for intentional/acceptable duplication.
+    it to "keep" for intentional/acceptable duplication. `failure` is empty;
+    naming the concrete drift is the judgment pass's job.
     """
     data = json.loads(json_str)
     rows = []
@@ -25,18 +30,16 @@ def parse_jscpd(json_str):
         first = dup["firstFile"]
         second = dup["secondFile"]
         tokens = dup["tokens"]
-        rows.append(
-            {
-                "bucket": "consolidate",
-                "file": first["name"],
-                "line": first["start"],
-                "category": "token-clone",
-                "summary": f"{first['name']}:{first['start']} duplicates {second['name']}:{second['start']} ({tokens} tokens)",
-                "failure": f"two copies drift; a fix to one at {first['name']}:{first['start']} silently skips the other at {second['name']}:{second['start']}",
-                "extra": {"clone_tokens": tokens},
-                "owner": f"{second['name']}:{second['start']}",
-            }
+        row = auditlib.finding(
+            "consolidate",
+            first["name"],
+            first["start"],
+            "token-clone",
+            f"{first['name']}:{first['start']} duplicates {second['name']}:{second['start']} ({tokens} tokens)",
+            clone_tokens=tokens,
         )
+        row["owner"] = f"{second['name']}:{second['start']}"
+        rows.append(row)
     return rows
 
 
@@ -64,7 +67,7 @@ def _selfcheck():
     assert row["bucket"] == "consolidate"
     assert row["extra"]["clone_tokens"] == 92
     assert "b.py:6" in row["summary"]
-    assert "a.py:4" in row["failure"] and "b.py:6" in row["failure"]
+    assert row["failure"] == ""
     assert row["owner"] == "b.py:6"
 
     empty = parse_jscpd(json.dumps({"duplicates": []}))
@@ -74,12 +77,8 @@ def _selfcheck():
 
 
 def main(argv):
-    if argv[1:2] == ["--selfcheck"]:
-        _selfcheck()
-        return
-    text = sys.stdin.read() if len(argv) < 2 else open(argv[1], encoding="utf-8").read()
-    for row in parse_jscpd(text):
-        print(json.dumps(row))
+    # supports `--selfcheck` via auditlib.run_cli
+    auditlib.run_cli(argv, _selfcheck, parse_jscpd)
 
 
 if __name__ == "__main__":

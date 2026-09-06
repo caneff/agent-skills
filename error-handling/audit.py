@@ -15,7 +15,11 @@ hits from the two tools merge into one row instead of two.
 """
 
 import json
+import os
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "all-audits", "harness"))
+import auditlib  # noqa: E402
 
 _CATEGORY = {
     "BLE001": "bare-except",
@@ -75,17 +79,15 @@ def parse_findings(ruff_json, bandit_json):
     ):
         codes = sorted({code for code, _, _ in fired})
         category = min({cat for _, cat, _ in fired}, key=_PRIORITY.index)
-        messages = "; ".join(sorted({msg for _, _, msg in fired}))
         rows.append(
-            {
-                "bucket": "fix",
-                "file": file,
-                "line": line,
-                "category": category,
-                "summary": f"{category.replace('-', ' ')} at {file}:{line} ({', '.join(codes)})",
-                "failure": f"exception silenced with no visible re-raise or log: {messages}",
-                "extra": {"codes": codes},
-            }
+            auditlib.finding(
+                "fix",
+                file,
+                line,
+                category,
+                f"{category.replace('-', ' ')} at {file}:{line} ({', '.join(codes)})",
+                codes=codes,
+            )
         )
     return rows
 
@@ -152,23 +154,16 @@ def _selfcheck():
 
     empty = parse_findings(json.dumps([]), json.dumps({"results": []}))
     assert empty == []
+    assert all(r["failure"] == "" for r in rows)
 
     print("ok")
 
 
 def main(argv):
-    if argv[1:2] == ["--selfcheck"]:
-        _selfcheck()
-        return
-    if len(argv) < 3:
-        print(
-            "usage: audit.py <ruff.json> <bandit.json> | --selfcheck", file=sys.stderr
-        )
-        sys.exit(1)
-    ruff_json = open(argv[1], encoding="utf-8").read()
-    bandit_json = open(argv[2], encoding="utf-8").read()
-    for row in parse_findings(ruff_json, bandit_json):
-        print(json.dumps(row))
+    auditlib.run_cli(
+        argv, _selfcheck, parse_findings, nargs=2,
+        usage="usage: audit.py <ruff.json> <bandit.json> | --selfcheck",
+    )
 
 
 if __name__ == "__main__":
