@@ -131,8 +131,10 @@ read-only, exploration and review both, is an in-process subagent.
    Anything else is counted as nothing: a burn that writes prose here shows as
    permanently building on the statusline. Write `landed` only for a merge that
    happened — when the human owns the merge, `pr` is where the ticket stops.
-   Full grammar and the renderer:
-   `~/.agents/skills/flow/ccstatusline-table/helpers/burndown-segment.sh`.
+   Several `burning` lines can be open at once, one per ticket in flight; a
+   ticket's state is its last line, so a later line supersedes an earlier one
+   for that ticket — `pr` followed by `landed` is one ticket, merged.
+   This is the single documented home for the grammar — nothing else restates it.
 8. When a ticket settles, refill its slot: go to 1, skipping step 3. Re-list
    every pass — a landing can unblock tickets, and a human may have added
    more. At the ticket cap — landed plus parked — start no new tasks, let the
@@ -216,3 +218,17 @@ When the loop stops, tally: tickets landed (issue → commit), tickets parked
 and why, tickets still open and what blocks them. Say why the loop stopped —
 queue empty, ticket cap, or two parks with no landing — and if the queue is
 not empty, say to run `/burndown` again.
+
+Where a human owns the merge, the report ends with **one pasteable line** that
+merges every open PR from this burn, in stack-safe order — each base PR before
+the PR stacked on it:
+
+```
+! for n in <PR numbers in that order>; do gh pr merge $n --squash --delete-branch; done
+```
+
+Before handing it over, dry-run merge every branch in that order onto the
+default branch in a detached throwaway worktree and run the repo's test seam;
+say the result in one line. Never split the merges into per-PR commands. Any
+post-merge step a human must do on the live machine follows the line, in
+order.

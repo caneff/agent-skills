@@ -154,12 +154,10 @@ suite isn't watching it at all.
    python3 ~/.agents/skills/crap-audit/audit.py <tmpdir>/radon.json coverage.json          # Python
    python3 ~/.agents/skills/crap-audit/audit.py --ts <tmpdir>/crap_typescript.json         # TypeScript
    ```
-   `audit.py`'s `main()` only prints `findings` (bucket ≥ floor) as JSONL —
-   for the full ranking asset and gate values, call `score()` directly (a
-   one-line Python script or `-c` invocation) on `normalize(...)` or
-   `normalize_ts(...)`'s rows, and keep the whole returned dict: `findings`,
-   `under_floor` (`count` + a small `sample`), `gates` (`classic`,
-   `above_current_max`), `ranking` (every row, sorted).
+   `audit.py`'s `main()` prints the whole `score()` result as one JSON
+   object — `findings` (bucket ≥ floor), `under_floor` (`count` + a small
+   `sample`), `gates` (`classic`, `above_current_max`), `ranking` (every
+   row, sorted) — nothing further to call.
 
 6. **Write the deliverables and render the report — the default output.**
    This audit touches no code: it's a report, not a fix. Resolve

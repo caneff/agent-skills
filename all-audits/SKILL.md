@@ -9,8 +9,9 @@ Run the whole audit set over one repo in a single sweep. Thirteen audit skills f
 out in parallel, each as its own process; each writes a self-contained report;
 the reports collect under one folder behind an `index.html` that links them. The
 sweep **reports only** — it applies nothing and
-opens no PR. When it finishes it stops and hands you the index, so you decide what
-to grill.
+opens no PR. When it finishes it stops and hands you the index, so you decide
+whether to grill — and if you do, the grill walks every report in the fixed
+order.
 
 ## Scope
 
@@ -72,6 +73,10 @@ clean, fewer than `N` files (default 10) changed since the last-run SHA, no
 change touched `domain-drift`'s ground-truth (`CONTEXT.md`, `docs/adr/`), and the
 last run is within the time backstop (default 30 days).
 
+**Ignore file.** A repo can carry `.audit-ignore.md` at its root to suppress
+findings it has already reviewed and rejected, so a sweep stops re-raising
+them. Opt-in per repo — see [`harness/IGNORE-FILE.md`](harness/IGNORE-FILE.md).
+
 ## Run
 
 Two front doors, one engine. `run-audits.sh` runs the whole sweep — it fans each
@@ -100,13 +105,13 @@ When you are invoked in-session as `/all-audits [path]`:
    `Skill` tool; that is the broken path this replaces.
 
 3. **Report the index, then stop.** The script prints `index: <path>` and opens
-   that page itself — do not open it again. Print its absolute path, list the
-   audits, and tell the user they can grill any one by name. **Do not start
-   grilling on your own.**
+   that page itself — do not open it again. Print its absolute path and list the
+   audits. **Do not start grilling on your own** — the sweep never starts the
+   grill; when the user asks for it, the grill walks every report widest-first
+   per [`harness/GRILLING.md`](harness/GRILLING.md).
 
 ## After the sweep
 
-The sweep reports only and never grills on its own. For what to do once the
-user picks a report — running the `grilling` skill over its findings, deduping
-against decisions already reached this run, and filing the results as a
-`wayfinder:map` — see [`harness/GRILLING.md`](harness/GRILLING.md).
+The sweep reports only and never grills on its own. For the grill's walk of
+every report — order, per-report grilling, and the auto-carry rule — see
+[`harness/GRILLING.md`](harness/GRILLING.md).

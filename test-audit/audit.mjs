@@ -62,22 +62,25 @@ function walk(node, visit) {
   }
 }
 
+/** An Identifier node's name, else null. */
+function identifierName(node) {
+  return node && node.type === "Identifier" ? node.name : null;
+}
+
 /** The bare callee name for an Identifier call, else null. */
 function calleeName(node) {
   if (node.type !== "CallExpression") return null;
-  const c = node.callee;
-  if (c.type === "Identifier") return c.name;
-  return null;
+  return identifierName(node.callee);
 }
 
 /** The `object.property` root+method for a member-call (`it.skip`), else null. */
 function memberCallee(node) {
   if (node.type !== "CallExpression") return null;
   const c = node.callee;
-  if (c.type === "MemberExpression" && c.object.type === "Identifier" && c.property.type === "Identifier") {
-    return { root: c.object.name, method: c.property.name };
-  }
-  return null;
+  if (c.type !== "MemberExpression") return null;
+  const root = identifierName(c.object);
+  const method = identifierName(c.property);
+  return root && method ? { root, method } : null;
 }
 
 const TEST_ROOTS = new Set(["it", "test"]);
@@ -159,7 +162,7 @@ const EQ_MATCHERS = new Set(["toBe", "toEqual", "toStrictEqual"]);
  */
 function asExpectAssertion(node) {
   if (node.type !== "CallExpression" || node.callee.type !== "MemberExpression") return null;
-  const matcher = node.callee.property.type === "Identifier" ? node.callee.property.name : null;
+  const matcher = identifierName(node.callee.property);
   let obj = node.callee.object;
   while (obj && obj.type === "MemberExpression") obj = obj.object; // walk past .not/.resolves
   if (obj && obj.type === "CallExpression" && calleeName(obj) === "expect") {
@@ -177,10 +180,10 @@ const ASSERT_EQ_MATCHERS = new Set(["equal", "strictEqual", "deepEqual", "deepSt
 function assertCallInfo(node) {
   if (node.type !== "CallExpression") return null;
   const c = node.callee;
-  if (c.type === "MemberExpression" && c.object.type === "Identifier" && c.object.name === "assert" && c.property.type === "Identifier") {
-    return { matcher: c.property.name, args: node.arguments };
+  if (c.type === "MemberExpression" && identifierName(c.object) === "assert" && identifierName(c.property)) {
+    return { matcher: identifierName(c.property), args: node.arguments };
   }
-  if (c.type === "Identifier" && c.name === "assert") {
+  if (identifierName(c) === "assert") {
     return { matcher: "ok", args: node.arguments };
   }
   return null;

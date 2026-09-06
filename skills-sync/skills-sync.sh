@@ -106,7 +106,7 @@ main() {
   case "${1:-}" in
     --self-test) self_test ;;
     --fix)       scan fix ;;
-    ""|--report) scan nofix ;;
+    "") scan nofix ;;
     *) echo "usage: skills-sync.sh [--fix] [--self-test]" >&2; exit 2 ;;
   esac
 }

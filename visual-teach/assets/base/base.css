@@ -24,6 +24,8 @@
   --vt-warn-dk: #9a6b00; /* dark amber for outline/foreground warn uses */
   --vt-ui-font:
     "Helvetica Neue", Arial, sans-serif; /* sans UI chrome: kickers, labels, metabar, component text (body stays Georgia serif) */
+  --vt-mono-font:
+    ui-monospace, "Cascadia Code", Menlo, monospace; /* code, kbd, sandbox input — every monospace use shares this stack */
 }
 
 /* derived tints */
@@ -165,7 +167,7 @@ a {
   color: var(--vt-accent);
 }
 code {
-  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-family: var(--vt-mono-font);
   font-size: 0.88em;
   background: var(--vt-soft);
   padding: 0.1em 0.35em;

@@ -1,6 +1,6 @@
 ---
 name: visual-teach
-description: "`visual-teach` is the styling + behavior floor under every teaching lesson — link its Base first, then use ready-made `vt-*` blocks for the standard parts. The floor goes under any lesson HTML (especially `/teach`), including heavily custom or interactive ones: use the blocks for the commodity parts and build your bespoke exercise on top, never instead of it."
+description: "`visual-teach` is the styling + behavior floor under `/teach` lessons and the audit-skill HTML reports — link its Base first, then use ready-made `vt-*` blocks for the standard parts. Use the blocks for the commodity parts and build your bespoke exercise or report content on top, never instead of it."
 ---
 
 # visual-teach

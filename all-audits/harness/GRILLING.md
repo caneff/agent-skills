@@ -1,16 +1,36 @@
 # Post-sweep grilling workflow
 
 `all-audits/SKILL.md` points here after it reports the index and stops. This
-is what to do once the user picks a report to grill — the sweep itself does
-not start this on its own.
+is the grill's own walk of every report the sweep produced — the user never
+names one for it to start.
 
 ## Grilling a report
 
-When the user picks an audit to grill, run the `grilling` skill over **that one
-report's findings**. Grill the findings toward decisions — which to act on, which
-to drop, which need a closer look. Walk one audit at a time; do not merge them
-into one grilling — a comment cut and an architecture deepening share no design
-tree.
+Grill every report the sweep produced, one after another, without waiting to
+be told which one. When the user asks to grill the sweep, start at the top of
+the order below and work down. Run the `grilling` skill over **one report's findings at a
+time**. Grill the findings toward decisions — which to act on, which to drop,
+which need a closer look. Walk one audit at a time; never merge two reports
+into one grilling — a comment cut and an architecture deepening share no
+design tree.
+
+**Order: widest-reaching first, fixed.** Grill in this order, so the run
+that touches the most decisions settles first and cheapens everything after
+it. Skip any name below that has no report in this run:
+
+1. `improve-codebase-architecture` — shallow modules and deepening opportunities.
+2. `thermo-nuclear-code-quality-review` — abstraction quality, giant files, spaghetti growth.
+3. `crap-audit` — per-function CRAP score, real risk hotspots.
+4. `ponytail-audit` — over-engineering: what to delete, shrink, or replace with stdlib.
+5. `duplication` — one behavior with two homes.
+6. `dead-code` — functions, classes, imports nobody calls.
+7. `error-handling` — swallowed errors against the fail-loud rule.
+8. `type-tightness` — loose `Any`, unexplained `# type: ignore`, fake boundaries.
+9. `domain-drift` — code vocabulary that drifts from the project's domain terms.
+10. `docstring-coverage` — undocumented public API on a `py.typed` surface.
+11. `test-audit` — tests that prove nothing or check the wrong thing.
+12. `comment-audit` — comments that do not earn their place.
+13. `audit-instructions` — instruction files against Anthropic's current guidance.
 
 Read the findings from the audit's own record: for an audit that writes
 `findings.jsonl` (see [`findings-schema.md`](findings-schema.md)), the full
@@ -18,20 +38,24 @@ list is there (`log_path`) — read that, not the summary HTML, which holds only
 grouped counts. For an audit that renders a full HTML report instead, the
 report is the record.
 
-**Dedup against audits already grilled this run.** You grill the audits one after
-another in the same session, so the decisions you have already reached are in
-context — use them. For every finding in the current report, check it against what
-you already decided. A match is **semantic**, not same-file: the same underlying
-issue or fix, even if two reports word it differently or name different files; two
-audits touching one file for unrelated reasons are *not* a match. For a finding
-that repeats a settled one, do not grill it cold — surface it: "already decided
-`<decision>` while grilling `<audit>` — carry it forward, or re-open?" Grill only
-the fresh findings from scratch. Grilling the widest-reaching audit first
-(architecture, thermo) settles the most before the narrower passes run.
+**Rule: a semantic match with a settled decision is carried forward, never
+asked again.** You grill the audits one after another in the same session, so
+the decisions you have already reached are in context — use them. For every
+finding in the current report, check it against what you already decided. The
+match test is **semantic, not same-file**: the same underlying issue or fix,
+even if two reports word it differently or name different files, is a match;
+two audits touching one file for unrelated reasons is **not** a match. For a
+finding that matches a settled decision, do not grill it cold and do not put
+it to the user as a question — surface it as carried forward: "already decided
+`<decision>` while grilling `<audit>` — carrying it forward (say if you want
+it re-opened instead)." Grill only the fresh, non-matching findings from
+scratch.
 
 A grill ends at **decisions**. Do not chain into `/to-spec`, `/to-tickets`, or any
 build step — handing a decision off to the build pipeline is a separate call the
-user makes when ready.
+user makes when ready. Grilling changes no code and opens no PR — the sweep and
+its grill are report-and-decide only; applying anything is a separate, opt-in
+step outside this workflow.
 
 ## Turn the decisions into a map
 
