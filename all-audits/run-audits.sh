@@ -632,7 +632,7 @@ synthesis="$(printf '%s' "$synthesis" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt
 # --- Build index.html (visual-teach styling, matching the reports) -----------
 for name in "${AUDITS[@]}" "${MUTATION_MODULES[@]}"; do
   if [ -d "$COLLECTION/$name/assets" ]; then
-    cp -r "$COLLECTION/$name/assets" "$COLLECTION/assets"
+    replace_dir "$COLLECTION/$name/assets" "$COLLECTION/assets"
     break
   fi
 done
