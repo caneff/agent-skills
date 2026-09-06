@@ -36,6 +36,26 @@ fi
 
 echo "ok"
 
+# A module report can carry its own assets/ dir (visual-teach spine copied in).
+# A second --index run must REPLACE $tmp/collection/assets, not nest a copy of
+# it inside itself (#560: the old `cp -r` onto an existing dest nests
+# assets/assets on re-run; replace_dir's rm-then-cp must not).
+mkdir -p "$tmp/collection/dead-code/assets/base"
+echo "body{}" >"$tmp/collection/dead-code/assets/base/base.css"
+
+AUDITS_NO_OPEN=1 AUDITS_NO_SYNTH=1 bash "$SCRIPT" --index --out "$tmp" >"$tmp/run2.log" 2>&1 \
+  || fail "second --index run exited non-zero; see: $(cat "$tmp/run2.log")"
+[ -f "$tmp/collection/assets/base/base.css" ] || fail "second --index run: assets not copied to collection root"
+
+# Third run: $tmp/collection/assets already exists from run two — this is where
+# a bare `cp -r` nests (assets/assets) instead of replacing.
+AUDITS_NO_OPEN=1 AUDITS_NO_SYNTH=1 bash "$SCRIPT" --index --out "$tmp" >"$tmp/run3.log" 2>&1 \
+  || fail "third --index run exited non-zero; see: $(cat "$tmp/run3.log")"
+[ -f "$tmp/collection/assets/base/base.css" ] || fail "third --index run: assets not copied to collection root"
+[ -d "$tmp/collection/assets/assets" ] && fail "third --index run: assets/assets nesting (stale replace_dir/cp -r bug)"
+
+echo "ok (--index re-run replaces assets/ without nesting)"
+
 # --- report_path_from_log (#391): marker line wins over a split path in prose,
 # and a legacy bare single-line path still works with no marker present. ---
 source "$SCRIPT"
