@@ -55,7 +55,7 @@
 .vt-code pre code {
   display: block;
   padding: 0.9rem 1rem;
-  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-family: var(--vt-mono-font);
   font-size: 0.85rem;
   line-height: 1.55;
   background: none;
@@ -181,7 +181,7 @@ code.vt-pcode {
 .vt-io pre code {
   display: block;
   padding: 0.9rem 1rem;
-  font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+  font-family: var(--vt-mono-font);
   font-size: 0.85rem;
   line-height: 1.55;
   background: none;

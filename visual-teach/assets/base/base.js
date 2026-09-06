@@ -1,5 +1,5 @@
 /* Each component file is self-contained so it can be copied on its own. */
-
+(function () {
 /* Cross-origin-safe theme bridge: works even over file://, where a parent
    iframe cannot reach contentDocument to set the theme directly. */
 function wireThemeBridge(win) {
@@ -135,6 +135,59 @@ function init() {
   }
 }
 
+/* Shared structural guard: warns and returns false if `block` is missing any
+   of `selectors` — every component used to define its own copy of this. */
+function ensure(block, selectors) {
+  var blockClass =
+    Array.from(block.classList).find(function (c) {
+      return c.startsWith("vt-");
+    }) || block.className;
+  var ok = true;
+  selectors.forEach(function (sel) {
+    if (!block.querySelector(sel)) {
+      console.warn(
+        "visual-teach: " +
+          blockClass +
+          " missing required " +
+          sel +
+          " — left inert"
+      );
+      ok = false;
+    }
+  });
+  return ok;
+}
+
+/* Shared ready-state loop: every component used to hand-roll its own
+   "run now or on DOMContentLoaded" check. Pass a selector to wire each
+   matching element (errors per-element are caught and warned); pass a
+   falsy selector to run `fn` once, with no element, for global setup
+   (e.g. math's document-wide KaTeX pass). */
+function register(selector, fn, name) {
+  function run() {
+    if (!selector) {
+      try {
+        fn();
+      } catch (e) {
+        console.warn("visual-teach " + name + ": failed to wire", e);
+      }
+      return;
+    }
+    document.querySelectorAll(selector).forEach(function (el) {
+      try {
+        fn(el);
+      } catch (e) {
+        console.warn("visual-teach " + name + ": failed to wire", e);
+      }
+    });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", run);
+  } else {
+    run();
+  }
+}
+
 // Plain-script export (no ESM `export`) so lessons load via a classic
 // <script src> over file:// — no module CORS, no local server.
 var vtBase = {
@@ -142,6 +195,8 @@ var vtBase = {
   wireThemeToggle: wireThemeToggle,
   wireAnchors: wireAnchors,
   wireBreakout: wireBreakout,
+  ensure: ensure,
+  register: register,
   init: init,
 };
 if (typeof module !== "undefined" && module.exports) {
@@ -157,3 +212,4 @@ if (typeof document !== "undefined") {
     init();
   }
 }
+})();

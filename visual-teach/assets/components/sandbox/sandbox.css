@@ -23,7 +23,7 @@
   box-sizing: border-box;
   font: inherit;
   font-size: 0.95rem;
-  font-family: "Courier New", Courier, monospace;
+  font-family: var(--vt-mono-font);
   background: var(--vt-paper);
   color: var(--vt-ink);
   border: 1px solid var(--vt-rule);
