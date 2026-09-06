@@ -92,6 +92,13 @@ def _selfcheck():
 
         shutil.rmtree(tmp)
 
+    mirror = os.path.join(os.path.dirname(__file__), "excluded-dirs.json")
+    mirrored = set(json.load(open(mirror, encoding="utf-8")))
+    assert mirrored == EXCLUDED_DIRS, (
+        f"excluded-dirs.json is stale — re-run "
+        f"`python3 auditlib.py --write-json-mirror excluded-dirs.json` (got {mirrored}, want {EXCLUDED_DIRS})"
+    )
+
     print("ok")
 
 

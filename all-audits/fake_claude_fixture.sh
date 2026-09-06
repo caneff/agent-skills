@@ -19,5 +19,11 @@ case "$prompt" in
     mkdir -p "$(dirname "$manifest")"
     printf '{"report_path": "%s/report.html", "count": 1, "headline": "one finding"}\n' "$dir" >"$manifest"
     ;;
-  *) : ;;  # every other audit: write nothing — the missing-manifest case
+  *)
+    # Every other audit: no manifest — the crashed/silent-process case. Print
+    # a stray .html path to stdout (this becomes its log), the way a real
+    # transcript might mention an unrelated file — a log-grepping collector
+    # would wrongly pick this up; a manifest-reading one must not.
+    echo "see /tmp/unrelated-1234/other.html for context"
+    ;;
 esac

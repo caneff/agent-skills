@@ -113,8 +113,13 @@ def git_state(repo, last_sha):
     dirty = bool(_run(["git", "-C", repo, "status", "--porcelain"]).stdout.strip())
     changed = []
     if last_sha:
-        out = _run(["git", "-C", repo, "diff", "--name-only", f"{last_sha}..HEAD"]).stdout
-        changed = [ln for ln in out.splitlines() if ln.strip()]
+        result = _run(["git", "-C", repo, "diff", "--name-only", f"{last_sha}..HEAD"])
+        if result.returncode != 0:
+            # A SHA `git diff` can't resolve (never a real commit, or pruned)
+            # proves nothing about staleness — force dirty so should_run can
+            # never read "no diff output" as "unchanged" (#558).
+            return {"dirty": True, "changed_files": []}
+        changed = [ln for ln in result.stdout.splitlines() if ln.strip()]
     return {"dirty": dirty, "changed_files": changed}
 
 

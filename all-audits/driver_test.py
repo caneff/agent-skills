@@ -202,11 +202,11 @@ def test_index_from_manifests_missing_manifest_is_a_failure_row():
         )
         assert r.returncode == 0, r.stdout + r.stderr
 
-        # Plant an unrelated .html reference in duplication's log after the
-        # run, mimicking a stray path a transcript-grep would have picked up.
-        dup_log = os.path.join(tmp, "out", "logs", "duplication.log")
-        with open(dup_log, "a") as f:
-            f.write("\nsee /tmp/unrelated-1234/other.html for context\n")
+        # duplication's fake process printed a stray .html path to its own
+        # log (see fake_claude_fixture.sh) and wrote no manifest — a
+        # log-grepping collector would wrongly pick that path up.
+        dup_log = open(os.path.join(tmp, "out", "logs", "duplication.log")).read()
+        assert "unrelated-1234" in dup_log, "fixture setup: the stray path must land in duplication's own log"
 
         index_text = open(os.path.join(tmp, "out", "collection", "index.html")).read()
         assert "dead-code/report.html" in index_text, "the manifest-backed report must be linked"
@@ -226,14 +226,17 @@ def _init_git_repo(path):
 def test_cache_decision_bad_sha_forces_run():
     """AC: a bad/unknown last-run SHA on a real temp git repo must yield
     RUN — `git diff` against a SHA that doesn't exist can't prove the repo
-    is unchanged, so it must never read as SKIP."""
+    is unchanged, so it must never read as SKIP. The timestamp here is
+    fresh (regression witness: an old timestamp would trip the backstop
+    and pass even if the bad-SHA path itself silently read as unchanged —
+    that's exactly the bug this test caught)."""
     with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as cache_dir:
         _init_git_repo(repo)
         record_path = driver._record_file(repo, cache_dir)
         driver.save_record(record_path, {
             "domain-drift": {
                 "last_sha": "0" * 40,  # a SHA that was never a real commit
-                "timestamp": "2026-01-01T00:00:00+00:00",
+                "timestamp": driver._dt.datetime.now(driver._dt.timezone.utc).isoformat(),
                 "report_dir": os.path.join(cache_dir, "nope"),
             }
         })

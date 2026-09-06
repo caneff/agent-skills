@@ -14,6 +14,17 @@ one place the rule is stated: an audit that takes an explicit branch scope
 instead resolves it via `git merge-base` against the origin's default
 branch — never an assumed `main`.
 
+## Shared code
+
+A parser-style audit (one with an `audit.py`) imports
+[`auditlib.py`](auditlib.py) via a two-line path hook instead of carrying its
+own excluded-directory set, source walk, or parse/`--selfcheck` CLI dispatch
+— see `dead-code/audit.py` for the pattern. `auditlib.EXCLUDED_DIRS` is the
+one definition of the excluded-directory set; regenerate its JSON mirror
+(`excluded-dirs.json`, read by the `test-audit/audit.mjs` JS twin) with
+`python3 auditlib.py --write-json-mirror excluded-dirs.json` whenever the set
+changes.
+
 ## Write the findings log and render the summary — the default deliverable
 
 Write every finding to `findings.jsonl`, then draw a grouped summary

@@ -230,10 +230,11 @@ suite isn't watching it at all.
      - **Full record** — one line pointing at `findings.jsonl` and one at
        `ranking.jsonl`, both beside the report.
 
-   Print the marker on its own line after writing:
-   `ALL_AUDITS_REPORT=/abs/path/to/report.html`. Then open the report
-   (`xdg-open`/`open`/`start`) and print its absolute path, unless invoked
-   from inside an `all-audits` sweep, which says not to.
+   Then open the report (`xdg-open`/`open`/`start`) and print its absolute
+   path — unless invoked from inside an `all-audits` sweep, which instead
+   names a manifest path in its prompt to write to (see
+   `~/.agents/skills/all-audits/harness/AUDIT-RUN.md#the-manifest-559`)
+   and says not to open anything.
 
 ## TypeScript path
 
