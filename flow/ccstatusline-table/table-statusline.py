@@ -200,11 +200,11 @@ def main() -> None:
         breset = run([str(CFG / "usage-segment.sh"), "breset"], raw)
         return " · ".join(x for x in (win(weekly, wreset), win(session, breset)) if x)
 
-    # Project name only, matching the blind-test toast's `Path(cwd).name`
-    # convention; fed the main root so a linked worktree collapses to the
-    # project name too, not the worktree's.
     cells = [
         (PURPLE, model_cell),
+        # Project name only, matching the blind-test toast's `Path(cwd).name`
+        # convention; fed the main root so a linked worktree collapses to the
+        # project name too, not the worktree's.
         (CYAN, lambda: Path(root or cwd).name),
         (ORANGE, lambda: f"Ctx {tokens / 1000:.1f}k" if tokens else "Ctx —"),
         (PINK, usage_cell),
