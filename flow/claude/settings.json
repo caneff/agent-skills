@@ -38,7 +38,8 @@
       "Read(//home/caneff/.claude/**)",
       "Read(//home/caneff/.codex/**)",
       "Read(//home/caneff/.codex/skills/**)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "mcp__exa__web_search_exa"
     ],
     "deny": [
       "AskUserQuestion",
