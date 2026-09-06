@@ -137,7 +137,7 @@ def _sibling_tests(p):
     }
 
 
-def suggest_candidates(paths, limit=5):
+def suggest_candidates(paths, limit=None):
     """Suggest candidate modules to mutation-test from repo state.
 
     Pure: a list of repo-relative `.py` paths in, up to `limit` candidate

@@ -72,8 +72,14 @@ def collect(repo, range_arg):
     return commits
 
 
-def esc(x):
-    return html.escape(x)
+esc = html.escape
+
+
+def link(gh, path, text, cls=""):
+    if not gh:
+        return f'<span class="{cls}">{text}</span>' if cls else ""
+    attr = f' class="{cls}"' if cls else ""
+    return f'<a{attr} href="{gh}{path}">{text}</a>'
 
 
 def diff_html(d):
@@ -106,12 +112,9 @@ def render_repo(commits, gh):
         for c in cs:
             w = max(2, round(56 * (c["add"] + c["rem"]) / maxtotal))
             aw = round(w * c["add"] / (c["add"] + c["rem"])) if c["add"] + c["rem"] else 0
-            hash_ = (f'<a class="hash" href="{gh}/commit/{c["H"]}">{c["h"]}</a>' if gh
-                     else f'<span class="hash">{c["h"]}</span>')
+            hash_ = link(gh, f"/commit/{c['H']}", c["h"], "hash")
             badge = '<span class="badge">agent-built</span>' if c["agent"] else ''
-            closes = " ".join(
-                f'<a class="issue" href="{gh}/issues/{n}">#{n}</a>' if gh else f'<span class="issue">#{n}</span>'
-                for n in c["closes"])
+            closes = " ".join(link(gh, f"/issues/{n}", f"#{n}", "issue") for n in c["closes"])
             flist = "".join(
                 f'<tr><td class="fp">{esc(f)}</td><td class="fa">+{a}</td><td class="fr">−{r}</td></tr>'
                 for f, a, r in c["files"])
@@ -119,7 +122,8 @@ def render_repo(commits, gh):
                 dsec = (f'<details class="dwrap"><summary>diff · +{c["add"]} −{c["rem"]}</summary>'
                         f'<pre class="diff">{diff_html(c["diff"])}</pre></details>')
             else:
-                where = f' — <a href="{gh}/commit/{c["H"]}">read it on GitHub</a>' if gh else ''
+                commit_link = link(gh, f"/commit/{c['H']}", "read it on GitHub")
+                where = f' — {commit_link}' if gh else ''
                 dsec = f'<p class="skip">Diff skipped for size ({c["add"] + c["rem"]} changed lines){where}.</p>'
             bodyp = (f'<p class="cbody">{esc(c["body"]).replace(chr(10)+chr(10), "</p><p class=cbody>").replace(chr(10), " ")}</p>'
                      if c["body"] else '')
@@ -156,7 +160,6 @@ def main():
     page = f'''<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Landed</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&display=swap">
 <style>
 /* Dracula Theme Soft — the user's VS Code theme (dark-only, so no light mode). */
 :root {{ --bg:#191A21; --card:#282A36; --ink:#F6F6F4; --mut:#7B7F8B; --line:#44475A;
