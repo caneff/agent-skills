@@ -29,12 +29,14 @@ link claude/RTK.md              "$HOME/.claude/RTK.md"
 # would break the link. It is a copy-only backup (see backup-sync.sh), written
 # by the --restore call below.
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
-for h in block-dangerous-git.sh sync-primary-main.sh package.json; do
+for h in block-dangerous-git.sh sync-primary-main.sh require-agent-model.sh package.json; do
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
 done
 
-link ccstatusline/settings.json          "$HOME/.config/ccstatusline/settings.json"
-link ccstatusline/issue-counts-segment.sh "$HOME/.config/ccstatusline/issue-counts-segment.sh"
+# Pre-push hook: refuse a push when tests/all.sh fails. Hooks are shared
+# across worktrees, so resolve the common git dir rather than assuming ".git".
+git_common_dir="$(git -C "$here/.." rev-parse --path-format=absolute --git-common-dir)"
+link ../tests/all.sh "$git_common_dir/hooks/pre-push"
 
 # Lay down the copy-only backups (files a symlink can't hold): the Windows VS
 # Code settings and claude/settings.json.

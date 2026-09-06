@@ -15,9 +15,7 @@ every commit here is a backup.
 | `claude/RTK.md` | `~/.claude/RTK.md` | RTK proxy notes |
 | `claude/settings.json` | `~/.claude/settings.json` | Harness config: hooks, permissions |
 | `claude/settings.local.json` | `~/.claude/settings.local.json` | Machine-local overrides |
-| `claude/hooks/*` | `~/.claude/hooks/*` | git guardrail + main-sync hooks |
-| `ccstatusline/settings.json` | `~/.config/ccstatusline/settings.json` | ccstatusline layout + per-widget colors |
-| `ccstatusline/issue-counts-segment.sh` | `~/.config/ccstatusline/issue-counts-segment.sh` | Cached statusline widget calling `issue-counts` |
+| `claude/hooks/*` | `~/.claude/hooks/*` | git guardrail, main-sync, agent-model-guard hooks |
 
 `~/.claude/skills` is already this repo, so it isn't duplicated here.
 
@@ -43,11 +41,6 @@ top of the script):
 The `--commit` path is scoped to the manifest paths, so it never sweeps an
 unrelated edit into its commit. It copies each file **whole**, so keep secrets
 out of the listed files.
-
-The other segments `ccstatusline/settings.json` references (`effort-abbrev.py`,
-`usage-segment.sh`, `publish-usage.sh`) are not backed
-up here yet — a fresh restore links the config but those widgets won't run until
-their scripts exist.
 
 ## Restore on a fresh machine
 
