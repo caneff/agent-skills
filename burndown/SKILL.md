@@ -11,8 +11,10 @@ command is an Orca verb: run `orca-ide skills get orchestration` and
 which is version-matched to the binary.
 
 A single spec's slices in one Orca workspace are
-[`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this skill's — use
-that instead when every ticket traces to the same spec issue.
+[`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this skill's.
+When the whole queue is one spec's slices, run that instead. When a spec's
+slices sit in a mixed queue, this skill hands the spec off to it as one unit —
+see § Spec handoff — rather than building the slices one PR at a time.
 
 **Arguments:** `/burndown [builders] [tickets]` — the maximum number of live
 worker tasks (default 3) and the maximum number of tickets this burn will
@@ -56,7 +58,9 @@ read-only, exploration and review both, is an in-process subagent.
    Empty, with nothing in flight → report and stop.
 2. Take the **frontier** via Orca's ready-task query: every ticket whose
    blockers are all closed, lowest numbers first, up to the free worker
-   slots. That set is this pass's batch.
+   slots. That set is this pass's batch. Before dispatching, pull out any
+   ticket that is a sub-issue of a `spec`-labelled parent: those go through
+   § Spec handoff as one unit per spec, and the spec takes one worker slot.
 3. First pass only: run exploration (above) as a subagent and wait for its
    result before dispatching builders. Every later pass skips this and points
    its workers at the same notes file.
@@ -133,6 +137,37 @@ read-only, exploration and review both, is an in-process subagent.
    every pass — a landing can unblock tickets, and a human may have added
    more. At the ticket cap — landed plus parked — start no new tasks, let the
    live ones settle, and stop.
+
+## Spec handoff
+
+A ticket whose parent issue carries the `spec` label is a slice, and slices
+are built together or not at all: one workspace, one branch, one PR that
+closes the spec and every child, with the end-to-end review loop that only
+`implement-spec` runs. Building them one PR at a time here loses that loop and
+lands a spec in pieces a human has to reassemble.
+
+So the spec, not the slice, is the unit. Find the parent with
+`gh api repos/<owner>/<repo>/issues/<n>/parent` (or the `Part of #N`
+reference in the body when the tracker has no sub-issues) and confirm its label.
+Then:
+
+- Make one Orca workspace **from the spec issue** and dispatch one Orca task
+  in it — a top-level `claude` session seeded with the spec URL and the pointer
+  `~/.agents/skills/implement-spec/SKILL.md`, which it follows as coordinator.
+  That coordinator owns the spec's exploration, frontier, gates, review loop,
+  and PR; this burn does not look inside.
+- Every open slice of that spec — ready or still blocked — leaves this burn's
+  queue at handoff, and the cluster counts against the ticket cap as its
+  number of slices. Slices already `in-progress` under a burn worker finish
+  as they are; the spec coordinator picks up from their landings.
+- Progress lines use the spec's number: `burning #<spec>`, then `#<spec> pr
+  <ref>` or `#<spec> parked: <why>`. A gate the spec coordinator raises is that
+  burn's `ready-for-human` for the whole spec — park it, do not answer it.
+- The spec's workspace is the coordinator's to tear down, not this burn's.
+
+A slice with no `spec`-labelled parent is an ordinary ticket. A spec with
+exactly one open slice is still handed off — the loop is the point, not the
+count.
 
 ## Waiting on Orca workers
 
