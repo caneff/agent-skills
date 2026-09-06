@@ -22,6 +22,10 @@ section() { # section <file> <heading>
   ' "$1"
 }
 
+bullet() { # bullet <file> <bullet-prefix>
+  grep "^- \*\*$2" "$1" || true
+}
+
 fail=0
 live_gate=$(section "$LIVE" "## Grilling gate on new tickets")
 
@@ -38,6 +42,17 @@ for t in "${TEMPLATES[@]}"; do
 
   if ! grep -q "Relationships (parent" "$t"; then
     echo "FAIL: $t missing the parent/blocked-by/type relationships convention"
+    fail=1
+  fi
+done
+
+GITHUB=setup-matt-pocock-skills/issue-tracker-github.md
+for b in "List issues" "Relationships"; do
+  live_bullet=$(bullet "$LIVE" "$b")
+  gh_bullet=$(bullet "$GITHUB" "$b")
+  if [ "$live_bullet" != "$gh_bullet" ]; then
+    echo "FAIL: $GITHUB '$b' Conventions bullet drifted from $LIVE"
+    diff <(echo "$live_bullet") <(echo "$gh_bullet") || true
     fail=1
   fi
 done
