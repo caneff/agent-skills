@@ -280,6 +280,7 @@ def test_under_floor_sample_caps_at_five_not_the_full_count():
 def test_recommend_write_tests_when_full_coverage_would_clear_the_gate():
     rec = audit._recommend(6)
     assert rec == {"action": "write tests", "projected_crap": 6.0}
+    assert audit._crap(6, 1.0) == 6
 
 
 def test_recommend_refactor_when_complexity_alone_meets_or_exceeds_the_gate():

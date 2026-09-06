@@ -122,8 +122,7 @@ def render_repo(commits, gh):
                 dsec = (f'<details class="dwrap"><summary>diff · +{c["add"]} −{c["rem"]}</summary>'
                         f'<pre class="diff">{diff_html(c["diff"])}</pre></details>')
             else:
-                commit_link = link(gh, f"/commit/{c['H']}", "read it on GitHub")
-                where = f' — {commit_link}' if gh else ''
+                where = f' — {link(gh, f"/commit/{c["H"]}", "read it on GitHub")}' if gh else ''
                 dsec = f'<p class="skip">Diff skipped for size ({c["add"] + c["rem"]} changed lines){where}.</p>'
             bodyp = (f'<p class="cbody">{esc(c["body"]).replace(chr(10)+chr(10), "</p><p class=cbody>").replace(chr(10), " ")}</p>'
                      if c["body"] else '')

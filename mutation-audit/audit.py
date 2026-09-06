@@ -302,7 +302,7 @@ def main(argv):
         return
     if argv[1:2] == ["--suggest"]:
         root = argv[2] if len(argv) > 2 else "."
-        for candidate in suggest_candidates(_walk_py(root), limit=None):
+        for candidate in suggest_candidates(_walk_py(root)):
             print(json.dumps({"candidate": candidate}))
         return
     if argv[1:2] == ["--no-tests"]:
