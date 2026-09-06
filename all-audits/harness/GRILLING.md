@@ -1,13 +1,12 @@
 # Post-sweep grilling workflow
 
-`all-audits/SKILL.md` points here for the grill. This is the grill's own walk
-of every report the sweep produced — the user never names one for it to
-start.
+`all-audits/SKILL.md` points here after the sweep reports its index — the
+sweep continues straight into this, the grill's own walk of every report it
+produced, without being asked and without the user naming one to start.
 
 ## Grilling a report
 
-Grill every report the sweep produced, one after another, without waiting to
-be told which one. When the user asks to grill the sweep, start at the top of
+Grill every report the sweep produced, one after another. Start at the top of
 the order below and work down. Run the `grilling` skill over **one report's findings at a
 time**. Grill the findings toward decisions — which to act on, which to drop,
 which need a closer look. Walk one audit at a time; never merge two reports
@@ -55,42 +54,45 @@ Grilling changes no code and opens no PR — the sweep and its grill are
 report-and-decide-and-file only; applying any finding's fix is a separate,
 opt-in step outside this workflow.
 
+**Write down each rejection as you reach it.** The moment a finding is
+decided DROP, append it to the audited repo's `.audit-ignore.md` right then —
+don't wait for the sweep to finish grilling. One entry per rejection, in the
+format `harness/IGNORE-FILE.md` defines (finding, reason, date, audit). This
+is independent of whether the spec below ever gets approved: a rejection is
+real the moment it's decided, and a session that ends mid-sweep must not lose
+the DROPs it already made. A DROP that is a standing architectural decision —
+not just "not now" but "not ever, and here's why" — also gets an ADR written
+in the audited repo (its `docs/adr/` convention if it has one, else a new
+`docs/adr/` there), and that ignore entry's `adr:` field links to it. Most
+rejections are too small for this; reserve it for the ones worth prose on
+their own.
+
 ## Land one spec for the whole sweep
 
-Once every report in the run is grilled, land the sweep's decisions as **one
-spec, sliced into tickets** — never one spec per audit, and never a map.
+Once every report in the run is grilled, land the sweep's ACT decisions as
+**one spec, sliced into tickets** — never one spec per audit, and never a map.
 Per-audit structure survives as a section per audit inside that one spec, so a
 later audit's amendment or overrule of an earlier one stays readable in the
-same document.
+same document — call out each amendment or overrule explicitly in the section
+of the audit that made it, naming the decision it changes.
 
-1. **Draft the spec.** Follow `/to-spec`'s template and process, but skip its
-   interview — every decision needed is already settled from grilling. Each
-   ACT item becomes a user story and an implementation decision, grouped under
-   its audit's section; a DROP is not included in the spec (see below for
-   where it goes). Note any `ADR-NNNN` a decision revisits.
-2. **One confirmation, then file.** Show the user the drafted spec and the
-   list of proposed ticket titles `/to-tickets` would slice it into. Wait for
-   one approval. This is the only point in the whole sweep where the agent
-   writes something the user would otherwise have to delete by hand — a
-   thirteen-audit sweep can propose twenty-plus tickets in one go, so ask
-   once, before any of it exists on the tracker.
-3. **Nothing is written until that approval lands.** If the user asks for
-   changes, redraft and show again — still nothing is filed. If the user
-   declines outright, stop; the decisions stay in this session only.
-4. **On approval, publish.** Run `/to-spec` to publish the spec issue —
+1. **Draft the spec.** Write it directly using `/to-spec`'s template — skip
+   its interview and its seam-check-with-the-user step, since every decision
+   the template needs is already settled from grilling. Each ACT item becomes
+   a user story and an implementation decision, grouped under its audit's
+   section. DROPs stay out of the spec; they already went to the ignore file
+   above.
+2. **One confirmation, then file — and only one.** Show the user the drafted
+   spec and the ticket titles it would slice into, and wait for one approval.
+   Nothing is written to the tracker until it lands; asked for changes,
+   redraft and show again; declined outright, stop — the draft stays in this
+   session only. A thirteen-audit sweep can propose twenty-plus tickets in one
+   go, so this is the one point in the whole run the agent writes something
+   the user would otherwise delete by hand — which is why publishing below
+   uses only `/to-spec` and `/to-tickets`'s filing mechanics, not their own
+   interactive approval loops: this approval already covers both, a second
+   round of quizzing would break the "one confirmation" promise.
+3. **On approval, publish.** File the approved draft as the spec issue —
    labelled `spec`, never `ready-for-agent`, so nothing starts building it
-   unsliced — then `/to-tickets` to slice it into the approved tickets.
-
-## Write down every rejection
-
-At the same point — after approval, alongside filing the spec — append every
-DROP decision from the whole sweep to the audited repo's `.audit-ignore.md`,
-one entry per rejection, in the format `harness/IGNORE-FILE.md` defines
-(finding, reason, date, audit). This runs whether or not any ACT item existed;
-a sweep that only rejected findings still writes its rejections down.
-
-A DROP that is a standing architectural decision — not just "not now" but "not
-ever, and here's why" — also gets an ADR written in the audited repo (its
-existing `docs/adr/` convention), and that ignore entry's `adr:` field links to
-it. Most rejections are too small for this; reserve it for the ones worth
-prose on their own.
+   unsliced — then slice it into the approved tickets, each labelled
+   `ready-for-agent` per `/to-tickets`'s convention.

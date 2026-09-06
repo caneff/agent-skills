@@ -8,10 +8,10 @@ argument-hint: "[path]"
 Run the whole audit set over one repo in a single sweep. Thirteen audit skills fan
 out in parallel, each as its own process; each writes a self-contained report;
 the reports collect under one folder behind an `index.html` that links them. The
-sweep **reports only** — it applies nothing and
-opens no PR. When it finishes it stops and hands you the index; grilling is a
-separate, opt-in step — ask for it and the grill walks every report in the
-fixed order, then lands the whole run as one spec.
+sweep runs to completion on its own: past the index, it grills every report
+widest-first and lands the run as one spec — the only stop in the whole run is
+the single confirmation before anything is written to the tracker. It
+**reports and files only** — no edit is applied, no PR is opened.
 
 ## Scope
 
@@ -104,15 +104,16 @@ When you are invoked in-session as `/all-audits [path]`:
    PR. Do not fan out subagents yourself and do not invoke any audit through the
    `Skill` tool; that is the broken path this replaces.
 
-3. **Report the index, then stop.** The script prints `index: <path>` and opens
+3. **Report the index, then grill.** The script prints `index: <path>` and opens
    that page itself — do not open it again. Print its absolute path and list the
-   audits. **Do not start grilling on your own** — the sweep never starts the
-   grill; when the user asks for it, the grill walks every report widest-first
-   per [`harness/GRILLING.md`](harness/GRILLING.md).
+   audits, then continue straight into the grill — no separate ask needed —
+   which walks every report widest-first per
+   [`harness/GRILLING.md`](harness/GRILLING.md).
 
 ## After the sweep
 
-The sweep reports only and never grills on its own. For the grill's walk of
-every report — order, per-report grilling, the auto-carry rule, and how the
-run lands as one spec with its rejections written to `.audit-ignore.md` — see
+The sweep never stops at the index waiting to be told to grill — it continues
+on its own. For the grill's walk of every report — order, per-report grilling,
+the auto-carry rule, and how the run lands as one spec with its rejections
+written to `.audit-ignore.md` as they're decided — see
 [`harness/GRILLING.md`](harness/GRILLING.md).
