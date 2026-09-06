@@ -9,7 +9,7 @@ the list is yours to pick from. Re-run with `--flip <nums>` to flip the ones you
 actually call by hand to `disable-model-invocation: true` (keeps /slash, drops
 them from the context window).
 """
-import re, glob, os, sys
+import argparse, re, glob, os, sys
 from datetime import datetime, timezone
 
 SKILLS_DIR = os.path.expanduser("~/.agents/skills")
@@ -35,9 +35,9 @@ def parse_frontmatter(text):
 def add_flag(text):
     """Add `disable-model-invocation: true` to the frontmatter. Idempotent.
 
-    Returns (new_text, changed). Inserts right after the `name:` line, or after
-    the opening `---` if there is no name line. If the flag is already present in
-    the frontmatter, returns the text unchanged.
+    Returns (new_text, changed). Inserts right after the opening `---` fence.
+    If the flag is already present in the frontmatter, returns the text
+    unchanged.
     """
     lines = text.splitlines(keepends=True)
     # Locate the frontmatter block: the first two `---` fence lines.
@@ -48,13 +48,7 @@ def add_flag(text):
     for ln in lines[top + 1 : bot]:
         if ln.split(":", 1)[0].strip() == "disable-model-invocation":
             return text, False
-    # Insert after the name: line if there is one, else right after the top fence.
-    insert_at = top + 1
-    for i in range(top + 1, bot):
-        if lines[i].split(":", 1)[0].strip() == "name":
-            insert_at = i + 1
-            break
-    lines.insert(insert_at, "disable-model-invocation: true\n")
+    lines.insert(top + 1, "disable-model-invocation: true\n")
     return "".join(lines), True
 
 
@@ -75,7 +69,7 @@ def _selfcheck():
     src = "---\nname: foo\ndescription: bar\n---\nbody\n"
     out, changed = add_flag(src)
     assert changed and "disable-model-invocation: true" in out, out
-    assert out.index("name: foo") < out.index("disable-model-invocation") < out.index("description"), out
+    assert out.index("disable-model-invocation") < out.index("name: foo") < out.index("description"), out
     out2, changed2 = add_flag(out)  # idempotent
     assert not changed2 and out2 == out, out2
     assert out.count("disable-model-invocation") == 1, out
@@ -98,18 +92,12 @@ if sys.argv[1:2] == ["--selfcheck"]:
     sys.exit()
 
 # Args: optional positional stale-days (back-compat), optional `--flip a,b,c`.
-STALE_DAYS = 45
-flip_nums = None
-argv = sys.argv[1:]
-i = 0
-while i < len(argv):
-    a = argv[i]
-    if a == "--flip":
-        i += 1
-        flip_nums = [int(x) for x in argv[i].split(",") if x.strip()]
-    elif a.isdigit():
-        STALE_DAYS = int(a)
-    i += 1
+parser = argparse.ArgumentParser()
+parser.add_argument("stale_days", nargs="?", type=int, default=45)
+parser.add_argument("--flip")
+args = parser.parse_args()
+STALE_DAYS = args.stale_days
+flip_nums = [int(x) for x in args.flip.split(",") if x.strip()] if args.flip else None
 
 skills = {}  # name -> model_invocable(bool)
 paths = {}   # name -> SKILL.md path
@@ -168,21 +156,16 @@ if flip_nums is not None:
     sys.exit()
 
 
-def fmt(r):
-    name, model_inv, used, days = r
-    inv = "model" if model_inv else "slash-only"
-    when = used.strftime("%Y-%m-%d") if used else "NEVER"
-    ago = f"{days}d ago" if days is not None else "—"
-    return f"  {name:<34} {inv:<11} {when:<11} {ago:<9}"
-
-
 model_ct = sum(1 for r in rows if r[1])
 print(f"\nSkills in {SKILLS_DIR}: {len(rows)}  |  model-invocable (cost context): {model_ct}")
 print(f"Stale threshold: >{STALE_DAYS} days\n")
 print(f"  {'SKILL':<34} {'INVOKE':<11} {'LAST USED':<11} {'AGE':<9}")
 print("  " + "-" * 62)
-for r in rows:
-    print(fmt(r))
+for name, model_inv, used, days in rows:
+    inv = "model" if model_inv else "slash-only"
+    when = used.strftime("%Y-%m-%d") if used else "NEVER"
+    ago = f"{days}d ago" if days is not None else "—"
+    print(f"  {name:<34} {inv:<11} {when:<11} {ago:<9}")
 
 print(f"\n{len(targets)} model-invocable skill(s) unused >{STALE_DAYS}d. "
       "Unused ≠ useless — pick the ones you call by hand, leave the rest:")

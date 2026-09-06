@@ -277,15 +277,10 @@ def test_under_floor_sample_caps_at_five_not_the_full_count():
     assert len(result["under_floor"]["sample"]) == 5
 
 
-def test_crap_at_full_coverage_collapses_to_complexity():
-    """Coverage=1.0 zeroes the penalty term -- CRAP reduces to bare complexity."""
-    assert audit._crap_at_full_coverage(6) == 6.0
-    assert audit._crap_at_full_coverage(30) == 30.0
-
-
 def test_recommend_write_tests_when_full_coverage_would_clear_the_gate():
     rec = audit._recommend(6)
     assert rec == {"action": "write tests", "projected_crap": 6.0}
+    assert audit._crap(6, 1.0) == 6
 
 
 def test_recommend_refactor_when_complexity_alone_meets_or_exceeds_the_gate():
@@ -324,8 +319,10 @@ def test_gate_suggestions_present_and_correct():
     assert result["gates"]["above_current_max"] == 33
 
 
-def test_cli_main_prints_findings_jsonl():
-    """The thin CLI main reads the two JSON files and prints findings.jsonl lines."""
+def test_cli_main_prints_whole_score_result():
+    """The thin CLI main reads the two JSON files and prints the whole
+    score() result -- findings, under_floor, gates, and ranking -- as one
+    JSON object."""
     out = subprocess.run(
         [
             sys.executable,
@@ -337,10 +334,11 @@ def test_cli_main_prints_findings_jsonl():
         text=True,
         check=True,
     ).stdout
-    lines = [json.loads(line) for line in out.splitlines() if line.strip()]
-    assert len(lines) == 2
-    assert {row["file"] for row in lines} == {"sample.py"}
-    assert {row["line"] for row in lines} == {2, 17}
+    result = json.loads(out)
+    assert set(result) == {"findings", "under_floor", "gates", "ranking"}
+    assert len(result["findings"]) == 2
+    assert {row["file"] for row in result["findings"]} == {"sample.py"}
+    assert {row["line"] for row in result["findings"]} == {2, 17}
 
 
 def _load_ts_fixture():
@@ -515,9 +513,10 @@ def test_ts_ranking_never_reports_the_synthetic_unmeasured_axis():
     assert uncovered["branch_coverage"] is None
 
 
-def test_cli_main_ts_mode_prints_findings_jsonl():
+def test_cli_main_ts_mode_prints_whole_score_result():
     """The thin CLI's `--ts <report.json>` mode reads the captured tool
-    report and prints findings.jsonl lines via the same score()."""
+    report and prints the whole score() result -- findings, under_floor,
+    gates, and ranking -- as one JSON object."""
     out = subprocess.run(
         [
             sys.executable,
@@ -529,9 +528,10 @@ def test_cli_main_ts_mode_prints_findings_jsonl():
         text=True,
         check=True,
     ).stdout
-    lines = [json.loads(line) for line in out.splitlines() if line.strip()]
-    assert len(lines) == 2
-    assert {row["file"] for row in lines} == {"src/sample.ts"}
+    result = json.loads(out)
+    assert set(result) == {"findings", "under_floor", "gates", "ranking"}
+    assert len(result["findings"]) == 2
+    assert {row["file"] for row in result["findings"]} == {"src/sample.ts"}
 
 
 def main():

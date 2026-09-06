@@ -188,19 +188,15 @@ def _bucket(crap):
     return "critical" if crap >= CLASSIC_GATE else "hotspot"
 
 
-def _crap_at_full_coverage(complexity):
-    """CRAP with coverage=1.0: the (1-cov)^3 penalty term vanishes, so this
-    collapses to bare complexity — the remediation ceiling testing alone can
-    reach, no matter how undertested the function is today."""
-    return _crap(complexity, 1.0)
-
-
 def _recommend(complexity):
     """Per-finding remediation leverage: 'write tests' when full coverage
     would drop CRAP under the classic gate (testing alone gets there), else
     'refactor' (complexity itself already meets/exceeds the gate, so no
-    coverage improvement escapes it — the fix has to shrink complexity)."""
-    projected = _crap_at_full_coverage(complexity)
+    coverage improvement escapes it — the fix has to shrink complexity).
+
+    CRAP at coverage=1.0 collapses to bare complexity — the (1-cov)^3
+    penalty term vanishes — so the projection is just `complexity` itself."""
+    projected = complexity
     action = "write tests" if projected < CLASSIC_GATE else "refactor"
     return {"action": action, "projected_crap": projected}
 
@@ -286,8 +282,7 @@ def main(argv):
         radon_json = json.load(open(argv[1], encoding="utf-8"))
         coverage_json = json.load(open(argv[2], encoding="utf-8"))
         rows = normalize(radon_json, coverage_json)
-    for finding in score(rows)["findings"]:
-        print(json.dumps(finding))
+    print(json.dumps(score(rows)))
 
 
 if __name__ == "__main__":

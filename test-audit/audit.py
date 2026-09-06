@@ -30,23 +30,23 @@ MOCK_NAMES = {"Mock", "MagicMock", "patch"}
 MOCK_CEILING = 3
 
 
-def _call_name(node):
-    if not isinstance(node, ast.Call):
-        return None
-    f = node.func
-    if isinstance(f, ast.Attribute):
-        return f.attr
-    if isinstance(f, ast.Name):
-        return f.id
+def _name_of(node):
+    """Attribute -> its `.attr`, Name -> its `.id`, else None."""
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Name):
+        return node.id
     return None
 
 
+def _call_name(node):
+    if not isinstance(node, ast.Call):
+        return None
+    return _name_of(node.func)
+
+
 def _is_unittest_testcase(cls):
-    for base in cls.bases:
-        name = base.attr if isinstance(base, ast.Attribute) else (base.id if isinstance(base, ast.Name) else None)
-        if name == "TestCase":
-            return True
-    return False
+    return any(_name_of(base) == "TestCase" for base in cls.bases)
 
 
 def _test_functions(tree):
@@ -169,7 +169,7 @@ def is_empty_or_skipped(func):
         return True
     for dec in func.decorator_list:
         target = dec.func if isinstance(dec, ast.Call) else dec
-        attr = target.attr if isinstance(target, ast.Attribute) else (target.id if isinstance(target, ast.Name) else None)
+        attr = _name_of(target)
         if attr != "skip":
             continue
         if isinstance(dec, ast.Call):
