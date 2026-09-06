@@ -54,7 +54,6 @@ cp "$vt/prism/prism-core.min.js" "$vt/prism/prism-clike.min.js" "$tmp/assets/pri
 cp "$vt/prism/prism-python.min.js" "$tmp/assets/prism/"                        # one grammar per language shown
 # cp "$vt/mermaid.js" "$vt/mermaid.min.js" "$tmp/assets/"                      # only with a diagram
 # write the report to "$tmp/report.html" linking href="assets/base/base.css" etc.
-echo "ALL_AUDITS_REPORT=$tmp/report.html"                                     # machine-readable marker, own line
 ```
 
 The tmp dir already resolves `${TMPDIR:-/tmp}` — a skill reusing this pattern
@@ -63,11 +62,11 @@ separate fallback note. Once the report is written, **open it and hand off the
 path**: `xdg-open <path>` on Linux, `open <path>` on macOS, `start <path>` on
 Windows, then tell the user the absolute path.
 
-**Print the marker line.** `driver.py` collects each report by scanning
-the audit's stdout for `ALL_AUDITS_REPORT=/abs/path/to/report.html` on its own
-line — print exactly that, with the absolute path, after the report is
-written. Don't only describe the path in prose (e.g. across two lines, a
-directory then a filename): the collector greps for the marker, not English.
+**Inside a sweep, write the manifest.** When the prompt names a manifest
+path, `driver.py` finds your report there — a JSON object naming
+`report_path`, not a stdout scan. See
+[`AUDIT-RUN.md`](AUDIT-RUN.md#the-manifest-559)'s "The manifest" section for
+the exact shape.
 
 ## Scaffold basics
 

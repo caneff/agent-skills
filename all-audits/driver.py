@@ -190,7 +190,7 @@ def report_path_from_log(log_path):
     return m.group(1) if m else None
 
 
-def audit_prompt(name, repo):
+def audit_prompt(name, repo, manifest_path=None):
     ignore_file = os.path.join(repo, ".audit-ignore.md")
     ignore_block = ""
     if os.path.isfile(ignore_file):
@@ -204,9 +204,16 @@ def audit_prompt(name, repo):
         "tree — audit only the project's own tracked source. Do NOT open the report: skip every "
         "xdg-open/open/start step the skill would run. You are one audit inside an all-audits sweep, and the "
         "sweep opens only the final index — thirteen reports opening at once would bury it. Just write the "
-        "report and print its absolute path."
+        "report."
     )
-    return f"/{name} {repo}\n{override}{ignore_block}\n"
+    manifest_block = ""
+    if manifest_path:
+        manifest_block = (
+            f"\nAfter writing the report, write a manifest to {manifest_path} — a JSON object with "
+            '"report_path" (the report\'s absolute path), "count" (how many findings), and "headline" '
+            "(the one-line verdict). This is how the sweep finds your report; it does not scan your output."
+        )
+    return f"/{name} {repo}\n{override}{manifest_block}{ignore_block}\n"
 
 
 def mutation_prepass_prompt(repo):
@@ -240,11 +247,33 @@ def collect_module_report(log, collection_dir, module):
     replace_dir(os.path.dirname(report), os.path.join(collection_dir, module_slug(module)))
 
 
-def run_one(name, repo, outlogs):
+def manifest_path_for(manifests_dir, name):
+    return os.path.join(manifests_dir, name, "manifest.json")
+
+
+def read_manifest(manifests_dir, name):
+    """The manifest an audit wrote — {report_path, count, headline} — or
+    None when it never wrote one (#559: the driver reads this, never a
+    transcript; a missing manifest is a named failure, not a silent skip)."""
+    path = manifest_path_for(manifests_dir, name)
+    if not os.path.isfile(path):
+        return None
+    try:
+        data = json.loads(open(path, encoding="utf-8").read())
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not data.get("report_path"):
+        return None
+    return data
+
+
+def run_one(name, repo, outlogs, manifests_dir):
     print(f"[{name}] starting")
     log_path = os.path.join(outlogs, f"{name}.log")
+    manifest = manifest_path_for(manifests_dir, name)
+    os.makedirs(os.path.dirname(manifest), exist_ok=True)
     with open(log_path, "w", encoding="utf-8") as log:
-        subprocess.run(["claude", *CLAUDE_FLAGS, audit_prompt(name, repo)], stdout=log, stderr=subprocess.STDOUT, check=False)
+        subprocess.run(["claude", *CLAUDE_FLAGS, audit_prompt(name, repo, manifest)], stdout=log, stderr=subprocess.STDOUT, check=False)
     print(f"[{name}] done")
 
 
@@ -266,7 +295,7 @@ _HEAD = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 """
 
 
-def build_index(collection, repo, report_link, skip_note, synthesis, mutation_modules, mutation_survivors_sum, notest_count):
+def build_index(collection, repo, report_link, skip_note, synthesis, mutation_modules, mutation_survivors_sum, notest_count, notest_error=None):
     out = [_HEAD.format(title="All-audits index", prefix="")]
     out.append('<p class="vt-kicker">All-audits sweep</p>\n')
     out.append(f'<h1>{html.escape(repo)} <span style="color:var(--vt-muted)">· {len(AUDIT_NAMES)}-audit sweep</span></h1>\n')
@@ -281,9 +310,11 @@ def build_index(collection, repo, report_link, skip_note, synthesis, mutation_mo
             out.append(f'<tr><td>{name}</td><td><a href="{link}">open report</a></td><td>{note}</td></tr>\n')
         else:
             out.append(f'<tr><td>{name}</td><td style="color:var(--vt-muted)">no report</td><td>{note}</td></tr>\n')
-    if mutation_modules or notest_count > 0:
+    if mutation_modules or notest_count > 0 or notest_error:
         verdict = f"{len(mutation_modules)} modules run, {mutation_survivors_sum} total survivors"
-        if notest_count > 0:
+        if notest_error:
+            verdict += " · no-tests count could not be determined"
+        elif notest_count > 0:
             verdict += f" · {notest_count} with no tests"
         out.append(f'<tr><td>mutation</td><td><a href="mutation/index.html">open report</a></td><td>{verdict}</td></tr>\n')
     out.append("</tbody></table></div></main></body></html>")
@@ -309,14 +340,16 @@ def mutation_tally(findings_jsonl):
     return None
 
 
-def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, notest_total):
+def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, notest_total, notest_error=None):
     d = os.path.join(collection, "mutation")
     os.makedirs(d, exist_ok=True)
     out = [_HEAD.format(title="Mutation sub-index", prefix="../")]
     out.append('<p class="vt-kicker">Mutation sweep</p>\n')
     out.append(f'<h1>{html.escape(repo)} <span style="color:var(--vt-muted)">· {len(mutation_modules)} mutation modules</span></h1>\n')
     notest_count = len(notest_modules)
-    if notest_total > 0:
+    if notest_error:
+        out.append(f'<p class="vt-lede">No-tests count could not be determined ({html.escape(notest_error)}).</p>\n')
+    elif notest_total > 0:
         out.append(f'<p class="vt-lede">{notest_count} of {notest_total} source modules have no tests.</p>\n')
     if mutation_modules:
         out.append('<h2>Modules</h2><div class="vt-table-wrap"><table class="audit-table">\n')
@@ -378,8 +411,10 @@ def sweep(repo, out, only, short, index_only, force):
     os.environ["TMPDIR"] = run_dir
     outlogs = os.path.join(run_dir, "logs")
     collection = os.path.join(run_dir, "collection")
+    manifests_dir = os.path.join(run_dir, "manifests")
     os.makedirs(outlogs, exist_ok=True)
     os.makedirs(collection, exist_ok=True)
+    os.makedirs(manifests_dir, exist_ok=True)
     print(f"run dir: {run_dir}")
     print(f"collecting under: {collection}")
     print(f"repo: {repo}")
@@ -406,7 +441,7 @@ def sweep(repo, out, only, short, index_only, force):
         if to_run:
             smoke = to_run[0]
             print(f"== smoke test: {smoke} ==")
-            run_one(smoke, repo, outlogs)
+            run_one(smoke, repo, outlogs, manifests_dir)
             log_text = open(os.path.join(outlogs, f"{smoke}.log"), encoding="utf-8", errors="replace").read()
             if re.search(r"cannot be used with Skill tool|disable-model-invocation", log_text, re.IGNORECASE):
                 print(f"ABORT: -p slash invocation was rejected by the guard. See {outlogs}/{smoke}.log", file=sys.stderr)
@@ -415,16 +450,23 @@ def sweep(repo, out, only, short, index_only, force):
             rest = to_run[1:]
             if rest:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=len(rest)) as ex:
-                    list(ex.map(lambda n: run_one(n, repo, outlogs), rest))
+                    list(ex.map(lambda n: run_one(n, repo, outlogs, manifests_dir), rest))
 
+    manifest_note = {}
     for name in to_run:
-        report = report_path_from_log(os.path.join(outlogs, f"{name}.log"))
-        if report and os.path.isfile(report):
-            replace_dir(os.path.dirname(report), os.path.join(collection, name))
-            if name in GATED:
-                os.makedirs(stable, exist_ok=True)
-                replace_dir(os.path.join(collection, name), os.path.join(stable, name))
-                update_cache(repo, name, os.path.join(stable, name), base=base)
+        manifest = read_manifest(manifests_dir, name)
+        if manifest is None:
+            manifest_note[name] = f"no manifest — see {os.path.join(outlogs, name + '.log')}"
+            continue
+        report = manifest["report_path"]
+        if not os.path.isfile(report):
+            manifest_note[name] = f"manifest names a missing report: {report}"
+            continue
+        replace_dir(os.path.dirname(report), os.path.join(collection, name))
+        if name in GATED:
+            os.makedirs(stable, exist_ok=True)
+            replace_dir(os.path.join(collection, name), os.path.join(stable, name))
+            update_cache(repo, name, os.path.join(stable, name), base=base)
 
     report_link = {}
     for name in AUDIT_NAMES:
@@ -450,15 +492,18 @@ def sweep(repo, out, only, short, index_only, force):
             _, _, s, n = tally
             mutation_survivors_sum += s + n
 
-    notest_modules, notest_total = [], 0
+    notest_modules, notest_total, notest_error = [], 0, None
     notest_json = os.path.join(collection, "mutation-no-tests.json")
     if os.path.exists(notest_json):
         try:
             d = json.load(open(notest_json, encoding="utf-8"))
-            notest_total = int(d.get("total", 0))
-            notest_modules = d.get("no_tests", [])
+            if "error" in d:
+                notest_error = d["error"]
+            else:
+                notest_total = int(d.get("total", 0))
+                notest_modules = d.get("no_tests", [])
         except (json.JSONDecodeError, OSError):
-            pass
+            notest_error = "no-tests probe wrote unparseable output"
 
     report_files = [os.path.join(collection, report_link[n]) for n in AUDIT_NAMES if report_link[n]]
     synthesis = ""
@@ -478,9 +523,9 @@ def sweep(repo, out, only, short, index_only, force):
             replace_dir(assets, os.path.join(collection, "assets"))
             break
 
-    build_index(collection, repo, report_link, skip_note, synthesis, mutation_modules, mutation_survivors_sum, len(notest_modules))
-    if mutation_modules or notest_modules:
-        build_mutation_subindex(collection, repo, mutation_modules, notest_modules, notest_total)
+    build_index(collection, repo, report_link, {**skip_note, **manifest_note}, synthesis, mutation_modules, mutation_survivors_sum, len(notest_modules), notest_error)
+    if mutation_modules or notest_modules or notest_error:
+        build_mutation_subindex(collection, repo, mutation_modules, notest_modules, notest_total, notest_error)
 
     print()
     print(f"index: {os.path.join(collection, 'index.html')}")
@@ -535,10 +580,17 @@ def mutation_mode(repo, mutation_list, out):
 
     notest_json = os.path.join(collection, "mutation-no-tests.json")
     r = _run(["python3", os.path.join(here, "..", "mutation-audit", "audit.py"), "--no-tests", repo])
-    try:
-        data = json.loads(r.stdout)
-    except json.JSONDecodeError:
-        data = {"no_tests": [], "total": 0}
+    data = None
+    if r.returncode == 0:
+        try:
+            data = json.loads(r.stdout)
+        except json.JSONDecodeError:
+            data = None
+    if data is None:
+        # A crash or unparseable output is a real "don't know", never a
+        # silent zero (#559) — the index must render this as could-not-
+        # determine, not as a repo with zero testless modules.
+        data = {"error": "no-tests probe crashed or returned unparseable output"}
     with open(notest_json, "w", encoding="utf-8") as f:
         json.dump(data, f)
     notest_paths = set(data.get("no_tests", []))

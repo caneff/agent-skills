@@ -87,10 +87,10 @@ what the orchestrator collects into the index, regardless of which audit ran:
 - `count` — how many findings.
 - `report_path` — absolute path to the report's `.html` file. For an audit
   that writes `findings.jsonl`, this is the grouped summary page above, not a
-  card-per-finding report. Reflect it on stdout as
-  `ALL_AUDITS_REPORT=<report_path>` on its own line — `driver.py` greps
-  stdout logs for this marker to collect each report (see
-  [`HTML-REPORT.md`](HTML-REPORT.md)).
+  card-per-finding report. Inside a sweep, this whole struct — `report_path`,
+  `count`, `headline` — is what you write to the manifest path `driver.py`'s
+  prompt names (see [`AUDIT-RUN.md`](AUDIT-RUN.md#the-manifest-559)); the
+  driver reads that file, it does not scan your process's stdout.
 - `log_path` — absolute path to `findings.jsonl`, for any audit that writes
   one. Omit for an audit that renders a full card-per-finding HTML report
   instead.

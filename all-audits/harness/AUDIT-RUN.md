@@ -24,3 +24,20 @@ falling back to `/tmp`. Write both to `<tmpdir>/<skill>-<timestamp>/`, then
 open the summary and hand off its path per
 [`HTML-REPORT.md`](HTML-REPORT.md)'s asset-delivery section. Print the
 one-line verdict and the summary's absolute path, nothing else.
+
+## The manifest (#559)
+
+When `driver.py` runs an audit as part of a sweep, its prompt names an
+absolute manifest path and asks for one more file after the report:
+a JSON object at that path —
+
+```json
+{"report_path": "/abs/path/to/report.html", "count": 3, "headline": "one-line verdict"}
+```
+
+`driver.py` reads this file to find your report; it never scans your
+process's stdout for a path. A run outside a sweep (invoked directly as
+`/name`, no manifest path in the prompt) writes no manifest — there's
+nothing to hand it to. A sweep audit that crashes or times out with no
+manifest renders as a named failure row in the index, never a silent
+"no report" that could be mistaken for a clean pass.

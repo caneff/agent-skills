@@ -178,6 +178,42 @@ def test_no_test_modules_section():
         assert "no-coverage" in sub.lower() or "no coverage" in sub.lower()
 
 
+def test_index_from_manifests_missing_manifest_is_a_failure_row():
+    """#559: the driver reads each audit's manifest, never a transcript. A
+    fixture log containing an unrelated .html path must not land in the
+    index — the audit that never wrote a manifest renders as a named
+    failure row instead of silently reusing a stray path from its log."""
+    fake_claude_dir = os.path.dirname(os.path.abspath(__file__))
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as cache_dir, tempfile.TemporaryDirectory() as bin_dir:
+        os.symlink(os.path.join(fake_claude_dir, "fake_claude_fixture.sh"), os.path.join(bin_dir, "claude"))
+
+        # A stray .html path in duplication's log — must never be mistaken
+        # for its report now that the driver reads manifests, not logs.
+        env = {
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "XDG_CACHE_HOME": cache_dir,
+            "AUDITS_NO_OPEN": "1",
+            "AUDITS_NO_SYNTH": "1",
+        }
+        r = subprocess.run(
+            [sys.executable, os.path.join(fake_claude_dir, "driver.py"), tmp, "--only", "dead-code,duplication", "--out", os.path.join(tmp, "out")],
+            capture_output=True, text=True, env=env,
+        )
+        assert r.returncode == 0, r.stdout + r.stderr
+
+        # Plant an unrelated .html reference in duplication's log after the
+        # run, mimicking a stray path a transcript-grep would have picked up.
+        dup_log = os.path.join(tmp, "out", "logs", "duplication.log")
+        with open(dup_log, "a") as f:
+            f.write("\nsee /tmp/unrelated-1234/other.html for context\n")
+
+        index_text = open(os.path.join(tmp, "out", "collection", "index.html")).read()
+        assert "dead-code/report.html" in index_text, "the manifest-backed report must be linked"
+        assert "unrelated-1234" not in index_text, "the driver must never pick up a stray path from a log"
+        assert "no manifest" in index_text, "duplication (no manifest written) must render as a named failure"
+
+
 def _init_git_repo(path):
     subprocess.run(["git", "init", "-q", path], check=True)
     subprocess.run(["git", "-C", path, "config", "user.email", "t@example.com"], check=True)
@@ -221,6 +257,38 @@ def test_cache_decision_clean_recent_repo_skips():
         d = driver.decide(repo, "domain-drift", ["CONTEXT.md"], base=cache_dir)
         assert d.run is False, d
         assert d.report_dir == report_dir
+
+
+def test_crashed_no_tests_probe_renders_could_not_determine_not_zero():
+    """#559: a no-tests probe that crashes or returns garbage must render as
+    "could not determine" in the sub-index and the main-index verdict —
+    never as a silent zero, which would read as a clean 0%-no-tests repo."""
+    with tempfile.TemporaryDirectory() as tmp:
+        d = os.path.join(tmp, "collection", "solver.py")
+        os.makedirs(d)
+        open(os.path.join(d, "report.html"), "w").write("<html>x</html>")
+        row = {
+            "bucket": "rewrite", "file": "solver.py", "line": 1, "category": "surviving-mutant",
+            "summary": "s", "failure": "",
+            "extra": {"mutant": "x", "killed": False, "survived": True,
+                      "killed_count": 1, "survived_count": 0, "no_coverage_count": 0},
+        }
+        open(os.path.join(d, "findings.jsonl"), "w").write(json.dumps(row) + "\n")
+        # The crash shape driver.mutation_mode now writes instead of a silent
+        # {"no_tests": [], "total": 0}.
+        open(os.path.join(tmp, "collection", "mutation-no-tests.json"), "w").write(
+            json.dumps({"error": "no-tests probe crashed or returned unparseable output"})
+        )
+
+        r = _run_driver("--index", "--out", tmp)
+        assert r.returncode == 0, r.stdout + r.stderr
+
+        index_text = open(os.path.join(tmp, "collection", "index.html")).read()
+        assert "could not be determined" in index_text
+        assert "0 with no tests" not in index_text
+
+        sub = open(os.path.join(tmp, "collection", "mutation", "index.html")).read()
+        assert "could not be determined" in sub
 
 
 def main():
