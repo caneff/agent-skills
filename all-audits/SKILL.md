@@ -72,6 +72,10 @@ clean, fewer than `N` files (default 10) changed since the last-run SHA, no
 change touched `domain-drift`'s ground-truth (`CONTEXT.md`, `docs/adr/`), and the
 last run is within the time backstop (default 30 days).
 
+**Ignore file.** A repo can carry `.audit-ignore.md` at its root to suppress
+findings it has already reviewed and rejected, so a sweep stops re-raising
+them. Opt-in per repo — see [`harness/IGNORE-FILE.md`](harness/IGNORE-FILE.md).
+
 ## Run
 
 Two front doors, one engine. `run-audits.sh` runs the whole sweep — it fans each
