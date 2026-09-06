@@ -190,15 +190,6 @@
       "installedAt": "2026-05-30T20:11:57.419Z",
       "updatedAt": "2026-09-03T18:40:20.014Z"
     },
-    "git-guardrails-claude-code": {
-      "source": "mattpocock/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "skillPath": "skills/misc/git-guardrails-claude-code/SKILL.md",
-      "skillFolderHash": "ceed97af09633b300826d0ca0b1464c527ec9a35",
-      "installedAt": "2026-05-30T20:11:57.421Z",
-      "updatedAt": "2026-09-03T18:40:20.872Z"
-    },
     "migrate-to-shoehorn": {
       "source": "mattpocock/skills",
       "sourceType": "github",

@@ -19,11 +19,9 @@ segment bar with a colored box-drawing grid.
 ## Layout
 
 ```
-╭────────────────┬───────────┬──────────────┬─────────────────────────╮
-│ O 4.8 (M)      │ Ctx 60.0k │ ⎇ main +0,-0 │ 🏰 idle                 │
-├────────────────┼───────────┼──────────────┼─────────────────────────┤
-│ ~/src/gridfind │ 94% 2d·6% 3h │ f38b22aa  │ ✅0 🔥1 🗺️1 🚧0 📋2 💤5 │
-╰────────────────┴───────────┴──────────────┴─────────────────────────╯
+╭─────────────┬──────────┬───────────┬──────────────┬──────────────╮
+│ O 4.8 (M)   │ gridfind │ Ctx 60.0k │ 94% 2d·6% 3h │ ⎇ main +0,-0 │
+╰─────────────┴──────────┴───────────┴──────────────┴──────────────╯
 ```
 
 Frame color signals context fill: green <140k, yellow ≥140k, red ≥180k,
@@ -36,14 +34,11 @@ too, never the worktree's.
 
 ## Dependencies
 
-Reads the session JSON on stdin, then fans it out to helper scripts. Three
-are vendored in `helpers/` (versioned here):
+Reads the session JSON on stdin, then fans it out to helper scripts vendored
+in `helpers/` (versioned here):
 
 - `helpers/effort-abbrev.py` — thinking-effort abbreviation
 - `helpers/usage-segment.sh` — weekly/session %, resets
-- `helpers/issue-counts-segment.sh` — repo issue counts
-- `helpers/burndown-segment.sh` — live burndown progress; the progress-file
-  grammar it renders is documented in its own header comment
 
 Git branch/changes and context tokens are computed in-script.
 
