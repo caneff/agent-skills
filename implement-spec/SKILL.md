@@ -64,7 +64,8 @@ answers in your terminal.
 Draft PR at the first commit, closing the spec and every ticket. Push the
 branch; the owner merges.
 
-End of spec is a **loop**: a review-only worker runs `/code-review` on HEAD,
+End of spec is a **loop**: a review-only worker runs `/code-review` and
+`/spec-standards-review` on HEAD,
 and one end-to-end test drives the whole spec — write it if none exists; it is
 what catches the bugs the per-ticket suites cannot. Findings become fix tasks;
 then review again on the new HEAD. Exit when a pass returns no P0/P1. A fix

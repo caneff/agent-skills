@@ -79,8 +79,9 @@ read-only, exploration and review both, is an in-process subagent.
    with an in-process subagent (`Agent` tool, `model: opus`) — no Orca task,
    no terminal, no worktree; review is read-only. Seed it with only the issue
    reference and the branch — never the burn history or the explorer's notes —
-   running the `~/.agents/skills/code-review/SKILL.md` skill by pointer, not by
-   slash invocation. It owns the verdict, one of three:
+   running both the built-in `code-review` skill and
+   `~/.agents/skills/spec-standards-review/SKILL.md` by pointer, not by slash
+   invocation — correctness first, then spec/standards. It owns the verdict, one of three:
 
    - **clean** — go to step 6.
    - **changes requested** — findings the builder can act on. Pass them to the

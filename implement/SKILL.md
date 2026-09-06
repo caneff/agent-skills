@@ -72,7 +72,21 @@ these rules, which bind the worker, or you when you build inline:
 
 ## Finish
 
-Use `/code-review`, and fix what it raises.
+Run both reviews and fix what they raise:
+
+1. `/code-review` — the built-in correctness review (bugs, reuse, efficiency,
+   CLAUDE.md conventions). It runs at the session's effort level; no argument
+   needed.
+2. `/spec-standards-review` — this repo's two-axis review (documented coding
+   standards + the originating spec).
+
+Neither one produces the other's findings. Both run, every time.
+
+Then, only if the diff pushes a file from under 1000 lines to over, run
+`~/.agents/skills/thermo-nuclear-code-quality-review/SKILL.md` by pointer —
+it carries `disable-model-invocation`, so the slash form will not fire for
+you. That threshold is the whole trigger: it is a structural review that
+will propose restructuring beyond the ticket, so it stays off by default.
 
 Commit to the workspace's branch. When the ticket maps to a GitHub issue, put a
 closing keyword (`Closes #<n>`) in the final commit body — a bare `(#<n>)` links
