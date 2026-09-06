@@ -87,6 +87,41 @@ and a `[data-theme]` override) and `base/base.js` injects a fixed toggle that
 flips `data-theme`. The default view follows the OS theme; the toggle forces
 either. Mermaid re-themes on the flip through the bridge.
 
+## Page shell — the one skeleton every report fills in
+
+`<!doctype html>` on line 1, `base/base.css` + `base/base.js` always linked,
+Prism grammars (if any) loaded before `base.js`/`code.js`, the `mermaid.js`
+bridge last (if used). A skill's own `HTML-REPORT.md` fills in `{{title}}`,
+`{{kicker}}`, `{{h1}}`, its component `<link>`/`<script>` tags, and its body
+— it does not restate this skeleton:
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{title}}</title>
+
+    <link rel="stylesheet" href="assets/base/base.css" />
+    <!-- one <link> per component used, e.g. assets/components/callout/callout.css -->
+
+    <!-- Prism grammars (only if a card highlights code), before base.js/code.js -->
+    <script src="assets/base/base.js"></script>
+    <!-- assets/components/code/code.js — only if code blocks are used -->
+    <!-- assets/mermaid.js — only if a diagram is used, added last -->
+  </head>
+  <body>
+    <main>
+      <p class="vt-kicker">{{kicker}}</p>
+      <h1>{{h1}}</h1>
+      <p class="vt-lede">{{one-line verdict}}</p>
+      <!-- the skill's own body: cards, groups, standouts -->
+    </main>
+  </body>
+</html>
+```
+
 ## Beyond this doc
 
 This harness stops at the mechanism. For header/verdict shape, badge

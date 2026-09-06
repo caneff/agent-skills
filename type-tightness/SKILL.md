@@ -149,16 +149,11 @@ value = external_api.fetch()  # type: ignore[no-any-return]  # boundary — SDK 
    missing reason, or it doesn't go in the log.
 
 5. **Write the findings log and render the summary — the default
-   deliverable.** Write every `tighten`/`justify` finding to
-   `findings.jsonl` (`keep` rows are counted, not logged), then draw a
-   grouped summary `report.html` from it, following
-   `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
-   JSONL schema and the summary's grouped-overview shape.
-   Resolve `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write both to
-   `<tmpdir>/type-tightness-<timestamp>/`, then open the summary and hand
-   off its path as `~/.agents/skills/all-audits/harness/HTML-REPORT.md`'s
-   asset-delivery section describes. Print the one-line verdict and the
-   summary's absolute path, nothing else.
+   deliverable.** `keep` rows are counted, not logged. See
+   `~/.agents/skills/all-audits/harness/AUDIT-RUN.md` for the shared
+   write-and-deliver step (tmpdir resolution, `findings.jsonl` +
+   `report.html`, opening, and the final print). This skill's own bucket
+   names and metabar:
 
 ## Write the log and render the summary
 

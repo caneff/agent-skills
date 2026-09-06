@@ -160,9 +160,9 @@ suite isn't watching it at all.
    row, sorted) — nothing further to call.
 
 6. **Write the deliverables and render the report — the default output.**
-   This audit touches no code: it's a report, not a fix. Resolve
-   `<tmpdir>` from `$TMPDIR`, fall back to `/tmp`. Write to
-   `<tmpdir>/crap-audit-<timestamp>/`:
+   This audit touches no code: it's a report, not a fix. Resolve `<tmpdir>`
+   per `~/.agents/skills/all-audits/harness/AUDIT-RUN.md`'s write-and-deliver
+   step. Write to `<tmpdir>/crap-audit-<timestamp>/`:
 
    - **`findings.jsonl`** — one line per finding (CRAP ≥ floor), the
      `score()` result's `findings` list verbatim, each row already carrying

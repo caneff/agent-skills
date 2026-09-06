@@ -17,12 +17,8 @@ order.
 
 `$ARGUMENTS` names the repo path if given, else the current working directory.
 
-Whole-repo is the default for every audit — the tree, not a git diff or
-recent-changes review, and not any audit's own hot-spot default;
-`run-audits.sh`'s `audit_prompt` enforces this on each audit process it
-launches. This is the one place the rule is stated: an audit that takes an
-explicit branch scope instead resolves it via `git merge-base` against the
-origin's default branch — never an assumed `main`.
+Whole-repo by default, and the branch-scope exception — see
+[`harness/AUDIT-RUN.md`](harness/AUDIT-RUN.md#scope).
 
 ## The set — thirteen skills
 
