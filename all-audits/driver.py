@@ -28,7 +28,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.dirname(__file__))
 from audits_data import AUDIT_NAMES, GATED, SHORT_SET  # noqa: E402
@@ -89,16 +88,27 @@ def repo_key(repo_path):
 
 
 def load_record(path):
+    """An unreadable or corrupt record is "no cached run", never a crash
+    (#558 regression fix) — matches the old bash `cache.py decide`, whose
+    subprocess crash on bad JSON printed nothing, failed the `= "SKIP"`
+    check, and let the audit run."""
     if not os.path.exists(path):
         return {}
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
 def save_record(path, record):
+    """Write-then-rename so an interrupted run can never leave a truncated
+    record for the next `load_record` to trip over."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(record, f, indent=2)
+    os.replace(tmp, path)
 
 
 def _record_file(repo, base=None):
@@ -149,8 +159,13 @@ def decide(repo, name, ground_truth, threshold=DEFAULT_THRESHOLD, backstop=DEFAU
     record = load_record(_record_file(repo, base))
     entry = record.get(name)
     cache_record = None
-    if entry:
-        cache_record = {"last_sha": entry["last_sha"], "age_days": age_days(entry["timestamp"])}
+    if entry and {"last_sha", "timestamp", "report_dir"} <= entry.keys():
+        try:
+            cache_record = {"last_sha": entry["last_sha"], "age_days": age_days(entry["timestamp"])}
+        except ValueError:
+            entry = None
+    else:
+        entry = None  # a legacy/incomplete entry is "no cached run", never a KeyError
     state = git_state(repo, entry["last_sha"] if entry else None)
     cfg = {"ground_truth": ground_truth, "threshold": threshold, "backstop_days": backstop}
     run, reason = should_run(cfg, cache_record, state)
@@ -184,15 +199,12 @@ def module_slug(module):
     return module.replace("/", "_")
 
 
-def report_path_from_log(log_path):
-    if not os.path.exists(log_path):
-        return None
-    text = open(log_path, encoding="utf-8", errors="replace").read()
-    m = re.search(r"ALL_AUDITS_REPORT=(/\S+\.html)", text)
-    if m:
-        return m.group(1)
-    m = re.search(r"(/\S+\.html)", text)
-    return m.group(1) if m else None
+def manifest_instruction(manifest_path):
+    return (
+        f"\nAfter writing the report, write a manifest to {manifest_path} — a JSON object with "
+        '"report_path" (the report\'s absolute path), "count" (how many findings), and "headline" '
+        "(the one-line verdict). This is how the sweep finds your report; it does not scan your output."
+    )
 
 
 def audit_prompt(name, repo, manifest_path=None):
