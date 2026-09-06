@@ -79,8 +79,11 @@ of the audit that made it, naming the decision it changes.
 1. **Draft the spec and its slices, together.** Write the spec directly using
    `/to-spec`'s template — skip its interview and its seam-check-with-the-user
    step, since every decision the template needs is already settled from
-   grilling. Each ACT item becomes a user story and an implementation
-   decision, grouped under its audit's section. DROPs stay out of the spec;
+   grilling. Each ACT item becomes an implementation decision, grouped under
+   its audit's section; write it as a user story only where a real actor and
+   benefit exist — most audit findings are internal code-quality fixes with
+   neither, and forcing "as a developer, I want fewer unused functions" onto
+   one is padding, not a story. DROPs stay out of the spec;
    they already went to the ignore file above. Then, still in this same
    drafting pass and before showing the user anything, break it into vertical
    slices using `/to-tickets`'s own rules — title, blocking edges, what it
