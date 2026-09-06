@@ -1,6 +1,6 @@
 ---
 name: all-audits
-description: Run every repo audit at once — thirteen audit skills in parallel, one HTML index linking each report, then grill through them one at a time.
+description: Run every repo audit at once — thirteen audit skills in parallel, one HTML index linking each report, then grill through them one at a time and land the sweep as one spec.
 disable-model-invocation: true
 argument-hint: "[path]"
 ---
@@ -9,8 +9,9 @@ Run the whole audit set over one repo in a single sweep. Thirteen audit skills f
 out in parallel, each as its own process; each writes a self-contained report;
 the reports collect under one folder behind an `index.html` that links them. The
 sweep runs to completion on its own: past the index, it grills every report
-widest-first and lands the run as one spec — the only stop in the whole run is
-the single confirmation before anything is written to the tracker. It
+widest-first and lands the run as one spec — the only stop that **writes**
+anything is the single confirmation before the spec and its tickets go to the
+tracker (grilling itself still questions the user on each fresh finding). It
 **reports and files only** — no edit is applied, no PR is opened.
 
 ## Scope

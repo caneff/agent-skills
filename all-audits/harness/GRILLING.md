@@ -76,23 +76,31 @@ later audit's amendment or overrule of an earlier one stays readable in the
 same document — call out each amendment or overrule explicitly in the section
 of the audit that made it, naming the decision it changes.
 
-1. **Draft the spec.** Write it directly using `/to-spec`'s template — skip
-   its interview and its seam-check-with-the-user step, since every decision
-   the template needs is already settled from grilling. Each ACT item becomes
-   a user story and an implementation decision, grouped under its audit's
-   section. DROPs stay out of the spec; they already went to the ignore file
-   above.
+1. **Draft the spec and its slices, together.** Write the spec directly using
+   `/to-spec`'s template — skip its interview and its seam-check-with-the-user
+   step, since every decision the template needs is already settled from
+   grilling. Each ACT item becomes a user story and an implementation
+   decision, grouped under its audit's section. DROPs stay out of the spec;
+   they already went to the ignore file above. Then, still in this same
+   drafting pass and before showing the user anything, break it into vertical
+   slices using `/to-tickets`'s own rules — title, blocking edges, what it
+   delivers, seams under test per ticket. One confirmation has to cover the
+   whole shape, so the shape has to exist before that confirmation, not after.
 2. **One confirmation, then file — and only one.** Show the user the drafted
-   spec and the ticket titles it would slice into, and wait for one approval.
-   Nothing is written to the tracker until it lands; asked for changes,
-   redraft and show again; declined outright, stop — the draft stays in this
-   session only. A thirteen-audit sweep can propose twenty-plus tickets in one
-   go, so this is the one point in the whole run the agent writes something
-   the user would otherwise delete by hand — which is why publishing below
-   uses only `/to-spec` and `/to-tickets`'s filing mechanics, not their own
-   interactive approval loops: this approval already covers both, a second
-   round of quizzing would break the "one confirmation" promise.
-3. **On approval, publish.** File the approved draft as the spec issue —
-   labelled `spec`, never `ready-for-agent`, so nothing starts building it
-   unsliced — then slice it into the approved tickets, each labelled
-   `ready-for-agent` per `/to-tickets`'s convention.
+   spec and the full ticket breakdown (not just titles — blocking edges and
+   seams too), and wait for one approval covering both. Nothing is written to
+   the tracker until it lands; asked for changes, redraft and show again;
+   declined outright, stop — the draft stays in this session only. A
+   thirteen-audit sweep can propose twenty-plus tickets in one go, so this is
+   the one point in the whole run the agent writes something the user would
+   otherwise delete by hand.
+3. **On approval, publish — spec first, unlabelled, then tickets, then the
+   `spec` label last.** File the approved draft as the spec issue with no
+   `spec` label yet — `/to-tickets`'s own guard treats a `spec`-labelled
+   source as already sliced and stops instead of publishing children.
+   Publish the approved tickets as its children, each labelled
+   `ready-for-agent`, using `/to-tickets`'s publish step and its blocking-edge
+   and parent-linking conventions — its own quiz-and-iterate step is skipped,
+   since the breakdown was already approved in step 2. Only once the children
+   are linked, label the parent `spec` — never `ready-for-agent` — so nothing
+   starts building it unsliced.
