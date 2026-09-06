@@ -220,11 +220,10 @@ queue empty, ticket cap, or two parks with no landing — and if the queue is
 not empty, say to run `/burndown` again.
 
 Where a human owns the merge, the report ends with **one pasteable line** that
-merges every open PR from this burn, in stack-safe order — each base PR before
-the PR stacked on it:
+merges every PR from this burn that is based on the default branch:
 
 ```
-! for n in <PR numbers in that order>; do gh pr merge $n --squash --delete-branch; done
+! for n in <PR numbers>; do gh pr merge $n --squash --delete-branch; done
 ```
 
 Before handing it over, dry-run merge every branch in that order onto the
@@ -232,3 +231,14 @@ default branch in a detached throwaway worktree and run the repo's test seam;
 say the result in one line. Never split the merges into per-PR commands. Any
 post-merge step a human must do on the live machine follows the line, in
 order.
+
+**Stacked branches never go in that line.** A ticket serialised on another's
+branch (a collision resolved by stacking) opens its PR against the default
+branch anyway, never against the base branch: GitHub closes a PR whose base
+branch is deleted and cannot reopen it, and a stacked branch conflicts with
+the squash of its base. After the human merges the first line, cherry-pick
+the stacked ticket's own commits onto the new default branch in a fresh
+branch, re-run the test seam, open a new PR, close the old one, and hand a
+second line. Prefer not stacking at all: when other tickets are ready, hold
+the serialised ticket until its base lands, and stack only when the slot
+would otherwise sit idle.
