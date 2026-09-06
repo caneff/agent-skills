@@ -1,5 +1,5 @@
 /* Each component file is self-contained so it can be copied on its own. */
-
+(function () {
 /* Cross-origin-safe theme bridge: works even over file://, where a parent
    iframe cannot reach contentDocument to set the theme directly. */
 function wireThemeBridge(win) {
@@ -163,8 +163,7 @@ function ensure(block, selectors) {
    matching element (errors per-element are caught and warned); pass a
    falsy selector to run `fn` once, with no element, for global setup
    (e.g. math's document-wide KaTeX pass). */
-function register(selector, fn, label) {
-  var name = label || selector || fn.name || "component";
+function register(selector, fn, name) {
   function run() {
     if (!selector) {
       try {
@@ -213,3 +212,4 @@ if (typeof document !== "undefined") {
     init();
   }
 }
+})();

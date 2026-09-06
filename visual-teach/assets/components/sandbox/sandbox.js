@@ -1,9 +1,8 @@
 (function () {
   var DEBOUNCE_MS = 300;
 
-  var ensure = (typeof window !== "undefined" && window.vtBase && window.vtBase.ensure) || function () { return true; };
-
   function wireSandbox(sandbox) {
+    var ensure = window.vtBase.ensure;
     var blockClass =
       Array.from(sandbox.classList).find(function (c) {
         return c.startsWith("vt-");
@@ -66,6 +65,10 @@
 
   if (typeof window !== "undefined" && window.vtBase) {
     window.vtBase.register(".vt-sandbox", wireSandbox, "sandbox");
+  } else if (typeof window !== "undefined") {
+    console.warn(
+      "visual-teach: sandbox.js loaded without visual-teach base.js — not wired"
+    );
   }
 
   if (typeof module !== "undefined" && module.exports) {

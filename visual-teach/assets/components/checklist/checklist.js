@@ -1,7 +1,6 @@
 (function () {
-  var ensure = (typeof window !== "undefined" && window.vtBase && window.vtBase.ensure) || function () { return true; };
-
   function wireChecklist(list) {
+    var ensure = window.vtBase.ensure;
     if (!ensure(list, ['input[type="checkbox"]'])) return;
 
     var key = "vt-checklist:" + (list.dataset.key || location.pathname);
@@ -99,6 +98,10 @@
 
   if (typeof window !== "undefined" && window.vtBase) {
     window.vtBase.register(".vt-checklist", wireChecklist, "checklist");
+  } else if (typeof window !== "undefined") {
+    console.warn(
+      "visual-teach: checklist.js loaded without visual-teach base.js — not wired"
+    );
   }
 
   if (typeof module !== "undefined" && module.exports) {

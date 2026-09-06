@@ -95,6 +95,10 @@
 
   if (typeof window !== "undefined" && window.vtBase) {
     window.vtBase.register(null, initKatex, "math");
+  } else if (typeof window !== "undefined") {
+    console.warn(
+      "visual-teach: math.js loaded without visual-teach base.js — not wired"
+    );
   }
 
   if (typeof module !== "undefined" && module.exports) {

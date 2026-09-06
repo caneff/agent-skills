@@ -28,6 +28,10 @@
 
   if (typeof window !== "undefined" && window.vtBase) {
     window.vtBase.register(".vt-flow", wireFlow, "diagram");
+  } else if (typeof window !== "undefined") {
+    console.warn(
+      "visual-teach: diagram.js loaded without visual-teach base.js — not wired"
+    );
   }
 
   if (typeof module !== "undefined" && module.exports) {

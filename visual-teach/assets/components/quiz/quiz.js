@@ -1,6 +1,4 @@
 (function () {
-  var ensure = (typeof window !== "undefined" && window.vtBase && window.vtBase.ensure) || function () { return true; };
-
   function announce(r, t) {
     if (r) r.textContent = t;
   }
@@ -15,6 +13,7 @@
   }
 
   function wireQuiz(quiz) {
+    var ensure = window.vtBase.ensure;
     // Optional: template.why-good, template.why-bad, template[data-opt="N"], [aria-live].
     if (!ensure(quiz, ["button.opt", ".feedback"])) return;
 
@@ -178,6 +177,10 @@
 
   if (typeof window !== "undefined" && window.vtBase) {
     window.vtBase.register(".vt-quiz", wireQuiz, "quiz");
+  } else if (typeof window !== "undefined") {
+    console.warn(
+      "visual-teach: quiz.js loaded without visual-teach base.js — not wired"
+    );
   }
 
   if (typeof module !== "undefined" && module.exports) {
