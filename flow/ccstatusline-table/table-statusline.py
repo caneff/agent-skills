@@ -34,11 +34,11 @@ def paint(text: str, hex_: str) -> str:
 CFG = Path(__file__).resolve().parent / "helpers"
 
 
-def run(cmd: list[str], stdin: bytes) -> str:
+def run(cmd: list[str], stdin: bytes, cwd: str | None = None) -> str:
     """Run a helper, feed it the session JSON, return its trimmed stdout."""
     try:
         out = subprocess.run(
-            cmd, input=stdin, capture_output=True, timeout=1.5
+            cmd, input=stdin, capture_output=True, timeout=1.5, cwd=cwd
         ).stdout
         return ANSI.sub("", out.decode("utf-8", "replace")).strip()
     except Exception:
@@ -214,6 +214,15 @@ def main() -> None:
     row = row or [(model, PURPLE)]
 
     print(table([row], frame))
+
+    # ponytail: graft's own statusline (graph size / stale count) as one extra
+    # line under the table, only in repos where `graft init` wired it.
+    proj = (data.get("workspace") or {}).get("project_dir") or cwd
+    graft = Path(proj) / ".claude" / "helpers" / "graft-statusline.cjs"
+    if graft.exists():
+        line = run(["node", str(graft)], raw, cwd=proj)
+        if line:
+            print(line)
 
 
 if __name__ == "__main__":
