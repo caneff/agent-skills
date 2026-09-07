@@ -8,6 +8,10 @@
 # -f: suite commands are word-split out of the tab-separated list, so keep
 # the shell from globbing a path that happens to contain a wildcard.
 set -uf
+# A caller's leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR would
+# redirect every git call below (and in every suite it spawns) at that
+# caller's repo instead of this one (#620) — scrub before touching git at all.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
 
