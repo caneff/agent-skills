@@ -32,3 +32,7 @@ regenerating here just guarantees freshness before opening.
 
 Page anatomy lives in `generate.py` itself — read it there, don't restate it
 here.
+
+`generate.py` also takes `--roots <comma-separated paths>` and `--out <path>`
+to override which repos it scans and where it writes, for testing against a
+throwaway git repo instead of the real workspace. Not needed for normal use.

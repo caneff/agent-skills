@@ -5,7 +5,8 @@ Usage: generate.py [RANGE]
   RANGE: a count (20), a duration (3d, 2w), or a git rev range (abc..main).
   Default: 7d. Output: ~/.claude/landed.html — one tab per repo with commits.
 """
-import subprocess, html, re, sys, datetime, collections
+import subprocess, html, re, sys, datetime
+from dataclasses import dataclass, field
 from pathlib import Path
 
 HOME = Path.home()
@@ -13,6 +14,22 @@ OUT = HOME / ".claude" / "landed.html"
 ROOTS = sorted(p for p in HOME.glob("src/*") if (p / ".git").exists())
 ROOTS.append(HOME / ".agents" / "skills")
 CAP = 50
+
+
+@dataclass
+class Commit:
+    full_hash: str
+    short_hash: str
+    date: str
+    author: str
+    subject: str
+    body: str
+    closes: list
+    agent: bool
+    files: list = field(default_factory=list)
+    add: int = 0
+    rem: int = 0
+    diff: str = None
 
 
 def git(repo, *a):
@@ -62,8 +79,8 @@ def collect(repo, range_arg):
                 a = 0 if m[0] == "-" else int(m[0])
                 r = 0 if m[1] == "-" else int(m[1])
                 add += a; rem += r; files.append((m[2], a, r))
-        commits.append(dict(
-            H=H, h=h, date=ad, an=an, s=s,
+        commits.append(Commit(
+            full_hash=H, short_hash=h, date=ad, author=an, subject=s,
             body=re.sub(r"(Closes #\d+|Co-Authored-By:.*)", "", b).strip(),
             closes=sorted(set(re.findall(r"Closes #(\d+)", b))),
             agent="Co-Authored-By: Claude" in b,
@@ -101,57 +118,77 @@ def diff_html(d):
     return "\n".join(out)
 
 
+def render_commit(c, gh, maxtotal):
+    w = max(2, round(56 * (c.add + c.rem) / maxtotal))
+    aw = round(w * c.add / (c.add + c.rem)) if c.add + c.rem else 0
+    hash_ = link(gh, f"/commit/{c.full_hash}", c.short_hash, "hash")
+    badge = '<span class="badge">agent-built</span>' if c.agent else ''
+    closes = " ".join(link(gh, f"/issues/{n}", f"#{n}", "issue") for n in c.closes)
+    flist = "".join(
+        f'<tr><td class="fp">{esc(f)}</td><td class="fa">+{a}</td><td class="fr">−{r}</td></tr>'
+        for f, a, r in c.files)
+    if c.diff:
+        dsec = (f'<details class="dwrap"><summary>diff · +{c.add} −{c.rem}</summary>'
+                f'<pre class="diff">{diff_html(c.diff)}</pre></details>')
+    else:
+        read_link = link(gh, f"/commit/{c.full_hash}", "read it on GitHub")
+        where = f' — {read_link}' if gh else ''
+        dsec = f'<p class="skip">Diff skipped for size ({c.add + c.rem} changed lines){where}.</p>'
+    bodyp = (f'<p class="cbody">{esc(c.body).replace(chr(10)+chr(10), "</p><p class=cbody>").replace(chr(10), " ")}</p>'
+             if c.body else '')
+    preview = (f'<span class="preview">{esc(c.body)}</span>' if c.body
+               else '<span class="preview nobody">(no description)</span>')
+    return f'''<details class="commit" data-dt="{c.date}" data-day="{c.date[:10]}"><summary>
+<span class="lhs"><span class="subj">{esc(c.subject)}</span>
+<span class="meta">{hash_} <span class="when">{c.date}</span>{badge}{closes}
+<span class="bar"><i class="ba" style="width:{aw}px"></i><i class="br" style="width:{w-aw}px"></i></span>
+<span class="counts">+{c.add} −{c.rem}</span></span></span>
+{preview}</summary>
+{bodyp}<table class="files">{flist}</table>{dsec}</details>'''
+
+
 def render_repo(commits, gh):
-    maxtotal = max(c["add"] + c["rem"] for c in commits) or 1
-    days = collections.OrderedDict()
+    maxtotal = max(c.add + c.rem for c in commits) or 1
+    days = {}
     for c in commits:
-        days.setdefault(c["date"][:10], []).append(c)
+        days.setdefault(c.date[:10], []).append(c)
     parts = []
     for day, cs in days.items():
         parts.append(f'<h2 class="day" data-day="{day}">{datetime.date.fromisoformat(day).strftime("%A, %B %-d")}</h2>')
         for c in cs:
-            w = max(2, round(56 * (c["add"] + c["rem"]) / maxtotal))
-            aw = round(w * c["add"] / (c["add"] + c["rem"])) if c["add"] + c["rem"] else 0
-            hash_ = link(gh, f"/commit/{c['H']}", c["h"], "hash")
-            badge = '<span class="badge">agent-built</span>' if c["agent"] else ''
-            closes = " ".join(link(gh, f"/issues/{n}", f"#{n}", "issue") for n in c["closes"])
-            flist = "".join(
-                f'<tr><td class="fp">{esc(f)}</td><td class="fa">+{a}</td><td class="fr">−{r}</td></tr>'
-                for f, a, r in c["files"])
-            if c["diff"]:
-                dsec = (f'<details class="dwrap"><summary>diff · +{c["add"]} −{c["rem"]}</summary>'
-                        f'<pre class="diff">{diff_html(c["diff"])}</pre></details>')
-            else:
-                where = f' — {link(gh, f"/commit/{c["H"]}", "read it on GitHub")}' if gh else ''
-                dsec = f'<p class="skip">Diff skipped for size ({c["add"] + c["rem"]} changed lines){where}.</p>'
-            bodyp = (f'<p class="cbody">{esc(c["body"]).replace(chr(10)+chr(10), "</p><p class=cbody>").replace(chr(10), " ")}</p>'
-                     if c["body"] else '')
-            preview = (f'<span class="preview">{esc(c["body"])}</span>' if c["body"]
-                       else '<span class="preview nobody">(no description)</span>')
-            parts.append(f'''<details class="commit" data-dt="{c["date"]}" data-day="{c["date"][:10]}"><summary>
-<span class="lhs"><span class="subj">{esc(c["s"])}</span>
-<span class="meta">{hash_} <span class="when">{c["date"]}</span>{badge}{closes}
-<span class="bar"><i class="ba" style="width:{aw}px"></i><i class="br" style="width:{w-aw}px"></i></span>
-<span class="counts">+{c["add"]} −{c["rem"]}</span></span></span>
-{preview}</summary>
-{bodyp}<table class="files">{flist}</table>{dsec}</details>''')
+            parts.append(render_commit(c, gh, maxtotal))
     return "".join(parts)
 
 
-def main():
-    range_arg = sys.argv[1] if len(sys.argv) > 1 else "7d"
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    out_path, roots, positional = OUT, ROOTS, []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--out":
+            i += 1
+            out_path = Path(argv[i])
+        elif a == "--roots":
+            i += 1
+            roots = [Path(p) for p in argv[i].split(",") if p]
+        else:
+            positional.append(a)
+        i += 1
+    range_arg = positional[0] if positional else "7d"
+
     tabs, panes = [], []
-    for repo in ROOTS:
+    for repo in roots:
         commits = collect(repo, range_arg)
         if not commits:
             continue
         name = repo.name
-        nagent = sum(1 for c in commits if c["agent"])
+        nagent = sum(1 for c in commits if c.agent)
         tabs.append(f'<button class="tab" data-pane="{name}">{name} '
                     f'<span class="tn">{len(commits)}</span></button>')
         panes.append(f'<section class="pane" id="pane-{name}" hidden>'
                      f'<p class="sub">{len(commits)} commits, <b>{nagent} agent-built</b> · '
-                     f'+{sum(c["add"] for c in commits)} −{sum(c["rem"] for c in commits)} lines</p>'
+                     f'+{sum(c.add for c in commits)} −{sum(c.rem for c in commits)} lines</p>'
                      f'{render_repo(commits, github_base(repo))}</section>')
     if not tabs:
         print(f"no commits in range '{range_arg}' in any workspace repo; page not written")
@@ -261,8 +298,8 @@ let age = 0;
 try {{ age = +localStorage.getItem("landed-age") || 0; }} catch (e) {{}}
 applyAge(age);
 </script></body></html>'''
-    OUT.write_text(page)
-    print(f"{OUT} · {len(tabs)} repo tabs · {len(page)} bytes")
+    out_path.write_text(page)
+    print(f"{out_path} · {len(tabs)} repo tabs · {len(page)} bytes")
     return 0
 
 
