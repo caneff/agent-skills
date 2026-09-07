@@ -148,14 +148,13 @@ in that setup.
      independently a Cut by `test-audit`'s own smells (see Buckets above).
 
 6. **Write the findings log and render the summary — the default
-   deliverable.** Write every finalized row to `findings.jsonl`, then draw
-   a grouped summary `report.html` from it, following
-   `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
-   JSONL schema and the summary's grouped-overview shape.
-   Write both to `<tmpdir>/mutation-audit-<timestamp>/` and deliver the summary
-   per `~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir resolution,
-   opening, and handing off the path all live there. This audit touches no test —
+   deliverable.** See
+   `~/.agents/skills/all-audits/harness/AUDIT-RUN.md` for the shared
+   write-and-deliver step (tmpdir resolution, `findings.jsonl` +
+   `report.html`, opening, and the final print) — every finalized row goes
+   in the log. This audit touches no test —
    rewriting a weak assertion is a separate, opt-in step the user asks for by name.
+   This skill's own bucket names and metabar:
 
    - **Log** — one JSONL line per surviving mutant. `bucket` is `rewrite`,
      `no-coverage`, or `cut`. `category` is always `surviving-mutant`.

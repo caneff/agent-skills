@@ -25,8 +25,11 @@ Whole-repo by default, and the branch-scope exception — see
 
 ## The set — thirteen skills
 
-Each audits the whole repo and writes a `findings.jsonl` + grouped-summary
-`report.html` pair (see `harness/findings-schema.md`):
+Each audits the whole repo. Most write a `findings.jsonl` + grouped-summary
+`report.html` pair (see `harness/findings-schema.md`); the three structural
+audits — `ponytail-audit`, `thermo-nuclear-code-quality-review`, and
+`improve-codebase-architecture` — render a full HTML report as their record
+instead, with no separate log file:
 
 - `ponytail-audit` — over-engineering: what to delete, shrink, or replace with stdlib.
 - `test-audit` — tests that prove nothing or check the wrong thing.

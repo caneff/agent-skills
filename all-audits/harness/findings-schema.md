@@ -77,26 +77,21 @@ overview, not cards.
 
 Do not list every finding here. The log is the list; the summary is the map.
 
-## The fan-out return struct
+## The fan-out manifest
 
-Every audit subagent `all-audits` spawns returns the same shape — this is
-what the orchestrator collects into the index, regardless of which audit ran:
+`driver.py` runs each audit as its own `claude -p "/name"` process (see
+`all-audits/SKILL.md`) — never a spawned subagent, since several audits set
+`disable-model-invocation` and a subagent fan-out would silently lose them.
+Each process writes the same manifest shape to the path the prompt names,
+regardless of which audit ran — this is what `driver.py` reads to find the
+report; it never scans the process's stdout (see
+[`AUDIT-RUN.md`](AUDIT-RUN.md#the-manifest-559)):
 
-- `audit` — the skill name.
-- `headline` — the one-line verdict from the report.
-- `count` — how many findings.
 - `report_path` — absolute path to the report's `.html` file. For an audit
   that writes `findings.jsonl`, this is the grouped summary page above, not a
-  card-per-finding report. Inside a sweep, this whole struct — `report_path`,
-  `count`, `headline` — is what you write to the manifest path `driver.py`'s
-  prompt names (see [`AUDIT-RUN.md`](AUDIT-RUN.md#the-manifest-559)); the
-  driver reads that file, it does not scan your process's stdout.
-- `log_path` — absolute path to `findings.jsonl`, for any audit that writes
-  one. Omit for an audit that renders a full card-per-finding HTML report
-  instead.
-- `findings` — a short list, one entry per finding: `{ target, note }`, where
-  `target` is the repo-relative file path the finding is about and `note` is
-  a one-line summary.
+  card-per-finding report.
+- `count` — how many findings.
+- `headline` — the one-line verdict from the report.
 
-See `all-audits/SKILL.md` for how the orchestrator collects these into
+See `all-audits/SKILL.md` for how the driver collects these into
 `index.html`.

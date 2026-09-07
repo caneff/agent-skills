@@ -263,21 +263,16 @@ candidate list and the pass-two bucket for each test. Running this skill over
    judging — don't bucket it yet.
 
 5. **Write the findings log and render the summary — the default deliverable.**
-   Write every judged Cut/Rewrite/Keep to `findings.jsonl`, then draw a grouped
-   summary `report.html` from it (see below). Touch no test. Print the one-line
-   verdict and the summary's absolute path, nothing else. The mechanical
-   scanners' `file:line: <smell>` candidate list from pass one still prints to
-   the terminal — it is a scan, not the log.
+   Every judged Cut/Rewrite/Keep goes in the log (see below). Touch no test.
+   The mechanical scanners' `file:line: <smell>` candidate list from pass one
+   still prints to the terminal — it is a scan, not the log.
 
 ## Write the log and render the summary
 
-Write the full record to `findings.jsonl` and a grouped summary to
-`report.html`, following `~/.agents/skills/all-audits/harness/findings-schema.md`
-for both — the JSONL schema, the grouped-overview shape, and why it's two
-files instead of one card per test.
-Write both to `<tmpdir>/test-audit-<timestamp>/` and deliver the summary per
-`~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir resolution,
-opening, and handing off the path all live there.
+See `~/.agents/skills/all-audits/harness/AUDIT-RUN.md` for the shared
+write-and-deliver step (tmpdir resolution, `findings.jsonl` + `report.html`,
+opening, and the final print). This skill's own bucket names, category
+vocabulary, and metabar:
 
 - **Log** — one JSONL line per judged test. `bucket` is `cut` / `rewrite` /
   `keep`. `category` is the smell that named it — `duplicate-coverage`,

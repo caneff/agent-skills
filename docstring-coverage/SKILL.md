@@ -81,15 +81,12 @@ the same number on every row, not per-symbol.
    self-explanatory" for a `skip`.
 
 4. **Write the findings log and render the summary — the default
-   deliverable.** Write every judged row to `findings.jsonl`, then draw a
-   grouped summary `report.html` from it, following
-   `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
-   JSONL schema and the summary's grouped-overview shape.
-   Write both to `<tmpdir>/docstring-coverage-<timestamp>/` and deliver the
-   summary per `~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir
-   resolution, opening, and handing off the path all live there. This audit
+   deliverable.** See
+   `~/.agents/skills/all-audits/harness/AUDIT-RUN.md` for the shared
+   write-and-deliver step (tmpdir resolution, `findings.jsonl` +
+   `report.html`, opening, and the final print). This audit
    touches no code — writing the docstrings is a separate, opt-in step the
-   user asks for by name.
+   user asks for by name. This skill's own bucket names and metabar:
 
    - **Log** — one JSONL line per ruff D1xx hit. `bucket` is `document` /
      `skip` / `unsure`. `category` is the D-code slug (see above).
