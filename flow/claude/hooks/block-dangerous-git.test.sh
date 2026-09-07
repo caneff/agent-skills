@@ -4,6 +4,10 @@
 # hook's internals. `gh` is stubbed via PATH so this runs offline.
 # Run: bash flow/claude/hooks/block-dangerous-git.test.sh
 set -uo pipefail
+# A caller's leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR/
+# GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES would redirect the
+# repo init below at that caller's repo instead of $tmp (#620).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 hook="$here/block-dangerous-git.sh"
 

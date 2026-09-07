@@ -266,13 +266,51 @@ def test_index_from_manifests_missing_manifest_is_a_failure_row():
         assert "no manifest" in index_text, "duplication (no manifest written) must render as a named failure"
 
 
+_GIT_ENV_LEAKS = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+)
+
+
 def _init_git_repo(path):
-    subprocess.run(["git", "init", "-q", path], check=True)
-    subprocess.run(["git", "-C", path, "config", "user.email", "t@example.com"], check=True)
-    subprocess.run(["git", "-C", path, "config", "user.name", "t"], check=True)
+    # A caller's leaked GIT_DIR/GIT_WORK_TREE would redirect these calls at
+    # that repo instead of `path` (#620) — scrub them from the child env.
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_LEAKS}
+    subprocess.run(["git", "-C", path, "init", "-q"], check=True, env=env)
+    subprocess.run(["git", "-C", path, "config", "user.email", "t@example.com"], check=True, env=env)
+    subprocess.run(["git", "-C", path, "config", "user.name", "t"], check=True, env=env)
     open(os.path.join(path, "a.py"), "w").write("x = 1\n")
-    subprocess.run(["git", "-C", path, "add", "."], check=True)
-    subprocess.run(["git", "-C", path, "commit", "-q", "-m", "init"], check=True)
+    subprocess.run(["git", "-C", path, "add", "."], check=True, env=env)
+    subprocess.run(["git", "-C", path, "commit", "-q", "-m", "init"], check=True, env=env)
+
+
+def test_init_git_repo_ignores_leaked_git_dir():
+    """AC (#620): _init_git_repo must write only inside its own temp dir even
+    when the caller's shell leaked GIT_DIR/GIT_WORK_TREE pointing at a real
+    repo — regression witness for the 2026-09-07 incident, where a leaked
+    GIT_DIR made `git init` on a /tmp path silently reinitialize that other
+    repo instead and rewrite its .git/config."""
+    with tempfile.TemporaryDirectory() as victim, tempfile.TemporaryDirectory() as target:
+        clean_env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_LEAKS}
+        subprocess.run(["git", "init", "-q", victim], check=True, env=clean_env)
+        config_path = os.path.join(victim, ".git", "config")
+        before = open(config_path).read()
+
+        saved = {k: os.environ.get(k) for k in _GIT_ENV_LEAKS}
+        os.environ["GIT_DIR"] = os.path.join(victim, ".git")
+        os.environ["GIT_WORK_TREE"] = victim
+        try:
+            _init_git_repo(target)
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+        after = open(config_path).read()
+        assert after == before, "a leaked GIT_DIR must not let _init_git_repo touch another repo's config"
+        assert os.path.isdir(os.path.join(target, ".git")), "_init_git_repo must still create a repo in its own temp dir"
 
 
 def test_cache_decision_bad_sha_forces_run():
