@@ -14,8 +14,15 @@ sys.path.insert(0, os.path.dirname(__file__))
 import generate  # noqa: E402
 
 
+# A caller's leaked GIT_DIR/GIT_WORK_TREE would redirect every call below at
+# that repo instead of the tmp one (#622); scrub them out of the subprocess env.
+_GIT_ENV_LEAKS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                  "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")
+
+
 def _git(repo, *args):
-    subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True)
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_LEAKS}
+    subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True, env=env)
 
 
 def _make_repo(tmp):
@@ -47,6 +54,7 @@ def test_page_contains_commit_subjects_and_hashes():
         short_hash = subprocess.run(
             ["git", "-C", repo, "log", "-1", "--format=%h"],
             capture_output=True, text=True, check=True,
+            env={k: v for k, v in os.environ.items() if k not in _GIT_ENV_LEAKS},
         ).stdout.strip()
         assert short_hash in page
 
