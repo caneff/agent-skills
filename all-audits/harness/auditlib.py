@@ -18,17 +18,44 @@ EXCLUDED_DIRS = frozenset(
 )
 
 
-def walk_source(root, suffix=".py"):
+def walk_source(root, suffix=".py", skip=None):
     """Sorted repo-relative `suffix` paths under `root`, pruning
-    `EXCLUDED_DIRS` and dot-dirs before descending into them."""
+    `EXCLUDED_DIRS` and dot-dirs before descending into them.
+
+    `skip`, when given, is a callable taking a `/`-joined relative path and
+    returning True to drop it from the result — an additional per-file
+    filter on top of the directory pruning above (e.g. `is_test_or_fixture`
+    below, for a caller that wants only "real" source modules)."""
     paths = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIRS and not d.startswith(".")]
         for filename in filenames:
             if filename.endswith(suffix):
-                rel = os.path.relpath(os.path.join(dirpath, filename), root)
-                paths.append(rel.replace(os.sep, "/"))
+                rel = os.path.relpath(os.path.join(dirpath, filename), root).replace(os.sep, "/")
+                if skip is None or not skip(rel):
+                    paths.append(rel)
     return sorted(paths)
+
+
+def is_test_or_fixture(path):
+    """True when `path` (a `/`-joined relative path) is not a worthy,
+    testable source module: a test file itself, `conftest*`, `__init__.py`,
+    non-Python, or under an excluded or `fixtures/` directory.
+
+    The one home for the skip rule mutation-audit's `_sibling_tests` used to
+    carry by hand — pass it as `walk_source`'s `skip=` to get only "real"
+    source modules, or call it directly the way `_sibling_tests` does."""
+    parts = path.split("/")
+    dirs, name = parts[:-1], parts[-1]
+    if EXCLUDED_DIRS & set(dirs):
+        return True
+    if "fixtures" in dirs or "conftest" in name:
+        return True
+    if name == "__init__.py" or name.startswith("test_") or name.endswith("_test.py"):
+        return True
+    if not name.endswith(".py"):
+        return True
+    return False
 
 
 def finding(bucket, file, line, category, summary, failure="", **extra):

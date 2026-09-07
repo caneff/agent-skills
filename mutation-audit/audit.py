@@ -45,8 +45,6 @@ _RESULT_LINE_RE = re.compile(
     r"^\s*(?P<module>[\w.]+)\.x_(?P<func>\w+?)__mutmut_(?P<id>\d+):\s*(?P<status>.+?)\s*$"
 )
 
-_SKIP_DIRS = auditlib.EXCLUDED_DIRS
-
 
 def parse_mutmut_results(text):
     """Parse `mutmut results --all true` text into surviving-mutant candidate rows.
@@ -111,20 +109,15 @@ def parse_mutmut_results(text):
 def _sibling_tests(p):
     """The sibling-test paths for a mutation-worthy source module `p`, or
     `None` when `p` is not a worthy source module at all — an `__init__.py`, a
-    test file, or anything under a skip/fixture dir. The single predicate both
+    test file, or anything under a skip/fixture dir (the shared
+    `auditlib.is_test_or_fixture` check, #611). The single predicate both
     `suggest_candidates` (keep when a sibling exists) and `no_test_modules`
     (keep when none does) share, so the two can never drift apart.
     """
+    if auditlib.is_test_or_fixture(p):
+        return None
     parts = p.split("/")
     dirs, name = parts[:-1], parts[-1]
-    if _SKIP_DIRS & set(dirs):
-        return None
-    if "fixtures" in dirs or "conftest" in name:
-        return None
-    if name == "__init__.py" or name.startswith("test_") or name.endswith("_test.py"):
-        return None
-    if not name.endswith(".py"):
-        return None
     stem = name[: -len(".py")]
     return {
         "/".join([*dirs, f"test_{name}"]),

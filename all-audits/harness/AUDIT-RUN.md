@@ -23,7 +23,10 @@ own excluded-directory set, source walk, or parse/`--selfcheck` CLI dispatch
 one definition of the excluded-directory set; regenerate its JSON mirror
 (`excluded-dirs.json`, read by the `test-audit/audit.mjs` JS twin) with
 `python3 auditlib.py --write-json-mirror excluded-dirs.json` whenever the set
-changes.
+changes. `walk_source`'s optional `skip=` predicate filters out test files,
+fixtures, and `__init__.py` on top of the directory pruning; `auditlib.is_test_or_fixture`
+is the one definition of that check (mutation-audit's `_sibling_tests` uses it
+directly rather than keeping its own copy).
 
 ## Write the findings log and render the summary — the default deliverable
 
