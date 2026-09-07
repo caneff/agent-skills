@@ -47,6 +47,8 @@ def tally(worktree, projects_root):
                         entry = json.loads(line)
                     except ValueError:
                         continue  # a half-written last line is not a failure
+                    if not isinstance(entry, dict):
+                        continue
                     message = entry.get("message") or {}
                     usage = message.get("usage")
                     if not isinstance(usage, dict):

@@ -185,8 +185,7 @@ stages sit either side of that line (step 3).
    invocation — correctness first, then spec/standards. The seed says: run
    `code-review` in your own context, never as a background fork — a forked
    review hung twice in one burn and needed two pings before it returned;
-   wait for both reviews to finish, then send the verdict and your own token
-   usage — step 6's `<coord-review>` has no other source — with the message
+   wait for both reviews to finish, then send the verdict with the message
    tool **before** going idle, and arm no background wait afterwards — a
    reviewer that keeps a timer running re-notifies the coordinator with the
    same verdict two or three times, and one that goes idle without sending
@@ -237,10 +236,11 @@ stages sit either side of that line (step 3).
    `<builder>` and `<review>` are the script's first two numbers: main-line and
    sidechain tokens in that worktree's transcripts. Sidechain is every subagent
    the builder spawned, its two reviews and any lookup alike, so read `<review>`
-   as delegated work rather than review alone. `<coord-review>` is the tokens
-   the step 5 reviewer reported at its completion, `0` when none ran: it is an
-   in-process subagent, so its transcript is the coordinator's, not the
-   worktree's, and the script cannot see it. `<rounds>` is how many step 5
+   as delegated work rather than review alone. `<coord-review>` is the step 5
+   reviewer's own tokens, read off the usage its `Agent` completion carries —
+   never asked of the reviewer, which cannot count itself — and `0` when none
+   ran. The script cannot see it: an in-process subagent writes into the
+   coordinator's transcript, not the worktree's. `<rounds>` is how many step 5
    rounds the ticket took, `0` when it skipped review. Nothing in the loop
    reads this file back — it is read between burns.
 

@@ -111,6 +111,25 @@ def test_one_message_split_over_several_lines_counts_once():
         assert r.stdout == "9 0 9\n", r.stdout
 
 
+def test_junk_in_the_transcript_dir_never_kills_the_tally():
+    """Settle time is the wrong place to die: a half-written line, a bare JSON
+    scalar, and the `.meta.json` siblings Claude writes beside every subagent
+    transcript all have to pass through."""
+    with tempfile.TemporaryDirectory() as tmp:
+        project = os.path.join(tmp, PROJECT_DIR)
+        _write(os.path.join(project, "session.jsonl"), [
+            _line(False, inp=8),
+            '{"message": {"usage": {"input_tokens": 99',  # truncated mid-write
+            "null",
+            "[1, 2, 3]",
+        ])
+        _write(os.path.join(project, "session", "subagents", "agent-a.meta.json"),
+               [json.dumps({"message": {"usage": {"input_tokens": 4000}}})])
+        r = _run(tmp)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert r.stdout == "8 0 8\n", r.stdout
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
