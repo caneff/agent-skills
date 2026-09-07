@@ -52,9 +52,19 @@ settings.json, or CI config counts as code per the owner's Gate 2), one-file, or
 multi-file.
 
 Both stages feed one notes file, `~/.cache/burndown/<repo dir name>.notes.md`,
-outside the repo so every worker can read it, kept after the burn. Its layout is
-fixed: a `## Collisions` section first, then one `## #<n>` section per ticket,
-in number order. The shallow pass lays the file out; every later pass appends —
+outside the repo so every worker can read it, kept after the burn. Two things
+about its layout are fixed, and only these two: every ticket's section heading
+**starts** with `## #<n>` — that exact prefix, whatever follows it on the line —
+and the collisions heading is verbatim `## Collisions`. Position, ordering, and
+any other section the explorer finds useful (repo orientation, dependency order,
+invariants) are its own call. The two fixed strings are what a builder's seed
+points at, and a seed that points at a heading the file does not contain sends
+the builder to read all of it: five of six burns wrote `## COLLISION TABLE`,
+`## 1. Per-ticket detail`, or `## 525 — …` with no `#` at all, and no grep for
+`## #525` finds anything. Because the explorer writes the layout and never reads
+this file, **its prompt must carry both heading strings verbatim.**
+
+The shallow pass lays the file out; every later pass appends —
 a batch's deep read into the sections it covers, a ticket the shallow pass never
 saw into a new section of its own. Nothing rewrites what an earlier pass wrote.
 A builder's seed names the file, its own `## #<n>` section, and the collisions
