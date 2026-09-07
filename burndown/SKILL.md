@@ -60,7 +60,8 @@ Exploration is read-only and needs no worktree, terminal, or Orca task: run it
 as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`) and read
 its result directly. **Only builders are Orca tasks** — they are the only
 workers that write code and need their own worktree and branch. Everything
-read-only, exploration and review both, is an in-process subagent.
+read-only stays in process: exploration as a subagent, review as the
+coordinator itself or a subagent by diff size (step 5).
 
 ## The loop
 
@@ -110,21 +111,27 @@ read-only, exploration and review both, is an in-process subagent.
    status poll: a coordinator polling `task-list` must check the mailbox for
    pending questions on every poll.
 5. **Review.** Once a worker reports its branch, `git fetch` it and review it
-   with an in-process subagent (`Agent` tool, `model: opus`) — no Orca task,
-   no terminal, no worktree; review is read-only. Seed it with only the issue
-   reference and the branch — never the burn history or the explorer's notes —
-   running both the built-in `code-review` skill and
-   `~/.agents/skills/two-axis-code-review/SKILL.md` by pointer, not by slash
-   invocation — correctness first, then spec/standards. The seed says: run
-   `code-review` in your own context, never as a background fork — a forked
-   review hung twice in one burn and needed two pings before it returned;
-   wait for both reviews to finish, then send the verdict with the message
-   tool **before** going idle, and arm no background wait afterwards — a
-   reviewer that keeps a timer running re-notifies the coordinator with the
-   same verdict two or three times, and one that goes idle without sending
-   costs a round trip to prod it. The coordinator prods a silent reviewer
-   once, then rules on the findings it already has. It owns the verdict, one
-   of three:
+   against the ticket's acceptance criteria and the questions in
+   `~/.agents/skills/two-axis-code-review/SKILL.md` — correctness first, then
+   spec/standards. Review is read-only: no Orca task, no terminal, no worktree.
+   Who reads depends on size:
+
+   - **Under about 150 changed lines: the coordinator reads the whole diff
+     itself, inline.** No subagent. A 54-line diff reviewed this way caught a
+     test that wrote the live VS Code settings in one pass, after the agent
+     sent for it had sat five minutes in silence.
+   - **Larger: an in-process subagent** (`Agent` tool, `model: opus`), seeded
+     with only the issue reference and the branch — never the burn history or
+     the explorer's notes. The seed says: do the correctness pass **in your
+     own context** and apply the two-axis review **by reading it**; never
+     invoke the built-in `code-review` skill and never fork a review agent —
+     that nested layer is what hung every reviewer in one burn. Send the
+     verdict with the message tool **before** going idle, and arm no
+     background wait afterwards.
+
+   A reviewer silent for ten minutes is killed and its diff reviewed inline;
+   it is not prodded a second time. Whoever reads owns the verdict, one of
+   three:
 
    - **clean** — go to step 6.
    - **changes requested** — findings the builder can act on. Write them to
@@ -134,8 +141,9 @@ read-only, exploration and review both, is an in-process subagent.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
 
-   A re-review always **resumes the same reviewer** (send it the range with
-   the message tool) rather than spawning a fresh one: a resumed reviewer
+   A re-review of a subagent's branch always **resumes the same reviewer**
+   (send it the range with the message tool) rather than spawning a fresh
+   one: a resumed reviewer
    checks its own list and stops, while a fresh reader re-reads the whole
    branch and grades comment wording as P1 — one burn spent rounds three and
    four that way. The re-review message names the range
