@@ -31,8 +31,10 @@ the owner reads, and the only surface that shows a gate.
 
 ## The brief
 
-The worker rules in `implement/SKILL.md` § Build, by pointer, plus the
-**file-ownership map** — the one thing the injected preamble cannot carry:
+The worker rules in `implement/SKILL.md` § Build, by pointer — its
+§ The report included, which is how a worker's result reaches you whole
+instead of truncated — plus the **file-ownership map**, the one thing the
+injected preamble cannot carry:
 
 - Which files this worker owns outright.
 - For each shared file, one writer at a time. The handover condition is a
@@ -80,8 +82,10 @@ branch; the owner merges.
 End of spec is a **loop**: a review-only worker runs `/code-review` and
 `/two-axis-code-review` on HEAD,
 and one end-to-end test drives the whole spec — write it if none exists; it is
-what catches the bugs the per-ticket suites cannot. Findings become fix tasks;
-then review again on the new HEAD. Exit when a pass returns no P0/P1. A fix
+what catches the bugs the per-ticket suites cannot. Findings become fix
+tasks, each dispatched with the path of the review's report file rather than
+its text; then review again on the new HEAD. Exit when a pass returns no
+P0/P1. A fix
 brief names the primary signal and the whole state machine; a fix that only
 reorders one rule trades a P1 for its mirror.
 

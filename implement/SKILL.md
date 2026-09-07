@@ -75,6 +75,24 @@ these rules, which bind the worker, or you when you build inline:
   sized like the neighboring test files.
 - Commit to this branch; the driver pushes.
 
+### The report
+
+Every worker sends exactly one report, in this shape — a build, a fix round,
+or a review alike. It is worded here and nowhere else; `burndown` and
+`implement-spec` bind their workers to it by pointer.
+
+1. **Write the full report to a file first**, outside the checkout:
+   `$CLAUDE_JOB_DIR/tmp` when the session sets that variable, else `/tmp`.
+   Never under the repo — `two-axis-code-review/SKILL.md` § Spawn both
+   sub-agents carries the same ban and the reason.
+2. **Send one message.** Verdict first: any question that timed out and the
+   choice made, then what changed, the test line, the path of the file from
+   step 1, and the commit sha last. Under 60 lines — a longer message is
+   truncated in transit and the coordinator reads a cut-off verdict.
+3. **Then stay quiet** until pinged. One report, never a summary message
+   plus an idle notification, and never a resend: the file holds the detail
+   and the coordinator opens it when the message is not enough.
+
 ## Finish
 
 Run both reviews and fix what they raise:
