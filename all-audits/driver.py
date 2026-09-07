@@ -113,8 +113,22 @@ def _record_file(repo, base=None):
     return os.path.join(base or cache_base(), repo_key(repo) + ".json")
 
 
+# Git reads these ahead of any `-C` or path argument, so a caller's leaked
+# GIT_DIR (a shell export, a git hook's environment) silently redirects every
+# git call at that repo instead of the one the driver was handed (#625).
+GIT_ENV_LEAKS = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+)
+
+
+def scrubbed_env():
+    """The current environment minus the git-redirecting variables (#625)."""
+    return {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAKS}
+
+
 def _run(cmd, cwd=None):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False, env=scrubbed_env())
 
 
 def git_state(repo, last_sha):
@@ -725,7 +739,8 @@ def _run_mutation_module(repo, module, run):
     print(f"[mutation:{module}] creating worktree")
     try:
         with open(log, "w", encoding="utf-8") as f:
-            r = subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", wt, "HEAD"], stdout=f, stderr=subprocess.STDOUT)
+            # the one git call outside _run — same scrubbed env (#625)
+            r = subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", wt, "HEAD"], stdout=f, stderr=subprocess.STDOUT, env=scrubbed_env())
         if r.returncode != 0:
             print(f"[mutation:{module}] worktree creation failed — see {log}", file=sys.stderr)
             write_setup_failure_report(collection, module, "git worktree add failed")
