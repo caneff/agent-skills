@@ -99,10 +99,13 @@ read-only, exploration and review both, is an in-process subagent.
    before the worker's first commit and tell the worker.
 
    **Do not `worker-release` at `worker_done`.** The builder stays live through
-   review: review findings go to its dispatch (`orchestration send --to
-   dispatch:<id>`), so a fix round costs no Orca startup and no re-reading of
-   the ticket and notes. Release only when the review is clean or the ticket
-   parks.
+   review. A dispatch settles at `worker_done` and rejects mail
+   (`dispatch_inactive`), so a fix round is a new task started on the same
+   agent terminal: `task-create` with the findings path, then `worker-start
+   --task <id> --worktree name:<wt> --terminal <agent handle from
+   worker-show>`. The agent keeps its context, so the round costs no Orca
+   startup and no re-reading of the ticket and notes. Release only when the
+   review is clean or the ticket parks.
 
    The coordinator's wait covers `question` and `escalation`, not just
    `worker_done`. Task status runs `pending → ready → dispatched →
@@ -128,8 +131,8 @@ read-only, exploration and review both, is an in-process subagent.
 
    - **clean** — go to step 6.
    - **changes requested** — findings the builder can act on. Write them to
-     `~/.cache/burndown/findings/<n>-r<round>.md` **verbatim** and send the
-     path to the builder's live dispatch, then re-review. This is the
+     `~/.cache/burndown/findings/<n>-r<round>.md` **verbatim** and start the
+     fix round on the builder's terminal (step 4), then re-review. This is the
      normal outcome of a first review; it is not a park.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
