@@ -68,8 +68,22 @@ When PRs are in scope, include external PRs in these buckets and tag each line `
 Show counts and a one-line summary per item. Let the maintainer pick.
 
 **Large list (more than five items), or the maintainer says "all":** do not
-walk it one issue at a time. Read every body first, then sort into three
-buckets and present that before any per-issue work:
+walk it one issue at a time. Read every body first. For each, decide
+whether it should be done at all before deciding how — clarity and low
+effort are not reasons to do a thing:
+
+- **Would the proposed mechanism change behaviour?** A retro item whose
+  body says the prior prose rule was a no-op must not become another prose
+  rule. Either name a mechanical form (a script the step runs, a file the
+  worker must read, a hook) or dismiss it.
+- **Is the evidence repeated or one incident?** One run's pain earns a
+  note, not a rule. Split a ticket that mixes both and keep the repeated part.
+- **Is it already covered?** By an existing rule, a fix that landed since,
+  or an architecture change that removed the failure mode. Dismiss with the
+  pointer.
+
+Then sort what survives into three buckets and present that before any
+per-issue work:
 
 1. **Worth talking about** — a design or scope decision only the maintainer
    can make. Name the decision in one line. Merge issues that share it.
