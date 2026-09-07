@@ -115,27 +115,18 @@ stages sit either side of that line (step 3).
    coordinator owns the PR. A docs-only ticket takes a shorter seed —
    § Docs-only lane.
 
-   For a one-file or multi-file ticket, two more lines go in every seed.
-   First: read the
-   repo's `CLAUDE.md` and `AGENTS.md` before editing and apply their
+   For a one-file or multi-file ticket, one more line goes in every seed:
+   read the repo's `CLAUDE.md` and `AGENTS.md` before editing and apply their
    same-PR rules (docs, glossary, CONTEXT.md) — a pointer buried under a
-   task list gets skipped, and the reviewer then spends a round on it. Second,
-   point the builder at `implement`'s § Finish for its review steps only —
-   run both reviews (the built-in `code-review` skill and
-   `~/.agents/skills/two-axis-code-review/SKILL.md`) on its own branch, then
-   stop short of Finish's own PR step; the coordinator owns the PR, per
-   above. The two-axis review pins its own subagent model, not the builder's:
-   `~/.agents/skills/two-axis-code-review/SKILL.md` passes `model: opus` to
-   both its spawned reviewers ("Pass `model: opus` to both.") regardless of
-   the builder's tier, so a sonnet-tier build still gets an opus-tier
-   two-axis review. The built-in `code-review` runs as a background fork and
-   a builder is a top-level session, so the seed says to block on the fork
-   with `TaskOutput` and never go idle with one outstanding. What
-   happens to each finding is this burn's rule, not Finish's: act
-   on it, then lead the `worker_done` report with every finding both reviews
-   raised, one of three dispositions each — **fixed**, **deferred: <why>**,
-   or **disputed: <why>** — before the commit sha; a done message with no
-   findings list is a question back to the builder, not a settle.
+   task list gets skipped, and the reviewer then spends a round on it.
+   **Builders run no reviews.** The seed points at `implement`'s § Build
+   only, never its § Finish: no `code-review`, no `two-axis-code-review` on
+   the builder's branch. Review is the coordinator's, once per clump (step
+   5), in contexts that hold nothing but the diff. A builder that reviews
+   itself spends a builder's worth of tokens on wording nits and still
+   misses what a fresh reader catches. `worker_done` leads with any
+   timed-out question and the choice made, then the test line, the branch,
+   and the commit sha.
 
    One rule goes in every seed, docs-only included: a question
    to the coordinator that times out is not a stop — take the safe option, the
@@ -153,65 +144,45 @@ stages sit either side of that line (step 3).
    The builder is not released at `worker_done`, and the coordinator's wait
    from dispatch through settle covers more than `worker_done` — § Holding
    the builder.
-5. **Review.** The coordinator spawns its own in-process reviewer on one of
-   three triggers, and on no others:
+5. **Review.** Once per **clump**, when every builder in it has reported
+   `worker_done`. A clump is the tickets of a batch that share files — a
+   serialised stack from § Collisions is one clump, reviewed as one range
+   from its base to its tip — and each independent ticket is its own clump;
+   fold two small independent ones into a single clump only when each diff is
+   a few lines, so one reader holds both. Review is read-only: no Orca task,
+   no terminal, no worktree beyond `git fetch` of the branches.
 
-   1. the builder's report defers or disputes a finding;
-   2. the branch's changed files (`git diff --name-only <range>`, checked
-      against the seed's own-files list from § Shape) leave the set
-      exploration assigned to the ticket;
-   3. the ticket is docs-only and its diff holds a code file (§ Shape defines
-      the term) — the size tag was wrong, and the builder ran no review of its
-      own, so nothing has read this diff yet.
+   The coordinator itself, from the primary checkout, runs on the clump's
+   range: `~/.agents/skills/two-axis-code-review/SKILL.md` by pointer, which
+   spawns its own two fresh agents, standards and spec, in parallel (it pins
+   `model: opus` on both); and the built-in `code-review` skill on the same
+   range, blocking on its fork with `TaskOutput` — never idle with one
+   outstanding. The two axes stay separate agents by design; do not collapse
+   them into one reviewer. Before either runs, do the scope check yourself:
+   `git diff --name-only <range>` against the seeds' own-files lists, and a
+   file outside a ticket's set is a finding for that ticket.
 
-   A docs-only ticket reports no findings, so only 2 and 3 can fire for it.
-   When no trigger fires, whatever the ticket's size, it goes straight to
-   step 6, reviewed by nobody.
-
-   When triggered, `git fetch` the branch and review it with a **fresh**
-   in-process subagent (`Agent` tool, `model: opus`) — always a subagent,
-   whatever the diff size, so the read happens in a context that holds
-   nothing but the branch. No Orca task, no terminal, no worktree; review is
-   read-only. Seed it with three things only — the issue reference, the
-   builder's `worker_done` report, and the commit range — never the burn
-   history or the explorer's notes. It reports everything it finds against the
-   criteria, whatever the trigger was; the coordinator filters, and the
-   reviewer never narrows its read to the trigger. The seed says: review against
-   the ticket's acceptance criteria and the questions in
-   `~/.agents/skills/two-axis-code-review/SKILL.md` — correctness first, then
-   spec/standards — doing the correctness pass **in your own context** and
-   applying the two-axis review **by reading it**. **A reviewer forks
-   nothing**: it never invokes the built-in `code-review` skill (which runs as
-   a background fork) and never spawns an agent of its own. A subagent has no
-   `TaskOutput`, so it cannot wait on a fork; its turn ends, it goes idle, and
-   the fork's result lands as a notification nothing delivers until a message
-   wakes it — one burn's reviewer sat thirty minutes on a finished verdict
-   that way. Send the verdict with the message tool as the last act of the
-   turn, and arm no background wait afterwards.
-
-   A reviewer silent for ten minutes is killed and a fresh one spawned on the
-   same seed; it is not prodded a second time. The reviewer owns the verdict,
-   one of three:
+   Merge the three reports per ticket and write each ticket's findings
+   **verbatim** to `~/.cache/burndown/findings/<n>-r1.md`. The verdict per
+   ticket is one of three:
 
    - **clean** — go to step 6.
-   - **changes requested** — findings the builder can act on. Write them to
-     `~/.cache/burndown/findings/<n>-r<round>.md` **verbatim** and start the
-     fix round on the builder's terminal (step 4), then re-review.
+   - **changes requested** — findings the builder can act on. Start the fix
+     round on that ticket's held builder (§ Holding the builder) with the
+     findings path. Fixes are always the builder's, never the coordinator's.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
 
-   This gets exactly **one round**: a re-review, if the fix needs checking,
-   always **resumes the same reviewer** (send it the range with the message
-   tool) rather than spawning a fresh one — a resumed reviewer checks its own
-   list and stops, while a fresh reader re-reads the whole branch and grades
-   comment wording as P1 — and the re-review message names the range
-   `<reviewed-sha>..<new-sha>`, never just the branch, since builders amend
-   and force-push and a reviewer pointed at a branch name silently re-reads
-   work it already cleared. Whatever is still open after that one round goes
-   into the PR body for the human, not into a second round. Reviews run
-   concurrently and do not count against the builder cap.
-6. **Settle**, in the order each ticket clears — reviewed clean or skipped
-   straight from step 5 — per the
+   There is **one round and no re-review**: the builder's fix report carries
+   each finding's disposition — **fixed**, **deferred: <why>**, or
+   **disputed: <why>** — and the coordinator checks only two things itself
+   before settling: `git diff --name-only` still holds only the ticket's own
+   files, and the repo's test seam passes on the new sha. Whatever is
+   deferred or disputed goes into the PR body for the human, not into a second
+   round. A builder that stacks a fix commit reports the new sha; it never
+   amends or rebases a pushed branch.
+6. **Settle**, in the order each ticket clears — clean, or its one fix
+   round reported — per the
    Finish section of `~/.agents/skills/implement/SKILL.md` — which carries the
    ownership gate. Where the repo owner lets agents land directly, land. Where
    review is a human's, the terminal state of a ticket in this burn is **PR
@@ -238,16 +209,14 @@ stages sit either side of that line (step 3).
 
    `<builder>` and `<review>` are the script's first two numbers: main-line and
    sidechain tokens in that worktree's transcripts. Sidechain is every subagent
-   the builder spawned, both its reviews and any lookup alike, so read
-   `<review>` as delegated work rather than review alone. The built-in
-   `code-review` runs as a fork, but its transcript still lands under
-   `subagents/` with `isSidechain: true`, so its tokens are in `<review>` too.
-   `<coord-review>` is the step 5 reviewer's own tokens, read off the usage
-   its `Agent` completion carries — never asked of the reviewer, which cannot
-   count itself — and `0` when none ran.
-   The script cannot see it: an in-process subagent writes into the
-   coordinator's transcript, not the worktree's. `<rounds>` is how many step 5
-   rounds the ticket took, `0` when it skipped review. Nothing in the loop
+   the builder spawned — lookups, since builders run no reviews — so a
+   non-zero `<review>` there is delegated work, not review.
+   `<coord-review>` is the step 5 reviewers' tokens for this ticket, read off
+   the usage each `Agent` completion carries (the two-axis pair and the
+   `code-review` fork), split evenly across the clump's tickets — never asked
+   of a reviewer, which cannot count itself. The script cannot see it: an
+   in-process subagent writes into the coordinator's transcript, not the
+   worktree's. `<rounds>` is `1` when the ticket took a fix round, else `0`. Nothing in the loop
    reads this file back — it is read between burns.
 
    One caveat the numbers carry: a projects dir outlives the worktree that
@@ -293,11 +262,11 @@ stages sit either side of that line (step 3).
 
 ## Docs-only lane
 
-A docs-only ticket's seed skips `implement`'s test-first step and Finish's
-review step entirely — commit, then report; no `code-review`, no
-`two-axis-code-review`. It still gets its own worktree, branch, and progress
-lines like every other ticket; only the seed's build steps shrink. Its diff is
-still read for code files at step 5 — trigger 3.
+A docs-only ticket's seed skips `implement`'s test-first step — commit, then
+report. It still gets its own worktree, branch, and progress lines like every
+other ticket; only the seed's build steps shrink. Its diff joins its clump's
+review at step 5 like any other, and a code file in it means the size tag was
+wrong — a finding, not a park.
 
 ## Holding the builder
 
