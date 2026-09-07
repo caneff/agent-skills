@@ -266,13 +266,19 @@ def test_index_from_manifests_missing_manifest_is_a_failure_row():
         assert "no manifest" in index_text, "duplication (no manifest written) must render as a named failure"
 
 
+_GIT_ENV_LEAKS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")
+
+
 def _init_git_repo(path):
-    subprocess.run(["git", "init", "-q", path], check=True)
-    subprocess.run(["git", "-C", path, "config", "user.email", "t@example.com"], check=True)
-    subprocess.run(["git", "-C", path, "config", "user.name", "t"], check=True)
+    # A caller's leaked GIT_DIR/GIT_WORK_TREE would redirect these calls at
+    # that repo instead of `path` (#620) — scrub them from the child env.
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_LEAKS}
+    subprocess.run(["git", "-C", path, "init", "-q"], check=True, env=env)
+    subprocess.run(["git", "-C", path, "config", "user.email", "t@example.com"], check=True, env=env)
+    subprocess.run(["git", "-C", path, "config", "user.name", "t"], check=True, env=env)
     open(os.path.join(path, "a.py"), "w").write("x = 1\n")
-    subprocess.run(["git", "-C", path, "add", "."], check=True)
-    subprocess.run(["git", "-C", path, "commit", "-q", "-m", "init"], check=True)
+    subprocess.run(["git", "-C", path, "add", "."], check=True, env=env)
+    subprocess.run(["git", "-C", path, "commit", "-q", "-m", "init"], check=True, env=env)
 
 
 def test_init_git_repo_ignores_leaked_git_dir():
