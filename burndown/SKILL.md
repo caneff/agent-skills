@@ -137,7 +137,10 @@ stages sit either side of that line (step 3).
    the unit from here on, and "ticket" in steps 3–7 reads as "clump" where
    the clump has more than one. Before dispatching, pull out any
    ticket that is a sub-issue of a `spec`-labelled parent: those go through
-   § Spec handoff as one unit per spec, and the spec takes one worker slot.
+   `~/.agents/skills/burndown/references/spec-handoff.md` as one unit per spec,
+   and the spec takes one worker slot. Read that file when this fires; a slice
+   built one PR at a time loses the end-to-end review loop and lands a spec in
+   pieces.
 3. **Explore** (§ Shape). First pass only: run the shallow pass over the whole
    reachable queue and resolve its collisions. Then, every pass: run this
    batch's deep read as a subagent and wait for its result before dispatching
@@ -420,37 +423,6 @@ and needs an answer; only the status-poll workaround for finding one is
 moot now that there's no task-list poll to miss it (§ Waiting on Orca
 workers has the one-wait-per-wake mechanics).
 
-## Spec handoff
-
-A ticket whose parent issue carries the `spec` label is a slice, and slices
-are built together or not at all: one workspace, one branch, one PR that
-closes the spec and every child, with the end-to-end review loop that only
-`implement-spec` runs. Building them one PR at a time here loses that loop and
-lands a spec in pieces a human has to reassemble.
-
-So the spec, not the slice, is the unit. Find the parent with
-`gh api repos/<owner>/<repo>/issues/<n>/parent` (or the `Part of #N`
-reference in the body when the tracker has no sub-issues) and confirm its label.
-Then:
-
-- Make one Orca workspace **from the spec issue** and dispatch one Orca task
-  in it — a top-level `claude` session seeded with the spec URL and the pointer
-  `~/.agents/skills/implement-spec/SKILL.md`, which it follows as coordinator.
-  That coordinator owns the spec's exploration, frontier, gates, review loop,
-  and PR; this burn does not look inside.
-- Every open slice of that spec — ready or still blocked — leaves this burn's
-  queue at handoff, and the cluster counts against the ticket cap as its
-  number of slices. Slices already `in-progress` under a burn worker finish
-  as they are; the spec coordinator picks up from their landings.
-- Progress lines use the spec's number: `burning #<spec>`, then `#<spec> pr
-  <ref>` or `#<spec> parked: <why>`. A gate the spec coordinator raises is that
-  burn's `ready-for-human` for the whole spec — park it, do not answer it.
-- The spec's workspace is the coordinator's to tear down, not this burn's.
-
-A slice with no `spec`-labelled parent is an ordinary ticket. A spec with
-exactly one open slice is still handed off — the loop is the point, not the
-count.
-
 ## Waiting on Orca workers
 
 Never the Orca wait verb — it returns `waiter_exists` for a waiter nobody can
@@ -525,20 +497,12 @@ say the result in one line. Never split the merges into per-PR commands. Any
 post-merge step a human must do on the live machine follows the line, in
 order.
 
-**Branches that conflict with each other get linearised, not squashed.** Two
-PRs that touch the same line (an import list, a scenario count) both merge
-clean against the default branch and then conflict with each other after the
-first squash, so the one-line merge stops halfway. When the dry run shows
-that, rebase the later branches into one linear stack in merge order,
-resolving only the shared line, verify each rebased branch's diff is identical
-to its reviewed diff apart from that line, run the seam at the stack tip,
-force-push (with lease), note the new base sha in each PR body, and hand the
-line with `--merge` in place of `--squash` — merge commits keep a linear stack
-mergeable in one line, squashes do not. Every PR still opens against the
-default branch, never against its base branch: GitHub closes a PR whose base
-branch is deleted and cannot reopen it. Prefer not stacking at all: when other
-tickets are ready, hold the serialised ticket until its base lands, and stack
-only when the slot would otherwise sit idle.
+When the dry run shows two branches conflicting with each other, they get
+linearised, not squashed — read
+`~/.agents/skills/burndown/references/merge-tail.md` before touching either
+branch. Prefer not stacking at all: when other tickets are ready, hold the
+serialised ticket until its base lands, and stack only when the slot would
+otherwise sit idle.
 
 **Live verification is batched, not per ticket.** A ticket whose sign-off
 needs the live rig (a scene shot to eyeball, a stream-side behaviour to watch)
