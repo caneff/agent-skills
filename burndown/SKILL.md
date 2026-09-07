@@ -241,6 +241,9 @@ stages sit either side of that line (step 3).
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
 
+   Each verdict gets a step 7 line as `clean`, `changes`, or `blocked` — those
+   three tokens, whatever the reviewers called it.
+
    There is **one round and no re-review** — the owner's ruling, over the
    older re-review-on-new-HEAD rule, so leave it. The builder's fix report is
    one `implement` § The report message carrying each finding's disposition —
@@ -317,22 +320,41 @@ stages sit either side of that line (step 3).
    sidebar and holds the local branch against deletion.
 7. Append to the progress file at
    `~/.cache/burndown/<repo dir name>.progress` (never in the repo), one line
-   per state change. A parser reads it, so write **only** these lines:
+   per state change. This file is the burn's state, not its diary: a
+   coordinator whose context was summarized mid-burn rebuilds from it, and a
+   later burn reads it to see what the queue did. Write **only** these lines:
 
    ```
    burning #<n>          claimed, build in flight
+   #<n> built <sha>      builder reported; awaiting review
+   #<n> review <verdict> step 5's verdict: clean, changes, or blocked
+   #<n> fixing <sha>     fix or gate dispatch out; <sha> is what was reviewed
    #<n> pr <ref>         PR open, awaiting a human merge
    #<n> landed <sha>     merged
    #<n> parked: <why>    handed to a human
    done                  the loop stopped
    ```
 
-   Anything else is counted as nothing: a burn that writes prose here shows as
-   permanently building on the statusline. Write `landed` only for a merge that
-   happened — when the human owns the merge, `pr` is where the ticket stops.
+   Keep to the set because that is what makes the file greppable a week later,
+   not because anything parses it today — nothing does. Prose is what a
+   coordinator writes when the grammar has no form for the state it is in, and
+   every form the loop reaches is above: three of them were added after burns
+   wrote `#315 review CANNOT GET CLEAN, 6 findings, fix round dispatched`
+   because there was no other way to say it. Hitting a state with no form is a
+   finding about this list, not licence to write a sentence.
+
+   Write `landed` only for a merge that happened — when the human owns the
+   merge, `pr` is where the ticket stops. The sha is never optional: `#255
+   landed` with no sha names nothing a week later. On `fixing` it is the sha
+   the reviewers saw, not the fix — the fix has no sha yet, and that reviewed
+   sha is the one the PR body discloses (`implement` § Finish).
    Several `burning` lines can be open at once, one per ticket in flight; a
    ticket's state is its last line, so a later line supersedes an earlier one
    for that ticket — `pr` followed by `landed` is one ticket, merged.
+   A clump gets one line per ticket, each carrying the shared ref — six
+   `#<n> pr .../654` lines, not one line naming six tickets. Never
+   `burning #135 #136 #139`: the parser you may write later needs one number
+   per line, and a clump's tickets can still park separately.
    This is the single documented home for the grammar — nothing else restates it.
 8. Once every ticket in the batch has settled or parked, re-list the queue
    for the next frontier: go to 1. Re-list every pass — a
