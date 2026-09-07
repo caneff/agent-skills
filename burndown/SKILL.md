@@ -252,6 +252,16 @@ stages sit either side of that line (step 3).
    goes into the PR body for the human, not into a second round. A builder
    that stacks a fix commit reports the new sha; it never amends or rebases a
    pushed branch.
+
+   **Those two checks are gates, not reviews.** One that fails sends another
+   fix dispatch, and the one-round rule does not count it: no reviewer ran, the
+   coordinator saw a mechanical fact. Both have happened after the round was
+   spent — a lock file restored to main's version instead of the branch base,
+   and commits by another author rewriting a real config file to a test
+   fixture's value. Two gate dispatches on one ticket, then park.
+   `implement` § Finish states the shared rule; this step sets burndown's cap.
+   Because no reviewer sees the fix commits, the PR body (step 6) names the
+   last reviewed sha and says the commits after it were not re-reviewed.
 6. **Settle**, in the order each ticket clears — clean, or its one fix
    round reported — per the
    Finish section of `~/.agents/skills/implement/SKILL.md`, its ownership gate
@@ -288,8 +298,10 @@ stages sit either side of that line (step 3).
    never asked of a reviewer, which cannot count itself. Record the clump's
    total on its lowest-numbered ticket's line and `0` on its other tickets.
    The script cannot see it: an in-process subagent writes into the
-   coordinator's transcript, not the worktree's. `<rounds>` is `1` when the
-   ticket took a fix round, else `0`. Nothing in the loop reads this file
+   coordinator's transcript, not the worktree's. `<rounds>` counts the
+   ticket's fix dispatches — the one review round plus any gate dispatch — so
+   `0` is a clean settle and `2` is a round then a gate failure. It is a
+   count, not a flag. Nothing in the loop reads this file
    back — it is read between burns.
 
    One caveat the numbers carry: a projects dir outlives the worktree that

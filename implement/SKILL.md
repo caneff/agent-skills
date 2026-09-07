@@ -128,6 +128,18 @@ not — they are where reviewers start re-raising decisions already settled. A
 finding you dispute is not a fourth pass either: record it as
 `disputed: <why>` and let the owner rule.
 
+**A gate failure is not a review pass.** A pass is findings → fix → re-run the
+review; only that counts against the cap. Your own mechanical checks failing —
+the scope check (`git diff --name-only` outside the ticket's files), the test
+seam, `pre-report-gate.sh` — is not a pass: no reviewer ran and nothing was
+judged. Fix it and carry on. Two gate failures on one ticket, then park.
+
+**A sha nobody reviewed says so.** When the cap is spent, or the lane runs no
+re-review at all (`~/.agents/skills/burndown/SKILL.md` step 5 runs one round),
+the PR body names the last reviewed sha and says the commits after it were not
+re-reviewed. That line is what the reader gets in place of the pass that did
+not run.
+
 Then, only if the diff pushes a file from under 1000 lines to over, run
 `~/.agents/skills/thermo-nuclear-code-quality-review/SKILL.md` by pointer —
 it carries `disable-model-invocation`, so the slash form will not fire for
@@ -166,6 +178,9 @@ and the run is not done until the merge line is handed over.
    gh pr ready <n> --repo <owner/name>        # only if it opened as a draft
    gh pr view <n> --repo <owner/name> --json isDraft,mergeStateStatus
    ```
+
+   `--fill` builds the body from the commits, so when the unreviewed-sha line
+   above applies it is not in there — pass `--body` yourself and put it in.
 
    The last command must print `false` and `CLEAN` before you go on;
    `UNKNOWN` means GitHub has not finished computing mergeability, so poll it
