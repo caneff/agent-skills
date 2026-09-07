@@ -83,7 +83,10 @@ End of spec is a **loop**: a review-only worker runs `/code-review` and
 and one end-to-end test drives the whole spec — write it if none exists; it is
 what catches the bugs the per-ticket suites cannot. Findings become fix
 tasks, each dispatched with the path of the review's report file; then review
-again on the new HEAD. Exit when a pass returns no P0/P1. A worker's message
+again on the new HEAD. Exit when a pass returns no P0/P1, or at the three-pass
+cap in `implement` § Finish — a fourth pass re-raises what the first three
+settled. At the cap, park the spec and hand the owner what is still open,
+with the findings and the settled comments behind it. A worker's message
 that arrives cut off is read from the file it names — never ask for a resend.
 A fix
 brief names the primary signal and the whole state machine; a fix that only

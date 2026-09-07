@@ -48,6 +48,7 @@ run() {
 run "clean tree, sha on the branch passes" 0 "$tip" "pre-report gate: clean tree"
 run "an older commit on the branch is an ancestor" 0 "$first"
 run "a sha off the branch fails" 1 "$offbranch" "not an ancestor"
+run "a sha git cannot resolve is exit 2" 2 nosuchsha "cannot resolve"
 
 # Dirty tree: an untracked file is as blocking as a modified one.
 echo scratch > "$repo/untracked.txt"

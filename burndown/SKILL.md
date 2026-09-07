@@ -92,11 +92,14 @@ runs, and six landings moved every line number in the notes out from under the
 builders reading them; a name still resolves after the file is edited. A contradicted
 decision is a ruling for the human, posted on the issue before dispatch, not a
 P0 for a reviewer to find after the build (#130 cost a build, a review round
-and a ruling comment that way).
+and a ruling comment that way). Post the owner's answer back as an issue
+comment opening with the marker `**Settled:**`, one ruling per comment. That
+marker is what makes a ruling findable later: step 5's reviewers read the
+ticket's `**Settled:**` comments and never re-raise what one of them closed.
 
 Both stages are read-only and need no worktree, terminal, or Orca task: run
 each as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`). The
-explorer writes its full text to `~/.cache/burndown/<repo dir name>.<n>-<stage>.md`
+explorer writes its full text to `~/.cache/burndown/<repo dir name>.<stage>-<n>.md`
 — `<n>` the batch's lowest ticket number, `<stage>` `shallow` or `deep` — and
 returns a summary under 60 lines, size tag first, that names that path; the
 coordinator appends to the notes file from the scratch file, never from the
@@ -144,19 +147,23 @@ stages sit either side of that line (step 3).
    read the repo's `CLAUDE.md` and `AGENTS.md` before editing and apply their
    same-PR rules (docs, glossary, CONTEXT.md) — a pointer buried under a
    task list gets skipped, and the reviewer then spends a round on it.
-   **Builders run no reviews.** The seed points at `implement`'s § Build
-   only, never its § Finish: no `code-review`, no `two-axis-code-review` on
-   the builder's branch. Review is the coordinator's, once per clump (step
+   **Builders run no reviews.** The seed points at `implement`'s § Build,
+   § The report, and § Finish **steps 1–2 only** — the addenda check and the
+   pre-report gate — never its reviews, its push, or its PR step: no
+   `code-review`, no `two-axis-code-review` on the builder's branch. Review is the coordinator's, once per clump (step
    5), in contexts that hold nothing but the diff. `worker_done` is
    `implement`'s § The report, seeded by that same pointer, plus the branch
    name — the one thing the contract has no reason to know the coordinator
    needs. The fix round (step 5) reports the same way.
 
    The seed also names the ticket's **addenda file**,
-   `~/.cache/burndown/addenda/<n>.md`, and says the coordinator appends to it:
-   that is where a mid-build message lands (§ Holding the builder). The builder
-   checks every entry off against its diff before its final commit, as
-   `implement`'s § Finish addenda check does.
+   `~/.cache/burndown/<repo dir name>.addenda-<n>.md`, and says the coordinator
+   appends to it: that is where a mid-build message lands (§ Holding the
+   builder). `mkdir -p ~/.cache/burndown` before the first dispatch — every
+   report, addenda and notes file of the burn lands in that one directory,
+   keyed by issue number, and an append to a missing directory fails. The
+   builder checks every entry off against its diff before its final commit, per
+   § Finish step 1.
 
    One rule goes in every seed, docs-only included: a question
    to the coordinator that times out is not a stop — take the safe option, the
@@ -183,7 +190,9 @@ stages sit either side of that line (step 3).
    the branches.
 
    Three fresh `Agent` calls, `subagent_type: diff-reviewer`, `model: opus`,
-   all in parallel, each seeded with the diff command
+   all in parallel — and if `diff-reviewer` is not among the available agent
+   types, take two-axis § 4's no-definition fallback for all three, which is
+   the same one it takes itself — each seeded with the diff command
    (`git -C <worktree> diff <base>...<tip>`), the commit list, the clump's
    **settled decisions**, and nothing else from the burn: the two axes of
    `~/.agents/skills/two-axis-code-review/SKILL.md` — run that skill by
@@ -201,21 +210,22 @@ stages sit either side of that line (step 3).
    seeds' own-files lists, and a file outside a ticket's set is a finding for
    that ticket.
 
-   The settled decisions are the rulings already in the notes file — a
-   contradicted grill decision the owner ruled on before dispatch, an owner
-   ruling posted on the issue, and anything the builder asked and was answered
-   mid-build. One line each, verbatim from the notes, with "settled decisions:
-   none" when there are none. A reviewer that re-raises one costs a whole round
-   on a question that was closed before the build started.
+   The settled decisions are the ticket's `**Settled:**` comments (§ Shape),
+   one line each, plus anything the builder asked and was answered mid-build.
+   Two-axis § 4 words the rule and the empty case; this step only supplies the
+   list.
 
-   Each reviewer also writes its full report to a file, named for the clump:
+   Each reviewer also writes its full report to a file and returns a summary
+   under 60 lines, verdict first, that names that path — the same
+   file-plus-pointer contract § Shape's explorers run under. The file is named
+   for the clump:
    `two-axis-code-review/SKILL.md` § 4. Spawn both sub-agents in parallel
    holds the rule and expands the directory, and `<n>` there is the clump's
    lowest ticket number with the round suffixed
-   (`review-standards-584-r1.md`). A report written inside a worktree blocks
-   its teardown at step 6. A reviewer silent
-   for ten minutes is killed and a fresh one spawned on the same seed; it is
-   not prodded a second time.
+   (`review-standards-584.md`). A report written inside a worktree blocks its
+   teardown at step 6. A fire-and-return `Agent` call has no handle to kill, so
+   a reviewer silent for ten minutes is abandoned and a fresh one spawned on
+   the same seed; it is not prodded a second time.
 
    Merge the three reports per ticket and write each ticket's findings
    **verbatim** to `~/.cache/burndown/findings/<n>-r1.md`. The verdict per
@@ -346,7 +356,8 @@ parks, never before.
 
 A **mid-build message** to a live builder — an addendum from the owner, a
 scope correction, an order to cut the ticket short — is appended to that
-ticket's `~/.cache/burndown/addenda/<n>.md` as its own entry **before** it is
+ticket's `~/.cache/burndown/<repo dir name>.addenda-<n>.md` (step 4) as its
+own entry **before** it is
 sent. Sending it alone leaves nothing for the builder's pre-commit check to
 find, which is how four PRs shipped without the change they were told about
 mid-build.

@@ -75,9 +75,9 @@ these rules, which bind the worker, or you when you build inline:
   sized like the neighboring test files.
 - Record every message that arrives mid-build — an owner's terminal message,
   a coordinator addendum — as its own entry in the **addenda file**, the moment
-  it arrives: the path the dispatch names (`burndown` seeds
-  `~/.cache/burndown/addenda/<n>.md`), else `/tmp/addenda-<n>.md`. Outside the
-  checkout, like the report. Finish checks each entry against the diff, and an
+  it arrives, at `~/.cache/burndown/<repo dir name>.addenda-<n>.md` — the same
+  cache directory as the report (§ The report), outside every checkout, and
+  `mkdir -p`'d before the first append. Finish checks each entry against the diff, and an
   unrecorded message cannot be checked.
 - Commit to this branch; the driver pushes.
 
@@ -85,15 +85,18 @@ these rules, which bind the worker, or you when you build inline:
 
 An Orca build or fix worker sends exactly one report, in this shape. It is
 worded here and nowhere else; `burndown` and `implement-spec` bind their
-workers to it by pointer. Reviewers are not covered —
-`two-axis-code-review` carries its own report shape and its own caps.
+workers to it by pointer. Reviewers are not covered — their own
+file-plus-pointer contract is `two-axis-code-review/SKILL.md` § 4's, along
+with their report shape and word caps.
 
-1. **Write the full report to a file first**, in the directory the dispatch
-   names (`burndown` seeds `~/.cache/burndown/findings/`); with none named,
-   `/tmp`. Never inside the checkout: an untracked report there blocks the
-   worktree's teardown. Name it `report-<n>.md` — `<n>` the ticket number,
-   `report-<n>-r<round>.md` for a fix round — so the path is derivable when
-   the message carrying it is not.
+1. **Write the full report to a file first**, at
+   `~/.cache/burndown/<repo dir name>.report-<n>.md` — `<n>` the ticket
+   number, `.report-<n>-r<round>.md` for a fix round — so the path is
+   derivable when the message carrying it is not. That cache directory is the
+   one home for a run's files whatever the lane, and it exists outside every
+   checkout: an untracked report inside one blocks the worktree's teardown.
+   `mkdir -p` it before the first write; never fall back to a bare `/tmp`,
+   where a path nobody derived is a path nobody finds.
 2. **Send one message with the message tool**: `SendMessage`, or Orca
    `worker_done`, as the lane dictates. Verdict first — any question that
    timed out and the choice made — then what changed, the path from step 1,
@@ -117,7 +120,8 @@ Run both reviews and fix what they raise:
 Neither one produces the other's findings. Both run, every time.
 
 **Three passes, then park.** A review that raises findings is fixed and re-run,
-at most three times. If the third pass is still not clean, stop: park the
+at most three times — the same cap `implement-spec` § Landing runs its loop
+under. If the third pass is still not clean, stop: park the
 ticket, report what is still open and why, and hand it to the owner. Passes
 four through seven cost as much as the build and settle nothing that three did
 not — they are where reviewers start re-raising decisions already settled. A
