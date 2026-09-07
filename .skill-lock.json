@@ -379,15 +379,6 @@
       "installedAt": "2026-08-05T15:43:52.566Z",
       "updatedAt": "2026-09-03T18:40:41.030Z"
     },
-    "claude-handoff": {
-      "source": "mattpocock/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "skillPath": "skills/in-progress/claude-handoff/SKILL.md",
-      "skillFolderHash": "6845c30e62e1c0c2c0fbdea8307379197f0b4dc4",
-      "installedAt": "2026-08-05T15:43:52.567Z",
-      "updatedAt": "2026-09-03T18:40:41.750Z"
-    },
     "setup-ts-deep-modules": {
       "source": "mattpocock/skills",
       "sourceType": "github",

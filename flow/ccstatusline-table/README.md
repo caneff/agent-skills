@@ -38,7 +38,10 @@ Reads the session JSON on stdin, then fans it out to helper scripts vendored
 in `helpers/` (versioned here):
 
 - `helpers/effort-abbrev.py` — thinking-effort abbreviation
-- `helpers/usage-segment.sh` — weekly/session %, resets
+- `helpers/usage-segment.sh` — weekly/session %, resets. The usage cell calls
+  its `all` mode once per tick and splits the tab-separated line; the
+  single-field modes (`weekly`/`session`/`wreset`/`breset`) still work
+  standalone for compatibility.
 
 Git branch/changes and context tokens are computed in-script.
 
@@ -46,4 +49,7 @@ Git branch/changes and context tokens are computed in-script.
 
 ```
 python3 table-statusline.py --selftest
+helpers/usage-segment.sh --selftest
 ```
+
+`statusline.test.sh` runs both, so the repo's `tests/all.sh` picks them up.

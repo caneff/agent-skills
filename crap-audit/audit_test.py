@@ -3,7 +3,7 @@
 
 Assert-based, no framework — matches the audit family's convention (see
 dead-code/audit.py's `_selfcheck`). One function per acceptance criterion of
-ticket #505; run directly with `python3 crap-audit/test_audit.py`.
+ticket #505; run directly with `python3 crap-audit/audit_test.py`.
 """
 import json
 import os

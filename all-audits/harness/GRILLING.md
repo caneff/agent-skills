@@ -33,7 +33,7 @@ it. Skip any name below that has no report in this run:
 
 Read the findings from the audit's own record: for an audit that writes
 `findings.jsonl` (see [`findings-schema.md`](findings-schema.md)), the full
-list is there (`log_path`) — read that, not the summary HTML, which holds only
+list is there — read that, not the summary HTML, which holds only
 grouped counts. For an audit that renders a full HTML report instead, the
 report is the record.
 

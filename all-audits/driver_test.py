@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the audit sweep driver (#558) — ports run-audits.test.sh's
 hermetic index test to Python (parses the index rather than grepping it, per
-the family's plain-assert convention — see crap-audit/test_audit.py), plus a
+the family's plain-assert convention — see crap-audit/audit_test.py), plus a
 new cache-decision test against a real temporary git repo, including the
 bad-last-run-SHA case, which must mean RUN.
 """
@@ -63,6 +63,47 @@ def test_index_rerun_replaces_assets_without_nesting():
         assert not os.path.isdir(os.path.join(tmp, "collection", "assets", "assets")), "assets/assets nesting"
 
 
+def test_index_over_an_empty_collection_still_links_to_real_assets():
+    """#613: assets come from pagelib.copy_assets, not hoisted out of the
+    first report folder — so an index whose audits all skipped still links to
+    files that exist."""
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, "collection"))
+
+        r = _run_driver("--index", "--out", tmp)
+        assert r.returncode == 0, r.stdout + r.stderr
+
+        index = os.path.join(tmp, "collection", "index.html")
+        text = open(index).read()
+        assert 'href="assets/base/base.css"' in text
+        for linked in ("assets/base/base.css", "assets/base/base.js",
+                       "assets/components/callout/callout.css",
+                       "assets/components/table/table.css"):  # vt-table-wrap's CSS
+            assert os.path.isfile(os.path.join(tmp, "collection", linked)), linked
+
+
+def test_index_over_an_old_run_dir_does_not_prune_it():
+    """#606 round 2: `--index --out <run older than the TTL>` must index that
+    run, not delete it — pruning happens after `--out` is resolved and skips
+    the resolved dir."""
+    with tempfile.TemporaryDirectory() as cache_dir:
+        base = os.path.join(cache_dir, "all-audits")
+        old_run = os.path.join(base, "run-20200101-000000")
+        report = os.path.join(old_run, "collection", "dead-code", "report.html")
+        os.makedirs(os.path.dirname(report))
+        open(report, "w").write("<html>old report</html>")
+        os.utime(old_run, (0, 0))
+
+        r = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), "--index", "--out", old_run],
+            capture_output=True, text=True,
+            env={**os.environ, "XDG_CACHE_HOME": cache_dir, "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1"},
+        )
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert os.path.isfile(report), "the run being indexed was pruned"
+        assert "dead-code" in open(os.path.join(old_run, "collection", "index.html")).read()
+
+
 def test_collect_from_manifest_mutation_style():
     """#580: mutation mode now finds its report the same way the sweep does
     — through a manifest, never by grepping a log for a stray .html path
@@ -108,13 +149,6 @@ def test_audit_prompt_whole_repo_override_and_ignore_file():
         assert "ENTIRE repository" in with_file
         assert "god object in solver.py" in with_file
         assert "0009-solver-shape.md" in with_file
-
-
-def test_mutation_cap():
-    capped, skipped = driver.mutation_cap(list("abcde"), 3)
-    assert capped == ["a", "b", "c"] and skipped == 2
-    capped, skipped = driver.mutation_cap(list("abc"), 5)
-    assert capped == ["a", "b", "c"] and skipped == 0
 
 
 def test_mutation_subindex_and_single_main_row():
@@ -348,6 +382,166 @@ def test_crashed_no_tests_probe_renders_could_not_determine_not_zero():
 
         sub = open(os.path.join(tmp, "collection", "mutation", "index.html")).read()
         assert "could not be determined" in sub
+
+
+def test_mutation_run_dir_prunes_old_runs_and_makes_worktrees():
+    """#606: mutation mode resolves its run folder through the same `RunDir`
+    as the sweep, so it inherits the 3-day prune of old `run-*` dirs that it
+    used to skip. No `claude` is needed: naming the module skips the prepass,
+    and a module with no env manifest fails setup before any audit runs."""
+    with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as cache_dir:
+        _init_git_repo(repo)
+        base = os.path.join(cache_dir, "all-audits")
+        stale = os.path.join(base, "run-20200101-000000")
+        os.makedirs(stale)
+        os.utime(stale, (0, 0))
+
+        r = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), repo, "--mutation", "solver.py"],
+            capture_output=True, text=True,
+            env={**os.environ, "XDG_CACHE_HOME": cache_dir, "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1"},
+        )
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert not os.path.exists(stale), "mutation mode must prune run dirs past the TTL"
+
+        runs = [d for d in os.listdir(base) if d.startswith("run-")]
+        assert len(runs) == 1, runs
+        run_dir = os.path.join(base, runs[0])
+        for sub in ("logs", "collection", "manifests", "worktrees"):
+            assert os.path.isdir(os.path.join(run_dir, sub)), sub
+        assert os.listdir(os.path.join(run_dir, "worktrees")) == [], "the worktree must be cleaned up on the setup-failure path"
+        # round 2: the setup-failure page links ../assets/, so mutation mode
+        # delivers the shell's assets into the collection like the sweep does.
+        failure_page = open(os.path.join(run_dir, "collection", "solver.py", "report.html")).read()
+        assert '../assets/base/base.css' in failure_page
+        assert os.path.isfile(os.path.join(run_dir, "collection", "assets", "base", "base.css"))
+
+
+def _seed_run_dir(tmp, worktrees=False):
+    run = driver.RunDir(
+        root=tmp,
+        logs=os.path.join(tmp, "logs"),
+        collection=os.path.join(tmp, "collection"),
+        manifests=os.path.join(tmp, "manifests"),
+        worktrees=os.path.join(tmp, "worktrees") if worktrees else "",
+    )
+    for d in (run.logs, run.collection, run.manifests, run.worktrees):
+        if d:
+            os.makedirs(d, exist_ok=True)
+    return run
+
+
+def test_plan_reuses_the_cached_report_and_runs_the_rest():
+    """#606: the plan step decides alone — cache in, lists out. No audit
+    process is spawned, so it needs a tmp dir and no fake `claude`."""
+    with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as cache_dir:
+        _init_git_repo(repo)
+        report_dir = os.path.join(cache_dir, "domain-drift-report")
+        os.makedirs(report_dir)
+        driver.save_record(driver._record_file(repo, cache_dir), {
+            "domain-drift": {
+                "last_sha": driver.head_sha(repo),
+                "timestamp": driver._dt.datetime.now(driver._dt.timezone.utc).isoformat(),
+                "report_dir": report_dir,
+            }
+        })
+
+        plan = driver.plan_sweep(repo, ["domain-drift", "dead-code"], force=False, base=cache_dir)
+        assert plan.to_run == ["dead-code"], plan
+        assert plan.reused == {"domain-drift": report_dir}, plan
+        assert plan.skip_note["domain-drift"].startswith("unchanged since"), plan
+
+        forced = driver.plan_sweep(repo, ["domain-drift", "dead-code"], force=True, base=cache_dir)
+        assert forced.to_run == ["domain-drift", "dead-code"], forced
+        assert forced.reused == {} and forced.skip_note == {}, forced
+
+
+def test_collect_copies_both_report_kinds_and_returns_the_index():
+    """#606: the collect step assembles the collection from what is already
+    on disk — a manifest for what ran, the cache dir for what was reused —
+    and renders. Also needs only a tmp dir and no fake `claude`."""
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as srcdir:
+        run = _seed_run_dir(tmp)
+        ran = os.path.join(srcdir, "ran")
+        os.makedirs(ran)
+        open(os.path.join(ran, "report.html"), "w").write("<html>dead-code</html>")
+        manifest = driver.manifest_path_for(run.manifests, "dead-code")
+        os.makedirs(os.path.dirname(manifest))
+        json.dump({"report_path": os.path.join(ran, "report.html"), "count": 1, "headline": "h"}, open(manifest, "w"))
+
+        cached = os.path.join(srcdir, "cached")
+        os.makedirs(cached)
+        open(os.path.join(cached, "report.html"), "w").write("<html>domain-drift</html>")
+
+        plan = driver.Plan(
+            to_run=["dead-code", "duplication"],
+            reused={"domain-drift": cached},
+            skip_note={"domain-drift": "unchanged since abcd1234"},
+        )
+        index = driver.collect(run, "/some/repo", plan, base=os.path.join(tmp, "cache"))
+
+        assert index == os.path.join(run.collection, "index.html")
+        assert os.path.isfile(os.path.join(run.collection, "dead-code", "report.html"))
+        assert os.path.isfile(os.path.join(run.collection, "domain-drift", "report.html"))
+        text = open(index).read()
+        assert 'href="dead-code/report.html"' in text
+        assert 'href="domain-drift/report.html"' in text
+        assert "unchanged since abcd1234" in text
+        assert "no manifest" in text, "duplication ran and wrote no manifest — a named failure row"
+
+
+def test_index_only_rebuild_spawns_nothing_and_needs_no_run_branch():
+    """#606: `--index --out DIR` calls the collect step over an existing
+    collection. Nothing is spawned — the PATH here holds no `claude` and no
+    `git` — and no logs/ or manifests/ content is read."""
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as empty_bin:
+        d = os.path.join(tmp, "collection", "dead-code")
+        os.makedirs(d)
+        open(os.path.join(d, "report.html"), "w").write("<html>x</html>")
+
+        r = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), "--index", "--out", tmp],
+            capture_output=True, text=True,
+            env={**os.environ, "PATH": empty_bin, "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1"},
+        )
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert 'href="dead-code/report.html"' in open(os.path.join(tmp, "collection", "index.html")).read()
+        assert os.listdir(os.path.join(tmp, "manifests")) == []
+        assert os.listdir(os.path.join(tmp, "logs")) == []
+
+
+def test_help_prints_the_docstring_and_an_unknown_flag_exits_2():
+    """#606: argparse parses the flags and the module docstring is the help
+    text, so the flag reference has one home (all-audits/SKILL.md points at
+    it rather than restating it)."""
+    driver_py = os.path.join(os.path.dirname(__file__), "driver.py")
+    r = subprocess.run([sys.executable, driver_py, "--help"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.startswith("usage:"), r.stdout
+    assert driver.__doc__.splitlines()[0] in r.stdout
+    for flag in ("--out", "--only", "--short", "--index", "--force", "--mutation"):
+        assert flag in r.stdout, flag
+
+    bad = subprocess.run([sys.executable, driver_py, "--nope"], capture_output=True, text=True)
+    assert bad.returncode == 2, bad.stdout + bad.stderr
+
+
+def test_mutation_worktree_is_removed_even_when_the_failure_report_raises():
+    """#606: worktree cleanup is one try/finally per worktree. Before it, an
+    exception between `git worktree add` and the explicit cleanup call left
+    the worktree registered and on disk; here the failure-report write is made
+    to fail (unwritable collection) and the worktree must still be gone."""
+    with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as tmp:
+        _init_git_repo(repo)
+        run = _seed_run_dir(tmp, worktrees=True)
+        os.chmod(run.collection, 0o555)  # the module has no env manifest, so the driver writes a setup-failure report here
+        try:
+            driver._run_mutation_module(repo, "solver.py", run)
+        except OSError:
+            pass
+        finally:
+            os.chmod(run.collection, 0o755)
+        assert os.listdir(run.worktrees) == [], "the worktree must be removed on every exit path"
 
 
 def main():

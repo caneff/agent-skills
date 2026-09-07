@@ -287,7 +287,7 @@ floor along with `entirelyUncovered`/`outer`/`branchlessFn`; gates
 
 Running this skill's steps 5–6 directly against either fixture's captured
 JSON (skipping the test-run/tool-run steps, since it's already captured)
-should reproduce its table exactly — `~/.agents/skills/crap-audit/test_audit.py` already
+should reproduce its table exactly — `~/.agents/skills/crap-audit/audit_test.py` already
 asserts this programmatically for both scoring paths; this skill's own dry
 run confirms the report-writing step reproduces the same numbers end to
 end.

@@ -83,7 +83,6 @@
     "add-molab-badge": "off",
     "anywidget-generator": "off",
     "auto-paper-demo": "off",
-    "claude-handoff": "off",
     "find-skills": "off",
     "implement-paper-auto": "off",
     "loop-me": "off",
@@ -144,8 +143,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/caneff/.claude/hooks/sync-primary-main.sh",
-            "statusMessage": "Syncing primary worktree main"
+            "command": "/home/caneff/.claude/hooks/refresh-landed.sh",
+            "statusMessage": "Refreshing landed page"
           }
         ]
       },

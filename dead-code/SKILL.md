@@ -75,15 +75,12 @@ still `dynamic`, not `unsure`, once the entrypoint evidence is concrete.
    for a `dead`.
 
 4. **Write the findings log and render the summary — the default
-   deliverable.** Write every judged row to `findings.jsonl`, then draw a
-   grouped summary `report.html` from it, following
-   `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
-   JSONL schema and the summary's grouped-overview shape.
-   Write both to `<tmpdir>/dead-code-<timestamp>/` and deliver the summary per
-   `~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir resolution,
-   opening, and handing off the path all live there. This audit touches no
+   deliverable.** See
+   `~/.agents/skills/all-audits/harness/AUDIT-RUN.md` for the shared
+   write-and-deliver step (tmpdir resolution, `findings.jsonl` +
+   `report.html`, opening, and the final print). This audit touches no
    code — deleting dead code is a separate, opt-in step the user asks for by
-   name.
+   name. This skill's own bucket names and metabar:
 
    - **Log** — one JSONL line per vulture hit. `bucket` is `dead` / `dynamic`
      / `unsure`. `category` is the vulture kind, slugged (see above).

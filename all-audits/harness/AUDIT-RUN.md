@@ -23,7 +23,10 @@ own excluded-directory set, source walk, or parse/`--selfcheck` CLI dispatch
 one definition of the excluded-directory set; regenerate its JSON mirror
 (`excluded-dirs.json`, read by the `test-audit/audit.mjs` JS twin) with
 `python3 auditlib.py --write-json-mirror excluded-dirs.json` whenever the set
-changes.
+changes. `walk_source`'s optional `skip=` predicate filters out test files,
+fixtures, and `__init__.py` on top of the directory pruning; `auditlib.is_test_or_fixture`
+is the one definition of that check (mutation-audit's `_sibling_tests` uses it
+directly rather than keeping its own copy).
 
 ## Write the findings log and render the summary — the default deliverable
 
@@ -33,7 +36,8 @@ Write every finding to `findings.jsonl`, then draw a grouped summary
 the summary's grouped-overview shape. Resolve `<tmpdir>` from `$TMPDIR`,
 falling back to `/tmp`. Write both to `<tmpdir>/<skill>-<timestamp>/`, then
 open the summary and hand off its path per
-[`HTML-REPORT.md`](HTML-REPORT.md)'s asset-delivery section. Print the
+[`HTML-REPORT.md`](HTML-REPORT.md), whose `pagelib.page()` /
+`pagelib.copy_assets()` render the page and deliver its assets. Print the
 one-line verdict and the summary's absolute path, nothing else.
 
 ## The manifest (#559)

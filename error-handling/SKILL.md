@@ -80,15 +80,12 @@ lists every code that fired, so pass two sees the full mechanical picture.
    them together and give them the same verdict.
 
 4. **Write the findings log and render the summary — the default
-   deliverable.** Write every judged row to `findings.jsonl`, then draw a
-   grouped summary `report.html` from it, following
-   `~/.agents/skills/all-audits/harness/findings-schema.md` for both — the
-   JSONL schema and the summary's grouped-overview shape.
-   Write both to `<tmpdir>/error-handling-<timestamp>/` and deliver the
-   summary per `~/.agents/skills/all-audits/harness/HTML-REPORT.md` — tmpdir
-   resolution, opening, and handing off the path all live there. This audit
+   deliverable.** See
+   `~/.agents/skills/all-audits/harness/AUDIT-RUN.md` for the shared
+   write-and-deliver step (tmpdir resolution, `findings.jsonl` +
+   `report.html`, opening, and the final print). This audit
    touches no code — fixing a swallowed error is a separate, opt-in step the
-   user asks for by name.
+   user asks for by name. This skill's own bucket names and metabar:
 
    - **Log** — one JSONL line per merged hit. `bucket` is `fix` / `justified`
      / `unsure`. `category` is the tool-code slug (see above). `extra.codes`

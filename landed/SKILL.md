@@ -21,8 +21,10 @@ instead of a PR queue.
 
    It scans every git repo under `~/src` plus `~/.agents/skills`, renders a
    tab for each repo with commits in range, and writes
-   `~/.claude/landed.html`. It prints the path, tab count, and size — or says
-   so and writes nothing when the range is empty everywhere.
+   `~/.claude/landed.html` plus the `assets/` folder that page links
+   (`all-audits/harness/pagelib.py` owns both the shell and the copy). It
+   prints the path, tab count, and size — or says so and writes nothing when
+   the range is empty everywhere.
 
 2. Open it: `wslview ~/.claude/landed.html`. Report the per-run counts.
 
@@ -32,3 +34,7 @@ regenerating here just guarantees freshness before opening.
 
 Page anatomy lives in `generate.py` itself — read it there, don't restate it
 here.
+
+`generate.py` also takes `--roots <comma-separated paths>` and `--out <path>`
+to override which repos it scans and where it writes, for testing against a
+throwaway git repo instead of the real workspace. Not needed for normal use.

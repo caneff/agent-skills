@@ -85,7 +85,7 @@ Ship.`
 See `~/.agents/skills/ponytail-audit/HTML-REPORT.md` for the card anatomy and
 the tag→badge palette, and
 `~/.agents/skills/all-audits/harness/HTML-REPORT.md` for the shared scaffold
-and asset-delivery recipe.
+and the `copy_assets` asset step.
 
 ## Write the findings in plain language
 

@@ -8,16 +8,11 @@ run-audits.sh's original header comment for why: several audit skills carry
 gets past the guard — a subagent fan-out would silently lose them), collects
 the report folders under one `collection/` dir, and builds `index.html`.
 
-Usage:
-  driver.py [REPO]                 fresh sweep of every audit (default)
-  driver.py [REPO] --out DIR       write into DIR, accumulating (no wipe)
-  driver.py [REPO] --only a,b      run just these audits
-  driver.py [REPO] --short         run only the short set (see audits_data.py)
-  driver.py [REPO] --index --out DIR   rebuild index only, over DIR's reports
-  driver.py [REPO] --force         bypass the staleness cache, run everything
-  driver.py --mutation a.py,b.py   run mutation-audit on each module, one
-                                    fresh git worktree at a time
+A run is three steps: plan (ask the staleness cache what still needs a run),
+execute (the only step that spawns audits), collect (assemble the collection
+and render the index). `--index` calls collect alone.
 """
+import argparse
 import concurrent.futures
 import dataclasses
 import datetime as _dt
@@ -26,11 +21,14 @@ import html
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "harness"))
 from audits_data import AUDIT_NAMES, GATED, SHORT_SET  # noqa: E402
+import pagelib  # noqa: E402
 
 DEFAULT_THRESHOLD = 10
 DEFAULT_BACKSTOP_DAYS = 30
@@ -188,8 +186,6 @@ def update_cache(repo, name, report_dir, base=None):
 # --- filesystem / prompt helpers (ported from run-audits.sh) ----------------
 
 def replace_dir(src, dest):
-    import shutil
-
     if os.path.exists(dest):
         shutil.rmtree(dest)
     shutil.copytree(src, dest)
@@ -235,18 +231,23 @@ def mutation_prepass_prompt(repo):
     )
 
 
-def mutation_cap(candidates, n):
-    """Pure (candidates, n) -> (capped list, skipped count)."""
-    total = len(candidates)
-    skipped = max(0, total - n)
-    return candidates[:n], skipped
+# visual-teach components the driver's pages use: callouts, and the table
+# wrapper (`vt-table-wrap`) around the index and mutation sub-index tables.
+INDEX_COMPONENTS = ("callout", "table")
 
 
 def write_setup_failure_report(collection_dir, module, reason):
     d = os.path.join(collection_dir, module_slug(module))
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, "report.html"), "w", encoding="utf-8") as f:
-        f.write(f"<!doctype html><html><body><h1>mutation-audit setup failure</h1><p>Module: {html.escape(module)}</p><p>Reason: {html.escape(reason)}</p></body></html>\n")
+        f.write(pagelib.page(
+            title="mutation-audit setup failure",
+            kicker="Mutation sweep",
+            h1="mutation-audit setup failure",
+            lede=f"Module: {html.escape(module)}",
+            body=f'<div class="vt-callout bad">{html.escape(reason)}</div>\n',
+            prefix="../",
+        ))
     with open(os.path.join(d, "findings.jsonl"), "w", encoding="utf-8") as f:
         f.write(json.dumps({"status": "setup_failure", "module": module, "reason": reason}) + "\n")
 
@@ -299,47 +300,56 @@ def run_one(name, repo, outlogs, manifests_dir):
 
 # --- HTML index rendering -----------------------------------------------------
 
-_HEAD = """<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title}</title>
-<link rel="stylesheet" href="{prefix}assets/base/base.css">
-<link rel="stylesheet" href="{prefix}assets/components/callout/callout.css">
-<script src="{prefix}assets/base/base.js"></script>
-<style>
-  main {{ --vt-measure: 1080px; }}
-  .audit-table {{ width:100%; border-collapse:collapse; }}
-  .audit-table th, .audit-table td {{ border:1px solid var(--vt-rule); padding:.6rem .8rem; text-align:left; vertical-align:top; }}
-  .audit-table th {{ background:var(--vt-soft); font-weight:600; }}
-  .audit-table tr:nth-child(even) td {{ background:var(--vt-stripe); }}
-</style></head><body><main>
-"""
+_INDEX_CSS = """main { --vt-measure: 1080px; }
+.audit-table { width:100%; border-collapse:collapse; }
+.audit-table th, .audit-table td { border:1px solid var(--vt-rule); padding:.6rem .8rem; text-align:left; vertical-align:top; }
+.audit-table th { background:var(--vt-soft); font-weight:600; }
+.audit-table tr:nth-child(even) td { background:var(--vt-stripe); }"""
 
 
-def build_index(collection, repo, report_link, skip_note, synthesis, mutation_modules, mutation_survivors_sum, notest_count, notest_error=None):
-    out = [_HEAD.format(title="All-audits index", prefix="")]
-    out.append('<p class="vt-kicker">All-audits sweep</p>\n')
-    out.append(f'<h1>{html.escape(repo)} <span style="color:var(--vt-muted)">· {len(AUDIT_NAMES)}-audit sweep</span></h1>\n')
-    if synthesis:
-        out.append(f'<p class="vt-lede">{html.escape(synthesis)}</p>\n')
-    out.append('<h2>Reports</h2><div class="vt-table-wrap"><table class="audit-table">\n')
+@dataclasses.dataclass
+class IndexModel:
+    """Everything the sweep index renders (#606) — one value the collect step
+    fills in, so the renderer takes a model instead of nine positionals."""
+
+    collection: str
+    repo: str
+    report_link: dict
+    skip_note: dict
+    synthesis: str = ""
+    mutation_modules: list = dataclasses.field(default_factory=list)
+    mutation_survivors_sum: int = 0
+    notest_count: int = 0
+    notest_error: str = None
+
+
+def build_index(model):
+    out = ['<h2>Reports</h2><div class="vt-table-wrap"><table class="audit-table">\n']
     out.append("<thead><tr><th>Audit</th><th>Report</th><th>Status</th></tr></thead><tbody>\n")
     for name in AUDIT_NAMES:
-        link = report_link.get(name, "")
-        note = skip_note.get(name, "")
+        link = model.report_link.get(name, "")
+        note = model.skip_note.get(name, "")
         if link:
             out.append(f'<tr><td>{name}</td><td><a href="{link}">open report</a></td><td>{note}</td></tr>\n')
         else:
             out.append(f'<tr><td>{name}</td><td style="color:var(--vt-muted)">no report</td><td>{note}</td></tr>\n')
-    if mutation_modules or notest_count > 0 or notest_error:
-        verdict = f"{len(mutation_modules)} modules run, {mutation_survivors_sum} total survivors"
-        if notest_error:
+    if model.mutation_modules or model.notest_count > 0 or model.notest_error:
+        verdict = f"{len(model.mutation_modules)} modules run, {model.mutation_survivors_sum} total survivors"
+        if model.notest_error:
             verdict += " · no-tests count could not be determined"
-        elif notest_count > 0:
-            verdict += f" · {notest_count} with no tests"
+        elif model.notest_count > 0:
+            verdict += f" · {model.notest_count} with no tests"
         out.append(f'<tr><td>mutation</td><td><a href="mutation/index.html">open report</a></td><td>{verdict}</td></tr>\n')
-    out.append("</tbody></table></div></main></body></html>")
-    with open(os.path.join(collection, "index.html"), "w", encoding="utf-8") as f:
-        f.write("".join(out))
+    out.append("</tbody></table></div>\n")
+    with open(os.path.join(model.collection, "index.html"), "w", encoding="utf-8") as f:
+        f.write(pagelib.page(
+            title="All-audits index",
+            kicker="All-audits sweep",
+            h1=f'{html.escape(model.repo)} <span style="color:var(--vt-muted)">· {len(AUDIT_NAMES)}-audit sweep</span>',
+            lede=html.escape(model.synthesis) if model.synthesis else "",
+            body="".join(out),
+            extra_css=_INDEX_CSS,
+        ))
 
 
 def mutation_tally(findings_jsonl):
@@ -363,14 +373,14 @@ def mutation_tally(findings_jsonl):
 def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, notest_total, notest_error=None):
     d = os.path.join(collection, "mutation")
     os.makedirs(d, exist_ok=True)
-    out = [_HEAD.format(title="Mutation sub-index", prefix="../")]
-    out.append('<p class="vt-kicker">Mutation sweep</p>\n')
-    out.append(f'<h1>{html.escape(repo)} <span style="color:var(--vt-muted)">· {len(mutation_modules)} mutation modules</span></h1>\n')
+    out = []
     notest_count = len(notest_modules)
     if notest_error:
-        out.append(f'<p class="vt-lede">No-tests count could not be determined ({html.escape(notest_error)}).</p>\n')
+        lede = f"No-tests count could not be determined ({html.escape(notest_error)})."
     elif notest_total > 0:
-        out.append(f'<p class="vt-lede">{notest_count} of {notest_total} source modules have no tests.</p>\n')
+        lede = f"{notest_count} of {notest_total} source modules have no tests."
+    else:
+        lede = ""
     if mutation_modules:
         out.append('<h2>Modules</h2><div class="vt-table-wrap"><table class="audit-table">\n')
         out.append("<thead><tr><th>Module</th><th>Killed/total</th><th>Weak-assertion</th><th>No-coverage</th><th>Report</th></tr></thead><tbody>\n")
@@ -396,87 +406,137 @@ def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, 
         for m in notest_modules:
             out.append(f"<tr><td>{m}</td><td>0% — no tests</td></tr>\n")
         out.append("</tbody></table></div>\n")
-    out.append("</main></body></html>")
     with open(os.path.join(d, "index.html"), "w", encoding="utf-8") as f:
-        f.write("".join(out))
+        f.write(pagelib.page(
+            title="Mutation sub-index",
+            kicker="Mutation sweep",
+            h1=f'{html.escape(repo)} <span style="color:var(--vt-muted)">· {len(mutation_modules)} mutation modules</span>',
+            lede=lede,
+            body="".join(out),
+            prefix="../",
+            extra_css=_INDEX_CSS,
+        ))
+
+
+# --- the run folder -----------------------------------------------------------
+
+RUN_TTL_DAYS = 3
+
+
+@dataclasses.dataclass(frozen=True)
+class RunDir:
+    """The run folder's layout, made once for every mode (#606). One owner
+    for: resolving `--out` or a fresh `run-<timestamp>` under the cache base,
+    pruning runs past the TTL, creating the sub-folders, and pointing TMPDIR
+    at the run so every audit subprocess writes inside it."""
+
+    root: str
+    logs: str
+    collection: str
+    manifests: str
+    worktrees: str = ""
+
+    @classmethod
+    def create(cls, out, worktrees=False):
+        base = cache_base()
+        os.makedirs(base, exist_ok=True)
+        root = os.path.abspath(out) if out else os.path.join(base, "run-" + _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
+        # Prune only after `--out` is resolved, and never the run being asked
+        # for: `--index --out <old run>` must index it, not delete it.
+        cutoff = _dt.datetime.now().timestamp() - RUN_TTL_DAYS * 86400
+        for entry in os.listdir(base):
+            p = os.path.join(base, entry)
+            if entry.startswith("run-") and os.path.isdir(p) and p != root and os.path.getmtime(p) < cutoff:
+                shutil.rmtree(p, ignore_errors=True)
+        run = cls(
+            root=root,
+            logs=os.path.join(root, "logs"),
+            collection=os.path.join(root, "collection"),
+            manifests=os.path.join(root, "manifests"),
+            worktrees=os.path.join(root, "worktrees") if worktrees else "",
+        )
+        for d in (run.root, run.logs, run.collection, run.manifests, run.worktrees):
+            if d:
+                os.makedirs(d, exist_ok=True)
+        os.environ["TMPDIR"] = run.root
+        return run
 
 
 # --- the sweep ----------------------------------------------------------------
 
-def _resolve_run_dir(out, index_only):
-    base = cache_base()
-    os.makedirs(base, exist_ok=True)
-    ttl_days = int(os.environ.get("AUDITS_TTL_DAYS", "3"))
-    cutoff = _dt.datetime.now().timestamp() - ttl_days * 86400
-    for entry in os.listdir(base):
-        p = os.path.join(base, entry)
-        if entry.startswith("run-") and os.path.isdir(p) and os.path.getmtime(p) < cutoff:
-            import shutil
 
-            shutil.rmtree(p, ignore_errors=True)
-    if out:
-        os.makedirs(out, exist_ok=True)
-        return os.path.abspath(out)
-    if index_only:
-        print("ERROR: --index needs --out DIR — the dir whose reports to index.", file=sys.stderr)
-        sys.exit(2)
-    return os.path.join(base, "run-" + _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
+@dataclasses.dataclass
+class Plan:
+    """What the sweep will do before it does anything (#606): which audits
+    run, which reuse a cached report, and the note the index prints for
+    each skip. Deciding this spawns no audit."""
+
+    to_run: list = dataclasses.field(default_factory=list)
+    reused: dict = dataclasses.field(default_factory=dict)
+    skip_note: dict = dataclasses.field(default_factory=dict)
 
 
-def sweep(repo, out, only, short, index_only, force):
-    repo = os.path.abspath(repo)
-    selected = [s.strip() for s in only.split(",") if s.strip()] if only else (SHORT_SET if short else list(AUDIT_NAMES))
+def plan_sweep(repo, selected, force, base=None):
+    """Ask the staleness cache which of `selected` still needs a run."""
+    base = base or cache_base()
+    plan = Plan()
+    for name in selected:
+        if name in GATED and not force:
+            d = decide(repo, name, GATED[name], base=base)
+            if not d.run:
+                if d.report_dir and os.path.isdir(d.report_dir):
+                    plan.reused[name] = d.report_dir
+                    plan.skip_note[name] = f"unchanged since {d.sha[:8]}"
+                    print(f"[{name}] skipped (unchanged since {d.sha[:8]}), reusing cached report")
+                    continue
+                print(f"[{name}] cache says skip but cached report is gone — running fresh")
+        plan.to_run.append(name)
+    return plan
 
-    run_dir = _resolve_run_dir(out, index_only)
-    os.environ["TMPDIR"] = run_dir
-    outlogs = os.path.join(run_dir, "logs")
-    collection = os.path.join(run_dir, "collection")
-    manifests_dir = os.path.join(run_dir, "manifests")
-    os.makedirs(outlogs, exist_ok=True)
-    os.makedirs(collection, exist_ok=True)
-    os.makedirs(manifests_dir, exist_ok=True)
-    print(f"run dir: {run_dir}")
-    print(f"collecting under: {collection}")
-    print(f"repo: {repo}")
-    print()
 
-    base = cache_base()
+def execute(repo, plan, run):
+    """Run the planned audits — the only place a sweep spawns a process.
+
+    The first audit runs alone as a smoke test: if the `-p` slash invocation
+    is rejected by the model-invocation guard, every audit would fail the
+    same way, so the sweep aborts instead of fanning thirteen failures out.
+    """
+    if not plan.to_run:
+        return
+    smoke = plan.to_run[0]
+    print(f"== smoke test: {smoke} ==")
+    run_one(smoke, repo, run.logs, run.manifests)
+    log_text = open(os.path.join(run.logs, f"{smoke}.log"), encoding="utf-8", errors="replace").read()
+    if re.search(r"cannot be used with Skill tool|disable-model-invocation", log_text, re.IGNORECASE):
+        print(f"ABORT: -p slash invocation was rejected by the guard. See {run.logs}/{smoke}.log", file=sys.stderr)
+        sys.exit(1)
+    print("smoke test passed; fanning out the rest\n")
+    rest = plan.to_run[1:]
+    if rest:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(rest)) as ex:
+            list(ex.map(lambda n: run_one(n, repo, run.logs, run.manifests), rest))
+
+
+def collect(run, repo, plan, base=None):
+    """Assemble the collection from what is on disk and render the index.
+
+    Reports arrive two ways — through the manifest each audit that ran wrote,
+    or copied from the cache for a skipped one — and this is the only step
+    that reads either. Returns the index path. `--index` calls it directly
+    over an existing collection, which is why it never touches the run
+    branch: an empty `Plan` collects a finished folder just as well.
+    """
+    base = base or cache_base()
+    collection = run.collection
+    for name, cached in plan.reused.items():
+        replace_dir(cached, os.path.join(collection, name))
+
     stable = os.path.join(base, repo_key(repo), "reports")
-
-    skip_note = {}
-    to_run = []
-    if not index_only:
-        for name in selected:
-            if name in GATED and not force:
-                d = decide(repo, name, GATED[name], base=base)
-                if not d.run:
-                    if d.report_dir and os.path.isdir(d.report_dir):
-                        replace_dir(d.report_dir, os.path.join(collection, name))
-                        skip_note[name] = f"unchanged since {d.sha[:8]}"
-                        print(f"[{name}] skipped (unchanged since {d.sha[:8]}), reusing cached report")
-                        continue
-                    print(f"[{name}] cache says skip but cached report is gone — running fresh")
-            to_run.append(name)
-
-        if to_run:
-            smoke = to_run[0]
-            print(f"== smoke test: {smoke} ==")
-            run_one(smoke, repo, outlogs, manifests_dir)
-            log_text = open(os.path.join(outlogs, f"{smoke}.log"), encoding="utf-8", errors="replace").read()
-            if re.search(r"cannot be used with Skill tool|disable-model-invocation", log_text, re.IGNORECASE):
-                print(f"ABORT: -p slash invocation was rejected by the guard. See {outlogs}/{smoke}.log", file=sys.stderr)
-                sys.exit(1)
-            print("smoke test passed; fanning out the rest\n")
-            rest = to_run[1:]
-            if rest:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=len(rest)) as ex:
-                    list(ex.map(lambda n: run_one(n, repo, outlogs, manifests_dir), rest))
-
     manifest_note = {}
-    for name in to_run:
-        reason = collect_from_manifest(manifests_dir, name, collection, name)
+    for name in plan.to_run:
+        reason = collect_from_manifest(run.manifests, name, collection, name)
         if reason == "no manifest":
-            manifest_note[name] = f"no manifest — see {os.path.join(outlogs, name + '.log')}"
+            manifest_note[name] = f"no manifest — see {os.path.join(run.logs, name + '.log')}"
             continue
         if reason:
             manifest_note[name] = reason
@@ -535,66 +595,88 @@ def sweep(repo, out, only, short, index_only, force):
         result = _run(["claude", *CLAUDE_FLAGS, prompt])
         synthesis = result.stdout.strip()
 
-    for name in AUDIT_NAMES + mutation_modules:
-        assets = os.path.join(collection, name, "assets")
-        if os.path.isdir(assets):
-            replace_dir(assets, os.path.join(collection, "assets"))
-            break
+    pagelib.copy_assets(collection, components=INDEX_COMPONENTS)
 
-    build_index(collection, repo, report_link, {**skip_note, **manifest_note}, synthesis, mutation_modules, mutation_survivors_sum, len(notest_modules), notest_error)
+    build_index(IndexModel(
+        collection=collection,
+        repo=repo,
+        report_link=report_link,
+        skip_note={**plan.skip_note, **manifest_note},
+        synthesis=synthesis,
+        mutation_modules=mutation_modules,
+        mutation_survivors_sum=mutation_survivors_sum,
+        notest_count=len(notest_modules),
+        notest_error=notest_error,
+    ))
     if mutation_modules or notest_modules or notest_error:
         build_mutation_subindex(collection, repo, mutation_modules, notest_modules, notest_total, notest_error)
 
-    print()
-    print(f"index: {os.path.join(collection, 'index.html')}")
-    print(f"logs: {outlogs}")
-
     index_path = os.path.join(collection, "index.html")
-    if os.environ.get("AUDITS_NO_OPEN", "0") != "1":
-        opener = "xdg-open" if sys.platform.startswith("linux") else ("open" if sys.platform == "darwin" else None)
-        if opener:
-            subprocess.run([opener, index_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    print()
+    print(f"index: {index_path}")
+    print(f"logs: {run.logs}")
+    return index_path
+
+
+def open_index(index_path):
+    if os.environ.get("AUDITS_NO_OPEN", "0") == "1":
+        return
+    opener = "xdg-open" if sys.platform.startswith("linux") else ("open" if sys.platform == "darwin" else None)
+    if opener:
+        subprocess.run([opener, index_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+
+def _announce(run, repo):
+    print(f"run dir: {run.root}")
+    print(f"collecting under: {run.collection}")
+    print(f"repo: {repo}")
+    print()
+
+
+def sweep(repo, out, only, short, force):
+    repo = os.path.abspath(repo)
+    selected = only if only is not None else (SHORT_SET if short else list(AUDIT_NAMES))
+    run = RunDir.create(out)
+    _announce(run, repo)
+    plan = plan_sweep(repo, selected, force)
+    execute(repo, plan, run)
+    open_index(collect(run, repo, plan))
+
+
+def rebuild_index(repo, out):
+    """`--index --out DIR`: collect over a finished collection, nothing else."""
+    repo = os.path.abspath(repo)
+    run = RunDir.create(out)
+    _announce(run, repo)
+    open_index(collect(run, repo, Plan()))
 
 
 # --- mutation mode --------------------------------------------------------
 
-def mutation_mode(repo, mutation_list, out):
+def mutation_mode(repo, modules, out):
     repo = os.path.abspath(repo)
     here = os.path.dirname(os.path.abspath(__file__))
 
-    final_targets = [t.strip() for t in mutation_list.split(",") if t.strip()] if mutation_list else None
+    final_targets = None if modules is None else list(modules)
     skipped = 0
     if final_targets is None:
         candidates = []
-        env_candidates = os.environ.get("MUTATION_CANDIDATES")
-        if env_candidates is not None:
-            candidates = [ln.strip() for ln in env_candidates.splitlines() if ln.strip()]
-        elif os.environ.get("AUDITS_NO_SYNTH", "0") != "1":
+        if os.environ.get("AUDITS_NO_SYNTH", "0") != "1":
             result = _run(["claude", *CLAUDE_FLAGS, mutation_prepass_prompt(repo)])
             candidates = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
         max_n = int(os.environ.get("MUTATION_MAX", "10"))
-        final_targets, skipped = mutation_cap(candidates, max_n)
+        final_targets = candidates[:max_n]
+        skipped = max(0, len(candidates) - max_n)
 
     for t in final_targets:
         print(f"mutation-target: {t}")
     if skipped > 0:
         print(f"… {skipped} more modules skipped (raise MUTATION_MAX to include them)")
 
-    if os.environ.get("MUTATION_DRY_RUN", "0") == "1":
-        return
-
-    base = cache_base()
-    os.makedirs(base, exist_ok=True)
-    run_dir = os.path.abspath(out) if out else os.path.join(base, "run-" + _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
-    os.makedirs(run_dir, exist_ok=True)
-    os.environ["TMPDIR"] = run_dir
-    outlogs = os.path.join(run_dir, "logs")
-    collection = os.path.join(run_dir, "collection")
-    worktrees = os.path.join(run_dir, "worktrees")
-    manifests_dir = os.path.join(run_dir, "manifests")
-    for d in (outlogs, collection, worktrees, manifests_dir):
-        os.makedirs(d, exist_ok=True)
-    print(f"run dir: {run_dir}")
+    run = RunDir.create(out, worktrees=True)
+    collection = run.collection
+    pagelib.copy_assets(collection, components=INDEX_COMPONENTS)  # setup-failure pages link ../assets/
+    print(f"run dir: {run.root}")
     print(f"collecting under: {collection}\n")
 
     notest_json = os.path.join(collection, "mutation-no-tests.json")
@@ -623,106 +705,94 @@ def mutation_mode(repo, mutation_list, out):
 
     try:
         for module in final_targets:
-            _run_mutation_module(repo, module, outlogs, collection, worktrees, manifests_dir)
+            _run_mutation_module(repo, module, run)
     finally:
-        for d in os.listdir(worktrees):
-            _run(["git", "-C", repo, "worktree", "remove", "--force", os.path.join(worktrees, d)])
+        for d in os.listdir(run.worktrees):
+            _run(["git", "-C", repo, "worktree", "remove", "--force", os.path.join(run.worktrees, d)])
         _run(["git", "-C", repo, "worktree", "prune"])
 
     print(f"\ncollection: {collection}")
 
 
-def _run_mutation_module(repo, module, outlogs, collection, worktrees, manifests_dir):
+def _run_mutation_module(repo, module, run):
     slug = module_slug(module)
-    wt = os.path.join(worktrees, slug)
-    log = os.path.join(outlogs, f"mutation-{slug}.log")
-    manifest = manifest_path_for(manifests_dir, slug)
+    collection = run.collection
+    wt = os.path.join(run.worktrees, slug)
+    log = os.path.join(run.logs, f"mutation-{slug}.log")
+    manifest = manifest_path_for(run.manifests, slug)
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
 
-    def cleanup():
-        _run(["git", "-C", repo, "worktree", "remove", "--force", wt])
-        _run(["git", "-C", repo, "worktree", "prune"])
-
     print(f"[mutation:{module}] creating worktree")
-    with open(log, "w", encoding="utf-8") as f:
-        r = subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", wt, "HEAD"], stdout=f, stderr=subprocess.STDOUT)
-    if r.returncode != 0:
-        print(f"[mutation:{module}] worktree creation failed — see {log}", file=sys.stderr)
-        write_setup_failure_report(collection, module, "git worktree add failed")
-        cleanup()
-        return
+    try:
+        with open(log, "w", encoding="utf-8") as f:
+            r = subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", wt, "HEAD"], stdout=f, stderr=subprocess.STDOUT)
+        if r.returncode != 0:
+            print(f"[mutation:{module}] worktree creation failed — see {log}", file=sys.stderr)
+            write_setup_failure_report(collection, module, "git worktree add failed")
+            return
 
-    if os.path.isfile(os.path.join(wt, "uv.lock")) or os.path.isfile(os.path.join(wt, "pyproject.toml")):
+        if not (os.path.isfile(os.path.join(wt, "uv.lock")) or os.path.isfile(os.path.join(wt, "pyproject.toml"))):
+            print(f"[mutation:{module}] no recognized env manifest (uv.lock/pyproject.toml) — see {log}", file=sys.stderr)
+            write_setup_failure_report(collection, module, "no recognized env manifest (uv.lock/pyproject.toml); env resolution heuristic ceiling")
+            return
+
         print(f"[mutation:{module}] resolving env (uv sync)")
         with open(log, "a", encoding="utf-8") as f:
             r = subprocess.run(["uv", "sync"], cwd=wt, stdout=f, stderr=subprocess.STDOUT)
         if r.returncode != 0:
             print(f"[mutation:{module}] env resolution failed — see {log}", file=sys.stderr)
             write_setup_failure_report(collection, module, "uv sync failed")
-            cleanup()
             return
-    else:
-        print(f"[mutation:{module}] no recognized env manifest (uv.lock/pyproject.toml) — see {log}", file=sys.stderr)
-        write_setup_failure_report(collection, module, "no recognized env manifest (uv.lock/pyproject.toml); env resolution heuristic ceiling")
-        cleanup()
-        return
 
-    print(f"[mutation:{module}] running /mutation-audit {module}")
-    prompt = f"/mutation-audit {module}\n{manifest_instruction(manifest)}"
-    with open(log, "a", encoding="utf-8") as f:
-        subprocess.run(["claude", *CLAUDE_FLAGS, prompt], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False)
+        print(f"[mutation:{module}] running /mutation-audit {module}")
+        prompt = f"/mutation-audit {module}\n{manifest_instruction(manifest)}"
+        with open(log, "a", encoding="utf-8") as f:
+            subprocess.run(["claude", *CLAUDE_FLAGS, prompt], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False)
 
-    reason = collect_from_manifest(manifests_dir, slug, collection, slug)
-    if reason:
-        print(f"[mutation:{module}] {reason} — see {log}", file=sys.stderr)
-        write_setup_failure_report(collection, module, reason)
-    cleanup()
+        reason = collect_from_manifest(run.manifests, slug, collection, slug)
+        if reason:
+            print(f"[mutation:{module}] {reason} — see {log}", file=sys.stderr)
+            write_setup_failure_report(collection, module, reason)
+    finally:
+        # The one cleanup for this worktree — every exit path, including an
+        # exception, comes through here (#606). mutation_mode keeps an outer
+        # sweep of `worktrees/` as the backstop for a crash mid-`add`.
+        _run(["git", "-C", repo, "worktree", "remove", "--force", wt])
+        _run(["git", "-C", repo, "worktree", "prune"])
     print(f"[mutation:{module}] done")
 
 
 # --- CLI ----------------------------------------------------------------
 
-def main(argv):
-    repo, out, only, short, index_only, force = None, None, None, False, False, False
-    mutation, mutation_list = False, None
-    args = argv[1:]
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--out":
-            out = args[i + 1]
-            i += 2
-        elif a == "--only":
-            only = args[i + 1]
-            i += 2
-        elif a == "--short":
-            short = True
-            i += 1
-        elif a == "--index":
-            index_only = True
-            i += 1
-        elif a == "--force":
-            force = True
-            i += 1
-        elif a == "--mutation":
-            mutation = True
-            if i + 1 < len(args) and not args[i + 1].startswith("-"):
-                mutation_list = args[i + 1]
-                i += 2
-            else:
-                i += 1
-        elif a.startswith("-"):
-            print(f"unknown flag: {a}", file=sys.stderr)
-            sys.exit(2)
-        else:
-            repo = a
-            i += 1
-    repo = repo or os.getcwd()
+def _split(value):
+    """A comma-separated flag value as a list — the one place the CLI splits."""
+    return [v.strip() for v in value.split(",") if v.strip()] if value else []
 
-    if mutation:
-        mutation_mode(repo, mutation_list, out)
+
+def main(argv):
+    p = argparse.ArgumentParser(
+        prog="driver.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument("repo", nargs="?", help="repo to audit (default: the current directory)")
+    p.add_argument("--out", metavar="DIR", help="write into DIR, accumulating (no wipe)")
+    p.add_argument("--only", metavar="A,B", help="run just these audits")
+    p.add_argument("--short", action="store_true", help="run only the short set (see audits_data.py)")
+    p.add_argument("--index", action="store_true", help="rebuild the index only, over --out DIR's reports")
+    p.add_argument("--force", action="store_true", help="bypass the staleness cache, run everything")
+    p.add_argument("--mutation", nargs="?", const="", metavar="A.PY,B.PY",
+                   help="run mutation-audit on each module, one fresh git worktree at a time "
+                        "(no value: pick the modules with a prepass)")
+    args = p.parse_args(argv[1:])
+
+    repo = args.repo or os.getcwd()
+    if args.mutation is not None:
+        mutation_mode(repo, None if args.mutation == "" else _split(args.mutation), args.out)
+    elif args.index:
+        if not args.out:
+            p.error("--index needs --out DIR — the dir whose reports to index.")
+        rebuild_index(repo, args.out)
     else:
-        sweep(repo, out, only, short, index_only, force)
+        sweep(repo, args.out, _split(args.only) if args.only is not None else None, args.short, args.force)
 
 
 if __name__ == "__main__":
