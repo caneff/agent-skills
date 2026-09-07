@@ -21,6 +21,8 @@ Reconciles the hand-wired skill layout:
 ~/.agents/skills/skills-sync/skills-sync.sh --self-test
 ```
 
+`skills-sync.test.sh` wraps the self-test so the repo's `tests/all.sh` runs it.
+
 A "skill" = a directory containing `SKILL.md`. Non-dir files (`.skill-lock.json`)
 and dot-dirs (`.system`, `.agents`) are skipped. Matching is by directory name
 only.

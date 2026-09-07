@@ -1,17 +1,34 @@
 #!/usr/bin/env bash
-# Runs every test suite in the repo: git-tracked *.test.sh, every audit.py
-# that implements --selfcheck, and every test_audit.py. One line per suite;
-# exits non-zero on the first failure (and prints that suite's output).
+# Runs every test suite in the repo. Three discovery rules over git-tracked
+# files, no per-file special cases: `*.test.sh` runs under bash, `*_test.py`
+# runs directly under python3, and each `audit.py` that implements
+# `--selfcheck` runs with that flag. One line per suite; exits non-zero on
+# the first failure (and prints that suite's output). `--list` prints the
+# labels the rules select, without running anything.
 set -u
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
 
-count=0
+suites() { # prints "<label>\t<command>" per discovered suite
+  git ls-files -- '*.test.sh' |
+    while IFS= read -r f; do printf '%s\tbash %s\n' "$f" "$f"; done
+  git ls-files -- '*_test.py' |
+    while IFS= read -r f; do printf '%s\tpython3 %s\n' "$f" "$f"; done
+  git ls-files | grep -E '(^|/)audit\.py$' |
+    while IFS= read -r f; do
+      grep -q -- '--selfcheck' "$f" &&
+        printf '%s --selfcheck\tpython3 %s --selfcheck\n' "$f" "$f"
+    done
+}
 
-run() { # run <label> <cmd...>
-  local label=$1; shift
-  local out
-  if out=$("$@" 2>&1 </dev/null); then
+if [ "${1:-}" = --list ]; then
+  suites | cut -f1
+  exit 0
+fi
+
+count=0
+while IFS=$'\t' read -r label cmd; do
+  if out=$($cmd 2>&1 </dev/null); then
     echo "PASS $label"
     count=$((count + 1))
   else
@@ -19,18 +36,6 @@ run() { # run <label> <cmd...>
     printf '%s\n' "$out"
     exit 1
   fi
-}
-
-while IFS= read -r f; do
-  run "$f" bash "$f"
-done < <(git ls-files -- '*.test.sh')
-
-while IFS= read -r f; do
-  grep -q -- '--selfcheck' "$f" && run "$f --selfcheck" python3 "$f" --selfcheck
-done < <(git ls-files | grep -E '(^|/)audit\.py$')
-
-while IFS= read -r f; do
-  run "$f" python3 "$f"
-done < <(git ls-files | grep -E '(^|/)test_audit\.py$')
+done < <(suites)
 
 echo "$count suites passed"

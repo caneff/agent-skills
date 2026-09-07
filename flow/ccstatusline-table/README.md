@@ -46,4 +46,7 @@ Git branch/changes and context tokens are computed in-script.
 
 ```
 python3 table-statusline.py --selftest
+helpers/usage-segment.sh --selftest
 ```
+
+`statusline.test.sh` runs both, so the repo's `tests/all.sh` picks them up.
