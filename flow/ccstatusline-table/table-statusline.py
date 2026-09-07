@@ -69,6 +69,17 @@ def pad(s: str, width: int) -> str:
     return s + " " * max(0, width - dwidth(s))
 
 
+def parse_usage_fields(line: str) -> tuple[str, str, str, str]:
+    """Split `usage-segment.sh all`'s tab-separated line into its 4 fields.
+
+    Pads with blanks on the right so a trailing empty field (dropped by a
+    plain ``.split`` when nothing follows the last tab) still comes back as
+    "", matching the single-field modes' "blank when absent" contract.
+    """
+    weekly, wreset, session, breset = (line.split("\t") + [""] * 4)[:4]
+    return weekly, wreset, session, breset
+
+
 def git(cwd: str) -> tuple[str, str, str]:
     """Return (branch-cell, changes-cell, main-repo-root) for the repo at cwd.
 
@@ -194,10 +205,19 @@ def main() -> None:
         return f"{short} {effort}".strip()
 
     def usage_cell() -> str:
-        weekly = run([str(CFG / "usage-segment.sh"), "weekly"], raw)
-        session = run([str(CFG / "usage-segment.sh"), "session"], raw)
-        wreset = run([str(CFG / "usage-segment.sh"), "wreset"], raw)
-        breset = run([str(CFG / "usage-segment.sh"), "breset"], raw)
+        # One spawn for all four fields (not `run()`: its `.strip()` would eat
+        # a leading/trailing empty field's tab along with it).
+        try:
+            out = subprocess.run(
+                [str(CFG / "usage-segment.sh"), "all"],
+                input=raw,
+                capture_output=True,
+                timeout=1.5,
+            ).stdout
+            line = ANSI.sub("", out.decode("utf-8", "replace")).rstrip("\n")
+        except Exception:
+            line = ""
+        weekly, wreset, session, breset = parse_usage_fields(line)
         return " · ".join(x for x in (win(weekly, wreset), win(session, breset)) if x)
 
     cells = [
@@ -241,6 +261,11 @@ if __name__ == "__main__":
         assert frame_color(179_000) == YELLOW
         assert frame_color(180_000) == RED
         assert frame_color(250_000) == RED  # over 200k: stays red
+        assert parse_usage_fields("42%\t2d3h30m\t12%\t3h10m") == (
+            "42%", "2d3h30m", "12%", "3h10m",
+        )
+        assert parse_usage_fields("\t\t12%\t3h10m") == ("", "", "12%", "3h10m")
+        assert parse_usage_fields("") == ("", "", "", "")
         print("ok")
     else:
         main()
