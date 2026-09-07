@@ -32,19 +32,22 @@ entry_mode(){ git ls-tree "$1" -- "$2" | awk '{print $1}'; }
 # put <tree-ish> <path-in-tree> <dest> — write that blob out, mode included.
 # The rm is load-bearing: writing through an existing symlink would follow it
 # and dump the content wherever it points, leaving the link itself untouched.
+# Every step reports its own failure: `set -e` is suppressed inside merge_skill
+# (main tests its status), so a silent write failure would otherwise be reported
+# as a merge result.
 put(){
-  local mode; mode=$(entry_mode "$1" "$2")
-  mkdir -p "$(dirname "$3")"
-  rm -f "$3"
-  if [ "$mode" = 120000 ]; then ln -s "$(git cat-file blob "$1:$2")" "$3"; return; fi
-  git cat-file blob "$1:$2" > "$3"
+  local mode; mode=$(entry_mode "$1" "$2") || return 1
+  mkdir -p "$(dirname "$3")" || return 1
+  rm -f "$3" || return 1
+  if [ "$mode" = 120000 ]; then ln -s "$(git cat-file blob "$1:$2")" "$3" || return 1; return 0; fi
+  git cat-file blob "$1:$2" > "$3" || return 1
   case "$mode" in *755) chmod +x "$3" ;; *) chmod -x "$3" ;; esac
 }
 
 # install_merged <mode-tree> <path> <merged-file> — put the merged text at
 # <path> with the mode <mode-tree> records, by writing that blob for its mode
 # and then overwriting the bytes.
-install_merged(){ put "$1" "$2" "$2"; cat "$3" > "$2"; }
+install_merged(){ put "$1" "$2" "$2" || return 1; cat "$3" > "$2"; }
 
 # merge_skill <skill> <base-tree> <pre> <post>
 # Three-way merge one protected skill into the working tree, which holds
@@ -75,7 +78,7 @@ merge_skill(){ (
       if [ -n "$lo" ] \
          && [ "$(entry_mode "$pre" "$skill/$f")" != "$(entry_mode "$post" "$skill/$f")" ] \
          && [ "$(entry_mode "$pre" "$skill/$f")" != "$(entry_mode "$base" "$f")" ]; then
-        put "$pre" "$skill/$f" "$skill/$f"
+        put "$pre" "$skill/$f" "$skill/$f" || exit 2
         printf '%s\t%s\t%s\n' LOCAL "$f" "your file mode kept"
       fi
       continue
@@ -83,31 +86,31 @@ merge_skill(){ (
     st=
     if [ -z "$lo" ]; then                          # absent from your version
       if   [ -z "$bo" ];      then st=UPSTREAM     # brand-new upstream file
-      elif [ "$bo" = "$uo" ]; then st=LOCAL; rm -f "$skill/$f"   # you deleted it
+      elif [ "$bo" = "$uo" ]; then st=LOCAL; rm -f "$skill/$f" || exit 2   # you deleted it
       else                                         # you deleted, upstream changed
         st=CONFLICT; conflicted=1
         note="you deleted this file; upstream changed it, and ITS version is in the tree"
       fi
     elif [ -z "$uo" ]; then                        # absent from upstream
-      if   [ -z "$bo" ];      then st=LOCAL;    put "$pre" "$skill/$f" "$skill/$f"
+      if   [ -z "$bo" ];      then st=LOCAL;    put "$pre" "$skill/$f" "$skill/$f" || exit 2
       elif [ "$bo" = "$lo" ]; then st=UPSTREAM  # upstream deleted, you hadn't edited
       else
-        st=CONFLICT; conflicted=1; put "$pre" "$skill/$f" "$skill/$f"
+        st=CONFLICT; conflicted=1; put "$pre" "$skill/$f" "$skill/$f" || exit 2
         note="upstream deleted this file; you had edited it, and YOUR version is in the tree"
       fi
     elif [ "$lo" = "$bo" ]; then st=UPSTREAM       # you never touched it
-    elif [ "$uo" = "$bo" ]; then st=LOCAL; put "$pre" "$skill/$f" "$skill/$f"
+    elif [ "$uo" = "$bo" ]; then st=LOCAL; put "$pre" "$skill/$f" "$skill/$f" || exit 2
     elif [ "$(entry_mode "$pre" "$skill/$f")" = 120000 ] \
       || [ "$(entry_mode "$post" "$skill/$f")" = 120000 ]; then
       # a symlink has no lines to merge — keep yours and say so, rather than
       # writing upstream's target string into a regular file.
-      st=CONFLICT; conflicted=1; put "$pre" "$skill/$f" "$skill/$f"
+      st=CONFLICT; conflicted=1; put "$pre" "$skill/$f" "$skill/$f" || exit 2
       note="symlink — not line-mergeable; YOUR version is in the tree"
     else
-      put "$pre" "$skill/$f" "$tmp/ours"
+      put "$pre" "$skill/$f" "$tmp/ours" || exit 2
       # both sides may have ADDED the file, in which case base has no such path
-      if [ -n "$bo" ]; then put "$base" "$f" "$tmp/base"; else : > "$tmp/base"; fi
-      put "$post" "$skill/$f" "$tmp/theirs"
+      if [ -n "$bo" ]; then put "$base" "$f" "$tmp/base" || exit 2; else : > "$tmp/base"; fi
+      put "$post" "$skill/$f" "$tmp/theirs" || exit 2
       # a mode you changed yourself is a local edit like any other: keep it
       mode_src=$post
       if [ -n "$bo" ] && [ "$(entry_mode "$pre" "$skill/$f")" != "$(entry_mode "$base" "$f")" ]; then
@@ -117,12 +120,13 @@ merge_skill(){ (
       git merge-file -q -L "yours: $skill/$f" -L "installed upstream" \
         -L "new upstream" "$tmp/ours" "$tmp/base" "$tmp/theirs" || rc=$?
       if [ "$rc" -eq 0 ]; then
-        st=MERGED; install_merged "$mode_src" "$skill/$f" "$tmp/ours"
+        st=MERGED; install_merged "$mode_src" "$skill/$f" "$tmp/ours" || exit 2
       elif [ "$rc" -lt 128 ]; then                 # rc = number of conflicts
         st=CONFLICT; conflicted=1
-        install_merged "$mode_src" "$skill/$f" "$tmp/ours"
+        install_merged "$mode_src" "$skill/$f" "$tmp/ours" || exit 2
       else                                         # unmergeable (binary): keep yours
-        st=CONFLICT; conflicted=1; put "$pre" "$skill/$f" "$skill/$f"
+        st=CONFLICT; conflicted=1; put "$pre" "$skill/$f" "$skill/$f" || exit 2
+        note="not line-mergeable (binary?); YOUR version is in the tree"
       fi
     fi
     printf '%s\t%s\t%s\n' "$st" "$f" "$note"
@@ -211,7 +215,14 @@ fi
 
 merged=(); conflicted=(); nobase=(); report=""
 for s in "${!PROT[@]}"; do
-  [ -e "$s" ] || continue
+  if [ ! -e "$s" ]; then
+    # upstream removed the skill outright. Your edited copy is still in PRE —
+    # restore it rather than letting it disappear, and let the digest rule.
+    if git cat-file -e "$PRE:$s" 2>/dev/null; then
+      git checkout "$PRE" -- "$s"; nobase+=("$s")
+    fi
+    continue
+  fi
   if git diff --quiet "$PRE" "$POST" -- "$s"; then continue; fi   # upstream left it alone
   if [ -z "${MANUAL[$s]:-}" ] && base=$(resolve_base_tree "${BASEHASH[$s]:-}"); then
     rc=0; out=$(merge_skill "$s" "$base" "$PRE" "$POST") || rc=$?

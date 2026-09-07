@@ -42,7 +42,10 @@ seq_lines > myskill/del-changed.md
 seq_lines > "myskill/réf.md"          # non-ASCII: core.quotePath must not hide it
 seq_lines > myskill/exec-merge.sh     # upstream keeps it 644, you chmod +x
 seq_lines > myskill/modeonly.sh       # same bytes everywhere, you chmod +x
-ln -s targetA myskill/link
+seq_lines > myskill/you-edited-they-deleted.md
+printf 'BASE\000\001\002' > myskill/blob.bin
+printf 'A\n' > "$WORK/tA"; printf 'LOCAL\n' > "$WORK/tLOCAL"; printf 'UP\n' > "$WORK/tUP"
+ln -s "$WORK/tA" myskill/link
 git add -A; git commit -qm base
 BASE=$(git rev-parse HEAD:myskill); BASE_C=$(git rev-parse HEAD)
 
@@ -53,9 +56,11 @@ echo "my own note" > myskill/local-only.md
 printf '#!/bin/sh\necho mine\n' > myskill/local-only.sh; chmod +x myskill/local-only.sh
 sed -i 's/^line1$/line1 LOCAL/' "myskill/réf.md"
 sed -i 's/^line1$/line1 LOCAL/' myskill/exec-merge.sh; chmod +x myskill/exec-merge.sh
+sed -i 's/^line1$/line1 LOCAL/' myskill/you-edited-they-deleted.md
+printf 'LOCAL\000\001\002' > myskill/blob.bin
 echo "both sides added this" > myskill/addadd.md
 chmod +x myskill/modeonly.sh
-ln -sfn targetLOCAL myskill/link
+ln -sfn "$WORK/tLOCAL" myskill/link
 rm myskill/del-clean.md myskill/del-changed.md     # you deleted both
 git add -A; git commit -qm local
 PRE=$(git rev-parse HEAD)
@@ -68,8 +73,10 @@ echo "brand new" > myskill/new-upstream.md
 sed -i 's/^line3$/line3 UPSTREAM/' myskill/del-changed.md   # upstream edited what you deleted
 sed -i 's/^line10$/line10 UPSTREAM/' "myskill/réf.md"
 sed -i 's/^line10$/line10 UPSTREAM/' myskill/exec-merge.sh
+rm myskill/you-edited-they-deleted.md
+printf 'UP\000\001\002' > myskill/blob.bin
 echo "upstream added it too" > myskill/addadd.md
-ln -sfn targetUP myskill/link
+ln -sfn "$WORK/tUP" myskill/link
 rm myskill/local-only.md myskill/local-only.sh
 chmod +x myskill/tool.sh
 git add -A; git commit -qm upstream
@@ -137,11 +144,21 @@ contains "mode-only edit reported" "LOCAL	modeonly.sh" "$report"
 # it must not spray content into whatever it points at
 if [ -L myskill/link ]; then ok "conflicted symlink is still a symlink"
 else bad "conflicted symlink is still a symlink"; fi
-check "conflicted symlink keeps your target" "targetLOCAL" "$(readlink myskill/link 2>/dev/null)"
-if [ -e myskill/targetUP ] || [ -e myskill/targetLOCAL ]; then
-  bad "no file written through the symlink"
-else ok "no file written through the symlink"; fi
+check "conflicted symlink keeps your target" "$WORK/tLOCAL" "$(readlink myskill/link 2>/dev/null)"
+# the targets are real files: writing through the link would rewrite one of them
+check "symlink target untouched (yours)"    "LOCAL" "$(cat "$WORK/tLOCAL")"
+check "symlink target untouched (upstream)" "UP"    "$(cat "$WORK/tUP")"
 contains "symlink conflict reported" "CONFLICT	link" "$report"
+contains "symlink conflict names the reason" "symlink — not line-mergeable" "$report"
+
+# upstream deleted a file you had edited: your version stays, and it conflicts
+contains "upstream-deleted-yours-edited conflicts" "CONFLICT	you-edited-they-deleted.md" "$report"
+contains "your edit to it survives" "line1 LOCAL" myskill/you-edited-they-deleted.md
+
+# an unmergeable (binary) file falls back to keeping yours, and says so
+contains "binary conflict reported" "CONFLICT	blob.bin" "$report"
+contains "binary conflict names the surviving side" "YOUR version is in the tree" "$report"
+check "binary file keeps your bytes" "LOCAL" "$(head -c 5 myskill/blob.bin)"
 
 # you chmod +x a file, upstream edits its text: your mode is an edit too
 contains "content-merged file merged" "MERGED	exec-merge.sh" "$report"
