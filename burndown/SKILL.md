@@ -154,15 +154,22 @@ stages sit either side of that line (step 3).
    a few lines, so one reader holds both. Review is read-only: no Orca task,
    no terminal, no worktree beyond `git fetch` of the branches.
 
-   The coordinator itself, from the primary checkout, runs on the clump's
-   range: `~/.agents/skills/two-axis-code-review/SKILL.md` by pointer, which
-   spawns its own two fresh agents, standards and spec, in parallel (it pins
-   `model: opus` on both); and the built-in `code-review` skill on the same
-   range, blocking on its fork with `TaskOutput` — never idle with one
-   outstanding. The two axes stay separate agents by design; do not collapse
-   them into one reviewer. Before either runs, do the scope check yourself:
-   `git diff --name-only <range>` against the seeds' own-files lists, and a
-   file outside a ticket's set is a finding for that ticket.
+   Three fresh `Agent` calls, `model: opus`, all in parallel, each seeded
+   with the diff command (`git -C <worktree> diff <base>...<tip>`), the
+   commit list, and nothing from the burn: the two axes of
+   `~/.agents/skills/two-axis-code-review/SKILL.md` — run that skill by
+   pointer; its § Spawn both sub-agents holds the two prompts, and its
+   fixed point is passed as an argument since the coordinator's own HEAD is
+   not the branch — and a **correctness** reviewer with a brief of its own:
+   bugs, behaviour the ticket did not ask for, and every new test checked as
+   a witness (strip the constraint, see whether it still passes). The
+   built-in `code-review` skill is not used here: its eight-finder fork costs
+   about 100k tokens and five minutes on a fifty-line diff and finds what one
+   fresh reader finds. The two axes stay separate agents by design; do not
+   collapse them into the correctness reviewer. Before any of the three runs,
+   do the scope check yourself: `git diff --name-only <range>` against the
+   seeds' own-files lists, and a file outside a ticket's set is a finding for
+   that ticket.
 
    The reviewers write their own reports to files outside every checkout —
    `two-axis-code-review/SKILL.md` § Spawn both sub-agents states the ban and
@@ -220,9 +227,9 @@ stages sit either side of that line (step 3).
    the builder spawned — lookups, since builders run no reviews — so a
    non-zero `<review>` there is delegated work, not review.
    `<coord-review>` is the step 5 reviewers' tokens for this ticket, read off
-   the usage each `Agent` completion carries (the two-axis pair and the
-   `code-review` fork), split evenly across the clump's tickets — never asked
-   of a reviewer, which cannot count itself. The script cannot see it: an
+   the usage each `Agent` completion carries (the two axes and the
+   correctness reviewer), split evenly across the clump's tickets — never
+   asked of a reviewer, which cannot count itself. The script cannot see it: an
    in-process subagent writes into the coordinator's transcript, not the
    worktree's. `<rounds>` is `1` when the ticket took a fix round, else `0`. Nothing in the loop
    reads this file back — it is read between burns.
