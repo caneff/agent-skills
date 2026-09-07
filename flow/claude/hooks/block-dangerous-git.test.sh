@@ -99,6 +99,17 @@ run "history destroyer message hands the user a runnable ! line" 2 \
 run "chain blocked names the tripping segment's pattern" 2 \
   "ls -la && git branch -D foo" "protected pattern 'git branch -D'"
 
+# The force-push guard is per segment: a `--force` that belongs to some other
+# command in the chain, or a `push` that is only a word in a path, is not a
+# force-push (#637 — three false blocks in one burn).
+run "force on a non-push segment after a push allowed" 0 \
+  "git push -q origin b; orca-ide worktree rm --worktree x --force"
+run "pre-push path plus worktree remove --force allowed" 0 \
+  "ls .git/hooks/pre-push && git worktree remove --force /tmp/x"
+run "git -C push -f still blocked" 2 "git -C /r push -f origin main" "force-push"
+run "force-push in a later segment still blocked" 2 \
+  "git fetch && git push --force origin main" "force-push"
+
 # Reading git is untouched.
 run "ordinary git command allowed" 0 "git status"
 

@@ -40,6 +40,19 @@ The worker rules in `implement/SKILL.md` § Build, by pointer, plus the
 - When a ticket touches one rule of a state machine that lives across files,
   the brief states the whole machine.
 
+## An unusable Orca CLI is a stop
+
+If `orca-ide` fails before the Run exists or stops answering mid-run —
+`run-detectors: unable to find an interpreter` (Windows interop gone), a
+`waiter_exists` storm, the runtime unreachable — **stop and report the exact
+error**, in the workspace comment and in your terminal, then end your turn.
+Never substitute in-process subagents for Orca workers: that loses the Run,
+the Tasks, the gates and the per-slice review loop, and the coordinator who
+dispatched you cannot see any of it. One spec was built that way through an
+interop outage and its report only arrived when the burn asked. Workers
+already dispatched keep going; when the CLI is back, resume from the tracker
+and the task list, not from memory.
+
 ## Waiting
 
 Wait for a worker to finish, escalate, or ask. Known failure: the wait verb

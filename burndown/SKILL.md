@@ -151,11 +151,14 @@ stages sit either side of that line (step 3).
    before the worker's first commit and tell the worker.
 
    **Do not `worker-release` at `worker_done`.** The builder stays live until
-   its ticket settles or parks — whether or not a review round happens: when
-   one does, findings go to its dispatch (`orchestration send --to
-   dispatch:<id>`), so a fix round costs no Orca startup and no re-reading of
-   the ticket and notes. Release at settle (reviewed or skipped straight from
-   step 5) or when the ticket parks, never before.
+   its ticket settles or parks — whether or not a review round happens. A
+   dispatch settles at `worker_done` and rejects mail (`dispatch_inactive`),
+   so a fix round is a new task started on the same agent terminal:
+   `task-create` with the findings path, then `worker-start --task <id>
+   --worktree name:<wt> --terminal <agent handle from worker-show>`. The
+   agent keeps its context, so the round costs no Orca startup and no
+   re-reading of the ticket and notes. Release at settle (reviewed or skipped
+   straight from step 5) or when the ticket parks, never before.
 
    The coordinator's wait, from here through settle, covers `question` and
    `escalation` alike, not just `worker_done` — a blocking question is real
@@ -175,28 +178,34 @@ stages sit either side of that line (step 3).
    to the ticket. A report with every finding fixed and no file outside its
    set skips review and goes straight to step 6.
 
-   When triggered, `git fetch` the branch and review it with an in-process
-   subagent (`Agent` tool, `model: opus`) — no Orca task, no terminal, no
-   worktree; review is read-only. Seed it with three things only — the issue
-   reference, the builder's `worker_done` report, and the commit range —
-   never the burn history or the explorer's notes: this reviewer is
-   confirming a specific gap, not re-reading the ticket from scratch. It runs
-   the same two reviews step 4 names, by pointer, not by slash
-   invocation — correctness first, then spec/standards. The seed says: run
-   `code-review` in your own context, never as a background fork — a forked
-   review hung twice in one burn and needed two pings before it returned;
-   wait for both reviews to finish, then send the verdict with the message
-   tool **before** going idle, and arm no background wait afterwards — a
-   reviewer that keeps a timer running re-notifies the coordinator with the
-   same verdict two or three times, and one that goes idle without sending
-   costs a round trip to prod it. The coordinator prods a silent reviewer
-   once, then rules on the findings it already has. It owns the verdict, one
-   of three:
+   When triggered, `git fetch` the branch and review it with a **fresh**
+   in-process subagent (`Agent` tool, `model: opus`) — always a subagent,
+   whatever the diff size, so the read happens in a context that holds
+   nothing but the branch. No Orca task, no terminal, no worktree; review is
+   read-only. Seed it with three things only — the issue reference, the
+   builder's `worker_done` report, and the commit range — never the burn
+   history or the explorer's notes: this reviewer is confirming a specific
+   gap, not re-reading the ticket from scratch. The seed says: review against
+   the ticket's acceptance criteria and the questions in
+   `~/.agents/skills/two-axis-code-review/SKILL.md` — correctness first, then
+   spec/standards — doing the correctness pass **in your own context** and
+   applying the two-axis review **by reading it**. **A reviewer forks
+   nothing**: it never invokes the built-in `code-review` skill (which runs as
+   a background fork) and never spawns an agent of its own. A subagent has no
+   `TaskOutput`, so it cannot wait on a fork; its turn ends, it goes idle, and
+   the fork's result lands as a notification nothing delivers until a message
+   wakes it — one burn's reviewer sat thirty minutes on a finished verdict
+   that way. Send the verdict with the message tool as the last act of the
+   turn, and arm no background wait afterwards.
+
+   A reviewer silent for ten minutes is killed and a fresh one spawned on the
+   same seed; it is not prodded a second time. The reviewer owns the verdict,
+   one of three:
 
    - **clean** — go to step 6.
    - **changes requested** — findings the builder can act on. Write them to
-     `~/.cache/burndown/findings/<n>-r<round>.md` **verbatim** and send the
-     path to the builder's live dispatch, then re-review.
+     `~/.cache/burndown/findings/<n>-r<round>.md` **verbatim** and start the
+     fix round on the builder's terminal (step 4), then re-review.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
 

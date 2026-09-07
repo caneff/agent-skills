@@ -38,10 +38,15 @@ if [ -L "$HOME/.claude/hooks/sync-primary-main.sh" ]; then
   rm -f "$HOME/.claude/hooks/sync-primary-main.sh"
 fi
 
-# Pre-push hook: refuse a push when tests/all.sh fails. Hooks are shared
-# across worktrees, so resolve the common git dir rather than assuming ".git".
+# The pre-push hook that ran tests/all.sh is retired (#633): a push is not the
+# gate, the merge is (`git config land.testcmd`), and the hook's own GIT_DIR
+# leaked into the suite. Drop the symlink an earlier install left. Hooks are
+# shared across worktrees, so resolve the common git dir rather than ".git".
 git_common_dir="$(git -C "$here/.." rev-parse --path-format=absolute --git-common-dir)"
-link ../tests/all.sh "$git_common_dir/hooks/pre-push"
+if [ -L "$git_common_dir/hooks/pre-push" ]; then
+  rm -f "$git_common_dir/hooks/pre-push"
+  echo "removed retired pre-push hook"
+fi
 
 # Lay down the copy-only backups (files a symlink can't hold): the Windows VS
 # Code settings and claude/settings.json.
