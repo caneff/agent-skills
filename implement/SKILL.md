@@ -73,6 +73,12 @@ these rules, which bind the worker, or you when you build inline:
   work without it — report it as a follow-up. Scratch checks need not become
   committed tests; commit roughly one focused test per acceptance criterion,
   sized like the neighboring test files.
+- Record every message that arrives mid-build — an owner's terminal message,
+  a coordinator addendum — as its own entry in the **addenda file**, the moment
+  it arrives: the path the dispatch names (`burndown` seeds
+  `~/.cache/burndown/addenda/<n>.md`), else `/tmp/addenda-<n>.md`. Outside the
+  checkout, like the report. Finish checks each entry against the diff, and an
+  unrecorded message cannot be checked.
 - Commit to this branch; the driver pushes.
 
 ### The report
@@ -116,12 +122,58 @@ it carries `disable-model-invocation`, so the slash form will not fire for
 you. That threshold is the whole trigger: it is a structural review that
 will propose restructuring beyond the ticket, so it stays off by default.
 
-Commit to the workspace's branch. When the ticket maps to a GitHub issue, put a
-closing keyword (`Closes #<n>`) in the final commit body — a bare `(#<n>)` links
-the issue but does not close it. **That trailer is the only thing that closes
-the ticket**, and it fires when the commit reaches the default branch.
+Then the handoff, in order. Every step has a command whose output you read,
+and the run is not done until the merge line is handed over.
 
-Then open a PR and set the card to `in-review`. The owner merges; you never do.
+1. **Addenda check.** List every entry in the addenda file (§ Build) and say,
+   per entry, where it is in the diff or why it was declined. An entry that is
+   neither is unfinished work — fold it in now, before the commit.
+
+   Then commit to the workspace's branch. When the ticket maps to a GitHub
+   issue, put a closing keyword (`Closes #<n>`) in the final commit body — a
+   bare `(#<n>)` links the issue but does not close it. **That trailer is the
+   only thing that closes the ticket**, and it fires when the commit reaches
+   the default branch.
+
+2. **Pre-report gate.** Run it on the sha you are about to report:
+
+   ```
+   bash ~/.agents/skills/implement/pre-report-gate.sh <sha>
+   ```
+
+   It exits non-zero on a dirty tree or on a sha that is not an ancestor of the
+   branch tip — the two ways a "done" report has described work that was not on
+   the branch. Quote its pass line in the report. Fix commits stack: never
+   amend or rebase a sha already reported.
+
+3. **Push, open the PR, confirm it.**
+
+   ```
+   git push -u origin <branch>
+   gh pr create --repo <owner/name> --fill
+   gh pr ready <n> --repo <owner/name>        # only if it opened as a draft
+   gh pr view <n> --repo <owner/name> --json isDraft,mergeStateStatus
+   ```
+
+   The last command must print `false` and `CLEAN` before you go on;
+   `UNKNOWN` means GitHub has not finished computing mergeability, so poll it
+   for a few seconds. Then set the card:
+   `orca-ide worktree set --worktree active --workspace-status in-review --json`.
+
+4. **Hand the merge line.** The owner merges; you never do.
+
+   ```
+   ! gh pr merge <n> --repo <owner/name> --squash
+   ```
+
+   No `--delete-branch` while an Orca workspace holds the branch — git refuses
+   to delete a branch a worktree has checked out, and the merge line fails on
+   it. Pair it with the teardown line instead, which takes the full branch
+   name as its selector:
+
+   ```
+   ! orca-ide worktree rm --worktree <full branch name>
+   ```
 
 If `origin`'s owner is not the person you are working for, push the branch and
 stop — hand them the `gh pr create` line instead of opening it yourself.
