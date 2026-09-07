@@ -136,8 +136,9 @@ stages sit either side of that line (step 3).
    on it, then lead the `worker_done` report with every finding both reviews
    raised, one of three dispositions each — **fixed**, **deferred: <why>**,
    or **disputed: <why>** — before the commit sha; a done message with no
-   findings list is a question back to the builder, not a settle. One rule
-   goes in every seed: a question
+   findings list is a question back to the builder, not a settle.
+
+   One rule goes in every seed, docs-only included: a question
    to the coordinator that times out is not a stop — take the safe option, the
    one a reviewer can reverse in a single commit, keep building, and put the
    question and the choice you made at the top of `worker_done`. The
@@ -165,8 +166,8 @@ stages sit either side of that line (step 3).
       own, so nothing has read this diff yet.
 
    A docs-only ticket reports no findings, so only 2 and 3 can fire for it.
-   No trigger fires at all and the ticket goes straight to step 6, reviewed
-   by nobody.
+   When no trigger fires, whatever the ticket's size, it goes straight to
+   step 6, reviewed by nobody.
 
    When triggered, `git fetch` the branch and review it with a **fresh**
    in-process subagent (`Agent` tool, `model: opus`) — always a subagent,
@@ -241,8 +242,8 @@ stages sit either side of that line (step 3).
    the builder spawned, both its reviews and any lookup alike, so read
    `<review>` as delegated work rather than review alone. The built-in
    `code-review` runs as a fork, but its transcript still lands under
-   `subagents/` with `isSidechain: true`, so its tokens are in `<review>`
-   too — checked against this repo's own transcripts. `<coord-review>` is the step 5
+   `subagents/` with `isSidechain: true`, so its tokens are in
+   `<review>` too. `<coord-review>` is the step 5
    reviewer's own tokens, read off the usage its `Agent` completion carries —
    never asked of the reviewer, which cannot count itself — and `0` when none
    ran. The script cannot see it: an in-process subagent writes into the
