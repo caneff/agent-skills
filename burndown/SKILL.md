@@ -10,6 +10,10 @@ command is an Orca verb: run `orca-ide skills get orchestration` and
 `orca-ide skills get orca-cli` before the first one and follow that grammar,
 which is version-matched to the binary.
 
+The coordinator's job is judgment and git surgery over a long session: start
+it as `opus`, not the top tier — `sonnet` is the experiment to run once the
+cost file (a later ticket) shows the coordinator's own share of the burn.
+
 A single spec's slices in one Orca workspace are
 [`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this skill's.
 When the whole queue is one spec's slices, run that instead. When a spec's
@@ -64,6 +68,11 @@ read-only, exploration and review both, is an in-process subagent.
 
 ## The loop
 
+The loop's unit is the batch: dispatch every builder in a batch together,
+wait, settle every ticket in it, and only then re-list for the next frontier
+— there is no per-slot refill (step 8 has the rule). Exploration itself stays
+per-burn (step 3), run once regardless of how many batches follow.
+
 1. List the queue: `gh issue list --label ready-for-agent --state open`.
    Empty, with nothing in flight → report and stop.
 2. Take the **frontier** via Orca's ready-task query: every ticket whose
@@ -81,11 +90,17 @@ read-only, exploration and review both, is an in-process subagent.
    coordinator owns the PR. Two more lines go in every seed. First: read the
    repo's `CLAUDE.md` and `AGENTS.md` before editing and apply their
    same-PR rules (docs, glossary, CONTEXT.md) — a pointer buried under a
-   task list gets skipped, and the reviewer then spends a round on it. Second:
-   before `worker_done`, run the built-in `code-review` skill and
-   `~/.agents/skills/two-axis-code-review/SKILL.md` on your own branch and fix
-   what they raise, so the coordinator's review is a confirming pass, not the
-   first pass. One rule goes in every seed: a question
+   task list gets skipped, and the reviewer then spends a round on it. Second,
+   point the builder at `implement`'s § Finish for its review steps only —
+   run both reviews (the built-in `code-review` skill and
+   `~/.agents/skills/two-axis-code-review/SKILL.md`) on its own branch, then
+   stop short of Finish's own PR step; the coordinator owns the PR, per
+   above. What happens to each finding is this burn's rule, not Finish's: act
+   on it, then lead the `worker_done` report with every finding both reviews
+   raised, one of three dispositions each — **fixed**, **deferred: <why>**,
+   or **disputed: <why>** — before the commit sha; a done message with no
+   findings list is a question back to the builder, not a settle. One rule
+   goes in every seed: a question
    to the coordinator that times out is not a stop — take the safe option, the
    one a reviewer can reverse in a single commit, keep building, and put the
    question and the choice you made at the top of `worker_done`. The
@@ -98,23 +113,32 @@ read-only, exploration and review both, is an in-process subagent.
    have committed onto another ticket's PR. Fix it with `git checkout -b`
    before the worker's first commit and tell the worker.
 
-   **Do not `worker-release` at `worker_done`.** The builder stays live through
-   review: review findings go to its dispatch (`orchestration send --to
+   **Do not `worker-release` at `worker_done`.** The builder stays live until
+   its ticket settles or parks — whether or not a review round happens: when
+   one does, findings go to its dispatch (`orchestration send --to
    dispatch:<id>`), so a fix round costs no Orca startup and no re-reading of
-   the ticket and notes. Release only when the review is clean or the ticket
-   parks.
+   the ticket and notes. Release at settle (reviewed or skipped straight from
+   step 5) or when the ticket parks, never before.
 
-   The coordinator's wait covers `question` and `escalation`, not just
-   `worker_done`. Task status runs `pending → ready → dispatched →
-   completed` and carries no messages, so a blocking question is invisible to a
-   status poll: a coordinator polling `task-list` must check the mailbox for
-   pending questions on every poll.
-5. **Review.** Once a worker reports its branch, `git fetch` it and review it
-   with an in-process subagent (`Agent` tool, `model: opus`) — no Orca task,
-   no terminal, no worktree; review is read-only. Seed it with only the issue
-   reference and the branch — never the burn history or the explorer's notes —
-   running both the built-in `code-review` skill and
-   `~/.agents/skills/two-axis-code-review/SKILL.md` by pointer, not by slash
+   The coordinator's wait, from here through settle, covers `question` and
+   `escalation` alike, not just `worker_done` — a blocking question is real
+   and needs an answer; only the status-poll workaround for finding one is
+   moot now that there's no task-list poll to miss it (§ Waiting on Orca
+   workers has the one-wait-per-wake mechanics).
+5. **Review.** The coordinator spawns its own in-process reviewer only on one
+   of two triggers: the builder's report defers or disputes a finding, or the
+   branch's changed files (`git diff --name-only <range>`, checked against
+   the seed's own-files list from § Shape) leave the set exploration assigned
+   to the ticket. A report with every finding fixed and no file outside its
+   set skips review and goes straight to step 6.
+
+   When triggered, `git fetch` the branch and review it with an in-process
+   subagent (`Agent` tool, `model: opus`) — no Orca task, no terminal, no
+   worktree; review is read-only. Seed it with three things only — the issue
+   reference, the builder's `worker_done` report, and the commit range —
+   never the burn history or the explorer's notes: this reviewer is
+   confirming a specific gap, not re-reading the ticket from scratch. It runs
+   the same two reviews step 4 names, by pointer, not by slash
    invocation — correctness first, then spec/standards. The seed says: run
    `code-review` in your own context, never as a background fork — a forked
    review hung twice in one burn and needed two pings before it returned;
@@ -129,22 +153,22 @@ read-only, exploration and review both, is an in-process subagent.
    - **clean** — go to step 6.
    - **changes requested** — findings the builder can act on. Write them to
      `~/.cache/burndown/findings/<n>-r<round>.md` **verbatim** and send the
-     path to the builder's live dispatch, then re-review. This is the
-     normal outcome of a first review; it is not a park.
+     path to the builder's live dispatch, then re-review.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
 
-   A re-review always **resumes the same reviewer** (send it the range with
-   the message tool) rather than spawning a fresh one: a resumed reviewer
-   checks its own list and stops, while a fresh reader re-reads the whole
-   branch and grades comment wording as P1 — one burn spent rounds three and
-   four that way. The re-review message names the range
-   `<reviewed-sha>..<new-sha>`, never just the branch — builders amend and
-   force-push, and a reviewer pointed at a branch name silently re-reads work
-   it already cleared. Two coordinator rounds is the cap: a P1 still open after
-   round two goes into the PR body for the human, not into a third round.
-   Reviews run concurrently and do not count against the builder cap.
-6. **Settle, one at a time**, in the order reviews come back clean, per the
+   This gets exactly **one round**: a re-review, if the fix needs checking,
+   always **resumes the same reviewer** (send it the range with the message
+   tool) rather than spawning a fresh one — a resumed reviewer checks its own
+   list and stops, while a fresh reader re-reads the whole branch and grades
+   comment wording as P1 — and the re-review message names the range
+   `<reviewed-sha>..<new-sha>`, never just the branch, since builders amend
+   and force-push and a reviewer pointed at a branch name silently re-reads
+   work it already cleared. Whatever is still open after that one round goes
+   into the PR body for the human, not into a second round. Reviews run
+   concurrently and do not count against the builder cap.
+6. **Settle**, in the order each ticket clears — reviewed clean or skipped
+   straight from step 5 — per the
    Finish section of `~/.agents/skills/implement/SKILL.md` — which carries the
    ownership gate. Where the repo owner lets agents land directly, land. Where
    review is a human's, the terminal state of a ticket in this burn is **PR
@@ -181,10 +205,16 @@ read-only, exploration and review both, is an in-process subagent.
    ticket's state is its last line, so a later line supersedes an earlier one
    for that ticket — `pr` followed by `landed` is one ticket, merged.
    This is the single documented home for the grammar — nothing else restates it.
-8. When a ticket settles, refill its slot: go to 1, skipping step 3. Re-list
-   every pass — a landing can unblock tickets, and a human may have added
-   more. At the ticket cap — landed plus parked — start no new tasks, let the
-   live ones settle, and stop.
+8. Once every ticket in the batch has settled or parked, re-list the queue
+   for the next frontier: go to 1, skipping step 3. Re-list every pass — a
+   landing can unblock tickets, and a human may have added more. There is no
+   per-slot refill: a settled ticket's slot sits idle until every ticket in
+   its batch has settled or parked, so the frontier taken in step 2 is always
+   a whole batch, not a trickle of one-off replacements. Parks stay immediate
+   and never hold the batch: a parked ticket gets its progress line and its
+   issue comment right away, but the loop still waits on its batch-mates
+   before re-listing. At the ticket cap — landed plus parked — start no new
+   tasks, let the live ones settle, and stop.
 
 ## Spec handoff
 
@@ -226,18 +256,23 @@ see and its retry flag does not attach. Use `orca-wait --terminal <handle>
 old wait loop before arming a new one. Subagents are not waited on this way —
 the `Agent` call returns when the subagent finishes.
 
-One consumer of the Run mailbox at a time. `--types` decides when a waiter
-wakes, but the delivery it returns is the oldest whole batch, so heartbeats
-still arrive and a manual `check` while a waiter is armed drains the batch that
-waiter was going to return. Use `check --ack <delivery_id> --wait` as one call,
-and treat a heartbeat-only batch as a checkpoint, not an event.
+One consumer of the Run mailbox at a time, and one wait per wake: every wake
+is a single `check --ack <delivery_id> --wait` call, acknowledging the prior
+delivery in the same call, with no `task-list` poll before or after it —
+`worker-start` branch checks and progress-file writes happen around that one
+call, not a status loop between wakes. `--types` decides when a waiter wakes,
+but the delivery it returns is the oldest whole batch, so heartbeats still
+arrive inside it; treat a heartbeat-only batch as a checkpoint, not an event,
+and go straight into the next `check --ack --wait` rather than polling task
+status to fill the gap.
 
 The mailbox waiter lives on the server, not in the client. A `check --wait`
 that is backgrounded, killed, or interrupted leaves its waiter armed, and every
 later wait fails with `waiter_exists` until that waiter's own timeout expires —
-so run `check --wait` in the foreground only, with a timeout short enough to
-survive a kill (five minutes, never the tool's maximum), and when one is stuck
-poll with `check --peek` until it clears rather than retrying the wait.
+so run `check --wait` in the foreground only, with a timeout long enough to
+cover a real wait but short enough to survive a kill (five minutes, never the
+tool's maximum), and when one is stuck poll with `check --peek` until it
+clears rather than retrying the wait.
 
 ## Coordinator context stays thin
 
