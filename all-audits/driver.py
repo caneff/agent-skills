@@ -709,44 +709,43 @@ def _run_mutation_module(repo, module, outlogs, collection, worktrees, manifests
     manifest = manifest_path_for(manifests_dir, slug)
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
 
-    def cleanup():
-        _run(["git", "-C", repo, "worktree", "remove", "--force", wt])
-        _run(["git", "-C", repo, "worktree", "prune"])
-
     print(f"[mutation:{module}] creating worktree")
-    with open(log, "w", encoding="utf-8") as f:
-        r = subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", wt, "HEAD"], stdout=f, stderr=subprocess.STDOUT)
-    if r.returncode != 0:
-        print(f"[mutation:{module}] worktree creation failed — see {log}", file=sys.stderr)
-        write_setup_failure_report(collection, module, "git worktree add failed")
-        cleanup()
-        return
+    try:
+        with open(log, "w", encoding="utf-8") as f:
+            r = subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", wt, "HEAD"], stdout=f, stderr=subprocess.STDOUT)
+        if r.returncode != 0:
+            print(f"[mutation:{module}] worktree creation failed — see {log}", file=sys.stderr)
+            write_setup_failure_report(collection, module, "git worktree add failed")
+            return
 
-    if os.path.isfile(os.path.join(wt, "uv.lock")) or os.path.isfile(os.path.join(wt, "pyproject.toml")):
+        if not (os.path.isfile(os.path.join(wt, "uv.lock")) or os.path.isfile(os.path.join(wt, "pyproject.toml"))):
+            print(f"[mutation:{module}] no recognized env manifest (uv.lock/pyproject.toml) — see {log}", file=sys.stderr)
+            write_setup_failure_report(collection, module, "no recognized env manifest (uv.lock/pyproject.toml); env resolution heuristic ceiling")
+            return
+
         print(f"[mutation:{module}] resolving env (uv sync)")
         with open(log, "a", encoding="utf-8") as f:
             r = subprocess.run(["uv", "sync"], cwd=wt, stdout=f, stderr=subprocess.STDOUT)
         if r.returncode != 0:
             print(f"[mutation:{module}] env resolution failed — see {log}", file=sys.stderr)
             write_setup_failure_report(collection, module, "uv sync failed")
-            cleanup()
             return
-    else:
-        print(f"[mutation:{module}] no recognized env manifest (uv.lock/pyproject.toml) — see {log}", file=sys.stderr)
-        write_setup_failure_report(collection, module, "no recognized env manifest (uv.lock/pyproject.toml); env resolution heuristic ceiling")
-        cleanup()
-        return
 
-    print(f"[mutation:{module}] running /mutation-audit {module}")
-    prompt = f"/mutation-audit {module}\n{manifest_instruction(manifest)}"
-    with open(log, "a", encoding="utf-8") as f:
-        subprocess.run(["claude", *CLAUDE_FLAGS, prompt], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False)
+        print(f"[mutation:{module}] running /mutation-audit {module}")
+        prompt = f"/mutation-audit {module}\n{manifest_instruction(manifest)}"
+        with open(log, "a", encoding="utf-8") as f:
+            subprocess.run(["claude", *CLAUDE_FLAGS, prompt], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False)
 
-    reason = collect_from_manifest(manifests_dir, slug, collection, slug)
-    if reason:
-        print(f"[mutation:{module}] {reason} — see {log}", file=sys.stderr)
-        write_setup_failure_report(collection, module, reason)
-    cleanup()
+        reason = collect_from_manifest(manifests_dir, slug, collection, slug)
+        if reason:
+            print(f"[mutation:{module}] {reason} — see {log}", file=sys.stderr)
+            write_setup_failure_report(collection, module, reason)
+    finally:
+        # The one cleanup for this worktree — every exit path, including an
+        # exception, comes through here (#606). mutation_mode keeps an outer
+        # sweep of `worktrees/` as the backstop for a crash mid-`add`.
+        _run(["git", "-C", repo, "worktree", "remove", "--force", wt])
+        _run(["git", "-C", repo, "worktree", "prune"])
     print(f"[mutation:{module}] done")
 
 
