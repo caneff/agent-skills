@@ -89,7 +89,7 @@ CI config, and any skill/agent `.md`; a mixed diff is code. Auto-ship: edit on
 `main`, commit, push, report — except a fenced code block still needs its
 format check run first (formatters read fences; `uv run ruff format --check
 <file>` or equivalent). Code lane: one workspace per ticket, then `/implement`
-drives TDD → `/code-review` + `/spec-standards-review` → commit with
+drives TDD → `/code-review` + `/two-axis-code-review` → commit with
 `Closes #<n>` → PR. My insight is after the fact: small honest commits,
 `/landed` or `git log -p`, revert if wrong.
 

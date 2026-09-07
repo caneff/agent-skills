@@ -77,7 +77,7 @@ Run both reviews and fix what they raise:
 1. `/code-review` — the built-in correctness review (bugs, reuse, efficiency,
    CLAUDE.md conventions). It runs at the session's effort level; no argument
    needed.
-2. `/spec-standards-review` — this repo's two-axis review (documented coding
+2. `/two-axis-code-review` — this repo's two-axis review (documented coding
    standards + the originating spec).
 
 Neither one produces the other's findings. Both run, every time.

@@ -83,7 +83,7 @@ read-only, exploration and review both, is an in-process subagent.
    same-PR rules (docs, glossary, CONTEXT.md) — a pointer buried under a
    task list gets skipped, and the reviewer then spends a round on it. Second:
    before `worker_done`, run the built-in `code-review` skill and
-   `~/.agents/skills/spec-standards-review/SKILL.md` on your own branch and fix
+   `~/.agents/skills/two-axis-code-review/SKILL.md` on your own branch and fix
    what they raise, so the coordinator's review is a confirming pass, not the
    first pass. One rule goes in every seed: a question
    to the coordinator that times out is not a stop — take the safe option, the
@@ -114,7 +114,7 @@ read-only, exploration and review both, is an in-process subagent.
    no terminal, no worktree; review is read-only. Seed it with only the issue
    reference and the branch — never the burn history or the explorer's notes —
    running both the built-in `code-review` skill and
-   `~/.agents/skills/spec-standards-review/SKILL.md` by pointer, not by slash
+   `~/.agents/skills/two-axis-code-review/SKILL.md` by pointer, not by slash
    invocation — correctness first, then spec/standards. The seed says: wait
    for both reviews to finish, then send the verdict as your final message
    and arm no background wait afterwards — a reviewer that keeps a timer
