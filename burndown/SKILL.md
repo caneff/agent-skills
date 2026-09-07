@@ -249,8 +249,9 @@ stages sit either side of that line (step 3).
      round on that ticket's held builder (§ Holding the builder). Fixes are
      always the builder's, never the coordinator's: the dispatch hands the
      findings path, and the builder owns the files and the intent behind each
-     finding. Never send a scripted edit to apply verbatim — a fix dispatch
-     that dictated the change took four micro-rounds on one helper.
+     finding — under two-axis § A finding names the file and the intent, which
+     is that rule's one home and governs a coordinator's fix dispatch exactly
+     as it governs a reviewer's finding.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
 
