@@ -18,8 +18,11 @@ bash scripts/safe-update.sh     # do the update, merging your edits with upstrea
 Both run against `~/.agents/skills` (override with `SKILLS_DIR=...`).
 
 `safe-update.sh` exits **non-zero when a merge conflicted**. That is not a
-failed run — the update happened and is committed. Read the report, do the
-digest, and resolve the conflicts.
+crash: the update ran, and `PRE` and the upstream `POST` are both committed.
+What is *not* committed is the merge itself — a conflicted run leaves the
+markers in the working tree deliberately, so the hand merge happens on the real
+files and the commit that follows records the resolution instead of the
+markers. Read the report, do the digest, resolve every marker, then commit.
 
 ## Check status first (read-only)
 
@@ -67,6 +70,12 @@ DIGEST_CONFLICTED=<space-separated skills with conflict markers to resolve>
 DIGEST_KEPT=<space-separated skills kept whole-file, not merged>
 ```
 
+A conflicted run stops before the merge commit, so `git status` in
+`DIGEST_SKILLS_DIR` is dirty by design until the conflicts are resolved.
+
+```
+```
+
 Then:
 
 1. For each changed skill, read its content diff — prose files only, skip pure boilerplate:
@@ -85,11 +94,16 @@ below), so most edited skills need nothing from you. Two anchors do:
   `<<<<<<< yours` / `>>>>>>> new upstream` markers in the file. The three cases
   with no lines to mark up — you deleted a file upstream changed, upstream
   deleted a file you edited, and a symlink — carry no markers, and the report
-  line says which side is sitting in the tree instead. Read both, resolve, then
+  line says which side is sitting in the tree instead. **Nothing in the run is
+  committed while any of this stands** — not even the skills that merged
+  cleanly. Read both kinds, resolve every marker in the working tree, then
   `git add -A && git commit`.
-- **`DIGEST_KEPT`** — skills kept whole-file with no merge attempted: you
-  listed them in `.protected-skills`, or there was no merge base. Your files
-  are restored, but brand-new files upstream added still land. Read `git -C
+- **`DIGEST_KEPT`** — skills kept whole-file with no merge attempted. Three
+  things land here: you listed the skill in `.protected-skills`; there was no
+  merge base for it; or the merge itself failed to write (the script prints
+  `merge failed for <skill>` on stderr, and that one is a bug worth reporting,
+  not a normal outcome). In every case your files are restored, but brand-new
+  files upstream added still land. Read `git -C
   <DIGEST_SKILLS_DIR> --no-pager diff <DIGEST_PRE> <DIGEST_POST> -- <skill>`,
   decide whether upstream changed anything beyond the inverse of your own edit
   — if the whole delta is upstream stripping your customization, drop it
@@ -119,8 +133,9 @@ diff.
    is the merge base. Per file: your edit alone applies, upstream's alone
    applies, both apply when the hunks don't overlap, and overlapping hunks are
    written out with conflict markers. It prints a per-file report (`MERGED` /
-   `CONFLICT` / `LOCAL` / `UPSTREAM`) per skill, commits the result, and exits
-   non-zero if anything conflicted. A skill in `.protected-skills`, or one with
+   `CONFLICT` / `LOCAL` / `UPSTREAM`) per skill. It commits the merge **only if
+   nothing conflicted**; otherwise it exits non-zero and leaves the markers
+   uncommitted in the working tree for you to resolve. A skill in `.protected-skills`, or one with
    no reachable base, is kept whole-file and lands in `DIGEST_KEPT` instead.
 6. Prints a change summary and the one-line undo: `git reset --hard PRE`.
 

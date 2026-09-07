@@ -46,6 +46,7 @@ seq_lines > myskill/you-edited-they-deleted.md
 printf 'BASE\000\001\002' > myskill/blob.bin
 printf 'A\n' > "$WORK/tA"; printf 'LOCAL\n' > "$WORK/tLOCAL"; printf 'UP\n' > "$WORK/tUP"
 ln -s "$WORK/tA" myskill/link
+printf 'theirs\n' > "$WORK/tBase"; ln -s "$WORK/tBase" myskill/was-a-link
 git add -A; git commit -qm base
 BASE=$(git rev-parse HEAD:myskill); BASE_C=$(git rev-parse HEAD)
 
@@ -59,8 +60,10 @@ sed -i 's/^line1$/line1 LOCAL/' myskill/exec-merge.sh; chmod +x myskill/exec-mer
 sed -i 's/^line1$/line1 LOCAL/' myskill/you-edited-they-deleted.md
 printf 'LOCAL\000\001\002' > myskill/blob.bin
 echo "both sides added this" > myskill/addadd.md
+printf 'yours\n' > myskill/addadd.sh; chmod +x myskill/addadd.sh
 chmod +x myskill/modeonly.sh
 ln -sfn "$WORK/tLOCAL" myskill/link
+rm myskill/was-a-link; printf 'yours\n'  > myskill/was-a-link
 rm myskill/del-clean.md myskill/del-changed.md     # you deleted both
 git add -A; git commit -qm local
 PRE=$(git rev-parse HEAD)
@@ -76,7 +79,9 @@ sed -i 's/^line10$/line10 UPSTREAM/' myskill/exec-merge.sh
 rm myskill/you-edited-they-deleted.md
 printf 'UP\000\001\002' > myskill/blob.bin
 echo "upstream added it too" > myskill/addadd.md
+rm myskill/addadd.sh; printf 'theirs\n' > myskill/addadd.sh
 ln -sfn "$WORK/tUP" myskill/link
+rm myskill/was-a-link; printf 'theirs\n' > myskill/was-a-link
 rm myskill/local-only.md myskill/local-only.sh
 chmod +x myskill/tool.sh
 git add -A; git commit -qm upstream
@@ -157,8 +162,23 @@ contains "your edit to it survives" "line1 LOCAL" myskill/you-edited-they-delete
 
 # an unmergeable (binary) file falls back to keeping yours, and says so
 contains "binary conflict reported" "CONFLICT	blob.bin" "$report"
-contains "binary conflict names the surviving side" "YOUR version is in the tree" "$report"
+contains "binary conflict names its own reason" "not line-mergeable (binary?)" "$report"
+# the binary route keeps your bytes verbatim; the text route writes markers.
+# Without the rc>=128 branch a binary file would take the marker route instead.
+lacks "binary file has no conflict markers" "<<<<<<<" myskill/blob.bin
 check "binary file keeps your bytes" "LOCAL" "$(head -c 5 myskill/blob.bin)"
+
+# a file both sides ADDED has no base mode either — your exec bit is still yours
+if [ -x myskill/addadd.sh ]; then ok "add/add keeps your exec bit"
+else bad "add/add keeps your exec bit"; fi
+
+# base recorded a symlink, both sides now hold regular files: merge the files,
+# never the link's target
+contains "ex-symlink conflicts on content" "CONFLICT	was-a-link" "$report"
+contains "ex-symlink keeps your line"     "yours"  myskill/was-a-link
+contains "ex-symlink keeps upstream line" "theirs" myskill/was-a-link
+contains "ex-symlink is a real conflict, not a clean merge" "<<<<<<<" myskill/was-a-link
+check "ex-symlink base target untouched" "theirs" "$(cat "$WORK/tBase")"
 
 # you chmod +x a file, upstream edits its text: your mode is an edit too
 contains "content-merged file merged" "MERGED	exec-merge.sh" "$report"
