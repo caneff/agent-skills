@@ -58,7 +58,24 @@ Check `entered: 0` and a ring that is not full. In
 **sudokumaker-custom-constraints**, `just check` gates both across every shipped
 `PUZZLE_LINK*.txt`, and `docs/share-checklist.md` carries the criteria a gate
 cannot test. A non-given cell must never hold a solution digit or a hidden
-clue — that ships a board with the answer typed in.
+clue — that ships a board with the answer typed in. Do not fill the whole
+ring either; most outside-clue cells stay blank. Verify with a decode that
+non-given cells are `{}` and the ring is sparse before calling a link
+share-ready.
+
+Two exceptions:
+
+- Pencilmarks the owner asks for by name ("add the pencilmarks too") are
+  candidates, not values, and are wanted.
+- A ring carved to CP-SAT minimality is "mostly blank" by definition (owner
+  ruling, sudokumaker-custom-constraints #286) — do not re-derive or thin it.
+
+## Where the app and its wire format live
+
+SudokuMaker lives at sudokumaker.app — sudokumaker.com is a parked domain. For
+wire-format questions, read the app's `main-*.js` bundle (live fetch, or the
+HAR under `examples/_shared` in **sudokumaker-custom-constraints**), and check
+**gridfind**'s `docs/research/` for the recorded method before re-deriving it.
 
 ## Stripping a board for timing
 
