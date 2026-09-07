@@ -393,37 +393,60 @@ def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, 
         f.write("".join(out))
 
 
-# --- the sweep ----------------------------------------------------------------
+# --- the run folder -----------------------------------------------------------
 
-def _resolve_run_dir(out, index_only):
-    base = cache_base()
-    os.makedirs(base, exist_ok=True)
-    cutoff = _dt.datetime.now().timestamp() - 3 * 86400
-    for entry in os.listdir(base):
-        p = os.path.join(base, entry)
-        if entry.startswith("run-") and os.path.isdir(p) and os.path.getmtime(p) < cutoff:
-            shutil.rmtree(p, ignore_errors=True)
-    if out:
-        os.makedirs(out, exist_ok=True)
-        return os.path.abspath(out)
-    if index_only:
-        print("ERROR: --index needs --out DIR — the dir whose reports to index.", file=sys.stderr)
-        sys.exit(2)
-    return os.path.join(base, "run-" + _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
+RUN_TTL_DAYS = 3
+
+
+@dataclasses.dataclass(frozen=True)
+class RunDir:
+    """The run folder's layout, made once for every mode (#606). One owner
+    for: resolving `--out` or a fresh `run-<timestamp>` under the cache base,
+    pruning runs past the TTL, creating the sub-folders, and pointing TMPDIR
+    at the run so every audit subprocess writes inside it."""
+
+    root: str
+    logs: str
+    collection: str
+    manifests: str
+    worktrees: str = ""
+
+    @classmethod
+    def create(cls, out, worktrees=False):
+        base = cache_base()
+        os.makedirs(base, exist_ok=True)
+        cutoff = _dt.datetime.now().timestamp() - RUN_TTL_DAYS * 86400
+        for entry in os.listdir(base):
+            p = os.path.join(base, entry)
+            if entry.startswith("run-") and os.path.isdir(p) and os.path.getmtime(p) < cutoff:
+                shutil.rmtree(p, ignore_errors=True)
+        root = os.path.abspath(out) if out else os.path.join(base, "run-" + _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
+        run = cls(
+            root=root,
+            logs=os.path.join(root, "logs"),
+            collection=os.path.join(root, "collection"),
+            manifests=os.path.join(root, "manifests"),
+            worktrees=os.path.join(root, "worktrees") if worktrees else "",
+        )
+        for d in (run.root, run.logs, run.collection, run.manifests, run.worktrees):
+            if d:
+                os.makedirs(d, exist_ok=True)
+        os.environ["TMPDIR"] = run.root
+        return run
+
+
+# --- the sweep ----------------------------------------------------------------
 
 
 def sweep(repo, out, only, short, index_only, force):
     repo = os.path.abspath(repo)
     selected = [s.strip() for s in only.split(",") if s.strip()] if only else (SHORT_SET if short else list(AUDIT_NAMES))
 
-    run_dir = _resolve_run_dir(out, index_only)
-    os.environ["TMPDIR"] = run_dir
-    outlogs = os.path.join(run_dir, "logs")
-    collection = os.path.join(run_dir, "collection")
-    manifests_dir = os.path.join(run_dir, "manifests")
-    os.makedirs(outlogs, exist_ok=True)
-    os.makedirs(collection, exist_ok=True)
-    os.makedirs(manifests_dir, exist_ok=True)
+    if index_only and not out:
+        print("ERROR: --index needs --out DIR — the dir whose reports to index.", file=sys.stderr)
+        sys.exit(2)
+    run = RunDir.create(out)
+    run_dir, outlogs, collection, manifests_dir = run.root, run.logs, run.collection, run.manifests
     print(f"run dir: {run_dir}")
     print(f"collecting under: {collection}")
     print(f"repo: {repo}")
@@ -567,17 +590,9 @@ def mutation_mode(repo, mutation_list, out):
     if skipped > 0:
         print(f"… {skipped} more modules skipped (raise MUTATION_MAX to include them)")
 
-    base = cache_base()
-    os.makedirs(base, exist_ok=True)
-    run_dir = os.path.abspath(out) if out else os.path.join(base, "run-" + _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
-    os.makedirs(run_dir, exist_ok=True)
-    os.environ["TMPDIR"] = run_dir
-    outlogs = os.path.join(run_dir, "logs")
-    collection = os.path.join(run_dir, "collection")
-    worktrees = os.path.join(run_dir, "worktrees")
-    manifests_dir = os.path.join(run_dir, "manifests")
-    for d in (outlogs, collection, worktrees, manifests_dir):
-        os.makedirs(d, exist_ok=True)
+    run = RunDir.create(out, worktrees=True)
+    run_dir, outlogs, collection = run.root, run.logs, run.collection
+    worktrees, manifests_dir = run.worktrees, run.manifests
     print(f"run dir: {run_dir}")
     print(f"collecting under: {collection}\n")
 

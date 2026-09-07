@@ -343,6 +343,33 @@ def test_crashed_no_tests_probe_renders_could_not_determine_not_zero():
         assert "could not be determined" in sub
 
 
+def test_mutation_run_dir_prunes_old_runs_and_makes_worktrees():
+    """#606: mutation mode resolves its run folder through the same `RunDir`
+    as the sweep, so it inherits the 3-day prune of old `run-*` dirs that it
+    used to skip. No `claude` is needed: naming the module skips the prepass,
+    and a module with no env manifest fails setup before any audit runs."""
+    with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as cache_dir:
+        _init_git_repo(repo)
+        base = os.path.join(cache_dir, "all-audits")
+        stale = os.path.join(base, "run-20200101-000000")
+        os.makedirs(stale)
+        os.utime(stale, (0, 0))
+
+        r = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), repo, "--mutation", "solver.py"],
+            capture_output=True, text=True,
+            env={**os.environ, "XDG_CACHE_HOME": cache_dir, "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1"},
+        )
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert not os.path.exists(stale), "mutation mode must prune run dirs past the TTL"
+
+        runs = [d for d in os.listdir(base) if d.startswith("run-")]
+        assert len(runs) == 1, runs
+        run_dir = os.path.join(base, runs[0])
+        for sub in ("logs", "collection", "manifests", "worktrees"):
+            assert os.path.isdir(os.path.join(run_dir, sub)), sub
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
