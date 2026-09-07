@@ -52,9 +52,19 @@ settings.json, or CI config counts as code per the owner's Gate 2), one-file, or
 multi-file.
 
 Both stages feed one notes file, `~/.cache/burndown/<repo dir name>.notes.md`,
-outside the repo so every worker can read it, kept after the burn. Its layout is
-fixed: a `## Collisions` section first, then one `## #<n>` section per ticket,
-in number order. The shallow pass lays the file out; every later pass appends —
+outside the repo so every worker can read it, kept after the burn. Two things
+about its layout are fixed, and only these two: every ticket's section heading
+**starts** with `## #<n>` — that exact prefix, whatever follows it on the line —
+and the collisions heading is verbatim `## Collisions`. Position, ordering, and
+any other section the explorer finds useful (repo orientation, dependency order,
+invariants) are its own call. The two fixed strings are what a builder's seed
+points at, and a seed that points at a heading the file does not contain sends
+the builder to read all of it: five of six burns wrote `## COLLISION TABLE`,
+`## 1. Per-ticket detail`, or `## 525 — …` with no `#` at all, and no grep for
+`## #525` finds anything. Because the explorer writes the layout and never reads
+this file, **its prompt must carry both heading strings verbatim.**
+
+The shallow pass lays the file out; every later pass appends —
 a batch's deep read into the sections it covers, a ticket the shallow pass never
 saw into a new section of its own. Nothing rewrites what an earlier pass wrote.
 A builder's seed names the file, its own `## #<n>` section, and the collisions
@@ -127,7 +137,10 @@ stages sit either side of that line (step 3).
    the unit from here on, and "ticket" in steps 3–7 reads as "clump" where
    the clump has more than one. Before dispatching, pull out any
    ticket that is a sub-issue of a `spec`-labelled parent: those go through
-   § Spec handoff as one unit per spec, and the spec takes one worker slot.
+   `~/.agents/skills/burndown/references/spec-handoff.md` as one unit per spec,
+   and the spec takes one worker slot. Read that file when this fires; a slice
+   built one PR at a time loses the end-to-end review loop and lands a spec in
+   pieces.
 3. **Explore** (§ Shape). First pass only: run the shallow pass over the whole
    reachable queue and resolve its collisions. Then, every pass: run this
    batch's deep read as a subagent and wait for its result before dispatching
@@ -236,8 +249,9 @@ stages sit either side of that line (step 3).
      round on that ticket's held builder (§ Holding the builder). Fixes are
      always the builder's, never the coordinator's: the dispatch hands the
      findings path, and the builder owns the files and the intent behind each
-     finding. Never send a scripted edit to apply verbatim — a fix dispatch
-     that dictated the change took four micro-rounds on one helper.
+     finding — under two-axis § A finding names the file and the intent, which
+     is that rule's one home and governs a coordinator's fix dispatch exactly
+     as it governs a reviewer's finding.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
 
@@ -283,7 +297,8 @@ stages sit either side of that line (step 3).
    Then **record what the ticket cost**: run
    `python3 ~/.agents/skills/burndown/cost.py <worktree>` and append one line
    to `~/.cache/burndown/<repo dir name>.cost` — beside the progress file,
-   never in it. One line per settled ticket, five space-separated integers:
+   never in it. One line per settled ticket, five space-separated fields — all
+   integers except `<coord-review>`, which may be `-`:
 
    ```
    <n> <builder> <review> <coord-review> <rounds>
@@ -298,8 +313,15 @@ stages sit either side of that line (step 3).
    non-zero `<review>` there is delegated work, not review.
    `<coord-review>` is the step 5 reviewers' tokens, read off the usage each
    `Agent` completion carries (the two axes and the correctness reviewer) —
-   never asked of a reviewer, which cannot count itself. Record the clump's
+   never asked of a reviewer, which cannot count itself. Write `-` when you did
+   not actually read them: a guess in this column cannot be told apart from a
+   measurement afterwards, and comparing burns is the only thing the file is
+   for. Four estimates already sit in `skills.cost` as 220000, 160000, 230000
+   and 300000 — round numbers are the tell. Record the clump's
    total on its lowest-numbered ticket's line and `0` on its other tickets.
+   Field 1 is always a ticket number: a `clump<n>` line is malformed, and the
+   one in `skills.cost` bills #584 twice, once on its own line and once again
+   under `clump584`.
    The script cannot see it: an in-process subagent writes into the
    coordinator's transcript, not the worktree's. `<rounds>` counts the
    ticket's fix dispatches — the one review round plus any gate dispatch — so
@@ -402,37 +424,6 @@ and needs an answer; only the status-poll workaround for finding one is
 moot now that there's no task-list poll to miss it (§ Waiting on Orca
 workers has the one-wait-per-wake mechanics).
 
-## Spec handoff
-
-A ticket whose parent issue carries the `spec` label is a slice, and slices
-are built together or not at all: one workspace, one branch, one PR that
-closes the spec and every child, with the end-to-end review loop that only
-`implement-spec` runs. Building them one PR at a time here loses that loop and
-lands a spec in pieces a human has to reassemble.
-
-So the spec, not the slice, is the unit. Find the parent with
-`gh api repos/<owner>/<repo>/issues/<n>/parent` (or the `Part of #N`
-reference in the body when the tracker has no sub-issues) and confirm its label.
-Then:
-
-- Make one Orca workspace **from the spec issue** and dispatch one Orca task
-  in it — a top-level `claude` session seeded with the spec URL and the pointer
-  `~/.agents/skills/implement-spec/SKILL.md`, which it follows as coordinator.
-  That coordinator owns the spec's exploration, frontier, gates, review loop,
-  and PR; this burn does not look inside.
-- Every open slice of that spec — ready or still blocked — leaves this burn's
-  queue at handoff, and the cluster counts against the ticket cap as its
-  number of slices. Slices already `in-progress` under a burn worker finish
-  as they are; the spec coordinator picks up from their landings.
-- Progress lines use the spec's number: `burning #<spec>`, then `#<spec> pr
-  <ref>` or `#<spec> parked: <why>`. A gate the spec coordinator raises is that
-  burn's `ready-for-human` for the whole spec — park it, do not answer it.
-- The spec's workspace is the coordinator's to tear down, not this burn's.
-
-A slice with no `spec`-labelled parent is an ordinary ticket. A spec with
-exactly one open slice is still handed off — the loop is the point, not the
-count.
-
 ## Waiting on Orca workers
 
 Never the Orca wait verb — it returns `waiter_exists` for a waiter nobody can
@@ -507,20 +498,12 @@ say the result in one line. Never split the merges into per-PR commands. Any
 post-merge step a human must do on the live machine follows the line, in
 order.
 
-**Branches that conflict with each other get linearised, not squashed.** Two
-PRs that touch the same line (an import list, a scenario count) both merge
-clean against the default branch and then conflict with each other after the
-first squash, so the one-line merge stops halfway. When the dry run shows
-that, rebase the later branches into one linear stack in merge order,
-resolving only the shared line, verify each rebased branch's diff is identical
-to its reviewed diff apart from that line, run the seam at the stack tip,
-force-push (with lease), note the new base sha in each PR body, and hand the
-line with `--merge` in place of `--squash` — merge commits keep a linear stack
-mergeable in one line, squashes do not. Every PR still opens against the
-default branch, never against its base branch: GitHub closes a PR whose base
-branch is deleted and cannot reopen it. Prefer not stacking at all: when other
-tickets are ready, hold the serialised ticket until its base lands, and stack
-only when the slot would otherwise sit idle.
+When the dry run shows two branches conflicting with each other, they get
+linearised, not squashed — read
+`~/.agents/skills/burndown/references/merge-tail.md` before touching either
+branch. Prefer not stacking at all: when other tickets are ready, hold the
+serialised ticket until its base lands, and stack only when the slot would
+otherwise sit idle.
 
 **Live verification is batched, not per ticket.** A ticket whose sign-off
 needs the live rig (a scene shot to eyeball, a stream-side behaviour to watch)
