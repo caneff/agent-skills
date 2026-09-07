@@ -60,6 +60,19 @@ def test_page_has_one_h2_per_day():
         assert page.count('<h2 class="day"') == 1  # both commits land the same day
 
 
+def test_page_links_the_shell_assets_and_writes_them_beside_it():
+    """#613: the page comes from the harness shell, which links assets/ —
+    so the generator delivers those files next to the page it wrote."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = _make_repo(tmp)
+        out = os.path.join(tmp, "landed.html")
+        generate.main(["--roots", repo, "--out", out, "100"])
+        page = open(out, encoding="utf-8").read()
+        assert '<link rel="stylesheet" href="assets/base/base.css">' in page
+        assert os.path.isfile(os.path.join(tmp, "assets", "base", "base.css"))
+        assert os.path.isfile(os.path.join(tmp, "assets", "components", "callout", "callout.css"))
+
+
 def test_no_commits_in_range_writes_nothing_and_returns_1():
     with tempfile.TemporaryDirectory() as tmp:
         repo = _make_repo(tmp)
