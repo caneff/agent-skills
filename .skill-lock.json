@@ -325,7 +325,7 @@
       "installedAt": "2026-07-02T15:11:53.072Z",
       "updatedAt": "2026-09-03T18:40:35.798Z"
     },
-    "spec-standards-review": {
+    "two-axis-code-review": {
       "source": "mattpocock/skills",
       "sourceType": "github",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
