@@ -16,7 +16,7 @@ PROJECT_DIR = "-home-someone-orca-workspaces-repo-a"
 def _line(sidechain, *, inp=0, cache_creation=0, cache_read=0, out=0, mid=None):
     return json.dumps({
         "isSidechain": sidechain,
-        "uuid": mid or f"uuid-{inp}-{out}-{sidechain}",
+        "uuid": "uuid-every-line-carries-one",
         "message": {"id": mid, "usage": {
             "input_tokens": inp,
             "cache_creation_input_tokens": cache_creation,

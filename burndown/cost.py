@@ -53,7 +53,7 @@ def tally(worktree, projects_root):
                     usage = message.get("usage")
                     if not isinstance(usage, dict):
                         continue
-                    key = message.get("id") or entry.get("uuid")
+                    key = message.get("id")
                     if key is not None:
                         if key in seen:
                             continue

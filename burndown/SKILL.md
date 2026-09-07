@@ -51,7 +51,7 @@ The size tag is docs-only (no code file touched: a SKILL.md, hook,
 settings.json, or CI config counts as code per the owner's Gate 2), one-file, or
 multi-file.
 
-Both stages write one notes file, `~/.cache/burndown/<repo dir name>.notes.md`,
+Both stages feed one notes file, `~/.cache/burndown/<repo dir name>.notes.md`,
 outside the repo so every worker can read it, kept after the burn. Its layout is
 fixed: a `## Collisions` section first, then one `## #<n>` section per ticket,
 in number order. The shallow pass lays the file out; every later pass appends —
@@ -78,8 +78,10 @@ P0 for a reviewer to find after the build (#130 cost a build, a review round
 and a ruling comment that way).
 
 Both stages are read-only and need no worktree, terminal, or Orca task: run
-each as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`) and
-read its result directly. **Only builders are Orca tasks** — they are the only
+each as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`). An
+`Explore` subagent has no `Write` tool, so it returns its section text and the
+coordinator appends it — the notes file has one writer, the coordinator.
+**Only builders are Orca tasks** — they are the only
 workers that write code and need their own worktree and branch. Everything
 read-only, exploration and review both, is an in-process subagent.
 
@@ -109,13 +111,8 @@ stages sit either side of that line (step 3).
    `sonnet` for docs-only and one-file, `opus` for multi-file, the top tier
    only when the ticket names it.
    Seed the worker to stop after committing, report its branch, and wait; the
-   coordinator owns the PR.
-
-   **Docs-only lane.** A docs-only ticket's seed skips `implement`'s
-   test-first step and Finish's review step entirely — commit, then report;
-   no `code-review`, no `two-axis-code-review`. It still gets its own
-   worktree, branch, and progress lines like every other ticket; only the
-   seed's build steps shrink (step 5 has what this means for review).
+   coordinator owns the PR. A docs-only ticket takes a shorter seed —
+   § Docs-only lane.
 
    For a one-file or multi-file ticket, two more lines go in every seed.
    First: read the
@@ -131,7 +128,9 @@ stages sit either side of that line (step 3).
    both its spawned reviewers ("Pass `model: opus` to both.") regardless of
    the builder's tier, so a sonnet-tier build still gets an opus-tier
    two-axis review; the built-in `code-review` carries no such pin and runs
-   at the builder's own session model. What
+   at the builder's own session model. That one runs as a background fork and
+   a builder is a top-level session, so the seed says to block on the fork
+   with `TaskOutput` and never go idle with one outstanding. What
    happens to each finding is this burn's rule, not Finish's: act
    on it, then lead the `worker_done` report with every finding both reviews
    raised, one of three dispositions each — **fixed**, **deferred: <why>**,
@@ -150,33 +149,24 @@ stages sit either side of that line (step 3).
    have committed onto another ticket's PR. Fix it with `git checkout -b`
    before the worker's first commit and tell the worker.
 
-   **Do not `worker-release` at `worker_done`.** The builder stays live until
-   its ticket settles or parks — whether or not a review round happens. A
-   dispatch settles at `worker_done` and rejects mail (`dispatch_inactive`),
-   so a fix round is a new task started on the same agent terminal:
-   `task-create` with the findings path, then `worker-start --task <id>
-   --worktree name:<wt> --terminal <agent handle from worker-show>`. The
-   agent keeps its context, so the round costs no Orca startup and no
-   re-reading of the ticket and notes. Release at settle (reviewed or skipped
-   straight from step 5) or when the ticket parks, never before.
+   The builder is not released at `worker_done`, and the coordinator's wait
+   from here through settle covers more than `worker_done` — § Holding the
+   builder.
+5. **Review.** The coordinator spawns its own in-process reviewer on one of
+   three triggers, and on no others:
 
-   The coordinator's wait, from here through settle, covers `question` and
-   `escalation` alike, not just `worker_done` — a blocking question is real
-   and needs an answer; only the status-poll workaround for finding one is
-   moot now that there's no task-list poll to miss it (§ Waiting on Orca
-   workers has the one-wait-per-wake mechanics).
-5. **Review.** A docs-only ticket skips straight into step 6 with no reviewer,
-   but only while `git diff --name-only <range>` shows no code file (§ Shape
-   defines the term): a code file in the diff means the size tag was wrong, and
-   the file-set trigger below fires — and that reviewer reads the branch from
-   scratch, not as a confirmation, since the builder ran no review of its own.
-   For a one-file or multi-file ticket, the coordinator spawns its own
-   in-process reviewer only
-   on one of two triggers: the builder's report defers or disputes a finding, or the
-   branch's changed files (`git diff --name-only <range>`, checked against
-   the seed's own-files list from § Shape) leave the set exploration assigned
-   to the ticket. A report with every finding fixed and no file outside its
-   set skips review and goes straight to step 6.
+   1. the builder's report defers or disputes a finding;
+   2. the branch's changed files (`git diff --name-only <range>`, checked
+      against the seed's own-files list from § Shape) leave the set
+      exploration assigned to the ticket;
+   3. the ticket is docs-only and its diff holds a code file (§ Shape defines
+      the term) — the size tag was wrong, and the builder ran no review of its
+      own, so nothing has read this diff yet.
+
+   A docs-only ticket reports no findings, so trigger 1 cannot fire for it;
+   2 and 3 both can. No trigger fires at all — every finding fixed, no file
+   outside the set, no code file in a docs-only diff — and the ticket goes
+   straight to step 6 with no reviewer.
 
    When triggered, `git fetch` the branch and review it with a **fresh**
    in-process subagent (`Agent` tool, `model: opus`) — always a subagent,
@@ -184,8 +174,9 @@ stages sit either side of that line (step 3).
    nothing but the branch. No Orca task, no terminal, no worktree; review is
    read-only. Seed it with three things only — the issue reference, the
    builder's `worker_done` report, and the commit range — never the burn
-   history or the explorer's notes: this reviewer is confirming a specific
-   gap, not re-reading the ticket from scratch. The seed says: review against
+   history or the explorer's notes. It reports everything it finds against the
+   criteria, whatever the trigger was; the coordinator filters, and the
+   reviewer never narrows its read to the trigger. The seed says: review against
    the ticket's acceptance criteria and the questions in
    `~/.agents/skills/two-axis-code-review/SKILL.md` — correctness first, then
    spec/standards — doing the correctness pass **in your own context** and
@@ -242,10 +233,15 @@ stages sit either side of that line (step 3).
    <n> <builder> <review> <coord-review> <rounds>
    ```
 
+   Every number is raw tokens with cache reads counted at par, not spend: a
+   burn's numbers compare against another burn's, not against a bill.
+
    `<builder>` and `<review>` are the script's first two numbers: main-line and
    sidechain tokens in that worktree's transcripts. Sidechain is every subagent
-   the builder spawned, its two reviews and any lookup alike, so read `<review>`
-   as delegated work rather than review alone. `<coord-review>` is the step 5
+   the builder spawned, its two-axis review and any lookup alike, so read
+   `<review>` as delegated work rather than review alone. A fork is a separate
+   session (`isSidechain: false`), so the built-in `code-review`'s tokens land
+   in `<builder>`, not `<review>`. `<coord-review>` is the step 5
    reviewer's own tokens, read off the usage its `Agent` completion carries —
    never asked of the reviewer, which cannot count itself — and `0` when none
    ran. The script cannot see it: an in-process subagent writes into the
@@ -293,6 +289,32 @@ stages sit either side of that line (step 3).
    issue comment right away, but the loop still waits on its batch-mates
    before re-listing. At the ticket cap — landed plus parked — start no new
    tasks, let the live ones settle, and stop.
+
+## Docs-only lane
+
+A docs-only ticket's seed skips `implement`'s test-first step and Finish's
+review step entirely — commit, then report; no `code-review`, no
+`two-axis-code-review`. It still gets its own worktree, branch, and progress
+lines like every other ticket; only the seed's build steps shrink. Its diff is
+still read for code files at step 5 — trigger 3.
+
+## Holding the builder
+
+**Do not `worker-release` at `worker_done`.** The builder stays live until
+its ticket settles or parks — whether or not a review round happens. A
+dispatch settles at `worker_done` and rejects mail (`dispatch_inactive`),
+so a fix round is a new task started on the same agent terminal:
+`task-create` with the findings path, then `worker-start --task <id>
+--worktree name:<wt> --terminal <agent handle from worker-show>`. The
+agent keeps its context, so the round costs no Orca startup and no
+re-reading of the ticket and notes. Release at settle (reviewed or skipped
+straight from step 5) or when the ticket parks, never before.
+
+The coordinator's wait, from dispatch through settle, covers `question` and
+`escalation` alike, not just `worker_done` — a blocking question is real
+and needs an answer; only the status-poll workaround for finding one is
+moot now that there's no task-list poll to miss it (§ Waiting on Orca
+workers has the one-wait-per-wake mechanics).
 
 ## Spec handoff
 
