@@ -26,7 +26,9 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "harness"))
 from audits_data import AUDIT_NAMES, GATED, SHORT_SET  # noqa: E402
+import pagelib  # noqa: E402
 
 DEFAULT_THRESHOLD = 10
 DEFAULT_BACKSTOP_DAYS = 30
@@ -233,7 +235,14 @@ def write_setup_failure_report(collection_dir, module, reason):
     d = os.path.join(collection_dir, module_slug(module))
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, "report.html"), "w", encoding="utf-8") as f:
-        f.write(f"<!doctype html><html><body><h1>mutation-audit setup failure</h1><p>Module: {html.escape(module)}</p><p>Reason: {html.escape(reason)}</p></body></html>\n")
+        f.write(pagelib.page(
+            title="mutation-audit setup failure",
+            kicker="Mutation sweep",
+            h1="mutation-audit setup failure",
+            lede=f"Module: {html.escape(module)}",
+            body=f'<div class="vt-callout bad">{html.escape(reason)}</div>\n',
+            prefix="../",
+        ))
     with open(os.path.join(d, "findings.jsonl"), "w", encoding="utf-8") as f:
         f.write(json.dumps({"status": "setup_failure", "module": module, "reason": reason}) + "\n")
 
@@ -286,20 +295,11 @@ def run_one(name, repo, outlogs, manifests_dir):
 
 # --- HTML index rendering -----------------------------------------------------
 
-_HEAD = """<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title}</title>
-<link rel="stylesheet" href="{prefix}assets/base/base.css">
-<link rel="stylesheet" href="{prefix}assets/components/callout/callout.css">
-<script src="{prefix}assets/base/base.js"></script>
-<style>
-  main {{ --vt-measure: 1080px; }}
-  .audit-table {{ width:100%; border-collapse:collapse; }}
-  .audit-table th, .audit-table td {{ border:1px solid var(--vt-rule); padding:.6rem .8rem; text-align:left; vertical-align:top; }}
-  .audit-table th {{ background:var(--vt-soft); font-weight:600; }}
-  .audit-table tr:nth-child(even) td {{ background:var(--vt-stripe); }}
-</style></head><body><main>
-"""
+_INDEX_CSS = """main { --vt-measure: 1080px; }
+.audit-table { width:100%; border-collapse:collapse; }
+.audit-table th, .audit-table td { border:1px solid var(--vt-rule); padding:.6rem .8rem; text-align:left; vertical-align:top; }
+.audit-table th { background:var(--vt-soft); font-weight:600; }
+.audit-table tr:nth-child(even) td { background:var(--vt-stripe); }"""
 
 
 @dataclasses.dataclass
@@ -319,12 +319,7 @@ class IndexModel:
 
 
 def build_index(model):
-    out = [_HEAD.format(title="All-audits index", prefix="")]
-    out.append('<p class="vt-kicker">All-audits sweep</p>\n')
-    out.append(f'<h1>{html.escape(model.repo)} <span style="color:var(--vt-muted)">· {len(AUDIT_NAMES)}-audit sweep</span></h1>\n')
-    if model.synthesis:
-        out.append(f'<p class="vt-lede">{html.escape(model.synthesis)}</p>\n')
-    out.append('<h2>Reports</h2><div class="vt-table-wrap"><table class="audit-table">\n')
+    out = ['<h2>Reports</h2><div class="vt-table-wrap"><table class="audit-table">\n']
     out.append("<thead><tr><th>Audit</th><th>Report</th><th>Status</th></tr></thead><tbody>\n")
     for name in AUDIT_NAMES:
         link = model.report_link.get(name, "")
@@ -340,9 +335,16 @@ def build_index(model):
         elif model.notest_count > 0:
             verdict += f" · {model.notest_count} with no tests"
         out.append(f'<tr><td>mutation</td><td><a href="mutation/index.html">open report</a></td><td>{verdict}</td></tr>\n')
-    out.append("</tbody></table></div></main></body></html>")
+    out.append("</tbody></table></div>\n")
     with open(os.path.join(model.collection, "index.html"), "w", encoding="utf-8") as f:
-        f.write("".join(out))
+        f.write(pagelib.page(
+            title="All-audits index",
+            kicker="All-audits sweep",
+            h1=f'{html.escape(model.repo)} <span style="color:var(--vt-muted)">· {len(AUDIT_NAMES)}-audit sweep</span>',
+            lede=html.escape(model.synthesis) if model.synthesis else "",
+            body="".join(out),
+            extra_css=_INDEX_CSS,
+        ))
 
 
 def mutation_tally(findings_jsonl):
@@ -366,14 +368,14 @@ def mutation_tally(findings_jsonl):
 def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, notest_total, notest_error=None):
     d = os.path.join(collection, "mutation")
     os.makedirs(d, exist_ok=True)
-    out = [_HEAD.format(title="Mutation sub-index", prefix="../")]
-    out.append('<p class="vt-kicker">Mutation sweep</p>\n')
-    out.append(f'<h1>{html.escape(repo)} <span style="color:var(--vt-muted)">· {len(mutation_modules)} mutation modules</span></h1>\n')
+    out = []
     notest_count = len(notest_modules)
     if notest_error:
-        out.append(f'<p class="vt-lede">No-tests count could not be determined ({html.escape(notest_error)}).</p>\n')
+        lede = f"No-tests count could not be determined ({html.escape(notest_error)})."
     elif notest_total > 0:
-        out.append(f'<p class="vt-lede">{notest_count} of {notest_total} source modules have no tests.</p>\n')
+        lede = f"{notest_count} of {notest_total} source modules have no tests."
+    else:
+        lede = ""
     if mutation_modules:
         out.append('<h2>Modules</h2><div class="vt-table-wrap"><table class="audit-table">\n')
         out.append("<thead><tr><th>Module</th><th>Killed/total</th><th>Weak-assertion</th><th>No-coverage</th><th>Report</th></tr></thead><tbody>\n")
@@ -399,9 +401,16 @@ def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, 
         for m in notest_modules:
             out.append(f"<tr><td>{m}</td><td>0% — no tests</td></tr>\n")
         out.append("</tbody></table></div>\n")
-    out.append("</main></body></html>")
     with open(os.path.join(d, "index.html"), "w", encoding="utf-8") as f:
-        f.write("".join(out))
+        f.write(pagelib.page(
+            title="Mutation sub-index",
+            kicker="Mutation sweep",
+            h1=f'{html.escape(repo)} <span style="color:var(--vt-muted)">· {len(mutation_modules)} mutation modules</span>',
+            lede=lede,
+            body="".join(out),
+            prefix="../",
+            extra_css=_INDEX_CSS,
+        ))
 
 
 # --- the run folder -----------------------------------------------------------
@@ -579,11 +588,7 @@ def collect(run, repo, plan, base=None):
         result = _run(["claude", *CLAUDE_FLAGS, prompt])
         synthesis = result.stdout.strip()
 
-    for name in AUDIT_NAMES + mutation_modules:
-        assets = os.path.join(collection, name, "assets")
-        if os.path.isdir(assets):
-            replace_dir(assets, os.path.join(collection, "assets"))
-            break
+    pagelib.copy_assets(collection)
 
     build_index(IndexModel(
         collection=collection,

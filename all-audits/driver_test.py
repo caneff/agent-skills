@@ -63,6 +63,24 @@ def test_index_rerun_replaces_assets_without_nesting():
         assert not os.path.isdir(os.path.join(tmp, "collection", "assets", "assets")), "assets/assets nesting"
 
 
+def test_index_over_an_empty_collection_still_links_to_real_assets():
+    """#613: assets come from pagelib.copy_assets, not hoisted out of the
+    first report folder — so an index whose audits all skipped still links to
+    files that exist."""
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, "collection"))
+
+        r = _run_driver("--index", "--out", tmp)
+        assert r.returncode == 0, r.stdout + r.stderr
+
+        index = os.path.join(tmp, "collection", "index.html")
+        text = open(index).read()
+        assert 'href="assets/base/base.css"' in text
+        for linked in ("assets/base/base.css", "assets/base/base.js",
+                       "assets/components/callout/callout.css"):
+            assert os.path.isfile(os.path.join(tmp, "collection", linked)), linked
+
+
 def test_collect_from_manifest_mutation_style():
     """#580: mutation mode now finds its report the same way the sweep does
     — through a manifest, never by grepping a log for a stray .html path
