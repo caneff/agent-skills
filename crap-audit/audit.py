@@ -22,6 +22,9 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "all-audits", "harness"))
+import auditlib  # noqa: E402
+
 FLOOR = 15
 CLASSIC_GATE = 30
 UNDER_FLOOR_SAMPLE = 5
@@ -235,24 +238,22 @@ def score(rows, floor=FLOOR):
     for r in ranking:
         if r["crap"] >= floor:
             findings.append(
-                {
-                    "bucket": _bucket(r["crap"]),
-                    "file": r["file"],
-                    "line": r["line"],
-                    "category": _category(r["complexity"], r["coverage"]),
-                    "summary": f"{r['name']} scores CRAP {r['crap']:.1f} "
+                auditlib.finding(
+                    _bucket(r["crap"]),
+                    r["file"],
+                    r["line"],
+                    _category(r["complexity"], r["coverage"]),
+                    f"{r['name']} scores CRAP {r['crap']:.1f} "
                     f"(complexity {r['complexity']}, coverage {r['coverage'] * 100:.0f}%)",
-                    "failure": f"a change to {r['name']} is both likely to break "
+                    f"a change to {r['name']} is both likely to break "
                     "something and unlikely to be caught by a test",
-                    "extra": {
-                        "complexity": r["complexity"],
-                        "statement_coverage": r["statement_coverage"],
-                        "branch_coverage": r["branch_coverage"],
-                        "coverage": r["coverage"],
-                        "crap": r["crap"],
-                        "recommendation": _recommend(r["complexity"]),
-                    },
-                }
+                    complexity=r["complexity"],
+                    statement_coverage=r["statement_coverage"],
+                    branch_coverage=r["branch_coverage"],
+                    coverage=r["coverage"],
+                    crap=r["crap"],
+                    recommendation=_recommend(r["complexity"]),
+                )
             )
         else:
             under_floor.append(r)
@@ -268,21 +269,44 @@ def score(rows, floor=FLOOR):
     }
 
 
+def _parse_default(radon_text, coverage_text):
+    """The two-file default path's `parse`, as `run_cli` expects: one row
+    out — the whole `score()` result — so `run_cli`'s `for row in parse(...):
+    print(json.dumps(row))` reproduces the prior single-line output exactly.
+    """
+    return [score(normalize(json.loads(radon_text), json.loads(coverage_text)))]
+
+
+def _selfcheck():
+    """Reproduce fixtures/sample_project's known findings — the same fixture
+    `audit_test.py`'s test_cli_main_prints_whole_score_result pins against."""
+    fixtures = os.path.join(os.path.dirname(__file__), "fixtures", "sample_project")
+    radon_json = json.load(open(os.path.join(fixtures, "radon.json"), encoding="utf-8"))
+    coverage_json = json.load(open(os.path.join(fixtures, "coverage.json"), encoding="utf-8"))
+    result = score(normalize(radon_json, coverage_json))
+    assert len(result["findings"]) == 2, result
+    assert {row["file"] for row in result["findings"]} == {"sample.py"}, result
+    assert {row["line"] for row in result["findings"]} == {2, 17}, result
+    for row in result["findings"]:
+        assert set(row) == {"bucket", "file", "line", "category", "summary", "failure", "extra"}, row
+    print("ok")
+
+
 def main(argv):
     if argv[1:2] == ["--ts"]:
         if len(argv) < 3:
             print("usage: audit.py --ts <crap_typescript.json>", file=sys.stderr)
             sys.exit(1)
         report_json = json.load(open(argv[2], encoding="utf-8"))
-        rows = normalize_ts(report_json)
-    else:
-        if len(argv) < 3:
-            print("usage: audit.py <radon.json> <coverage.json>", file=sys.stderr)
-            sys.exit(1)
-        radon_json = json.load(open(argv[1], encoding="utf-8"))
-        coverage_json = json.load(open(argv[2], encoding="utf-8"))
-        rows = normalize(radon_json, coverage_json)
-    print(json.dumps(score(rows)))
+        print(json.dumps(score(normalize_ts(report_json))))
+        return
+    auditlib.run_cli(
+        argv,
+        _selfcheck,
+        _parse_default,
+        nargs=2,
+        usage="usage: audit.py <radon.json> <coverage.json> | --ts <ts.json> | --selfcheck",
+    )
 
 
 if __name__ == "__main__":
