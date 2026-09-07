@@ -85,7 +85,11 @@ A ticket's grill comment often overrides its body, and it is written from
 memory of how a component behaves. For each decision that asserts runtime
 behaviour ("the mask is always on in puzzle mode", "the server resizes before
 the switch"), the explorer finds the line that implements it and quotes it in
-the notes — confirmed, or contradicted with the file:line. A contradicted
+the notes — confirmed, or contradicted, anchored on the **name** it lives
+under: the function, section heading, or a grep string that finds it, and the
+quoted line itself. Never a bare `file:line`. A burn lands tickets while it
+runs, and six landings moved every line number in the notes out from under the
+builders reading them; a name still resolves after the file is edited. A contradicted
 decision is a ruling for the human, posted on the issue before dispatch, not a
 P0 for a reviewer to find after the build (#130 cost a build, a review round
 and a ruling comment that way).
@@ -93,7 +97,8 @@ and a ruling comment that way).
 Both stages are read-only and need no worktree, terminal, or Orca task: run
 each as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`). The
 explorer returns its section text and never writes the file; the coordinator
-appends it. Say so in the explorer's own prompt — the notes file has one
+appends it. Say so in the explorer's own prompt, along with the
+name-not-line-number anchoring above — the notes file has one
 writer, and its fixed section order is what a second writer would break.
 **Only builders are Orca tasks** — they are the only
 workers that write code and need their own worktree and branch. Everything
