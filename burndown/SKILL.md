@@ -68,7 +68,14 @@ read-only, exploration and review both, is an in-process subagent.
    [`implement`](~/.agents/skills/implement/SKILL.md) skill's § Build by pointer — the
    issue reference, the notes path, and the branch base, never a summary.
    Seed the worker to stop after committing, report its branch, and wait; the
-   coordinator owns review and the PR. One rule goes in every seed: a question
+   coordinator owns the PR. Two more lines go in every seed. First: read the
+   repo's `CLAUDE.md` and `AGENTS.md` before editing and apply their
+   same-PR rules (docs, glossary, CONTEXT.md) — a pointer buried under a
+   task list gets skipped, and the reviewer then spends a round on it. Second:
+   before `worker_done`, run the built-in `code-review` skill and
+   `~/.agents/skills/spec-standards-review/SKILL.md` on your own branch and fix
+   what they raise, so the coordinator's review is a confirming pass, not the
+   first pass. One rule goes in every seed: a question
    to the coordinator that times out is not a stop — take the safe option, the
    one a reviewer can reverse in a single commit, keep building, and put the
    question and the choice you made at the top of `worker_done`. The
@@ -94,10 +101,16 @@ read-only, exploration and review both, is an in-process subagent.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
 
-   A re-review seed always names the range `<reviewed-sha>..<new-sha>`, never
-   just the branch — builders amend and force-push, and a reviewer pointed at a
-   branch name silently re-reads work it already cleared. Reviews run
-   concurrently and do not count against the builder cap.
+   A re-review always **resumes the same reviewer** (send it the range with
+   the message tool) rather than spawning a fresh one: a resumed reviewer
+   checks its own list and stops, while a fresh reader re-reads the whole
+   branch and grades comment wording as P1 — one burn spent rounds three and
+   four that way. The re-review message names the range
+   `<reviewed-sha>..<new-sha>`, never just the branch — builders amend and
+   force-push, and a reviewer pointed at a branch name silently re-reads work
+   it already cleared. Two coordinator rounds is the cap: a P1 still open after
+   round two goes into the PR body for the human, not into a third round.
+   Reviews run concurrently and do not count against the builder cap.
 6. **Settle, one at a time**, in the order reviews come back clean, per the
    Finish section of `~/.agents/skills/implement/SKILL.md` — which carries the
    ownership gate. Where the repo owner lets agents land directly, land. Where
