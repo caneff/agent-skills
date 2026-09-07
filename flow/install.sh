@@ -23,6 +23,7 @@ link() { # link <repo-relative-src> <live-dest>
 }
 
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
+link bin/merge-cleanup          "$HOME/.local/bin/merge-cleanup"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 link claude/RTK.md              "$HOME/.claude/RTK.md"
 # claude/settings.json is NOT symlinked — the harness rewrites it in place and
@@ -31,6 +32,12 @@ link claude/RTK.md              "$HOME/.claude/RTK.md"
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
 for h in block-dangerous-git.sh refresh-landed.sh require-agent-model.sh package.json; do
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
+done
+for a in "$here/claude/agents"/*.md; do
+  # An empty dir leaves the literal glob, and `link` failing on it would abort
+  # the install before backup-sync.sh ever runs.
+  [ -e "$a" ] || continue
+  link "claude/agents/$(basename "$a")" "$HOME/.claude/agents/$(basename "$a")"
 done
 # Renamed from sync-primary-main.sh to refresh-landed.sh: drop the stale
 # symlink so a rename doesn't leave the old name pointing into this repo.

@@ -42,6 +42,32 @@ if [ -L "$tmp/home/.claude/hooks/refresh-landed.sh" ]; then
 else
   echo "FAIL refresh-landed.sh not linked under the scratch HOME"; fails=1
 fi
+if [ -L "$tmp/home/.local/bin/merge-cleanup" ]; then
+  echo "PASS merge-cleanup linked under the scratch HOME"
+else
+  echo "FAIL bin/merge-cleanup not linked under the scratch HOME"; fails=1
+fi
+if [ -L "$tmp/home/.claude/agents/diff-reviewer.md" ]; then
+  echo "PASS reviewer agent definition linked under the scratch HOME"
+else
+  echo "FAIL claude/agents/diff-reviewer.md not linked under the scratch HOME"; fails=1
+fi
+
+# An empty claude/agents dir leaves the literal glob; without the guard `link`
+# fails it and set -e aborts the install before backup-sync.sh runs.
+empty="$tmp/empty"
+mkdir -p "$empty/tests"
+cp -r "$root/flow" "$empty/flow"
+cp "$root/tests/all.sh" "$empty/tests/all.sh"
+git -C "$empty" init -q
+rm -f "$empty/flow/claude/agents"/*.md
+printf '#!/usr/bin/env bash\nexit 0\n' > "$empty/flow/backup-sync.sh"
+if HOME="$empty/home" bash "$empty/flow/install.sh" >/dev/null 2>&1 \
+   && [ -L "$empty/home/.claude/hooks/refresh-landed.sh" ]; then
+  echo "PASS an empty claude/agents dir does not abort the install"
+else
+  echo "FAIL an empty claude/agents dir aborted the install"; fails=1
+fi
 
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"

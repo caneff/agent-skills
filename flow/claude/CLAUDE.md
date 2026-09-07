@@ -105,8 +105,8 @@ drives TDD → `/code-review` + `/two-axis-code-review` → commit with
   `~/.agents/skills/flow/claude/subagent-tiers.md`.
 - **Never bare `orca` on Linux** — it resolves to the GNOME screen reader and
   starts speech. Use `orca-ide`, or `$ORCA_CLI_COMMAND` where Orca exports it.
-- Orca does not clean up after a merge — `orca-ide worktree rm` the workspace
-  yourself, or merged branches pile up in the sidebar.
+- Orca does not clean up after a merge — run `merge-cleanup --repo <primary
+  checkout> <branch>` (`--help` for PR/URL and `--sweep`), or worktrees pile up.
 - `head`/`tail` are for looking, not measuring — use `wc -l`/`grep -c` before
   treating file contents as a premise.
 - To show me a file, open it in Orca's editor: `orca-ide file open <path>
