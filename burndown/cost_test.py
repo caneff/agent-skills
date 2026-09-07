@@ -13,10 +13,11 @@ WORKTREE = "/home/someone/orca/workspaces/repo/a"
 PROJECT_DIR = "-home-someone-orca-workspaces-repo-a"
 
 
-def _line(sidechain, *, inp=0, cache_creation=0, cache_read=0, out=0):
+def _line(sidechain, *, inp=0, cache_creation=0, cache_read=0, out=0, mid=None):
     return json.dumps({
         "isSidechain": sidechain,
-        "message": {"usage": {
+        "uuid": mid or f"uuid-{inp}-{out}-{sidechain}",
+        "message": {"id": mid, "usage": {
             "input_tokens": inp,
             "cache_creation_input_tokens": cache_creation,
             "cache_read_input_tokens": cache_read,
@@ -94,6 +95,20 @@ def test_a_dotted_path_segment_doubles_the_hyphen():
                [_line(False, inp=4)])
         r = _run(tmp, worktree="/home/someone/.agents/skills")
         assert r.stdout == "4 0 4\n", r.stdout
+
+
+def test_one_message_split_over_several_lines_counts_once():
+    """Claude writes one assistant message as one JSONL entry per content
+    block — thinking, text, each tool call — all carrying the same usage."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _write(os.path.join(tmp, PROJECT_DIR, "session.jsonl"), [
+            _line(False, inp=6, out=1, mid="msg_1"),
+            _line(False, inp=6, out=1, mid="msg_1"),
+            _line(False, inp=6, out=1, mid="msg_1"),
+            _line(False, inp=2, out=0, mid="msg_2"),
+        ])
+        r = _run(tmp)
+        assert r.stdout == "9 0 9\n", r.stdout
 
 
 def main():

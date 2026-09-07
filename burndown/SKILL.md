@@ -165,8 +165,10 @@ stages sit either side of that line (step 3).
 5. **Review.** A docs-only ticket skips straight into step 6 with no reviewer,
    but only while `git diff --name-only <range>` shows no code file (§ Shape
    defines the term): a code file in the diff means the size tag was wrong, and
-   the file-set trigger below fires as for any ticket. For a one-file or
-   multi-file ticket, the coordinator spawns its own in-process reviewer only
+   the file-set trigger below fires — and that reviewer reads the branch from
+   scratch, not as a confirmation, since the builder ran no review of its own.
+   For a one-file or multi-file ticket, the coordinator spawns its own
+   in-process reviewer only
    on one of two triggers: the builder's report defers or disputes a finding, or the
    branch's changed files (`git diff --name-only <range>`, checked against
    the seed's own-files list from § Shape) leave the set exploration assigned
@@ -183,7 +185,8 @@ stages sit either side of that line (step 3).
    invocation — correctness first, then spec/standards. The seed says: run
    `code-review` in your own context, never as a background fork — a forked
    review hung twice in one burn and needed two pings before it returned;
-   wait for both reviews to finish, then send the verdict with the message
+   wait for both reviews to finish, then send the verdict and your own token
+   usage — step 6's `<coord-review>` has no other source — with the message
    tool **before** going idle, and arm no background wait afterwards — a
    reviewer that keeps a timer running re-notifies the coordinator with the
    same verdict two or three times, and one that goes idle without sending
@@ -240,6 +243,12 @@ stages sit either side of that line (step 3).
    worktree's, and the script cannot see it. `<rounds>` is how many step 5
    rounds the ticket took, `0` when it skipped review. Nothing in the loop
    reads this file back — it is read between burns.
+
+   One caveat the numbers carry: a projects dir outlives the worktree that
+   made it, so a burn that reuses a path bills the new ticket for the old
+   one's sessions too. Never reuse a torn-down worktree's name — step 4 bans
+   it for its own reason — and read a line whose path was reused as an upper
+   bound.
 
    Then **tear down the ticket's worktree**. `git status --porcelain` in it
    first and keep it if anything is uncommitted or untracked; otherwise

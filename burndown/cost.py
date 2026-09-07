@@ -25,9 +25,18 @@ def project_dir_name(worktree):
 
 def tally(worktree, projects_root):
     """(main-line, sidechain) tokens. Subagent transcripts sit under
-    `<session>/subagents/`, and their lines carry `isSidechain: true`."""
+    `<session>/subagents/`, and their lines carry `isSidechain: true`.
+
+    One assistant message is written as one line per content block — thinking,
+    text, each tool call — and every one of them repeats the same `usage`, so
+    the tally counts each `message.id` once. Summing per line doubles the
+    totals (2.0x measured over this repo's own transcripts), and doubles them
+    unevenly: a tool-heavy build inflates more than a prose-heavy one, which is
+    the axis the cost file exists to compare.
+    """
     root = os.path.join(projects_root, project_dir_name(worktree))
     builder = sidechain = 0
+    seen = set()
     for parent, _, files in os.walk(root):
         for name in files:
             if not name.endswith(".jsonl"):
@@ -38,9 +47,15 @@ def tally(worktree, projects_root):
                         entry = json.loads(line)
                     except ValueError:
                         continue  # a half-written last line is not a failure
-                    usage = (entry.get("message") or {}).get("usage")
+                    message = entry.get("message") or {}
+                    usage = message.get("usage")
                     if not isinstance(usage, dict):
                         continue
+                    key = message.get("id") or entry.get("uuid")
+                    if key is not None:
+                        if key in seen:
+                            continue
+                        seen.add(key)
                     n = sum(usage.get(k) or 0 for k in COUNTERS)
                     if entry.get("isSidechain"):
                         sidechain += n
