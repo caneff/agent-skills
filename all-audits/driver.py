@@ -438,57 +438,78 @@ class RunDir:
 # --- the sweep ----------------------------------------------------------------
 
 
-def sweep(repo, out, only, short, index_only, force):
-    repo = os.path.abspath(repo)
-    selected = [s.strip() for s in only.split(",") if s.strip()] if only else (SHORT_SET if short else list(AUDIT_NAMES))
+@dataclasses.dataclass
+class Plan:
+    """What the sweep will do before it does anything (#606): which audits
+    run, which reuse a cached report, and the note the index prints for
+    each skip. Deciding this spawns no audit."""
 
-    if index_only and not out:
-        print("ERROR: --index needs --out DIR — the dir whose reports to index.", file=sys.stderr)
-        sys.exit(2)
-    run = RunDir.create(out)
-    run_dir, outlogs, collection, manifests_dir = run.root, run.logs, run.collection, run.manifests
-    print(f"run dir: {run_dir}")
-    print(f"collecting under: {collection}")
-    print(f"repo: {repo}")
-    print()
+    to_run: list = dataclasses.field(default_factory=list)
+    reused: dict = dataclasses.field(default_factory=dict)
+    skip_note: dict = dataclasses.field(default_factory=dict)
 
-    base = cache_base()
+
+def plan_sweep(repo, selected, force, base=None):
+    """Ask the staleness cache which of `selected` still needs a run."""
+    base = base or cache_base()
+    plan = Plan()
+    for name in selected:
+        if name in GATED and not force:
+            d = decide(repo, name, GATED[name], base=base)
+            if not d.run:
+                if d.report_dir and os.path.isdir(d.report_dir):
+                    plan.reused[name] = d.report_dir
+                    plan.skip_note[name] = f"unchanged since {d.sha[:8]}"
+                    print(f"[{name}] skipped (unchanged since {d.sha[:8]}), reusing cached report")
+                    continue
+                print(f"[{name}] cache says skip but cached report is gone — running fresh")
+        plan.to_run.append(name)
+    return plan
+
+
+def execute(repo, plan, run):
+    """Run the planned audits — the only place a sweep spawns a process.
+
+    The first audit runs alone as a smoke test: if the `-p` slash invocation
+    is rejected by the model-invocation guard, every audit would fail the
+    same way, so the sweep aborts instead of fanning thirteen failures out.
+    """
+    if not plan.to_run:
+        return
+    smoke = plan.to_run[0]
+    print(f"== smoke test: {smoke} ==")
+    run_one(smoke, repo, run.logs, run.manifests)
+    log_text = open(os.path.join(run.logs, f"{smoke}.log"), encoding="utf-8", errors="replace").read()
+    if re.search(r"cannot be used with Skill tool|disable-model-invocation", log_text, re.IGNORECASE):
+        print(f"ABORT: -p slash invocation was rejected by the guard. See {run.logs}/{smoke}.log", file=sys.stderr)
+        sys.exit(1)
+    print("smoke test passed; fanning out the rest\n")
+    rest = plan.to_run[1:]
+    if rest:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(rest)) as ex:
+            list(ex.map(lambda n: run_one(n, repo, run.logs, run.manifests), rest))
+
+
+def collect(run, repo, plan, base=None):
+    """Assemble the collection from what is on disk and render the index.
+
+    Reports arrive two ways — through the manifest each audit that ran wrote,
+    or copied from the cache for a skipped one — and this is the only step
+    that reads either. Returns the index path. `--index` calls it directly
+    over an existing collection, which is why it never touches the run
+    branch: an empty `Plan` collects a finished folder just as well.
+    """
+    base = base or cache_base()
+    collection = run.collection
+    for name, cached in plan.reused.items():
+        replace_dir(cached, os.path.join(collection, name))
+
     stable = os.path.join(base, repo_key(repo), "reports")
-
-    skip_note = {}
-    to_run = []
-    if not index_only:
-        for name in selected:
-            if name in GATED and not force:
-                d = decide(repo, name, GATED[name], base=base)
-                if not d.run:
-                    if d.report_dir and os.path.isdir(d.report_dir):
-                        replace_dir(d.report_dir, os.path.join(collection, name))
-                        skip_note[name] = f"unchanged since {d.sha[:8]}"
-                        print(f"[{name}] skipped (unchanged since {d.sha[:8]}), reusing cached report")
-                        continue
-                    print(f"[{name}] cache says skip but cached report is gone — running fresh")
-            to_run.append(name)
-
-        if to_run:
-            smoke = to_run[0]
-            print(f"== smoke test: {smoke} ==")
-            run_one(smoke, repo, outlogs, manifests_dir)
-            log_text = open(os.path.join(outlogs, f"{smoke}.log"), encoding="utf-8", errors="replace").read()
-            if re.search(r"cannot be used with Skill tool|disable-model-invocation", log_text, re.IGNORECASE):
-                print(f"ABORT: -p slash invocation was rejected by the guard. See {outlogs}/{smoke}.log", file=sys.stderr)
-                sys.exit(1)
-            print("smoke test passed; fanning out the rest\n")
-            rest = to_run[1:]
-            if rest:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=len(rest)) as ex:
-                    list(ex.map(lambda n: run_one(n, repo, outlogs, manifests_dir), rest))
-
     manifest_note = {}
-    for name in to_run:
-        reason = collect_from_manifest(manifests_dir, name, collection, name)
+    for name in plan.to_run:
+        reason = collect_from_manifest(run.manifests, name, collection, name)
         if reason == "no manifest":
-            manifest_note[name] = f"no manifest — see {os.path.join(outlogs, name + '.log')}"
+            manifest_note[name] = f"no manifest — see {os.path.join(run.logs, name + '.log')}"
             continue
         if reason:
             manifest_note[name] = reason
@@ -553,19 +574,48 @@ def sweep(repo, out, only, short, index_only, force):
             replace_dir(assets, os.path.join(collection, "assets"))
             break
 
-    build_index(collection, repo, report_link, {**skip_note, **manifest_note}, synthesis, mutation_modules, mutation_survivors_sum, len(notest_modules), notest_error)
+    build_index(collection, repo, report_link, {**plan.skip_note, **manifest_note}, synthesis, mutation_modules, mutation_survivors_sum, len(notest_modules), notest_error)
     if mutation_modules or notest_modules or notest_error:
         build_mutation_subindex(collection, repo, mutation_modules, notest_modules, notest_total, notest_error)
 
-    print()
-    print(f"index: {os.path.join(collection, 'index.html')}")
-    print(f"logs: {outlogs}")
-
     index_path = os.path.join(collection, "index.html")
-    if os.environ.get("AUDITS_NO_OPEN", "0") != "1":
-        opener = "xdg-open" if sys.platform.startswith("linux") else ("open" if sys.platform == "darwin" else None)
-        if opener:
-            subprocess.run([opener, index_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    print()
+    print(f"index: {index_path}")
+    print(f"logs: {run.logs}")
+    return index_path
+
+
+def open_index(index_path):
+    if os.environ.get("AUDITS_NO_OPEN", "0") == "1":
+        return
+    opener = "xdg-open" if sys.platform.startswith("linux") else ("open" if sys.platform == "darwin" else None)
+    if opener:
+        subprocess.run([opener, index_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+
+def _announce(run, repo):
+    print(f"run dir: {run.root}")
+    print(f"collecting under: {run.collection}")
+    print(f"repo: {repo}")
+    print()
+
+
+def sweep(repo, out, only, short, force):
+    repo = os.path.abspath(repo)
+    selected = only or (SHORT_SET if short else list(AUDIT_NAMES))
+    run = RunDir.create(out)
+    _announce(run, repo)
+    plan = plan_sweep(repo, selected, force)
+    execute(repo, plan, run)
+    open_index(collect(run, repo, plan))
+
+
+def rebuild_index(repo, out):
+    """`--index --out DIR`: collect over a finished collection, nothing else."""
+    repo = os.path.abspath(repo)
+    run = RunDir.create(out)
+    _announce(run, repo)
+    open_index(collect(run, repo, Plan()))
 
 
 # --- mutation mode --------------------------------------------------------
@@ -720,8 +770,13 @@ def main(argv):
 
     if mutation:
         mutation_mode(repo, mutation_list, out)
+    elif index_only:
+        if not out:
+            print("ERROR: --index needs --out DIR — the dir whose reports to index.", file=sys.stderr)
+            sys.exit(2)
+        rebuild_index(repo, out)
     else:
-        sweep(repo, out, only, short, index_only, force)
+        sweep(repo, out, [s.strip() for s in only.split(",") if s.strip()] if only else None, short, force)
 
 
 if __name__ == "__main__":
