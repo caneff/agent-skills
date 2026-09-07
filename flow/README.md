@@ -15,7 +15,7 @@ every commit here is a backup.
 | `claude/RTK.md` | `~/.claude/RTK.md` | RTK proxy notes |
 | `claude/settings.json` | `~/.claude/settings.json` | Harness config: hooks, permissions |
 | `claude/settings.local.json` | `~/.claude/settings.local.json` | Machine-local overrides |
-| `claude/hooks/*` | `~/.claude/hooks/*` | git guardrail, main-sync, agent-model-guard hooks |
+| `claude/hooks/*` | `~/.claude/hooks/*` | git guardrail, landed-refresh, agent-model-guard hooks |
 
 `~/.claude/skills` is already this repo, so it isn't duplicated here.
 

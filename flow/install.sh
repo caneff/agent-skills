@@ -29,9 +29,14 @@ link claude/RTK.md              "$HOME/.claude/RTK.md"
 # would break the link. It is a copy-only backup (see backup-sync.sh), written
 # by the --restore call below.
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
-for h in block-dangerous-git.sh sync-primary-main.sh require-agent-model.sh package.json; do
+for h in block-dangerous-git.sh refresh-landed.sh require-agent-model.sh package.json; do
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
 done
+# Renamed from sync-primary-main.sh to refresh-landed.sh: drop the stale
+# symlink so a rename doesn't leave the old name pointing into this repo.
+if [ -L "$HOME/.claude/hooks/sync-primary-main.sh" ]; then
+  rm -f "$HOME/.claude/hooks/sync-primary-main.sh"
+fi
 
 # Pre-push hook: refuse a push when tests/all.sh fails. Hooks are shared
 # across worktrees, so resolve the common git dir rather than assuming ".git".

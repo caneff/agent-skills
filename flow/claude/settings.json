@@ -144,8 +144,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/caneff/.claude/hooks/sync-primary-main.sh",
-            "statusMessage": "Syncing primary worktree main"
+            "command": "/home/caneff/.claude/hooks/refresh-landed.sh",
+            "statusMessage": "Refreshing landed page"
           }
         ]
       },
