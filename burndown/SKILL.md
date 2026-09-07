@@ -115,11 +115,16 @@ read-only, exploration and review both, is an in-process subagent.
    reference and the branch — never the burn history or the explorer's notes —
    running both the built-in `code-review` skill and
    `~/.agents/skills/two-axis-code-review/SKILL.md` by pointer, not by slash
-   invocation — correctness first, then spec/standards. The seed says: wait
-   for both reviews to finish, then send the verdict as your final message
-   and arm no background wait afterwards — a reviewer that keeps a timer
-   running re-notifies the coordinator with the same verdict two or three
-   times. It owns the verdict, one of three:
+   invocation — correctness first, then spec/standards. The seed says: run
+   `code-review` in your own context, never as a background fork — a forked
+   review hung twice in one burn and needed two pings before it returned;
+   wait for both reviews to finish, then send the verdict with the message
+   tool **before** going idle, and arm no background wait afterwards — a
+   reviewer that keeps a timer running re-notifies the coordinator with the
+   same verdict two or three times, and one that goes idle without sending
+   costs a round trip to prod it. The coordinator prods a silent reviewer
+   once, then rules on the findings it already has. It owns the verdict, one
+   of three:
 
    - **clean** — go to step 6.
    - **changes requested** — findings the builder can act on. Write them to
@@ -226,6 +231,13 @@ wakes, but the delivery it returns is the oldest whole batch, so heartbeats
 still arrive and a manual `check` while a waiter is armed drains the batch that
 waiter was going to return. Use `check --ack <delivery_id> --wait` as one call,
 and treat a heartbeat-only batch as a checkpoint, not an event.
+
+The mailbox waiter lives on the server, not in the client. A `check --wait`
+that is backgrounded, killed, or interrupted leaves its waiter armed, and every
+later wait fails with `waiter_exists` until that waiter's own timeout expires —
+so run `check --wait` in the foreground only, with a timeout short enough to
+survive a kill (five minutes, never the tool's maximum), and when one is stuck
+poll with `check --peek` until it clears rather than retrying the wait.
 
 ## Coordinator context stays thin
 
