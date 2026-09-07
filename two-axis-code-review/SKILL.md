@@ -81,24 +81,28 @@ This lens **owns** the three smells above that are really over-engineering — S
 
 ### 4. Spawn both sub-agents in parallel
 
-Spawn both with the plain `Agent` tool, fire-and-return: no `name`, not background, no teammate messaging. This is what makes the result reach *you* as the agent's completion notification — even when you yourself are a subagent of some other caller. A named background teammate parks its report for `SendMessage`/`ListAgents` instead, and when you're a subagent nothing is polling for that: the report idles or lands nowhere.
+Spawn both with the plain `Agent` tool, `subagent_type: diff-reviewer`, fire-and-return: no `name`, not background, no teammate messaging. This is what makes the result reach *you* as the agent's completion notification — even when you yourself are a subagent of some other caller. A named background teammate parks its report for `SendMessage`/`ListAgents` instead, and when you're a subagent nothing is polling for that: the report idles or lands nowhere.
 
 Pass `model: opus` to both. Review is Opus-tier and the user reads every line before merge, so a miss is caught downstream — do not let them inherit the session model.
 
-Both prompts carry only the **diff, the commit list, and the spec/standards sources** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
+The `diff-reviewer` agent definition (`flow/claude/agents/diff-reviewer.md`, installed at `~/.claude/agents/diff-reviewer.md`) carries the standing brief and points back at this file's § 3, so a prompt passes only what is specific to this diff. If the definition is not installed, spawn without `subagent_type` and paste § 3 and the axis brief in full instead — the reviews still run, at the cost of the paste.
+
+**Settled decisions.** Every prompt carries a settled-decisions list: what the owner already ruled on, at a grill, on the issue, or in an earlier round, one line each. With nothing settled, say so — "settled decisions: none" — rather than dropping the line, so the reviewer knows the list is empty and not forgotten. A reviewer that re-raises a settled decision costs a round the fixer spends re-arguing it.
+
+Both prompts carry only the **diff, the commit list, the spec/standards sources, and the settled decisions** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
 
 Belt and braces: append to **both** prompts — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards` or `spec`, `<n>` the issue number from step 2 (or the branch name if there is none). **Expand `<dir>` yourself before writing the prompt**: `$CLAUDE_JOB_DIR/tmp` if that variable is set in your session, else `/tmp`. Sub-agents do not inherit the variable, and a fallback inside the checkout leaves an untracked file that blocks `git worktree remove` (and so `ship`). Never point the report at `./.scratch/` or anywhere under the repo. If the completion notification comes back missing or empty, read that file before treating the report as absent.
 
 **Standards sub-agent prompt** — include:
 
 - The full diff command and commit list.
-- The list of standards-source files you found in step 3, **plus the smell baseline and the over-engineering lens from step 3** pasted in full — the sub-agent has no other access to them.
+- The list of standards-source files you found in step 3, and the settled decisions. The smell baseline and the over-engineering lens are the agent definition's to read from § 3; paste them only in the no-definition fallback above.
 - The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. For any test in the diff that claims to prove a behaviour, check the verdict depends on it — strip the constraint under test and see whether the assertion still passes; one that survives is a hollow witness, flag it. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the over-engineering lens over the diff and list what to cut, one line each in `location: <tag> <what>. <replacement>.` form using the five tags. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Under 550 words."
 
 **Spec sub-agent prompt** — include:
 
 - The diff command and commit list.
-- The path or fetched contents of the spec.
+- The path or fetched contents of the spec, and the settled decisions.
 - The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Under 400 words."
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report.

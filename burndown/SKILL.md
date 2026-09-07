@@ -172,9 +172,10 @@ stages sit either side of that line (step 3).
    read-only: no Orca task, no terminal, no worktree beyond `git fetch` of
    the branches.
 
-   Three fresh `Agent` calls, `model: opus`, all in parallel, each seeded with
-   the diff command (`git -C <worktree> diff <base>...<tip>`), the commit list,
-   and nothing from the burn: the two axes of
+   Three fresh `Agent` calls, `subagent_type: diff-reviewer`, `model: opus`,
+   all in parallel, each seeded with the diff command
+   (`git -C <worktree> diff <base>...<tip>`), the commit list, the clump's
+   **settled decisions**, and nothing else from the burn: the two axes of
    `~/.agents/skills/two-axis-code-review/SKILL.md` — run that skill by
    pointer; its § 4. Spawn both sub-agents in parallel holds the two prompts,
    and its fixed point is passed as an argument. Every git command in all three
@@ -189,6 +190,13 @@ stages sit either side of that line (step 3).
    do the scope check yourself: `git diff --name-only <range>` against the
    seeds' own-files lists, and a file outside a ticket's set is a finding for
    that ticket.
+
+   The settled decisions are the rulings already in the notes file — a
+   contradicted grill decision the owner ruled on before dispatch, an owner
+   ruling posted on the issue, and anything the builder asked and was answered
+   mid-build. One line each, verbatim from the notes, with "settled decisions:
+   none" when there are none. A reviewer that re-raises one costs a whole round
+   on a question that was closed before the build started.
 
    Each reviewer also writes its full report to a file, named for the clump:
    `two-axis-code-review/SKILL.md` § 4. Spawn both sub-agents in parallel
@@ -206,7 +214,10 @@ stages sit either side of that line (step 3).
    - **clean** — go to step 6.
    - **changes requested** — findings the builder can act on. Start the fix
      round on that ticket's held builder (§ Holding the builder). Fixes are
-     always the builder's, never the coordinator's.
+     always the builder's, never the coordinator's: the dispatch hands the
+     findings path, and the builder owns the files and the intent behind each
+     finding. Never send a scripted edit to apply verbatim — a fix dispatch
+     that dictated the change took four micro-rounds on one helper.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
 

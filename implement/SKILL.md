@@ -116,6 +116,14 @@ Run both reviews and fix what they raise:
 
 Neither one produces the other's findings. Both run, every time.
 
+**Three passes, then park.** A review that raises findings is fixed and re-run,
+at most three times. If the third pass is still not clean, stop: park the
+ticket, report what is still open and why, and hand it to the owner. Passes
+four through seven cost as much as the build and settle nothing that three did
+not — they are where reviewers start re-raising decisions already settled. A
+finding you dispute is not a fourth pass either: record it as
+`disputed: <why>` and let the owner rule.
+
 Then, only if the diff pushes a file from under 1000 lines to over, run
 `~/.agents/skills/thermo-nuclear-code-quality-review/SKILL.md` by pointer —
 it carries `disable-model-invocation`, so the slash form will not fire for

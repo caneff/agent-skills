@@ -32,6 +32,9 @@ link claude/settings.local.json "$HOME/.claude/settings.local.json"
 for h in block-dangerous-git.sh refresh-landed.sh require-agent-model.sh package.json; do
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
 done
+for a in "$here/claude/agents"/*.md; do
+  link "claude/agents/$(basename "$a")" "$HOME/.claude/agents/$(basename "$a")"
+done
 # Renamed from sync-primary-main.sh to refresh-landed.sh: drop the stale
 # symlink so a rename doesn't leave the old name pointing into this repo.
 if [ -L "$HOME/.claude/hooks/sync-primary-main.sh" ]; then

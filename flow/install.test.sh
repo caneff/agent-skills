@@ -42,6 +42,11 @@ if [ -L "$tmp/home/.claude/hooks/refresh-landed.sh" ]; then
 else
   echo "FAIL refresh-landed.sh not linked under the scratch HOME"; fails=1
 fi
+if [ -L "$tmp/home/.claude/agents/diff-reviewer.md" ]; then
+  echo "PASS reviewer agent definition linked under the scratch HOME"
+else
+  echo "FAIL claude/agents/diff-reviewer.md not linked under the scratch HOME"; fails=1
+fi
 
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
