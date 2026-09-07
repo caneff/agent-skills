@@ -53,7 +53,6 @@
       "RemoteTrigger",
       "ReportFindings",
       "ScheduleWakeup",
-      "Skill(ponytail:ponytail-audit)",
       "mcp__c4ai__crawl",
       "mcp__c4ai__html",
       "mcp__c4ai__pdf",
@@ -320,17 +319,6 @@
     "command": "python3 /home/caneff/.agents/skills/flow/ccstatusline-table/table-statusline.py",
     "padding": 0,
     "refreshInterval": 10
-  },
-  "enabledPlugins": {
-    "ponytail@ponytail": true
-  },
-  "extraKnownMarketplaces": {
-    "ponytail": {
-      "source": {
-        "source": "github",
-        "repo": "DietrichGebert/ponytail"
-      }
-    }
   },
   "outputStyle": "Quill",
   "feedbackDrafts": "off",
