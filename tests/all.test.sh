@@ -50,6 +50,8 @@ git -C "$shadow" add -A \
 
 git init -q "$victim" \
   || { echo "FAIL: could not init the victim repo"; exit 1; }
+before_config=$(cat "$victim/.git/config")
+before_ls=$(cd "$victim" && ls -A)
 
 out=$(
   cd "$shadow" &&
@@ -67,6 +69,13 @@ fi
 if ! printf '%s\n' "$out" | grep -qE '^[1-9][0-9]* suites passed$'; then
   echo "FAIL: nested tests/all.sh reported no suites run — it must have resolved its root against the leaked/victim repo instead of the shadow working tree"
   printf '%s\n' "$out"
+  exit 1
+fi
+
+after_config=$(cat "$victim/.git/config")
+after_ls=$(cd "$victim" && ls -A)
+if [ "$before_config" != "$after_config" ] || [ "$before_ls" != "$after_ls" ]; then
+  echo "FAIL: the leaked GIT_DIR let the suite rewrite or write into the victim repo it pointed at"
   exit 1
 fi
 echo "ALL PASS"
