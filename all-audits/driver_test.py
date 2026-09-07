@@ -293,8 +293,12 @@ def test_init_git_repo_ignores_leaked_git_dir():
     with tempfile.TemporaryDirectory() as victim, tempfile.TemporaryDirectory() as target:
         clean_env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_LEAKS}
         subprocess.run(["git", "init", "-q", victim], check=True, env=clean_env)
+        subprocess.run(["git", "-C", victim, "-c", "user.email=v@example.com", "-c", "user.name=v",
+                        "commit", "-q", "--allow-empty", "-m", "victim"], check=True, env=clean_env)
         config_path = os.path.join(victim, ".git", "config")
         before = open(config_path).read()
+        head_before = subprocess.run(["git", "-C", victim, "rev-parse", "HEAD"], check=True,
+                                     capture_output=True, text=True, env=clean_env).stdout
 
         saved = {k: os.environ.get(k) for k in _GIT_ENV_LEAKS}
         os.environ["GIT_DIR"] = os.path.join(victim, ".git")
@@ -310,6 +314,9 @@ def test_init_git_repo_ignores_leaked_git_dir():
 
         after = open(config_path).read()
         assert after == before, "a leaked GIT_DIR must not let _init_git_repo touch another repo's config"
+        head_after = subprocess.run(["git", "-C", victim, "rev-parse", "HEAD"], check=True,
+                                    capture_output=True, text=True, env=clean_env).stdout
+        assert head_after == head_before, "a leaked GIT_DIR must not let _init_git_repo commit onto another repo (#622)"
         assert os.path.isdir(os.path.join(target, ".git")), "_init_git_repo must still create a repo in its own temp dir"
 
 
