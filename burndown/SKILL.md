@@ -62,9 +62,22 @@ header — never the whole file, which hands one builder every other ticket's
 detail to wade through.
 
 The shallow pass must report **collisions**: any file two tickets would both
-touch. Resolve every one before dispatching batch 1 — narrow one ticket's scope
-to what its own issue already permits, or serialise the pair — and say in each
-builder's seed which files are its own. Two builders editing one file is a merge
+touch. Then comes the **clumping step**, a reasoning step the coordinator
+does once, after the shallow pass and before batch 1: draw the collision
+graph and take its connected components. Every component with two or more
+tickets is a **clump** — one worker, one worktree, one branch, one PR whose
+body closes every ticket in it, one review. A ticket that collides with
+nothing is a clump of one. Write the clumps into the notes file under the
+`## Collisions` header, each with its tickets in number order and the union
+of their files, and say in each seed which files are the clump's own. A
+clump takes one worker slot and counts against the ticket cap as its number
+of tickets; its seed points at every ticket's `## #<n>` section and tells
+the builder to work them in number order, one commit per ticket with that
+ticket's `Closes #<n>`. Never serialise a component into stacked PRs: a burn
+that did so ran one builder at a time for seven tickets while two slots sat
+idle, and every later PR carried the earlier ones' diff until merge. Narrow a
+ticket's scope instead only when its own issue already permits it and that
+breaks it out of the component. Two builders editing one file is a merge
 conflict the coordinator caused.
 
 The deep read **checks every grill decision against the code it rests on.**
@@ -95,9 +108,11 @@ stages sit either side of that line (step 3).
 
 1. List the queue: `gh issue list --label ready-for-agent --state open`.
    Empty, with nothing in flight → report and stop.
-2. Take the **frontier** via Orca's ready-task query: every ticket whose
-   blockers are all closed, lowest numbers first, up to the free worker
-   slots. That set is this pass's batch. Before dispatching, pull out any
+2. Take the **frontier** via Orca's ready-task query: every clump (§ Shape)
+   whose tickets' blockers are all closed, lowest first ticket number first,
+   up to the free worker slots. That set is this pass's batch; a clump is
+   the unit from here on, and "ticket" in steps 3–7 reads as "clump" where
+   the clump has more than one. Before dispatching, pull out any
    ticket that is a sub-issue of a `spec`-labelled parent: those go through
    § Spec handoff as one unit per spec, and the spec takes one worker slot.
 3. **Explore** (§ Shape). First pass only: run the shallow pass over the whole
@@ -144,13 +159,13 @@ stages sit either side of that line (step 3).
    The builder is not released at `worker_done`, and the coordinator's wait
    from dispatch through settle covers more than `worker_done` — § Holding
    the builder.
-5. **Review.** Once per **clump**, when every builder in it has reported
-   `worker_done`. A clump is the tickets of a batch that share files — a
-   serialised stack from § Collisions is one clump, reviewed as one range
-   from its base to its tip — and each independent ticket is its own clump;
-   fold two small independent ones into a single clump only when each diff is
-   a few lines, so one reader holds both. Review is read-only: no Orca task,
-   no terminal, no worktree beyond `git fetch` of the branches.
+5. **Review.** Once per **clump**, when its builder has reported
+   `worker_done`. The clump is the one § Shape formed — one branch, one
+   range from its base to its tip, however many tickets it closes — so review
+   runs once per branch. Fold two clumps of one into a single review only
+   when each diff is a few lines, so one reader holds both. Review is
+   read-only: no Orca task, no terminal, no worktree beyond `git fetch` of
+   the branches.
 
    Three fresh `Agent` calls, `model: opus`, all in parallel, each seeded
    with the diff command (`git -C <worktree> diff <base>...<tip>`), the
