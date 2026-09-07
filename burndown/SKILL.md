@@ -122,12 +122,9 @@ stages sit either side of that line (step 3).
    **Builders run no reviews.** The seed points at `implement`'s § Build
    only, never its § Finish: no `code-review`, no `two-axis-code-review` on
    the builder's branch. Review is the coordinator's, once per clump (step
-   5), in contexts that hold nothing but the diff. A builder that reviews
-   itself spends a builder's worth of tokens on wording nits and still
-   misses what a fresh reader catches. `worker_done` takes the shape of
-   `implement`'s § The report, seeded by that same pointer — full report to
-   a file outside the checkout, one message, verdict first, sha last — plus
-   the branch name, which the contract has no reason to know the coordinator
+   5), in contexts that hold nothing but the diff. `worker_done` is
+   `implement`'s § The report, seeded by that same pointer, plus the branch
+   name — the one thing the contract has no reason to know the coordinator
    needs. The fix round (step 5) reports the same way.
 
    One rule goes in every seed, docs-only included: a question
@@ -147,22 +144,23 @@ stages sit either side of that line (step 3).
    from dispatch through settle covers more than `worker_done` — § Holding
    the builder.
 5. **Review.** Once per **clump**, when every builder in it has reported
-   `worker_done`. A clump is the tickets of a batch that share files — a
-   serialised stack from § Collisions is one clump, reviewed as one range
-   from its base to its tip — and each independent ticket is its own clump;
-   fold two small independent ones into a single clump only when each diff is
-   a few lines, so one reader holds both. Review is read-only: no Orca task,
-   no terminal, no worktree beyond `git fetch` of the branches.
+   `worker_done`. A clump is the tickets of a batch that share files —
+   a serialised stack from § Shape's collision rule is one clump, reviewed as
+   one range from its base to its tip — and each independent ticket is its own
+   clump; fold two small independent ones into a single clump only when each
+   diff is a few lines, so one reader holds both. Review is read-only: no Orca
+   task, no terminal, no worktree beyond `git fetch` of the branches.
 
-   Three fresh `Agent` calls, `model: opus`, all in parallel, each seeded
-   with the diff command (`git -C <worktree> diff <base>...<tip>`), the
-   commit list, and nothing from the burn: the two axes of
+   Three fresh `Agent` calls, `model: opus`, all in parallel, each seeded with
+   the diff command (`git -C <worktree> diff <base>...<tip>`), the commit list,
+   and nothing from the burn: the two axes of
    `~/.agents/skills/two-axis-code-review/SKILL.md` — run that skill by
-   pointer; its § Spawn both sub-agents holds the two prompts, and its
-   fixed point is passed as an argument since the coordinator's own HEAD is
-   not the branch — and a **correctness** reviewer with a brief of its own:
-   bugs, behaviour the ticket did not ask for, and every new test checked as
-   a witness (strip the constraint, see whether it still passes). The
+   pointer; its § 4. Spawn both sub-agents in parallel holds the two prompts,
+   and its fixed point is passed as an argument. Every git command in all three
+   prompts is `git -C <worktree> ...`: the coordinator's own HEAD is not the
+   branch under review — and a **correctness** reviewer with a brief of its
+   own: bugs, behaviour the ticket did not ask for, and every new test checked
+   as a witness (strip the constraint, see whether it still passes). The
    built-in `code-review` skill is not used here: its eight-finder fork costs
    about 100k tokens and five minutes on a fifty-line diff and finds what one
    fresh reader finds. The two axes stay separate agents by design; do not
@@ -171,35 +169,42 @@ stages sit either side of that line (step 3).
    seeds' own-files lists, and a file outside a ticket's set is a finding for
    that ticket.
 
-   The reviewers write their own reports to files outside every checkout —
-   `two-axis-code-review/SKILL.md` § Spawn both sub-agents states the ban and
-   expands the directory; an untracked report inside a worktree blocks its
-   teardown at step 6. Merge the three reports per ticket and write each
-   ticket's findings **verbatim** to `~/.cache/burndown/findings/<n>-r1.md`.
-   The verdict per ticket is one of three:
+   Each reviewer also writes its full report to a file, named for the clump:
+   `two-axis-code-review/SKILL.md` § 4. Spawn both sub-agents in parallel
+   holds the rule and expands the directory, and `<n>` there is the clump's
+   lowest ticket number with the round suffixed
+   (`review-standards-584-r1.md`). A report written inside a worktree blocks
+   its teardown at step 6. A reviewer silent
+   for ten minutes is killed and a fresh one spawned on the same seed; it is
+   not prodded a second time.
+
+   Merge the three reports per ticket and write each ticket's findings
+   **verbatim** to `~/.cache/burndown/findings/<n>-r1.md`. The verdict per
+   ticket is one of three:
 
    - **clean** — go to step 6.
    - **changes requested** — findings the builder can act on. Start the fix
-     round on that ticket's held builder (§ Holding the builder), handing it
-     the findings **path** — the file is the report, so the dispatch never
-     pastes the findings in. Fixes are always the builder's, never the
-     coordinator's.
+     round on that ticket's held builder (§ Holding the builder). Fixes are
+     always the builder's, never the coordinator's.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
 
-   There is **one round and no re-review**: the builder's fix report is one
-   `implement` § The report message like the first, carrying each finding's
-   disposition — **fixed**, **deferred: <why>**, or **disputed: <why>** —
-   and the coordinator checks only two things itself before settling:
+   There is **one round and no re-review** — the owner's ruling, over the
+   older re-review-on-new-HEAD rule, so leave it. The builder's fix report is
+   one `implement` § The report message carrying each finding's disposition —
+   **fixed**, **deferred: <why>**, or **disputed: <why>**. A report that
+   arrives cut off is read from the file it names, never asked for again.
+   The coordinator checks only two things itself before settling:
    `git diff --name-only` still holds only the ticket's own files, and the
-   repo's test seam passes on the new sha. Whatever is
-   deferred or disputed goes into the PR body for the human, not into a second
-   round. A builder that stacks a fix commit reports the new sha; it never
-   amends or rebases a pushed branch.
+   repo's test seam passes on the new sha. Whatever is deferred or disputed
+   goes into the PR body for the human, not into a second round. A builder
+   that stacks a fix commit reports the new sha; it never amends or rebases a
+   pushed branch.
 6. **Settle**, in the order each ticket clears — clean, or its one fix
    round reported — per the
-   Finish section of `~/.agents/skills/implement/SKILL.md` — which carries the
-   ownership gate. Where the repo owner lets agents land directly, land. Where
+   Finish section of `~/.agents/skills/implement/SKILL.md`, its ownership gate
+   and PR step only; the reviews it opens with are step 5's and do not run
+   again. Where the repo owner lets agents land directly, land. Where
    review is a human's, the terminal state of a ticket in this burn is **PR
    open**: open it, hand over the exact `gh pr merge` line, and do not merge.
    Satisfy any acceptance criterion the coordinator owns — an issue comment the
@@ -226,13 +231,14 @@ stages sit either side of that line (step 3).
    sidechain tokens in that worktree's transcripts. Sidechain is every subagent
    the builder spawned — lookups, since builders run no reviews — so a
    non-zero `<review>` there is delegated work, not review.
-   `<coord-review>` is the step 5 reviewers' tokens for this ticket, read off
-   the usage each `Agent` completion carries (the two axes and the
-   correctness reviewer), split evenly across the clump's tickets — never
-   asked of a reviewer, which cannot count itself. The script cannot see it: an
-   in-process subagent writes into the coordinator's transcript, not the
-   worktree's. `<rounds>` is `1` when the ticket took a fix round, else `0`. Nothing in the loop
-   reads this file back — it is read between burns.
+   `<coord-review>` is the step 5 reviewers' tokens, read off the usage each
+   `Agent` completion carries (the two axes and the correctness reviewer) —
+   never asked of a reviewer, which cannot count itself. Record the clump's
+   total on its lowest-numbered ticket's line and `0` on its other tickets.
+   The script cannot see it: an in-process subagent writes into the
+   coordinator's transcript, not the worktree's. `<rounds>` is `1` when the
+   ticket took a fix round, else `0`. Nothing in the loop reads this file
+   back — it is read between burns.
 
    One caveat the numbers carry: a projects dir outlives the worktree that
    made it, so a burn that reuses a path bills the new ticket for the old
@@ -278,23 +284,23 @@ stages sit either side of that line (step 3).
 ## Docs-only lane
 
 A docs-only ticket's seed skips `implement`'s test-first step — commit, then
-report. It still gets its own worktree, branch, and progress lines like every
-other ticket; only the seed's build steps shrink. Its diff joins its clump's
+report — and its report carries no test line, since it ran none. It still
+gets its own worktree, branch, and progress lines like every other ticket;
+only the seed's build steps shrink. Its diff joins its clump's
 review at step 5 like any other, and a code file in it means the size tag was
 wrong — a finding, not a park.
 
 ## Holding the builder
 
 **Do not `worker-release` at `worker_done`.** The builder stays live until
-its ticket settles or parks — whether or not a review round happens. A
-dispatch settles at `worker_done` and rejects mail (`dispatch_inactive`),
-so a fix round is a new task started on the same agent terminal:
-`task-create` with the findings path — the path, never the findings text —
-then `worker-start --task <id>
---worktree name:<wt> --terminal <agent handle from worker-show>`. The
+its ticket settles or parks. A dispatch settles at `worker_done` and rejects
+mail (`dispatch_inactive`), so a fix round is a new task started on the same
+agent terminal: `task-create` with the findings path — the path, never the
+findings text — then `worker-start --task <id> --worktree name:<wt>
+--terminal <agent handle from worker-show>`. The
 agent keeps its context, so the round costs no Orca startup and no
-re-reading of the ticket and notes. Release at settle (reviewed or skipped
-straight from step 5) or when the ticket parks, never before.
+re-reading of the ticket and notes. Release at settle or when the ticket
+parks, never before.
 
 The coordinator's wait, from dispatch through settle, covers `question` and
 `escalation` alike, not just `worker_done` — a blocking question is real
