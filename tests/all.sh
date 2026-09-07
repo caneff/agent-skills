@@ -28,6 +28,10 @@ suites() { # prints "<label>\t<command>" per discovered suite
     done
 }
 
+# flow/install.sh symlinks this file in as the pre-push hook, and git calls a
+# pre-push hook with `<remote> <url>`; those are not flags, so drop them.
+case "$(basename "$0")" in pre-push) set -- ;; esac
+
 case "${1:-}" in
   --list) suites | cut -f1; exit 0 ;;
   "") ;;
