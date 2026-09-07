@@ -77,8 +77,31 @@ def test_index_over_an_empty_collection_still_links_to_real_assets():
         text = open(index).read()
         assert 'href="assets/base/base.css"' in text
         for linked in ("assets/base/base.css", "assets/base/base.js",
-                       "assets/components/callout/callout.css"):
+                       "assets/components/callout/callout.css",
+                       "assets/components/table/table.css"):  # vt-table-wrap's CSS
             assert os.path.isfile(os.path.join(tmp, "collection", linked)), linked
+
+
+def test_index_over_an_old_run_dir_does_not_prune_it():
+    """#606 round 2: `--index --out <run older than the TTL>` must index that
+    run, not delete it — pruning happens after `--out` is resolved and skips
+    the resolved dir."""
+    with tempfile.TemporaryDirectory() as cache_dir:
+        base = os.path.join(cache_dir, "all-audits")
+        old_run = os.path.join(base, "run-20200101-000000")
+        report = os.path.join(old_run, "collection", "dead-code", "report.html")
+        os.makedirs(os.path.dirname(report))
+        open(report, "w").write("<html>old report</html>")
+        os.utime(old_run, (0, 0))
+
+        r = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__), "driver.py"), "--index", "--out", old_run],
+            capture_output=True, text=True,
+            env={**os.environ, "XDG_CACHE_HOME": cache_dir, "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1"},
+        )
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert os.path.isfile(report), "the run being indexed was pruned"
+        assert "dead-code" in open(os.path.join(old_run, "collection", "index.html")).read()
 
 
 def test_collect_from_manifest_mutation_style():
@@ -387,6 +410,11 @@ def test_mutation_run_dir_prunes_old_runs_and_makes_worktrees():
         for sub in ("logs", "collection", "manifests", "worktrees"):
             assert os.path.isdir(os.path.join(run_dir, sub)), sub
         assert os.listdir(os.path.join(run_dir, "worktrees")) == [], "the worktree must be cleaned up on the setup-failure path"
+        # round 2: the setup-failure page links ../assets/, so mutation mode
+        # delivers the shell's assets into the collection like the sweep does.
+        failure_page = open(os.path.join(run_dir, "collection", "solver.py", "report.html")).read()
+        assert '../assets/base/base.css' in failure_page
+        assert os.path.isfile(os.path.join(run_dir, "collection", "assets", "base", "base.css"))
 
 
 def _seed_run_dir(tmp, worktrees=False):

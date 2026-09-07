@@ -231,6 +231,11 @@ def mutation_prepass_prompt(repo):
     )
 
 
+# visual-teach components the driver's pages use: callouts, and the table
+# wrapper (`vt-table-wrap`) around the index and mutation sub-index tables.
+INDEX_COMPONENTS = ("callout", "table")
+
+
 def write_setup_failure_report(collection_dir, module, reason):
     d = os.path.join(collection_dir, module_slug(module))
     os.makedirs(d, exist_ok=True)
@@ -435,12 +440,14 @@ class RunDir:
     def create(cls, out, worktrees=False):
         base = cache_base()
         os.makedirs(base, exist_ok=True)
+        root = os.path.abspath(out) if out else os.path.join(base, "run-" + _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
+        # Prune only after `--out` is resolved, and never the run being asked
+        # for: `--index --out <old run>` must index it, not delete it.
         cutoff = _dt.datetime.now().timestamp() - RUN_TTL_DAYS * 86400
         for entry in os.listdir(base):
             p = os.path.join(base, entry)
-            if entry.startswith("run-") and os.path.isdir(p) and os.path.getmtime(p) < cutoff:
+            if entry.startswith("run-") and os.path.isdir(p) and p != root and os.path.getmtime(p) < cutoff:
                 shutil.rmtree(p, ignore_errors=True)
-        root = os.path.abspath(out) if out else os.path.join(base, "run-" + _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
         run = cls(
             root=root,
             logs=os.path.join(root, "logs"),
@@ -588,7 +595,7 @@ def collect(run, repo, plan, base=None):
         result = _run(["claude", *CLAUDE_FLAGS, prompt])
         synthesis = result.stdout.strip()
 
-    pagelib.copy_assets(collection)
+    pagelib.copy_assets(collection, components=INDEX_COMPONENTS)
 
     build_index(IndexModel(
         collection=collection,
@@ -668,6 +675,7 @@ def mutation_mode(repo, modules, out):
 
     run = RunDir.create(out, worktrees=True)
     collection = run.collection
+    pagelib.copy_assets(collection, components=INDEX_COMPONENTS)  # setup-failure pages link ../assets/
     print(f"run dir: {run.root}")
     print(f"collecting under: {collection}\n")
 

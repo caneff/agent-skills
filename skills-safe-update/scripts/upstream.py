@@ -105,17 +105,29 @@ def upstream_tree(owner, repo, cache):
         cache[key] = None
         return None
     head, root_tree = ch
-    r = gh("api", f"repos/{owner}/{repo}/git/trees/{head}?recursive=1")
-    if r.returncode != 0:
-        cache[key] = None
-        return None
     tree = {"": root_tree}
-    for t in json.loads(r.stdout).get("tree", []):
-        if t["type"] == "tree":
-            tree[t["path"]] = t["sha"]
-    result = {"head": head, "tree": tree}
+    # The root entry never needs the recursive trees call (the old inline
+    # code skipped it for root-path extras); a failed trees call only makes
+    # the non-root dirs unknown, so it is recorded rather than fatal.
+    r = gh("api", f"repos/{owner}/{repo}/git/trees/{head}?recursive=1")
+    trees_failed = r.returncode != 0
+    if not trees_failed:
+        for t in json.loads(r.stdout).get("tree", []):
+            if t["type"] == "tree":
+                tree[t["path"]] = t["sha"]
+    result = {"head": head, "tree": tree, "trees_failed": trees_failed}
     cache[key] = result
     return result
+
+
+def upstream_dir(t, path):
+    """(known, sha) for `path` in an `upstream_tree` result: the root ("")
+    is always known; other dirs are unknown when the trees call failed."""
+    if path == "":
+        return True, t["tree"][""]
+    if t["trees_failed"]:
+        return False, None
+    return True, t["tree"].get(path)
 
 
 def status_rows(base, lock_path, extras_path):
@@ -130,10 +142,10 @@ def status_rows(base, lock_path, extras_path):
             status = "non-github source (skip)"
         else:
             t = upstream_tree(it["owner"], it["repo"], cache)
-            if t is None:
+            known, upstream = (False, None) if t is None else upstream_dir(t, it["dir"])
+            if not known:
                 status = "upstream UNKNOWN (gh fetch failed)"
             else:
-                upstream = t["tree"].get(it["dir"])
                 folder_hash = it["hash"]
                 edited = local != folder_hash
                 if upstream is None:
@@ -163,10 +175,10 @@ def sync_extras(extras_path):
         owner, repo = e["repo"].split("/", 1)
         path = e.get("path", "")
         t = upstream_tree(owner, repo, cache)
-        if t is None:
+        known, up = (False, None) if t is None else upstream_dir(t, path)
+        if not known:
             out.append(f"  {name}: upstream fetch failed, skipped")
             continue
-        up = t["tree"].get(path)
         if not up:
             out.append(f"  {name}: path {path!r} gone upstream (ORPHAN), skipped")
             continue
@@ -258,6 +270,20 @@ def selfcheck():
               t is not None and t["tree"].get("skills/foo") == "foosha")
         check("upstream_tree only maps tree entries, not blobs",
               t is not None and "skills/foo/SKILL.md" not in t["tree"])
+
+        # round 2: a failed recursive trees call must not lose the root entry
+        def trees_down(*args):
+            r = fake_gh(*args)
+            if "git/trees" in args[1]:
+                r.returncode, r.stdout = 1, b""
+            return r
+        set_gh_runner(trees_down)
+        t = upstream_tree("acme", "repo", {})
+        check("a root-path extra resolves from the commits API when the trees call fails",
+              upstream_dir(t, "") == (True, "roottreeSHA"))
+        check("a non-root dir is unknown, not orphaned, when the trees call fails",
+              upstream_dir(t, "skills/foo") == (False, None))
+        set_gh_runner(fake_gh)
 
         cache = {}
         upstream_tree("acme", "repo", cache)
