@@ -113,21 +113,26 @@ read-only, exploration and review both, is an in-process subagent.
    status poll: a coordinator polling `task-list` must check the mailbox for
    pending questions on every poll.
 5. **Review.** Once a worker reports its branch, `git fetch` it and review it
-   with an in-process subagent (`Agent` tool, `model: opus`) — no Orca task,
-   no terminal, no worktree; review is read-only. Seed it with only the issue
-   reference and the branch — never the burn history or the explorer's notes —
-   running both the built-in `code-review` skill and
-   `~/.agents/skills/two-axis-code-review/SKILL.md` by pointer, not by slash
-   invocation — correctness first, then spec/standards. The seed says: run
-   `code-review` in your own context, never as a background fork — a forked
-   review hung twice in one burn and needed two pings before it returned;
-   wait for both reviews to finish, then send the verdict with the message
-   tool **before** going idle, and arm no background wait afterwards — a
-   reviewer that keeps a timer running re-notifies the coordinator with the
-   same verdict two or three times, and one that goes idle without sending
-   costs a round trip to prod it. The coordinator prods a silent reviewer
-   once, then rules on the findings it already has. It owns the verdict, one
-   of three:
+   with a **fresh** in-process subagent (`Agent` tool, `model: opus`) — always
+   a subagent, whatever the diff size, so the read happens in a context that
+   holds nothing but the branch. No Orca task, no terminal, no worktree;
+   review is read-only. Seed it with only the issue reference and the branch
+   — never the burn history or the explorer's notes. The seed says: review
+   against the ticket's acceptance criteria and the questions in
+   `~/.agents/skills/two-axis-code-review/SKILL.md` — correctness first, then
+   spec/standards — doing the correctness pass **in your own context** and
+   applying the two-axis review **by reading it**. **A reviewer forks
+   nothing**: it never invokes the built-in `code-review` skill (which runs as
+   a background fork) and never spawns an agent of its own. A subagent has no
+   `TaskOutput`, so it cannot wait on a fork; its turn ends, it goes idle, and
+   the fork's result lands as a notification nothing delivers until a message
+   wakes it — one burn's reviewer sat thirty minutes on a finished verdict
+   that way. Send the verdict with the message tool as the last act of the
+   turn, and arm no background wait afterwards.
+
+   A reviewer silent for ten minutes is killed and a fresh one spawned on the
+   same seed; it is not prodded a second time. The reviewer owns the verdict,
+   one of three:
 
    - **clean** — go to step 6.
    - **changes requested** — findings the builder can act on. Write them to
