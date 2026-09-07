@@ -124,9 +124,11 @@ stages sit either side of that line (step 3).
    the builder's branch. Review is the coordinator's, once per clump (step
    5), in contexts that hold nothing but the diff. A builder that reviews
    itself spends a builder's worth of tokens on wording nits and still
-   misses what a fresh reader catches. `worker_done` leads with any
-   timed-out question and the choice made, then the test line, the branch,
-   and the commit sha.
+   misses what a fresh reader catches. `worker_done` takes the shape of
+   `implement`'s § The report, seeded by that same pointer — full report to
+   a file outside the checkout, one message, verdict first, sha last — plus
+   the branch name, which the contract has no reason to know the coordinator
+   needs. The fix round (step 5) reports the same way.
 
    One rule goes in every seed, docs-only included: a question
    to the coordinator that times out is not a stop — take the safe option, the
@@ -162,22 +164,28 @@ stages sit either side of that line (step 3).
    `git diff --name-only <range>` against the seeds' own-files lists, and a
    file outside a ticket's set is a finding for that ticket.
 
-   Merge the three reports per ticket and write each ticket's findings
-   **verbatim** to `~/.cache/burndown/findings/<n>-r1.md`. The verdict per
-   ticket is one of three:
+   The reviewers write their own reports to files outside every checkout —
+   `two-axis-code-review/SKILL.md` § Spawn both sub-agents states the ban and
+   expands the directory; an untracked report inside a worktree blocks its
+   teardown at step 6. Merge the three reports per ticket and write each
+   ticket's findings **verbatim** to `~/.cache/burndown/findings/<n>-r1.md`.
+   The verdict per ticket is one of three:
 
    - **clean** — go to step 6.
    - **changes requested** — findings the builder can act on. Start the fix
-     round on that ticket's held builder (§ Holding the builder) with the
-     findings path. Fixes are always the builder's, never the coordinator's.
+     round on that ticket's held builder (§ Holding the builder), handing it
+     the findings **path** — the file is the report, so the dispatch never
+     pastes the findings in. Fixes are always the builder's, never the
+     coordinator's.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
 
-   There is **one round and no re-review**: the builder's fix report carries
-   each finding's disposition — **fixed**, **deferred: <why>**, or
-   **disputed: <why>** — and the coordinator checks only two things itself
-   before settling: `git diff --name-only` still holds only the ticket's own
-   files, and the repo's test seam passes on the new sha. Whatever is
+   There is **one round and no re-review**: the builder's fix report is one
+   `implement` § The report message like the first, carrying each finding's
+   disposition — **fixed**, **deferred: <why>**, or **disputed: <why>** —
+   and the coordinator checks only two things itself before settling:
+   `git diff --name-only` still holds only the ticket's own files, and the
+   repo's test seam passes on the new sha. Whatever is
    deferred or disputed goes into the PR body for the human, not into a second
    round. A builder that stacks a fix commit reports the new sha; it never
    amends or rebases a pushed branch.
@@ -274,7 +282,8 @@ wrong — a finding, not a park.
 its ticket settles or parks — whether or not a review round happens. A
 dispatch settles at `worker_done` and rejects mail (`dispatch_inactive`),
 so a fix round is a new task started on the same agent terminal:
-`task-create` with the findings path, then `worker-start --task <id>
+`task-create` with the findings path — the path, never the findings text —
+then `worker-start --task <id>
 --worktree name:<wt> --terminal <agent handle from worker-show>`. The
 agent keeps its context, so the round costs no Orca startup and no
 re-reading of the ticket and notes. Release at settle (reviewed or skipped
