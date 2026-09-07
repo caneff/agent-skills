@@ -190,15 +190,6 @@
       "installedAt": "2026-05-30T20:11:57.419Z",
       "updatedAt": "2026-09-03T18:40:20.014Z"
     },
-    "git-guardrails-claude-code": {
-      "source": "mattpocock/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "skillPath": "skills/misc/git-guardrails-claude-code/SKILL.md",
-      "skillFolderHash": "ceed97af09633b300826d0ca0b1464c527ec9a35",
-      "installedAt": "2026-05-30T20:11:57.421Z",
-      "updatedAt": "2026-09-03T18:40:20.872Z"
-    },
     "migrate-to-shoehorn": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -334,7 +325,7 @@
       "installedAt": "2026-07-02T15:11:53.072Z",
       "updatedAt": "2026-09-03T18:40:35.798Z"
     },
-    "code-review": {
+    "two-axis-code-review": {
       "source": "mattpocock/skills",
       "sourceType": "github",
       "sourceUrl": "https://github.com/mattpocock/skills.git",
@@ -456,27 +447,27 @@
       "sourceType": "github",
       "sourceUrl": "https://github.com/stablyai/orca.git",
       "skillPath": "skills/computer-use/SKILL.md",
-      "skillFolderHash": "fab1436f0d73889492279544eadebc9bcc2694b6",
+      "skillFolderHash": "f0561c41d1f709a953684aef5d5368f8c58d269f",
       "installedAt": "2026-09-01T19:00:40.655Z",
-      "updatedAt": "2026-09-07T15:55:54.774Z"
+      "updatedAt": "2026-09-01T19:00:40.655Z"
     },
     "orca-cli": {
       "source": "stablyai/orca",
       "sourceType": "github",
       "sourceUrl": "https://github.com/stablyai/orca.git",
       "skillPath": "skills/orca-cli/SKILL.md",
-      "skillFolderHash": "0c90a5b8b422a93ca806af6df3b65445ab5b2072",
+      "skillFolderHash": "cdf89459f89dddf347ee2759ff884c369051f06a",
       "installedAt": "2026-09-01T19:00:40.656Z",
-      "updatedAt": "2026-09-07T15:56:09.518Z"
+      "updatedAt": "2026-09-01T19:00:40.656Z"
     },
     "orchestration": {
       "source": "stablyai/orca",
       "sourceType": "github",
       "sourceUrl": "https://github.com/stablyai/orca.git",
       "skillPath": "skills/orchestration/SKILL.md",
-      "skillFolderHash": "ebd864919dd8cab9d7049fc624c9afeebce2767c",
+      "skillFolderHash": "4199ec6988801dd491631706cba62631b4bed8fb",
       "installedAt": "2026-09-01T19:00:40.657Z",
-      "updatedAt": "2026-09-07T15:56:27.292Z"
+      "updatedAt": "2026-09-01T19:00:40.657Z"
     }
   },
   "dismissed": {
