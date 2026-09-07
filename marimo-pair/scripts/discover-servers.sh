@@ -16,22 +16,11 @@
 # Pass `url` straight to execute-code.sh --url.
 set -euo pipefail
 
-missing=""
-for tool in jq curl; do
-  command -v "$tool" >/dev/null 2>&1 || missing="${missing:+$missing, }$tool"
-done
-if [[ -n "$missing" ]]; then
-  echo "discover-servers.sh needs ${missing} on PATH." >&2
-  exit 1
-fi
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
-if [[ "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* ]]; then
-  platform=windows
-elif [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft /proc/version 2>/dev/null; then
-  platform=wsl
-else
-  platform=posix
-fi
+require_tools jq curl
+
+platform=$(detect_platform)
 
 # Path to a Windows executable. With appendWindowsPath=false interop still
 # works, it is just not on PATH.
@@ -122,24 +111,12 @@ process_alive() {
 gateway=""
 gateway_resolved=false
 
-# The default gateway, which under WSL NAT is the Windows host.
-find_gateway() {
-  local hex
+# Memoize lib.sh's find_gateway: this script may need it from several call
+# sites (candidate_hosts, the trailer loop) and it shells out to `ip`.
+resolve_gateway() {
   [[ "$gateway_resolved" == false ]] || return 0
   gateway_resolved=true
-  if command -v ip >/dev/null 2>&1; then
-    # `|| gateway=""` keeps `set -e` from killing us before the fallback runs.
-    gateway=$(ip route show default 2>/dev/null | awk 'NR == 1 { print $3 }') || gateway=""
-  fi
-  if [[ -z "$gateway" && -r /proc/net/route ]]; then
-    # Without iproute2, read the default route (destination and mask zero)
-    # from the kernel. Its gateway field is little-endian hex.
-    hex=$(awk '$2 == "00000000" && $8 == "00000000" { print $3; exit }' /proc/net/route 2>/dev/null) || hex=""
-    if [[ "$hex" =~ ^[0-9A-Fa-f]{8}$ ]]; then
-      printf -v gateway '%d.%d.%d.%d' \
-        "0x${hex:6:2}" "0x${hex:4:2}" "0x${hex:2:2}" "0x${hex:0:2}"
-    fi
-  fi
+  gateway=$(find_gateway)
 }
 
 is_private_ipv4() {
@@ -186,7 +163,7 @@ candidate_hosts() {
     *) echo "$host" ;;
   esac
 
-  find_gateway
+  resolve_gateway
   if [[ -n "$gateway" ]] && is_private_ipv4 "$gateway"; then
     echo "$gateway"
   fi
@@ -286,7 +263,7 @@ for ((i = 0; i < live_count; i++)); do
   port=${live_ports[$i]}
 
   if [[ "${live_origins[$i]}" == windows-host ]]; then
-    find_gateway
+    resolve_gateway
     echo "${id} is running on the Windows host (PID ${pid}) but answered at no address reachable from WSL." >&2
     case "$host" in
       0.0.0.0|::)
