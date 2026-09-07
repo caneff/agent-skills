@@ -69,7 +69,7 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 - **Middle Man** — a class or function that mostly just delegates onward. → cut it, call the real target direct.
 - **Refused Bequest** — a subclass or implementer that ignores or overrides most of what it inherits. → drop the inheritance, use composition.
 
-**The over-engineering lens (the ponytail pass).** On top of the smells, the Standards axis runs the over-engineering review the `ponytail-review` skill defines — the sharpest depth on "is this well-built?". It hunts what to **delete**, not what to rename. Five tags, one line each — location, what to cut, what replaces it:
+**The over-engineering lens (the ponytail pass).** On top of the smells, the Standards axis runs an over-engineering review — the sharpest depth on "is this well-built?". It hunts what to **delete**, not what to rename. Five tags, one line each — location, what to cut, what replaces it:
 
 - `delete:` dead code, unused flexibility, speculative feature. → replacement: nothing.
 - `stdlib:` a hand-rolled thing the standard library ships. → name the function.
