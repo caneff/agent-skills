@@ -67,6 +67,21 @@ When PRs are in scope, include external PRs in these buckets and tag each line `
 
 Show counts and a one-line summary per item. Let the maintainer pick.
 
+**Large list (more than five items), or the maintainer says "all":** do not
+walk it one issue at a time. Read every body first, then sort into three
+buckets and present that before any per-issue work:
+
+1. **Worth talking about** — a design or scope decision only the maintainer
+   can make. Name the decision in one line. Merge issues that share it.
+2. **Handle myself now** — one-liners in docs or config; batch them into one
+   commit.
+3. **Brief and label without discussion** — spec already clear; post the
+   agent brief and move on. Merge issues that are one ticket in disguise.
+
+Plus a **dismiss** line for anything that is a checklist item, already done,
+or has no gate. Then ask the maintainer to confirm the sort. Buckets 2 and 3
+run start to finish on a "go"; bucket 1 comes back one issue at a time.
+
 ## Triage a specific issue or PR
 
 1. **Gather context.** Read the full issue or PR (body, comments, labels, author, dates; for a PR, the diff too). Parse any prior triage notes so you don't re-ask resolved questions. Explore the codebase using the project's domain glossary, respecting ADRs in the area. Run two checks against the codebase: (a) **redundancy** — search for an existing implementation of the requested behavior by domain concept (not just the request's wording), and report where you looked. If found, it's an already-implemented `wontfix` (step 5). (b) **prior rejection** — read `.out-of-scope/*.md` and surface any that resembles this request.
