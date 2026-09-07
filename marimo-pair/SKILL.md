@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: marimo-pair
 description: >-
   Drive a live marimo notebook as a workspace: run Python in the same kernel
