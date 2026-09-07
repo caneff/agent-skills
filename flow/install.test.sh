@@ -20,6 +20,9 @@ cp -r "$root/flow" "$repo/flow"
 cp "$root/tests/all.sh" "$repo/tests/all.sh"
 git -C "$repo" init -q
 ln -s "$repo/flow/../tests/all.sh" "$repo/.git/hooks/pre-push"
+# backup-sync.sh --restore writes to absolute live paths (the Windows VS Code
+# settings), not $HOME, so the scratch copy is a no-op.
+printf '#!/usr/bin/env bash\nexit 0\n' > "$repo/flow/backup-sync.sh"
 
 fails=0
 out=$(HOME="$tmp/home" bash "$repo/flow/install.sh" 2>&1) || { echo "FAIL install.sh exited non-zero"; printf '%s\n' "$out"; fails=1; }
