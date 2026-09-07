@@ -59,11 +59,13 @@ direct commit to main. Carry this contract into any new audit skill you add here
 ## The runnable sweep — `driver.py`
 
 `driver.py` is the Python orchestrator that runs each guarded audit as its own
-`claude -p "/name"` process and collects the reports. Its own module docstring
-is the flag reference (`[REPO]`, `--out`, `--only`, `--short`,
-`--index`, `--force`, `--mutation`) — this doc doesn't restate it, so
-the two can't drift apart. `audits_data.py` holds the audit set — adding an
-audit is one entry there.
+`claude -p "/name"` process and collects the reports. `driver.py --help` is
+the flag reference — argparse prints it from the module docstring, and this
+doc doesn't restate it, so the two can't drift apart. A run is three steps:
+`plan_sweep` asks the staleness cache what still needs running, `execute`
+spawns the audits (the only step that does), and `collect` assembles the
+collection and renders the index — `--index` calls `collect` alone.
+`audits_data.py` holds the audit set — adding an audit is one entry there.
 
 **Staleness cache.** The two expensive LLM passes — `domain-drift` and
 `type-tightness` — are gated: while the repo is materially unchanged since their
@@ -71,7 +73,8 @@ last run, they are skipped and their cached report is reused in the index, marke
 "unchanged since `<sha>`". `should_run()` in `driver.py` owns the skip/run
 decision; `driver.decide`/`driver.update_cache` gather git state, read/write the per-repo record at
 `~/.cache/all-audits/<repo-key>.json`, and persists each gated report to a stable
-location that survives the run-dir TTL prune. Skip holds only when the tree is
+location that survives the run-dir TTL prune (`RunDir` owns that folder layout
+and the 3-day prune, for both the sweep and mutation mode). Skip holds only when the tree is
 clean, fewer than `N` files (default 10) changed since the last-run SHA, no
 change touched `domain-drift`'s ground-truth (`CONTEXT.md`, `docs/adr/`), and the
 last run is within the time backstop (default 30 days).

@@ -461,6 +461,22 @@ def test_index_only_rebuild_spawns_nothing_and_needs_no_run_branch():
         assert os.listdir(os.path.join(tmp, "logs")) == []
 
 
+def test_help_prints_the_docstring_and_an_unknown_flag_exits_2():
+    """#606: argparse parses the flags and the module docstring is the help
+    text, so the flag reference has one home (all-audits/SKILL.md points at
+    it rather than restating it)."""
+    driver_py = os.path.join(os.path.dirname(__file__), "driver.py")
+    r = subprocess.run([sys.executable, driver_py, "--help"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.startswith("usage:"), r.stdout
+    assert driver.__doc__.splitlines()[0] in r.stdout
+    for flag in ("--out", "--only", "--short", "--index", "--force", "--mutation"):
+        assert flag in r.stdout, flag
+
+    bad = subprocess.run([sys.executable, driver_py, "--nope"], capture_output=True, text=True)
+    assert bad.returncode == 2, bad.stdout + bad.stderr
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

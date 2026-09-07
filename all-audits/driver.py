@@ -8,16 +8,11 @@ run-audits.sh's original header comment for why: several audit skills carry
 gets past the guard — a subagent fan-out would silently lose them), collects
 the report folders under one `collection/` dir, and builds `index.html`.
 
-Usage:
-  driver.py [REPO]                 fresh sweep of every audit (default)
-  driver.py [REPO] --out DIR       write into DIR, accumulating (no wipe)
-  driver.py [REPO] --only a,b      run just these audits
-  driver.py [REPO] --short         run only the short set (see audits_data.py)
-  driver.py [REPO] --index --out DIR   rebuild index only, over DIR's reports
-  driver.py [REPO] --force         bypass the staleness cache, run everything
-  driver.py --mutation a.py,b.py   run mutation-audit on each module, one
-                                    fresh git worktree at a time
+A run is three steps: plan (ask the staleness cache what still needs a run),
+execute (the only step that spawns audits), collect (assemble the collection
+and render the index). `--index` calls collect alone.
 """
+import argparse
 import concurrent.futures
 import dataclasses
 import datetime as _dt
@@ -646,11 +641,11 @@ def rebuild_index(repo, out):
 
 # --- mutation mode --------------------------------------------------------
 
-def mutation_mode(repo, mutation_list, out):
+def mutation_mode(repo, modules, out):
     repo = os.path.abspath(repo)
     here = os.path.dirname(os.path.abspath(__file__))
 
-    final_targets = [t.strip() for t in mutation_list.split(",") if t.strip()] if mutation_list else None
+    final_targets = list(modules) or None
     skipped = 0
     if final_targets is None:
         candidates = []
@@ -757,52 +752,35 @@ def _run_mutation_module(repo, module, outlogs, collection, worktrees, manifests
 
 # --- CLI ----------------------------------------------------------------
 
-def main(argv):
-    repo, out, only, short, index_only, force = None, None, None, False, False, False
-    mutation, mutation_list = False, None
-    args = argv[1:]
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--out":
-            out = args[i + 1]
-            i += 2
-        elif a == "--only":
-            only = args[i + 1]
-            i += 2
-        elif a == "--short":
-            short = True
-            i += 1
-        elif a == "--index":
-            index_only = True
-            i += 1
-        elif a == "--force":
-            force = True
-            i += 1
-        elif a == "--mutation":
-            mutation = True
-            if i + 1 < len(args) and not args[i + 1].startswith("-"):
-                mutation_list = args[i + 1]
-                i += 2
-            else:
-                i += 1
-        elif a.startswith("-"):
-            print(f"unknown flag: {a}", file=sys.stderr)
-            sys.exit(2)
-        else:
-            repo = a
-            i += 1
-    repo = repo or os.getcwd()
+def _split(value):
+    """A comma-separated flag value as a list — the one place the CLI splits."""
+    return [v.strip() for v in value.split(",") if v.strip()] if value else []
 
-    if mutation:
-        mutation_mode(repo, mutation_list, out)
-    elif index_only:
-        if not out:
-            print("ERROR: --index needs --out DIR — the dir whose reports to index.", file=sys.stderr)
-            sys.exit(2)
-        rebuild_index(repo, out)
+
+def main(argv):
+    p = argparse.ArgumentParser(
+        prog="driver.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument("repo", nargs="?", help="repo to audit (default: the current directory)")
+    p.add_argument("--out", metavar="DIR", help="write into DIR, accumulating (no wipe)")
+    p.add_argument("--only", metavar="A,B", help="run just these audits")
+    p.add_argument("--short", action="store_true", help="run only the short set (see audits_data.py)")
+    p.add_argument("--index", action="store_true", help="rebuild the index only, over --out DIR's reports")
+    p.add_argument("--force", action="store_true", help="bypass the staleness cache, run everything")
+    p.add_argument("--mutation", nargs="?", const="", metavar="A.PY,B.PY",
+                   help="run mutation-audit on each module, one fresh git worktree at a time "
+                        "(no value: pick the modules with a prepass)")
+    args = p.parse_args(argv[1:])
+
+    repo = args.repo or os.getcwd()
+    if args.mutation is not None:
+        mutation_mode(repo, _split(args.mutation), args.out)
+    elif args.index:
+        if not args.out:
+            p.error("--index needs --out DIR — the dir whose reports to index.")
+        rebuild_index(repo, args.out)
     else:
-        sweep(repo, out, [s.strip() for s in only.split(",") if s.strip()] if only else None, short, force)
+        sweep(repo, args.out, _split(args.only), args.short, args.force)
 
 
 if __name__ == "__main__":
