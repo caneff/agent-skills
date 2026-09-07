@@ -96,10 +96,15 @@ and a ruling comment that way).
 
 Both stages are read-only and need no worktree, terminal, or Orca task: run
 each as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`). The
-explorer returns its section text and never writes the file; the coordinator
-appends it. Say so in the explorer's own prompt, along with the
-name-not-line-number anchoring above — the notes file has one
-writer, and its fixed section order is what a second writer would break.
+explorer writes its full text to `~/.cache/burndown/<repo dir name>.<n>-<stage>.md`
+— `<n>` the batch's lowest ticket number, `<stage>` `shallow` or `deep` — and
+returns a summary under 60 lines, size tag first, that names that path; the
+coordinator appends to the notes file from the scratch file, never from the
+message, which the completion channel truncates mid-section. **The explorer
+never writes the notes file itself** — that file, not its own scratch file:
+the notes file has one writer, and its fixed section order is what a second
+writer would break. Say all of this in the explorer's own prompt, along with
+the name-not-line-number anchoring above.
 **Only builders are Orca tasks** — they are the only
 workers that write code and need their own worktree and branch. Everything
 read-only, exploration and review both, is an in-process subagent.
