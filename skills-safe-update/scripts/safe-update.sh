@@ -30,9 +30,13 @@ oid(){ git rev-parse -q --verify "$1" 2>/dev/null || true; }
 entry_mode(){ git ls-tree "$1" -- "$2" | awk '{print $1}'; }
 
 # put <tree-ish> <path-in-tree> <dest> — write that blob out, mode included.
+# The rm is load-bearing: writing through an existing symlink would follow it
+# and dump the content wherever it points, leaving the link itself untouched.
 put(){
   local mode; mode=$(entry_mode "$1" "$2")
   mkdir -p "$(dirname "$3")"
+  rm -f "$3"
+  if [ "$mode" = 120000 ]; then ln -s "$(git cat-file blob "$1:$2")" "$3"; return; fi
   git cat-file blob "$1:$2" > "$3"
   case "$mode" in *755) chmod +x "$3" ;; *) chmod -x "$3" ;; esac
 }
@@ -64,7 +68,18 @@ merge_skill(){ (
     [ -n "$f" ] || continue
     bo=$(oid "$base:$f"); lo=$(oid "$pre:$skill/$f"); uo=$(oid "$post:$skill/$f")
     note=
-    if [ "$lo" = "$uo" ]; then continue; fi        # nothing to decide
+    if [ "$lo" = "$uo" ]; then                     # same bytes on both sides...
+      # ...but a mode YOU changed is a local edit like any other. Upstream
+      # changing the mode while you left it alone needs nothing: the working
+      # tree already holds POST.
+      if [ -n "$lo" ] \
+         && [ "$(entry_mode "$pre" "$skill/$f")" != "$(entry_mode "$post" "$skill/$f")" ] \
+         && [ "$(entry_mode "$pre" "$skill/$f")" != "$(entry_mode "$base" "$f")" ]; then
+        put "$pre" "$skill/$f" "$skill/$f"
+        printf '%s\t%s\t%s\n' LOCAL "$f" "your file mode kept"
+      fi
+      continue
+    fi
     st=
     if [ -z "$lo" ]; then                          # absent from your version
       if   [ -z "$bo" ];      then st=UPSTREAM     # brand-new upstream file
@@ -188,7 +203,7 @@ if [ -s "$PRELOCK" ]; then
 fi
 rm -f "$PRELOCK"
 if [ -f .protected-skills ]; then
-  while read -r s; do
+  while read -r s || [ -n "$s" ]; do   # || : a hand-edited file may lack its final newline
     [[ -z "$s" || "$s" == \#* ]] && continue
     PROT[$s]=1; MANUAL[$s]=1   # an explicit "keep mine" beats any merge base
   done < .protected-skills

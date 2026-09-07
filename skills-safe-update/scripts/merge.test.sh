@@ -41,6 +41,8 @@ echo "untouched by upstream" > myskill/del-clean.md
 seq_lines > myskill/del-changed.md
 seq_lines > "myskill/réf.md"          # non-ASCII: core.quotePath must not hide it
 seq_lines > myskill/exec-merge.sh     # upstream keeps it 644, you chmod +x
+seq_lines > myskill/modeonly.sh       # same bytes everywhere, you chmod +x
+ln -s targetA myskill/link
 git add -A; git commit -qm base
 BASE=$(git rev-parse HEAD:myskill); BASE_C=$(git rev-parse HEAD)
 
@@ -52,6 +54,8 @@ printf '#!/bin/sh\necho mine\n' > myskill/local-only.sh; chmod +x myskill/local-
 sed -i 's/^line1$/line1 LOCAL/' "myskill/réf.md"
 sed -i 's/^line1$/line1 LOCAL/' myskill/exec-merge.sh; chmod +x myskill/exec-merge.sh
 echo "both sides added this" > myskill/addadd.md
+chmod +x myskill/modeonly.sh
+ln -sfn targetLOCAL myskill/link
 rm myskill/del-clean.md myskill/del-changed.md     # you deleted both
 git add -A; git commit -qm local
 PRE=$(git rev-parse HEAD)
@@ -65,7 +69,8 @@ sed -i 's/^line3$/line3 UPSTREAM/' myskill/del-changed.md   # upstream edited wh
 sed -i 's/^line10$/line10 UPSTREAM/' "myskill/réf.md"
 sed -i 's/^line10$/line10 UPSTREAM/' myskill/exec-merge.sh
 echo "upstream added it too" > myskill/addadd.md
-rm myskill/local-only.md
+ln -sfn targetUP myskill/link
+rm myskill/local-only.md myskill/local-only.sh
 chmod +x myskill/tool.sh
 git add -A; git commit -qm upstream
 POST=$(git rev-parse HEAD)
@@ -122,6 +127,21 @@ contains "non-ASCII file reported" "MERGED	réf.md" "$report"
 contains "add/add conflicts" "CONFLICT	addadd.md" "$report"
 contains "add/add keeps your line"     "both sides added this"  myskill/addadd.md
 contains "add/add keeps upstream line" "upstream added it too"  myskill/addadd.md
+
+# you chmod +x a file and nothing else changed: the mode is still your edit
+if [ -x myskill/modeonly.sh ]; then ok "mode-only local edit survives"
+else bad "mode-only local edit survives"; fi
+contains "mode-only edit reported" "LOCAL	modeonly.sh" "$report"
+
+# a symlink cannot be line-merged: yours stays a symlink, and writing through
+# it must not spray content into whatever it points at
+if [ -L myskill/link ]; then ok "conflicted symlink is still a symlink"
+else bad "conflicted symlink is still a symlink"; fi
+check "conflicted symlink keeps your target" "targetLOCAL" "$(readlink myskill/link 2>/dev/null)"
+if [ -e myskill/targetUP ] || [ -e myskill/targetLOCAL ]; then
+  bad "no file written through the symlink"
+else ok "no file written through the symlink"; fi
+contains "symlink conflict reported" "CONFLICT	link" "$report"
 
 # you chmod +x a file, upstream edits its text: your mode is an edit too
 contains "content-merged file merged" "MERGED	exec-merge.sh" "$report"
