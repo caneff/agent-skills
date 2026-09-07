@@ -242,11 +242,11 @@ stages sit either side of that line (step 3).
    the builder spawned, both its reviews and any lookup alike, so read
    `<review>` as delegated work rather than review alone. The built-in
    `code-review` runs as a fork, but its transcript still lands under
-   `subagents/` with `isSidechain: true`, so its tokens are in
-   `<review>` too. `<coord-review>` is the step 5
-   reviewer's own tokens, read off the usage its `Agent` completion carries —
-   never asked of the reviewer, which cannot count itself — and `0` when none
-   ran. The script cannot see it: an in-process subagent writes into the
+   `subagents/` with `isSidechain: true`, so its tokens are in `<review>` too.
+   `<coord-review>` is the step 5 reviewer's own tokens, read off the usage
+   its `Agent` completion carries — never asked of the reviewer, which cannot
+   count itself — and `0` when none ran.
+   The script cannot see it: an in-process subagent writes into the
    coordinator's transcript, not the worktree's. `<rounds>` is how many step 5
    rounds the ticket took, `0` when it skipped review. Nothing in the loop
    reads this file back — it is read between burns.
