@@ -623,7 +623,7 @@ def _announce(run, repo):
 
 def sweep(repo, out, only, short, force):
     repo = os.path.abspath(repo)
-    selected = only or (SHORT_SET if short else list(AUDIT_NAMES))
+    selected = only if only is not None else (SHORT_SET if short else list(AUDIT_NAMES))
     run = RunDir.create(out)
     _announce(run, repo)
     plan = plan_sweep(repo, selected, force)
@@ -645,7 +645,7 @@ def mutation_mode(repo, modules, out):
     repo = os.path.abspath(repo)
     here = os.path.dirname(os.path.abspath(__file__))
 
-    final_targets = list(modules) or None
+    final_targets = None if modules is None else list(modules)
     skipped = 0
     if final_targets is None:
         candidates = []
@@ -662,9 +662,8 @@ def mutation_mode(repo, modules, out):
         print(f"… {skipped} more modules skipped (raise MUTATION_MAX to include them)")
 
     run = RunDir.create(out, worktrees=True)
-    run_dir, outlogs, collection = run.root, run.logs, run.collection
-    worktrees, manifests_dir = run.worktrees, run.manifests
-    print(f"run dir: {run_dir}")
+    collection = run.collection
+    print(f"run dir: {run.root}")
     print(f"collecting under: {collection}\n")
 
     notest_json = os.path.join(collection, "mutation-no-tests.json")
@@ -693,20 +692,21 @@ def mutation_mode(repo, modules, out):
 
     try:
         for module in final_targets:
-            _run_mutation_module(repo, module, outlogs, collection, worktrees, manifests_dir)
+            _run_mutation_module(repo, module, run)
     finally:
-        for d in os.listdir(worktrees):
-            _run(["git", "-C", repo, "worktree", "remove", "--force", os.path.join(worktrees, d)])
+        for d in os.listdir(run.worktrees):
+            _run(["git", "-C", repo, "worktree", "remove", "--force", os.path.join(run.worktrees, d)])
         _run(["git", "-C", repo, "worktree", "prune"])
 
     print(f"\ncollection: {collection}")
 
 
-def _run_mutation_module(repo, module, outlogs, collection, worktrees, manifests_dir):
+def _run_mutation_module(repo, module, run):
     slug = module_slug(module)
-    wt = os.path.join(worktrees, slug)
-    log = os.path.join(outlogs, f"mutation-{slug}.log")
-    manifest = manifest_path_for(manifests_dir, slug)
+    collection = run.collection
+    wt = os.path.join(run.worktrees, slug)
+    log = os.path.join(run.logs, f"mutation-{slug}.log")
+    manifest = manifest_path_for(run.manifests, slug)
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
 
     print(f"[mutation:{module}] creating worktree")
@@ -736,7 +736,7 @@ def _run_mutation_module(repo, module, outlogs, collection, worktrees, manifests
         with open(log, "a", encoding="utf-8") as f:
             subprocess.run(["claude", *CLAUDE_FLAGS, prompt], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False)
 
-        reason = collect_from_manifest(manifests_dir, slug, collection, slug)
+        reason = collect_from_manifest(run.manifests, slug, collection, slug)
         if reason:
             print(f"[mutation:{module}] {reason} — see {log}", file=sys.stderr)
             write_setup_failure_report(collection, module, reason)
@@ -773,13 +773,13 @@ def main(argv):
 
     repo = args.repo or os.getcwd()
     if args.mutation is not None:
-        mutation_mode(repo, _split(args.mutation), args.out)
+        mutation_mode(repo, None if args.mutation == "" else _split(args.mutation), args.out)
     elif args.index:
         if not args.out:
             p.error("--index needs --out DIR — the dir whose reports to index.")
         rebuild_index(repo, args.out)
     else:
-        sweep(repo, args.out, _split(args.only), args.short, args.force)
+        sweep(repo, args.out, _split(args.only) if args.only is not None else None, args.short, args.force)
 
 
 if __name__ == "__main__":

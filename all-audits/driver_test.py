@@ -371,15 +371,17 @@ def test_mutation_run_dir_prunes_old_runs_and_makes_worktrees():
         assert os.listdir(os.path.join(run_dir, "worktrees")) == [], "the worktree must be cleaned up on the setup-failure path"
 
 
-def _seed_run_dir(tmp):
+def _seed_run_dir(tmp, worktrees=False):
     run = driver.RunDir(
         root=tmp,
         logs=os.path.join(tmp, "logs"),
         collection=os.path.join(tmp, "collection"),
         manifests=os.path.join(tmp, "manifests"),
+        worktrees=os.path.join(tmp, "worktrees") if worktrees else "",
     )
-    for d in (run.logs, run.collection, run.manifests):
-        os.makedirs(d, exist_ok=True)
+    for d in (run.logs, run.collection, run.manifests, run.worktrees):
+        if d:
+            os.makedirs(d, exist_ok=True)
     return run
 
 
@@ -483,20 +485,17 @@ def test_mutation_worktree_is_removed_even_when_the_failure_report_raises():
     exception between `git worktree add` and the explicit cleanup call left
     the worktree registered and on disk; here the failure-report write is made
     to fail (unwritable collection) and the worktree must still be gone."""
-    with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as run_dir:
+    with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as tmp:
         _init_git_repo(repo)
-        logs, collection = os.path.join(run_dir, "logs"), os.path.join(run_dir, "collection")
-        worktrees, manifests = os.path.join(run_dir, "worktrees"), os.path.join(run_dir, "manifests")
-        for d in (logs, collection, worktrees, manifests):
-            os.makedirs(d)
-        os.chmod(collection, 0o555)  # the module has no env manifest, so the driver writes a setup-failure report here
+        run = _seed_run_dir(tmp, worktrees=True)
+        os.chmod(run.collection, 0o555)  # the module has no env manifest, so the driver writes a setup-failure report here
         try:
-            driver._run_mutation_module(repo, "solver.py", logs, collection, worktrees, manifests)
+            driver._run_mutation_module(repo, "solver.py", run)
         except OSError:
             pass
         finally:
-            os.chmod(collection, 0o755)
-        assert os.listdir(worktrees) == [], "the worktree must be removed on every exit path"
+            os.chmod(run.collection, 0o755)
+        assert os.listdir(run.worktrees) == [], "the worktree must be removed on every exit path"
 
 
 def main():
