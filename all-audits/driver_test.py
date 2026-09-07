@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the audit sweep driver (#558) — ports run-audits.test.sh's
 hermetic index test to Python (parses the index rather than grepping it, per
-the family's plain-assert convention — see crap-audit/test_audit.py), plus a
+the family's plain-assert convention — see crap-audit/audit_test.py), plus a
 new cache-decision test against a real temporary git repo, including the
 bad-last-run-SHA case, which must mean RUN.
 """

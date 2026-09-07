@@ -17,6 +17,7 @@ import pagelib  # noqa: E402
 # choice (see `.audit-ignore.md`), so it keeps its own palette on top of the
 # shell's base.css instead of the `--vt-*` tokens.
 PALETTE = """main { --vt-measure: 1400px; }
+.vt-theme-toggle { display:none; } /* palette is fixed dark; the shell's toggle would be inert */
 :root { --bg:#191A21; --card:#282A36; --ink:#F6F6F4; --mut:#7B7F8B; --line:#44475A;
   --accent:#BF9EEE; --add:#62E884; --rem:#EE6666; --chip:#343746; --dhbg:#21222C; }
 body { background:var(--bg); color:var(--ink); font:15px/1.55 'Fira Code',Consolas,'Courier New',monospace;
