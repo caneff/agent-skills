@@ -23,6 +23,7 @@ link() { # link <repo-relative-src> <live-dest>
 }
 
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
+link bin/merge-cleanup          "$HOME/.local/bin/merge-cleanup"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 link claude/RTK.md              "$HOME/.claude/RTK.md"
 # claude/settings.json is NOT symlinked — the harness rewrites it in place and

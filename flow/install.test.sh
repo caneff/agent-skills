@@ -42,6 +42,11 @@ if [ -L "$tmp/home/.claude/hooks/refresh-landed.sh" ]; then
 else
   echo "FAIL refresh-landed.sh not linked under the scratch HOME"; fails=1
 fi
+if [ -L "$tmp/home/.local/bin/merge-cleanup" ]; then
+  echo "PASS merge-cleanup linked under the scratch HOME"
+else
+  echo "FAIL bin/merge-cleanup not linked under the scratch HOME"; fails=1
+fi
 if [ -L "$tmp/home/.claude/agents/diff-reviewer.md" ]; then
   echo "PASS reviewer agent definition linked under the scratch HOME"
 else

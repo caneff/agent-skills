@@ -176,11 +176,12 @@ and the run is not done until the merge line is handed over.
 
    No `--delete-branch` while an Orca workspace holds the branch — git refuses
    to delete a branch a worktree has checked out, and the merge line fails on
-   it. Pair it with the teardown line instead, which takes the full branch
-   name as its selector:
+   it. Pair it with the cleanup line instead, which tears the workspace down by
+   full branch name, deletes the branch local and remote, and fast-forwards the
+   primary checkout:
 
    ```
-   ! orca-ide worktree rm --worktree <full branch name>
+   ! merge-cleanup <full branch name>
    ```
 
 If `origin`'s owner is not the person you are working for, push the branch and

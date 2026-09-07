@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# The tail Chris hand-ran after every squash merge: tear the Orca workspace
+# down, delete the branch local and remote, fast-forward the primary checkout.
+# Agents never merge — this runs after the merge has already happened, and it
+# refuses any branch the tracker does not report as merged.
+#
+#   merge-cleanup [--repo <path>] <branch> [--dry-run]
+#   merge-cleanup [--repo <path>] --pr <n>  [--dry-run]
+#   merge-cleanup --sweep [--root <dir>]    [--dry-run]
+#
+# --sweep walks every git repo one level under <dir> (default ~/src) and runs
+# the same six steps for every merged local branch it finds.
+set -uo pipefail
+
+repo="" branch="" pr="" sweep=0 root="" dry=0
+die() { echo "merge-cleanup: $*" >&2; exit 1; }
+say() { echo "$*"; }
+run() { # run <description> -- <cmd...>
+  local what="$1"; shift; [ "$1" = "--" ] && shift
+  if [ "$dry" = 1 ]; then say "would $what: $*"; return 0; fi
+  say "$what"; "$@"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repo)    repo="${2:-}"; shift 2 ;;
+    --pr)      pr="${2:-}"; shift 2 ;;
+    --sweep)   sweep=1; shift ;;
+    --root)    root="${2:-}"; shift 2 ;;
+    --dry-run) dry=1; shift ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    -*)        die "unknown flag: $1" ;;
+    *)         [ -n "$branch" ] && die "one branch at a time"; branch="$1"; shift ;;
+  esac
+done
+
+# Step 1 — the repo and its default branch.
+primary_of() { # primary_of <path> -> the repo's primary (non-linked) worktree
+  git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'
+}
+default_of() { # default_of <path> -> main, master, whatever origin points at
+  local d
+  d=$(git -C "$1" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)
+  [ -n "$d" ] && { echo "${d#origin/}"; return; }
+  for d in main master; do
+    git -C "$1" show-ref -q --verify "refs/remotes/origin/$d" && { echo "$d"; return; }
+  done
+  echo main
+}
+slug_of() { # slug_of <path> -> owner/name, for the gh calls
+  local url; url=$(git -C "$1" remote get-url origin 2>/dev/null) || return 1
+  url="${url%.git}"; url="${url#*github.com/}"; url="${url#*github.com:}"
+  echo "$url"
+}
+
+# Step 2 — is this branch actually merged? The tracker is the authority: a
+# squash merge leaves none of the branch's commits in the default branch, so
+# an ancestor test alone would call every squashed branch unmerged. Without
+# gh, fall back to the ancestor test and refuse whatever it cannot prove.
+is_merged() { # is_merged <path> <branch>
+  local path="$1" b="$2" slug out
+  if command -v gh >/dev/null 2>&1 && slug=$(slug_of "$path"); then
+    out=$(gh pr list --repo "$slug" --head "$b" --state merged --json number 2>/dev/null) || out=""
+    case "$out" in ''|'[]') ;; *) return 0 ;; esac
+  fi
+  git -C "$path" merge-base --is-ancestor "$b" "origin/$(default_of "$path")" 2>/dev/null
+}
+
+cleanup_branch() { # cleanup_branch <path> <branch> -> steps 3-6
+  local path="$1" b="$2" primary default
+  primary=$(primary_of "$path"); default=$(default_of "$path")
+  [ "$b" = "$default" ] && { echo "merge-cleanup: refusing to delete the default branch $b" >&2; return 1; }
+  if ! is_merged "$path" "$b"; then
+    echo "merge-cleanup: $b is not merged — nothing cleaned up" >&2; return 1
+  fi
+
+  # Step 3 — the Orca workspace, by full branch name: the selector takes the
+  # branch, and a folder name or UUID returns selector_not_found. It also has
+  # to go first, since git refuses to delete a branch a worktree holds.
+  if command -v orca-ide >/dev/null 2>&1; then
+    run "removing the Orca workspace for $b" -- orca-ide worktree rm --worktree "$b" --force || true
+  fi
+  git -C "$path" worktree prune 2>/dev/null
+
+  # Step 4 — the local branch. Git refuses to delete a branch a checkout holds,
+  # so move the primary off it first. -D, not -d: a squash merge leaves it
+  # unmerged in git's eyes, and step 2 already proved the merge.
+  if [ -n "$primary" ] && [ "$(git -C "$primary" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "$b" ]; then
+    if git -C "$primary" show-ref -q --verify "refs/heads/$default"; then
+      run "switching $primary off $b onto $default" -- git -C "$primary" checkout -q "$default" || return 1
+    else
+      run "switching $primary off $b onto a fresh $default" -- \
+        git -C "$primary" checkout -q -b "$default" --track "origin/$default" || return 1
+    fi
+  fi
+  if git -C "$path" show-ref -q --verify "refs/heads/$b"; then
+    run "deleting local branch $b" -- git -C "$path" branch -D "$b" || return 1
+  fi
+
+  # Step 5 — the remote branch, if the merge did not already drop it.
+  if git -C "$path" ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1; then
+    run "deleting remote branch $b" -- git -C "$path" push origin --delete "$b" || true
+  fi
+
+  # Step 6 — fast-forward the primary checkout, so the next branch starts from
+  # the merge rather than from behind it.
+  if [ -n "$primary" ] && [ "$(git -C "$primary" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "$default" ]; then
+    run "fast-forwarding $default in $primary" -- git -C "$primary" pull --ff-only --quiet || true
+  fi
+}
+
+if [ "$sweep" = 1 ]; then
+  [ -n "$branch" ] || [ -n "$pr" ] && [ -n "$branch$pr" ] && die "--sweep takes no branch or --pr"
+  root="${root:-$HOME/src}"
+  [ -d "$root" ] || die "no such root: $root"
+  rc=0
+  for d in "$root"/*/; do
+    git -C "$d" rev-parse --git-dir >/dev/null 2>&1 || continue
+    default=$(default_of "$d")
+    while read -r b; do
+      [ -n "$b" ] && [ "$b" != "$default" ] || continue
+      is_merged "$d" "$b" || continue
+      say "== ${d%/} $b"
+      cleanup_branch "$d" "$b" || rc=1
+    done < <(git -C "$d" for-each-ref --format='%(refname:short)' refs/heads/)
+  done
+  exit "$rc"
+fi
+
+repo="${repo:-$PWD}"
+git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || die "not a git repo: $repo"
+if [ -z "$branch" ] && [ -n "$pr" ]; then
+  slug=$(slug_of "$repo") || die "no origin remote in $repo"
+  branch=$(gh pr view "$pr" --repo "$slug" --json headRefName -q .headRefName) \
+    || die "could not read PR #$pr"
+fi
+[ -n "$branch" ] || die "name a branch, or pass --pr <n> or --sweep"
+cleanup_branch "$repo" "$branch"
