@@ -4,7 +4,8 @@
 # runs directly under python3, and each `audit.py` that implements
 # `--selfcheck` runs with that flag. One line per suite; exits non-zero on
 # the first failure (and prints that suite's output). `--list` prints the
-# labels the rules select, without running anything.
+# labels the rules select, without running anything. This is the merge gate
+# (`git config land.testcmd`), not a push hook — see #633.
 # -f: suite commands are word-split out of the tab-separated list, so keep
 # the shell from globbing a path that happens to contain a wildcard.
 set -uf
