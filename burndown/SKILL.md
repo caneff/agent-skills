@@ -29,8 +29,10 @@ continue, since the tracker and the progress file hold all the state.
 ## Shape
 
 Mirrors `implement-spec`: one Run, one Task per ticket, dependencies as
-blocking edges, workers via Orca `claude`/`sonnet` (or `opus` if the ticket
-names it), frontier = Orca's ready-task query. Unlike `implement-spec`, the
+blocking edges, workers via Orca `claude` at the model exploration's size tag
+picks (§ below) — `sonnet` for docs-only and one-file, `opus` for multi-file,
+the top tier only when the ticket names it — frontier = Orca's ready-task
+query. Unlike `implement-spec`, the
 ticket set is not fixed up front — the queue is mixed-origin and re-listed
 every pass, so a task is created for a ticket only once it enters the
 frontier, and a landing or a human adding tickets can grow the queue mid-burn.
@@ -39,7 +41,10 @@ One **exploration** pass, first pass only, covering every ticket this burn
 can reach — step 1's listing in dependency order, cut at the ticket cap, not
 just the first pass's frontier — that every ticket task depends on. The cap is
 sized for this read: at 15 tickets it fits a 200k window with room to think;
-past 20 it skims. Notes go to `~/.cache/burndown/<repo dir name>.notes.md`,
+past 20 it skims. For each ticket, exploration records a size tag — docs-only
+(no code file touched: a SKILL.md, hook, settings.json, or CI config counts as
+code per the owner's Gate 2), one-file, or multi-file — in the notes. Notes go
+to `~/.cache/burndown/<repo dir name>.notes.md`,
 outside the repo so every worker can read them, and are kept after the burn.
 A later pass that lists a ticket not in the pass-1 queue explores that ticket
 alone and appends to the same file.
@@ -86,8 +91,21 @@ per-burn (step 3), run once regardless of how many batches follow.
 4. **Build.** Dispatch one Orca task per ticket in the batch, running the
    [`implement`](~/.agents/skills/implement/SKILL.md) skill's § Build by pointer — the
    issue reference, the notes path, and the branch base, never a summary.
+   Pass the model on `worker-start --model`, from exploration's size tag:
+   `sonnet` for docs-only and one-file, `opus` for multi-file, the top tier
+   only when the ticket names it.
    Seed the worker to stop after committing, report its branch, and wait; the
-   coordinator owns the PR. Two more lines go in every seed. First: read the
+   coordinator owns the PR.
+
+   **Docs-only lane.** A docs-only ticket's seed skips `implement`'s
+   test-first step and Finish's review step entirely — commit, then report;
+   no `code-review`, no `two-axis-code-review`. It still gets its own
+   worktree, branch, and progress lines like every other ticket; only the
+   seed's build steps shrink. Step 5 never triggers for it — the coordinator
+   settles it straight out of this step, with no reviewer.
+
+   For a one-file or multi-file ticket, two more lines go in every seed.
+   First: read the
    repo's `CLAUDE.md` and `AGENTS.md` before editing and apply their
    same-PR rules (docs, glossary, CONTEXT.md) — a pointer buried under a
    task list gets skipped, and the reviewer then spends a round on it. Second,
@@ -95,7 +113,12 @@ per-burn (step 3), run once regardless of how many batches follow.
    run both reviews (the built-in `code-review` skill and
    `~/.agents/skills/two-axis-code-review/SKILL.md`) on its own branch, then
    stop short of Finish's own PR step; the coordinator owns the PR, per
-   above. What happens to each finding is this burn's rule, not Finish's: act
+   above. The review skills pin their own subagent models, not the
+   builder's: `two-axis-code-review/SKILL.md:86` passes `model: opus` to both
+   its spawned reviewers regardless of the builder's tier, so a sonnet-tier
+   build still gets an opus-tier two-axis review; the built-in `code-review`
+   carries no such pin and runs at the builder's own session model. What
+   happens to each finding is this burn's rule, not Finish's: act
    on it, then lead the `worker_done` report with every finding both reviews
    raised, one of three dispositions each — **fixed**, **deferred: <why>**,
    or **disputed: <why>** — before the commit sha; a done message with no
@@ -125,8 +148,10 @@ per-burn (step 3), run once regardless of how many batches follow.
    and needs an answer; only the status-poll workaround for finding one is
    moot now that there's no task-list poll to miss it (§ Waiting on Orca
    workers has the one-wait-per-wake mechanics).
-5. **Review.** The coordinator spawns its own in-process reviewer only on one
-   of two triggers: the builder's report defers or disputes a finding, or the
+5. **Review.** A docs-only ticket never reaches this step — § 4's docs-only
+   lane settles it straight into step 6 with no reviewer. For a one-file or
+   multi-file ticket, the coordinator spawns its own in-process reviewer only
+   on one of two triggers: the builder's report defers or disputes a finding, or the
    branch's changed files (`git diff --name-only <range>`, checked against
    the seed's own-files list from § Shape) leave the set exploration assigned
    to the ticket. A report with every finding fixed and no file outside its
