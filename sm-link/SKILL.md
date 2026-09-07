@@ -96,3 +96,21 @@ solving.
 Each example's own `build_link.py` does this, using
 `examples/_shared/link_swap.py`. Edit the builder and re-run it; there is no
 generic swap command.
+
+## Comparing a link against its example
+
+Do not hand-roll this (it was written three times: #287, #289, #290 in
+**sudokumaker-custom-constraints**). Two checks already exist there:
+
+- `framebuild.check` runs at build time and asserts the link decodes back to
+  the built document and ships exactly the components its embedded backend
+  registers.
+- `examples/_shared/check_layout.py` runs the same over every committed link
+  (`uv run --with lzstring examples/_shared/check_layout.py`, also in
+  `just check`). For one arbitrary link, call its
+  `check_components(example_dir, link)` from a one-line `python -c`; it returns
+  one violation string per stale component set.
+
+Registration is detected lexically by `examples/_shared/component_scan.py`
+(`new <Name>Component`), so an aliased or dynamic registration is invisible to
+both checks.
