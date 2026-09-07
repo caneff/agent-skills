@@ -293,7 +293,8 @@ stages sit either side of that line (step 3).
    Then **record what the ticket cost**: run
    `python3 ~/.agents/skills/burndown/cost.py <worktree>` and append one line
    to `~/.cache/burndown/<repo dir name>.cost` — beside the progress file,
-   never in it. One line per settled ticket, five space-separated integers:
+   never in it. One line per settled ticket, five space-separated fields — all
+   integers except `<coord-review>`, which may be `-`:
 
    ```
    <n> <builder> <review> <coord-review> <rounds>
@@ -308,8 +309,15 @@ stages sit either side of that line (step 3).
    non-zero `<review>` there is delegated work, not review.
    `<coord-review>` is the step 5 reviewers' tokens, read off the usage each
    `Agent` completion carries (the two axes and the correctness reviewer) —
-   never asked of a reviewer, which cannot count itself. Record the clump's
+   never asked of a reviewer, which cannot count itself. Write `-` when you did
+   not actually read them: a guess in this column cannot be told apart from a
+   measurement afterwards, and comparing burns is the only thing the file is
+   for. Four estimates already sit in `skills.cost` as 220000, 160000, 230000
+   and 300000 — round numbers are the tell. Record the clump's
    total on its lowest-numbered ticket's line and `0` on its other tickets.
+   Field 1 is always a ticket number: a `clump<n>` line is malformed, and the
+   one in `skills.cost` bills #584 twice, once on its own line and once again
+   under `clump584`.
    The script cannot see it: an in-process subagent writes into the
    coordinator's transcript, not the worktree's. `<rounds>` counts the
    ticket's fix dispatches — the one review round plus any gate dispatch — so
