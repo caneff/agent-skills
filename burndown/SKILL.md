@@ -78,9 +78,10 @@ P0 for a reviewer to find after the build (#130 cost a build, a review round
 and a ruling comment that way).
 
 Both stages are read-only and need no worktree, terminal, or Orca task: run
-each as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`). An
-`Explore` subagent has no `Write` tool, so it returns its section text and the
-coordinator appends it — the notes file has one writer, the coordinator.
+each as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`). The
+explorer returns its section text and never writes the file; the coordinator
+appends it. Say so in the explorer's own prompt — the notes file has one
+writer, and its fixed section order is what a second writer would break.
 **Only builders are Orca tasks** — they are the only
 workers that write code and need their own worktree and branch. Everything
 read-only, exploration and review both, is an in-process subagent.
@@ -150,8 +151,8 @@ stages sit either side of that line (step 3).
    before the worker's first commit and tell the worker.
 
    The builder is not released at `worker_done`, and the coordinator's wait
-   from here through settle covers more than `worker_done` — § Holding the
-   builder.
+   from dispatch through settle covers more than `worker_done` — § Holding
+   the builder.
 5. **Review.** The coordinator spawns its own in-process reviewer on one of
    three triggers, and on no others:
 
@@ -163,10 +164,9 @@ stages sit either side of that line (step 3).
       the term) — the size tag was wrong, and the builder ran no review of its
       own, so nothing has read this diff yet.
 
-   A docs-only ticket reports no findings, so trigger 1 cannot fire for it;
-   2 and 3 both can. No trigger fires at all — every finding fixed, no file
-   outside the set, no code file in a docs-only diff — and the ticket goes
-   straight to step 6 with no reviewer.
+   A docs-only ticket reports no findings, so only 2 and 3 can fire for it.
+   No trigger fires at all and the ticket goes straight to step 6, reviewed
+   by nobody.
 
    When triggered, `git fetch` the branch and review it with a **fresh**
    in-process subagent (`Agent` tool, `model: opus`) — always a subagent,
@@ -238,10 +238,11 @@ stages sit either side of that line (step 3).
 
    `<builder>` and `<review>` are the script's first two numbers: main-line and
    sidechain tokens in that worktree's transcripts. Sidechain is every subagent
-   the builder spawned, its two-axis review and any lookup alike, so read
-   `<review>` as delegated work rather than review alone. A fork is a separate
-   session (`isSidechain: false`), so the built-in `code-review`'s tokens land
-   in `<builder>`, not `<review>`. `<coord-review>` is the step 5
+   the builder spawned, both its reviews and any lookup alike, so read
+   `<review>` as delegated work rather than review alone. The built-in
+   `code-review` runs as a fork, but its transcript still lands under
+   `subagents/` with `isSidechain: true`, so its tokens are in `<review>`
+   too — checked against this repo's own transcripts. `<coord-review>` is the step 5
    reviewer's own tokens, read off the usage its `Agent` completion carries —
    never asked of the reviewer, which cannot count itself — and `0` when none
    ran. The script cannot see it: an in-process subagent writes into the

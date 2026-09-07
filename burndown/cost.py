@@ -27,6 +27,9 @@ def tally(worktree, projects_root):
     """(main-line, sidechain) tokens. Subagent transcripts sit under
     `<session>/subagents/`, and their lines carry `isSidechain: true`.
 
+Every usage-bearing entry carries `message.id`, so that alone is the
+    dedup key — there is no `uuid` fallback to fall back to.
+
     One assistant message is written as one line per content block — thinking,
     text, each tool call — and every one of them repeats the same `usage`, so
     the tally counts each `message.id` once. Summing per line doubles the
