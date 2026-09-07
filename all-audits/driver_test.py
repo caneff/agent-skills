@@ -110,13 +110,6 @@ def test_audit_prompt_whole_repo_override_and_ignore_file():
         assert "0009-solver-shape.md" in with_file
 
 
-def test_mutation_cap():
-    capped, skipped = driver.mutation_cap(list("abcde"), 3)
-    assert capped == ["a", "b", "c"] and skipped == 2
-    capped, skipped = driver.mutation_cap(list("abc"), 5)
-    assert capped == ["a", "b", "c"] and skipped == 0
-
-
 def test_mutation_subindex_and_single_main_row():
     with tempfile.TemporaryDirectory() as tmp:
         for name in ("dead-code", "test-audit"):

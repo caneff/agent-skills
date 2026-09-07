@@ -106,10 +106,7 @@ def check_candidate_selection():
     assert audit.no_test_modules(["only.py"]) == ["only.py"]  # worthy, no sibling test
     assert audit.no_test_modules(["pkg/test_only.py"]) == []  # a test file is not worthy
     # The two partition the worthy universe: no module is in both.
-    assert not (set(audit.suggest_candidates(paths, limit=None)) & set(audit.no_test_modules(paths)))
-
-    limited = audit.suggest_candidates(paths, limit=1)
-    assert limited == ["pkg/gadget.py"], limited
+    assert not (set(audit.suggest_candidates(paths)) & set(audit.no_test_modules(paths)))
 
 
 def check_cli_path():

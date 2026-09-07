@@ -26,6 +26,7 @@ import html
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -188,8 +189,6 @@ def update_cache(repo, name, report_dir, base=None):
 # --- filesystem / prompt helpers (ported from run-audits.sh) ----------------
 
 def replace_dir(src, dest):
-    import shutil
-
     if os.path.exists(dest):
         shutil.rmtree(dest)
     shutil.copytree(src, dest)
@@ -233,13 +232,6 @@ def mutation_prepass_prompt(repo):
         "that have a sibling test, where a silently-passing test would be dangerous. Print ONLY the module "
         "file paths, one per line — no prose, no numbering, no markdown.\n"
     )
-
-
-def mutation_cap(candidates, n):
-    """Pure (candidates, n) -> (capped list, skipped count)."""
-    total = len(candidates)
-    skipped = max(0, total - n)
-    return candidates[:n], skipped
 
 
 def write_setup_failure_report(collection_dir, module, reason):
@@ -406,13 +398,10 @@ def build_mutation_subindex(collection, repo, mutation_modules, notest_modules, 
 def _resolve_run_dir(out, index_only):
     base = cache_base()
     os.makedirs(base, exist_ok=True)
-    ttl_days = int(os.environ.get("AUDITS_TTL_DAYS", "3"))
-    cutoff = _dt.datetime.now().timestamp() - ttl_days * 86400
+    cutoff = _dt.datetime.now().timestamp() - 3 * 86400
     for entry in os.listdir(base):
         p = os.path.join(base, entry)
         if entry.startswith("run-") and os.path.isdir(p) and os.path.getmtime(p) < cutoff:
-            import shutil
-
             shutil.rmtree(p, ignore_errors=True)
     if out:
         os.makedirs(out, exist_ok=True)
@@ -566,22 +555,17 @@ def mutation_mode(repo, mutation_list, out):
     skipped = 0
     if final_targets is None:
         candidates = []
-        env_candidates = os.environ.get("MUTATION_CANDIDATES")
-        if env_candidates is not None:
-            candidates = [ln.strip() for ln in env_candidates.splitlines() if ln.strip()]
-        elif os.environ.get("AUDITS_NO_SYNTH", "0") != "1":
+        if os.environ.get("AUDITS_NO_SYNTH", "0") != "1":
             result = _run(["claude", *CLAUDE_FLAGS, mutation_prepass_prompt(repo)])
             candidates = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
         max_n = int(os.environ.get("MUTATION_MAX", "10"))
-        final_targets, skipped = mutation_cap(candidates, max_n)
+        final_targets = candidates[:max_n]
+        skipped = max(0, len(candidates) - max_n)
 
     for t in final_targets:
         print(f"mutation-target: {t}")
     if skipped > 0:
         print(f"… {skipped} more modules skipped (raise MUTATION_MAX to include them)")
-
-    if os.environ.get("MUTATION_DRY_RUN", "0") == "1":
-        return
 
     base = cache_base()
     os.makedirs(base, exist_ok=True)

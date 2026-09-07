@@ -128,12 +128,11 @@ def _sibling_tests(p):
     }
 
 
-def suggest_candidates(paths, limit=None):
+def suggest_candidates(paths):
     """Suggest candidate modules to mutation-test from repo state.
 
-    Pure: a list of repo-relative `.py` paths in, up to `limit` candidate
-    module paths out (sorted). `limit=None` means no cap — all candidates
-    are returned. A path is a candidate when it's a worthy source module (see
+    Pure: a list of repo-relative `.py` paths in, candidate module paths out
+    (sorted). A path is a candidate when it's a worthy source module (see
     `_sibling_tests`) AND a sibling test file exists for it in `paths` (mutmut
     needs a test suite to mutate against; a module with no tests is not a
     useful target — `no_test_modules` reports those instead). Never errors,
@@ -146,7 +145,7 @@ def suggest_candidates(paths, limit=None):
         siblings = _sibling_tests(p)
         if siblings is not None and siblings & pathset:
             candidates.append(p)
-    return sorted(candidates)[:limit]
+    return sorted(candidates)
 
 
 def no_test_modules(paths):
