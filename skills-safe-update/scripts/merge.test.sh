@@ -37,6 +37,10 @@ mkdir -p myskill/reference
 seq_lines > myskill/SKILL.md
 seq_lines > myskill/reference/overlap.md
 echo "upstream tool" > myskill/tool.sh
+echo "untouched by upstream" > myskill/del-clean.md
+seq_lines > myskill/del-changed.md
+seq_lines > "myskill/réf.md"          # non-ASCII: core.quotePath must not hide it
+seq_lines > myskill/exec-merge.sh     # upstream keeps it 644, you chmod +x
 git add -A; git commit -qm base
 BASE=$(git rev-parse HEAD:myskill); BASE_C=$(git rev-parse HEAD)
 
@@ -44,6 +48,11 @@ BASE=$(git rev-parse HEAD:myskill); BASE_C=$(git rev-parse HEAD)
 sed -i 's/^line1$/line1 LOCAL/' myskill/SKILL.md
 sed -i 's/^line5$/line5 LOCAL/' myskill/reference/overlap.md
 echo "my own note" > myskill/local-only.md
+printf '#!/bin/sh\necho mine\n' > myskill/local-only.sh; chmod +x myskill/local-only.sh
+sed -i 's/^line1$/line1 LOCAL/' "myskill/réf.md"
+sed -i 's/^line1$/line1 LOCAL/' myskill/exec-merge.sh; chmod +x myskill/exec-merge.sh
+echo "both sides added this" > myskill/addadd.md
+rm myskill/del-clean.md myskill/del-changed.md     # you deleted both
 git add -A; git commit -qm local
 PRE=$(git rev-parse HEAD)
 
@@ -52,15 +61,20 @@ git checkout -q "$BASE_C" -- myskill   # upstream never saw your edits
 sed -i 's/^line10$/line10 UPSTREAM/' myskill/SKILL.md
 sed -i 's/^line5$/line5 UPSTREAM/' myskill/reference/overlap.md
 echo "brand new" > myskill/new-upstream.md
+sed -i 's/^line3$/line3 UPSTREAM/' myskill/del-changed.md   # upstream edited what you deleted
+sed -i 's/^line10$/line10 UPSTREAM/' "myskill/réf.md"
+sed -i 's/^line10$/line10 UPSTREAM/' myskill/exec-merge.sh
+echo "upstream added it too" > myskill/addadd.md
 rm myskill/local-only.md
 chmod +x myskill/tool.sh
 git add -A; git commit -qm upstream
 POST=$(git rev-parse HEAD)
 
 # working tree now holds POST, exactly as safe-update.sh leaves it
-report=$WORK/report.txt
-merge_skill myskill "$BASE" "$PRE" "$POST" > "$report"
+report=$WORK/report.txt; errlog=$WORK/stderr.txt
+merge_skill myskill "$BASE" "$PRE" "$POST" > "$report" 2> "$errlog"
 rc=$?
+check "merge writes nothing to stderr" "" "$(cat "$errlog")"
 
 check "conflicting skill exits non-zero" 1 "$rc"
 
@@ -76,11 +90,43 @@ contains "conflict names local side"    "line5 LOCAL"    myskill/reference/overl
 contains "conflict names upstream side" "line5 UPSTREAM" myskill/reference/overlap.md
 contains "conflict reported" "CONFLICT	reference/overlap.md" "$report"
 
+# the merged file is exactly base plus both edits — nothing else moved
+{ echo "line1 LOCAL"; for i in 2 3 4 5 6 7 8 9; do echo "line$i"; done; echo "line10 UPSTREAM"; } > "$WORK/want"
+if diff -q "$WORK/want" myskill/SKILL.md >/dev/null; then ok "merged file is base plus both edits"
+else bad "merged file is base plus both edits"; diff "$WORK/want" myskill/SKILL.md; fi
+
 # untouched-by-you files take upstream; your unique files survive; new ones land
 check "local-only file restored" "my own note" "$(cat myskill/local-only.md 2>/dev/null)"
 contains "local-only reported" "LOCAL	local-only.md" "$report"
 check "new upstream file kept" "brand new" "$(cat myskill/new-upstream.md 2>/dev/null)"
+contains "new upstream file reported" "UPSTREAM	new-upstream.md" "$report"
 if [ -x myskill/tool.sh ]; then ok "upstream mode change kept"; else bad "upstream mode change kept"; fi
+# a restored local-only file keeps its executable bit (put writes the mode)
+if [ -x myskill/local-only.sh ]; then ok "restored file keeps exec bit"; else bad "restored file keeps exec bit"; fi
+
+# you deleted a file upstream left alone: the deletion stands
+if [ -e myskill/del-clean.md ]; then bad "local deletion honoured"; else ok "local deletion honoured"; fi
+contains "local deletion reported" "LOCAL	del-clean.md" "$report"
+# you deleted a file upstream then changed: nobody wins silently
+contains "delete-vs-edit conflicts" "CONFLICT	del-changed.md" "$report"
+# ...and the report says which side is actually sitting in the tree, since a
+# delete-vs-edit conflict has no lines to mark up
+contains "delete-vs-edit names the surviving side" "upstream changed it, and ITS version is in the tree" "$report"
+
+# a non-ASCII name must merge like any other (core.quotePath would hide it)
+contains "non-ASCII file kept local hunk"    "line1 LOCAL"     "myskill/réf.md"
+contains "non-ASCII file took upstream hunk" "line10 UPSTREAM" "myskill/réf.md"
+contains "non-ASCII file reported" "MERGED	réf.md" "$report"
+
+# a file both sides added has no base version — merge it against an empty one
+contains "add/add conflicts" "CONFLICT	addadd.md" "$report"
+contains "add/add keeps your line"     "both sides added this"  myskill/addadd.md
+contains "add/add keeps upstream line" "upstream added it too"  myskill/addadd.md
+
+# you chmod +x a file, upstream edits its text: your mode is an edit too
+contains "content-merged file merged" "MERGED	exec-merge.sh" "$report"
+if [ -x myskill/exec-merge.sh ]; then ok "local exec bit survives a content merge"
+else bad "local exec bit survives a content merge"; fi
 
 # A skill you edited that upstream only reformatted merges clean and exits 0
 mkdir -p clean/reference

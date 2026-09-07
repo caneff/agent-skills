@@ -12,10 +12,14 @@ disable-model-invocation: true
 
 ```bash
 bash scripts/skills-status.sh   # read-only: what's edited vs out of date
-bash scripts/safe-update.sh     # do the update, preserving edits
+bash scripts/safe-update.sh     # do the update, merging your edits with upstream
 ```
 
 Both run against `~/.agents/skills` (override with `SKILLS_DIR=...`).
+
+`safe-update.sh` exits **non-zero when a merge conflicted**. That is not a
+failed run — the update happened and is committed. Read the report, do the
+digest, and resolve the conflicts.
 
 ## Check status first (read-only)
 
@@ -60,7 +64,7 @@ DIGEST_PRE=<sha>          DIGEST_POST=<sha>
 DIGEST_SKILLS_DIR=<dir>   DIGEST_CHANGED=<space-separated skill names>
 DIGEST_MERGED=<space-separated skills merged clean with upstream>
 DIGEST_CONFLICTED=<space-separated skills with conflict markers to resolve>
-DIGEST_KEPT=<space-separated skills kept whole-file: no merge base>
+DIGEST_KEPT=<space-separated skills kept whole-file, not merged>
 ```
 
 Then:
@@ -73,29 +77,30 @@ Then:
 
 ## Resolve merge conflicts (required, interactive)
 
-`safe-update.sh` three-way merges every skill you edited: base = the upstream
-version you had installed, yours = your working copy, theirs = what upstream
-just published. Non-overlapping changes land on both sides automatically, so
-most edited skills need nothing from you. Two lists do:
+`safe-update.sh` three-way merges every skill you edited (see **What it does**
+below), so most edited skills need nothing from you. Two anchors do:
 
-- **`DIGEST_CONFLICTED`** — files where your edit and upstream's overlap. The
-  files carry `<<<<<<< yours` / `>>>>>>> new upstream` markers, they are
-  committed in that state, and the script exits **non-zero**. Read the marked
-  regions, resolve each one, `git add -A && git commit`.
-- **`DIGEST_KEPT`** — skills with no merge base (a `.protected-skills` entry
-  with no lockfile hash, or a hash the buffer never held). Nothing was merged;
-  your version is kept whole-file and the upstream delta is NOT applied. For
-  each, read `git -C <DIGEST_SKILLS_DIR> --no-pager diff <DIGEST_PRE>
-  <DIGEST_POST> -- <skill>`, decide whether upstream changed anything beyond
-  the inverse of your own edit — if the whole delta is upstream stripping your
-  customization, drop it silently — and hand-merge the rest.
+- **`DIGEST_CONFLICTED`** — your edit and upstream's overlap. The script exits
+  **non-zero** and its per-file report names each file. A text overlap carries
+  `<<<<<<< yours` / `>>>>>>> new upstream` markers in the file. The three cases
+  with no lines to mark up — you deleted a file upstream changed, upstream
+  deleted a file you edited, and a symlink — carry no markers, and the report
+  line says which side is sitting in the tree instead. Read both, resolve, then
+  `git add -A && git commit`.
+- **`DIGEST_KEPT`** — skills kept whole-file with no merge attempted: you
+  listed them in `.protected-skills`, or there was no merge base. Your files
+  are restored, but brand-new files upstream added still land. Read `git -C
+  <DIGEST_SKILLS_DIR> --no-pager diff <DIGEST_PRE> <DIGEST_POST> -- <skill>`,
+  decide whether upstream changed anything beyond the inverse of your own edit
+  — if the whole delta is upstream stripping your customization, drop it
+  silently — and hand-merge the rest.
 
-For both lists: tell the user in plain English what upstream changed AND what
-their local edit was — distinguish the two — then ask how to resolve, one
-question covering every real conflict, not one per skill. Make a default
-recommendation from the diff. Never blindly overwrite the local edit away.
+For both: tell the user in plain English what upstream changed AND what their
+local edit was — distinguish the two — then ask how to resolve, one question
+covering every real conflict, not one per skill. Make a default recommendation
+from the diff. Never blindly overwrite the local edit away.
 
-If both lists are empty, say nothing about conflicts — there is nothing to
+If both anchors are empty, say nothing about conflicts — there is nothing to
 discuss.
 
 Keep it tight. The user wants to know what changed in the pipeline, not read a
@@ -115,8 +120,8 @@ diff.
    applies, both apply when the hunks don't overlap, and overlapping hunks are
    written out with conflict markers. It prints a per-file report (`MERGED` /
    `CONFLICT` / `LOCAL` / `UPSTREAM`) per skill, commits the result, and exits
-   non-zero if anything conflicted. A skill with no reachable base keeps your
-   version whole-file and lands in `DIGEST_KEPT` instead.
+   non-zero if anything conflicted. A skill in `.protected-skills`, or one with
+   no reachable base, is kept whole-file and lands in `DIGEST_KEPT` instead.
 6. Prints a change summary and the one-line undo: `git reset --hard PRE`.
 
 Unedited skills update normally. Nothing is ever lost — `PRE` is always in git.
@@ -132,9 +137,9 @@ form.
 
 ## Optional manual override
 
-If you want to force-protect a skill the auto-detector can't see (e.g. a hand-made skill with no lockfile entry), create `.protected-skills` at the skills-dir root — one skill name per line, `#` comments allowed. It's unioned with the auto-detected set. Most setups never need it.
+If you want to force-protect a skill, create `.protected-skills` at the skills-dir root — one skill name per line, `#` comments allowed. It's unioned with the auto-detected set. Most setups never need it.
 
-Such an entry has no lockfile hash, so there is no merge base for it: it is kept whole-file and reported under `DIGEST_KEPT`, not merged.
+A listed name is never merged, even when its lockfile hash would give a usable base: naming it here says *keep mine*. It is kept whole-file and reported under `DIGEST_KEPT`.
 
 ## Notes
 

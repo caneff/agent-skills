@@ -13,12 +13,10 @@ git(){ command git -c user.email=skills@local -c user.name=skills "$@"; }
 # ---------------------------------------------------------- three-way merge
 
 # resolve_base_tree <tree-sha> — print the merge base, or fail.
-# The base is the upstream version you HAD installed. The lock's
+# The base is the upstream version you HAD installed, and the lock's
 # skillFolderHash IS that folder's git tree SHA, so it addresses the base
-# directly; there is nothing to search for, because the object is in the
-# buffer's database exactly when some commit held that version. It is missing
-# only for a skill the buffer never saw clean (a manual .protected-skills
-# entry, or a lock hash pruned as unreachable) — the caller falls back there.
+# directly — no history to walk, since the object is in the buffer's database
+# exactly when some commit held that version.
 resolve_base_tree(){
   local hash=${1:-}
   [ -n "$hash" ] || return 1
@@ -28,69 +26,97 @@ resolve_base_tree(){
 # oid <tree-ish>:<path> — blob SHA, or empty when the path is absent.
 oid(){ git rev-parse -q --verify "$1" 2>/dev/null || true; }
 
+# entry_mode <tree-ish> <path-in-tree> — the 6-digit mode git records for it.
+entry_mode(){ git ls-tree "$1" -- "$2" | awk '{print $1}'; }
+
 # put <tree-ish> <path-in-tree> <dest> — write that blob out, mode included.
 put(){
-  local mode
-  mode=$(git ls-tree "$1" -- "$2" | awk '{print $1}')
+  local mode; mode=$(entry_mode "$1" "$2")
   mkdir -p "$(dirname "$3")"
   git cat-file blob "$1:$2" > "$3"
   case "$mode" in *755) chmod +x "$3" ;; *) chmod -x "$3" ;; esac
 }
 
+# install_merged <mode-tree> <path> <merged-file> — put the merged text at
+# <path> with the mode <mode-tree> records, by writing that blob for its mode
+# and then overwriting the bytes.
+install_merged(){ put "$1" "$2" "$2"; cat "$3" > "$2"; }
+
 # merge_skill <skill> <base-tree> <pre> <post>
 # Three-way merge one protected skill into the working tree, which holds
 # <post> on entry: base = the upstream version you installed, yours = <pre>,
 # theirs = <post>. Prints one "<STATUS>\t<path>" line per file that needed a
-# decision (MERGED / CONFLICT / LOCAL / UPSTREAM); returns 1 if any file
-# conflicted, else 0. Conflicts are left in the file as markers, not dropped.
-merge_skill(){
+# decision (MERGED / CONFLICT / LOCAL / UPSTREAM); exits 1 if any file
+# conflicted, 0 if none, and >1 if the merge itself failed (the caller must
+# not read that as a clean run). Text conflicts are left in the file as
+# markers, not dropped. Runs as a subshell so its scratch dir is cleaned even
+# when `set -e` aborts it mid-merge.
+merge_skill(){ (
   local skill=$1 base=$2 pre=$3 post=$4
-  local conflicted=0 f bo lo uo rc st tmp
-  tmp=$(mktemp -d)
-  local files
-  files=$( { git ls-tree -r --name-only "$base"        2>/dev/null || true
-             git ls-tree -r --name-only "$pre:$skill"  2>/dev/null || true
-             git ls-tree -r --name-only "$post:$skill" 2>/dev/null || true
-           } | sort -u )
-  while IFS= read -r f; do
+  local conflicted=0 f bo lo uo rc st tmp note mode_src
+  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+  # -z: --name-only alone honours core.quotePath, which mangles a non-ASCII
+  # name into an escaped string that matches nothing — the file would then be
+  # skipped in silence, taking your edits with it.
+  # NUL-separated straight into the loop: a command substitution would drop
+  # the separators, and a variable cannot hold them.
+  while IFS= read -r -d '' f; do
     [ -n "$f" ] || continue
     bo=$(oid "$base:$f"); lo=$(oid "$pre:$skill/$f"); uo=$(oid "$post:$skill/$f")
-    [ "$lo" = "$uo" ] && continue                  # nothing to decide
+    note=
+    if [ "$lo" = "$uo" ]; then continue; fi        # nothing to decide
     st=
     if [ -z "$lo" ]; then                          # absent from your version
       if   [ -z "$bo" ];      then st=UPSTREAM     # brand-new upstream file
       elif [ "$bo" = "$uo" ]; then st=LOCAL; rm -f "$skill/$f"   # you deleted it
-      else st=CONFLICT; conflicted=1               # you deleted, upstream changed
+      else                                         # you deleted, upstream changed
+        st=CONFLICT; conflicted=1
+        note="you deleted this file; upstream changed it, and ITS version is in the tree"
       fi
     elif [ -z "$uo" ]; then                        # absent from upstream
       if   [ -z "$bo" ];      then st=LOCAL;    put "$pre" "$skill/$f" "$skill/$f"
       elif [ "$bo" = "$lo" ]; then st=UPSTREAM  # upstream deleted, you hadn't edited
-      else st=CONFLICT; conflicted=1; put "$pre" "$skill/$f" "$skill/$f"
+      else
+        st=CONFLICT; conflicted=1; put "$pre" "$skill/$f" "$skill/$f"
+        note="upstream deleted this file; you had edited it, and YOUR version is in the tree"
       fi
     elif [ "$lo" = "$bo" ]; then st=UPSTREAM       # you never touched it
     elif [ "$uo" = "$bo" ]; then st=LOCAL; put "$pre" "$skill/$f" "$skill/$f"
+    elif [ "$(entry_mode "$pre" "$skill/$f")" = 120000 ] \
+      || [ "$(entry_mode "$post" "$skill/$f")" = 120000 ]; then
+      # a symlink has no lines to merge — keep yours and say so, rather than
+      # writing upstream's target string into a regular file.
+      st=CONFLICT; conflicted=1; put "$pre" "$skill/$f" "$skill/$f"
+      note="symlink — not line-mergeable; YOUR version is in the tree"
     else
       put "$pre" "$skill/$f" "$tmp/ours"
-      put "$base" "$f" "$tmp/base"
+      # both sides may have ADDED the file, in which case base has no such path
+      if [ -n "$bo" ]; then put "$base" "$f" "$tmp/base"; else : > "$tmp/base"; fi
       put "$post" "$skill/$f" "$tmp/theirs"
+      # a mode you changed yourself is a local edit like any other: keep it
+      mode_src=$post
+      if [ -n "$bo" ] && [ "$(entry_mode "$pre" "$skill/$f")" != "$(entry_mode "$base" "$f")" ]; then
+        mode_src=$pre
+      fi
       rc=0
       git merge-file -q -L "yours: $skill/$f" -L "installed upstream" \
         -L "new upstream" "$tmp/ours" "$tmp/base" "$tmp/theirs" || rc=$?
       if [ "$rc" -eq 0 ]; then
-        st=MERGED
-        put "$post" "$skill/$f" "$skill/$f"; cat "$tmp/ours" > "$skill/$f"
+        st=MERGED; install_merged "$mode_src" "$skill/$f" "$tmp/ours"
       elif [ "$rc" -lt 128 ]; then                 # rc = number of conflicts
         st=CONFLICT; conflicted=1
-        put "$post" "$skill/$f" "$skill/$f"; cat "$tmp/ours" > "$skill/$f"
+        install_merged "$mode_src" "$skill/$f" "$tmp/ours"
       else                                         # unmergeable (binary): keep yours
         st=CONFLICT; conflicted=1; put "$pre" "$skill/$f" "$skill/$f"
       fi
     fi
-    printf '%s\t%s\n' "$st" "$f"
-  done <<< "$files"
-  rm -rf "$tmp"
-  return "$conflicted"
-}
+    printf '%s\t%s\t%s\n' "$st" "$f" "$note"
+  done < <( { git ls-tree -rz --name-only "$base"        2>/dev/null || true
+              git ls-tree -rz --name-only "$pre:$skill"  2>/dev/null || true
+              git ls-tree -rz --name-only "$post:$skill" 2>/dev/null || true
+            } | sort -zu )
+  exit "$conflicted"
+) }
 
 # ------------------------------------------------------------------- update
 
@@ -149,8 +175,9 @@ POST=$(git rev-parse HEAD)
 # 5. protect locally-edited skills: merge YOUR version with upstream's.
 # Protected set = AUTO-DETECTED (pre-update on-disk tree diverged from the
 # PRE-UPDATE lock hash, i.e. from the upstream version you had installed)
-# UNION any manual entries in .protected-skills (override for untracked/edge cases).
-declare -A PROT BASEHASH
+# UNION any manual entries in .protected-skills, which force a whole-file keep
+# (no merge) for the skills they name.
+declare -A PROT BASEHASH MANUAL
 if [ -s "$PRELOCK" ]; then
   while IFS=$'\t' read -r name hash; do
     [ -z "$name" ] && continue
@@ -161,26 +188,36 @@ if [ -s "$PRELOCK" ]; then
 fi
 rm -f "$PRELOCK"
 if [ -f .protected-skills ]; then
-  while read -r s; do [[ -z "$s" || "$s" == \#* ]] && continue; PROT[$s]=1; done < .protected-skills
+  while read -r s; do
+    [[ -z "$s" || "$s" == \#* ]] && continue
+    PROT[$s]=1; MANUAL[$s]=1   # an explicit "keep mine" beats any merge base
+  done < .protected-skills
 fi
 
 merged=(); conflicted=(); nobase=(); report=""
 for s in "${!PROT[@]}"; do
   [ -e "$s" ] || continue
   if git diff --quiet "$PRE" "$POST" -- "$s"; then continue; fi   # upstream left it alone
-  if base=$(resolve_base_tree "${BASEHASH[$s]:-}"); then
+  if [ -z "${MANUAL[$s]:-}" ] && base=$(resolve_base_tree "${BASEHASH[$s]:-}"); then
     rc=0; out=$(merge_skill "$s" "$base" "$PRE" "$POST") || rc=$?
+    if [ "$rc" -gt 1 ]; then
+      # the merge itself broke — don't pass a half-merged tree off as a result
+      echo "merge failed for $s (exit $rc) — keeping your version whole-file" >&2
+      git checkout "$PRE" -- "$s"; nobase+=("$s"); continue
+    fi
     if [ "$rc" -eq 0 ]; then merged+=("$s"); else conflicted+=("$s"); fi
     report+="$s  (base ${base:0:9})"$'\n'
-    report+=$(printf '%s\n' "$out" | awk -F'\t' 'NF==2{printf "  %-9s %s\n", $1, $2}')$'\n'
+    report+=$(printf '%s\n' "$out" | awk -F'\t' 'NF>=2{printf "  %-9s %s%s\n", $1, $2, ($3 == "" ? "" : "   <- " $3)}')$'\n'
   else
-    # No base to merge from — never guess one. Keep YOUR version whole-file and
-    # say so; the upstream delta stays one `git diff PRE POST` away.
+    # Either you asked for whole-file protection in .protected-skills, or there
+    # is no base to merge from and guessing one is worse than not merging. Keep
+    # YOUR version; the upstream delta stays one `git diff PRE POST` away.
     git checkout "$PRE" -- "$s"; nobase+=("$s")
   fi
 done
-if [ -n "$report" ] || [ ${#nobase[@]} -gt 0 ]; then
-  git add -A && git commit -qm "merge local edits with upstream (three-way)" >/dev/null 2>&1 || true
+git add -A
+if ! git diff --cached --quiet HEAD; then
+  git commit -qm "merge local edits with upstream (three-way)" >/dev/null
 fi
 
 # Categorize every skill that changed upstream (PRE..POST). Protected ones are
@@ -204,7 +241,7 @@ if [ ${#conflicted[@]} -gt 0 ]; then
   echo "CONFLICTED — files below carry conflict markers, resolve them (${#conflicted[@]}): ${conflicted[*]}"
 fi
 if [ ${#nobase[@]} -gt 0 ]; then
-  echo "No merge base — your version kept whole-file, upstream delta NOT applied (${#nobase[@]}):"
+  echo "Kept whole-file, NOT merged — manual override or no merge base (${#nobase[@]}):"
   for s in "${nobase[@]}"; do echo "  $s   (review: git -C $SKILLS diff $PRE $POST -- $s)"; done
 fi
 

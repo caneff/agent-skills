@@ -1,7 +1,7 @@
 # Follow renames & moves (ORPHAN resolution)
 
 `safe-update.sh` handles the two axes a script can see — *clean-behind*
-(pulled) and *edited-stale* (your version restored, merge diff printed). It
+(pulled) and *edited-stale* (three-way merged with upstream; conflicts marked). It
 **cannot** follow a skill upstream renamed, moved between category folders,
 or rewrote under a new name: those surface as **ORPHAN** in
 `skills-status.sh`. Resolving them is model judgment — do it after the pull.
