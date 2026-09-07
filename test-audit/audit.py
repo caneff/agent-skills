@@ -20,7 +20,6 @@ general classifier. jest, go test, and other non-Python runners are
 out-of-scope follow-ups per the parent spec (#275).
 """
 import ast
-import glob
 import os
 import sys
 
@@ -221,11 +220,7 @@ def scan_path(root):
     if os.path.isfile(root):
         paths = [root]
     else:
-        paths = [
-            p
-            for p in sorted(glob.glob(os.path.join(root, "**", "*.py"), recursive=True))
-            if not (auditlib.EXCLUDED_DIRS & set(p.split(os.sep)))
-        ]
+        paths = [os.path.join(root, rel) for rel in auditlib.walk_source(root)]
     findings = []
     for path in paths:
         findings.extend(scan_file(path))
@@ -296,6 +291,20 @@ def _selfcheck():
         _func_from("@pytest.mark.skip(reason='flaky')\ndef test_x():\n    assert True\n")
     )
     assert not is_empty_or_skipped(_func_from("def test_x():\n    x = compute()\n    assert x == 5\n"))
+
+    # scan_path walks via auditlib.walk_source (#611), so a dot-dir like
+    # .tox is pruned the same way every other audit prunes it.
+    import shutil
+    import tempfile
+
+    tmp = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(tmp, ".tox"))
+        with open(os.path.join(tmp, ".tox", "test_x.py"), "w", encoding="utf-8") as f:
+            f.write("def test_x():\n    pass\n")
+        assert scan_path(tmp) == [], scan_path(tmp)
+    finally:
+        shutil.rmtree(tmp)
 
     print("ok")
 
