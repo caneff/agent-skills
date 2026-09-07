@@ -128,8 +128,7 @@ stages sit either side of that line (step 3).
    `~/.agents/skills/two-axis-code-review/SKILL.md` passes `model: opus` to
    both its spawned reviewers ("Pass `model: opus` to both.") regardless of
    the builder's tier, so a sonnet-tier build still gets an opus-tier
-   two-axis review; the built-in `code-review` carries no such pin and runs
-   at the builder's own session model. That one runs as a background fork and
+   two-axis review. The built-in `code-review` runs as a background fork and
    a builder is a top-level session, so the seed says to block on the fork
    with `TaskOutput` and never go idle with one outstanding. What
    happens to each finding is this burn's rule, not Finish's: act
