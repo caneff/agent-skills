@@ -5,6 +5,7 @@ the family's plain-assert convention — see crap-audit/audit_test.py), plus a
 new cache-decision test against a real temporary git repo, including the
 bad-last-run-SHA case, which must mean RUN.
 """
+import contextlib
 import json
 import os
 import subprocess
@@ -266,16 +267,27 @@ def test_index_from_manifests_missing_manifest_is_a_failure_row():
         assert "no manifest" in index_text, "duplication (no manifest written) must render as a named failure"
 
 
-_GIT_ENV_LEAKS = (
-    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-)
+@contextlib.contextmanager
+def _leaked_git_env(victim):
+    """Run the body with GIT_DIR/GIT_WORK_TREE pointing at `victim`, the way a
+    caller's shell (or a git hook) leaks them into the driver (#625)."""
+    saved = {k: os.environ.get(k) for k in driver.GIT_REDIRECT_VARS}
+    os.environ["GIT_DIR"] = os.path.join(victim, ".git")
+    os.environ["GIT_WORK_TREE"] = victim
+    try:
+        yield
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def _init_git_repo(path):
     # A caller's leaked GIT_DIR/GIT_WORK_TREE would redirect these calls at
     # that repo instead of `path` (#620) — scrub them from the child env.
-    env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_LEAKS}
+    env = driver.scrubbed_env()
     subprocess.run(["git", "-C", path, "init", "-q"], check=True, env=env)
     subprocess.run(["git", "-C", path, "config", "user.email", "t@example.com"], check=True, env=env)
     subprocess.run(["git", "-C", path, "config", "user.name", "t"], check=True, env=env)
@@ -291,7 +303,7 @@ def test_init_git_repo_ignores_leaked_git_dir():
     GIT_DIR made `git init` on a /tmp path silently reinitialize that other
     repo instead and rewrite its .git/config."""
     with tempfile.TemporaryDirectory() as victim, tempfile.TemporaryDirectory() as target:
-        clean_env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_LEAKS}
+        clean_env = driver.scrubbed_env()
         subprocess.run(["git", "init", "-q", victim], check=True, env=clean_env)
         subprocess.run(["git", "-C", victim, "-c", "user.email=v@example.com", "-c", "user.name=v",
                         "commit", "-q", "--allow-empty", "-m", "victim"], check=True, env=clean_env)
@@ -300,17 +312,8 @@ def test_init_git_repo_ignores_leaked_git_dir():
         head_before = subprocess.run(["git", "-C", victim, "rev-parse", "HEAD"], check=True,
                                      capture_output=True, text=True, env=clean_env).stdout
 
-        saved = {k: os.environ.get(k) for k in _GIT_ENV_LEAKS}
-        os.environ["GIT_DIR"] = os.path.join(victim, ".git")
-        os.environ["GIT_WORK_TREE"] = victim
-        try:
+        with _leaked_git_env(victim):
             _init_git_repo(target)
-        finally:
-            for k, v in saved.items():
-                if v is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = v
 
         after = open(config_path).read()
         assert after == before, "a leaked GIT_DIR must not let _init_git_repo touch another repo's config"
@@ -318,6 +321,63 @@ def test_init_git_repo_ignores_leaked_git_dir():
                                     capture_output=True, text=True, env=clean_env).stdout
         assert head_after == head_before, "a leaked GIT_DIR must not let _init_git_repo commit onto another repo (#622)"
         assert os.path.isdir(os.path.join(target, ".git")), "_init_git_repo must still create a repo in its own temp dir"
+
+
+def test_decide_and_head_sha_ignore_leaked_git_dir():
+    """AC (#625): the driver's own git calls must read the repo they were
+    handed. Under a leaked GIT_DIR pointing at a dirty repo, decide() on a
+    clean, freshly-cached repo returned run=True "dirty working tree" and
+    head_sha() returned the other repo's SHA."""
+    with tempfile.TemporaryDirectory() as victim, tempfile.TemporaryDirectory() as repo, \
+            tempfile.TemporaryDirectory() as cache_dir:
+        _init_git_repo(victim)
+        # a second commit, so the victim's HEAD can never coincide with the
+        # audited repo's (both repos hold the same tree otherwise)
+        clean_env = driver.scrubbed_env()
+        subprocess.run(["git", "-C", victim, "commit", "-q", "--allow-empty", "-m", "second"],
+                       check=True, env=clean_env)
+        open(os.path.join(victim, "untracked.py"), "w").write("x = 2\n")  # victim reads dirty
+        _init_git_repo(repo)
+        sha = driver.head_sha(repo)
+        report_dir = os.path.join(cache_dir, "report")
+        os.makedirs(report_dir)
+        driver.save_record(driver._record_file(repo, cache_dir), {
+            "domain-drift": {
+                "last_sha": sha,
+                "timestamp": driver._dt.datetime.now(driver._dt.timezone.utc).isoformat(),
+                "report_dir": report_dir,
+            }
+        })
+
+        with _leaked_git_env(victim):
+            leaked_sha = driver.head_sha(repo)
+            d = driver.decide(repo, "domain-drift", ["CONTEXT.md"], base=cache_dir)
+
+        assert leaked_sha == sha, "head_sha must read the repo it was handed, not the leaked GIT_DIR"
+        assert d.run is False, d
+        assert d.report_dir == report_dir, d
+
+
+def test_mutation_worktree_add_ignores_leaked_git_dir():
+    """AC (#625): the mutation worktree is the one git call that bypasses
+    _run — under a leaked GIT_DIR it registered its worktree in the caller's
+    repo instead of the audited one."""
+    with tempfile.TemporaryDirectory() as victim, tempfile.TemporaryDirectory() as repo, \
+            tempfile.TemporaryDirectory() as tmp:
+        # the victim has no commit, so a `worktree add HEAD` aimed at it by a
+        # leak fails outright while the same call on `repo` succeeds
+        clean_env = driver.scrubbed_env()
+        subprocess.run(["git", "init", "-q", victim], check=True, env=clean_env)
+        _init_git_repo(repo)
+        run = _seed_run_dir(tmp, worktrees=True)
+        with _leaked_git_env(victim):
+            driver._run_mutation_module(repo, "solver.py", run)  # no env manifest: setup-failure, then cleanup
+
+        report = open(os.path.join(run.collection, "solver.py", "report.html")).read()
+        assert "git worktree add failed" not in report, \
+            "a leaked GIT_DIR must not aim `git worktree add` at another repo"
+        assert "no recognized env manifest" in report, report
+        assert os.listdir(run.worktrees) == [], "the worktree must still be cleaned up"
 
 
 def test_cache_decision_bad_sha_forces_run():
