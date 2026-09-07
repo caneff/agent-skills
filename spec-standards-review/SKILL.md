@@ -1,6 +1,6 @@
 ---
 name: spec-standards-review
-description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the ponytail over-engineering lens?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. It does NOT hunt runtime correctness bugs — the built-in `/code-review` does that, and the two are meant to run back to back. Use when the user wants a branch, PR, or work-in-progress diff checked against its spec and the repo's standards.
+description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the over-engineering lens?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. It does NOT hunt runtime correctness bugs — the built-in `/code-review` does that, and the two are meant to run back to back. Use when the user wants a branch, PR, or work-in-progress diff checked against its spec and the repo's standards.
 ---
 
 Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
@@ -69,7 +69,7 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 - **Middle Man** — a class or function that mostly just delegates onward. → cut it, call the real target direct.
 - **Refused Bequest** — a subclass or implementer that ignores or overrides most of what it inherits. → drop the inheritance, use composition.
 
-**The over-engineering lens (the ponytail pass).** On top of the smells, the Standards axis runs an over-engineering review — the sharpest depth on "is this well-built?". It hunts what to **delete**, not what to rename. Five tags, one line each — location, what to cut, what replaces it:
+**The over-engineering lens.** On top of the smells, the Standards axis runs an over-engineering review — the sharpest depth on "is this well-built?". It hunts what to **delete**, not what to rename. Five tags, one line each — location, what to cut, what replaces it:
 
 - `delete:` dead code, unused flexibility, speculative feature. → replacement: nothing.
 - `stdlib:` a hand-rolled thing the standard library ships. → name the function.
@@ -77,7 +77,7 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 - `yagni:` an abstraction with one implementation, config nobody sets, a layer with one caller. → inline it until a second caller exists.
 - `shrink:` same logic, fewer lines. → show the shorter form.
 
-This lens **owns** the three smells above that are really over-engineering — Speculative Generality, Middle Man, Refused Bequest. Report each such cut **once**, under the over-engineering subsection (step 4), never twice. A single smoke test or `assert`-based self-check is the ponytail minimum, not bloat — never flag it as a cut.
+This lens **owns** the three smells above that are really over-engineering — Speculative Generality, Middle Man, Refused Bequest. Report each such cut **once**, under the over-engineering subsection (step 4), never twice. A single smoke test or `assert`-based self-check is the minimum, not bloat — never flag it as a cut.
 
 ### 4. Spawn both sub-agents in parallel
 
@@ -93,7 +93,7 @@ Belt and braces: append to **both** prompts — "Also write your full report to 
 
 - The full diff command and commit list.
 - The list of standards-source files you found in step 3, **plus the smell baseline and the over-engineering lens from step 3** pasted in full — the sub-agent has no other access to them.
-- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. For any test in the diff that claims to prove a behaviour, check the verdict depends on it — strip the constraint under test and see whether the assertion still passes; one that survives is a hollow witness, flag it. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the ponytail lens over the diff and list what to cut, one line each in `location: <tag> <what>. <replacement>.` form using the five tags. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Under 550 words."
+- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. For any test in the diff that claims to prove a behaviour, check the verdict depends on it — strip the constraint under test and see whether the assertion still passes; one that survives is a hollow witness, flag it. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the over-engineering lens over the diff and list what to cut, one line each in `location: <tag> <what>. <replacement>.` form using the five tags. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Under 550 words."
 
 **Spec sub-agent prompt** — include:
 

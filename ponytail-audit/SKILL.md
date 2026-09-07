@@ -89,7 +89,7 @@ and asset-delivery recipe.
 
 The HTML is a deliverable a reader judges — write every finding in plain,
 present-tense sentences a maintainer understands on the first read. The tags
-(`delete:`/`stdlib:`/…) and ponytail's steering metaphors ("bloat", "dead
+(`delete:`/`stdlib:`/…) and the steering metaphors ("bloat", "dead
 flexibility") are for you; the card prose says what is actually true and what it
 costs. "This class is never constructed outside its own test" beats "speculative
 YAGNI cruft". State the replacement concretely — the stdlib function by name,
@@ -99,5 +99,5 @@ the one-line form, or "nothing".
 
 Complexity only. Correctness bugs, security holes, and performance go to a
 normal review pass, not this one. A single smoke test or `assert`-based
-self-check is the ponytail minimum, not bloat — never flag it for deletion.
+self-check is the minimum, not bloat — never flag it for deletion.
 Lists findings, applies nothing. One-shot.
