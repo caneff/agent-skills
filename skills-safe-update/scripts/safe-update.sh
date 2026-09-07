@@ -5,6 +5,7 @@
 # Hand-installed skills registered in .extra-skills.json (name -> {repo, path,
 # treeSha}) are synced from their github upstreams in the same run.
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="${SKILLS_DIR:-$HOME/.agents/skills}"
 cd "$SKILLS"
 git(){ command git -c user.email=skills@local -c user.name=skills "$@"; }
@@ -32,12 +33,11 @@ PRE=$(git rev-parse HEAD)
 # git tree SHA of the skill folder, so a hash here describes the *installed*
 # upstream version. Read it AFTER npx (as we used to) and npx has already
 # rewritten it to the NEW upstream — making every updated skill look edited.
-PRELOCK=$(mktemp)
-[ -f "$LOCK" ] && python3 -c "import json;d=json.load(open('$LOCK')).get('skills',{});[print(k+chr(9)+v.get('skillFolderHash','')) for k,v in d.items()]" > "$PRELOCK"
 # hand-installed skills (.extra-skills.json) join the same protection map:
 # treeSha is their installed-upstream hash, same semantics as skillFolderHash.
 EXTRA="$SKILLS/.extra-skills.json"
-[ -f "$EXTRA" ] && python3 -c "import json;d=json.load(open('$EXTRA'));[print(k+chr(9)+v.get('treeSha','')) for k,v in d.items()]" >> "$PRELOCK"
+PRELOCK=$(mktemp)
+python3 "$SCRIPT_DIR/upstream.py" prelock --lock "$LOCK" --extras "$EXTRA" > "$PRELOCK"
 
 echo "running: npx skills update -g"
 npx -y skills update -g
@@ -47,55 +47,7 @@ npx -y skills update -g
 # cover them exactly like lockfile skills.
 if [ -f "$EXTRA" ]; then
   echo "syncing extra skills (.extra-skills.json)"
-  python3 - "$EXTRA" <<'PY'
-import io, json, os, shutil, subprocess, sys, tarfile
-
-manifest_path = sys.argv[1]
-manifest = json.load(open(manifest_path))
-
-def sh(*a):
-    return subprocess.run(a, capture_output=True)
-
-for name, e in manifest.items():
-    repo, path = e["repo"], e.get("path", "")
-    r = sh("gh", "api", f"repos/{repo}/commits/HEAD", "--jq", ".sha+\" \"+.commit.tree.sha")
-    if r.returncode != 0:
-        print(f"  {name}: upstream fetch failed, skipped"); continue
-    head, root_tree = r.stdout.decode().split()
-    if path:
-        r = sh("gh", "api", f"repos/{repo}/git/trees/{head}?recursive=1")
-        if r.returncode != 0:
-            print(f"  {name}: tree fetch failed, skipped"); continue
-        trees = {t["path"]: t["sha"] for t in json.loads(r.stdout).get("tree", []) if t["type"] == "tree"}
-        up = trees.get(path)
-    else:
-        up = root_tree
-    if not up:
-        print(f"  {name}: path {path!r} gone upstream (ORPHAN), skipped"); continue
-    if up == e.get("treeSha"):
-        continue
-    r = sh("gh", "api", f"repos/{repo}/tarball/{head}")
-    if r.returncode != 0:
-        print(f"  {name}: tarball fetch failed, skipped"); continue
-    tf = tarfile.open(fileobj=io.BytesIO(r.stdout), mode="r:gz")
-    prefix = tf.getmembers()[0].name.split("/")[0]
-    want = f"{prefix}/{path}".rstrip("/") + "/"
-    if os.path.isdir(name):
-        shutil.rmtree(name)  # reversible: PRE snapshot holds the old version
-    for mem in tf.getmembers():
-        if not mem.isfile() or not mem.name.startswith(want) or ".." in mem.name:
-            continue
-        dest = os.path.join(name, mem.name[len(want):])
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with open(dest, "wb") as f:
-            f.write(tf.extractfile(mem).read())
-    e["treeSha"] = up
-    print(f"  {name}: synced from {repo}@{head[:9]}")
-
-with open(manifest_path, "w") as f:
-    json.dump(manifest, f, indent=2)
-    f.write("\n")
-PY
+  python3 "$SCRIPT_DIR/upstream.py" sync-extras --extras "$EXTRA"
 fi
 
 # 4. record upstream result (npx rewrote the live lock — mirror the new one in)

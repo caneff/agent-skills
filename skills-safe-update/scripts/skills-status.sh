@@ -19,6 +19,7 @@
 # Pairs with safe-update.sh: this only REPORTS (mutates nothing); run it before
 # updating to see what's stale and what'll need a hand-merge. Needs git + gh + python3.
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS="${SKILLS_DIR:-$HOME/.agents/skills}"
 LOCK="${SKILL_LOCK:-$(dirname "$SKILLS")/.skill-lock.json}"
 cd "$SKILLS"
@@ -31,74 +32,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || { echo "$SKILLS is not a git repo —
 WT=$(git stash create 2>/dev/null || true)
 BASE="${WT:-HEAD}"
 
-BASE="$BASE" LOCK="$LOCK" python3 - <<'PY'
-import json, os, re, subprocess, sys
-
-base = os.environ["BASE"]
-lock = json.load(open(os.environ["LOCK"])).get("skills", {})
-extra = json.load(open(".extra-skills.json")) if os.path.exists(".extra-skills.json") else {}
-
-def sh(*a):
-    return subprocess.run(a, capture_output=True, text=True)
-
-# Fetch each source repo's full tree once (default branch); cache dir->sha maps.
-_cache = {}
-def upstream_map(owner, repo):
-    key = (owner, repo)
-    if key not in _cache:
-        r = sh("gh", "api", f"repos/{owner}/{repo}/git/trees/HEAD?recursive=1")
-        # "" = repo root, for a skill living at the repo top level. The trees API
-        # echoes the resolved COMMIT sha as .sha, so take the root tree from the
-        # commits API instead.
-        r2 = sh("gh", "api", f"repos/{owner}/{repo}/commits/HEAD", "--jq", ".commit.tree.sha")
-        if r.returncode == 0 and r2.returncode == 0:
-            m = {"": r2.stdout.strip()}
-            for t in json.loads(r.stdout).get("tree", []):
-                if t["type"] == "tree":
-                    m[t["path"]] = t["sha"]
-        else:
-            m = None  # fetch failed → staleness UNKNOWN
-        _cache[key] = m
-    return _cache[key]
-
-# Unify both sources into (name, (owner,repo)|None, dir-in-repo, installed-hash, tag).
-items = []
-for name, e in lock.items():
-    m = re.search(r"github\.com[:/]+([^/]+)/([^/.]+)", e.get("sourceUrl", ""))
-    skill_dir = re.sub(r"/SKILL\.md$", "", e.get("skillPath", ""))  # skills/<cat>/<name>
-    items.append((name, m.groups() if m else None, skill_dir, e.get("skillFolderHash", ""), ""))
-for name, e in extra.items():
-    items.append((name, tuple(e["repo"].split("/", 1)), e.get("path", ""), e.get("treeSha", ""), " [extra]"))
-
-rows = []
-for name, src, skill_dir, folder_hash, tag in items:
-    r = sh("git", "rev-parse", f"{base}:{name}")
-    local = r.stdout.strip() if r.returncode == 0 else "MISSING"
-
-    if not src:
-        status = "non-github source (skip)"
-    else:
-        up = upstream_map(*src)
-        if up is None:
-            status = "upstream UNKNOWN (gh fetch failed)"
-        else:
-            upstream = up.get(skill_dir)
-            edited = local != folder_hash
-            if upstream is None:
-                status = "ORPHAN (removed upstream)"
-            elif edited and folder_hash != upstream:
-                status = "EDITED+STALE (merge needed)"
-            elif edited:
-                status = "edited, on latest"
-            elif folder_hash != upstream:
-                status = "OUT OF DATE"
-            else:
-                status = "clean"
-    rows.append((status, name + tag))
-
-# Group: actionable rows first, clean last.
-order = {"clean": 9, "non-github source (skip)": 8}
-rows.sort(key=lambda r: (order.get(r[0], 0), r[0], r[1]))
-for status, name in rows:
-    print(f"{name:<32}{status}")
-PY
+# Unifying the lock + .extra-skills.json, the upstream tree/commit lookups
+# (root-tree quirk included), and the per-repo cache all live in upstream.py —
+# shared with safe-update.sh's extras sync. This just prints its report.
+python3 "$SCRIPT_DIR/upstream.py" status --base "$BASE" --lock "$LOCK"
