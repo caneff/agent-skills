@@ -241,6 +241,35 @@ def _init_git_repo(path):
     subprocess.run(["git", "-C", path, "commit", "-q", "-m", "init"], check=True)
 
 
+def test_init_git_repo_ignores_leaked_git_dir():
+    """AC (#620): _init_git_repo must write only inside its own temp dir even
+    when the caller's shell leaked GIT_DIR/GIT_WORK_TREE pointing at a real
+    repo — regression witness for the 2026-09-07 incident, where a leaked
+    GIT_DIR made `git init` on a /tmp path silently reinitialize that other
+    repo instead and rewrite its .git/config."""
+    with tempfile.TemporaryDirectory() as victim, tempfile.TemporaryDirectory() as target:
+        subprocess.run(["git", "init", "-q", victim], check=True)
+        config_path = os.path.join(victim, ".git", "config")
+        before = open(config_path).read()
+
+        saved = {k: os.environ.get(k) for k in
+                  ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")}
+        os.environ["GIT_DIR"] = os.path.join(victim, ".git")
+        os.environ["GIT_WORK_TREE"] = victim
+        try:
+            _init_git_repo(target)
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+        after = open(config_path).read()
+        assert after == before, "a leaked GIT_DIR must not let _init_git_repo touch another repo's config"
+        assert os.path.isdir(os.path.join(target, ".git")), "_init_git_repo must still create a repo in its own temp dir"
+
+
 def test_cache_decision_bad_sha_forces_run():
     """AC: a bad/unknown last-run SHA on a real temp git repo must yield
     RUN — `git diff` against a SHA that doesn't exist can't prove the repo
