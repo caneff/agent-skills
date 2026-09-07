@@ -46,6 +46,16 @@ scope to what its own issue already permits, or serialise the pair — and say i
 each builder's seed which files are its own. Two builders editing one file is a
 merge conflict the coordinator caused.
 
+Exploration also **checks every grill decision against the code it rests on.**
+A ticket's grill comment often overrides its body, and it is written from
+memory of how a component behaves. For each decision that asserts runtime
+behaviour ("the mask is always on in puzzle mode", "the server resizes before
+the switch"), the explorer finds the line that implements it and quotes it in
+the notes — confirmed, or contradicted with the file:line. A contradicted
+decision is a ruling for the human, posted on the issue before dispatch, not a
+P0 for a reviewer to find after the build (#130 cost a build, a review round
+and a ruling comment that way).
+
 Exploration is read-only and needs no worktree, terminal, or Orca task: run it
 as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`) and read
 its result directly. **Only builders are Orca tasks** — they are the only
@@ -81,6 +91,19 @@ read-only, exploration and review both, is an in-process subagent.
    question and the choice you made at the top of `worker_done`. The
    coordinator's attention is not a dependency a build may block on.
 
+   After every `worker-start`, run `git -C <worktree> branch --show-current`
+   and confirm it names the ticket's own branch. Reusing a just-removed
+   worktree name, or starting from `--base-branch <other ticket's branch>`,
+   has left Orca checking out the base branch itself, so the builder would
+   have committed onto another ticket's PR. Fix it with `git checkout -b`
+   before the worker's first commit and tell the worker.
+
+   **Do not `worker-release` at `worker_done`.** The builder stays live through
+   review: review findings go to its dispatch (`orchestration send --to
+   dispatch:<id>`), so a fix round costs no Orca startup and no re-reading of
+   the ticket and notes. Release only when the review is clean or the ticket
+   parks.
+
    The coordinator's wait covers `question` and `escalation`, not just
    `worker_done`. Task status runs `pending → ready → dispatched →
    completed` and carries no messages, so a blocking question is invisible to a
@@ -92,11 +115,16 @@ read-only, exploration and review both, is an in-process subagent.
    reference and the branch — never the burn history or the explorer's notes —
    running both the built-in `code-review` skill and
    `~/.agents/skills/spec-standards-review/SKILL.md` by pointer, not by slash
-   invocation — correctness first, then spec/standards. It owns the verdict, one of three:
+   invocation — correctness first, then spec/standards. The seed says: wait
+   for both reviews to finish, then send the verdict as your final message
+   and arm no background wait afterwards — a reviewer that keeps a timer
+   running re-notifies the coordinator with the same verdict two or three
+   times. It owns the verdict, one of three:
 
    - **clean** — go to step 6.
-   - **changes requested** — findings the builder can act on. Pass them to the
-     builder **verbatim**, in its own worktree, then re-review. This is the
+   - **changes requested** — findings the builder can act on. Write them to
+     `~/.cache/burndown/findings/<n>-r<round>.md` **verbatim** and send the
+     path to the builder's live dispatch, then re-review. This is the
      normal outcome of a first review; it is not a park.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
      coordinator cannot make, or the ticket is wrong. Only this one parks.
@@ -233,10 +261,11 @@ queue empty, ticket cap, or two parks with no landing — and if the queue is
 not empty, say to run `/burndown` again.
 
 Where a human owns the merge, the report ends with **one pasteable line** that
-merges every PR from this burn that is based on the default branch:
+merges every PR from this burn, leading with `cd <absolute repo path> &&` and
+carrying `--repo owner/name` on every `gh` call:
 
 ```
-! for n in <PR numbers>; do gh pr merge $n --squash --delete-branch; done
+! cd <repo> && for n in <PR numbers>; do gh pr merge $n --repo <owner/name> --squash --delete-branch; done
 ```
 
 Before handing it over, dry-run merge every branch in that order onto the
@@ -245,13 +274,24 @@ say the result in one line. Never split the merges into per-PR commands. Any
 post-merge step a human must do on the live machine follows the line, in
 order.
 
-**Stacked branches never go in that line.** A ticket serialised on another's
-branch (a collision resolved by stacking) opens its PR against the default
-branch anyway, never against the base branch: GitHub closes a PR whose base
-branch is deleted and cannot reopen it, and a stacked branch conflicts with
-the squash of its base. After the human merges the first line, cherry-pick
-the stacked ticket's own commits onto the new default branch in a fresh
-branch, re-run the test seam, open a new PR, close the old one, and hand a
-second line. Prefer not stacking at all: when other tickets are ready, hold
-the serialised ticket until its base lands, and stack only when the slot
-would otherwise sit idle.
+**Branches that conflict with each other get linearised, not squashed.** Two
+PRs that touch the same line (an import list, a scenario count) both merge
+clean against the default branch and then conflict with each other after the
+first squash, so the one-line merge stops halfway. When the dry run shows
+that, rebase the later branches into one linear stack in merge order,
+resolving only the shared line, verify each rebased branch's diff is identical
+to its reviewed diff apart from that line, run the seam at the stack tip,
+force-push (with lease), note the new base sha in each PR body, and hand the
+line with `--merge` in place of `--squash` — merge commits keep a linear stack
+mergeable in one line, squashes do not. Every PR still opens against the
+default branch, never against its base branch: GitHub closes a PR whose base
+branch is deleted and cannot reopen it. Prefer not stacking at all: when other
+tickets are ready, hold the serialised ticket until its base lands, and stack
+only when the slot would otherwise sit idle.
+
+**Live verification is batched, not per ticket.** A ticket whose sign-off
+needs the live rig (a scene shot to eyeball, a stream-side behaviour to watch)
+cannot be verified inside the burn, and the burn must not start a live run
+on its own. Do not repeat "confirm on the next live run" once per PR. The
+report ends with one **post-burn live check** step that lists every such
+item, so a single run after the merges clears them all.
