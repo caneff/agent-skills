@@ -87,9 +87,8 @@ read-only, exploration and review both, is an in-process subagent.
 
 The loop's unit is the batch: dispatch every builder in a batch together,
 wait, settle every ticket in it, and only then re-list for the next frontier
-— there is no per-slot refill (step 8 has the rule). Exploration straddles
-both: its shallow pass runs once per burn, its deep read once per batch
-(step 3).
+— there is no per-slot refill (step 8 has the rule). Exploration's two
+stages sit either side of that line (step 3).
 
 1. List the queue: `gh issue list --label ready-for-agent --state open`.
    Empty, with nothing in flight → report and stop.
@@ -226,21 +225,21 @@ both: its shallow pass runs once per burn, its deep read once per batch
    Then **record what the ticket cost**: run
    `python3 ~/.agents/skills/burndown/cost.py <worktree>` and append one line
    to `~/.cache/burndown/<repo dir name>.cost` — beside the progress file,
-   never in it; step 7's grammar is untouched. One line per settled ticket,
-   five space-separated integers:
+   never in it. One line per settled ticket, five space-separated integers:
 
    ```
    <n> <builder> <review> <coord-review> <rounds>
    ```
 
    `<builder>` and `<review>` are the script's first two numbers: main-line and
-   sidechain tokens in that worktree's transcripts — the build, and the
-   builder's own two reviews. `<coord-review>` is the tokens the step 5
-   reviewer reported at its completion, `0` when none ran: it is an in-process
-   subagent, so its transcript is the coordinator's, not the worktree's, and
-   the script cannot see it. `<rounds>` is how many step 5 rounds the ticket
-   took, `0` when it skipped review. Nothing in the loop reads this file back —
-   it is read between burns.
+   sidechain tokens in that worktree's transcripts. Sidechain is every subagent
+   the builder spawned, its two reviews and any lookup alike, so read `<review>`
+   as delegated work rather than review alone. `<coord-review>` is the tokens
+   the step 5 reviewer reported at its completion, `0` when none ran: it is an
+   in-process subagent, so its transcript is the coordinator's, not the
+   worktree's, and the script cannot see it. `<rounds>` is how many step 5
+   rounds the ticket took, `0` when it skipped review. Nothing in the loop
+   reads this file back — it is read between burns.
 
    Then **tear down the ticket's worktree**. `git status --porcelain` in it
    first and keep it if anything is uncommitted or untracked; otherwise
@@ -267,8 +266,7 @@ both: its shallow pass runs once per burn, its deep read once per batch
    for that ticket — `pr` followed by `landed` is one ticket, merged.
    This is the single documented home for the grammar — nothing else restates it.
 8. Once every ticket in the batch has settled or parked, re-list the queue
-   for the next frontier: go to 1 — step 3 runs its deep read again, not its
-   shallow pass. Re-list every pass — a
+   for the next frontier: go to 1. Re-list every pass — a
    landing can unblock tickets, and a human may have added more. There is no
    per-slot refill: a settled ticket's slot sits idle until every ticket in
    its batch has settled or parked, so the frontier taken in step 2 is always

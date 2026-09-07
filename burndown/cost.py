@@ -24,10 +24,10 @@ def project_dir_name(worktree):
 
 
 def tally(worktree, projects_root):
-    """(builder, review) tokens. Subagent transcripts sit under
+    """(main-line, sidechain) tokens. Subagent transcripts sit under
     `<session>/subagents/`, and their lines carry `isSidechain: true`."""
     root = os.path.join(projects_root, project_dir_name(worktree))
-    builder = review = 0
+    builder = sidechain = 0
     for parent, _, files in os.walk(root):
         for name in files:
             if not name.endswith(".jsonl"):
@@ -43,10 +43,10 @@ def tally(worktree, projects_root):
                         continue
                     n = sum(usage.get(k) or 0 for k in COUNTERS)
                     if entry.get("isSidechain"):
-                        review += n
+                        sidechain += n
                     else:
                         builder += n
-    return builder, review
+    return builder, sidechain
 
 
 def main(argv):
@@ -55,8 +55,8 @@ def main(argv):
         return 2
     projects_root = os.environ.get("BURNDOWN_PROJECTS_DIR") or os.path.expanduser(
         "~/.claude/projects")
-    builder, review = tally(argv[1], projects_root)
-    print(f"{builder} {review} {builder + review}")
+    builder, sidechain = tally(argv[1], projects_root)
+    print(f"{builder} {sidechain} {builder + sidechain}")
     return 0
 
 
