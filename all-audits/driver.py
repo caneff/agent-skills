@@ -307,30 +307,46 @@ _HEAD = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 """
 
 
-def build_index(collection, repo, report_link, skip_note, synthesis, mutation_modules, mutation_survivors_sum, notest_count, notest_error=None):
+@dataclasses.dataclass
+class IndexModel:
+    """Everything the sweep index renders (#606) — one value the collect step
+    fills in, so the renderer takes a model instead of nine positionals."""
+
+    collection: str
+    repo: str
+    report_link: dict
+    skip_note: dict
+    synthesis: str = ""
+    mutation_modules: list = dataclasses.field(default_factory=list)
+    mutation_survivors_sum: int = 0
+    notest_count: int = 0
+    notest_error: str = None
+
+
+def build_index(model):
     out = [_HEAD.format(title="All-audits index", prefix="")]
     out.append('<p class="vt-kicker">All-audits sweep</p>\n')
-    out.append(f'<h1>{html.escape(repo)} <span style="color:var(--vt-muted)">· {len(AUDIT_NAMES)}-audit sweep</span></h1>\n')
-    if synthesis:
-        out.append(f'<p class="vt-lede">{html.escape(synthesis)}</p>\n')
+    out.append(f'<h1>{html.escape(model.repo)} <span style="color:var(--vt-muted)">· {len(AUDIT_NAMES)}-audit sweep</span></h1>\n')
+    if model.synthesis:
+        out.append(f'<p class="vt-lede">{html.escape(model.synthesis)}</p>\n')
     out.append('<h2>Reports</h2><div class="vt-table-wrap"><table class="audit-table">\n')
     out.append("<thead><tr><th>Audit</th><th>Report</th><th>Status</th></tr></thead><tbody>\n")
     for name in AUDIT_NAMES:
-        link = report_link.get(name, "")
-        note = skip_note.get(name, "")
+        link = model.report_link.get(name, "")
+        note = model.skip_note.get(name, "")
         if link:
             out.append(f'<tr><td>{name}</td><td><a href="{link}">open report</a></td><td>{note}</td></tr>\n')
         else:
             out.append(f'<tr><td>{name}</td><td style="color:var(--vt-muted)">no report</td><td>{note}</td></tr>\n')
-    if mutation_modules or notest_count > 0 or notest_error:
-        verdict = f"{len(mutation_modules)} modules run, {mutation_survivors_sum} total survivors"
-        if notest_error:
+    if model.mutation_modules or model.notest_count > 0 or model.notest_error:
+        verdict = f"{len(model.mutation_modules)} modules run, {model.mutation_survivors_sum} total survivors"
+        if model.notest_error:
             verdict += " · no-tests count could not be determined"
-        elif notest_count > 0:
-            verdict += f" · {notest_count} with no tests"
+        elif model.notest_count > 0:
+            verdict += f" · {model.notest_count} with no tests"
         out.append(f'<tr><td>mutation</td><td><a href="mutation/index.html">open report</a></td><td>{verdict}</td></tr>\n')
     out.append("</tbody></table></div></main></body></html>")
-    with open(os.path.join(collection, "index.html"), "w", encoding="utf-8") as f:
+    with open(os.path.join(model.collection, "index.html"), "w", encoding="utf-8") as f:
         f.write("".join(out))
 
 
@@ -574,7 +590,17 @@ def collect(run, repo, plan, base=None):
             replace_dir(assets, os.path.join(collection, "assets"))
             break
 
-    build_index(collection, repo, report_link, {**plan.skip_note, **manifest_note}, synthesis, mutation_modules, mutation_survivors_sum, len(notest_modules), notest_error)
+    build_index(IndexModel(
+        collection=collection,
+        repo=repo,
+        report_link=report_link,
+        skip_note={**plan.skip_note, **manifest_note},
+        synthesis=synthesis,
+        mutation_modules=mutation_modules,
+        mutation_survivors_sum=mutation_survivors_sum,
+        notest_count=len(notest_modules),
+        notest_error=notest_error,
+    ))
     if mutation_modules or notest_modules or notest_error:
         build_mutation_subindex(collection, repo, mutation_modules, notest_modules, notest_total, notest_error)
 
