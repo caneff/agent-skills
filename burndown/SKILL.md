@@ -30,8 +30,7 @@ continue, since the tracker and the progress file hold all the state.
 
 Mirrors `implement-spec`: one Run, one Task per ticket, dependencies as
 blocking edges, workers via Orca `claude` at the model exploration's size tag
-picks (§ below) — `sonnet` for docs-only and one-file, `opus` for multi-file,
-the top tier only when the ticket names it — frontier = Orca's ready-task
+picks (step 4 has the mapping), frontier = Orca's ready-task
 query. Unlike `implement-spec`, the
 ticket set is not fixed up front — the queue is mixed-origin and re-listed
 every pass, so a task is created for a ticket only once it enters the
@@ -101,8 +100,7 @@ per-burn (step 3), run once regardless of how many batches follow.
    test-first step and Finish's review step entirely — commit, then report;
    no `code-review`, no `two-axis-code-review`. It still gets its own
    worktree, branch, and progress lines like every other ticket; only the
-   seed's build steps shrink. Step 5 never triggers for it — the coordinator
-   settles it straight out of this step, with no reviewer.
+   seed's build steps shrink (step 5 has what this means for review).
 
    For a one-file or multi-file ticket, two more lines go in every seed.
    First: read the
@@ -113,11 +111,12 @@ per-burn (step 3), run once regardless of how many batches follow.
    run both reviews (the built-in `code-review` skill and
    `~/.agents/skills/two-axis-code-review/SKILL.md`) on its own branch, then
    stop short of Finish's own PR step; the coordinator owns the PR, per
-   above. The review skills pin their own subagent models, not the
-   builder's: `two-axis-code-review/SKILL.md:86` passes `model: opus` to both
-   its spawned reviewers regardless of the builder's tier, so a sonnet-tier
-   build still gets an opus-tier two-axis review; the built-in `code-review`
-   carries no such pin and runs at the builder's own session model. What
+   above. The two-axis review pins its own subagent model, not the builder's:
+   `~/.agents/skills/two-axis-code-review/SKILL.md` passes `model: opus` to
+   both its spawned reviewers ("Pass `model: opus` to both.") regardless of
+   the builder's tier, so a sonnet-tier build still gets an opus-tier
+   two-axis review; the built-in `code-review` carries no such pin and runs
+   at the builder's own session model. What
    happens to each finding is this burn's rule, not Finish's: act
    on it, then lead the `worker_done` report with every finding both reviews
    raised, one of three dispositions each — **fixed**, **deferred: <why>**,
