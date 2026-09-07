@@ -63,9 +63,10 @@ these rules, which bind the worker, or you when you build inline:
 - For each acceptance criterion: failing test first, shown red, then the code
   that makes it pass. Implementation follows a red test.
 - Once a new or changed test is green, strip the constraint it claims to
-  verify (revert the fix, comment out the check) and confirm it now fails.
-  One that still passes is a hollow witness — fix it or drop it, never
-  commit it.
+  verify (revert the fix, comment out the check), confirm it now fails,
+  then restore it. One that still passes is a hollow witness — fix it or
+  drop it, never commit it. `two-axis-code-review` runs the same check
+  at Finish.
 - Typecheck and single test files as you go, the full suite once at the end.
 - A pre-existing bug, performance concern, or unmentioned behavior found
   along the way: don't fix or extend it unless the ticket's behavior cannot
