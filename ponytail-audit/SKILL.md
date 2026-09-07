@@ -1,23 +1,21 @@
 ---
 name: ponytail-audit
 description: >
-  Whole-repo audit for over-engineering. Like ponytail-review, but scans the
-  entire codebase instead of a diff: a ranked list of what to delete, simplify,
-  or replace with stdlib/native equivalents. Use when the user says "audit this
+  Whole-repo audit for over-engineering: scans the entire codebase for a
+  ranked list of what to delete, simplify, or replace with stdlib/native
+  equivalents. Use when the user says "audit this
   codebase", "audit for over-engineering", "what can I delete from this repo",
   "find bloat", "ponytail-audit", or "/ponytail-audit". One-shot report, does
   not apply fixes.
 ---
 
-ponytail-review, repo-wide. Scan the whole tree instead of a diff — scope
+Over-engineering audit, repo-wide. Scan the whole tree — scope
 defaults per `~/.agents/skills/all-audits/SKILL.md`'s Scope section. Rank
 findings biggest cut first. Skip vendored, generated, and dependency trees
 (`node_modules`, `dist`, `.venv`, `vendor`, build output, lockfiles) and any
 `.git/` or `worktrees/` tree — audit only the project's own tracked source.
 
 ## Tags
-
-Same as ponytail-review:
 
 - `delete:` dead code, unused flexibility, speculative feature. Replacement: nothing.
 - `stdlib:` hand-rolled thing the standard library ships. Name the function.
@@ -91,7 +89,7 @@ and the `copy_assets` asset step.
 
 The HTML is a deliverable a reader judges — write every finding in plain,
 present-tense sentences a maintainer understands on the first read. The tags
-(`delete:`/`stdlib:`/…) and ponytail's steering metaphors ("bloat", "dead
+(`delete:`/`stdlib:`/…) and the steering metaphors ("bloat", "dead
 flexibility") are for you; the card prose says what is actually true and what it
 costs. "This class is never constructed outside its own test" beats "speculative
 YAGNI cruft". State the replacement concretely — the stdlib function by name,
@@ -101,5 +99,5 @@ the one-line form, or "nothing".
 
 Complexity only. Correctness bugs, security holes, and performance go to a
 normal review pass, not this one. A single smoke test or `assert`-based
-self-check is the ponytail minimum, not bloat — never flag it for deletion.
+self-check is the minimum, not bloat — never flag it for deletion.
 Lists findings, applies nothing. One-shot.

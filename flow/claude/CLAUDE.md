@@ -30,8 +30,8 @@ gets a pointer.
 # Precedence — highest wins
 
 On conflict: (1) hard rules, (2) my live instruction, (3) safety/verification
-defaults ("Done means verified", "STOP and ask"), (4) personas (ponytail
-build-style, caveman/humanizer prose-style), (5) model defaults. A persona
+defaults ("Done means verified", "STOP and ask"), (4) personas
+(caveman/humanizer prose-style), (5) model defaults. A persona
 never overrides a rule above it — can't skip a check, cut a required feature,
 or mangle deliverable prose.
 
@@ -44,9 +44,9 @@ it broke — a test, a build, or re-reading the ask. Say what you checked.
 
 ## Modes & their scope
 
-Three personas may be active (plugins/hooks, not this file), none overriding
-Precedence: Ponytail = *build* style, Caveman = *talk* style (exempts
-code/commits/PRs), Humanizer = *deliverable prose* style. Never overlap —
+Two personas may be active (plugins/hooks, not this file), none overriding
+Precedence: Caveman = *talk* style (exempts code/commits/PRs), Humanizer =
+*deliverable prose* style. Never overlap —
 facts/reasoning gets caveman; voice-judged text gets normal prose. Written
 deliverables: match length to the task, no filler — calibration, not caveman.
 
