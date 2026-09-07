@@ -12,7 +12,7 @@ which is version-matched to the binary.
 
 The coordinator's job is judgment and git surgery over a long session: start
 it as `opus`, not the top tier — `sonnet` is the experiment to run once the
-cost file (a later ticket) shows the coordinator's own share of the burn.
+cost file (step 6) has a few burns' numbers behind it.
 
 A single spec's slices in one Orca workspace are
 [`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this skill's.
@@ -36,25 +36,38 @@ ticket set is not fixed up front — the queue is mixed-origin and re-listed
 every pass, so a task is created for a ticket only once it enters the
 frontier, and a landing or a human adding tickets can grow the queue mid-burn.
 
-One **exploration** pass, first pass only, covering every ticket this burn
-can reach — step 1's listing in dependency order, cut at the ticket cap, not
-just the first pass's frontier — that every ticket task depends on. The cap is
-sized for this read: at 15 tickets it fits a 200k window with room to think;
-past 20 it skims. For each ticket, exploration records a size tag — docs-only
-(no code file touched: a SKILL.md, hook, settings.json, or CI config counts as
-code per the owner's Gate 2), one-file, or multi-file — in the notes. Notes go
-to `~/.cache/burndown/<repo dir name>.notes.md`,
-outside the repo so every worker can read them, and are kept after the burn.
-A later pass that lists a ticket not in the pass-1 queue explores that ticket
-alone and appends to the same file.
+**Exploration runs in two stages.** The **shallow pass** goes once over every
+ticket this burn can reach — step 1's listing in dependency order, cut at the
+ticket cap, not just the first pass's frontier — and records three things per
+ticket and nothing else: the files it would touch, its size tag, and its
+collisions. The **deep read** runs per batch, over that batch's tickets only,
+immediately before dispatch: the ticket read end to end, the code its acceptance
+criteria land in, and the grill-decision check below. Reading every ticket
+deeply up front spends a builder's worth of context on tickets a later batch may
+never reach. The cap is sized for the shallow pass: at 15 tickets it fits a 200k
+window with room to think; past 20 it skims.
 
-Exploration must report **collisions**: any file two tickets in the batch would
-both touch. Resolve every collision before dispatching — narrow one ticket's
-scope to what its own issue already permits, or serialise the pair — and say in
-each builder's seed which files are its own. Two builders editing one file is a
-merge conflict the coordinator caused.
+The size tag is docs-only (no code file touched: a SKILL.md, hook,
+settings.json, or CI config counts as code per the owner's Gate 2), one-file, or
+multi-file.
 
-Exploration also **checks every grill decision against the code it rests on.**
+Both stages write one notes file, `~/.cache/burndown/<repo dir name>.notes.md`,
+outside the repo so every worker can read it, kept after the burn. Its layout is
+fixed: a `## Collisions` section first, then one `## #<n>` section per ticket,
+in number order. The shallow pass lays the file out; every later pass appends —
+a batch's deep read into the sections it covers, a ticket the shallow pass never
+saw into a new section of its own. Nothing rewrites what an earlier pass wrote.
+A builder's seed names the file, its own `## #<n>` section, and the collisions
+header — never the whole file, which hands one builder every other ticket's
+detail to wade through.
+
+The shallow pass must report **collisions**: any file two tickets would both
+touch. Resolve every one before dispatching batch 1 — narrow one ticket's scope
+to what its own issue already permits, or serialise the pair — and say in each
+builder's seed which files are its own. Two builders editing one file is a merge
+conflict the coordinator caused.
+
+The deep read **checks every grill decision against the code it rests on.**
 A ticket's grill comment often overrides its body, and it is written from
 memory of how a component behaves. For each decision that asserts runtime
 behaviour ("the mask is always on in puzzle mode", "the server resizes before
@@ -64,9 +77,9 @@ decision is a ruling for the human, posted on the issue before dispatch, not a
 P0 for a reviewer to find after the build (#130 cost a build, a review round
 and a ruling comment that way).
 
-Exploration is read-only and needs no worktree, terminal, or Orca task: run it
-as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`) and read
-its result directly. **Only builders are Orca tasks** — they are the only
+Both stages are read-only and need no worktree, terminal, or Orca task: run
+each as an in-process `Explore` subagent (`Agent` tool, `model: sonnet`) and
+read its result directly. **Only builders are Orca tasks** — they are the only
 workers that write code and need their own worktree and branch. Everything
 read-only, exploration and review both, is an in-process subagent.
 
@@ -74,8 +87,9 @@ read-only, exploration and review both, is an in-process subagent.
 
 The loop's unit is the batch: dispatch every builder in a batch together,
 wait, settle every ticket in it, and only then re-list for the next frontier
-— there is no per-slot refill (step 8 has the rule). Exploration itself stays
-per-burn (step 3), run once regardless of how many batches follow.
+— there is no per-slot refill (step 8 has the rule). Exploration straddles
+both: its shallow pass runs once per burn, its deep read once per batch
+(step 3).
 
 1. List the queue: `gh issue list --label ready-for-agent --state open`.
    Empty, with nothing in flight → report and stop.
@@ -84,12 +98,14 @@ per-burn (step 3), run once regardless of how many batches follow.
    slots. That set is this pass's batch. Before dispatching, pull out any
    ticket that is a sub-issue of a `spec`-labelled parent: those go through
    § Spec handoff as one unit per spec, and the spec takes one worker slot.
-3. First pass only: run exploration (above) as a subagent and wait for its
-   result before dispatching builders. Every later pass skips this and points
-   its workers at the same notes file.
+3. **Explore** (§ Shape). First pass only: run the shallow pass over the whole
+   reachable queue and resolve its collisions. Then, every pass: run this
+   batch's deep read as a subagent and wait for its result before dispatching
+   builders.
 4. **Build.** Dispatch one Orca task per ticket in the batch, running the
    [`implement`](~/.agents/skills/implement/SKILL.md) skill's § Build by pointer — the
-   issue reference, the notes path, and the branch base, never a summary.
+   issue reference, the notes path with the ticket's own `## #<n>` section and
+   the `## Collisions` header named, and the branch base, never a summary.
    Pass the model on `worker-start --model`, from exploration's size tag:
    `sonnet` for docs-only and one-file, `opus` for multi-file, the top tier
    only when the ticket names it.
@@ -147,8 +163,10 @@ per-burn (step 3), run once regardless of how many batches follow.
    and needs an answer; only the status-poll workaround for finding one is
    moot now that there's no task-list poll to miss it (§ Waiting on Orca
    workers has the one-wait-per-wake mechanics).
-5. **Review.** A docs-only ticket never reaches this step — § 4's docs-only
-   lane settles it straight into step 6 with no reviewer. For a one-file or
+5. **Review.** A docs-only ticket skips straight into step 6 with no reviewer,
+   but only while `git diff --name-only <range>` shows no code file (§ Shape
+   defines the term): a code file in the diff means the size tag was wrong, and
+   the file-set trigger below fires as for any ticket. For a one-file or
    multi-file ticket, the coordinator spawns its own in-process reviewer only
    on one of two triggers: the builder's report defers or disputes a finding, or the
    branch's changed files (`git diff --name-only <range>`, checked against
@@ -205,6 +223,25 @@ per-burn (step 3), run once regardless of how many batches follow.
    a stale base needs no warning: the PR reports the conflict against the pushed
    default branch, so a real collision surfaces there and parks the ticket.
 
+   Then **record what the ticket cost**: run
+   `python3 ~/.agents/skills/burndown/cost.py <worktree>` and append one line
+   to `~/.cache/burndown/<repo dir name>.cost` — beside the progress file,
+   never in it; step 7's grammar is untouched. One line per settled ticket,
+   five space-separated integers:
+
+   ```
+   <n> <builder> <review> <coord-review> <rounds>
+   ```
+
+   `<builder>` and `<review>` are the script's first two numbers: main-line and
+   sidechain tokens in that worktree's transcripts — the build, and the
+   builder's own two reviews. `<coord-review>` is the tokens the step 5
+   reviewer reported at its completion, `0` when none ran: it is an in-process
+   subagent, so its transcript is the coordinator's, not the worktree's, and
+   the script cannot see it. `<rounds>` is how many step 5 rounds the ticket
+   took, `0` when it skipped review. Nothing in the loop reads this file back —
+   it is read between burns.
+
    Then **tear down the ticket's worktree**. `git status --porcelain` in it
    first and keep it if anything is uncommitted or untracked; otherwise
    `orca-ide worktree rm --worktree name:<name> --force`. Orca does not do this
@@ -230,7 +267,8 @@ per-burn (step 3), run once regardless of how many batches follow.
    for that ticket — `pr` followed by `landed` is one ticket, merged.
    This is the single documented home for the grammar — nothing else restates it.
 8. Once every ticket in the batch has settled or parked, re-list the queue
-   for the next frontier: go to 1, skipping step 3. Re-list every pass — a
+   for the next frontier: go to 1 — step 3 runs its deep read again, not its
+   shallow pass. Re-list every pass — a
    landing can unblock tickets, and a human may have added more. There is no
    per-slot refill: a settled ticket's slot sits idle until every ticket in
    its batch has settled or parked, so the frontier taken in step 2 is always
