@@ -158,7 +158,12 @@ merge_skill(){ (
 # tree, so the hand merge happens on the real files and the commit that follows
 # records the resolution, never the markers.
 # Sets the globals `merged`, `conflicted`, `nobase` and `report`.
+# Every git call below runs on the working tree, so the FIRST thing it does is
+# cd into $SKILLS. main() is already there, but a caller that is not (a test,
+# a sourced shell) would otherwise have the protection loop stage and COMMIT
+# whatever repo it happened to be standing in.
 protect_skills(){
+  cd "$SKILLS" || return 1
   local PRE=$1 POST=$2 prelock=$3 s base rc out name hash cur
   # Protected set = AUTO-DETECTED (pre-update on-disk tree diverged from the
   # PRE-UPDATE lock hash, i.e. from the upstream version you had installed)
