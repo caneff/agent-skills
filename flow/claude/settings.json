@@ -28,7 +28,6 @@
       "Bash(rtk git fetch)",
       "Bash(rtk git worktree *)",
       "Bash(rtk git worktree:*)",
-      "Bash(land)",
       "Bash(node *)",
       "Bash(pushpr)",
       "Bash(pushpr:*)",

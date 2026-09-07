@@ -109,6 +109,12 @@ drives TDD → `/code-review` + `/two-axis-code-review` → commit with
   yourself, or merged branches pile up in the sidebar.
 - `head`/`tail` are for looking, not measuring — use `wc -l`/`grep -c` before
   treating file contents as a premise.
+- To show me a file, open it in Orca's editor: `orca-ide file open <path>
+  [--worktree <selector>]` (`file diff`, `file open-changed` likewise). Never
+  print a path and ask me to open it.
+- Never `pkill -f`/`pgrep -f` a pattern that appears in your own command line —
+  it kills your shell (exit 143). Bracket a character (`'zb[.]py hunt'`) or kill
+  by PID from a separate listing.
 - Prefer a surgical edit over rewriting the whole file when the result is the
   same — whole-file rewrites waste output tokens and time.
 - When summarizing a source, reword it; any verbatim phrase gets quotation
@@ -119,8 +125,6 @@ drives TDD → `/code-review` + `/two-axis-code-review` → commit with
 
 @RTK.md
 
-<!-- retro flag: the memory rule about staying quiet when `ship` fails after a
-push is stale — `ship` was deleted for the land lane (issues #461–#465). -->
 # second-brain vault memory (auto-imported by the weekly retro)
 @/home/caneff/src/second-brain-v2/Memory/RULES.md
 @/home/caneff/src/second-brain-v2/Memory/SOUL.md

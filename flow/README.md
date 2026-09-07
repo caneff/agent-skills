@@ -58,3 +58,7 @@ git clone <agent-skills>  ~/.agents/skills   # or wherever it lives
   which is its own repo — back that up there, not here.
 - `settings.local.json` is machine-local by convention; it's kept for disaster
   recovery, but review it before linking on a second machine.
+- Output styles: `/output-style` is gone (v2.1.91+); the style is picked in
+  `/config` and stored as `outputStyle` in settings.json. The menu shows the
+  style file's frontmatter `name:`, not its filename — set that, then `/clear`
+  so the new session loads it.
