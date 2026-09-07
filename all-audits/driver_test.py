@@ -232,7 +232,10 @@ def test_index_from_manifests_missing_manifest_is_a_failure_row():
         assert "no manifest" in index_text, "duplication (no manifest written) must render as a named failure"
 
 
-_GIT_ENV_LEAKS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")
+_GIT_ENV_LEAKS = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+)
 
 
 def _init_git_repo(path):
@@ -254,7 +257,8 @@ def test_init_git_repo_ignores_leaked_git_dir():
     GIT_DIR made `git init` on a /tmp path silently reinitialize that other
     repo instead and rewrite its .git/config."""
     with tempfile.TemporaryDirectory() as victim, tempfile.TemporaryDirectory() as target:
-        subprocess.run(["git", "init", "-q", victim], check=True)
+        clean_env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_LEAKS}
+        subprocess.run(["git", "init", "-q", victim], check=True, env=clean_env)
         config_path = os.path.join(victim, ".git", "config")
         before = open(config_path).read()
 
