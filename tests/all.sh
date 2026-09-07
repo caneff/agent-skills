@@ -5,7 +5,9 @@
 # `--selfcheck` runs with that flag. One line per suite; exits non-zero on
 # the first failure (and prints that suite's output). `--list` prints the
 # labels the rules select, without running anything.
-set -u
+# -f: suite commands are word-split out of the tab-separated list, so keep
+# the shell from globbing a path that happens to contain a wildcard.
+set -uf
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root" || exit 1
 
@@ -21,10 +23,11 @@ suites() { # prints "<label>\t<command>" per discovered suite
     done
 }
 
-if [ "${1:-}" = --list ]; then
-  suites | cut -f1
-  exit 0
-fi
+case "${1:-}" in
+  --list) suites | cut -f1; exit 0 ;;
+  "") ;;
+  *) echo "usage: tests/all.sh [--list]" >&2; exit 2 ;;
+esac
 
 count=0
 while IFS=$'\t' read -r label cmd; do
