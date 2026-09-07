@@ -142,6 +142,12 @@ stages sit either side of that line (step 3).
    name — the one thing the contract has no reason to know the coordinator
    needs. The fix round (step 5) reports the same way.
 
+   The seed also names the ticket's **addenda file**,
+   `~/.cache/burndown/addenda/<n>.md`, and says the coordinator appends to it:
+   that is where a mid-build message lands (§ Holding the builder). The builder
+   checks every entry off against its diff before its final commit, as
+   `implement`'s § Finish addenda check does.
+
    One rule goes in every seed, docs-only included: a question
    to the coordinator that times out is not a stop — take the safe option, the
    one a reviewer can reverse in a single commit, keep building, and put the
@@ -316,6 +322,13 @@ findings text — then `worker-start --task <id> --worktree name:<wt>
 agent keeps its context, so the round costs no Orca startup and no
 re-reading of the ticket and notes. Release at settle or when the ticket
 parks, never before.
+
+A **mid-build message** to a live builder — an addendum from the owner, a
+scope correction, an order to cut the ticket short — is appended to that
+ticket's `~/.cache/burndown/addenda/<n>.md` as its own entry **before** it is
+sent. Sending it alone leaves nothing for the builder's pre-commit check to
+find, which is how four PRs shipped without the change they were told about
+mid-build.
 
 The coordinator's wait, from dispatch through settle, covers `question` and
 `escalation` alike, not just `worker_done` — a blocking question is real
