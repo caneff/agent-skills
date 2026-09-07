@@ -12,6 +12,7 @@ Callers own escaping: `kicker`, `h1`, `lede` and `body` are inserted as HTML
 so a caller can put markup in a heading. Escape untrusted text with
 `html.escape` before passing it.
 """
+import html
 import os
 import shutil
 
@@ -32,7 +33,7 @@ def page(title, kicker, h1, lede, body, *, prefix="", extra_css=""):
         "<!doctype html>\n<html lang=\"en\">\n<head>\n",
         '<meta charset="utf-8">\n',
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n',
-        f"<title>{title}</title>\n",
+        f"<title>{html.escape(title)}</title>\n",
         f'<link rel="stylesheet" href="{prefix}assets/base/base.css">\n',
         f'<link rel="stylesheet" href="{prefix}assets/components/callout/callout.css">\n',
         f'<script src="{prefix}assets/base/base.js"></script>\n',
