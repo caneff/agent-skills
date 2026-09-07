@@ -118,10 +118,15 @@ read-only, exploration and review both, is an in-process subagent.
    against the ticket's acceptance criteria and the questions in
    `~/.agents/skills/two-axis-code-review/SKILL.md` — correctness first, then
    spec/standards — doing the correctness pass **in your own context** and
-   applying the two-axis review **by reading it**; never invoke the built-in
-   `code-review` skill and never fork a review agent — that nested layer is
-   what hung every reviewer in one burn. Send the verdict with the message
-   tool **before** going idle, and arm no background wait afterwards.
+   applying the two-axis review **by reading it**, not by invoking the
+   built-in `code-review` skill. The binding rule is about turns, not tools:
+   **a reviewer never ends a turn with a fork outstanding.** Anything it does
+   launch in the background (`code-review` forks one) it blocks on with
+   `TaskOutput` (`block: true`) until the result is back — a subagent whose
+   turn ends while a fork is running goes idle, and the fork's completion
+   does not wake it; one burn's reviewer sat thirty minutes on a finished
+   verdict that way. Send the verdict with the message tool as the last act
+   of the turn, and arm no background wait afterwards.
 
    A reviewer silent for ten minutes is killed and a fresh one spawned on the
    same seed; it is not prodded a second time. The reviewer owns the verdict,
