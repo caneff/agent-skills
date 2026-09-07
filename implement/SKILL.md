@@ -181,8 +181,12 @@ and the run is not done until the merge line is handed over.
    primary checkout:
 
    ```
-   ! merge-cleanup <full branch name>
+   ! cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> <full branch name>
    ```
+
+   Expand both paths yourself. `--repo` defaults to the shell's cwd, and this
+   line is pasted from the workspace the cleanup is about to delete — a
+   relative run would tear down its own checkout mid-step.
 
 If `origin`'s owner is not the person you are working for, push the branch and
 stop — hand them the `gh pr create` line instead of opening it yourself.

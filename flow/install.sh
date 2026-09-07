@@ -34,6 +34,9 @@ for h in block-dangerous-git.sh refresh-landed.sh require-agent-model.sh package
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
 done
 for a in "$here/claude/agents"/*.md; do
+  # An empty dir leaves the literal glob, and `link` failing on it would abort
+  # the install before backup-sync.sh ever runs.
+  [ -e "$a" ] || continue
   link "claude/agents/$(basename "$a")" "$HOME/.claude/agents/$(basename "$a")"
 done
 # Renamed from sync-primary-main.sh to refresh-landed.sh: drop the stale
