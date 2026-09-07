@@ -5,17 +5,16 @@ description: Turn a review finding or chat conclusion into a tracked issue, one-
 
 # File Ticket
 
-One-shot capture: the thing just discussed becomes one issue, labeled
-`needs-triage`, in the current repo's tracker. Not `to-tickets` (spec
-slicing) and not `/triage` (sorting an existing backlog) — this only fires
-on a direct "file it" request.
+One-shot capture: the thing just discussed becomes one tracked issue. This
+lands the issue deliberately *before* the tracker's grilling gate — capture
+first, `/triage` routes it later.
 
 ## Resolve the target
 
 "File it" points at the most recent finding or conclusion in the
 conversation. "File 1" or "the label collision" narrows it. A request that
-names more than one target files one issue per target, run through this
-same process each time.
+names more than one target repeats **Write the issue** through **Create it**
+once per target.
 
 If it's unclear which finding "it" refers to — more than one was raised and
 none was named — **ask one question** listing the candidates. Do not
@@ -23,27 +22,36 @@ guess and do not create an issue until the target is confirmed.
 
 ## Write the issue
 
-- **Title**: short, imperative, matches this repo's existing style — sample
-  recent titles with `gh issue list --repo <owner>/<repo> --limit 20 --json
-  title` before writing one from scratch.
-- **Body**: three parts — what (the finding or conclusion, in your own
-  words), where (file:line, command output, or the part of the conversation
-  it came from), evidence (the concrete detail that makes it checkable: a
-  grep hit, an error string, a repro step).
-- **Label**: the triage role this repo calls `needs-triage` — read
-  `docs/agents/issue-tracker.md` (or wherever the repo's setup skill points)
-  for the tracker convention and its triage-label mapping if one exists;
-  fall back to the literal string `needs-triage` when no mapping doc exists.
+- **Title**: short, imperative, matches this repo's tone, under about 70
+  characters.
+- **Body**: two to five sentences, covering — what (the finding or
+  conclusion, in your own words), where (durable anchors: file plus symbol
+  or grep string, never a line number — those drift), evidence (the
+  concrete detail that makes it checkable: a grep hit, an error string, a
+  repro step), and a trailing "Filed from" line naming the source
+  (conversation, review, digest).
+- **Label**: the triage-label mapping should have been provided to you —
+  it names the role for "needs a human to evaluate this"; use that label.
+  When the finding is obviously a bug or an enhancement, add that label
+  too.
 
 ## Create it
 
-Every `gh` call in this skill carries an explicit `--repo`, even though the
-tracker doc's own examples omit it — infer `owner/repo` from `git remote -v`
-in the current worktree, never rely on `gh`'s cwd-inference alone:
+Pass `--repo <owner>/<repo>` on every `gh` call. Read the owner/repo pair
+from the `origin` remote (`git remote -v`) — if `origin`'s owner isn't your
+`gh` login, hand the command back instead of filing it yourself.
+
+Build the body through a heredoc so evidence text (backticks, `$(...)`,
+`$N`) isn't shell-expanded:
 
 ```
-gh issue create --repo <owner>/<repo> --title "<title>" --body "<body>" --label needs-triage
+gh issue create --repo <owner>/<repo> --title "<title>" \
+  --label "<needs-triage label>[,<bug-or-enhancement label>]" \
+  --body "$(cat <<'EOF'
+<body>
+EOF
+)"
 ```
 
-`gh issue create` prints the new issue's URL on success — print that URL
-back **bare**, on its own line, nothing else wrapped around it.
+Filing more than one target prints one URL per line, in the order the
+targets were given.

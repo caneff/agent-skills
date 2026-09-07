@@ -15,7 +15,7 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
   - Type: `gh issue create ... --type <name>` — only a type the org defines. `gh` errors on an unknown name, and types are unavailable on user-account repos, so omit `--type` when none exist.
 - **Close**: `gh issue close <number> --comment "..."`
 
-Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
+Pass `--repo <owner>/<name>` on every `gh` call; read the pair once from `git remote -v`. Without it `gh issue view` can print nothing and exit 0 (worktrees, cwd outside the clone), and `gh api` paths need the pair anyway.
 
 ## Grilling gate on new tickets
 
