@@ -82,12 +82,21 @@ done
 
 # --- Bare force-push: blocked. `--force-with-lease` is fine (the lease refuses
 # to clobber commits this clone hasn't seen), and still goes through the
-# ownership gate below like any other push. ---
-if echo "$SCAN" | grep -qE 'push([[:space:]].*)?[[:space:]](--force([[:space:]]|$)|-f([[:space:]]|$))' \
-   && ! echo "$SCAN" | grep -q 'force-with-lease'; then
-  echo "BLOCKED: bare force-push in '$COMMAND' can destroy commits on origin. Use '--force-with-lease', or hand the user the exact '! git push --force ...' line." >&2
-  exit 2
-fi
+# ownership gate below like any other push. Judged per command segment: a
+# `--force` that belongs to another command in the chain (`worktree rm
+# --force`) or a `push` that is only a word in a path (`hooks/pre-push`) is
+# not a force-push (#637). ---
+is_force_push_segment() {
+  echo "$1" | grep -qE '(^|[[:space:]])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push([[:space:]]|$)' \
+    && echo "$1" | grep -qE '[[:space:]](--force([[:space:]]|$)|-f([[:space:]]|$))' \
+    && ! echo "$1" | grep -q 'force-with-lease'
+}
+while IFS= read -r segment; do
+  if is_force_push_segment "$segment"; then
+    echo "BLOCKED: bare force-push in '$COMMAND' can destroy commits on origin. Use '--force-with-lease', or hand the user the exact '! git push --force ...' line." >&2
+    exit 2
+  fi
+done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g')
 
 # --- Ownership of this repo, cached. ---
 # Verdict is keyed on the repo's toplevel path. Only the OWNED verdict is
