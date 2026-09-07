@@ -284,9 +284,6 @@ def _selfcheck():
 
 
 def main(argv):
-    if argv[1:2] == ["--selfcheck"]:
-        _selfcheck()
-        return
     if argv[1:2] == ["--suggest"]:
         root = argv[2] if len(argv) > 2 else "."
         for candidate in suggest_candidates(auditlib.walk_source(root)):
@@ -300,9 +297,8 @@ def main(argv):
         worthy = sum(1 for p in paths if _sibling_tests(p) is not None)
         print(json.dumps({"no_tests": no_test_modules(paths), "total": worthy}))
         return
-    text = sys.stdin.read() if len(argv) < 2 else open(argv[1], encoding="utf-8").read()
-    for row in parse_mutmut_results(text):
-        print(json.dumps(row))
+    # `--selfcheck` and the file/stdin parse path go through auditlib.run_cli.
+    auditlib.run_cli(argv, _selfcheck, parse_mutmut_results)
 
 
 if __name__ == "__main__":

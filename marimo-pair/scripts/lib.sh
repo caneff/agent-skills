@@ -44,14 +44,14 @@ parse_proc_net_route() {
 # first, then falls back to reading the kernel route table directly (no
 # iproute2). Echoes the address, or nothing if it cannot be determined.
 find_gateway() {
-  local route_file="${1:-/proc/net/route}" gateway=""
+  local gateway=""
   if command -v ip >/dev/null 2>&1; then
     # `|| gateway=""` keeps `set -e` from killing the caller before the
     # fallback runs.
     gateway=$(ip route show default 2>/dev/null | awk 'NR == 1 { print $3 }') || gateway=""
   fi
   if [[ -z "$gateway" ]]; then
-    gateway=$(parse_proc_net_route "$route_file")
+    gateway=$(parse_proc_net_route /proc/net/route)
   fi
   printf '%s' "$gateway"
 }
