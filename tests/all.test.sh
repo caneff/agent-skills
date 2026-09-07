@@ -23,7 +23,7 @@ root="$(git rev-parse --show-toplevel)"
 shadow=$(mktemp -d)
 trap 'rm -rf "$shadow"' EXIT
 
-git clone -q --no-hardlinks "$root" "$shadow"
+git clone -q --no-hardlinks "$root" "$shadow" || { echo "FAIL: could not create shadow clone"; exit 1; }
 before=$(cat "$shadow/.git/config")
 
 (

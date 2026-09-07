@@ -292,8 +292,7 @@ def test_init_git_repo_ignores_leaked_git_dir():
         config_path = os.path.join(victim, ".git", "config")
         before = open(config_path).read()
 
-        saved = {k: os.environ.get(k) for k in
-                  ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")}
+        saved = {k: os.environ.get(k) for k in _GIT_ENV_LEAKS}
         os.environ["GIT_DIR"] = os.path.join(victim, ".git")
         os.environ["GIT_WORK_TREE"] = victim
         try:
