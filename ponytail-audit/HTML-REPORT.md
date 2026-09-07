@@ -1,7 +1,8 @@
 # HTML Report Format
 
-For the shared render mechanism — asset delivery, scaffold rules, the
-`type="module"` warning, theme toggle — see
+The page shell and its assets are not this doc's business — render through
+`pagelib.page()` and deliver the assets with `pagelib.copy_assets()`, both
+described in
 [`all-audits/harness/HTML-REPORT.md`](../all-audits/harness/HTML-REPORT.md).
 For the report's overall shape — verdict, top cut, ranked cards, Deliberately
 leaving alone — see this skill's own `SKILL.md`. Everything below is what

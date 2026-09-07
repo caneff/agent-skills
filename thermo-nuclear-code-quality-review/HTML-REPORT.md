@@ -6,20 +6,18 @@ The centrepiece of most findings is a **before/after code block**, not a graph �
 
 A committed sample lives at [`sample/code-quality-review-sample.html`](sample/code-quality-review-sample.html). Open it, toggle the theme, and read it as the reference for everything below.
 
-For the shared asset-delivery mechanism (copy the `vt-*` assets beside the
-report, scaffold rules, the `type="module"` warning, theme toggle) see
+Render the page with `pagelib.page()` and deliver its assets with
+`pagelib.copy_assets()` — see
 [`all-audits/harness/HTML-REPORT.md`](../all-audits/harness/HTML-REPORT.md).
 
-> The committed sample is the one exception to copy-at-render-time: it lives
-> in the repo, so it links the vendored copies at
-> `../../visual-teach/assets/base/…` and
-> `../../visual-teach/assets/components/…` instead of copying them. Same
+> The committed sample is the one exception: it lives in the repo, so it
+> links the vendored copies at `../../visual-teach/assets/base/…` and
+> `../../visual-teach/assets/components/…` instead of getting its own. Same
 > relative-link model, fixed location.
 
 ## Scaffold
 
-Fills the harness's page shell (see `all-audits/harness/HTML-REPORT.md`
-"Page shell") with: `{{title}}` = `Code quality review — {{repo name}}`,
+Fills the harness's page shell with: `{{title}}` = `Code quality review — {{repo name}}`,
 `{{kicker}}` = `Thermo-nuclear code quality review`, `{{h1}}` = `{{repo}} ·
 branch {{branch}}`, verdict = the honest state of the code in one sentence.
 Components: `callout`, `chip`, `code`, `diagram` — plus Prism grammars

@@ -6,19 +6,17 @@ The architectural review is rendered as a single self-contained HTML file in the
 
 A committed sample lives at [`sample/architecture-review-sample.html`](sample/architecture-review-sample.html). Open it, toggle the theme, and read it as the reference for everything below.
 
-For the shared asset-delivery mechanism (copy the `vt-*` assets beside the
-report, scaffold rules, the `type="module"` warning, theme toggle) see
+Render the page with `pagelib.page()` and deliver its assets with
+`pagelib.copy_assets()` — see
 [`all-audits/harness/HTML-REPORT.md`](../all-audits/harness/HTML-REPORT.md).
 
-> The committed sample is the one exception to copy-at-render-time: it lives
-> in the repo, so it links the vendored copies at
-> `../../visual-teach/assets/…` instead of copying them. Same relative-link
-> model, fixed location.
+> The committed sample is the one exception: it lives in the repo, so it
+> links the vendored copies at `../../visual-teach/assets/…` instead of
+> getting its own. Same relative-link model, fixed location.
 
 ## Scaffold
 
-Fills the harness's page shell (see `all-audits/harness/HTML-REPORT.md`
-"Page shell") with: `{{title}}` = `Architecture review — {{repo name}}`,
+Fills the harness's page shell with: `{{title}}` = `Architecture review — {{repo name}}`,
 `{{kicker}}` = `Improve codebase architecture`, `{{h1}}` = `{{repo}} ·
 deepening review`, verdict = the shape of the code in one sentence.
 Components: `callout`, `chip`, `code`, `diagram` — plus Prism grammars

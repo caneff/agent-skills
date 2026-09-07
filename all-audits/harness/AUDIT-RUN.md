@@ -36,7 +36,8 @@ Write every finding to `findings.jsonl`, then draw a grouped summary
 the summary's grouped-overview shape. Resolve `<tmpdir>` from `$TMPDIR`,
 falling back to `/tmp`. Write both to `<tmpdir>/<skill>-<timestamp>/`, then
 open the summary and hand off its path per
-[`HTML-REPORT.md`](HTML-REPORT.md)'s asset-delivery section. Print the
+[`HTML-REPORT.md`](HTML-REPORT.md), whose `pagelib.page()` /
+`pagelib.copy_assets()` render the page and deliver its assets. Print the
 one-line verdict and the summary's absolute path, nothing else.
 
 ## The manifest (#559)
