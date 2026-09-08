@@ -49,10 +49,14 @@ IFS=$'\t' read -r tool background id <<<"$(field '
 cmd=$(field '.tool_input.command // ""')
 
 # Already under job-run: a record exists, so wrapping again would only risk
-# nesting, and warning about a missing record would be a lie. Anchored, not a
-# substring — a command that merely mentions job-run (`grep job-run flow/bin/*`)
-# is an ordinary job and deserves its record.
-case "$cmd" in "job-run "*|*"job-run --name "*) exit 0 ;; esac
+# nesting, and warning about a missing record would be a lie. Matched only where
+# a command can start — the head of the line, or after a separator — so a job
+# that merely mentions or quotes the phrase (`grep -r 'job-run --name ' .`) is an
+# ordinary job and deserves its record.
+case "$cmd" in
+  "job-run "*|*[\;\&\|]" job-run "*|*[\;\&\|]"job-run "*|*"
+job-run "*) exit 0 ;;
+esac
 
 skip() { # skip <why> — pass the call through, and say a record will not exist
   jq -nc --arg m "job-run: $1, so this background job runs unwrapped and will leave no record. \`job-run --status\` will not find it." \

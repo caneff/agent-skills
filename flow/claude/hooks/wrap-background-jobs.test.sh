@@ -103,11 +103,21 @@ passthrough() { # passthrough <name> <path-dir> <json>
 silent "a foreground Bash call passes through untouched" withjr "$fg"
 silent "a Bash call with no run_in_background field passes through untouched" withjr "$noflag"
 silent "a command already running under job-run passes through untouched" withjr "$wrapped"
-mentions='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01AbCdEfGhIjKlMnOp","tool_input":{"command":"grep -r job-run flow/bin","run_in_background":true}}'
-got=$(fire withjr "$mentions"); body=${got#*|}
-printf '%s' "$body" | jq -e '.hookSpecificOutput.updatedInput.command' >/dev/null 2>&1 \
-  && ok "a command that merely mentions job-run is still wrapped" \
-  || no "a command that merely mentions job-run is still wrapped" "$body"
+# A command is "already wrapped" only where a command can start. Merely naming
+# the phrase, even in full, is an ordinary job and deserves its record.
+mentions_wrapped() { # mentions_wrapped <expectation> <command>
+  local want=$1 cmd=$2 body
+  body=$(fire withjr "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_use_id\":\"toolu_01AbCdEfGhIjKlMnOp\",\"tool_input\":{\"command\":$(printf '%s' "$cmd" | jq -Rs .),\"run_in_background\":true}}")
+  body=${body#*|}
+  local saw=skipped
+  printf '%s' "$body" | jq -e '.hookSpecificOutput.updatedInput.command' >/dev/null 2>&1 && saw=wrapped
+  [ "$saw" = "$want" ] && ok "$want: $cmd" || no "$want: $cmd" "saw $saw"
+}
+mentions_wrapped wrapped "grep -r job-run flow/bin"
+mentions_wrapped wrapped "grep -r 'job-run --name ' flow/"
+mentions_wrapped wrapped "echo 'use job-run --name x'"
+mentions_wrapped skipped "job-run --name x -- true"
+mentions_wrapped skipped "echo a; job-run --name x -- true"
 silent "a non-Bash tool call passes through untouched" withjr "$other"
 passthrough "a command the wrapper cannot take passes through" withjr "$nocmd"
 passthrough "job-run missing from PATH passes through" nojr "$bg"

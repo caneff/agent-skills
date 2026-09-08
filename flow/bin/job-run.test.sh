@@ -79,6 +79,27 @@ lines=$("$job_run" --name chatty -- sh -c 'seq 1 20000' 2>/dev/null | wc -l)
   || no "20000 lines reach both the caller and progress" \
        "caller=$lines progress=$(wc -l < "$jobs_dir/chatty/progress")"
 
+# --- the caller's stdin reaches the job --------------------------------------
+# bash hands an async command /dev/null, so without the fd this silently differs
+# from running the job unwrapped.
+got=$(echo hello | "$job_run" --name reads-stdin -- cat 2>/dev/null)
+[ "$got" = hello ] \
+  && ok "the caller's stdin reaches the job" \
+  || no "the caller's stdin reaches the job" "got=$got"
+
+# --- every progress timestamp is UTC, including the ones the wrapper writes ---
+# A job whose child outlives it makes the wrapper write the one progress line it
+# does not write from inside the tee. Under a non-UTC TZ that line used to be
+# local time wearing a Z, landing hours out of order in its own file.
+TZ=Asia/Tokyo "$job_run" --name tz -- sh -c 'sleep 9 & echo first' >/dev/null 2>&1
+notice=$(grep -c 'outlived the job' "$jobs_dir/tz/progress")
+stamp=$(sed -n '$s/ .*//p' "$jobs_dir/tz/progress")
+skew=$(( $(date -u +%s) - $(date -u -d "$stamp" +%s 2>/dev/null || echo 0) ))
+[ "$notice" = 1 ] && [ "$skew" -ge -120 ] && [ "$skew" -le 120 ] \
+  && ok "the cut-short notice is stamped in UTC like every line above it" \
+  || no "the cut-short notice is stamped in UTC like every line above it" \
+       "skew=${skew}s $(cat "$jobs_dir/tz/progress")"
+
 # --- a job that never ran is not a clean success -----------------------------
 "$job_run" --name missing-tool -- sh -c 'notarealtool --x' >/dev/null 2>&1; rc=$?
 [ "$rc" = 127 ] && grep -q '^rc=127$' "$jobs_dir/missing-tool/exit" \
