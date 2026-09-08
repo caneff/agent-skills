@@ -38,6 +38,14 @@ PROGRESS_CAP=$((10 * 1024 * 1024))
 
 die() { echo "job-run: $*" >&2; exit 1; }
 
+# Is the run in <dir> still running? Its recorded pid, and whether that pid is
+# still there. The one place that question is asked; prune, the name-collision
+# refusal and --status all read it here.
+alive() { # alive <run dir>
+  local p; p=$(cat "$1/pid" 2>/dev/null)
+  [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+}
+
 name="" status=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -52,12 +60,23 @@ done
 
 jobs_dir="$HOME/.cache/agent-jobs"
 
+# A run name is one directory name under jobs_dir and nothing else. Unchecked it
+# is a path traversal — `--name ../../x` writes a run outside the cache — and
+# "never inside a repo" has to be enforced, not merely claimed.
+check_name() {
+  case "$1" in
+    *[!A-Za-z0-9._-]*) die "--name may hold only letters, digits, dot, dash and underscore: '$1'" ;;
+    .|..)              die "--name may not be '$1'" ;;
+  esac
+}
+
 # --- --status ---------------------------------------------------------------
 # One line, and an exit status a caller can branch on without parsing it:
 #   0 finished (an exit record exists)  10 alive  11 killed  12 no such run
 # The three live above the range bash and `die` use for their own failures, so a
 # caller's `case $?` cannot read "the interpreter fell over" as "still running".
 if [ -n "$status" ]; then
+  check_name "$status"
   dir="$jobs_dir/$status"
   [ -d "$dir" ] || { echo "unknown $status: no run directory at $dir"; exit 12; }
   if [ -e "$dir/exit" ]; then
@@ -68,7 +87,7 @@ if [ -n "$status" ]; then
     exit 0
   fi
   pid=$(cat "$dir/pid" 2>/dev/null)
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+  if alive "$dir"; then
     echo "alive $status pid=$pid last=$(tail -n 1 "$dir/progress" 2>/dev/null | cut -d' ' -f1)"
     exit 10
   fi
@@ -79,6 +98,7 @@ fi
 
 # --- a run ------------------------------------------------------------------
 [ -n "$name" ] || die "--name is required and is never auto-generated (a path you cannot predict is a path you lose to a context summary)"
+check_name "$name"
 [ $# -gt 0 ] || die "no command: put it after --"
 
 dir="$jobs_dir/$name"
@@ -91,11 +111,10 @@ dir="$jobs_dir/$name"
 # A live run is never pruned however old, and a prune that cannot finish must
 # not stop the job it was launched alongside.
 prune() {
-  local d p
+  local d
   for d in "$jobs_dir"/*/; do
     [ -d "$d" ] || continue
-    p=$(cat "$d/pid" 2>/dev/null)
-    [ -n "$p" ] && kill -0 "$p" 2>/dev/null && continue
+    alive "$d" && continue
     [ -z "$(find "$d" -maxdepth 1 -newermt '14 days ago' -print -quit 2>/dev/null)" ] \
       && rm -rf "$d"
   done
@@ -107,11 +126,8 @@ prune >/dev/null 2>&1 || true
 # name: the path the caller predicted has to be the path that exists. Against a
 # dead pid the directory is reused, because a rerun after a kill is the common
 # case and must just work.
-if [ -d "$dir" ]; then
-  live=$(cat "$dir/pid" 2>/dev/null)
-  if [ -n "$live" ] && kill -0 "$live" 2>/dev/null; then
-    die "run '$name' is already live (pid $live, progress $dir/progress). Choose another --name; job-run never picks one for you."
-  fi
+if [ -d "$dir" ] && alive "$dir"; then
+  die "run '$name' is already live (pid $(cat "$dir/pid"), progress $dir/progress). Choose another --name; job-run never picks one for you."
 fi
 
 mkdir -p "$dir" || die "cannot create $dir"
@@ -128,18 +144,22 @@ export JOB_PROGRESS="$dir/progress"
 # pass-through does not; a `head -c` here would SIGPIPE the job it is supposed to
 # be recording, so the cap is counted rather than enforced by a closed pipe.
 tee_through() {
+  # bash's own printf for the timestamp, not a `date` fork per line: forking
+  # capped the tee at roughly a thousand lines a second, slow enough that a
+  # chatty job outran the drain below and silently lost its tail.
+  export TZ=UTC
   local written=0 capped=0 line
   while IFS= read -r line || [ -n "$line" ]; do
     printf '%s\n' "$line"
     [ "$capped" = 1 ] && continue
     written=$((written + ${#line} + 21))
     if [ "$written" -gt "$PROGRESS_CAP" ]; then
-      printf '%s [job-run] progress capped at %s bytes; further output dropped\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PROGRESS_CAP" >> "$JOB_PROGRESS"
+      printf '%(%Y-%m-%dT%H:%M:%SZ)T [job-run] progress capped at %s bytes; further output dropped\n' \
+        -1 "$PROGRESS_CAP" >> "$JOB_PROGRESS"
       capped=1
       continue
     fi
-    printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$line" >> "$JOB_PROGRESS"
+    printf '%(%Y-%m-%dT%H:%M:%SZ)T %s\n' -1 "$line" >> "$JOB_PROGRESS"
   done
 }
 
@@ -147,25 +167,27 @@ pipe="$dir/.pipe"
 rm -f "$pipe"
 mkfifo "$pipe" || die "cannot create $pipe"
 
-rc=0 cause=exit child="" recorded=0
+rc=0 child="" recorded=0
 
 record() {
   [ "$recorded" = 1 ] && return
   recorded=1
-  # rc above 128 is the child dying on a signal; name it rather than leaving the
-  # reader to do the arithmetic.
-  if [ "$cause" = exit ] && [ "$rc" -gt 128 ] 2>/dev/null; then
+  # The cause comes from what the job returned, never from what the wrapper was
+  # asked to do: a job that ran to completion while a TERM was on its way is a
+  # job that exited. rc above 128 is a death by signal, named rather than left
+  # as arithmetic for the reader.
+  local cause=exit signame
+  if [ "$rc" -gt 128 ] 2>/dev/null; then
     signame=$(kill -l $((rc - 128)) 2>/dev/null) && [ -n "$signame" ] && cause="$signame"
   fi
   printf 'rc=%s\ncause=%s\nended=%s\n' "$rc" "$cause" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$dir/exit"
 }
 
-stop() { # stop <cause> <signal> — forward to the job, then let EXIT record it
-  cause="$1"
-  [ -n "$child" ] && kill -"$2" "$child" 2>/dev/null
-}
-trap 'stop INT INT' INT
-trap 'stop TERM TERM' TERM
+# Forward the signal to the job and go on waiting. A job that ignores it keeps
+# the wrapper alive, which is the truth: this records, it does not enforce.
+stop() { [ -n "$child" ] && kill -"$1" "$child" 2>/dev/null; }
+trap 'stop INT' INT
+trap 'stop TERM' TERM
 trap 'rm -f "$pipe"; record' EXIT
 
 tee_through < "$pipe" &
@@ -173,18 +195,25 @@ cap_pid=$!
 "$@" > "$pipe" 2>&1 &
 child=$!
 # A trapped signal interrupts `wait`, so wait again until the child is reaped.
-# 127 is bash saying the child is already gone, not a status the job returned.
+# Whatever it returns then is the job's own status, 127 (command not found)
+# included — that is how a mistyped background job most often dies.
 while :; do
   wait "$child"; w=$?
   kill -0 "$child" 2>/dev/null && continue
-  [ "$w" != 127 ] && rc=$w
+  rc=$w
   break
 done
-# Drain the tee, but bounded: a grandchild that inherited the pipe and
-# outlived the job would otherwise hold the exit record hostage for as long as
-# it runs, which is exactly the silence this script exists to end.
+# Drain the tee, but bounded: a grandchild that inherited the pipe and outlived
+# the job would otherwise hold the exit record hostage for as long as it runs,
+# which is exactly the silence this script exists to end. Cutting the drain
+# short is said out loud, so a missing tail is never a silent one.
 for _ in $(seq 1 20); do kill -0 "$cap_pid" 2>/dev/null || break; sleep 0.1; done
-kill "$cap_pid" 2>/dev/null
+if kill -0 "$cap_pid" 2>/dev/null; then
+  kill "$cap_pid" 2>/dev/null
+  printf '%(%Y-%m-%dT%H:%M:%SZ)T %s\n' -1 \
+    "[job-run] a child outlived the job and still holds its output; the record stops here" \
+    >> "$JOB_PROGRESS"
+fi
 
 record
 exit "$rc"

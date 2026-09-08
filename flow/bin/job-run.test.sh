@@ -2,7 +2,8 @@
 # Contract test for job-run, against a redirected HOME under mktemp, so no real
 # run directory is touched. Asserts only on observable artifacts — the files a
 # run leaves behind, the printed status line, and the exit status — never on the
-# script's internals. Every job it drives is sub-second.
+# script's internals. Jobs are short; the two cases that need a live process to
+# signal, and the one that waits out the drain, are the suite's slow part.
 # Run: bash flow/bin/job-run.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -69,6 +70,35 @@ grep -q '^rc=7$' "$jobs_dir/failed/exit" \
   && ok "job-run returns the job's own exit status to its caller" \
   || no "job-run returns the job's own exit status to its caller" "got $caller_rc"
 
+# --- a chatty job loses nothing, to the caller or to the record --------------
+# A per-line `date` fork once held the tee to about a thousand lines a second,
+# slow enough that the drain below cut the tail off both streams in silence.
+lines=$("$job_run" --name chatty -- sh -c 'seq 1 20000' 2>/dev/null | wc -l)
+[ "$lines" = 20000 ] && [ "$(wc -l < "$jobs_dir/chatty/progress")" = 20000 ] \
+  && ok "20000 lines reach both the caller and progress" \
+  || no "20000 lines reach both the caller and progress" \
+       "caller=$lines progress=$(wc -l < "$jobs_dir/chatty/progress")"
+
+# --- a job that never ran is not a clean success -----------------------------
+"$job_run" --name missing-tool -- sh -c 'notarealtool --x' >/dev/null 2>&1; rc=$?
+[ "$rc" = 127 ] && grep -q '^rc=127$' "$jobs_dir/missing-tool/exit" \
+  && ok "command-not-found records rc=127, not success" \
+  || no "command-not-found records rc=127, not success" \
+       "rc=$rc $(cat "$jobs_dir/missing-tool/exit" 2>&1)"
+
+# --- a run name is one directory under the jobs dir, never a way out of it ---
+escape="$tmp/escaped"
+out=$("$job_run" --name "../../../../${escape#/}" -- sh -c 'echo pwned' 2>&1); rc=$?
+[ "$rc" != 0 ] && [ ! -e "$escape" ] \
+  && ok "a --name that climbs out of the jobs dir is refused" \
+  || no "a --name that climbs out of the jobs dir is refused" "rc=$rc out=$out"
+# Refused as a bad name, not merely reported as an unknown run — the difference
+# is whether the path was ever built.
+out=$("$job_run" --status "../../etc" 2>&1); rc=$?
+[ "$rc" != 0 ] && [[ "$out" == *"may hold only"* ]] \
+  && ok "--status refuses the same shape" \
+  || no "--status refuses the same shape" "rc=$rc out=$out"
+
 # --- a SIGTERMed run records the cause; a SIGKILLed one records nothing ------
 # Both drive a real background job-run and signal the wrapper itself.
 start_bg() { # start_bg <name> ; echoes the job-run pid
@@ -86,6 +116,20 @@ if await "$jobs_dir/termed/exit" && grep -q '^cause=TERM$' "$jobs_dir/termed/exi
   ok "a SIGTERMed run records that cause"
 else
   no "a SIGTERMed run records that cause" "$(cat "$jobs_dir/termed/exit" 2>&1)"
+fi
+
+# A job that ignores the forwarded signal and finishes on its own exited — the
+# cause follows what the job returned, never what the wrapper was asked to do.
+"$job_run" --name outlives -- bash -c 'trap "" TERM; sleep 1; exit 5' >/dev/null 2>&1 &
+pid=$!
+await "$jobs_dir/outlives/pid" && sleep 0.3
+kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+if await "$jobs_dir/outlives/exit" && grep -q '^cause=exit$' "$jobs_dir/outlives/exit" \
+   && grep -q '^rc=5$' "$jobs_dir/outlives/exit"; then
+  ok "a job that outlives a forwarded TERM records its own exit, not a termination"
+else
+  no "a job that outlives a forwarded TERM records its own exit, not a termination" \
+     "$(cat "$jobs_dir/outlives/exit" 2>&1)"
 fi
 
 pid=$(start_bg killed)
@@ -171,11 +215,12 @@ case "$got" in
 esac
 kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 
+oneline=1
 for n in nobody-ran-this clean failed termed killed still-going; do
   lines=$("$job_run" --status "$n" 2>&1 | wc -l)
-  [ "$lines" = 1 ] || { no "--status $n prints exactly one line" "$lines lines"; }
+  [ "$lines" = 1 ] || { oneline=0; no "--status $n prints exactly one line" "$lines lines"; }
 done
-ok "every --status answer is one line"
+[ "$oneline" = 1 ] && ok "every --status answer is one line"
 
 # --- lifecycle: name collision -----------------------------------------------
 pid=$(start_bg held)

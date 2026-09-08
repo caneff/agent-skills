@@ -22,6 +22,12 @@
 # Every path exits 0. A bookkeeping hook must never be the reason a real command
 # does not run, so its own failure is never the tool call's.
 #
+# Two limits of the wrapping, by design: the job body runs in a fresh `bash -c`,
+# so shell functions and aliases the session had defined are not in scope, and
+# job-run's tee is line-oriented, so binary output on stdout is not preserved.
+# Neither is what a background job wants; a job that needs either should write
+# its own file and be run unwrapped.
+#
 # Ordering: hooks on one matcher each see the original input, their rewrites do
 # not chain, and exactly one `updatedInput` survives at random — measured in
 # docs/research/run-in-background-reaches-pretooluse.md. `rtk hook claude` also
@@ -34,8 +40,11 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 field() { printf '%s' "$INPUT" | jq -r "$1" 2>/dev/null || true; }
 
-[ "$(field '.tool_name // ""')" = Bash ] || exit 0
-[ "$(field '.tool_input.run_in_background // false')" = true ] || exit 0
+IFS=$'\t' read -r tool background id <<<"$(field '
+  [ .tool_name // "", (.tool_input.run_in_background // false | tostring),
+    .tool_use_id // "" ] | @tsv')"
+[ "$tool" = Bash ] || exit 0
+[ "$background" = true ] || exit 0
 
 cmd=$(field '.tool_input.command // ""')
 
@@ -62,18 +71,20 @@ slug=$(printf '%s' "$slug" | sed 's/-*$//'); slug=${slug:-job}
 # With no tool_use_id there is no stable key, and uniqueness has to win: two
 # concurrent jobs sharing a name would hit job-run's live-name refusal and fail
 # the very tool call this hook promises never to fail.
-id=$(field '.tool_use_id // ""')
 [ -n "$id" ] || id="$$$RANDOM"
-name="$slug-$(printf '%s' "${id: -8}" | tr -c 'A-Za-z0-9' '-')"
+[ ${#id} -gt 8 ] && id=${id: -8}
+name="$slug-$(printf '%s' "$id" | tr -c 'A-Za-z0-9' '-')"
 
-out=$(jq -nc --arg n "$name" --arg c "$cmd" '
+# The rewrite edits the original tool_input rather than replacing it, so a
+# description or a timeout the caller set survives the wrapping.
+out=$(printf '%s' "$INPUT" | jq -c --arg n "$name" --arg c "$cmd" '
   { hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecisionReason: "job-run: recording as \($n); read it with `job-run --status \($n)`",
-      updatedInput: {
+      updatedInput: (.tool_input + {
         command: ("job-run --name \($n) -- bash -c " + ($c | @sh)),
         run_in_background: true
-      } } }' 2>/dev/null)
+      }) } }' 2>/dev/null)
 # A rewrite that could not be built is a pass-through that says so, never a
 # silent one — silence is the hole this hook exists to close.
 [ -n "$out" ] || skip "the rewrite could not be built for this call"

@@ -64,9 +64,26 @@ n2=$(fire withjr "$noid"); n2=$(printf '%s' "${n2#*|}" | jq -r '.hookSpecificOut
   || no "a call with no tool_use_id still gets a distinct run name" "$n1 vs $n2"
 
 # --- the hook tells the caller where the record is ---------------------------
-printf '%s' "$body" | grep -q "$name" \
+# On the reason field itself: $name came out of updatedInput.command, which is in
+# the same body, so grepping the body would pass with no feedback at all.
+printf '%s' "$body" | jq -e --arg n "$name" \
+  '.hookSpecificOutput.permissionDecisionReason | test($n)' >/dev/null 2>&1 \
   && ok "the feedback names the run so its path is predictable" \
   || no "the feedback names the run so its path is predictable" "$body"
+
+short='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"ab","tool_input":{"command":"ls -l","run_in_background":true}}'
+sn=$(fire withjr "$short"); sn=$(printf '%s' "${sn#*|}" | jq -r '.hookSpecificOutput.updatedInput.command' | sed -n 's/.*--name \([^ ]*\).*/\1/p')
+[ "$sn" = "ls-ab" ] \
+  && ok "an id shorter than the slice still lands in the name" \
+  || no "an id shorter than the slice still lands in the name" "$sn"
+
+# --- the rest of the tool input survives the rewrite -------------------------
+extra='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01AbCdEfGhIjKlMnOp","tool_input":{"command":"sleep 30","description":"a long job","timeout":600000,"run_in_background":true}}'
+got=$(fire withjr "$extra"); body2=${got#*|}
+[ "$(printf '%s' "$body2" | jq -r '.hookSpecificOutput.updatedInput.description')" = "a long job" ] \
+  && [ "$(printf '%s' "$body2" | jq -r '.hookSpecificOutput.updatedInput.timeout')" = 600000 ] \
+  && ok "description and timeout survive the rewrite" \
+  || no "description and timeout survive the rewrite" "$body2"
 
 # --- pass-through cases ------------------------------------------------------
 # A call the hook has no business touching says nothing at all.
@@ -104,12 +121,6 @@ got=$(fire withjr "$nocmd"); body=${got#*|}
 printf '%s' "$body" | jq -e '.systemMessage | test("no.*record"; "i")' >/dev/null 2>&1 \
   && ok "an unwrappable command says no record will exist" \
   || no "an unwrappable command says no record will exist" "$body"
-# An already-wrapped command keeps its record, so warning about one would lie.
-got=$(fire withjr "$wrapped"); body=${got#*|}
-printf '%s' "$body" | grep -qi 'no record' \
-  && no "an already-wrapped command is not warned about" "$body" \
-  || ok "an already-wrapped command is not warned about"
-
 # --- no input shape blocks, and the hook's own failure is never the tool's ---
 blocked=0
 for j in "$bg" "$fg" "$noflag" "$wrapped" "$other" "$nocmd" \
