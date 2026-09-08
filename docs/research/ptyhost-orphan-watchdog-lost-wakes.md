@@ -55,8 +55,9 @@ killed exactly as fast as a hung one.
 Same second, two jobs — one client stall drops every socket it holds.
 
 `Ff` writes `exit-cause` only into `$CLAUDE_JOB_DIR`, which is set for
-background *agent* jobs. A plain `run_in_background` Bash job killed the same
-way **writes nothing**. That is the silent class: #243, #274, `9x9_28g`.
+background *agent* jobs. A plain `run_in_background` Bash job killed this way
+would write nothing — but see the scope limit below, which puts the second half
+of that in doubt.
 
 Ruled out: the Linux OOM killer. `dmesg -T` is readable on this box and holds
 no OOM or `killed process` entries.
@@ -115,7 +116,45 @@ Two harness traps worth keeping, both of which produced false greens:
   killing "the parent" kills the host instead. The job then *outlives* the
   host, which looks green for the wrong reason.
 
+## Scope limit: which jobs this actually covers
+
+**Measured 2026-09-08, and it narrows the finding.** With a background Bash job
+running, a `ps -eo pid,ppid,args` snapshot showed **no `bg-pty-host` process at
+all**, and the job as a direct child of the CLI:
+
+```
+  22402   22114 claude                 <- the CLI
+ 903385   22402 /bin/bash -c ... 'for i in $(seq 1 40); do echo "tick $i"; sleep 1; done'
+```
+
+So `--bg-pty-host` is **not** in the path for `run_in_background` Bash tasks.
+It is used for background *agent* jobs — the `~/.claude/jobs/` `template: "bg"`
+ones — which is consistent with `exit-cause` existing only for those, and with
+both watchdog artifacts above being agent jobs.
+
+Consequence: the orphan watchdog explains killed background **agent** jobs. It
+does **not** explain a killed plain background Bash job, which was never under a
+pty host.
+
+That leaves #243, #274 and `9x9_28g` unattributed. If they were background agent
+jobs, the watchdog is their cause; if they were plain `run_in_background` Bash,
+something else is, and they need their own diagnosis. Which they were has not
+been established — do not assert it either way from this document.
+
+Inspect with a `ps` snapshot read from a file, never an inline `pgrep -f`: the
+pattern matches the agent's own command line, bracketed or not, because the
+bracketed literal is itself in that command line.
+
 ## Mitigation
+
+Applied 2026-09-08 in user-global `~/.claude/settings.json`:
+`CLAUDE_PTY_ORPHAN_CHECK_MS=20000` (600s grace) and
+`CLAUDE_PTY_HEARTBEAT_MS=180000` (540s of silence before the socket drops).
+
+Settings propagate to spawned children **live, without a session restart** —
+a Bash-tool shell spawned by a CLI started before the edit carried both vars,
+while the CLI's own environ did not. Whether they reach a pty host's
+`Bun.spawn` is still unverified (#666); no host was running to inspect.
 
 Both knobs are plain env vars, so `settings.json` `env` can set them:
 
