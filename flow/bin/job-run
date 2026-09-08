@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# job-run — run a job so that its death leaves a record.
+#
+#   job-run --name <name> -- <command> [args...]
+#   job-run --status <name>
+#
+# A background job that is SIGKILLed cannot report anything on the way down, so
+# the only survivable account of it is what reached disk before it died. job-run
+# owns a directory per run under ~/.cache/agent-jobs/<name>/ — never inside a
+# repo — holding:
+#
+#   cmd      the command as invoked
+#   progress the job's stdout and stderr, tee'd through, one timestamped line each
+#   pid      the wrapper's pid, so a later reader can ask whether it is still alive
+#   exit     written only when the wrapper observes the job end: rc, cause, ended
+#
+# The wrapper traps EXIT, TERM and INT. SIGKILL cannot be trapped, so a killed
+# run simply leaves no `exit` file, and that absence is the signal `--status`
+# reads. There is deliberately no heartbeat process: it would be killed by the
+# same event that kills the job, and the progress timestamps already show
+# staleness.
+#
+# $JOB_PROGRESS is exported into the job, naming the progress file, so a job can
+# append its own structured lines beside the tee'd output.
+#
+# Progress capture is capped at 10 MiB (PROGRESS_CAP below). Past the cap one
+# notice line is written and further output is dropped; the job keeps running and
+# its output keeps flowing to the caller. Readers use `--status` or a tail, not
+# the whole file.
+#
+# job-run records; it does not prevent. No setsid, no detaching, no keep-alive.
+set -uo pipefail
+
+PROGRESS_CAP=$((10 * 1024 * 1024))
+
+die() { echo "job-run: $*" >&2; exit 1; }
+
+name="" status=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --name)    name="${2:-}"; shift 2 ;;
+    --status)  status="${2:-}"; shift 2 ;;
+    -h|--help) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
+    --)        shift; break ;;
+    -*)        die "unknown flag: $1" ;;
+    *)         die "unexpected argument: $1 (put the command after --)" ;;
+  esac
+done
+
+jobs_dir="$HOME/.cache/agent-jobs"
+
+# --- --status ---------------------------------------------------------------
+# One line, and an exit status a caller can branch on without parsing it:
+#   0 finished (an exit record exists)  1 alive  2 killed  3 no such run
+if [ -n "$status" ]; then
+  dir="$jobs_dir/$status"
+  [ -d "$dir" ] || { echo "unknown $status: no run directory at $dir"; exit 3; }
+  if [ -e "$dir/exit" ]; then
+    rc=$(sed -n 's/^rc=//p' "$dir/exit")
+    cause=$(sed -n 's/^cause=//p' "$dir/exit")
+    ended=$(sed -n 's/^ended=//p' "$dir/exit")
+    echo "finished $status rc=$rc cause=$cause ended=$ended"
+    exit 0
+  fi
+  pid=$(cat "$dir/pid" 2>/dev/null)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    echo "alive $status pid=$pid last=$(tail -n 1 "$dir/progress" 2>/dev/null | cut -d' ' -f1)"
+    exit 1
+  fi
+  last=$(tail -n 1 "$dir/progress" 2>/dev/null)
+  echo "killed $status pid=${pid:-?} gone with no exit record; last progress: ${last:-<none>}"
+  exit 2
+fi
+
+# --- a run ------------------------------------------------------------------
+[ -n "$name" ] || die "--name is required and is never auto-generated (a path you cannot predict is a path you lose to a context summary)"
+[ $# -gt 0 ] || die "no command: put it after --"
+
+dir="$jobs_dir/$name"
+mkdir -p "$dir" || die "cannot create $dir"
+
+printf '%s\n' "$*" > "$dir/cmd"
+rm -f "$dir/exit"
+printf '%s\n' "$$" > "$dir/pid"
+: > "$dir/progress"
+export JOB_PROGRESS="$dir/progress"
+
+# Timestamp each line into progress, stopping at the cap but still draining the
+# pipe — a `head -c` here would SIGPIPE the job it is supposed to be recording.
+capture() {
+  local written=0 capped=0 line
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$capped" = 0 ]; then
+      written=$((written + ${#line} + 21))
+      if [ "$written" -gt "$PROGRESS_CAP" ]; then
+        printf '%s [job-run] progress capped at %s bytes; further output dropped\n' \
+          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PROGRESS_CAP" >> "$JOB_PROGRESS"
+        capped=1
+        continue
+      fi
+      printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$line" >> "$JOB_PROGRESS"
+    fi
+  done
+}
+
+pipe="$dir/.pipe"
+rm -f "$pipe"
+mkfifo "$pipe" || die "cannot create $pipe"
+
+rc=0 cause=exit child="" recorded=0
+
+record() {
+  [ "$recorded" = 1 ] && return
+  recorded=1
+  # rc above 128 is the child dying on a signal; name it rather than leaving the
+  # reader to do the arithmetic.
+  if [ "$cause" = exit ] && [ "$rc" -gt 128 ] 2>/dev/null; then
+    signame=$(kill -l $((rc - 128)) 2>/dev/null) && [ -n "$signame" ] && cause="$signame"
+  fi
+  printf 'rc=%s\ncause=%s\nended=%s\n' "$rc" "$cause" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$dir/exit"
+}
+
+stop() { # stop <cause> <signal> — forward to the job, then let EXIT record it
+  cause="$1"
+  [ -n "$child" ] && kill -"$2" "$child" 2>/dev/null
+}
+trap 'stop INT INT' INT
+trap 'stop TERM TERM' TERM
+trap 'rm -f "$pipe"; record' EXIT
+
+capture < "$pipe" &
+cap_pid=$!
+"$@" > "$pipe" 2>&1 &
+child=$!
+# A trapped signal interrupts `wait`, so wait again until the child is reaped.
+# 127 is bash saying the child is already gone, not a status the job returned.
+while :; do
+  wait "$child"; w=$?
+  kill -0 "$child" 2>/dev/null && continue
+  [ "$w" != 127 ] && rc=$w
+  break
+done
+# Drain the capture, but bounded: a grandchild that inherited the pipe and
+# outlived the job would otherwise hold the exit record hostage for as long as
+# it runs, which is exactly the silence this script exists to end.
+for _ in $(seq 1 20); do kill -0 "$cap_pid" 2>/dev/null || break; sleep 0.1; done
+kill "$cap_pid" 2>/dev/null
+
+record
+exit "$rc"
