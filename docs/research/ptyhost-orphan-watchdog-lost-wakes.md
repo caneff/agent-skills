@@ -153,8 +153,38 @@ Applied 2026-09-08 in user-global `~/.claude/settings.json`:
 
 Settings propagate to spawned children **live, without a session restart** —
 a Bash-tool shell spawned by a CLI started before the edit carried both vars,
-while the CLI's own environ did not. Whether they reach a pty host's
-`Bun.spawn` is still unverified (#666); no host was running to inspect.
+while the CLI's own environ did not. They also reach a pty host's `Bun.spawn`
+(#666, measured 2026-09-08). A background *agent* job — the only job kind that
+spawns a host, per the scope limit above — was launched under an isolated
+`HOME` whose `.claude/settings.json` carried a marked `env` block, and the
+host it spawned held exactly those values:
+
+```
+1524426 1524395 claude bg-pty-host --bg-pty-host .../pty/be5cb706.sock 200 50 -- ...
+1524425 1524395 claude bg-pty-host --bg-pty-host .../spare/93151c87.pty.sock 200 50 -- ...
+```
+
+```
+$ tr '\0' '\n' < /proc/1524426/environ | grep -E 'CLAUDE_PTY|PROBE666'
+CLAUDE_PTY_ORPHAN_CHECK_MS=31337
+CLAUDE_PTY_HEARTBEAT_MS=131313
+PROBE666_MARKER=isolated-home
+```
+
+`PROBE666_MARKER` exists in no shell environment on the box — only in that
+settings file — so the host's env was read from `settings.json` and injected
+at spawn, not inherited. The daemon (`1524395`) and the idle spare host carry
+it too.
+
+Two limits on that result. `claude --bg` is refused whenever `disableAgentView`
+is true in user-global settings — `'--bg' is disabled by the 'disableAgentView'
+setting` — and a `--settings` override, as a JSON string or a file, does not
+lift it; hence the isolated `HOME` rather than the real one. So the *mechanism*
+is confirmed (a `settings.json` `env` block reaches the host's `Bun.spawn`) and
+the *real file being read* is confirmed separately for Bash-tool children, but
+the two have not been observed in one end-to-end measurement. To close that
+last gap, someone with `disableAgentView` off repeats the probe against the
+user-global file.
 
 Both knobs are plain env vars, so `settings.json` `env` can set them:
 
