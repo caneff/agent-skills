@@ -101,5 +101,63 @@ git -C "$scratch" init -q
   || no "a job launched inside a checkout leaves it clean" \
        "$(git -C "$scratch" status --porcelain --untracked-files=all)"
 
+# --- --status: alive, finished, killed, unknown ------------------------------
+# One line each, and an exit status a caller can branch on without parsing it:
+# 0 finished, 1 alive, 2 killed, 3 no such run.
+status_of() { # status_of <name> ; prints "<rc>|<line>"
+  local out rc
+  out=$("$job_run" --status "$1" 2>&1); rc=$?
+  printf '%s|%s' "$rc" "$out"
+}
+
+got=$(status_of nobody-ran-this)
+case "$got" in
+  3\|unknown*"no run"*) ok "an unknown name reports no such run, exit 3" ;;
+  *) no "an unknown name reports no such run, exit 3" "$got" ;;
+esac
+
+got=$(status_of clean)
+case "$got" in
+  0\|finished*rc=0*cause=exit*) ok "a finished job reports its return code, exit 0" ;;
+  *) no "a finished job reports its return code, exit 0" "$got" ;;
+esac
+
+got=$(status_of failed)
+case "$got" in
+  0\|finished*rc=7*) ok "a failed job reports rc=7" ;;
+  *) no "a failed job reports rc=7" "$got" ;;
+esac
+
+got=$(status_of termed)
+case "$got" in
+  0\|finished*cause=TERM*) ok "a SIGTERMed job reports finished with that cause, not killed" ;;
+  *) no "a SIGTERMed job reports finished with that cause, not killed" "$got" ;;
+esac
+
+got=$(status_of killed)
+case "$got" in
+  2\|killed*"last progress"*started*) ok "a kill -9ed job reports killed with its last progress line, exit 2" ;;
+  *) no "a kill -9ed job reports killed with its last progress line, exit 2" "$got" ;;
+esac
+case "$got" in
+  *[0-9]-[0-9][0-9]-[0-9][0-9]T*Z*) ok "the killed line carries the last progress timestamp" ;;
+  *) no "the killed line carries the last progress timestamp" "$got" ;;
+esac
+
+pid=$(start_bg still-going)
+await "$jobs_dir/still-going/progress" && sleep 0.2
+got=$(status_of still-going)
+case "$got" in
+  1\|alive*) ok "a running job reports alive, exit 1" ;;
+  *) no "a running job reports alive, exit 1" "$got" ;;
+esac
+kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+
+for n in nobody-ran-this clean failed termed killed still-going; do
+  lines=$("$job_run" --status "$n" 2>&1 | wc -l)
+  [ "$lines" = 1 ] || { no "--status $n prints exactly one line" "$lines lines"; }
+done
+ok "every --status answer is one line"
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
