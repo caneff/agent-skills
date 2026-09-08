@@ -153,8 +153,9 @@ Applied 2026-09-08 in user-global `~/.claude/settings.json`:
 
 Settings propagate to spawned children **live, without a session restart** —
 a Bash-tool shell spawned by a CLI started before the edit carried both vars,
-while the CLI's own environ did not. Whether they reach a pty host's
-`Bun.spawn` is still unverified (#666); no host was running to inspect.
+while the CLI's own environ did not. A `settings.json` `env` block also reaches
+a `bg-pty-host` — see the verification section below for what that does and
+does not establish.
 
 Both knobs are plain env vars, so `settings.json` `env` can set them:
 
@@ -169,6 +170,99 @@ hand. This trades silent job loss for occasional process leaks.
 This is an upstream defect. There is no seam in this repo to regression-test
 it, so the harness above *is* the regression test: re-run it after a Claude
 Code upgrade to see whether the behaviour changed.
+
+## Verification: a settings `env` block reaches the pty host
+
+**Measured 2026-09-08 against an isolated settings file, not the user-global
+one** (#666). The mechanism is shown; the last hop into the host is not pinned
+down.
+
+`claude --bg` is the only way to start a `template: "bg"` agent job, and the
+scope limit above puts a pty host in that path and not in plain background
+Bash's. It is refused while `disableAgentView` is true in user-global settings
+— `'--bg' is disabled by the 'disableAgentView' setting` — and a `--settings`
+override does not lift it, as a JSON string or as a file. The probe therefore
+ran under an isolated `HOME` whose `.claude/settings.json` set
+`disableAgentView` false and carried three deliberate sentinels. The two
+numbers are *not* the applied 20000/180000 above, precisely so that a hit
+cannot have come from the user-global file:
+
+```json
+"env": {
+  "CLAUDE_PTY_ORPHAN_CHECK_MS": "31337",
+  "CLAUDE_PTY_HEARTBEAT_MS": "131313",
+  "PROBE666_MARKER": "isolated-home"
+}
+```
+
+One short background agent job under that `HOME`:
+
+```
+$ HOME=<probe>/fakehome claude --bg --permission-mode auto \
+    --model claude-haiku-4-5-20251001 "<a job that sleeps 300s>"
+Starting background service…
+backgrounded · 68ba16ba
+```
+
+`ps -eo pid,ppid,args` written to a file and grepped from there — columns are
+pid, ppid, args:
+
+```
+$ grep -E 'pty-host|daemon run' ps-r2.txt
+2390200 1495671 .../2.1.263 daemon run --origin transient --spawned-by {"label":"claude --bg",…,"pid":2390173}
+2390253 2390200 claude bg-pty-host --bg-pty-host …/spare/556a5133.pty.sock 200 50 -- …   <- idle spare host
+2390254 2390200 claude bg-pty-host --bg-pty-host …/pty/68ba16ba.sock 200 50 -- … --session-id 68ba16ba-…   <- this job's host
+```
+
+Which processes hold the sentinel, across every readable environ on the box:
+
+```
+$ grep -al PROBE666_MARKER /proc/[0-9]*/environ
+/proc/2390200/environ   <- the daemon
+/proc/2390253/environ   <- spare host
+/proc/2390254/environ   <- this job's host
+/proc/2390289/environ   <- bg-spare, child of the spare host
+/proc/2390290/environ   <- the agent session, child of its host
+```
+
+Five processes, all at or below the daemon. Each carries all three sentinels;
+the job's own host:
+
+```
+$ tr '\0' '\n' < /proc/2390254/environ | grep -E '^(HOME|CLAUDE_PTY|PROBE666)'
+HOME=<probe>/fakehome
+CLAUDE_PTY_ORPHAN_CHECK_MS=31337
+CLAUDE_PTY_HEARTBEAT_MS=131313
+PROBE666_MARKER=isolated-home
+```
+
+— and 2390200, 2390253, 2390289 and 2390290 identical to it.
+
+**What this establishes.** The host's env came from a `settings.json` `env`
+block and not from the shell that launched it. The sentinel appears in no
+readable environ outside that daemon subtree — including this session's own
+shell, which carries the real 20000/180000 — and `grep -a` over
+`/proc/[0-9]*/environ` is the whole readable population, not a sample.
+
+**What it does not.** It does not separate an explicit env passed to the host's
+`Bun.spawn` from ordinary inheritance: the daemon carries the sentinel too, so
+a host that simply inherited its parent's environ would look exactly like this.
+Distinguishing them needs the host's spawn arguments, not its environ. Worth
+noting that this propagation shape differs from the Bash-tool case in
+`## Mitigation`, where the parent CLI's own environ did **not** carry the vars.
+
+Three limits, none of them fatal to the mitigation:
+
+- The file read was the isolated one. The user-global file is known to be read
+  for Bash-tool children, but the two halves have not been observed in one
+  measurement. A session with `disableAgentView` off would close that.
+- The isolated daemon started *after* its settings file existed, so this tests
+  read-at-startup. Live propagation into an already-running host — the
+  no-restart behaviour claimed above for Bash-tool children — is untested.
+- Two environs could not be captured. The `claude --bg` launcher (pid 2390173)
+  had exited before the snapshot, and `/proc/1495671/environ` — the daemon's
+  parent, WSL `/init` — is root-owned and unreadable. The launch command line
+  above is the record of what the launcher set, and it sets only `HOME`.
 
 ## Why this matters for #597's other two asks
 
