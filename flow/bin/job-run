@@ -11,6 +11,9 @@
 #
 #   cmd      the command as invoked
 #   progress the job's stdout and stderr, tee'd through, one timestamped line each
+#            — tee'd, so the job's own output still reaches the caller unchanged;
+#            stderr is merged into stdout on the way, as it is for any job whose
+#            output is read back as one stream
 #   pid      the wrapper's pid, so a later reader can ask whether it is still alive
 #   exit     written only when the wrapper observes the job end: rc, cause, ended
 #
@@ -38,8 +41,8 @@ die() { echo "job-run: $*" >&2; exit 1; }
 name="" status=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --name)    name="${2:-}"; shift 2 ;;
-    --status)  status="${2:-}"; shift 2 ;;
+    --name)    [ $# -ge 2 ] || die "--name needs a value"; name="$2"; shift 2 ;;
+    --status)  [ $# -ge 2 ] || die "--status needs a value"; status="$2"; shift 2 ;;
     -h|--help) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
     --)        shift; break ;;
     -*)        die "unknown flag: $1" ;;
@@ -51,10 +54,12 @@ jobs_dir="$HOME/.cache/agent-jobs"
 
 # --- --status ---------------------------------------------------------------
 # One line, and an exit status a caller can branch on without parsing it:
-#   0 finished (an exit record exists)  1 alive  2 killed  3 no such run
+#   0 finished (an exit record exists)  10 alive  11 killed  12 no such run
+# The three live above the range bash and `die` use for their own failures, so a
+# caller's `case $?` cannot read "the interpreter fell over" as "still running".
 if [ -n "$status" ]; then
   dir="$jobs_dir/$status"
-  [ -d "$dir" ] || { echo "unknown $status: no run directory at $dir"; exit 3; }
+  [ -d "$dir" ] || { echo "unknown $status: no run directory at $dir"; exit 12; }
   if [ -e "$dir/exit" ]; then
     rc=$(sed -n 's/^rc=//p' "$dir/exit")
     cause=$(sed -n 's/^cause=//p' "$dir/exit")
@@ -65,11 +70,11 @@ if [ -n "$status" ]; then
   pid=$(cat "$dir/pid" 2>/dev/null)
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
     echo "alive $status pid=$pid last=$(tail -n 1 "$dir/progress" 2>/dev/null | cut -d' ' -f1)"
-    exit 1
+    exit 10
   fi
   last=$(tail -n 1 "$dir/progress" 2>/dev/null)
   echo "killed $status pid=${pid:-?} gone with no exit record; last progress: ${last:-<none>}"
-  exit 2
+  exit 11
 fi
 
 # --- a run ------------------------------------------------------------------
@@ -79,8 +84,10 @@ fi
 dir="$jobs_dir/$name"
 
 # Retention, on every start, so nobody has to remember it: a run directory
-# nothing has touched for 14 days goes. That kills the stale-read directly — an
-# agent reading a progress file left by a job that reused this name weeks ago.
+# nothing has touched for 14 days goes — measured on the newest file inside the
+# run, because appending to progress never updates the directory's own mtime and
+# keying on that would prune the killed records first. That kills the stale-read
+# directly: an agent reading a progress file a job left under this name weeks ago.
 # A live run is never pruned however old, and a prune that cannot finish must
 # not stop the job it was launched alongside.
 prune() {
@@ -89,7 +96,8 @@ prune() {
     [ -d "$d" ] || continue
     p=$(cat "$d/pid" 2>/dev/null)
     [ -n "$p" ] && kill -0 "$p" 2>/dev/null && continue
-    [ -n "$(find "$d" -maxdepth 0 -mtime +14 2>/dev/null)" ] && rm -rf "$d"
+    [ -z "$(find "$d" -maxdepth 1 -newermt '14 days ago' -print -quit 2>/dev/null)" ] \
+      && rm -rf "$d"
   done
   return 0
 }
@@ -114,21 +122,24 @@ printf '%s\n' "$$" > "$dir/pid"
 : > "$dir/progress"
 export JOB_PROGRESS="$dir/progress"
 
-# Timestamp each line into progress, stopping at the cap but still draining the
-# pipe — a `head -c` here would SIGPIPE the job it is supposed to be recording.
-capture() {
+# Tee, not capture: every line goes on to the caller unchanged — a wrapped job
+# has to look exactly like the unwrapped one to whatever reads its output — and a
+# timestamped copy goes to progress. Past the cap the copy stops and the
+# pass-through does not; a `head -c` here would SIGPIPE the job it is supposed to
+# be recording, so the cap is counted rather than enforced by a closed pipe.
+tee_through() {
   local written=0 capped=0 line
   while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$capped" = 0 ]; then
-      written=$((written + ${#line} + 21))
-      if [ "$written" -gt "$PROGRESS_CAP" ]; then
-        printf '%s [job-run] progress capped at %s bytes; further output dropped\n' \
-          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PROGRESS_CAP" >> "$JOB_PROGRESS"
-        capped=1
-        continue
-      fi
-      printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$line" >> "$JOB_PROGRESS"
+    printf '%s\n' "$line"
+    [ "$capped" = 1 ] && continue
+    written=$((written + ${#line} + 21))
+    if [ "$written" -gt "$PROGRESS_CAP" ]; then
+      printf '%s [job-run] progress capped at %s bytes; further output dropped\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PROGRESS_CAP" >> "$JOB_PROGRESS"
+      capped=1
+      continue
     fi
+    printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$line" >> "$JOB_PROGRESS"
   done
 }
 
@@ -157,7 +168,7 @@ trap 'stop INT INT' INT
 trap 'stop TERM TERM' TERM
 trap 'rm -f "$pipe"; record' EXIT
 
-capture < "$pipe" &
+tee_through < "$pipe" &
 cap_pid=$!
 "$@" > "$pipe" 2>&1 &
 child=$!
@@ -169,7 +180,7 @@ while :; do
   [ "$w" != 127 ] && rc=$w
   break
 done
-# Drain the capture, but bounded: a grandchild that inherited the pipe and
+# Drain the tee, but bounded: a grandchild that inherited the pipe and
 # outlived the job would otherwise hold the exit record hostage for as long as
 # it runs, which is exactly the silence this script exists to end.
 for _ in $(seq 1 20); do kill -0 "$cap_pid" 2>/dev/null || break; sleep 0.1; done

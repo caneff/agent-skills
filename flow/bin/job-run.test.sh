@@ -23,6 +23,13 @@ grep -q 'echo out' "$jobs_dir/hello/cmd" \
   && ok "cmd records the command as invoked" \
   || no "cmd records the command as invoked" "$(cat "$jobs_dir/hello/cmd" 2>&1)"
 
+# A wrapped job has to look like the unwrapped one to whatever reads its output.
+out=$("$job_run" --name passthrough -- sh -c 'echo out; echo err >&2' 2>&1)
+[ "$out" = "out
+err" ] \
+  && ok "the job's own output still reaches the caller" \
+  || no "the job's own output still reaches the caller" "out=$out"
+
 prog="$jobs_dir/hello/progress"
 grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z out$' "$prog" \
   && ok "stdout lands in progress, timestamped" \
@@ -37,6 +44,16 @@ out=$("$job_run" -- true 2>&1); rc=$?
 [ "$rc" != 0 ] && [ ! -d "$jobs_dir" ] \
   && ok "a missing --name errors and creates no run directory" \
   || no "a missing --name errors and creates no run directory" "rc=$rc out=$out"
+
+# --- a flag with no value is an error, not a hang ----------------------------
+# `shift 2` on one remaining argument fails silently, and without this guard the
+# arg loop spins forever on a typo.
+for flag in --name --status; do
+  out=$(timeout 5 "$job_run" "$flag" 2>&1); rc=$?
+  [ "$rc" != 0 ] && [ "$rc" != 124 ] \
+    && ok "$flag with no value errors instead of hanging" \
+    || no "$flag with no value errors instead of hanging" "rc=$rc out=$out"
+done
 
 # --- observed exits ----------------------------------------------------------
 "$job_run" --name clean -- true >/dev/null 2>&1
@@ -103,7 +120,8 @@ git -C "$scratch" init -q
 
 # --- --status: alive, finished, killed, unknown ------------------------------
 # One line each, and an exit status a caller can branch on without parsing it:
-# 0 finished, 1 alive, 2 killed, 3 no such run.
+# 0 finished, 10 alive, 11 killed, 12 no such run — the last three above the
+# range bash and the script use for their own errors.
 status_of() { # status_of <name> ; prints "<rc>|<line>"
   local out rc
   out=$("$job_run" --status "$1" 2>&1); rc=$?
@@ -112,8 +130,8 @@ status_of() { # status_of <name> ; prints "<rc>|<line>"
 
 got=$(status_of nobody-ran-this)
 case "$got" in
-  3\|unknown*"no run"*) ok "an unknown name reports no such run, exit 3" ;;
-  *) no "an unknown name reports no such run, exit 3" "$got" ;;
+  12\|unknown*"no run"*) ok "an unknown name reports no such run, exit 12" ;;
+  *) no "an unknown name reports no such run, exit 12" "$got" ;;
 esac
 
 got=$(status_of clean)
@@ -136,8 +154,8 @@ esac
 
 got=$(status_of killed)
 case "$got" in
-  2\|killed*"last progress"*started*) ok "a kill -9ed job reports killed with its last progress line, exit 2" ;;
-  *) no "a kill -9ed job reports killed with its last progress line, exit 2" "$got" ;;
+  11\|killed*"last progress"*started*) ok "a kill -9ed job reports killed with its last progress line, exit 11" ;;
+  *) no "a kill -9ed job reports killed with its last progress line, exit 11" "$got" ;;
 esac
 case "$got" in
   *[0-9]-[0-9][0-9]-[0-9][0-9]T*Z*) ok "the killed line carries the last progress timestamp" ;;
@@ -148,8 +166,8 @@ pid=$(start_bg still-going)
 await "$jobs_dir/still-going/progress" && sleep 0.2
 got=$(status_of still-going)
 case "$got" in
-  1\|alive*) ok "a running job reports alive, exit 1" ;;
-  *) no "a running job reports alive, exit 1" "$got" ;;
+  10\|alive*) ok "a running job reports alive, exit 10" ;;
+  *) no "a running job reports alive, exit 10" "$got" ;;
 esac
 kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 
@@ -201,6 +219,20 @@ age recent 13
   && ok "a run directory newer than 14 days is kept" \
   || no "a run directory newer than 14 days is kept"
 
+# Retention ages a run by the newest thing inside it, not the directory's own
+# mtime: appending to progress never touches the directory, so a killed run that
+# logged for weeks would otherwise be pruned first — exactly the record this is
+# all for.
+mkdir -p "$jobs_dir/long-runner"
+printf '999999\n' > "$jobs_dir/long-runner/pid"
+printf 'old\n' > "$jobs_dir/long-runner/progress"
+touch -d "1 day ago" "$jobs_dir/long-runner/progress"
+touch -d "40 days ago" "$jobs_dir/long-runner"
+"$job_run" --name trigger-prune-3 -- true >/dev/null 2>&1
+[ -d "$jobs_dir/long-runner" ] \
+  && ok "a run whose progress is recent survives an old directory mtime" \
+  || no "a run whose progress is recent survives an old directory mtime"
+
 # A live run is never pruned, however old its files are.
 pid=$(start_bg old-but-live)
 await "$jobs_dir/old-but-live/progress" && sleep 0.2
@@ -212,7 +244,8 @@ touch -d "60 days ago" "$jobs_dir/old-but-live"
 kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 
 # A prune that cannot remove a directory must not stop the job it was launched
-# alongside. A read-only run directory makes rm -rf fail.
+# alongside, and must not leak its own noise into the caller's output — the job's
+# stdout is what the caller reads. A read-only run directory makes rm -rf fail.
 age stubborn 20
 chmod 500 "$jobs_dir/stubborn"
 out=$("$job_run" --name survives-a-prune-failure -- echo ran 2>&1); rc=$?
@@ -220,6 +253,12 @@ chmod 700 "$jobs_dir/stubborn"
 [ "$rc" = 0 ] && grep -q 'ran' "$jobs_dir/survives-a-prune-failure/progress" \
   && ok "a prune failure does not stop the job" \
   || no "a prune failure does not stop the job" "rc=$rc out=$out"
+[ "$out" = "ran" ] \
+  && ok "a prune failure does not leak into the caller's output" \
+  || no "a prune failure does not leak into the caller's output" "out=$out"
+[ -d "$jobs_dir/stubborn" ] \
+  && ok "a directory prune could not remove is left alone" \
+  || no "a directory prune could not remove is left alone"
 
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"

@@ -14,7 +14,7 @@ no() { echo "FAIL $1"; [ $# -gt 1 ] && printf '  %s\n' "$2"; fails=1; }
 
 # Two PATHs: one where job-run exists, one where it does not.
 mkdir -p "$tmp/withjr" "$tmp/nojr"
-for t in bash cat jq sed cut tr head; do
+for t in cat jq tr cut sed; do
   p=$(command -v "$t") && { ln -sf "$p" "$tmp/withjr/$t"; ln -sf "$p" "$tmp/nojr/$t"; }
 done
 printf '#!/usr/bin/env bash\nexit 0\n' > "$tmp/withjr/job-run"; chmod +x "$tmp/withjr/job-run"
@@ -54,6 +54,15 @@ name3=$(printf '%s' "$different" | jq -r '.hookSpecificOutput.updatedInput.comma
   && ok "a different call gets a different run name" \
   || no "a different call gets a different run name" "both $name"
 
+# With no tool_use_id there is no stable key, so uniqueness wins: two such calls
+# must not share a run directory and trip job-run's live-name refusal.
+noid='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"sleep 30; echo done","run_in_background":true}}'
+n1=$(fire withjr "$noid"); n1=$(printf '%s' "${n1#*|}" | jq -r '.hookSpecificOutput.updatedInput.command' | sed -n 's/.*--name \([^ ]*\).*/\1/p')
+n2=$(fire withjr "$noid"); n2=$(printf '%s' "${n2#*|}" | jq -r '.hookSpecificOutput.updatedInput.command' | sed -n 's/.*--name \([^ ]*\).*/\1/p')
+[ -n "$n1" ] && [ "$n1" != "$n2" ] \
+  && ok "a call with no tool_use_id still gets a distinct run name" \
+  || no "a call with no tool_use_id still gets a distinct run name" "$n1 vs $n2"
+
 # --- the hook tells the caller where the record is ---------------------------
 printf '%s' "$body" | grep -q "$name" \
   && ok "the feedback names the run so its path is predictable" \
@@ -77,6 +86,11 @@ passthrough() { # passthrough <name> <path-dir> <json>
 silent "a foreground Bash call passes through untouched" withjr "$fg"
 silent "a Bash call with no run_in_background field passes through untouched" withjr "$noflag"
 silent "a command already running under job-run passes through untouched" withjr "$wrapped"
+mentions='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01AbCdEfGhIjKlMnOp","tool_input":{"command":"grep -r job-run flow/bin","run_in_background":true}}'
+got=$(fire withjr "$mentions"); body=${got#*|}
+printf '%s' "$body" | jq -e '.hookSpecificOutput.updatedInput.command' >/dev/null 2>&1 \
+  && ok "a command that merely mentions job-run is still wrapped" \
+  || no "a command that merely mentions job-run is still wrapped" "$body"
 silent "a non-Bash tool call passes through untouched" withjr "$other"
 passthrough "a command the wrapper cannot take passes through" withjr "$nocmd"
 passthrough "job-run missing from PATH passes through" nojr "$bg"
@@ -109,6 +123,30 @@ for j in "$bg" "$fg" "$noflag" "$wrapped" "$other" "$nocmd" \
   done
 done
 [ "$blocked" = 0 ] && ok "no input shape blocks, errors, or fails the tool call"
+
+# --- end to end, through the real job-run ------------------------------------
+# The unit cases above stub job-run, so nothing so far proves the rewritten
+# command actually survives a shell and leaves the record it promises. This runs
+# it, with a command carrying nested quotes and a non-zero exit.
+real='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01EndToEndZzYyXx","tool_input":{"command":"echo '"'"'quoted \"x\"'"'"'; echo err >&2; exit 3","run_in_background":true}}'
+body=$(printf '%s' "$real" | PATH="$here/../../bin:$PATH" "$hook" 2>/dev/null)
+rewritten=$(printf '%s' "$body" | jq -r '.hookSpecificOutput.updatedInput.command')
+run_name=$(printf '%s' "$rewritten" | sed -n 's/.*--name \([^ ]*\).*/\1/p')
+( export HOME="$tmp/e2e-home"; mkdir -p "$HOME"
+  export PATH="$here/../../bin:$PATH"; eval "$rewritten" ) >/dev/null 2>&1
+e2e_rc=$?
+e2e_dir="$tmp/e2e-home/.cache/agent-jobs/$run_name"
+[ "$e2e_rc" = 3 ] \
+  && grep -q 'quoted "x"' "$e2e_dir/progress" 2>/dev/null \
+  && grep -q 'err' "$e2e_dir/progress" 2>/dev/null \
+  && grep -q '^rc=3$' "$e2e_dir/exit" 2>/dev/null \
+  && ok "the rewritten command runs, keeps its quoting, and leaves a record" \
+  || no "the rewritten command runs, keeps its quoting, and leaves a record" \
+       "rc=$e2e_rc cmd=$rewritten $(cat "$e2e_dir/progress" "$e2e_dir/exit" 2>&1)"
+line=$(HOME="$tmp/e2e-home" PATH="$here/../../bin:$PATH" job-run --status "$run_name" 2>&1)
+case "$line" in finished*rc=3*) ok "--status reads back the record the hook set up" ;;
+  *) no "--status reads back the record the hook set up" "$line" ;;
+esac
 
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"

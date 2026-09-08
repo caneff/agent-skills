@@ -8,9 +8,11 @@
 # survives. Read it back with `job-run --status <name>`.
 #
 # The name is derived from the call — the first word of the command plus a slice
-# of the tool_use_id — so it is stable for that call, unique across calls, and
-# printed back in the hook's feedback, which is how the caller learns the path
-# before the job starts.
+# of the tool_use_id — so it is stable for that call and unique across calls. The
+# caller learns it from the rewritten command, which the background task's own
+# completion notice echoes back verbatim; it is repeated in
+# permissionDecisionReason rather than in systemMessage, because a warning banner
+# on every background job would be noise, and nothing here is a warning.
 #
 # It degrades, it never blocks. A call it cannot wrap — no command, or `job-run`
 # not on PATH — passes through unchanged *and* says so, because the one failure
@@ -38,8 +40,10 @@ field() { printf '%s' "$INPUT" | jq -r "$1" 2>/dev/null || true; }
 cmd=$(field '.tool_input.command // ""')
 
 # Already under job-run: a record exists, so wrapping again would only risk
-# nesting, and warning about a missing record would be a lie.
-case "$cmd" in *job-run*) exit 0 ;; esac
+# nesting, and warning about a missing record would be a lie. Anchored, not a
+# substring — a command that merely mentions job-run (`grep job-run flow/bin/*`)
+# is an ordinary job and deserves its record.
+case "$cmd" in "job-run "*|*"job-run --name "*) exit 0 ;; esac
 
 skip() { # skip <why> — pass the call through, and say a record will not exist
   jq -nc --arg m "job-run: $1, so this background job runs unwrapped and will leave no record. \`job-run --status\` will not find it." \
@@ -54,8 +58,12 @@ command -v job-run >/dev/null 2>&1 || skip "job-run is not on PATH (run flow/ins
 # runs of the same command distinct, so the wrapper's name-collision refusal
 # can never turn into a failed tool call.
 slug=$(printf '%s' "${cmd%%[ 	;|&]*}" | tr -c 'A-Za-z0-9' '-' | cut -c1-24)
-slug=${slug%%-} ; slug=${slug:-job}
+slug=$(printf '%s' "$slug" | sed 's/-*$//'); slug=${slug:-job}
+# With no tool_use_id there is no stable key, and uniqueness has to win: two
+# concurrent jobs sharing a name would hit job-run's live-name refusal and fail
+# the very tool call this hook promises never to fail.
 id=$(field '.tool_use_id // ""')
+[ -n "$id" ] || id="$$$RANDOM"
 name="$slug-$(printf '%s' "${id: -8}" | tr -c 'A-Za-z0-9' '-')"
 
 out=$(jq -nc --arg n "$name" --arg c "$cmd" '
