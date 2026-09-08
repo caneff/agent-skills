@@ -4,58 +4,83 @@ description: "Implement a piece of work based on a spec or set of tickets."
 ---
 
 Two front doors, and `git branch --show-current` picks which one you came in
-by. Inside an Orca workspace — its own branch, checkout, and terminal — you
-are the driver: skip to § Claim the ticket. Sitting on the repo's **default
-branch**, you are not: § Dispatch from the default branch is your whole run,
-and every section after it belongs to the worker you hand off to.
+by — read against the repo's default branch, which is
+`git symbolic-ref --short refs/remotes/origin/HEAD` and not assumed to be
+`main`. Inside an Orca workspace — its own branch, checkout, and terminal —
+skip to § Claim the ticket. On the default branch you are at the other door:
+§ Dispatch from the default branch is your whole run, and every section after
+it belongs to the agent you hand off to.
 
-You are the **driver**: claim, brief, review, commit, PR. The build itself
-runs as an Orca worker so the model is chosen per ticket — see Build. Orca
-dispatch is the only spawn path; Claude Code's own subagent tools give a build
-no task, no preamble, and no `worker_done`.
+Inside the workspace you are the **driver**: claim, brief, review, commit,
+PR. The build itself runs as an Orca worker so the model is chosen per ticket
+— see Build. Orca dispatch is the only spawn path; Claude Code's own subagent
+tools give a build no task, no preamble, and no `worker_done`.
 
 ## Dispatch from the default branch
 
 The primary checkout is the one tree every session's `merge-cleanup`
 fast-forwards, so the work gets a workspace and the workspace gets the build.
-Make one here, dispatch into it, and stop — you never claim, never
-`git checkout -b` in place, and never build on this branch.
+This session makes one, hands the ticket to it, and stops. On a detached HEAD
+you are at neither door: say so and stop.
 
-1. **Resolve the ticket.** An explicit number is the ticket. `next` is the
-   lowest-numbered open issue labelled `ready-for-agent`:
+1. **Resolve and claim the ticket.** An explicit number is the ticket; `next`
+   is the lowest-numbered open issue labelled `ready-for-agent`:
 
    ```
-   gh issue list --repo <owner/name> --label ready-for-agent --state open
+   gh issue list --repo <owner/name> --label ready-for-agent --state open \
+     --limit 200 --json number --jq 'min_by(.number).number'
    ```
 
-   An empty queue is the whole answer: say so and stop.
+   `gh` pages newest-first and stops at 30, so the lowest number is off the
+   default page as soon as the queue is long.
 
-2. **Create the workspace**, named `implement-<n>` — the shape `burndown`
-   dispatches under, and what `merge-cleanup` and
-   `orca-ide worktree rm --worktree <full branch name>` select on. Orca
-   derives the branch from that name and puts the agent in the workspace's
-   first terminal:
+   Then claim it **here, before the workspace exists**. § Claim the ticket is
+   the whole rule and it binds this session exactly as it binds a worker —
+   `needs-info` and held tickets included, an explicit number read for labels
+   as carefully as `next`. Claiming from inside the workspace instead is what
+   lets two `/implement next` sessions dispatch the same ticket. Nothing
+   resolves — an empty queue, or a number the labels hold — and that is the
+   whole answer: say so and stop.
+
+2. **Create the workspace**, named `implement-<n>`. The name is keyed to the
+   ticket so it is derivable from `<n>` alone, and Orca derives the branch
+   from the name in turn; that pair is what the `merge-cleanup <full branch
+   name>` and `orca-ide worktree rm --worktree name:<name>` lines are handed
+   later. `git fetch` first — the workspace is cut from the local default
+   branch, and a stale one starts the build behind origin.
 
    ```
    orca-ide worktree create --repo path:<absolute primary checkout> \
-     --name implement-<n> --no-parent --base-branch <default branch> \
-     --issue <n> --agent claude --prompt "/implement <n>" --json
+     --name implement-<n> --no-parent --issue <n> \
+     --agent claude --prompt "/implement <n>" --json
    ```
 
    The brief is that pointer and nothing else: this same skill, run from
    inside the workspace, takes the driver's path above.
 
-3. **Confirm the branch** before you report. Read it back rather than
-   assuming the name Orca derived:
+   **A name that already exists ends the run.** Check `orca-ide worktree list
+   --json` before creating, and treat a `worktree create` error the same way:
+   report the workspace that is already there and stop. This ticket already
+   has one, holding a diff and possibly a live agent; dispatching a second
+   agent into it lands on that work, and dispatching beside it under an
+   invented name buys a workspace the cleanup lines cannot select. Which of
+   those the owner wants is the owner's call, and it is one command either
+   way.
+
+3. **Confirm the branch**, and stop if it is wrong:
 
    ```
    git -C <new worktree path> branch --show-current
    ```
 
-   It must name this ticket's own branch. A reused workspace name has left
-   Orca sitting on the base branch itself, where the worker would commit onto
-   whatever that base is; fix it with `git checkout -b` there and tell the
-   worker.
+   It must name this ticket's own branch. Orca left sitting on the base branch
+   instead means the worker would commit onto that base. Report the mismatch
+   and let the owner tear the workspace down — repairing it in place with
+   `git checkout -b` leaves the name and the branch disagreeing, and the
+   `merge-cleanup <full branch name>` line handed over at the end selects the
+   branch. (`burndown` § 4 runs the same check on its own dispatches and
+   repairs instead: it holds the worker and can tell it, which this door,
+   having already handed off, cannot.)
 
 4. **Report the workspace and stop.** Name the worktree path and the branch
    you dispatched to. The build runs over there; this session is done.
@@ -74,7 +99,10 @@ client cannot pick up the same one. Read its labels first:
   `ready-for-human` for `ready-for-agent` below.
 - **`needs-info`** — open questions block the build. Run `/grill-with-docs`
   to resolve them with the owner first; only then relabel and build.
-- **`in-progress`, or otherwise held** — stop and ask.
+- **`in-progress`, or otherwise held** — stop and ask. One exception: a ticket
+  already `in-progress` and assigned to you, in the workspace named for it, is
+  your own claim arriving from § Dispatch, already made at the other door.
+  Build.
 
 ```
 gh issue edit <n> --remove-label ready-for-agent --add-label in-progress --add-assignee @me
