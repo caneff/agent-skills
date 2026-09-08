@@ -77,6 +77,35 @@ fi
 [ $# -gt 0 ] || die "no command: put it after --"
 
 dir="$jobs_dir/$name"
+
+# Retention, on every start, so nobody has to remember it: a run directory
+# nothing has touched for 14 days goes. That kills the stale-read directly — an
+# agent reading a progress file left by a job that reused this name weeks ago.
+# A live run is never pruned however old, and a prune that cannot finish must
+# not stop the job it was launched alongside.
+prune() {
+  local d p
+  for d in "$jobs_dir"/*/; do
+    [ -d "$d" ] || continue
+    p=$(cat "$d/pid" 2>/dev/null)
+    [ -n "$p" ] && kill -0 "$p" 2>/dev/null && continue
+    [ -n "$(find "$d" -maxdepth 0 -mtime +14 2>/dev/null)" ] && rm -rf "$d"
+  done
+  return 0
+}
+prune >/dev/null 2>&1 || true
+
+# A name collision against a live pid is a refusal, never a quietly different
+# name: the path the caller predicted has to be the path that exists. Against a
+# dead pid the directory is reused, because a rerun after a kill is the common
+# case and must just work.
+if [ -d "$dir" ]; then
+  live=$(cat "$dir/pid" 2>/dev/null)
+  if [ -n "$live" ] && kill -0 "$live" 2>/dev/null; then
+    die "run '$name' is already live (pid $live, progress $dir/progress). Choose another --name; job-run never picks one for you."
+  fi
+fi
+
 mkdir -p "$dir" || die "cannot create $dir"
 
 printf '%s\n' "$*" > "$dir/cmd"

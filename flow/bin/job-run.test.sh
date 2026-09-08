@@ -159,5 +159,67 @@ for n in nobody-ran-this clean failed termed killed still-going; do
 done
 ok "every --status answer is one line"
 
+# --- lifecycle: name collision -----------------------------------------------
+pid=$(start_bg held)
+await "$jobs_dir/held/progress" && sleep 0.2
+before=$(cat "$jobs_dir/held/progress")
+out=$("$job_run" --name held -- echo second 2>&1); rc=$?
+[ "$rc" != 0 ] && [[ "$out" == *held* ]] && [[ "$out" == *"$pid"* ]] \
+  && ok "a name held by a live pid refuses, naming the live run" \
+  || no "a name held by a live pid refuses, naming the live run" "rc=$rc out=$out"
+[ "$(cat "$jobs_dir/held/progress")" = "$before" ] \
+  && ok "a refusal leaves the existing run's files untouched" \
+  || no "a refusal leaves the existing run's files untouched" "$(cat "$jobs_dir/held/progress")"
+kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+await "$jobs_dir/held/exit"
+
+# The same name against a dead pid reuses the directory, and the previous run's
+# exit record does not survive into the new run.
+"$job_run" --name held -- sh -c 'echo rerun; sleep 0.1' >/dev/null 2>&1
+grep -q 'rerun' "$jobs_dir/held/progress" \
+  && ok "the same name against a dead pid reuses the directory" \
+  || no "the same name against a dead pid reuses the directory" "$(cat "$jobs_dir/held/progress")"
+grep -q '^cause=exit$' "$jobs_dir/held/exit" \
+  && ok "a reused directory does not carry the previous run's exit file" \
+  || no "a reused directory does not carry the previous run's exit file" "$(cat "$jobs_dir/held/exit")"
+
+# --- lifecycle: 14-day prune -------------------------------------------------
+age() { # age <name> <days> — a finished run whose files are <days> old
+  mkdir -p "$jobs_dir/$1"
+  printf 'rc=0\ncause=exit\nended=old\n' > "$jobs_dir/$1/exit"
+  printf 'old\n' > "$jobs_dir/$1/progress"
+  printf '999999\n' > "$jobs_dir/$1/pid"
+  touch -d "$2 days ago" "$jobs_dir/$1"/* "$jobs_dir/$1"
+}
+age ancient 15
+age recent 13
+"$job_run" --name trigger-prune -- true >/dev/null 2>&1
+[ ! -d "$jobs_dir/ancient" ] \
+  && ok "a run directory older than 14 days is pruned on start" \
+  || no "a run directory older than 14 days is pruned on start"
+[ -d "$jobs_dir/recent" ] \
+  && ok "a run directory newer than 14 days is kept" \
+  || no "a run directory newer than 14 days is kept"
+
+# A live run is never pruned, however old its files are.
+pid=$(start_bg old-but-live)
+await "$jobs_dir/old-but-live/progress" && sleep 0.2
+touch -d "60 days ago" "$jobs_dir/old-but-live"
+"$job_run" --name trigger-prune-2 -- true >/dev/null 2>&1
+[ -d "$jobs_dir/old-but-live" ] \
+  && ok "a live run is never pruned regardless of age" \
+  || no "a live run is never pruned regardless of age"
+kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+
+# A prune that cannot remove a directory must not stop the job it was launched
+# alongside. A read-only run directory makes rm -rf fail.
+age stubborn 20
+chmod 500 "$jobs_dir/stubborn"
+out=$("$job_run" --name survives-a-prune-failure -- echo ran 2>&1); rc=$?
+chmod 700 "$jobs_dir/stubborn"
+[ "$rc" = 0 ] && grep -q 'ran' "$jobs_dir/survives-a-prune-failure/progress" \
+  && ok "a prune failure does not stop the job" \
+  || no "a prune failure does not stop the job" "rc=$rc out=$out"
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
