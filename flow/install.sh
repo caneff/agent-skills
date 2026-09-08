@@ -24,13 +24,15 @@ link() { # link <repo-relative-src> <live-dest>
 
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link bin/merge-cleanup          "$HOME/.local/bin/merge-cleanup"
+link bin/job-run                "$HOME/.local/bin/job-run"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 link claude/RTK.md              "$HOME/.claude/RTK.md"
 # claude/settings.json is NOT symlinked — the harness rewrites it in place and
 # would break the link. It is a copy-only backup (see backup-sync.sh), written
 # by the --restore call below.
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
-for h in block-dangerous-git.sh refresh-landed.sh require-agent-model.sh package.json; do
+for h in block-dangerous-git.sh refresh-landed.sh require-agent-model.sh \
+         wrap-background-jobs.sh package.json; do
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
 done
 for a in "$here/claude/agents"/*.md; do

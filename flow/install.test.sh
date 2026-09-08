@@ -47,6 +47,24 @@ if [ -L "$tmp/home/.local/bin/merge-cleanup" ]; then
 else
   echo "FAIL bin/merge-cleanup not linked under the scratch HOME"; fails=1
 fi
+if [ -L "$tmp/home/.local/bin/job-run" ]; then
+  echo "PASS job-run linked onto PATH under the scratch HOME"
+else
+  echo "FAIL bin/job-run not linked under the scratch HOME"; fails=1
+fi
+if [ -L "$tmp/home/.claude/hooks/wrap-background-jobs.sh" ]; then
+  echo "PASS the background-job hook linked under the scratch HOME"
+else
+  echo "FAIL claude/hooks/wrap-background-jobs.sh not linked under the scratch HOME"; fails=1
+fi
+# Re-running changes nothing: the second install leaves the same symlink, not a
+# .pre-flow backup of the first one's.
+HOME="$tmp/home" bash "$repo/flow/install.sh" >/dev/null 2>&1
+if [ -L "$tmp/home/.local/bin/job-run" ] && [ ! -e "$tmp/home/.local/bin/job-run.pre-flow" ]; then
+  echo "PASS installing twice changes nothing"
+else
+  echo "FAIL a second install left a .pre-flow backup of its own symlink"; fails=1
+fi
 if [ -L "$tmp/home/.claude/agents/diff-reviewer.md" ]; then
   echo "PASS reviewer agent definition linked under the scratch HOME"
 else

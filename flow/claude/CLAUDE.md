@@ -107,6 +107,9 @@ drives TDD → `/code-review` + `/two-axis-code-review` → commit with
 - **Every Agent call passes `model`** — the session is Fable and a bare call
   inherits it. Explore/lookup → `sonnet`, review/diagnosis → `opus`. Rubric:
   `~/.agents/skills/flow/claude/subagent-tiers.md`.
+- **Long background job? run it under `job-run --name <n> -- <cmd>`** — its
+  output and exit survive a kill, and `job-run --status <n>` answers alive /
+  finished / killed. Details in `job-run --help`.
 - **Never bare `orca` on Linux** — it resolves to the GNOME screen reader and
   starts speech. Use `orca-ide`, or `$ORCA_CLI_COMMAND` where Orca exports it.
 - Orca does not clean up after a merge — run `merge-cleanup --repo <primary
