@@ -26,7 +26,6 @@ link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link bin/merge-cleanup          "$HOME/.local/bin/merge-cleanup"
 link bin/job-run                "$HOME/.local/bin/job-run"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
-link claude/RTK.md              "$HOME/.claude/RTK.md"
 # claude/settings.json is NOT symlinked — the harness rewrites it in place and
 # would break the link. It is a copy-only backup (see backup-sync.sh), written
 # by the --restore call below.

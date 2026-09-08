@@ -12,7 +12,6 @@ every commit here is a backup.
 |---|---|---|
 | `bin/issue-counts` | `~/.local/bin/issue-counts` | Open-issue counts per wayfinder group for the current repo |
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Global instructions (hard rules, the two gates) |
-| `claude/RTK.md` | `~/.claude/RTK.md` | RTK proxy notes |
 | `claude/settings.json` | `~/.claude/settings.json` | Harness config: hooks, permissions |
 | `claude/settings.local.json` | `~/.claude/settings.local.json` | Machine-local overrides |
 | `claude/hooks/*` | `~/.claude/hooks/*` | git guardrail, landed-refresh, agent-model-guard hooks |

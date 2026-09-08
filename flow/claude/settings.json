@@ -21,15 +21,6 @@
       "Bash(git fetch)",
       "Bash(git worktree *)",
       "Bash(git worktree:*)",
-      "Bash(rtk gh issue *)",
-      "Bash(rtk gh issue edit:*)",
-      "Bash(rtk git -C:*)",
-      "Bash(rtk git branch -d *)",
-      "Bash(rtk git diff *)",
-      "Bash(rtk git fetch *)",
-      "Bash(rtk git fetch)",
-      "Bash(rtk git worktree *)",
-      "Bash(rtk git worktree:*)",
       "Bash(npm run *)",
       "Bash(npm test)",
       "Bash(npm test *)",
@@ -44,20 +35,6 @@
       "Bash(cargo test *)",
       "Bash(pytest)",
       "Bash(pytest *)",
-      "Bash(rtk npm run *)",
-      "Bash(rtk npm test)",
-      "Bash(rtk npm test *)",
-      "Bash(rtk pnpm run *)",
-      "Bash(rtk pnpm test)",
-      "Bash(rtk pnpm test *)",
-      "Bash(rtk cargo build)",
-      "Bash(rtk cargo build *)",
-      "Bash(rtk cargo check)",
-      "Bash(rtk cargo check *)",
-      "Bash(rtk cargo test)",
-      "Bash(rtk cargo test *)",
-      "Bash(rtk pytest)",
-      "Bash(rtk pytest *)",
       "Bash(node *)",
       "Bash(pushpr)",
       "Bash(pushpr:*)",
@@ -148,10 +125,6 @@
           {
             "type": "command",
             "command": "/home/caneff/.claude/hooks/block-dangerous-git.sh"
-          },
-          {
-            "type": "command",
-            "command": "rtk hook claude"
           }
         ]
       },

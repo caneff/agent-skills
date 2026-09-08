@@ -30,9 +30,8 @@
 #
 # Ordering: hooks on one matcher each see the original input, their rewrites do
 # not chain, and exactly one `updatedInput` survives at random — measured in
-# docs/research/run-in-background-reaches-pretooluse.md. `rtk hook claude` also
-# rewrites background calls, so registration must leave one producer of
-# `updatedInput` for them; see flow/claude/settings.json.
+# docs/research/run-in-background-reaches-pretooluse.md. Registration must
+# therefore leave exactly one producer of `updatedInput` on the Bash matcher.
 set -u
 
 INPUT=$(cat 2>/dev/null) || exit 0

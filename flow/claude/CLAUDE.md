@@ -130,7 +130,6 @@ drives TDD → `/code-review` + `/two-axis-code-review` → commit with
   of interest before answering — don't squint at the full frame. Pillow and
   OpenCV are installed for bare `python3` (`import PIL, cv2`).
 
-@RTK.md
 
 # second-brain vault memory (auto-imported by the weekly retro)
 @/home/caneff/src/second-brain-v2/Memory/RULES.md
