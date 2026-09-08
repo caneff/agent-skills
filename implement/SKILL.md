@@ -3,15 +3,62 @@ name: implement
 description: "Implement a piece of work based on a spec or set of tickets."
 ---
 
-You are already in the right place. An Orca workspace is its own branch,
-checkout, and terminal, so this skill never creates, switches, or removes one.
-If you are sitting on the repo's default branch and the work needs a branch,
-stop and say so — the workspace should have been made from the ticket.
+Two front doors, and `git branch --show-current` picks which one you came in
+by. Inside an Orca workspace — its own branch, checkout, and terminal — you
+are the driver: skip to § Claim the ticket. Sitting on the repo's **default
+branch**, you are not: § Dispatch from the default branch is your whole run,
+and every section after it belongs to the worker you hand off to.
 
 You are the **driver**: claim, brief, review, commit, PR. The build itself
 runs as an Orca worker so the model is chosen per ticket — see Build. Orca
 dispatch is the only spawn path; Claude Code's own subagent tools give a build
 no task, no preamble, and no `worker_done`.
+
+## Dispatch from the default branch
+
+The primary checkout is the one tree every session's `merge-cleanup`
+fast-forwards, so the work gets a workspace and the workspace gets the build.
+Make one here, dispatch into it, and stop — you never claim, never
+`git checkout -b` in place, and never build on this branch.
+
+1. **Resolve the ticket.** An explicit number is the ticket. `next` is the
+   lowest-numbered open issue labelled `ready-for-agent`:
+
+   ```
+   gh issue list --repo <owner/name> --label ready-for-agent --state open
+   ```
+
+   An empty queue is the whole answer: say so and stop.
+
+2. **Create the workspace**, named `implement-<n>` — the shape `burndown`
+   dispatches under, and what `merge-cleanup` and
+   `orca-ide worktree rm --worktree <full branch name>` select on. Orca
+   derives the branch from that name and puts the agent in the workspace's
+   first terminal:
+
+   ```
+   orca-ide worktree create --repo path:<absolute primary checkout> \
+     --name implement-<n> --no-parent --base-branch <default branch> \
+     --issue <n> --agent claude --prompt "/implement <n>" --json
+   ```
+
+   The brief is that pointer and nothing else: this same skill, run from
+   inside the workspace, takes the driver's path above.
+
+3. **Confirm the branch** before you report. Read it back rather than
+   assuming the name Orca derived:
+
+   ```
+   git -C <new worktree path> branch --show-current
+   ```
+
+   It must name this ticket's own branch. A reused workspace name has left
+   Orca sitting on the base branch itself, where the worker would commit onto
+   whatever that base is; fix it with `git checkout -b` there and tell the
+   worker.
+
+4. **Report the workspace and stop.** Name the worktree path and the branch
+   you dispatched to. The build runs over there; this session is done.
 
 ## Claim the ticket
 

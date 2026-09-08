@@ -9,9 +9,13 @@
 - **Gate 1 — whose repo?** Mine (origin owner = my gh login) → agents land
   directly. Anyone else's → push the branch, stop before the PR, hand me the
   PR command.
-- **One Orca workspace per task** — each is its own worktree and branch, made
-  from the `+` on the project row. Agents never share a tree, so nothing
-  guards the primary checkout; a terminal opened on `main` means you meant it.
+- **One Orca workspace per task** — each is its own worktree and branch. Make
+  it from the `+` on the project row, or let `/implement` make it: run on
+  `main` it resolves the ticket, creates the workspace, dispatches a builder
+  into it, and stops.
+- **Never build on the primary checkout.** Agents never share a tree, so
+  nothing guards it; a terminal opened on `main` means you meant it, and what
+  it means is dispatch, never a branch cut in place.
 - **Gate 2 — code or decision?** Code file touched on my repo → code lane: a
   workspace made from the ticket, `/implement` inside it, PR at the end, and I
   merge. Zero code files → auto-ship: edit on `main`, commit, push, no
