@@ -6,7 +6,8 @@ judgment pass (SKILL.md) to sort into Cut/Rewrite/Keep. This script never
 classifies — it only surfaces candidates.
 
 Five detectors, each a small AST check:
-  1. assertion-free   — no assert / pytest.raises / self.assert*, or only a
+  1. assertion-free   — no assert / pytest.raises / self.assert* / a
+                         delegated `_assert_*` helper, or only a
                          trivial `assert True` / `assert x is not None`.
   2. tautology         — `assert x == x` (same expression both sides).
   3. mock-the-world     — many Mock/MagicMock/patch constructs, few real calls.
@@ -47,6 +48,14 @@ def _call_name(node):
     return _name_of(node.func)
 
 
+def _bare_name(node):
+    """`_call_name` with leading underscores stripped. `_assert_*` is the
+    private-helper spelling of a delegated assertion, and every detector that
+    keys off the `assert` prefix means the same thing by it (#678)."""
+    name = _call_name(node)
+    return name.lstrip("_") if name else name
+
+
 def _is_unittest_testcase(cls):
     return any(_name_of(base) == "TestCase" for base in cls.bases)
 
@@ -85,11 +94,8 @@ def _assertion_mechanisms(func):
         if isinstance(n, ast.Assert):
             mechs.append(n)
         else:
-            name = _call_name(n)
-            # `_assert_*` is the private-helper spelling of a delegated
-            # assertion, so leading underscores don't change what the call is.
-            name = name.lstrip("_") if name else name
-            if name and (name.startswith("assert") or name == "raises"):
+            bare = _bare_name(n)
+            if (bare and bare.startswith("assert")) or _call_name(n) == "raises":
                 mechs.append(n)
     return mechs
 
@@ -132,7 +138,7 @@ def is_mock_the_world(func):
         name = _call_name(n)
         if name in MOCK_NAMES:
             mock_calls += 1
-        elif name and not name.startswith("assert"):
+        elif name and not _bare_name(n).startswith("assert"):
             real_calls += 1
     return mock_calls >= MOCK_CEILING and mock_calls > real_calls
 
@@ -144,9 +150,9 @@ def _is_interaction_check(node):
         test = node.test
         if isinstance(test, ast.Attribute) and test.attr == "called":
             return True
-        name = _call_name(test)
+        name = _bare_name(test)
         return bool(name and name.startswith("assert_called"))
-    name = _call_name(node)
+    name = _bare_name(node)
     return bool(name and name.startswith("assert_called"))
 
 
@@ -290,6 +296,11 @@ def _selfcheck():
     )
     assert not is_interaction_only(
         _func_from("def test_x():\n    result = subject.run()\n    assert result == 'ok'\n")
+    )
+    # the private-helper spelling reaches this detector too: without it a
+    # spy-only test escapes both assertion-free and interaction-only (#678).
+    assert is_interaction_only(
+        _func_from("def test_x():\n    mock_obj.run()\n    _assert_called_once(mock_obj)\n")
     )
 
     # 5. empty/skipped
