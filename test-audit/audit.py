@@ -86,6 +86,9 @@ def _assertion_mechanisms(func):
             mechs.append(n)
         else:
             name = _call_name(n)
+            # `_assert_*` is the private-helper spelling of a delegated
+            # assertion, so leading underscores don't change what the call is.
+            name = name.lstrip("_") if name else name
             if name and (name.startswith("assert") or name == "raises"):
                 mechs.append(n)
     return mechs
@@ -236,6 +239,11 @@ def _selfcheck():
     assert is_assertion_free(_func_from("def test_x():\n    x = compute()\n"))
     assert is_assertion_free(_func_from("def test_x():\n    x = compute()\n    assert x is not None\n"))
     assert not is_assertion_free(_func_from("def test_x():\n    x = compute()\n    assert x == 5\n"))
+    # a private helper is still a delegated assertion: `_assert_*` is the
+    # module-local convention for one, so the leading underscores are stripped
+    # before the prefix test (#678).
+    assert not is_assertion_free(_func_from("def test_x():\n    _assert_foo(compute())\n"))
+    assert is_assertion_free(_func_from("def test_x():\n    _check_foo(compute())\n"))
 
     # 2. tautology
     assert is_tautology(_func_from("def test_x():\n    x = compute()\n    assert x == x\n"))
