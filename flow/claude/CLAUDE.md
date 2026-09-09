@@ -107,6 +107,10 @@ drives TDD → `/code-review` + `/two-axis-code-review` → commit with
 - **Every Agent call passes `model`** — the session is Fable and a bare call
   inherits it. Explore/lookup → `sonnet`, review/diagnosis → `opus`. Rubric:
   `~/.agents/skills/flow/claude/subagent-tiers.md`.
+- **A dispatched agent's status comes from the process table, never the
+  terminal tail** — a cached screen with unchanged text is not evidence of
+  work. Check children (`ps --ppid`), HEAD, `ls-remote`, `gh pr list`. Detail:
+  `~/.agents/skills/flow/claude/agent-status.md`.
 - **Long background job? run it under `job-run --name <n> -- <cmd>`** — its
   output and exit survive a kill, and `job-run --status <n>` answers alive /
   finished / killed. Details in `job-run --help`.
