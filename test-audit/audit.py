@@ -214,8 +214,14 @@ def _is_pytest_file(path, tree):
 
 
 def scan_file(path):
-    with open(path, encoding="utf-8", errors="replace") as f:
-        source = f.read()
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            source = f.read()
+    except OSError:
+        # A file we cannot read is skipped, mirroring audit.mjs's scanFile.
+        # Without this an unreadable file raised through `main` and the process
+        # exited 1, which under the gate's contract means "hollow tests found".
+        return []
     try:
         tree = ast.parse(source, filename=path)
     except SyntaxError:
@@ -435,23 +441,56 @@ def _selfcheck():
         # report success: EXIT_UNABLE, distinct from both 0 (clean) and 1
         # (hollow tests found), so a typo in a repo's wiring reads
         # differently from a real finding (#685).
+        # Each guard is witnessed by its own message: `os.access` also rejects
+        # a missing path, so a status-only assertion would leave the existence
+        # branch passing with its constraint stripped.
         missing = os.path.join(tmp, "no-such-dir")
-        assert _quiet_main(["audit.py", "--gate", missing]) == EXIT_UNABLE
+        code, err = _main_stderr(["audit.py", "--gate", missing])
+        assert code == EXIT_UNABLE, (code, err)
+        assert "no such path" in err, err
         assert _quiet_main(["audit.py", missing]) == EXIT_UNABLE
-
-        # A root that exists but cannot be read was not checked either -- the
-        # same lie, reached by EACCES instead of ENOENT (#685).
-        unreadable = os.path.join(tmp, "unreadable")
-        os.makedirs(unreadable)
-        with open(os.path.join(unreadable, "test_hollow.py"), "w", encoding="utf-8") as f:
-            f.write("def test_x():\n    compute()\n")
-        os.chmod(unreadable, 0o000)
-        try:
-            assert _quiet_main(["audit.py", "--gate", unreadable]) == EXIT_UNABLE
-        finally:
-            os.chmod(unreadable, 0o755)
     finally:
         shutil.rmtree(tmp)
+
+    # A root that exists but cannot be read was not checked either -- the same
+    # lie, reached by EACCES instead of ENOENT (#685). Its own root, never one
+    # earlier assertions gate on: a hollow fixture parked under such a root is
+    # what makes those assertions pass.
+    #
+    # Skipped for uid 0, which is granted access whatever the mode, so the tree
+    # would scan and the gate would find the fixture.
+    if os.geteuid() != 0:
+        denied = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(denied, "test_hollow.py"), "w", encoding="utf-8") as f:
+                f.write("def test_x():\n    compute()\n")
+            # Readable but not listable, then not readable at all: both leave
+            # the walk with nothing, so both must refuse rather than report clean.
+            for mode in (0o444, 0o000):
+                os.chmod(denied, mode)
+                code, err = _main_stderr(["audit.py", "--gate", denied])
+                os.chmod(denied, 0o755)
+                assert code == EXIT_UNABLE, (oct(mode), code, err)
+                assert "cannot read" in err, err
+        finally:
+            os.chmod(denied, 0o755)
+            shutil.rmtree(denied)
+
+        # An unreadable *file* under a readable root is skipped, not raised.
+        # audit.mjs's scanFile has always caught this; without the mirror the
+        # exception reached `main` and the process exited 1, which under the
+        # gate's contract means "hollow tests found". Skipping it still leaves
+        # the file unexamined -- that wider hole is the documented follow-up.
+        locked = tempfile.mkdtemp()
+        try:
+            path = os.path.join(locked, "test_locked.py")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("def test_x():\n    compute()\n")
+            os.chmod(path, 0o000)
+            assert _quiet_main(["audit.py", "--gate", locked]) == 0
+        finally:
+            os.chmod(path, 0o644)
+            shutil.rmtree(locked)
 
     print("ok")
 
@@ -474,7 +513,10 @@ def main(argv):
     # walks to zero files, which is indistinguishable from a clean tree. Only
     # the root is checked here -- an unreadable directory deeper in the tree is
     # still swallowed by `os.walk`, which is a wider fix than #685 asked for.
-    if not os.access(root, os.R_OK):
+    # A directory needs X_OK as well: R_OK alone lists it, but opening the
+    # files inside it still fails, so the walk yields nothing.
+    needed = os.R_OK | os.X_OK if os.path.isdir(root) else os.R_OK
+    if not os.access(root, needed):
         print(f"test-audit: cannot read {root} -- nothing was scanned.", file=sys.stderr)
         return EXIT_UNABLE
     if gate_mode:

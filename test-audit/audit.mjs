@@ -238,6 +238,14 @@ const ASSERT_MODULES = new Set(["node:assert", "node:assert/strict", "assert", "
  * import admits the file (#685), an unrecognized assertion turns a correct
  * test into a build-blocking `assertion-free` finding.
  */
+/** The name an import specifier reads from the module -- `x` in
+ * `import { x as y }`, and in its string form `import { "x" as y }` -- or null
+ * for a default or namespace import, which reads the module whole. */
+function importedName(spec) {
+  if (spec.type !== "ImportSpecifier") return null;
+  return identifierName(spec.imported) || spec.imported.value;
+}
+
 function assertBindings(tree) {
   const roots = new Set(["assert"]);
   const matchers = new Set();
@@ -246,8 +254,8 @@ function assertBindings(tree) {
     for (const spec of n.specifiers) {
       // `strict` and `default` are namespace-like: they carry the whole
       // matcher set and are called as `<local>.<matcher>(...)`, not bare.
-      const imported = spec.type === "ImportSpecifier" ? identifierName(spec.imported) || spec.imported.value : null;
-      if (spec.type !== "ImportSpecifier" || imported === "strict" || imported === "default") {
+      const imported = importedName(spec);
+      if (imported === null || imported === "strict" || imported === "default") {
         roots.add(spec.local.name);
       } else {
         matchers.add(spec.local.name);
@@ -282,7 +290,9 @@ function assertCallInfo(node, bindings = NO_ASSERT_BINDINGS) {
     }
   }
   const bare = identifierName(c);
-  if (bare === "assert") return { matcher: "ok", args: node.arguments };
+  // `assert(x)` -- and the same shorthand through any other root binding --
+  // is node:assert's spelling of `assert.ok(x)`.
+  if (bare && bindings.roots.has(bare)) return { matcher: "ok", args: node.arguments };
   if (bare && bindings.matchers.has(bare)) return { matcher: bare, args: node.arguments };
   return null;
 }
@@ -764,6 +774,23 @@ function selfcheck() {
       "import { test } from 'node:test';\nimport { strict } from 'node:assert';\n" +
         "test('x', () => { strict.equal(compute(), 3); });\n",
     );
+    // A root binding is callable as the `assert.ok` shorthand under any name,
+    // and `default` is a spelling of that binding. (`importedName` also reads a
+    // string-literal specifier; no input distinguishes that half, since such a
+    // specifier otherwise falls through to `roots` and still reads as an
+    // assertion, so nothing here claims to witness it.)
+    const bareRoot = join(tmp, "bare-root.test.js");
+    writeFileSync(
+      bareRoot,
+      "import { test } from 'node:test';\nimport a from 'node:assert';\n" +
+        "test('x', () => { a(compute()); });\n",
+    );
+    const defaultSpec = join(tmp, "default-spec.test.js");
+    writeFileSync(
+      defaultSpec,
+      "import { test } from 'node:test';\nimport { default as a } from 'node:assert';\n" +
+        "test('x', () => { a.equal(compute(), 3); });\n",
+    );
     assert.equal(
       quietMain(["node", "audit.mjs", "--gate", tmp]),
       0,
@@ -773,22 +800,9 @@ function selfcheck() {
     unlinkSync(namedAssert);
     unlinkSync(strictAssert);
     unlinkSync(strictNamed);
+    unlinkSync(bareRoot);
+    unlinkSync(defaultSpec);
 
-    // A root that exists but cannot be read was not checked either -- the same
-    // lie as a missing root, reached by EACCES instead of ENOENT (#685).
-    const unreadable = join(tmp, "unreadable");
-    mkdirSync(unreadable);
-    writeFileSync(join(unreadable, "hollow.test.js"), hollow);
-    chmodSync(unreadable, 0o000);
-    try {
-      assert.equal(
-        quietMain(["node", "audit.mjs", "--gate", unreadable]),
-        EXIT_UNABLE,
-        "gate refuses a root it cannot read",
-      );
-    } finally {
-      chmodSync(unreadable, 0o755);
-    }
 
     // The file the gate most wants to catch: every test in it is hollow, so
     // there is no `expect` anywhere to identify it by. The runner import is
@@ -803,10 +817,43 @@ function selfcheck() {
     // found), so a typo in a repo's wiring reads differently from a real
     // finding (#685).
     const missing = join(tmp, "no-such-dir");
-    assert.equal(quietMain(["node", "audit.mjs", "--gate", missing]), EXIT_UNABLE, "gate refuses a missing root");
+    {
+      // Each guard is witnessed by its own message: `accessSync` also rejects a
+      // missing path, so a status-only assertion would leave the existence
+      // branch passing with its constraint stripped.
+      const [code, err] = mainStderr(["node", "audit.mjs", "--gate", missing]);
+      assert.equal(code, EXIT_UNABLE, "gate refuses a missing root");
+      assert(err.includes("no such path"), `gate names a missing root: ${err}`);
+    }
     assert.equal(quietMain(["node", "audit.mjs", missing]), EXIT_UNABLE, "report refuses a missing root");
   } finally {
     rmSync(tmp, { recursive: true, force: true });
+  }
+
+  // A root that exists but cannot be read was not checked either -- the same
+  // lie as a missing root, reached by EACCES instead of ENOENT (#685). Its own
+  // root, never the shared one above: a hollow fixture parked under a root that
+  // later assertions gate on is what makes those assertions pass.
+  //
+  // Skipped for uid 0, which is granted access whatever the mode, so the tree
+  // would scan and the gate would find the fixture.
+  if (!(process.getuid && process.getuid() === 0)) {
+    const denied = mkdtempSync(join(tmpdir(), "test-audit-eacces-"));
+    try {
+      writeFileSync(join(denied, "hollow.test.js"), "it('x', () => { compute(); });\nit('y', () => { expect(a).toBe(1); });\n");
+      // Readable but not listable, then not readable at all: both leave the
+      // walk with nothing, so both must refuse rather than report clean.
+      for (const mode of [0o444, 0o000]) {
+        chmodSync(denied, mode);
+        const [code, err] = mainStderr(["node", "audit.mjs", "--gate", denied]);
+        chmodSync(denied, 0o755);
+        assert.equal(code, EXIT_UNABLE, `gate refuses a root it cannot read (mode ${mode.toString(8)})`);
+        assert(err.includes("cannot read"), `gate says it could not read the root: ${err}`);
+      }
+    } finally {
+      chmodSync(denied, 0o755);
+      rmSync(denied, { recursive: true, force: true });
+    }
   }
 
   process.stdout.write("ok\n");
@@ -871,7 +918,10 @@ function main(argv) {
   // the root is checked here -- an unreadable directory deeper in the tree is
   // still swallowed by `collect`, which is a wider fix than #685 asked for.
   try {
-    accessSync(root, constants.R_OK);
+    // A directory needs X_OK as well: R_OK alone lists it, but opening the
+    // files inside it still fails, so the walk yields nothing.
+    const needed = statSync(root).isDirectory() ? constants.R_OK | constants.X_OK : constants.R_OK;
+    accessSync(root, needed);
   } catch {
     process.stderr.write(`test-audit: cannot read ${root} -- nothing was scanned.\n`);
     return EXIT_UNABLE;
