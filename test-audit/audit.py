@@ -241,6 +241,40 @@ def scan_path(root):
     return findings
 
 
+# --- gate mode -------------------------------------------------------------
+
+# The one smell a build gates on. The other four are report-only: a
+# mock-the-world or interaction-only test still runs and still fails when the
+# behavior breaks, so blocking a merge on one costs more than it buys. An
+# assertion-free test cannot fail at all, which is the one finding a machine
+# can call a defect without reading anything.
+GATE_SMELL = "assertion-free test"
+
+
+def _under_fixtures(path):
+    """True when `path` lies under a `fixtures/` directory.
+
+    A fixture is a deliberate specimen of the smell -- this skill's own
+    `fixtures/test_pytest_smells.py` exists to be flagged -- so the gate
+    never counts one. The report pass still sees them; only the gate skips."""
+    return "fixtures" in path.replace(os.sep, "/").split("/")
+
+
+def gate(root):
+    """The findings that fail a build: `GATE_SMELL` only, fixtures excluded."""
+    return [f for f in scan_path(root) if f[2] == GATE_SMELL and not _under_fixtures(f[0])]
+
+
+def _quiet_main(argv):
+    """`main` with its report swallowed -- the selfcheck asserts on the exit
+    status, and a passing suite should print only `ok`."""
+    import contextlib
+    import io
+
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        return main(argv)
+
+
 def _selfcheck():
     def _func_from(src):
         tree = ast.parse(src)
@@ -345,20 +379,55 @@ def _selfcheck():
     finally:
         shutil.rmtree(tmp)
 
+    # gate mode: assertion-free only, and never a fixture.
+    tmp = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(tmp, "fixtures"))
+        with open(os.path.join(tmp, "fixtures", "test_specimen.py"), "w", encoding="utf-8") as f:
+            f.write("def test_x():\n    compute()\n")
+        with open(os.path.join(tmp, "test_taut.py"), "w", encoding="utf-8") as f:
+            f.write("def test_x():\n    x = compute()\n    assert x == x\n")
+        # a deliberate specimen and a report-only smell: neither fails a build
+        assert gate(tmp) == [], gate(tmp)
+        assert [smell for _, _, smell in scan_path(tmp)] != [], "the report pass still sees both"
+
+        with open(os.path.join(tmp, "test_hollow.py"), "w", encoding="utf-8") as f:
+            f.write("def test_x():\n    compute()\n")
+        gated = gate(tmp)
+        assert len(gated) == 1, gated
+        assert gated[0][0].endswith("test_hollow.py"), gated
+        assert _quiet_main(["audit.py", "--gate", tmp]) == 1
+        os.remove(os.path.join(tmp, "test_hollow.py"))
+        assert _quiet_main(["audit.py", "--gate", tmp]) == 0
+    finally:
+        shutil.rmtree(tmp)
+
     print("ok")
 
 
 def main(argv):
     if argv[1:2] == ["--selfcheck"]:
         _selfcheck()
-        return
+        return 0
+    if argv[1:2] == ["--gate"]:
+        findings = gate(argv[2] if len(argv) > 2 else ".")
+        for path, lineno, smell in findings:
+            print(f"{path}:{lineno}: {smell}")
+        if findings:
+            print(
+                f"test-audit: {len(findings)} assertion-free test(s) -- a test that cannot fail proves nothing.",
+                file=sys.stderr,
+            )
+            return 1
+        return 0
     root = argv[1] if len(argv) > 1 else "."
     findings = scan_path(root)
     for path, lineno, smell in findings:
         print(f"{path}:{lineno}: {smell}")
     if not findings:
         print("no mechanical smells found", file=sys.stderr)
+    return 0
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    sys.exit(main(sys.argv))
