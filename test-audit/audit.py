@@ -13,6 +13,10 @@ Five detectors, each a small AST check:
   4. interaction-only   — the only checks are `assert_called*` / `.called`.
   5. empty/skipped      — `pass`-body test, or `@skip` with no reason.
 
+Wherever a detector keys off the `assert` name prefix, leading underscores are
+stripped first: `_assert_*` is the private-helper spelling of a delegated
+assertion (#678).
+
 ponytail: pytest-only. Framework detection is filename convention
 (`test_*.py`/`*_test.py`) plus excluding unittest.TestCase methods (a
 different framework: different assertion API, different discovery) — not a
@@ -45,6 +49,14 @@ def _call_name(node):
     if not isinstance(node, ast.Call):
         return None
     return _name_of(node.func)
+
+
+def _bare_name(node):
+    """`_call_name` with leading underscores stripped. `_assert_*` is the
+    private-helper spelling of a delegated assertion, and every detector that
+    keys off the `assert` prefix means the same thing by it (#678)."""
+    name = _call_name(node)
+    return name.lstrip("_") if name else name
 
 
 def _is_unittest_testcase(cls):
@@ -85,8 +97,10 @@ def _assertion_mechanisms(func):
         if isinstance(n, ast.Assert):
             mechs.append(n)
         else:
-            name = _call_name(n)
-            if name and (name.startswith("assert") or name == "raises"):
+            bare = _bare_name(n)
+            # `raises` stays on the raw name: `pytest.raises` is spelled one
+            # way, and there is no `_raises` private-helper convention.
+            if (bare and bare.startswith("assert")) or _call_name(n) == "raises":
                 mechs.append(n)
     return mechs
 
@@ -129,7 +143,7 @@ def is_mock_the_world(func):
         name = _call_name(n)
         if name in MOCK_NAMES:
             mock_calls += 1
-        elif name and not name.startswith("assert"):
+        elif name and not _bare_name(n).startswith("assert"):
             real_calls += 1
     return mock_calls >= MOCK_CEILING and mock_calls > real_calls
 
@@ -141,9 +155,9 @@ def _is_interaction_check(node):
         test = node.test
         if isinstance(test, ast.Attribute) and test.attr == "called":
             return True
-        name = _call_name(test)
+        name = _bare_name(test)
         return bool(name and name.startswith("assert_called"))
-    name = _call_name(node)
+    name = _bare_name(node)
     return bool(name and name.startswith("assert_called"))
 
 
@@ -236,6 +250,11 @@ def _selfcheck():
     assert is_assertion_free(_func_from("def test_x():\n    x = compute()\n"))
     assert is_assertion_free(_func_from("def test_x():\n    x = compute()\n    assert x is not None\n"))
     assert not is_assertion_free(_func_from("def test_x():\n    x = compute()\n    assert x == 5\n"))
+    # a private helper is still a delegated assertion: `_assert_*` is the
+    # module-local convention for one, so the leading underscores are stripped
+    # before the prefix test (#678).
+    assert not is_assertion_free(_func_from("def test_x():\n    _assert_foo(compute())\n"))
+    assert is_assertion_free(_func_from("def test_x():\n    _check_foo(compute())\n"))
 
     # 2. tautology
     assert is_tautology(_func_from("def test_x():\n    x = compute()\n    assert x == x\n"))
@@ -276,12 +295,32 @@ def _selfcheck():
         )
     )
 
+    # the same underscore stripping decides the real-call count here: three
+    # mocks against three `_assert_*` helpers only reads as mock-the-world
+    # while the helpers are not counted as real calls (#678).
+    assert is_mock_the_world(
+        _func_from(
+            "def test_x():\n"
+            "    m1 = MagicMock()\n"
+            "    m2 = MagicMock()\n"
+            "    m3 = MagicMock()\n"
+            "    _assert_a(m1)\n"
+            "    _assert_b(m2)\n"
+            "    _assert_c(m3)\n"
+        )
+    )
+
     # 4. interaction-only assertion
     assert is_interaction_only(
         _func_from("def test_x():\n    mock_obj.run()\n    mock_obj.assert_called_once()\n")
     )
     assert not is_interaction_only(
         _func_from("def test_x():\n    result = subject.run()\n    assert result == 'ok'\n")
+    )
+    # the private-helper spelling reaches this detector too: without it a
+    # spy-only test escapes both assertion-free and interaction-only (#678).
+    assert is_interaction_only(
+        _func_from("def test_x():\n    mock_obj.run()\n    _assert_called_once(mock_obj)\n")
     )
 
     # 5. empty/skipped
