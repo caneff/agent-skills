@@ -6,13 +6,16 @@ judgment pass (SKILL.md) to sort into Cut/Rewrite/Keep. This script never
 classifies — it only surfaces candidates.
 
 Five detectors, each a small AST check:
-  1. assertion-free   — no assert / pytest.raises / self.assert* / a
-                         delegated `_assert_*` helper, or only a
+  1. assertion-free   — no assert / pytest.raises / self.assert*, or only a
                          trivial `assert True` / `assert x is not None`.
   2. tautology         — `assert x == x` (same expression both sides).
   3. mock-the-world     — many Mock/MagicMock/patch constructs, few real calls.
   4. interaction-only   — the only checks are `assert_called*` / `.called`.
   5. empty/skipped      — `pass`-body test, or `@skip` with no reason.
+
+Wherever a detector keys off the `assert` name prefix, leading underscores are
+stripped first: `_assert_*` is the private-helper spelling of a delegated
+assertion (#678).
 
 ponytail: pytest-only. Framework detection is filename convention
 (`test_*.py`/`*_test.py`) plus excluding unittest.TestCase methods (a
@@ -95,6 +98,8 @@ def _assertion_mechanisms(func):
             mechs.append(n)
         else:
             bare = _bare_name(n)
+            # `raises` stays on the raw name: `pytest.raises` is spelled one
+            # way, and there is no `_raises` private-helper convention.
             if (bare and bare.startswith("assert")) or _call_name(n) == "raises":
                 mechs.append(n)
     return mechs
@@ -287,6 +292,21 @@ def _selfcheck():
             "    m = Mock()\n"
             "    result = subject.compute(1, 2)\n"
             "    assert result == 3\n"
+        )
+    )
+
+    # the same underscore stripping decides the real-call count here: three
+    # mocks against three `_assert_*` helpers only reads as mock-the-world
+    # while the helpers are not counted as real calls (#678).
+    assert is_mock_the_world(
+        _func_from(
+            "def test_x():\n"
+            "    m1 = MagicMock()\n"
+            "    m2 = MagicMock()\n"
+            "    m3 = MagicMock()\n"
+            "    _assert_a(m1)\n"
+            "    _assert_b(m2)\n"
+            "    _assert_c(m3)\n"
         )
     )
 
