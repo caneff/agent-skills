@@ -23,34 +23,49 @@ covers pytest; `audit.mjs` covers vitest and node:test. Run both first; their
 combined candidate list feeds the judgment sweep below instead of starting
 from a blank page.
 
-**JS/TS reach.** `audit.mjs` recognizes vitest (`describe`/`it`/`test` +
-`expect`) and node:test (`node:test` import + `assert.*`) — nothing else. A
-file it can't identify as one of those two is skipped, never flagged, so a
-homegrown or non-standard harness doesn't flood pass one with false
-assertion-free findings. Playwright `.spec` files are out of scope — they're
-e2e/visual specs, not unit tests, and auditing them by this yardstick would
-misjudge them. jest, mocha, ava, and chai are likewise out of scope. A
-missing `@babel/parser` prints a `run npm ci` message and exits — bootstrap
-with `npm ci` in `~/.agents/skills/test-audit/` once.
+**JS/TS reach.** `audit.mjs` recognizes vitest and node:test — nothing else.
+A file identifies as **vitest** by importing `vitest`, or by naming tests
+(`describe`/`it`/`test`) and calling `expect`. A file identifies as
+**node:test** by importing `node:test`, and only that way — `assert.*` alone
+is not a signal, so a node:test file that reaches its runner some other way is
+out of reach. A file it can't identify as one of those two is skipped, never
+flagged, so a homegrown or non-standard harness doesn't flood pass one with
+false assertion-free findings. Playwright
+`.spec` files are out of scope — they're e2e/visual specs, not unit tests, and
+auditing them by this yardstick would misjudge them. jest, mocha, ava, and
+chai are likewise out of scope. A missing `@babel/parser` prints a `run npm
+ci` message and exits — bootstrap with `npm ci` in
+`~/.agents/skills/test-audit/` once.
 
 **Gate mode.** `audit.py --gate [path]` and `audit.mjs --gate [path]` are the
-build-gate form of pass one: they report **only** smell 1, skip anything under
-a `fixtures/` directory, and exit non-zero on any hit. Smell 1 alone gates
-because an assertion-free test cannot fail at all — a machine can call that a
-defect without reading anything. The other four still run and still fail when
-the behavior breaks, so blocking a merge on one costs more than it buys; they
-stay report-only.
+build-gate form of pass one: they report **only** smell 1 and skip anything
+under a `fixtures/` directory. Smell 1 alone gates because an assertion-free
+test cannot fail at all — a machine can call that a defect without reading
+anything. The other four still run and still fail when the behavior breaks, so
+blocking a merge on one costs more than it buys; they stay report-only.
+
+Three exit statuses: **0** clean, **1** hollow tests found, **2** unable to
+check. Only gate mode ever returns 1 — a report never fails a build — but 0 and
+2 mean the same thing in both modes. A path that does not exist gets 2, never 0
+— a gate that reports success while it scanned nothing is a lie, and a typo in
+a repo's wiring would otherwise make that repo's gate permanently green (#685).
+`audit.mjs` also exits 2 when `@babel/parser` is missing.
+
+The `fixtures/` exemption matches a directory of that name at any depth, so the
+gate prints how many findings it suppressed (`N assertion-free finding(s)
+suppressed under fixtures/.`) even when it passes — otherwise a repo could park
+hollow tests under a directory it named `fixtures` and never notice.
 
 Wire it into a repo by adding it to that repo's local gate (`git config
 land.testcmd`). In this repo that is `test-audit/assertion-free-gate.test.sh`,
 picked up automatically by `tests/all.sh`'s `*.test.sh` discovery.
 
-**The JS gate's blind spot.** `audit.mjs` audits a file only when it already
-uses `expect` (vitest) or `assert.*` (node:test) — the #287 guard against
-flooding a homegrown harness with false findings. A test file with *no*
-assertion anywhere is therefore skipped whole, so `--gate` catches a hollow
-test only when a real assertion sits elsewhere in the same file. `audit.py`
-has no such limit; it audits any `test_*.py` outright.
+**The JS gate's remaining blind spot.** A file whose every test is
+assertion-free has no assertion to be recognized by, so the runner *import* is
+what identifies it (#685) — which leaves one case uncovered: a vitest file run
+in globals mode, importing nothing, whose every test is assertion-free. It is
+invisible to both signals. `audit.py` has no equivalent limit; it audits any
+`test_*.py` outright.
 
 **Name collision.** This is `test-audit` — test-*file* quality. It is not
 `ponytail-audit` (production-code over-engineering) or `skill-audit`
