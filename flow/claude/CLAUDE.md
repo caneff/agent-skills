@@ -29,7 +29,11 @@ after; revert is the undo.
 **Progressive disclosure governs this file:** pointer inline, detail in a
 read-on-demand doc read via the Read tool. A rule stays inline only if it
 fires in most sessions or guards an expensive/irreversible mistake — else it
-gets a pointer.
+gets a pointer. This covers **every** always-on agent doc, not just this file
+— `AGENTS.md`, `CODING_STANDARDS.md` and `Memory/RULES.md` included: load-bearing
+invariants inline, full detail in a read-on-demand pointer doc. When I say
+"always" about the shape of a recurring output, put the change in the skill and
+auto-ship it rather than complying once in the session.
 
 # Precedence — highest wins
 
@@ -39,10 +43,22 @@ defaults ("Done means verified", "STOP and ask"), (4) personas
 never overrides a rule above it — can't skip a check, cut a required feature,
 or mangle deliverable prose.
 
+An explicit ruling from me outranks the current state of the tree and any
+written criteria: change the tree or the doc, never "correct" the ruling to
+match what exists. A doc-vs-code contradiction found mid-build is a decision,
+not a fix — report both sides and let me rule. Before a rename or a golden
+regeneration, `ls` the sibling examples for the convention already in the tree
+and hold the ruling provisional until the reviewer weighs it.
+
 # Done means verified
 
 Never report work done without running the smallest check that would fail if
 it broke — a test, a build, or re-reading the ask. Say what you checked.
+
+Never graduate an unverified assumption into a fact. When a two-second check
+exists — `gh`, `ls`, `grep`, a tasklist, a screenshot, a decode — run it before
+asserting what exists or what state a thing is in, and cite it. Asserting a
+negative from memory is how you end up acting on a plausible story.
 
 # Communication
 
@@ -65,6 +81,10 @@ with the outcome, detail after.
 Relay the **delta**, not the report. When a subagent finishes, say only what it
 added that you had not already said; if it confirms what you told me, that is
 one sentence. Never answer a question and delegate the same question — pick one.
+A teammate or subagent idle notification that repeats a report you already
+relayed gets **no reply at all** — not "nothing new", not "already relayed".
+The one-sentence confirmation above is for a report that adds nothing, not for
+a literal duplicate.
 
 # Planning/build workflow (Matt Pocock skills)
 
@@ -128,7 +148,26 @@ drives TDD → `/code-review` + `/two-axis-code-review` → commit with
   everywhere.
 - To show me a file, open it in Orca's editor: `orca-ide file open <path>
   [--worktree <selector>]` (`file diff`, `file open-changed` likewise). Never
-  print a path and ask me to open it.
+  print a path and ask me to open it. A **rendered** artifact — an HTML page, a
+  report, a lineup — goes to Orca's browser instead, and so does any page I
+  need to *look at* myself: `orca-ide tab create --url
+  file://wsl.localhost/Ubuntu-24.04/<abs path>`, then `tab switch --page <id>`
+  and `screenshot`. Three traps: the UNC form is not optional — the GUI is the
+  Windows build, so a Linux `file:///home/...` loads as `ERR_FILE_NOT_FOUND` and
+  only `tab list --json` shows it in `loadError`; `screenshot` shoots the
+  *active* tab, and handing it `--page` answers `runtime_unavailable`, so `tab
+  switch` first; and `eval` wants an **expression**, so wrap statements in an
+  IIFE and reach elements through `document.getElementById` (a bare `sort` is
+  not a global). Never stand up an http server, headless Chrome or a screenshot
+  MCP to read a local page. The rest of the group (`goto`, `eval`, `click`,
+  `check`) is in the `orca-cli` skill — load it rather than guessing at command
+  names, which are top-level and not under a `browser` subcommand. **Load it on
+  my own intent, with you having named nothing**: its own triggers are all
+  phrases *you* say, so it never fires when I am the one who needs to look at
+  something, and that gap is what sends me building an http server instead. The
+  same goes for `computer-use` and `orchestration`. Fix the gap here and not in
+  those three skills' own files — they are `orca skills install` output,
+  gitignored, and regenerated on the next install.
 - Never `pkill -f`/`pgrep -f` in a command line that names the target anywhere
   else — a heredoc writing the script, or a relaunch after the kill, both match
   and kill your shell (exit 143/144). A kill gets its own Bash call and nothing
