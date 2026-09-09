@@ -129,9 +129,15 @@ drives TDD → `/code-review` + `/two-axis-code-review` → commit with
 - To show me a file, open it in Orca's editor: `orca-ide file open <path>
   [--worktree <selector>]` (`file diff`, `file open-changed` likewise). Never
   print a path and ask me to open it.
-- Never `pkill -f`/`pgrep -f` a pattern that appears in your own command line —
-  it kills your shell (exit 143). Bracket a character (`'zb[.]py hunt'`) or kill
-  by PID from a separate listing.
+- Never `pkill -f`/`pgrep -f` in a command line that names the target anywhere
+  else — a heredoc writing the script, or a relaunch after the kill, both match
+  and kill your shell (exit 143/144). A kill gets its own Bash call and nothing
+  else; killing by PID from a separate `ps -eo pid,args --no-headers | grep
+  '[p]attern'` listing is the default. Bracketing (`'zb[.]py hunt'`) only stops
+  the pattern matching itself, so it is the second line of defence, not the
+  rule. When the shell dies mid-compound-command the later steps never ran — a
+  file you "just wrote" may still hold its old contents, so re-read it before
+  debugging what it does.
 - Prefer a surgical edit over rewriting the whole file when the result is the
   same — whole-file rewrites waste output tokens and time.
 - When summarizing a source, reword it; any verbatim phrase gets quotation
