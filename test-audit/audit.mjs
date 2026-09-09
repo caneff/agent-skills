@@ -85,13 +85,19 @@ function memberCallee(node) {
 
 const TEST_ROOTS = new Set(["it", "test"]);
 const SUITE_ROOTS = new Set(["describe", "it", "test"]);
+// node:test hangs its lifecycle hooks off the same root as its tests
+// (`test.after(...)`), so a root match alone collects a teardown hook as an
+// assertion-free test (#677). A denylist, so `it.skip` and any runner variant
+// (`concurrent`, `failing`) stay collected. `beforeAll`/`afterAll` are here for
+// the same reason: vitest and Playwright hang them off `test` too.
+const LIFECYCLE_HOOKS = new Set(["after", "before", "beforeEach", "afterEach", "beforeAll", "afterAll"]);
 
 /** Does this CallExpression name a single test (`it`/`test`, incl. `.skip`)? */
 function isTestCall(node) {
   const bare = calleeName(node);
   if (bare && TEST_ROOTS.has(bare)) return true;
   const mem = memberCallee(node);
-  return !!(mem && TEST_ROOTS.has(mem.root));
+  return !!(mem && TEST_ROOTS.has(mem.root) && !LIFECYCLE_HOOKS.has(mem.method));
 }
 
 /** The modifier on a member test call (`skip`/`todo`/`only`), else null. */
@@ -443,8 +449,23 @@ function testCallFrom(src) {
 function tautologyOf(src) {
   return isTautology(testCallFrom(src), src);
 }
+function testCallCount(src) {
+  return testCalls(parseSource(src, "snippet.test.js")).length;
+}
 
 function selfcheck() {
+  // 0. test-call collection: modifiers are tests, lifecycle hooks are not (#677)
+  assert(testCallCount("test.after(() => { server.close(); })") === 0, "lifecycle hook is not a test call");
+  assert(testCallCount("test.before(() => { server.listen(); })") === 0, "before hook is not a test call");
+  assert(testCallCount("test.beforeEach(() => { reset(); })") === 0, "beforeEach hook is not a test call");
+  assert(testCallCount("test.afterEach(() => { reset(); })") === 0, "afterEach hook is not a test call");
+  assert(testCallCount("test.beforeAll(() => { boot(); })") === 0, "beforeAll hook is not a test call");
+  assert(testCallCount("test.afterAll(() => { shutdown(); })") === 0, "afterAll hook is not a test call");
+  assert(
+    testCallCount("it.skip('x', () => { expect(a).toBe(b); })") === 1,
+    "skip modifier is still a test call",
+  );
+
   // 1. assertion-free
   assert(isAssertionFree(testCallFrom("it('x', () => { const y = compute(); })")), "assertion-free positive");
   assert(!isAssertionFree(testCallFrom("it('x', () => { expect(compute()).toBe(5); })")), "assertion-free negative");
