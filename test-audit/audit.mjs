@@ -16,12 +16,15 @@
  * audit.py keeps the pytest path untouched.
  */
 import {
+  accessSync,
+  constants,
   readFileSync,
   readdirSync,
   statSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
+  chmodSync,
   writeFileSync,
   rmSync,
   unlinkSync,
@@ -137,33 +140,20 @@ function testCalls(tree) {
 // --- recognize-or-skip gate ------------------------------------------------
 
 // A file is audited only when it identifies as one of the two runners in
-// scope (#287: vitest and node:test). Two signals say so, and either is
-// enough:
+// scope (#287: vitest and node:test) -- see SKILL.md § JS/TS reach for the
+// rule and its remaining blind spot.
 //
-//   - it imports the runner (`vitest` / `node:test`), or
-//   - it names tests (`describe`/`it`/`test`) and uses that runner's
-//     assertion vocabulary (`expect` / `assert.*`).
+// Importing the runner is the signal that matters, and #685 added it. The
+// original #287 guard was the assertion vocabulary alone, which costs exactly
+// the file the gate most wants to catch: one whose every test is
+// assertion-free has no assertion anywhere to be recognized by. The import
+// does not reopen the #287 floodgate, because it is the stronger evidence of
+// the two -- a homegrown harness imports its own `ok()`/`eq()`, never `vitest`
+// or `node:test`.
 //
-// The assertion signal alone was the original #287 guard, and it costs
-// exactly the file the gate most wants to catch: one whose every test is
-// assertion-free has no assertion anywhere to be recognized by, so it was
-// skipped whole (#685). The import signal closes that without reopening the
-// #287 floodgate, because it is the stronger evidence of the two: a homegrown
-// harness imports its own `ok()`/`eq()`, never `vitest` or `node:test`. Across
-// the 432 JS/TS test files in the surveyed repos -- the ~150-file homegrown
-// pile that motivated #287 included -- the import signal admits no file the
-// assertion signal did not already admit, and `--gate` output on those repos
-// is unchanged.
-//
-// Admitting a file on its import alone does raise the cost of an assertion the
-// vocabulary cannot see: it becomes a build-blocking false finding rather than
-// a skipped file. `assertBindings` below is what pays that cost, recognizing
-// node:test's `t.assert.*` and named node:assert imports as the assertions
-// they are.
-//
-// Residual blind spot, unchanged in kind: a vitest file run in globals mode
-// (no import) whose every test is assertion-free is still invisible to both
-// signals.
+// It does raise the cost of an assertion the vocabulary cannot see, from a
+// skipped file to a build-blocking false finding. `assertBindings` below is
+// what pays that cost.
 
 /** Does the tree import from `module`? */
 function importsFrom(tree, module) {
@@ -193,6 +183,21 @@ function isNodeTestFile(tree) {
 }
 
 // --- assertion vocabulary --------------------------------------------------
+
+/** The dotted name chain of a (possibly nested) MemberExpression callee, e.g.
+ * `t.mock.fn` -> ["t", "mock", "fn"]. Null if any link isn't a plain name. */
+function memberPath(node) {
+  const parts = [];
+  let n = node;
+  while (n && n.type === "MemberExpression") {
+    if (n.property.type !== "Identifier") return null;
+    parts.unshift(n.property.name);
+    n = n.object;
+  }
+  if (!n || n.type !== "Identifier") return null;
+  parts.unshift(n.name);
+  return parts;
+}
 
 const EQ_MATCHERS = new Set(["toBe", "toEqual", "toStrictEqual"]);
 
@@ -239,8 +244,14 @@ function assertBindings(tree) {
   walk(tree, (n) => {
     if (n.type !== "ImportDeclaration" || !ASSERT_MODULES.has(n.source.value)) return;
     for (const spec of n.specifiers) {
-      if (spec.type === "ImportSpecifier") matchers.add(spec.local.name);
-      else roots.add(spec.local.name); // default or namespace import
+      // `strict` and `default` are namespace-like: they carry the whole
+      // matcher set and are called as `<local>.<matcher>(...)`, not bare.
+      const imported = spec.type === "ImportSpecifier" ? identifierName(spec.imported) || spec.imported.value : null;
+      if (spec.type !== "ImportSpecifier" || imported === "strict" || imported === "default") {
+        roots.add(spec.local.name);
+      } else {
+        matchers.add(spec.local.name);
+      }
     }
   });
   return { roots, matchers };
@@ -260,8 +271,15 @@ function assertCallInfo(node, bindings = NO_ASSERT_BINDINGS) {
   if (node.type !== "CallExpression") return null;
   const c = node.callee;
   const path = memberPath(c);
-  if (path && path.length >= 2 && bindings.roots.has(path[path.length - 2])) {
-    return { matcher: path[path.length - 1], args: node.arguments };
+  // `assert.equal(...)`, node's test-context `t.assert.equal(...)`, and the
+  // strict spelling of either (`assert.strict.equal(...)`), which slots a
+  // `strict` segment between the binding and the matcher.
+  if (path && path.length >= 2) {
+    let root = path.length - 2;
+    if (path[root] === "strict" && root > 0) root -= 1;
+    if (bindings.roots.has(path[root])) {
+      return { matcher: path[path.length - 1], args: node.arguments };
+    }
   }
   const bare = identifierName(c);
   if (bare === "assert") return { matcher: "ok", args: node.arguments };
@@ -346,21 +364,6 @@ function sameSource(a, b, source) {
 // test with one or two mocked collaborators and real logic in between is
 // normal isolation, not a smell.
 const MOCK_CEILING = 3;
-
-/** The dotted name chain of a (possibly nested) MemberExpression callee, e.g.
- * `t.mock.fn` -> ["t", "mock", "fn"]. Null if any link isn't a plain name. */
-function memberPath(node) {
-  const parts = [];
-  let n = node;
-  while (n && n.type === "MemberExpression") {
-    if (n.property.type !== "Identifier") return null;
-    parts.unshift(n.property.name);
-    n = n.object;
-  }
-  if (!n || n.type !== "Identifier") return null;
-  parts.unshift(n.name);
-  return parts;
-}
 
 const NODE_MOCK_ROOTS = new Set(["fn", "method", "module", "timers"]);
 
@@ -747,13 +750,45 @@ function selfcheck() {
       "import { test } from 'node:test';\nimport { strictEqual } from 'node:assert';\n" +
         "test('x', () => { strictEqual(compute(), 3); });\n",
     );
+    // node's strict mode reaches the same matchers through a `strict` segment,
+    // as a member of the default export or as its own named import.
+    const strictAssert = join(tmp, "strict-assert.test.js");
+    writeFileSync(
+      strictAssert,
+      "import { test } from 'node:test';\nimport assert from 'node:assert';\n" +
+        "test('x', () => { assert.strict.equal(compute(), 3); });\n",
+    );
+    const strictNamed = join(tmp, "strict-named.test.js");
+    writeFileSync(
+      strictNamed,
+      "import { test } from 'node:test';\nimport { strict } from 'node:assert';\n" +
+        "test('x', () => { strict.equal(compute(), 3); });\n",
+    );
     assert.equal(
       quietMain(["node", "audit.mjs", "--gate", tmp]),
       0,
-      "a test-context or named-import node:assert call is a real assertion",
+      "every ordinary node:assert spelling is a real assertion",
     );
     unlinkSync(ctxAssert);
     unlinkSync(namedAssert);
+    unlinkSync(strictAssert);
+    unlinkSync(strictNamed);
+
+    // A root that exists but cannot be read was not checked either -- the same
+    // lie as a missing root, reached by EACCES instead of ENOENT (#685).
+    const unreadable = join(tmp, "unreadable");
+    mkdirSync(unreadable);
+    writeFileSync(join(unreadable, "hollow.test.js"), hollow);
+    chmodSync(unreadable, 0o000);
+    try {
+      assert.equal(
+        quietMain(["node", "audit.mjs", "--gate", unreadable]),
+        EXIT_UNABLE,
+        "gate refuses a root it cannot read",
+      );
+    } finally {
+      chmodSync(unreadable, 0o755);
+    }
 
     // The file the gate most wants to catch: every test in it is hollow, so
     // there is no `expect` anywhere to identify it by. The runner import is
@@ -829,6 +864,16 @@ function main(argv) {
   // green (#685).
   if (!existsSync(root)) {
     process.stderr.write(`test-audit: no such path: ${root} -- nothing was scanned.\n`);
+    return EXIT_UNABLE;
+  }
+  // The same lie by a different errno: a root that exists but cannot be read
+  // walks to zero files, which is indistinguishable from a clean tree. Only
+  // the root is checked here -- an unreadable directory deeper in the tree is
+  // still swallowed by `collect`, which is a wider fix than #685 asked for.
+  try {
+    accessSync(root, constants.R_OK);
+  } catch {
+    process.stderr.write(`test-audit: cannot read ${root} -- nothing was scanned.\n`);
     return EXIT_UNABLE;
   }
   if (gateMode) {

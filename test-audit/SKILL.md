@@ -24,11 +24,13 @@ combined candidate list feeds the judgment sweep below instead of starting
 from a blank page.
 
 **JS/TS reach.** `audit.mjs` recognizes vitest and node:test — nothing else.
-A file identifies as one of them by importing the runner (`vitest`,
-`node:test`), or by naming tests (`describe`/`it`/`test`) and using that
-runner's assertion vocabulary (`expect`, `assert.*`). A file it can't identify
-as one of those two is skipped, never flagged, so a homegrown or non-standard
-harness doesn't flood pass one with false assertion-free findings. Playwright
+A file identifies as **vitest** by importing `vitest`, or by naming tests
+(`describe`/`it`/`test`) and calling `expect`. A file identifies as
+**node:test** by importing `node:test`, and only that way — `assert.*` alone
+is not a signal, so a node:test file that reaches its runner some other way is
+out of reach. A file it can't identify as one of those two is skipped, never
+flagged, so a homegrown or non-standard harness doesn't flood pass one with
+false assertion-free findings. Playwright
 `.spec` files are out of scope — they're e2e/visual specs, not unit tests, and
 auditing them by this yardstick would misjudge them. jest, mocha, ava, and
 chai are likewise out of scope. A missing `@babel/parser` prints a `run npm

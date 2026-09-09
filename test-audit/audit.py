@@ -438,6 +438,18 @@ def _selfcheck():
         missing = os.path.join(tmp, "no-such-dir")
         assert _quiet_main(["audit.py", "--gate", missing]) == EXIT_UNABLE
         assert _quiet_main(["audit.py", missing]) == EXIT_UNABLE
+
+        # A root that exists but cannot be read was not checked either -- the
+        # same lie, reached by EACCES instead of ENOENT (#685).
+        unreadable = os.path.join(tmp, "unreadable")
+        os.makedirs(unreadable)
+        with open(os.path.join(unreadable, "test_hollow.py"), "w", encoding="utf-8") as f:
+            f.write("def test_x():\n    compute()\n")
+        os.chmod(unreadable, 0o000)
+        try:
+            assert _quiet_main(["audit.py", "--gate", unreadable]) == EXIT_UNABLE
+        finally:
+            os.chmod(unreadable, 0o755)
     finally:
         shutil.rmtree(tmp)
 
@@ -457,6 +469,13 @@ def main(argv):
     # green (#685).
     if not os.path.exists(root):
         print(f"test-audit: no such path: {root} -- nothing was scanned.", file=sys.stderr)
+        return EXIT_UNABLE
+    # The same lie by a different errno: a root that exists but cannot be read
+    # walks to zero files, which is indistinguishable from a clean tree. Only
+    # the root is checked here -- an unreadable directory deeper in the tree is
+    # still swallowed by `os.walk`, which is a wider fix than #685 asked for.
+    if not os.access(root, os.R_OK):
+        print(f"test-audit: cannot read {root} -- nothing was scanned.", file=sys.stderr)
         return EXIT_UNABLE
     if gate_mode:
         findings, suppressed = gate(root)
