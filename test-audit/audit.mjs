@@ -15,7 +15,17 @@
  *
  * audit.py keeps the pytest path untouched.
  */
-import { readFileSync, readdirSync, statSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync } from "node:fs";
+import {
+  readFileSync,
+  readdirSync,
+  statSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  unlinkSync,
+} from "node:fs";
 import { join, basename, extname } from "node:path";
 import { tmpdir } from "node:os";
 import assert from "node:assert";
@@ -126,13 +136,46 @@ function testCalls(tree) {
 
 // --- recognize-or-skip gate ------------------------------------------------
 
-// A file is audited only when it looks like vitest: it names tests
-// (`describe`/`it`/`test`) AND uses `expect`. Requiring `expect` is the guard
-// against a homegrown harness — its custom check verb is not `expect`, so the
-// file is skipped rather than flooded with false assertion-free findings. The
-// cost is a vitest file whose every test is assertion-free (no `expect`
-// anywhere): it is skipped too. That tradeoff is the #287 decision.
+// A file is audited only when it identifies as one of the two runners in
+// scope (#287: vitest and node:test). Two signals say so, and either is
+// enough:
+//
+//   - it imports the runner (`vitest` / `node:test`), or
+//   - it names tests (`describe`/`it`/`test`) and uses that runner's
+//     assertion vocabulary (`expect` / `assert.*`).
+//
+// The assertion signal alone was the original #287 guard, and it costs
+// exactly the file the gate most wants to catch: one whose every test is
+// assertion-free has no assertion anywhere to be recognized by, so it was
+// skipped whole (#685). The import signal closes that without reopening the
+// #287 floodgate, because it is the stronger evidence of the two: a homegrown
+// harness imports its own `ok()`/`eq()`, never `vitest` or `node:test`. Across
+// the 432 JS/TS test files in the surveyed repos -- the ~150-file homegrown
+// pile that motivated #287 included -- the import signal admits no file the
+// assertion signal did not already admit, and `--gate` output on those repos
+// is unchanged.
+//
+// Admitting a file on its import alone does raise the cost of an assertion the
+// vocabulary cannot see: it becomes a build-blocking false finding rather than
+// a skipped file. `assertBindings` below is what pays that cost, recognizing
+// node:test's `t.assert.*` and named node:assert imports as the assertions
+// they are.
+//
+// Residual blind spot, unchanged in kind: a vitest file run in globals mode
+// (no import) whose every test is assertion-free is still invisible to both
+// signals.
+
+/** Does the tree import from `module`? */
+function importsFrom(tree, module) {
+  let found = false;
+  walk(tree, (n) => {
+    if (n.type === "ImportDeclaration" && n.source.value === module) found = true;
+  });
+  return found;
+}
+
 function isVitestFile(tree) {
+  if (importsFrom(tree, "vitest")) return true;
   let hasSuite = false;
   let hasExpect = false;
   walk(tree, (n) => {
@@ -145,17 +188,8 @@ function isVitestFile(tree) {
   return hasSuite && hasExpect;
 }
 
-// A file is audited as node:test only when it both imports from 'node:test'
-// AND uses `assert.*` — the same false-positive guard as the vitest gate,
-// applied to node's built-in runner instead of a `describe`/`it`/`expect` net.
 function isNodeTestFile(tree) {
-  let hasImport = false;
-  let hasAssert = false;
-  walk(tree, (n) => {
-    if (n.type === "ImportDeclaration" && n.source.value === "node:test") hasImport = true;
-    if (assertCallInfo(n)) hasAssert = true;
-  });
-  return hasImport && hasAssert;
+  return importsFrom(tree, "node:test");
 }
 
 // --- assertion vocabulary --------------------------------------------------
@@ -180,26 +214,65 @@ function asExpectAssertion(node) {
 
 const ASSERT_EQ_MATCHERS = new Set(["equal", "strictEqual", "deepEqual", "deepStrictEqual"]);
 
+const ASSERT_MODULES = new Set(["node:assert", "node:assert/strict", "assert", "assert/strict"]);
+
 /**
- * A `node:assert` call: `assert.equal(a, b)` (member form) or the bare
- * `assert(x)` shorthand for `assert.ok(x)`. Returns { matcher, args } or null.
+ * The local names a file binds to node:assert, as `{ roots, matchers }`:
+ *
+ *   - `roots` are called as `<root>.<matcher>(...)`. `assert` is always one,
+ *     with or without an import, because node's test context hangs the same
+ *     API off `t.assert` and the trailing `assert.<matcher>` is what matches.
+ *     A renamed default or namespace import (`import a from 'node:assert'`)
+ *     joins it.
+ *   - `matchers` are named imports called bare:
+ *     `import { strictEqual } from 'node:assert'`.
+ *
+ * Both spellings are ordinary node:test style, and both were invisible while
+ * the vocabulary was the literal `assert.*` alone. That was survivable when a
+ * file had to show an `assert.*` call to be audited at all; once the runner
+ * import admits the file (#685), an unrecognized assertion turns a correct
+ * test into a build-blocking `assertion-free` finding.
  */
-function assertCallInfo(node) {
+function assertBindings(tree) {
+  const roots = new Set(["assert"]);
+  const matchers = new Set();
+  walk(tree, (n) => {
+    if (n.type !== "ImportDeclaration" || !ASSERT_MODULES.has(n.source.value)) return;
+    for (const spec of n.specifiers) {
+      if (spec.type === "ImportSpecifier") matchers.add(spec.local.name);
+      else roots.add(spec.local.name); // default or namespace import
+    }
+  });
+  return { roots, matchers };
+}
+
+// A file that binds nothing: `assert.*` still reads as an assertion, which is
+// what the snippet-level selfchecks below parse without an import.
+const NO_ASSERT_BINDINGS = { roots: new Set(["assert"]), matchers: new Set() };
+
+/**
+ * A `node:assert` call: `assert.equal(a, b)`, node's test-context spelling
+ * `t.assert.equal(a, b)`, a named import called bare (`strictEqual(a, b)`), or
+ * the bare `assert(x)` shorthand for `assert.ok(x)`. Returns { matcher, args }
+ * or null.
+ */
+function assertCallInfo(node, bindings = NO_ASSERT_BINDINGS) {
   if (node.type !== "CallExpression") return null;
   const c = node.callee;
-  if (c.type === "MemberExpression" && identifierName(c.object) === "assert" && identifierName(c.property)) {
-    return { matcher: identifierName(c.property), args: node.arguments };
+  const path = memberPath(c);
+  if (path && path.length >= 2 && bindings.roots.has(path[path.length - 2])) {
+    return { matcher: path[path.length - 1], args: node.arguments };
   }
-  if (identifierName(c) === "assert") {
-    return { matcher: "ok", args: node.arguments };
-  }
+  const bare = identifierName(c);
+  if (bare === "assert") return { matcher: "ok", args: node.arguments };
+  if (bare && bindings.matchers.has(bare)) return { matcher: bare, args: node.arguments };
   return null;
 }
 
 // Every assertion in a test body, `expect(...)` chains and `assert.*` calls
 // alike, normalized to { isEq, actual, expected } — the shape both the
 // assertion-free and tautology detectors need, regardless of vocabulary.
-function assertionsIn(func) {
+function assertionsIn(func, bindings) {
   const out = [];
   walk(func.body, (n) => {
     const e = asExpectAssertion(n);
@@ -213,7 +286,7 @@ function assertionsIn(func) {
       });
       return;
     }
-    const a = assertCallInfo(n);
+    const a = assertCallInfo(n, bindings);
     if (a) {
       out.push({
         kind: "assert",
@@ -230,22 +303,23 @@ function assertionsIn(func) {
 
 // --- detectors -------------------------------------------------------------
 
-// Every detector takes the same pair — the test CallExpression and the file
-// source — mirroring audit.py's uniform `detector(func)`. Each pulls what it
-// needs (callback, source) internally, so the scan loop stays a plain
-// `for (smell, detector) if detector(call, source)`.
+// Every detector takes the same triple — the test CallExpression, the file
+// source, and the file's node:assert bindings — mirroring audit.py's uniform
+// `detector(func)`. Each pulls what it needs (callback, source) internally, so
+// the scan loop stays a plain
+// `for (smell, detector) if detector(call, source, bindings)`.
 
-function isAssertionFree(call) {
+function isAssertionFree(call, source, bindings) {
   const cb = testCallback(call);
   // No callback (a bodyless `it`) is empty/skipped's concern, not this one.
   if (!cb) return false;
-  return assertionsIn(cb).length === 0;
+  return assertionsIn(cb, bindings).length === 0;
 }
 
-function isTautology(call, source) {
+function isTautology(call, source, bindings) {
   const cb = testCallback(call);
   if (!cb) return false;
-  for (const { isEq, actual, expected } of assertionsIn(cb)) {
+  for (const { isEq, actual, expected } of assertionsIn(cb, bindings)) {
     if (!isEq) continue;
     if (actual && expected && sameSource(actual, expected, source)) return true;
   }
@@ -307,11 +381,11 @@ function isMockConstructCall(node) {
   return !!(obj && obj.type === "CallExpression" && isMockConstructCall(obj));
 }
 
-function isAssertionCall(node) {
-  return calleeName(node) === "expect" || !!asExpectAssertion(node) || !!assertCallInfo(node);
+function isAssertionCall(node, bindings) {
+  return calleeName(node) === "expect" || !!asExpectAssertion(node) || !!assertCallInfo(node, bindings);
 }
 
-function isMockTheWorld(call) {
+function isMockTheWorld(call, source, bindings) {
   const cb = testCallback(call);
   if (!cb) return false;
   let mockCalls = 0;
@@ -320,7 +394,7 @@ function isMockTheWorld(call) {
     if (n.type !== "CallExpression") return;
     if (isMockConstructCall(n)) {
       mockCalls += 1;
-    } else if (!isAssertionCall(n)) {
+    } else if (!isAssertionCall(n, bindings)) {
       realCalls += 1;
     }
   });
@@ -351,10 +425,10 @@ function isSpyCheck(assertion, source) {
 
 // Every assertion is a spy-call check (reuses assertionsIn() so an outcome
 // assertion mixed in with spy checks correctly stops this from firing).
-function isInteractionOnly(call, source) {
+function isInteractionOnly(call, source, bindings) {
   const cb = testCallback(call);
   if (!cb) return false;
-  const assertions = assertionsIn(cb);
+  const assertions = assertionsIn(cb, bindings);
   if (assertions.length === 0) return false;
   return assertions.every((a) => isSpyCheck(a, source));
 }
@@ -387,10 +461,11 @@ function scanFile(path) {
     return [];
   }
   if (!isVitestFile(tree) && !isNodeTestFile(tree)) return [];
+  const bindings = assertBindings(tree);
   const findings = [];
   for (const call of testCalls(tree)) {
     for (const [smell, detect] of DETECTORS) {
-      if (detect(call, source)) findings.push([path, lineOf(call), smell]);
+      if (detect(call, source, bindings)) findings.push([path, lineOf(call), smell]);
     }
   }
   return findings;
@@ -516,11 +591,30 @@ function selfcheck() {
     !isVitestFile(parseSource(nodeTestSrc, "s.test.js")),
     "gate: node:test file is not vitest",
   );
+  // #685 reverses this: an import of the runner is what identifies the
+  // harness, so an all-hollow node:test file is audited rather than skipped.
   assert(
-    !isNodeTestFile(
+    isNodeTestFile(
       parseSource("import { test } from 'node:test';\ntest('x', () => { doStuff(a, b); });\n", "s.test.js"),
     ),
-    "gate skips node:test import without assert.* usage",
+    "a node:test import identifies the file even with no assert.* call",
+  );
+  // The same for vitest: importing the runner is proof enough, so a file whose
+  // every test is assertion-free is no longer skipped whole (#685).
+  assert(
+    isVitestFile(parseSource("import { it } from 'vitest';\nit('x', () => { compute(); });\n", "s.test.js")),
+    "a vitest import identifies the file even with no expect call",
+  );
+  // The #287 guard is what the import signal replaces, and it must still
+  // hold: a homegrown harness imports neither runner, so it stays skipped
+  // whether or not it imports something of its own.
+  const homegrown = parseSource(
+    "import { ok, eq } from './harness.mjs';\ntest('x', () => { ok(compute()); });\n",
+    "s.test.mjs",
+  );
+  assert(
+    !isVitestFile(homegrown) && !isNodeTestFile(homegrown),
+    "gate still skips a homegrown harness that imports neither runner",
   );
   const foreignHarness = parseSource("harness('x', () => { check(a, b); })", "s.test.js");
   assert(
@@ -605,24 +699,77 @@ function selfcheck() {
   // gate mode: assertion-free only, and never a fixture.
   const tmp = mkdtempSync(join(tmpdir(), "test-audit-gate-"));
   try {
-    // Every file here carries a real `expect` so the recognize-or-skip gate
-    // above admits it -- a file with no assertion anywhere is skipped whole,
-    // the #287 tradeoff, and the gate inherits that blind spot.
+    // These two files carry a real `expect`, so the assertion signal alone
+    // admits them; the all-hollow case further down is the one that needs the
+    // runner import to be seen at all (#685).
     const hollow = "it('hollow', () => { compute(); });\nit('real', () => { expect(a).toBe(1); });\n";
     mkdirSync(join(tmp, "fixtures"));
     writeFileSync(join(tmp, "fixtures", "specimen.test.js"), hollow);
     writeFileSync(join(tmp, "taut.test.js"), "it('x', () => { expect(x).toBe(x); });\n");
     // a deliberate specimen and a report-only smell: neither fails a build
-    assert.deepEqual(gate(tmp), [], "gate skips fixtures and non-gated smells");
+    assert.deepEqual(gate(tmp)[0], [], "gate skips fixtures and non-gated smells");
     assert(scanPath(tmp).length > 0, "the report pass still sees both");
 
+    // ...but the exemption is counted and reported. `fixtures` matches any
+    // directory of that name at any depth, so without this line a repo could
+    // park hollow tests under one and never see it (#685).
+    assert.equal(gate(tmp)[1], 1, "gate counts what the fixtures exemption dropped");
+    {
+      const [code, err] = mainStderr(["node", "audit.mjs", "--gate", tmp]);
+      assert.equal(code, 0, "a fixtures-only finding still passes the gate");
+      assert(
+        err.includes("1 assertion-free finding(s) suppressed under fixtures/"),
+        `gate reports the suppressed count: ${err}`,
+      );
+    }
+
     writeFileSync(join(tmp, "hollow.test.js"), hollow);
-    const gated = gate(tmp);
+    const [gated, suppressed] = gate(tmp);
     assert.equal(gated.length, 1, "gate catches the hollow test");
     assert(gated[0][0].endsWith("hollow.test.js"), "gate names the hollow test");
+    assert.equal(suppressed, 1, "the fixtures specimen is still counted as suppressed");
 
     unlinkSync(join(tmp, "hollow.test.js"));
-    assert.deepEqual(gate(tmp), [], "gate is clean once the hollow test is gone");
+    assert.deepEqual(gate(tmp)[0], [], "gate is clean once the hollow test is gone");
+
+    // Two ordinary node:test assertion spellings. The runner import admits
+    // these files, so a vocabulary that did not recognize their assertions
+    // would report every test in them as assertion-free and block the build --
+    // the inverse of the bug #685 fixes.
+    const ctxAssert = join(tmp, "ctx-assert.test.js");
+    writeFileSync(
+      ctxAssert,
+      "import { test } from 'node:test';\ntest('x', (t) => { t.assert.strictEqual(compute(), 3); });\n",
+    );
+    const namedAssert = join(tmp, "named-assert.test.js");
+    writeFileSync(
+      namedAssert,
+      "import { test } from 'node:test';\nimport { strictEqual } from 'node:assert';\n" +
+        "test('x', () => { strictEqual(compute(), 3); });\n",
+    );
+    assert.equal(
+      quietMain(["node", "audit.mjs", "--gate", tmp]),
+      0,
+      "a test-context or named-import node:assert call is a real assertion",
+    );
+    unlinkSync(ctxAssert);
+    unlinkSync(namedAssert);
+
+    // The file the gate most wants to catch: every test in it is hollow, so
+    // there is no `expect` anywhere to identify it by. The runner import is
+    // what identifies it now (#685).
+    const allHollow = join(tmp, "all-hollow.test.js");
+    writeFileSync(allHollow, "import { it } from 'vitest';\nit('x', () => { compute(); });\n");
+    assert.equal(quietMain(["node", "audit.mjs", "--gate", tmp]), 1, "an all-hollow vitest file fails the gate");
+    unlinkSync(allHollow);
+
+    // A root that does not exist was not checked, so the gate must not report
+    // success: EXIT_UNABLE, distinct from both 0 (clean) and 1 (hollow tests
+    // found), so a typo in a repo's wiring reads differently from a real
+    // finding (#685).
+    const missing = join(tmp, "no-such-dir");
+    assert.equal(quietMain(["node", "audit.mjs", "--gate", missing]), EXIT_UNABLE, "gate refuses a missing root");
+    assert.equal(quietMain(["node", "audit.mjs", missing]), EXIT_UNABLE, "report refuses a missing root");
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -637,33 +784,96 @@ function selfcheck() {
 // breaks, while an assertion-free test cannot fail at all.
 const GATE_SMELL = "assertion-free test";
 
+// Exit status contract: 0 clean, 1 hollow tests found, 2 unable to check --
+// the status the bootstrap failure above already uses. Only gate mode ever
+// returns 1 -- a report never fails a build -- but 0 and 2 mean the same in
+// both. A root that does not exist gets 2 and never 0: a gate that reports
+// success while it scanned nothing is a lie, and it fails silently and
+// permanently once wired into a repo's build (#685). Mirrors audit.py.
+const EXIT_UNABLE = 2;
+
 /** Does `path` lie under a `fixtures/` directory? A fixture is a deliberate
  * specimen of the smell, so the gate never counts one; the report still does. */
 function underFixtures(path) {
   return path.split(/[\\/]/).includes("fixtures");
 }
 
-/** The findings that fail a build: `GATE_SMELL` only, fixtures excluded. */
+/** `[findings, suppressed]` -- the `GATE_SMELL` findings that fail a build,
+ * and how many the fixtures exemption dropped.
+ *
+ * The count is returned, and reported by `main`, because `underFixtures`
+ * matches a `fixtures` segment at any depth: without it a repo could park
+ * hollow tests under any directory it named `fixtures` and never see that the
+ * gate had stopped looking at them (#685). Mirrors audit.py. */
 function gate(root) {
-  return scanPath(root).filter(([path, , smell]) => smell === GATE_SMELL && !underFixtures(path));
+  const gated = scanPath(root).filter(([, , smell]) => smell === GATE_SMELL);
+  const findings = gated.filter(([path]) => !underFixtures(path));
+  return [findings, gated.length - findings.length];
 }
 
 // --- main ------------------------------------------------------------------
 
-const arg = process.argv[2];
-if (arg === "--selfcheck") {
-  selfcheck();
-} else if (arg === "--gate") {
-  const findings = gate(process.argv[3] || ".");
-  for (const [path, line, smell] of findings) process.stdout.write(`${path}:${line}: ${smell}\n`);
-  if (findings.length > 0) {
-    process.stderr.write(
-      `test-audit: ${findings.length} assertion-free test(s) -- a test that cannot fail proves nothing.\n`,
-    );
-    process.exit(1);
+// A function returning its exit status rather than calling process.exit, so
+// the selfcheck can assert on that status -- mirrors audit.py's `main(argv)`.
+function main(argv) {
+  const arg = argv[2];
+  if (arg === "--selfcheck") {
+    selfcheck();
+    return 0;
   }
-} else {
-  const findings = scanPath(arg || ".");
+  const gateMode = arg === "--gate";
+  const root = (gateMode ? argv[3] : arg) || ".";
+  // Refuse a root that does not exist before scanning it. Walking a missing
+  // directory finds nothing, and "nothing" is indistinguishable from a clean
+  // tree -- so a typo in a repo's wiring would make its gate permanently
+  // green (#685).
+  if (!existsSync(root)) {
+    process.stderr.write(`test-audit: no such path: ${root} -- nothing was scanned.\n`);
+    return EXIT_UNABLE;
+  }
+  if (gateMode) {
+    const [findings, suppressed] = gate(root);
+    for (const [path, line, smell] of findings) process.stdout.write(`${path}:${line}: ${smell}\n`);
+    if (suppressed > 0) {
+      process.stderr.write(`test-audit: ${suppressed} assertion-free finding(s) suppressed under fixtures/.\n`);
+    }
+    if (findings.length > 0) {
+      process.stderr.write(
+        `test-audit: ${findings.length} assertion-free test(s) -- a test that cannot fail proves nothing.\n`,
+      );
+      return 1;
+    }
+    return 0;
+  }
+  const findings = scanPath(root);
   for (const [path, line, smell] of findings) process.stdout.write(`${path}:${line}: ${smell}\n`);
   if (findings.length === 0) process.stderr.write("no mechanical smells found\n");
+  return 0;
 }
+
+/** `[exitStatus, stderrText]` -- `main` with its report swallowed, so a
+ * passing suite prints only `ok`. The gate reports its suppressed-fixtures
+ * count on stderr, so the selfcheck reads it there. Mirrors audit.py's
+ * `_main_stderr`. */
+function mainStderr(argv) {
+  const out = process.stdout.write;
+  const errWrite = process.stderr.write;
+  let captured = "";
+  process.stdout.write = () => true;
+  process.stderr.write = (chunk) => {
+    captured += chunk;
+    return true;
+  };
+  try {
+    return [main(argv), captured];
+  } finally {
+    process.stdout.write = out;
+    process.stderr.write = errWrite;
+  }
+}
+
+function quietMain(argv) {
+  return mainStderr(argv)[0];
+}
+
+process.exit(main(process.argv));

@@ -250,6 +250,13 @@ def scan_path(root):
 # can call a defect without reading anything.
 GATE_SMELL = "assertion-free test"
 
+# Exit status contract: 0 clean, 1 hollow tests found, 2 unable to check. Only
+# gate mode ever returns 1 -- a report never fails a build -- but 0 and 2 mean
+# the same in both. A root that does not exist gets 2 and never 0 --
+# a gate that reports success while it scanned nothing is a lie, and it fails
+# silently and permanently once wired into a repo's build (#685).
+EXIT_UNABLE = 2
+
 
 def _under_fixtures(path):
     """True when `path` lies under a `fixtures/` directory.
@@ -261,18 +268,33 @@ def _under_fixtures(path):
 
 
 def gate(root):
-    """The findings that fail a build: `GATE_SMELL` only, fixtures excluded."""
-    return [f for f in scan_path(root) if f[2] == GATE_SMELL and not _under_fixtures(f[0])]
+    """`(findings, suppressed)` -- the `GATE_SMELL` findings that fail a build,
+    and how many the fixtures exemption dropped.
+
+    The count is returned, and reported by `main`, because `_under_fixtures`
+    matches a `fixtures` segment at any depth: without it a repo could park
+    hollow tests under any directory it named `fixtures` and never see that
+    the gate had stopped looking at them (#685)."""
+    gated = [f for f in scan_path(root) if f[2] == GATE_SMELL]
+    findings = [f for f in gated if not _under_fixtures(f[0])]
+    return findings, len(gated) - len(findings)
 
 
-def _quiet_main(argv):
-    """`main` with its report swallowed -- the selfcheck asserts on the exit
-    status, and a passing suite should print only `ok`."""
+def _main_stderr(argv):
+    """`main`'s exit status paired with what it wrote to stderr, its report
+    swallowed -- a passing suite should print only `ok`. The gate reports its
+    suppressed-fixtures count on stderr, so the selfcheck reads it there."""
     import contextlib
     import io
 
-    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        return main(argv)
+    err = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+        code = main(argv)
+    return code, err.getvalue()
+
+
+def _quiet_main(argv):
+    return _main_stderr(argv)[0]
 
 
 def _selfcheck():
@@ -388,17 +410,34 @@ def _selfcheck():
         with open(os.path.join(tmp, "test_taut.py"), "w", encoding="utf-8") as f:
             f.write("def test_x():\n    x = compute()\n    assert x == x\n")
         # a deliberate specimen and a report-only smell: neither fails a build
-        assert gate(tmp) == [], gate(tmp)
+        assert gate(tmp)[0] == [], gate(tmp)
         assert [smell for _, _, smell in scan_path(tmp)] != [], "the report pass still sees both"
+
+        # ...but the exemption is counted and reported. `fixtures` matches any
+        # directory of that name at any depth, so without this line a repo
+        # could park hollow tests under one and never see it (#685).
+        assert gate(tmp)[1] == 1, gate(tmp)
+        code, err = _main_stderr(["audit.py", "--gate", tmp])
+        assert code == 0, (code, err)
+        assert "1 assertion-free finding(s) suppressed under fixtures/" in err, err
 
         with open(os.path.join(tmp, "test_hollow.py"), "w", encoding="utf-8") as f:
             f.write("def test_x():\n    compute()\n")
-        gated = gate(tmp)
+        gated, suppressed = gate(tmp)
         assert len(gated) == 1, gated
         assert gated[0][0].endswith("test_hollow.py"), gated
+        assert suppressed == 1, suppressed
         assert _quiet_main(["audit.py", "--gate", tmp]) == 1
         os.remove(os.path.join(tmp, "test_hollow.py"))
         assert _quiet_main(["audit.py", "--gate", tmp]) == 0
+
+        # A root that does not exist was not checked, so the gate must not
+        # report success: EXIT_UNABLE, distinct from both 0 (clean) and 1
+        # (hollow tests found), so a typo in a repo's wiring reads
+        # differently from a real finding (#685).
+        missing = os.path.join(tmp, "no-such-dir")
+        assert _quiet_main(["audit.py", "--gate", missing]) == EXIT_UNABLE
+        assert _quiet_main(["audit.py", missing]) == EXIT_UNABLE
     finally:
         shutil.rmtree(tmp)
 
@@ -409,10 +448,25 @@ def main(argv):
     if argv[1:2] == ["--selfcheck"]:
         _selfcheck()
         return 0
-    if argv[1:2] == ["--gate"]:
-        findings = gate(argv[2] if len(argv) > 2 else ".")
+    gate_mode = argv[1:2] == ["--gate"]
+    rest = argv[2:] if gate_mode else argv[1:]
+    root = rest[0] if rest else "."
+    # Refuse a root that does not exist before scanning it. Walking a missing
+    # directory finds nothing, and "nothing" is indistinguishable from a clean
+    # tree -- so a typo in a repo's wiring would make its gate permanently
+    # green (#685).
+    if not os.path.exists(root):
+        print(f"test-audit: no such path: {root} -- nothing was scanned.", file=sys.stderr)
+        return EXIT_UNABLE
+    if gate_mode:
+        findings, suppressed = gate(root)
         for path, lineno, smell in findings:
             print(f"{path}:{lineno}: {smell}")
+        if suppressed:
+            print(
+                f"test-audit: {suppressed} assertion-free finding(s) suppressed under fixtures/.",
+                file=sys.stderr,
+            )
         if findings:
             print(
                 f"test-audit: {len(findings)} assertion-free test(s) -- a test that cannot fail proves nothing.",
@@ -420,7 +474,6 @@ def main(argv):
             )
             return 1
         return 0
-    root = argv[1] if len(argv) > 1 else "."
     findings = scan_path(root)
     for path, lineno, smell in findings:
         print(f"{path}:{lineno}: {smell}")
