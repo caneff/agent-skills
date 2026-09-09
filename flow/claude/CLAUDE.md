@@ -120,6 +120,12 @@ drives TDD → `/code-review` + `/two-axis-code-review` → commit with
   checkout> <branch>` (`--help` for PR/URL and `--sweep`), or worktrees pile up.
 - `head`/`tail` are for looking, not measuring — use `wc -l`/`grep -c` before
   treating file contents as a premise.
+- Shell searches use `rg`, not `grep -r`. It skips gitignored *and* dotted
+  paths by default, so a zero-hit result is not evidence of absence — re-run
+  with `-uu` before asserting a thing does not exist. `.agents/skills` ignores
+  three live skill dirs (`computer-use/`, `orca-cli/`, `orchestration/`),
+  `twitch-rules-scroller` ignores `e2e-artifacts/`, and `.github/` is dotted
+  everywhere.
 - To show me a file, open it in Orca's editor: `orca-ide file open <path>
   [--worktree <selector>]` (`file diff`, `file open-changed` likewise). Never
   print a path and ask me to open it.
