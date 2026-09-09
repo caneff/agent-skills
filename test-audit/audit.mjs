@@ -15,8 +15,9 @@
  *
  * audit.py keeps the pytest path untouched.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync } from "node:fs";
 import { join, basename, extname } from "node:path";
+import { tmpdir } from "node:os";
 import assert from "node:assert";
 
 // --- parser bootstrap ------------------------------------------------------
@@ -601,7 +602,50 @@ function selfcheck() {
     assert(!isInteractionOnly(testCallFrom(src), src), "interaction-only negative (vitest, mixed assertions)");
   }
 
+  // gate mode: assertion-free only, and never a fixture.
+  const tmp = mkdtempSync(join(tmpdir(), "test-audit-gate-"));
+  try {
+    // Every file here carries a real `expect` so the recognize-or-skip gate
+    // above admits it -- a file with no assertion anywhere is skipped whole,
+    // the #287 tradeoff, and the gate inherits that blind spot.
+    const hollow = "it('hollow', () => { compute(); });\nit('real', () => { expect(a).toBe(1); });\n";
+    mkdirSync(join(tmp, "fixtures"));
+    writeFileSync(join(tmp, "fixtures", "specimen.test.js"), hollow);
+    writeFileSync(join(tmp, "taut.test.js"), "it('x', () => { expect(x).toBe(x); });\n");
+    // a deliberate specimen and a report-only smell: neither fails a build
+    assert.deepEqual(gate(tmp), [], "gate skips fixtures and non-gated smells");
+    assert(scanPath(tmp).length > 0, "the report pass still sees both");
+
+    writeFileSync(join(tmp, "hollow.test.js"), hollow);
+    const gated = gate(tmp);
+    assert.equal(gated.length, 1, "gate catches the hollow test");
+    assert(gated[0][0].endsWith("hollow.test.js"), "gate names the hollow test");
+
+    unlinkSync(join(tmp, "hollow.test.js"));
+    assert.deepEqual(gate(tmp), [], "gate is clean once the hollow test is gone");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+
   process.stdout.write("ok\n");
+}
+
+// --- gate mode -------------------------------------------------------------
+
+// The one smell a build gates on -- the Python side's GATE_SMELL, same
+// reasoning: the other four still run and still fail when the behavior
+// breaks, while an assertion-free test cannot fail at all.
+const GATE_SMELL = "assertion-free test";
+
+/** Does `path` lie under a `fixtures/` directory? A fixture is a deliberate
+ * specimen of the smell, so the gate never counts one; the report still does. */
+function underFixtures(path) {
+  return path.split(/[\\/]/).includes("fixtures");
+}
+
+/** The findings that fail a build: `GATE_SMELL` only, fixtures excluded. */
+function gate(root) {
+  return scanPath(root).filter(([path, , smell]) => smell === GATE_SMELL && !underFixtures(path));
 }
 
 // --- main ------------------------------------------------------------------
@@ -609,6 +653,15 @@ function selfcheck() {
 const arg = process.argv[2];
 if (arg === "--selfcheck") {
   selfcheck();
+} else if (arg === "--gate") {
+  const findings = gate(process.argv[3] || ".");
+  for (const [path, line, smell] of findings) process.stdout.write(`${path}:${line}: ${smell}\n`);
+  if (findings.length > 0) {
+    process.stderr.write(
+      `test-audit: ${findings.length} assertion-free test(s) -- a test that cannot fail proves nothing.\n`,
+    );
+    process.exit(1);
+  }
 } else {
   const findings = scanPath(arg || ".");
   for (const [path, line, smell] of findings) process.stdout.write(`${path}:${line}: ${smell}\n`);

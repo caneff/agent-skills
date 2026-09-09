@@ -33,6 +33,25 @@ misjudge them. jest, mocha, ava, and chai are likewise out of scope. A
 missing `@babel/parser` prints a `run npm ci` message and exits — bootstrap
 with `npm ci` in `~/.agents/skills/test-audit/` once.
 
+**Gate mode.** `audit.py --gate [path]` and `audit.mjs --gate [path]` are the
+build-gate form of pass one: they report **only** smell 1, skip anything under
+a `fixtures/` directory, and exit non-zero on any hit. Smell 1 alone gates
+because an assertion-free test cannot fail at all — a machine can call that a
+defect without reading anything. The other four still run and still fail when
+the behavior breaks, so blocking a merge on one costs more than it buys; they
+stay report-only.
+
+Wire it into a repo by adding it to that repo's local gate (`git config
+land.testcmd`). In this repo that is `test-audit/assertion-free-gate.test.sh`,
+picked up automatically by `tests/all.sh`'s `*.test.sh` discovery.
+
+**The JS gate's blind spot.** `audit.mjs` audits a file only when it already
+uses `expect` (vitest) or `assert.*` (node:test) — the #287 guard against
+flooding a homegrown harness with false findings. A test file with *no*
+assertion anywhere is therefore skipped whole, so `--gate` catches a hollow
+test only when a real assertion sits elsewhere in the same file. `audit.py`
+has no such limit; it audits any `test_*.py` outright.
+
 **Name collision.** This is `test-audit` — test-*file* quality. It is not
 `ponytail-audit` (production-code over-engineering) or `skill-audit`
 (skill-*file* quality).
