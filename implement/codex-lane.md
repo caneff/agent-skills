@@ -1,0 +1,73 @@
+# The Codex lane
+
+Swap the build engine from Claude to Codex to spend someone else's quota. The
+ceremony around it does not change: same claim, same workspace, same addenda,
+same pre-report gate, same PR the owner merges. Only who writes the code moves.
+
+**Opt-in, never inferred.** `--codex` on the invocation, or the owner saying in
+so many words that Claude quota is short. A build that reaches for this on its
+own has decided the owner's billing for them.
+
+## Preflight
+
+```
+codex login status
+```
+
+Not `Logged in` — stop and hand the owner `! codex login`. Everything below
+runs through the `codex@openai-codex` plugin, which drives the local Codex CLI
+under the owner's own auth; there is no second runtime to configure.
+
+Load the plugin's `gpt-5-4-prompting` skill before writing the brief. A prompt
+shaped for Claude is not shaped for Codex, and the handoff is one shot.
+
+## The build
+
+Two doors, matching `implement/SKILL.md` § Build:
+
+- **Inline in this workspace** — `/codex:rescue`, one call, carrying the brief
+  below. Read the result, not the codebase.
+- **Dispatched from the default branch** — the driver stays Claude, since
+  claiming, the PR and the merge line cost almost nothing. Pass the lane
+  through in the prompt: `--prompt "/implement <n> --codex"`.
+- **Dispatched as an Orca worker** — the same `worktree create` line with
+  `--agent codex` in place of `--agent claude`. The prompt is the brief, not
+  `/implement <n>`: Codex does not have these skills.
+
+The brief carries what neither engine can infer:
+
+- The ticket body **verbatim** — its acceptance criteria and its named seams
+  under test. A pointer to an issue URL is not a brief for an agent that will
+  not go fetch it.
+- The repo's gate, read from `git config land.testcmd`, and the instruction to
+  run it green before finishing.
+- § Build's TDD rules: failing test first per criterion, no implementation
+  ahead of a red test, no scope beyond the ticket.
+- Commit to this branch with `Closes #<n>` in the final commit body. Do not
+  push, do not open a PR.
+
+**Do not read the codebase yourself, before or after.** That reading is the
+entire cost this lane exists to avoid; a "quick look" at the diff spends what
+the delegation saved. The owner's `git log -p` is the cheap review of last
+resort.
+
+## The reviews
+
+`/code-review` and `/two-axis-code-review` are Claude passes and cost Claude
+quota. In this lane they swap:
+
+1. `/codex:review` — correctness on the working diff.
+2. `/codex:adversarial-review` — the skeptical pass. Hand it the ticket body
+   again; without it there is no spec axis, only taste.
+
+The three-pass cap and the gate-failure rule in `implement/SKILL.md` § Finish
+bind unchanged. So does the disclosure: the PR body names the reviews that
+actually ran and says the diff was written by Codex, not Claude. A reader who
+assumes a Claude review happened is reading a claim nobody made.
+
+## When quota runs out mid-run
+
+`/codex:transfer` converts this session into a resumable Codex thread and
+returns a `codex resume <session-id>` line. Hand that line to the owner and
+stop — it is a handoff, not a delegation, and this skill's driver does not
+survive it.

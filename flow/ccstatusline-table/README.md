@@ -42,6 +42,12 @@ in `helpers/` (versioned here):
   its `all` mode once per tick and splits the tab-separated line; the
   single-field modes (`weekly`/`session`/`wreset`/`breset`) still work
   standalone for compatibility.
+- `helpers/codex-usage.py` — Codex's own rate limit, read from the newest
+  `~/.codex/sessions/**/rollout-*.jsonl`, which is where the Codex CLI records
+  what OpenAI last told it. Renders as a labelled `Cdx 12% 6d` cell so the
+  unlabelled percentages beside it stay Claude's. Blank until Codex has run,
+  blank once the window it describes has reset, and marked `12%?` when the
+  snapshot is over a day old — Codex refreshes it only when Codex runs.
 
 Git branch/changes and context tokens are computed in-script.
 
@@ -50,6 +56,7 @@ Git branch/changes and context tokens are computed in-script.
 ```
 python3 table-statusline.py --selftest
 helpers/usage-segment.sh --selftest
+python3 helpers/codex-usage.py --selftest
 ```
 
-`statusline.test.sh` runs both, so the repo's `tests/all.sh` picks them up.
+`statusline.test.sh` runs all three, so the repo's `tests/all.sh` picks them up.

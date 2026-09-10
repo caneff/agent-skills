@@ -130,6 +130,12 @@ a subtle seam. The loop mechanics (guide to load, waiting, release) are
 `implement-spec/SKILL.md`; read it. A change of a few lines with no seam to
 test: build it inline, following the same rules.
 
+**Codex builds this one?** `--codex` on the invocation, or the owner saying
+their Claude quota is short, moves the build to Codex and the reviews with it:
+read [`codex-lane.md`](codex-lane.md) and follow it instead of the Build and
+Finish mechanics here. Nothing else about the run changes, and nothing but the
+owner's word turns it on.
+
 The brief is pointers, not prose — the ticket URL and its named seams — and
 these rules, which bind the worker, or you when you build inline:
 
@@ -192,7 +198,7 @@ Run both reviews and fix what they raise:
 2. `/two-axis-code-review` — this repo's two-axis review (documented coding
    standards + the originating spec).
 
-Neither one produces the other's findings. Both run, every time.
+Neither one produces the other's findings. Both run, every time — unless this is a Codex build, whose two reviews are named in [`codex-lane.md`](codex-lane.md).
 
 **Three passes, then park.** A review that raises findings is fixed and re-run,
 at most three times — the same cap `implement-spec` § Landing runs its loop

@@ -25,6 +25,12 @@ Workers run in this workspace, agent `claude`, model `sonnet` unless the ticket
 names opus. The frontier is Orca's ready-task query. Start every ready worker,
 then wait.
 
+`--codex` on the invocation, or the owner saying their Claude quota is short,
+moves every worker to `--agent codex` and the end-of-spec reviews with them:
+`implement/codex-lane.md` is the policy, and the coordinator stays Claude. Each
+worker's brief then carries the ticket body verbatim, since Codex has none of
+these skills. Nothing but the owner's word turns it on.
+
 Set the workspace comment at every checkpoint — a task dispatched, a ticket
 landed, a gate raised or resolved, and the Run's end. It is the progress line
 the owner reads, and the only surface that shows a gate.
@@ -79,9 +85,9 @@ Draft PR at the first commit, closing the spec and every ticket. Push the
 branch; the owner merges.
 
 End of spec is a **loop**: a review-only worker runs `/code-review` and
-`/two-axis-code-review` on HEAD,
-and one end-to-end test drives the whole spec — write it if none exists; it is
-what catches the bugs the per-ticket suites cannot. Findings become fix
+`/two-axis-code-review` on HEAD — or, in the Codex lane, that file's two
+reviews — and one end-to-end test drives the whole spec — write it if none
+exists; it is what catches the bugs the per-ticket suites cannot. Findings become fix
 tasks, each dispatched with the path of the review's report file; then review
 again on the new HEAD. Exit when a pass returns no P0/P1, or at the three-pass
 cap in `implement` § Finish — a fourth pass re-raises what the first three
