@@ -321,11 +321,21 @@
     "padding": 0,
     "refreshInterval": 10
   },
+  "enabledPlugins": {
+    "codex@openai-codex": true,
+    "warp@claude-code-warp": true
+  },
   "extraKnownMarketplaces": {
     "openai-codex": {
       "source": {
         "source": "github",
         "repo": "openai/codex-plugin-cc"
+      }
+    },
+    "claude-code-warp": {
+      "source": {
+        "source": "github",
+        "repo": "warpdotdev/claude-code-warp"
       }
     }
   },
@@ -343,8 +353,5 @@
   "theme": "dark-ansi",
   "remoteControlAtStartup": false,
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true,
-  "enabledPlugins": {
-    "codex@openai-codex": true
-  }
+  "agentPushNotifEnabled": true
 }
