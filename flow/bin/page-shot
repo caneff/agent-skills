@@ -1,0 +1,41 @@
+#!/usr/bin/env node
+// Render a local file or a URL headlessly and write a PNG, so an agent can
+// look at a rendered page without standing up an http server. Replaces the
+// Orca-browser dance (tab create with a UNC path, tab switch, screenshot).
+//
+//   page-shot <file-or-url> [out.png] [--full] [--wait ms] [--width N] [--height N]
+//
+// Prints the absolute PNG path on stdout; page and console errors go to
+// stderr, which Orca's browser never surfaced at all.
+import { resolve } from 'node:path'
+import { arg, openPage } from './browser.mjs'
+
+const argv = process.argv.slice(2)
+const { one, has } = arg(argv)
+const usage = 'usage: page-shot <file-or-url> [out.png] [--full] [--wait ms] [--width N] [--height N]'
+
+// Positional args are whatever is neither a flag nor a flag's value.
+const valueFlags = ['--wait', '--width', '--height']
+const positional = argv.filter((a, i) => !a.startsWith('--') && !valueFlags.includes(argv[i - 1]))
+const [target, out = 'shot.png'] = positional
+if (!target) {
+  console.error(usage)
+  process.exit(2)
+}
+
+const { browser, page, errors, response, url } = await openPage(target, {
+  width: one('--width', 1280),
+  height: one('--height', 900),
+})
+if (response && !response.ok() && url.startsWith('http')) {
+  console.error(`HTTP ${response.status()}`)
+}
+await page.waitForTimeout(+one('--wait', 250))
+await page.screenshot({ path: resolve(out), fullPage: has('--full') })
+await browser.close()
+
+console.log(resolve(out))
+if (errors.length) {
+  console.error('page errors:')
+  for (const e of errors) console.error('  ' + e)
+}
