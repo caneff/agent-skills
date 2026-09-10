@@ -220,6 +220,12 @@ def main() -> None:
         weekly, wreset, session, breset = parse_usage_fields(line)
         return " · ".join(x for x in (win(weekly, wreset), win(session, breset)) if x)
 
+    def codex_cell() -> str:
+        # Codex's own quota, labelled because the unlabelled percentages next
+        # to it are Claude's. Blank — and so dropped — until Codex has run.
+        got = run(["python3", str(CFG / "codex-usage.py")], raw)
+        return f"Cdx {got}" if got else ""
+
     cells = [
         (PURPLE, model_cell),
         # Project name only, matching the blind-test toast's `Path(cwd).name`
@@ -228,6 +234,7 @@ def main() -> None:
         (CYAN, lambda: Path(root or cwd).name),
         (ORANGE, lambda: f"Ctx {tokens / 1000:.1f}k" if tokens else "Ctx —"),
         (PINK, usage_cell),
+        (YELLOW, codex_cell),
         (GREEN, lambda: f"{branch} {changes}".strip()),
     ]
     row = [(text, color) for color, build in cells if (text := build())]
