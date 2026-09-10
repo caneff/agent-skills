@@ -149,21 +149,27 @@ drives TDD → `/code-review` + `/two-axis-code-review` → commit with
 - To show me a file, open it in Orca's editor: `orca-ide file open <path>
   [--worktree <selector>]` (`file diff`, `file open-changed` likewise). Never
   print a path and ask me to open it. A **rendered** artifact — an HTML page, a
-  report, a lineup — and any page I need to *look at* myself go through two
-  scripts, never a browser GUI: `page-shot <file-or-url> [out.png] [--full]
-  [--wait ms] [--width N] [--height N]` renders headlessly and prints the PNG
-  path for you to read, and `page-eval <file-or-url> [--click SEL] [--fill
-  SEL=VAL] [--js EXPR] [--text SEL] [--shot out.png]` drives the page and
-  prints JSON. Both take a bare path, both report page and console errors, and
-  `--js` wants an **expression** — wrap statements in an IIFE and reach
-  elements through `document.getElementById` (a bare `sort` is not a global).
-  Never stand up an http server, a screenshot MCP or your own headless Chrome
-  to read a local page. The exception is a **visible** window on my monitor,
-  which these cannot drive: that is CDP against the real profile (the
-  twitch-rules-scroller e2e Chrome on 9333), or `computer-use` for OS-level
-  control. **Load `computer-use` on my own intent, with you having named
-  nothing**: its triggers are all phrases *you* say, so it never fires when I
-  am the one who needs to look at something, and that gap is what sends you
+  report, a lineup — and any page you need to *look at* yourself go through
+  `shot-scraper` (`uv tool install shot-scraper && shot-scraper install`), never
+  a browser GUI and never your own headless Chrome:
+  - `shot-scraper accessibility <file-or-url>` — the page as a text tree.
+    **Reach for this first**: far cheaper to read than an image, and it answers
+    most "did this render right" questions on its own.
+  - `shot-scraper <file-or-url> -o out.png [-w 1280] [-h 900] [--selector SEL]
+    [--wait 500] [--wait-for '<expr>']` — a PNG to read. `--selector` shoots one
+    element, which is usually the crop you actually wanted.
+  - `shot-scraper javascript <file-or-url> "<expr>"` — JSON out. It wants an
+    **expression**, so wrap statements in an IIFE and reach elements through
+    `document.getElementById` (a bare `sort` is not a global); that same IIFE is
+    how you fill and click before reading. `-i script.js` for anything longer.
+  - `shot-scraper html` and `shot-scraper pdf` likewise.
+  Bare paths work — it prefixes `file:` itself. Never stand up an http server or
+  a screenshot MCP to read a local page. The exception is a **visible** window on
+  my monitor, which shot-scraper cannot drive: that is CDP against the real
+  profile (the twitch-rules-scroller e2e Chrome on 9333), or `computer-use` for
+  OS-level control. **Load `computer-use` on my own intent, with you having
+  named nothing**: its triggers are all phrases *you* say, so it never fires when
+  I am the one who needs to look at something, and that gap is what sends you
   building an http server instead. Fix the gap here and not in that skill's own
   file — it is `orca skills install` output, gitignored, and regenerated on the
   next install.
