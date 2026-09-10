@@ -149,25 +149,30 @@ drives TDD → `/code-review` + `/two-axis-code-review` → commit with
 - To show me a file, open it in Orca's editor: `orca-ide file open <path>
   [--worktree <selector>]` (`file diff`, `file open-changed` likewise). Never
   print a path and ask me to open it. A **rendered** artifact — an HTML page, a
-  report, a lineup — goes to Orca's browser instead, and so does any page I
-  need to *look at* myself: `orca-ide tab create --url
-  file://wsl.localhost/Ubuntu-24.04/<abs path>`, then `tab switch --page <id>`
-  and `screenshot`. Three traps: the UNC form is not optional — the GUI is the
-  Windows build, so a Linux `file:///home/...` loads as `ERR_FILE_NOT_FOUND` and
-  only `tab list --json` shows it in `loadError`; `screenshot` shoots the
-  *active* tab, and handing it `--page` answers `runtime_unavailable`, so `tab
-  switch` first; and `eval` wants an **expression**, so wrap statements in an
-  IIFE and reach elements through `document.getElementById` (a bare `sort` is
-  not a global). Never stand up an http server, headless Chrome or a screenshot
-  MCP to read a local page. The rest of the group (`goto`, `eval`, `click`,
-  `check`) is in the `orca-cli` skill — load it rather than guessing at command
-  names, which are top-level and not under a `browser` subcommand. **Load it on
-  my own intent, with you having named nothing**: its own triggers are all
-  phrases *you* say, so it never fires when I am the one who needs to look at
-  something, and that gap is what sends me building an http server instead. The
-  same goes for `computer-use` and `orchestration`. Fix the gap here and not in
-  those three skills' own files — they are `orca skills install` output,
-  gitignored, and regenerated on the next install.
+  report, a lineup — and any page you need to *look at* yourself go through
+  `shot-scraper` (`uv tool install shot-scraper && shot-scraper install`), never
+  a browser GUI and never your own headless Chrome:
+  - `shot-scraper accessibility <file-or-url>` — the page as a text tree.
+    **Reach for this first**: far cheaper to read than an image, and it answers
+    most "did this render right" questions on its own.
+  - `shot-scraper <file-or-url> -o out.png [-w 1280] [-h 900] [--selector SEL]
+    [--wait 500] [--wait-for '<expr>']` — a PNG to read. `--selector` shoots one
+    element, which is usually the crop you actually wanted.
+  - `shot-scraper javascript <file-or-url> "<expr>"` — JSON out. It wants an
+    **expression**, so wrap statements in an IIFE and reach elements through
+    `document.getElementById` (a bare `sort` is not a global); that same IIFE is
+    how you fill and click before reading. `-i script.js` for anything longer.
+  - `shot-scraper html` and `shot-scraper pdf` likewise.
+  Bare paths work — it prefixes `file:` itself. Never stand up an http server or
+  a screenshot MCP to read a local page. The exception is a **visible** window on
+  my monitor, which shot-scraper cannot drive: that is CDP against the real
+  profile (the twitch-rules-scroller e2e Chrome on 9333), or `computer-use` for
+  OS-level control. **Load `computer-use` on my own intent, with you having
+  named nothing**: its triggers are all phrases *you* say, so it never fires when
+  I am the one who needs to look at something, and that gap is what sends you
+  building an http server instead. Fix the gap here and not in that skill's own
+  file — it is `orca skills install` output, gitignored, and regenerated on the
+  next install.
 - Never `pkill -f`/`pgrep -f` in a command line that names the target anywhere
   else — a heredoc writing the script, or a relaunch after the kill, both match
   and kill your shell (exit 143/144). A kill gets its own Bash call and nothing
