@@ -17,8 +17,16 @@ A git worktree under `<repo>/.claude/worktrees/<name>` on its own branch, holdin
 _Avoid_: Orca workspace, worktree (when the herdr pane is meant too)
 
 **Brief**:
-The single prefilled prompt a worker receives at start, `/implement <n>`; the skill supplies everything else.
+The single prefilled prompt a worker receives at start, `/implement <n> --tier light|heavy --controller <name>`; the skill supplies everything else.
 _Avoid_: prompt, instructions, task description
+
+**Controller**:
+The session a worker reports to: the dispatcher that started it, named in its brief. It rules on the worker's questions and escalates to Chris only a spec-ruling change, a new dependency, an irreversible deletion, or a repo Chris does not own.
+_Avoid_: coordinator, driver, parent session, owner
+
+**Tier**:
+How much process a ticket's build gets, set at dispatch by its `documentation` label: light (label present; the worker pushes to the default branch, no PR, no reviewer) or heavy (no label; TDD, one review round plus one verification pass, PR). A worker may raise light to heavy, never the reverse.
+_Avoid_: lane (that is auto-ship vs code), mode, level
 
 **Front end**:
 Where Chris watches workers and their state; herdr. Not where dispatch happens.
