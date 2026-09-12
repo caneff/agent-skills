@@ -47,6 +47,17 @@ if [ -L "$tmp/home/.local/bin/merge-cleanup" ]; then
 else
   echo "FAIL bin/merge-cleanup not linked under the scratch HOME"; fails=1
 fi
+# Both scripts refuse here only after sourcing the helper. They find it through
+# their own link, so an install that predates the helper still works.
+dispatch_out=$(HOME="$tmp/home" bash "$tmp/home/.local/bin/implement-dispatch" --repo "$tmp/nowhere" 1 2>&1)
+cleanup_out=$(cd "$repo" && HOME="$tmp/home" bash "$tmp/home/.local/bin/merge-cleanup" --dry-run 2>&1)
+if [ -L "$tmp/home/.local/bin/implement-dispatch" ] && [ ! -e "$tmp/home/.local/bin/git-origin.sh" ] \
+   && printf '%s' "$dispatch_out" | grep -q "not a git repo" \
+   && printf '%s' "$cleanup_out" | grep -q "name a branch"; then
+  echo "PASS implement-dispatch linked, and both scripts source git-origin.sh through their links"
+else
+  echo "FAIL bin/implement-dispatch not linked, or git-origin.sh not sourced through the links: $dispatch_out / $cleanup_out"; fails=1
+fi
 if [ -L "$tmp/home/.local/bin/job-run" ]; then
   echo "PASS job-run linked onto PATH under the scratch HOME"
 else
