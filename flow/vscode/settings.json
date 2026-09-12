@@ -98,5 +98,9 @@
         "sash.hoverBorder": "#6272a4"
     },
     "githubIssues.showIssueNumberInTree": true,
-    "editor.minimap.enabled": false
+    "editor.minimap.enabled": false,
+    "terminal.integrated.commandsToSkipShell": [
+        "-workbench.action.closeActiveEditor",
+        "-workbench.action.closeWindow"
+    ]
 }

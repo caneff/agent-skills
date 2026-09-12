@@ -69,7 +69,8 @@
       "allow": [
         "$defaults",
         "Git worktree commands in any repository, including the `git -C <path> worktree ...` form: add, list, lock, unlock, prune, remove.",
-        "Driving the OBS e2e rig from this repo: closing OBS's window via PowerShell `Get-Process obs64` + `CloseMainWindow()`, and any obs-websocket request sent through `layout/obs-request.mjs` (including SetSourceFilterEnabled)."
+        "Driving the OBS e2e rig from this repo: closing OBS's window via PowerShell `Get-Process obs64` + `CloseMainWindow()`, and any obs-websocket request sent through `layout/obs-request.mjs` (including SetSourceFilterEnabled).",
+        "Editing, commenting on, closing, and labelling GitHub issues in the user's own repos with `gh issue edit|comment|close|create`, including inside a compound command that first prepares the body in the scratchpad."
       ]
     }
   },
