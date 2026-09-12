@@ -15,7 +15,9 @@ quoted in the answer. `<name>` is the herdr agent name or its pane ID.
 herdr agent get <name>                                  # state
 herdr agent read <name> --source visible --lines 40     # why idle is idle
 for f in ~/.claude/sessions/*.json; do                  # liveness
-  [ "$(jq -r .cwd "$f")" = <worktree> ] && kill -0 "$(jq .pid "$f")" 2>/dev/null \
+  p=$(jq .pid "$f")
+  [ "$(jq -r .cwd "$f")" = <worktree> ] && kill -0 "$p" 2>/dev/null \
+    && [ "$(awk '{print $22}' /proc/$p/stat)" = "$(jq -r .procStart "$f")" ] \
     && jq -c '{pid,status,waitingFor}' "$f"
 done
 git -C <worktree> log --oneline -1                      # HEAD
@@ -39,10 +41,12 @@ To wait instead of poll by hand: `herdr agent wait <name> --until idle
   turn nobody has focused yet; reads do not mark it seen. Treat both as idle.
 - **`unknown`** — an agent is present but herdr cannot classify it. It does
   not prove completion.
-- **dead** — `herdr agent get` returns `agent_not_found` (the name clears
-  when the agent exits) and no registry file for the worktree has a live pid.
-  A file whose pid fails `kill -0` is stale — a crashed session leaves one;
-  on 2026-09-12, 122 of 138 files were stale. Ignore them.
+- **dead** — no registry file for the worktree has a live pid. The registry
+  decides; `herdr agent get` returning `agent_not_found` (the name clears
+  when the agent exits) only corroborates it.
+  A file whose pid fails `kill -0`, or whose `procStart` differs from field
+  22 of `/proc/<pid>/stat` (the pid was reused), is stale — a crashed
+  session leaves one. Ignore them.
 
 ## The registry and `waiting`
 
@@ -80,8 +84,8 @@ has three causes:
   which herdr classifies as `idle` (`herdr agent explain` names the rule,
   `live_prompt_box`), so `herdr agent read` is how you learn what it asked
 - finished — HEAD, `ls-remote` and the PR lookup say how far it got
-- dead — the process is gone entirely; resume with `claude --resume` in the
-  worktree
+- dead — the process is gone entirely and herdr no longer finds the agent;
+  resume with `claude --resume` in the worktree
 
 ## Poll; silence is not progress
 
