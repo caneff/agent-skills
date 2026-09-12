@@ -55,15 +55,10 @@ done
 # The helper sits beside the real script, not beside its ~/.local/bin link.
 src="${BASH_SOURCE[0]}"; [ -L "$src" ] && src=$(readlink -f "$src")
 bin_dir="${src%/*}"; [ "$bin_dir" = "$src" ] && bin_dir=.
-# shellcheck source=default-branch.sh
-. "$bin_dir/default-branch.sh" || die "cannot source $bin_dir/default-branch.sh"
+# shellcheck source=git-origin.sh
+. "$bin_dir/git-origin.sh" || die "cannot source $bin_dir/git-origin.sh"
 primary_of() { # primary_of <path> -> the repo's primary (non-linked) worktree
   git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'
-}
-slug_of() { # slug_of <path> -> owner/name, for the gh calls
-  local url; url=$(git -C "$1" remote get-url origin 2>/dev/null) || return 1
-  url="${url%.git}"; url="${url#*github.com/}"; url="${url#*github.com:}"
-  echo "$url"
 }
 
 # Step 2 — is this branch actually merged? The tracker is the authority: a

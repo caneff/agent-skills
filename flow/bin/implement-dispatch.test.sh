@@ -16,9 +16,17 @@ no() { echo "FAIL $1"; fails=1; }
 
 # --- stubs -----------------------------------------------------------------
 mkdir -p "$tmp/stubs" "$tmp/bin"
-for t in bash git sed grep jq cat mv rm mktemp; do
+for t in bash git sed grep cat mv rm mktemp flock; do
   p=$(command -v "$t") && ln -sf "$p" "$tmp/bin/$t"
 done
+# jq: the real one, except that the trust rewrite dawdles for a second when
+# $JQ_SLOW is set, so two concurrent dispatches overlap inside it.
+cat > "$tmp/bin/jq" <<STUB
+#!/usr/bin/env bash
+case "\$*" in *'hasTrustDialogAccepted = true'*) [ -n "\${JQ_SLOW:-}" ] && $(command -v sleep) 1 ;; esac
+exec $(command -v jq) "\$@"
+STUB
+chmod +x "$tmp/bin/jq"
 # gh: `issue view` answers "$GH_STATE $GH_LABELS" (empty state = no such issue).
 cat > "$tmp/stubs/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -56,8 +64,9 @@ export CALL_LOG="$tmp/calls.log" GH_STATE=OPEN GH_LABELS=enhancement,ready-for-a
 # --- fixture ---------------------------------------------------------------
 # A scratch origin plus a clone with no origin/HEAD, whose origin/<default> is
 # one commit ahead of the local one: the base must be origin/<default>, not HEAD.
+# The origin lives under a github.com/caneff/ path, so it names owner/name.
 mkfixture() { # mkfixture <dir> [default branch]
-  local d="$1" origin="$1.origin.git" b="${2:-main}"
+  local d="$1" origin="$tmp/github.com/caneff/${1##*/}.git" b="${2:-main}"
   git init -q -b "$b" --bare "$origin"
   git clone -q "$origin" "$d" 2>/dev/null
   git -C "$d" checkout -q -b "$b"
@@ -102,6 +111,13 @@ refused "refuses a closed issue" "$rc" "$out" "$repo" 395 "not an open issue"
 reset_home
 out=$(GH_STATE="" dispatch --repo "$repo" 395); rc=$?
 refused "refuses a missing issue" "$rc" "$out" "$repo" 395 "not an open issue"
+reset_home
+nfix="$tmp/notgithub"
+mkfixture "$nfix"
+git -C "$nfix" remote set-url origin "$tmp/elsewhere/notgithub.git"
+out=$(dispatch --repo "$nfix" 395); rc=$?
+refused "refuses an origin that names no GitHub owner/name" "$rc" "$out" "$nfix" 395 "owner/name"
+grep -q '^gh ' "$CALL_LOG" && no "gh was called without an owner/name: $(cat "$CALL_LOG")"
 reset_home
 out=$(GH_LABELS=in-progress dispatch --repo "$repo" 395); rc=$?
 refused "refuses an issue not labelled ready-for-agent" "$rc" "$out" "$repo" 395 "ready-for-agent"
@@ -164,7 +180,13 @@ else
   no "herdr calls wrong:
 $herdr_calls"
 fi
-grep -q "^gh issue edit 395 --remove-label ready-for-agent --add-label in-progress --add-assignee @me" "$CALL_LOG" \
+if [ "$(grep -c '^gh ' "$CALL_LOG")" = 2 ] \
+   && ! grep '^gh ' "$CALL_LOG" | grep -vq -- "--repo caneff/sudokumaker-custom-constraints"; then
+  ok "every gh call names the repo from origin with --repo"
+else
+  no "a gh call relied on the cwd: $(grep '^gh ' "$CALL_LOG")"
+fi
+grep -q "^gh issue edit 395 --repo caneff/sudokumaker-custom-constraints --remove-label ready-for-agent --add-label in-progress --add-assignee @me" "$CALL_LOG" \
   && ok "claims the ticket" || no "ticket not claimed: $(cat "$CALL_LOG")"
 if printf '%s' "$out" | grep -q "worktree: $wt" && printf '%s' "$out" | grep -q "branch: *implement-395" \
    && printf '%s' "$out" | grep -q "agent: *$name" \
@@ -219,6 +241,20 @@ if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q agent_prompt_stalled \
   ok "a stalled prompt exits non-zero with herdr's error and leaves the worktree"
 else
   no "stall not reported (rc=$rc): $out"
+fi
+
+# --- 6. concurrent dispatches both keep their trust key ----------------------
+reset_home
+mkfixture "$tmp/race-a"; mkfixture "$tmp/race-b"
+JQ_SLOW=1 dispatch --repo "$tmp/race-a" 501 > "$tmp/race-a.out" & pa=$!
+JQ_SLOW=1 dispatch --repo "$tmp/race-b" 502 > "$tmp/race-b.out" & pb=$!
+wait "$pa"; ra=$?; wait "$pb"; rb=$?
+if [ "$ra" -eq 0 ] && [ "$rb" -eq 0 ] \
+   && [ "$(jq --arg a "$tmp/race-a/.claude/worktrees/implement-501" --arg b "$tmp/race-b/.claude/worktrees/implement-502" \
+         '.projects[$a].hasTrustDialogAccepted == true and .projects[$b].hasTrustDialogAccepted == true and .projects["/elsewhere"] != null' "$HOME/.claude.json")" = true ]; then
+  ok "two concurrent dispatches both leave their trust keys"
+else
+  no "a concurrent dispatch lost a trust key (rc=$ra/$rb): $(cat "$HOME/.claude.json") / $(cat "$tmp/race-a.out" "$tmp/race-b.out")"
 fi
 
 [ "$fails" = 0 ] && echo "ALL PASS"

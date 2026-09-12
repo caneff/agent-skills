@@ -32,12 +32,16 @@ command -v jq >/dev/null 2>&1 || die "jq is not on PATH"
 # The helper sits beside the real script, not beside its ~/.local/bin link.
 src="${BASH_SOURCE[0]}"; [ -L "$src" ] && src=$(readlink -f "$src")
 bin_dir="${src%/*}"; [ "$bin_dir" = "$src" ] && bin_dir=.
-# shellcheck source=default-branch.sh
-. "$bin_dir/default-branch.sh" || die "cannot source $bin_dir/default-branch.sh"
+# shellcheck source=git-origin.sh
+. "$bin_dir/git-origin.sh" || die "cannot source $bin_dir/git-origin.sh"
 
 repo="${repo:-$PWD}"
 primary=$(git -C "$repo" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
 [ -n "$primary" ] || die "not a git repo: $repo"
+# gh always names the repo from origin; a cwd can resolve to another remote.
+slug=$(slug_of "$primary")
+case "$slug" in [!/:]*/[!/:]*) case "$slug" in */*/*|*:*) slug="" ;; esac ;; *) slug="" ;; esac
+[ -n "$slug" ] || die "origin in $primary names no GitHub owner/name"
 branch="implement-$n"
 wt="$primary/.claude/worktrees/$branch"
 # herdr caps agent names at 32 characters: cut the repo part from the right.
@@ -46,7 +50,7 @@ repo_name="${primary##*/}"
 agent="${repo_name:0:$((32 - ${#suffix}))}$suffix"
 
 # Refusals first, so a refused run leaves nothing claimed or created.
-issue=$(cd "$primary" && gh issue view "$n" --json state,labels -q '.state + " " + ([.labels[].name] | join(","))' 2>/dev/null)
+issue=$(gh issue view "$n" --repo "$slug" --json state,labels -q '.state + " " + ([.labels[].name] | join(","))' 2>/dev/null)
 [ "${issue%% *}" = OPEN ] || die "#$n is not an open issue"
 # needs-info and ready-for-human are judgement calls, in-progress is someone
 # else's claim: the owner relabels first.
@@ -73,22 +77,26 @@ git -C "$primary" show-ref -q --verify "refs/remotes/origin/$default" || die "no
 fail() { # fail <what> <herdr output>
   echo "implement-dispatch: $1 failed: $2" >&2
   [ -e "$wt" ] && echo "workspace left in place at $wt" >&2
-  echo "release the ticket: gh issue edit $n --remove-label in-progress --add-label ready-for-agent" >&2
+  echo "release the ticket: gh issue edit $n --repo $slug --remove-label in-progress --add-label ready-for-agent" >&2
   exit 1
 }
-(cd "$primary" && gh issue edit "$n" --remove-label ready-for-agent --add-label in-progress --add-assignee @me >/dev/null) \
+gh issue edit "$n" --repo "$slug" --remove-label ready-for-agent --add-label in-progress --add-assignee @me >/dev/null \
   || die "could not claim #$n"
 
 out=$(git -C "$primary" worktree add -q --no-track -b "$branch" "$wt" "origin/$default" 2>&1) \
   || fail "git worktree add" "$out"
 
-# Pre-accept the trust dialog for exactly this path, so the worker starts at a prompt.
-tmp_json=$(mktemp "$HOME/.claude.json.XXXXXX") || fail "trust pre-seed" "mktemp"
-if jq --arg p "$wt" '.projects[$p].hasTrustDialogAccepted = true' "$HOME/.claude.json" > "$tmp_json"; then
-  mv "$tmp_json" "$HOME/.claude.json"
-else
-  rm -f "$tmp_json"; fail "trust pre-seed" "jq could not rewrite $HOME/.claude.json"
-fi
+# Pre-accept the trust dialog for exactly this path, so the worker starts at a
+# prompt. Dispatches from several repos run at once: the lock serialises their
+# read, modify and rename, so none overwrites another's key.
+lock="$HOME/.claude.json.implement-dispatch.lock"
+out=$({
+  flock -w 30 9 || { echo "timed out waiting for $lock"; exit 1; }
+  tmp_json=$(mktemp "$HOME/.claude.json.XXXXXX") || exit 1
+  jq --arg p "$wt" '.projects[$p].hasTrustDialogAccepted = true' "$HOME/.claude.json" > "$tmp_json" \
+    && mv "$tmp_json" "$HOME/.claude.json" \
+    || { rm -f "$tmp_json"; echo "jq could not rewrite $HOME/.claude.json"; exit 1; }
+} 9>"$lock" 2>&1) || fail "trust pre-seed" "$out"
 
 # --cwd names the repo: without it herdr resolves the focused workspace's repo
 # and answers worktree_not_found.
