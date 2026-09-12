@@ -4,12 +4,15 @@ Date: 2026-09-12. Settled by grilling on wayfinder map
 [Orca exit](https://github.com/caneff/agent-skills/issues/700), ticket
 [The front end after Orca](https://github.com/caneff/agent-skills/issues/704).
 Two researchers score candidates independently against this brief; neither
-sees the other's list before reporting.
+sees the other's list before reporting. Scope: the front end for all agent
+work, not only the one-ticket case.
 
 ## The question
 
-Chris runs a single-ticket lane: one ticket, one worktree, one agent session,
-one PR, Chris merges. Orca 1.4.197 is the current front end: a rail with one
+Chris runs agents across 4-5 repos: today one ticket per worktree per agent
+session, with Chris merging each PR; next, several workers on one spec at
+once, and Codex CLI alongside Claude Code. The front end is the window for
+all of that, so it is scored for all of it. Orca 1.4.197 is the current front end: a rail with one
 row per worktree across 4-5 repos, a terminal per agent, file open and diff,
 an embedded browser. Orca is being removed for the cost it imposed
 (see [#692](https://github.com/caneff/agent-skills/issues/692)). What replaces
@@ -48,6 +51,8 @@ the window Chris watches and clicks in?
 
 ## Scored
 
+- Many concurrent sessions in one repo, grouped so several workers on one
+  spec read as one unit, and any one of them can be opened.
 - Workspace per ticket made at launch, not part-way through.
 - Batch review: many PRs reviewable in one sitting; no mandatory per-ticket
   interactive gate.
