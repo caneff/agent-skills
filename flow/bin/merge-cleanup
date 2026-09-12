@@ -55,7 +55,9 @@ done
 primary_of() { # primary_of <path> -> the repo's primary (non-linked) worktree
   git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'
 }
-bin_dir="${BASH_SOURCE[0]%/*}"; [ "$bin_dir" = "${BASH_SOURCE[0]}" ] && bin_dir=.
+# The helper sits beside the real script, not beside its ~/.local/bin link.
+src="${BASH_SOURCE[0]}"; [ -L "$src" ] && src=$(readlink -f "$src")
+bin_dir="${src%/*}"; [ "$bin_dir" = "$src" ] && bin_dir=.
 # shellcheck source=default-branch.sh
 . "$bin_dir/default-branch.sh" || die "cannot source $bin_dir/default-branch.sh"
 slug_of() { # slug_of <path> -> owner/name, for the gh calls

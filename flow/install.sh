@@ -25,8 +25,6 @@ link() { # link <repo-relative-src> <live-dest>
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link bin/merge-cleanup          "$HOME/.local/bin/merge-cleanup"
 link bin/implement-dispatch     "$HOME/.local/bin/implement-dispatch"
-# Sourced by the two above from their own directory, so it lives beside them.
-link bin/default-branch.sh      "$HOME/.local/bin/default-branch.sh"
 link bin/job-run                "$HOME/.local/bin/job-run"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 # claude/settings.json is NOT symlinked — the harness rewrites it in place and

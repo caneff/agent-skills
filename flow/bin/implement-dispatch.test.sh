@@ -165,6 +165,13 @@ fi
 reset_home
 out=$(dispatch --repo "$repo" --model haiku 398); rc=$?
 refused "refuses a model other than sonnet or opus" "$rc" "$out" "$repo" 398 "model"
+reset_home
+out=$(timeout 10 env PATH="$tmp/bin" bash "$here/implement-dispatch" 398 --model 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && printf '%s' "$out" | grep -q -- "--model needs a value"; then
+  ok "a flag with no value is refused, not looped on"
+else
+  no "a trailing --model hung or was accepted (rc=$rc): $out"
+fi
 
 # --- 4. a stalled prompt fails and leaves the workspace ---------------------
 reset_home

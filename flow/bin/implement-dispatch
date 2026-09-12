@@ -17,8 +17,10 @@ die() { echo "implement-dispatch: $*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo)    repo="${2:-}"; shift 2 ;;
-    --model)   model="${2:-}"; shift 2 ;;
+    --repo|--model)
+               [ $# -ge 2 ] || die "$1 needs a value"
+               case "$1" in --repo) repo="$2" ;; --model) model="$2" ;; esac
+               shift 2 ;;
     -h|--help) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
     -*)        die "unknown flag: $1" ;;
     *)         [ -n "$n" ] && die "one ticket at a time"; n="$1"; shift ;;
@@ -28,7 +30,9 @@ case "$n" in ''|*[!0-9]*) die "name one issue number" ;; esac
 case "$model" in sonnet|opus) ;; *) die "--model must be sonnet or opus, not '$model'" ;; esac
 command -v jq >/dev/null 2>&1 || die "jq is not on PATH"
 
-bin_dir="${BASH_SOURCE[0]%/*}"; [ "$bin_dir" = "${BASH_SOURCE[0]}" ] && bin_dir=.
+# The helper sits beside the real script, not beside its ~/.local/bin link.
+src="${BASH_SOURCE[0]}"; [ -L "$src" ] && src=$(readlink -f "$src")
+bin_dir="${src%/*}"; [ "$bin_dir" = "$src" ] && bin_dir=.
 # shellcheck source=default-branch.sh
 . "$bin_dir/default-branch.sh" || die "cannot source $bin_dir/default-branch.sh"
 
@@ -58,7 +62,7 @@ git -C "$primary" show-ref -q --verify "refs/heads/$branch" && die "branch $bran
 # Past here the ticket is claimed; a failure says how to release it.
 fail() { # fail <what> <herdr output>
   echo "implement-dispatch: $1 failed: $2" >&2
-  echo "workspace left in place at $wt" >&2
+  [ -e "$wt" ] && echo "workspace left in place at $wt" >&2
   echo "release the ticket: gh issue edit $n --remove-label in-progress --add-label ready-for-agent" >&2
   exit 1
 }
@@ -66,9 +70,7 @@ fail() { # fail <what> <herdr output>
   || die "could not claim #$n"
 
 default=$(default_of "$primary")
-base="origin/$default"
-git -C "$primary" show-ref -q --verify "refs/remotes/$base" || base="$default"
-out=$(git -C "$primary" worktree add -q --no-track -b "$branch" "$wt" "$base" 2>&1) \
+out=$(git -C "$primary" worktree add -q --no-track -b "$branch" "$wt" "origin/$default" 2>&1) \
   || fail "git worktree add" "$out"
 
 # Pre-accept the trust dialog for exactly this path, so the worker starts at a prompt.
