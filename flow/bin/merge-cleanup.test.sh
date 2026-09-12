@@ -15,10 +15,11 @@ ok() { echo "PASS $1"; }
 no() { echo "FAIL $1"; fails=1; }
 
 # --- stubs -----------------------------------------------------------------
-# Three PATHs, so the gh-absent and herdr-absent branches are reachable:
+# Four PATHs, so the gh-, herdr- and jq-absent branches are reachable:
 #   full   = gh + herdr + the real tools the script calls
 #   nogh   = herdr only
 #   noherdr= gh only
+#   nojq   = gh only, and no jq
 mkbin() { # mkbin <dir> <stub>...
   local d="$1"; shift; mkdir -p "$d"
   local t; for t in bash git sed awk basename column jq cat; do
@@ -284,7 +285,7 @@ else
   no "failing herdr agent list not refused (rc=$rc): $out"
 fi
 out=$(mc "$tmp/nojq" --repo "$tmp/r6" caneff/merged-one); rc=$?
-if [ $rc -ne 0 ] && printf '%s' "$out" | grep -q "jq" && [ -d "$wt6" ]; then
+if [ $rc -ne 0 ] && printf '%s' "$out" | grep -q "jq is not on PATH" && [ -d "$wt6" ]; then
   ok "without jq the registry cannot be read, so the cleanup is refused"
 else
   no "missing jq not refused (rc=$rc): $out"
@@ -302,6 +303,7 @@ echo 'scratch/' >> "$tmp/r6/.git/info/exclude"
 git -C "$tmp/r6" worktree add -q --detach "$wts/agent-ignored" origin/main 2>/dev/null
 mkdir "$wts/agent-ignored/scratch"; echo evidence > "$wts/agent-ignored/scratch/log"
 printf '{"pid":%s,"cwd":"%s"}\n' "$$" "$wts/agent-live" > "$HOME/.claude/sessions/sibling.json"
+printf '{"pid":%s,"cwd":"%s0"}\n' "$$" "$wt6" > "$HOME/.claude/sessions/prefix.json"
 # A herdr agent in a sibling whose path merely starts with this one's.
 printf '{"result":{"agents":[{"name":"skills-10","pane_id":"w3:p1","cwd":"%s0"}]}}\n' "$wt6" > "$HERDR_AGENTS"
 # A folder git no longer tracks as a worktree.
@@ -323,7 +325,7 @@ fi
 out=$(mc "$tmp/full" --repo "$tmp/r6" caneff/merged-one); rc=$?
 if [ $rc -eq 0 ] && [ ! -d "$wt6" ] \
    && ! git -C "$tmp/r6" show-ref -q --verify refs/heads/caneff/merged-one; then
-  ok "a dead registry pid and a herdr agent elsewhere do not block the cleanup"
+  ok "a dead registry pid, and a live pid or herdr agent elsewhere, do not block the cleanup"
 else
   no "dead registry pid or an agent elsewhere blocked the cleanup (rc=$rc): $out"
 fi
@@ -344,7 +346,7 @@ if printf '%s' "$stale" | grep -q "$wts/agent-old$" \
 else
   no "stale sibling report wrong: $out"
 fi
-rm "$HOME/.claude/sessions/sibling.json" "$HOME/.claude/sessions/dead.json"
+rm "$HOME/.claude/sessions/"{sibling,prefix,dead}.json
 
 # A removal git refuses (a locked worktree) leaves the herdr workspace open.
 mkfixture "$tmp/r7"

@@ -10,6 +10,11 @@
 # --sweep walks every git repo one level under <dir> (default ~/src) and runs
 # the same six steps for every merged local branch it finds, then prints a
 # summary table.
+#
+# A linked worktree is never removed while a live session is in it (a sessions
+# registry pid or a herdr agent). Other idle entries under .claude/worktrees
+# are listed as "stale, not removed". The herdr workspaces of removed
+# worktrees close at exit, after everything else.
 set -uo pipefail
 
 repo="" branch="" pr="" sweep=0 root="" dry=0 force=0
@@ -128,7 +133,7 @@ guard_live() { # guard_live <worktree>
 # owner, never removed. A folder there that git no longer tracks as a worktree
 # is listed too, marked. This run's removal targets are not "other".
 stale_worktrees() { # stale_worktrees <repo> -> one path per line
-  local primary default base e live c
+  local primary default base e live c mark
   primary=$(primary_of "$1"); default=$(default_of "$1")
   base="origin/$default"
   git -C "$primary" show-ref -q --verify "refs/remotes/$base" || base="$default"
@@ -136,12 +141,13 @@ stale_worktrees() { # stale_worktrees <repo> -> one path per line
     e="${e%/}"
     for c in "${removal_targets[@]}"; do [ "$c" = "$e" ] && continue 2; done
     if [ "$(git -C "$e" rev-parse --show-toplevel 2>/dev/null)" != "$e" ]; then
-      live=$(live_sessions "$e") && [ -z "$live" ] && echo "$e (not a git worktree)"
-      continue
+      mark=" (not a git worktree)"
+    else
+      mark=""
+      [ "$(git -C "$e" rev-list --count "$base..HEAD" 2>/dev/null)" = 0 ] || continue
+      [ -z "$(git -C "$e" status --porcelain --ignored 2>/dev/null)" ] || continue
     fi
-    [ "$(git -C "$e" rev-list --count "$base..HEAD" 2>/dev/null)" = 0 ] || continue
-    [ -z "$(git -C "$e" status --porcelain --ignored 2>/dev/null)" ] || continue
-    live=$(live_sessions "$e") && [ -z "$live" ] && echo "$e"
+    live=$(live_sessions "$e") && [ -z "$live" ] && echo "$e$mark"
   done
 }
 report_stale() { # report_stale <path>...
@@ -157,7 +163,7 @@ report_stale() { # report_stale <path>...
 # herdr keeps its own workspace record per checkout. Once the checkout is gone,
 # close the herdr workspace whose path matched, so herdr does not keep panes
 # open on deleted directories. It closes every pane there, the one this runs in
-# included, so close_removed_workspaces runs once, after everything else.
+# included, so close_removed_herdr_workspaces runs once, after everything else.
 close_herdr_workspace() { # close_herdr_workspace <worktree>
   local wt="$1" ids id
   command -v herdr >/dev/null 2>&1 || { skip "the herdr workspace close" "herdr is not on PATH"; return 0; }
@@ -168,7 +174,7 @@ close_herdr_workspace() { # close_herdr_workspace <worktree>
     run "closing herdr workspace $id" herdr workspace close "$id" || true
   done <<< "$ids"
 }
-close_removed_workspaces() {
+close_removed_herdr_workspaces() {
   local wt
   for wt in "${removed_worktrees[@]}"; do close_herdr_workspace "$wt"; done
 }
@@ -257,7 +263,7 @@ if [ "$sweep" = 1 ]; then
       || printf '  %s\n' "${rows[@]}"
   fi
   report_stale "${repos[@]}"
-  close_removed_workspaces
+  close_removed_herdr_workspaces
   exit "$rc"
 fi
 
@@ -274,5 +280,5 @@ fi
 rc=0
 cleanup_branch "$repo" "$branch" || rc=1
 [ "$rc" = 1 ] || report_stale "$repo"
-close_removed_workspaces
+close_removed_herdr_workspaces
 exit "$rc"
