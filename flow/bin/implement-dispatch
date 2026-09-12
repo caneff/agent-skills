@@ -5,9 +5,10 @@
 #
 #   implement-dispatch [--repo <path>] [--model sonnet|opus] <issue number>
 #
-# Refuses, with nothing claimed or created, when the issue is not open, the
-# herdr server is not running, claude onboarding is incomplete, or the
-# workspace path or branch already exists. After the workspace exists, any
+# Refuses, with nothing claimed or created, when the issue is not open and
+# labelled ready-for-agent, the herdr server is not running, claude onboarding
+# is incomplete, the herdr agent name is taken, or the workspace path or branch
+# already exists. After the workspace exists, any
 # herdr failure exits non-zero with herdr's own error and leaves the workspace
 # in place for inspection. There is no bare-claude fallback.
 set -uo pipefail
@@ -17,10 +18,8 @@ die() { echo "implement-dispatch: $*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --repo|--model)
-               [ $# -ge 2 ] || die "$1 needs a value"
-               case "$1" in --repo) repo="$2" ;; --model) model="$2" ;; esac
-               shift 2 ;;
+    --repo)    [ $# -ge 2 ] || die "--repo needs a value"; repo="$2"; shift 2 ;;
+    --model)   [ $# -ge 2 ] || die "--model needs a value"; model="$2"; shift 2 ;;
     -h|--help) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
     -*)        die "unknown flag: $1" ;;
     *)         [ -n "$n" ] && die "one ticket at a time"; n="$1"; shift ;;
@@ -47,12 +46,17 @@ repo_name="${primary##*/}"
 agent="${repo_name:0:$((32 - ${#suffix}))}$suffix"
 
 # Refusals first, so a refused run leaves nothing claimed or created.
-state=$(cd "$primary" && gh issue view "$n" --json state -q .state 2>/dev/null)
-[ "$state" = OPEN ] || die "#$n is not an open issue"
+issue=$(cd "$primary" && gh issue view "$n" --json state,labels -q '.state + " " + ([.labels[].name] | join(","))' 2>/dev/null)
+[ "${issue%% *}" = OPEN ] || die "#$n is not an open issue"
+# Any other label is a judgement call (needs-info, ready-for-human) or someone
+# else's claim (in-progress): the owner relabels first.
+case ",${issue#* }," in *,ready-for-agent,*) ;; *) die "#$n is not labelled ready-for-agent" ;; esac
 herdr status --json 2>/dev/null | jq -e '.server.running == true' >/dev/null \
   || die "no herdr server is running (herdr status)"
 jq -e '.hasCompletedOnboarding == true' "$HOME/.claude.json" >/dev/null 2>&1 \
   || die "claude onboarding is not complete in $HOME/.claude.json; a brief would land in its dialog"
+# The cut name can collide with another repo's ticket; never reuse a live agent.
+herdr agent get "$agent" >/dev/null 2>&1 && die "herdr agent $agent already exists"
 git -C "$primary" fetch -q origin || die "git fetch failed in $primary"
 if [ -e "$wt" ] || git -C "$primary" worktree list --porcelain | grep -qxF "worktree $wt"; then
   die "$wt already exists"

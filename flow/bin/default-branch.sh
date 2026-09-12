@@ -1,6 +1,6 @@
 # Sourced, not run: the one default-branch resolver merge-cleanup and
-# implement-dispatch share. The installer links it beside them in
-# ~/.local/bin, so each sources it from its own directory.
+# implement-dispatch share. Each follows its own ~/.local/bin link back to
+# flow/bin and sources it from there, so the installer does not link it.
 
 default_of() { # default_of <path> -> main, master, whatever origin points at
   local d

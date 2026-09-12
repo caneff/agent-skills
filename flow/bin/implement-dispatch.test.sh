@@ -19,17 +19,18 @@ mkdir -p "$tmp/stubs" "$tmp/bin"
 for t in bash git sed grep jq cat mv rm mktemp; do
   p=$(command -v "$t") && ln -sf "$p" "$tmp/bin/$t"
 done
-# gh: `issue view` answers the state in $GH_STATE (empty = no such issue).
+# gh: `issue view` answers "$GH_STATE $GH_LABELS" (empty state = no such issue).
 cat > "$tmp/stubs/gh" <<'STUB'
 #!/usr/bin/env bash
 echo "gh $*" >> "$CALL_LOG"
 case "${1:-} ${2:-}" in
-  "issue view") [ -n "$GH_STATE" ] || { echo "no issue" >&2; exit 1; }; echo "$GH_STATE" ;;
+  "issue view") [ -n "$GH_STATE" ] || { echo "no issue" >&2; exit 1; }; echo "$GH_STATE $GH_LABELS" ;;
 esac
 STUB
 # herdr: `status --json` reports $HERDR_RUNNING; `worktree open` returns a root
 # pane unless $HERDR_NO_ROOT_PANE, in which case `pane list` names it; `agent
-# prompt` stalls when $HERDR_STALL is set.
+# get` finds an agent only when $HERDR_AGENT_TAKEN; `agent prompt` stalls when
+# $HERDR_STALL is set.
 cat > "$tmp/stubs/herdr" <<'STUB'
 #!/usr/bin/env bash
 echo "herdr $*" >> "$CALL_LOG"
@@ -38,6 +39,9 @@ case "${1:-} ${2:-}" in
   "worktree open")
     if [ -n "${HERDR_NO_ROOT_PANE:-}" ]; then echo '{"result":{"workspace":{"workspace_id":"w8"}}}'
     else echo '{"result":{"workspace":{"workspace_id":"w7"},"root_pane":{"pane_id":"w7:p1"}}}'; fi ;;
+  "agent get")
+    [ -n "${HERDR_AGENT_TAKEN:-}" ] && { echo '{"result":{"agent":{"name":"taken"}}}'; exit 0; }
+    echo '{"error":{"code":"agent_not_found","message":"not found"}}'; exit 1 ;;
   "pane list") echo '{"result":{"panes":[{"pane_id":"w8:p3"}]}}' ;;
   "agent prompt")
     [ -n "${HERDR_STALL:-}" ] || exit 0
@@ -47,20 +51,20 @@ esac
 STUB
 chmod +x "$tmp/stubs/gh" "$tmp/stubs/herdr"
 ln -sf "$tmp/stubs/gh" "$tmp/bin/gh"; ln -sf "$tmp/stubs/herdr" "$tmp/bin/herdr"
-export CALL_LOG="$tmp/calls.log" GH_STATE=OPEN HERDR_RUNNING=true
+export CALL_LOG="$tmp/calls.log" GH_STATE=OPEN GH_LABELS=enhancement,ready-for-agent HERDR_RUNNING=true
 
 # --- fixture ---------------------------------------------------------------
-# A scratch origin plus a clone with no origin/HEAD, whose origin/main is one
-# commit ahead of the local main: the base must be origin/main, not HEAD.
-mkfixture() { # mkfixture <dir>
-  local d="$1" origin="$1.origin.git"
-  git init -q -b main --bare "$origin"
+# A scratch origin plus a clone with no origin/HEAD, whose origin/<default> is
+# one commit ahead of the local one: the base must be origin/<default>, not HEAD.
+mkfixture() { # mkfixture <dir> [default branch]
+  local d="$1" origin="$1.origin.git" b="${2:-main}"
+  git init -q -b "$b" --bare "$origin"
   git clone -q "$origin" "$d" 2>/dev/null
-  git -C "$d" checkout -q -b main
+  git -C "$d" checkout -q -b "$b"
   git -C "$d" config user.email t@example.com; git -C "$d" config user.name t
   echo one > "$d/f"; git -C "$d" add f; git -C "$d" commit -qm one
   echo two >> "$d/f"; git -C "$d" commit -qam two
-  git -C "$d" push -q -u origin main
+  git -C "$d" push -q -u origin "$b"
   git -C "$d" reset -q --hard HEAD~1
 }
 reset_home() { # onboarding true, one pre-existing project entry
@@ -98,12 +102,25 @@ refused "refuses a closed issue" "$rc" "$out" "$repo" 395 "not an open issue"
 reset_home
 out=$(GH_STATE="" dispatch --repo "$repo" 395); rc=$?
 refused "refuses a missing issue" "$rc" "$out" "$repo" 395 "not an open issue"
+reset_home
+out=$(GH_LABELS=in-progress dispatch --repo "$repo" 395); rc=$?
+refused "refuses an issue not labelled ready-for-agent" "$rc" "$out" "$repo" 395 "ready-for-agent"
+reset_home
+out=$(HERDR_AGENT_TAKEN=1 dispatch --repo "$repo" 395); rc=$?
+refused "refuses when the herdr agent name is already taken" "$rc" "$out" "$repo" 395 "sudokumaker-custom-constrain-395"
 
 reset_home
 mkdir -p "$repo/.claude/worktrees/implement-395"
 out=$(dispatch --repo "$repo" 395); rc=$?
 refused "refuses when the workspace path exists" "$rc" "$out" "$repo" 395 "already exists"
 rmdir "$repo/.claude/worktrees/implement-395"
+# Registered with git, but its directory is gone.
+reset_home
+git -C "$repo" worktree add -q --detach "$repo/.claude/worktrees/implement-394" main 2>/dev/null
+rm -rf "$repo/.claude/worktrees/implement-394"
+out=$(dispatch --repo "$repo" 394); rc=$?
+refused "refuses when git still registers a worktree at the path" "$rc" "$out" "$repo" 394 "already exists"
+git -C "$repo" worktree prune
 
 reset_home
 git -C "$repo" branch implement-396 main
@@ -134,7 +151,7 @@ else
 fi
 # herdr allows 1-32 characters; the repo part is cut so the whole is exactly 32.
 name=sudokumaker-custom-constrain-395
-herdr_calls=$(grep '^herdr \(worktree\|agent\)' "$CALL_LOG")
+herdr_calls=$(grep '^herdr \(worktree open\|agent start\|agent prompt\)' "$CALL_LOG")
 expected="herdr worktree open --cwd $repo --path $wt --label implement-395 --no-focus --trust-repository
 herdr agent start $name --kind claude --pane w7:p1 -- --model sonnet
 herdr agent prompt $name /implement 395 --wait --until working --timeout 120000"
@@ -173,7 +190,18 @@ else
   no "a trailing --model hung or was accepted (rc=$rc): $out"
 fi
 
-# --- 4. a stalled prompt fails and leaves the workspace ---------------------
+# --- 4. the base follows the resolver: origin has only master, no origin/HEAD
+reset_home
+mfix="$tmp/masteronly"
+mkfixture "$mfix" master
+out=$(dispatch --repo "$mfix" 401); rc=$?
+if [ "$rc" -eq 0 ] && [ "$(git -C "$mfix/.claude/worktrees/implement-401" rev-parse HEAD 2>/dev/null)" = "$(git -C "$mfix" rev-parse origin/master)" ]; then
+  ok "the base is origin/master when origin has no main and no HEAD"
+else
+  no "master-only base wrong (rc=$rc): $out"
+fi
+
+# --- 5. a stalled prompt fails and leaves the workspace ---------------------
 reset_home
 out=$(HERDR_STALL=1 dispatch --repo "$repo" 399); rc=$?
 if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q agent_prompt_stalled \
