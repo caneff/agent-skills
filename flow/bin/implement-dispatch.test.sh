@@ -64,7 +64,9 @@ export CALL_LOG="$tmp/calls.log" GH_STATE=OPEN GH_LABELS=enhancement,ready-for-a
 # an ancestor of every dispatch it runs.
 mkdir -p "$HOME/.claude/sessions"
 session_file="$HOME/.claude/sessions/$$.json"
-echo '{"pid":1,"name":"skills-ctl"}' > "$session_file"
+stat=$(cat /proc/$$/stat); read -ra f <<< "${stat##*) }"; proc_start=${f[19]}
+session() { printf '{"pid":%s,"procStart":"%s","name":"%s"}\n' "$$" "$2" "$1" > "$session_file"; }
+session skills-ctl "$proc_start"
 
 # --- fixture ---------------------------------------------------------------
 # A scratch origin plus a clone with no origin/HEAD, whose origin/<default> is
@@ -182,7 +184,7 @@ name=sudokumaker-custom-constrain-395
 herdr_calls=$(grep '^herdr \(worktree open\|agent start\|agent prompt\)' "$CALL_LOG")
 expected="herdr worktree open --cwd $repo --path $wt --label implement-395 --no-focus --trust-repository
 herdr agent start $name --kind claude --pane w7:p1 -- --model sonnet
-herdr agent prompt $name /implement 395 --tier heavy --controller skills-ctl --wait --until working --timeout 120000"
+herdr agent prompt $name /implement 395 --tier heavy --controller \"skills-ctl\" --wait --until working --timeout 120000"
 if [ "$herdr_calls" = "$expected" ]; then
   ok "calls open, start, prompt in order with the truncated agent name"
 else
@@ -226,14 +228,14 @@ fi
 # --- 3b. tier from the documentation label; controller from flag or session ---
 reset_home
 out=$(GH_LABELS=documentation,ready-for-agent dispatch --repo "$repo" 403); rc=$?
-if [ "$rc" -eq 0 ] && grep -qx "herdr agent prompt sudokumaker-custom-constrain-403 /implement 403 --tier light --controller skills-ctl --wait --until working --timeout 120000" "$CALL_LOG"; then
+if [ "$rc" -eq 0 ] && grep -qx "herdr agent prompt sudokumaker-custom-constrain-403 /implement 403 --tier light --controller \"skills-ctl\" --wait --until working --timeout 120000" "$CALL_LOG"; then
   ok "a documentation label puts --tier light in the brief"
 else
   no "light tier missing (rc=$rc): $out / $(cat "$CALL_LOG")"
 fi
 reset_home
 out=$(dispatch --repo "$repo" --controller other-9 404); rc=$?
-if [ "$rc" -eq 0 ] && grep -qx "herdr agent prompt sudokumaker-custom-constrain-404 /implement 404 --tier heavy --controller other-9 --wait --until working --timeout 120000" "$CALL_LOG"; then
+if [ "$rc" -eq 0 ] && grep -qx "herdr agent prompt sudokumaker-custom-constrain-404 /implement 404 --tier heavy --controller \"other-9\" --wait --until working --timeout 120000" "$CALL_LOG"; then
   ok "--controller overrides the session registry"
 else
   no "--controller not in the brief (rc=$rc): $out / $(cat "$CALL_LOG")"
@@ -243,6 +245,23 @@ mv "$session_file" "$session_file.off"
 out=$(dispatch --repo "$repo" 405); rc=$?
 mv "$session_file.off" "$session_file"
 refused "refuses when no controller session is found and none is named" "$rc" "$out" "$repo" 405 "controller"
+reset_home
+session skills-ctl 1
+out=$(dispatch --repo "$repo" 406); rc=$?
+session skills-ctl "$proc_start"
+refused "skips a session file whose procStart is not the live process's" "$rc" "$out" "$repo" 406 "controller"
+reset_home
+session "bank drill composition" "$proc_start"
+out=$(dispatch --repo "$repo" 407); rc=$?
+session skills-ctl "$proc_start"
+if [ "$rc" -eq 0 ] && grep -qxF 'herdr agent prompt sudokumaker-custom-constrain-407 /implement 407 --tier heavy --controller "bank drill composition" --wait --until working --timeout 120000' "$CALL_LOG"; then
+  ok "a controller name with spaces reaches the brief whole, quoted"
+else
+  no "spaced controller name broken (rc=$rc): $out / $(cat "$CALL_LOG")"
+fi
+reset_home
+out=$(dispatch --repo "$repo" --controller 'say "hi"' 408); rc=$?
+refused "refuses a controller name holding a double quote" "$rc" "$out" "$repo" 408 "controller"
 
 # --- 4. the base follows the resolver: origin has only master, no origin/HEAD
 reset_home

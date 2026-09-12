@@ -17,26 +17,25 @@ neither door: say so and stop.
 implement-dispatch <n> [--model sonnet|opus]
 ```
 
-`sonnet` for an ordinary ticket, `opus` for a subtle seam. `next` as the
-argument means the lowest-numbered open `ready-for-agent` issue:
+`sonnet` for an ordinary ticket, `opus` for a subtle seam. The script takes
+only a number; for `/implement next`, resolve the lowest-numbered open
+`ready-for-agent` issue first and pass that number:
 
 ```
 gh issue list --repo <owner/name> --label ready-for-agent --state open \
   --limit 200 --json number --jq 'min_by(.number).number'
 ```
 
-The dispatcher claims the ticket, creates the workspace, starts the worker in
-a herdr pane, and puts the tier and your session name in the brief. Its
-refusals — the ticket not open or not `ready-for-agent`, held (`in-progress`,
-`needs-info`, `ready-for-human`), no controller found, herdr not running, the
-workspace or branch already there — are the whole claim rule
-(`implement-dispatch --help`); a refusal is the answer, relayed as it stands.
-Relay its report and stop. You are now that worker's **controller**
-(§ Control).
+`implement-dispatch` claims the ticket, creates the workspace, starts the
+worker in a herdr pane, and puts the tier and your session name in the brief.
+Its refusals are the whole claim rule (`implement-dispatch --help` lists
+them); a refusal is the answer, relayed as it stands. Relay its report and end
+the dispatch. You stay that worker's **controller** (§ Control) until its
+ticket lands.
 
 ## The brief
 
-The worker starts with `/implement <n> --tier light|heavy --controller <name>`.
+The worker starts with `/implement <n> --tier light|heavy --controller "<name>"`.
 The ticket is `in-progress` and assigned to you already; build it.
 
 - **Light** (`documentation` label): § Light tier.
@@ -55,12 +54,11 @@ owner's word turns it on.
 
 ## Control
 
-The controller is the session named in the brief. Send it every question and
-your finish notice with `SendMessage` to that name — never to Chris. The
-controller rules and escalates to Chris only a decision that changes a spec
-ruling, adds a dependency, deletes something that cannot be undone, or
-touches a repo Chris does not own. An ordinary call you make yourself, under
-an assumption you state, and list under Decisions made.
+The controller is the session named in the brief; what it rules on and what
+it escalates is its `CONTEXT.md` entry. Send it every question and your
+finish notice with `SendMessage` to that name — never to Chris. An ordinary
+call you make yourself, under an assumption you state, and list under
+Decisions made.
 
 ## Light tier
 
@@ -73,8 +71,11 @@ an assumption you state, and list under Decisions made.
    git push origin HEAD:<default>
    ```
 
+   The rebase first because a push from a stale base is rejected as a
+   non-fast-forward, and a force push would erase someone else's commit.
+
 3. Send the controller the landed sha and the cleanup line:
-   `cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>`.
+   `! cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>`.
 
 No PR and no reviewer; Chris reads the log after.
 
@@ -82,16 +83,18 @@ No PR and no reviewer; Chris reads the log after.
 
 ### Build
 
-- Invoke the `tdd` skill before any implementation code. The ticket's Seams
-  under test are the confirmed seams; a ticket with none asks the controller.
+- Invoke the `tdd` skill before any implementation code.
 - For each acceptance criterion, write the failing test and see it red before
   the code that makes it pass. Once green, strip the constraint it verifies
   and see it fail, then restore it — a test that passed with the fix reverted
   has shipped as proof of a fix it never checked.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
-  report it as a follow-up.
+  report it as a follow-up. Why: an unasked fix widens the diff past what the
+  reviewers check against the ticket.
 - Typecheck and single test files as you go, the full suite once at the end.
+  Why: a failure caught at the file it came from is cheaper to place than one
+  found in the full run.
 
 ### Review
 
@@ -124,7 +127,7 @@ body's last reviewed sha says where review stopped.
    never fires.
 
 The final commit body carries `Closes #<n>`. Stack fix commits; never amend a
-sha already reported.
+sha already reported — an amend erases the sha the controller was handed.
 
 ### The PR
 

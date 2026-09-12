@@ -20,16 +20,16 @@ human before me, and cannot be taken back.
 `Memory/RULES.md`, research notes and the scripts under `docs/research/`
 that nothing imports or runs.
 
-- **Auto-ship** (zero code files, no ticket): edit on `main`, commit, push,
+- **Auto-ship** (zero code files): edit on `main`, commit, push,
   report. A fenced code block still gets its format check first (formatters
   read fences; `uv run ruff format --check <file>` or equivalent).
-- **Code lane**: `implement-dispatch <n>` from `main` gives the ticket a
-  workspace and a worker; `implement/SKILL.md` runs it at one of two tiers,
-  set by the ticket's `documentation` label. **Light** (label present): the
-  worker commits with `Closes #<n>` and pushes to the default branch, no PR,
-  no reviewer. **Heavy** (no label): TDD → one round of `/code-review` +
-  `/two-axis-code-review` → one verification pass → PR → I merge. Why: a
-  doc-only diff is cheaper to revert than to review; code is not.
+- **Code lane**: TDD, reviews and a PR I merge, run by `implement/SKILL.md`
+  in a workspace. Why: code is cheaper to review than to revert.
+- **A dispatched ticket** (`implement-dispatch <n>` from `main`) runs at its
+  **tier** (`CONTEXT.md`): heavy is the code lane; light, for a
+  `documentation` label, lands like auto-ship but from its own workspace.
+  Why: a doc-only diff is cheaper to revert than to review, and the workspace
+  keeps the primary checkout from being built on.
 - My insight is after the fact: small honest commits, `/landed` or
   `git log -p`, revert if wrong.
 - **The one `SKILL.md` edit that auto-ships**: a change that only alters the
@@ -64,19 +64,22 @@ private repos.
 ## Requests with a fixed shape
 
 - **A sweep** (cleanup, audit, rename) I asked for is thorough and ruthless —
-  the deletions and the churn, not the smallest diff.
+  the deletions and the churn, not the smallest diff. Why: a timid sweep leaves
+  the cruft it was asked to remove and needs a second pass.
 - **"Do your research"** means online (Exa search / fetch), not the codebase.
   On an agent-workflow or tooling problem, survey prior art from primary
   sources first (GitHub search API, the tools' own repos and docs) before
-  proposing a homegrown mechanism — we are not the first to hit it.
+  proposing a homegrown mechanism. Why: we are not the first to hit it, and
+  the codebase cannot tell you what exists outside it.
 - **An automated reminder** ("prompt me when X") is one line in that repo's
   `AGENTS.md` — not a hook, not new tooling. Why: a hook or tool for a
   reminder is more to maintain than the reminder is worth.
 - **Summarizing a source**: reword it; any verbatim phrase gets quotation
-  marks.
+  marks. Why: unmarked verbatim text passes someone else's words off as mine.
 
 ## Personas
 
 Humanizer is a plugin/hook, not this file: it governs *deliverable prose*
 only. Facts and reasoning stay in the session's output style. Written
-deliverables: match length to the task, no filler.
+deliverables: match length to the task, no filler. Why: a humanized fact is
+harder to check than a plain one.

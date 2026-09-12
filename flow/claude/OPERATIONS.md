@@ -27,15 +27,29 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   lands in a path that already exists is someone else's tree, and a commit
   made from the wrong cwd lands there.
 
+### Herdr configuration
+
+- Worktree path: `[worktrees]` `directory = ".claude/worktrees"` in
+  `~/.config/herdr/config.toml`, so a worktree opened through herdr lands at
+  `<repo>/.claude/worktrees/<branch-slug>`, where `merge-cleanup` looks.
+- `herdr-reviewr` is linked; the `herdr-push` plugin (feeds `herdr-remote`'s
+  mobile approval relay) is not installed — `herdr plugin install
+  dcolinmorgan/herdr-push` needs my own hands, since the auto-mode classifier
+  denies it as untrusted code integration.
+- **`herdr integration install claude` is never run** — it wires lifecycle
+  hooks into `~/.claude/settings.json` for state that screen detection gives
+  for free. As of 2026-09-12 it is installed anyway (`herdr integration
+  status` shows `claude: current`); `herdr integration uninstall claude`
+  needs my own hands, since the classifier denies it as self-modification.
+
 ## Control
 
 - The dispatching session is the worker's **controller**. The worker sends
   every question and its finish notice ("PR up", or the landed sha on the
   light tier) to the controller with `SendMessage`, never to me.
-- The controller rules and escalates to me only a decision that changes a
-  spec ruling, adds a dependency, deletes something that cannot be undone, or
-  touches a repo I do not own. Why: those are the four outcomes a controller
-  cannot undo on my behalf; everything else it can revert.
+- What the controller rules on and escalates to me: its `CONTEXT.md` entry.
+  Why: the four escalations are the outcomes a controller cannot undo on my
+  behalf.
 - **Relay the delta, not the report.** When a worker or subagent finishes,
   say only what it added; if it confirms what I already said, that is one
   sentence. Never answer a question and delegate the same question. An idle
@@ -77,40 +91,16 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   is that it is overrunning. Why: an answer built from what a worker was told
   restates the plan, not the state.
 
-### Herdr configuration
-
-- Worktree path: `[worktrees]` `directory = ".claude/worktrees"` in
-  `~/.config/herdr/config.toml`, so a worktree opened through herdr lands at
-  `<repo>/.claude/worktrees/<branch-slug>`, where `merge-cleanup` looks.
-- `herdr-reviewr` is linked; the `herdr-push` plugin (feeds `herdr-remote`'s
-  mobile approval relay) is not installed — `herdr plugin install
-  dcolinmorgan/herdr-push` needs my own hands, since the auto-mode classifier
-  denies it as untrusted code integration.
-- **`herdr integration install claude` is never run** — it wires lifecycle
-  hooks into `~/.claude/settings.json` for state that screen detection gives
-  for free. As of 2026-09-12 it is installed anyway (`herdr integration
-  status` shows `claude: current`); `herdr integration uninstall claude`
-  needs my own hands, since the classifier denies it as self-modification.
-
 ## End
 
 - Before reporting a commit sha, `git status --porcelain` is empty, and fix
   commits stack instead of amending. Why: the report describes the commit,
   not the working tree, and an amend erases a sha already handed over.
-- The heavy tier's review is one round plus one verification pass;
-  `implement/SKILL.md` § Heavy tier. Commits after the last reviewed sha are
-  unreviewed and the PR body names that sha. Why: further passes cost as much
-  as the build and are where reviewers re-raise settled decisions.
-- **The merge line** carries `--repo owner/name`, has no `--delete-branch`,
-  and goes out only after `gh pr view --json isDraft,mergeStateStatus` shows
-  not-draft and CLEAN. Why: a merge line on a draft or conflicted PR fails in
-  my shell, and `--delete-branch` fails ("'main' is already used by worktree")
-  while a worktree holds the branch.
-- Pair it with `merge-cleanup --repo <primary checkout> <branch>`
+- The review loop, the before-the-PR checks (CLEAN, `Closes` verified) and
+  the merge line: `implement/SKILL.md` § Heavy tier. Why: one home, so the
+  lane and this file cannot drift apart.
+- Pair the merge line with `merge-cleanup --repo <primary checkout> <branch>`
   (`--help` for PR/URL and `--sweep`). It removes the workspace, deletes the
   branch local and remote, closes the herdr workspace, and fast-forwards the
   primary checkout; its live-session guard refuses while the worker is
   alive. Why: nothing else cleans up after a merge, and worktrees pile up.
-- After a land or merge, check each `Closes` issue with
-  `gh issue view --repo` before reporting it closed. Why: a rebase can rewrite
-  the commit so the trailer never fires.
