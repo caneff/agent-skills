@@ -99,7 +99,7 @@ live_sessions() { # live_sessions <worktree> -> one line per live session; 1 if 
   local wt="$1" f pid cwd
   for f in "$HOME"/.claude/sessions/*.json; do
     [ -f "$f" ] || continue
-    pid=$(jq -r '.pid // empty' "$f" 2>/dev/null); cwd=$(jq -r '.cwd // empty' "$f" 2>/dev/null)
+    IFS=$'\t' read -r pid cwd < <(jq -r '[.pid // "", .cwd // ""] | @tsv' "$f" 2>/dev/null)
     [ -n "$pid" ] && in_tree "$cwd" "$wt" && kill -0 "$pid" 2>/dev/null && echo "pid $pid"
   done
   command -v herdr >/dev/null 2>&1 || return 0
@@ -109,6 +109,8 @@ live_sessions() { # live_sessions <worktree> -> one line per live session; 1 if 
 }
 guard_live() { # guard_live <worktree>
   local wt="$1" live
+  command -v jq >/dev/null 2>&1 \
+    || { echo "merge-cleanup: refusing to remove $wt — jq is not on PATH, so the sessions registry cannot be read" >&2; return 1; }
   command -v herdr >/dev/null 2>&1 || skip "the herdr agent check" "herdr is not on PATH"
   # A herdr that cannot answer cannot clear the workspace either.
   live=$(live_sessions "$wt") \
@@ -118,8 +120,9 @@ guard_live() { # guard_live <worktree>
   return 1
 }
 
-# Other workspaces under <repo>/.claude/worktrees with no live session and no
-# commits ahead of the default branch: listed for the owner, never removed.
+# Other workspaces under <repo>/.claude/worktrees with no live session, no
+# commits ahead of the default branch and a clean tree: listed for the owner,
+# never removed.
 stale_worktrees() { # stale_worktrees <repo> -> one path per line
   local primary default base e live
   primary=$(primary_of "$1"); default=$(default_of "$1")
@@ -129,6 +132,7 @@ stale_worktrees() { # stale_worktrees <repo> -> one path per line
     e="${e%/}"
     [ "$(git -C "$e" rev-parse --show-toplevel 2>/dev/null)" = "$e" ] || continue
     [ "$(git -C "$e" rev-list --count "$base..HEAD" 2>/dev/null)" = 0 ] || continue
+    [ -z "$(git -C "$e" status --porcelain 2>/dev/null)" ] || continue
     live=$(live_sessions "$e") && [ -z "$live" ] && echo "$e"
   done
 }
@@ -141,8 +145,8 @@ report_stale() { # report_stale <path>...
   printf '  %s\n' "${list[@]}"
 }
 
-# herdr keeps a workspace per checkout; once the checkout is gone, close the one
-# whose path matched so the rail does not fill with panes on deleted directories.
+# herdr keeps its own workspace record per checkout; once the checkout is gone,
+# close the herdr workspace whose path matched so the rail does not fill with panes on deleted directories.
 close_herdr_workspace() { # close_herdr_workspace <worktree>
   local wt="$1" id
   command -v herdr >/dev/null 2>&1 || { skip "the herdr workspace close" "herdr is not on PATH"; return 0; }
@@ -155,7 +159,7 @@ close_herdr_workspace() { # close_herdr_workspace <worktree>
 }
 
 cleanup_branch() { # cleanup_branch <path> <branch> -> steps 3-6
-  local path="$1" b="$2" primary default wt
+  local path="$1" b="$2" primary default wt removed=0
   primary=$(primary_of "$path"); default=$(default_of "$path")
   [ "$b" = "$default" ] && { echo "merge-cleanup: refusing to delete the default branch $b" >&2; return 1; }
   if [ "$force" = 1 ]; then
@@ -171,10 +175,10 @@ cleanup_branch() { # cleanup_branch <path> <branch> -> steps 3-6
        | awk -v b="refs/heads/$b" '/^worktree /{p=$2} $0=="branch "b{print p; exit}')
   if [ -n "$wt" ] && [ "$wt" != "$primary" ]; then
     guard_live "$wt" || return 1
-    run "removing the linked worktree at $wt" git -C "$path" worktree remove --force "$wt" || true
+    run "removing the linked worktree at $wt" git -C "$path" worktree remove --force "$wt" && removed=1
   fi
   run "pruning stale worktree entries" git -C "$path" worktree prune
-  [ -n "$wt" ] && [ "$wt" != "$primary" ] && close_herdr_workspace "$wt"
+  [ "$removed" = 1 ] && close_herdr_workspace "$wt"
 
   # Step 4 — the local branch. Git refuses to delete a branch a checkout holds,
   # so move the primary off it first.
@@ -212,9 +216,10 @@ if [ "$sweep" = 1 ]; then
   [ -n "$branch$pr" ] && die "--sweep takes no branch or PR"
   root="${root:-$HOME/src}"
   [ -d "$root" ] || die "no such root: $root"
-  rc=0
+  rc=0 repos=()
   for d in "$root"/*/; do
     git -C "$d" rev-parse --git-dir >/dev/null 2>&1 || continue
+    repos+=("$d")
     default=$(default_of "$d")
     while read -r b; do
       [ -n "$b" ] && [ "$b" != "$default" ] || continue
@@ -235,6 +240,7 @@ if [ "$sweep" = 1 ]; then
     printf '  %s\n' "${rows[@]}" | column -t -s '|' 2>/dev/null \
       || printf '  %s\n' "${rows[@]}"
   fi
+  [ "${#repos[@]}" = 0 ] || report_stale "${repos[@]}"
   exit "$rc"
 fi
 
