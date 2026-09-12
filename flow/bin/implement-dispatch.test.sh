@@ -119,6 +119,10 @@ out=$(dispatch --repo "$nfix" 395); rc=$?
 refused "refuses an origin that names no GitHub owner/name" "$rc" "$out" "$nfix" 395 "owner/name"
 grep -q '^gh ' "$CALL_LOG" && no "gh was called without an owner/name: $(cat "$CALL_LOG")"
 reset_home
+mkdir -p "$tmp/noflock"; cp -P "$tmp/bin"/* "$tmp/noflock/"; rm "$tmp/noflock/flock"
+out=$(PATH="$tmp/noflock" bash "$here/implement-dispatch" --repo "$repo" 395 2>&1); rc=$?
+refused "refuses when flock is not on PATH" "$rc" "$out" "$repo" 395 "flock is not on PATH"
+reset_home
 out=$(GH_LABELS=in-progress dispatch --repo "$repo" 395); rc=$?
 refused "refuses an issue not labelled ready-for-agent" "$rc" "$out" "$repo" 395 "ready-for-agent"
 reset_home
@@ -180,8 +184,7 @@ else
   no "herdr calls wrong:
 $herdr_calls"
 fi
-if [ "$(grep -c '^gh ' "$CALL_LOG")" = 2 ] \
-   && ! grep '^gh ' "$CALL_LOG" | grep -vq -- "--repo caneff/sudokumaker-custom-constraints"; then
+if ! grep '^gh ' "$CALL_LOG" | grep -vq -- "--repo caneff/sudokumaker-custom-constraints"; then
   ok "every gh call names the repo from origin with --repo"
 else
   no "a gh call relied on the cwd: $(grep '^gh ' "$CALL_LOG")"

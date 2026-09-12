@@ -28,6 +28,7 @@ done
 case "$n" in ''|*[!0-9]*) die "name one issue number" ;; esac
 case "$model" in sonnet|opus) ;; *) die "--model must be sonnet or opus, not '$model'" ;; esac
 command -v jq >/dev/null 2>&1 || die "jq is not on PATH"
+command -v flock >/dev/null 2>&1 || die "flock is not on PATH"
 
 # The helper sits beside the real script, not beside its ~/.local/bin link.
 src="${BASH_SOURCE[0]}"; [ -L "$src" ] && src=$(readlink -f "$src")
@@ -40,8 +41,7 @@ primary=$(git -C "$repo" worktree list --porcelain 2>/dev/null | sed -n '1s/^wor
 [ -n "$primary" ] || die "not a git repo: $repo"
 # gh always names the repo from origin; a cwd can resolve to another remote.
 slug=$(slug_of "$primary")
-case "$slug" in [!/:]*/[!/:]*) case "$slug" in */*/*|*:*) slug="" ;; esac ;; *) slug="" ;; esac
-[ -n "$slug" ] || die "origin in $primary names no GitHub owner/name"
+[[ $slug =~ ^[^/:]+/[^/:]+$ ]] || die "origin in $primary names no GitHub owner/name"
 branch="implement-$n"
 wt="$primary/.claude/worktrees/$branch"
 # herdr caps agent names at 32 characters: cut the repo part from the right.

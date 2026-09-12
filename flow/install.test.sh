@@ -54,9 +54,9 @@ cleanup_out=$(cd "$repo" && HOME="$tmp/home" bash "$tmp/home/.local/bin/merge-cl
 if [ -L "$tmp/home/.local/bin/implement-dispatch" ] && [ ! -e "$tmp/home/.local/bin/git-origin.sh" ] \
    && printf '%s' "$dispatch_out" | grep -q "not a git repo" \
    && printf '%s' "$cleanup_out" | grep -q "name a branch"; then
-  echo "PASS implement-dispatch linked, and both scripts source the shared resolver through their links"
+  echo "PASS implement-dispatch linked, and both scripts source git-origin.sh through their links"
 else
-  echo "FAIL bin/implement-dispatch not linked, or the resolver not sourced through the links: $dispatch_out / $cleanup_out"; fails=1
+  echo "FAIL bin/implement-dispatch not linked, or git-origin.sh not sourced through the links: $dispatch_out / $cleanup_out"; fails=1
 fi
 if [ -L "$tmp/home/.local/bin/job-run" ]; then
   echo "PASS job-run linked onto PATH under the scratch HOME"
