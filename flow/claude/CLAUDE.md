@@ -108,7 +108,7 @@ Before reporting a commit sha, `git status --porcelain` is empty.
 - Merge line: `--repo owner/name`, only after `gh pr view` shows not-draft
   and CLEAN.
 - Detail — dispatch, report contract, worktree hygiene, status answers,
-  monitors, review caps, merge/cleanup, Orca specifics:
+  monitors, review caps, merge/cleanup, herdr config, Orca specifics:
   `~/.agents/skills/flow/claude/OPERATIONS.md`.
 
 # Gotchas

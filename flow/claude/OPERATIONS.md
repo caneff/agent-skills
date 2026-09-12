@@ -72,15 +72,18 @@ status is that it is overrunning.
 - Worktree path is pinned to the lane's own convention:
   `[worktrees]` `directory = ".claude/worktrees"` in
   `~/.config/herdr/config.toml`, so a worktree opened through herdr lands at
-  `<repo>/.claude/worktrees/<branch-slug>` alongside the ones `git worktree
-  add` already creates for `/implement`.
-- `herdr-reviewr` and the `herdr-push` plugin (feeds `herdr-remote`'s mobile
-  approval relay) are the two adopted add-ons. **`herdr integration install
-  claude` is never run** — it wires seven extra hooks into
-  `~/.claude/settings.json` for lifecycle state that screen detection already
-  gives Chris for free. If `herdr integration status` ever reports `claude:
-  current`, that's drift — run `herdr integration uninstall claude` and check
-  `~/.claude/settings.json` for a leftover `herdr-agent-state.sh` hook line.
+  `<repo>/.claude/worktrees/<branch-slug>`.
+- `herdr-reviewr` is linked; the `herdr-push` plugin (feeds `herdr-remote`'s
+  mobile approval relay) is not installed yet — `herdr plugin install
+  dcolinmorgan/herdr-push` needs my own hands, since Claude Code's auto-mode
+  classifier denies it as untrusted code integration.
+- **`herdr integration install claude` is never run** — it wires extra
+  lifecycle hooks into `~/.claude/settings.json` for state screen detection
+  already gives me for free. As of 2026-09-12 it is installed anyway
+  (`herdr integration status` shows `claude: current`, with a live
+  `herdr-agent-state.sh` hook in `~/.claude/settings.json`); `herdr
+  integration uninstall claude` needs my own hands too, since Claude Code's
+  auto-mode classifier denies it as self-modification.
 
 ## Committing, reviewing, merging
 
