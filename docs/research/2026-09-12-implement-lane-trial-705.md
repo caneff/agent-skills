@@ -43,11 +43,31 @@ Dispatcher stopped after the prompt. Worker stays alive through review.
    therefore not the bare `/implement <n>` the contract specifies until the
    skill is rewritten.
 
-## Still to observe (Chris, through herdr)
+## Outcome
 
-- Whether `~/.claude/sessions/<pid>.json` writes `waiting` on a permission
-  prompt, and whether herdr flips to `blocked` at the same moment.
-- Whether the PR body's "Lane friction" list adds items the dispatcher did
-  not see.
-- `merge-cleanup implement-395` after merge: does the live-session guard
-  refuse while the pane is open, and does `herdr workspace close` follow.
+PR [sudokumaker-custom-constraints #409](https://github.com/caneff/sudokumaker-custom-constraints/pull/409)
+merged by Chris; `merge-cleanup implement-395` run by Chris from the primary
+checkout. The lane works end to end. The worker's own "Lane friction" list
+added nothing Orca-shaped (one self-inflicted `git stash -u` near-miss).
+
+6. **`merge-cleanup` removed the worktree under a live worker.** At cleanup
+   time `~/.claude/sessions/2400746.json` had `cwd` = the worktree, the pid
+   answered `kill -0`, and `herdr agent list` showed `smcc-implement-395`
+   idle in it. Cleanup proceeded anyway: the live-session guard decided on
+   #703/#704 is not yet in `merge-cleanup`. Afterwards herdr reports the
+   agent's cwd as `… (deleted)`, pane w4:p1 still open. This is the exact
+   failure the guard exists for, reproduced with no `herdr worktree remove`
+   involved.
+7. **`merge-cleanup` still calls Orca.** "removing the Orca workspace" ran
+   first and failed on `orca-runtime.json` (Orca not running); harmless but
+   noisy. It also never called `herdr workspace close`, so workspace w4 is
+   orphaned.
+8. **The dispatcher cannot find the PR by ticket.** `gh pr list --search 395`
+   returned nothing once the branch was deleted; the PR is found by
+   `Closes #395` only through the issue's timeline. The status rule "PR =
+   in review" needs `--head implement-<n>` while the branch lives and the
+   issue's linked PR after.
+
+Not verified: whether the sessions registry writes `waiting` on a permission
+prompt. Chris did not report a blocked moment; the registry file showed
+`idle` at cleanup time. Stays open for the spec's `agent-status.md` rewrite.
