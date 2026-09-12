@@ -1,7 +1,7 @@
 ---
 name: extract-coding-standards
-description: Mine a repo's recent history — merged PRs, review comments, commits, and the current code — for the conventions the team actually enforces, and write them into CODING_STANDARDS.md in the house rule format.
-disable-model-invocation: true
+description: >-
+  Extract the coding standards a repo actually enforces from recent PRs, reviews, commits, and current code, and write them into CODING_STANDARDS.md. Use when the user says "extract coding standards", "mine recent commits or PRs for standards", "last N submissions", or "write CODING_STANDARDS".
 argument-hint: "[N | all]"
 ---
 

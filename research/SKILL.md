@@ -1,6 +1,7 @@
 ---
 name: research
-description: Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.
+description: >-
+  Research a question from high-trust primary sources and capture the findings as Markdown in the repo. Use when the user says "do some research", "research about", "look into", or asks for options, comparisons, current capabilities, or evidence about a tool, workflow, or practice. Version-sensitive package, SDK, or API docs go to read-the-damn-docs instead.
 ---
 
 Spin up a **background agent** to do the research, so you keep working while it reads.
