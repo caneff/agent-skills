@@ -21,6 +21,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 declare -A COPIES=(
   ["vscode/settings.json"]="/mnt/c/Users/*/AppData/Roaming/Code/User/settings.json"
   ["claude/settings.json"]="$HOME/.claude/settings.json"
+  ["claude/output-styles/quill.md"]="$HOME/.claude/output-styles/quill.md"
 )
 
 mode=${1:-}
