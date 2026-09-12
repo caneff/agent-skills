@@ -37,7 +37,7 @@ gh issue view <n> --repo <owner/name> \
 - **`idle`** / **`done`** — ready for input. `done` is an idle whose finished
   turn nobody has focused yet; reads do not mark it seen. Treat both as idle.
 - **`unknown`** — an agent is present but herdr cannot classify it. It does
-  not prove completion.
+  not prove completion; re-check on the next poll.
 - **dead** — no registry file for the worktree has a live pid. The registry
   decides; `herdr agent get` returning `agent_not_found` (the name clears
   when the agent exits) only corroborates it.
@@ -72,8 +72,9 @@ whether it is working.
 
 ## Idle has three causes
 
-Here idle means not running a turn — whatever herdr reports. That is all it
-proves. Idle has three causes:
+An agent that is not `working` is idle in the loose sense: not running a
+turn. That covers herdr `idle`, `done` and `blocked`, and a dead agent. It
+has three causes:
 
 - parked on a stop-and-ask — shows as `blocked` for a permission dialog, as
   `idle` for a question asked in plain prose (the turn ends at the input box;
@@ -81,8 +82,7 @@ proves. Idle has three causes:
   `herdr agent read` is how you learn what it asked
 - finished — shows as `idle` or `done`; HEAD, `ls-remote` and the PR lookup
   say how far it got
-- dead — shows as `agent_not_found` and no live registry pid (see **dead**
-  above); resume with `claude --resume` in the worktree
+- dead — no live registry pid, which decides it (see **dead** above); resume with `claude --resume` in the worktree
 
 ## Poll; silence is not progress
 
