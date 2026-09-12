@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Contract test for merge-cleanup, against scratch origins and clones under
-# mktemp. `gh` and `orca-ide` are stubbed on PATH and HOME is redirected, so
-# nothing live — no real repo, no Orca workspace, no network — is touched.
+# mktemp. `gh` and `herdr` are stubbed on PATH and HOME is redirected, so
+# nothing live — no real repo, no herdr pane, no sessions registry, no network —
+# is touched.
 # Run: bash flow/bin/merge-cleanup.test.sh
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-tmp=$(mktemp -d)
+tmp=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$tmp"' EXIT
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 export HOME="$tmp/home"; mkdir -p "$HOME"
@@ -14,13 +15,14 @@ ok() { echo "PASS $1"; }
 no() { echo "FAIL $1"; fails=1; }
 
 # --- stubs -----------------------------------------------------------------
-# Three PATHs, so the gh-absent and orca-absent branches are reachable:
-#   full  = gh + orca-ide + the real tools the script calls
-#   nogh  = orca-ide only
-#   noorca= gh only
+# Four PATHs, so the gh-, herdr- and jq-absent branches are reachable:
+#   full   = gh + herdr + the real tools the script calls
+#   nogh   = herdr only
+#   noherdr= gh only
+#   nojq   = gh only, and no jq
 mkbin() { # mkbin <dir> <stub>...
   local d="$1"; shift; mkdir -p "$d"
-  local t; for t in bash git sed awk basename column; do
+  local t; for t in bash git sed awk basename column jq cat; do
     local p; p=$(command -v "$t") && ln -sf "$p" "$d/$t"
   done
   local s; for s in "$@"; do ln -sf "$tmp/stubs/$s" "$d/$s"; done
@@ -37,15 +39,26 @@ case "$sub" in
 esac
 if [ "$head" = "caneff/merged-one" ]; then echo '[{"number":7}]'; else echo '[]'; fi
 STUB
-cat > "$tmp/stubs/orca-ide" <<'STUB'
+# herdr answers `agent list` and `workspace list` from the JSON files the case
+# under test writes, and logs every call.
+cat > "$tmp/stubs/herdr" <<'STUB'
 #!/usr/bin/env bash
-echo "orca-ide $*" >> "$ORCA_LOG"
+echo "herdr $*" >> "$HERDR_LOG"
+[ -n "${HERDR_FAIL:-}" ] && exit 1
+case "${1:-} ${2:-}" in
+  "agent list")     cat "$HERDR_AGENTS" ;;
+  "workspace list") cat "$HERDR_WORKSPACES" ;;
+esac
 STUB
-chmod +x "$tmp/stubs/gh" "$tmp/stubs/orca-ide"
-mkbin "$tmp/full"   gh orca-ide
-mkbin "$tmp/nogh"   orca-ide
-mkbin "$tmp/noorca" gh
-export ORCA_LOG="$tmp/orca.log"; : > "$ORCA_LOG"
+chmod +x "$tmp/stubs/gh" "$tmp/stubs/herdr"
+mkbin "$tmp/full"    gh herdr
+mkbin "$tmp/nogh"    herdr
+mkbin "$tmp/noherdr" gh
+mkbin "$tmp/nojq"    gh; rm "$tmp/nojq/jq"
+export HERDR_LOG="$tmp/herdr.log"; : > "$HERDR_LOG"
+export HERDR_AGENTS="$tmp/agents.json" HERDR_WORKSPACES="$tmp/workspaces.json"
+echo '{"result":{"agents":[]}}' > "$HERDR_AGENTS"
+echo '{"result":{"workspaces":[]}}' > "$HERDR_WORKSPACES"
 
 # --- fixture ---------------------------------------------------------------
 # A scratch origin plus a clone: caneff/merged-one is squash-merged (its own
@@ -81,6 +94,8 @@ mkfixture() { # mkfixture <dir>
   git -C "$d" reset -q --hard HEAD~1
 }
 mc() { local p="$1"; shift; PATH="$p" bash "$here/merge-cleanup" "$@" 2>&1; }
+# The indented lines under the "stale, not removed:" header, nothing after them.
+stale_of() { printf '%s\n' "$1" | awk '/^stale, not removed:/{f=1; next} f && /^  /{print; next} {f=0}'; }
 
 # --- 1. dry run changes nothing -------------------------------------------
 mkfixture "$tmp/r1"
@@ -88,9 +103,8 @@ before=$(git -C "$tmp/r1" rev-parse HEAD)
 out=$(mc "$tmp/full" --repo "$tmp/r1" caneff/merged-one --dry-run); rc=$?
 [ $rc -eq 0 ] || no "dry-run exited $rc: $out"
 if git -C "$tmp/r1" show-ref -q --verify refs/heads/caneff/merged-one \
-   && [ "$(git -C "$tmp/r1" rev-parse HEAD)" = "$before" ] \
-   && [ ! -s "$ORCA_LOG" ]; then
-  ok "dry-run leaves branch, HEAD and Orca untouched"
+   && [ "$(git -C "$tmp/r1" rev-parse HEAD)" = "$before" ]; then
+  ok "dry-run leaves branch and HEAD untouched"
 else
   no "dry-run mutated something"
 fi
@@ -128,13 +142,9 @@ else
   no "-d path not taken (rc=$rc): $out"
 fi
 
-# --- 5. the full run: workspace, branches, fast-forward, skip lines --------
-: > "$ORCA_LOG"
+# --- 5. the full run: branches, fast-forward, skip lines ------------------
 out=$(mc "$tmp/full" --repo "$tmp/r1" caneff/merged-one); rc=$?
 [ $rc -eq 0 ] || no "cleanup exited $rc: $out"
-grep -q -- "worktree rm .*caneff/merged-one" "$ORCA_LOG" \
-  && ok "Orca workspace removed by full branch name" \
-  || no "no orca-ide worktree rm for the full branch name: $(cat "$ORCA_LOG")"
 git -C "$tmp/r1" show-ref -q --verify refs/heads/caneff/merged-one \
   && no "local branch survived" || ok "local branch deleted"
 git -C "$tmp/r1.origin.git" show-ref -q --verify refs/heads/caneff/merged-one \
@@ -186,18 +196,18 @@ else
   no "no-gh squash branch not refused (rc=$rc): $out"
 fi
 
-# --- 8. without Orca, a linked worktree is removed anyway ------------------
+# --- 8. without herdr, a linked worktree is removed anyway -----------------
 mkfixture "$tmp/r5"
 git -C "$tmp/r5" worktree add -q "$tmp/r5-wt" caneff/merged-one 2>/dev/null
-out=$(mc "$tmp/noorca" --repo "$tmp/r5" caneff/merged-one); rc=$?
+out=$(mc "$tmp/noherdr" --repo "$tmp/r5" caneff/merged-one); rc=$?
 if [ $rc -eq 0 ] && ! git -C "$tmp/r5" show-ref -q --verify refs/heads/caneff/merged-one \
    && [ ! -d "$tmp/r5-wt" ]; then
-  ok "no Orca: the linked worktree is removed and the branch deleted"
+  ok "no herdr: the linked worktree is removed and the branch deleted"
 else
   no "linked worktree blocked the delete (rc=$rc): $out"
 fi
-printf '%s' "$out" | grep -q "skipped the Orca workspace teardown" \
-  && ok "the missing orca-ide is reported as a skip" || no "no skip line for orca-ide: $out"
+printf '%s' "$out" | grep -q "skipped the herdr workspace close (herdr is not on PATH)" \
+  && ok "the missing herdr is reported as a skip" || no "no skip line for herdr: $out"
 
 # --- 9. sweep: cleans the merged branch, spares the repo it cannot prove ----
 mkdir -p "$tmp/src"
@@ -209,8 +219,17 @@ git -C "$tmp/src/noremote" config user.name t
 echo x > "$tmp/src/noremote/f"; git -C "$tmp/src/noremote" add f
 git -C "$tmp/src/noremote" commit -qm x
 git -C "$tmp/src/noremote" branch caneff/untracked
-: > "$ORCA_LOG"
+git -C "$tmp/src/other" worktree add -q --detach "$tmp/src/other/.claude/worktrees/agent-old" origin/main 2>/dev/null
+git -C "$tmp/src/other" worktree add -q "$tmp/src/other/.claude/worktrees/implement-9" caneff/merged-one 2>/dev/null
+printf '{"result":{"workspaces":[{"workspace_id":"w4","worktree":{"checkout_path":"%s"}}]}}\n' \
+  "$tmp/src/other/.claude/worktrees/implement-9" > "$HERDR_WORKSPACES"
 out=$(mc "$tmp/full" --sweep --root "$tmp/src"); rc=$?
+echo '{"result":{"workspaces":[]}}' > "$HERDR_WORKSPACES"
+if printf '%s\n' "$out" | awk '/stale, not removed/{r=NR} /closing herdr workspace w4/{c=NR} END{exit !(r && c > r)}'; then
+  ok "sweep closes the herdr workspaces only after its summary"
+else
+  no "sweep closed a herdr workspace before its summary: $out"
+fi
 [ $rc -eq 0 ] || no "sweep exited $rc: $out"
 git -C "$tmp/src/other" show-ref -q --verify refs/heads/caneff/merged-one \
   && no "sweep left a merged branch behind" || ok "sweep deleted the merged branch"
@@ -220,9 +239,158 @@ if git -C "$tmp/src/noremote" show-ref -q --verify refs/heads/caneff/untracked \
 else
   no "sweep did not skip the unprovable branch: $out"
 fi
-printf '%s' "$out" | grep -q "Orca worktrees removed: 2" \
-  && ok "sweep summary counts the Orca worktrees removed" \
-  || no "no Orca count in the sweep summary: $out"
+if stale_of "$out" | grep -q "$tmp/src/other/.claude/worktrees/agent-old" \
+   && [ -d "$tmp/src/other/.claude/worktrees/agent-old" ]; then
+  ok "sweep summary lists the stale sibling and leaves it in place"
+else
+  no "sweep summary has no stale sibling: $out"
+fi
+out=$(mc "$tmp/nojq" --sweep --root "$tmp/src" --dry-run); rc=$?
+if printf '%s' "$out" | grep -q "skipped the stale worktree report (jq is not on PATH)" \
+   && ! printf '%s' "$out" | grep -q "stale, not removed"; then
+  ok "without jq the stale report is skipped, not guessed"
+else
+  no "stale report ran without jq: $out"
+fi
+
+# --- 10. the live-session guard --------------------------------------------
+# A workspace at the lane's own path, holding the merged branch.
+mkfixture "$tmp/r6"
+wt6="$tmp/r6/.claude/worktrees/implement-1"
+git -C "$tmp/r6" worktree add -q "$wt6" caneff/merged-one 2>/dev/null
+mkdir -p "$HOME/.claude/sessions"
+printf '{"pid":%s,"cwd":"%s"}\n' "$$" "$wt6" > "$HOME/.claude/sessions/live.json"
+out=$(mc "$tmp/full" --repo "$tmp/r6" caneff/merged-one); rc=$?
+if [ $rc -ne 0 ] && printf '%s' "$out" | grep -q "pid $$" && [ -d "$wt6" ] \
+   && git -C "$tmp/r6" show-ref -q --verify refs/heads/caneff/merged-one; then
+  ok "a live registry pid in the workspace refuses the cleanup"
+else
+  no "live registry pid not refused (rc=$rc): $out"
+fi
+rm "$HOME/.claude/sessions/live.json"
+
+printf '{"result":{"agents":[{"name":"skills-1","pane_id":"w2:p1","cwd":"%s"}]}}\n' "$wt6" > "$HERDR_AGENTS"
+out=$(mc "$tmp/full" --repo "$tmp/r6" caneff/merged-one); rc=$?
+if [ $rc -ne 0 ] && printf '%s' "$out" | grep -q "skills-1" && [ -d "$wt6" ]; then
+  ok "a herdr agent in the workspace refuses the cleanup"
+else
+  no "herdr agent not refused (rc=$rc): $out"
+fi
+echo '{"result":{"agents":[]}}' > "$HERDR_AGENTS"
+
+out=$(HERDR_FAIL=1 mc "$tmp/full" --repo "$tmp/r6" caneff/merged-one); rc=$?
+if [ $rc -ne 0 ] && printf '%s' "$out" | grep -q "herdr agent list failed" && [ -d "$wt6" ]; then
+  ok "a herdr that cannot list its agents refuses the cleanup"
+else
+  no "failing herdr agent list not refused (rc=$rc): $out"
+fi
+out=$(mc "$tmp/nojq" --repo "$tmp/r6" caneff/merged-one); rc=$?
+if [ $rc -ne 0 ] && printf '%s' "$out" | grep -q "jq is not on PATH" && [ -d "$wt6" ]; then
+  ok "without jq the registry cannot be read, so the cleanup is refused"
+else
+  no "missing jq not refused (rc=$rc): $out"
+fi
+
+# Siblings: one idle leftover, one with work ahead of main, one with a session.
+wts="$tmp/r6/.claude/worktrees"
+git -C "$tmp/r6" worktree add -q --detach "$wts/agent-old" origin/main 2>/dev/null
+git -C "$tmp/r6" worktree add -q -b ahead "$wts/agent-ahead" origin/main 2>/dev/null
+echo ahead >> "$wts/agent-ahead/f"; git -C "$wts/agent-ahead" commit -qam ahead
+git -C "$tmp/r6" worktree add -q --detach "$wts/agent-live" origin/main 2>/dev/null
+git -C "$tmp/r6" worktree add -q --detach "$wts/agent-dirty" origin/main 2>/dev/null
+echo unsaved > "$wts/agent-dirty/notes"
+echo 'scratch/' >> "$tmp/r6/.git/info/exclude"
+git -C "$tmp/r6" worktree add -q --detach "$wts/agent-ignored" origin/main 2>/dev/null
+mkdir "$wts/agent-ignored/scratch"; echo evidence > "$wts/agent-ignored/scratch/log"
+printf '{"pid":%s,"cwd":"%s"}\n' "$$" "$wts/agent-live" > "$HOME/.claude/sessions/sibling.json"
+printf '{"pid":%s,"cwd":"%s0"}\n' "$$" "$wt6" > "$HOME/.claude/sessions/prefix.json"
+# A herdr agent in a sibling whose path merely starts with this one's.
+printf '{"result":{"agents":[{"name":"skills-10","pane_id":"w3:p1","cwd":"%s0"}]}}\n' "$wt6" > "$HERDR_AGENTS"
+# A folder git no longer tracks as a worktree.
+mkdir "$wts/agent-orphan"; echo leftover > "$wts/agent-orphan/f"
+# A crashed session leaves its registry file behind; its pid is gone.
+bash -c 'exit 0' & dead=$!; wait "$dead"
+printf '{"pid":%s,"cwd":"%s"}\n' "$dead" "$wt6" > "$HOME/.claude/sessions/dead.json"
+printf '{"result":{"workspaces":[{"workspace_id":"w1","worktree":{"checkout_path":"%s"}},{"workspace_id":"w9","worktree":{"checkout_path":"%s"}}]}}\n' \
+  "$tmp/r6" "$wt6" > "$HERDR_WORKSPACES"
+: > "$HERDR_LOG"
+out=$(mc "$tmp/full" --repo "$tmp/r6" caneff/merged-one --dry-run); rc=$?
+if [ $rc -eq 0 ] && [ -d "$wt6" ] && grep -q "workspace list" "$HERDR_LOG" \
+   && ! grep -q "workspace close" "$HERDR_LOG"; then
+  ok "dry-run finds the herdr workspace but does not close it"
+else
+  no "dry-run closed or never looked up the herdr workspace (rc=$rc): $(cat "$HERDR_LOG") / $out"
+fi
+: > "$HERDR_LOG"
+out=$(mc "$tmp/full" --repo "$tmp/r6" caneff/merged-one); rc=$?
+if [ $rc -eq 0 ] && [ ! -d "$wt6" ] \
+   && ! git -C "$tmp/r6" show-ref -q --verify refs/heads/caneff/merged-one; then
+  ok "a dead registry pid, and a live pid or herdr agent elsewhere, do not block the cleanup"
+else
+  no "dead registry pid or an agent elsewhere blocked the cleanup (rc=$rc): $out"
+fi
+echo '{"result":{"agents":[]}}' > "$HERDR_AGENTS"
+if grep -qx "herdr workspace close w9" "$HERDR_LOG" && ! grep -q "close w1" "$HERDR_LOG" \
+   && printf '%s\n' "$out" | awk '/stale, not removed/{r=NR} /closing herdr workspace w9/{c=NR; exit} END{exit !(r && c > r)}'; then
+  ok "the matching herdr workspace is closed at the end of the run"
+else
+  no "herdr workspace close not called for w9 at the end of the run: $(cat "$HERDR_LOG") / $out"
+fi
+stale=$(stale_of "$out")
+if printf '%s' "$stale" | grep -q "$wts/agent-old$" \
+   && printf '%s' "$stale" | grep -q "$wts/agent-orphan (not a git worktree)" \
+   && ! printf '%s' "$stale" | grep -qE "agent-ahead|agent-live|agent-dirty|agent-ignored|implement-1" \
+   && [ -d "$wts/agent-old" ] && [ -d "$wts/agent-ahead" ] && [ -d "$wts/agent-live" ] \
+   && [ -d "$wts/agent-orphan" ]; then
+  ok "idle siblings and untracked leftover folders are listed as stale and left in place"
+else
+  no "stale sibling report wrong: $out"
+fi
+rm "$HOME/.claude/sessions/"{sibling,prefix,dead}.json
+
+# A removal git refuses (a locked worktree) leaves the herdr workspace open.
+mkfixture "$tmp/r7"
+wt7="$tmp/r7/.claude/worktrees/implement-2"
+git -C "$tmp/r7" worktree add -q "$wt7" caneff/merged-one 2>/dev/null
+git -C "$tmp/r7" worktree lock "$wt7"
+printf '{"result":{"workspaces":[{"workspace_id":"w5","worktree":{"checkout_path":"%s"}}]}}\n' "$wt7" > "$HERDR_WORKSPACES"
+: > "$HERDR_LOG"
+out=$(mc "$tmp/full" --repo "$tmp/r7" caneff/merged-one); rc=$?
+if [ -d "$wt7" ] && ! grep -q "workspace close" "$HERDR_LOG"; then
+  ok "a failed worktree removal does not close the herdr workspace"
+else
+  no "herdr workspace closed although the worktree survived (rc=$rc): $(cat "$HERDR_LOG") / $out"
+fi
+
+# A step after the removal fails (the branch ref is locked): the worktree is
+# gone, so its herdr workspace still closes.
+mkfixture "$tmp/r9"
+wt9="$tmp/r9/.claude/worktrees/implement-4"
+git -C "$tmp/r9" worktree add -q "$wt9" caneff/merged-one 2>/dev/null
+: > "$tmp/r9/.git/refs/heads/caneff/merged-one.lock"
+printf '{"result":{"workspaces":[{"workspace_id":"w6","worktree":{"checkout_path":"%s"}}]}}\n' "$wt9" > "$HERDR_WORKSPACES"
+: > "$HERDR_LOG"
+out=$(mc "$tmp/full" --repo "$tmp/r9" caneff/merged-one); rc=$?
+if [ $rc -ne 0 ] && [ ! -d "$wt9" ] && grep -qx "herdr workspace close w6" "$HERDR_LOG"; then
+  ok "a failure after the removal still closes the herdr workspace"
+else
+  no "herdr workspace left open after a later step failed (rc=$rc): $(cat "$HERDR_LOG") / $out"
+fi
+echo '{"result":{"workspaces":[]}}' > "$HERDR_WORKSPACES"
+
+# The branch under cleanup sits at main, clean and idle: on a dry run its own
+# worktree is still there, and it is not "stale" — it is the one being removed.
+mkfixture "$tmp/r8"
+wt8="$tmp/r8/.claude/worktrees/implement-3"
+git -C "$tmp/r8" worktree add -q "$wt8" caneff/ff-merged 2>/dev/null
+git -C "$tmp/r8" worktree add -q --detach "$tmp/r8/.claude/worktrees/agent-old" origin/main 2>/dev/null
+out=$(mc "$tmp/full" --repo "$tmp/r8" caneff/ff-merged --dry-run); rc=$?
+stale=$(stale_of "$out")
+if [ $rc -eq 0 ] && printf '%s' "$stale" | grep -q "agent-old" && ! printf '%s' "$stale" | grep -q "implement-3"; then
+  ok "the worktree under cleanup is not reported as a stale sibling"
+else
+  no "the worktree under cleanup was reported stale (rc=$rc): $out"
+fi
 
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
