@@ -199,24 +199,6 @@
       "installedAt": "2026-05-30T20:11:57.421Z",
       "updatedAt": "2026-09-03T18:40:20.872Z"
     },
-    "migrate-to-shoehorn": {
-      "source": "mattpocock/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "skillPath": "skills/misc/migrate-to-shoehorn/SKILL.md",
-      "skillFolderHash": "0aea91a3599a4bf7aeec17e3262d4cbcfcbeec23",
-      "installedAt": "2026-05-30T20:11:57.422Z",
-      "updatedAt": "2026-07-13T12:28:04.958Z"
-    },
-    "scaffold-exercises": {
-      "source": "mattpocock/skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/mattpocock/skills.git",
-      "skillPath": "skills/misc/scaffold-exercises/SKILL.md",
-      "skillFolderHash": "44a0ee332b9d67ebbd59389c7eb4e5aff1ce845c",
-      "installedAt": "2026-05-30T20:11:57.423Z",
-      "updatedAt": "2026-07-13T12:28:05.670Z"
-    },
     "setup-pre-commit": {
       "source": "mattpocock/skills",
       "sourceType": "github",
