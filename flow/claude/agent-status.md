@@ -29,9 +29,6 @@ gh issue view <n> --repo <owner/name> \
                                                         # PR, branch deleted
 ```
 
-To wait instead of poll by hand: `herdr agent wait <name> --until idle
---until blocked --until done --timeout <ms>`.
-
 ## The states
 
 - **`working`** — herdr sees the agent mid-turn.
@@ -62,7 +59,6 @@ with `"waitingFor":null`, herdr `"idle"`. A mid-turn session shows `"busy"`
 in the registry. When the pane closed, the process exited and its registry
 file was removed.
 
-herdr stays the source for state; the registry is the source for liveness.
 Use the registry's `status` only to cross-check herdr, or when the session
 runs outside herdr.
 
@@ -76,20 +72,22 @@ whether it is working.
 
 ## Idle has three causes
 
-`idle` proves the agent is not running a turn. That is all it proves. Idle
-has three causes:
+Here idle means not running a turn — whatever herdr reports. That is all it
+proves. Idle has three causes:
 
-- parked on a stop-and-ask — needs an answer. A permission dialog shows as
-  `blocked`. A question asked in plain prose ends the turn at the input box,
-  which herdr classifies as `idle` (`herdr agent explain` names the rule,
-  `live_prompt_box`), so `herdr agent read` is how you learn what it asked
-- finished — HEAD, `ls-remote` and the PR lookup say how far it got
-- dead — the process is gone entirely and herdr no longer finds the agent;
-  resume with `claude --resume` in the worktree
+- parked on a stop-and-ask — shows as `blocked` for a permission dialog, as
+  `idle` for a question asked in plain prose (the turn ends at the input box;
+  `herdr agent explain` names the rule, `live_prompt_box`). Needs an answer;
+  `herdr agent read` is how you learn what it asked
+- finished — shows as `idle` or `done`; HEAD, `ls-remote` and the PR lookup
+  say how far it got
+- dead — shows as `agent_not_found` and no live registry pid (see **dead**
+  above); resume with `claude --resume` in the worktree
 
 ## Poll; silence is not progress
 
 A parked agent is invisible until someone looks. Notifications get lost. Poll
-`herdr agent get` on a timer or arm `herdr agent wait`, and when an agent is
+`herdr agent get` on a timer or arm `herdr agent wait <name> --until idle
+--until blocked --until done --timeout <ms>`, and when an agent is
 `blocked`, or `idle` with no PR, read its screen and act on what it is
 waiting for.
