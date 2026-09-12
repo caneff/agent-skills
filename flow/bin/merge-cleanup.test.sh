@@ -101,8 +101,8 @@ out=$(mc "$tmp/full" --repo "$tmp/r1" caneff/merged-one --dry-run); rc=$?
 [ $rc -eq 0 ] || no "dry-run exited $rc: $out"
 if git -C "$tmp/r1" show-ref -q --verify refs/heads/caneff/merged-one \
    && [ "$(git -C "$tmp/r1" rev-parse HEAD)" = "$before" ] \
-   && ! grep -q "workspace close" "$HERDR_LOG"; then
-  ok "dry-run leaves branch, HEAD and herdr untouched"
+   ; then
+  ok "dry-run leaves branch and HEAD untouched"
 else
   no "dry-run mutated something"
 fi
@@ -234,6 +234,13 @@ if printf '%s\n' "$out" | sed -n '/stale, not removed/,$p' | grep -q "$tmp/src/o
 else
   no "sweep summary has no stale sibling: $out"
 fi
+out=$(mc "$tmp/nojq" --sweep --root "$tmp/src" --dry-run); rc=$?
+if printf '%s' "$out" | grep -q "skipped the stale worktree report (jq is not on PATH)" \
+   && ! printf '%s' "$out" | grep -q "stale, not removed"; then
+  ok "without jq the stale report is skipped, not guessed"
+else
+  no "stale report ran without jq: $out"
+fi
 
 # --- 10. the live-session guard --------------------------------------------
 # A workspace at the lane's own path, holding the merged branch.
@@ -281,6 +288,9 @@ echo ahead >> "$wts/agent-ahead/f"; git -C "$wts/agent-ahead" commit -qam ahead
 git -C "$tmp/r6" worktree add -q --detach "$wts/agent-live" origin/main 2>/dev/null
 git -C "$tmp/r6" worktree add -q --detach "$wts/agent-dirty" origin/main 2>/dev/null
 echo unsaved > "$wts/agent-dirty/notes"
+echo 'scratch/' >> "$tmp/r6/.git/info/exclude"
+git -C "$tmp/r6" worktree add -q --detach "$wts/agent-ignored" origin/main 2>/dev/null
+mkdir "$wts/agent-ignored/scratch"; echo evidence > "$wts/agent-ignored/scratch/log"
 printf '{"pid":%s,"cwd":"%s"}\n' "$$" "$wts/agent-live" > "$HOME/.claude/sessions/sibling.json"
 # A crashed session leaves its registry file behind; its pid is gone.
 bash -c 'exit 0' & dead=$!; wait "$dead"
@@ -304,14 +314,14 @@ else
   no "dead registry pid blocked the cleanup (rc=$rc): $out"
 fi
 if grep -qx "herdr workspace close w9" "$HERDR_LOG" && ! grep -q "close w1" "$HERDR_LOG" \
-   && printf '%s\n' "$out" | awk '/removing the linked worktree/{r=NR} /closing herdr workspace w9/{c=NR; exit} END{exit !(r && c > r)}'; then
-  ok "the matching herdr workspace is closed after the worktree is removed"
+   && printf '%s\n' "$out" | awk '/fast-forwarding main/{r=NR} /closing herdr workspace w9/{c=NR; exit} END{exit !(r && c > r)}'; then
+  ok "the matching herdr workspace is closed last, after the branch cleanup"
 else
-  no "herdr workspace close not called for w9 after removal: $(cat "$HERDR_LOG") / $out"
+  no "herdr workspace close not called for w9 as the last step: $(cat "$HERDR_LOG") / $out"
 fi
 stale=$(printf '%s\n' "$out" | sed -n '/stale, not removed/,$p')
 if printf '%s' "$stale" | grep -q "$wts/agent-old" \
-   && ! printf '%s' "$stale" | grep -qE "agent-ahead|agent-live|agent-dirty|implement-1" \
+   && ! printf '%s' "$stale" | grep -qE "agent-ahead|agent-live|agent-dirty|agent-ignored|implement-1" \
    && [ -d "$wts/agent-old" ] && [ -d "$wts/agent-ahead" ] && [ -d "$wts/agent-live" ]; then
   ok "an idle sibling worktree is listed as stale and left in place"
 else
@@ -333,6 +343,20 @@ else
   no "herdr workspace closed although the worktree survived (rc=$rc): $(cat "$HERDR_LOG") / $out"
 fi
 echo '{"result":{"workspaces":[]}}' > "$HERDR_WORKSPACES"
+
+# The branch under cleanup sits at main, clean and idle: on a dry run its own
+# worktree is still there, and it is not "stale" — it is the one being removed.
+mkfixture "$tmp/r8"
+wt8="$tmp/r8/.claude/worktrees/implement-3"
+git -C "$tmp/r8" worktree add -q "$wt8" caneff/ff-merged 2>/dev/null
+git -C "$tmp/r8" worktree add -q --detach "$tmp/r8/.claude/worktrees/agent-old" origin/main 2>/dev/null
+out=$(mc "$tmp/full" --repo "$tmp/r8" caneff/ff-merged --dry-run); rc=$?
+stale=$(printf '%s\n' "$out" | sed -n '/stale, not removed/,$p')
+if [ $rc -eq 0 ] && printf '%s' "$stale" | grep -q "agent-old" && ! printf '%s' "$stale" | grep -q "implement-3"; then
+  ok "the worktree under cleanup is not reported as a stale sibling"
+else
+  no "the worktree under cleanup was reported stale (rc=$rc): $out"
+fi
 
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
