@@ -78,8 +78,9 @@ status is that it is overrunning.
   dcolinmorgan/herdr-push` needs my own hands, since Claude Code's auto-mode
   classifier denies it as untrusted code integration.
 - **`herdr integration install claude` is never run** — it wires extra
-  lifecycle hooks into `~/.claude/settings.json` for state screen detection
-  already gives me for free. As of 2026-09-12 it is installed anyway
+  lifecycle hooks into `~/.claude/settings.json` for state that screen
+  detection already gives me for free. As of 2026-09-12 it is installed
+  anyway
   (`herdr integration status` shows `claude: current`, with a live
   `herdr-agent-state.sh` hook in `~/.claude/settings.json`); `herdr
   integration uninstall claude` needs my own hands too, since Claude Code's
