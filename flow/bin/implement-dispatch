@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# The dispatcher for the /implement lane: turn a ticket number into a worker
+# running in its own workspace inside herdr, report, and stop. It never waits
+# on the worker.
+#
+#   implement-dispatch [--repo <path>] [--model sonnet|opus] <issue number>
+#
+# Refuses, with nothing claimed or created, when the issue is not open, the
+# herdr server is not running, claude onboarding is incomplete, or the
+# workspace path or branch already exists. After the workspace exists, any
+# herdr failure exits non-zero with herdr's own error and leaves the workspace
+# in place for inspection. There is no bare-claude fallback.
+set -uo pipefail
+
+repo="" model=sonnet n=""
+die() { echo "implement-dispatch: $*" >&2; exit 1; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repo)    repo="${2:-}"; shift 2 ;;
+    --model)   model="${2:-}"; shift 2 ;;
+    -h|--help) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
+    -*)        die "unknown flag: $1" ;;
+    *)         [ -n "$n" ] && die "one ticket at a time"; n="$1"; shift ;;
+  esac
+done
+case "$n" in ''|*[!0-9]*) die "name one issue number" ;; esac
+case "$model" in sonnet|opus) ;; *) die "--model must be sonnet or opus, not '$model'" ;; esac
+command -v jq >/dev/null 2>&1 || die "jq is not on PATH"
+
+bin_dir="${BASH_SOURCE[0]%/*}"; [ "$bin_dir" = "${BASH_SOURCE[0]}" ] && bin_dir=.
+# shellcheck source=default-branch.sh
+. "$bin_dir/default-branch.sh" || die "cannot source $bin_dir/default-branch.sh"
+
+repo="${repo:-$PWD}"
+primary=$(git -C "$repo" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+[ -n "$primary" ] || die "not a git repo: $repo"
+branch="implement-$n"
+wt="$primary/.claude/worktrees/$branch"
+# herdr caps agent names at 32 characters: cut the repo part from the right.
+suffix="-$n"
+repo_name="${primary##*/}"
+agent="${repo_name:0:$((32 - ${#suffix}))}$suffix"
+
+# Refusals first, so a refused run leaves nothing claimed or created.
+state=$(cd "$primary" && gh issue view "$n" --json state -q .state 2>/dev/null)
+[ "$state" = OPEN ] || die "#$n is not an open issue"
+herdr status --json 2>/dev/null | jq -e '.server.running == true' >/dev/null \
+  || die "no herdr server is running (herdr status)"
+jq -e '.hasCompletedOnboarding == true' "$HOME/.claude.json" >/dev/null 2>&1 \
+  || die "claude onboarding is not complete in $HOME/.claude.json; a brief would land in its dialog"
+git -C "$primary" fetch -q origin || die "git fetch failed in $primary"
+if [ -e "$wt" ] || git -C "$primary" worktree list --porcelain | grep -qxF "worktree $wt"; then
+  die "$wt already exists"
+fi
+git -C "$primary" show-ref -q --verify "refs/heads/$branch" && die "branch $branch already exists"
+
+# Past here the ticket is claimed; a failure says how to release it.
+fail() { # fail <what> <herdr output>
+  echo "implement-dispatch: $1 failed: $2" >&2
+  echo "workspace left in place at $wt" >&2
+  echo "release the ticket: gh issue edit $n --remove-label in-progress --add-label ready-for-agent" >&2
+  exit 1
+}
+(cd "$primary" && gh issue edit "$n" --remove-label ready-for-agent --add-label in-progress --add-assignee @me >/dev/null) \
+  || die "could not claim #$n"
+
+default=$(default_of "$primary")
+base="origin/$default"
+git -C "$primary" show-ref -q --verify "refs/remotes/$base" || base="$default"
+out=$(git -C "$primary" worktree add -q --no-track -b "$branch" "$wt" "$base" 2>&1) \
+  || fail "git worktree add" "$out"
+
+# Pre-accept the trust dialog for exactly this path, so the worker starts at a prompt.
+tmp_json=$(mktemp "$HOME/.claude.json.XXXXXX") || fail "trust pre-seed" "mktemp"
+if jq --arg p "$wt" '.projects[$p].hasTrustDialogAccepted = true' "$HOME/.claude.json" > "$tmp_json"; then
+  mv "$tmp_json" "$HOME/.claude.json"
+else
+  rm -f "$tmp_json"; fail "trust pre-seed" "jq could not rewrite $HOME/.claude.json"
+fi
+
+# --cwd names the repo: without it herdr resolves the focused workspace's repo
+# and answers worktree_not_found.
+out=$(herdr worktree open --cwd "$primary" --path "$wt" --label "$branch" --no-focus --trust-repository 2>&1) \
+  || fail "herdr worktree open" "$out"
+pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
+if [ -z "$pane" ]; then
+  ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id // empty' 2>/dev/null)
+  [ -n "$ws" ] || fail "herdr worktree open" "no workspace in its response: $out"
+  panes=$(herdr pane list --workspace "$ws" 2>&1) || fail "herdr pane list" "$panes"
+  pane=$(printf '%s' "$panes" | jq -r '.result.panes[0].pane_id // empty' 2>/dev/null)
+  [ -n "$pane" ] || fail "herdr pane list" "no pane in workspace $ws: $panes"
+fi
+out=$(herdr agent start "$agent" --kind claude --pane "$pane" -- --model "$model" 2>&1) \
+  || fail "herdr agent start" "$out"
+out=$(herdr agent prompt "$agent" "/implement $n" --wait --until working --timeout 120000 2>&1) \
+  || fail "herdr agent prompt" "$out"
+
+echo "dispatched #$n ($model)"
+echo "worktree: $wt"
+echo "branch:   $branch"
+echo "agent:    $agent"
+echo "cleanup:  cd $primary && merge-cleanup $branch --repo $primary"
