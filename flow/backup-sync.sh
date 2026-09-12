@@ -48,7 +48,7 @@ if [ "$mode" = --commit ]; then
     # ahead of origin, which is what makes the next push refuse to
     # fast-forward. Push only from main: the commit above went onto whatever
     # HEAD is, so pushing main from another branch would push the wrong thing.
-    # ponytail: a rejected push only warns. Rebasing the user's main from a
+    # A rejected push only warns. Rebasing the user's main from a
     # SessionStart hook is worse than leaving the drift visible.
     if [ "$(git -C "$here" symbolic-ref --quiet --short HEAD)" = main ]; then
       timeout 20 git -C "$here" push -q origin main ||

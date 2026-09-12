@@ -39,7 +39,7 @@ scan() {
     elif is_skill "$d"; then
       echo "NOT_SYMLINK $n"
       if [ "$fix" = fix ]; then
-        # ponytail: refuse if a canonical body already exists — moving would clobber it
+        # Refuse if a canonical body already exists — moving would clobber it
         if [ -e "$AGENTS/$n" ]; then
           echo "  skip-fix $n: $AGENTS/$n already exists, resolve by hand" >&2
         else
