@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The tail Chris hand-ran after every squash merge: tear the Orca workspace
-# down, delete the branch local and remote, fast-forward the primary checkout.
+# The tail Chris hand-ran after every squash merge: tear the workspace down,
+# delete the branch local and remote, fast-forward the primary checkout.
 # Agents never merge — this runs after the merge has already happened, and it
 # refuses any branch the tracker does not report as merged unless --force.
 #
@@ -9,11 +9,10 @@
 #
 # --sweep walks every git repo one level under <dir> (default ~/src) and runs
 # the same six steps for every merged local branch it finds, then prints a
-# summary table and the number of Orca worktrees removed.
+# summary table.
 set -uo pipefail
 
 repo="" branch="" pr="" sweep=0 root="" dry=0 force=0
-orca_removed=0
 rows=()
 die() { echo "merge-cleanup: $*" >&2; exit 1; }
 skip() { echo "skipped $1 ($2)"; }
@@ -92,6 +91,69 @@ delete_local() { # delete_local <path> <branch>
   git -C "$path" branch -D "$b"
 }
 
+# The live-session guard. Two sources, either one counts: a sessions-registry
+# file whose cwd is in the workspace and whose pid still answers `kill -0` (a
+# dead pid is a crashed session and is ignored), or a herdr agent whose cwd is.
+in_tree() { [ "$1" = "$2" ] || case "$1" in "$2"/*) true ;; *) false ;; esac; }
+live_sessions() { # live_sessions <worktree> -> one line per live session; 1 if herdr cannot answer
+  local wt="$1" f pid cwd
+  for f in "$HOME"/.claude/sessions/*.json; do
+    [ -f "$f" ] || continue
+    pid=$(jq -r '.pid // empty' "$f" 2>/dev/null); cwd=$(jq -r '.cwd // empty' "$f" 2>/dev/null)
+    [ -n "$pid" ] && in_tree "$cwd" "$wt" && kill -0 "$pid" 2>/dev/null && echo "pid $pid"
+  done
+  command -v herdr >/dev/null 2>&1 || return 0
+  herdr agent list 2>/dev/null | jq -r --arg wt "$wt" '.result.agents[]
+    | select(.cwd == $wt or (.cwd // "" | startswith($wt + "/")))
+    | "herdr agent \(.name // .agent) (\(.pane_id))"' 2>/dev/null
+}
+guard_live() { # guard_live <worktree>
+  local wt="$1" live
+  command -v herdr >/dev/null 2>&1 || skip "the herdr agent check" "herdr is not on PATH"
+  # A herdr that cannot answer cannot clear the workspace either.
+  live=$(live_sessions "$wt") \
+    || { echo "merge-cleanup: refusing to remove $wt — herdr agent list failed" >&2; return 1; }
+  [ -z "$live" ] && return 0
+  echo "merge-cleanup: refusing to remove $wt — a live session is in it: ${live//$'\n'/, }" >&2
+  return 1
+}
+
+# Other workspaces under <repo>/.claude/worktrees with no live session and no
+# commits ahead of the default branch: listed for the owner, never removed.
+stale_worktrees() { # stale_worktrees <repo> -> one path per line
+  local primary default base e live
+  primary=$(primary_of "$1"); default=$(default_of "$1")
+  base="origin/$default"
+  git -C "$primary" show-ref -q --verify "refs/remotes/$base" || base="$default"
+  for e in "$primary"/.claude/worktrees/*/; do
+    e="${e%/}"
+    [ "$(git -C "$e" rev-parse --show-toplevel 2>/dev/null)" = "$e" ] || continue
+    [ "$(git -C "$e" rev-list --count "$base..HEAD" 2>/dev/null)" = 0 ] || continue
+    live=$(live_sessions "$e") && [ -z "$live" ] && echo "$e"
+  done
+}
+report_stale() { # report_stale <path>...
+  local p list=()
+  for p in "$@"; do mapfile -t -O "${#list[@]}" list < <(stale_worktrees "$p"); done
+  [ "${#list[@]}" = 0 ] && return 0
+  echo
+  echo "stale, not removed:"
+  printf '  %s\n' "${list[@]}"
+}
+
+# herdr keeps a workspace per checkout; once the checkout is gone, close the one
+# whose path matched so the rail does not fill with panes on deleted directories.
+close_herdr_workspace() { # close_herdr_workspace <worktree>
+  local wt="$1" id
+  command -v herdr >/dev/null 2>&1 || { skip "the herdr workspace close" "herdr is not on PATH"; return 0; }
+  id=$(herdr workspace list 2>/dev/null | jq -r --arg wt "$wt" \
+       '.result.workspaces[] | select(.worktree.checkout_path == $wt) | .workspace_id' 2>/dev/null)
+  [ -n "$id" ] || { skip "the herdr workspace close" "no herdr workspace at $wt"; return 0; }
+  while read -r id; do
+    run "closing herdr workspace $id" herdr workspace close "$id" || true
+  done <<< "$id"
+}
+
 cleanup_branch() { # cleanup_branch <path> <branch> -> steps 3-6
   local path="$1" b="$2" primary default wt
   primary=$(primary_of "$path"); default=$(default_of "$path")
@@ -102,26 +164,17 @@ cleanup_branch() { # cleanup_branch <path> <branch> -> steps 3-6
     echo "merge-cleanup: $b is not merged — nothing cleaned up (--force overrides)" >&2; return 1
   fi
 
-  # Step 3 — the Orca workspace, by full branch name: the selector takes the
-  # branch, and a folder name or UUID returns selector_not_found. It also has
-  # to go first, since git refuses to delete a branch a worktree holds.
-  if command -v orca-ide >/dev/null 2>&1; then
-    if run "removing the Orca workspace for $b" orca-ide worktree rm --worktree "$b" --force; then
-      [ "$dry" = 1 ] || orca_removed=$((orca_removed + 1))
-    fi
-  else
-    skip "the Orca workspace teardown" "orca-ide is not on PATH"
-  fi
-  run "pruning stale worktree entries" git -C "$path" worktree prune
-
-  # Orca may be absent, or its teardown may have failed. Either way a linked
-  # worktree still holding the branch makes `git branch -d` fail with "used by
-  # worktree", so remove it here by the path git itself reports.
+  # Step 3 — the workspace. A linked worktree holding the branch makes `git
+  # branch -d` fail with "used by worktree", so it goes first, by the path git
+  # itself reports — but never while a session is still alive in it.
   wt=$(git -C "$path" worktree list --porcelain 2>/dev/null \
        | awk -v b="refs/heads/$b" '/^worktree /{p=$2} $0=="branch "b{print p; exit}')
   if [ -n "$wt" ] && [ "$wt" != "$primary" ]; then
+    guard_live "$wt" || return 1
     run "removing the linked worktree at $wt" git -C "$path" worktree remove --force "$wt" || true
   fi
+  run "pruning stale worktree entries" git -C "$path" worktree prune
+  [ -n "$wt" ] && [ "$wt" != "$primary" ] && close_herdr_workspace "$wt"
 
   # Step 4 — the local branch. Git refuses to delete a branch a checkout holds,
   # so move the primary off it first.
@@ -182,7 +235,6 @@ if [ "$sweep" = 1 ]; then
     printf '  %s\n' "${rows[@]}" | column -t -s '|' 2>/dev/null \
       || printf '  %s\n' "${rows[@]}"
   fi
-  echo "  Orca worktrees removed: $orca_removed"
   exit "$rc"
 fi
 
@@ -196,4 +248,5 @@ if [ -z "$branch" ] && [ -n "$pr" ]; then
   echo "PR #$pr is $branch"
 fi
 [ -n "$branch" ] || die "name a branch, a PR number or URL, or pass --sweep"
-cleanup_branch "$repo" "$branch"
+cleanup_branch "$repo" "$branch" || exit 1
+report_stale "$repo"
