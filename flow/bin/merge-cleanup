@@ -13,7 +13,9 @@
 set -uo pipefail
 
 repo="" branch="" pr="" sweep=0 root="" dry=0 force=0
-rows=() cleaning=()
+rows=()
+removal_targets=()   # worktrees this run passed the guard for, dry runs included
+removed_worktrees=() # worktrees this run removed; their herdr workspaces close at exit
 die() { echo "merge-cleanup: $*" >&2; exit 1; }
 skip() { echo "skipped $1 ($2)"; }
 run() { # run <description> <cmd...>
@@ -91,7 +93,7 @@ delete_local() { # delete_local <path> <branch>
   git -C "$path" branch -D "$b"
 }
 
-# The live-session guard. Two sources, either one counts: a sessions-registry
+# The live-session guard. Two sources, either one counts: a sessions registry
 # file whose cwd is in the workspace and whose pid still answers `kill -0` (a
 # dead pid is a crashed session and is ignored), or a herdr agent whose cwd is.
 in_tree() { case "$1/" in "$2"/*) true ;; *) false ;; esac; }
@@ -123,7 +125,8 @@ guard_live() { # guard_live <worktree>
 # Other workspaces under <repo>/.claude/worktrees with no live session, no
 # commits ahead of the default branch and nothing on disk git does not hold
 # (ignored files included — .scratch evidence is work too): listed for the
-# owner, never removed. The ones this run is cleaning are not "other".
+# owner, never removed. A folder there that git no longer tracks as a worktree
+# is listed too, marked. This run's removal targets are not "other".
 stale_worktrees() { # stale_worktrees <repo> -> one path per line
   local primary default base e live c
   primary=$(primary_of "$1"); default=$(default_of "$1")
@@ -131,8 +134,11 @@ stale_worktrees() { # stale_worktrees <repo> -> one path per line
   git -C "$primary" show-ref -q --verify "refs/remotes/$base" || base="$default"
   for e in "$primary"/.claude/worktrees/*/; do
     e="${e%/}"
-    for c in "${cleaning[@]}"; do [ "$c" = "$e" ] && continue 2; done
-    [ "$(git -C "$e" rev-parse --show-toplevel 2>/dev/null)" = "$e" ] || continue
+    for c in "${removal_targets[@]}"; do [ "$c" = "$e" ] && continue 2; done
+    if [ "$(git -C "$e" rev-parse --show-toplevel 2>/dev/null)" != "$e" ]; then
+      live=$(live_sessions "$e") && [ -z "$live" ] && echo "$e (not a git worktree)"
+      continue
+    fi
     [ "$(git -C "$e" rev-list --count "$base..HEAD" 2>/dev/null)" = 0 ] || continue
     [ -z "$(git -C "$e" status --porcelain --ignored 2>/dev/null)" ] || continue
     live=$(live_sessions "$e") && [ -z "$live" ] && echo "$e"
@@ -151,7 +157,7 @@ report_stale() { # report_stale <path>...
 # herdr keeps its own workspace record per checkout. Once the checkout is gone,
 # close the herdr workspace whose path matched, so herdr does not keep panes
 # open on deleted directories. It closes every pane there, the one this runs in
-# included, so it is the last step.
+# included, so close_removed_workspaces runs once, after everything else.
 close_herdr_workspace() { # close_herdr_workspace <worktree>
   local wt="$1" ids id
   command -v herdr >/dev/null 2>&1 || { skip "the herdr workspace close" "herdr is not on PATH"; return 0; }
@@ -162,9 +168,13 @@ close_herdr_workspace() { # close_herdr_workspace <worktree>
     run "closing herdr workspace $id" herdr workspace close "$id" || true
   done <<< "$ids"
 }
+close_removed_workspaces() {
+  local wt
+  for wt in "${removed_worktrees[@]}"; do close_herdr_workspace "$wt"; done
+}
 
 cleanup_branch() { # cleanup_branch <path> <branch> -> steps 3-6
-  local path="$1" b="$2" primary default wt removed=0
+  local path="$1" b="$2" primary default wt
   primary=$(primary_of "$path"); default=$(default_of "$path")
   [ "$b" = "$default" ] && { echo "merge-cleanup: refusing to delete the default branch $b" >&2; return 1; }
   if [ "$force" = 1 ]; then
@@ -180,8 +190,9 @@ cleanup_branch() { # cleanup_branch <path> <branch> -> steps 3-6
        | awk -v b="refs/heads/$b" '/^worktree /{p=$2} $0=="branch "b{print p; exit}')
   if [ -n "$wt" ] && [ "$wt" != "$primary" ]; then
     guard_live "$wt" || return 1
-    cleaning+=("$wt")
-    run "removing the linked worktree at $wt" git -C "$path" worktree remove --force "$wt" && removed=1
+    removal_targets+=("$wt")
+    run "removing the linked worktree at $wt" git -C "$path" worktree remove --force "$wt" \
+      && removed_worktrees+=("$wt")
   fi
   run "pruning stale worktree entries" git -C "$path" worktree prune
 
@@ -215,7 +226,6 @@ cleanup_branch() { # cleanup_branch <path> <branch> -> steps 3-6
   else
     skip "the fast-forward" "$primary is not on $default"
   fi
-  [ "$removed" = 0 ] || close_herdr_workspace "$wt"
 }
 
 if [ "$sweep" = 1 ]; then
@@ -247,6 +257,7 @@ if [ "$sweep" = 1 ]; then
       || printf '  %s\n' "${rows[@]}"
   fi
   report_stale "${repos[@]}"
+  close_removed_workspaces
   exit "$rc"
 fi
 
@@ -260,5 +271,8 @@ if [ -z "$branch" ] && [ -n "$pr" ]; then
   echo "PR #$pr is $branch"
 fi
 [ -n "$branch" ] || die "name a branch, a PR number or URL, or pass --sweep"
-cleanup_branch "$repo" "$branch" || exit 1
-report_stale "$repo"
+rc=0
+cleanup_branch "$repo" "$branch" || rc=1
+[ "$rc" = 1 ] || report_stale "$repo"
+close_removed_workspaces
+exit "$rc"
