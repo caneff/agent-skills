@@ -42,15 +42,18 @@ the window Chris watches and clicks in?
    Code today and Codex CLI next. Running its own agent *in addition* is fine.
 4. **Cannot show 4-5 repos in one view**, or switch between running agents
    without one window per repo.
-5. **Removes a workspace holding a live session** without refusing or
-   confirming.
-6. **Not scriptable.** Every action `/implement` needs must be reachable from
+5. **Not scriptable.** Every action `/implement` needs must be reachable from
    a shell, so dispatch stays unattended.
-7. **No rail.** Cannot show in-flight work across repos with a live status.
-8. **Cannot open a session to answer a prompt** from that rail.
+6. **No rail.** Cannot show in-flight work across repos with a live status.
+7. **Cannot open a session to answer a prompt** from that rail.
 
 ## Scored
 
+- Removes a workspace holding a live session without refusing or confirming.
+  *Demoted from hard reject on 2026-09-12 (Chris, after the herdr trial): the
+  lane never calls the front end's remove; `merge-cleanup` gains a check that
+  refuses to remove a worktree with a live session in `~/.claude/sessions/`,
+  which holds under any front end.*
 - Many concurrent sessions in one repo, grouped so several workers on one
   spec read as one unit, and any one of them can be opened.
 - Workspace per ticket made at launch, not part-way through.
