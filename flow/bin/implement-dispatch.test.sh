@@ -67,7 +67,7 @@ mkfixture() { # mkfixture <dir> [default branch]
   git -C "$d" push -q -u origin "$b"
   git -C "$d" reset -q --hard HEAD~1
 }
-reset_home() { # onboarding true, one pre-existing project entry
+reset_home() { # reset_home [onboarding] -> fresh ~/.claude.json with one other project, empty call log
   printf '{"hasCompletedOnboarding":%s,"projects":{"/elsewhere":{"hasTrustDialogAccepted":false}}}\n' \
     "${1:-true}" > "$HOME/.claude.json"
   : > "$CALL_LOG"
@@ -105,6 +105,9 @@ refused "refuses a missing issue" "$rc" "$out" "$repo" 395 "not an open issue"
 reset_home
 out=$(GH_LABELS=in-progress dispatch --repo "$repo" 395); rc=$?
 refused "refuses an issue not labelled ready-for-agent" "$rc" "$out" "$repo" 395 "ready-for-agent"
+reset_home
+out=$(GH_LABELS=ready-for-agent,in-progress dispatch --repo "$repo" 395); rc=$?
+refused "refuses a ready-for-agent issue that is also held" "$rc" "$out" "$repo" 395 "in-progress"
 reset_home
 out=$(HERDR_AGENT_TAKEN=1 dispatch --repo "$repo" 395); rc=$?
 refused "refuses when the herdr agent name is already taken" "$rc" "$out" "$repo" 395 "sudokumaker-custom-constrain-395"
@@ -200,6 +203,13 @@ if [ "$rc" -eq 0 ] && [ "$(git -C "$mfix/.claude/worktrees/implement-401" rev-pa
 else
   no "master-only base wrong (rc=$rc): $out"
 fi
+
+# An origin with neither main nor master and no HEAD: no base, so nothing is claimed.
+reset_home
+tfix="$tmp/trunkonly"
+mkfixture "$tfix" trunk
+out=$(dispatch --repo "$tfix" 402); rc=$?
+refused "refuses when the resolved base is not on origin" "$rc" "$out" "$tfix" 402 "origin/main"
 
 # --- 5. a stalled prompt fails and leaves the workspace ---------------------
 reset_home

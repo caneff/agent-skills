@@ -48,9 +48,13 @@ agent="${repo_name:0:$((32 - ${#suffix}))}$suffix"
 # Refusals first, so a refused run leaves nothing claimed or created.
 issue=$(cd "$primary" && gh issue view "$n" --json state,labels -q '.state + " " + ([.labels[].name] | join(","))' 2>/dev/null)
 [ "${issue%% *}" = OPEN ] || die "#$n is not an open issue"
-# Any other label is a judgement call (needs-info, ready-for-human) or someone
-# else's claim (in-progress): the owner relabels first.
-case ",${issue#* }," in *,ready-for-agent,*) ;; *) die "#$n is not labelled ready-for-agent" ;; esac
+# needs-info and ready-for-human are judgement calls, in-progress is someone
+# else's claim: the owner relabels first.
+labels=",${issue#* },"
+case "$labels" in *,ready-for-agent,*) ;; *) die "#$n is not labelled ready-for-agent" ;; esac
+for held in in-progress needs-info ready-for-human; do
+  case "$labels" in *,"$held",*) die "#$n is labelled $held" ;; esac
+done
 herdr status --json 2>/dev/null | jq -e '.server.running == true' >/dev/null \
   || die "no herdr server is running (herdr status)"
 jq -e '.hasCompletedOnboarding == true' "$HOME/.claude.json" >/dev/null 2>&1 \
@@ -62,6 +66,8 @@ if [ -e "$wt" ] || git -C "$primary" worktree list --porcelain | grep -qxF "work
   die "$wt already exists"
 fi
 git -C "$primary" show-ref -q --verify "refs/heads/$branch" && die "branch $branch already exists"
+default=$(default_of "$primary")
+git -C "$primary" show-ref -q --verify "refs/remotes/origin/$default" || die "no origin/$default to branch from"
 
 # Past here the ticket is claimed; a failure says how to release it.
 fail() { # fail <what> <herdr output>
@@ -73,7 +79,6 @@ fail() { # fail <what> <herdr output>
 (cd "$primary" && gh issue edit "$n" --remove-label ready-for-agent --add-label in-progress --add-assignee @me >/dev/null) \
   || die "could not claim #$n"
 
-default=$(default_of "$primary")
 out=$(git -C "$primary" worktree add -q --no-track -b "$branch" "$wt" "origin/$default" 2>&1) \
   || fail "git worktree add" "$out"
 
