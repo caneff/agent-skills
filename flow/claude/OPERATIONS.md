@@ -67,6 +67,24 @@ status is that it is overrunning.
   `waiter_exists`. Use `orca-wait --terminal <handle> --for exit|tui-idle
   [--timeout-ms N]` (script in `~/.local/bin`; exit 0 = met, 2 = timeout).
 
+## Herdr configuration
+
+- Worktree path is pinned to the lane's own convention:
+  `[worktrees]` `directory = ".claude/worktrees"` in
+  `~/.config/herdr/config.toml`, so a worktree opened through herdr lands at
+  `<repo>/.claude/worktrees/<branch-slug>`.
+- `herdr-reviewr` is linked; the `herdr-push` plugin (feeds `herdr-remote`'s
+  mobile approval relay) is not installed yet — `herdr plugin install
+  dcolinmorgan/herdr-push` needs my own hands, since Claude Code's auto-mode
+  classifier denies it as untrusted code integration.
+- **`herdr integration install claude` is never run** — it wires extra
+  lifecycle hooks into `~/.claude/settings.json` for state that screen
+  detection already gives me for free. As of 2026-09-12 it is installed
+  anyway (`herdr integration status` shows `claude: current`, with a live
+  `herdr-agent-state.sh` hook in `~/.claude/settings.json`); `herdr
+  integration uninstall claude` needs my own hands too, since Claude Code's
+  auto-mode classifier denies it as self-modification.
+
 ## Committing, reviewing, merging
 
 - Before reporting a commit sha, `git status --porcelain` is empty — the
