@@ -67,7 +67,6 @@ repos).
 
 ## Personas
 
-Caveman and Humanizer are plugins/hooks, not this file. Caveman = *talk*
-style (exempts code/commits/PRs); Humanizer = *deliverable prose* style. They
-never overlap — facts/reasoning gets caveman, voice-judged text gets normal
-prose. Written deliverables: match length to the task, no filler.
+Humanizer is a plugin/hook, not this file: it governs *deliverable prose*
+only. Facts and reasoning stay in the session's output style. Written
+deliverables: match length to the task, no filler.
