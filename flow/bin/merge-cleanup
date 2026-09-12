@@ -55,15 +55,9 @@ done
 primary_of() { # primary_of <path> -> the repo's primary (non-linked) worktree
   git -C "$1" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p'
 }
-default_of() { # default_of <path> -> main, master, whatever origin points at
-  local d
-  d=$(git -C "$1" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)
-  [ -n "$d" ] && { echo "${d#origin/}"; return; }
-  for d in main master; do
-    git -C "$1" show-ref -q --verify "refs/remotes/origin/$d" && { echo "$d"; return; }
-  done
-  echo main
-}
+bin_dir="${BASH_SOURCE[0]%/*}"; [ "$bin_dir" = "${BASH_SOURCE[0]}" ] && bin_dir=.
+# shellcheck source=default-branch.sh
+. "$bin_dir/default-branch.sh" || die "cannot source $bin_dir/default-branch.sh"
 slug_of() { # slug_of <path> -> owner/name, for the gh calls
   local url; url=$(git -C "$1" remote get-url origin 2>/dev/null) || return 1
   url="${url%.git}"; url="${url#*github.com/}"; url="${url#*github.com:}"
