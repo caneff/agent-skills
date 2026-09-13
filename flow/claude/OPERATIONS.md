@@ -47,9 +47,9 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
 - The dispatching session is the worker's **controller**. The worker sends
   every question and its finish notice ("PR up", or the landed sha on the
   light tier) to the controller with `SendMessage`, never to me.
-- What the controller rules on and escalates to me: its `CONTEXT.md` entry.
-  Why: the four escalations are the outcomes a controller cannot undo on my
-  behalf.
+- What the controller rules on and escalates to me: its entry in
+  `~/.agents/skills/CONTEXT.md`. Why: each escalation listed there is an
+  outcome a controller cannot undo on my behalf.
 - **Relay the delta, not the report.** When a worker or subagent finishes,
   say only what it added; if it confirms what I already said, that is one
   sentence. Never answer a question and delegate the same question. An idle
@@ -97,7 +97,8 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   commits stack instead of amending. Why: the report describes the commit,
   not the working tree, and an amend erases a sha already handed over.
 - The review loop, the before-the-PR checks (CLEAN, `Closes` verified) and
-  the merge line: `implement/SKILL.md` § Heavy tier. Why: one home, so the
+  the merge line: `implement/SKILL.md` § Heavy tier; the light tier's landing
+  and its `Closes` check: § Light tier. Why: one home, so the
   lane and this file cannot drift apart.
 - Pair the merge line with `merge-cleanup --repo <primary checkout> <branch>`
   (`--help` for PR/URL and `--sweep`). It removes the workspace, deletes the

@@ -55,7 +55,7 @@ owner's word turns it on.
 ## Control
 
 The controller is the session named in the brief; what it rules on and what
-it escalates is its `CONTEXT.md` entry. Send it every question and your
+it escalates is its entry in `~/.agents/skills/CONTEXT.md`. Send it every question and your
 finish notice with `SendMessage` to that name — never to Chris. An ordinary
 call you make yourself, under an assumption you state, and list under
 Decisions made.
@@ -74,7 +74,9 @@ Decisions made.
    The rebase first because a push from a stale base is rejected as a
    non-fast-forward, and a force push would erase someone else's commit.
 
-3. Send the controller the landed sha and the cleanup line:
+3. Confirm `gh issue view <n> --repo <owner/name>` shows the issue closed —
+   a rebase can rewrite the commit so the trailer never fires.
+4. Send the controller the landed sha and the cleanup line:
    `! cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>`.
 
 No PR and no reviewer; Chris reads the log after.
@@ -118,7 +120,7 @@ body's last reviewed sha says where review stopped.
 3. **`bash ~/.agents/skills/implement/pre-report-gate.sh <sha>`** passes on
    the sha you report — a "done" report has described work that was dirty in
    the tree or not on the branch.
-4. **`gh pr view <n> --repo <owner/name> --json isDraft,mergeStateStatus`**
+4. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus`**
    prints `false` and `CLEAN` before the merge line goes out — a merge line
    handed over on a draft or a conflicted PR fails in Chris's shell. `UNKNOWN`
    means GitHub is still computing; poll a few seconds.

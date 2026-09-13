@@ -26,7 +26,7 @@ that nothing imports or runs.
 - **Code lane**: TDD, reviews and a PR I merge, run by `implement/SKILL.md`
   in a workspace. Why: code is cheaper to review than to revert.
 - **A dispatched ticket** (`implement-dispatch <n>` from `main`) runs at its
-  **tier** (`CONTEXT.md`): heavy is the code lane; light, for a
+  **tier** (`~/.agents/skills/CONTEXT.md`): heavy is the code lane; light, for a
   `documentation` label, lands like auto-ship but from its own workspace.
   Why: a doc-only diff is cheaper to revert than to review, and the workspace
   keeps the primary checkout from being built on.
@@ -80,6 +80,6 @@ private repos.
 ## Personas
 
 Humanizer is a plugin/hook, not this file: it governs *deliverable prose*
-only. Facts and reasoning stay in the session's output style. Written
-deliverables: match length to the task, no filler. Why: a humanized fact is
-harder to check than a plain one.
+only. Facts and reasoning stay in the session's output style — why: a
+humanized fact is harder to check than a plain one. Written deliverables:
+match length to the task, no filler.
