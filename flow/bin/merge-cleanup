@@ -144,12 +144,12 @@ registry_pids() { # registry_pids <worktree> -> "pid <pid>" per live registry se
     [ -n "$pid" ] && in_tree "$cwd" "$wt" && kill -0 "$pid" 2>/dev/null && echo "pid $pid"
   done
 }
-herdr_agents_in() { # herdr_agents_in <worktree> -> "<name>\t<status>\t<pane_id>" per herdr agent there; 1 if herdr cannot answer
+herdr_agents_in() { # herdr_agents_in <worktree> -> "<name>\t<status>\t<pane_id>" per herdr agent there; empty when herdr is absent, 1 when the `herdr agent list` call itself fails
   local wt="$1"
   command -v herdr >/dev/null 2>&1 || return 0
   herdr agent list 2>/dev/null | jq -r --arg wt "$wt" '.result.agents[]
     | select(.cwd == $wt or (.cwd // "" | startswith($wt + "/")))
-    | [(.name // .agent), (.agent_status // ""), (.pane_id // "")] | @tsv'
+    | [(.name // .agent), (.agent_status // ""), (.pane_id // "")] | @tsv' 2>/dev/null
 }
 live_sessions() { # live_sessions <worktree> -> one line per live session, read-only; 1 if herdr cannot answer
   local wt="$1" agents name status pane
@@ -161,7 +161,7 @@ live_sessions() { # live_sessions <worktree> -> one line per live session, read-
   done <<< "$agents"
 }
 guard_live() { # guard_live <worktree>
-  local wt="$1" reg agents name status pane
+  local wt="$1" reg agents name status pane blockers=() idles=()
   command -v jq >/dev/null 2>&1 \
     || { echo "merge-cleanup: refusing to remove $wt — jq is not on PATH, so the sessions registry cannot be read" >&2; return 1; }
   reg=$(registry_pids "$wt")
@@ -174,14 +174,26 @@ guard_live() { # guard_live <worktree>
   agents=$(herdr_agents_in "$wt") \
     || { echo "merge-cleanup: refusing to remove $wt — herdr agent list failed" >&2; return 1; }
   [ -z "$agents" ] && return 0
+  # Classify every agent before stopping any: a working or blocked sibling
+  # must refuse the whole worktree before an idle one is touched, so the
+  # outcome never depends on herdr agent list's order.
   while IFS=$'\t' read -r name status pane; do
     [ -n "$name" ] || continue
     case "$status" in
-      idle|done) run "stopping idle herdr agent $name" herdr agent stop "$name" ;;
-      *) echo "merge-cleanup: refusing to remove $wt — a live session is in it: herdr agent $name ($pane)" >&2
-         return 1 ;;
+      idle|done) idles+=("$name") ;;
+      *)         blockers+=("herdr agent $name ($pane)") ;;
     esac
   done <<< "$agents"
+  if [ "${#blockers[@]}" -gt 0 ]; then
+    local joined
+    joined=$(IFS=', '; echo "${blockers[*]}")
+    echo "merge-cleanup: refusing to remove $wt — a live session is in it: $joined" >&2
+    return 1
+  fi
+  for name in "${idles[@]}"; do
+    run "stopping idle herdr agent $name" herdr agent stop "$name" \
+      || { echo "merge-cleanup: refusing to remove $wt — failed to stop herdr agent $name" >&2; return 1; }
+  done
 }
 
 # Other workspaces under <repo>/.claude/worktrees with no live session, no
