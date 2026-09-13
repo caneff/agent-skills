@@ -434,7 +434,11 @@ fn two_concurrent_dispatches_both_leave_their_trust_keys() {
     f.reset_home(true);
     let repo_a = f.mkfixture("race-a", "main");
     let repo_b = f.mkfixture("race-b", "main");
-    let scenario = default_scenario();
+    // Holds each dispatch's seed-trust critical section open long enough that,
+    // without the flock, both would read ~/.claude.json before either writes
+    // it back — the only way this test can actually witness the lock instead
+    // of passing by luck on how fast two processes happen to interleave.
+    let scenario = with(&default_scenario(), &[("LANE_SEED_TRUST_DELAY_MS", "200")]);
     let (out_a, out_b) = std::thread::scope(|s| {
         let ta = s.spawn(|| f.dispatch(&["--repo", repo_a.to_str().unwrap(), "501"], &scenario));
         let tb = s.spawn(|| f.dispatch(&["--repo", repo_b.to_str().unwrap(), "502"], &scenario));
@@ -450,5 +454,34 @@ fn two_concurrent_dispatches_both_leave_their_trust_keys() {
     assert_eq!(v["projects"][wt_a.to_str().unwrap()]["hasTrustDialogAccepted"], true, "{raw}");
     assert_eq!(v["projects"][wt_b.to_str().unwrap()]["hasTrustDialogAccepted"], true, "{raw}");
     assert!(v["projects"]["/elsewhere"].is_object(), "{raw}");
+}
+
+#[test]
+fn the_trust_pre_seed_keeps_claude_jsons_original_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let claude_json = f.home().join(".claude.json");
+    std::fs::set_permissions(&claude_json, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let mode = std::fs::metadata(&claude_json).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "the rewrite widened ~/.claude.json's permissions");
+}
+
+#[test]
+fn an_empty_controller_flag_falls_back_to_the_session_registry() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--controller", "", "409"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(
+        f.calls().lines().any(|l| l
+            == "herdr agent prompt sudokumaker-custom-constrain-409 /implement 409 --tier heavy --controller \"skills-ctl\" --wait --until working --timeout 120000"),
+        "an empty --controller should fall back to the session name, not dispatch with an empty one: {}",
+        f.calls()
+    );
 }
 

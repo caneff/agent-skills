@@ -2,19 +2,20 @@
 //! repo's origin. Shells out to `git`, matching bash exactly rather than
 //! parsing `.git` on disk, so behavior tracks the installed git.
 
+use crate::runner::{quiet_ok, quiet_stdout};
 use std::path::Path;
-use std::process::Command;
 
 /// `default_of <path>` -> main, master, whatever origin points at.
 pub fn default_branch(repo: &Path) -> String {
-    if let Some(d) = run_git(repo, &["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"]) {
+    let repo_s = repo.to_string_lossy();
+    if let Some(d) = quiet_stdout("git", &["-C", &repo_s, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"]) {
         let d = d.trim();
         if !d.is_empty() {
             return d.strip_prefix("origin/").unwrap_or(d).to_string();
         }
     }
     for d in ["main", "master"] {
-        if git_ok(repo, &["show-ref", "-q", "--verify", &format!("refs/remotes/origin/{d}")]) {
+        if quiet_ok("git", &["-C", &repo_s, "show-ref", "-q", "--verify", &format!("refs/remotes/origin/{d}")]) {
             return d.to_string();
         }
     }
@@ -24,7 +25,8 @@ pub fn default_branch(repo: &Path) -> String {
 /// `slug_of <path>` -> owner/name, for the gh calls. `None` when there is no
 /// origin remote.
 pub fn origin_slug(repo: &Path) -> Option<String> {
-    let url = run_git(repo, &["remote", "get-url", "origin"])?;
+    let repo_s = repo.to_string_lossy();
+    let url = quiet_stdout("git", &["-C", &repo_s, "remote", "get-url", "origin"])?;
     let url = url.trim();
     if url.is_empty() {
         return None;
@@ -38,24 +40,6 @@ pub fn origin_slug(repo: &Path) -> Option<String> {
         },
     };
     Some(url.to_string())
-}
-
-fn run_git(repo: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git").arg("-C").arg(repo).args(args).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    String::from_utf8(out.stdout).ok()
-}
-
-fn git_ok(repo: &Path, args: &[&str]) -> bool {
-    Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(args)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
 }
 
 #[cfg(test)]

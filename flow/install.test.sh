@@ -114,5 +114,26 @@ else
   echo "FAIL an empty claude/agents dir aborted the install"; fails=1
 fi
 
+# A failing lane-install.sh (a missing cargo, a compile error) runs last and
+# must not half-install everything else — it was never a gate on the rest of
+# install.sh before #748, and still is not.
+broken="$tmp/broken"
+mkdir -p "$broken/tests"
+cp -r "$root/flow" "$broken/flow"
+rm -rf "$broken/flow/lane/target"
+cp "$root/tests/all.sh" "$broken/tests/all.sh"
+git -C "$broken" init -q
+printf '#!/usr/bin/env bash\nexit 0\n' > "$broken/flow/backup-sync.sh"
+printf '#!/usr/bin/env bash\necho "lane-install: boom" >&2\nexit 1\n' > "$broken/flow/lane-install.sh"
+out=$(HOME="$tmp/broken-home" bash "$broken/flow/install.sh" 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "boom" \
+   && [ -L "$tmp/broken-home/.claude/hooks/refresh-landed.sh" ] \
+   && [ -L "$tmp/broken-home/.local/bin/merge-cleanup" ] \
+   && [ -L "$tmp/broken-home/.local/bin/job-run" ]; then
+  echo "PASS a failing lane-install.sh reports loudly without half-installing the rest"
+else
+  echo "FAIL a failing lane-install.sh broke or silenced the rest of the install (rc=$rc): $out"; fails=1
+fi
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"

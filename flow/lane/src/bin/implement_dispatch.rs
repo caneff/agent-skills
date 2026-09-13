@@ -18,11 +18,13 @@
 //! exists, any herdr failure exits non-zero with herdr's own error and leaves the
 //! workspace in place for inspection. There is no bare-claude fallback.
 
-use lane::{git_origin, proc_info, runner, sessions};
+use lane::runner::{self, quiet_ok, quiet_stdout, CommandOutput};
+use lane::{git_origin, proc_info, sessions};
 use serde_json::Value;
 use std::env;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::ExitCode;
 
 const HELP: &str = r#"What the dispatcher runs for the /implement lane: turn a ticket number into a
 worker running in its own workspace inside herdr, report, and stop. It never
@@ -51,8 +53,12 @@ fn die(msg: impl AsRef<str>) -> ExitCode {
 }
 
 fn command_on_path(name: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
     let Some(path) = env::var_os("PATH") else { return false };
-    env::split_paths(&path).any(|dir| dir.join(name).is_file())
+    env::split_paths(&path).any(|dir| {
+        let p = dir.join(name);
+        std::fs::metadata(&p).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    })
 }
 
 struct Args {
@@ -104,73 +110,51 @@ fn parse_args(argv: Vec<String>) -> Parsed {
 /// Handles the hidden `--seed-trust <claude.json path> <workspace path>`
 /// form: the critical section run under `flock`, standing in for the bash
 /// subshell `{ ... } 9>"$lock"`. Sets `.projects[$wt].hasTrustDialogAccepted`
-/// to true, preserving everything else in the file.
+/// to true, preserving everything else in the file and its permissions —
+/// bash's `mktemp` starts a replacement file at 0600, so the replacement
+/// here matches the original file's mode instead of leaving `fs::write`'s
+/// default, which would otherwise widen a 0600 `~/.claude.json` to 0644.
+/// `LANE_SEED_TRUST_DELAY_MS`, set only by the concurrency test, holds the
+/// critical section open long enough to prove two overlapping dispatches
+/// actually serialize on the lock rather than through luck.
 fn seed_trust(claude_json: &str, wt: &str) -> ExitCode {
-    let raw = match std::fs::read_to_string(claude_json) {
-        Ok(r) => r,
-        Err(_) => {
-            println!("jq could not rewrite {claude_json}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let mut value: Value = match serde_json::from_str(&raw) {
-        Ok(v) => v,
-        Err(_) => {
-            println!("jq could not rewrite {claude_json}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let Some(obj) = value.as_object_mut() else {
+    let fail = || {
         println!("jq could not rewrite {claude_json}");
-        return ExitCode::FAILURE;
+        ExitCode::FAILURE
     };
+    let Ok(raw) = std::fs::read_to_string(claude_json) else { return fail() };
+    let mode = std::fs::metadata(claude_json).ok().map(|m| m.permissions().mode());
+    let Ok(mut value) = serde_json::from_str::<Value>(&raw) else { return fail() };
+    if let Ok(ms) = env::var("LANE_SEED_TRUST_DELAY_MS") {
+        if let Ok(ms) = ms.parse() {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+        }
+    }
+    let Some(obj) = value.as_object_mut() else { return fail() };
     let projects = obj.entry("projects").or_insert_with(|| Value::Object(Default::default()));
-    let Some(projects) = projects.as_object_mut() else {
-        println!("jq could not rewrite {claude_json}");
-        return ExitCode::FAILURE;
-    };
+    let Some(projects) = projects.as_object_mut() else { return fail() };
     let entry = projects.entry(wt.to_string()).or_insert_with(|| Value::Object(Default::default()));
-    let Some(entry) = entry.as_object_mut() else {
-        println!("jq could not rewrite {claude_json}");
-        return ExitCode::FAILURE;
-    };
+    let Some(entry) = entry.as_object_mut() else { return fail() };
     entry.insert("hasTrustDialogAccepted".to_string(), Value::Bool(true));
 
-    let tmp = format!("{claude_json}.tmp-{}-{}", std::process::id(), std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0));
-    let write_ok = std::fs::write(&tmp, serde_json::to_string_pretty(&value).unwrap_or_default()).is_ok();
-    if !write_ok || std::fs::rename(&tmp, claude_json).is_err() {
+    let Ok(rendered) = serde_json::to_string_pretty(&value) else { return fail() };
+    let tmp = format!(
+        "{claude_json}.tmp-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+    );
+    if std::fs::write(&tmp, rendered).is_err() {
         let _ = std::fs::remove_file(&tmp);
-        println!("jq could not rewrite {claude_json}");
-        return ExitCode::FAILURE;
+        return fail();
+    }
+    if let Some(mode) = mode {
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode));
+    }
+    if std::fs::rename(&tmp, claude_json).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return fail();
     }
     ExitCode::SUCCESS
-}
-
-fn quiet_stdout(program: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(program).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
-    // Bash's `$(...)` strips trailing newlines; match that.
-    while s.ends_with('\n') {
-        s.pop();
-    }
-    Some(s)
-}
-
-fn quiet_ok(program: &str, args: &[&str]) -> bool {
-    Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
 }
 
 fn primary_worktree(repo: &str) -> Option<String> {
@@ -185,57 +169,99 @@ fn valid_slug(s: &str) -> bool {
     !a.is_empty() && !b.is_empty() && !a.contains(':') && !b.contains(':') && !b.contains('/')
 }
 
-fn fail(what: &str, out: &str, n: &str, slug: &str, wt: &Path) -> ExitCode {
-    eprintln!("implement-dispatch: {what} failed: {out}");
-    if wt.exists() {
-        eprintln!("workspace left in place at {}", wt.display());
+/// The claimed ticket: what a failure past the claim needs to say how to
+/// release it, and where the workspace would be if it exists.
+struct Claim<'a> {
+    n: &'a str,
+    slug: &'a str,
+    wt: &'a Path,
+}
+
+impl Claim<'_> {
+    fn fail(&self, what: &str, out: &str) -> ExitCode {
+        eprintln!("implement-dispatch: {what} failed: {out}");
+        if self.wt.exists() {
+            eprintln!("workspace left in place at {}", self.wt.display());
+        }
+        eprintln!(
+            "release the ticket: gh issue edit {} --repo {} --remove-label in-progress --add-label ready-for-agent",
+            self.n, self.slug
+        );
+        ExitCode::FAILURE
     }
-    eprintln!(
-        "release the ticket: gh issue edit {n} --repo {slug} --remove-label in-progress --add-label ready-for-agent"
-    );
-    ExitCode::FAILURE
+
+    /// Runs one post-claim step: on success, the combined output; on
+    /// failure, prints via `fail` and returns it as the process exit code.
+    /// A `flock` timeout exits non-zero with nothing on either stream —
+    /// bash's own subshell said so explicitly, so an empty failure here
+    /// gets the same wording instead of a silent trailing colon.
+    fn step(&self, what: &str, res: std::io::Result<CommandOutput>, empty_timeout: Option<&str>) -> Result<String, ExitCode> {
+        match res {
+            Ok(o) if o.success => Ok(o.combined),
+            Ok(o) if o.combined.is_empty() => {
+                Err(self.fail(what, empty_timeout.unwrap_or("(no output)")))
+            }
+            Ok(o) => Err(self.fail(what, &o.combined)),
+            Err(e) => Err(self.fail(what, &e.to_string())),
+        }
+    }
+}
+
+fn json_str<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
+    let mut cur = v;
+    for p in path {
+        cur = cur.get(p)?;
+    }
+    cur.as_str()
 }
 
 fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(code) => code,
+    }
+}
+
+fn run() -> Result<(), ExitCode> {
     let mut raw_args: Vec<String> = env::args().skip(1).collect();
     // Hidden critical-section entry point run under `flock`; never reached
     // through normal flag parsing.
     if raw_args.first().map(String::as_str) == Some("--seed-trust") {
         if raw_args.len() != 3 {
             eprintln!("implement-dispatch: --seed-trust needs a claude.json path and a workspace path");
-            return ExitCode::FAILURE;
+            return Err(ExitCode::FAILURE);
         }
-        return seed_trust(&raw_args[1], &raw_args[2]);
+        let code = seed_trust(&raw_args[1], &raw_args[2]);
+        return if code == ExitCode::SUCCESS { Ok(()) } else { Err(code) };
     }
 
-    let parsed = parse_args(std::mem::take(&mut raw_args));
-    let args = match parsed {
+    let args = match parse_args(std::mem::take(&mut raw_args)) {
         Parsed::Help => {
             print!("{HELP}");
-            return ExitCode::SUCCESS;
+            return Ok(());
         }
-        Parsed::Err(e) => return die(e),
+        Parsed::Err(e) => return Err(die(e)),
         Parsed::Args(a) => a,
     };
 
     let n = match &args.n {
         Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => n.clone(),
-        _ => return die("name one issue number"),
+        _ => return Err(die("name one issue number")),
     };
     if args.model != "sonnet" && args.model != "opus" {
-        return die(format!("--model must be sonnet or opus, not '{}'", args.model));
+        return Err(die(format!("--model must be sonnet or opus, not '{}'", args.model)));
     }
     if !command_on_path("flock") {
-        return die("flock is not on PATH");
+        return Err(die("flock is not on PATH"));
     }
 
     let repo = args.repo.clone().unwrap_or_else(|| env::current_dir().map(|p| p.display().to_string()).unwrap_or_default());
     let Some(primary) = primary_worktree(&repo) else {
-        return die(format!("not a git repo: {repo}"));
+        return Err(die(format!("not a git repo: {repo}")));
     };
     let slug = git_origin::origin_slug(Path::new(&primary)).unwrap_or_default();
     if !valid_slug(&slug) {
-        return die(format!("origin in {primary} names no GitHub owner/name"));
+        return Err(die(format!("origin in {primary} names no GitHub owner/name")));
     }
     let branch = format!("implement-{n}");
     let wt = PathBuf::from(&primary).join(".claude/worktrees").join(&branch);
@@ -263,37 +289,40 @@ fn main() -> ExitCode {
     .unwrap_or_default();
     let (state, labels_csv) = issue.split_once(' ').unwrap_or((issue.as_str(), ""));
     if state != "OPEN" {
-        return die(format!("#{n} is not an open issue"));
+        return Err(die(format!("#{n} is not an open issue")));
     }
     let labels = format!(",{labels_csv},");
     if !labels.contains(",ready-for-agent,") {
-        return die(format!("#{n} is not labelled ready-for-agent"));
+        return Err(die(format!("#{n} is not labelled ready-for-agent")));
     }
     for held in ["in-progress", "needs-info", "ready-for-human"] {
         if labels.contains(&format!(",{held},")) {
-            return die(format!("#{n} is labelled {held}"));
+            return Err(die(format!("#{n} is labelled {held}")));
         }
     }
     let tier = if labels.contains(",documentation,") { "light" } else { "heavy" };
 
     let home = env::var("HOME").unwrap_or_default();
-    let controller = match args.controller.clone() {
-        Some(c) => c,
+    // An empty --controller is bash's `[ -z "$controller" ]`: absent, not a
+    // literal empty name, so it still falls through to the session lookup.
+    let controller_flag = args.controller.as_deref().filter(|c| !c.is_empty());
+    let controller = match controller_flag {
+        Some(c) => c.to_string(),
         None => {
             let self_pid = std::process::id() as i32;
             let start_ancestor = proc_info::parent_pid(self_pid).unwrap_or(0);
             match sessions::find_controller(Path::new(&home), start_ancestor) {
                 Some(c) => c,
                 None => {
-                    return die(
+                    return Err(die(
                         "no controller: no live ancestor session has a ~/.claude/sessions/<pid>.json name; pass --controller",
-                    );
+                    ));
                 }
             }
         }
     };
     if controller.contains('"') || controller.contains('\n') {
-        return die(format!("controller name cannot hold a double quote or newline: {controller}"));
+        return Err(die(format!("controller name cannot hold a double quote or newline: {controller}")));
     }
 
     let status_out = quiet_stdout("herdr", &["status", "--json"]).unwrap_or_default();
@@ -302,7 +331,7 @@ fn main() -> ExitCode {
         .and_then(|v| v.get("server").and_then(|s| s.get("running")).and_then(Value::as_bool))
         .unwrap_or(false);
     if !running {
-        return die("no herdr server is running (herdr status)");
+        return Err(die("no herdr server is running (herdr status)"));
     }
 
     let claude_json_path = format!("{home}/.claude.json");
@@ -312,75 +341,54 @@ fn main() -> ExitCode {
         .and_then(|v| v.get("hasCompletedOnboarding").and_then(Value::as_bool))
         .unwrap_or(false);
     if !onboarded {
-        return die(format!(
-            "claude onboarding is not complete in {claude_json_path}; a brief would land in its dialog"
-        ));
+        return Err(die(format!("claude onboarding is not complete in {claude_json_path}; a brief would land in its dialog")));
     }
 
     if quiet_ok("herdr", &["agent", "get", &agent]) {
-        return die(format!("herdr agent {agent} already exists"));
+        return Err(die(format!("herdr agent {agent} already exists")));
     }
     if !quiet_ok("git", &["-C", &primary, "fetch", "-q", "origin"]) {
-        return die(format!("git fetch failed in {primary}"));
+        return Err(die(format!("git fetch failed in {primary}")));
     }
     let registered_worktree = quiet_stdout("git", &["-C", &primary, "worktree", "list", "--porcelain"])
         .map(|out| out.lines().any(|l| l == format!("worktree {}", wt.display())))
         .unwrap_or(false);
     if wt.exists() || registered_worktree {
-        return die(format!("{} already exists", wt.display()));
+        return Err(die(format!("{} already exists", wt.display())));
     }
     if quiet_ok("git", &["-C", &primary, "show-ref", "-q", "--verify", &format!("refs/heads/{branch}")]) {
-        return die(format!("branch {branch} already exists"));
+        return Err(die(format!("branch {branch} already exists")));
     }
     let default = git_origin::default_branch(Path::new(&primary));
     if !quiet_ok("git", &["-C", &primary, "show-ref", "-q", "--verify", &format!("refs/remotes/origin/{default}")]) {
-        return die(format!("no origin/{default} to branch from"));
+        return Err(die(format!("no origin/{default} to branch from")));
     }
 
     // Past here the ticket is claimed; a failure says how to release it.
-    let claim = runner::run(
+    let claimed = runner::run(
         "gh",
         &[
-            "issue",
-            "edit",
-            &n,
-            "--repo",
-            &slug,
-            "--remove-label",
-            "ready-for-agent",
-            "--add-label",
-            "in-progress",
-            "--add-assignee",
+            "issue", "edit", &n, "--repo", &slug, "--remove-label", "ready-for-agent", "--add-label", "in-progress", "--add-assignee",
             "@me",
         ],
     );
-    match claim {
+    match claimed {
         Ok(c) if c.success => {}
-        _ => return die(format!("could not claim #{n}")),
+        _ => return Err(die(format!("could not claim #{n}"))),
     }
+    let claim = Claim { n: &n, slug: &slug, wt: &wt };
 
     let wa = runner::run_in(
         None,
         "git",
         &["-C", &primary, "worktree", "add", "-q", "--no-track", "-b", &branch, wt.to_str().unwrap_or(""), &format!("origin/{default}")],
     );
-    match wa {
-        Ok(o) if o.success => {}
-        Ok(o) => return fail("git worktree add", &o.combined, &n, &slug, &wt),
-        Err(e) => return fail("git worktree add", &e.to_string(), &n, &slug, &wt),
-    }
+    claim.step("git worktree add", wa, None)?;
 
     let lock = format!("{home}/.claude.json.implement-dispatch.lock");
     let self_exe = env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "implement-dispatch".to_string());
-    let seed = runner::run(
-        "flock",
-        &["-w", "30", &lock, &self_exe, "--seed-trust", &claude_json_path, wt.to_str().unwrap_or("")],
-    );
-    match seed {
-        Ok(o) if o.success => {}
-        Ok(o) => return fail("trust pre-seed", &o.combined, &n, &slug, &wt),
-        Err(e) => return fail("trust pre-seed", &e.to_string(), &n, &slug, &wt),
-    }
+    let seed = runner::run("flock", &["-w", "30", &lock, &self_exe, "--seed-trust", &claude_json_path, wt.to_str().unwrap_or("")]);
+    claim.step("trust pre-seed", seed, Some(&format!("timed out waiting for {lock}")))?;
 
     // --cwd names the repo: without it herdr resolves the focused workspace's
     // repo and answers worktree_not_found.
@@ -388,37 +396,15 @@ fn main() -> ExitCode {
         "herdr",
         &["worktree", "open", "--cwd", &primary, "--path", wt.to_str().unwrap_or(""), "--label", &branch, "--no-focus", "--trust-repository"],
     );
-    let open_out = match open {
-        Ok(o) if o.success => o.combined,
-        Ok(o) => return fail("herdr worktree open", &o.combined, &n, &slug, &wt),
-        Err(e) => return fail("herdr worktree open", &e.to_string(), &n, &slug, &wt),
-    };
+    let open_out = claim.step("herdr worktree open", open, None)?;
     let open_json: Option<Value> = serde_json::from_str(&open_out).ok();
-    let mut pane = open_json
-        .as_ref()
-        .and_then(|v| v.get("result"))
-        .and_then(|v| v.get("root_pane"))
-        .and_then(|v| v.get("pane_id"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    let mut pane = open_json.as_ref().and_then(|v| json_str(v, &["result", "root_pane", "pane_id"])).unwrap_or("").to_string();
     if pane.is_empty() {
-        let ws = open_json
-            .as_ref()
-            .and_then(|v| v.get("result"))
-            .and_then(|v| v.get("workspace"))
-            .and_then(|v| v.get("workspace_id"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
+        let ws = open_json.as_ref().and_then(|v| json_str(v, &["result", "workspace", "workspace_id"])).unwrap_or("").to_string();
         if ws.is_empty() {
-            return fail("herdr worktree open", &format!("no workspace in its response: {open_out}"), &n, &slug, &wt);
+            return Err(claim.fail("herdr worktree open", &format!("no workspace in its response: {open_out}")));
         }
-        let panes = match runner::run("herdr", &["pane", "list", "--workspace", &ws]) {
-            Ok(o) if o.success => o.combined,
-            Ok(o) => return fail("herdr pane list", &o.combined, &n, &slug, &wt),
-            Err(e) => return fail("herdr pane list", &e.to_string(), &n, &slug, &wt),
-        };
+        let panes = claim.step("herdr pane list", runner::run("herdr", &["pane", "list", "--workspace", &ws]), None)?;
         let panes_json: Option<Value> = serde_json::from_str(&panes).ok();
         pane = panes_json
             .as_ref()
@@ -430,32 +416,23 @@ fn main() -> ExitCode {
             .unwrap_or("")
             .to_string();
         if pane.is_empty() {
-            return fail("herdr pane list", &format!("no pane in workspace {ws}: {panes}"), &n, &slug, &wt);
+            return Err(claim.fail("herdr pane list", &format!("no pane in workspace {ws}: {panes}")));
         }
     }
 
-    let start = runner::run("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &args.model]);
-    match start {
-        Ok(o) if o.success => {}
-        Ok(o) => return fail("herdr agent start", &o.combined, &n, &slug, &wt),
-        Err(e) => return fail("herdr agent start", &e.to_string(), &n, &slug, &wt),
-    }
+    claim.step("herdr agent start", runner::run("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &args.model]), None)?;
 
     let brief = format!("/implement {n} --tier {tier} --controller \"{controller}\"");
-    let prompt = runner::run(
-        "herdr",
-        &["agent", "prompt", &agent, &brief, "--wait", "--until", "working", "--timeout", "120000"],
-    );
-    match prompt {
-        Ok(o) if o.success => {}
-        Ok(o) => return fail("herdr agent prompt", &o.combined, &n, &slug, &wt),
-        Err(e) => return fail("herdr agent prompt", &e.to_string(), &n, &slug, &wt),
-    }
+    claim.step(
+        "herdr agent prompt",
+        runner::run("herdr", &["agent", "prompt", &agent, &brief, "--wait", "--until", "working", "--timeout", "120000"]),
+        None,
+    )?;
 
     println!("dispatched #{n} ({}, {tier} tier, controller {controller})", args.model);
     println!("worktree: {}", wt.display());
     println!("branch:   {branch}");
     println!("agent:    {agent}");
     println!("cleanup:  cd {primary} && merge-cleanup {branch} --repo {primary}");
-    ExitCode::SUCCESS
+    Ok(())
 }
