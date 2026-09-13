@@ -30,15 +30,23 @@ mkbin() { # mkbin <dir> <stub>...
 mkdir -p "$tmp/stubs"
 cat > "$tmp/stubs/gh" <<'STUB'
 #!/usr/bin/env bash
-# `pr list --head <b>` reports merged only for caneff/merged-one;
-# `pr view <n>` resolves PR 7 to that same branch.
-head=""; prev=""; sub="${1:-} ${2:-}"
-for a in "$@"; do [ "$prev" = "--head" ] && head="$a"; prev="$a"; done
+# `pr list --head <b>` reports a merged PR for the branches mkfixture records
+# under $GH_PR_HEADS (one file per branch, `/` as `__`, holding the sha the PR
+# merged at); `pr view <n>` resolves PR 7 to caneff/merged-one.
+head=""; prev=""; sub="${1:-} ${2:-}"; jq=0
+for a in "$@"; do [ "$prev" = "--head" ] && head="$a"; [ "$a" = "--jq" ] && jq=1; prev="$a"; done
 case "$sub" in
   "pr view") [ "${3:-}" = "7" ] && { echo caneff/merged-one; exit 0; }; exit 1 ;;
 esac
-if [ "$head" = "caneff/merged-one" ]; then echo '[{"number":7}]'; else echo '[]'; fi
+f="$GH_PR_HEADS/${head//\//__}"
+if [ -f "$f" ]; then
+  oid=$(cat "$f")
+  if [ "$jq" = 1 ]; then echo "7 $oid"; else echo "[{\"number\":7,\"headRefOid\":\"$oid\"}]"; fi
+else
+  [ "$jq" = 1 ] || echo '[]'
+fi
 STUB
+export GH_PR_HEADS="$tmp/gh-pr-heads"; mkdir -p "$GH_PR_HEADS"
 # herdr answers `agent list` and `workspace list` from the JSON files the case
 # under test writes, and logs every call.
 cat > "$tmp/stubs/herdr" <<'STUB'
@@ -77,6 +85,15 @@ mkfixture() { # mkfixture <dir>
     git -C "$d" checkout -q -b "$b" main
     echo "$b" >> "$d/f"; git -C "$d" commit -qam "$b"; git -C "$d" push -q -u origin "$b"
   done
+  git -C "$d" checkout -q main
+  # The tracker merged caneff/merged-one at its tip. caneff/merged-then-more
+  # had a PR merged at its first commit, then kept going — the incident shape.
+  git -C "$d" rev-parse caneff/merged-one > "$GH_PR_HEADS/caneff__merged-one"
+  git -C "$d" checkout -q -b caneff/merged-then-more main
+  echo landed >> "$d/f"; git -C "$d" commit -qam "landed via a PR"
+  git -C "$d" rev-parse HEAD > "$GH_PR_HEADS/caneff__merged-then-more"
+  echo unlanded >> "$d/f"; git -C "$d" commit -qam "kept going after the PR"
+  git -C "$d" push -q -u origin caneff/merged-then-more
   git -C "$d" checkout -q main
   # caneff/ff-merged is genuinely in main: `git branch -d` accepts it.
   git -C "$d" checkout -q -b caneff/ff-merged main
@@ -124,6 +141,15 @@ else
   no "--force did not clean up (rc=$rc): $out"
 fi
 
+# --- 2b. a merged PR is not the branch: the tip must be the PR's head -------
+out=$(mc "$tmp/full" --repo "$tmp/r1" caneff/merged-then-more); rc=$?
+if [ $rc -ne 0 ] && printf '%s' "$out" | grep -qi "not merged" \
+   && git -C "$tmp/r1" show-ref -q --verify refs/heads/caneff/merged-then-more; then
+  ok "a branch with commits past its merged PR's head is refused, branch kept"
+else
+  no "branch past its merged PR was treated as merged (rc=$rc): $out"
+fi
+
 # --- 3. the default branch is refused --------------------------------------
 out=$(mc "$tmp/full" --repo "$tmp/r1" main); rc=$?
 if [ $rc -ne 0 ] && printf '%s' "$out" | grep -q "default branch" \
@@ -143,10 +169,17 @@ else
 fi
 
 # --- 5. the full run: branches, fast-forward, skip lines ------------------
+tip=$(git -C "$tmp/r1" rev-parse caneff/merged-one)
 out=$(mc "$tmp/full" --repo "$tmp/r1" caneff/merged-one); rc=$?
 [ $rc -eq 0 ] || no "cleanup exited $rc: $out"
 git -C "$tmp/r1" show-ref -q --verify refs/heads/caneff/merged-one \
   && no "local branch survived" || ok "local branch deleted"
+if [ "$(git -C "$tmp/r1" rev-parse -q --verify refs/deleted/caneff/merged-one)" = "$tip" ] \
+   && printf '%s' "$out" | grep -q "refs/deleted/caneff/merged-one"; then
+  ok "the deleted tip is recorded under refs/deleted and the record is announced"
+else
+  no "no refs/deleted record of the tip: $out"
+fi
 git -C "$tmp/r1.origin.git" show-ref -q --verify refs/heads/caneff/merged-one \
   && no "remote branch survived" || ok "remote branch deleted"
 [ "$(git -C "$tmp/r1" rev-parse main)" = "$(git -C "$tmp/r1" rev-parse origin/main)" ] \
@@ -223,8 +256,38 @@ git -C "$tmp/src/other" worktree add -q --detach "$tmp/src/other/.claude/worktre
 git -C "$tmp/src/other" worktree add -q "$tmp/src/other/.claude/worktrees/implement-9" caneff/merged-one 2>/dev/null
 printf '{"result":{"workspaces":[{"workspace_id":"w4","worktree":{"checkout_path":"%s"}}]}}\n' \
   "$tmp/src/other/.claude/worktrees/implement-9" > "$HERDR_WORKSPACES"
-out=$(mc "$tmp/full" --sweep --root "$tmp/src"); rc=$?
+out=$(mc "$tmp/full" --sweep --root "$tmp/src" --dry-run </dev/null); rc=$?
+if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "^sweep plan (dry run):" \
+   && git -C "$tmp/src/other" show-ref -q --verify refs/heads/caneff/merged-one; then
+  ok "a dry-run sweep labels its plan, never asks, and deletes nothing"
+else
+  no "dry-run sweep asked or was unlabelled (rc=$rc): $out"
+fi
+# Without --yes the sweep prints its plan and waits for a "y"; a closed stdin
+# is not a yes. Nothing is deleted, and the plan carries the ahead count.
+out=$(mc "$tmp/full" --sweep --root "$tmp/src" </dev/null); rc=$?
+if [ $rc -ne 0 ] && git -C "$tmp/src/other" show-ref -q --verify refs/heads/caneff/merged-one \
+   && [ -d "$tmp/src/other/.claude/worktrees/implement-9" ] \
+   && printf '%s' "$out" | grep -q "other caneff/merged-one.*0 commits past PR #7" \
+   && ! printf '%s' "$out" | grep -q "(dry run)"; then
+  ok "sweep without --yes prints the plan and deletes nothing"
+else
+  no "sweep without --yes deleted something or printed no plan (rc=$rc): $out"
+fi
+out=$(printf 'n\n' | mc "$tmp/full" --sweep --root "$tmp/src"); rc=$?
+if [ $rc -ne 0 ] && git -C "$tmp/src/other" show-ref -q --verify refs/heads/caneff/merged-one; then
+  ok "sweep answered n deletes nothing"
+else
+  no "sweep answered n still deleted (rc=$rc): $out"
+fi
+out=$(mc "$tmp/full" --sweep --root "$tmp/src" --yes); rc=$?
 echo '{"result":{"workspaces":[]}}' > "$HERDR_WORKSPACES"
+printf '%s' "$out" | grep -q "other *caneff/merged-one *cleaned *0 commits past PR #7" \
+  && ok "sweep summary counts commits past the sha the PR merged at" \
+  || no "sweep summary has no count past the PR head: $out"
+printf '%s' "$out" | grep -q "other *caneff/ff-merged *cleaned *0 commits past origin/main" \
+  && ok "a branch proven by the ancestor test counts past origin/main" \
+  || no "ff-merged row lacks its count: $out"
 if printf '%s\n' "$out" | awk '/stale, not removed/{r=NR} /closing herdr workspace w4/{c=NR} END{exit !(r && c > r)}'; then
   ok "sweep closes the herdr workspaces only after its summary"
 else
@@ -244,6 +307,13 @@ if stale_of "$out" | grep -q "$tmp/src/other/.claude/worktrees/agent-old" \
   ok "sweep summary lists the stale sibling and leaves it in place"
 else
   no "sweep summary has no stale sibling: $out"
+fi
+mkfixture "$tmp/src/again"
+out=$(printf 'y\n' | mc "$tmp/full" --sweep --root "$tmp/src"); rc=$?
+if [ $rc -eq 0 ] && ! git -C "$tmp/src/again" show-ref -q --verify refs/heads/caneff/merged-one; then
+  ok "sweep answered y cleans the merged branch"
+else
+  no "sweep answered y did not clean (rc=$rc): $out"
 fi
 out=$(mc "$tmp/nojq" --sweep --root "$tmp/src" --dry-run); rc=$?
 if printf '%s' "$out" | grep -q "skipped the stale worktree report (jq is not on PATH)" \
