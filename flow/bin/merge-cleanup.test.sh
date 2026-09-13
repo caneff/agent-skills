@@ -548,5 +548,56 @@ else
 fi
 rm "$HOME/.claude/sessions/r11.json"
 
+# --- 12. a herdr worker's own registry session is decided by its herdr status ---
+# The registry session's sessionId matches a herdr agent's agent_session.value
+# for the same worktree: the herdr status decides instead of the pid refusing.
+mkfixture "$tmp/r14"
+wt14="$tmp/r14/.claude/worktrees/implement-745a"
+git -C "$tmp/r14" worktree add -q "$wt14" caneff/merged-one 2>/dev/null
+printf '{"pid":%s,"cwd":"%s","sessionId":"sess-14"}\n' "$$" "$wt14" > "$HOME/.claude/sessions/r14.json"
+printf '{"result":{"agents":[{"name":"skills-14","pane_id":"w12:p1","cwd":"%s","agent_status":"idle","agent_session":{"value":"sess-14"}}]}}\n' \
+  "$wt14" > "$HERDR_AGENTS"
+: > "$HERDR_LOG"
+out=$(mc "$tmp/full" --repo "$tmp/r14" caneff/merged-one); rc=$?
+if [ $rc -eq 0 ] && grep -qx "herdr agent stop skills-14" "$HERDR_LOG" && [ ! -d "$wt14" ] \
+   && ! git -C "$tmp/r14" show-ref -q --verify refs/heads/caneff/merged-one; then
+  ok "a registry session matching an idle herdr agent's session is stopped, not refused"
+else
+  no "matching idle registry session was refused instead of stopped (rc=$rc): $(cat "$HERDR_LOG") / $out"
+fi
+rm "$HOME/.claude/sessions/r14.json"
+echo '{"result":{"agents":[]}}' > "$HERDR_AGENTS"
+
+mkfixture "$tmp/r15"
+wt15="$tmp/r15/.claude/worktrees/implement-745b"
+git -C "$tmp/r15" worktree add -q "$wt15" caneff/merged-one 2>/dev/null
+printf '{"pid":%s,"cwd":"%s","sessionId":"sess-15"}\n' "$$" "$wt15" > "$HOME/.claude/sessions/r15.json"
+printf '{"result":{"agents":[{"name":"skills-15","pane_id":"w13:p1","cwd":"%s","agent_status":"working","agent_session":{"value":"sess-15"}}]}}\n' \
+  "$wt15" > "$HERDR_AGENTS"
+out=$(mc "$tmp/full" --repo "$tmp/r15" caneff/merged-one); rc=$?
+if [ $rc -ne 0 ] && printf '%s' "$out" | grep -q "skills-15" && [ -d "$wt15" ] \
+   && git -C "$tmp/r15" show-ref -q --verify refs/heads/caneff/merged-one; then
+  ok "a registry session matching a working herdr agent's session refuses"
+else
+  no "matching working registry session was not refused (rc=$rc): $out"
+fi
+rm "$HOME/.claude/sessions/r15.json"
+echo '{"result":{"agents":[]}}' > "$HERDR_AGENTS"
+
+# A registry session carrying a sessionId that no herdr agent's agent_session
+# matches still refuses on the pid, same as one with no sessionId at all.
+mkfixture "$tmp/r16"
+wt16="$tmp/r16/.claude/worktrees/implement-745c"
+git -C "$tmp/r16" worktree add -q "$wt16" caneff/merged-one 2>/dev/null
+printf '{"pid":%s,"cwd":"%s","sessionId":"sess-16-unmatched"}\n' "$$" "$wt16" > "$HOME/.claude/sessions/r16.json"
+out=$(mc "$tmp/full" --repo "$tmp/r16" caneff/merged-one); rc=$?
+if [ $rc -ne 0 ] && printf '%s' "$out" | grep -q "pid $$" && [ -d "$wt16" ] \
+   && git -C "$tmp/r16" show-ref -q --verify refs/heads/caneff/merged-one; then
+  ok "a registry session with no matching herdr agent still refuses"
+else
+  no "unmatched registry session was not refused (rc=$rc): $out"
+fi
+rm "$HOME/.claude/sessions/r16.json"
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
