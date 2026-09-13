@@ -1,33 +1,11 @@
 # Spec handoff
 
-Read this when step 2 finds a ticket whose parent issue carries the `spec`
-label. Nothing else in a burn reaches it.
+> **Parked** until the multi-worker lane is rebuilt on the herdr lane — see
+> [#700](https://github.com/caneff/agent-skills/issues/700)'s "Out of scope"
+> note. Nothing below is executable policy until then.
 
-A ticket whose parent issue carries the `spec` label is a slice, and slices
-are built together or not at all: one workspace, one branch, one PR that
-closes the spec and every child, with the end-to-end review loop that only
-`implement-spec` runs. Building them one PR at a time here loses that loop and
-lands a spec in pieces a human has to reassemble.
-
-So the spec, not the slice, is the unit. Find the parent with
-`gh api repos/<owner>/<repo>/issues/<n>/parent` (or the `Part of #N`
-reference in the body when the tracker has no sub-issues) and confirm its label.
-Then:
-
-- Make one Orca workspace **from the spec issue** and dispatch one Orca task
-  in it — a top-level `claude` session seeded with the spec URL and the pointer
-  `~/.agents/skills/implement-spec/SKILL.md`, which it follows as coordinator.
-  That coordinator owns the spec's exploration, frontier, gates, review loop,
-  and PR; this burn does not look inside.
-- Every open slice of that spec — ready or still blocked — leaves this burn's
-  queue at handoff, and the cluster counts against the ticket cap as its
-  number of slices. Slices already `in-progress` under a burn worker finish
-  as they are; the spec coordinator picks up from their landings.
-- Progress lines use the spec's number: `burning #<spec>`, then `#<spec> pr
-  <ref>` or `#<spec> parked: <why>`. A gate the spec coordinator raises is that
-  burn's `ready-for-human` for the whole spec — park it, do not answer it.
-- The spec's workspace is the coordinator's to tear down, not this burn's.
-
-A slice with no `spec`-labelled parent is an ordinary ticket. A spec with
-exactly one open slice is still handed off — the loop is the point, not the
-count.
+Parked — this file told a burn coordinator to hand a spec's slices off to
+`implement-spec` as one workspace and one task, so the end-to-end review loop
+ran once over the whole spec instead of once per slice. That handoff and the
+coordination tool it dispatched into are both retired with the lane; no
+replacement yet.
