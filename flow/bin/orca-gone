@@ -15,7 +15,11 @@
 #     vendored/generated code where case-insensitive substring matching
 #     hits by coincidence — a minified or camelCase identifier can straddle
 #     two ordinary words and spell the four letters this check looks for by
-#     accident — and not a real reference
+#     accident — and not a real reference; also excluding .git/ (git's own
+#     files: refs, logs, packed history), .claude/worktrees/ (other
+#     worktrees, scanned on their own run), and .scratch/ (scratch notes,
+#     gitignored but not a real reference) — not a tracked-files-only scan,
+#     which would miss ignored files wired into the harness elsewhere
 #   - both CLAUDE.md copies: this repo's flow/claude/CLAUDE.md (covered by
 #     the repo scan above) and ~/.claude/CLAUDE.md
 #   - regular files in ~/.local/bin (content only — a dangling symlink or an
@@ -49,9 +53,22 @@ scan() { # scan <file-or-dir>, skipped if it doesn't exist
   [ -e "$1" ] && add_hits "$(rg -uu -i -n -H "$needle" "$1" 2>/dev/null)"
 }
 
-add_hits "$(rg -uu -i -n -H "$needle" "$repo_root" \
-  --glob '!docs/research/**' --glob '!**/node_modules/**' \
-  --glob '!visual-teach/assets/**' 2>/dev/null)"
+# cd into repo_root first: rg resolves an unanchored --glob relative to the
+# process's cwd, not the search-root argument. Without this, running from
+# inside a worktree (the normal case — code-lane work never happens in the
+# primary checkout) makes '!.claude/worktrees/**' match the prefix of
+# repo_root itself and silently skip the whole scan; and a glob like
+# '!.git' would exclude nothing at all if cwd happened to differ from
+# repo_root. '!.git' (no trailing /**) excludes both a real .git/ directory
+# and the gitdir-pointer file a linked worktree has in its place.
+if repo_scan_dir="$(cd -P -- "$repo_root" && pwd)"; then
+  add_hits "$(cd "$repo_scan_dir" && rg -uu -i -n -H "$needle" . \
+    --glob '!docs/research/**' --glob '!**/node_modules/**' \
+    --glob '!visual-teach/assets/**' --glob '!.git' \
+    --glob '!.claude/worktrees/**' --glob '!.scratch/**' 2>/dev/null)"
+else
+  add_hits "$repo_root could not be entered to run the repo scan"
+fi
 
 scan "$home_claude_md"
 scan "$local_bin"

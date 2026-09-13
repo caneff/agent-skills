@@ -195,5 +195,61 @@ else
   echo "FAIL unreadable ~/src fixture: rc=$rc out=$out"; fails=1
 fi
 
+# Planted hits in .git/, .claude/worktrees/<name>/ and .scratch/ inside the
+# repo scan must all be skipped — these are git's own files, other
+# worktrees, and scratch notes, not real references.
+excluded_dirs="$tmp/excluded_dirs"
+mkdir -p "$excluded_dirs/repo/.git" \
+         "$excluded_dirs/repo/.claude/worktrees/implement-999" \
+         "$excluded_dirs/repo/.scratch" \
+         "$excluded_dirs/home/.claude" "$excluded_dirs/home/.local/bin" \
+         "$excluded_dirs/home/src/some-project" "$excluded_dirs/home/$needle/workspaces"
+echo "nothing to see here" > "$excluded_dirs/repo/README.md"
+echo "ref: refs/heads/${needle}-doc-sweep" > "$excluded_dirs/repo/.git/packed-refs"
+echo "call ${needle}-ide worktree rm here" > "$excluded_dirs/repo/.claude/worktrees/implement-999/leftover.sh"
+echo "notes about ${needle}-ide from earlier" > "$excluded_dirs/repo/.scratch/notes.txt"
+echo "clean" > "$excluded_dirs/home/.claude/CLAUDE.md"
+echo "clean" > "$excluded_dirs/home/src/some-project/AGENTS.md"
+
+out=$(GONE_REPO_ROOT="$excluded_dirs/repo" \
+      GONE_HOME_CLAUDE_MD="$excluded_dirs/home/.claude/CLAUDE.md" \
+      GONE_LOCAL_BIN="$excluded_dirs/home/.local/bin" \
+      GONE_SRC_DIR="$excluded_dirs/home/src" \
+      GONE_WORKSPACES_DIR="$excluded_dirs/home/$needle/workspaces" \
+      HOME="$excluded_dirs/home" bash "$script" 2>&1)
+rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q "^PASS"; then
+  echo "PASS planted hits in .git/, .claude/worktrees/ and .scratch/ are skipped"
+else
+  echo "FAIL excluded_dirs fixture: rc=$rc out=$out"; fails=1
+fi
+
+# A planted hit in an ordinary gitignored file elsewhere in the repo (not
+# under .git/, .claude/worktrees/ or .scratch/) must still fail the check —
+# the exclusion is these specific paths, not a tracked-files-only scan.
+ordinary_ignored="$tmp/ordinary_ignored"
+mkdir -p "$ordinary_ignored/repo/build" "$ordinary_ignored/home/.claude" \
+         "$ordinary_ignored/home/.local/bin" "$ordinary_ignored/home/src/some-project" \
+         "$ordinary_ignored/home/$needle/workspaces"
+git -C "$ordinary_ignored/repo" init -q
+echo "build/" > "$ordinary_ignored/repo/.gitignore"
+echo "nothing to see here" > "$ordinary_ignored/repo/README.md"
+echo "leftover ${needle}-ide build artifact" > "$ordinary_ignored/repo/build/output.txt"
+echo "clean" > "$ordinary_ignored/home/.claude/CLAUDE.md"
+echo "clean" > "$ordinary_ignored/home/src/some-project/AGENTS.md"
+
+out=$(GONE_REPO_ROOT="$ordinary_ignored/repo" \
+      GONE_HOME_CLAUDE_MD="$ordinary_ignored/home/.claude/CLAUDE.md" \
+      GONE_LOCAL_BIN="$ordinary_ignored/home/.local/bin" \
+      GONE_SRC_DIR="$ordinary_ignored/home/src" \
+      GONE_WORKSPACES_DIR="$ordinary_ignored/home/$needle/workspaces" \
+      HOME="$ordinary_ignored/home" bash "$script" 2>&1)
+rc=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "output.txt"; then
+  echo "PASS a planted hit in an ordinary ignored file still fails"
+else
+  echo "FAIL ordinary_ignored fixture: rc=$rc out=$out"; fails=1
+fi
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
