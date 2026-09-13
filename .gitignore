@@ -15,3 +15,5 @@ __pycache__/
 computer-use/
 orca-cli/
 orchestration/
+# the /implement lane's Rust crate: its build output, never committed.
+flow/lane/target/

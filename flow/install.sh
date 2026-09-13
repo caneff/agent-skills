@@ -24,7 +24,6 @@ link() { # link <repo-relative-src> <live-dest>
 
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link bin/merge-cleanup          "$HOME/.local/bin/merge-cleanup"
-link bin/implement-dispatch     "$HOME/.local/bin/implement-dispatch"
 link bin/job-run                "$HOME/.local/bin/job-run"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 # claude/settings.json is NOT symlinked — the harness rewrites it in place and
@@ -60,6 +59,15 @@ fi
 # Lay down the copy-only backups (files a symlink can't hold): the Windows VS
 # Code settings and claude/settings.json.
 bash "$here/backup-sync.sh" --restore
+
+# implement-dispatch is a Rust binary now (#748): cargo install replaces it in
+# place, rather than a symlink into the repo. Runs last, after every symlink
+# above is in place, so a missing cargo or a compile error never leaves the
+# rest of the install half-done — it was never gated on a toolchain before
+# this ticket, and still is not. Never installs the test-only fake —
+# lane-install.sh only names implement-dispatch and merge-cleanup.
+mkdir -p "$HOME/.local/bin"
+bash "$here/lane-install.sh"
 
 echo
 echo "Done. The live flow tooling now points at this repo; commit to back it up."

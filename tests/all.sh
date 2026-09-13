@@ -27,6 +27,8 @@ suites() { # prints "<label>\t<command>" per discovered suite
       grep -q -- '--selfcheck' "$f" &&
         printf '%s --selfcheck\tpython3 %s --selfcheck\n' "$f" "$f"
     done
+  git ls-files -- '*Cargo.toml' |
+    while IFS= read -r f; do printf '%s\tcargo test --manifest-path %s\n' "$f" "$f"; done
 }
 
 case "${1:-}" in
@@ -34,6 +36,12 @@ case "${1:-}" in
   "") ;;
   *) echo "usage: tests/all.sh [--list]" >&2; exit 2 ;;
 esac
+
+# A missing cargo must fail the gate, not silently skip every Cargo suite.
+if suites | cut -f2 | grep -q '^cargo test ' && ! command -v cargo >/dev/null 2>&1; then
+  echo "tests/all.sh: cargo is not on PATH, and a tracked Cargo.toml needs it" >&2
+  exit 1
+fi
 
 count=0
 while IFS=$'\t' read -r label cmd; do

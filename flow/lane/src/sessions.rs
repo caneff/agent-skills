@@ -1,0 +1,76 @@
+//! The sessions-registry reader: walks `/proc` ancestry looking for a live
+//! Claude session's name, the same rule `implement-dispatch` used in bash.
+
+use crate::proc_info::read_stat;
+use std::path::Path;
+
+/// Walks up from `start_ancestor`, looking for `<home>/.claude/sessions/<pid>.json`
+/// whose `procStart` matches that pid's own `/proc/<pid>/stat` starttime — a
+/// file left by a dead session whose pid was reused has another procStart.
+/// Stops (returns `None`) once `/proc/<pid>/stat` can no longer be read, or
+/// once pid 1 is reached.
+pub fn find_controller(home: &Path, start_ancestor: i32) -> Option<String> {
+    let mut ancestor = start_ancestor;
+    while ancestor > 1 {
+        let stat = read_stat(ancestor)?;
+        let session_file = home.join(".claude/sessions").join(format!("{ancestor}.json"));
+        if let Ok(raw) = std::fs::read_to_string(&session_file) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                let proc_start_matches = v.get("procStart").and_then(|p| p.as_str()) == Some(stat.start.as_str());
+                if proc_start_matches {
+                    if let Some(name) = v.get("name").and_then(|n| n.as_str()) {
+                        if !name.is_empty() {
+                            return Some(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        ancestor = stat.ppid;
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proc_info::read_stat;
+    use tempfile::TempDir;
+
+    #[test]
+    fn finds_the_controller_named_by_its_own_procstart() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let pid = std::process::id() as i32;
+        let stat = read_stat(pid).unwrap();
+        std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
+        std::fs::write(
+            home.join(".claude/sessions").join(format!("{pid}.json")),
+            format!(r#"{{"pid":{pid},"procStart":"{}","name":"skills-ctl"}}"#, stat.start),
+        )
+        .unwrap();
+        assert_eq!(find_controller(home, pid).as_deref(), Some("skills-ctl"));
+    }
+
+    #[test]
+    fn skips_a_session_file_whose_procstart_does_not_match() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let pid = std::process::id() as i32;
+        std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
+        std::fs::write(
+            home.join(".claude/sessions").join(format!("{pid}.json")),
+            r#"{"pid":1,"procStart":"1","name":"skills-ctl"}"#,
+        )
+        .unwrap();
+        // Walking from pid climbs to pid 1 with no match anywhere.
+        assert_eq!(find_controller(home, pid), None);
+    }
+
+    #[test]
+    fn no_session_file_anywhere_is_none() {
+        let tmp = TempDir::new().unwrap();
+        let pid = std::process::id() as i32;
+        assert_eq!(find_controller(tmp.path(), pid), None);
+    }
+}
