@@ -462,5 +462,51 @@ else
   no "the worktree under cleanup was reported stale (rc=$rc): $out"
 fi
 
+# --- 11. an idle herdr agent is stopped, a working or blocked one refuses --
+mkfixture "$tmp/r10"
+wt10="$tmp/r10/.claude/worktrees/implement-5"
+git -C "$tmp/r10" worktree add -q "$wt10" caneff/merged-one 2>/dev/null
+: > "$HERDR_LOG"
+printf '{"result":{"agents":[{"name":"skills-idle","pane_id":"w7:p1","cwd":"%s","agent_status":"idle"}]}}\n' \
+  "$wt10" > "$HERDR_AGENTS"
+out=$(mc "$tmp/full" --repo "$tmp/r10" caneff/merged-one); rc=$?
+if [ $rc -eq 0 ] && grep -qx "herdr agent stop skills-idle" "$HERDR_LOG" \
+   && [ ! -d "$wt10" ] && ! git -C "$tmp/r10" show-ref -q --verify refs/heads/caneff/merged-one; then
+  ok "an idle herdr agent is stopped and the cleanup proceeds"
+else
+  no "idle herdr agent not stopped or cleanup blocked (rc=$rc): $(cat "$HERDR_LOG") / $out"
+fi
+echo '{"result":{"agents":[]}}' > "$HERDR_AGENTS"
+
+for status in working blocked; do
+  mkfixture "$tmp/r10-$status"
+  wtN="$tmp/r10-$status/.claude/worktrees/implement-5"
+  git -C "$tmp/r10-$status" worktree add -q "$wtN" caneff/merged-one 2>/dev/null
+  printf '{"result":{"agents":[{"name":"skills-%s","pane_id":"w8:p1","cwd":"%s","agent_status":"%s"}]}}\n' \
+    "$status" "$wtN" "$status" > "$HERDR_AGENTS"
+  out=$(mc "$tmp/full" --repo "$tmp/r10-$status" caneff/merged-one); rc=$?
+  if [ $rc -ne 0 ] && [ -d "$wtN" ] \
+     && git -C "$tmp/r10-$status" show-ref -q --verify refs/heads/caneff/merged-one \
+     && printf '%s' "$out" | grep -q "skills-$status"; then
+    ok "a $status herdr agent refuses the cleanup"
+  else
+    no "a $status herdr agent did not refuse (rc=$rc): $out"
+  fi
+done
+echo '{"result":{"agents":[]}}' > "$HERDR_AGENTS"
+
+# A live registry pid still refuses even with no herdr agent present — unchanged.
+mkfixture "$tmp/r11"
+wt11="$tmp/r11/.claude/worktrees/implement-6"
+git -C "$tmp/r11" worktree add -q "$wt11" caneff/merged-one 2>/dev/null
+printf '{"pid":%s,"cwd":"%s"}\n' "$$" "$wt11" > "$HOME/.claude/sessions/r11.json"
+out=$(mc "$tmp/full" --repo "$tmp/r11" caneff/merged-one); rc=$?
+if [ $rc -ne 0 ] && printf '%s' "$out" | grep -q "pid $$" && [ -d "$wt11" ]; then
+  ok "a live registry pid with no herdr agent still refuses"
+else
+  no "live registry pid with no herdr agent not refused (rc=$rc): $out"
+fi
+rm "$HOME/.claude/sessions/r11.json"
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"

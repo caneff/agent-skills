@@ -106,5 +106,8 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   workspace, deletes the branch local and remote (the tip stays under
   `refs/deleted/<branch>`; `git branch <branch> refs/deleted/<branch>`
   restores it), closes the herdr workspace, and fast-forwards the primary
-  checkout; its live-session guard refuses while the worker is alive. Why:
-  nothing else cleans up after a merge, and worktrees pile up.
+  checkout. Its live-session guard stops an idle worker's herdr agent itself
+  and proceeds; a working or blocked agent, or a live session outside herdr,
+  still refuses. Why: nothing else cleans up after a merge, worktrees pile
+  up, and closing an idle worker's pane by hand was a chore Chris no longer
+  does.
