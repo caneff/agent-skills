@@ -172,5 +172,28 @@ else
   echo "FAIL vendored fixture: rc=$rc out=$out"; fails=1
 fi
 
+# An unreadable ~/src must fail loud, not silently skip the AGENTS.md sweep.
+unreadable_src="$tmp/unreadable_src"
+mkdir -p "$unreadable_src/repo" "$unreadable_src/home/.claude" \
+         "$unreadable_src/home/.local/bin" "$unreadable_src/home/src" \
+         "$unreadable_src/home/$needle/workspaces"
+echo "nothing to see here" > "$unreadable_src/repo/README.md"
+echo "clean" > "$unreadable_src/home/.claude/CLAUDE.md"
+chmod 000 "$unreadable_src/home/src"
+
+out=$(GONE_REPO_ROOT="$unreadable_src/repo" \
+      GONE_HOME_CLAUDE_MD="$unreadable_src/home/.claude/CLAUDE.md" \
+      GONE_LOCAL_BIN="$unreadable_src/home/.local/bin" \
+      GONE_SRC_DIR="$unreadable_src/home/src" \
+      GONE_WORKSPACES_DIR="$unreadable_src/home/$needle/workspaces" \
+      HOME="$unreadable_src/home" bash "$script" 2>&1)
+rc=$?
+chmod 700 "$unreadable_src/home/src"
+if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "could not be entered"; then
+  echo "PASS an unreadable ~/src fails loud instead of skipping silently"
+else
+  echo "FAIL unreadable ~/src fixture: rc=$rc out=$out"; fails=1
+fi
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"

@@ -59,10 +59,17 @@ scan "$local_bin"
 if [ -d "$src_dir" ]; then
   # cd -P resolves a symlinked $src_dir itself; find is still -P (physical)
   # for everything under it, so an internal symlink loop can't run away.
-  resolved_src_dir="$(cd -P -- "$src_dir" && pwd)"
-  while IFS= read -r -d '' agents_md; do
-    scan "$agents_md"
-  done < <(find "$resolved_src_dir" -iname AGENTS.md -print0 2>/dev/null)
+  # An unreadable $src_dir makes cd fail: without this check, the empty
+  # substitution would send find "" -iname AGENTS.md into a suppressed
+  # error and the sweep would silently skip, the same false-pass shape as
+  # a missing rg.
+  if resolved_src_dir="$(cd -P -- "$src_dir" && pwd)"; then
+    while IFS= read -r -d '' agents_md; do
+      scan "$agents_md"
+    done < <(find "$resolved_src_dir" -iname AGENTS.md -print0 2>/dev/null)
+  else
+    add_hits "$src_dir could not be entered to sweep its AGENTS.md files"
+  fi
 fi
 
 workspaces_left=""
