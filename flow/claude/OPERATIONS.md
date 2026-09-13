@@ -36,11 +36,15 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   mobile approval relay) is not installed — `herdr plugin install
   dcolinmorgan/herdr-push` needs my own hands, since the auto-mode classifier
   denies it as untrusted code integration.
-- **`herdr integration install claude` is never run** — it wires lifecycle
-  hooks into `~/.claude/settings.json` for state that screen detection gives
-  for free. As of 2026-09-12 it is installed anyway (`herdr integration
-  status` shows `claude: current`); `herdr integration uninstall claude`
-  needs my own hands, since the classifier denies it as self-modification.
+- **The herdr `claude` integration stays installed** (`herdr integration
+  status` shows `claude: current`). Screen detection gives idle/working/blocked
+  for free, but not the session id: its SessionStart hook
+  (`~/.claude/hooks/herdr-agent-state.sh`) is what reports each pane's Claude
+  sessionId as `agent_session.value`, and `merge-cleanup`'s live-session guard
+  matches a worker's own session against that value — without it, cleanup
+  refuses an idle worker (#745). Never uninstall it; if a herdr update drops
+  it, `herdr integration install claude` needs my own hands (the classifier
+  denies it as self-modification). Ruled 2026-09-13, #725.
 
 ## Control
 
