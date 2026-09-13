@@ -135,5 +135,29 @@ else
   echo "FAIL a failing lane-install.sh broke or silenced the rest of the install (rc=$rc): $out"; fails=1
 fi
 
+# #715: the three retired helper scripts an earlier machine setup left on
+# PATH are cleaned up, present as a plain file or a symlink either way —
+# install.sh never linked them, so they are foreign leftovers, not ours to
+# preserve.
+legacy="$tmp/legacy"
+mkdir -p "$legacy/tests" "$legacy/home/.local/bin"
+cp -r "$root/flow" "$legacy/flow"
+rm -rf "$legacy/flow/lane/target"
+cp "$root/tests/all.sh" "$legacy/tests/all.sh"
+git -C "$legacy" init -q
+printf '#!/usr/bin/env bash\nexit 0\n' > "$legacy/flow/backup-sync.sh"
+printf '#!/usr/bin/env bash\necho stub\n' > "$legacy/home/.local/bin/orca-ide"
+chmod +x "$legacy/home/.local/bin/orca-ide"
+printf '#!/usr/bin/env bash\necho stub\n' > "$legacy/home/.local/bin/orca-wait"
+chmod +x "$legacy/home/.local/bin/orca-wait"
+ln -s /nonexistent-target "$legacy/home/.local/bin/orca-auto-enter"
+HOME="$legacy/home" bash "$legacy/flow/install.sh" >/dev/null 2>&1
+if [ ! -e "$legacy/home/.local/bin/orca-ide" ] && [ ! -e "$legacy/home/.local/bin/orca-wait" ] \
+   && [ ! -e "$legacy/home/.local/bin/orca-auto-enter" ] && [ ! -L "$legacy/home/.local/bin/orca-auto-enter" ]; then
+  echo "PASS the three retired helper scripts are removed from ~/.local/bin"
+else
+  echo "FAIL a retired helper script survived install.sh"; fails=1
+fi
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
