@@ -29,10 +29,14 @@ Two doors, matching `implement/SKILL.md` § Build:
   below. Read the result, not the codebase.
 - **Dispatched from the default branch** — `implement-dispatch <n>` claims
   the ticket and starts the worker exactly as it would for any other build;
-  `implement-dispatch` has no `--codex` flag of its own, so once the worker
-  is up, `SendMessage` it to build under this lane before it starts. The
-  driver stays Claude for claiming, the PR and the merge line, since those
-  cost almost nothing.
+  it has no `--codex` flag of its own. To move that worker onto this lane,
+  the controller re-steers it with `herdr agent prompt`, quoting the owner's
+  own words as the trigger — never the controller's inference. The worker
+  is already building under `implement/SKILL.md` § Build by the time this
+  reaches it: discard that work, reset to the ticket's base sha, and pick up
+  at Preflight below, then build under the inline door. The dispatching
+  session stays Claude for
+  claiming, the PR and the merge line, since those cost almost nothing.
 
 The brief carries what neither engine can infer:
 
