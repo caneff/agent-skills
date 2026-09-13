@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# One command says whether the retired front end is fully gone. Run with no
+# arguments.
+#
+# Greps the paths named in the removal inventory under docs/research/
+# (dated 2026-09-10) for the retired name, case-insensitive, `rg -uu`
+# (ignored and dotted paths included), and checks that its old worktree
+# directory is absent or empty. Exits 0 with a one-line pass; else lists
+# every hit and exits 1.
+#
+# Scope:
+#   - this repo, excluding docs/research/ (the inventory and other research
+#     notes name it throughout on purpose — that's the record, not a call
+#     site) and visual-teach/assets/ (vendored third-party minified JS;
+#     case-insensitive substring matching hits it by coincidence in a couple
+#     of minified identifiers — not a real reference)
+#   - both CLAUDE.md copies: this repo's flow/claude/CLAUDE.md (covered by
+#     the repo scan above) and ~/.claude/CLAUDE.md
+#   - regular files in ~/.local/bin (rg does not follow symlinks by default,
+#     so the many scripts symlinked in from this repo are not re-scanned here)
+#   - every AGENTS.md under ~/src
+#
+# The name this script searches for is assembled below rather than spelled
+# out, here or in its test, so this file and its fixtures never flag
+# themselves and never need an exclusion of their own.
+set -uo pipefail
+
+needle='or''ca'
+
+repo_root="${GONE_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+home_claude_md="${GONE_HOME_CLAUDE_MD:-$HOME/.claude/CLAUDE.md}"
+local_bin="${GONE_LOCAL_BIN:-$HOME/.local/bin}"
+src_dir="${GONE_SRC_DIR:-$HOME/src}"
+workspaces_dir="${GONE_WORKSPACES_DIR:-$HOME/$needle/workspaces}"
+
+hits=""
+add_hits() { # add_hits <rg output, possibly empty>
+  [ -n "$1" ] && hits="$hits
+$1"
+}
+
+add_hits "$(rg -uu -i -n "$needle" "$repo_root" \
+  --glob '!docs/research/**' --glob '!visual-teach/assets/**' 2>/dev/null)"
+
+[ -e "$home_claude_md" ] && add_hits "$(rg -uu -i -n "$needle" "$home_claude_md" 2>/dev/null)"
+
+[ -d "$local_bin" ] && add_hits "$(rg -uu -i -n "$needle" "$local_bin" 2>/dev/null)"
+
+if [ -d "$src_dir" ]; then
+  while IFS= read -r -d '' agents_md; do
+    add_hits "$(rg -uu -i -n "$needle" "$agents_md" 2>/dev/null)"
+  done < <(find "$src_dir" -iname AGENTS.md -print0 2>/dev/null)
+fi
+
+workspaces_left=""
+if [ -e "$workspaces_dir" ]; then
+  if [ -d "$workspaces_dir" ]; then
+    if [ -n "$(ls -A "$workspaces_dir" 2>/dev/null)" ]; then
+      workspaces_left="$workspaces_dir is not empty"
+    fi
+  else
+    workspaces_left="$workspaces_dir exists and is not a directory"
+  fi
+fi
+
+if [ -z "$hits" ] && [ -z "$workspaces_left" ]; then
+  echo "PASS: clean"
+  exit 0
+fi
+
+echo "FAIL: not clean"
+[ -n "$hits" ] && printf '%s\n' "$hits" | sed '/^$/d'
+[ -n "$workspaces_left" ] && echo "$workspaces_left"
+exit 1

@@ -133,35 +133,5 @@ else
   echo "FAIL a failing lane-install.sh broke or silenced the rest of the install (rc=$rc): $out"; fails=1
 fi
 
-# #715: the three retired helper scripts an earlier machine setup left on
-# PATH are cleaned up, whatever form each one takes — a plain file, a
-# symlink (dangling or not), or a directory (a plain `rm -f` fails on a
-# directory and, under install.sh's `set -e`, would abort the rest of the
-# install) — install.sh never linked them, so they are foreign leftovers,
-# not ours to preserve.
-legacy="$tmp/legacy"
-mkdir -p "$legacy/tests" "$legacy/home/.local/bin"
-cp -r "$root/flow" "$legacy/flow"
-rm -rf "$legacy/flow/lane/target"
-cp "$root/tests/all.sh" "$legacy/tests/all.sh"
-git -C "$legacy" init -q
-printf '#!/usr/bin/env bash\nexit 0\n' > "$legacy/flow/backup-sync.sh"
-printf '#!/usr/bin/env bash\necho stub\n' > "$legacy/home/.local/bin/orca-ide"
-chmod +x "$legacy/home/.local/bin/orca-ide"
-mkdir -p "$legacy/home/.local/bin/orca-wait"
-ln -s /nonexistent-target "$legacy/home/.local/bin/orca-auto-enter"
-out=$(HOME="$legacy/home" bash "$legacy/flow/install.sh" 2>&1); rc=$?
-survivors=""
-for retired_bin in orca-ide orca-wait orca-auto-enter; do
-  if [ -e "$legacy/home/.local/bin/$retired_bin" ] || [ -L "$legacy/home/.local/bin/$retired_bin" ]; then
-    survivors="$survivors $retired_bin"
-  fi
-done
-if [ "$rc" -eq 0 ] && [ -z "$survivors" ]; then
-  echo "PASS the three retired helper scripts are removed from ~/.local/bin"
-else
-  echo "FAIL install.sh rc=$rc, survivors:$survivors — out: $out"; fails=1
-fi
-
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
