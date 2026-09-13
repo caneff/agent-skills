@@ -27,12 +27,9 @@ Two doors, matching `implement/SKILL.md` § Build:
 
 - **Inline in this workspace** — `/codex:rescue`, one call, carrying the brief
   below. Read the result, not the codebase.
-- **Dispatched from the default branch** — the driver stays Claude, since
-  claiming, the PR and the merge line cost almost nothing. Pass the lane
-  through in the prompt: `--prompt "/implement <n> --codex"`.
-- **Dispatched as an Orca worker** — the same `worktree create` line with
-  `--agent codex` in place of `--agent claude`. The prompt is the brief, not
-  `/implement <n>`: Codex does not have these skills.
+- **No dispatched door yet** — `implement-dispatch` has no `--codex` flag.
+  Dispatch normally and build under the inline door from inside the
+  workspace. A dispatched Codex door is #688's to decide.
 
 The brief carries what neither engine can infer:
 
@@ -60,10 +57,11 @@ quota. In this lane they swap for:
 2. `/codex:adversarial-review` — the skeptical pass. Hand it the ticket body
    again; without it there is no spec axis, only taste.
 
-The three-pass cap and the gate-failure rule in `implement/SKILL.md` § Finish
-bind unchanged. So does the disclosure: the PR body names the reviews that
-actually ran and says the diff was written by Codex, not Claude. A reader who
-assumes a Claude review happened is reading a claim nobody made.
+The one-round-plus-verification cap and the pre-report gate in
+`implement/SKILL.md` § Review and § Before the PR bind unchanged. So does the
+disclosure: the PR body names the reviews that actually ran and says the diff
+was written by Codex, not Claude. A reader who assumes a Claude review
+happened is reading a claim nobody made.
 
 ## When quota runs out mid-run
 
