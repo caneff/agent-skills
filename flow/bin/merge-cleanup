@@ -20,7 +20,7 @@
 # registry session refuses unless its sessionId equals a herdr agent's
 # agent_session.value for that worktree, in which case the herdr agent's own
 # status decides it instead — working or blocked (or herdr cannot classify it)
-# refuses, idle (or done) this run stops itself and the removal proceeds. A
+# refuses, idle (or done) this run closes its pane and the removal proceeds. A
 # registry session with no matching herdr agent always refuses. Other idle
 # entries under .claude/worktrees are listed as "stale, not removed". The
 # herdr workspaces of removed worktrees close at exit, after everything else.
@@ -138,8 +138,8 @@ delete_local() { # delete_local <path> <branch>
 # session is not a stray: it is the worker's own pane, and the herdr agent's
 # status decides it instead. A herdr agent whose cwd is in the workspace
 # refuses only while its agent_status is working or blocked (or herdr cannot
-# classify it); an idle one (idle or done) this run stops itself, then
-# proceeds.
+# classify it); an idle one (idle or done) has its pane closed by this run,
+# then proceeds.
 in_tree() { case "$1/" in "$2"/*) true ;; *) false ;; esac; }
 registry_sessions() { # registry_sessions <worktree> -> "<pid>\t<sessionId>" per live registry session
   local wt="$1" f pid cwd sid
@@ -174,7 +174,7 @@ live_sessions() { # live_sessions <worktree> -> one line per live session, read-
   done <<< "$agents"
 }
 guard_live() { # guard_live <worktree>
-  local wt="$1" agents name status pane session pid sid blockers=() idles=() unresolved=()
+  local wt="$1" agents name status pane session pid sid blockers=() idles=() idle_panes=() unresolved=()
   command -v jq >/dev/null 2>&1 \
     || { echo "merge-cleanup: refusing to remove $wt — jq is not on PATH, so the sessions registry cannot be read" >&2; return 1; }
 
@@ -213,14 +213,16 @@ guard_live() { # guard_live <worktree>
   while IFS=$'\t' read -r name status pane session; do
     [ -n "$name" ] || continue
     case "$status" in
-      idle|done) idles+=("$name") ;;
+      idle|done) idles+=("$name"); idle_panes+=("$pane") ;;
       *)         blockers+=("herdr agent $name ($pane)") ;;
     esac
   done <<< "$agents"
   [ "${#blockers[@]}" -gt 0 ] && { refuse_live "$wt" "${blockers[@]}"; return 1; }
-  for name in "${idles[@]}"; do
-    run "stopping idle herdr agent $name" herdr agent stop "$name" \
-      || { echo "merge-cleanup: refusing to remove $wt — failed to stop herdr agent $name" >&2; return 1; }
+  local i
+  for i in "${!idles[@]}"; do
+    name="${idles[$i]}"; pane="${idle_panes[$i]}"
+    run "closing idle herdr agent $name's pane ($pane)" herdr pane close "$pane" \
+      || { echo "merge-cleanup: refusing to remove $wt — failed to close herdr agent $name's pane ($pane)" >&2; return 1; }
   done
 }
 
