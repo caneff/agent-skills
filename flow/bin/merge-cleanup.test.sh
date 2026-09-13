@@ -53,6 +53,7 @@ cat > "$tmp/stubs/herdr" <<'STUB'
 #!/usr/bin/env bash
 echo "herdr $*" >> "$HERDR_LOG"
 [ -n "${HERDR_FAIL:-}" ] && exit 1
+[ "${1:-} ${2:-}" = "agent stop" ] && [ "${3:-}" = "${HERDR_STOP_FAIL:-}" ] && exit 1
 case "${1:-} ${2:-}" in
   "agent list")     cat "$HERDR_AGENTS" ;;
   "workspace list") cat "$HERDR_WORKSPACES" ;;
@@ -461,6 +462,91 @@ if [ $rc -eq 0 ] && printf '%s' "$stale" | grep -q "agent-old" && ! printf '%s' 
 else
   no "the worktree under cleanup was reported stale (rc=$rc): $out"
 fi
+
+# --- 11. an idle herdr agent is stopped, a working or blocked one refuses --
+mkfixture "$tmp/r10"
+wt10="$tmp/r10/.claude/worktrees/implement-5"
+git -C "$tmp/r10" worktree add -q "$wt10" caneff/merged-one 2>/dev/null
+: > "$HERDR_LOG"
+printf '{"result":{"agents":[{"name":"skills-idle","pane_id":"w7:p1","cwd":"%s","agent_status":"idle"}]}}\n' \
+  "$wt10" > "$HERDR_AGENTS"
+printf '{"result":{"workspaces":[{"workspace_id":"w10","worktree":{"checkout_path":"%s"}}]}}\n' \
+  "$wt10" > "$HERDR_WORKSPACES"
+out=$(mc "$tmp/full" --repo "$tmp/r10" caneff/merged-one); rc=$?
+if [ $rc -eq 0 ] && grep -qx "herdr agent stop skills-idle" "$HERDR_LOG" \
+   && [ ! -d "$wt10" ] && ! git -C "$tmp/r10" show-ref -q --verify refs/heads/caneff/merged-one \
+   && grep -qx "herdr workspace close w10" "$HERDR_LOG"; then
+  ok "an idle herdr agent is stopped, the cleanup proceeds, and its workspace closes"
+else
+  no "idle herdr agent not stopped, cleanup blocked, or workspace not closed (rc=$rc): $(cat "$HERDR_LOG") / $out"
+fi
+echo '{"result":{"agents":[]}}' > "$HERDR_AGENTS"
+echo '{"result":{"workspaces":[]}}' > "$HERDR_WORKSPACES"
+
+for status in working blocked; do
+  mkfixture "$tmp/r10-$status"
+  wtN="$tmp/r10-$status/.claude/worktrees/implement-5"
+  git -C "$tmp/r10-$status" worktree add -q "$wtN" caneff/merged-one 2>/dev/null
+  printf '{"result":{"agents":[{"name":"skills-%s","pane_id":"w8:p1","cwd":"%s","agent_status":"%s"}]}}\n' \
+    "$status" "$wtN" "$status" > "$HERDR_AGENTS"
+  out=$(mc "$tmp/full" --repo "$tmp/r10-$status" caneff/merged-one); rc=$?
+  if [ $rc -ne 0 ] && [ -d "$wtN" ] \
+     && git -C "$tmp/r10-$status" show-ref -q --verify refs/heads/caneff/merged-one \
+     && printf '%s' "$out" | grep -q "skills-$status"; then
+    ok "a $status herdr agent refuses the cleanup"
+  else
+    no "a $status herdr agent did not refuse (rc=$rc): $out"
+  fi
+done
+echo '{"result":{"agents":[]}}' > "$HERDR_AGENTS"
+
+# A working sibling refuses without stopping an idle agent first — the outcome
+# must not depend on herdr agent list's order.
+mkfixture "$tmp/r12"
+wt12="$tmp/r12/.claude/worktrees/implement-7"
+git -C "$tmp/r12" worktree add -q "$wt12" caneff/merged-one 2>/dev/null
+: > "$HERDR_LOG"
+printf '{"result":{"agents":[{"name":"skills-idle2","pane_id":"w9:p1","cwd":"%s","agent_status":"idle"},{"name":"skills-working2","pane_id":"w9:p2","cwd":"%s","agent_status":"working"}]}}\n' \
+  "$wt12" "$wt12" > "$HERDR_AGENTS"
+out=$(mc "$tmp/full" --repo "$tmp/r12" caneff/merged-one); rc=$?
+if [ $rc -ne 0 ] && [ -d "$wt12" ] \
+   && git -C "$tmp/r12" show-ref -q --verify refs/heads/caneff/merged-one \
+   && ! grep -q "herdr agent stop" "$HERDR_LOG"; then
+  ok "a working sibling refuses before an idle agent in the same worktree is stopped"
+else
+  no "idle agent stopped ahead of a working sibling's refusal (rc=$rc): $(cat "$HERDR_LOG") / $out"
+fi
+echo '{"result":{"agents":[]}}' > "$HERDR_AGENTS"
+
+# A failing `herdr agent stop` refuses explicitly, instead of the verdict
+# silently depending on which agent's stop ran last.
+mkfixture "$tmp/r13"
+wt13="$tmp/r13/.claude/worktrees/implement-8"
+git -C "$tmp/r13" worktree add -q "$wt13" caneff/merged-one 2>/dev/null
+printf '{"result":{"agents":[{"name":"skills-stuck","pane_id":"w11:p1","cwd":"%s","agent_status":"idle"}]}}\n' \
+  "$wt13" > "$HERDR_AGENTS"
+out=$(HERDR_STOP_FAIL=skills-stuck mc "$tmp/full" --repo "$tmp/r13" caneff/merged-one); rc=$?
+if [ $rc -ne 0 ] && [ -d "$wt13" ] \
+   && git -C "$tmp/r13" show-ref -q --verify refs/heads/caneff/merged-one \
+   && printf '%s' "$out" | grep -qi "refusing.*skills-stuck"; then
+  ok "a failed herdr agent stop refuses explicitly, nothing removed"
+else
+  no "a failed stop did not refuse explicitly (rc=$rc): $out"
+fi
+echo '{"result":{"agents":[]}}' > "$HERDR_AGENTS"
+
+# A live registry pid still refuses even with no herdr agent present — unchanged.
+mkfixture "$tmp/r11"
+wt11="$tmp/r11/.claude/worktrees/implement-6"
+git -C "$tmp/r11" worktree add -q "$wt11" caneff/merged-one 2>/dev/null
+printf '{"pid":%s,"cwd":"%s"}\n' "$$" "$wt11" > "$HOME/.claude/sessions/r11.json"
+out=$(mc "$tmp/full" --repo "$tmp/r11" caneff/merged-one); rc=$?
+if [ $rc -ne 0 ] && printf '%s' "$out" | grep -q "pid $$" && [ -d "$wt11" ]; then
+  ok "a live registry pid with no herdr agent still refuses"
+else
+  no "live registry pid with no herdr agent not refused (rc=$rc): $out"
+fi
+rm "$HOME/.claude/sessions/r11.json"
 
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
