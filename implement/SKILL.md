@@ -100,9 +100,11 @@ No PR and no reviewer; Chris reads the log after.
 
 ### Review
 
-1. One full round of `/code-review` and `/two-axis-code-review`. Neither
-   produces the other's findings. Fix what is fixable; record the rest as
-   `disputed: <why>` or as a follow-up.
+1. One full round of `/two-axis-code-review` — its standards, spec and
+   correctness axes. Not the built-in `/code-review`: at medium effort it
+   forks eight finder agents for about 9M cached tokens on a 250-line diff
+   and the correctness axis finds what it finds (#732). Fix what is
+   fixable; record the rest as `disputed: <why>` or as a follow-up.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
    Pass the reviewers every disputed, ruled, or other-ticket item as settled.
 

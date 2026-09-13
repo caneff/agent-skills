@@ -1,14 +1,16 @@
 ---
 name: two-axis-code-review
-description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the over-engineering lens?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. It does NOT hunt runtime correctness bugs — the built-in `/code-review` does that, and the two are meant to run back to back. Use when the user wants a branch, PR, or work-in-progress diff checked against its spec and the repo's standards.
+description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along three axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the over-engineering lens?), Spec (does the code match what the originating issue/spec asked for?) and Correctness (how does it fail in the field, and does every new test actually witness its claim?). Runs the three reviews in parallel sub-agents and reports them side by side. It replaces the built-in `/code-review` in the implement lane, whose medium effort forks eight finder agents for ~9M cached tokens on a 250-line diff (agent-skills #732). Use when the user wants a branch, PR, or work-in-progress diff checked against its spec, the repo's standards, and runtime failure.
 ---
 
-Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
+Review of the diff between `HEAD` and a fixed point the user supplies, along
+three axes (the skill keeps its two-axis name; the third joined in #732):
 
 - **Standards** — does the code conform to this repo's documented coding standards?
 - **Spec** — does the code faithfully implement the originating issue / spec?
+- **Correctness** — how does it fail in the field, and does each new test witness what it claims?
 
-Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
+The axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
 
 The issue tracker should have been provided to you — run `/setup-matt-pocock-skills` if `docs/agents/issue-tracker.md` is missing.
 
@@ -79,11 +81,11 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 
 This lens **owns** the three smells above that are really over-engineering — Speculative Generality, Middle Man, Refused Bequest. Report each such cut **once**, under the over-engineering subsection (step 4), never twice. A single smoke test or `assert`-based self-check is the minimum, not bloat — never flag it as a cut.
 
-### 4. Spawn both sub-agents in parallel
+### 4. Spawn the three sub-agents in parallel
 
-Spawn both with the plain `Agent` tool, `subagent_type: diff-reviewer`, fire-and-return: no `name`, not background, no teammate messaging. This is what makes the result reach *you* as the agent's completion notification — even when you yourself are a subagent of some other caller. A named background teammate parks its report for `SendMessage`/`ListAgents` instead, and when you're a subagent nothing is polling for that: the report idles or lands nowhere.
+Spawn all three with the plain `Agent` tool, `subagent_type: diff-reviewer`, fire-and-return: no `name`, not background, no teammate messaging. This is what makes the result reach *you* as the agent's completion notification — even when you yourself are a subagent of some other caller. A named background teammate parks its report for `SendMessage`/`ListAgents` instead, and when you're a subagent nothing is polling for that: the report idles or lands nowhere.
 
-Pass `model: opus` to both. Review is Opus-tier and the user reads every line before merge, so a miss is caught downstream — do not let them inherit the session model.
+Pass `model: opus` to all three. Review is Opus-tier and the user reads every line before merge, so a miss is caught downstream — do not let them inherit the session model.
 
 The `diff-reviewer` agent definition (`flow/claude/agents/diff-reviewer.md`, installed at `~/.claude/agents/diff-reviewer.md` by `flow/install.sh`) carries the standing brief and points back at this file's § 3, so a prompt passes only what is specific to this diff. If `diff-reviewer` is not among the available agent types, run `bash flow/install.sh` and it will be; failing that, spawn without `subagent_type` and paste § 3 and the axis brief in full — the reviews still run, at the cost of the paste.
 
@@ -91,9 +93,9 @@ The `diff-reviewer` agent definition (`flow/claude/agents/diff-reviewer.md`, ins
 
 **A finding names the file and the intent, not the edit.** This is the one home for the rule; callers point here rather than reword it. Say where the problem is and what outcome is wrong; the fixer owns the file and picks the change. The observable: a finding never contains a command to run. A finding written as a patch to apply verbatim ("exactly these, nothing else", or a `git checkout <sha> -- <path>` the fixer is told to paste) turns one round into four — the fixer stops reading for the problem and starts applying the script, so a wrong script lands four times instead of being caught once.
 
-Both prompts carry only the **diff, the commit list, the spec/standards sources, and the settled decisions** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
+Every prompt carries only the **diff, the commit list, the spec/standards sources, and the settled decisions** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
 
-Belt and braces: append to **both** prompts — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards` or `spec`, `<n>` the issue number from step 2 (or the branch name if there is none). **Expand `<dir>` yourself before writing the prompt**: `$CLAUDE_JOB_DIR/tmp` if that variable is set in your session, else `/tmp`. Sub-agents do not inherit the variable, and a fallback inside the checkout leaves an untracked file that blocks `git worktree remove` (and so `ship`). Never point the report at `./.scratch/` or anywhere under the repo. If the completion notification comes back missing or empty, read that file before treating the report as absent.
+Belt and braces: append to **every** prompt — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). **Expand `<dir>` yourself before writing the prompt**: `$CLAUDE_JOB_DIR/tmp` if that variable is set in your session, else `/tmp`. Sub-agents do not inherit the variable, and a fallback inside the checkout leaves an untracked file that blocks `git worktree remove` (and so `ship`). Never point the report at `./.scratch/` or anywhere under the repo. If the completion notification comes back missing or empty, read that file before treating the report as absent.
 
 **Standards sub-agent prompt** — include:
 
@@ -107,21 +109,28 @@ Belt and braces: append to **both** prompts — "Also write your full report to 
 - The path or fetched contents of the spec, and the settled decisions.
 - The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Under 400 words."
 
-If the spec is missing, skip the Spec sub-agent and note this in the final report.
+**Correctness sub-agent prompt** — include:
 
-Once both agents finish, if an axis has neither a completion notification nor a fallback file, don't block or self-review in its place — report that axis in step 5 as `## Standards — NO REPORT RECEIVED` (or `## Spec — NO REPORT RECEIVED`) and move on.
+- The diff command and commit list.
+- The path or fetched contents of the spec if there is one (so "behaviour the ticket did not ask for" has a referent), the test command the repo uses, and the settled decisions.
+- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it (you may edit a scratch copy of the tree for this; the checkout is left exactly as found). Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
+
+If the spec is missing, skip the Spec sub-agent and note this in the final report; the Correctness sub-agent runs regardless, minus part (b).
+
+Once the agents finish, if an axis has neither a completion notification nor a fallback file, don't block or self-review in its place — report that axis in step 5 as `## Standards — NO REPORT RECEIVED` (or `## Spec — …`, `## Correctness — …`) and move on.
 
 ### 5. Aggregate
 
-Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
+Present the reports under `## Standards`, `## Spec` and `## Correctness` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings — the axes are deliberately separate (see _Why separate axes_).
 
 End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
 
-## Why two axes
+## Why separate axes
 
-A change can pass one axis and fail the other:
+A change can pass one axis and fail another:
 
 - Code that follows every standard but implements the wrong thing → **Standards pass, Spec fail.**
 - Code that does exactly what the issue asked but breaks the project's conventions → **Spec pass, Standards fail.**
+- Code that matches the ticket and the conventions and deletes the wrong branch when stdin is a pipe → **Standards and Spec pass, Correctness fail.**
 
-Reporting them separately stops one axis from masking the other.
+Reporting them separately stops one axis from masking another. On #731 the standards and spec axes found the rule and ticket findings, and every runtime finding (the prompt lost under a pipe, the ahead count that was noise, the unrecorded `branch -D`) came from the failure-scenario reader — at a tenth of the built-in `/code-review`'s cost when it is one opus reviewer rather than eight.

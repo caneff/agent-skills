@@ -33,8 +33,8 @@ Pick the tier by how much the agent must *do*, not by the topic:
     the files." The agent must search and navigate, but there's no judgment
     call in what counts as a match.
 - **`sonnet` is also the implementation tier** — ticket-sized, spec'd coding
-  with tests. The code lane's downstream nets (TDD red-green, `/code-review` +
-  `/two-axis-code-review`, the after-the-fact log read) are exactly the tie-breaker's "a check would
+  with tests. The code lane's downstream nets (TDD red-green, the three axes
+  of `/two-axis-code-review`, the after-the-fact log read) are exactly the tie-breaker's "a check would
   catch a miss", so builds default down, not up. Escalate a build to Opus
   only when the ticket itself is a judgment call: design still fuzzy, gnarly
   concurrency, or no test can express the requirement.

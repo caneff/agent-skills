@@ -53,8 +53,8 @@ resort.
 
 ## The reviews
 
-`/code-review` and `/two-axis-code-review` are Claude passes and cost Claude
-quota. In this lane they swap:
+`/two-axis-code-review`'s three axes are Claude passes and cost Claude
+quota. In this lane they swap for:
 
 1. `/codex:review` — correctness on the working diff.
 2. `/codex:adversarial-review` — the skeptical pass. Hand it the ticket body
