@@ -56,6 +56,17 @@ if [ -L "$git_common_dir/hooks/pre-push" ]; then
   echo "removed retired pre-push hook"
 fi
 
+# #715: drop the three retired helper scripts from ~/.local/bin if an earlier
+# setup put them there. Never ours to symlink — clean up whatever is at the
+# path, file, directory, or symlink (-rf, not -f: a stray directory there
+# would fail plain rm and abort the rest of the install under set -e).
+for retired_bin in orca-ide orca-wait orca-auto-enter; do
+  if [ -e "$HOME/.local/bin/$retired_bin" ] || [ -L "$HOME/.local/bin/$retired_bin" ]; then
+    rm -rf -- "$HOME/.local/bin/$retired_bin"
+    echo "removed retired $retired_bin"
+  fi
+done
+
 # Lay down the copy-only backups (files a symlink can't hold): the Windows VS
 # Code settings and claude/settings.json.
 bash "$here/backup-sync.sh" --restore

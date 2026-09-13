@@ -103,7 +103,7 @@ run "chain blocked names the tripping segment's pattern" 2 \
 # command in the chain, or a `push` that is only a word in a path, is not a
 # force-push (#637 — three false blocks in one burn).
 run "force on a non-push segment after a push allowed" 0 \
-  "git push -q origin b; orca-ide worktree rm --worktree x --force"
+  "git push -q origin b; git worktree remove --force x"
 run "pre-push path plus worktree remove --force allowed" 0 \
   "ls .git/hooks/pre-push && git worktree remove --force /tmp/x"
 run "git -C push -f still blocked" 2 "git -C /r push -f origin main" "force-push"
