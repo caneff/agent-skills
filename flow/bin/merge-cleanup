@@ -74,12 +74,12 @@ primary_of() { # primary_of <path> -> the repo's primary (non-linked) worktree
 # the ancestor test — fetching first, since it reads origin/<default> and a
 # stale ref there deletes a branch that is not merged.
 is_merged() { # is_merged <path> <branch>
-  local path="$1" b="$2" slug tip heads
+  local path="$1" b="$2" slug tip heads h
   if command -v gh >/dev/null 2>&1 && slug=$(slug_of "$path"); then
     tip=$(git -C "$path" rev-parse --verify -q "refs/heads/$b") || tip=""
     heads=$(gh pr list --repo "$slug" --head "$b" --state merged \
               --json headRefOid --jq '.[].headRefOid' 2>/dev/null) || heads=""
-    case "$tip" in '') ;; *) case $'\n'"$heads"$'\n' in *$'\n'"$tip"$'\n'*) return 0 ;; esac ;; esac
+    for h in $heads; do [ "$h" = "$tip" ] && return 0; done
   fi
   git -C "$path" fetch -q origin 2>/dev/null
   git -C "$path" merge-base --is-ancestor "$b" "origin/$(default_of "$path")" 2>/dev/null
@@ -87,12 +87,15 @@ is_merged() { # is_merged <path> <branch>
 
 # How far a branch is past the default branch — printed beside every sweep
 # deletion, so a wrong "merged" call shows up as a number, not as silence.
-ahead_of_default() { # ahead_of_default <path> <branch> -> "N commit(s) ahead of <default>"
-  local path="$1" b="$2" default base n
-  default=$(default_of "$path"); base="origin/$default"
-  git -C "$path" show-ref -q --verify "refs/remotes/$base" || base="$default"
-  n=$(git -C "$path" rev-list --count "$base..$b" 2>/dev/null) || n="?"
-  if [ "$n" = 1 ]; then echo "1 commit ahead of $default"; else echo "$n commits ahead of $default"; fi
+ahead_count() { # ahead_count <path> <branch> -> N, or ? when git cannot say
+  local path="$1" b="$2" base
+  base="origin/$(default_of "$path")"
+  git -C "$path" show-ref -q --verify "refs/remotes/$base" || base="${base#origin/}"
+  git -C "$path" rev-list --count "$base..$b" 2>/dev/null || echo "?"
+}
+ahead_text() { # ahead_text <path> <N> -> "N commit(s) ahead of <default>"
+  local s="s"; [ "$2" = 1 ] && s=""
+  echo "$2 commit$s ahead of $(default_of "$1")"
 }
 
 # Step 4's delete. `-d` first: it is the honest question, and it succeeds on a
@@ -248,7 +251,8 @@ if [ "$sweep" = 1 ]; then
   [ -n "$branch$pr" ] && die "--sweep takes no branch or PR"
   root="${root:-$HOME/src}"
   [ -d "$root" ] || die "no such root: $root"
-  rc=0 repos=() plan=()
+  rc=0 repos=() plan=() header="sweep plan"
+  [ "$dry" = 1 ] && header="$header (dry run)"
   # Pass 1 — the plan: every merged branch, with its distance past the default
   # branch, before anything is touched.
   for d in "$root"/*/; do
@@ -258,14 +262,14 @@ if [ "$sweep" = 1 ]; then
     while read -r b; do
       [ -n "$b" ] && [ "$b" != "$default" ] || continue
       is_merged "$d" "$b" || continue
-      plan+=("$d|$b|$(ahead_of_default "$d" "$b")")
+      plan+=("$d|$b|$(ahead_count "$d" "$b")")
     done < <(git -C "$d" for-each-ref --format='%(refname:short)' refs/heads/)
   done
   if [ "${#plan[@]}" -gt 0 ]; then
-    echo "sweep plan${dry:+ (dry run)}: ${#plan[@]} merged branch(es) under $root"
+    echo "$header: ${#plan[@]} merged branch(es) under $root"
     for row in "${plan[@]}"; do
-      IFS='|' read -r d b ahead <<< "$row"
-      echo "  $(basename "${d%/}") $b  $ahead"
+      IFS='|' read -r d b n <<< "$row"
+      echo "  $(basename "${d%/}") $b  $(ahead_text "$d" "$n")"
     done
     # Nothing is deleted until confirmed. A closed or non-terminal stdin is
     # not a yes: an unattended sweep needs --yes on the line.
@@ -277,12 +281,12 @@ if [ "$sweep" = 1 ]; then
   fi
   # Pass 2 — the cleanup.
   for row in "${plan[@]}"; do
-    IFS='|' read -r d b ahead <<< "$row"
+    IFS='|' read -r d b n <<< "$row"
     echo "== ${d%/} $b"
     if cleanup_branch "$d" "$b"; then
-      rows+=("$(basename "${d%/}")|$b|cleaned|$ahead")
+      rows+=("$(basename "${d%/}")|$b|cleaned|$(ahead_text "$d" "$n")")
     else
-      rows+=("$(basename "${d%/}")|$b|FAILED|$ahead"); rc=1
+      rows+=("$(basename "${d%/}")|$b|FAILED|$(ahead_text "$d" "$n")"); rc=1
     fi
   done
   echo

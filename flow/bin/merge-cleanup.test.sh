@@ -249,12 +249,20 @@ git -C "$tmp/src/other" worktree add -q --detach "$tmp/src/other/.claude/worktre
 git -C "$tmp/src/other" worktree add -q "$tmp/src/other/.claude/worktrees/implement-9" caneff/merged-one 2>/dev/null
 printf '{"result":{"workspaces":[{"workspace_id":"w4","worktree":{"checkout_path":"%s"}}]}}\n' \
   "$tmp/src/other/.claude/worktrees/implement-9" > "$HERDR_WORKSPACES"
+out=$(mc "$tmp/full" --sweep --root "$tmp/src" --dry-run </dev/null); rc=$?
+if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "^sweep plan (dry run):" \
+   && git -C "$tmp/src/other" show-ref -q --verify refs/heads/caneff/merged-one; then
+  ok "a dry-run sweep labels its plan, never asks, and deletes nothing"
+else
+  no "dry-run sweep asked or was unlabelled (rc=$rc): $out"
+fi
 # Without --yes the sweep prints its plan and waits for a "y"; a closed stdin
 # is not a yes. Nothing is deleted, and the plan carries the ahead count.
 out=$(mc "$tmp/full" --sweep --root "$tmp/src" </dev/null); rc=$?
 if [ $rc -ne 0 ] && git -C "$tmp/src/other" show-ref -q --verify refs/heads/caneff/merged-one \
    && [ -d "$tmp/src/other/.claude/worktrees/implement-9" ] \
-   && printf '%s' "$out" | grep -q "other caneff/merged-one.*1 commit ahead of main"; then
+   && printf '%s' "$out" | grep -q "other caneff/merged-one.*1 commit ahead of main" \
+   && ! printf '%s' "$out" | grep -q "(dry run)"; then
   ok "sweep without --yes prints the plan and deletes nothing"
 else
   no "sweep without --yes deleted something or printed no plan (rc=$rc): $out"

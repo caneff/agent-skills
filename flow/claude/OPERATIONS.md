@@ -101,8 +101,9 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   and its `Closes` check: § Light tier. Why: one home, so the
   lane and this file cannot drift apart.
 - Pair the merge line with `merge-cleanup --repo <primary checkout> <branch>`
-  (`--help` for PR/URL and `--sweep`, which shows its plan and asks before
-  deleting; `--yes` answers for an unattended run). It removes the workspace, deletes the
-  branch local and remote, closes the herdr workspace, and fast-forwards the
-  primary checkout; its live-session guard refuses while the worker is
-  alive. Why: nothing else cleans up after a merge, and worktrees pile up.
+  (`--help` for PR/URL and `--sweep`). The sweep shows its plan and asks
+  before deleting; `--yes` answers for an unattended run. It removes the
+  workspace, deletes the branch local and remote, closes the herdr
+  workspace, and fast-forwards the primary checkout; its live-session guard
+  refuses while the worker is alive. Why: nothing else cleans up after a
+  merge, and worktrees pile up.
