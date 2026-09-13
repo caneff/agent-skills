@@ -30,15 +30,23 @@ mkbin() { # mkbin <dir> <stub>...
 mkdir -p "$tmp/stubs"
 cat > "$tmp/stubs/gh" <<'STUB'
 #!/usr/bin/env bash
-# `pr list --head <b>` reports merged only for caneff/merged-one;
-# `pr view <n>` resolves PR 7 to that same branch.
-head=""; prev=""; sub="${1:-} ${2:-}"
-for a in "$@"; do [ "$prev" = "--head" ] && head="$a"; prev="$a"; done
+# `pr list --head <b>` reports a merged PR for the branches mkfixture records
+# under $GH_PR_HEADS (one file per branch, `/` as `__`, holding the sha the PR
+# merged at); `pr view <n>` resolves PR 7 to caneff/merged-one.
+head=""; prev=""; sub="${1:-} ${2:-}"; jq=0
+for a in "$@"; do [ "$prev" = "--head" ] && head="$a"; [ "$a" = "--jq" ] && jq=1; prev="$a"; done
 case "$sub" in
   "pr view") [ "${3:-}" = "7" ] && { echo caneff/merged-one; exit 0; }; exit 1 ;;
 esac
-if [ "$head" = "caneff/merged-one" ]; then echo '[{"number":7}]'; else echo '[]'; fi
+f="$GH_PR_HEADS/${head//\//__}"
+if [ -f "$f" ]; then
+  oid=$(cat "$f")
+  if [ "$jq" = 1 ]; then echo "$oid"; else echo "[{\"number\":7,\"headRefOid\":\"$oid\"}]"; fi
+else
+  [ "$jq" = 1 ] || echo '[]'
+fi
 STUB
+export GH_PR_HEADS="$tmp/gh-pr-heads"; mkdir -p "$GH_PR_HEADS"
 # herdr answers `agent list` and `workspace list` from the JSON files the case
 # under test writes, and logs every call.
 cat > "$tmp/stubs/herdr" <<'STUB'
@@ -77,6 +85,15 @@ mkfixture() { # mkfixture <dir>
     git -C "$d" checkout -q -b "$b" main
     echo "$b" >> "$d/f"; git -C "$d" commit -qam "$b"; git -C "$d" push -q -u origin "$b"
   done
+  git -C "$d" checkout -q main
+  # The tracker merged caneff/merged-one at its tip. caneff/merged-then-more
+  # had a PR merged at its first commit, then kept going — the incident shape.
+  git -C "$d" rev-parse caneff/merged-one > "$GH_PR_HEADS/caneff__merged-one"
+  git -C "$d" checkout -q -b caneff/merged-then-more main
+  echo landed >> "$d/f"; git -C "$d" commit -qam "landed via a PR"
+  git -C "$d" rev-parse HEAD > "$GH_PR_HEADS/caneff__merged-then-more"
+  echo unlanded >> "$d/f"; git -C "$d" commit -qam "kept going after the PR"
+  git -C "$d" push -q -u origin caneff/merged-then-more
   git -C "$d" checkout -q main
   # caneff/ff-merged is genuinely in main: `git branch -d` accepts it.
   git -C "$d" checkout -q -b caneff/ff-merged main
@@ -122,6 +139,15 @@ if [ $rc -eq 0 ] && ! git -C "$tmp/r1" show-ref -q --verify refs/heads/caneff/op
   ok "--force cleans up an unmerged branch"
 else
   no "--force did not clean up (rc=$rc): $out"
+fi
+
+# --- 2b. a merged PR is not the branch: the tip must be the PR's head -------
+out=$(mc "$tmp/full" --repo "$tmp/r1" caneff/merged-then-more); rc=$?
+if [ $rc -ne 0 ] && printf '%s' "$out" | grep -qi "not merged" \
+   && git -C "$tmp/r1" show-ref -q --verify refs/heads/caneff/merged-then-more; then
+  ok "a branch with commits past its merged PR's head is refused, branch kept"
+else
+  no "branch past its merged PR was treated as merged (rc=$rc): $out"
 fi
 
 # --- 3. the default branch is refused --------------------------------------

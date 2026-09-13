@@ -63,14 +63,20 @@ primary_of() { # primary_of <path> -> the repo's primary (non-linked) worktree
 
 # Step 2 — is this branch actually merged? The tracker is the authority: a
 # squash merge leaves none of the branch's commits in the default branch, so
-# an ancestor test alone would call every squashed branch unmerged. Without
-# gh, fall back to the ancestor test — fetching first, since it reads
-# origin/<default> and a stale ref there deletes a branch that is not merged.
+# an ancestor test alone would call every squashed branch unmerged. But a
+# merged PR proves only the sha it merged at: a branch that kept going after
+# its PR is merged up to that head and unlanded past it, so the tip must equal
+# a merged PR's head. (2026-09-13: a sweep took "a PR from this branch once
+# merged" as merged and deleted 87 unlanded commits.) Without gh, fall back to
+# the ancestor test — fetching first, since it reads origin/<default> and a
+# stale ref there deletes a branch that is not merged.
 is_merged() { # is_merged <path> <branch>
-  local path="$1" b="$2" slug out
+  local path="$1" b="$2" slug tip heads
   if command -v gh >/dev/null 2>&1 && slug=$(slug_of "$path"); then
-    out=$(gh pr list --repo "$slug" --head "$b" --state merged --json number 2>/dev/null) || out=""
-    case "$out" in ''|'[]') ;; *) return 0 ;; esac
+    tip=$(git -C "$path" rev-parse --verify -q "refs/heads/$b") || tip=""
+    heads=$(gh pr list --repo "$slug" --head "$b" --state merged \
+              --json headRefOid --jq '.[].headRefOid' 2>/dev/null) || heads=""
+    case "$tip" in '') ;; *) case $'\n'"$heads"$'\n' in *$'\n'"$tip"$'\n'*) return 0 ;; esac ;; esac
   fi
   git -C "$path" fetch -q origin 2>/dev/null
   git -C "$path" merge-base --is-ancestor "$b" "origin/$(default_of "$path")" 2>/dev/null
