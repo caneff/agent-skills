@@ -178,8 +178,8 @@ impl Occupancy {
 
 /// The agents that block a removal, as "herdr agent <name> (<pane>)": every
 /// one that is not idle, and every one herdr gives no name — an agent that
-/// cannot be named cannot be classified, so it neither clears the worktree
-/// nor explains a registry session away.
+/// cannot be named cannot be classified, so it never clears the worktree,
+/// and a registry session it explains is refused through it instead.
 fn blockers(agents: &[Agent]) -> Vec<String> {
     agents
         .iter()
@@ -220,9 +220,7 @@ impl Cleanup {
         // A registry session is explained away only by a herdr agent whose
         // own sessionId matches it — herdr agent list has to have answered.
         let herdr_sessions: Vec<&str> = match &herdr {
-            Some(Ok(agents)) => {
-                agents.iter().filter(|a| !a.name().is_empty()).map(Agent::session).filter(|s| !s.is_empty()).collect()
-            }
+            Some(Ok(agents)) => agents.iter().map(Agent::session).filter(|s| !s.is_empty()).collect(),
             _ => Vec::new(),
         };
         let unresolved = sessions::live_in(Path::new(&self.home), wt)

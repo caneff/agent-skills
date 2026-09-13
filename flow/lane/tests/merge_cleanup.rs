@@ -472,19 +472,21 @@ fn a_live_registry_pid_with_no_herdr_agent_still_refuses() {
 }
 
 #[test]
-fn a_herdr_agent_with_no_name_refuses_and_excuses_no_registry_session() {
-    // An agent herdr cannot name cannot be classified, so it blocks whatever
-    // its status says, and its session id explains nothing away.
-    for status in ["working", "idle"] {
+fn a_herdr_agent_with_no_name_refuses_whatever_its_status() {
+    // An agent herdr cannot name cannot be classified, so it blocks — alone
+    // and idle, or working behind a registry session it would explain.
+    for (status, registry) in [("idle", false), ("working", true)] {
         let c = Cleanup::new();
         let (r, wt) = lane_workspace(&c, "r22", "implement-22");
-        c.session("r22", &format!(r#"{{"pid":{},"cwd":"{}","sessionId":"sess-22"}}"#, me(), wt.display()));
+        if registry {
+            c.session("r22", &format!(r#"{{"pid":{},"cwd":"{}","sessionId":"sess-22"}}"#, me(), wt.display()));
+        }
         c.set_agents(&format!(
             r#"[{{"pane_id":"w22:p1","cwd":"{}","agent_status":"{status}","agent_session":{{"value":"sess-22"}}}}]"#,
             wt.display()
         ));
         let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
-        assert!(!run.ok && run.stderr.contains("a live session is in it:"), "{status}: {}", run.text());
+        assert!(!run.ok && run.stderr.contains("a live session is in it: an unnamed herdr agent (w22:p1)"), "{status}: {}", run.text());
         assert!(wt.is_dir() && c.has_branch(&r, "caneff/merged-one"), "{status}");
         assert!(!c.calls().contains("pane close"), "{}", c.calls());
     }
