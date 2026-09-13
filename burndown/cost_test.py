@@ -9,8 +9,8 @@ import sys
 import tempfile
 
 COST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cost.py")
-WORKTREE = "/home/someone/orca/workspaces/repo/a"
-PROJECT_DIR = "-home-someone-orca-workspaces-repo-a"
+WORKTREE = "/home/someone/repo/.claude/worktrees/a"
+PROJECT_DIR = "-home-someone-repo--claude-worktrees-a"
 
 
 def _line(sidechain, *, inp=0, cache_creation=0, cache_read=0, out=0, mid=None):
