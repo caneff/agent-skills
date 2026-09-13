@@ -95,7 +95,18 @@ The `diff-reviewer` agent definition (`flow/claude/agents/diff-reviewer.md`, ins
 
 Every prompt carries only the **diff, the commit list, the spec/standards sources, and the settled decisions** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
 
-Belt and braces: append to **every** prompt — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). **Expand `<dir>` yourself before writing the prompt**: `$CLAUDE_JOB_DIR/tmp` if that variable is set in your session, else `/tmp`. Sub-agents do not inherit the variable, and a fallback inside the checkout leaves an untracked file that blocks `git worktree remove` (and so `ship`). Never point the report at `./.scratch/` or anywhere under the repo. If the completion notification comes back missing or empty, read that file before treating the report as absent.
+Belt and braces: append to **every** prompt — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). `/tmp` is wiped at every boot here and herdr workers never set `$CLAUDE_JOB_DIR`, so these reports — the only record of what each reviewer said — need a home that survives: `~/.cache/agent-reviews/<repo>/`. Never point the report at `./.scratch/` or anywhere under the repo — an untracked file there blocks `git worktree remove` (and so `ship`).
+
+**Expand `<dir>` yourself before writing the prompt**, and prune anything untouched for 14 days, the same folder style and retention `job-run` gives `~/.cache/agent-jobs`. `<repo>` must be the repo's own name, not the worktree's — reviews always run from a task worktree, and `git rev-parse --show-toplevel` there returns the worktree path, so key on the common `.git` instead:
+
+```
+top=$(git rev-parse --path-format=absolute --git-common-dir) || exit 1
+dir="$HOME/.cache/agent-reviews/$(basename "$(dirname "$top")")"
+mkdir -p "$dir"
+find "$dir" -maxdepth 1 -type f -mtime +13 -delete  # +13, not +14: find's -mtime +N means "older than N+1 days"
+```
+
+If the completion notification comes back missing or empty, read that file before treating the report as absent.
 
 **Standards sub-agent prompt** — include:
 
