@@ -4,4 +4,5 @@
 > [#700](https://github.com/caneff/agent-skills/issues/700)'s "Out of scope"
 > note. This file told a burn to hand a spec's slices to `implement-spec` as
 > one unit rather than build them ticket by ticket; that handoff and the
-> tool it dispatched into are both retired with the lane.
+> tool it dispatched into are both retired with the lane. Full text:
+> `git show 7c7eb30:burndown/references/spec-handoff.md`.

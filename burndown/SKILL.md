@@ -9,7 +9,8 @@ disable-model-invocation: true
 > note. Everything this skill described — the batch loop, exploration and
 > clumping, worker dispatch, the review round, and the progress and cost
 > bookkeeping — is retired with the tool it ran on; nothing below is
-> executable policy until the lane is rebuilt.
+> executable policy until the lane is rebuilt. Full text:
+> `git show 7c7eb30:burndown/SKILL.md`.
 
 A single spec's slices in one workspace are
 [`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this

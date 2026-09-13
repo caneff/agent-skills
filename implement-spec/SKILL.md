@@ -9,7 +9,7 @@ disable-model-invocation: true
 > note. Everything this skill described — the spec-wide task graph, worker
 > dispatch, wait, gates, and the end-of-spec review loop — is retired with
 > the tool it ran on; nothing below is executable policy until the lane is
-> rebuilt.
+> rebuilt. Full text: `git show 7c7eb30:implement-spec/SKILL.md`.
 
 A mixed-origin queue — several tickets from different specs, not one spec's
 slices — is [`burndown`](../burndown/SKILL.md)'s job, also parked.
