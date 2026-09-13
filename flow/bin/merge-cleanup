@@ -149,12 +149,6 @@ registry_sessions() { # registry_sessions <worktree> -> "<pid>\t<sessionId>" per
     [ -n "$pid" ] && in_tree "$cwd" "$wt" && kill -0 "$pid" 2>/dev/null && printf '%s\t%s\n' "$pid" "$sid"
   done
 }
-registry_pids() { # registry_pids <worktree> -> "pid <pid>" per live registry session
-  local pid sid
-  while IFS=$'\t' read -r pid sid; do
-    [ -n "$pid" ] && echo "pid $pid"
-  done < <(registry_sessions "$1")
-}
 herdr_agents_in() { # herdr_agents_in <worktree> -> "<name>\t<status>\t<pane_id>\t<session>" per herdr agent there; empty when herdr is absent, 1 when the `herdr agent list` call itself fails
   local wt="$1"
   command -v herdr >/dev/null 2>&1 || return 0
@@ -162,9 +156,17 @@ herdr_agents_in() { # herdr_agents_in <worktree> -> "<name>\t<status>\t<pane_id>
     | select(.cwd == $wt or (.cwd // "" | startswith($wt + "/")))
     | [(.name // .agent), (.agent_status // ""), (.pane_id // ""), (.agent_session.value // "")] | @tsv' 2>/dev/null
 }
+refuse_live() { # refuse_live <worktree> <item>... -> refuses with the joined item list, always returns 1
+  local wt="$1"; shift
+  local joined; joined=$(IFS=', '; echo "$*")
+  echo "merge-cleanup: refusing to remove $wt — a live session is in it: $joined" >&2
+  return 1
+}
 live_sessions() { # live_sessions <worktree> -> one line per live session, read-only; 1 if herdr cannot answer
-  local wt="$1" agents name status pane session
-  registry_pids "$wt"
+  local wt="$1" agents name status pane session pid sid
+  while IFS=$'\t' read -r pid sid; do
+    [ -n "$pid" ] && echo "pid $pid"
+  done < <(registry_sessions "$wt")
   agents=$(herdr_agents_in "$wt") || return 1
   [ -z "$agents" ] && return 0
   while IFS=$'\t' read -r name status pane session; do
@@ -196,12 +198,7 @@ guard_live() { # guard_live <worktree>
     [ -n "$sid" ] && [ -n "${herdr_session_ids[$sid]:-}" ] && continue
     unresolved+=("pid $pid")
   done < <(registry_sessions "$wt")
-  if [ "${#unresolved[@]}" -gt 0 ]; then
-    local joined
-    joined=$(IFS=', '; echo "${unresolved[*]}")
-    echo "merge-cleanup: refusing to remove $wt — a live session is in it: $joined" >&2
-    return 1
-  fi
+  [ "${#unresolved[@]}" -gt 0 ] && { refuse_live "$wt" "${unresolved[@]}"; return 1; }
 
   [ "$herdr_present" = 1 ] || { skip "the herdr agent check" "herdr is not on PATH"; return 0; }
   # A herdr that cannot answer cannot clear the workspace either.
@@ -220,12 +217,7 @@ guard_live() { # guard_live <worktree>
       *)         blockers+=("herdr agent $name ($pane)") ;;
     esac
   done <<< "$agents"
-  if [ "${#blockers[@]}" -gt 0 ]; then
-    local joined
-    joined=$(IFS=', '; echo "${blockers[*]}")
-    echo "merge-cleanup: refusing to remove $wt — a live session is in it: $joined" >&2
-    return 1
-  fi
+  [ "${#blockers[@]}" -gt 0 ] && { refuse_live "$wt" "${blockers[@]}"; return 1; }
   for name in "${idles[@]}"; do
     run "stopping idle herdr agent $name" herdr agent stop "$name" \
       || { echo "merge-cleanup: refusing to remove $wt — failed to stop herdr agent $name" >&2; return 1; }
