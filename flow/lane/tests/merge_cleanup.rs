@@ -90,14 +90,71 @@ fn the_full_run_deletes_both_branches_and_fast_forwards() {
 }
 
 #[test]
-fn the_deleted_tip_is_recorded_under_refs_deleted() {
+fn the_deleted_tip_is_recorded_under_refs_deleted_keyed_by_its_short_sha() {
     let c = Cleanup::new();
     let r = c.mkfixture("r1");
     let tip = c.rev(&r, "caneff/merged-one");
+    let short = c.git_out(&["-C", s(&r), "rev-parse", "--short", &tip]);
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok, "{}", run.text());
-    assert_eq!(c.rev(&r, "refs/deleted/caneff/merged-one"), tip);
-    assert!(run.has("refs/deleted/caneff/merged-one"), "{}", run.text());
+    let record = format!("refs/deleted/caneff/merged-one@{short}");
+    assert_eq!(c.rev(&r, &record), tip);
+    let line = format!("recorded the tip of caneff/merged-one at {record} (git branch caneff/merged-one {record} restores it)");
+    assert!(run.stdout.contains(&line), "{}", run.text());
+}
+
+/// Every `refs/deleted/` record in `repo`, as `<ref> <sha>` lines.
+fn deleted_records(c: &Cleanup, repo: &std::path::Path) -> Vec<String> {
+    c.git_out(&["-C", s(repo), "for-each-ref", "--format=%(refname) %(objectname)", "refs/deleted/"]).lines().map(str::to_string).collect()
+}
+
+#[test]
+fn nested_branch_names_do_not_collide_under_refs_deleted() {
+    // #737: git cannot hold refs/deleted/foo and refs/deleted/foo/bar at once.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r1");
+    c.git_ok(&["-C", s(&r), "branch", "foo", "caneff/local-only"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "foo", "--force"], &[]);
+    assert!(run.ok && !c.has_branch(&r, "foo"), "{}", run.text());
+    c.git_ok(&["-C", s(&r), "branch", "foo/bar", "caneff/open-one"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "foo/bar", "--force"], &[]);
+    assert!(run.ok && !c.has_branch(&r, "foo/bar"), "{}", run.text());
+    let records = deleted_records(&c, &r);
+    assert_eq!(records.len(), 2, "{records:?}");
+    assert!(records.iter().any(|l| l.starts_with("refs/deleted/foo@") && l.ends_with(&c.rev(&r, "caneff/local-only"))), "{records:?}");
+    assert!(records.iter().any(|l| l.starts_with("refs/deleted/foo/bar@") && l.ends_with(&c.rev(&r, "caneff/open-one"))), "{records:?}");
+}
+
+#[test]
+fn deleting_a_branch_name_twice_keeps_both_tips() {
+    // #737: the second delete of a name must not overwrite the first record.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r1");
+    for tip in ["caneff/local-only", "caneff/open-one"] {
+        c.git_ok(&["-C", s(&r), "branch", "again", tip]);
+        let run = c.mc(Tools::Full, &["--repo", s(&r), "again", "--force"], &[]);
+        assert!(run.ok && !c.has_branch(&r, "again"), "{}", run.text());
+    }
+    let shas: Vec<String> = deleted_records(&c, &r).iter().map(|l| l.rsplit(' ').next().unwrap().to_string()).collect();
+    let mut want = vec![c.rev(&r, "caneff/local-only"), c.rev(&r, "caneff/open-one")];
+    let mut got = shas.clone();
+    want.sort();
+    got.sort();
+    assert_eq!(got, want);
+}
+
+#[test]
+fn a_record_that_cannot_be_written_says_so_and_keeps_the_branch() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r1");
+    let short = c.git_out(&["-C", s(&r), "rev-parse", "--short", "caneff/local-only"]);
+    let lock = r.join(format!(".git/refs/deleted/caneff/local-only@{short}.lock"));
+    std::fs::create_dir_all(lock.parent().unwrap()).unwrap();
+    std::fs::write(&lock, "").unwrap();
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/local-only", "--force"], &[]);
+    let want = format!("merge-cleanup: could not record the tip of caneff/local-only at refs/deleted/caneff/local-only@{short}, so it was not deleted: ");
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+    assert!(c.has_branch(&r, "caneff/local-only"));
 }
 
 #[test]
@@ -160,6 +217,7 @@ fn help_prints_the_header_and_exits_zero() {
     assert!(run.ok);
     assert!(run.stdout.starts_with("The tail Chris hand-ran after every squash merge"), "{}", run.stdout);
     assert!(run.stdout.contains("  merge-cleanup --sweep [--root <dir>] [--yes] [--dry-run]\n"), "{}", run.stdout);
+    assert!(run.stdout.contains("`git branch <branch> refs/deleted/<branch>@<short sha>` restores."), "{}", run.stdout);
 }
 
 #[test]

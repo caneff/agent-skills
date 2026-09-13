@@ -25,8 +25,9 @@ and how many commits sit past that proof (0 is healthy) — and asks before
 touching anything: --yes answers for you, --dry-run never asks. Then it runs
 the same six steps for each and prints a summary table with the same count.
 
-Every local branch delete first records the tip under refs/deleted/<branch>;
-`git branch <branch> refs/deleted/<branch>` restores it.
+Every local branch delete first records the tip under
+refs/deleted/<branch>@<short sha>, which
+`git branch <branch> refs/deleted/<branch>@<short sha>` restores.
 
 A linked worktree is never removed while a live session is in it: a sessions
 registry session refuses unless its sessionId equals a herdr agent's
@@ -462,11 +463,25 @@ impl Cleanup {
         }
         // The tip goes under refs/deleted first, so a wrong verdict is undone
         // with `git branch` rather than reflog forensics. A ref, not a note,
-        // so the objects stay reachable past reflog expiry and gc.
-        if !status("git", &["-C", path, "update-ref", &format!("refs/deleted/{b}"), &format!("refs/heads/{b}")]) {
-            return false;
+        // so the objects stay reachable past reflog expiry and gc. Keyed by
+        // the tip's short sha (#737): refs/deleted/foo would block a later
+        // refs/deleted/foo/bar, and a second delete of the same name would
+        // overwrite the tip the first record kept.
+        let short = quiet_stdout("git", &["-C", path, "rev-parse", "--short", &format!("refs/heads/{b}")]).unwrap_or_default();
+        let record = format!("refs/deleted/{b}@{short}");
+        let written = lane::runner::run("git", &["-C", path, "update-ref", &record, &format!("refs/heads/{b}")]);
+        match written {
+            Ok(out) if out.success => {}
+            Ok(out) => {
+                eprintln!("merge-cleanup: could not record the tip of {b} at {record}, so it was not deleted: {}", out.combined);
+                return false;
+            }
+            Err(e) => {
+                eprintln!("merge-cleanup: could not record the tip of {b} at {record}, so it was not deleted: {e}");
+                return false;
+            }
         }
-        println!("recorded the tip of {b} at refs/deleted/{b} (git branch {b} refs/deleted/{b} restores it)");
+        println!("recorded the tip of {b} at {record} (git branch {b} {record} restores it)");
         if quiet_stderr_ok("git", &["-C", path, "branch", "-d", b]) {
             println!("deleted local branch {b}");
             return true;
