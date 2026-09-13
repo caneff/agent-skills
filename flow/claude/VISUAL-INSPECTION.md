@@ -4,9 +4,14 @@ Pointer target for `CLAUDE.md` § Gotchas.
 
 ## Showing me a file
 
-**[Orca]** Open it in Orca's editor: `orca-ide file open <path>
-[--worktree <selector>]` (`file diff`, `file open-changed` likewise). Never
-print a path and ask me to open it.
+Open it for me; never print a path and ask me to open it. Why: that hands me
+a step your own hands can do.
+
+- A source file: `code --reuse-window --goto <path>[:line[:col]]` — it lands
+  in the VS Code window I already have open.
+- A rendered HTML page I should look at myself: `wslview <file>` opens it in
+  my Windows browser. That is my opener, not your reader — you read the page
+  through `shot-scraper` below.
 
 ## Reading a rendered page yourself
 
@@ -28,7 +33,8 @@ and never your own headless Chrome:
 - `shot-scraper html` and `shot-scraper pdf` likewise.
 
 Bare paths work — it prefixes `file:` itself. Never stand up an http server
-or a screenshot MCP to read a local page.
+or a screenshot MCP to read a local page. Why: shot-scraper already reads the
+file directly, and a server is one more process to leave running.
 
 ## A visible window on my monitor
 
@@ -38,18 +44,19 @@ control. **Load `computer-use` on my own intent, with you having named
 nothing**: its triggers are all phrases *you* say, so it never fires when I
 am the one who needs to look at something, and that gap is what sends you
 building an http server instead. Fix the gap here and not in that skill's
-own file — it is `orca skills install` output, gitignored, and regenerated on
-the next install.
+own file — it is installer output, gitignored, and regenerated on the next
+install.
 
 ## Windows and WSL
 
-My desktop is Windows; WSL (distro `Ubuntu-24.04`) is the shell only. Orca and
-VS Code run as Windows builds against WSL, and worktree paths reach Windows
+My desktop is Windows; WSL (distro `Ubuntu-24.04`) is the shell only. VS Code
+runs as a Windows build against WSL, and worktree paths reach Windows
 as `\\wsl.localhost\Ubuntu-24.04\...`. Never propose a Linux GUI under WSLg,
 driving my UI blind (xdotool), or `wsl --shutdown`. When I say "look", take a
 PowerShell-interop screenshot from WSL, crop the region, and read it. When
 recommending tools, macOS-only is a non-starter and so is anything needing
-one window per repo.
+one window per repo. Why: a Linux GUI or a blind input tool acts on a display
+I cannot see, and `wsl --shutdown` kills every session running in WSL.
 
 ## Judging visual work
 
@@ -59,11 +66,14 @@ one window per repo.
   e2e profile when e2e is the subject) before claiming a fix. Never delete
   evidence artifacts from earlier runs; a new run writes beside them. After
   any multi-attempt visual fix, write the failure path to a durable file
-  unprompted.
+  unprompted. Why: a green log says nothing about what a pixel looks like, and
+  a deleted artifact is the only evidence of what an earlier run showed.
 - A batch of visual artifacts for me to review — screenshots, frames, audit
   findings — ships as ONE collected HTML page in a durable git-ignored dir
   inside the workspace, never loose files, never under /tmp; long reports use
   expandable sections. Audit reports look like the other audits' reports.
+  Why: loose files and /tmp paths get lost or wiped before I review them.
 - Dense image (chart, screenshot, board photo): crop and enlarge the region
   of interest before answering — don't squint at the full frame. Pillow and
-  OpenCV are installed for bare `python3` (`import PIL, cv2`).
+  OpenCV are installed for bare `python3` (`import PIL, cv2`). Why: detail in
+  a full frame is downscaled past reading.

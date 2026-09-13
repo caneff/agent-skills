@@ -1,25 +1,33 @@
 #!/usr/bin/env bash
-# The dispatcher for the /implement lane: turn a ticket number into a worker
-# running in its own workspace inside herdr, report, and stop. It never waits
-# on the worker.
+# What the dispatcher runs for the /implement lane: turn a ticket number into a
+# worker running in its own workspace inside herdr, report, and stop. It never
+# waits on the worker.
 #
-#   implement-dispatch [--repo <path>] [--model sonnet|opus] <issue number>
+#   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
+#                      <issue number>
+#
+# The brief is `/implement <n> --tier light|heavy --controller "<name>"`: light
+# when the issue carries the documentation label, heavy otherwise. The
+# controller is --controller, else the name in ~/.claude/sessions/<pid>.json of
+# the nearest ancestor process whose file is live (its procStart matches) — the
+# Claude session running this. Session names can hold spaces, hence the quotes.
 #
 # Refuses, with nothing claimed or created, when the issue is not open and
-# labelled ready-for-agent, the herdr server is not running, claude onboarding
-# is incomplete, the herdr agent name is taken, or the workspace path or branch
-# already exists. After the workspace exists, any
-# herdr failure exits non-zero with herdr's own error and leaves the workspace
-# in place for inspection. There is no bare-claude fallback.
+# labelled ready-for-agent, no controller is named or found, the herdr server
+# is not running, claude onboarding is incomplete, the herdr agent name is
+# taken, or the workspace path or branch already exists. After the workspace
+# exists, any herdr failure exits non-zero with herdr's own error and leaves the
+# workspace in place for inspection. There is no bare-claude fallback.
 set -uo pipefail
 
-repo="" model=sonnet n=""
+repo="" model=sonnet controller="" n=""
 die() { echo "implement-dispatch: $*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo)    [ $# -ge 2 ] || die "--repo needs a value"; repo="$2"; shift 2 ;;
     --model)   [ $# -ge 2 ] || die "--model needs a value"; model="$2"; shift 2 ;;
+    --controller) [ $# -ge 2 ] || die "--controller needs a value"; controller="$2"; shift 2 ;;
     -h|--help) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
     -*)        die "unknown flag: $1" ;;
     *)         [ -n "$n" ] && die "one ticket at a time"; n="$1"; shift ;;
@@ -59,6 +67,20 @@ case "$labels" in *,ready-for-agent,*) ;; *) die "#$n is not labelled ready-for-
 for held in in-progress needs-info ready-for-human; do
   case "$labels" in *,"$held",*) die "#$n is labelled $held" ;; esac
 done
+case "$labels" in *,documentation,*) tier=light ;; *) tier=heavy ;; esac
+# Walk up /proc to the Claude session that ran this; its registry file names it.
+# A file left by a dead session whose pid was reused has another procStart.
+ancestor=$PPID
+while [ -z "$controller" ] && [ "${ancestor:-0}" -gt 1 ]; do
+  proc_stat=$(cat "/proc/$ancestor/stat" 2>/dev/null) || break
+  read -ra fields <<< "${proc_stat##*) }"  # fields[1] is the ppid, fields[19] the start time
+  session_file="$HOME/.claude/sessions/$ancestor.json"
+  [ -f "$session_file" ] && controller=$(jq -r --arg s "${fields[19]}" \
+    'select(.procStart == $s) | .name // empty' "$session_file" 2>/dev/null)
+  ancestor=${fields[1]}
+done
+[ -n "$controller" ] || die "no controller: no live ancestor session has a ~/.claude/sessions/<pid>.json name; pass --controller"
+case "$controller" in *'"'*|*$'\n'*) die "controller name cannot hold a double quote or newline: $controller" ;; esac
 herdr status --json 2>/dev/null | jq -e '.server.running == true' >/dev/null \
   || die "no herdr server is running (herdr status)"
 jq -e '.hasCompletedOnboarding == true' "$HOME/.claude.json" >/dev/null 2>&1 \
@@ -112,10 +134,10 @@ if [ -z "$pane" ]; then
 fi
 out=$(herdr agent start "$agent" --kind claude --pane "$pane" -- --model "$model" 2>&1) \
   || fail "herdr agent start" "$out"
-out=$(herdr agent prompt "$agent" "/implement $n" --wait --until working --timeout 120000 2>&1) \
+out=$(herdr agent prompt "$agent" "/implement $n --tier $tier --controller \"$controller\"" --wait --until working --timeout 120000 2>&1) \
   || fail "herdr agent prompt" "$out"
 
-echo "dispatched #$n ($model)"
+echo "dispatched #$n ($model, $tier tier, controller $controller)"
 echo "worktree: $wt"
 echo "branch:   $branch"
 echo "agent:    $agent"

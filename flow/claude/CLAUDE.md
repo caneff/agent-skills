@@ -12,7 +12,8 @@
   PR command.
 - **One workspace per task** — its own worktree and branch, resumed across
   sessions. **Code-lane work never builds on the primary checkout**; a
-  terminal opened on `main` means dispatch, not a branch cut in place.
+  terminal opened on `main` means dispatch (`implement-dispatch <n>`), not a
+  branch cut in place.
   Auto-ship edits and commits on `main` by design.
 - **Gate 2 — code or not?** A code file is anything executed, imported, or
   wired into the harness — `.py/.ts/.js/.sh/.rs`, `settings.json`, hooks, CI
@@ -107,20 +108,20 @@ Before reporting a commit sha, `git status --porcelain` is empty.
   terminal tail. Long job → `job-run` + a progress file.
 - Merge line: `--repo owner/name`, only after `gh pr view` shows not-draft
   and CLEAN.
-- Detail — dispatch, report contract, worktree hygiene, status answers,
-  monitors, review caps, merge/cleanup, herdr config, Orca specifics:
+- Detail — dispatch, control, wait, status, worktree hygiene, monitors,
+  review loop, merge/cleanup, herdr config:
   `~/.agents/skills/flow/claude/OPERATIONS.md`.
 
 # Gotchas
 
 - A process kill gets its own Bash call and nothing else.
   Searching and killing safely: `~/.agents/skills/flow/claude/SHELL-SAFETY.md`.
-- Never print a path and ask me to open it — open it for me. A rendered page
+- Never print a path and ask me to open it — open it for me
+  (`code --reuse-window --goto`). A rendered page
   is read through `shot-scraper`, never a browser GUI or your own headless
   Chrome. My desktop is Windows, WSL is the shell only — never a Linux GUI.
   Showing files, screenshots, windows, images, visual passes:
   `~/.agents/skills/flow/claude/VISUAL-INSPECTION.md`.
-- Never bare `orca` on Linux — it is the screen reader; use `orca-ide`.
 
 
 # second-brain vault memory (auto-imported by the weekly retro)
