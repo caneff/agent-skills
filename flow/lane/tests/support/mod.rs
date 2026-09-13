@@ -3,6 +3,8 @@
 //! `lane-fake` on a scratch PATH, mirroring the bash suite's own fixture.
 #![allow(dead_code)]
 
+pub mod cleanup;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};

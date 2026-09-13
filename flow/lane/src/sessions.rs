@@ -1,8 +1,52 @@
-//! The sessions-registry reader: walks `/proc` ancestry looking for a live
-//! Claude session's name, the same rule `implement-dispatch` used in bash.
+//! The sessions-registry reader: `~/.claude/sessions/<pid>.json`, one file
+//! per Claude session. `implement-dispatch` walks `/proc` ancestry for its
+//! controller's name; `merge-cleanup` lists the live sessions in a worktree.
 
 use crate::proc_info::read_stat;
 use std::path::Path;
+
+/// A registry session whose pid is alive.
+pub struct LiveSession {
+    pub pid: String,
+    /// The Claude sessionId, empty when the file has none.
+    pub session_id: String,
+}
+
+/// Whether `path` is `root` or inside it.
+pub fn in_tree(path: &str, root: &str) -> bool {
+    format!("{path}/").starts_with(&format!("{root}/"))
+}
+
+/// Every registry file under `<home>/.claude/sessions` whose `cwd` is in
+/// `worktree` and whose pid is alive — a dead pid is a crashed session and
+/// is ignored. Files in name order; unreadable files are skipped.
+pub fn live_in(home: &Path, worktree: &str) -> Vec<LiveSession> {
+    let Ok(dir) = std::fs::read_dir(home.join(".claude/sessions")) else { return Vec::new() };
+    let mut files: Vec<_> = dir
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json") && !p.file_name().unwrap().to_string_lossy().starts_with('.'))
+        .collect();
+    files.sort();
+    let mut live = Vec::new();
+    for f in files {
+        let Some(v) = std::fs::read_to_string(&f).ok().and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok()) else {
+            continue;
+        };
+        let pid = match v.get("pid") {
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            Some(serde_json::Value::String(s)) => s.clone(),
+            _ => continue,
+        };
+        let cwd = v.get("cwd").and_then(|c| c.as_str()).unwrap_or("");
+        let alive = pid.parse::<i32>().is_ok_and(|p| p > 0 && read_stat(p).is_some());
+        if !pid.is_empty() && in_tree(cwd, worktree) && alive {
+            let session_id = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            live.push(LiveSession { pid, session_id });
+        }
+    }
+    live
+}
 
 /// Walks up from `start_ancestor`, looking for `<home>/.claude/sessions/<pid>.json`
 /// whose `procStart` matches that pid's own `/proc/<pid>/stat` starttime — a

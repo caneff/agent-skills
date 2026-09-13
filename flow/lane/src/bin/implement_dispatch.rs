@@ -52,15 +52,6 @@ fn die(msg: impl AsRef<str>) -> ExitCode {
     ExitCode::FAILURE
 }
 
-fn command_on_path(name: &str) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    let Some(path) = env::var_os("PATH") else { return false };
-    env::split_paths(&path).any(|dir| {
-        let p = dir.join(name);
-        std::fs::metadata(&p).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
-    })
-}
-
 struct Args {
     repo: Option<String>,
     model: String,
@@ -251,7 +242,7 @@ fn run() -> Result<(), ExitCode> {
     if args.model != "sonnet" && args.model != "opus" {
         return Err(die(format!("--model must be sonnet or opus, not '{}'", args.model)));
     }
-    if !command_on_path("flock") {
+    if !runner::on_path("flock") {
         return Err(die("flock is not on PATH"));
     }
 
