@@ -57,6 +57,7 @@ struct Args {
     root: String,
     dry: bool,
     force: bool,
+    discard: bool,
     yes: bool,
 }
 
@@ -82,6 +83,7 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Parsed {
             "--sweep" => a.sweep = true,
             "--root" => a.root = value(&mut it),
             "--force" => a.force = true,
+            "--discard" => a.discard = true,
             "--yes" => a.yes = true,
             "--dry-run" => a.dry = true,
             "-h" | "--help" => return Parsed::Help,
@@ -136,6 +138,7 @@ struct Merged {
 struct Cleanup {
     dry: bool,
     force: bool,
+    discard: bool,
     home: String,
     /// Worktrees this run passed the guard for, dry runs included.
     removal_targets: Vec<String>,
@@ -194,6 +197,75 @@ fn blockers(agents: &[Agent]) -> Vec<String> {
             name => format!("herdr agent {name} ({})", a.pane()),
         })
         .collect()
+}
+
+/// What `git worktree remove --force` would throw away: a worktree's
+/// `git status --porcelain --ignored` entries, by kind. An untracked or
+/// ignored directory is one entry, as git collapses it.
+#[derive(Default)]
+struct WorktreeFiles {
+    modified: Vec<String>,
+    untracked: Vec<String>,
+    ignored: Vec<String>,
+}
+
+/// How many names a message lists before "and <n> more".
+const NAMES_SHOWN: usize = 5;
+
+impl WorktreeFiles {
+    /// `None` when git cannot read the status of a worktree that is on disk.
+    /// A worktree whose directory is already gone holds nothing to lose.
+    fn read(wt: &str) -> Option<Self> {
+        let Some(out) = quiet_stdout("git", &["-C", wt, "status", "--porcelain", "--ignored"]) else {
+            return (!Path::new(wt).exists()).then(Self::default);
+        };
+        let mut files = Self::default();
+        for line in out.lines().filter(|l| l.len() > 3) {
+            let (code, name) = (&line[..2], line[3..].to_string());
+            match code {
+                "??" => files.untracked.push(name),
+                "!!" => files.ignored.push(name),
+                _ => files.modified.push(name),
+            }
+        }
+        Some(files)
+    }
+
+    /// Modified or untracked files: work a removal would lose. Ignored files
+    /// are not — every worktree holds `.venv/` or a cache after a merge.
+    fn is_dirty(&self) -> bool {
+        !self.modified.is_empty() || !self.untracked.is_empty()
+    }
+
+    fn is_empty(&self) -> bool {
+        !self.is_dirty() && self.ignored.is_empty()
+    }
+
+    /// "1 modified, 2 untracked, 3 ignored".
+    fn counts(&self) -> String {
+        format!("{} modified, {} untracked, {} ignored", self.modified.len(), self.untracked.len(), self.ignored.len())
+    }
+
+    /// "1 modified, 2 untracked file(s) would be lost: f, a, b" — the kinds
+    /// that are present, then their first names.
+    fn dirty_text(&self) -> String {
+        let kinds: Vec<String> = [("modified", &self.modified), ("untracked", &self.untracked)]
+            .iter()
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(k, v)| format!("{} {k}", v.len()))
+            .collect();
+        let names: Vec<String> = self.modified.iter().chain(&self.untracked).cloned().collect();
+        format!("{} file(s) would be lost: {}", kinds.join(", "), first_names(&names))
+    }
+}
+
+/// The first `NAMES_SHOWN` names, comma-separated, then "and <n> more".
+fn first_names(names: &[String]) -> String {
+    let shown = names[..names.len().min(NAMES_SHOWN)].join(", ");
+    match names.len().saturating_sub(NAMES_SHOWN) {
+        0 => shown,
+        more => format!("{shown} and {more} more"),
+    }
 }
 
 fn refuse_live(wt: &str, items: &[String]) -> bool {
@@ -278,6 +350,29 @@ impl Cleanup {
         true
     }
 
+    /// The uncommitted-files guard (#736). `git worktree remove --force`
+    /// discards everything git does not hold, so modified or untracked files
+    /// refuse the removal unless --discard. Ignored files never refuse; their
+    /// count and first names are printed, since they go too.
+    fn guard_files(&self, wt: &str) -> bool {
+        let Some(files) = WorktreeFiles::read(wt) else {
+            eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there");
+            return false;
+        };
+        let would = if self.dry { "would discard" } else { "discarding" };
+        if files.is_dirty() {
+            if !self.discard {
+                eprintln!("merge-cleanup: refusing to remove {wt} — {} (--discard overrides)", files.dirty_text());
+                return false;
+            }
+            println!("--discard: {wt} — {}", files.dirty_text());
+        }
+        if !files.ignored.is_empty() {
+            println!("{would} {} ignored file(s) in {wt}: {}", files.ignored.len(), first_names(&files.ignored));
+        }
+        true
+    }
+
     /// Other workspaces under <repo>/.claude/worktrees the guard would clear,
     /// no commits ahead of the default branch and nothing on disk git does
     /// not hold (ignored files included — .scratch evidence is work too):
@@ -302,7 +397,7 @@ impl Cleanup {
                 if quiet_stdout("git", &["-C", &e, "rev-list", "--count", &format!("{base}..HEAD")]).as_deref() != Some("0") {
                     continue;
                 }
-                if !quiet_stdout("git", &["-C", &e, "status", "--porcelain", "--ignored"]).unwrap_or_default().is_empty() {
+                if !WorktreeFiles::read(&e).is_some_and(|f| f.is_empty()) {
                     continue;
                 }
                 ""
@@ -550,6 +645,11 @@ impl Cleanup {
         // the path git itself reports — but never while a session is alive.
         let wt = worktree_holding(path, b);
         if !wt.is_empty() && wt != primary {
+            // Before the live-session guard, which closes idle panes: a
+            // removal refused for its files must not have touched herdr.
+            if !self.guard_files(&wt) {
+                return false;
+            }
             if !self.guard_live(&wt) {
                 return false;
             }
@@ -691,6 +791,7 @@ fn main() -> ExitCode {
     let mut c = Cleanup {
         dry: a.dry,
         force: a.force,
+        discard: a.discard,
         home: env::var("HOME").unwrap_or_default(),
         removal_targets: Vec::new(),
         removed_worktrees: Vec::new(),

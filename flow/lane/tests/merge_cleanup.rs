@@ -704,6 +704,58 @@ fn a_dry_run_never_rebuilds() {
     assert_eq!(std::fs::read_to_string(&log).unwrap(), "");
 }
 
+// --- #736: uncommitted files in the worktree ---------------------------------
+
+/// A modified tracked file, or an untracked one, in the workspace.
+fn dirty(wt: &std::path::Path, kind: &str) {
+    match kind {
+        "modified" => std::fs::write(wt.join("f"), "changed\n").unwrap(),
+        _ => std::fs::write(wt.join("notes"), "unsaved\n").unwrap(),
+    }
+}
+
+#[test]
+fn a_worktree_with_a_modified_or_untracked_file_is_refused_naming_it() {
+    for (kind, name) in [("modified", "f"), ("untracked", "notes")] {
+        let c = Cleanup::new();
+        let (r, wt) = lane_workspace(&c, "r23", "implement-23");
+        dirty(&wt, kind);
+        let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+        let want = format!("merge-cleanup: refusing to remove {} — 1 {kind} file(s) would be lost: {name} (--discard overrides)", wt.display());
+        assert!(!run.ok && run.stderr.contains(&want), "{kind}: {}", run.text());
+        assert!(wt.join(name).is_file() && c.has_branch(&r, "caneff/merged-one"), "{kind}: {}", run.text());
+    }
+}
+
+#[test]
+fn force_alone_still_refuses_a_dirty_worktree_and_discard_removes_it() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r24", "implement-24");
+    dirty(&wt, "modified");
+    dirty(&wt, "untracked");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--force"], &[]);
+    assert!(!run.ok && run.stderr.contains("1 modified, 1 untracked file(s) would be lost: f, notes"), "{}", run.text());
+    assert!(wt.join("notes").is_file() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    assert!(run.has(&format!("--discard: {} — 1 modified, 1 untracked file(s) would be lost: f, notes", wt.display())), "{}", run.text());
+}
+
+#[test]
+fn a_worktree_holding_only_ignored_files_is_removed_and_they_are_listed() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r25", "implement-25");
+    std::fs::write(r.join(".git/info/exclude"), "*.log\n").unwrap();
+    for n in 1..=7 {
+        std::fs::write(wt.join(format!("{n}.log")), "cache\n").unwrap();
+    }
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    let want = format!("discarding 7 ignored file(s) in {}: 1.log, 2.log, 3.log, 4.log, 5.log and 2 more", wt.display());
+    assert!(run.has(&want), "{}", run.text());
+}
+
 // --- #735: a repo with no .claude/worktrees lists nothing ---------------------
 
 #[test]
