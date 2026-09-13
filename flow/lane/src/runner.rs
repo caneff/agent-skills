@@ -63,6 +63,27 @@ pub fn quiet_ok(program: &str, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
+/// `command -v <name>`: an executable file of that name on PATH.
+pub fn on_path(name: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    let Some(path) = std::env::var_os("PATH") else { return false };
+    std::env::split_paths(&path).any(|dir| {
+        std::fs::metadata(dir.join(name)).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    })
+}
+
+/// `cmd; rc=$?` with stdout and stderr passed through to this process's
+/// own, for the steps whose git output the bash original let the operator
+/// see. A command that cannot be spawned counts as failed.
+pub fn status(program: &str, args: &[&str]) -> bool {
+    Command::new(program).args(args).status().map(|s| s.success()).unwrap_or(false)
+}
+
+/// `cmd 2>/dev/null; rc=$?`: stdout passed through, stderr discarded.
+pub fn quiet_stderr_ok(program: &str, args: &[&str]) -> bool {
+    Command::new(program).args(args).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

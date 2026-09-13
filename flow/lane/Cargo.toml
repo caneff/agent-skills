@@ -13,6 +13,10 @@ name = "implement-dispatch"
 path = "src/bin/implement_dispatch.rs"
 
 [[bin]]
+name = "merge-cleanup"
+path = "src/bin/merge_cleanup.rs"
+
+[[bin]]
 name = "lane-fake"
 path = "src/bin/lane_fake.rs"
 

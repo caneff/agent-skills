@@ -8,7 +8,9 @@
 //! exist, hid a command that fails on the real machine). Scenario behavior
 //! is driven by env vars, matching the bash stubs it replaces: GH_STATE,
 //! GH_LABELS, HERDR_RUNNING, HERDR_NO_ROOT_PANE, HERDR_AGENT_TAKEN,
-//! HERDR_STALL. Never installed — see install.sh.
+//! HERDR_STALL for implement-dispatch; GH_PR_HEADS, HERDR_AGENTS,
+//! HERDR_WORKSPACES, HERDR_FAIL, HERDR_PANE_CLOSE_FAIL for merge-cleanup.
+//! Never installed — see install.sh.
 
 use std::env;
 use std::fs::OpenOptions;
@@ -46,6 +48,7 @@ const HERDR_PANE_VERBS: &[&str] = &[
     "send-keys", "wait-output", "run", "report-agent", "report-agent-session", "release-agent",
     "report-metadata",
 ];
+const HERDR_WORKSPACE_VERBS: &[&str] = &["list", "create", "get", "focus", "rename", "report-metadata", "close"];
 const HERDR_STATUS_VERBS: &[&str] = &["server", "client"];
 
 fn role_of(arg0: &str) -> String {
@@ -81,6 +84,7 @@ fn herdr_allowed(args: &[String]) -> bool {
         "agent" => args.get(1).is_some_and(|v| HERDR_AGENT_VERBS.contains(&v.as_str())),
         "worktree" => args.get(1).is_some_and(|v| HERDR_WORKTREE_VERBS.contains(&v.as_str())),
         "pane" => args.get(1).is_some_and(|v| HERDR_PANE_VERBS.contains(&v.as_str())),
+        "workspace" => args.get(1).is_some_and(|v| HERDR_WORKSPACE_VERBS.contains(&v.as_str())),
         "status" => match args.get(1) {
             None => true,
             Some(v) if v.starts_with("--") => true,
@@ -106,13 +110,57 @@ fn run_gh(args: &[String]) -> ExitCode {
         let labels = env::var("GH_LABELS").unwrap_or_default();
         println!("{state} {labels}");
     }
+    if (a0, a1) == ("pr", "list") {
+        return gh_pr_list(args);
+    }
+    if (a0, a1) == ("pr", "view") {
+        // PR 7 is caneff/merged-one, the bash stub's one resolvable PR.
+        if args.get(2).map(String::as_str) != Some("7") {
+            return ExitCode::FAILURE;
+        }
+        println!("caneff/merged-one");
+    }
     ExitCode::SUCCESS
+}
+
+/// `pr list --head <b> --state merged --json ... --jq ...`: a merged PR #7
+/// for each branch with a file under `$GH_PR_HEADS` (`/` spelled `__`)
+/// holding the sha that PR merged at; nothing for any other branch.
+fn gh_pr_list(args: &[String]) -> ExitCode {
+    let head = args.windows(2).find(|w| w[0] == "--head").map(|w| w[1].as_str()).unwrap_or("");
+    let jq = args.iter().any(|a| a == "--jq");
+    let dir = env::var("GH_PR_HEADS").unwrap_or_default();
+    let recorded = std::fs::read_to_string(Path::new(&dir).join(head.replace('/', "__")));
+    match (recorded, jq) {
+        (Ok(oid), true) => println!("7 {}", oid.trim()),
+        (Ok(oid), false) => println!("[{{\"number\":7,\"headRefOid\":\"{}\"}}]", oid.trim()),
+        (Err(_), false) => println!("[]"),
+        (Err(_), true) => {}
+    }
+    ExitCode::SUCCESS
+}
+
+/// Prints the file an env var names; nothing when it is unset or unreadable.
+fn cat_env_file(var: &str) {
+    if let Some(body) = env::var(var).ok().and_then(|p| std::fs::read_to_string(p).ok()) {
+        print!("{body}");
+    }
 }
 
 fn run_herdr(args: &[String]) -> ExitCode {
     let a0 = args.first().map(String::as_str).unwrap_or("");
     let a1 = args.get(1).map(String::as_str).unwrap_or("");
+    if env_flag("HERDR_FAIL") {
+        return ExitCode::FAILURE;
+    }
     match (a0, a1) {
+        ("agent", "list") => cat_env_file("HERDR_AGENTS"),
+        ("workspace", "list") => cat_env_file("HERDR_WORKSPACES"),
+        ("pane", "close") => {
+            if args.get(2).is_some_and(|p| env::var("HERDR_PANE_CLOSE_FAIL").is_ok_and(|f| &f == p)) {
+                return ExitCode::FAILURE;
+            }
+        }
         ("status", _) => {
             let running = if env::var("HERDR_RUNNING").as_deref() == Ok("true") { "true" } else { "false" };
             println!("{{\"server\":{{\"running\":{running}}}}}");
@@ -189,6 +237,12 @@ mod tests {
     #[test]
     fn herdr_agent_prompt_is_allowed() {
         assert!(herdr_allowed(&["agent".into(), "prompt".into()]));
+    }
+
+    #[test]
+    fn herdr_workspace_close_is_allowed_and_an_invented_verb_is_not() {
+        assert!(herdr_allowed(&["workspace".into(), "close".into()]));
+        assert!(!herdr_allowed(&["workspace".into(), "delete".into()]));
     }
 
     #[test]

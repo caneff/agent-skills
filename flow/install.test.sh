@@ -30,6 +30,11 @@ ln -s "$repo/flow/../tests/all.sh" "$repo/.git/hooks/pre-push"
 # settings), not $HOME, so the scratch copy is a no-op.
 printf '#!/usr/bin/env bash\nexit 0\n' > "$repo/flow/backup-sync.sh"
 
+# An earlier install linked merge-cleanup to the bash script this repo no
+# longer has; the install must replace that dangling link with the binary.
+mkdir -p "$tmp/home/.local/bin"
+ln -s "$repo/flow/bin/merge-cleanup" "$tmp/home/.local/bin/merge-cleanup"
+
 fails=0
 out=$(HOME="$tmp/home" bash "$repo/flow/install.sh" 2>&1) || { echo "FAIL install.sh exited non-zero"; printf '%s\n' "$out"; fails=1; }
 
@@ -48,21 +53,6 @@ if [ -L "$tmp/home/.claude/hooks/refresh-landed.sh" ]; then
 else
   echo "FAIL refresh-landed.sh not linked under the scratch HOME"; fails=1
 fi
-if [ -L "$tmp/home/.local/bin/merge-cleanup" ]; then
-  echo "PASS merge-cleanup linked under the scratch HOME"
-else
-  echo "FAIL bin/merge-cleanup not linked under the scratch HOME"; fails=1
-fi
-# merge-cleanup refuses here only after sourcing the helper. It finds it
-# through its own link, so an install that predates the helper still works.
-cleanup_out=$(cd "$repo" && HOME="$tmp/home" bash "$tmp/home/.local/bin/merge-cleanup" --dry-run 2>&1)
-if [ -L "$tmp/home/.local/bin/merge-cleanup" ] && [ ! -e "$tmp/home/.local/bin/git-origin.sh" ] \
-   && printf '%s' "$cleanup_out" | grep -q "name a branch"; then
-  echo "PASS merge-cleanup linked, and sources git-origin.sh through its link"
-else
-  echo "FAIL bin/merge-cleanup not linked, or git-origin.sh not sourced through its link: $cleanup_out"; fails=1
-fi
-
 # implement-dispatch (#748) is `cargo install`ed, not linked: a real
 # executable, never a symlink into the repo, and the fake is never installed.
 dispatch_out=$(HOME="$tmp/home" "$tmp/home/.local/bin/implement-dispatch" --repo "$tmp/nowhere" 1 2>&1)
@@ -72,6 +62,15 @@ if [ -x "$tmp/home/.local/bin/implement-dispatch" ] && [ ! -L "$tmp/home/.local/
   echo "PASS implement-dispatch installed as a real binary, and the fake is never installed"
 else
   echo "FAIL implement-dispatch not installed correctly: $dispatch_out"; fails=1
+fi
+# merge-cleanup (#749) is `cargo install`ed the same way, and replaces the
+# symlink an earlier install left pointing at the deleted bash script.
+cleanup_out=$(HOME="$tmp/home" "$tmp/home/.local/bin/merge-cleanup" --repo "$tmp/nowhere" x 2>&1)
+if [ -x "$tmp/home/.local/bin/merge-cleanup" ] && [ ! -L "$tmp/home/.local/bin/merge-cleanup" ] \
+   && printf '%s' "$cleanup_out" | grep -q "not a git repo"; then
+  echo "PASS merge-cleanup installed as a real binary"
+else
+  echo "FAIL merge-cleanup not installed correctly: $cleanup_out"; fails=1
 fi
 if [ -L "$tmp/home/.local/bin/job-run" ]; then
   echo "PASS job-run linked onto PATH under the scratch HOME"
@@ -128,7 +127,6 @@ printf '#!/usr/bin/env bash\necho "lane-install: boom" >&2\nexit 1\n' > "$broken
 out=$(HOME="$tmp/broken-home" bash "$broken/flow/install.sh" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "boom" \
    && [ -L "$tmp/broken-home/.claude/hooks/refresh-landed.sh" ] \
-   && [ -L "$tmp/broken-home/.local/bin/merge-cleanup" ] \
    && [ -L "$tmp/broken-home/.local/bin/job-run" ]; then
   echo "PASS a failing lane-install.sh reports loudly without half-installing the rest"
 else

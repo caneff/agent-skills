@@ -1,7 +1,10 @@
-//! Shared fixture for the implement-dispatch integration tests: a scratch
-//! origin plus a clone under a temp dir, and the fake `gh`/`herdr` from
-//! `lane-fake` on a scratch PATH, mirroring the bash suite's own fixture.
+//! Shared test support. This file is the implement-dispatch fixture: a
+//! scratch origin plus a clone under a temp dir, and the fake `gh`/`herdr`
+//! from `lane-fake` on a scratch PATH, mirroring the bash suite's own
+//! fixture. `cleanup` is the merge-cleanup fixture.
 #![allow(dead_code)]
+
+pub mod cleanup;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
