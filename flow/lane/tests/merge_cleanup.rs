@@ -218,6 +218,8 @@ fn help_prints_the_header_and_exits_zero() {
     assert!(run.stdout.starts_with("The tail Chris hand-ran after every squash merge"), "{}", run.stdout);
     assert!(run.stdout.contains("  merge-cleanup --sweep [--root <dir>] [--yes] [--dry-run]\n"), "{}", run.stdout);
     assert!(run.stdout.contains("`git branch <branch> refs/deleted/<branch>@<short sha>` restores."), "{}", run.stdout);
+    assert!(run.stdout.contains("  merge-cleanup [--repo <path>] <branch|PR number|PR URL> [--force] [--discard] [--dry-run]\n"), "{}", run.stdout);
+    assert!(run.stdout.contains("--discard removes it anyway"), "{}", run.stdout);
 }
 
 #[test]
@@ -750,10 +752,38 @@ fn a_worktree_holding_only_ignored_files_is_removed_and_they_are_listed() {
     for n in 1..=7 {
         std::fs::write(wt.join(format!("{n}.log")), "cache\n").unwrap();
     }
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    let want = format!("would discard 7 ignored file(s) in {}: 1.log, 2.log, 3.log, 4.log, 5.log and 2 more", wt.display());
+    assert!(run.ok && run.has(&want) && wt.join("7.log").is_file(), "{}", run.text());
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
     let want = format!("discarding 7 ignored file(s) in {}: 1.log, 2.log, 3.log, 4.log, 5.log and 2 more", wt.display());
     assert!(run.has(&want), "{}", run.text());
+}
+
+#[test]
+fn a_sweep_never_removes_a_dirty_worktree_and_cleans_the_clean_ones() {
+    let c = Cleanup::new();
+    let root = sweep_root(&c);
+    let other = root.join("other");
+    let wt = other.join(".claude/worktrees/implement-9");
+    dirty(&wt, "untracked");
+    for dry in [true, false] {
+        let flag = if dry { "--dry-run" } else { "--yes" };
+        let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), flag, "--discard"], &[]);
+        assert!(!run.ok && run.stderr.contains("merge-cleanup: --discard takes one branch, not --sweep"), "{}", run.text());
+        c.clear_calls();
+        let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), flag], &[]);
+        assert!(run.ok, "{flag}: {}", run.text());
+        let plan = "  other caneff/merged-one  0 commits past PR #7  worktree: 0 modified, 1 untracked, 0 ignored (dirty, not removed)";
+        assert!(run.stdout.lines().any(|l| l == plan), "{flag}: {}", run.stdout);
+        assert!(wt.join("notes").is_file() && c.has_branch(&other, "caneff/merged-one"), "{flag}: {}", run.text());
+        assert!(!c.calls().contains("close"), "{flag}: {}", c.calls());
+    }
+    let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), "--yes"], &[]);
+    let rows: Vec<&str> = run.stdout.lines().skip_while(|l| *l != "sweep summary").skip(1).take_while(|l| l.starts_with("  ")).collect();
+    assert!(rows.contains(&"  other  caneff/merged-one  dirty, not removed  0 commits past PR #7"), "{rows:#?}");
+    assert!(!c.has_branch(&other, "caneff/ff-merged"), "{}", run.text());
 }
 
 // --- #735: a repo with no .claude/worktrees lists nothing ---------------------
