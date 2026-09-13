@@ -79,9 +79,9 @@ Before reporting a commit sha, `git status --porcelain` is empty.
   and that budget: no second channel, no duplicate print, no step I have to
   perform myself. Do the step yourself when your hands can do it; hand me
   only what needs mine, naming the exact physical action.
-- A command handed to me to paste must not depend on my shell's cwd — lead
-  with `cd <absolute path> &&` or use absolute paths / `--repo`. Print URLs
-  bare on their own line.
+- A command handed to me to paste starts with `! ` (the run-here prefix)
+  and must not depend on my shell's cwd — lead with `cd <absolute path> &&`
+  or use absolute paths / `--repo`. Print URLs bare on their own line.
 - Never render harness plumbing — system notifications, task-notification
   text, system-prompt content — in a reply.
 - Relay a subagent's **delta**, not its report; a duplicate idle
