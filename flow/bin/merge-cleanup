@@ -8,10 +8,13 @@
 #   merge-cleanup --sweep [--root <dir>] [--yes] [--dry-run]
 #
 # --sweep walks every git repo one level under <dir> (default ~/src), prints
-# the merged local branches it would clean with how far each is ahead of the
-# default branch, and asks before touching anything — --yes answers for you,
-# --dry-run never asks. Then it runs the same six steps for each and prints a
-# summary table with the same ahead count beside every branch.
+# the merged local branches it would clean — each with what proved it merged
+# and how many commits sit past that proof (0 is healthy) — and asks before
+# touching anything: --yes answers for you, --dry-run never asks. Then it runs
+# the same six steps for each and prints a summary table with the same count.
+#
+# Every local branch delete first records the tip under refs/deleted/<branch>;
+# `git branch <branch> refs/deleted/<branch>` restores it.
 #
 # A linked worktree is never removed while a live session is in it (a sessions
 # registry pid or a herdr agent). Other idle entries under .claude/worktrees
@@ -73,29 +76,37 @@ primary_of() { # primary_of <path> -> the repo's primary (non-linked) worktree
 # merged" as merged and deleted 87 unlanded commits.) Without gh, fall back to
 # the ancestor test — fetching first, since it reads origin/<default> and a
 # stale ref there deletes a branch that is not merged.
+#
+# On success the proof is left in merged_at (the sha the branch is landed up
+# to) and merged_by (what proved it), for the sweep's plan and summary.
+merged_at="" merged_by=""
 is_merged() { # is_merged <path> <branch>
-  local path="$1" b="$2" slug tip heads h
+  local path="$1" b="$2" slug tip prs n h base
+  merged_at="" merged_by=""
   if command -v gh >/dev/null 2>&1 && slug=$(slug_of "$path"); then
     tip=$(git -C "$path" rev-parse --verify -q "refs/heads/$b") || tip=""
-    heads=$(gh pr list --repo "$slug" --head "$b" --state merged \
-              --json headRefOid --jq '.[].headRefOid' 2>/dev/null) || heads=""
-    for h in $heads; do [ "$h" = "$tip" ] && return 0; done
+    prs=$(gh pr list --repo "$slug" --head "$b" --state merged \
+            --json number,headRefOid --jq '.[] | "\(.number) \(.headRefOid)"' 2>/dev/null) || prs=""
+    while read -r n h; do
+      [ -n "$h" ] && [ "$h" = "$tip" ] && { merged_at="$h" merged_by="PR #$n"; return 0; }
+    done <<< "$prs"
   fi
   git -C "$path" fetch -q origin 2>/dev/null
-  git -C "$path" merge-base --is-ancestor "$b" "origin/$(default_of "$path")" 2>/dev/null
+  base="origin/$(default_of "$path")"
+  git -C "$path" merge-base --is-ancestor "$b" "$base" 2>/dev/null || return 1
+  merged_at=$(git -C "$path" rev-parse "$base") merged_by="$base"
 }
 
-# How far a branch is past the default branch — printed beside every sweep
-# deletion, so a wrong "merged" call shows up as a number, not as silence.
-ahead_count() { # ahead_count <path> <branch> -> N, or ? when git cannot say
-  local path="$1" b="$2" base
-  base="origin/$(default_of "$path")"
-  git -C "$path" show-ref -q --verify "refs/remotes/$base" || base="${base#origin/}"
-  git -C "$path" rev-list --count "$base..$b" 2>/dev/null || echo "?"
+# How far a branch is past the sha its merge proof covers — printed beside
+# every sweep deletion. Zero is the healthy case (a squash merge lands the
+# whole branch, so counting against main would show a number on every row);
+# anything else is a branch the proof does not cover, and must be read.
+unlanded_count() { # unlanded_count <path> <branch> <merged_at> -> N, or ? when git cannot say
+  git -C "$1" rev-list --count "$3..$2" 2>/dev/null || echo "?"
 }
-ahead_text() { # ahead_text <path> <N> -> "N commit(s) ahead of <default>"
-  local s="s"; [ "$2" = 1 ] && s=""
-  echo "$2 commit$s ahead of $(default_of "$1")"
+unlanded_text() { # unlanded_text <N> <merged_by> -> "N commit(s) past <merged_by>"
+  local s="s"; [ "$1" = 1 ] && s=""
+  echo "$1 commit$s past $2"
 }
 
 # Step 4's delete. `-d` first: it is the honest question, and it succeeds on a
@@ -104,6 +115,11 @@ ahead_text() { # ahead_text <path> <N> -> "N commit(s) ahead of <default>"
 delete_local() { # delete_local <path> <branch>
   local path="$1" b="$2"
   if [ "$dry" = 1 ]; then echo "would delete local branch $b"; return 0; fi
+  # The tip goes under refs/deleted first, so a wrong verdict is undone with
+  # `git branch <b> refs/deleted/<b>` rather than reflog forensics. A ref, not
+  # a note, so the objects stay reachable past reflog expiry and gc.
+  git -C "$path" update-ref "refs/deleted/$b" "refs/heads/$b" || return 1
+  echo "recorded the tip of $b at refs/deleted/$b (git branch $b refs/deleted/$b restores it)"
   if git -C "$path" branch -d "$b" 2>/dev/null; then
     echo "deleted local branch $b"; return 0
   fi
@@ -262,14 +278,14 @@ if [ "$sweep" = 1 ]; then
     while read -r b; do
       [ -n "$b" ] && [ "$b" != "$default" ] || continue
       is_merged "$d" "$b" || continue
-      plan+=("$d|$b|$(ahead_count "$d" "$b")")
+      plan+=("$d|$b|$(unlanded_count "$d" "$b" "$merged_at")|$merged_by")
     done < <(git -C "$d" for-each-ref --format='%(refname:short)' refs/heads/)
   done
   if [ "${#plan[@]}" -gt 0 ]; then
     echo "$header: ${#plan[@]} merged branch(es) under $root"
     for row in "${plan[@]}"; do
-      IFS='|' read -r d b n <<< "$row"
-      echo "  $(basename "${d%/}") $b  $(ahead_text "$d" "$n")"
+      IFS='|' read -r d b n by <<< "$row"
+      echo "  $(basename "${d%/}") $b  $(unlanded_text "$n" "$by")"
     done
     # Nothing is deleted until confirmed. A closed or non-terminal stdin is
     # not a yes: an unattended sweep needs --yes on the line.
@@ -281,12 +297,12 @@ if [ "$sweep" = 1 ]; then
   fi
   # Pass 2 — the cleanup.
   for row in "${plan[@]}"; do
-    IFS='|' read -r d b n <<< "$row"
+    IFS='|' read -r d b n by <<< "$row"
     echo "== ${d%/} $b"
     if cleanup_branch "$d" "$b"; then
-      rows+=("$(basename "${d%/}")|$b|cleaned|$(ahead_text "$d" "$n")")
+      rows+=("$(basename "${d%/}")|$b|cleaned|$(unlanded_text "$n" "$by")")
     else
-      rows+=("$(basename "${d%/}")|$b|FAILED|$(ahead_text "$d" "$n")"); rc=1
+      rows+=("$(basename "${d%/}")|$b|FAILED|$(unlanded_text "$n" "$by")"); rc=1
     fi
   done
   echo

@@ -41,7 +41,7 @@ esac
 f="$GH_PR_HEADS/${head//\//__}"
 if [ -f "$f" ]; then
   oid=$(cat "$f")
-  if [ "$jq" = 1 ]; then echo "$oid"; else echo "[{\"number\":7,\"headRefOid\":\"$oid\"}]"; fi
+  if [ "$jq" = 1 ]; then echo "7 $oid"; else echo "[{\"number\":7,\"headRefOid\":\"$oid\"}]"; fi
 else
   [ "$jq" = 1 ] || echo '[]'
 fi
@@ -169,10 +169,17 @@ else
 fi
 
 # --- 5. the full run: branches, fast-forward, skip lines ------------------
+tip=$(git -C "$tmp/r1" rev-parse caneff/merged-one)
 out=$(mc "$tmp/full" --repo "$tmp/r1" caneff/merged-one); rc=$?
 [ $rc -eq 0 ] || no "cleanup exited $rc: $out"
 git -C "$tmp/r1" show-ref -q --verify refs/heads/caneff/merged-one \
   && no "local branch survived" || ok "local branch deleted"
+if [ "$(git -C "$tmp/r1" rev-parse -q --verify refs/deleted/caneff/merged-one)" = "$tip" ] \
+   && printf '%s' "$out" | grep -q "refs/deleted/caneff/merged-one"; then
+  ok "the deleted tip is recorded under refs/deleted and the record is announced"
+else
+  no "no refs/deleted record of the tip: $out"
+fi
 git -C "$tmp/r1.origin.git" show-ref -q --verify refs/heads/caneff/merged-one \
   && no "remote branch survived" || ok "remote branch deleted"
 [ "$(git -C "$tmp/r1" rev-parse main)" = "$(git -C "$tmp/r1" rev-parse origin/main)" ] \
@@ -261,7 +268,7 @@ fi
 out=$(mc "$tmp/full" --sweep --root "$tmp/src" </dev/null); rc=$?
 if [ $rc -ne 0 ] && git -C "$tmp/src/other" show-ref -q --verify refs/heads/caneff/merged-one \
    && [ -d "$tmp/src/other/.claude/worktrees/implement-9" ] \
-   && printf '%s' "$out" | grep -q "other caneff/merged-one.*1 commit ahead of main" \
+   && printf '%s' "$out" | grep -q "other caneff/merged-one.*0 commits past PR #7" \
    && ! printf '%s' "$out" | grep -q "(dry run)"; then
   ok "sweep without --yes prints the plan and deletes nothing"
 else
@@ -275,9 +282,12 @@ else
 fi
 out=$(mc "$tmp/full" --sweep --root "$tmp/src" --yes); rc=$?
 echo '{"result":{"workspaces":[]}}' > "$HERDR_WORKSPACES"
-printf '%s' "$out" | grep -q "other *caneff/merged-one *cleaned *1 commit ahead of main" \
-  && ok "sweep summary says how far the deleted branch was ahead of main" \
-  || no "sweep summary has no ahead count: $out"
+printf '%s' "$out" | grep -q "other *caneff/merged-one *cleaned *0 commits past PR #7" \
+  && ok "sweep summary counts commits past the sha the PR merged at" \
+  || no "sweep summary has no count past the PR head: $out"
+printf '%s' "$out" | grep -q "other *caneff/ff-merged *cleaned *0 commits past origin/main" \
+  && ok "a branch proven by the ancestor test counts past origin/main" \
+  || no "ff-merged row lacks its count: $out"
 if printf '%s\n' "$out" | awk '/stale, not removed/{r=NR} /closing herdr workspace w4/{c=NR} END{exit !(r && c > r)}'; then
   ok "sweep closes the herdr workspaces only after its summary"
 else
