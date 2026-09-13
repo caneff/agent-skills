@@ -34,8 +34,8 @@ skipped. Matching is by directory name only.
 | `NO_SYMLINK`   | agents body has no `~/.claude` symlink | creates the symlink |
 | `NOT_SYMLINK`  | `~/.claude` entry is a real dir, not a symlink | moves body to agents, symlinks back (refuses if an agents body already exists) |
 | `WRONG_TARGET` | symlink resolves but points at the wrong body | relinks |
-| `BROKEN_LINK`  | symlink doesn't resolve to a body, but its canonical name (`~/.agents/skills/<n>`) is a healthy body, or nothing is there at all | relinks if the canonical body is healthy, else removes the dead symlink |
-| `NOT_A_BODY`   | symlink's canonical name exists but isn't a body (no marker file, or a dangling `plugin.json` symlink) | left untouched — relinking would never converge |
+| `BROKEN_LINK`  | symlink doesn't resolve to a body, but its canonical name (`~/.agents/skills/<n>`) is a healthy body, or there's no directory there at all | relinks if the canonical body is healthy, else removes the dead symlink |
+| `NOT_A_BODY`   | symlink's canonical name is a directory but isn't a body (no marker file, or a dangling `plugin.json` symlink) | left untouched — relinking would never converge |
 
 `--fix` creates symlinks, moves a stray `~/.claude` body into `~/.agents`, and
 removes dangling `~/.claude` symlinks (ones whose body is gone). It never
