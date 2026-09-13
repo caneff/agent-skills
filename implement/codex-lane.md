@@ -35,8 +35,8 @@ Two doors, matching `implement/SKILL.md` § Build:
   is already building under `implement/SKILL.md` § Build by the time this
   reaches it: discard that work, reset to the ticket's base sha, and pick up
   at Preflight below, then build under the inline door. The dispatching
-  session stays Claude for
-  claiming, the PR and the merge line, since those cost almost nothing.
+  session stays Claude for claiming, the PR and the merge line, since those
+  cost almost nothing.
 
 The brief carries what neither engine can infer:
 
