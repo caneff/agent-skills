@@ -491,22 +491,34 @@ fn a_dry_run_sweep_labels_its_plan_never_asks_and_deletes_nothing() {
 }
 
 #[test]
-fn a_sweep_with_closed_stdin_prints_the_plan_and_deletes_nothing() {
-    let c = Cleanup::new();
-    let root = sweep_root(&c);
-    let other = root.join("other");
-    let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root)], &[]);
-    assert!(!run.ok && c.has_branch(&other, "caneff/merged-one") && other.join(".claude/worktrees/implement-9").is_dir(), "{}", run.text());
-    assert!(run.has("  other caneff/merged-one  0 commits past PR #7"), "{}", run.text());
-    assert!(run.has("merged branch(es) under") && !run.has("(dry run)"), "{}", run.text());
+fn a_sweep_with_stdin_not_a_terminal_prints_the_plan_refuses_and_deletes_nothing() {
+    // #733: a closed or piped stdin is told apart from an answered no, and
+    // no question is asked that nobody can answer.
+    for piped in [None, Some("y\n")] {
+        let c = Cleanup::new();
+        let root = sweep_root(&c);
+        let other = root.join("other");
+        let args = ["--sweep", "--root", s(&root)];
+        let run = match piped {
+            None => c.mc(Tools::Full, &args, &[]),
+            Some(input) => c.mc_piped(Tools::Full, &args, input),
+        };
+        assert!(!run.ok && run.stderr.contains("merge-cleanup: stdin is not a terminal; pass --yes"), "{}", run.text());
+        assert!(!run.has("[y/N]") && !run.has("nothing deleted"), "{}", run.text());
+        assert!(c.has_branch(&other, "caneff/merged-one") && other.join(".claude/worktrees/implement-9").is_dir(), "{}", run.text());
+        assert!(run.has("  other caneff/merged-one  0 commits past PR #7"), "{}", run.text());
+        assert!(run.has("merged branch(es) under") && !run.has("(dry run)"), "{}", run.text());
+    }
 }
 
 #[test]
-fn a_sweep_answered_n_deletes_nothing() {
+fn a_sweep_answered_n_at_the_terminal_deletes_nothing() {
     let c = Cleanup::new();
     let root = sweep_root(&c);
-    let run = c.mc_piped(Tools::Full, &["--sweep", "--root", s(&root)], "n\n");
-    assert!(!run.ok && c.has_branch(&root.join("other"), "caneff/merged-one"), "{}", run.text());
+    let run = c.mc_tty(Tools::Full, &["--sweep", "--root", s(&root)], "n\n");
+    assert!(!run.ok && run.terminal.contains("nothing deleted (answer y, or pass --yes)"), "{}", run.terminal);
+    assert!(!run.terminal.contains("stdin is not a terminal"), "{}", run.terminal);
+    assert!(c.has_branch(&root.join("other"), "caneff/merged-one"));
 }
 
 #[test]
@@ -531,11 +543,15 @@ fn a_sweep_with_yes_cleans_counts_and_reports() {
 }
 
 #[test]
-fn a_sweep_answered_y_cleans_the_merged_branch() {
+fn a_sweep_piped_through_cat_still_shows_the_question_and_y_cleans() {
+    // #733: the question goes to the terminal, not into the pipe.
     let c = Cleanup::new();
     let root = sweep_root(&c);
-    let run = c.mc_piped(Tools::Full, &["--sweep", "--root", s(&root)], "y\n");
-    assert!(run.ok && !c.has_branch(&root.join("other"), "caneff/merged-one"), "{}", run.text());
+    let run = c.mc_tty(Tools::Full, &["--sweep", "--root", s(&root)], "y\n");
+    let question = "delete these branches and their worktrees? [y/N] ";
+    assert!(run.ok && run.terminal.contains(question), "terminal: {}\npipe: {}", run.terminal, run.stdout);
+    assert!(!run.stdout.contains("[y/N]") && run.stdout.contains("sweep summary"), "{}", run.stdout);
+    assert!(!c.has_branch(&root.join("other"), "caneff/merged-one"));
 }
 
 #[test]

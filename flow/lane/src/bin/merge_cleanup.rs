@@ -7,7 +7,7 @@ use lane::herdr::{self, Agent};
 use lane::runner::{on_path, quiet_ok, quiet_stdout, status};
 use lane::sessions::{self, in_tree};
 use std::env;
-use std::io::Write;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -365,10 +365,15 @@ impl Cleanup {
                 println!("  {} {}  {}", row.name(), row.branch, row.unlanded);
             }
             // Nothing is deleted until confirmed. A closed or non-terminal
-            // stdin is not a yes: an unattended sweep needs --yes on the line.
+            // stdin is not a yes: an unattended sweep needs --yes on the line,
+            // and it is told so rather than asked a question nobody can
+            // answer. The question goes to stderr, so a sweep piped into
+            // `tee` or `less` still shows it (#733).
             if !self.dry && !yes {
-                print!("delete these branches and their worktrees? [y/N] ");
-                let _ = std::io::stdout().flush();
+                if !std::io::stdin().is_terminal() {
+                    return die("stdin is not a terminal; pass --yes");
+                }
+                eprint!("delete these branches and their worktrees? [y/N] ");
                 let mut ans = String::new();
                 let _ = std::io::stdin().read_line(&mut ans);
                 if !matches!(ans.trim(), "y" | "Y" | "yes" | "YES") {

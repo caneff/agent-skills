@@ -266,6 +266,58 @@ impl Cleanup {
     }
 }
 
+/// A run whose stdin is a real terminal (a pty from util-linux `script`),
+/// with stdout piped through `cat` into a file — the `| tee` / `| less`
+/// shape #733 is about.
+pub struct TtyRun {
+    pub ok: bool,
+    /// What the terminal showed: stderr, and the typed answer's echo.
+    pub terminal: String,
+    /// What reached the pipe.
+    pub stdout: String,
+}
+
+impl Cleanup {
+    pub fn mc_tty(&self, tools: Tools, args: &[&str], typed: &str) -> TtyRun {
+        let cmd = self.command(tools, args, &[]);
+        let quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+        let mut line = String::from("set -o pipefail; env -i");
+        for (k, v) in cmd.get_envs() {
+            line.push_str(&format!(" {}={}", k.to_string_lossy(), quote(&v.unwrap_or_default().to_string_lossy())));
+        }
+        line.push(' ');
+        line.push_str(&quote(&cmd.get_program().to_string_lossy()));
+        for a in cmd.get_args() {
+            line.push(' ');
+            line.push_str(&quote(&a.to_string_lossy()));
+        }
+        let piped = self.root().join("tty-stdout.txt");
+        line.push_str(&format!(" | cat > {}", quote(&piped.display().to_string())));
+        let out = self.tty_command(&line, typed);
+        TtyRun {
+            ok: out.status.success(),
+            terminal: String::from_utf8_lossy(&out.stdout).replace('\r', ""),
+            stdout: std::fs::read_to_string(&piped).unwrap_or_default(),
+        }
+    }
+
+    fn tty_command(&self, line: &str, typed: &str) -> Output {
+        use std::io::Write;
+        let mut child = Command::new("script")
+            .args(["-qec", line, "/dev/null"])
+            .env("SHELL", which("bash"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // The answer arrives after the prompt is up, as a person's would.
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        child.stdin.take().unwrap().write_all(typed.as_bytes()).unwrap();
+        child.wait_with_output().unwrap()
+    }
+}
+
 pub struct Run {
     pub ok: bool,
     pub stdout: String,
