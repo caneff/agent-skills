@@ -14,7 +14,7 @@ _Avoid_: agent (ambiguous), task, builder
 
 **Workspace**:
 A git worktree under `<repo>/.claude/worktrees/<name>` on its own branch, holding exactly one worker.
-_Avoid_: Orca workspace, worktree (when the herdr pane is meant too)
+_Avoid_: worktree (when the herdr pane is meant too)
 
 **Brief**:
 The single prefilled prompt a worker receives at start, `/implement <n> --tier light|heavy --controller "<name>"`; the skill supplies everything else.
