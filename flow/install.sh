@@ -24,8 +24,12 @@ link() { # link <repo-relative-src> <live-dest>
 
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link bin/merge-cleanup          "$HOME/.local/bin/merge-cleanup"
-link bin/implement-dispatch     "$HOME/.local/bin/implement-dispatch"
 link bin/job-run                "$HOME/.local/bin/job-run"
+# implement-dispatch is a Rust binary now (#748): cargo install replaces it in
+# place, rather than a symlink into the repo. Never installs the test-only
+# fake — lane-install.sh only names implement-dispatch and merge-cleanup.
+mkdir -p "$HOME/.local/bin"
+bash "$here/lane-install.sh"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 # claude/settings.json is NOT symlinked — the harness rewrites it in place and
 # would break the link. It is a copy-only backup (see backup-sync.sh), written

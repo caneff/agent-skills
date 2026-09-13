@@ -1,0 +1,454 @@
+//! Contract tests for the `implement-dispatch` binary, against a scratch
+//! origin/clone and the fake `gh`/`herdr` from `lane-fake` — the same seam
+//! the bash suite it replaces used. Covers every case in
+//! `flow/bin/implement-dispatch.test.sh`.
+
+mod support;
+use support::{default_scenario, out_text, with, Fixture};
+
+fn refused(out: &std::process::Output, calls: &str, repo: &std::path::Path, n: &str, want: &str) -> bool {
+    let text = out_text(out).to_lowercase();
+    !out.status.success()
+        && text.contains(&want.to_lowercase())
+        && !calls.contains("worktree open")
+        && !calls.contains("issue edit")
+        && !std::path::Path::new(&format!("{}/.git/refs/heads/implement-{n}", repo.display())).exists()
+}
+
+#[test]
+fn refuses_when_no_herdr_server_is_running() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("HERDR_RUNNING", "false")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "herdr server"), "{}", out_text(&out));
+}
+
+#[test]
+fn refuses_when_claude_onboarding_is_not_complete() {
+    let f = Fixture::new();
+    f.reset_home(false);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "395", "onboarding"), "{}", out_text(&out));
+}
+
+#[test]
+fn refuses_a_closed_issue() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_STATE", "CLOSED")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "not an open issue"), "{}", out_text(&out));
+}
+
+#[test]
+fn refuses_a_missing_issue() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_STATE", "")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "not an open issue"), "{}", out_text(&out));
+}
+
+#[test]
+fn refuses_an_origin_that_names_no_github_owner_name() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("notgithub", "main");
+    std::process::Command::new("git")
+        .args(["-C", repo.to_str().unwrap(), "remote", "set-url", "origin", "/elsewhere/notgithub.git"])
+        .status()
+        .unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "395", "owner/name"), "{}", out_text(&out));
+    assert!(!f.calls().lines().any(|l| l.starts_with("gh ")), "gh was called without an owner/name: {}", f.calls());
+}
+
+#[test]
+fn refuses_when_flock_is_not_on_path() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    // A PATH with the fake dir and every real tool except flock.
+    let noflock = f.tmp.path().join("noflock");
+    std::fs::create_dir_all(&noflock).unwrap();
+    for t in ["git"] {
+        let p = which(t);
+        std::os::unix::fs::symlink(p, noflock.join(t)).unwrap();
+    }
+    std::os::unix::fs::symlink(support::bin_path(), f.tmp.path().join("bin/implement-dispatch-noop")).ok();
+    let out = std::process::Command::new(support::bin_path())
+        .args(["--repo", repo.to_str().unwrap(), "395"])
+        .env_clear()
+        .env("PATH", format!("{}:{}", noflock.display(), f.tmp.path().join("bin").display()))
+        .env("HOME", f.home())
+        .env("CALL_LOG", f.call_log())
+        .envs(default_scenario())
+        .output()
+        .unwrap();
+    assert!(refused(&out, &f.calls(), &repo, "395", "flock is not on path"), "{}", out_text(&out));
+}
+
+fn which(name: &str) -> std::path::PathBuf {
+    let path = std::env::var("PATH").unwrap();
+    std::env::split_paths(&path).map(|d| d.join(name)).find(|p| p.is_file()).unwrap()
+}
+
+#[test]
+fn refuses_an_issue_not_labelled_ready_for_agent() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "in-progress")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "ready-for-agent"), "{}", out_text(&out));
+}
+
+#[test]
+fn refuses_a_ready_for_agent_issue_that_is_also_held() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "ready-for-agent,in-progress")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "in-progress"), "{}", out_text(&out));
+}
+
+#[test]
+fn refuses_when_herdr_agent_name_is_already_taken() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("HERDR_AGENT_TAKEN", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(
+        refused(&out, &f.calls(), &repo, "395", "sudokumaker-custom-constrain-395"),
+        "{}",
+        out_text(&out)
+    );
+}
+
+#[test]
+fn refuses_when_the_workspace_path_exists() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    std::fs::create_dir_all(repo.join(".claude/worktrees/implement-395")).unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "395", "already exists"), "{}", out_text(&out));
+}
+
+#[test]
+fn refuses_when_git_still_registers_a_worktree_at_the_path() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    std::process::Command::new("git")
+        .args(["-C", repo.to_str().unwrap(), "worktree", "add", "-q", "--detach", ".claude/worktrees/implement-394", "main"])
+        .status()
+        .unwrap();
+    std::fs::remove_dir_all(repo.join(".claude/worktrees/implement-394")).unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "394"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "394", "already exists"), "{}", out_text(&out));
+}
+
+#[test]
+fn refuses_when_the_branch_exists() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    std::process::Command::new("git").args(["-C", repo.to_str().unwrap(), "branch", "implement-396", "main"]).status().unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "396"], &default_scenario());
+    assert!(!out.status.success());
+    assert!(out_text(&out).contains("already exists"), "{}", out_text(&out));
+    assert!(!repo.join(".claude/worktrees/implement-396").exists());
+    assert!(!f.calls().contains("worktree open") && !f.calls().contains("issue edit"));
+}
+
+#[test]
+fn creates_the_workspace_and_branch_off_origin_default_with_no_origin_head() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    // no origin/HEAD in this fixture
+    let head_ref = std::process::Command::new("git")
+        .args(["-C", repo.to_str().unwrap(), "symbolic-ref", "-q", "refs/remotes/origin/HEAD"])
+        .output()
+        .unwrap();
+    assert!(!head_ref.status.success(), "fixture unexpectedly has origin/HEAD");
+
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "dispatch failed: {}", out_text(&out));
+
+    let wt = repo.join(".claude/worktrees/implement-395");
+    let branch = String::from_utf8(
+        std::process::Command::new("git").args(["-C", wt.to_str().unwrap(), "branch", "--show-current"]).output().unwrap().stdout,
+    )
+    .unwrap();
+    assert_eq!(branch.trim(), "implement-395");
+    let wt_head =
+        String::from_utf8(std::process::Command::new("git").args(["-C", wt.to_str().unwrap(), "rev-parse", "HEAD"]).output().unwrap().stdout).unwrap();
+    let origin_main = String::from_utf8(
+        std::process::Command::new("git").args(["-C", repo.to_str().unwrap(), "rev-parse", "origin/main"]).output().unwrap().stdout,
+    )
+    .unwrap();
+    assert_eq!(wt_head, origin_main);
+}
+
+#[test]
+fn writes_the_trust_key_for_exactly_the_new_path() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let wt = repo.join(".claude/worktrees/implement-395");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+
+    let raw = std::fs::read_to_string(f.home().join(".claude.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let projects = v.get("projects").unwrap().as_object().unwrap();
+    let mut keys: Vec<&str> = projects.keys().map(String::as_str).collect();
+    keys.sort();
+    let mut expected = vec!["/elsewhere", wt.to_str().unwrap()];
+    expected.sort();
+    assert_eq!(keys, expected);
+    assert_eq!(projects[wt.to_str().unwrap()]["hasTrustDialogAccepted"], true);
+    assert_eq!(projects["/elsewhere"]["hasTrustDialogAccepted"], false);
+    assert_eq!(v["hasCompletedOnboarding"], true);
+}
+
+#[test]
+fn calls_open_start_prompt_in_order_with_the_truncated_agent_name() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let wt = repo.join(".claude/worktrees/implement-395");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+
+    let calls = f.calls();
+    let herdr_calls: Vec<&str> = calls
+        .lines()
+        .filter(|l| l.starts_with("herdr worktree open") || l.starts_with("herdr agent start") || l.starts_with("herdr agent prompt"))
+        .collect();
+    let name = "sudokumaker-custom-constrain-395";
+    let expected = vec![
+        format!(
+            "herdr worktree open --cwd {} --path {} --label implement-395 --no-focus --trust-repository",
+            repo.display(),
+            wt.display()
+        ),
+        format!("herdr agent start {name} --kind claude --pane w7:p1 -- --model sonnet"),
+        format!("herdr agent prompt {name} /implement 395 --tier heavy --controller \"skills-ctl\" --wait --until working --timeout 120000"),
+    ];
+    assert_eq!(herdr_calls, expected, "herdr calls wrong:\n{herdr_calls:?}");
+}
+
+#[test]
+fn every_gh_call_names_the_repo_from_origin_and_claims_the_ticket() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let calls = f.calls();
+    for line in calls.lines().filter(|l| l.starts_with("gh ")) {
+        assert!(line.contains("--repo caneff/sudokumaker-custom-constraints"), "a gh call relied on the cwd: {line}");
+    }
+    assert!(
+        calls.contains("gh issue edit 395 --repo caneff/sudokumaker-custom-constraints --remove-label ready-for-agent --add-label in-progress --add-assignee @me"),
+        "ticket not claimed: {calls}"
+    );
+}
+
+#[test]
+fn the_report_names_path_branch_agent_and_the_cleanup_line() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let wt = repo.join(".claude/worktrees/implement-395");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let text = out_text(&out);
+    assert!(text.contains(&format!("worktree: {}", wt.display())), "{text}");
+    assert!(text.contains("branch:   implement-395"), "{text}");
+    assert!(text.contains("agent:    sudokumaker-custom-constrain-395"), "{text}");
+    assert!(text.contains(&format!("cd {} && merge-cleanup implement-395 --repo {}", repo.display(), repo.display())), "{text}");
+}
+
+#[test]
+fn model_reaches_agent_start_and_pane_falls_back_to_pane_list() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("HERDR_NO_ROOT_PANE", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--model", "opus", "397"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(
+        f.calls().lines().any(|l| l == "herdr agent start sudokumaker-custom-constrain-397 --kind claude --pane w8:p3 -- --model opus"),
+        "{}",
+        f.calls()
+    );
+}
+
+#[test]
+fn refuses_a_model_other_than_sonnet_or_opus() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--model", "haiku", "398"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "398", "model"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_flag_with_no_value_is_refused_not_looped_on() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["398", "--model"], &default_scenario());
+    assert!(!out.status.success());
+    assert!(out_text(&out).contains("--model needs a value"), "{}", out_text(&out));
+    let _ = repo;
+}
+
+#[test]
+fn a_documentation_label_puts_tier_light_in_the_brief() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "documentation,ready-for-agent")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "403"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(
+        f.calls().lines().any(|l| l
+            == "herdr agent prompt sudokumaker-custom-constrain-403 /implement 403 --tier light --controller \"skills-ctl\" --wait --until working --timeout 120000"),
+        "{}",
+        f.calls()
+    );
+}
+
+#[test]
+fn controller_flag_overrides_the_session_registry() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--controller", "other-9", "404"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(
+        f.calls().lines().any(|l| l
+            == "herdr agent prompt sudokumaker-custom-constrain-404 /implement 404 --tier heavy --controller \"other-9\" --wait --until working --timeout 120000"),
+        "{}",
+        f.calls()
+    );
+}
+
+#[test]
+fn refuses_when_no_controller_session_is_found_and_none_is_named() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    std::fs::remove_file(f.session_file()).unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "405"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "405", "controller"), "{}", out_text(&out));
+}
+
+#[test]
+fn skips_a_session_file_whose_procstart_is_not_the_live_process() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    f.set_session("skills-ctl", "1");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "406"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "406", "controller"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_controller_name_with_spaces_reaches_the_brief_whole_quoted() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    f.set_session("bank drill composition", &f.own_proc_start());
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "407"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(
+        f.calls().lines().any(|l| l
+            == "herdr agent prompt sudokumaker-custom-constrain-407 /implement 407 --tier heavy --controller \"bank drill composition\" --wait --until working --timeout 120000"),
+        "{}",
+        f.calls()
+    );
+}
+
+#[test]
+fn refuses_a_controller_name_holding_a_double_quote() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--controller", "say \"hi\"", "408"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "408", "controller"), "{}", out_text(&out));
+}
+
+#[test]
+fn the_base_is_origin_master_when_origin_has_no_main_and_no_head() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("masteronly", "master");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "401"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let wt = repo.join(".claude/worktrees/implement-401");
+    let wt_head =
+        String::from_utf8(std::process::Command::new("git").args(["-C", wt.to_str().unwrap(), "rev-parse", "HEAD"]).output().unwrap().stdout).unwrap();
+    let origin_master =
+        String::from_utf8(std::process::Command::new("git").args(["-C", repo.to_str().unwrap(), "rev-parse", "origin/master"]).output().unwrap().stdout)
+            .unwrap();
+    assert_eq!(wt_head, origin_master);
+}
+
+#[test]
+fn refuses_when_the_resolved_base_is_not_on_origin() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("trunkonly", "trunk");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "402"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "402", "origin/main"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_stalled_prompt_exits_non_zero_with_herdrs_error_and_leaves_the_worktree() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("HERDR_STALL", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "399"], &scenario);
+    assert!(!out.status.success());
+    assert!(out_text(&out).contains("agent_prompt_stalled"), "{}", out_text(&out));
+    assert!(repo.join(".claude/worktrees/implement-399").is_dir());
+}
+
+#[test]
+fn two_concurrent_dispatches_both_leave_their_trust_keys() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo_a = f.mkfixture("race-a", "main");
+    let repo_b = f.mkfixture("race-b", "main");
+    let scenario = default_scenario();
+    let (out_a, out_b) = std::thread::scope(|s| {
+        let ta = s.spawn(|| f.dispatch(&["--repo", repo_a.to_str().unwrap(), "501"], &scenario));
+        let tb = s.spawn(|| f.dispatch(&["--repo", repo_b.to_str().unwrap(), "502"], &scenario));
+        (ta.join().unwrap(), tb.join().unwrap())
+    });
+    assert!(out_a.status.success(), "{}", out_text(&out_a));
+    assert!(out_b.status.success(), "{}", out_text(&out_b));
+
+    let raw = std::fs::read_to_string(f.home().join(".claude.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let wt_a = repo_a.join(".claude/worktrees/implement-501");
+    let wt_b = repo_b.join(".claude/worktrees/implement-502");
+    assert_eq!(v["projects"][wt_a.to_str().unwrap()]["hasTrustDialogAccepted"], true, "{raw}");
+    assert_eq!(v["projects"][wt_b.to_str().unwrap()]["hasTrustDialogAccepted"], true, "{raw}");
+    assert!(v["projects"]["/elsewhere"].is_object(), "{raw}");
+}
+

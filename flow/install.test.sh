@@ -12,11 +12,17 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
+# cargo install (run by lane-install.sh) needs its own real cache — captured
+# before HOME is overridden below — so a scratch HOME does not force a
+# from-scratch, possibly offline, rebuild of every dependency.
+export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+
 # A scratch repo holding only what install.sh links, plus a stale pre-push hook
 # left by an earlier install.
 repo="$tmp/repo"
 mkdir -p "$repo/tests"
 cp -r "$root/flow" "$repo/flow"
+rm -rf "$repo/flow/lane/target" # a build cache, not part of the source
 cp "$root/tests/all.sh" "$repo/tests/all.sh"
 git -C "$repo" init -q
 ln -s "$repo/flow/../tests/all.sh" "$repo/.git/hooks/pre-push"
@@ -47,16 +53,25 @@ if [ -L "$tmp/home/.local/bin/merge-cleanup" ]; then
 else
   echo "FAIL bin/merge-cleanup not linked under the scratch HOME"; fails=1
 fi
-# Both scripts refuse here only after sourcing the helper. They find it through
-# their own link, so an install that predates the helper still works.
-dispatch_out=$(HOME="$tmp/home" bash "$tmp/home/.local/bin/implement-dispatch" --repo "$tmp/nowhere" 1 2>&1)
+# merge-cleanup refuses here only after sourcing the helper. It finds it
+# through its own link, so an install that predates the helper still works.
 cleanup_out=$(cd "$repo" && HOME="$tmp/home" bash "$tmp/home/.local/bin/merge-cleanup" --dry-run 2>&1)
-if [ -L "$tmp/home/.local/bin/implement-dispatch" ] && [ ! -e "$tmp/home/.local/bin/git-origin.sh" ] \
-   && printf '%s' "$dispatch_out" | grep -q "not a git repo" \
+if [ -L "$tmp/home/.local/bin/merge-cleanup" ] && [ ! -e "$tmp/home/.local/bin/git-origin.sh" ] \
    && printf '%s' "$cleanup_out" | grep -q "name a branch"; then
-  echo "PASS implement-dispatch linked, and both scripts source git-origin.sh through their links"
+  echo "PASS merge-cleanup linked, and sources git-origin.sh through its link"
 else
-  echo "FAIL bin/implement-dispatch not linked, or git-origin.sh not sourced through the links: $dispatch_out / $cleanup_out"; fails=1
+  echo "FAIL bin/merge-cleanup not linked, or git-origin.sh not sourced through its link: $cleanup_out"; fails=1
+fi
+
+# implement-dispatch (#748) is `cargo install`ed, not linked: a real
+# executable, never a symlink into the repo, and the fake is never installed.
+dispatch_out=$(HOME="$tmp/home" "$tmp/home/.local/bin/implement-dispatch" --repo "$tmp/nowhere" 1 2>&1)
+if [ -x "$tmp/home/.local/bin/implement-dispatch" ] && [ ! -L "$tmp/home/.local/bin/implement-dispatch" ] \
+   && [ ! -e "$tmp/home/.local/bin/lane-fake" ] \
+   && printf '%s' "$dispatch_out" | grep -q "not a git repo"; then
+  echo "PASS implement-dispatch installed as a real binary, and the fake is never installed"
+else
+  echo "FAIL implement-dispatch not installed correctly: $dispatch_out"; fails=1
 fi
 if [ -L "$tmp/home/.local/bin/job-run" ]; then
   echo "PASS job-run linked onto PATH under the scratch HOME"
@@ -87,6 +102,7 @@ fi
 empty="$tmp/empty"
 mkdir -p "$empty/tests"
 cp -r "$root/flow" "$empty/flow"
+rm -rf "$empty/flow/lane/target"
 cp "$root/tests/all.sh" "$empty/tests/all.sh"
 git -C "$empty" init -q
 rm -f "$empty/flow/claude/agents"/*.md

@@ -611,5 +611,77 @@ else
 fi
 rm "$HOME/.claude/sessions/r16.json"
 
+# --- 17. #748: the fast-forward step rebuilds the lane binaries -------------
+# A fake flow/lane-install.sh, so the case runs fast and offline: it fails
+# when $LANE_INSTALL_FAIL is set, else logs a run and drops a marker file
+# standing in for "the binary was rebuilt".
+lane_body='#!/usr/bin/env bash
+if [ -n "${LANE_INSTALL_FAIL:-}" ]; then
+  echo "compile error: boom" >&2
+  exit 1
+fi
+echo ran >> "$LANE_INSTALL_LOG"
+echo NEW > "$LANE_INSTALLED_BIN"
+'
+mk_lane_repo() { # mk_lane_repo <dir> <touch-lane 0|1>
+  local d="$1" touch_lane="$2" origin="$1.origin.git"
+  git init -q -b main --bare "$origin"
+  git clone -q "$origin" "$d" 2>/dev/null
+  git -C "$d" checkout -q -b main
+  git -C "$d" config user.email t@example.com; git -C "$d" config user.name t
+  mkdir -p "$d/flow/lane"
+  printf '%s' "$lane_body" > "$d/flow/lane-install.sh"; chmod +x "$d/flow/lane-install.sh"
+  echo fn1 > "$d/flow/lane/main.rs"
+  git -C "$d" add -A; git -C "$d" commit -qm base
+  git -C "$d" checkout -q -b caneff/trivial main
+  echo x > "$d/trivial"; git -C "$d" add trivial; git -C "$d" commit -qam trivial
+  git -C "$d" checkout -q main
+  git -C "$d" merge -q --ff-only caneff/trivial
+  git -C "$d" push -q -u origin main
+  # origin/main moves ahead again while local main lags — the thing step 6
+  # pulls, some of it under flow/lane and some not depending on the case.
+  if [ "$touch_lane" = 1 ]; then
+    echo fn2 >> "$d/flow/lane/main.rs"
+  else
+    echo other > "$d/unrelated"
+  fi
+  git -C "$d" add -A; git -C "$d" commit -qam "further change"
+  git -C "$d" push -q origin main
+  git -C "$d" reset -q --hard HEAD~1
+}
+
+export LANE_INSTALL_LOG="$tmp/lane-install.log" LANE_INSTALLED_BIN="$tmp/installed-bin"
+: > "$LANE_INSTALL_LOG"; echo OLD > "$LANE_INSTALLED_BIN"; unset LANE_INSTALL_FAIL
+mk_lane_repo "$tmp/r17" 1
+out=$(mc "$tmp/full" --repo "$tmp/r17" caneff/trivial); rc=$?
+if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "flow/lane changed: rebuilding the lane binaries" \
+   && [ "$(cat "$LANE_INSTALL_LOG")" = "ran" ] && [ "$(cat "$LANE_INSTALLED_BIN")" = NEW ]; then
+  ok "rebuilds after a pull that changed the crate"
+else
+  no "did not rebuild on a crate-touching pull (rc=$rc): $out"
+fi
+
+: > "$LANE_INSTALL_LOG"; echo OLD > "$LANE_INSTALLED_BIN"
+mk_lane_repo "$tmp/r18" 0
+out=$(mc "$tmp/full" --repo "$tmp/r18" caneff/trivial); rc=$?
+if [ $rc -eq 0 ] && ! printf '%s' "$out" | grep -q "rebuilding the lane binaries" \
+   && [ ! -s "$LANE_INSTALL_LOG" ] && [ "$(cat "$LANE_INSTALLED_BIN")" = OLD ]; then
+  ok "skips the rebuild when the pull did not touch the crate"
+else
+  no "rebuilt on a pull that never touched flow/lane (rc=$rc): $out"
+fi
+
+: > "$LANE_INSTALL_LOG"; echo OLD > "$LANE_INSTALLED_BIN"
+mk_lane_repo "$tmp/r19" 1
+out=$(LANE_INSTALL_FAIL=1 mc "$tmp/full" --repo "$tmp/r19" caneff/trivial); rc=$?
+if [ $rc -eq 0 ] && printf '%s' "$out" | grep -q "lane rebuild failed" \
+   && printf '%s' "$out" | grep -q "compile error: boom" \
+   && [ "$(cat "$LANE_INSTALLED_BIN")" = OLD ] \
+   && [ "$(git -C "$tmp/r19" rev-parse main)" = "$(git -C "$tmp/r19" rev-parse origin/main)" ]; then
+  ok "a failed rebuild reports the compiler error, keeps the old binary, and does not fail the cleanup"
+else
+  no "a failed rebuild broke the cleanup or lost the old binary (rc=$rc): $out"
+fi
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"

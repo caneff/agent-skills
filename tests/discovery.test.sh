@@ -14,7 +14,8 @@ for label in \
   "flow/ccstatusline-table/statusline.test.sh" \
   "all-audits/driver_test.py" \
   "crap-audit/audit_test.py" \
-  "mutation-audit/audit.py --selfcheck"
+  "mutation-audit/audit.py --selfcheck" \
+  "flow/lane/Cargo.toml"
 do
   grep -qxF "$label" <<<"$listed" || { echo "FAIL: $label not discovered"; fail=1; }
 done

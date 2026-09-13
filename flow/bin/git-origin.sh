@@ -1,6 +1,7 @@
-# Sourced, not run: what merge-cleanup and implement-dispatch read from a
-# repo's origin. Each follows its own ~/.local/bin link back to flow/bin and
-# sources it from there, so the installer does not link it.
+# Sourced, not run: what merge-cleanup reads from a repo's origin. It follows
+# its own ~/.local/bin link back to flow/bin and sources it from there, so the
+# installer does not link it. implement-dispatch was ported to Rust in #748
+# and no longer sources this; the Rust port of merge-cleanup will drop it too.
 
 default_of() { # default_of <path> -> main, master, whatever origin points at
   local d

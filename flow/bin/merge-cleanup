@@ -327,9 +327,33 @@ cleanup_branch() { # cleanup_branch <path> <branch> -> steps 3-6
   # Step 6 — fast-forward the primary checkout, so the next branch starts from
   # the merge rather than from behind it.
   if [ -n "$primary" ] && [ "$(git -C "$primary" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "$default" ]; then
-    run "fast-forwarding $default in $primary" git -C "$primary" pull --ff-only --quiet || true
+    rebuild_lane_if_pull_touched_it "$primary" "$default"
   else
     skip "the fast-forward" "$primary is not on $default"
+  fi
+}
+
+# #748: when the pull below moves HEAD and the move touches flow/lane, the
+# installed lane binaries (implement-dispatch, and merge-cleanup once #748's
+# follow-up ports it) would otherwise run behind main. Rebuilds from the
+# freshly pulled checkout's own flow/lane-install.sh, so this works the same
+# whether $primary is this tooling's own repo or, for any other repo (no
+# flow/lane there), is simply a no-op. A build failure is reported with the
+# compiler's error and never fails the fast-forward that already happened —
+# a dry run never pulls, so old and new HEAD are equal and this is a no-op.
+rebuild_lane_if_pull_touched_it() { # rebuild_lane_if_pull_touched_it <primary> <default>
+  local primary="$1" default="$2" old_head new_head
+  old_head=$(git -C "$primary" rev-parse HEAD 2>/dev/null)
+  run "fast-forwarding $default in $primary" git -C "$primary" pull --ff-only --quiet || true
+  new_head=$(git -C "$primary" rev-parse HEAD 2>/dev/null)
+  [ -n "$old_head" ] && [ -n "$new_head" ] && [ "$old_head" != "$new_head" ] || return 0
+  [ -f "$primary/flow/lane-install.sh" ] || return 0
+  git -C "$primary" diff --quiet "$old_head" "$new_head" -- flow/lane 2>/dev/null && return 0
+  echo "flow/lane changed: rebuilding the lane binaries"
+  local out
+  if ! out=$(bash "$primary/flow/lane-install.sh" 2>&1); then
+    echo "merge-cleanup: lane rebuild failed, keeping the installed binaries:" >&2
+    printf '%s\n' "$out" >&2
   fi
 }
 
