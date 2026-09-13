@@ -32,10 +32,12 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
 - Worktree path: `[worktrees]` `directory = ".claude/worktrees"` in
   `~/.config/herdr/config.toml`, so a worktree opened through herdr lands at
   `<repo>/.claude/worktrees/<branch-slug>`, where `merge-cleanup` looks.
-- `herdr-reviewr` is linked; the `herdr-push` plugin (feeds `herdr-remote`'s
-  mobile approval relay) is not installed — `herdr plugin install
-  dcolinmorgan/herdr-push` needs my own hands, since the auto-mode classifier
-  denies it as untrusted code integration.
+- `herdr-reviewr` is linked; the `herdr-push` plugin (`herdr.push`, feeds
+  `herdr-remote`'s mobile approval relay) is installed pinned at `f4fdb06`
+  (2026-09-13, #726) but inert: it exits unless `HERDR_RELAY` is set in its
+  `.env`, and no relay is stood up. Reinstalling or updating it needs my own
+  hands (`--ref <sha> --yes`), since the auto-mode classifier denies it as
+  untrusted code integration.
 - **The herdr `claude` integration stays installed** (`herdr integration
   status` shows `claude: current`). Screen detection gives idle/working/blocked
   for free, but not the session id: its SessionStart hook
