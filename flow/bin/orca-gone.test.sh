@@ -231,6 +231,7 @@ ordinary_ignored="$tmp/ordinary_ignored"
 mkdir -p "$ordinary_ignored/repo/build" "$ordinary_ignored/home/.claude" \
          "$ordinary_ignored/home/.local/bin" "$ordinary_ignored/home/src/some-project" \
          "$ordinary_ignored/home/$needle/workspaces"
+git -C "$ordinary_ignored/repo" init -q
 echo "build/" > "$ordinary_ignored/repo/.gitignore"
 echo "nothing to see here" > "$ordinary_ignored/repo/README.md"
 echo "leftover ${needle}-ide build artifact" > "$ordinary_ignored/repo/build/output.txt"
