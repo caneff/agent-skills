@@ -609,7 +609,9 @@ fn worktree_holding(path: &str, b: &str) -> String {
     String::new()
 }
 
-/// `"$dir"/*/`: the non-hidden directories in `dir`, sorted, as paths.
+/// `"$dir"/*/`: the non-hidden directories in `dir`, sorted, as paths. A
+/// listing, not a glob, so a missing `dir` yields nothing rather than the
+/// unexpanded pattern (#735).
 fn subdirs(dir: &str) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut names: Vec<String> = entries

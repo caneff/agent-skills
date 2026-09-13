@@ -624,3 +624,20 @@ fn a_dry_run_never_rebuilds() {
     assert!(run.ok && !run.has("rebuilding"), "{}", run.text());
     assert_eq!(std::fs::read_to_string(&log).unwrap(), "");
 }
+
+// --- #735: a repo with no .claude/worktrees lists nothing ---------------------
+
+#[test]
+fn a_repo_with_no_worktrees_dir_adds_no_stale_line() {
+    let c = Cleanup::new();
+    let root = sweep_root(&c);
+    assert!(!root.join("noremote/.claude").exists());
+    let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), "--dry-run"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!run.has("*"), "{}", run.text());
+    assert_eq!(run.stale(), vec![root.join("other/.claude/worktrees/agent-old").display().to_string()], "{}", run.text());
+
+    let r = c.mkfixture("plain");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !run.has("stale, not removed"), "{}", run.text());
+}
