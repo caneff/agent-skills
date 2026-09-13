@@ -11,7 +11,9 @@ shopt -s nullglob
 : "${AGENTS:=$HOME/.agents/skills}"
 : "${CLAUDE:=$HOME/.claude/skills}"
 
-is_skill() { [ -d "$1" ] && [ -f "$1/SKILL.md" ]; }
+# A body Claude Code loads from the skills dir: a skill (SKILL.md) or a
+# function-hook plugin (.claude-plugin/plugin.json) (#740).
+is_body() { [ -d "$1" ] && { [ -f "$1/SKILL.md" ] || [ -f "$1/.claude-plugin/plugin.json" ]; }; }
 
 scan() {
   local fix="$1" d n want tgt
@@ -19,7 +21,7 @@ scan() {
   for d in "$CLAUDE"/*; do
     n=$(basename "$d"); want="../../.agents/skills/$n"
     if [ -L "$d" ]; then
-      if [ ! -e "$d/SKILL.md" ]; then
+      if ! is_body "$d"; then
         echo "BROKEN_LINK $n"
         if [ "$fix" = fix ]; then
           if [ -d "$AGENTS/$n" ]; then
@@ -36,7 +38,7 @@ scan() {
         echo "WRONG_TARGET $n ($tgt)"
         [ "$fix" = fix ] && ln -sfn "$want" "$d"
       fi
-    elif is_skill "$d"; then
+    elif is_body "$d"; then
       echo "NOT_SYMLINK $n"
       if [ "$fix" = fix ]; then
         # Refuse if a canonical body already exists — moving would clobber it
@@ -51,7 +53,7 @@ scan() {
 
   # agents/ bodies with no claude symlink
   for d in "$AGENTS"/*; do
-    is_skill "$d" || continue; n=$(basename "$d")
+    is_body "$d" || continue; n=$(basename "$d")
     if [ ! -e "$CLAUDE/$n" ] && [ ! -L "$CLAUDE/$n" ]; then
       echo "NO_SYMLINK $n"
       [ "$fix" = fix ] && ln -s "../../.agents/skills/$n" "$CLAUDE/$n"
@@ -64,6 +66,7 @@ self_test() {
   export AGENTS="$T/.agents/skills" CLAUDE="$T/.claude/skills"
   mkdir -p "$AGENTS" "$CLAUDE"
   mk() { mkdir -p "$1"; echo 'name: x' > "$1/SKILL.md"; }
+  mkplug() { mkdir -p "$1/.claude-plugin"; echo '{}' > "$1/.claude-plugin/plugin.json"; }
 
   # clean: body + correct symlink (should produce nothing)
   mk "$AGENTS/ok";   ln -s "../../.agents/skills/ok" "$CLAUDE/ok"
@@ -75,6 +78,11 @@ self_test() {
   mk "$AGENTS/wrong"; ln -s "../../.agents/skills/ok" "$CLAUDE/wrong"
   # BROKEN_LINK: claude link to missing body
   ln -s "../../.agents/skills/dead" "$CLAUDE/dead"
+  # clean: a function-hook plugin body (plugin.json, no SKILL.md) + correct
+  # symlink; Claude Code loads these from the skills dir (#740)
+  mkplug "$AGENTS/hookplug"; ln -s "../../.agents/skills/hookplug" "$CLAUDE/hookplug"
+  # NO_SYMLINK for a plugin body too
+  mkplug "$AGENTS/hooknolink"
 
   local out; out=$(scan nofix)
   local fail=0
@@ -84,6 +92,8 @@ self_test() {
   check "WRONG_TARGET wrong (../../.agents/skills/ok)"
   check "BROKEN_LINK dead"
   grep -q " ok\$" <<<"$out" && { echo "FAIL: clean skill 'ok' was reported"; fail=1; }
+  grep -q " hookplug\$" <<<"$out" && { echo "FAIL: clean plugin 'hookplug' was reported"; fail=1; }
+  check "NO_SYMLINK hooknolink"
 
   # apply --fix, then assert the fixable cases are gone on a re-scan
   scan fix >/dev/null
@@ -97,6 +107,8 @@ self_test() {
   [ "$(readlink "$CLAUDE/wrong")" = "../../.agents/skills/wrong" ] || { echo "FAIL: wrong not relinked"; fail=1; }
   # dangling link (no body) is removed, not left behind
   [ ! -L "$CLAUDE/dead" ] || { echo "FAIL: dead symlink not removed by --fix"; fail=1; }
+  grep -q " hookplug\$" <<<"$out2" && { echo "FAIL: plugin 'hookplug' reported after --fix"; fail=1; }
+  [ -L "$CLAUDE/hooknolink" ] || { echo "FAIL: hooknolink symlink not created"; fail=1; }
 
   rm -rf "$T"
   [ "$fail" = 0 ] && { echo "self-test OK"; return 0; } || { echo "self-test FAILED"; return 1; }
