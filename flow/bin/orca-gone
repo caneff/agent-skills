@@ -15,7 +15,11 @@
 #     vendored/generated code where case-insensitive substring matching
 #     hits by coincidence — a minified or camelCase identifier can straddle
 #     two ordinary words and spell the four letters this check looks for by
-#     accident — and not a real reference
+#     accident — and not a real reference; also excluding .git/ (git's own
+#     files: refs, logs, packed history), .claude/worktrees/ (other
+#     worktrees, scanned on their own run), and .scratch/ (scratch notes,
+#     gitignored but not a real reference) — not a tracked-files-only scan,
+#     which would miss ignored files wired into the harness elsewhere
 #   - both CLAUDE.md copies: this repo's flow/claude/CLAUDE.md (covered by
 #     the repo scan above) and ~/.claude/CLAUDE.md
 #   - regular files in ~/.local/bin (content only — a dangling symlink or an
@@ -51,7 +55,8 @@ scan() { # scan <file-or-dir>, skipped if it doesn't exist
 
 add_hits "$(rg -uu -i -n -H "$needle" "$repo_root" \
   --glob '!docs/research/**' --glob '!**/node_modules/**' \
-  --glob '!visual-teach/assets/**' 2>/dev/null)"
+  --glob '!visual-teach/assets/**' --glob '!**/.git/**' \
+  --glob '!**/.claude/worktrees/**' --glob '!**/.scratch/**' 2>/dev/null)"
 
 scan "$home_claude_md"
 scan "$local_bin"
