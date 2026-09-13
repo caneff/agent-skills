@@ -1,6 +1,6 @@
 ---
 name: diff-reviewer
-description: Review one diff along one named axis — standards, spec, or correctness — for a caller that already pinned the fixed point. Spawned by two-axis-code-review and burndown; not for general use.
+description: Review one diff along one named axis — standards, spec, or correctness — for a caller that already pinned the fixed point. Spawned by multi-axis-code-review and burndown; not for general use.
 model: opus
 tools: Read, Grep, Glob, Bash, Write
 ---
@@ -15,7 +15,7 @@ form exactly as given.
 
 ## The standing brief
 
-`~/.agents/skills/two-axis-code-review/SKILL.md` is the one home for the rules
+`~/.agents/skills/multi-axis-code-review/SKILL.md` is the one home for the rules
 every axis runs under, so the caller does not paste them and this file does not
 restate them:
 

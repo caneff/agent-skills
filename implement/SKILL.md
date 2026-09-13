@@ -100,11 +100,16 @@ No PR and no reviewer; Chris reads the log after.
 
 ### Review
 
-1. One full round of `/code-review` and `/two-axis-code-review`. Neither
-   produces the other's findings. Fix what is fixable; record the rest as
-   `disputed: <why>` or as a follow-up.
+1. One full round of `/multi-axis-code-review`: standards, spec and
+   correctness, all three waited for (its § Why separate axes says why the
+   built-in `/code-review` is not run here; `/code-review low` only when the
+   owner asks). Every finding in the aggregate gets exactly one disposition:
+   fixed in a commit, `disputed: <why>`, or filed as a follow-up ticket.
+   The PR body lists the disputed and filed ones.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
    Pass the reviewers every disputed, ruled, or other-ticket item as settled.
+   A round-1 finding with no disposition is the one thing this pass fails
+   on.
 
 No third pass. Commits after the verification pass are unreviewed; the PR
 body's last reviewed sha says where review stopped.
@@ -142,7 +147,8 @@ The body has these sections and nothing else:
 
 - **What changed** — three lines.
 - **Tests run** — the command and its result line.
-- **Decisions made** — each with its reason.
+- **Decisions made** — each with its reason, including every round-1
+  finding that was disputed (with the why) or filed (with its ticket number).
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
 
 Send the controller "PR up" with the PR URL and these two lines, paths
