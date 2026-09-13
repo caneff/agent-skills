@@ -140,11 +140,10 @@ fn gh_pr_list(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Prints the file an env var names, or `fallback` when it is unset.
-fn cat_env_file(var: &str, fallback: &str) {
-    match env::var(var).ok().and_then(|p| std::fs::read_to_string(p).ok()) {
-        Some(body) => print!("{body}"),
-        None => println!("{fallback}"),
+/// Prints the file an env var names; nothing when it is unset or unreadable.
+fn cat_env_file(var: &str) {
+    if let Some(body) = env::var(var).ok().and_then(|p| std::fs::read_to_string(p).ok()) {
+        print!("{body}");
     }
 }
 
@@ -155,8 +154,8 @@ fn run_herdr(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     }
     match (a0, a1) {
-        ("agent", "list") => cat_env_file("HERDR_AGENTS", r#"{"result":{"agents":[]}}"#),
-        ("workspace", "list") => cat_env_file("HERDR_WORKSPACES", r#"{"result":{"workspaces":[]}}"#),
+        ("agent", "list") => cat_env_file("HERDR_AGENTS"),
+        ("workspace", "list") => cat_env_file("HERDR_WORKSPACES"),
         ("pane", "close") => {
             if args.get(2).is_some_and(|p| env::var("HERDR_PANE_CLOSE_FAIL").is_ok_and(|f| &f == p)) {
                 return ExitCode::FAILURE;

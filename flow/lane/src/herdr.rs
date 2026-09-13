@@ -12,17 +12,17 @@ struct AgentResult {
     agents: Vec<Agent>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
 pub struct Agent {
     name: Option<String>,
     agent: Option<String>,
-    pub agent_status: Option<String>,
-    pub pane_id: Option<String>,
-    pub cwd: Option<String>,
+    agent_status: Option<String>,
+    pane_id: Option<String>,
+    cwd: Option<String>,
     agent_session: Option<AgentSession>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
 struct AgentSession {
     value: Option<String>,
 }
@@ -34,6 +34,9 @@ impl Agent {
     }
     pub fn status(&self) -> &str {
         self.agent_status.as_deref().unwrap_or("")
+    }
+    pub fn cwd(&self) -> &str {
+        self.cwd.as_deref().unwrap_or("")
     }
     pub fn pane(&self) -> &str {
         self.pane_id.as_deref().unwrap_or("")

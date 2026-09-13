@@ -4,7 +4,7 @@
 
 use lane::git_origin::{default_branch, origin_slug};
 use lane::herdr::{self, Agent};
-use lane::runner::{on_path, quiet_ok, quiet_stdout, status};
+use lane::runner::{on_path, quiet_ok, quiet_stderr_ok, quiet_stdout, status};
 use lane::sessions::{self, in_tree};
 use std::env;
 use std::io::IsTerminal;
@@ -143,24 +143,29 @@ struct Cleanup {
     removed_worktrees: Vec<String>,
 }
 
-/// The herdr agents whose cwd is in `wt`: empty when herdr is absent, `Err`
-/// when `herdr agent list` fails or answers something unreadable.
+/// The herdr agents whose cwd is in `wt`; `Err` when `herdr agent list`
+/// fails or answers something unreadable.
 fn herdr_agents_in(wt: &str) -> Result<Vec<Agent>, ()> {
-    if !on_path("herdr") {
-        return Ok(Vec::new());
-    }
     let out = quiet_stdout("herdr", &["agent", "list"]).ok_or(())?;
     let agents = herdr::parse_agents(&out).ok_or(())?;
-    Ok(agents.into_iter().filter(|a| a.cwd.as_deref().is_some_and(|c| in_tree(c, wt))).collect())
+    Ok(agents.into_iter().filter(|a| in_tree(a.cwd(), wt)).collect())
+}
+
+/// What `herdr agent list` said about a worktree.
+enum HerdrAnswer {
+    /// herdr is not on PATH.
+    Absent,
+    /// `herdr agent list` failed or answered something unreadable.
+    Failed,
+    /// The herdr agents whose cwd is in the worktree.
+    Agents(Vec<Agent>),
 }
 
 /// What `Cleanup::occupancy` found alive in a worktree.
 struct Occupancy {
     /// Registry sessions no herdr agent explains, as "pid <n>".
     unresolved: Vec<String>,
-    /// The named herdr agents there; `None` when herdr is not on PATH,
-    /// `Err` when `herdr agent list` failed.
-    herdr: Option<Result<Vec<Agent>, ()>>,
+    herdr: HerdrAnswer,
 }
 
 impl Occupancy {
@@ -169,9 +174,9 @@ impl Occupancy {
     fn is_clear(&self) -> bool {
         self.unresolved.is_empty()
             && match &self.herdr {
-                None => true,
-                Some(Err(())) => false,
-                Some(Ok(agents)) => blockers(agents).is_empty(),
+                HerdrAnswer::Absent => true,
+                HerdrAnswer::Failed => false,
+                HerdrAnswer::Agents(agents) => blockers(agents).is_empty(),
             }
     }
 }
@@ -197,9 +202,9 @@ fn refuse_live(wt: &str, items: &[String]) -> bool {
 }
 
 impl Cleanup {
-    /// `run <description> <cmd...>`: on a dry run, say what would run;
+    /// bash's `run <description> <cmd...>`: on a dry run, say what would run;
     /// otherwise announce it and run it with its output passed through.
-    fn run(&self, what: &str, program: &str, args: &[&str]) -> bool {
+    fn step(&self, what: &str, program: &str, args: &[&str]) -> bool {
         if self.dry {
             println!("would {what}: {program} {}", args.join(" "));
             return true;
@@ -216,11 +221,15 @@ impl Cleanup {
     /// worktree, in which case that session is the worker's own pane and the
     /// herdr agent's status decides it instead.
     fn occupancy(&self, wt: &str) -> Occupancy {
-        let herdr = on_path("herdr").then(|| herdr_agents_in(wt));
+        let herdr = match on_path("herdr").then(|| herdr_agents_in(wt)) {
+            None => HerdrAnswer::Absent,
+            Some(Err(())) => HerdrAnswer::Failed,
+            Some(Ok(agents)) => HerdrAnswer::Agents(agents),
+        };
         // A registry session is explained away only by a herdr agent whose
         // own sessionId matches it — herdr agent list has to have answered.
         let herdr_sessions: Vec<&str> = match &herdr {
-            Some(Ok(agents)) => agents.iter().map(Agent::session).filter(|s| !s.is_empty()).collect(),
+            HerdrAnswer::Agents(agents) => agents.iter().map(Agent::session).filter(|s| !s.is_empty()).collect(),
             _ => Vec::new(),
         };
         let unresolved = sessions::live_in(Path::new(&self.home), wt)
@@ -240,14 +249,17 @@ impl Cleanup {
         if !occupancy.unresolved.is_empty() {
             return refuse_live(wt, &occupancy.unresolved);
         }
-        let Some(agents) = occupancy.herdr else {
-            skip("the herdr agent check", "herdr is not on PATH");
-            return true;
-        };
-        // A herdr that cannot answer cannot clear the workspace either.
-        let Ok(agents) = agents else {
-            eprintln!("merge-cleanup: refusing to remove {wt} — herdr agent list failed");
-            return false;
+        let agents = match occupancy.herdr {
+            HerdrAnswer::Absent => {
+                skip("the herdr agent check", "herdr is not on PATH");
+                return true;
+            }
+            // A herdr that cannot answer cannot clear the workspace either.
+            HerdrAnswer::Failed => {
+                eprintln!("merge-cleanup: refusing to remove {wt} — herdr agent list failed");
+                return false;
+            }
+            HerdrAnswer::Agents(agents) => agents,
         };
         // Classify every agent before closing any: a working or blocked
         // sibling must refuse the whole worktree before an idle one is
@@ -258,7 +270,7 @@ impl Cleanup {
         }
         for a in agents {
             let (name, pane) = (a.name(), a.pane());
-            if !self.run(&format!("closing idle herdr agent {name}'s pane ({pane})"), "herdr", &["pane", "close", pane]) {
+            if !self.step(&format!("closing idle herdr agent {name}'s pane ({pane})"), "herdr", &["pane", "close", pane]) {
                 eprintln!("merge-cleanup: refusing to remove {wt} — failed to close herdr agent {name}'s pane ({pane})");
                 return false;
             }
@@ -331,7 +343,7 @@ impl Cleanup {
                 continue;
             }
             for id in ids {
-                self.run(&format!("closing herdr workspace {id}"), "herdr", &["workspace", "close", &id]);
+                self.step(&format!("closing herdr workspace {id}"), "herdr", &["workspace", "close", &id]);
             }
         }
     }
@@ -346,7 +358,7 @@ impl Cleanup {
     /// this is a no-op.
     fn fast_forward_and_rebuild(&self, primary: &str, default: &str) {
         let old_head = quiet_stdout("git", &["-C", primary, "rev-parse", "HEAD"]).unwrap_or_default();
-        self.run(&format!("fast-forwarding {default} in {primary}"), "git", &["-C", primary, "pull", "--ff-only", "--quiet"]);
+        self.step(&format!("fast-forwarding {default} in {primary}"), "git", &["-C", primary, "pull", "--ff-only", "--quiet"]);
         let new_head = quiet_stdout("git", &["-C", primary, "rev-parse", "HEAD"]).unwrap_or_default();
         if old_head.is_empty() || new_head.is_empty() || old_head == new_head {
             return;
@@ -500,17 +512,14 @@ impl Cleanup {
         // overwrite the tip the first record kept.
         let short = quiet_stdout("git", &["-C", path, "rev-parse", "--short", &format!("refs/heads/{b}")]).unwrap_or_default();
         let record = format!("refs/deleted/{b}@{short}");
-        let written = lane::runner::run("git", &["-C", path, "update-ref", &record, &format!("refs/heads/{b}")]);
-        match written {
-            Ok(out) if out.success => {}
-            Ok(out) => {
-                eprintln!("merge-cleanup: could not record the tip of {b} at {record}, so it was not deleted: {}", out.combined);
-                return false;
-            }
-            Err(e) => {
-                eprintln!("merge-cleanup: could not record the tip of {b} at {record}, so it was not deleted: {e}");
-                return false;
-            }
+        let failure = match lane::runner::run("git", &["-C", path, "update-ref", &record, &format!("refs/heads/{b}")]) {
+            Ok(out) if out.success => None,
+            Ok(out) => Some(out.combined),
+            Err(e) => Some(e.to_string()),
+        };
+        if let Some(why) = failure {
+            eprintln!("merge-cleanup: could not record the tip of {b} at {record}, so it was not deleted: {why}");
+            return false;
         }
         println!("recorded the tip of {b} at {record} (git branch {b} {record} restores it)");
         if quiet_stderr_ok("git", &["-C", path, "branch", "-d", b]) {
@@ -545,19 +554,19 @@ impl Cleanup {
                 return false;
             }
             self.removal_targets.push(wt.clone());
-            if self.run(&format!("removing the linked worktree at {wt}"), "git", &["-C", path, "worktree", "remove", "--force", &wt]) {
+            if self.step(&format!("removing the linked worktree at {wt}"), "git", &["-C", path, "worktree", "remove", "--force", &wt]) {
                 self.removed_worktrees.push(wt);
             }
         }
-        self.run("pruning stale worktree entries", "git", &["-C", path, "worktree", "prune"]);
+        self.step("pruning stale worktree entries", "git", &["-C", path, "worktree", "prune"]);
 
         // Step 4 — the local branch. Git refuses to delete a branch a
         // checkout holds, so move the primary off it first.
         if !primary.is_empty() && head_of(&primary).as_deref() == Some(b) {
             let switched = if quiet_ok("git", &["-C", &primary, "show-ref", "-q", "--verify", &format!("refs/heads/{default}")]) {
-                self.run(&format!("switching {primary} off {b} onto {default}"), "git", &["-C", &primary, "checkout", "-q", &default])
+                self.step(&format!("switching {primary} off {b} onto {default}"), "git", &["-C", &primary, "checkout", "-q", &default])
             } else {
-                self.run(
+                self.step(
                     &format!("switching {primary} off {b} onto a fresh {default}"),
                     "git",
                     &["-C", &primary, "checkout", "-q", "-b", &default, "--track", &format!("origin/{default}")],
@@ -577,7 +586,7 @@ impl Cleanup {
 
         // Step 5 — the remote branch, if the merge did not already drop it.
         if quiet_ok("git", &["-C", path, "ls-remote", "--exit-code", "--heads", "origin", b]) {
-            self.run(&format!("deleting remote branch {b}"), "git", &["-C", path, "push", "origin", "--delete", b]);
+            self.step(&format!("deleting remote branch {b}"), "git", &["-C", path, "push", "origin", "--delete", b]);
         } else {
             skip("the remote branch delete", &format!("origin has no {b}"));
         }
@@ -670,16 +679,6 @@ fn subdirs(dir: &str) -> Vec<String> {
     names.into_iter().map(|n| format!("{dir}/{n}")).collect()
 }
 
-/// `cmd 2>/dev/null; rc=$?`, stdout passed through.
-fn quiet_stderr_ok(program: &str, args: &[&str]) -> bool {
-    std::process::Command::new(program)
-        .args(args)
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
 fn main() -> ExitCode {
     let a = match parse_args(env::args().skip(1)) {
         Parsed::Help => {
@@ -701,7 +700,7 @@ fn main() -> ExitCode {
         if !a.branch.is_empty() || !a.pr.is_empty() {
             return die("--sweep takes no branch or PR");
         }
-        let root = if a.root.is_empty() { format!("{}/src", env::var("HOME").unwrap_or_default()) } else { a.root.clone() };
+        let root = if a.root.is_empty() { format!("{}/src", c.home) } else { a.root.clone() };
         if !Path::new(&root).is_dir() {
             return die(format!("no such root: {root}"));
         }

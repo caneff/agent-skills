@@ -63,9 +63,10 @@ bash "$here/backup-sync.sh" --restore
 # cargo install replaces each in place, rather than a symlink into the repo,
 # and replaces the symlink an earlier install left for either. Runs last,
 # after every symlink above is in place, so a missing cargo or a compile
-# error never leaves the rest of the install half-done — it was never gated on a toolchain before
-# this ticket, and still is not. Never installs the test-only fake —
-# lane-install.sh only names implement-dispatch and merge-cleanup.
+# error never leaves the rest of the install half-done — the install was
+# never gated on a toolchain before #748, and still is not. Never installs
+# the test-only fake — lane-install.sh only names implement-dispatch and
+# merge-cleanup.
 mkdir -p "$HOME/.local/bin"
 bash "$here/lane-install.sh"
 

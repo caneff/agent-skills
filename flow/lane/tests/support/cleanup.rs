@@ -109,11 +109,8 @@ impl Cleanup {
     pub fn git_out(&self, args: &[&str]) -> String {
         String::from_utf8_lossy(&self.git(args).stdout).trim().to_string()
     }
-    pub fn has_ref(&self, repo: &Path, r: &str) -> bool {
-        self.git(&["-C", repo.to_str().unwrap(), "show-ref", "-q", "--verify", r]).status.success()
-    }
     pub fn has_branch(&self, repo: &Path, b: &str) -> bool {
-        self.has_ref(repo, &format!("refs/heads/{b}"))
+        self.git(&["-C", repo.to_str().unwrap(), "show-ref", "-q", "--verify", &format!("refs/heads/{b}")]).status.success()
     }
     pub fn rev(&self, repo: &Path, r: &str) -> String {
         self.git_out(&["-C", repo.to_str().unwrap(), "rev-parse", r])
@@ -133,13 +130,9 @@ impl Cleanup {
         self.git_ok(&["-C", d, "commit", "-qam", msg]);
     }
 
-    /// The bash suite's `mkfixture`: a scratch origin plus a clone where
-    /// caneff/merged-one is squash-merged (a merged PR at its tip),
-    /// caneff/merged-then-more had a PR merged then kept going,
-    /// caneff/ff-merged is a real fast-forward merge, caneff/local-only was
-    /// never pushed, caneff/open-one is open — and origin/main sits one
-    /// commit ahead of the local main, so the fast-forward has work.
-    pub fn mkfixture(&self, rel: &str) -> PathBuf {
+    /// A bare origin at `<rel>.origin.git` and a clone of it at `<rel>` on
+    /// main, with a commit identity set.
+    fn clone_origin(&self, rel: &str) -> PathBuf {
         let dir = self.root().join(rel);
         std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
         let d = dir.to_str().unwrap();
@@ -149,6 +142,18 @@ impl Cleanup {
         self.git_ok(&["-C", d, "checkout", "-q", "-b", "main"]);
         self.git_ok(&["-C", d, "config", "user.email", "t@example.com"]);
         self.git_ok(&["-C", d, "config", "user.name", "t"]);
+        dir
+    }
+
+    /// The bash suite's `mkfixture`: a scratch origin plus a clone where
+    /// caneff/merged-one is squash-merged (a merged PR at its tip),
+    /// caneff/merged-then-more had a PR merged then kept going,
+    /// caneff/ff-merged is a real fast-forward merge, caneff/local-only was
+    /// never pushed, caneff/open-one is open — and origin/main sits one
+    /// commit ahead of the local main, so the fast-forward has work.
+    pub fn mkfixture(&self, rel: &str) -> PathBuf {
+        let dir = self.clone_origin(rel);
+        let d = dir.to_str().unwrap();
         std::fs::write(dir.join("f"), "one\n").unwrap();
         self.git_ok(&["-C", d, "add", "f"]);
         self.git_ok(&["-C", d, "commit", "-qm", "one"]);
@@ -188,14 +193,8 @@ impl Cleanup {
     /// The bash suite's `mk_lane_repo`: caneff/trivial is merged into main,
     /// and origin/main is one commit ahead that touches flow/lane or not.
     pub fn mk_lane_repo(&self, rel: &str, touch_lane: bool) -> PathBuf {
-        let dir = self.root().join(rel);
+        let dir = self.clone_origin(rel);
         let d = dir.to_str().unwrap();
-        let origin = format!("{d}.origin.git");
-        self.git_ok(&["init", "-q", "-b", "main", "--bare", &origin]);
-        self.git_ok(&["clone", "-q", &origin, d]);
-        self.git_ok(&["-C", d, "checkout", "-q", "-b", "main"]);
-        self.git_ok(&["-C", d, "config", "user.email", "t@example.com"]);
-        self.git_ok(&["-C", d, "config", "user.name", "t"]);
         std::fs::create_dir_all(dir.join("flow/lane")).unwrap();
         std::fs::write(
             dir.join("flow/lane-install.sh"),
