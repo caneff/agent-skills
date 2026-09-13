@@ -147,7 +147,8 @@ The body has these sections and nothing else:
 
 - **What changed** — three lines.
 - **Tests run** — the command and its result line.
-- **Decisions made** — each with its reason.
+- **Decisions made** — each with its reason, including every round-1
+  finding that was disputed (with the why) or filed (with its ticket number).
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
 
 Send the controller "PR up" with the PR URL and these two lines, paths
