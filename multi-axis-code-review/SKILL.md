@@ -95,7 +95,17 @@ The `diff-reviewer` agent definition (`flow/claude/agents/diff-reviewer.md`, ins
 
 Every prompt carries only the **diff, the commit list, the spec/standards sources, and the settled decisions** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
 
-Belt and braces: append to **every** prompt — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). **Expand `<dir>` yourself before writing the prompt**: `$CLAUDE_JOB_DIR/tmp` if that variable is set in your session, else `/tmp`. Sub-agents do not inherit the variable, and a fallback inside the checkout leaves an untracked file that blocks `git worktree remove` (and so `ship`). Never point the report at `./.scratch/` or anywhere under the repo. If the completion notification comes back missing or empty, read that file before treating the report as absent.
+Belt and braces: append to **every** prompt — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). **Expand `<dir>` yourself before writing the prompt**: `~/.cache/agent-reviews/<repo>/`, `<repo>` the basename of `git rev-parse --show-toplevel`. herdr workers are interactive sessions, so `$CLAUDE_JOB_DIR` is never set there and a `/tmp` fallback is lost at the next boot (this machine empties `/tmp` on every boot) — these reports are the only record of what each reviewer said, and a weekly retro needs to read them back days later. Never point the report at `./.scratch/` or anywhere under the repo — an untracked file there blocks `git worktree remove` (and so `ship`). Keying the directory on `<repo>` keeps same-numbered issues in different repos from overwriting each other's reports.
+
+Before expanding `<dir>`, create it and prune anything untouched for 14 days, the same retention `job-run` gives `~/.cache/agent-jobs` — a live review's own reports are always fresh, so nothing this round just wrote is ever caught by it:
+
+```
+dir="$HOME/.cache/agent-reviews/$(basename "$(git rev-parse --show-toplevel)")"
+mkdir -p "$dir"
+find "$dir" -maxdepth 1 -type f -mtime +14 -delete
+```
+
+If the completion notification comes back missing or empty, read that file before treating the report as absent.
 
 **Standards sub-agent prompt** — include:
 
