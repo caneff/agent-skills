@@ -512,13 +512,19 @@ fn a_sweep_with_stdin_not_a_terminal_prints_the_plan_refuses_and_deletes_nothing
 }
 
 #[test]
-fn a_sweep_answered_n_at_the_terminal_deletes_nothing() {
+fn a_sweep_answered_n_at_the_terminal_deletes_nothing_reports_stale_and_exits_zero() {
+    // #734: a deliberate no is not a failure, and still shows the stale list.
     let c = Cleanup::new();
     let root = sweep_root(&c);
+    let other = root.join("other");
     let run = c.mc_tty(Tools::Full, &["--sweep", "--root", s(&root)], "n\n");
-    assert!(!run.ok && run.terminal.contains("nothing deleted (answer y, or pass --yes)"), "{}", run.terminal);
+    assert!(run.ok && run.terminal.contains("nothing deleted (answer y, or pass --yes)"), "{}", run.terminal);
     assert!(!run.terminal.contains("stdin is not a terminal"), "{}", run.terminal);
-    assert!(c.has_branch(&root.join("other"), "caneff/merged-one"));
+    let stale = format!("stale, not removed:\n  {}\n", other.join(".claude/worktrees/agent-old").display());
+    assert!(run.stdout.contains(&stale), "{}", run.stdout);
+    assert!(!run.stdout.contains("sweep summary") && !run.stdout.contains("== "), "{}", run.stdout);
+    assert!(c.has_branch(&other, "caneff/merged-one") && other.join(".claude/worktrees/implement-9").is_dir());
+    assert!(!c.calls().contains("close"), "{}", c.calls());
 }
 
 #[test]

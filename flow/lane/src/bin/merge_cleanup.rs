@@ -376,8 +376,13 @@ impl Cleanup {
                 eprint!("delete these branches and their worktrees? [y/N] ");
                 let mut ans = String::new();
                 let _ = std::io::stdin().read_line(&mut ans);
+                // A deliberate no is an answer, not a failure: the operator
+                // who reads the plan and declines still gets the stale
+                // report, and a wrapper sees success (#734).
                 if !matches!(ans.trim(), "y" | "Y" | "yes" | "YES") {
-                    return die("nothing deleted (answer y, or pass --yes)");
+                    eprintln!("merge-cleanup: nothing deleted (answer y, or pass --yes)");
+                    self.report_stale(&repos);
+                    return ExitCode::SUCCESS;
                 }
             }
         }
