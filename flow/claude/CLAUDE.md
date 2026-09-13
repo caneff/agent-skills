@@ -62,6 +62,13 @@ absence.
 
 Before reporting a commit sha, `git status --porcelain` is empty.
 
+A command handed over that deletes, sweeps, or rewrites has had its scope
+read (`--help`, or `--dry-run` when one exists) in this session, and the
+reply names exactly what it will remove. Never infer a flag's blast radius
+from a one-line mention in a doc. (`merge-cleanup --sweep`, 2026-09-13:
+described as two worktrees, walked every repo and deleted 87 unlanded
+commits.)
+
 # Communication
 
 - One sentence before your first tool call on what you're about to do; brief
