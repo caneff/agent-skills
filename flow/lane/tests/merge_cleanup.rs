@@ -712,21 +712,47 @@ fn a_dry_run_never_rebuilds() {
 fn dirty(wt: &std::path::Path, kind: &str) {
     match kind {
         "modified" => std::fs::write(wt.join("f"), "changed\n").unwrap(),
-        _ => std::fs::write(wt.join("notes"), "unsaved\n").unwrap(),
+        "untracked" => std::fs::write(wt.join("notes"), "unsaved\n").unwrap(),
+        other => panic!("no such kind of dirty file: {other}"),
     }
 }
 
 #[test]
 fn a_worktree_with_a_modified_or_untracked_file_is_refused_naming_it() {
-    for (kind, name) in [("modified", "f"), ("untracked", "notes")] {
+    // An idle herdr agent sits in the worktree: the refusal comes before the
+    // live-session guard would close its pane. `status.showUntrackedFiles=no`
+    // hides untracked files from a bare `git status`, but not from the guard.
+    for (kind, name, hide_untracked) in [("modified", "f", false), ("untracked", "notes", false), ("untracked", "notes", true)] {
         let c = Cleanup::new();
         let (r, wt) = lane_workspace(&c, "r23", "implement-23");
+        if hide_untracked {
+            c.git_ok(&["-C", s(&r), "config", "status.showUntrackedFiles", "no"]);
+        }
         dirty(&wt, kind);
+        c.set_agents(&format!(r#"[{{"name":"skills-23","pane_id":"w23:p1","cwd":"{}","agent_status":"idle"}}]"#, wt.display()));
+        c.clear_calls();
         let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
         let want = format!("merge-cleanup: refusing to remove {} — 1 {kind} file(s) would be lost: {name} (--discard overrides)", wt.display());
-        assert!(!run.ok && run.stderr.contains(&want), "{kind}: {}", run.text());
+        assert!(!run.ok && run.stderr.contains(&want), "{kind} {hide_untracked}: {}", run.text());
         assert!(wt.join(name).is_file() && c.has_branch(&r, "caneff/merged-one"), "{kind}: {}", run.text());
+        assert!(!c.calls().contains("pane close"), "{kind}: {}", c.calls());
     }
+}
+
+#[test]
+fn a_worktree_git_cannot_read_is_never_removed() {
+    let c = Cleanup::new();
+    let root = sweep_root(&c);
+    let other = root.join("other");
+    let wt = other.join(".claude/worktrees/implement-9");
+    std::fs::write(wt.join(".git"), "gitdir: /nonexistent-gitdir\n").unwrap();
+    let run = c.mc(Tools::Full, &["--repo", s(&other), "caneff/merged-one"], &[]);
+    let want = format!("merge-cleanup: refusing to remove {} — git status failed there", wt.display());
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+    let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), "--yes"], &[]);
+    assert!(run.has("  other caneff/merged-one  0 commits past PR #7  worktree: git status failed (unreadable, not removed)"), "{}", run.text());
+    assert!(run.has("  other  caneff/merged-one  unreadable, not removed  0 commits past PR #7"), "{}", run.text());
+    assert!(wt.is_dir() && c.has_branch(&other, "caneff/merged-one"), "{}", run.text());
 }
 
 #[test]
@@ -763,27 +789,30 @@ fn a_worktree_holding_only_ignored_files_is_removed_and_they_are_listed() {
 
 #[test]
 fn a_sweep_never_removes_a_dirty_worktree_and_cleans_the_clean_ones() {
+    // The dirty worktree holds caneff/ff-merged, which sorts before the clean
+    // caneff/merged-one: the sweep goes on past a held row.
     let c = Cleanup::new();
     let root = sweep_root(&c);
     let other = root.join("other");
-    let wt = other.join(".claude/worktrees/implement-9");
+    let wt = other.join(".claude/worktrees/implement-ff");
+    c.worktree_add(&other, &[s(&wt), "caneff/ff-merged"]);
     dirty(&wt, "untracked");
-    for dry in [true, false] {
-        let flag = if dry { "--dry-run" } else { "--yes" };
+    let held = "  other caneff/ff-merged  0 commits past origin/main  worktree: 0 modified, 1 untracked, 0 ignored (dirty, not removed)";
+    let clean = "  other caneff/merged-one  0 commits past PR #7  worktree: 0 modified, 0 untracked, 0 ignored";
+    for flag in ["--dry-run", "--yes"] {
         let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), flag, "--discard"], &[]);
         assert!(!run.ok && run.stderr.contains("merge-cleanup: --discard takes one branch, not --sweep"), "{}", run.text());
-        c.clear_calls();
-        let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), flag], &[]);
-        assert!(run.ok, "{flag}: {}", run.text());
-        let plan = "  other caneff/merged-one  0 commits past PR #7  worktree: 0 modified, 1 untracked, 0 ignored (dirty, not removed)";
-        assert!(run.stdout.lines().any(|l| l == plan), "{flag}: {}", run.stdout);
-        assert!(wt.join("notes").is_file() && c.has_branch(&other, "caneff/merged-one"), "{flag}: {}", run.text());
-        assert!(!c.calls().contains("close"), "{flag}: {}", c.calls());
     }
+    let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), "--dry-run"], &[]);
+    assert!(run.ok && run.stdout.lines().any(|l| l == held) && run.stdout.lines().any(|l| l == clean), "{}", run.stdout);
+
     let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), "--yes"], &[]);
+    assert!(run.ok && run.stdout.lines().any(|l| l == held), "{}", run.text());
     let rows: Vec<&str> = run.stdout.lines().skip_while(|l| *l != "sweep summary").skip(1).take_while(|l| l.starts_with("  ")).collect();
-    assert!(rows.contains(&"  other  caneff/merged-one  dirty, not removed  0 commits past PR #7"), "{rows:#?}");
-    assert!(!c.has_branch(&other, "caneff/ff-merged"), "{}", run.text());
+    assert!(rows.contains(&"  other  caneff/ff-merged   dirty, not removed  0 commits past origin/main"), "{rows:#?}");
+    assert!(rows.contains(&"  other  caneff/merged-one  cleaned             0 commits past PR #7"), "{rows:#?}");
+    assert!(wt.join("notes").is_file() && c.has_branch(&other, "caneff/ff-merged"), "{}", run.text());
+    assert!(!c.has_branch(&other, "caneff/merged-one") && !other.join(".claude/worktrees/implement-9").exists(), "{}", run.text());
 }
 
 // --- #735: a repo with no .claude/worktrees lists nothing ---------------------

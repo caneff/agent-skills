@@ -222,9 +222,11 @@ const NAMES_SHOWN: usize = 5;
 
 impl WorktreeFiles {
     /// `None` when git cannot read the status of a worktree that is on disk.
-    /// A worktree whose directory is already gone holds nothing to lose.
+    /// A worktree whose directory is already gone holds nothing to lose. The
+    /// untracked and ignored modes are spelled out, so a
+    /// `status.showUntrackedFiles=no` config cannot hide files from the guard.
     fn read(wt: &str) -> Option<Self> {
-        let Some(out) = quiet_stdout("git", &["-C", wt, "status", "--porcelain", "--ignored"]) else {
+        let Some(out) = quiet_stdout("git", &["-C", wt, "status", "--porcelain", "--untracked-files=normal", "--ignored=traditional"]) else {
             return (!Path::new(wt).exists()).then(Self::default);
         };
         let mut files = Self::default();
@@ -243,10 +245,6 @@ impl WorktreeFiles {
     /// are not — every worktree holds `.venv/` or a cache after a merge.
     fn is_dirty(&self) -> bool {
         !self.modified.is_empty() || !self.untracked.is_empty()
-    }
-
-    fn is_empty(&self) -> bool {
-        !self.is_dirty() && self.ignored.is_empty()
     }
 
     /// "1 modified, 2 untracked, 3 ignored".
@@ -367,7 +365,6 @@ impl Cleanup {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there");
             return false;
         };
-        let would = if self.dry { "would discard" } else { "discarding" };
         if files.is_dirty() {
             if !self.discard {
                 eprintln!("merge-cleanup: refusing to remove {wt} — {} (--discard overrides)", files.dirty_text());
@@ -376,6 +373,7 @@ impl Cleanup {
             println!("--discard: {wt} — {}", files.dirty_text());
         }
         if !files.ignored.is_empty() {
+            let would = if self.dry { "would discard" } else { "discarding" };
             println!("{would} {} ignored file(s) in {wt}: {}", files.ignored.len(), first_names(&files.ignored));
         }
         true
@@ -405,7 +403,7 @@ impl Cleanup {
                 if quiet_stdout("git", &["-C", &e, "rev-list", "--count", &format!("{base}..HEAD")]).as_deref() != Some("0") {
                     continue;
                 }
-                if !WorktreeFiles::read(&e).is_some_and(|f| f.is_empty()) {
+                if !WorktreeFiles::read(&e).is_some_and(|f| !f.is_dirty() && f.ignored.is_empty()) {
                     continue;
                 }
                 ""
@@ -510,7 +508,12 @@ impl Cleanup {
             let header = if self.dry { "sweep plan (dry run)" } else { "sweep plan" };
             println!("{header}: {} merged branch(es) under {root}", plan.len());
             for row in &plan {
-                println!("  {} {}  {}{}", row.name(), row.branch, row.unlanded, row.files);
+                let files = match (&row.files, row.held) {
+                    (None, _) => String::new(),
+                    (Some(files), None) => format!("  worktree: {files}"),
+                    (Some(files), Some(held)) => format!("  worktree: {files} ({held})"),
+                };
+                println!("  {} {}  {}{files}", row.name(), row.branch, row.unlanded);
             }
             // Nothing is deleted until confirmed. A closed or non-terminal
             // stdin is not a yes: an unattended sweep needs --yes on the line,
@@ -658,8 +661,7 @@ impl Cleanup {
         // Step 3 — the workspace. A linked worktree holding the branch makes
         // `git branch -d` fail with "used by worktree", so it goes first, by
         // the path git itself reports — but never while a session is alive.
-        let wt = worktree_holding(path, b);
-        if !wt.is_empty() && wt != primary {
+        if let Some(wt) = linked_worktree_holding(path, b) {
             // Before the live-session guard, which closes idle panes: a
             // removal refused for its files must not have touched herdr.
             if !self.guard_files(&wt) {
@@ -722,24 +724,20 @@ struct PlanRow {
     repo: String,
     branch: String,
     unlanded: String,
-    /// The plan's note on the linked worktree holding the branch, or empty.
-    files: String,
+    /// The file counts of the linked worktree holding the branch, if any.
+    files: Option<String>,
     /// Why the sweep leaves this branch and its worktree alone, if it does.
     held: Option<&'static str>,
 }
 
-/// A sweep plan row's worktree note and hold: the modified, untracked and
+/// A sweep plan row's worktree counts and hold: the modified, untracked and
 /// ignored counts of the linked worktree holding `b`, and a hold when it has
 /// work a removal would lose — or when git cannot say whether it does.
-fn worktree_plan(repo: &str, b: &str) -> (String, Option<&'static str>) {
-    let wt = worktree_holding(repo, b);
-    if wt.is_empty() || wt == primary_of(repo) {
-        return (String::new(), None);
-    }
+fn worktree_plan(repo: &str, b: &str) -> (Option<String>, Option<&'static str>) {
+    let Some(wt) = linked_worktree_holding(repo, b) else { return (None, None) };
     match WorktreeFiles::read(&wt) {
-        None => ("  worktree: git status failed (unreadable, not removed)".into(), Some("unreadable, not removed")),
-        Some(f) if f.is_dirty() => (format!("  worktree: {} (dirty, not removed)", f.counts()), Some("dirty, not removed")),
-        Some(f) => (format!("  worktree: {}", f.counts()), None),
+        None => (Some("git status failed".into()), Some("unreadable, not removed")),
+        Some(f) => (Some(f.counts()), f.is_dirty().then_some("dirty, not removed")),
     }
 }
 
@@ -781,6 +779,12 @@ fn print_table(rows: &[[String; 4]]) {
         }
         println!("{line}");
     }
+}
+
+/// The linked worktree — not the primary checkout — that has `b` checked out.
+fn linked_worktree_holding(path: &str, b: &str) -> Option<String> {
+    let wt = worktree_holding(path, b);
+    (!wt.is_empty() && wt != primary_of(path)).then_some(wt)
 }
 
 /// The path of the worktree that has `b` checked out, or empty.
