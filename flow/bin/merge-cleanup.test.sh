@@ -249,8 +249,27 @@ git -C "$tmp/src/other" worktree add -q --detach "$tmp/src/other/.claude/worktre
 git -C "$tmp/src/other" worktree add -q "$tmp/src/other/.claude/worktrees/implement-9" caneff/merged-one 2>/dev/null
 printf '{"result":{"workspaces":[{"workspace_id":"w4","worktree":{"checkout_path":"%s"}}]}}\n' \
   "$tmp/src/other/.claude/worktrees/implement-9" > "$HERDR_WORKSPACES"
-out=$(mc "$tmp/full" --sweep --root "$tmp/src"); rc=$?
+# Without --yes the sweep prints its plan and waits for a "y"; a closed stdin
+# is not a yes. Nothing is deleted, and the plan carries the ahead count.
+out=$(mc "$tmp/full" --sweep --root "$tmp/src" </dev/null); rc=$?
+if [ $rc -ne 0 ] && git -C "$tmp/src/other" show-ref -q --verify refs/heads/caneff/merged-one \
+   && [ -d "$tmp/src/other/.claude/worktrees/implement-9" ] \
+   && printf '%s' "$out" | grep -q "other caneff/merged-one.*1 commit ahead of main"; then
+  ok "sweep without --yes prints the plan and deletes nothing"
+else
+  no "sweep without --yes deleted something or printed no plan (rc=$rc): $out"
+fi
+out=$(printf 'n\n' | mc "$tmp/full" --sweep --root "$tmp/src"); rc=$?
+if [ $rc -ne 0 ] && git -C "$tmp/src/other" show-ref -q --verify refs/heads/caneff/merged-one; then
+  ok "sweep answered n deletes nothing"
+else
+  no "sweep answered n still deleted (rc=$rc): $out"
+fi
+out=$(mc "$tmp/full" --sweep --root "$tmp/src" --yes); rc=$?
 echo '{"result":{"workspaces":[]}}' > "$HERDR_WORKSPACES"
+printf '%s' "$out" | grep -q "other *caneff/merged-one *cleaned *1 commit ahead of main" \
+  && ok "sweep summary says how far the deleted branch was ahead of main" \
+  || no "sweep summary has no ahead count: $out"
 if printf '%s\n' "$out" | awk '/stale, not removed/{r=NR} /closing herdr workspace w4/{c=NR} END{exit !(r && c > r)}'; then
   ok "sweep closes the herdr workspaces only after its summary"
 else
@@ -270,6 +289,13 @@ if stale_of "$out" | grep -q "$tmp/src/other/.claude/worktrees/agent-old" \
   ok "sweep summary lists the stale sibling and leaves it in place"
 else
   no "sweep summary has no stale sibling: $out"
+fi
+mkfixture "$tmp/src/again"
+out=$(printf 'y\n' | mc "$tmp/full" --sweep --root "$tmp/src"); rc=$?
+if [ $rc -eq 0 ] && ! git -C "$tmp/src/again" show-ref -q --verify refs/heads/caneff/merged-one; then
+  ok "sweep answered y cleans the merged branch"
+else
+  no "sweep answered y did not clean (rc=$rc): $out"
 fi
 out=$(mc "$tmp/nojq" --sweep --root "$tmp/src" --dry-run); rc=$?
 if printf '%s' "$out" | grep -q "skipped the stale worktree report (jq is not on PATH)" \

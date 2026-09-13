@@ -5,11 +5,13 @@
 # refuses any branch the tracker does not report as merged unless --force.
 #
 #   merge-cleanup [--repo <path>] <branch|PR number|PR URL> [--force] [--dry-run]
-#   merge-cleanup --sweep [--root <dir>] [--dry-run]
+#   merge-cleanup --sweep [--root <dir>] [--yes] [--dry-run]
 #
-# --sweep walks every git repo one level under <dir> (default ~/src) and runs
-# the same six steps for every merged local branch it finds, then prints a
-# summary table.
+# --sweep walks every git repo one level under <dir> (default ~/src), prints
+# the merged local branches it would clean with how far each is ahead of the
+# default branch, and asks before touching anything — --yes answers for you,
+# --dry-run never asks. Then it runs the same six steps for each and prints a
+# summary table with the same ahead count beside every branch.
 #
 # A linked worktree is never removed while a live session is in it (a sessions
 # registry pid or a herdr agent). Other idle entries under .claude/worktrees
@@ -17,7 +19,7 @@
 # worktrees close at exit, after everything else.
 set -uo pipefail
 
-repo="" branch="" pr="" sweep=0 root="" dry=0 force=0
+repo="" branch="" pr="" sweep=0 root="" dry=0 force=0 yes=0
 rows=()
 removal_targets=()   # worktrees this run passed the guard for, dry runs included
 removed_worktrees=() # worktrees this run removed; their herdr workspaces close at exit
@@ -36,6 +38,7 @@ while [ $# -gt 0 ]; do
     --sweep)   sweep=1; shift ;;
     --root)    root="${2:-}"; shift 2 ;;
     --force)   force=1; shift ;;
+    --yes)     yes=1; shift ;;
     --dry-run) dry=1; shift ;;
     -h|--help) sed -n '2,${/^#/!q;s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
     -*)        die "unknown flag: $1" ;;
@@ -80,6 +83,16 @@ is_merged() { # is_merged <path> <branch>
   fi
   git -C "$path" fetch -q origin 2>/dev/null
   git -C "$path" merge-base --is-ancestor "$b" "origin/$(default_of "$path")" 2>/dev/null
+}
+
+# How far a branch is past the default branch — printed beside every sweep
+# deletion, so a wrong "merged" call shows up as a number, not as silence.
+ahead_of_default() { # ahead_of_default <path> <branch> -> "N commit(s) ahead of <default>"
+  local path="$1" b="$2" default base n
+  default=$(default_of "$path"); base="origin/$default"
+  git -C "$path" show-ref -q --verify "refs/remotes/$base" || base="$default"
+  n=$(git -C "$path" rev-list --count "$base..$b" 2>/dev/null) || n="?"
+  if [ "$n" = 1 ]; then echo "1 commit ahead of $default"; else echo "$n commits ahead of $default"; fi
 }
 
 # Step 4's delete. `-d` first: it is the honest question, and it succeeds on a
@@ -235,7 +248,9 @@ if [ "$sweep" = 1 ]; then
   [ -n "$branch$pr" ] && die "--sweep takes no branch or PR"
   root="${root:-$HOME/src}"
   [ -d "$root" ] || die "no such root: $root"
-  rc=0 repos=()
+  rc=0 repos=() plan=()
+  # Pass 1 — the plan: every merged branch, with its distance past the default
+  # branch, before anything is touched.
   for d in "$root"/*/; do
     git -C "$d" rev-parse --git-dir >/dev/null 2>&1 || continue
     repos+=("$d")
@@ -243,13 +258,32 @@ if [ "$sweep" = 1 ]; then
     while read -r b; do
       [ -n "$b" ] && [ "$b" != "$default" ] || continue
       is_merged "$d" "$b" || continue
-      echo "== ${d%/} $b"
-      if cleanup_branch "$d" "$b"; then
-        rows+=("$(basename "${d%/}")|$b|cleaned")
-      else
-        rows+=("$(basename "${d%/}")|$b|FAILED"); rc=1
-      fi
+      plan+=("$d|$b|$(ahead_of_default "$d" "$b")")
     done < <(git -C "$d" for-each-ref --format='%(refname:short)' refs/heads/)
+  done
+  if [ "${#plan[@]}" -gt 0 ]; then
+    echo "sweep plan${dry:+ (dry run)}: ${#plan[@]} merged branch(es) under $root"
+    for row in "${plan[@]}"; do
+      IFS='|' read -r d b ahead <<< "$row"
+      echo "  $(basename "${d%/}") $b  $ahead"
+    done
+    # Nothing is deleted until confirmed. A closed or non-terminal stdin is
+    # not a yes: an unattended sweep needs --yes on the line.
+    if [ "$dry" = 0 ] && [ "$yes" = 0 ]; then
+      printf 'delete these branches and their worktrees? [y/N] '
+      read -r ans || ans=""
+      case "$ans" in y|Y|yes|YES) ;; *) die "nothing deleted (answer y, or pass --yes)" ;; esac
+    fi
+  fi
+  # Pass 2 — the cleanup.
+  for row in "${plan[@]}"; do
+    IFS='|' read -r d b ahead <<< "$row"
+    echo "== ${d%/} $b"
+    if cleanup_branch "$d" "$b"; then
+      rows+=("$(basename "${d%/}")|$b|cleaned|$ahead")
+    else
+      rows+=("$(basename "${d%/}")|$b|FAILED|$ahead"); rc=1
+    fi
   done
   echo
   echo "sweep summary"
