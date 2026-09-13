@@ -34,7 +34,7 @@ Two doors, matching `implement/SKILL.md` § Build:
   own words as the trigger — never the controller's inference. The worker
   is already building under `implement/SKILL.md` § Build by the time this
   reaches it: discard that work, reset to the ticket's base sha, and pick up
-  at Preflight below, then build under the inline door. The dispatching
+  at Preflight above, then build under the inline door. The dispatching
   session stays Claude for claiming, the PR and the merge line, since those
   cost almost nothing.
 
