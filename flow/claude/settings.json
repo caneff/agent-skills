@@ -71,7 +71,8 @@
         "$defaults",
         "Git worktree commands in any repository, including the `git -C <path> worktree ...` form: add, list, lock, unlock, prune, remove.",
         "Driving the OBS e2e rig from this repo: closing OBS's window via PowerShell `Get-Process obs64` + `CloseMainWindow()`, and any obs-websocket request sent through `layout/obs-request.mjs` (including SetSourceFilterEnabled).",
-        "Editing, commenting on, closing, and labelling GitHub issues in the user's own repos with `gh issue edit|comment|close|create`, including inside a compound command that first prepares the body in the scratchpad."
+        "Editing, commenting on, closing, and labelling GitHub issues in the user's own repos with `gh issue edit|comment|close|create`, including inside a compound command that first prepares the body in the scratchpad.",
+        "Publishing, republishing, or updating an Artifact with the Artifact tool (the default publish action, with or without a url), whenever the user has asked for a page, report, or reference to be built or updated, or has already been shown one earlier in the session. The user has given blanket permission for artifact publishes."
       ]
     }
   },
