@@ -22,11 +22,13 @@ scan() {
     n=$(basename "$d"); want="../../.agents/skills/$n"
     if [ -L "$d" ]; then
       if ! is_body "$d"; then
-        echo "BROKEN_LINK $n"
-        if [ "$fix" = fix ]; then
-          if [ -d "$AGENTS/$n" ]; then
-            ln -sfn "$want" "$d"
-          else
+        if [ -d "$AGENTS/$n" ]; then
+          # target exists but isn't a body (no marker, or a dangling
+          # plugin.json symlink) — relinking to it never converges (#741)
+          echo "NOT_A_BODY $n"
+        else
+          echo "BROKEN_LINK $n"
+          if [ "$fix" = fix ]; then
             # no body to point at — prune the dead symlink (only ever a symlink here)
             rm "$d"; echo "  removed dead link $n" >&2
           fi
@@ -83,6 +85,13 @@ self_test() {
   mkplug "$AGENTS/hookplug"; ln -s "../../.agents/skills/hookplug" "$CLAUDE/hookplug"
   # NO_SYMLINK for a plugin body too
   mkplug "$AGENTS/hooknolink"
+  # NOT_A_BODY: claude link resolves to a directory with no marker file (#741)
+  mkdir -p "$AGENTS/nomarker"; ln -s "../../.agents/skills/nomarker" "$CLAUDE/nomarker"
+  # NOT_A_BODY: claude link resolves to a directory whose plugin.json is a
+  # dangling symlink (#741)
+  mkdir -p "$AGENTS/danglejson/.claude-plugin"
+  ln -s "/no/such/target" "$AGENTS/danglejson/.claude-plugin/plugin.json"
+  ln -s "../../.agents/skills/danglejson" "$CLAUDE/danglejson"
 
   local out; out=$(scan nofix)
   local fail=0
@@ -94,6 +103,8 @@ self_test() {
   grep -q " ok\$" <<<"$out" && { echo "FAIL: clean skill 'ok' was reported"; fail=1; }
   grep -q " hookplug\$" <<<"$out" && { echo "FAIL: clean plugin 'hookplug' was reported"; fail=1; }
   check "NO_SYMLINK hooknolink"
+  check "NOT_A_BODY nomarker"
+  check "NOT_A_BODY danglejson"
 
   # apply --fix, then assert the fixable cases are gone on a re-scan
   scan fix >/dev/null
@@ -109,6 +120,12 @@ self_test() {
   [ ! -L "$CLAUDE/dead" ] || { echo "FAIL: dead symlink not removed by --fix"; fail=1; }
   grep -q " hookplug\$" <<<"$out2" && { echo "FAIL: plugin 'hookplug' reported after --fix"; fail=1; }
   [ -L "$CLAUDE/hooknolink" ] || { echo "FAIL: hooknolink symlink not created"; fail=1; }
+  # --fix must never converge on a non-body by relinking to itself (#741)
+  for code in "NOT_A_BODY nomarker" "NOT_A_BODY danglejson"; do
+    grep -q "^$code\$" <<<"$out2" || { echo "FAIL: '$code' missing after --fix"; fail=1; }
+  done
+  [ -L "$CLAUDE/nomarker" ] || { echo "FAIL: nomarker link removed by --fix"; fail=1; }
+  [ -L "$CLAUDE/danglejson" ] || { echo "FAIL: danglejson link removed by --fix"; fail=1; }
 
   rm -rf "$T"
   [ "$fail" = 0 ] && { echo "self-test OK"; return 0; } || { echo "self-test FAILED"; return 1; }
