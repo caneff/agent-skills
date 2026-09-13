@@ -1,10 +1,10 @@
 ---
-name: two-axis-code-review
-description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along three axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the over-engineering lens?), Spec (does the code match what the originating issue/spec asked for?) and Correctness (how does it fail in the field, and does every new test actually witness its claim?). Runs the three reviews in parallel sub-agents and reports them side by side. It replaces the built-in `/code-review` in the implement lane, whose medium effort forks eight finder agents for ~9M cached tokens on a 250-line diff (agent-skills #732). Use when the user wants a branch, PR, or work-in-progress diff checked against its spec, the repo's standards, and runtime failure.
+name: multi-axis-code-review
+description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along three axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the over-engineering lens?), Spec (does the code match what the originating issue/spec asked for?) and Correctness (how does it fail in the field, and does every new test actually witness its claim?). Runs the three reviews in parallel sub-agents, waits for all of them, and reports every finding side by side. It replaces the built-in `/code-review` in the implement lane. Use when the user wants a branch, PR, or work-in-progress diff checked against its spec, the repo's standards, and runtime failure.
 ---
 
 Review of the diff between `HEAD` and a fixed point the user supplies, along
-three axes (the skill keeps its two-axis name; the third joined in #732):
+three axes (it was two until #732; callers still saying "two-axis" mean this):
 
 - **Standards** — does the code conform to this repo's documented coding standards?
 - **Spec** — does the code faithfully implement the originating issue / spec?
@@ -36,7 +36,7 @@ fixed_point="origin/$default"
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
-Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here — not inside two parallel sub-agents.
+Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here — not inside three parallel sub-agents.
 
 ### 2. Identify the spec source
 
@@ -113,15 +113,15 @@ Belt and braces: append to **every** prompt — "Also write your full report to 
 
 - The diff command and commit list.
 - The path or fetched contents of the spec if there is one (so "behaviour the ticket did not ask for" has a referent), the test command the repo uses, and the settled decisions.
-- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it (you may edit a scratch copy of the tree for this; the checkout is left exactly as found). Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
+- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it (do it on a scratch copy of the tree outside the checkout, made with Bash; the checkout is left exactly as found). Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
 
-If the spec is missing, skip the Spec sub-agent and note this in the final report; the Correctness sub-agent runs regardless, minus part (b).
+If the spec is missing, skip the Spec sub-agent and note this in the final report. The Correctness sub-agent still runs; replace its part (b) with "(b) say 'no spec available'".
 
-Once the agents finish, if an axis has neither a completion notification nor a fallback file, don't block or self-review in its place — report that axis in step 5 as `## Standards — NO REPORT RECEIVED` (or `## Spec — …`, `## Correctness — …`) and move on.
+**Wait for every axis.** Each reviewer ends with a completion notification; do nothing with the round until every one you spawned has arrived. Never send a reviewer a "report now" or "wrap up" message — a reviewer hurried mid-pass returns what it has and its unread work is the round's biggest cost (agent-skills #732: eight finder reports, none read). Only when an axis's notification has arrived empty *and* its fallback file is absent do you report that axis in step 5 as `## Standards — NO REPORT RECEIVED` (or `## Spec — …`, `## Correctness — …`); a reviewer that is merely slow is waited on, not replaced.
 
 ### 5. Aggregate
 
-Present the reports under `## Standards`, `## Spec` and `## Correctness` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings — the axes are deliberately separate (see _Why separate axes_).
+Present the reports under `## Standards`, `## Spec` and `## Correctness` headings, verbatim or lightly cleaned. Every finding every axis returned is in the aggregate — none is dropped as minor, duplicate, or already known; the caller disposes of findings, this skill only collects them. Do **not** merge or rerank findings — the axes are deliberately separate (see _Why separate axes_).
 
 End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
 
@@ -133,4 +133,6 @@ A change can pass one axis and fail another:
 - Code that does exactly what the issue asked but breaks the project's conventions → **Spec pass, Standards fail.**
 - Code that matches the ticket and the conventions and deletes the wrong branch when stdin is a pipe → **Standards and Spec pass, Correctness fail.**
 
-Reporting them separately stops one axis from masking another. On #731 the standards and spec axes found the rule and ticket findings, and every runtime finding (the prompt lost under a pipe, the ahead count that was noise, the unrecorded `branch -D`) came from the failure-scenario reader — at a tenth of the built-in `/code-review`'s cost when it is one opus reviewer rather than eight.
+Reporting them separately stops one axis from masking another. On agent-skills #731 the standards and spec axes found the rule and ticket findings, and every runtime finding (the prompt lost under a pipe, the ahead count that was noise, the unrecorded `branch -D`) came from failure-scenario reading.
+
+This is also the one home for why the built-in `/code-review` is not in the implement lane (#732, measured on that 250-line diff): at medium effort it forked eight finder agents for 80k output and 9.2M cached tokens and returned before reading them; one opus standards axis cost 9.4k output and 0.68M cached. `/code-review low` (3.4k / 70k, one finding) stays available when the owner asks for it.

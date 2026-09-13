@@ -100,13 +100,16 @@ No PR and no reviewer; Chris reads the log after.
 
 ### Review
 
-1. One full round of `/two-axis-code-review` — its standards, spec and
-   correctness axes. Not the built-in `/code-review`: at medium effort it
-   forks eight finder agents for about 9M cached tokens on a 250-line diff
-   and the correctness axis finds what it finds (#732). Fix what is
-   fixable; record the rest as `disputed: <why>` or as a follow-up.
+1. One full round of `/multi-axis-code-review`: standards, spec and
+   correctness, all three waited for (its § Why separate axes says why the
+   built-in `/code-review` is not run here; `/code-review low` only when the
+   owner asks). Every finding in the aggregate gets exactly one disposition:
+   fixed in a commit, `disputed: <why>`, or filed as a follow-up ticket.
+   The PR body lists the disputed and filed ones.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
    Pass the reviewers every disputed, ruled, or other-ticket item as settled.
+   A round-1 finding with no disposition is the one thing this pass fails
+   on.
 
 No third pass. Commits after the verification pass are unreviewed; the PR
 body's last reviewed sha says where review stopped.

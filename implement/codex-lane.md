@@ -53,7 +53,7 @@ resort.
 
 ## The reviews
 
-`/two-axis-code-review`'s three axes are Claude passes and cost Claude
+`/multi-axis-code-review`'s three axes are Claude passes and cost Claude
 quota. In this lane they swap for:
 
 1. `/codex:review` — correctness on the working diff.

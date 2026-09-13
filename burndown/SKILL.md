@@ -163,7 +163,7 @@ stages sit either side of that line (step 3).
    **Builders run no reviews.** The seed points at `implement`'s § Build,
    § The report, and § Finish **steps 1–2 only** — the addenda check and the
    pre-report gate — never its reviews, its push, or its PR step: no
-   `code-review`, no `two-axis-code-review` on the builder's branch. Review is the coordinator's, once per clump (step
+   `code-review`, no `multi-axis-code-review` on the builder's branch. Review is the coordinator's, once per clump (step
    5), in contexts that hold nothing but the diff. `worker_done` is
    `implement`'s § The report, seeded by that same pointer, plus the branch
    name — the one thing the contract has no reason to know the coordinator
@@ -204,36 +204,34 @@ stages sit either side of that line (step 3).
 
    Three fresh `Agent` calls, `subagent_type: diff-reviewer`, `model: opus`,
    all in parallel — and if `diff-reviewer` is not among the available agent
-   types, take two-axis § 4's no-definition fallback for all three, which is
+   types, take multi-axis § 4's no-definition fallback for all three, which is
    the same one it takes itself — each seeded with the diff command
    (`git -C <worktree> diff <base>...<tip>`), the commit list, the clump's
-   **settled decisions**, and nothing else from the burn: the two axes of
-   `~/.agents/skills/two-axis-code-review/SKILL.md` — run that skill by
-   pointer; its § 4. Spawn both sub-agents in parallel holds the two prompts,
-   and its fixed point is passed as an argument. Every git command in all three
-   prompts is `git -C <worktree> ...`: the coordinator's own HEAD is not the
-   branch under review — and a **correctness** reviewer with a brief of its
-   own: bugs, behaviour the ticket did not ask for, and every new test checked
-   as a witness (strip the constraint, see whether it still passes). The
-   built-in `code-review` skill is not used here: its eight-finder fork costs
-   about 100k tokens and five minutes on a fifty-line diff and finds what one
-   fresh reader finds. The two axes stay separate agents by design; do not
-   collapse them into the correctness reviewer. Before any of the three runs,
+   **settled decisions**, and nothing else from the burn: the three axes of
+   `~/.agents/skills/multi-axis-code-review/SKILL.md` — run that skill by
+   pointer; its § 4. Spawn the three sub-agents in parallel holds the three
+   prompts (standards, spec, correctness) and the wait-for-every-axis rule,
+   and its fixed point is passed as an argument. Every git command in all
+   three prompts is `git -C <worktree> ...`: the coordinator's own HEAD is
+   not the branch under review. The built-in `code-review` skill is not used
+   here; that skill's § Why separate axes holds the measured reason. The
+   three axes stay separate agents by design; do not collapse them into one
+   reviewer. Before any of the three runs,
    do the scope check yourself: `git diff --name-only <range>` against the
    seeds' own-files lists, and a file outside a ticket's set is a finding for
    that ticket.
 
    The settled decisions are the ticket's `**Settled:**` comments (§ Shape),
    one line each, plus anything the builder asked and was answered mid-build.
-   Two-axis § 4 words the rule and the empty case; this step only supplies the
+   Multi-axis § 4 words the rule and the empty case; this step only supplies the
    list.
 
    Each reviewer also writes its full report to a file and returns a summary
    under 60 lines, verdict first, that names that path — the same
    file-plus-pointer contract § Shape's explorers run under. The file is named
    for the clump:
-   `two-axis-code-review/SKILL.md` § 4. Spawn both sub-agents in parallel
-   holds the rule and expands the directory, and `<n>` there is the clump's
+   `multi-axis-code-review/SKILL.md` § 4. Spawn the three sub-agents in
+   parallel holds the rule and expands the directory, and `<n>` there is the clump's
    lowest ticket number with the round suffixed
    (`review-standards-584.md`). A report written inside a worktree blocks its
    teardown at step 6. A fire-and-return `Agent` call has no handle to kill, so
@@ -249,7 +247,7 @@ stages sit either side of that line (step 3).
      round on that ticket's held builder (§ Holding the builder). Fixes are
      always the builder's, never the coordinator's: the dispatch hands the
      findings path, and the builder owns the files and the intent behind each
-     finding — under two-axis § A finding names the file and the intent, which
+     finding — under multi-axis § A finding names the file and the intent, which
      is that rule's one home and governs a coordinator's fix dispatch exactly
      as it governs a reviewer's finding.
    - **can't get clean** — genuinely blocked: the fix needs a decision the
@@ -312,7 +310,7 @@ stages sit either side of that line (step 3).
    the builder spawned — lookups, since builders run no reviews — so a
    non-zero `<review>` there is delegated work, not review.
    `<coord-review>` is the step 5 reviewers' tokens, read off the usage each
-   `Agent` completion carries (the two axes and the correctness reviewer) —
+   `Agent` completion carries (the three axes) —
    never asked of a reviewer, which cannot count itself. Write `-` when you did
    not actually read them: a guess in this column cannot be told apart from a
    measurement afterwards, and comparing burns is the only thing the file is
