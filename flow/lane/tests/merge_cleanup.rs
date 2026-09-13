@@ -471,6 +471,25 @@ fn a_live_registry_pid_with_no_herdr_agent_still_refuses() {
     assert!(!run.ok && run.has(&format!("pid {}", me())) && wt.is_dir(), "{}", run.text());
 }
 
+#[test]
+fn a_herdr_agent_with_no_name_refuses_and_excuses_no_registry_session() {
+    // An agent herdr cannot name cannot be classified, so it blocks whatever
+    // its status says, and its session id explains nothing away.
+    for status in ["working", "idle"] {
+        let c = Cleanup::new();
+        let (r, wt) = lane_workspace(&c, "r22", "implement-22");
+        c.session("r22", &format!(r#"{{"pid":{},"cwd":"{}","sessionId":"sess-22"}}"#, me(), wt.display()));
+        c.set_agents(&format!(
+            r#"[{{"pane_id":"w22:p1","cwd":"{}","agent_status":"{status}","agent_session":{{"value":"sess-22"}}}}]"#,
+            wt.display()
+        ));
+        let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+        assert!(!run.ok && run.stderr.contains("a live session is in it:"), "{status}: {}", run.text());
+        assert!(wt.is_dir() && c.has_branch(&r, "caneff/merged-one"), "{status}");
+        assert!(!c.calls().contains("pane close"), "{}", c.calls());
+    }
+}
+
 // --- 12. a herdr worker's own registry session is decided by its status ------
 
 #[test]
