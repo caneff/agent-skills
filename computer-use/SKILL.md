@@ -11,9 +11,8 @@ fires on your own intent: load it only when Chris names a window, app, or
 on-screen thing for you to look at or drive. When Chris is the one who needs
 to look at something himself, that's `wslview` /
 `code --reuse-window --goto`, not this skill
-(`~/.agents/skills/flow/claude/VISUAL-INSPECTION.md`). Reading a rendered
-HTML page you produced is `shot-scraper`, never this skill either — it's
-headless and cheaper, and doesn't touch the real desktop.
+(`~/.agents/skills/flow/claude/VISUAL-INSPECTION.md`); a rendered HTML page
+you produced goes through `shot-scraper`, not this skill either (see below).
 
 Never `xdotool`, WSLg, or any Linux-GUI approach: it acts on a display Chris
 can't see. Never `wsl --shutdown`.
@@ -25,7 +24,8 @@ reached over the `powershell.exe` bridge. Covers both native windows and, via
 `use_dom=True`, the DOM of a real Chrome/Edge/Firefox window — the one thing
 PowerShell UI Automation can't do. Tools: `Snapshot`/`Screenshot` for state,
 `Click`/`Type`/`Scroll`/`Move`/`Shortcut`/`WaitFor` for input, `App` for
-launching and resizing. Registered with:
+launching and resizing. Registered with (get `<user>` from WSL with
+`powershell.exe -NoProfile -Command '$env:USERNAME'`):
 
 ```
 claude mcp add windows-mcp --transport stdio -s user -- powershell.exe -Command "C:/Users/<user>/.local/bin/uvx.exe windows-mcp@0.8.5 serve"
@@ -37,14 +37,17 @@ reach for them casually. First run installs Windows-side dependencies and can
 time out — that's not a broken server, restart it.
 
 **2. PowerShell UI Automation — the zero-install floor.** In-box on Windows
-5.1, no `uv`, no MCP, nothing to register. Reaches window enumeration,
-control-pattern inspection, `SendKeys` input, and `System.Drawing` capture —
-window-level only, no browser DOM. Use this when Windows-MCP isn't
-registered yet, or for anything that's just "is the window there / bring it
-forward / read its title / screenshot it." From WSL:
+PowerShell 5.1, no `uv`, no MCP, nothing to register. Reaches window
+enumeration, control-pattern inspection, `SendKeys` input, and
+`System.Drawing` capture — window-level only, no browser DOM. Use this when
+Windows-MCP isn't registered yet, or for anything that's just "is the window
+there / bring it forward / read its title / screenshot it." `inspect-windows.ps1`
+in this skill's own directory enumerates every top-level window's
+`Name`/`ClassName`; run it (or any other `.ps1`) with an absolute path so the
+command isn't cwd-dependent:
 
 ```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w script.ps1)"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w ~/.agents/skills/computer-use/inspect-windows.ps1)"
 ```
 
 A one-liner works too, but heredoc quoting crosses the WSL/Windows boundary
@@ -62,8 +65,13 @@ by two tags. Register with the Windows-side npm binary through the same
 `powershell.exe` bridge pattern as Windows-MCP:
 
 ```
-claude mcp add terminator -- powershell.exe -Command "npx.cmd -y terminator-mcp-agent@latest"
+claude mcp add terminator --transport stdio -s user -- powershell.exe -Command "npx.cmd -y terminator-mcp-agent@0.24.28"
 ```
+
+Pinned to the npm version the line actually fetches (`0.24.28`, itself two
+tags behind the repo's `v0.24.32`) rather than `@latest` — the skew is the
+whole reason this is second choice, and `@latest` would silently outrun the
+number this file cites.
 
 ## What doesn't apply here
 
@@ -91,12 +99,10 @@ drop Windows-MCP and Terminator in its favor if it clears the same bar.
 ## Verifying it's working
 
 A live inspection from WSL, minimal and cheap — no install needed for this
-one:
+one, same command as backend 2 above:
 
 ```bash
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w inspect-windows.ps1)"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w ~/.agents/skills/computer-use/inspect-windows.ps1)"
 ```
 
-where `inspect-windows.ps1` walks `AutomationElement::RootElement` with
-`FindAll` and prints each top-level window's `Name`/`ClassName`. A non-empty
-list of real window titles is the check.
+A non-empty list of real window titles is the check.
