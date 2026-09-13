@@ -699,3 +699,26 @@ fn a_repo_with_no_worktrees_dir_adds_no_stale_line() {
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !run.has("stale, not removed"), "{}", run.text());
 }
+
+// --- #746: the stale report decides a worker's own session like the guard ----
+
+#[test]
+fn a_sibling_whose_only_live_signal_is_an_idle_workers_own_session_is_stale() {
+    for (status, stale) in [("idle", true), ("working", false)] {
+        let c = Cleanup::new();
+        let r = c.mkfixture("r21");
+        let wts = r.join(".claude/worktrees");
+        let sibling = wts.join("implement-done");
+        c.worktree_add(&r, &["--detach", s(&sibling), "origin/main"]);
+        c.session("worker", &format!(r#"{{"pid":{},"cwd":"{}","sessionId":"sess-21"}}"#, me(), sibling.display()));
+        c.set_agents(&format!(
+            r#"[{{"name":"skills-21","pane_id":"w21:p1","cwd":"{}","agent_status":"{status}","agent_session":{{"value":"sess-21"}}}}]"#,
+            sibling.display()
+        ));
+        let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/ff-merged", "--dry-run"], &[]);
+        assert!(run.ok, "{}", run.text());
+        let want: Vec<String> = if stale { vec![sibling.display().to_string()] } else { vec![] };
+        assert_eq!(run.stale(), want, "{status}: {}", run.text());
+        assert!(sibling.is_dir() && !c.calls().contains("pane close"), "{}", c.calls());
+    }
+}

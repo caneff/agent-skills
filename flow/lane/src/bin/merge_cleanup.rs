@@ -154,6 +154,33 @@ fn herdr_agents_in(wt: &str) -> Result<Vec<Agent>, ()> {
     Ok(agents.into_iter().filter(|a| a.cwd.as_deref().is_some_and(|c| in_tree(c, wt))).collect())
 }
 
+/// What `Cleanup::occupancy` found alive in a worktree.
+struct Occupancy {
+    /// Registry sessions no herdr agent explains, as "pid <n>".
+    unresolved: Vec<String>,
+    /// The named herdr agents there; `None` when herdr is not on PATH,
+    /// `Err` when `herdr agent list` failed.
+    herdr: Option<Result<Vec<Agent>, ()>>,
+}
+
+impl Occupancy {
+    /// Nothing the guard would refuse on: no unresolved session, and herdr
+    /// absent or answering with idle agents only.
+    fn is_clear(&self) -> bool {
+        self.unresolved.is_empty()
+            && match &self.herdr {
+                None => true,
+                Some(Err(())) => false,
+                Some(Ok(agents)) => blockers(agents).is_empty(),
+            }
+    }
+}
+
+/// The agents that are not idle, as "herdr agent <name> (<pane>)".
+fn blockers(agents: &[Agent]) -> Vec<String> {
+    agents.iter().filter(|a| !a.is_idle()).map(|a| format!("herdr agent {} ({})", a.name(), a.pane())).collect()
+}
+
 fn refuse_live(wt: &str, items: &[String]) -> bool {
     eprintln!("merge-cleanup: refusing to remove {wt} — a live session is in it: {}", items.join(", "));
     false
@@ -171,57 +198,52 @@ impl Cleanup {
         status(program, args)
     }
 
-    /// One line per live session in `wt`, read-only; `Err` when herdr
-    /// cannot answer.
-    fn live_sessions(&self, wt: &str) -> Result<Vec<String>, ()> {
-        let mut live: Vec<String> = sessions::live_in(Path::new(&self.home), wt).into_iter().map(|s| format!("pid {}", s.pid)).collect();
-        for a in herdr_agents_in(wt)? {
-            if !a.name().is_empty() {
-                live.push(format!("herdr agent {} ({})", a.name(), a.pane()));
-            }
-        }
-        Ok(live)
-    }
-
-    /// The live-session guard. Two sources: a sessions registry file whose
-    /// cwd is in the workspace and whose pid is alive refuses — unless its
+    /// What is alive in `wt`, classified once for both the guard and the
+    /// stale report, so a worktree is listed as stale exactly when the guard
+    /// would clear it (#746). Two sources: a sessions registry file whose cwd
+    /// is in the workspace and whose pid is alive is unresolved — unless its
     /// sessionId equals a herdr agent's agent_session.value for that same
-    /// worktree, in which case that session is the worker's own pane and
-    /// the herdr agent's status decides it instead. A herdr agent whose cwd
-    /// is in the workspace refuses only while its agent_status is working or
-    /// blocked (or herdr cannot classify it); an idle one (idle or done) has
-    /// its pane closed by this run, then proceeds.
-    fn guard_live(&self, wt: &str) -> bool {
-        let herdr_present = on_path("herdr");
-        let agents = if herdr_present { herdr_agents_in(wt) } else { Ok(Vec::new()) };
-
+    /// worktree, in which case that session is the worker's own pane and the
+    /// herdr agent's status decides it instead.
+    fn occupancy(&self, wt: &str) -> Occupancy {
+        let herdr = on_path("herdr").then(|| herdr_agents_in(wt));
         // A registry session is explained away only by a herdr agent whose
         // own sessionId matches it — herdr agent list has to have answered.
-        let herdr_sessions: Vec<&str> = agents.iter().flatten().map(Agent::session).filter(|s| !s.is_empty()).collect();
-        let unresolved: Vec<String> = sessions::live_in(Path::new(&self.home), wt)
+        let herdr_sessions: Vec<&str> = match &herdr {
+            Some(Ok(agents)) => agents.iter().map(Agent::session).filter(|s| !s.is_empty()).collect(),
+            _ => Vec::new(),
+        };
+        let unresolved = sessions::live_in(Path::new(&self.home), wt)
             .into_iter()
             .filter(|s| s.session_id.is_empty() || !herdr_sessions.contains(&s.session_id.as_str()))
             .map(|s| format!("pid {}", s.pid))
             .collect();
-        if !unresolved.is_empty() {
-            return refuse_live(wt, &unresolved);
-        }
+        let herdr = herdr.map(|r| r.map(|agents| agents.into_iter().filter(|a| !a.name().is_empty()).collect()));
+        Occupancy { unresolved, herdr }
+    }
 
-        if !herdr_present {
+    /// The live-session guard. An unresolved registry session refuses. A
+    /// herdr agent whose cwd is in the workspace refuses only while its
+    /// agent_status is working or blocked (or herdr cannot classify it); an
+    /// idle one (idle or done) has its pane closed by this run, then proceeds.
+    fn guard_live(&self, wt: &str) -> bool {
+        let occupancy = self.occupancy(wt);
+        if !occupancy.unresolved.is_empty() {
+            return refuse_live(wt, &occupancy.unresolved);
+        }
+        let Some(agents) = occupancy.herdr else {
             skip("the herdr agent check", "herdr is not on PATH");
             return true;
-        }
+        };
         // A herdr that cannot answer cannot clear the workspace either.
         let Ok(agents) = agents else {
             eprintln!("merge-cleanup: refusing to remove {wt} — herdr agent list failed");
             return false;
         };
-        let agents: Vec<&Agent> = agents.iter().filter(|a| !a.name().is_empty()).collect();
         // Classify every agent before closing any: a working or blocked
         // sibling must refuse the whole worktree before an idle one is
         // touched, so the outcome never depends on herdr agent list's order.
-        let blockers: Vec<String> =
-            agents.iter().filter(|a| !a.is_idle()).map(|a| format!("herdr agent {} ({})", a.name(), a.pane())).collect();
+        let blockers = blockers(&agents);
         if !blockers.is_empty() {
             return refuse_live(wt, &blockers);
         }
@@ -235,7 +257,7 @@ impl Cleanup {
         true
     }
 
-    /// Other workspaces under <repo>/.claude/worktrees with no live session,
+    /// Other workspaces under <repo>/.claude/worktrees the guard would clear,
     /// no commits ahead of the default branch and nothing on disk git does
     /// not hold (ignored files included — .scratch evidence is work too):
     /// listed for the owner, never removed. A folder there that git no
@@ -264,7 +286,7 @@ impl Cleanup {
                 }
                 ""
             };
-            if self.live_sessions(&e).is_ok_and(|l| l.is_empty()) {
+            if self.occupancy(&e).is_clear() {
                 stale.push(format!("{e}{mark}"));
             }
         }
