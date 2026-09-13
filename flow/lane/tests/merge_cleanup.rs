@@ -745,7 +745,8 @@ fn a_worktree_git_cannot_read_is_never_removed() {
     let root = sweep_root(&c);
     let other = root.join("other");
     let wt = other.join(".claude/worktrees/implement-9");
-    std::fs::write(wt.join(".git"), "gitdir: /nonexistent-gitdir\n").unwrap();
+    // A corrupt index: `git status` fails, `git worktree remove --force` would not.
+    std::fs::write(other.join(".git/worktrees/implement-9/index"), "junk\n").unwrap();
     let run = c.mc(Tools::Full, &["--repo", s(&other), "caneff/merged-one"], &[]);
     let want = format!("merge-cleanup: refusing to remove {} — git status failed there", wt.display());
     assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
