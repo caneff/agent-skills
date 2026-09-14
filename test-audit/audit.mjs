@@ -105,13 +105,25 @@ const SUITE_ROOTS = new Set(["describe", "it", "test"]);
 // (`concurrent`, `failing`) stay collected. `beforeAll`/`afterAll` are here for
 // the same reason: vitest and Playwright hang them off `test` too.
 const LIFECYCLE_HOOKS = new Set(["after", "before", "beforeEach", "afterEach", "beforeAll", "afterAll"]);
+// node:test's and Playwright's suite alias hangs off the same root too
+// (`test.describe(...)`, `test.suite(...)`) -- `describe`/`it` are already
+// routed to SUITE_ROOTS, so a root match alone double-counts: the suite
+// itself as one test (its callback holds every nested assertion, so it
+// reports its inner tests' findings a second time) and the nested `it`/`test`
+// calls inside it as more (#679).
+const SUITE_ALIASES = new Set(["describe", "suite"]);
+// Playwright's non-callback config calls (`test.use({...})`,
+// `test.setTimeout(30000)`) have no callback at all, so treating them as
+// tests always reads as empty/skipped -- exclude them the same way (#679).
+const CONFIG_CALLS = new Set(["use", "setTimeout"]);
 
 /** Does this CallExpression name a single test (`it`/`test`, incl. `.skip`)? */
 function isTestCall(node) {
   const bare = calleeName(node);
   if (bare && TEST_ROOTS.has(bare)) return true;
   const mem = memberCallee(node);
-  return !!(mem && TEST_ROOTS.has(mem.root) && !LIFECYCLE_HOOKS.has(mem.method));
+  if (!mem || !TEST_ROOTS.has(mem.root)) return false;
+  return !LIFECYCLE_HOOKS.has(mem.method) && !SUITE_ALIASES.has(mem.method) && !CONFIG_CALLS.has(mem.method);
 }
 
 /** The modifier on a member test call (`skip`/`todo`/`only`), else null. */
@@ -554,6 +566,28 @@ function selfcheck() {
     testCallCount("it.skip('x', () => { expect(a).toBe(b); })") === 1,
     "skip modifier is still a test call",
   );
+
+  // 0b. suite aliases and non-callback config calls are not test calls (#679)
+  assert(
+    testCallCount("test.describe('group', () => { test('works', () => { assert.equal(1, 1); }); });") === 1,
+    "test.describe is a suite, not a test -- only the inner test call counts",
+  );
+  assert(
+    testCallCount("it.describe('group', () => { it('works', () => { expect(1).toBe(1); }); });") === 1,
+    "it.describe is a suite, not a test -- only the inner test call counts",
+  );
+  assert(testCallCount("test.describe('empty', () => {});") === 0, "an empty test.describe collects no test");
+  assert(testCallCount("test.suite('empty', () => {});") === 0, "an empty test.suite collects no test");
+  assert(testCallCount("test.use({ testIdAttribute: 'data-id' });") === 0, "test.use has no test to run");
+  assert(testCallCount("test.setTimeout(30000);") === 0, "test.setTimeout has no test to run");
+  {
+    const src =
+      "test.describe('group', () => { test('works', () => { assert.equal(1, 1); }); });";
+    const findings = testCalls(parseSource(src, "s.test.js")).flatMap((call) =>
+      DETECTORS.filter(([, detect]) => detect(call, src)).map(([smell]) => smell),
+    );
+    assert.deepEqual(findings, ["tautology"], "a tautology inside test.describe is reported once, not twice");
+  }
 
   // 1. assertion-free
   assert(isAssertionFree(testCallFrom("it('x', () => { const y = compute(); })")), "assertion-free positive");
