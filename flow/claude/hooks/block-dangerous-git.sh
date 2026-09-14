@@ -179,8 +179,9 @@ runs_pr_merge() {
 # `/`, `~` or `.`, or outside two-to-three segments, is not a repo name (e.g.
 # `merge-cleanup --repo <path>`) and names no owner (#803). OWNER is the first
 # segment, or the second when a HOST leads. A URL (`https://`, `ssh://git@`)
-# loses its scheme and user@ first, then its OWNER follows the host; one with
-# no OWNER prints `?`, which never matches the login, so it fails closed. They are
+# loses its scheme, and its OWNER is the segment after the host (a `user@`
+# rides along in the host); one with no OWNER prints `?`, which never matches
+# the login, so it fails closed. They are
 # checked on top of this checkout's ownership, never instead of it, so a name
 # on another command or inside a quoted subject can only block.
 named_merge_owners() {
@@ -188,7 +189,7 @@ named_merge_owners() {
     | grep -oE '(--repo[= ]|-R[[:space:]]+|GH_REPO=)[^[:space:];&|)]+' \
     | sed -E 's/^(--repo[= ]|-R[[:space:]]+|GH_REPO=)//' \
     | awk -F/ '
-        sub(/^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^\/@]*@)?/, "") { print (NF >= 3 && $2 != "" ? $2 : "?"); next }
+        sub(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, "") { print ($2 != "" ? $2 : "?"); next }
         !/^[\/~.]/ && NF >= 2 && NF <= 3 { print (NF == 3 ? $2 : $1) }'
   printf '%s\n' "$SCAN" | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/pull/' \
     | cut -d/ -f2
