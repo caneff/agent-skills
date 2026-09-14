@@ -32,6 +32,10 @@ _Avoid_: lane (that is auto-ship vs code), mode, level
 Where Chris watches workers and their state; herdr. Not where dispatch happens.
 _Avoid_: dashboard, viewer, rail
 
+**Wake**:
+A worker's report reaching an idle controller as the controller's next turn, about a second after the worker sends it. A controller inside a tool call is not woken; the report waits for the call to return.
+_Avoid_: notification, ping, callback
+
 **Live-session guard**:
 The refusal in `merge-cleanup` to remove a workspace while a session is alive in it.
 _Avoid_: safety check, lock

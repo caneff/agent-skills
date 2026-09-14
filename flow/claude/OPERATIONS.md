@@ -64,10 +64,15 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
 
 ## Wait
 
-- The controller never polls a worker. A worker's message arrives at the
-  controller's next tool round; to hear when a session goes idle, send it
-  `SendMessage` with `notify_when_idle: true`. Why: polling loops and
-  "are you done?" messages cost turns and interrupt the worker.
+- The controller never polls a worker. Its wait is going idle: a worker's
+  `SendMessage` wakes an idle controller as its next turn about a second
+  after the send. While the controller is inside a tool call the message is
+  held, unseen, until that call returns, so it never sits in a long tool
+  call (an untimed `herdr agent wait`, a long sleep, a blocking
+  `TaskOutput`) while workers are out. To hear when a session goes idle,
+  send it `SendMessage` with `notify_when_idle: true`. Why: polling loops
+  and "are you done?" messages cost turns and interrupt the worker; measured
+  on the socket fan-in prototype (#778).
 - Long-running job: run it under `job-run --name <n> -- <cmd>` — output and
   exit survive a kill, and `job-run --status <n>` answers alive / finished /
   killed. Why: a plain background run loses its output and exit code when
