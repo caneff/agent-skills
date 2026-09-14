@@ -183,13 +183,21 @@ runs_pr_merge() {
 # rides along in the host); one with no OWNER prints `?`, which never matches
 # the login, so it fails closed. They are
 # checked on top of this checkout's ownership, never instead of it, so a name
-# on another command or inside a quoted subject can only block.
+# on another command or inside a quoted subject can only block. The scp form
+# `user@host:OWNER/REPO` (#805) carries no scheme, so it never hits the URL
+# rule above and needs its own: only a clean host:OWNER/REPO reads OWNER out;
+# anything else with that '@...:' shape prints '?' and fails closed, rather
+# than being dropped as "not a repo name" the way a bare path is.
 named_merge_owners() {
   printf '%s\n' "$SCAN" | tr -d "'\"" \
     | grep -oE '(--repo[= ]|-R[[:space:]]+|GH_REPO=)[^[:space:];&|)]+' \
     | sed -E 's/^(--repo[= ]|-R[[:space:]]+|GH_REPO=)//' \
     | awk -F/ '
         sub(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, "") { print ($2 != "" ? $2 : "?"); next }
+        $1 ~ /@[^\/]*:/ {
+          owner = $1; sub(/^[^:]*:/, "", owner)
+          print (owner != "" && NF == 2 ? owner : "?"); next
+        }
         !/^[\/~.]/ && NF >= 2 && NF <= 3 { print (NF == 3 ? $2 : $1) }'
   printf '%s\n' "$SCAN" | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/pull/' \
     | cut -d/ -f2
