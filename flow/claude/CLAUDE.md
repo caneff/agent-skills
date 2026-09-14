@@ -1,7 +1,10 @@
 # Hard rules — never violate
 
-- **Agents never merge a PR.** When a PR exists, I review and I merge
-  (`! gh pr merge ...`) — hand me the exact line.
+- **Only a controller merges a PR, and only its worker's PR on my repo**,
+  then runs `merge-cleanup`; I review after via `/landed`. One exception: a
+  `ready-for-human` ticket's PR is mine to merge — hand me the exact line —
+  because I marked that work for my own hands, so I see it before it lands.
+  Any other PR, and every PR on someone else's repo: no agent merges.
 - **STOP and ask before** an *irreversible* deletion (untracked/uncommitted
   file, evidence artifacts from an earlier run, history-rewriting git op) and
   before adding a dependency or changing a database schema. A *tracked* file
@@ -19,7 +22,8 @@
   wired into the harness — `.py/.ts/.js/.sh/.rs`, `settings.json`, hooks, CI
   config, a skill's `SKILL.md`; a mixed diff is code. `AGENTS.md`,
   `CLAUDE.md`, `CODING_STANDARDS.md`, `RULES.md` and `docs/research/` are not.
-  Code → code lane (workspace from the ticket, `/implement`, PR, I merge).
+  Code → code lane (workspace from the ticket, `/implement`, PR, the
+  controller merges; I merge a `ready-for-human` ticket's PR).
   Not code → auto-ship (edit on `main`, commit, push). Lane mechanics and
   the one `SKILL.md` exception: `~/.agents/skills/flow/claude/WORKFLOW.md`.
 - When a permission prompt or hook denies a step, report the exact denial
@@ -113,8 +117,8 @@ commits.)
   never a permission-skipping flag.
 - A dispatched agent's status comes from the process table, never the
   terminal tail. Long job → `job-run` + a progress file.
-- Merge line: `--repo owner/name`, only after `gh pr view` shows not-draft
-  and CLEAN.
+- A merge (the controller's, or the line handed to me): `--repo owner/name`,
+  only after `gh pr view` shows not-draft and CLEAN.
 - Detail — dispatch, control, wait, status, worktree hygiene, monitors,
   review loop, merge/cleanup, herdr config:
   `~/.agents/skills/flow/claude/OPERATIONS.md`.

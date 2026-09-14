@@ -2,7 +2,8 @@
 
 Swap the build engine from Claude to Codex to spend someone else's quota. The
 ceremony around it does not change: same claim, same workspace, same addenda,
-same pre-report gate, same PR the owner merges. Only who writes the code moves.
+same pre-report gate, same merge (`implement/SKILL.md` § The merge). Only who
+writes the code moves.
 
 **Opt-in, never inferred.** `--codex` on the invocation, or the owner saying in
 so many words that Claude quota is short. A build that reaches for this on its

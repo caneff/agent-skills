@@ -64,7 +64,10 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
 
 - The dispatching session is the worker's **controller**. The worker sends
   every question and its finish notice ("PR up", or the landed sha on the
-  light tier) to the controller with `SendMessage`, never to me.
+  light tier) to the controller with `SendMessage`, never to me. On my
+  repos the controller then merges (`implement/SKILL.md` § The merge) —
+  except on a `ready-for-human` ticket, whose merge line comes to me. Why:
+  I marked that work for my own hands, so I see it before it lands.
 - What the controller rules on and escalates to me: its entry in
   `~/.agents/skills/CONTEXT.md`. Why: each escalation listed there is an
   outcome a controller cannot undo on my behalf.
@@ -119,11 +122,12 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
 - Before reporting a commit sha, `git status --porcelain` is empty, and fix
   commits stack instead of amending. Why: the report describes the commit,
   not the working tree, and an amend erases a sha already handed over.
-- The review loop, the before-the-PR checks (CLEAN, `Closes` verified) and
-  the merge line: `implement/SKILL.md` § Heavy tier; the light tier's landing
-  and its `Closes` check: § Light tier. Why: one home, so the
+- The review loop, the before-the-PR checks and the controller's merge
+  (CLEAN, `Closes` verified): `implement/SKILL.md` § Heavy tier; the light
+  tier's landing and its `Closes` check: § Light tier. Why: one home, so the
   lane and this file cannot drift apart.
-- Pair the merge line with `merge-cleanup --repo <primary checkout> <branch>`
+- The controller follows every merge with
+  `merge-cleanup --repo <primary checkout> <branch>`
   (`--help` for PR/URL and `--sweep`). The sweep shows its plan and asks
   before deleting; `--yes` answers for an unattended run. It removes the
   workspace, deletes the branch local and remote (the tip stays under
