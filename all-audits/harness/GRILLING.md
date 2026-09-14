@@ -97,13 +97,14 @@ of the audit that made it, naming the decision it changes.
    thirteen-audit sweep can propose twenty-plus tickets in one go, so this is
    the one point in the whole run the agent writes something the user would
    otherwise delete by hand.
-3. **On approval, publish — spec first, unlabelled, then tickets, then the
-   `spec` label last.** File the approved draft as the spec issue with no
-   `spec` label yet — `/to-tickets`'s own guard treats a `spec`-labelled
-   source as already sliced and stops instead of publishing children.
-   Publish the approved tickets as its children, each labelled
+3. **On approval, publish — spec first, unlabelled, then tickets, then both
+   labels on the parent last.** File the approved draft as the spec issue
+   with no `spec` label yet — `/to-tickets`'s own guard treats a
+   `spec`-labelled source as already sliced and stops instead of publishing
+   children. Publish the approved tickets as its children, each labelled
    `ready-for-agent`, using `/to-tickets`'s publish step and its blocking-edge
    and parent-linking conventions — its own quiz-and-iterate step is skipped,
    since the breakdown was already approved in step 2. Only once the children
-   are linked, label the parent `spec` — never `ready-for-agent` — so nothing
-   starts building it unsliced.
+   are linked, label the parent `spec` **and** `ready-for-agent` — plain
+   `implement-dispatch` refuses a `spec`-labelled issue, so that pair sends
+   it to `/implement-spec` instead of an ordinary agent building it unsliced.
