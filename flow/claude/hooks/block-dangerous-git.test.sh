@@ -111,6 +111,18 @@ run "gh pr merge naming someone else's repo by ssh URL blocked" 2 \
   "gh pr merge 1 --repo ssh://git@github.com/someone-else/x" "BLOCKED"
 run "gh pr merge with a URL --repo naming no owner blocked" 2 \
   "gh pr merge 1 --repo https://github.com" "BLOCKED"
+# scp-style `user@host:OWNER/REPO` (#805): no scheme, so OWNER sits after the
+# colon in the first slash-segment, not the whole host:owner chunk.
+run "gh pr merge naming an owned repo by scp-style --repo allowed" 0 \
+  "gh pr merge 1 --repo git@github.com:caneff/x"
+run "gh pr merge naming someone else's repo by scp-style --repo blocked" 2 \
+  "gh pr merge 1 --repo git@github.com:someone-else/x" "BLOCKED"
+run "GH_REPO naming someone else's repo by scp-style value blocked" 2 \
+  "GH_REPO=git@github.com:someone-else/x gh pr merge 1" "BLOCKED"
+run "gh pr merge naming someone else's repo by scp-style -R blocked" 2 \
+  "gh pr merge 1 -R git@github.com:someone-else/x" "BLOCKED"
+run "gh pr merge with a scp-style --repo naming no owner blocked" 2 \
+  "gh pr merge 1 --repo git@github.com:x" "BLOCKED"
 run "owned merge chained with a one-segment -R value allowed" 0 \
   "gh pr merge 1 --repo caneff/x && grep -R pattern ."
 run "someone else's repo on the merge still blocked beside a path --repo" 2 \
