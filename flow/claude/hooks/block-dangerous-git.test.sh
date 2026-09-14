@@ -83,8 +83,8 @@ run "gh pr merge -R naming someone else's repo blocked" 2 \
   "gh pr merge 12 -R someone-else/agent-skills" "BLOCKED"
 run "gh pr merge on someone else's PR URL blocked" 2 \
   "gh pr merge https://github.com/someone-else/agent-skills/pull/12 --squash" "BLOCKED"
-# A --repo that is a filesystem path names no repo owner (#803): the merge line
-# implement/SKILL.md § The merge hands the controller pairs with merge-cleanup.
+# A --repo that is a filesystem path names no repo owner (#803). The controller's
+# merge in implement/SKILL.md § The merge is followed by merge-cleanup --repo <path>.
 run "owned merge chained with merge-cleanup --repo <path> allowed" 0 \
   "gh pr merge 1 --repo caneff/x --squash && merge-cleanup --repo /home/caneff/.agents/skills b"
 run "owned merge chained with -R ./repo on another command allowed" 0 \
@@ -99,7 +99,9 @@ run "gh pr merge naming an owned repo in host form allowed" 0 \
   "gh pr merge 1 --repo github.com/caneff/x"
 run "gh pr merge naming someone else's repo in host form blocked" 2 \
   "gh pr merge 1 --repo github.com/someone-else/x" "BLOCKED"
-run "a path --repo does not hide someone else's repo on the merge" 2 \
+run "owned merge chained with a one-segment -R value allowed" 0 \
+  "gh pr merge 1 --repo caneff/x && grep -R pattern ."
+run "someone else's repo on the merge still blocked beside a path --repo" 2 \
   "merge-cleanup --repo /home/caneff/.agents/skills b && gh pr merge 1 --repo someone-else/x" "BLOCKED"
 
 rm -rf "$XDG_CACHE_HOME"
