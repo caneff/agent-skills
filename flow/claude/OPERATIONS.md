@@ -47,18 +47,18 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   refuses an idle worker (#745). Never uninstall it; if a herdr update drops
   it, `herdr integration install claude` needs my own hands (the classifier
   denies it as self-modification). Ruled 2026-09-13, #725.
-- **Wispr Flow in herdr needs the Kitty keyboard protocol off in VS Code**:
-  `"terminal.integrated.enableKittyKeyboardProtocol": false` in the Windows
-  user `settings.json`, then a new terminal and reattach. herdr turns the
-  protocol on (VS Code ≥ 1.109.5 defaults it on), and while it is on Wispr's
-  simulated Ctrl+V never lands — it reports no text box, even in a bare shell
-  pane. Not the cause: `ui.host_cursor`, editor-vs-panel placement.
-  `ui.mouse_capture = false` was never tested — ruled out as a fix. Same class:
-  earendil-works/pi#8778. Fixed 2026-09-14. Cost, from a raw-byte probe of
-  the VS Code terminal with the protocol off: Ctrl+Enter sends the same bytes
-  as Enter, Shift+Enter as Alt+Enter (`ESC CR`), Alt+Left as Ctrl+Left,
-  Ctrl+Backspace as Ctrl+W; Shift+Tab, Backspace vs Ctrl+H, and Ctrl+B stay
-  distinct. So no binding may rely on Ctrl+Enter.
+- **Wispr Flow in herdr needs a `shift+insert` paste binding in VS Code**:
+  `{"key": "shift+insert", "command": "workbench.action.terminal.paste",
+  "when": "terminalFocus"}` in the Windows user `keybindings.json`. Wispr
+  pastes by simulating Shift+Insert. herdr requests Kitty keyboard flags 7
+  (31 when a pane asks to report all keys), and with the protocol active VS
+  Code encodes Shift+Insert as a key (`ESC[2;2~`) instead of pasting, so no
+  text lands and Wispr reports no text box. The binding runs before the
+  encoder; a raw-byte probe then shows a bracketed paste. Keep
+  `terminal.integrated.enableKittyKeyboardProtocol` on — turning it off also
+  fixes Wispr but makes Ctrl+Enter send the same bytes as Enter. Not the
+  cause: `ui.host_cursor`, editor-vs-panel placement. Same class:
+  earendil-works/pi#8778. Fixed 2026-09-14.
 
 ## Control
 
