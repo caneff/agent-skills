@@ -167,10 +167,14 @@ there.
 The controller merges on a repo Chris owns; Chris reads it after via
 `/landed`, and revert is the undo.
 
-1. **Check who merges twice**: "Chris merges" in the dispatch report or the
-   worker's "PR up", and the live labels
-   (`gh issue view <n> --repo <owner/name> --json labels`) — Chris can
-   relabel a ticket mid-build. Either one → the exception below.
+1. **Check who merges twice**: the live labels
+   (`gh issue view <n> --repo <owner/name> --json labels`) are the primary
+   signal — `ready-for-human` stays on a Chris-merges ticket through its
+   whole build, so it still reads even from a controller compacted or
+   resumed since dispatch. "Chris merges" in the dispatch report or the
+   worker's "PR up" is the second signal, for a ticket dispatched before this
+   rule. Either one present → the exception below; Chris can also relabel a
+   ticket mid-build.
 2. **The PR is still not-draft and CLEAN** — the same check as § Before the
    PR step 4, rerun because `main` may have moved since "PR up".
 3. Merge:
