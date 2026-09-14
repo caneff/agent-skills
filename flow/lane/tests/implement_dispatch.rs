@@ -611,6 +611,30 @@ fn help_documents_both_modes() {
     }
 }
 
+// --- #794: a ready-for-human ticket dispatches, and Chris merges it ----------
+
+#[test]
+fn a_ready_for_human_ticket_is_claimed_and_briefed_as_chris_merges() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "enhancement,ready-for-human")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "410"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let calls = f.calls();
+    assert!(
+        calls.lines().any(|l| l
+            == "gh issue edit 410 --repo caneff/sudokumaker-custom-constraints --remove-label ready-for-human --add-label in-progress --add-assignee @me"),
+        "ticket not claimed off ready-for-human: {calls}"
+    );
+    assert!(
+        calls.lines().any(|l| l
+            == "herdr agent prompt sudokumaker-custom-constrain-410 /implement 410 --tier heavy --controller \"skills-ctl\" --chris-merges --wait --until working --timeout 120000"),
+        "{calls}"
+    );
+    assert!(out_text(&out).contains("dispatched #410 (sonnet, heavy tier, Chris merges, controller skills-ctl)"), "{}", out_text(&out));
+}
+
 #[test]
 fn spec_mode_briefs_the_parsed_slot_count_and_honours_model() {
     let f = Fixture::new();
