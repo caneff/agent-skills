@@ -120,16 +120,18 @@ const SUITE_ALIAS_METHODS = new Set(["describe", "suite"]);
 // own right, so it's excluded outright like the others rather than left to
 // the zero-argument rule below.
 const CONFIG_METHODS = new Set(["step", "use", "setTimeout", "slow", "extend", "configure", "info"]);
-const NON_TEST_METHODS = new Set([...HOOK_METHODS, ...SUITE_ALIAS_METHODS, ...CONFIG_METHODS]);
 
-/** Does this `it.<method>`/`test.<method>` member call carry any evidence
- * that the file organizes tests this way -- a real test, or a describe/suite
- * alias? Never a hook or config call. Shared by isTestCall (which further
- * excludes describe/suite, since those aren't tests themselves) and the
- * suite gate in isVitestFile, so the two can no longer disagree about what a
- * `test.<method>` call means (#679 triage ruling). */
-function isTestFrameworkMember(mem) {
-  return !!(mem && TEST_ROOTS.has(mem.root) && !HOOK_METHODS.has(mem.method) && !CONFIG_METHODS.has(mem.method));
+/** Does this `it.<method>`/`test.<method>`/`describe.<method>` member call
+ * carry any evidence that the file organizes tests this way -- a real test,
+ * or a describe/suite alias? Never a hook or config call. `roots` defaults to
+ * `TEST_ROOTS` for isTestCall's use (a describe.only/describe.each modifier
+ * is suite evidence, never a test in its own right); the suite gate in
+ * isVitestFile passes `SUITE_ROOTS` so `describe.only(...)`/`describe.each`
+ * still count there, matching pre-#679 behavior. One predicate either way, so
+ * the two can no longer disagree about what a `test.<method>` call means
+ * (#679 triage ruling). */
+function isTestFrameworkMember(mem, roots = TEST_ROOTS) {
+  return !!(mem && roots.has(mem.root) && !HOOK_METHODS.has(mem.method) && !CONFIG_METHODS.has(mem.method));
 }
 
 /** Does this CallExpression name a single test (`it`/`test`, incl. `.skip`)? */
@@ -206,7 +208,7 @@ function isVitestFile(tree) {
     // A hook or config call carries no evidence the file names tests this
     // way (#679 triage ruling) -- the shared predicate, not a raw root
     // match, is what keeps this gate and isTestCall from disagreeing.
-    if ((bare && SUITE_ROOTS.has(bare)) || isTestFrameworkMember(mem)) hasSuite = true;
+    if ((bare && SUITE_ROOTS.has(bare)) || isTestFrameworkMember(mem, SUITE_ROOTS)) hasSuite = true;
     if (bare === "expect") hasExpect = true;
   });
   return hasSuite && hasExpect;
@@ -647,6 +649,26 @@ function selfcheck() {
   assert(
     !isVitestFile(parseSource("test.afterEach(() => { expect(a).toBe(b); });", "s.test.js")),
     "a file whose only test.<method> calls are hooks plus expect does not count as a suite via the gate",
+  );
+  // The gate's evidence predicate covers SUITE_ROOTS (describe/it/test), not
+  // just TEST_ROOTS -- describe.only/describe.each are still suite evidence,
+  // matching pre-#679 behavior; the widened denylist still excludes a
+  // describe.<hook>/describe.<config> combination the same way (#679
+  // verification pass).
+  // No bare `it`/`test`/`describe` call anywhere in these two -- only the
+  // modifier member call itself can supply suite evidence, isolating the
+  // regression from a nested real test masking it.
+  assert(
+    isVitestFile(
+      parseSource("describe.only('g', () => { hand('x', () => { expect(a).toBe(b); }); });", "s.test.js"),
+    ),
+    "describe.only(...) is still suite evidence via the gate",
+  );
+  assert(
+    isVitestFile(
+      parseSource("describe.each([1])('g %i', () => { hand('x', () => { expect(a).toBe(b); }); });", "s.test.js"),
+    ),
+    "describe.each(...) is still suite evidence via the gate",
   );
 
   // 1. assertion-free
