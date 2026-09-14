@@ -39,6 +39,10 @@ run "Explore with opus is blocked" 2 \
   '{"tool_name":"Agent","tool_input":{"description":"explore code","subagent_type":"Explore","model":"opus"}}' \
   "sonnet or haiku"
 
+run "Explore with fable is blocked" 2 \
+  '{"tool_name":"Agent","tool_input":{"description":"explore code","subagent_type":"Explore","model":"fable"}}' \
+  "sonnet or haiku"
+
 run "Explore with sonnet proceeds" 0 \
   '{"tool_name":"Agent","tool_input":{"description":"explore code","subagent_type":"Explore","model":"sonnet"}}'
 

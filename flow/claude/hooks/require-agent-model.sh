@@ -5,9 +5,12 @@
 # inherits the session's model, which is often the wrong tier for the work
 # (an explore/lookup task doesn't need the session's top-tier model). This
 # hook blocks an Agent call that has no `model` field, naming the tier
-# rubric in the block message. A call with `model` set passes untouched. A
-# fork (`subagent_type: "fork"`) always inherits the parent model by design
-# and is exempt — it passes without `model`.
+# rubric in the block message. A fork (`subagent_type: "fork"`) always
+# inherits the parent model by design and is exempt — it passes without
+# `model`. `subagent_type: "Explore"` is read-only search by definition, so
+# it has a second, tighter gate: only `model: sonnet` or `model: haiku`
+# pass, everything else (including opus, fable, or no model) is blocked.
+# Every other Agent call just needs `model` set to some value.
 
 INPUT=$(cat)
 tool=$(echo "$INPUT" | jq -r '.tool_name // ""')
