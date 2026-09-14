@@ -126,6 +126,10 @@
           {
             "type": "command",
             "command": "/home/caneff/.claude/hooks/block-dangerous-git.sh"
+          },
+          {
+            "type": "command",
+            "command": "/home/caneff/.claude/hooks/wrap-background-jobs.sh"
           }
         ]
       }
