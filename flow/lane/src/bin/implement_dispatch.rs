@@ -1,22 +1,36 @@
-//! Port of `flow/bin/implement-dispatch`. What the dispatcher runs for the
-//! `/implement` lane: turn a ticket number into a worker running in its own
-//! workspace inside herdr, report, and stop. It never waits on the worker.
+//! Port of `flow/bin/implement-dispatch`.
+//!
+//! What the dispatcher runs for the /implement lane: turn a ticket number into a
+//! worker running in its own workspace inside herdr, report, and stop. It never
+//! waits on the worker.
 //!
 //!   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
 //!                      <issue number>
+//!   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
+//!                      --spec <n> --slots <k>
 //!
-//! The brief is `/implement <n> --tier light|heavy --controller "<name>"`: light
-//! when the issue carries the documentation label, heavy otherwise. The
-//! controller is --controller, else the name in ~/.claude/sessions/<pid>.json of
-//! the nearest ancestor process whose file is live (its procStart matches) — the
-//! Claude session running this. Session names can hold spaces, hence the quotes.
+//! Plain mode: the brief is `/implement <n> --tier light|heavy --controller
+//! "<name>"`, light when the issue carries the documentation label, heavy
+//! otherwise. Branch and workspace are implement-<n>; --model defaults to sonnet.
+//!
+//! Spec mode (--spec): the brief is `/implement-spec <n> --slots <k> --controller
+//! "<name>"`, a nested run over a spec issue. Branch and workspace are spec-<n>,
+//! the herdr agent is <repo>-spec-<n>, and --model defaults to opus. --slots is a
+//! positive integer, required with --spec and refused without it.
+//!
+//! The controller is --controller, else the name in ~/.claude/sessions/<pid>.json
+//! of the nearest ancestor process whose file is live (its procStart matches) —
+//! the Claude session running this. Session names can hold spaces, hence the
+//! quotes.
 //!
 //! Refuses, with nothing claimed or created, when the issue is not open and
-//! labelled ready-for-agent, no controller is named or found, the herdr server
-//! is not running, claude onboarding is incomplete, the herdr agent name is
-//! taken, or the workspace path or branch already exists. After the workspace
-//! exists, any herdr failure exits non-zero with herdr's own error and leaves the
-//! workspace in place for inspection. There is no bare-claude fallback.
+//! labelled ready-for-agent, it carries a held label, spec mode names an issue
+//! without the spec label, plain mode names one with it, no controller is named
+//! or found, the herdr server is not running, claude onboarding is incomplete,
+//! the herdr agent name is taken, or the workspace path or branch already exists.
+//! After the workspace exists, any herdr failure exits non-zero with herdr's own
+//! error and leaves the workspace in place for inspection. There is no
+//! bare-claude fallback.
 
 use lane::runner::{self, quiet_ok, quiet_stdout, CommandOutput};
 use lane::{git_origin, proc_info, safe_print, safe_println, sessions};
@@ -32,19 +46,31 @@ waits on the worker.
 
   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
                      <issue number>
+  implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
+                     --spec <n> --slots <k>
 
-The brief is `/implement <n> --tier light|heavy --controller "<name>"`: light
-when the issue carries the documentation label, heavy otherwise. The
-controller is --controller, else the name in ~/.claude/sessions/<pid>.json of
-the nearest ancestor process whose file is live (its procStart matches) — the
-Claude session running this. Session names can hold spaces, hence the quotes.
+Plain mode: the brief is `/implement <n> --tier light|heavy --controller
+"<name>"`, light when the issue carries the documentation label, heavy
+otherwise. Branch and workspace are implement-<n>; --model defaults to sonnet.
+
+Spec mode (--spec): the brief is `/implement-spec <n> --slots <k> --controller
+"<name>"`, a nested run over a spec issue. Branch and workspace are spec-<n>,
+the herdr agent is <repo>-spec-<n>, and --model defaults to opus. --slots is a
+positive integer, required with --spec and refused without it.
+
+The controller is --controller, else the name in ~/.claude/sessions/<pid>.json
+of the nearest ancestor process whose file is live (its procStart matches) —
+the Claude session running this. Session names can hold spaces, hence the
+quotes.
 
 Refuses, with nothing claimed or created, when the issue is not open and
-labelled ready-for-agent, no controller is named or found, the herdr server
-is not running, claude onboarding is incomplete, the herdr agent name is
-taken, or the workspace path or branch already exists. After the workspace
-exists, any herdr failure exits non-zero with herdr's own error and leaves the
-workspace in place for inspection. There is no bare-claude fallback.
+labelled ready-for-agent, it carries a held label, spec mode names an issue
+without the spec label, plain mode names one with it, no controller is named
+or found, the herdr server is not running, claude onboarding is incomplete,
+the herdr agent name is taken, or the workspace path or branch already exists.
+After the workspace exists, any herdr failure exits non-zero with herdr's own
+error and leaves the workspace in place for inspection. There is no
+bare-claude fallback.
 "#;
 
 fn die(msg: impl AsRef<str>) -> ExitCode {
@@ -316,6 +342,11 @@ fn run() -> Result<(), ExitCode> {
             return Err(die(format!("#{n} is labelled {held}")));
         }
     }
+    match (args.spec, labels.contains(",spec,")) {
+        (true, false) => return Err(die(format!("#{n} is not labelled spec"))),
+        (false, true) => return Err(die(format!("#{n} is labelled spec; dispatch it with --spec {n} --slots <k>"))),
+        _ => {}
+    }
     let tier = if labels.contains(",documentation,") { "light" } else { "heavy" };
 
     let home = env::var("HOME").unwrap_or_default();
@@ -448,7 +479,11 @@ fn run() -> Result<(), ExitCode> {
         None,
     )?;
 
-    safe_println!("dispatched #{n} ({model}, {tier} tier, controller {controller})");
+    let mode = match &args.slots {
+        Some(k) if args.spec => format!("spec, {k} slots"),
+        _ => format!("{tier} tier"),
+    };
+    safe_println!("dispatched #{n} ({model}, {mode}, controller {controller})");
     safe_println!("worktree: {}", wt.display());
     safe_println!("branch:   {branch}");
     safe_println!("agent:    {agent}");
