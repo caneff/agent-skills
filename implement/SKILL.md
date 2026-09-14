@@ -30,6 +30,10 @@ gh issue list --repo <owner/name> --label ready-for-agent --state open \
   --limit 200 --json number --jq 'min_by(.number).number'
 ```
 
+Before dispatching, record the ticket's labels
+(`gh issue view <n> --repo <owner/name> --json labels`): the claim swaps the
+triage label for `in-progress`, and § The merge decides from the one it had.
+
 `implement-dispatch` claims the ticket, creates the workspace, starts the
 worker in a herdr pane, and puts the tier and your session name in the brief.
 Its refusals are the whole claim rule (`implement-dispatch --help` lists
@@ -161,29 +165,41 @@ worker's run ends there.
 The controller merges on a repo Chris owns; Chris reads it after via
 `/landed`, and revert is the undo.
 
-One exception: the ticket is labelled `ready-for-human`. Nothing merges
-automatically — after step 1, hand Chris the two lines of step 2 with the
-`! ` prefix and paths expanded, and stop; Chris merges and cleans up. Why:
-Chris marked that work for his own hands, so he sees it before it lands.
-
-1. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus`**
-   prints `false` and `CLEAN` — a merge on a draft or a conflict fails.
-   `UNKNOWN` means GitHub is still computing; poll a few seconds.
-2. Merge, then clean up from the primary checkout:
+1. **Check the labels twice**: the ones recorded before dispatch, and the
+   live ones (`gh issue view <n> --repo <owner/name> --json labels`) —
+   Chris can relabel a ticket mid-build. `ready-for-human` in either → the
+   exception below.
+2. **The PR is still not-draft and CLEAN** — the same check as § Before the
+   PR step 4, rerun because `main` may have moved since "PR up".
+3. Merge:
 
    ```
    gh pr merge <pr> --repo <owner/name> --squash
-   cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>
    ```
 
    No `--delete-branch`: git refuses to delete a branch a worktree has
    checked out, and the merge fails on it; `merge-cleanup` removes the
    workspace and deletes the branch after.
-3. **`gh issue view <n> --repo <owner/name>` shows each `Closes` issue
+4. **Wait for the worker to go idle** (`SendMessage` with
+   `notify_when_idle: true`), then clean up from the primary checkout:
+
+   ```
+   cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>
+   ```
+
+   Its live-session guard refuses a worker still `working`; an idle one it
+   stops itself.
+5. **`gh issue view <n> --repo <owner/name>` shows each `Closes` issue
    closed** — a squash or rebase can rewrite the commit so the trailer never
    fires.
-4. Report "merged, sha X" to Chris, X being the squash commit on the default
+6. Report "merged, sha X" to Chris, X being the squash commit on the default
    branch (`gh pr view <pr> --repo <owner/name> --json mergeCommit`).
+
+**The one exception: a `ready-for-human` ticket.** Nothing merges
+automatically. After step 2, hand Chris the merge line and the cleanup line,
+each with the `! ` prefix and paths expanded, and stop; Chris merges, cleans
+up, and the `Closes` check is his. Why: Chris marked that work for his own
+hands, so he sees it before it lands.
 
 ## Someone else's repo
 

@@ -53,10 +53,9 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
 - The dispatching session is the worker's **controller**. The worker sends
   every question and its finish notice ("PR up", or the landed sha on the
   light tier) to the controller with `SendMessage`, never to me. On my
-  repos the controller merges the PR, runs `merge-cleanup`, and reports
-  "merged, sha X" to me — except on a `ready-for-human` ticket, where it
-  hands me the merge and cleanup lines instead. Why: I marked that work for
-  my own hands, so I see it before it lands.
+  repos the controller then merges (`implement/SKILL.md` § The merge) —
+  except on a `ready-for-human` ticket, whose merge line comes to me. Why:
+  I marked that work for my own hands, so I see it before it lands.
 - What the controller rules on and escalates to me: its entry in
   `~/.agents/skills/CONTEXT.md`. Why: each escalation listed there is an
   outcome a controller cannot undo on my behalf.

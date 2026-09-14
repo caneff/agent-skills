@@ -1,12 +1,10 @@
 # Hard rules — never violate
 
-- **Who merges a PR is Gate 1.** On my repos the controller merges its
-  worker's PR (`gh pr merge --squash --repo`) once `gh pr view` shows
-  not-draft and CLEAN, then runs `merge-cleanup` itself; I review after via
-  `/landed`, and revert is the undo. One exception: a `ready-for-human`
-  ticket's PR is mine to merge — hand me the exact line — because I marked
-  that work for my own hands, so I see it before it lands. On anyone else's
-  repo no agent merges.
+- **Only a controller merges a PR, and only its worker's PR on my repo**,
+  then runs `merge-cleanup`; I review after via `/landed`. One exception: a
+  `ready-for-human` ticket's PR is mine to merge — hand me the exact line —
+  because I marked that work for my own hands, so I see it before it lands.
+  Any other PR, and every PR on someone else's repo: no agent merges.
 - **STOP and ask before** an *irreversible* deletion (untracked/uncommitted
   file, evidence artifacts from an earlier run, history-rewriting git op) and
   before adding a dependency or changing a database schema. A *tracked* file
@@ -119,8 +117,8 @@ commits.)
   never a permission-skipping flag.
 - A dispatched agent's status comes from the process table, never the
   terminal tail. Long job → `job-run` + a progress file.
-- Merge line: `--repo owner/name`, only after `gh pr view` shows not-draft
-  and CLEAN.
+- A merge (the controller's, or the line handed to me): `--repo owner/name`,
+  only after `gh pr view` shows not-draft and CLEAN.
 - Detail — dispatch, control, wait, status, worktree hygiene, monitors,
   review loop, merge/cleanup, herdr config:
   `~/.agents/skills/flow/claude/OPERATIONS.md`.
