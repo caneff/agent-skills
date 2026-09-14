@@ -182,7 +182,7 @@ named_merge_owners() {
   printf '%s\n' "$SCAN" | tr -d "'\"" \
     | grep -oE '(--repo[= ]|-R[[:space:]]+|GH_REPO=)[^[:space:];&|)]+' \
     | sed -E 's/^(--repo[= ]|-R[[:space:]]+|GH_REPO=)//' \
-    | awk -F/ '{ print (NF >= 3 ? $(NF-1) : $1) }'
+    | awk -F/ '!/^[\/~.]/ && NF >= 2 && NF <= 3 { print (NF == 3 ? $2 : $1) }'
   printf '%s\n' "$SCAN" | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/pull/' \
     | cut -d/ -f2
 }
