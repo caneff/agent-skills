@@ -23,8 +23,13 @@ that nothing imports or runs.
 - **Auto-ship** (zero code files): edit on `main`, commit, push,
   report. A fenced code block still gets its format check first (formatters
   read fences; `uv run ruff format --check <file>` or equivalent).
-- **Code lane**: TDD, reviews and a PR I merge, run by `implement/SKILL.md`
-  in a workspace. Why: code is cheaper to review than to revert.
+- **Code lane**: TDD, reviews and a PR, run by `implement/SKILL.md` in a
+  workspace. On my repos the controller merges the PR and runs
+  `merge-cleanup`; I read it after via `/landed`. Why: code is cheaper to
+  review than to revert, and the reviewers have already read it before the
+  merge. One exception: a `ready-for-human` ticket's PR gets handed to me
+  with the merge line, and I merge it. Why: I marked that work for my own
+  hands, so I see it before it lands.
 - **A dispatched ticket** (`implement-dispatch <n>` from `main`) runs at its
   **tier** (`~/.agents/skills/CONTEXT.md`): heavy is the code lane; light, for a
   `documentation` label, lands like auto-ship but from its own workspace.

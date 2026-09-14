@@ -1,7 +1,12 @@
 # Hard rules — never violate
 
-- **Agents never merge a PR.** When a PR exists, I review and I merge
-  (`! gh pr merge ...`) — hand me the exact line.
+- **Who merges a PR is Gate 1.** On my repos the controller merges its
+  worker's PR (`gh pr merge --squash --repo`) once `gh pr view` shows
+  not-draft and CLEAN, then runs `merge-cleanup` itself; I review after via
+  `/landed`, and revert is the undo. One exception: a `ready-for-human`
+  ticket's PR is mine to merge — hand me the exact line — because I marked
+  that work for my own hands, so I see it before it lands. On anyone else's
+  repo no agent merges.
 - **STOP and ask before** an *irreversible* deletion (untracked/uncommitted
   file, evidence artifacts from an earlier run, history-rewriting git op) and
   before adding a dependency or changing a database schema. A *tracked* file
@@ -19,7 +24,8 @@
   wired into the harness — `.py/.ts/.js/.sh/.rs`, `settings.json`, hooks, CI
   config, a skill's `SKILL.md`; a mixed diff is code. `AGENTS.md`,
   `CLAUDE.md`, `CODING_STANDARDS.md`, `RULES.md` and `docs/research/` are not.
-  Code → code lane (workspace from the ticket, `/implement`, PR, I merge).
+  Code → code lane (workspace from the ticket, `/implement`, PR, the
+  controller merges; I merge a `ready-for-human` ticket's PR).
   Not code → auto-ship (edit on `main`, commit, push). Lane mechanics and
   the one `SKILL.md` exception: `~/.agents/skills/flow/claude/WORKFLOW.md`.
 - When a permission prompt or hook denies a step, report the exact denial

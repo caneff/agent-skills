@@ -35,7 +35,7 @@ worker in a herdr pane, and puts the tier and your session name in the brief.
 Its refusals are the whole claim rule (`implement-dispatch --help` lists
 them); a refusal is the answer, relayed as it stands. Relay its report and end
 the dispatch. You stay that worker's **controller** (§ Control) until its
-ticket lands.
+ticket lands, and on a repo Chris owns you merge its PR (§ The merge).
 
 ## The brief
 
@@ -80,8 +80,9 @@ Decisions made.
 
 3. Confirm `gh issue view <n> --repo <owner/name>` shows the issue closed —
    a rebase can rewrite the commit so the trailer never fires.
-4. Send the controller the landed sha and the cleanup line:
-   `! cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>`.
+4. Send the controller the landed sha. The controller runs
+   `cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>`
+   itself.
 
 No PR and no reviewer; Chris reads the log after.
 
@@ -130,12 +131,9 @@ body's last reviewed sha says where review stopped.
    the sha you report — a "done" report has described work that was dirty in
    the tree or not on the branch.
 4. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus`**
-   prints `false` and `CLEAN` before the merge line goes out — a merge line
-   handed over on a draft or a conflicted PR fails in Chris's shell. `UNKNOWN`
-   means GitHub is still computing; poll a few seconds.
-5. **After merge, `gh issue view <n> --repo <owner/name>` shows each `Closes`
-   issue closed** — a squash or rebase can rewrite the commit so the trailer
-   never fires.
+   prints `false` and `CLEAN` before "PR up" goes out — a PR reported on a
+   draft or a conflict fails the controller's merge. `UNKNOWN` means GitHub
+   is still computing; poll a few seconds.
 
 The final commit body carries `Closes #<n>`. Stack fix commits; never amend a
 sha already reported — an amend erases the sha the controller was handed.
@@ -155,22 +153,41 @@ The body has these sections and nothing else:
   finding that was disputed (with the why) or filed (with its ticket number).
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
 
-Send the controller "PR up" with the PR URL and these two lines, paths
-expanded:
+Send the controller "PR up" with the PR URL and the last reviewed sha. The
+worker's run ends there.
 
-```
-! gh pr merge <pr> --repo <owner/name> --squash
-! cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>
-```
+### The merge
 
-No `--delete-branch`: git refuses to delete a branch a worktree has checked
-out, and the merge fails on it; `merge-cleanup` removes the workspace and
-deletes the branch after. The paths are absolute because the line is pasted
-from the workspace it deletes.
+The controller merges on a repo Chris owns; Chris reads it after via
+`/landed`, and revert is the undo.
+
+One exception: the ticket is labelled `ready-for-human`. Nothing merges
+automatically — after step 1, hand Chris the two lines of step 2 with the
+`! ` prefix and paths expanded, and stop; Chris merges and cleans up. Why:
+Chris marked that work for his own hands, so he sees it before it lands.
+
+1. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus`**
+   prints `false` and `CLEAN` — a merge on a draft or a conflict fails.
+   `UNKNOWN` means GitHub is still computing; poll a few seconds.
+2. Merge, then clean up from the primary checkout:
+
+   ```
+   gh pr merge <pr> --repo <owner/name> --squash
+   cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>
+   ```
+
+   No `--delete-branch`: git refuses to delete a branch a worktree has
+   checked out, and the merge fails on it; `merge-cleanup` removes the
+   workspace and deletes the branch after.
+3. **`gh issue view <n> --repo <owner/name>` shows each `Closes` issue
+   closed** — a squash or rebase can rewrite the commit so the trailer never
+   fires.
+4. Report "merged, sha X" to Chris, X being the squash commit on the default
+   branch (`gh pr view <pr> --repo <owner/name> --json mergeCommit`).
 
 ## Someone else's repo
 
 When `origin`'s owner is not Chris, either tier: commit on the branch, and
 send the controller the push and `gh pr create` lines instead of running them.
-The git hook blocks every push to a repo Chris does not own, and Chris sees
-the work before any other human does.
+The controller merges nothing there. The git hook blocks every push to a repo
+Chris does not own, and Chris sees the work before any other human does.
