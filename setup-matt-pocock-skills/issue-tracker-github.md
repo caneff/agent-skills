@@ -33,7 +33,7 @@ When filing a ticket, route it to whoever acts on it next, using two questions.
 
 So `ready-for-human` covers both a standalone grilling ticket and any specified ticket a human should build. `ready-for-agent` is only for work the agent can take unattended.
 
-Never file a ticket label-less. A bare issue reads as *untriaged / unknown*, not as a signal to anyone — so every ticket leaves the gate with exactly one routing label: a `ready-*` label, a `wayfinder:*` label when a map owns it, or `backlog` when the work is real and its turn has not come. Wanting a human to see or grill it is `ready-for-human`, never the absence of a label.
+Never file a ticket label-less. A bare issue reads as *untriaged / unknown*, not as a signal to anyone — so every ticket leaves the gate with exactly one routing label: a `ready-*` label, a `wayfinder:*` label when a map owns it, or `backlog` when the work is real and its turn has not come. Wanting a human to see or grill it is `ready-for-human`, never the absence of a label. The one exception to the routing labels is `needs-triage`: use it only when you are genuinely unsure the ticket is ready to start, or unsure which label attaches, and say in the body what is in doubt.
 
 A quick sanity check the implementer can do while building (read the code, confirm one behavior) is neither grilling nor a human touch — write the constraint into the ticket and still mark it `ready-for-agent`.
 
