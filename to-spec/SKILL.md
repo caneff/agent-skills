@@ -15,7 +15,7 @@ The issue tracker and triage label vocabulary should have been provided to you �
 
 Check with the user that these seams match their expectations.
 
-3. Write the spec using the template below, then publish it to the project issue tracker. Apply the project's `spec` triage label — **not** `ready-for-agent`. A spec is a parent to be sliced by `/to-tickets` into ready-for-agent tickets; labeling the whole spec `ready-for-agent` would send an agent to build it unsliced. If the project has no `spec` label, leave it untriaged for `/to-tickets` rather than marking it ready.
+3. Write the spec using the template below, then publish it to the project issue tracker. Apply both the project's `spec` triage label and `ready-for-agent` — the same gate every ticket carries. Plain `implement-dispatch` refuses a `spec`-labelled issue, so a burn hands it to `/implement-spec` instead of an ordinary agent building it unsliced. If the project has no `spec` label, leave it untriaged for `/to-tickets` rather than marking it ready.
 
 <spec-template>
 
