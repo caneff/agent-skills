@@ -47,6 +47,14 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   refuses an idle worker (#745). Never uninstall it; if a herdr update drops
   it, `herdr integration install claude` needs my own hands (the classifier
   denies it as self-modification). Ruled 2026-09-13, #725.
+- **Wispr Flow in herdr needs the Kitty keyboard protocol off in VS Code**:
+  `"terminal.integrated.enableKittyKeyboardProtocol": false` in the Windows
+  user `settings.json`, then a new terminal and reattach. herdr turns the
+  protocol on (VS Code ≥ 1.109.5 defaults it on), and while it is on Wispr's
+  simulated Ctrl+V never lands — it reports no text box, even in a bare shell
+  pane. Not the cause: `ui.host_cursor`, editor-vs-panel placement.
+  `ui.mouse_capture = false` was never tested — ruled out as a fix. Same class:
+  earendil-works/pi#8778. Fixed 2026-09-14.
 
 ## Control
 
