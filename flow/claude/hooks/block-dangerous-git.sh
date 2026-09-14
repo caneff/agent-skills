@@ -175,7 +175,9 @@ runs_pr_merge() {
   printf '%s\n' "$BARE" | grep -qE "$cmd_start((bash|sh|zsh)[[:space:]]+-[a-z]*c|eval)([[:space:]]|$)|\|[[:space:]]*(bash|sh|zsh)([[:space:]]|$)|(bash|sh|zsh)[[:space:]]*<<"
 }
 # Owners the line names: `--repo`/`-R` values ([HOST/]OWNER/REPO), GH_REPO=,
-# and PR URLs, read from the raw text so a quoted value counts. They are
+# and PR URLs, read from the raw text so a quoted value counts. A value led by
+# `/`, `~` or `.`, or past three segments, is a filesystem path (`merge-cleanup
+# --repo <path>`), not a repo name, and names no owner (#803). They are
 # checked on top of this checkout's ownership, never instead of it, so a name
 # on another command or inside a quoted subject can only block.
 named_merge_owners() {
