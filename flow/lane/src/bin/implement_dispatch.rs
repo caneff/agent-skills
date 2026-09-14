@@ -54,9 +54,11 @@ fn die(msg: impl AsRef<str>) -> ExitCode {
 
 struct Args {
     repo: Option<String>,
-    model: String,
+    model: Option<String>,
     controller: Option<String>,
     n: Option<String>,
+    spec: bool,
+    slots: Option<String>,
 }
 
 enum Parsed {
@@ -67,9 +69,11 @@ enum Parsed {
 
 fn parse_args(argv: Vec<String>) -> Parsed {
     let mut repo = None;
-    let mut model = "sonnet".to_string();
+    let mut model = None;
     let mut controller = None;
     let mut n: Option<String> = None;
+    let mut spec = false;
+    let mut slots = None;
     let mut it = argv.into_iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -78,12 +82,24 @@ fn parse_args(argv: Vec<String>) -> Parsed {
                 None => return Parsed::Err("--repo needs a value".into()),
             },
             "--model" => match it.next() {
-                Some(v) => model = v,
+                Some(v) => model = Some(v),
                 None => return Parsed::Err("--model needs a value".into()),
             },
             "--controller" => match it.next() {
                 Some(v) => controller = Some(v),
                 None => return Parsed::Err("--controller needs a value".into()),
+            },
+            "--spec" => match it.next() {
+                Some(_) if n.is_some() => return Parsed::Err("one ticket at a time".into()),
+                Some(v) => {
+                    spec = true;
+                    n = Some(v);
+                }
+                None => return Parsed::Err("--spec needs a value".into()),
+            },
+            "--slots" => match it.next() {
+                Some(v) => slots = Some(v),
+                None => return Parsed::Err("--slots needs a value".into()),
             },
             "-h" | "--help" => return Parsed::Help,
             s if s.starts_with('-') => return Parsed::Err(format!("unknown flag: {s}")),
@@ -95,7 +111,7 @@ fn parse_args(argv: Vec<String>) -> Parsed {
             }
         }
     }
-    Parsed::Args(Args { repo, model, controller, n })
+    Parsed::Args(Args { repo, model, controller, n, spec, slots })
 }
 
 /// Handles the hidden `--seed-trust <claude.json path> <workspace path>`
@@ -239,8 +255,17 @@ fn run() -> Result<(), ExitCode> {
         Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => n.clone(),
         _ => return Err(die("name one issue number")),
     };
-    if args.model != "sonnet" && args.model != "opus" {
-        return Err(die(format!("--model must be sonnet or opus, not '{}'", args.model)));
+    match (&args.slots, args.spec) {
+        (None, true) => return Err(die("--spec needs --slots <k>")),
+        (Some(_), false) => return Err(die("--slots only goes with --spec")),
+        (Some(k), true) if !(k.chars().all(|c| c.is_ascii_digit()) && k.parse::<u32>().is_ok_and(|v| v > 0)) => {
+            return Err(die(format!("--slots must be a positive integer, not '{k}'")));
+        }
+        _ => {}
+    }
+    let model = args.model.clone().unwrap_or_else(|| if args.spec { "opus" } else { "sonnet" }.to_string());
+    if model != "sonnet" && model != "opus" {
+        return Err(die(format!("--model must be sonnet or opus, not '{model}'")));
     }
     if !runner::on_path("flock") {
         return Err(die("flock is not on PATH"));
@@ -254,9 +279,9 @@ fn run() -> Result<(), ExitCode> {
     if !valid_slug(&slug) {
         return Err(die(format!("origin in {primary} names no GitHub owner/name")));
     }
-    let branch = format!("implement-{n}");
+    let branch = if args.spec { format!("spec-{n}") } else { format!("implement-{n}") };
     let wt = PathBuf::from(&primary).join(".claude/worktrees").join(&branch);
-    let suffix = format!("-{n}");
+    let suffix = if args.spec { format!("-spec-{n}") } else { format!("-{n}") };
     let repo_name = Path::new(&primary).file_name().and_then(|f| f.to_str()).unwrap_or("");
     let cut = (32usize).saturating_sub(suffix.len());
     let repo_part: String = repo_name.chars().take(cut).collect();
@@ -411,16 +436,19 @@ fn run() -> Result<(), ExitCode> {
         }
     }
 
-    claim.step("herdr agent start", runner::run("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &args.model]), None)?;
+    claim.step("herdr agent start", runner::run("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &model]), None)?;
 
-    let brief = format!("/implement {n} --tier {tier} --controller \"{controller}\"");
+    let brief = match &args.slots {
+        Some(k) if args.spec => format!("/implement-spec {n} --slots {k} --controller \"{controller}\""),
+        _ => format!("/implement {n} --tier {tier} --controller \"{controller}\""),
+    };
     claim.step(
         "herdr agent prompt",
         runner::run("herdr", &["agent", "prompt", &agent, &brief, "--wait", "--until", "working", "--timeout", "120000"]),
         None,
     )?;
 
-    safe_println!("dispatched #{n} ({}, {tier} tier, controller {controller})", args.model);
+    safe_println!("dispatched #{n} ({model}, {tier} tier, controller {controller})");
     safe_println!("worktree: {}", wt.display());
     safe_println!("branch:   {branch}");
     safe_println!("agent:    {agent}");
