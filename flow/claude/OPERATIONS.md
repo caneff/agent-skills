@@ -54,7 +54,11 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   simulated Ctrl+V never lands — it reports no text box, even in a bare shell
   pane. Not the cause: `ui.host_cursor`, editor-vs-panel placement.
   `ui.mouse_capture = false` was never tested — ruled out as a fix. Same class:
-  earendil-works/pi#8778. Fixed 2026-09-14.
+  earendil-works/pi#8778. Fixed 2026-09-14. Cost, from a raw-byte probe of
+  the VS Code terminal with the protocol off: Ctrl+Enter sends the same bytes
+  as Enter, Shift+Enter as Alt+Enter (`ESC CR`), Alt+Left as Ctrl+Left,
+  Ctrl+Backspace as Ctrl+W; Shift+Tab, Backspace vs Ctrl+H, and Ctrl+B stay
+  distinct. So no binding may rely on Ctrl+Enter.
 
 ## Control
 
