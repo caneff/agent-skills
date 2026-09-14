@@ -855,3 +855,16 @@ fn a_sibling_whose_only_live_signal_is_an_idle_workers_own_session_is_stale() {
         assert!(sibling.is_dir() && !c.calls().contains("pane close"), "{}", c.calls());
     }
 }
+
+// --- #758: a closed stdout stops the run instead of panicking ----------------
+
+#[test]
+fn a_reader_that_closes_early_gets_a_clean_nonzero_exit_no_panic_text() {
+    let c = Cleanup::new();
+    let root = sweep_root(&c);
+    let (code, stderr) = c.mc_broken_pipe(Tools::Full, &["--sweep", "--root", s(&root), "--dry-run"]);
+    assert_ne!(code, Some(101), "stderr: {stderr}");
+    assert_ne!(code, Some(0), "stderr: {stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(!stderr.contains("Broken pipe"), "{stderr}");
+}

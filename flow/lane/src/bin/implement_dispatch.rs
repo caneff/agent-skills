@@ -19,7 +19,7 @@
 //! workspace in place for inspection. There is no bare-claude fallback.
 
 use lane::runner::{self, quiet_ok, quiet_stdout, CommandOutput};
-use lane::{git_origin, proc_info, sessions};
+use lane::{git_origin, proc_info, safe_print, safe_println, sessions};
 use serde_json::Value;
 use std::env;
 use std::os::unix::fs::PermissionsExt;
@@ -110,7 +110,7 @@ fn parse_args(argv: Vec<String>) -> Parsed {
 /// actually serialize on the lock rather than through luck.
 fn seed_trust(claude_json: &str, wt: &str) -> ExitCode {
     let fail = || {
-        println!("jq could not rewrite {claude_json}");
+        safe_println!("jq could not rewrite {claude_json}");
         ExitCode::FAILURE
     };
     let Ok(raw) = std::fs::read_to_string(claude_json) else { return fail() };
@@ -228,7 +228,7 @@ fn run() -> Result<(), ExitCode> {
 
     let args = match parse_args(std::mem::take(&mut raw_args)) {
         Parsed::Help => {
-            print!("{HELP}");
+            safe_print!("{HELP}");
             return Ok(());
         }
         Parsed::Err(e) => return Err(die(e)),
@@ -420,10 +420,10 @@ fn run() -> Result<(), ExitCode> {
         None,
     )?;
 
-    println!("dispatched #{n} ({}, {tier} tier, controller {controller})", args.model);
-    println!("worktree: {}", wt.display());
-    println!("branch:   {branch}");
-    println!("agent:    {agent}");
-    println!("cleanup:  cd {primary} && merge-cleanup {branch} --repo {primary}");
+    safe_println!("dispatched #{n} ({}, {tier} tier, controller {controller})", args.model);
+    safe_println!("worktree: {}", wt.display());
+    safe_println!("branch:   {branch}");
+    safe_println!("agent:    {agent}");
+    safe_println!("cleanup:  cd {primary} && merge-cleanup {branch} --repo {primary}");
     Ok(())
 }

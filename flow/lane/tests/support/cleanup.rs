@@ -250,6 +250,29 @@ impl Cleanup {
         Run::from(out)
     }
 
+    /// Runs merge-cleanup with its stdout read one line then closed, the way
+    /// `| head -n1` or quitting `less` early leaves it — for #758's broken
+    /// pipe. Returns the exit code (`None` if killed by a signal) and
+    /// stderr.
+    pub fn mc_broken_pipe(&self, tools: Tools, args: &[&str]) -> (Option<i32>, String) {
+        use std::io::Read;
+        let mut child = self
+            .command(tools, args, &[])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut stdout = child.stdout.take().unwrap();
+        let mut byte = [0u8; 1];
+        while stdout.read(&mut byte).unwrap() != 0 && byte[0] != b'\n' {}
+        drop(stdout);
+        let mut stderr = String::new();
+        child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+        let status = child.wait().unwrap();
+        (status.code(), stderr)
+    }
+
     /// Runs merge-cleanup with `input` piped to its stdin.
     pub fn mc_piped(&self, tools: Tools, args: &[&str], input: &str) -> Run {
         use std::io::Write;

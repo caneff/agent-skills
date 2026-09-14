@@ -118,6 +118,31 @@ impl Fixture {
     pub fn calls(&self) -> String {
         std::fs::read_to_string(self.call_log()).unwrap_or_default()
     }
+
+    /// Runs implement-dispatch with its stdout closed before the process
+    /// gets to write anything — the limit of `| head -n1` closing early,
+    /// for #758's broken pipe. All of dispatch's real work (git, the fake
+    /// gh/herdr) happens before its first `println!`, so dropping the read
+    /// end right after spawn reliably beats it there. Returns the exit code
+    /// (`None` if killed by a signal) and stderr.
+    pub fn dispatch_broken_pipe(&self, args: &[&str], scenario: &[(&str, &str)]) -> (Option<i32>, String) {
+        use std::io::Read;
+        let mut cmd = Command::new(bin_path());
+        cmd.args(args);
+        cmd.env_clear();
+        cmd.env("PATH", self.path_env());
+        cmd.env("HOME", self.home());
+        cmd.env("CALL_LOG", self.call_log());
+        for (k, v) in scenario {
+            cmd.env(k, v);
+        }
+        let mut child = cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+        drop(child.stdout.take().unwrap());
+        let mut stderr = String::new();
+        child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+        let status = child.wait().unwrap();
+        (status.code(), stderr)
+    }
 }
 
 fn run_ok(program: &str, args: &[&str], cwd: Option<&Path>) {
