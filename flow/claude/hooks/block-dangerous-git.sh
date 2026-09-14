@@ -185,11 +185,9 @@ runs_pr_merge() {
 # checked on top of this checkout's ownership, never instead of it, so a name
 # on another command or inside a quoted subject can only block. The scp form
 # `user@host:OWNER/REPO` (#805) carries no scheme, so it never hits the URL
-# rule above; its OWNER sits after the ':' in the first slash-segment, not in
-# the whole 'host:owner' chunk that segment naively splits out to. Only a
-# clean host:OWNER/REPO (one slash total) is read; anything else with that
-# '@...:' shape prints '?' and fails closed rather than being dropped as "not
-# a repo name" the way a bare path is.
+# rule above and needs its own: only a clean host:OWNER/REPO reads OWNER out;
+# anything else with that '@...:' shape prints '?' and fails closed, rather
+# than being dropped as "not a repo name" the way a bare path is.
 named_merge_owners() {
   printf '%s\n' "$SCAN" | tr -d "'\"" \
     | grep -oE '(--repo[= ]|-R[[:space:]]+|GH_REPO=)[^[:space:];&|)]+' \

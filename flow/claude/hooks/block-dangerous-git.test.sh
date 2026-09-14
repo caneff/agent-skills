@@ -115,6 +115,10 @@ run "gh pr merge with a URL --repo naming no owner blocked" 2 \
 # colon in the first slash-segment, not the whole host:owner chunk.
 run "gh pr merge naming an owned repo by scp-style --repo allowed" 0 \
   "gh pr merge 1 --repo git@github.com:caneff/x"
+run "gh pr merge naming an owned repo by scp-style -R allowed" 0 \
+  "gh pr merge 1 -R git@github.com:caneff/x"
+run "GH_REPO naming an owned repo by scp-style value allowed" 0 \
+  "GH_REPO=git@github.com:caneff/x gh pr merge 1"
 run "gh pr merge naming someone else's repo by scp-style --repo blocked" 2 \
   "gh pr merge 1 --repo git@github.com:someone-else/x" "BLOCKED"
 run "GH_REPO naming someone else's repo by scp-style value blocked" 2 \
