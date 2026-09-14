@@ -93,6 +93,10 @@ run "owned merge chained with --repo ~/src/x on another command allowed" 0 \
   "gh pr merge 1 --repo caneff/x && some-tool --repo ~/src/x"
 run "owned merge chained with a four-segment relative --repo path allowed" 0 \
   "gh pr merge 1 --repo caneff/x && some-tool --repo src/someone-else/x/y"
+run "owned merge chained with a two-segment absolute --repo path allowed" 0 \
+  "gh pr merge 1 --repo caneff/x && some-tool --repo /srv/x"
+run "gh pr merge naming an owned repo in host form allowed" 0 \
+  "gh pr merge 1 --repo github.com/caneff/x"
 run "gh pr merge naming someone else's repo in host form blocked" 2 \
   "gh pr merge 1 --repo github.com/someone-else/x" "BLOCKED"
 run "a path --repo does not hide someone else's repo on the merge" 2 \
