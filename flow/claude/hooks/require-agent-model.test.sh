@@ -35,4 +35,22 @@ run "fork call without model proceeds" 0 \
 run "non-Agent tool call is untouched" 0 \
   '{"tool_name":"Bash","tool_input":{"command":"ls"}}'
 
+run "Explore with opus is blocked" 2 \
+  '{"tool_name":"Agent","tool_input":{"description":"explore code","subagent_type":"Explore","model":"opus"}}' \
+  "sonnet or haiku"
+
+run "Explore with fable is blocked" 2 \
+  '{"tool_name":"Agent","tool_input":{"description":"explore code","subagent_type":"Explore","model":"fable"}}' \
+  "sonnet or haiku"
+
+run "Explore with sonnet proceeds" 0 \
+  '{"tool_name":"Agent","tool_input":{"description":"explore code","subagent_type":"Explore","model":"sonnet"}}'
+
+run "Explore with haiku proceeds" 0 \
+  '{"tool_name":"Agent","tool_input":{"description":"explore code","subagent_type":"Explore","model":"haiku"}}'
+
+run "Explore with no model is blocked, names Explore rule" 2 \
+  '{"tool_name":"Agent","tool_input":{"description":"explore code","subagent_type":"Explore"}}' \
+  "sonnet or haiku"
+
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
