@@ -11,10 +11,15 @@ use std::io::Write;
 /// 128 + SIGPIPE (13), what a shell reports for a process the pipe killed.
 pub const BROKEN_PIPE_EXIT: i32 = 141;
 
-/// Writes to stdout, or exits immediately with no panic text if the pipe is
-/// closed. Never call directly — use `safe_print!`/`safe_println!`.
+/// Writes to stdout, or exits immediately if the write fails. A closed pipe
+/// exits quietly with no panic text; any other write error (a full disk, a
+/// disconnected terminal) is still worth a diagnostic, so it gets one on
+/// stderr before exiting. Never call directly — use `safe_print!`/`safe_println!`.
 pub fn write_stdout(args: std::fmt::Arguments) {
-    if std::io::stdout().lock().write_fmt(args).is_err() {
+    if let Err(e) = std::io::stdout().lock().write_fmt(args) {
+        if e.kind() != std::io::ErrorKind::BrokenPipe {
+            eprintln!("stdout write failed: {e}");
+        }
         std::process::exit(BROKEN_PIPE_EXIT);
     }
 }

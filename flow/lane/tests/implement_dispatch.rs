@@ -493,8 +493,7 @@ fn a_reader_that_closes_early_gets_a_clean_nonzero_exit_no_panic_text() {
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let (code, stderr) = f.dispatch_broken_pipe(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
-    assert_ne!(code, Some(101), "stderr: {stderr}");
-    assert_ne!(code, Some(0), "stderr: {stderr}");
+    assert_eq!(code, Some(lane::io_safe::BROKEN_PIPE_EXIT), "stderr: {stderr}");
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(!stderr.contains("Broken pipe"), "{stderr}");
 }

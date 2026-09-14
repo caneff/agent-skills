@@ -136,7 +136,12 @@ impl Fixture {
         for (k, v) in scenario {
             cmd.env(k, v);
         }
-        let mut child = cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+        let mut child = cmd
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
         drop(child.stdout.take().unwrap());
         let mut stderr = String::new();
         child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
