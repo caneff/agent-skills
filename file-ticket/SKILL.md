@@ -29,15 +29,15 @@ guess and do not create an issue until the target is confirmed.
   concrete detail that makes it checkable: a grep hit, an error string, a
   repro step), and a trailing "Filed from" line naming the source
   (conversation, review, digest).
-- **Label**: take the label strings from the triage-label mapping that
-  should have been provided to you. Default to the ready state:
-  `ready-for-agent`, or `ready-for-human` when the work needs a human's
-  hands. Use `needs-triage` only when you are genuinely unsure the ticket
-  is ready to start, or unsure which label attaches, and say in the body
-  what is in doubt. Why: a ticket whose scope the conversation already
-  settled, filed as `needs-triage`, waits for a manual relabel before
-  anyone can dispatch it. When the finding is obviously a bug or an
-  enhancement, add that label too.
+- **Label**: the triage-label mapping should have been provided to you —
+  it maps each role below to this repo's label string. Default to the
+  ready role: `ready-for-agent`, or `ready-for-human` when the work needs
+  grilling or a human touch. Use `needs-triage` only when you are genuinely
+  unsure the ticket is ready to start, or unsure which role attaches, and
+  say in the body what is in doubt. Why: a ticket whose scope the
+  conversation already settled, filed as `needs-triage`, waits for a
+  manual relabel before anyone can dispatch it. When the finding is
+  obviously a bug or an enhancement, add that label too.
 
 ## Create it
 
