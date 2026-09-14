@@ -34,6 +34,7 @@
     "remote.autoForwardPortsSource": "hybrid",
     "editor.accessibilitySupport": "off",
     "terminal.integrated.mouseWheelScrollSensitivity": 3,
+    "terminal.integrated.enableKittyKeyboardProtocol": false,
     "githubIssues.queries": [
         {
             "label": "✅ Ready now",
