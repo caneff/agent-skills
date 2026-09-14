@@ -9,12 +9,11 @@
 #     run themselves: the outward-facing step is the user's. The ownership
 #     lookup FAILS CLOSED: gh erroring or the network being down means "not
 #     owned" means blocked.
-#   - `gh pr merge` is gated on the same OWNERSHIP (#790): allowed when the
-#     repo it merges into is the `gh` login's, blocked everywhere else. The
-#     target is the `--repo`/`-R` value or PR URL on the line, else this
-#     checkout's origin. Only the command is matched, not the phrase: quoted
-#     text (a grep pattern, a commit message) is data, unless a shell runs it
-#     (`bash -c`, `sh`, `eval`, `$(...)`). The `ready-for-human` exception —
+#   - `gh pr merge` is gated on the same OWNERSHIP (#790): allowed when this
+#     checkout and every repo the line names are the `gh` login's, blocked
+#     everywhere else. Only the command is matched, not the phrase: quoted
+#     text (a grep pattern, a commit message) is data unless a shell runs
+#     it. The `ready-for-human` exception —
 #     the user merges that ticket's PR — is enforced by `/implement`'s prose,
 #     not here: a squash merge on the user's own repo is undone with a revert,
 #     so a prose miss there costs a revert, not a merge nobody can take back.
@@ -142,30 +141,56 @@ repo_is_owned() {
 
 # --- PR merge policy: your repo = allowed, anyone else's = handed off. ---
 merge_re='gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$)'
-runs_pr_merge() {
-  local unquoted
-  unquoted=$(printf '%s\n' "$SCAN" | sed -E "s/'[^']*'//g; s/\"[^\"]*\"//g")
-  printf '%s\n' "$unquoted" | grep -qE "(^|[;&|(\`[:space:]])$merge_re" && return 0
-  # Quoted, but run: a command substitution, or a shell handed the string.
-  printf '%s\n' "$SCAN" | grep -qE "(\\\$\\(|\`)[[:space:]]*$merge_re" && return 0
-  printf '%s\n' "$SCAN" | grep -qE "(^|[;&|(\`[:space:]])(bash|sh|zsh|eval)([[:space:]]|$)" \
-    && printf '%s\n' "$SCAN" | grep -qE "$merge_re"
+cmd_start='(^|[;&|(`[:space:]])'
+# Two views of $1 from one pass that tracks quoting: BARE drops every quoted
+# character (what the shell runs as words); EXPANDS drops only single-quoted
+# ones, since `$(...)` and backticks still run inside double quotes.
+quote_views() {
+  local s=$1 i c q="" bare="" exp=""
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    case "$q" in
+      "'") [ "$c" = "'" ] && q="" ;;
+      '"')
+        if [ "$c" = '\' ]; then exp+=$c${s:i+1:1}; i=$((i + 1))
+        elif [ "$c" = '"' ]; then q=""
+        else exp+=$c; fi ;;
+      *)
+        case "$c" in
+          "'" | '"') q=$c ;;
+          '\') bare+=$c${s:i+1:1}; exp+=$c${s:i+1:1}; i=$((i + 1)) ;;
+          *) bare+=$c; exp+=$c ;;
+        esac ;;
+    esac
+  done
+  BARE=$bare EXPANDS=$exp
 }
-# Owners named on the line: `--repo`/`-R` values ([HOST/]OWNER/REPO) and PR
-# URLs. A `--repo` belonging to another command in the chain counts too, which
-# can only block more, never less.
+runs_pr_merge() {
+  # Cheap gate on the raw command (heredoc bodies included) before the lexer.
+  printf '%s\n' "$COMMAND" | grep -qE "$merge_re" || return 1
+  quote_views "$SCAN"
+  printf '%s\n' "$BARE" | grep -qE "$cmd_start$merge_re" && return 0
+  printf '%s\n' "$EXPANDS" | grep -qE "(\\\$\\(|\`)[[:space:]]*$merge_re" && return 0
+  # A shell handed text: `sh -c`, `eval`, a pipe or a heredoc into a shell.
+  printf '%s\n' "$BARE" | grep -qE "$cmd_start((bash|sh|zsh)[[:space:]]+-[a-z]*c|eval)([[:space:]]|$)|\|[[:space:]]*(bash|sh|zsh)([[:space:]]|$)|(bash|sh|zsh)[[:space:]]*<<"
+}
+# Owners the line names: `--repo`/`-R` values ([HOST/]OWNER/REPO), GH_REPO=,
+# and PR URLs, read from the raw text so a quoted value counts. They are
+# checked on top of this checkout's ownership, never instead of it, so a name
+# on another command or inside a quoted subject can only block.
 named_merge_owners() {
   printf '%s\n' "$SCAN" | tr -d "'\"" \
-    | grep -oE '(--repo[= ]|-R[[:space:]]+)[^[:space:];&|)]+' \
-    | sed -E 's/^(--repo[= ]|-R[[:space:]]+)//' \
+    | grep -oE '(--repo[= ]|-R[[:space:]]+|GH_REPO=)[^[:space:];&|)]+' \
+    | sed -E 's/^(--repo[= ]|-R[[:space:]]+|GH_REPO=)//' \
     | awk -F/ '{ print (NF >= 3 ? $(NF-1) : $1) }'
   printf '%s\n' "$SCAN" | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/pull/' \
     | cut -d/ -f2
 }
 merge_is_owned() {
   local owners me owner
+  repo_is_owned || return 1
   owners=$(named_merge_owners)
-  [ -n "$owners" ] || { repo_is_owned; return; }
+  [ -n "$owners" ] || return 0
   me=$(gh api user -q .login 2>/dev/null) || return 1
   [ -n "$me" ] || return 1
   while IFS= read -r owner; do

@@ -101,6 +101,34 @@ run "phrase mid-sentence in a commit message allowed on unowned repo" 0 \
 run "rg for the phrase in a substitution allowed on unowned repo" 0 \
   "n=\$(rg -c \"gh pr merge\" implement/SKILL.md)"
 
+run "gh pr merge chained with no spaces blocked on unowned repo" 2 \
+  "git status&&gh pr merge 12 --squash" "gh pr merge"
+# A --repo naming an owned repo, on another command or in a quoted subject,
+# never stands in for this checkout's ownership.
+run "owned --repo on another command does not unlock an unowned checkout" 2 \
+  "gh pr view 5 --repo caneff/agent-skills && gh pr merge 12" "gh pr merge"
+run "an apostrophe in double quotes does not hide a later merge" 2 \
+  "git commit -m \"don't\" && gh pr merge 12 && echo 'ok'" "gh pr merge"
+run "gh pr merge in a heredoc fed to bash blocked on unowned repo" 2 \
+  $'bash <<EOF\ngh pr merge 12 --squash\nEOF' "gh pr merge"
+run "phrase search with a --type sh flag allowed on unowned repo" 0 \
+  "rg \"gh pr merge 12\" --type sh"
+run "a bash run chained with a phrase grep allowed on unowned repo" 0 \
+  "bash tests/all.sh && grep -rn \"gh pr merge --squash\" ."
+run "backticks inside single quotes allowed on unowned repo" 0 \
+  "gh pr create --title t --body 'run \`gh pr merge 12\` after CLEAN'"
+run "gh pr merge piped into a shell blocked on unowned repo" 2 \
+  "echo 'gh pr merge 12' | sh" "gh pr merge"
+
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN=caneff STUB_OWNER=caneff
+run "GH_REPO naming someone else's repo blocked from an owned checkout" 2 \
+  "GH_REPO=someone-else/agent-skills gh pr merge 12" "BLOCKED"
+# Owned verdict now cached; a named owner still needs the login to compare.
+export STUB_LOGIN= STUB_OWNER=
+run "named owner blocked when the login lookup fails" 2 \
+  "gh pr merge 12 --repo caneff/agent-skills" "BLOCKED"
+
 rm -rf "$XDG_CACHE_HOME"
 export STUB_LOGIN= STUB_OWNER=
 run "gh pr merge blocked when ownership lookup fails" 2 "gh pr merge 12 --squash" "BLOCKED"
