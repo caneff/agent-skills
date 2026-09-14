@@ -24,16 +24,16 @@ When filing a ticket, route it to whoever acts on it next, using two questions.
 **1. Does it need grilling** — an open design decision, a tradeoff, or a departure from a documented standard that should be stress-tested before any code is written?
 
 - **Yes, tracked in a wayfinder map**: no `ready-for-*` label. The wayfinder flow owns it — it lives as a `wayfinder:grilling` child of the map and is handled there.
-- **Yes, standalone** (not part of a wayfinder map): label it `ready-for-human`. A human grills the decision, then implements.
+- **Yes, standalone** (not part of a wayfinder map): label it `needs-info`. It goes through `/grill-with-docs` before `/implement`.
 
 **2. If it does not need grilling, can the AFK agent build it end to end?**
 
 - **Yes** — fully specified, mechanical, no human judgment or hands needed (a boundary move, reusing an existing helper, a refactor): label it `ready-for-agent`. This is the default for tracer-bullet work.
 - **No** — specified, but it needs a human touch (a delicate change, a taste call, credentials or secrets, something you want to write yourself): label it `ready-for-human`.
 
-So `ready-for-human` covers both a standalone grilling ticket and any specified ticket a human should build. `ready-for-agent` is only for work the agent can take unattended.
+So `ready-for-human` is only for a specified ticket a human builds, and `needs-info` is for a standalone ticket that needs grilling first. `ready-for-agent` is only for work the agent can take unattended.
 
-Never file a ticket label-less. A bare issue reads as *untriaged / unknown*, not as a signal to anyone — so every ticket leaves the gate with exactly one routing label: a `ready-*` label, a `wayfinder:*` label when a map owns it, or `backlog` when the work is real and its turn has not come. Wanting a human to see or grill it is `ready-for-human`, never the absence of a label.
+Never file a ticket label-less. A bare issue reads as *untriaged / unknown*, not as a signal to anyone — so every ticket leaves the gate with exactly one routing label: a `ready-*` label, `needs-info` when it needs grilling, a `wayfinder:*` label when a map owns it, or `backlog` when the work is real and its turn has not come. Wanting a human to grill it is `needs-info` and wanting a human to build it is `ready-for-human`, never the absence of a label. A ticket too unclear to route is `needs-info`, with the body saying what is unclear. `needs-triage` is never a gate label — it is only for issues outside people open.
 
 A quick sanity check the implementer can do while building (read the code, confirm one behavior) is neither grilling nor a human touch — write the constraint into the ticket and still mark it `ready-for-agent`.
 

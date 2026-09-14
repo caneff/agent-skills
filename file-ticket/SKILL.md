@@ -5,9 +5,8 @@ description: Turn a review finding or chat conclusion into a tracked issue, one-
 
 # File Ticket
 
-One-shot capture: the thing just discussed becomes one tracked issue. This
-lands the issue deliberately *before* the tracker's grilling gate — capture
-first, `/triage` routes it later.
+One-shot capture: the thing just discussed becomes one tracked issue,
+filed with the role that says who acts on it next.
 
 ## Resolve the target
 
@@ -31,9 +30,17 @@ guess and do not create an issue until the target is confirmed.
   repro step), and a trailing "Filed from" line naming the source
   (conversation, review, digest).
 - **Label**: the triage-label mapping should have been provided to you —
-  it names the role for "needs a human to evaluate this"; use that label.
-  When the finding is obviously a bug or an enhancement, add that label
-  too.
+  it maps each role below to this repo's label string. Give the ticket
+  exactly one of three roles: `ready-for-agent` when it is fully specified
+  and an agent can build it unattended; `ready-for-human` when it is
+  specified but a human builds it (a taste call, credentials, something
+  the user wants to write themselves); `needs-info` when it needs grilling
+  first. A ticket genuinely too unclear to call is `needs-info`, with the
+  body saying what is unclear. Never `needs-triage` — that role is for
+  issues outside people open. Why: the filer already knows the ticket's
+  state, and a ticket filed as `needs-triage` waits for a manual relabel
+  before anyone can dispatch it. When the finding is obviously a bug or an
+  enhancement, add that label too.
 
 ## Create it
 
@@ -46,7 +53,7 @@ Build the body through a heredoc so evidence text (backticks, `$(...)`,
 
 ```
 gh issue create --repo <owner>/<repo> --title "<title>" \
-  --label "<needs-triage label>[,<bug-or-enhancement label>]" \
+  --label "<role label>[,<bug-or-enhancement label>]" \
   --body "$(cat <<'EOF'
 <body>
 EOF
