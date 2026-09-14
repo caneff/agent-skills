@@ -99,31 +99,50 @@ function memberCallee(node) {
 
 const TEST_ROOTS = new Set(["it", "test"]);
 const SUITE_ROOTS = new Set(["describe", "it", "test"]);
-// node:test hangs its lifecycle hooks off the same root as its tests
-// (`test.after(...)`), so a root match alone collects a teardown hook as an
-// assertion-free test (#677). A denylist, so `it.skip` and any runner variant
-// (`concurrent`, `failing`) stay collected. `beforeAll`/`afterAll` are here for
-// the same reason: vitest and Playwright hang them off `test` too.
-const LIFECYCLE_HOOKS = new Set(["after", "before", "beforeEach", "afterEach", "beforeAll", "afterAll"]);
-// node:test's and Playwright's suite alias hangs off the same root too
-// (`test.describe(...)`, `test.suite(...)`) -- `describe`/`it` are already
-// routed to SUITE_ROOTS, so a root match alone double-counts: the suite
-// itself as one test (its callback holds every nested assertion, so it
-// reports its inner tests' findings a second time) and the nested `it`/`test`
-// calls inside it as more (#679).
-const SUITE_ALIASES = new Set(["describe", "suite"]);
-// Playwright's non-callback config calls (`test.use({...})`,
-// `test.setTimeout(30000)`) have no callback at all, so treating them as
-// tests always reads as empty/skipped -- exclude them the same way (#679).
-const CONFIG_CALLS = new Set(["use", "setTimeout"]);
+// node:test and Playwright hang a growing family of non-test member calls off
+// the same root as their tests (`test.after(...)`, `test.describe(...)`,
+// `test.use(...)`), so a root match alone collects each as a test in its own
+// right -- a lifecycle hook or config call as an assertion-free/empty/skipped
+// test (#677), a suite alias as a duplicate of every finding inside it
+// (#679). A denylist, not an allowlist: a missed entry is a visible false
+// positive, an allowlist's missed entry silently drops a real test (#679
+// triage ruling). An unlisted runner variant (`concurrent`, `failing`,
+// `sequential`) stays collected, and so does `it.skip`/`test.todo`.
+const HOOK_METHODS = new Set(["after", "before", "beforeEach", "afterEach", "beforeAll", "afterAll"]);
+// `describe`/`suite` are real evidence a file organizes tests this way (kept
+// in the suite gate below) but are not themselves a test -- their nested
+// tests are audited individually.
+const SUITE_ALIAS_METHODS = new Set(["describe", "suite"]);
+// Playwright's config, fixture and annotation calls (`use`, `setTimeout`,
+// `extend`, `configure`, `slow`), `info()` (returns a value, declares
+// nothing), and `step` -- unlike the rest of this set `step` does take a
+// title+callback, but it's a sub-step of an enclosing test, not a test in its
+// own right, so it's excluded outright like the others rather than left to
+// the zero-argument rule below.
+const CONFIG_METHODS = new Set(["step", "use", "setTimeout", "slow", "extend", "configure", "info"]);
+const NON_TEST_METHODS = new Set([...HOOK_METHODS, ...SUITE_ALIAS_METHODS, ...CONFIG_METHODS]);
+
+/** Does this `it.<method>`/`test.<method>` member call carry any evidence
+ * that the file organizes tests this way -- a real test, or a describe/suite
+ * alias? Never a hook or config call. Shared by isTestCall (which further
+ * excludes describe/suite, since those aren't tests themselves) and the
+ * suite gate in isVitestFile, so the two can no longer disagree about what a
+ * `test.<method>` call means (#679 triage ruling). */
+function isTestFrameworkMember(mem) {
+  return !!(mem && TEST_ROOTS.has(mem.root) && !HOOK_METHODS.has(mem.method) && !CONFIG_METHODS.has(mem.method));
+}
 
 /** Does this CallExpression name a single test (`it`/`test`, incl. `.skip`)? */
 function isTestCall(node) {
   const bare = calleeName(node);
   if (bare && TEST_ROOTS.has(bare)) return true;
   const mem = memberCallee(node);
-  if (!mem || !TEST_ROOTS.has(mem.root)) return false;
-  return !LIFECYCLE_HOOKS.has(mem.method) && !SUITE_ALIASES.has(mem.method) && !CONFIG_CALLS.has(mem.method);
+  if (!isTestFrameworkMember(mem) || SUITE_ALIAS_METHODS.has(mem.method)) return false;
+  // A zero-argument `test.<method>()` call is an in-body annotation
+  // (`test.fixme()`, `test.slow()`), never a test definition -- `.fixme`
+  // isn't in the denylist above because `test.fixme('title', fn)` is still a
+  // real (skipped) test (#679 triage ruling).
+  return node.arguments.length > 0;
 }
 
 /** The modifier on a member test call (`skip`/`todo`/`only`), else null. */
@@ -184,7 +203,10 @@ function isVitestFile(tree) {
     if (n.type !== "CallExpression") return;
     const bare = calleeName(n);
     const mem = memberCallee(n);
-    if ((bare && SUITE_ROOTS.has(bare)) || (mem && SUITE_ROOTS.has(mem.root))) hasSuite = true;
+    // A hook or config call carries no evidence the file names tests this
+    // way (#679 triage ruling) -- the shared predicate, not a raw root
+    // match, is what keeps this gate and isTestCall from disagreeing.
+    if ((bare && SUITE_ROOTS.has(bare)) || isTestFrameworkMember(mem)) hasSuite = true;
     if (bare === "expect") hasExpect = true;
   });
   return hasSuite && hasExpect;
@@ -486,14 +508,21 @@ function scanFile(path) {
     return [];
   }
   if (!isVitestFile(tree) && !isNodeTestFile(tree)) return [];
+  return smellsIn(tree, source).map(([line, smell]) => [path, line, smell]);
+}
+
+/** `[line, smell]` for every DETECTORS hit in `tree` -- the one pipeline
+ * scanFile and the selfcheck's own witness checks both run, so a witness
+ * can't drift from what production actually does. */
+function smellsIn(tree, source) {
   const bindings = assertBindings(tree);
-  const findings = [];
+  const found = [];
   for (const call of testCalls(tree)) {
     for (const [smell, detect] of DETECTORS) {
-      if (detect(call, source, bindings)) findings.push([path, lineOf(call), smell]);
+      if (detect(call, source, bindings)) found.push([lineOf(call), smell]);
     }
   }
-  return findings;
+  return found;
 }
 
 const EXT_RE = /\.(js|jsx|ts|tsx|mjs|cjs|mts)$/;
@@ -547,6 +576,10 @@ function testCallFrom(src) {
   const tree = parseSource(src, "snippet.test.js");
   return testCalls(tree)[0];
 }
+/** The smell names `smellsIn` finds for a snippet, in call order. */
+function smellsOf(src) {
+  return smellsIn(parseSource(src, "snippet.test.js"), src).map(([, smell]) => smell);
+}
 function tautologyOf(src) {
   return isTautology(testCallFrom(src), src);
 }
@@ -567,27 +600,54 @@ function selfcheck() {
     "skip modifier is still a test call",
   );
 
-  // 0b. suite aliases and non-callback config calls are not test calls (#679)
-  assert(
-    testCallCount("test.describe('group', () => { test('works', () => { assert.equal(1, 1); }); });") === 1,
-    "test.describe is a suite, not a test -- only the inner test call counts",
+  // 0b. suite aliases, config calls and bare in-body annotations are not test
+  // calls (#679 triage ruling) -- one acceptance case per bullet in the
+  // ruling comment.
+  assert.deepEqual(
+    smellsOf("test.describe('group', () => { test('works', () => { assert.equal(1, 1); }); });"),
+    ["tautology"],
+    "test.describe('group', () => test('works', () => assert.equal(1,1))) -> exactly one tautology, on the inner test",
+  );
+  assert.deepEqual(
+    smellsOf("test.describe('x', () => {});"),
+    [],
+    "test.describe('x', () => {}) -> no findings",
   );
   assert(
-    testCallCount("it.describe('group', () => { it('works', () => { expect(1).toBe(1); }); });") === 1,
-    "it.describe is a suite, not a test -- only the inner test call counts",
+    testCallCount("it.describe('group', () => { it('works', () => { expect(compute()).toBe(1); }); });") === 1,
+    "it.describe is a suite too, not a test -- only the inner test call counts",
   );
-  assert(testCallCount("test.describe('empty', () => {});") === 0, "an empty test.describe collects no test");
   assert(testCallCount("test.suite('empty', () => {});") === 0, "an empty test.suite collects no test");
-  assert(testCallCount("test.use({ testIdAttribute: 'data-id' });") === 0, "test.use has no test to run");
-  assert(testCallCount("test.setTimeout(30000);") === 0, "test.setTimeout has no test to run");
-  {
-    const src =
-      "test.describe('group', () => { test('works', () => { assert.equal(1, 1); }); });";
-    const findings = testCalls(parseSource(src, "s.test.js")).flatMap((call) =>
-      DETECTORS.filter(([, detect]) => detect(call, src)).map(([smell]) => smell),
-    );
-    assert.deepEqual(findings, ["tautology"], "a tautology inside test.describe is reported once, not twice");
-  }
+  assert.deepEqual(
+    smellsOf(
+      "test('t', async () => { await test.step('go', async () => { await page.click('#go'); }); expect(compute()).toBe(1); });",
+    ),
+    [],
+    "test.step(...) inside a test -> no assertion-free test for the step",
+  );
+  assert.deepEqual(
+    smellsOf("test('t', () => { test.use({ locale: 'en' }); expect(compute()).toBe(1); });"),
+    [],
+    "test.use({ locale: 'en' }) -> no empty/skipped test",
+  );
+  assert.deepEqual(
+    smellsOf("test('t', () => { test.setTimeout(1000); expect(compute()).toBe(1); });"),
+    [],
+    "test.setTimeout(1000) -> no empty/skipped test",
+  );
+  assert.deepEqual(
+    smellsOf("test('t', () => { test.fixme(); expect(compute()).toBe(1); });"),
+    [],
+    "in-body test.fixme() -> no finding",
+  );
+  assert(
+    isEmptyOrSkipped(testCallFrom("test.fixme('t', () => {});")),
+    "test.fixme('t', () => {}) -> still empty/skipped",
+  );
+  assert(
+    !isVitestFile(parseSource("test.afterEach(() => { expect(a).toBe(b); });", "s.test.js")),
+    "a file whose only test.<method> calls are hooks plus expect does not count as a suite via the gate",
+  );
 
   // 1. assertion-free
   assert(isAssertionFree(testCallFrom("it('x', () => { const y = compute(); })")), "assertion-free positive");
