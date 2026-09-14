@@ -134,15 +134,25 @@ function isTestFrameworkMember(mem, roots = TEST_ROOTS) {
   return !!(mem && roots.has(mem.root) && !HOOK_METHODS.has(mem.method) && !CONFIG_METHODS.has(mem.method));
 }
 
-// skip/todo/only can't join the HOOK_METHODS/CONFIG_METHODS denylist above --
+// `skip` can't simply join the HOOK_METHODS/CONFIG_METHODS denylist above --
 // `it.skip('title', fn)` is a real (skipped) test and must stay collected --
-// but Playwright's `skip` also has a second, callback-free shape:
-// `test.skip(cond, 'why')`, called in-body to conditionally skip the
-// *enclosing* test. Two or more arguments and no callback is that shape, not
-// a test definition (#774); a single argument stays ambiguous with a
-// bodyless real test (`it.skip('title')`) and is left as a test, matching
-// prior behavior.
-const MODIFIER_METHODS = new Set(["skip", "todo", "only"]);
+// but Playwright's `skip` also has a second, callback-free shape, used
+// in-body to conditionally skip the *enclosing* test: `test.skip(cond,
+// 'why')`, `cond` a boolean or a fixture-reading predicate function
+// (`test.skip(({ browserName }) => browserName === 'webkit', 'why')`). Only
+// `skip` has this second shape -- `todo`/`only` don't take a condition, so
+// they're left out rather than inheriting a narrowing they don't need.
+//
+// The two shapes put a string title in different places: a real test's first
+// argument is always its title (a string/template literal, `it.skip('t',
+// fn)`); the bare annotation's first argument is the condition, never a
+// title (#774). A single argument (`test.skip(cond)`, `it.skip('title')`)
+// stays ambiguous either way and is left as a test, matching prior behavior.
+const MODIFIER_METHODS = new Set(["skip"]);
+
+function isTitleArg(node) {
+  return !!node && (node.type === "StringLiteral" || node.type === "TemplateLiteral");
+}
 
 /** Does this CallExpression name a single test (`it`/`test`, incl. `.skip`)? */
 function isTestCall(node) {
@@ -155,7 +165,7 @@ function isTestCall(node) {
   // isn't in the denylist above because `test.fixme('title', fn)` is still a
   // real (skipped) test (#679 triage ruling).
   if (node.arguments.length === 0) return false;
-  if (MODIFIER_METHODS.has(mem.method) && node.arguments.length > 1 && !testCallback(node)) return false;
+  if (MODIFIER_METHODS.has(mem.method) && node.arguments.length > 1 && !isTitleArg(node.arguments[0])) return false;
   return true;
 }
 
@@ -630,9 +640,28 @@ function selfcheck() {
     [],
     "test.skip(cond, 'why') inside a real test -> no spurious empty/skipped finding",
   );
+  // The condition can itself be a fixture-reading callback -- a function in
+  // the first-argument (condition) position is still the annotation shape,
+  // not a test, because the title always comes first in a real test.
   assert(
-    testCallCount("it.skip('x', () => { expect(a).toBe(b); })") === 1,
-    "it.skip('title', fn) is still a real test call (unchanged)",
+    testCallCount(
+      "test('t', ({ browserName }) => { test.skip(({ browserName }) => browserName === 'webkit', 'not supported'); expect(compute()).toBe(1); });",
+    ) === 1,
+    "in-body test.skip(callback-condition, 'why') is not itself a test call either",
+  );
+  assert.deepEqual(
+    smellsOf(
+      "test('t', ({ browserName }) => { test.skip(({ browserName }) => browserName === 'webkit', 'not supported'); expect(compute()).toBe(1); });",
+    ),
+    [],
+    "test.skip(callback-condition, 'why') inside a real test -> no spurious finding",
+  );
+  // A real skipped test's callback need not be inline -- a title in the
+  // first-argument position is what makes it a test, not the callback's own
+  // shape.
+  assert(
+    testCallCount("function body() { expect(a).toBe(b); } it.skip('x', body);") === 1,
+    "it.skip('title', <named callback>) is still a real test call",
   );
 
   // 0b. suite aliases, config calls and bare in-body annotations are not test
