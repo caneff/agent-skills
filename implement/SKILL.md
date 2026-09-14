@@ -30,12 +30,12 @@ gh issue list --repo <owner/name> --label ready-for-agent --state open \
   --limit 200 --json number --jq 'min_by(.number).number'
 ```
 
-Before dispatching, record the ticket's labels
-(`gh issue view <n> --repo <owner/name> --json labels`): the claim swaps the
-triage label for `in-progress`, and § The merge decides from the one it had.
-
-`implement-dispatch` claims the ticket, creates the workspace, starts the
+`implement-dispatch` claims the ticket — swapping its `ready-for-agent` or
+`ready-for-human` label for `in-progress` — creates the workspace, starts the
 worker in a herdr pane, and puts the tier and your session name in the brief.
+A `ready-for-human` ticket's brief also carries `--chris-merges`, and the
+report says "Chris merges": the claim erased the label, so § The merge reads
+the marker instead.
 Its refusals are the whole claim rule (`implement-dispatch --help` lists
 them); a refusal is the answer, relayed as it stands. Relay its report and end
 the dispatch. You stay that worker's **controller** (§ Control) until its
@@ -43,8 +43,11 @@ ticket lands, and on a repo Chris owns you merge its PR (§ The merge).
 
 ## The brief
 
-The worker starts with `/implement <n> --tier light|heavy --controller "<name>"`.
-The ticket is `in-progress` and assigned to you already; build it.
+The worker starts with `/implement <n> --tier light|heavy --controller "<name>"`,
+plus `--chris-merges` on a `ready-for-human` ticket. The ticket is
+`in-progress` and assigned to you already; build it. `--chris-merges` changes
+only who merges: build and review the same, and put "Chris merges" in your
+"PR up" message.
 
 - **Light** (`documentation` label): § Light tier.
 - **Heavy** (no label): § Heavy tier.
@@ -165,10 +168,10 @@ worker's run ends there.
 The controller merges on a repo Chris owns; Chris reads it after via
 `/landed`, and revert is the undo.
 
-1. **Check the labels twice**: the ones recorded before dispatch, and the
-   live ones (`gh issue view <n> --repo <owner/name> --json labels`) —
-   Chris can relabel a ticket mid-build. `ready-for-human` in either → the
-   exception below.
+1. **Check who merges twice**: `--chris-merges` in the brief (the dispatch
+   report said "Chris merges"), and the live labels
+   (`gh issue view <n> --repo <owner/name> --json labels`) — Chris can
+   relabel a ticket mid-build. Either one → the exception below.
 2. **The PR is still not-draft and CLEAN** — the same check as § Before the
    PR step 4, rerun because `main` may have moved since "PR up".
 3. Merge:
@@ -195,7 +198,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
 6. Report "merged, sha X" to Chris, X being the squash commit on the default
    branch (`gh pr view <pr> --repo <owner/name> --json mergeCommit`).
 
-**The one exception: a `ready-for-human` ticket.** Nothing merges
+**The one exception: a `ready-for-human` ticket** (`--chris-merges`). Nothing merges
 automatically. After step 2, hand Chris the merge line and the cleanup line,
 each with the `! ` prefix and paths expanded, and stop; Chris merges, cleans
 up, and the `Closes` check is his. Why: Chris marked that work for his own

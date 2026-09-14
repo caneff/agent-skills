@@ -17,7 +17,7 @@ A git worktree under `<repo>/.claude/worktrees/<name>` on its own branch, holdin
 _Avoid_: worktree (when the herdr pane is meant too)
 
 **Brief**:
-The single prefilled prompt a worker receives at start, `/implement <n> --tier light|heavy --controller "<name>"`; the skill supplies everything else.
+The single prefilled prompt a worker receives at start, `/implement <n> --tier light|heavy --controller "<name>"`, plus `--chris-merges` on a `ready-for-human` ticket; the skill supplies everything else.
 _Avoid_: prompt, instructions, task description
 
 **Controller**:
