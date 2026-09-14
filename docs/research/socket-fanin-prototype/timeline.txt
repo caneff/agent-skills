@@ -1,0 +1,39 @@
+2026-09-14T03:10:36.430Z CTL user-turn: 'You are a throwaway prototype controller for a messaging test. Rules: (1) Do not'
+2026-09-14T03:10:38.212Z CTL says: 'READY'
+2026-09-14T03:16:56.777Z W1 tool_result: [{"type": "tool_reference", "tool_name": "SendMessage"}]
+2026-09-14T03:16:58.290Z W1 SendMessage -> proto-fanin-ctl-94: W1 A from W1 at 2026-09-14T03:16:54.836Z
+2026-09-14T03:16:59.547Z CTL user-turn: 'Another Claude session sent a message:\n<cross-session-message from="uds:/run/use'
+2026-09-14T03:16:59.557Z W1 tool_result: [{"type": "text", "text": "{\"success\":true,\"message\":\"\u201cW1 A from W1 at 2026-09-14T03:16:54
+2026-09-14T03:17:01.182Z CTL says: 'got: W1 A from W1 at 2026-09-14T03:16:54.836Z'
+2026-09-14T03:17:41.764Z W2 tool_result: [{"type": "tool_reference", "tool_name": "SendMessage"}]
+2026-09-14T03:17:43.010Z W2 SendMessage -> proto-fanin-ctl-94: W2 A from W2 at 2026-09-14T03:17:39.838Z
+2026-09-14T03:17:43.994Z CTL user-turn: 'Another Claude session sent a message:\n<cross-session-message from="uds:/run/use'
+2026-09-14T03:17:44.003Z W2 tool_result: [{"type": "text", "text": "{\"success\":true,\"message\":\"\u201cW2 A from W2 at 2026-09-14T03:17:39
+2026-09-14T03:17:45.574Z CTL says: 'got: W2 A from W2 at 2026-09-14T03:17:39.838Z'
+2026-09-14T03:18:26.725Z W3 tool_result: [{"type": "tool_reference", "tool_name": "SendMessage"}]
+2026-09-14T03:18:28.016Z W3 SendMessage -> proto-fanin-ctl-94: W3 A from W3 at 2026-09-14T03:18:24.841Z
+2026-09-14T03:18:29.009Z CTL user-turn: 'Another Claude session sent a message:\n<cross-session-message from="uds:/run/use'
+2026-09-14T03:18:29.017Z W3 tool_result: [{"type": "text", "text": "{\"success\":true,\"message\":\"\u201cW3 A from W3 at 2026-09-14T03:18:24
+2026-09-14T03:18:30.327Z CTL says: 'got: W3 A from W3 at 2026-09-14T03:18:24.841Z'
+2026-09-14T03:19:01.007Z CTL user-turn: 'Run this one Bash command and nothing else: node -e "setTimeout(()=>console.log('
+2026-09-14T03:19:23.192Z W1 SendMessage -> proto-fanin-ctl-94: W1 B from W1 at 2026-09-14T03:19:21.002Z
+2026-09-14T03:19:24.629Z CTL peer-msg from proto-fanin-1-85 body='W1 B from W1 at 2026-09-14T03:19:21.002Z' rendered='<system-reminder>\nAnother Claude session sent a message whil'
+2026-09-14T03:19:24.639Z W1 tool_result: [{"type": "text", "text": "{\"success\":true,\"message\":\"\u201cW1 B from W1 at 2026-09-14T03:19:21
+2026-09-14T03:20:02.491Z W2 SendMessage -> proto-fanin-ctl-94: W2 B from W2 at 2026-09-14T03:20:01.004Z
+2026-09-14T03:20:03.492Z CTL peer-msg from proto-fanin-2-1a body='W2 B from W2 at 2026-09-14T03:20:01.004Z' rendered='<system-reminder>\nAnother Claude session sent a message whil'
+2026-09-14T03:20:03.503Z W2 tool_result: [{"type": "text", "text": "{\"success\":true,\"message\":\"\u201cW2 B from W2 at 2026-09-14T03:20:01
+2026-09-14T03:20:42.582Z W3 SendMessage -> proto-fanin-ctl-94: W3 B from W3 at 2026-09-14T03:20:41.006Z
+2026-09-14T03:20:43.581Z CTL peer-msg from proto-fanin-3-37 body='W3 B from W3 at 2026-09-14T03:20:41.006Z' rendered='<system-reminder>\nAnother Claude session sent a message whil'
+2026-09-14T03:20:43.591Z W3 tool_result: [{"type": "text", "text": "{\"success\":true,\"message\":\"\u201cW3 B from W3 at 2026-09-14T03:20:41
+2026-09-14T03:21:37.186Z CTL says: 'slept\ngot: W1 B from W1 at 2026-09-14T03:19:21.002Z\ngot: W2 B from W2 at 2026-09'
+2026-09-14T03:22:58.482Z W2 SendMessage -> proto-fanin-ctl-94: W2 C from W2 at 2026-09-14T03:22:56.802Z
+2026-09-14T03:22:58.701Z W3 SendMessage -> proto-fanin-ctl-94: W3 C from W3 at 2026-09-14T03:22:56.804Z
+2026-09-14T03:22:58.814Z W1 SendMessage -> proto-fanin-ctl-94: W1 C from W1 at 2026-09-14T03:22:56.800Z
+2026-09-14T03:22:59.469Z CTL user-turn: 'Another Claude session sent a message:\n<cross-session-message from="uds:/run/use'
+2026-09-14T03:22:59.477Z W2 tool_result: [{"type": "text", "text": "{\"success\":true,\"message\":\"\u201cW2 C from W2 at 2026-09-14T03:22:56
+2026-09-14T03:22:59.730Z W3 tool_result: [{"type": "text", "text": "{\"success\":true,\"message\":\"\u201cW3 C from W3 at 2026-09-14T03:22:56
+2026-09-14T03:23:00.451Z W1 tool_result: [{"type": "text", "text": "{\"success\":true,\"message\":\"\u201cW1 C from W1 at 2026-09-14T03:22:56
+2026-09-14T03:23:01.035Z CTL says: 'got: W2 C from W2 at 2026-09-14T03:22:56.802Z'
+2026-09-14T03:23:01.118Z CTL user-turn: 'Another Claude session sent a message:\n<cross-session-message from="uds:/run/use'
+2026-09-14T03:23:01.126Z CTL user-turn: 'Another Claude session sent a message:\n<cross-session-message from="uds:/run/use'
+2026-09-14T03:23:03.053Z CTL says: 'got: W3 C from W3 at 2026-09-14T03:22:56.804Z\ngot: W1 C from W1 at 2026-09-14T03'
