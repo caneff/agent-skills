@@ -343,13 +343,12 @@ fn run() -> Result<(), ExitCode> {
     let labels = format!(",{labels_csv},");
     // The ready label the claim swaps for in-progress. A ready-for-human
     // ticket is built the same way, but its brief says Chris merges it.
-    let ready = match (labels.contains(",ready-for-agent,"), labels.contains(",ready-for-human,")) {
-        (true, false) => "ready-for-agent",
-        (false, true) => "ready-for-human",
+    let (ready, chris_merges) = match (labels.contains(",ready-for-agent,"), labels.contains(",ready-for-human,")) {
+        (true, false) => ("ready-for-agent", false),
+        (false, true) => ("ready-for-human", true),
         (true, true) => return Err(die(format!("#{n} is labelled both ready-for-agent and ready-for-human"))),
         (false, false) => return Err(die(format!("#{n} is not labelled ready-for-agent or ready-for-human"))),
     };
-    let chris_merges = ready == "ready-for-human";
     for held in ["in-progress", "needs-info"] {
         if labels.contains(&format!(",{held},")) {
             return Err(die(format!("#{n} is labelled {held}")));
@@ -486,11 +485,10 @@ fn run() -> Result<(), ExitCode> {
     claim.step("herdr agent start", runner::run("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &model]), None)?;
 
     let (brief, described) = match mode {
-        Mode::Plain if chris_merges => (
-            format!("/implement {n} --tier {tier} --controller \"{controller}\" --chris-merges"),
-            format!("{tier} tier, Chris merges"),
-        ),
-        Mode::Plain => (format!("/implement {n} --tier {tier} --controller \"{controller}\""), format!("{tier} tier")),
+        Mode::Plain => {
+            let (marker, merger) = if chris_merges { (" --chris-merges", ", Chris merges") } else { ("", "") };
+            (format!("/implement {n} --tier {tier} --controller \"{controller}\"{marker}"), format!("{tier} tier{merger}"))
+        }
         Mode::Spec { slots } => (format!("/implement-spec {n} --slots {slots} --controller \"{controller}\""), format!("spec, {slots} slots")),
     };
     claim.step(
