@@ -1,36 +1,7 @@
-//! Port of `flow/bin/implement-dispatch`.
-//!
-//! What the dispatcher runs for the /implement lane: turn a ticket number into a
-//! worker running in its own workspace inside herdr, report, and stop. It never
-//! waits on the worker.
-//!
-//!   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
-//!                      <issue number>
-//!   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
-//!                      --spec <n> --slots <k>
-//!
-//! Plain mode: the brief is `/implement <n> --tier light|heavy --controller
-//! "<name>"`, light when the issue carries the documentation label, heavy
-//! otherwise. Branch and workspace are implement-<n>; --model defaults to sonnet.
-//!
-//! Spec mode (--spec): the brief is `/implement-spec <n> --slots <k> --controller
-//! "<name>"`, a nested run over a spec issue. Branch and workspace are spec-<n>,
-//! the herdr agent is <repo>-spec-<n>, and --model defaults to opus. --slots is a
-//! positive integer, required with --spec and refused without it.
-//!
-//! The controller is --controller, else the name in ~/.claude/sessions/<pid>.json
-//! of the nearest ancestor process whose file is live (its procStart matches) —
-//! the Claude session running this. Session names can hold spaces, hence the
-//! quotes.
-//!
-//! Refuses, with nothing claimed or created, when the issue is not open and
-//! labelled ready-for-agent, it carries a held label, spec mode names an issue
-//! without the spec label, plain mode names one with it, no controller is named
-//! or found, the herdr server is not running, claude onboarding is incomplete,
-//! the herdr agent name is taken, or the workspace path or branch already exists.
-//! After the workspace exists, any herdr failure exits non-zero with herdr's own
-//! error and leaves the workspace in place for inspection. There is no
-//! bare-claude fallback.
+//! Port of `flow/bin/implement-dispatch`. What the dispatcher runs for the
+//! `/implement` lane: turn a ticket number into a worker running in its own
+//! workspace inside herdr, report, and stop. It never waits on the worker.
+//! The contract is `--help` below.
 
 use lane::runner::{self, quiet_ok, quiet_stdout, CommandOutput};
 use lane::{git_origin, proc_info, safe_print, safe_println, sessions};
@@ -85,6 +56,30 @@ struct Args {
     n: Option<String>,
     spec: bool,
     slots: Option<String>,
+}
+
+/// Which run the worker is briefed for: a plain `/implement` ticket, or a
+/// nested `/implement-spec` run over a spec issue with its slot count.
+#[derive(Clone, Copy)]
+enum Mode {
+    Plain,
+    Spec { slots: u32 },
+}
+
+impl Mode {
+    fn default_model(self) -> &'static str {
+        match self {
+            Mode::Plain => "sonnet",
+            Mode::Spec { .. } => "opus",
+        }
+    }
+
+    fn branch_prefix(self) -> &'static str {
+        match self {
+            Mode::Plain => "implement",
+            Mode::Spec { .. } => "spec",
+        }
+    }
 }
 
 enum Parsed {
@@ -281,15 +276,16 @@ fn run() -> Result<(), ExitCode> {
         Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => n.clone(),
         _ => return Err(die("name one issue number")),
     };
-    match (&args.slots, args.spec) {
+    let mode = match (&args.slots, args.spec) {
+        (None, false) => Mode::Plain,
         (None, true) => return Err(die("--spec needs --slots <k>")),
         (Some(_), false) => return Err(die("--slots only goes with --spec")),
-        (Some(k), true) if !(k.chars().all(|c| c.is_ascii_digit()) && k.parse::<u32>().is_ok_and(|v| v > 0)) => {
-            return Err(die(format!("--slots must be a positive integer, not '{k}'")));
-        }
-        _ => {}
-    }
-    let model = args.model.clone().unwrap_or_else(|| if args.spec { "opus" } else { "sonnet" }.to_string());
+        (Some(k), true) => match k.parse::<u32>() {
+            Ok(slots) if slots > 0 => Mode::Spec { slots },
+            _ => return Err(die(format!("--slots must be a positive integer, not '{k}'"))),
+        },
+    };
+    let model = args.model.clone().unwrap_or_else(|| mode.default_model().to_string());
     if model != "sonnet" && model != "opus" {
         return Err(die(format!("--model must be sonnet or opus, not '{model}'")));
     }
@@ -305,9 +301,12 @@ fn run() -> Result<(), ExitCode> {
     if !valid_slug(&slug) {
         return Err(die(format!("origin in {primary} names no GitHub owner/name")));
     }
-    let branch = if args.spec { format!("spec-{n}") } else { format!("implement-{n}") };
+    let branch = format!("{}-{n}", mode.branch_prefix());
     let wt = PathBuf::from(&primary).join(".claude/worktrees").join(&branch);
-    let suffix = if args.spec { format!("-spec-{n}") } else { format!("-{n}") };
+    let suffix = match mode {
+        Mode::Plain => format!("-{n}"),
+        Mode::Spec { .. } => format!("-spec-{n}"),
+    };
     let repo_name = Path::new(&primary).file_name().and_then(|f| f.to_str()).unwrap_or("");
     let cut = (32usize).saturating_sub(suffix.len());
     let repo_part: String = repo_name.chars().take(cut).collect();
@@ -342,9 +341,9 @@ fn run() -> Result<(), ExitCode> {
             return Err(die(format!("#{n} is labelled {held}")));
         }
     }
-    match (args.spec, labels.contains(",spec,")) {
-        (true, false) => return Err(die(format!("#{n} is not labelled spec"))),
-        (false, true) => return Err(die(format!("#{n} is labelled spec; dispatch it with --spec {n} --slots <k>"))),
+    match (mode, labels.contains(",spec,")) {
+        (Mode::Spec { .. }, false) => return Err(die(format!("#{n} is not labelled spec"))),
+        (Mode::Plain, true) => return Err(die(format!("#{n} is labelled spec; dispatch it with --spec {n} --slots <k>"))),
         _ => {}
     }
     let tier = if labels.contains(",documentation,") { "light" } else { "heavy" };
@@ -469,9 +468,9 @@ fn run() -> Result<(), ExitCode> {
 
     claim.step("herdr agent start", runner::run("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &model]), None)?;
 
-    let brief = match &args.slots {
-        Some(k) if args.spec => format!("/implement-spec {n} --slots {k} --controller \"{controller}\""),
-        _ => format!("/implement {n} --tier {tier} --controller \"{controller}\""),
+    let (brief, described) = match mode {
+        Mode::Plain => (format!("/implement {n} --tier {tier} --controller \"{controller}\""), format!("{tier} tier")),
+        Mode::Spec { slots } => (format!("/implement-spec {n} --slots {slots} --controller \"{controller}\""), format!("spec, {slots} slots")),
     };
     claim.step(
         "herdr agent prompt",
@@ -479,11 +478,7 @@ fn run() -> Result<(), ExitCode> {
         None,
     )?;
 
-    let mode = match &args.slots {
-        Some(k) if args.spec => format!("spec, {k} slots"),
-        _ => format!("{tier} tier"),
-    };
-    safe_println!("dispatched #{n} ({model}, {mode}, controller {controller})");
+    safe_println!("dispatched #{n} ({model}, {described}, controller {controller})");
     safe_println!("worktree: {}", wt.display());
     safe_println!("branch:   {branch}");
     safe_println!("agent:    {agent}");

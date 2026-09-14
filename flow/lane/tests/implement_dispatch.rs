@@ -522,6 +522,7 @@ fn spec_mode_briefs_implement_spec_in_a_spec_workspace() {
         .lines()
         .filter(|l| l.starts_with("herdr worktree open") || l.starts_with("herdr agent start") || l.starts_with("herdr agent prompt"))
         .collect();
+    // 32 chars exactly: the repo part is cut to make room for "-spec-395".
     let name = "sudokumaker-custom-cons-spec-395";
     assert_eq!(name.len(), 32);
     let expected = vec![
@@ -608,4 +609,22 @@ fn help_documents_both_modes() {
     for want in ["<issue number>", "/implement <n> --tier", "--spec <n> --slots <k>", "/implement-spec <n> --slots <k>", "spec-<n>"] {
         assert!(text.contains(want), "help lacks {want:?}:\n{text}");
     }
+}
+
+#[test]
+fn spec_mode_briefs_the_parsed_slot_count_and_honours_model() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395", "--slots", "007", "--model", "sonnet"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let calls = f.calls();
+    let name = "sudokumaker-custom-cons-spec-395";
+    assert!(calls.lines().any(|l| l == format!("herdr agent start {name} --kind claude --pane w7:p1 -- --model sonnet")), "{calls}");
+    assert!(
+        calls.lines().any(|l| l
+            == format!("herdr agent prompt {name} /implement-spec 395 --slots 7 --controller \"skills-ctl\" --wait --until working --timeout 120000")),
+        "{calls}"
+    );
 }
