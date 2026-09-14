@@ -33,7 +33,8 @@ gh issue list --repo <owner/name> --label ready-for-agent --state open \
 `implement-dispatch` claims the ticket, creates the workspace, starts the
 worker in a herdr pane, and puts the tier and your session name in the brief.
 On a `ready-for-human` ticket the report says "Chris merges" (§ The brief):
-the claim swapped that label for `in-progress`, so § The merge cannot read it.
+the claim keeps that label alongside `in-progress`, so § The merge still
+reads it off the live labels after the claim.
 Its refusals are the whole claim rule (`implement-dispatch --help` lists
 them); a refusal is the answer, relayed as it stands. Relay its report and end
 the dispatch. You stay that worker's **controller** (§ Control) until its
@@ -43,7 +44,8 @@ ticket lands, and on a repo Chris owns you merge its PR (§ The merge).
 
 The worker starts with `/implement <n> --tier light|heavy --controller "<name>"`,
 plus `--chris-merges` on a `ready-for-human` ticket. The ticket is
-`in-progress` and assigned to you already; build it. `--chris-merges` changes
+`in-progress` and assigned to you already (a `ready-for-human` ticket keeps
+its `ready-for-human` label too); build it. `--chris-merges` changes
 only who merges: build and review the same, and say "Chris merges" in
 "PR up" (§ The PR).
 
@@ -167,10 +169,14 @@ there.
 The controller merges on a repo Chris owns; Chris reads it after via
 `/landed`, and revert is the undo.
 
-1. **Check who merges twice**: "Chris merges" in the dispatch report or the
-   worker's "PR up", and the live labels
-   (`gh issue view <n> --repo <owner/name> --json labels`) — Chris can
-   relabel a ticket mid-build. Either one → the exception below.
+1. **Check who merges twice**: the live labels
+   (`gh issue view <n> --repo <owner/name> --json labels`) are the primary
+   signal — `ready-for-human` stays on a Chris-merges ticket through its
+   whole build, so it still reads even from a controller compacted or
+   resumed since dispatch. "Chris merges" in the dispatch report or the
+   worker's "PR up" is the second signal, for a ticket dispatched before this
+   rule. Either one present → the exception below; Chris can also relabel a
+   ticket mid-build.
 2. **The PR is still not-draft and CLEAN** — the same check as § Before the
    PR step 4, rerun because `main` may have moved since "PR up".
 3. Merge:

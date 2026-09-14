@@ -36,8 +36,11 @@ of the nearest ancestor process whose file is live (its procStart matches) —
 the Claude session running this. Session names can hold spaces, hence the
 quotes.
 
-The claim swaps the issue's ready label (ready-for-agent or ready-for-human)
-for in-progress.
+The claim swaps ready-for-agent for in-progress. A ready-for-human ticket
+keeps ready-for-human and adds in-progress beside it, so the live labels
+still show Chris-merges after the claim, and a second dispatch still refuses
+on the held in-progress label. Release on a failed claim undoes only what the
+claim did: in-progress off, plus the ready label back on for ready-for-agent.
 
 Refuses, with nothing claimed or created, when the issue is not open and
 labelled exactly one of ready-for-agent and ready-for-human, it carries a
@@ -210,6 +213,7 @@ struct Claim<'a> {
     n: &'a str,
     slug: &'a str,
     ready: &'a str,
+    chris_merges: bool,
     wt: &'a Path,
 }
 
@@ -219,10 +223,16 @@ impl Claim<'_> {
         if self.wt.exists() {
             eprintln!("workspace left in place at {}", self.wt.display());
         }
-        eprintln!(
-            "release the ticket: gh issue edit {} --repo {} --remove-label in-progress --add-label {}",
-            self.n, self.slug, self.ready
-        );
+        // A ready-for-human claim never removed its ready label, so release
+        // only undoes the in-progress side of it.
+        if self.chris_merges {
+            eprintln!("release the ticket: gh issue edit {} --repo {} --remove-label in-progress", self.n, self.slug);
+        } else {
+            eprintln!(
+                "release the ticket: gh issue edit {} --repo {} --remove-label in-progress --add-label {}",
+                self.n, self.slug, self.ready
+            );
+        }
         ExitCode::FAILURE
     }
 
@@ -426,19 +436,21 @@ fn run() -> Result<(), ExitCode> {
         return Err(die(format!("no origin/{default} to branch from")));
     }
 
-    // Past here the ticket is claimed; a failure says how to release it.
-    let claimed = runner::run(
-        "gh",
-        &[
-            "issue", "edit", &n, "--repo", &slug, "--remove-label", ready, "--add-label", "in-progress", "--add-assignee",
-            "@me",
-        ],
-    );
+    // Past here the ticket is claimed; a failure says how to release it. A
+    // ready-for-human ticket keeps its ready label through the build, so the
+    // live labels stay a Chris-merges signal that outlives this session; a
+    // ready-for-agent ticket still swaps its ready label for in-progress.
+    let mut claim_args: Vec<&str> = vec!["issue", "edit", &n, "--repo", &slug];
+    if !chris_merges {
+        claim_args.extend(["--remove-label", ready]);
+    }
+    claim_args.extend(["--add-label", "in-progress", "--add-assignee", "@me"]);
+    let claimed = runner::run("gh", &claim_args);
     match claimed {
         Ok(c) if c.success => {}
         _ => return Err(die(format!("could not claim #{n}"))),
     }
-    let claim = Claim { n: &n, slug: &slug, ready, wt: &wt };
+    let claim = Claim { n: &n, slug: &slug, ready, chris_merges, wt: &wt };
 
     let wa = runner::run_in(
         None,

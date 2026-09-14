@@ -624,8 +624,12 @@ fn a_ready_for_human_ticket_is_claimed_and_briefed_as_chris_merges() {
     let calls = f.calls();
     assert!(
         calls.lines().any(|l| l
-            == "gh issue edit 410 --repo caneff/sudokumaker-custom-constraints --remove-label ready-for-human --add-label in-progress --add-assignee @me"),
-        "ticket not claimed off ready-for-human: {calls}"
+            == "gh issue edit 410 --repo caneff/sudokumaker-custom-constraints --add-label in-progress --add-assignee @me"),
+        "ready-for-human ticket not claimed with ready-for-human kept: {calls}"
+    );
+    assert!(
+        !calls.lines().any(|l| l.contains("--remove-label ready-for-human")),
+        "claim removed ready-for-human, but it must survive the build as the Chris-merges signal: {calls}"
     );
     assert!(
         calls.lines().any(|l| l
@@ -636,7 +640,7 @@ fn a_ready_for_human_ticket_is_claimed_and_briefed_as_chris_merges() {
 }
 
 #[test]
-fn a_failure_past_the_claim_releases_a_ready_for_human_ticket_back_to_ready_for_human() {
+fn a_failure_past_the_claim_on_a_ready_for_human_ticket_only_undoes_in_progress() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
@@ -644,12 +648,27 @@ fn a_failure_past_the_claim_releases_a_ready_for_human_ticket_back_to_ready_for_
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "411"], &scenario);
     assert!(!out.status.success());
     assert!(
-        out_text(&out).contains(
-            "release the ticket: gh issue edit 411 --repo caneff/sudokumaker-custom-constraints --remove-label in-progress --add-label ready-for-human"
-        ),
+        out_text(&out)
+            .contains("release the ticket: gh issue edit 411 --repo caneff/sudokumaker-custom-constraints --remove-label in-progress"),
         "{}",
         out_text(&out)
     );
+    assert!(
+        !out_text(&out).contains("--add-label ready-for-human"),
+        "release re-added ready-for-human, but the claim never removed it: {}",
+        out_text(&out)
+    );
+}
+
+#[test]
+fn a_claimed_ready_for_human_ticket_still_refuses_a_second_dispatch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    // What the ticket looks like mid-build: ready-for-human kept, in-progress added.
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "ready-for-human,in-progress")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "414"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "414", "in-progress"), "{}", out_text(&out));
 }
 
 #[test]
