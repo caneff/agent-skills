@@ -33,7 +33,8 @@ gh issue list --repo <owner/name> --label ready-for-agent --state open \
 `implement-dispatch` claims the ticket, creates the workspace, starts the
 worker in a herdr pane, and puts the tier and your session name in the brief.
 On a `ready-for-human` ticket the report says "Chris merges" (§ The brief):
-the claim swapped that label for `in-progress`, so § The merge cannot read it.
+the claim keeps that label alongside `in-progress`, so § The merge still
+reads it off the live labels after the claim.
 Its refusals are the whole claim rule (`implement-dispatch --help` lists
 them); a refusal is the answer, relayed as it stands. Relay its report and end
 the dispatch. You stay that worker's **controller** (§ Control) until its
@@ -43,7 +44,8 @@ ticket lands, and on a repo Chris owns you merge its PR (§ The merge).
 
 The worker starts with `/implement <n> --tier light|heavy --controller "<name>"`,
 plus `--chris-merges` on a `ready-for-human` ticket. The ticket is
-`in-progress` and assigned to you already; build it. `--chris-merges` changes
+`in-progress` and assigned to you already (a `ready-for-human` ticket keeps
+its `ready-for-human` label too); build it. `--chris-merges` changes
 only who merges: build and review the same, and say "Chris merges" in
 "PR up" (§ The PR).
 
