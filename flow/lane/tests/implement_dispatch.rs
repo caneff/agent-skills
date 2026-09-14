@@ -485,3 +485,16 @@ fn an_empty_controller_flag_falls_back_to_the_session_registry() {
     );
 }
 
+// --- #758: a closed stdout stops the run instead of panicking ----------------
+
+#[test]
+fn a_reader_that_closes_early_gets_a_clean_nonzero_exit_no_panic_text() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let (code, stderr) = f.dispatch_broken_pipe(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert_eq!(code, Some(lane::io_safe::BROKEN_PIPE_EXIT), "stderr: {stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(!stderr.contains("Broken pipe"), "{stderr}");
+}
+

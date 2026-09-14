@@ -6,6 +6,7 @@ use lane::git_origin::{default_branch, origin_slug};
 use lane::herdr::{self, Agent};
 use lane::runner::{on_path, quiet_ok, quiet_stderr_ok, quiet_stdout, status};
 use lane::sessions::{self, in_tree};
+use lane::{safe_print, safe_println};
 use std::env;
 use std::io::IsTerminal;
 use std::path::Path;
@@ -53,7 +54,7 @@ fn die(msg: impl AsRef<str>) -> ExitCode {
 }
 
 fn skip(what: &str, why: &str) {
-    println!("skipped {what} ({why})");
+    safe_println!("skipped {what} ({why})");
 }
 
 #[derive(Default)]
@@ -284,10 +285,10 @@ impl Cleanup {
     /// otherwise announce it and run it with its output passed through.
     fn step(&self, what: &str, program: &str, args: &[&str]) -> bool {
         if self.dry {
-            println!("would {what}: {program} {}", args.join(" "));
+            safe_println!("would {what}: {program} {}", args.join(" "));
             return true;
         }
-        println!("{what}");
+        safe_println!("{what}");
         status(program, args)
     }
 
@@ -370,11 +371,11 @@ impl Cleanup {
                 eprintln!("merge-cleanup: refusing to remove {wt} — {} (--discard overrides)", files.dirty_text());
                 return false;
             }
-            println!("--discard: {wt} — {}", files.dirty_text());
+            safe_println!("--discard: {wt} — {}", files.dirty_text());
         }
         if !files.ignored.is_empty() {
             let would = if self.dry { "would discard" } else { "discarding" };
-            println!("{would} {} ignored file(s) in {wt}: {}", files.ignored.len(), first_names(&files.ignored));
+            safe_println!("{would} {} ignored file(s) in {wt}: {}", files.ignored.len(), first_names(&files.ignored));
         }
         true
     }
@@ -420,10 +421,10 @@ impl Cleanup {
         if list.is_empty() {
             return;
         }
-        println!();
-        println!("stale, not removed:");
+        safe_println!();
+        safe_println!("stale, not removed:");
         for e in list {
-            println!("  {e}");
+            safe_println!("  {e}");
         }
     }
 
@@ -471,7 +472,7 @@ impl Cleanup {
         if quiet_ok("git", &["-C", primary, "diff", "--quiet", &old_head, &new_head, "--", "flow/lane"]) {
             return;
         }
-        println!("flow/lane changed: rebuilding the lane binaries");
+        safe_println!("flow/lane changed: rebuilding the lane binaries");
         let failure = match lane::runner::run("bash", &[&install]) {
             Ok(out) if out.success => return,
             Ok(out) => out.combined,
@@ -506,14 +507,14 @@ impl Cleanup {
         }
         if !plan.is_empty() {
             let header = if self.dry { "sweep plan (dry run)" } else { "sweep plan" };
-            println!("{header}: {} merged branch(es) under {root}", plan.len());
+            safe_println!("{header}: {} merged branch(es) under {root}", plan.len());
             for row in &plan {
                 let files = match (&row.files, row.held) {
                     (None, _) => String::new(),
                     (Some(files), None) => format!("  worktree: {files}"),
                     (Some(files), Some(held)) => format!("  worktree: {files} ({held})"),
                 };
-                println!("  {} {}  {}{files}", row.name(), row.branch, row.unlanded);
+                safe_println!("  {} {}  {}{files}", row.name(), row.branch, row.unlanded);
             }
             // Nothing is deleted until confirmed. A closed or non-terminal
             // stdin is not a yes: an unattended sweep needs --yes on the line,
@@ -547,7 +548,7 @@ impl Cleanup {
                 rows.push([row.name().to_string(), row.branch.clone(), held.to_string(), row.unlanded.clone()]);
                 continue;
             }
-            println!("== {} {}", row.repo.trim_end_matches('/'), row.branch);
+            safe_println!("== {} {}", row.repo.trim_end_matches('/'), row.branch);
             let verdict = if self.cleanup_branch(&row.repo, &row.branch) {
                 "cleaned"
             } else {
@@ -556,10 +557,10 @@ impl Cleanup {
             };
             rows.push([row.name().to_string(), row.branch.clone(), verdict.to_string(), row.unlanded.clone()]);
         }
-        println!();
-        println!("sweep summary");
+        safe_println!();
+        safe_println!("sweep summary");
         if rows.is_empty() {
-            println!("  nothing merged to clean up under {root}");
+            safe_println!("  nothing merged to clean up under {root}");
         } else {
             print_table(&rows);
         }
@@ -614,7 +615,7 @@ impl Cleanup {
     /// git's eyes, so fall back to `-D` — step 2 has already proved the merge.
     fn delete_local(&self, path: &str, b: &str) -> bool {
         if self.dry {
-            println!("would delete local branch {b}");
+            safe_println!("would delete local branch {b}");
             return true;
         }
         // The tip goes under refs/deleted first, so a wrong verdict is undone
@@ -634,12 +635,12 @@ impl Cleanup {
             eprintln!("merge-cleanup: could not record the tip of {b} at {record}, so it was not deleted: {why}");
             return false;
         }
-        println!("recorded the tip of {b} at {record} (git branch {b} {record} restores it)");
+        safe_println!("recorded the tip of {b} at {record} (git branch {b} {record} restores it)");
         if quiet_stderr_ok("git", &["-C", path, "branch", "-d", b]) {
-            println!("deleted local branch {b}");
+            safe_println!("deleted local branch {b}");
             return true;
         }
-        println!("deleting local branch {b} with -D (the squash merge left it unmerged)");
+        safe_println!("deleting local branch {b} with -D (the squash merge left it unmerged)");
         status("git", &["-C", path, "branch", "-D", b])
     }
 
@@ -652,7 +653,7 @@ impl Cleanup {
             return false;
         }
         if self.force {
-            println!("--force: skipping the merged check for {b}");
+            safe_println!("--force: skipping the merged check for {b}");
         } else if self.is_merged(path, b).is_none() {
             eprintln!("merge-cleanup: {b} is not merged — nothing cleaned up (--force overrides)");
             return false;
@@ -777,7 +778,7 @@ fn print_table(rows: &[[String; 4]]) {
                 line.push_str(&format!("{cell:<width$}  ", width = widths[i]));
             }
         }
-        println!("{line}");
+        safe_println!("{line}");
     }
 }
 
@@ -820,7 +821,7 @@ fn subdirs(dir: &str) -> Vec<String> {
 fn main() -> ExitCode {
     let a = match parse_args(env::args().skip(1)) {
         Parsed::Help => {
-            print!("{HELP}");
+            safe_print!("{HELP}");
             return ExitCode::SUCCESS;
         }
         Parsed::Err(e) => return die(e),
@@ -870,7 +871,7 @@ fn main() -> ExitCode {
         if branch.is_empty() {
             return die(format!("PR #{pr} has no head branch"));
         }
-        println!("PR #{pr} is {branch}");
+        safe_println!("PR #{pr} is {branch}");
     }
     if branch.is_empty() {
         return die("name a branch, a PR number or URL, or pass --sweep");
