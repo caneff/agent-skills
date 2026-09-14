@@ -215,7 +215,7 @@ fn help_prints_the_header_and_exits_zero() {
     let c = Cleanup::new();
     let run = c.mc(Tools::Full, &["--help"], &[]);
     assert!(run.ok);
-    assert!(run.stdout.starts_with("The tail Chris hand-ran after every squash merge"), "{}", run.stdout);
+    assert!(run.stdout.starts_with("The tail the controller runs after squash-merging a worker's PR"), "{}", run.stdout);
     assert!(run.stdout.contains("  merge-cleanup --sweep [--root <dir>] [--yes] [--dry-run]\n"), "{}", run.stdout);
     assert!(run.stdout.contains("`git branch <branch> refs/deleted/<branch>@<short sha>` restores."), "{}", run.stdout);
     assert!(run.stdout.contains("  merge-cleanup [--repo <path>] <branch|PR number|PR URL> [--force] [--discard] [--dry-run]\n"), "{}", run.stdout);

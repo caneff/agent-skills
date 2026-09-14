@@ -1,6 +1,7 @@
-//! Port of `flow/bin/merge-cleanup`. The tail Chris hand-ran after every
-//! squash merge: tear the workspace down, delete the branch local and remote,
-//! fast-forward the primary checkout. The contract is `--help` below.
+//! Port of `flow/bin/merge-cleanup`. The tail the controller runs after
+//! squash-merging a worker's PR: tear the workspace down, delete the branch
+//! local and remote, fast-forward the primary checkout. The contract is
+//! `--help` below.
 
 use lane::git_origin::{default_branch, origin_slug};
 use lane::herdr::{self, Agent};
@@ -12,10 +13,10 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::process::ExitCode;
 
-const HELP: &str = r#"The tail Chris hand-ran after every squash merge: tear the workspace down,
-delete the branch local and remote, fast-forward the primary checkout.
-Agents never merge — this runs after the merge has already happened, and it
-refuses any branch the tracker does not report as merged unless --force.
+const HELP: &str = r#"The tail the controller runs after squash-merging a worker's PR: tear the
+workspace down, delete the branch local and remote, fast-forward the primary
+checkout. This runs after the merge has already happened, and it refuses any
+branch the tracker does not report as merged unless --force.
 
   merge-cleanup [--repo <path>] <branch|PR number|PR URL> [--force] [--discard] [--dry-run]
   merge-cleanup --sweep [--root <dir>] [--yes] [--dry-run]
