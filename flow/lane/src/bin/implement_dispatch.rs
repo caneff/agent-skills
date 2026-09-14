@@ -1,22 +1,7 @@
 //! Port of `flow/bin/implement-dispatch`. What the dispatcher runs for the
 //! `/implement` lane: turn a ticket number into a worker running in its own
 //! workspace inside herdr, report, and stop. It never waits on the worker.
-//!
-//!   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
-//!                      <issue number>
-//!
-//! The brief is `/implement <n> --tier light|heavy --controller "<name>"`: light
-//! when the issue carries the documentation label, heavy otherwise. The
-//! controller is --controller, else the name in ~/.claude/sessions/<pid>.json of
-//! the nearest ancestor process whose file is live (its procStart matches) — the
-//! Claude session running this. Session names can hold spaces, hence the quotes.
-//!
-//! Refuses, with nothing claimed or created, when the issue is not open and
-//! labelled ready-for-agent, no controller is named or found, the herdr server
-//! is not running, claude onboarding is incomplete, the herdr agent name is
-//! taken, or the workspace path or branch already exists. After the workspace
-//! exists, any herdr failure exits non-zero with herdr's own error and leaves the
-//! workspace in place for inspection. There is no bare-claude fallback.
+//! The contract is `--help` below.
 
 use lane::runner::{self, quiet_ok, quiet_stdout, CommandOutput};
 use lane::{git_origin, proc_info, safe_print, safe_println, sessions};
@@ -32,19 +17,31 @@ waits on the worker.
 
   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
                      <issue number>
+  implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
+                     --spec <n> --slots <k>
 
-The brief is `/implement <n> --tier light|heavy --controller "<name>"`: light
-when the issue carries the documentation label, heavy otherwise. The
-controller is --controller, else the name in ~/.claude/sessions/<pid>.json of
-the nearest ancestor process whose file is live (its procStart matches) — the
-Claude session running this. Session names can hold spaces, hence the quotes.
+Plain mode: the brief is `/implement <n> --tier light|heavy --controller
+"<name>"`, light when the issue carries the documentation label, heavy
+otherwise. Branch and workspace are implement-<n>; --model defaults to sonnet.
+
+Spec mode (--spec): the brief is `/implement-spec <n> --slots <k> --controller
+"<name>"`, a nested run over a spec issue. Branch and workspace are spec-<n>,
+the herdr agent is <repo>-spec-<n>, and --model defaults to opus. --slots is a
+positive integer, required with --spec and refused without it.
+
+The controller is --controller, else the name in ~/.claude/sessions/<pid>.json
+of the nearest ancestor process whose file is live (its procStart matches) —
+the Claude session running this. Session names can hold spaces, hence the
+quotes.
 
 Refuses, with nothing claimed or created, when the issue is not open and
-labelled ready-for-agent, no controller is named or found, the herdr server
-is not running, claude onboarding is incomplete, the herdr agent name is
-taken, or the workspace path or branch already exists. After the workspace
-exists, any herdr failure exits non-zero with herdr's own error and leaves the
-workspace in place for inspection. There is no bare-claude fallback.
+labelled ready-for-agent, it carries a held label, spec mode names an issue
+without the spec label, plain mode names one with it, no controller is named
+or found, the herdr server is not running, claude onboarding is incomplete,
+the herdr agent name is taken, or the workspace path or branch already exists.
+After the workspace exists, any herdr failure exits non-zero with herdr's own
+error and leaves the workspace in place for inspection. There is no
+bare-claude fallback.
 "#;
 
 fn die(msg: impl AsRef<str>) -> ExitCode {
@@ -54,9 +51,35 @@ fn die(msg: impl AsRef<str>) -> ExitCode {
 
 struct Args {
     repo: Option<String>,
-    model: String,
+    model: Option<String>,
     controller: Option<String>,
     n: Option<String>,
+    spec: bool,
+    slots: Option<String>,
+}
+
+/// Which run the worker is briefed for: a plain `/implement` ticket, or a
+/// nested `/implement-spec` run over a spec issue with its slot count.
+#[derive(Clone, Copy)]
+enum Mode {
+    Plain,
+    Spec { slots: u32 },
+}
+
+impl Mode {
+    fn default_model(self) -> &'static str {
+        match self {
+            Mode::Plain => "sonnet",
+            Mode::Spec { .. } => "opus",
+        }
+    }
+
+    fn branch_prefix(self) -> &'static str {
+        match self {
+            Mode::Plain => "implement",
+            Mode::Spec { .. } => "spec",
+        }
+    }
 }
 
 enum Parsed {
@@ -67,9 +90,11 @@ enum Parsed {
 
 fn parse_args(argv: Vec<String>) -> Parsed {
     let mut repo = None;
-    let mut model = "sonnet".to_string();
+    let mut model = None;
     let mut controller = None;
     let mut n: Option<String> = None;
+    let mut spec = false;
+    let mut slots = None;
     let mut it = argv.into_iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -78,12 +103,24 @@ fn parse_args(argv: Vec<String>) -> Parsed {
                 None => return Parsed::Err("--repo needs a value".into()),
             },
             "--model" => match it.next() {
-                Some(v) => model = v,
+                Some(v) => model = Some(v),
                 None => return Parsed::Err("--model needs a value".into()),
             },
             "--controller" => match it.next() {
                 Some(v) => controller = Some(v),
                 None => return Parsed::Err("--controller needs a value".into()),
+            },
+            "--spec" => match it.next() {
+                Some(_) if n.is_some() => return Parsed::Err("one ticket at a time".into()),
+                Some(v) => {
+                    spec = true;
+                    n = Some(v);
+                }
+                None => return Parsed::Err("--spec needs a value".into()),
+            },
+            "--slots" => match it.next() {
+                Some(v) => slots = Some(v),
+                None => return Parsed::Err("--slots needs a value".into()),
             },
             "-h" | "--help" => return Parsed::Help,
             s if s.starts_with('-') => return Parsed::Err(format!("unknown flag: {s}")),
@@ -95,7 +132,7 @@ fn parse_args(argv: Vec<String>) -> Parsed {
             }
         }
     }
-    Parsed::Args(Args { repo, model, controller, n })
+    Parsed::Args(Args { repo, model, controller, n, spec, slots })
 }
 
 /// Handles the hidden `--seed-trust <claude.json path> <workspace path>`
@@ -239,8 +276,18 @@ fn run() -> Result<(), ExitCode> {
         Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => n.clone(),
         _ => return Err(die("name one issue number")),
     };
-    if args.model != "sonnet" && args.model != "opus" {
-        return Err(die(format!("--model must be sonnet or opus, not '{}'", args.model)));
+    let mode = match (&args.slots, args.spec) {
+        (None, false) => Mode::Plain,
+        (None, true) => return Err(die("--spec needs --slots <k>")),
+        (Some(_), false) => return Err(die("--slots only goes with --spec")),
+        (Some(k), true) => match k.parse::<u32>() {
+            Ok(slots) if slots > 0 => Mode::Spec { slots },
+            _ => return Err(die(format!("--slots must be a positive integer, not '{k}'"))),
+        },
+    };
+    let model = args.model.clone().unwrap_or_else(|| mode.default_model().to_string());
+    if model != "sonnet" && model != "opus" {
+        return Err(die(format!("--model must be sonnet or opus, not '{model}'")));
     }
     if !runner::on_path("flock") {
         return Err(die("flock is not on PATH"));
@@ -254,9 +301,12 @@ fn run() -> Result<(), ExitCode> {
     if !valid_slug(&slug) {
         return Err(die(format!("origin in {primary} names no GitHub owner/name")));
     }
-    let branch = format!("implement-{n}");
+    let branch = format!("{}-{n}", mode.branch_prefix());
     let wt = PathBuf::from(&primary).join(".claude/worktrees").join(&branch);
-    let suffix = format!("-{n}");
+    let suffix = match mode {
+        Mode::Plain => format!("-{n}"),
+        Mode::Spec { .. } => format!("-spec-{n}"),
+    };
     let repo_name = Path::new(&primary).file_name().and_then(|f| f.to_str()).unwrap_or("");
     let cut = (32usize).saturating_sub(suffix.len());
     let repo_part: String = repo_name.chars().take(cut).collect();
@@ -290,6 +340,11 @@ fn run() -> Result<(), ExitCode> {
         if labels.contains(&format!(",{held},")) {
             return Err(die(format!("#{n} is labelled {held}")));
         }
+    }
+    match (mode, labels.contains(",spec,")) {
+        (Mode::Spec { .. }, false) => return Err(die(format!("#{n} is not labelled spec"))),
+        (Mode::Plain, true) => return Err(die(format!("#{n} is labelled spec; dispatch it with --spec {n} --slots <k>"))),
+        _ => {}
     }
     let tier = if labels.contains(",documentation,") { "light" } else { "heavy" };
 
@@ -411,16 +466,19 @@ fn run() -> Result<(), ExitCode> {
         }
     }
 
-    claim.step("herdr agent start", runner::run("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &args.model]), None)?;
+    claim.step("herdr agent start", runner::run("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &model]), None)?;
 
-    let brief = format!("/implement {n} --tier {tier} --controller \"{controller}\"");
+    let (brief, described) = match mode {
+        Mode::Plain => (format!("/implement {n} --tier {tier} --controller \"{controller}\""), format!("{tier} tier")),
+        Mode::Spec { slots } => (format!("/implement-spec {n} --slots {slots} --controller \"{controller}\""), format!("spec, {slots} slots")),
+    };
     claim.step(
         "herdr agent prompt",
         runner::run("herdr", &["agent", "prompt", &agent, &brief, "--wait", "--until", "working", "--timeout", "120000"]),
         None,
     )?;
 
-    safe_println!("dispatched #{n} ({}, {tier} tier, controller {controller})", args.model);
+    safe_println!("dispatched #{n} ({model}, {described}, controller {controller})");
     safe_println!("worktree: {}", wt.display());
     safe_println!("branch:   {branch}");
     safe_println!("agent:    {agent}");

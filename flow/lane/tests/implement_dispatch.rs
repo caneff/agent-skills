@@ -13,6 +13,7 @@ fn refused(out: &std::process::Output, calls: &str, repo: &std::path::Path, n: &
         && !calls.contains("worktree open")
         && !calls.contains("issue edit")
         && !std::path::Path::new(&format!("{}/.git/refs/heads/implement-{n}", repo.display())).exists()
+        && !std::path::Path::new(&format!("{}/.git/refs/heads/spec-{n}", repo.display())).exists()
 }
 
 #[test]
@@ -498,3 +499,132 @@ fn a_reader_that_closes_early_gets_a_clean_nonzero_exit_no_panic_text() {
     assert!(!stderr.contains("Broken pipe"), "{stderr}");
 }
 
+
+// --- #787: --spec dispatches a nested /implement-spec run -------------------
+
+#[test]
+fn spec_mode_briefs_implement_spec_in_a_spec_workspace() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let wt = repo.join(".claude/worktrees/spec-395");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395", "--slots", "3"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+
+    let branch = String::from_utf8(
+        std::process::Command::new("git").args(["-C", wt.to_str().unwrap(), "branch", "--show-current"]).output().unwrap().stdout,
+    )
+    .unwrap();
+    assert_eq!(branch.trim(), "spec-395");
+    let calls = f.calls();
+    let herdr_calls: Vec<&str> = calls
+        .lines()
+        .filter(|l| l.starts_with("herdr worktree open") || l.starts_with("herdr agent start") || l.starts_with("herdr agent prompt"))
+        .collect();
+    // 32 chars exactly: the repo part is cut to make room for "-spec-395".
+    let name = "sudokumaker-custom-cons-spec-395";
+    assert_eq!(name.len(), 32);
+    let expected = vec![
+        format!("herdr worktree open --cwd {} --path {} --label spec-395 --no-focus --trust-repository", repo.display(), wt.display()),
+        format!("herdr agent start {name} --kind claude --pane w7:p1 -- --model opus"),
+        format!("herdr agent prompt {name} /implement-spec 395 --slots 3 --controller \"skills-ctl\" --wait --until working --timeout 120000"),
+    ];
+    assert_eq!(herdr_calls, expected, "herdr calls wrong:\n{herdr_calls:?}");
+    assert!(
+        calls.contains("gh issue edit 395 --repo caneff/sudokumaker-custom-constraints --remove-label ready-for-agent --add-label in-progress --add-assignee @me"),
+        "ticket not claimed: {calls}"
+    );
+    assert!(out_text(&out).contains("merge-cleanup spec-395"), "{}", out_text(&out));
+    assert!(out_text(&out).contains("dispatched #395 (opus, spec, 3 slots, controller skills-ctl)"), "{}", out_text(&out));
+}
+
+#[test]
+fn spec_mode_without_slots_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "--slots"), "{}", out_text(&out));
+}
+
+#[test]
+fn slots_without_spec_mode_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--slots", "3", "395"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "395", "--slots"), "{}", out_text(&out));
+}
+
+#[test]
+fn slots_that_is_not_a_positive_integer_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent")]);
+    for bad in ["three", "0", "-1", ""] {
+        let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395", "--slots", bad], &scenario);
+        assert!(refused(&out, &f.calls(), &repo, "395", "--slots"), "--slots {bad:?}: {}", out_text(&out));
+    }
+}
+
+#[test]
+fn spec_mode_refuses_an_issue_without_the_spec_label() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395", "--slots", "3"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "395", "not labelled spec"), "{}", out_text(&out));
+}
+
+#[test]
+fn plain_mode_refuses_a_spec_labelled_issue_naming_spec_mode() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "--spec"), "{}", out_text(&out));
+    assert!(!repo.join(".claude/worktrees/implement-395").exists());
+}
+
+#[test]
+fn spec_mode_still_refuses_a_held_issue() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent,in-progress")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395", "--slots", "3"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "in-progress"), "{}", out_text(&out));
+}
+
+#[test]
+fn help_documents_both_modes() {
+    let f = Fixture::new();
+    let out = f.dispatch(&["--help"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let text = out_text(&out);
+    for want in ["<issue number>", "/implement <n> --tier", "--spec <n> --slots <k>", "/implement-spec <n> --slots <k>", "spec-<n>"] {
+        assert!(text.contains(want), "help lacks {want:?}:\n{text}");
+    }
+}
+
+#[test]
+fn spec_mode_briefs_the_parsed_slot_count_and_honours_model() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395", "--slots", "007", "--model", "sonnet"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let calls = f.calls();
+    let name = "sudokumaker-custom-cons-spec-395";
+    assert!(calls.lines().any(|l| l == format!("herdr agent start {name} --kind claude --pane w7:p1 -- --model sonnet")), "{calls}");
+    assert!(
+        calls.lines().any(|l| l
+            == format!("herdr agent prompt {name} /implement-spec 395 --slots 7 --controller \"skills-ctl\" --wait --until working --timeout 120000")),
+        "{calls}"
+    );
+}
