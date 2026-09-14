@@ -9,8 +9,15 @@
 #     run themselves: the outward-facing step is the user's. The ownership
 #     lookup FAILS CLOSED: gh erroring or the network being down means "not
 #     owned" means blocked.
-#   - `gh pr merge` is blocked everywhere. When a PR exists, only the user
-#     finishes it — via `! gh pr merge ...` in their own shell, or the web UI.
+#   - `gh pr merge` is gated on the same OWNERSHIP (#790): allowed when the
+#     repo it merges into is the `gh` login's, blocked everywhere else. The
+#     target is the `--repo`/`-R` value or PR URL on the line, else this
+#     checkout's origin. Only the command is matched, not the phrase: quoted
+#     text (a grep pattern, a commit message) is data, unless a shell runs it
+#     (`bash -c`, `sh`, `eval`, `$(...)`). The `ready-for-human` exception —
+#     the user merges that ticket's PR — is enforced by `/implement`'s prose,
+#     not here: a squash merge on the user's own repo is undone with a revert,
+#     so a prose miss there costs a revert, not a merge nobody can take back.
 #   - History/worktree destroyers and bare force-pushes stay blocked; those
 #     guard against losing work, not against skipping a review lane.
 # The user lands anything via the `!` prefix, which runs in the user's own
@@ -40,9 +47,8 @@ strip_heredocs() {
 }
 SCAN=$(printf '%s\n' "$COMMAND" | strip_heredocs)
 
-# --- Always-blocked: PR merges and history/worktree destroyers. ---
+# --- Always-blocked: history/worktree destroyers. ---
 DANGEROUS_PATTERNS=(
-  "gh pr merge"
   "git ctm"
   "git-ctm"
   "git reset --hard"
@@ -133,6 +139,43 @@ repo_is_owned() {
   mkdir -p "$cache_dir" 2>/dev/null && printf '%s\n' "$target" > "$cache_dir/$key" 2>/dev/null
   return 0
 }
+
+# --- PR merge policy: your repo = allowed, anyone else's = handed off. ---
+merge_re='gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$)'
+runs_pr_merge() {
+  local unquoted
+  unquoted=$(printf '%s\n' "$SCAN" | sed -E "s/'[^']*'//g; s/\"[^\"]*\"//g")
+  printf '%s\n' "$unquoted" | grep -qE "(^|[;&|(\`[:space:]])$merge_re" && return 0
+  # Quoted, but run: a command substitution, or a shell handed the string.
+  printf '%s\n' "$SCAN" | grep -qE "(\\\$\\(|\`)[[:space:]]*$merge_re" && return 0
+  printf '%s\n' "$SCAN" | grep -qE "(^|[;&|(\`[:space:]])(bash|sh|zsh|eval)([[:space:]]|$)" \
+    && printf '%s\n' "$SCAN" | grep -qE "$merge_re"
+}
+# Owners named on the line: `--repo`/`-R` values ([HOST/]OWNER/REPO) and PR
+# URLs. A `--repo` belonging to another command in the chain counts too, which
+# can only block more, never less.
+named_merge_owners() {
+  printf '%s\n' "$SCAN" | tr -d "'\"" \
+    | grep -oE '(--repo[= ]|-R[[:space:]]+)[^[:space:];&|)]+' \
+    | sed -E 's/^(--repo[= ]|-R[[:space:]]+)//' \
+    | awk -F/ '{ print (NF >= 3 ? $(NF-1) : $1) }'
+  printf '%s\n' "$SCAN" | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/pull/' \
+    | cut -d/ -f2
+}
+merge_is_owned() {
+  local owners me owner
+  owners=$(named_merge_owners)
+  [ -n "$owners" ] || { repo_is_owned; return; }
+  me=$(gh api user -q .login 2>/dev/null) || return 1
+  [ -n "$me" ] || return 1
+  while IFS= read -r owner; do
+    [ "$owner" = "$me" ] || return 1
+  done <<< "$owners"
+}
+if runs_pr_merge && ! merge_is_owned; then
+  echo "BLOCKED: '$COMMAND' merges a PR on a repo you don't own (or ownership couldn't be verified — gh down?). That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact '! gh pr merge ...' line to run themselves. Do not attempt it yourself." >&2
+  exit 2
+fi
 
 # --- Push policy: your repo = allowed, anyone else's = handed off. ---
 if echo "$SCAN" | grep -qE '(^|[;&|[:space:]])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push([[:space:]]|$)'; then

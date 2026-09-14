@@ -71,10 +71,40 @@ rm -rf "$XDG_CACHE_HOME"
 export STUB_LOGIN= STUB_OWNER=
 run "ownership lookup failure blocks" 2 "git push origin main" "BLOCKED"
 
-# Merging a PR is the user's, everywhere — owned repo included.
+# Merging a PR follows ownership (#790): the controller merges on an owned
+# repo, and every other repo's merge stays the user's.
 rm -rf "$XDG_CACHE_HOME"
 export STUB_LOGIN=caneff STUB_OWNER=caneff
-run "gh pr merge blocked on owned repo" 2 "gh pr merge 12 --squash" "gh pr merge"
+run "gh pr merge allowed on owned repo" 0 "gh pr merge 12 --repo caneff/agent-skills --squash"
+run "gh pr merge allowed on owned repo, no --repo" 0 "gh pr merge 12 --squash"
+run "gh pr merge naming someone else's repo blocked from an owned checkout" 2 \
+  "gh pr merge 12 --repo someone-else/agent-skills --squash" "BLOCKED"
+run "gh pr merge -R naming someone else's repo blocked" 2 \
+  "gh pr merge 12 -R someone-else/agent-skills" "BLOCKED"
+run "gh pr merge on someone else's PR URL blocked" 2 \
+  "gh pr merge https://github.com/someone-else/agent-skills/pull/12 --squash" "BLOCKED"
+
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN=caneff STUB_OWNER=someone-else
+run "gh pr merge blocked on unowned repo" 2 "gh pr merge 12 --squash" "gh pr merge"
+run "gh pr merge later in a chain blocked on unowned repo" 2 \
+  "git status && gh pr merge 12 --squash" "gh pr merge"
+run "gh pr merge run by bash -c blocked on unowned repo" 2 \
+  "bash -c 'gh pr merge 12 --squash'" "gh pr merge"
+run "gh pr merge in a command substitution blocked on unowned repo" 2 \
+  "echo \"\$(gh pr merge 12 --squash)\"" "gh pr merge"
+# Only the command is guarded, not the phrase: reading or searching for it runs
+# nothing (a read-only grep was blocked before #790).
+run "grep for the phrase allowed on unowned repo" 0 "grep 'gh pr merge' flow/claude/CLAUDE.md"
+run "phrase mid-sentence in a commit message allowed on unowned repo" 0 \
+  "git commit -m \"docs: the controller runs gh pr merge after CLEAN\""
+run "rg for the phrase in a substitution allowed on unowned repo" 0 \
+  "n=\$(rg -c \"gh pr merge\" implement/SKILL.md)"
+
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN= STUB_OWNER=
+run "gh pr merge blocked when ownership lookup fails" 2 "gh pr merge 12 --squash" "BLOCKED"
+export STUB_LOGIN=caneff STUB_OWNER=caneff
 
 # Unrelated destructive guards survive the rework.
 run "history destroyer still blocked" 2 "git reset --hard HEAD~3" "BLOCKED"
