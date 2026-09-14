@@ -67,7 +67,7 @@ Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock
 - **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below — one ticket per file, never a single combined file.
 - **A real issue tracker (GitHub, Linear, …)** → publish one issue per ticket in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers. Use the platform's native blocking / sub-issue relationship where it has one; otherwise set each ticket's "Blocked by" to the blocking issues. When the source is a parent issue, link every published ticket as a child using the issue tracker doc's parent-linking convention — then verify the parent reports the full ticket count as children before finishing.
 
-Either way, give each ticket one triage role — its label on a tracker, its **Status** line in a local file. Default to the ready role: `ready-for-agent`, or `ready-for-human` when it needs grilling or a human touch. Use `needs-triage` only when you are genuinely unsure a ticket is ready to start, or unsure which role attaches, and say in its body what is in doubt. Why: a ticket marked ready is dispatched as it stands, so one whose doubt is unresolved gets built before anyone settles it.
+Either way, give each ticket exactly one of three triage roles — its label on a tracker, its **Status** line in a local file: `ready-for-agent` when it is fully specified and an agent can build it unattended; `ready-for-human` when it is specified but a human builds it (a taste call, credentials, something the user wants to write themselves); `needs-info` when it needs grilling first. A ticket genuinely too unclear to call is `needs-info`, with its body saying what is unclear. Never `needs-triage` — that role is for issues outside people open. Why: a ticket marked ready is dispatched as it stands, so one that still needs grilling must carry `needs-info` or it gets built before anyone grills it.
 
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
 
@@ -85,7 +85,7 @@ When the source was a tracker issue — a spec or plan these tickets now decompo
 
 **Seams under test:** the public boundaries the tests go against — user-approved, so `/implement` writes its failing tests here without asking again.
 
-**Status:** the triage role step 5 chose — ready-for-agent, ready-for-human, or needs-triage
+**Status:** the triage role step 5 chose — ready-for-agent, ready-for-human, or needs-info
 
 - [ ] Acceptance criterion 1
 - [ ] Acceptance criterion 2
