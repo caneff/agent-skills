@@ -105,5 +105,6 @@ of the audit that made it, naming the decision it changes.
    `ready-for-agent`, using `/to-tickets`'s publish step and its blocking-edge
    and parent-linking conventions — its own quiz-and-iterate step is skipped,
    since the breakdown was already approved in step 2. Only once the children
-   are linked, label the parent `spec` — never `ready-for-agent` — so nothing
-   starts building it unsliced.
+   are linked, label the parent `spec` **and keep** `ready-for-agent` — plain
+   `implement-dispatch` refuses a `spec`-labelled issue, so the label does not
+   send an ordinary agent to build it unsliced.
