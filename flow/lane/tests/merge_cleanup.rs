@@ -822,20 +822,33 @@ fn a_worktree_holding_only_caches_is_removed_and_they_are_listed() {
 #[test]
 fn caches_git_lists_by_their_contents_or_as_a_symlink_are_still_caches() {
     // pytest writes `*` into its own .gitignore, so git lists what is inside
-    // `.pytest_cache/`; a `*.pyc` pattern lists the file, not `__pycache__/`;
-    // a symlinked `node_modules` is listed with no trailing slash.
+    // `.pytest_cache/`; a symlinked `node_modules` is listed with no
+    // trailing slash.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r28", "implement-28");
-    std::fs::write(r.join(".git/info/exclude"), "node_modules\n*.pyc\n").unwrap();
+    std::fs::write(r.join(".git/info/exclude"), "node_modules\n").unwrap();
     std::fs::create_dir_all(wt.join(".pytest_cache/v")).unwrap();
     std::fs::write(wt.join(".pytest_cache/.gitignore"), "*\n").unwrap();
     std::fs::write(wt.join(".pytest_cache/v/x"), "x\n").unwrap();
-    std::fs::create_dir_all(wt.join("sub/__pycache__")).unwrap();
-    std::fs::write(wt.join("sub/__pycache__/a.pyc"), "x\n").unwrap();
     std::os::unix::fs::symlink(c.root(), wt.join("node_modules")).unwrap();
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
-    assert!(run.has(&format!("discarding 4 ignored file(s) in {}:", wt.display())), "{}", run.text());
+    assert!(run.has(&format!("discarding 3 ignored file(s) in {}:", wt.display())), "{}", run.text());
+}
+
+#[test]
+fn an_ignored_file_under_a_folder_merely_named_like_a_cache_is_refused() {
+    // Deny by default: `target/` here is neither ignored itself nor marked
+    // fully ignored by its own .gitignore, so `run.log` is work.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r30", "implement-30");
+    std::fs::write(r.join(".git/info/exclude"), "*.log\n").unwrap();
+    std::fs::create_dir_all(wt.join("notes/target")).unwrap();
+    std::fs::write(wt.join("notes/target/run.log"), "evidence\n").unwrap();
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: notes/target/run.log (--discard overrides)", wt.display());
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+    assert!(wt.join("notes/target/run.log").is_file(), "{}", run.text());
 }
 
 #[test]

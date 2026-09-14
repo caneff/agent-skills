@@ -35,8 +35,8 @@ the single-branch form refuses, naming them, and --discard removes it anyway
 even with --yes. Ignored files include .scratch/ and every other ignored name
 except the regenerable caches: an ignored entry named node_modules,
 __pycache__, target, .venv, .pytest_cache, .ruff_cache or .mypy_cache, or
-inside one, never refuses — it is removed with the worktree, and the count and
-first names are printed. The list is fixed on purpose: an unknown ignored name is kept, since
+inside one whose own .gitignore is `*`, never refuses — it is removed with the
+worktree, and the count and first names are printed. The list is fixed on purpose: an unknown ignored name is kept, since
 a wrongly kept cache costs a --discard and a discarded note cannot be undone.
 
 Every local branch delete first records the tip under
@@ -222,7 +222,7 @@ struct WorktreeFiles {
     untracked: Vec<String>,
     /// Ignored entries that are not regenerable caches — `.scratch/` evidence.
     ignored: Vec<String>,
-    /// Ignored directories named in `CACHE_DIRS`.
+    /// Ignored entries `is_cache` accepts.
     caches: Vec<String>,
 }
 
@@ -234,13 +234,23 @@ const NAMES_SHOWN: usize = 5;
 /// cache costs a --discard and a wrongly discarded note cannot be undone.
 const CACHE_DIRS: &[&str] = &["node_modules", "__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"];
 
-/// An ignored entry is a cache when any component of its path is named in
-/// `CACHE_DIRS`: git lists a cache as the directory itself, as a file or
-/// subdirectory inside it (pytest, ruff, mypy and venv write `*` into their
-/// own .gitignore; a `*.pyc` pattern names the file), or as a symlink with
-/// no trailing slash.
-fn is_cache(entry: &str) -> bool {
-    entry.split('/').any(|name| CACHE_DIRS.contains(&name))
+/// An ignored entry in worktree `wt` is a cache when its own name is in
+/// `CACHE_DIRS` (a directory, or a symlink git lists with no trailing
+/// slash), or when it sits inside a directory so named that marks itself
+/// wholly ignored with a `*` .gitignore — pytest, ruff, mypy and venv write
+/// one, so git lists their contents rather than the directory. A file under
+/// a directory merely named `target/` is not a cache.
+fn is_cache(wt: &str, entry: &str) -> bool {
+    let parts: Vec<&str> = entry.trim_end_matches('/').split('/').collect();
+    let last = parts.len() - 1;
+    parts.iter().enumerate().any(|(i, name)| {
+        CACHE_DIRS.contains(name) && (i == last || ignores_all(&Path::new(wt).join(parts[..=i].join("/"))))
+    })
+}
+
+/// `dir/.gitignore` has a `*` line: the tool that made `dir` ignores it whole.
+fn ignores_all(dir: &Path) -> bool {
+    std::fs::read_to_string(dir.join(".gitignore")).is_ok_and(|s| s.lines().any(|l| l.trim() == "*"))
 }
 
 impl WorktreeFiles {
@@ -260,7 +270,7 @@ impl WorktreeFiles {
             let (code, name) = (&line[..2], line[3..].to_string());
             match code {
                 "??" => files.untracked.push(name),
-                "!!" if is_cache(&name) => files.caches.push(name),
+                "!!" if is_cache(wt, &name) => files.caches.push(name),
                 "!!" => files.ignored.push(name),
                 _ => files.modified.push(name),
             }
