@@ -134,6 +134,16 @@ function isTestFrameworkMember(mem, roots = TEST_ROOTS) {
   return !!(mem && roots.has(mem.root) && !HOOK_METHODS.has(mem.method) && !CONFIG_METHODS.has(mem.method));
 }
 
+// skip/todo/only can't join the HOOK_METHODS/CONFIG_METHODS denylist above --
+// `it.skip('title', fn)` is a real (skipped) test and must stay collected --
+// but Playwright's `skip` also has a second, callback-free shape:
+// `test.skip(cond, 'why')`, called in-body to conditionally skip the
+// *enclosing* test. Two or more arguments and no callback is that shape, not
+// a test definition (#774); a single argument stays ambiguous with a
+// bodyless real test (`it.skip('title')`) and is left as a test, matching
+// prior behavior.
+const MODIFIER_METHODS = new Set(["skip", "todo", "only"]);
+
 /** Does this CallExpression name a single test (`it`/`test`, incl. `.skip`)? */
 function isTestCall(node) {
   const bare = calleeName(node);
@@ -144,7 +154,9 @@ function isTestCall(node) {
   // (`test.fixme()`, `test.slow()`), never a test definition -- `.fixme`
   // isn't in the denylist above because `test.fixme('title', fn)` is still a
   // real (skipped) test (#679 triage ruling).
-  return node.arguments.length > 0;
+  if (node.arguments.length === 0) return false;
+  if (MODIFIER_METHODS.has(mem.method) && node.arguments.length > 1 && !testCallback(node)) return false;
+  return true;
 }
 
 /** The modifier on a member test call (`skip`/`todo`/`only`), else null. */
@@ -600,6 +612,27 @@ function selfcheck() {
   assert(
     testCallCount("it.skip('x', () => { expect(a).toBe(b); })") === 1,
     "skip modifier is still a test call",
+  );
+  // 0a. Playwright's bare conditional-skip form -- `test.skip(cond, 'why')`,
+  // called in-body with no callback -- is a real test's own annotation, not a
+  // test definition. Shape (condition+reason, no callback), not the `skip`
+  // name, is what distinguishes it from `it.skip('title', fn)` (#774).
+  assert(
+    testCallCount(
+      "test('t', ({ browserName }) => { test.skip(browserName === 'webkit', 'not supported'); expect(compute()).toBe(1); });",
+    ) === 1,
+    "in-body test.skip(cond, 'why') is not itself a test call -- only the enclosing test counts",
+  );
+  assert.deepEqual(
+    smellsOf(
+      "test('t', ({ browserName }) => { test.skip(browserName === 'webkit', 'not supported'); expect(compute()).toBe(1); });",
+    ),
+    [],
+    "test.skip(cond, 'why') inside a real test -> no spurious empty/skipped finding",
+  );
+  assert(
+    testCallCount("it.skip('x', () => { expect(a).toBe(b); })") === 1,
+    "it.skip('title', fn) is still a real test call (unchanged)",
   );
 
   // 0b. suite aliases, config calls and bare in-body annotations are not test
