@@ -220,6 +220,7 @@ fn help_prints_the_header_and_exits_zero() {
     assert!(run.stdout.contains("`git branch <branch> refs/deleted/<branch>@<short sha>` restores."), "{}", run.stdout);
     assert!(run.stdout.contains("  merge-cleanup [--repo <path>] <branch|PR number|PR URL> [--force] [--discard] [--dry-run]\n"), "{}", run.stdout);
     assert!(run.stdout.contains("--discard removes it anyway"), "{}", run.stdout);
+    assert!(run.stdout.contains("Ignored files include .scratch/"), "{}", run.stdout);
 }
 
 #[test]
@@ -771,21 +772,110 @@ fn force_alone_still_refuses_a_dirty_worktree_and_discard_removes_it() {
     assert!(run.has(&format!("--discard: {} — 1 modified, 1 untracked file(s) would be lost: f, notes", wt.display())), "{}", run.text());
 }
 
-#[test]
-fn a_worktree_holding_only_ignored_files_is_removed_and_they_are_listed() {
-    let c = Cleanup::new();
-    let (r, wt) = lane_workspace(&c, "r25", "implement-25");
-    std::fs::write(r.join(".git/info/exclude"), "*.log\n").unwrap();
-    for n in 1..=7 {
-        std::fs::write(wt.join(format!("{n}.log")), "cache\n").unwrap();
+// --- #801: an ignored entry that is not a cache is work too -----------------
+
+/// Ignore `names` through the repo's `.git/info/exclude` and create each as a
+/// directory holding one file in `wt`.
+fn ignored_dirs(r: &std::path::Path, wt: &std::path::Path, names: &[&str]) {
+    let exclude: String = names.iter().map(|n| format!("{n}/\n")).collect();
+    std::fs::write(r.join(".git/info/exclude"), exclude).unwrap();
+    for n in names {
+        std::fs::create_dir_all(wt.join(n)).unwrap();
+        std::fs::write(wt.join(n).join("x"), "x\n").unwrap();
     }
+}
+
+#[test]
+fn a_worktree_holding_scratch_is_refused_naming_it() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r26", "implement-26");
+    ignored_dirs(&r, &wt, &[".scratch", "node_modules"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: .scratch/ (--discard overrides)", wt.display());
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+    assert!(wt.join(".scratch/x").is_file() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
-    let want = format!("would discard 7 ignored file(s) in {}: 1.log, 2.log, 3.log, 4.log, 5.log and 2 more", wt.display());
-    assert!(run.ok && run.has(&want) && wt.join("7.log").is_file(), "{}", run.text());
+    assert!(!run.ok && run.stderr.contains(&want) && !run.has("would remove"), "{}", run.text());
+    assert!(wt.join(".scratch/x").is_file() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    assert!(run.has(&format!("--discard: {} — 1 ignored file(s) would be lost: .scratch/", wt.display())), "{}", run.text());
+}
+
+#[test]
+fn a_worktree_holding_only_caches_is_removed_and_they_are_listed() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r27", "implement-27");
+    // A cache nested under a directory holding nothing else still counts.
+    ignored_dirs(&r, &wt, &["node_modules", "sub/__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"]);
+    let names = ".mypy_cache/, .pytest_cache/, .ruff_cache/, .venv/, node_modules/ and 2 more";
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    let want = format!("would discard 7 ignored file(s) in {}: {names}", wt.display());
+    assert!(run.ok && run.has(&want) && wt.join("target/x").is_file(), "{}", run.text());
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
-    let want = format!("discarding 7 ignored file(s) in {}: 1.log, 2.log, 3.log, 4.log, 5.log and 2 more", wt.display());
-    assert!(run.has(&want), "{}", run.text());
+    assert!(run.has(&format!("discarding 7 ignored file(s) in {}: {names}", wt.display())), "{}", run.text());
+}
+
+#[test]
+fn caches_git_lists_by_their_contents_or_as_a_symlink_are_still_caches() {
+    // pytest writes `*` into its own .gitignore, so git lists what is inside
+    // `.pytest_cache/`; a symlinked `node_modules` is listed with no
+    // trailing slash.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r28", "implement-28");
+    std::fs::write(r.join(".git/info/exclude"), "node_modules\n").unwrap();
+    std::fs::create_dir_all(wt.join(".pytest_cache/v")).unwrap();
+    std::fs::write(wt.join(".pytest_cache/.gitignore"), "*\n").unwrap();
+    std::fs::write(wt.join(".pytest_cache/v/x"), "x\n").unwrap();
+    std::os::unix::fs::symlink(c.root(), wt.join("node_modules")).unwrap();
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    assert!(run.has(&format!("discarding 3 ignored file(s) in {}:", wt.display())), "{}", run.text());
+}
+
+#[test]
+fn an_ignored_file_under_a_folder_merely_named_like_a_cache_is_refused() {
+    // Deny by default: `target/` here is neither ignored itself nor marked
+    // fully ignored by its own .gitignore, so `run.log` is work.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r30", "implement-30");
+    std::fs::write(r.join(".git/info/exclude"), "*.log\n").unwrap();
+    std::fs::create_dir_all(wt.join("notes/target")).unwrap();
+    std::fs::write(wt.join("notes/target/run.log"), "evidence\n").unwrap();
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: notes/target/run.log (--discard overrides)", wt.display());
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+    assert!(wt.join("notes/target/run.log").is_file(), "{}", run.text());
+}
+
+#[test]
+fn a_sibling_holding_only_caches_is_not_listed_stale() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r29");
+    let wts = r.join(".claude/worktrees");
+    c.worktree_add(&r, &["--detach", s(&wts.join("agent-cached")), "origin/main"]);
+    c.worktree_add(&r, &["--detach", s(&wts.join("agent-old")), "origin/main"]);
+    ignored_dirs(&r, &wts.join("agent-cached"), &["target"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/ff-merged", "--dry-run"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert_eq!(run.stale(), vec![wts.join("agent-old").display().to_string()], "{}", run.text());
+}
+
+#[test]
+fn a_sweep_with_yes_never_removes_a_worktree_holding_scratch() {
+    let c = Cleanup::new();
+    let root = sweep_root(&c);
+    let other = root.join("other");
+    let wt = other.join(".claude/worktrees/implement-9");
+    ignored_dirs(&other, &wt, &[".scratch", "node_modules"]);
+    let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), "--yes"], &[]);
+    let held = "  other caneff/merged-one  0 commits past PR #7  worktree: 0 modified, 0 untracked, 1 ignored, 1 cache (dirty, not removed)";
+    assert!(run.ok && run.stdout.lines().any(|l| l == held), "{}", run.text());
+    assert!(run.has("  other  caneff/merged-one  dirty, not removed  0 commits past PR #7"), "{}", run.text());
+    assert!(wt.join(".scratch/x").is_file() && c.has_branch(&other, "caneff/merged-one"), "{}", run.text());
 }
 
 #[test]
@@ -798,8 +888,8 @@ fn a_sweep_never_removes_a_dirty_worktree_and_cleans_the_clean_ones() {
     let wt = other.join(".claude/worktrees/implement-ff");
     c.worktree_add(&other, &[s(&wt), "caneff/ff-merged"]);
     dirty(&wt, "untracked");
-    let held = "  other caneff/ff-merged  0 commits past origin/main  worktree: 0 modified, 1 untracked, 0 ignored (dirty, not removed)";
-    let clean = "  other caneff/merged-one  0 commits past PR #7  worktree: 0 modified, 0 untracked, 0 ignored";
+    let held = "  other caneff/ff-merged  0 commits past origin/main  worktree: 0 modified, 1 untracked, 0 ignored, 0 cache (dirty, not removed)";
+    let clean = "  other caneff/merged-one  0 commits past PR #7  worktree: 0 modified, 0 untracked, 0 ignored, 0 cache";
     for flag in ["--dry-run", "--yes"] {
         let run = c.mc(Tools::Full, &["--sweep", "--root", s(&root), flag, "--discard"], &[]);
         assert!(!run.ok && run.stderr.contains("merge-cleanup: --discard takes one branch, not --sweep"), "{}", run.text());
