@@ -640,7 +640,7 @@ fn a_ready_for_human_ticket_is_claimed_and_briefed_as_chris_merges() {
 }
 
 #[test]
-fn a_failure_past_the_claim_releases_a_ready_for_human_ticket_back_to_ready_for_human() {
+fn a_failure_past_the_claim_on_a_ready_for_human_ticket_only_undoes_in_progress() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
