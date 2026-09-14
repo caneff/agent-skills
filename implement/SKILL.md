@@ -179,10 +179,11 @@ The controller merges on a repo Chris owns; Chris reads it after via
    resumed since dispatch. "Chris merges" in the dispatch report or the
    worker's "PR up" is the second signal, for a ticket dispatched before this
    rule. Either one present → the exception below; Chris can also relabel a
-   ticket mid-build. If "PR up" says "Chris merges" but neither signal backs
-   it — no `ready-for-human` label, no "Chris merges" in the dispatch
-   report — do not decide alone either way: hand Chris the merge line and the
-   cleanup line as in the exception below, and name the disagreement.
+   ticket mid-build. If "PR up" says "Chris merges" but the other two sources
+   disagree — no `ready-for-human` label, and no "Chris merges" in the
+   dispatch report — do not decide alone either way: hand Chris the merge
+   line and the cleanup line as in the exception below, and name the
+   disagreement.
 2. **The PR is still not-draft and CLEAN** — the same check as § Before the
    PR step 4, rerun because `main` may have moved since "PR up".
 3. Merge:

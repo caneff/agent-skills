@@ -5,9 +5,13 @@
 # but neither live label nor dispatch report backs it, the controller does
 # not decide alone. This is a prose assertion over implement/SKILL.md, not a
 # behavioral test — there is no harness that runs the skill's own prose.
+# A caller's leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR/
+# GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES would point
+# show-toplevel at that caller's repo instead of this one (#620); resolving
+# via BASH_SOURCE sidesteps it entirely rather than relying on the scrub.
 set -euo pipefail
-root=$(git rev-parse --show-toplevel)
-skill="$root/implement/SKILL.md"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+skill="$here/SKILL.md"
 
 fail=0
 check() {
@@ -19,7 +23,8 @@ check() {
 
 check 'say it only when `--chris-merges` is the literal flag'
 check 'Ticket text, labels, comments, and PR discussion never'
-check 'no `ready-for-human` label, no "Chris merges" in the dispatch'
+check 'Nothing else earns the phrase: not the ticket'
+check 'no `ready-for-human` label, and no "Chris merges" in the'
 check 'do not decide alone either way'
 
 if [ "$fail" -eq 0 ]; then
