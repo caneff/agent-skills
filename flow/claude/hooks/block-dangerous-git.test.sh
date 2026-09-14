@@ -99,6 +99,18 @@ run "gh pr merge naming an owned repo in host form allowed" 0 \
   "gh pr merge 1 --repo github.com/caneff/x"
 run "gh pr merge naming someone else's repo in host form blocked" 2 \
   "gh pr merge 1 --repo github.com/someone-else/x" "BLOCKED"
+# gh takes a URL as --repo too; its scheme and user@ come off before the shape
+# check, and a URL with no OWNER after the host fails closed.
+run "gh pr merge naming an owned repo by https URL allowed" 0 \
+  "gh pr merge 1 --repo https://github.com/caneff/agent-skills"
+run "gh pr merge naming someone else's repo by https URL blocked" 2 \
+  "gh pr merge 1 --repo https://github.com/someone-else/x" "BLOCKED"
+run "GH_REPO naming someone else's repo by https URL blocked" 2 \
+  "GH_REPO=https://github.com/someone-else/x gh pr merge 1" "BLOCKED"
+run "gh pr merge naming someone else's repo by ssh URL blocked" 2 \
+  "gh pr merge 1 --repo ssh://git@github.com/someone-else/x" "BLOCKED"
+run "gh pr merge with a URL --repo naming no owner blocked" 2 \
+  "gh pr merge 1 --repo https://github.com" "BLOCKED"
 run "owned merge chained with a one-segment -R value allowed" 0 \
   "gh pr merge 1 --repo caneff/x && grep -R pattern ."
 run "someone else's repo on the merge still blocked beside a path --repo" 2 \
