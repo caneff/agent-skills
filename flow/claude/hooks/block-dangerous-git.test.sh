@@ -83,6 +83,38 @@ run "gh pr merge -R naming someone else's repo blocked" 2 \
   "gh pr merge 12 -R someone-else/agent-skills" "BLOCKED"
 run "gh pr merge on someone else's PR URL blocked" 2 \
   "gh pr merge https://github.com/someone-else/agent-skills/pull/12 --squash" "BLOCKED"
+# A --repo that is a filesystem path names no repo owner (#803). The controller's
+# merge in implement/SKILL.md § The merge is followed by merge-cleanup --repo <path>.
+run "owned merge chained with merge-cleanup --repo <path> allowed" 0 \
+  "gh pr merge 1 --repo caneff/x --squash && merge-cleanup --repo /home/caneff/.agents/skills b"
+run "owned merge chained with -R ./repo on another command allowed" 0 \
+  "gh pr merge 1 --repo caneff/x && some-tool -R ./repo"
+run "owned merge chained with --repo ~/src/x on another command allowed" 0 \
+  "gh pr merge 1 --repo caneff/x && some-tool --repo ~/src/x"
+run "owned merge chained with a four-segment relative --repo path allowed" 0 \
+  "gh pr merge 1 --repo caneff/x && some-tool --repo src/someone-else/x/y"
+run "owned merge chained with a two-segment absolute --repo path allowed" 0 \
+  "gh pr merge 1 --repo caneff/x && some-tool --repo /srv/x"
+run "gh pr merge naming an owned repo in host form allowed" 0 \
+  "gh pr merge 1 --repo github.com/caneff/x"
+run "gh pr merge naming someone else's repo in host form blocked" 2 \
+  "gh pr merge 1 --repo github.com/someone-else/x" "BLOCKED"
+# gh takes a URL as --repo too: its OWNER is the segment after the host (a
+# user@ stays in the host), and a URL with no OWNER there fails closed.
+run "gh pr merge naming an owned repo by https URL allowed" 0 \
+  "gh pr merge 1 --repo https://github.com/caneff/agent-skills"
+run "gh pr merge naming someone else's repo by https URL blocked" 2 \
+  "gh pr merge 1 --repo https://github.com/someone-else/x" "BLOCKED"
+run "GH_REPO naming someone else's repo by https URL blocked" 2 \
+  "GH_REPO=https://github.com/someone-else/x gh pr merge 1" "BLOCKED"
+run "gh pr merge naming someone else's repo by ssh URL blocked" 2 \
+  "gh pr merge 1 --repo ssh://git@github.com/someone-else/x" "BLOCKED"
+run "gh pr merge with a URL --repo naming no owner blocked" 2 \
+  "gh pr merge 1 --repo https://github.com" "BLOCKED"
+run "owned merge chained with a one-segment -R value allowed" 0 \
+  "gh pr merge 1 --repo caneff/x && grep -R pattern ."
+run "someone else's repo on the merge still blocked beside a path --repo" 2 \
+  "merge-cleanup --repo /home/caneff/.agents/skills b && gh pr merge 1 --repo someone-else/x" "BLOCKED"
 
 rm -rf "$XDG_CACHE_HOME"
 export STUB_LOGIN=caneff STUB_OWNER=someone-else

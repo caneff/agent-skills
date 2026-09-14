@@ -175,14 +175,22 @@ runs_pr_merge() {
   printf '%s\n' "$BARE" | grep -qE "$cmd_start((bash|sh|zsh)[[:space:]]+-[a-z]*c|eval)([[:space:]]|$)|\|[[:space:]]*(bash|sh|zsh)([[:space:]]|$)|(bash|sh|zsh)[[:space:]]*<<"
 }
 # Owners the line names: `--repo`/`-R` values ([HOST/]OWNER/REPO), GH_REPO=,
-# and PR URLs, read from the raw text so a quoted value counts. They are
+# and PR URLs, read from the raw text so a quoted value counts. A value led by
+# `/`, `~` or `.`, or outside two-to-three segments, is not a repo name (e.g.
+# `merge-cleanup --repo <path>`) and names no owner (#803). OWNER is the first
+# segment, or the second when a HOST leads. A URL (`https://`, `ssh://git@`)
+# loses its scheme, and its OWNER is the segment after the host (a `user@`
+# rides along in the host); one with no OWNER prints `?`, which never matches
+# the login, so it fails closed. They are
 # checked on top of this checkout's ownership, never instead of it, so a name
 # on another command or inside a quoted subject can only block.
 named_merge_owners() {
   printf '%s\n' "$SCAN" | tr -d "'\"" \
     | grep -oE '(--repo[= ]|-R[[:space:]]+|GH_REPO=)[^[:space:];&|)]+' \
     | sed -E 's/^(--repo[= ]|-R[[:space:]]+|GH_REPO=)//' \
-    | awk -F/ '{ print (NF >= 3 ? $(NF-1) : $1) }'
+    | awk -F/ '
+        sub(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, "") { print ($2 != "" ? $2 : "?"); next }
+        !/^[\/~.]/ && NF >= 2 && NF <= 3 { print (NF == 3 ? $2 : $1) }'
   printf '%s\n' "$SCAN" | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/pull/' \
     | cut -d/ -f2
 }
