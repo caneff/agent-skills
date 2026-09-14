@@ -15,11 +15,15 @@ neither door: say so and stop.
 
 ```
 implement-dispatch <n> [--model sonnet|opus]
+implement-dispatch --spec <n> --slots <k> [--model sonnet|opus]
 ```
 
-`sonnet` for an ordinary ticket, `opus` for a subtle seam. The script takes
-only a number; for `/implement next`, resolve the lowest-numbered open
-`ready-for-agent` issue first and pass that number:
+`sonnet` for an ordinary ticket, `opus` for a subtle seam — `--spec` mode
+defaults to `opus` instead. Plain mode refuses an issue labelled `spec`,
+naming `--spec <n> --slots <k>` as the way to dispatch it; that hands the
+issue to a nested `/implement-spec` run instead of a worker. For
+`/implement next`, resolve the lowest-numbered open `ready-for-agent` issue
+first and pass that number:
 
 ```
 gh issue list --repo <owner/name> --label ready-for-agent --state open \
