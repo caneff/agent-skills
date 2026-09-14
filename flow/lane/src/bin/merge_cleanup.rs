@@ -24,16 +24,20 @@ branch the tracker does not report as merged unless --force.
 --sweep walks every git repo one level under <dir> (default ~/src), prints
 the merged local branches it would clean — each with what proved it merged,
 how many commits sit past that proof (0 is healthy), and the modified,
-untracked and ignored file counts of the worktree holding it — and asks
-before touching anything: --yes answers for you, --dry-run never asks. Then
-it runs the same six steps for each and prints a summary table with the same
-count.
+untracked, ignored and cache file counts of the worktree holding it — and
+asks before touching anything: --yes answers for you, --dry-run never asks.
+Then it runs the same six steps for each and prints a summary table with the
+same count.
 
-A linked worktree with modified or untracked files is never removed: the
-single-branch form refuses, naming them, and --discard removes it anyway
+A linked worktree with modified, untracked or ignored files is never removed:
+the single-branch form refuses, naming them, and --discard removes it anyway
 (--force only skips the merged check); --sweep lists it "dirty, not removed"
-even with --yes. Ignored files never refuse — they are removed with the
-worktree, and their count and first names are printed.
+even with --yes. Ignored files include .scratch/ and every other ignored name
+except the regenerable caches: an ignored directory named node_modules,
+__pycache__, target, .venv, .pytest_cache, .ruff_cache or .mypy_cache never
+refuses — it is removed with the worktree, and the count and first names are
+printed. The list is fixed on purpose: an unknown ignored name is kept, since
+a wrongly kept cache costs a --discard and a discarded note cannot be undone.
 
 Every local branch delete first records the tip under
 refs/deleted/<branch>@<short sha>, which
@@ -216,19 +220,35 @@ fn blockers(agents: &[Agent]) -> Vec<String> {
 struct WorktreeFiles {
     modified: Vec<String>,
     untracked: Vec<String>,
+    /// Ignored entries that are not regenerable caches — `.scratch/` evidence.
     ignored: Vec<String>,
+    /// Ignored directories named in `CACHE_DIRS`.
+    caches: Vec<String>,
 }
 
 /// How many names a message lists before "and <n> more".
 const NAMES_SHOWN: usize = 5;
+
+/// The ignored directory names a removal may discard unasked. Deny by
+/// default (#801): an unknown ignored name is kept, because a wrongly kept
+/// cache costs a --discard and a wrongly discarded note cannot be undone.
+const CACHE_DIRS: &[&str] = &["node_modules", "__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"];
+
+/// An ignored entry is a cache when it is a directory (git prints it with a
+/// trailing slash) whose own name is in `CACHE_DIRS`, at any depth.
+fn is_cache(entry: &str) -> bool {
+    entry.strip_suffix('/').and_then(|d| d.rsplit('/').next()).is_some_and(|name| CACHE_DIRS.contains(&name))
+}
 
 impl WorktreeFiles {
     /// `None` when git cannot read the status of a worktree that is on disk.
     /// A worktree whose directory is already gone holds nothing to lose. The
     /// untracked and ignored modes are spelled out, so a
     /// `status.showUntrackedFiles=no` config cannot hide files from the guard.
+    /// `matching`, not `traditional`: a directory holding only an ignored
+    /// cache is listed as `sub/__pycache__/`, not collapsed to `sub/`.
     fn read(wt: &str) -> Option<Self> {
-        let Some(out) = quiet_stdout("git", &["-C", wt, "status", "--porcelain", "--untracked-files=normal", "--ignored=traditional"]) else {
+        let Some(out) = quiet_stdout("git", &["-C", wt, "status", "--porcelain", "--untracked-files=normal", "--ignored=matching"]) else {
             return (!Path::new(wt).exists()).then(Self::default);
         };
         let mut files = Self::default();
@@ -236,6 +256,7 @@ impl WorktreeFiles {
             let (code, name) = (&line[..2], line[3..].to_string());
             match code {
                 "??" => files.untracked.push(name),
+                "!!" if is_cache(&name) => files.caches.push(name),
                 "!!" => files.ignored.push(name),
                 _ => files.modified.push(name),
             }
@@ -243,26 +264,33 @@ impl WorktreeFiles {
         Some(files)
     }
 
-    /// Modified or untracked files: work a removal would lose. Ignored files
-    /// are not — every worktree holds `.venv/` or a cache after a merge.
+    /// Modified, untracked or non-cache ignored files: work a removal would
+    /// lose. Caches are not — every worktree holds `.venv/` or `target/`
+    /// after a merge.
     fn is_dirty(&self) -> bool {
-        !self.modified.is_empty() || !self.untracked.is_empty()
+        !self.modified.is_empty() || !self.untracked.is_empty() || !self.ignored.is_empty()
     }
 
-    /// "1 modified, 2 untracked, 3 ignored".
+    /// "1 modified, 2 untracked, 3 ignored, 4 cache".
     fn counts(&self) -> String {
-        format!("{} modified, {} untracked, {} ignored", self.modified.len(), self.untracked.len(), self.ignored.len())
+        format!(
+            "{} modified, {} untracked, {} ignored, {} cache",
+            self.modified.len(),
+            self.untracked.len(),
+            self.ignored.len(),
+            self.caches.len()
+        )
     }
 
     /// "1 modified, 2 untracked file(s) would be lost: f, a, b" — the kinds
     /// that are present, then their first names.
     fn dirty_text(&self) -> String {
-        let kinds: Vec<String> = [("modified", &self.modified), ("untracked", &self.untracked)]
+        let kinds: Vec<String> = [("modified", &self.modified), ("untracked", &self.untracked), ("ignored", &self.ignored)]
             .iter()
             .filter(|(_, v)| !v.is_empty())
             .map(|(k, v)| format!("{} {k}", v.len()))
             .collect();
-        let names: Vec<String> = self.modified.iter().chain(&self.untracked).cloned().collect();
+        let names: Vec<String> = self.modified.iter().chain(&self.untracked).chain(&self.ignored).cloned().collect();
         format!("{} file(s) would be lost: {}", kinds.join(", "), first_names(&names))
     }
 }
@@ -359,9 +387,11 @@ impl Cleanup {
     }
 
     /// The uncommitted-files guard (#736). `git worktree remove --force`
-    /// discards everything git does not hold, so modified or untracked files
-    /// refuse the removal unless --discard. Ignored files never refuse; their
-    /// count and first names are printed, since they go too.
+    /// discards everything git does not hold, so modified, untracked or
+    /// ignored files refuse the removal unless --discard. The one exception
+    /// is an ignored directory named in `CACHE_DIRS` (#801): caches never
+    /// refuse, and their count and first names are printed, since they go
+    /// too. Any other ignored entry, `.scratch/` included, refuses.
     fn guard_files(&self, wt: &str) -> bool {
         let Some(files) = WorktreeFiles::read(wt) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there");
@@ -374,9 +404,9 @@ impl Cleanup {
             }
             safe_println!("--discard: {wt} — {}", files.dirty_text());
         }
-        if !files.ignored.is_empty() {
+        if !files.caches.is_empty() {
             let would = if self.dry { "would discard" } else { "discarding" };
-            safe_println!("{would} {} ignored file(s) in {wt}: {}", files.ignored.len(), first_names(&files.ignored));
+            safe_println!("{would} {} ignored file(s) in {wt}: {}", files.caches.len(), first_names(&files.caches));
         }
         true
     }
@@ -405,7 +435,7 @@ impl Cleanup {
                 if quiet_stdout("git", &["-C", &e, "rev-list", "--count", &format!("{base}..HEAD")]).as_deref() != Some("0") {
                     continue;
                 }
-                if !WorktreeFiles::read(&e).is_some_and(|f| !f.is_dirty() && f.ignored.is_empty()) {
+                if !WorktreeFiles::read(&e).is_some_and(|f| !f.is_dirty() && f.caches.is_empty()) {
                     continue;
                 }
                 ""
