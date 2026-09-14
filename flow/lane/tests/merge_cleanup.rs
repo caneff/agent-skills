@@ -820,6 +820,38 @@ fn a_worktree_holding_only_caches_is_removed_and_they_are_listed() {
 }
 
 #[test]
+fn caches_git_lists_by_their_contents_or_as_a_symlink_are_still_caches() {
+    // pytest writes `*` into its own .gitignore, so git lists what is inside
+    // `.pytest_cache/`; a `*.pyc` pattern lists the file, not `__pycache__/`;
+    // a symlinked `node_modules` is listed with no trailing slash.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r28", "implement-28");
+    std::fs::write(r.join(".git/info/exclude"), "node_modules\n*.pyc\n").unwrap();
+    std::fs::create_dir_all(wt.join(".pytest_cache/v")).unwrap();
+    std::fs::write(wt.join(".pytest_cache/.gitignore"), "*\n").unwrap();
+    std::fs::write(wt.join(".pytest_cache/v/x"), "x\n").unwrap();
+    std::fs::create_dir_all(wt.join("sub/__pycache__")).unwrap();
+    std::fs::write(wt.join("sub/__pycache__/a.pyc"), "x\n").unwrap();
+    std::os::unix::fs::symlink(c.root(), wt.join("node_modules")).unwrap();
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    assert!(run.has(&format!("discarding 4 ignored file(s) in {}:", wt.display())), "{}", run.text());
+}
+
+#[test]
+fn a_sibling_holding_only_caches_is_not_listed_stale() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r29");
+    let wts = r.join(".claude/worktrees");
+    c.worktree_add(&r, &["--detach", s(&wts.join("agent-cached")), "origin/main"]);
+    c.worktree_add(&r, &["--detach", s(&wts.join("agent-old")), "origin/main"]);
+    ignored_dirs(&r, &wts.join("agent-cached"), &["target"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/ff-merged", "--dry-run"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert_eq!(run.stale(), vec![wts.join("agent-old").display().to_string()], "{}", run.text());
+}
+
+#[test]
 fn a_sweep_with_yes_never_removes_a_worktree_holding_scratch() {
     let c = Cleanup::new();
     let root = sweep_root(&c);

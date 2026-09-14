@@ -33,10 +33,10 @@ A linked worktree with modified, untracked or ignored files is never removed:
 the single-branch form refuses, naming them, and --discard removes it anyway
 (--force only skips the merged check); --sweep lists it "dirty, not removed"
 even with --yes. Ignored files include .scratch/ and every other ignored name
-except the regenerable caches: an ignored directory named node_modules,
-__pycache__, target, .venv, .pytest_cache, .ruff_cache or .mypy_cache never
-refuses — it is removed with the worktree, and the count and first names are
-printed. The list is fixed on purpose: an unknown ignored name is kept, since
+except the regenerable caches: an ignored entry named node_modules,
+__pycache__, target, .venv, .pytest_cache, .ruff_cache or .mypy_cache, or
+inside one, never refuses — it is removed with the worktree, and the count and
+first names are printed. The list is fixed on purpose: an unknown ignored name is kept, since
 a wrongly kept cache costs a --discard and a discarded note cannot be undone.
 
 Every local branch delete first records the tip under
@@ -234,10 +234,13 @@ const NAMES_SHOWN: usize = 5;
 /// cache costs a --discard and a wrongly discarded note cannot be undone.
 const CACHE_DIRS: &[&str] = &["node_modules", "__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"];
 
-/// An ignored entry is a cache when it is a directory (git prints it with a
-/// trailing slash) whose own name is in `CACHE_DIRS`, at any depth.
+/// An ignored entry is a cache when any component of its path is named in
+/// `CACHE_DIRS`: git lists a cache as the directory itself, as a file or
+/// subdirectory inside it (pytest, ruff, mypy and venv write `*` into their
+/// own .gitignore; a `*.pyc` pattern names the file), or as a symlink with
+/// no trailing slash.
 fn is_cache(entry: &str) -> bool {
-    entry.strip_suffix('/').and_then(|d| d.rsplit('/').next()).is_some_and(|name| CACHE_DIRS.contains(&name))
+    entry.split('/').any(|name| CACHE_DIRS.contains(&name))
 }
 
 impl WorktreeFiles {
@@ -246,7 +249,8 @@ impl WorktreeFiles {
     /// untracked and ignored modes are spelled out, so a
     /// `status.showUntrackedFiles=no` config cannot hide files from the guard.
     /// `matching`, not `traditional`: a directory holding only an ignored
-    /// cache is listed as `sub/__pycache__/`, not collapsed to `sub/`.
+    /// cache is not collapsed to its parent (`sub/`), which `is_cache` could
+    /// not tell from work.
     fn read(wt: &str) -> Option<Self> {
         let Some(out) = quiet_stdout("git", &["-C", wt, "status", "--porcelain", "--untracked-files=normal", "--ignored=matching"]) else {
             return (!Path::new(wt).exists()).then(Self::default);
@@ -388,10 +392,9 @@ impl Cleanup {
 
     /// The uncommitted-files guard (#736). `git worktree remove --force`
     /// discards everything git does not hold, so modified, untracked or
-    /// ignored files refuse the removal unless --discard. The one exception
-    /// is an ignored directory named in `CACHE_DIRS` (#801): caches never
-    /// refuse, and their count and first names are printed, since they go
-    /// too. Any other ignored entry, `.scratch/` included, refuses.
+    /// ignored files refuse the removal unless --discard — `.scratch/`
+    /// included (#801). Caches (`is_cache`) never refuse; their count and
+    /// first names are printed, since they go too.
     fn guard_files(&self, wt: &str) -> bool {
         let Some(files) = WorktreeFiles::read(wt) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there");
@@ -413,7 +416,8 @@ impl Cleanup {
 
     /// Other workspaces under <repo>/.claude/worktrees the guard would clear,
     /// no commits ahead of the default branch and nothing on disk git does
-    /// not hold (ignored files included — .scratch evidence is work too):
+    /// not hold (ignored files and caches included — .scratch evidence is
+    /// work too):
     /// listed for the owner, never removed. A folder there that git no
     /// longer tracks as a worktree is listed too, marked. This run's removal
     /// targets are not "other".
