@@ -17,6 +17,17 @@ subagent_type=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // ""')
 [ "$subagent_type" = "fork" ] && exit 0
 
 model=$(echo "$INPUT" | jq -r '.tool_input.model // ""')
+
+if [ "$subagent_type" = "Explore" ]; then
+  case "$model" in
+    sonnet|haiku) exit 0 ;;
+    *)
+      echo "BLOCKED: Explore is a read-only search agent — pass model: sonnet or haiku, never opus or fable." >&2
+      exit 2
+      ;;
+  esac
+fi
+
 [ -n "$model" ] && exit 0
 
 echo "BLOCKED: this Agent call has no 'model'. Pass one — explore/lookup work uses sonnet, review/diagnosis work uses opus. (subagent_type: \"fork\" is exempt: it always inherits the parent model.)" >&2
