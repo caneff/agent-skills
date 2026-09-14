@@ -143,14 +143,19 @@ function isTestFrameworkMember(mem, roots = TEST_ROOTS) {
 // `skip` has this second shape -- `todo`/`only` don't take a condition, so
 // they're left out rather than inheriting a narrowing they don't need.
 //
-// The two shapes put a string title in different places: a real test's first
-// argument is always its title (a string/template literal, `it.skip('t',
-// fn)`); the bare annotation's first argument is the condition, never a
-// title (#774). A single argument (`test.skip(cond)`, `it.skip('title')`)
-// stays ambiguous either way and is left as a test, matching prior behavior.
+// The two shapes put a string in different positions: a real test's last
+// argument is always its callback, inline or a named reference
+// (`it.skip('t', fn)`, `it.skip(computedTitle, sharedFn)`); the bare
+// annotation's last argument is always its trailing reason string, whatever
+// the condition looks like (`test.skip(cond, 'why')`,
+// `test.skip(fnCond, 'why')`) (#774). Checking the *last* argument, not the
+// first, is what keeps a computed/non-literal title (`it.skip(c.name, fn)`)
+// from being mistaken for the annotation shape. A single argument
+// (`test.skip(cond)`, `it.skip('title')`) stays ambiguous either way and is
+// left as a test, matching prior behavior.
 const MODIFIER_METHODS = new Set(["skip"]);
 
-function isTitleArg(node) {
+function isReasonArg(node) {
   return !!node && (node.type === "StringLiteral" || node.type === "TemplateLiteral");
 }
 
@@ -165,7 +170,8 @@ function isTestCall(node) {
   // isn't in the denylist above because `test.fixme('title', fn)` is still a
   // real (skipped) test (#679 triage ruling).
   if (node.arguments.length === 0) return false;
-  if (MODIFIER_METHODS.has(mem.method) && node.arguments.length > 1 && !isTitleArg(node.arguments[0])) return false;
+  if (MODIFIER_METHODS.has(mem.method) && node.arguments.length > 1 && isReasonArg(node.arguments[node.arguments.length - 1]))
+    return false;
   return true;
 }
 
@@ -656,12 +662,16 @@ function selfcheck() {
     [],
     "test.skip(callback-condition, 'why') inside a real test -> no spurious finding",
   );
-  // A real skipped test's callback need not be inline -- a title in the
-  // first-argument position is what makes it a test, not the callback's own
-  // shape.
+  // A real skipped test's callback need not be inline, and its title need
+  // not be a literal -- the callback in the last-argument position is what
+  // makes it a test, not the title's own shape.
   assert(
     testCallCount("function body() { expect(a).toBe(b); } it.skip('x', body);") === 1,
     "it.skip('title', <named callback>) is still a real test call",
+  );
+  assert(
+    testCallCount("for (const c of cases) { it.skip(c.name, () => { expect(a).toBe(b); }); }") === 1,
+    "it.skip(<computed title>, fn) is still a real test call",
   );
 
   // 0b. suite aliases, config calls and bare in-body annotations are not test
