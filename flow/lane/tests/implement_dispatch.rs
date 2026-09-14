@@ -606,9 +606,70 @@ fn help_documents_both_modes() {
     let out = f.dispatch(&["--help"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     let text = out_text(&out);
-    for want in ["<issue number>", "/implement <n> --tier", "--spec <n> --slots <k>", "/implement-spec <n> --slots <k>", "spec-<n>"] {
+    for want in ["<issue number>", "/implement <n> --tier", "--spec <n> --slots <k>", "/implement-spec <n> --slots <k>", "spec-<n>", "ready-for-human", "--chris-merges"] {
         assert!(text.contains(want), "help lacks {want:?}:\n{text}");
     }
+}
+
+// --- #794: a ready-for-human ticket dispatches, and Chris merges it ----------
+
+#[test]
+fn a_ready_for_human_ticket_is_claimed_and_briefed_as_chris_merges() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "enhancement,ready-for-human")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "410"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let calls = f.calls();
+    assert!(
+        calls.lines().any(|l| l
+            == "gh issue edit 410 --repo caneff/sudokumaker-custom-constraints --remove-label ready-for-human --add-label in-progress --add-assignee @me"),
+        "ticket not claimed off ready-for-human: {calls}"
+    );
+    assert!(
+        calls.lines().any(|l| l
+            == "herdr agent prompt sudokumaker-custom-constrain-410 /implement 410 --tier heavy --controller \"skills-ctl\" --chris-merges --wait --until working --timeout 120000"),
+        "{calls}"
+    );
+    assert!(out_text(&out).contains("dispatched #410 (sonnet, heavy tier, Chris merges, controller skills-ctl)"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_failure_past_the_claim_releases_a_ready_for_human_ticket_back_to_ready_for_human() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "ready-for-human"), ("HERDR_STALL", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "411"], &scenario);
+    assert!(!out.status.success());
+    assert!(
+        out_text(&out).contains(
+            "release the ticket: gh issue edit 411 --repo caneff/sudokumaker-custom-constraints --remove-label in-progress --add-label ready-for-human"
+        ),
+        "{}",
+        out_text(&out)
+    );
+}
+
+#[test]
+fn refuses_an_issue_labelled_both_ready_for_agent_and_ready_for_human() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "ready-for-agent,ready-for-human")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "412"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "412", "both"), "{}", out_text(&out));
+}
+
+#[test]
+fn spec_mode_refuses_a_ready_for_human_issue() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-human")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "413", "--slots", "2"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "413", "ready-for-human"), "{}", out_text(&out));
 }
 
 #[test]

@@ -22,7 +22,9 @@ waits on the worker.
 
 Plain mode: the brief is `/implement <n> --tier light|heavy --controller
 "<name>"`, light when the issue carries the documentation label, heavy
-otherwise. Branch and workspace are implement-<n>; --model defaults to sonnet.
+otherwise. A ready-for-human ticket's brief ends with --chris-merges: the
+worker builds it and Chris merges its PR. Branch and workspace are
+implement-<n>; --model defaults to sonnet.
 
 Spec mode (--spec): the brief is `/implement-spec <n> --slots <k> --controller
 "<name>"`, a nested run over a spec issue. Branch and workspace are spec-<n>,
@@ -34,11 +36,16 @@ of the nearest ancestor process whose file is live (its procStart matches) —
 the Claude session running this. Session names can hold spaces, hence the
 quotes.
 
+The claim swaps the issue's ready label (ready-for-agent or ready-for-human)
+for in-progress.
+
 Refuses, with nothing claimed or created, when the issue is not open and
-labelled ready-for-agent, it carries a held label, spec mode names an issue
-without the spec label, plain mode names one with it, no controller is named
-or found, the herdr server is not running, claude onboarding is incomplete,
-the herdr agent name is taken, or the workspace path or branch already exists.
+labelled exactly one of ready-for-agent and ready-for-human, it carries a
+held label (in-progress, needs-info), spec mode names an issue without the
+spec label or with ready-for-human, plain mode names one with the spec
+label, no controller is named or found, the herdr server is not running,
+claude onboarding is incomplete, the herdr agent name is taken, or the
+workspace path or branch already exists.
 After the workspace exists, any herdr failure exits non-zero with herdr's own
 error and leaves the workspace in place for inspection. There is no
 bare-claude fallback.
@@ -202,6 +209,7 @@ fn valid_slug(s: &str) -> bool {
 struct Claim<'a> {
     n: &'a str,
     slug: &'a str,
+    ready: &'a str,
     wt: &'a Path,
 }
 
@@ -212,8 +220,8 @@ impl Claim<'_> {
             eprintln!("workspace left in place at {}", self.wt.display());
         }
         eprintln!(
-            "release the ticket: gh issue edit {} --repo {} --remove-label in-progress --add-label ready-for-agent",
-            self.n, self.slug
+            "release the ticket: gh issue edit {} --repo {} --remove-label in-progress --add-label {}",
+            self.n, self.slug, self.ready
         );
         ExitCode::FAILURE
     }
@@ -333,10 +341,15 @@ fn run() -> Result<(), ExitCode> {
         return Err(die(format!("#{n} is not an open issue")));
     }
     let labels = format!(",{labels_csv},");
-    if !labels.contains(",ready-for-agent,") {
-        return Err(die(format!("#{n} is not labelled ready-for-agent")));
-    }
-    for held in ["in-progress", "needs-info", "ready-for-human"] {
+    // The ready label the claim swaps for in-progress. A ready-for-human
+    // ticket is built the same way, but its brief says Chris merges it.
+    let (ready, chris_merges) = match (labels.contains(",ready-for-agent,"), labels.contains(",ready-for-human,")) {
+        (true, false) => ("ready-for-agent", false),
+        (false, true) => ("ready-for-human", true),
+        (true, true) => return Err(die(format!("#{n} is labelled both ready-for-agent and ready-for-human"))),
+        (false, false) => return Err(die(format!("#{n} is not labelled ready-for-agent or ready-for-human"))),
+    };
+    for held in ["in-progress", "needs-info"] {
         if labels.contains(&format!(",{held},")) {
             return Err(die(format!("#{n} is labelled {held}")));
         }
@@ -344,6 +357,9 @@ fn run() -> Result<(), ExitCode> {
     match (mode, labels.contains(",spec,")) {
         (Mode::Spec { .. }, false) => return Err(die(format!("#{n} is not labelled spec"))),
         (Mode::Plain, true) => return Err(die(format!("#{n} is labelled spec; dispatch it with --spec {n} --slots <k>"))),
+        (Mode::Spec { .. }, true) if chris_merges => {
+            return Err(die(format!("#{n} is labelled ready-for-human; a spec run has no Chris-merges brief")));
+        }
         _ => {}
     }
     let tier = if labels.contains(",documentation,") { "light" } else { "heavy" };
@@ -414,7 +430,7 @@ fn run() -> Result<(), ExitCode> {
     let claimed = runner::run(
         "gh",
         &[
-            "issue", "edit", &n, "--repo", &slug, "--remove-label", "ready-for-agent", "--add-label", "in-progress", "--add-assignee",
+            "issue", "edit", &n, "--repo", &slug, "--remove-label", ready, "--add-label", "in-progress", "--add-assignee",
             "@me",
         ],
     );
@@ -422,7 +438,7 @@ fn run() -> Result<(), ExitCode> {
         Ok(c) if c.success => {}
         _ => return Err(die(format!("could not claim #{n}"))),
     }
-    let claim = Claim { n: &n, slug: &slug, wt: &wt };
+    let claim = Claim { n: &n, slug: &slug, ready, wt: &wt };
 
     let wa = runner::run_in(
         None,
@@ -469,7 +485,10 @@ fn run() -> Result<(), ExitCode> {
     claim.step("herdr agent start", runner::run("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &model]), None)?;
 
     let (brief, described) = match mode {
-        Mode::Plain => (format!("/implement {n} --tier {tier} --controller \"{controller}\""), format!("{tier} tier")),
+        Mode::Plain => {
+            let (marker, merger) = if chris_merges { (" --chris-merges", ", Chris merges") } else { ("", "") };
+            (format!("/implement {n} --tier {tier} --controller \"{controller}\"{marker}"), format!("{tier} tier{merger}"))
+        }
         Mode::Spec { slots } => (format!("/implement-spec {n} --slots {slots} --controller \"{controller}\""), format!("spec, {slots} slots")),
     };
     claim.step(
