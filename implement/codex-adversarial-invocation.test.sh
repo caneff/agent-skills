@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Guards #814: `/codex:adversarial-review` (and, in the Codex lane,
+# `/codex:review`) carry `disable-model-invocation: true`, so the
+# SlashCommand tool never reaches them for a dispatched, unattended worker —
+# only a human typing the literal command in an interactive session runs
+# them. Both SKILL.md and codex-lane.md must instead instruct the worker to
+# invoke the plugin's own companion script directly via Bash, resolving its
+# installPath from ~/.claude/plugins/installed_plugins.json rather than
+# assuming CLAUDE_PLUGIN_ROOT is set outside a slash-command's own execution
+# context, and must feed an untrusted ticket body through exactly one
+# `-- "$(cat "$body_file")"` substitution — never by interpolating it
+# straight into a quoted shell string, the way a naive `"<ticket body
+# verbatim>"` placeholder invites (a Codex adversarial-review pass on an
+# earlier draft of this fix flagged exactly that, at high severity).
+# `--wait`/`--background` are accepted but inert on this path — the
+# `AskUserQuestion` gate they dodge lives in the slash command's own
+# markdown, which calling the script directly bypasses entirely; the
+# script's `handleReviewCommand` never reads either flag.
+# This is a prose assertion over the two files, not a behavioral test —
+# there is no harness that runs the skills' own prose.
+# A caller's leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR/
+# GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES would point
+# show-toplevel at that caller's repo instead of this one (#620); resolving
+# via BASH_SOURCE sidesteps it entirely rather than relying on the scrub.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+skill="$here/SKILL.md"
+lane="$here/codex-lane.md"
+
+fail=0
+check() {
+  local file="$1" needle="$2"
+  local flat
+  flat="$(tr '\n' ' ' <"$file" | tr -s ' ')"
+  case "$flat" in
+    *"$needle"*) ;;
+    *)
+      echo "FAIL: $file is missing: $needle" >&2
+      fail=1
+      ;;
+  esac
+}
+check_absent() {
+  local file="$1" needle="$2"
+  local flat
+  flat="$(tr '\n' ' ' <"$file" | tr -s ' ')"
+  case "$flat" in
+    *"$needle"*)
+      echo "FAIL: $file still has the naive, unsafe form: $needle" >&2
+      fail=1
+      ;;
+    *) ;;
+  esac
+}
+
+# SKILL.md § Review: direct script invocation, not the disabled slash command.
+check "$skill" 'disable-model-invocation: true'
+check "$skill" "codex@openai-codex"
+check "$skill" 'installPath'
+check "$skill" 'body_file=<absolute path you wrote the ticket body to>'
+check "$skill" 'codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"'
+check "$skill" 'the `AskUserQuestion` gate lives there, not in the script'
+check "$skill" '`handleReviewCommand` parses `--wait`/`--background` as booleans and'
+check_absent "$skill" '"<ticket body verbatim>"'
+
+# codex-lane.md § The reviews: same requirement, both commands it names.
+check "$lane" 'disable-model-invocation: true'
+check "$lane" "codex@openai-codex"
+check "$lane" 'installPath'
+check "$lane" 'body_file=<absolute path you wrote the ticket body to>'
+check "$lane" 'codex-companion.mjs" review --wait'
+check "$lane" 'codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"'
+check_absent "$lane" '"<ticket body verbatim>"'
+
+if [ "$fail" -eq 0 ]; then
+  echo "PASS implement/codex-adversarial-invocation.test.sh"
+else
+  exit 1
+fi

@@ -117,14 +117,36 @@ No PR and no reviewer; Chris reads the log after.
 1. One full round of `/multi-axis-code-review`: standards, spec and
    correctness, all three waited for (`multi-axis-code-review/SKILL.md` § Why separate axes: it says why the
    built-in `/code-review` is not run here; `/code-review low` only when the
-   owner asks) — plus `/codex:adversarial-review --base origin/<default>`
-   on the same diff, handed the ticket body verbatim — without the ticket
-   body there is no spec check, only taste.
+   owner asks) — plus a Codex adversarial-review pass on the same diff,
+   handed the ticket body verbatim — without the ticket body there is no
+   spec check, only taste.
    This is a trial fourth axis on the Claude lane, not a replacement for the
-   three above (`codex-lane.md`'s own review step is unchanged). It never
-   blocks a build: run `codex login status` first. Not logged in, or the
-   pass errors, skip it and name the skip in the PR body — never hand Chris
-   `! codex login` mid-build.
+   three above (`codex-lane.md`'s own review step is unchanged).
+   `/codex:adversarial-review` carries `disable-model-invocation: true`
+   (#814): the SlashCommand tool never reaches it for a dispatched worker,
+   so invoke the plugin's own script instead of the slash command. Write the
+   ticket body to a file with your file-write tool — never by interpolating
+   it into a shell string, quoted or not, since a body containing `"`,
+   `` ` ``, or `$(` would then run as shell instead of reading as text — set
+   `body_file` to that file's absolute path in the same call, and feed it
+   through exactly one command substitution, which bash never re-scans for
+   further expansion:
+
+   ```
+   body_file=<absolute path you wrote the ticket body to>
+   plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
+   node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"
+   ```
+
+   Calling the script directly bypasses the slash command's own markdown
+   entirely — the `AskUserQuestion` gate lives there, not in the script:
+   `handleReviewCommand` parses `--wait`/`--background` as booleans and
+   never reads them, always running foreground. Keep `--wait` anyway to say
+   what's intended; it's a harmless no-op on this path, not what prevents
+   the ask. It never blocks a build: run `codex login status` first. Not
+   logged in, `~/.claude/plugins/installed_plugins.json` has no
+   `codex@openai-codex` entry, or the pass errors, skip it and name the
+   skip in the PR body — never hand Chris `! codex login` mid-build.
 
    Every finding in the aggregate gets exactly one disposition: fixed in a
    commit, `disputed: <why>`, or filed as a follow-up ticket. The PR body
