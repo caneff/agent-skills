@@ -55,11 +55,15 @@ so there was no second review invocation to time — not a gap in the tool.
 
 ## Reading it
 
-- **Median total, dispatch → PR up: 14.4 min** across these 15 tickets —
-  dominated by build time, not review. Review round 1 (three parallel axis
-  reviews) plus verification together run 2–10 min on a typical ticket;
-  they rarely gate the worker, which keeps building or waits concurrently
-  rather than blocking on them.
+- **Median total, dispatch → PR up: 14.4 min** across these 15 tickets.
+  Review round 1 plus verification together are a **median 40% of that
+  total** (28–77% across tickets, `review_round_1 + verification` divided
+  by `total`) — a real share of wall-clock, not a rounding error, though
+  rarely the majority. The worker session does sit and wait for the axis
+  agents rather than doing other useful work in parallel (see #817's own
+  transcript: "I'll just wait passively for the next task notification
+  instead of polling"), so this is real serial time on the critical path,
+  not overlapped-and-free.
 - The ticket's own opening estimate — "first commit → PR open at a median
   of ~8 min" — used git commit timestamps, not the transcript. Measured
   from the transcript's first Edit/Write tool call to the `gh pr create`
