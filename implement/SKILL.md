@@ -117,9 +117,20 @@ No PR and no reviewer; Chris reads the log after.
 1. One full round of `/multi-axis-code-review`: standards, spec and
    correctness, all three waited for (`multi-axis-code-review/SKILL.md` § Why separate axes: it says why the
    built-in `/code-review` is not run here; `/code-review low` only when the
-   owner asks). Every finding in the aggregate gets exactly one disposition:
-   fixed in a commit, `disputed: <why>`, or filed as a follow-up ticket.
-   The PR body lists the disputed and filed ones.
+   owner asks) — plus `/codex:adversarial-review --base origin/<default>`
+   on the same diff, handed the ticket body verbatim — without the ticket
+   body there is no spec check, only taste.
+   This is a trial fourth axis on the Claude lane, not a replacement for the
+   three above (`codex-lane.md`'s own review step is unchanged). It never
+   blocks a build: run `codex login status` first. Not logged in, or the
+   pass errors, skip it and name the skip in the PR body — never hand Chris
+   `! codex login` mid-build.
+
+   Every finding in the aggregate gets exactly one disposition: fixed in a
+   commit, `disputed: <why>`, or filed as a follow-up ticket. The PR body
+   lists the disputed and filed ones. Every Codex finding also gets one
+   class in Decisions made: `codex-only, confirmed` (fixed or filed, and no
+   Claude axis raised it), `also found by Claude`, or `disputed` (with why).
 2. One verification pass, scoped to the round-1 findings and the fix commits.
    Pass the reviewers every disputed, ruled, or other-ticket item as settled.
    A round-1 finding with no disposition is the one thing this pass fails
@@ -127,6 +138,20 @@ No PR and no reviewer; Chris reads the log after.
 
 No third pass. Commits after the verification pass are unreviewed; the PR
 body's last reviewed sha says where review stopped.
+
+**The Codex trial (heavy Claude-lane builds only).** When the pass ran,
+append one row to `docs/research/2026-09-14-codex-review-trial.md` in this
+same PR: ticket, PR, counts per class, one line per codex-only confirmed
+finding. The PR body says whether the pass ran or was skipped, either way.
+The trial ends after five heavy Claude-lane tickets that ran the pass
+(a skip does not count); count rows as they land on `<default>`, not as
+drafted, since two heavy PRs open at once will conflict on the file's tail
+and the second to merge rebases through the true count. The worker whose PR
+adds the fifth row says "codex trial complete" in "PR up"; the controller
+then brings Chris the table and a keep/drop recommendation: keep if at
+least one codex-only confirmed finding would have shipped a real bug, drop
+if it only repeated the Claude axes or raised noise. This wording stays in
+`SKILL.md` until Chris rules.
 
 ### Before the PR
 
@@ -159,7 +184,9 @@ The body has these sections and nothing else:
 - **What changed** — three lines.
 - **Tests run** — the command and its result line.
 - **Decisions made** — each with its reason, including every round-1
-  finding that was disputed (with the why) or filed (with its ticket number).
+  finding that was disputed (with the why) or filed (with its ticket number),
+  and, on a heavy Claude-lane build, either every Codex finding's class or,
+  when the pass was skipped, that it was skipped and why.
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
 
 Send the controller "PR up" with the PR URL and the last reviewed sha, plus
