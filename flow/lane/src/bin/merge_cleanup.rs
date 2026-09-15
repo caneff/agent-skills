@@ -36,7 +36,10 @@ even with --yes. Ignored files include .scratch/ and every other ignored name
 except the regenerable caches: an ignored entry named node_modules,
 __pycache__, target, .venv, .pytest_cache, .ruff_cache or .mypy_cache, or
 inside one whose own .gitignore is `*`, never refuses — it is removed with the
-worktree, and the count and first names are printed. The list is fixed on purpose: an unknown ignored name is kept, since
+worktree, and its count and first names are printed as cache file(s), distinct
+from the ignored file(s) count above: the two never share a label, so a name
+Chris approved losing under one count is never misread as counted by the
+other. The list is fixed on purpose: an unknown ignored name is kept, since
 a wrongly kept cache costs a --discard and a discarded note cannot be undone.
 
 Every local branch delete first records the tip under
@@ -248,6 +251,15 @@ fn is_cache(wt: &str, entry: &str) -> bool {
     })
 }
 
+/// An ignored directory entry (git collapses a directly-ignored directory to
+/// its own name, whether or not anything is inside it — #823) that holds
+/// nothing on disk: the Codex adversarial-review pass leaves `.scratch/`
+/// this way after removing its two files. Nothing to lose, so it never
+/// refuses removal and is not counted.
+fn is_empty_dir(wt: &str, entry: &str) -> bool {
+    entry.ends_with('/') && std::fs::read_dir(Path::new(wt).join(entry.trim_end_matches('/'))).is_ok_and(|mut d| d.next().is_none())
+}
+
 /// `dir/.gitignore` has a `*` line: the tool that made `dir` ignores it whole.
 fn ignores_all(dir: &Path) -> bool {
     std::fs::read_to_string(dir.join(".gitignore")).is_ok_and(|s| s.lines().any(|l| l.trim() == "*"))
@@ -270,6 +282,7 @@ impl WorktreeFiles {
             let (code, name) = (&line[..2], line[3..].to_string());
             match code {
                 "??" => files.untracked.push(name),
+                "!!" if is_empty_dir(wt, &name) => {}
                 "!!" if is_cache(wt, &name) => files.caches.push(name),
                 "!!" => files.ignored.push(name),
                 _ => files.modified.push(name),
@@ -419,7 +432,7 @@ impl Cleanup {
         }
         if !files.caches.is_empty() {
             let would = if self.dry { "would discard" } else { "discarding" };
-            safe_println!("{would} {} ignored file(s) in {wt}: {}", files.caches.len(), first_names(&files.caches));
+            safe_println!("{would} {} cache file(s) in {wt}: {}", files.caches.len(), first_names(&files.caches));
         }
         true
     }
