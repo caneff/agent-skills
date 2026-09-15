@@ -202,6 +202,7 @@
   "disableAgentView": true,
   "disableRemoteControl": true,
   "disableWorkflows": false,
+  "bashEditDiffEnabled": false,
   "statusLine": {
     "type": "command",
     "command": "python3 /home/caneff/.agents/skills/flow/ccstatusline-table/table-statusline.py",
@@ -238,7 +239,6 @@
     }
   },
   "autoMemoryEnabled": false,
-  "bashEditDiffEnabled": false,
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
   "theme": "dark-ansi",
