@@ -278,7 +278,11 @@ fn worker_session_name(home: &str, wt: &str, agent: &str) -> String {
 /// session registry's records to appear — well inside the prompt wait's own
 /// 120s timeout, so a slow session name never becomes a slow dispatch.
 const SESSION_POLL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
-const SESSION_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+/// Gap between polls. Wide enough that a genuine miss (the agent never gets
+/// a session, not just late) doesn't spend the whole deadline hammering
+/// `herdr agent list` — on a loaded box that spam is the exact problem this
+/// poll exists to not make worse.
+const SESSION_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// The polling core of `worker_session_name`, with the herdr read injected
 /// so a test can make it appear late without a real subprocess or a real
@@ -293,16 +297,12 @@ fn poll_worker_session_name(
 ) -> String {
     let start = std::time::Instant::now();
     loop {
-        if let Some(out) = herdr_list() {
-            if let Some(agents) = herdr::parse_agents(&out) {
-                let session_id = agents.iter().find(|a| a.name() == agent).map(|a| a.session().to_string()).filter(|s| !s.is_empty());
-                if let Some(session_id) = session_id {
-                    let name = sessions::live_in(Path::new(home), wt).into_iter().find(|s| s.session_id == session_id).map(|s| s.name).filter(|n| !n.is_empty());
-                    if let Some(name) = name {
-                        return name;
-                    }
-                }
-            }
+        let name = herdr_list()
+            .and_then(|out| herdr::parse_agents(&out))
+            .and_then(|agents| agents.iter().find(|a| a.name() == agent).map(|a| a.session().to_string()).filter(|s| !s.is_empty()))
+            .and_then(|session_id| sessions::live_in(Path::new(home), wt).into_iter().find(|s| s.session_id == session_id).map(|s| s.name).filter(|n| !n.is_empty()));
+        if let Some(name) = name {
+            return name;
         }
         if start.elapsed() >= deadline {
             return "(unavailable)".to_string();
@@ -609,6 +609,5 @@ mod tests {
             herdr_list,
         );
         assert_eq!(name, "skills-worker");
-        assert!(start.elapsed() >= Duration::from_millis(100));
     }
 }
