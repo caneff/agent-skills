@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Guards #814: `/codex:adversarial-review` (and, in the Codex lane,
+# Guards #814/#817: `/codex:adversarial-review` (and, in the Codex lane,
 # `/codex:review`) carry `disable-model-invocation: true`, so the
-# SlashCommand tool never reaches them for a dispatched, unattended worker —
+# SlashCommand tool never reaches them for a dispatched, unattended session —
 # only a human typing the literal command in an interactive session runs
-# them. Both SKILL.md and codex-lane.md must instead instruct the worker to
+# them. #817 moved the adversarial-review invocation in SKILL.md from the
+# worker's round-1 review to the controller's § The merge step 3 (the
+# Codex-lane's own invocation in codex-lane.md, run by the worker, is
+# unchanged and out of #817's scope); wherever it runs, the caller must
 # invoke the plugin's own companion script directly via Bash, resolving its
 # installPath from ~/.claude/plugins/installed_plugins.json rather than
 # assuming CLAUDE_PLUGIN_ROOT is set outside a slash-command's own execution
@@ -53,7 +56,9 @@ check_absent() {
   esac
 }
 
-# SKILL.md § Review: direct script invocation, not the disabled slash command.
+# SKILL.md § The merge step 3 (controller, not the worker's § Review):
+# direct script invocation, not the disabled slash command.
+check "$skill" '**Codex adversarial-review pass (#812 trial) — heavy Claude-lane PRs'
 check "$skill" 'disable-model-invocation: true'
 check "$skill" "codex@openai-codex"
 check "$skill" 'installPath'

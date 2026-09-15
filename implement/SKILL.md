@@ -117,42 +117,11 @@ No PR and no reviewer; Chris reads the log after.
 1. One full round of `/multi-axis-code-review`: standards, spec and
    correctness, all three waited for (`multi-axis-code-review/SKILL.md` § Why separate axes: it says why the
    built-in `/code-review` is not run here; `/code-review low` only when the
-   owner asks) — plus a Codex adversarial-review pass on the same diff,
-   handed the ticket body verbatim — without the ticket body there is no
-   spec check, only taste.
-   This is a trial fourth axis on the Claude lane, not a replacement for the
-   three above (`codex-lane.md`'s own review step is unchanged).
-   `/codex:adversarial-review` carries `disable-model-invocation: true`
-   (#814): the SlashCommand tool never reaches it for a dispatched worker,
-   so invoke the plugin's own script instead of the slash command. Write the
-   ticket body to a file with your file-write tool — never by interpolating
-   it into a shell string, quoted or not, since a body containing `"`,
-   `` ` ``, or `$(` would then run as shell instead of reading as text — set
-   `body_file` to that file's absolute path in the same call, and feed it
-   through exactly one command substitution, which bash never re-scans for
-   further expansion:
+   owner asks).
 
-   ```
-   body_file=<absolute path you wrote the ticket body to>
-   plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
-   node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"
-   ```
-
-   Calling the script directly bypasses the slash command's own markdown
-   entirely — the `AskUserQuestion` gate lives there, not in the script:
-   `handleReviewCommand` parses `--wait`/`--background` as booleans and
-   never reads them, always running foreground. Keep `--wait` anyway to say
-   what's intended; it's a harmless no-op on this path, not what prevents
-   the ask. It never blocks a build: run `codex login status` first. Not
-   logged in, `~/.claude/plugins/installed_plugins.json` has no
-   `codex@openai-codex` entry, or the pass errors, skip it and name the
-   skip in the PR body — never hand Chris `! codex login` mid-build.
-
-   Every finding in the aggregate gets exactly one disposition: fixed in a
-   commit, `disputed: <why>`, or filed as a follow-up ticket. The PR body
-   lists the disputed and filed ones. Every Codex finding also gets one
-   class in Decisions made: `codex-only, confirmed` (fixed or filed, and no
-   Claude axis raised it), `also found by Claude`, or `disputed` (with why).
+   Every finding gets exactly one disposition: fixed in a commit,
+   `disputed: <why>`, or filed as a follow-up ticket. The PR body lists the
+   disputed and filed ones.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
    Pass the reviewers every disputed, ruled, or other-ticket item as settled.
    A round-1 finding with no disposition is the one thing this pass fails
@@ -161,19 +130,8 @@ No PR and no reviewer; Chris reads the log after.
 No third pass. Commits after the verification pass are unreviewed; the PR
 body's last reviewed sha says where review stopped.
 
-**The Codex trial (heavy Claude-lane builds only).** When the pass ran,
-append one row to `docs/research/2026-09-14-codex-review-trial.md` in this
-same PR: ticket, PR, counts per class, one line per codex-only confirmed
-finding. The PR body says whether the pass ran or was skipped, either way.
-The trial ends after five heavy Claude-lane tickets that ran the pass
-(a skip does not count); count rows as they land on `<default>`, not as
-drafted, since two heavy PRs open at once will conflict on the file's tail
-and the second to merge rebases through the true count. The worker whose PR
-adds the fifth row says "codex trial complete" in "PR up"; the controller
-then brings Chris the table and a keep/drop recommendation: keep if at
-least one codex-only confirmed finding would have shipped a real bug, drop
-if it only repeated the Claude axes or raised noise. This wording stays in
-`SKILL.md` until Chris rules.
+The Codex adversarial-review trial (#812) runs from the controller, at merge
+time, not from the worker: § The merge.
 
 ### Before the PR
 
@@ -206,9 +164,7 @@ The body has these sections and nothing else:
 - **What changed** — three lines.
 - **Tests run** — the command and its result line.
 - **Decisions made** — each with its reason, including every round-1
-  finding that was disputed (with the why) or filed (with its ticket number),
-  and, on a heavy Claude-lane build, either every Codex finding's class or,
-  when the pass was skipped, that it was skipped and why.
+  finding that was disputed (with the why) or filed (with its ticket number).
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
 
 Send the controller "PR up" with the PR URL and the last reviewed sha, plus
@@ -235,7 +191,59 @@ The controller merges on a repo Chris owns; Chris reads it after via
    disagreement.
 2. **The PR is still not-draft and CLEAN** — the same check as § Before the
    PR: step 4, rerun because `main` may have moved since "PR up".
-3. Merge:
+3. **Codex adversarial-review pass (#812 trial) — heavy Claude-lane PRs
+   only.** Not heavy, not Claude-lane (a Codex-lane build's own review step
+   is `codex-lane.md`'s, unchanged), skip to step 4.
+
+   Run `codex login status` first. Not logged in, no `codex@openai-codex`
+   entry in `~/.claude/plugins/installed_plugins.json`, or the pass errors:
+   comment `Codex pass skipped: <why>` on the PR and go to step 4 — a skip
+   adds no trial row.
+
+   Otherwise, from this PR's workspace, write the ticket body to a file
+   with your file-write tool — never by interpolating it into a shell
+   string, quoted or not, since a body containing `"`, `` ` ``, or `$(`
+   would then run as shell instead of reading as text — and invoke the
+   plugin's own script directly. `/codex:adversarial-review` carries
+   `disable-model-invocation: true`, so the SlashCommand tool never reaches
+   it here: calling the script directly bypasses the slash command's own
+   markdown entirely — the `AskUserQuestion` gate lives there, not in the
+   script; `handleReviewCommand` parses `--wait`/`--background` as booleans
+   and never reads them, always running foreground. Keep `--wait` anyway to
+   say what's intended; it's a harmless no-op on this path.
+
+   ```
+   body_file=<absolute path you wrote the ticket body to>
+   plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
+   node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"
+   ```
+
+   Write the raw output to this workspace's git-ignored `.scratch/`, never
+   `/tmp`, then post it as a PR comment before acting on it:
+   `gh pr comment <pr> --repo <owner/name> --body-file <file>`.
+
+   No material findings → go to step 4. Findings → hold the merge: send the
+   worker the findings and the comment URL. The worker disposes of each one
+   (fixed in a commit / `disputed: <why>` / filed) and sends "PR up" again;
+   re-run this pass once on the fixes — there is no third Codex run. Give
+   the second run's findings dispositions in the PR body, then go to
+   step 4.
+
+   Once the merge lands (step 4, or Chris's own merge under the
+   `ready-for-human` exception below), classify each finding by comparing
+   it with the PR body's round-1 findings — `codex-only, confirmed` (fixed
+   or filed, and no Claude axis raised it), `also found by Claude`, or
+   `disputed` (with why) — and append one row to
+   `docs/research/2026-09-14-codex-review-trial.md`: ticket, PR, counts per
+   class, one line per codex-only confirmed finding. This row is an
+   auto-ship commit on `<default>` (docs/research is not code). Count rows
+   as they land, not as drafted — two heavy PRs open at once will conflict
+   on the file's tail, and the second to merge rebases through the true
+   count. After the controller's own row brings the count to five, bring
+   Chris the table and a keep/drop recommendation: keep if at least one
+   codex-only confirmed finding would have shipped a real bug, drop if the
+   pass only repeated the Claude axes or raised noise.
+4. Merge:
 
    ```
    gh pr merge <pr> --repo <owner/name> --squash
@@ -244,7 +252,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    No `--delete-branch`: git refuses to delete a branch a worktree has
    checked out, and the merge fails on it; `merge-cleanup` removes the
    workspace and deletes the branch after.
-4. **Wait for the worker to go idle** (`SendMessage` with
+5. **Wait for the worker to go idle** (`SendMessage` with
    `notify_when_idle: true`), then clean up from the primary checkout:
 
    ```
@@ -253,17 +261,18 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
    Its live-session guard refuses a worker still `working`; an idle one it
    stops itself.
-5. **`gh issue view <n> --repo <owner/name>` shows each `Closes` issue
+6. **`gh issue view <n> --repo <owner/name>` shows each `Closes` issue
    closed** — a squash or rebase can rewrite the commit so the trailer never
    fires.
-6. Report "merged, sha X" to Chris, X being the squash commit on the default
+7. Report "merged, sha X" to Chris, X being the squash commit on the default
    branch (`gh pr view <pr> --repo <owner/name> --json mergeCommit`).
 
 **The one exception: a `ready-for-human` ticket** ("Chris merges"). Nothing
-merges automatically. After step 2, hand Chris the merge line and the cleanup
-line, each with the `! ` prefix and paths expanded, and stop; Chris merges,
-cleans up, and the `Closes` check is his. Why: Chris marked that work for his own
-hands, so he sees it before it lands.
+merges automatically. After step 3 (the Codex pass, if this PR is heavy
+Claude-lane), hand Chris the merge line and the cleanup line, each with the
+`! ` prefix and paths expanded, and stop; Chris merges, cleans up, and the
+`Closes` check is his. Why: Chris marked that work for his own hands, so he
+sees it before it lands.
 
 ## Someone else's repo
 
