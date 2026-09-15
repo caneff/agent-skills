@@ -1185,6 +1185,46 @@ fn scratch_alongside_many_caches_is_never_elided_behind_the_cache_count() {
 }
 
 #[test]
+fn scratch_is_never_elided_behind_bulk_modified_and_untracked_names() {
+    // #838: dirty_text's own name list chained modified, untracked, then
+    // ignored, so 5+ modified/untracked names filled first_names' NAMES_SHOWN
+    // and .scratch/ (the scarcest, least-recoverable class) fell into "and N
+    // more" with nothing else naming it. Ignored goes first in the chain, so
+    // it always shows regardless of how many modified/untracked names follow.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r32", "implement-32");
+    ignored_dirs(&r, &wt, &[".scratch"]);
+    dirty(&wt, "modified"); // "f", already tracked in the fixture
+    for name in ["a", "b", "c", "d"] {
+        std::fs::write(wt.join(name), "unsaved\n").unwrap();
+    }
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — 1 modified, 4 untracked, 1 ignored file(s) would be lost: .scratch/, f, a, b, c, d (--discard overrides)",
+        wt.display()
+    );
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+}
+
+#[test]
+fn six_or_more_ignored_names_are_all_shown_none_elided() {
+    // Codex adversarial review on PR #847: dirty_text still fed every ignored
+    // name into the same NAMES_SHOWN-capped list, so six or more non-cache
+    // ignored entries could still push one — .scratch/ included — into "and N
+    // more". Non-cache ignored is exactly what --discard destroys unseen, so
+    // none of it may be capped; only modified/untracked names are.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r33", "implement-33");
+    ignored_dirs(&r, &wt, &[".scratch", "z1", "z2", "z3", "z4", "z5"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — 6 ignored file(s) would be lost: .scratch/, z1/, z2/, z3/, z4/, z5/ (--discard overrides)",
+        wt.display()
+    );
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+}
+
+#[test]
 fn an_empty_ignored_directory_still_refuses_without_discard() {
     // #823, reversed by the Codex adversarial-review pass on PR #839: a
     // process can fill the directory between the read and the removal, and
