@@ -994,18 +994,24 @@ fn scratch_alongside_many_caches_is_never_elided_behind_the_cache_count() {
 }
 
 #[test]
-fn an_empty_ignored_directory_holds_nothing_to_lose_and_does_not_refuse() {
-    // Controller scope addition on #823: the Codex adversarial-review pass
-    // (§ The merge step 3) creates .scratch/ for its two files and removes
-    // only the files, leaving an empty ignored directory that held nothing
-    // by the time cleanup ran.
+fn an_empty_ignored_directory_still_refuses_without_discard() {
+    // #823, reversed by the Codex adversarial-review pass on PR #839: a
+    // process can fill the directory between the read and the removal, and
+    // an empty directory can be intentional, so emptiness earns no
+    // exemption. Cleanup owes nothing here that the caller can't already
+    // get with --discard. Fixing the actual source (the Codex pass leaving
+    // .scratch/ empty) belongs in implement/SKILL.md's own step, not here.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r32", "implement-32");
     std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
     std::fs::create_dir(wt.join(".scratch")).unwrap();
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: .scratch/ (--discard overrides)", wt.display());
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+    assert!(wt.join(".scratch").is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
     assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
-    assert!(!run.has("would be lost"), "{}", run.text());
 }
 
 #[test]

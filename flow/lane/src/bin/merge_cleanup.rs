@@ -251,15 +251,6 @@ fn is_cache(wt: &str, entry: &str) -> bool {
     })
 }
 
-/// An ignored directory entry (git collapses a directly-ignored directory to
-/// its own name, whether or not anything is inside it — #823) that holds
-/// nothing on disk: the Codex adversarial-review pass leaves `.scratch/`
-/// this way after removing its two files. Nothing to lose, so it never
-/// refuses removal and is not counted.
-fn is_empty_dir(wt: &str, entry: &str) -> bool {
-    entry.ends_with('/') && std::fs::read_dir(Path::new(wt).join(entry.trim_end_matches('/'))).is_ok_and(|mut d| d.next().is_none())
-}
-
 /// `dir/.gitignore` has a `*` line: the tool that made `dir` ignores it whole.
 fn ignores_all(dir: &Path) -> bool {
     std::fs::read_to_string(dir.join(".gitignore")).is_ok_and(|s| s.lines().any(|l| l.trim() == "*"))
@@ -282,7 +273,6 @@ impl WorktreeFiles {
             let (code, name) = (&line[..2], line[3..].to_string());
             match code {
                 "??" => files.untracked.push(name),
-                "!!" if is_empty_dir(wt, &name) => {}
                 "!!" if is_cache(wt, &name) => files.caches.push(name),
                 "!!" => files.ignored.push(name),
                 _ => files.modified.push(name),
@@ -416,11 +406,14 @@ impl Cleanup {
     /// The uncommitted-files guard (#736). `git worktree remove --force`
     /// discards everything git does not hold, so modified, untracked or
     /// ignored files refuse the removal unless --discard — `.scratch/`
-    /// included (#801), unless it is empty on disk (#823). Caches
-    /// (`is_cache`) never refuse; their count and first names are printed as
-    /// "cache file(s)", since they go too — a label distinct from the
-    /// non-cache "ignored file(s)" refusal above (#823), so a name approved
-    /// for loss in one line is never misread as belonging to the other's.
+    /// included (#801), empty or not: a process can fill it between the read
+    /// and the removal, and an empty directory can be intentional, so
+    /// emptiness earns no exemption (#823, reversed by a Codex pass on the
+    /// PR). Caches (`is_cache`) never refuse; their count and first names
+    /// are printed as "cache file(s)", since they go too — a label distinct
+    /// from the non-cache "ignored file(s)" refusal above (#823), so a name
+    /// approved for loss in one line is never misread as belonging to the
+    /// other's.
     fn guard_files(&self, wt: &str) -> bool {
         let Some(files) = WorktreeFiles::read(wt) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there");
