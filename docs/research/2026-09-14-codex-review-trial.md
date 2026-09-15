@@ -17,3 +17,4 @@ drop if the pass only repeated the Claude axes or raised noise.
 
 | Ticket | PR | codex-only, confirmed | also found by Claude | disputed | codex-only confirmed findings |
 |---|---|---|---|---|---|
+| #814 | #816 | 1 | 2 | 1 | Documented worker invocation interpolated the ticket body directly into a double-quoted shell string (`"<ticket body verbatim>"`), so a body containing `"`, backticks, or `$(` would run as shell instead of reading as text. |

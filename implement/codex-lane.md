@@ -58,6 +58,19 @@ quota. In this lane they swap for:
 2. `/codex:adversarial-review` — the skeptical pass. Hand it the ticket body
    again; without it there is no spec axis, only taste.
 
+   Both carry `disable-model-invocation: true` (#814): the SlashCommand tool
+   never reaches either for a dispatched worker. Invoke the plugin's own
+   script instead of the slash command, for each — same commands, and the
+   same injection-safety and `--wait` rationale, as `implement/SKILL.md`'s
+   Review step:
+
+   ```
+   body_file=<absolute path you wrote the ticket body to>
+   plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
+   node "$plugin_root/scripts/codex-companion.mjs" review --wait --base origin/<default>
+   node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"
+   ```
+
 The one-round-plus-verification cap and the pre-report gate in
 `implement/SKILL.md` § Review and § Before the PR: both bind unchanged. So does the
 disclosure: the PR body names the reviews that actually ran and says the diff

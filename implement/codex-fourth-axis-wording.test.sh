@@ -29,13 +29,13 @@ check() {
 }
 
 # Rule 1: fourth axis, not a replacement.
-check 'plus `/codex:adversarial-review --base origin/<default>` on the same diff, handed the ticket body verbatim'
+check 'plus a Codex adversarial-review pass on the same diff, handed the ticket body verbatim'
 check 'without the ticket body there is no spec check, only taste'
 check 'not a replacement for the three above'
 
 # Rule 2: never blocks a build.
 check 'run `codex login status` first'
-check 'Not logged in, or the pass errors, skip it and name the skip in the PR body'
+check 'or the pass errors, skip it and name the skip in the PR body'
 check 'never hand Chris `! codex login` mid-build'
 
 # Rule 3: finding log and classification.
