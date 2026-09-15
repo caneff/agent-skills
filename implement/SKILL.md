@@ -120,8 +120,15 @@ No PR and no reviewer; Chris reads the log after.
    owner asks).
 
    Every finding gets exactly one disposition: fixed in a commit,
-   `disputed: <why>`, or filed as a follow-up ticket. The PR body lists the
-   disputed and filed ones.
+   `disputed: <why>`, or filed as a follow-up ticket. On a heavy
+   Claude-lane build, the PR body lists **every** round-1 finding with its
+   disposition (fixed, with the fixing commit's sha; `disputed: <why>`; or
+   filed, with its ticket number) — not only the disputed and filed ones. A
+   fixed finding that's allowed to vanish from the record is one the § The
+   merge step 3 Codex pass can't tell from a Codex-only one, so it can
+   misclassify a real Claude catch as `codex-only, confirmed` and corrupt
+   the trial's evidence. On any other build, the PR body lists the disputed
+   and filed ones.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
    Pass the reviewers every disputed, ruled, or other-ticket item as settled.
    A round-1 finding with no disposition is the one thing this pass fails
@@ -163,8 +170,12 @@ The body has these sections and nothing else:
 
 - **What changed** — three lines.
 - **Tests run** — the command and its result line.
-- **Decisions made** — each with its reason, including every round-1
-  finding that was disputed (with the why) or filed (with its ticket number).
+- **Decisions made** — each with its reason. On a heavy Claude-lane build,
+  every round-1 finding, each with its disposition (fixed, with the sha;
+  disputed, with the why; or filed, with its ticket number) — § The merge
+  step 3's Codex classification reads this list. On any other build, every
+  round-1 finding that was disputed (with the why) or filed (with its
+  ticket number).
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
 
 Send the controller "PR up" with the PR URL and the last reviewed sha, plus
@@ -218,13 +229,16 @@ The controller merges on a repo Chris owns; Chris reads it after via
    ```
    git fetch origin
    body_file=<absolute path you wrote the ticket body to>
+   out_file=<this workspace's absolute path>/.scratch/codex-adversarial-<pr>.out
    plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
-   node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"
+   node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1
    ```
 
-   Write the raw output to this workspace's git-ignored `.scratch/`, never
-   `/tmp`, then post it as a PR comment before acting on it:
-   `gh pr comment <pr> --repo <owner/name> --body-file <file>`.
+   `out_file` is the pass's only durable record — the command's own output
+   goes to stdout otherwise, and nothing captures it. It must resolve under
+   this workspace's git-ignored `.scratch/`, never `/tmp`. Post it as a PR
+   comment before acting on it, using that same file:
+   `gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`.
 
    No material findings → go to step 4. Findings → hold the merge: send the
    worker the findings and the comment URL. The worker disposes of each one

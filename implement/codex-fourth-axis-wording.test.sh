@@ -27,8 +27,10 @@ skill="$here/SKILL.md"
 flatten() { tr '\n' ' ' | tr -s ' '; }
 
 review_section="$(sed -n '/^### Review$/,/^### Before the PR$/p' "$skill" | flatten)"
+pr_section="$(sed -n '/^### The PR$/,/^### The merge$/p' "$skill" | flatten)"
 merge_section="$(sed -n '/^### The merge$/,/^## Someone else/p' "$skill" | flatten)"
 [ -n "$review_section" ] || { echo "FAIL: could not extract § Review from implement/SKILL.md" >&2; exit 1; }
+[ -n "$pr_section" ] || { echo "FAIL: could not extract § The PR from implement/SKILL.md" >&2; exit 1; }
 [ -n "$merge_section" ] || { echo "FAIL: could not extract § The merge from implement/SKILL.md" >&2; exit 1; }
 
 fail=0
@@ -58,8 +60,7 @@ check_absent_in() {
 # points at § The merge instead of restating any of it.
 check_absent_in "$review_section" 'Codex adversarial-review pass on the same diff' '§ Review'
 check_absent_in "$review_section" 'trial fourth axis' '§ Review'
-check_absent_in "$review_section" 'codex-only, confirmed' '§ Review'
-check_absent_in "$review_section" 'also found by Claude' '§ Review'
+check_absent_in "$review_section" 'confirmed` (fixed or filed, and no Claude axis raised it), `also found by Claude`, or `disputed`' '§ Review'
 check_in "$review_section" 'The Codex adversarial-review trial (#812) runs from the controller, at merge'
 
 # Rule 1: the controller step lives in § The merge, heavy Claude-lane PRs
@@ -73,9 +74,9 @@ check_in "$merge_section" 'comment `Codex pass skipped: <why>` on the PR'
 check_in "$merge_section" 'a skip adds no trial row'
 
 # Rule 3: raw output is a PR comment, posted before acting on it, never /tmp.
-check_in "$merge_section" "this workspace's git-ignored \`.scratch/\`, never"
-check_in "$merge_section" 'then post it as a PR comment before acting on it'
-check_in "$merge_section" '`gh pr comment <pr> --repo <owner/name> --body-file <file>`'
+check_in "$merge_section" "must resolve under this workspace's git-ignored \`.scratch/\`, never"
+check_in "$merge_section" '/tmp`. Post it as a PR comment before acting on it'
+check_in "$merge_section" '`gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`'
 
 # Rule 4: findings hold the merge; the worker disposes of them and records
 # the dispositions itself; the CLEAN check reruns; one re-run only, and
@@ -101,6 +102,21 @@ check_in "$merge_section" "doesn't stop with the hand-off"
 check_in "$merge_section" "After the controller's own row brings the count to five, bring"
 check_in "$merge_section" 'Chris the table and a keep/drop recommendation'
 check_absent_in "$review_section" '"codex trial complete" in "PR up"' '§ Review'
+
+# Rule 7 (a controller Codex pass on PR #818 found this): the PR body must
+# carry every round-1 finding with its disposition, fixed ones included —
+# not just disputed/filed — or the controller's classification can't tell a
+# fixed Claude finding from a Codex-only one and misclassifies it.
+check_in "$review_section" 'the PR body lists **every** round-1 finding with its'
+check_in "$review_section" 'fixed, with the fixing commit'
+check_in "$pr_section" 'every round-1 finding, each with its disposition'
+
+# Rule 8 (same Codex pass): the raw output needs a bound, captured file —
+# not bare stdout — or there is nothing to post as the PR comment.
+check_in "$merge_section" 'out_file=<this workspace'
+check_in "$merge_section" '.scratch/codex-adversarial-<pr>.out'
+check_in "$merge_section" 'adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1'
+check_in "$merge_section" "the pass's only durable record"
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS implement/codex-fourth-axis-wording.test.sh"
