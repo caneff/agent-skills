@@ -10,6 +10,9 @@ pub struct LiveSession {
     pub pid: String,
     /// The Claude sessionId, empty when the file has none.
     pub session_id: String,
+    /// The Claude session name (`~/.claude/sessions/<pid>.json`'s `name`),
+    /// empty when the file has none.
+    pub name: String,
 }
 
 /// Whether `path` is `root` or inside it.
@@ -42,7 +45,8 @@ pub fn live_in(home: &Path, worktree: &str) -> Vec<LiveSession> {
         let alive = pid.parse::<i32>().is_ok_and(|p| p > 0 && read_stat(p).is_some());
         if !pid.is_empty() && in_tree(cwd, worktree) && alive {
             let session_id = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
-            live.push(LiveSession { pid, session_id });
+            let name = v.get("name").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            live.push(LiveSession { pid, session_id, name });
         }
     }
     live

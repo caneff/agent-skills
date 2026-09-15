@@ -281,6 +281,41 @@ fn the_report_names_path_branch_agent_and_the_cleanup_line() {
     assert!(text.contains(&format!("cd {} && merge-cleanup implement-395 --repo {}", repo.display(), repo.display())), "{text}");
 }
 
+// --- #819: the report also names the worker's Claude session -------------
+
+#[test]
+fn the_report_names_the_workers_claude_session_beside_the_herdr_agent() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let wt = repo.join(".claude/worktrees/implement-395");
+    // A live worker session already registered in the new worktree, the way
+    // Claude Code's own session file lands there once the worker starts.
+    let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+    std::fs::write(
+        f.home().join(".claude/sessions").join(format!("{}.json", child.id())),
+        format!(r#"{{"pid":{},"cwd":"{}","name":"implement-395-42"}}"#, child.id(), wt.display()),
+    )
+    .unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(out.status.success(), "{}", out_text(&out));
+    let text = out_text(&out);
+    assert!(text.contains("agent:    sudokumaker-custom-constrain-395"), "{text}");
+    assert!(text.contains("session:  implement-395-42"), "{text}");
+}
+
+#[test]
+fn no_matching_worker_session_reports_not_found_instead_of_failing() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(out_text(&out).contains("session:  (not found)"), "{}", out_text(&out));
+}
+
 #[test]
 fn model_reaches_agent_start_and_pane_falls_back_to_pane_list() {
     let f = Fixture::new();

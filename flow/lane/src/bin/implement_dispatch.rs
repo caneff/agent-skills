@@ -509,10 +509,20 @@ fn run() -> Result<(), ExitCode> {
         None,
     )?;
 
+    // The worker's own Claude session name, read the same way the
+    // --controller fallback reads a session's name: the registry file whose
+    // cwd is in this worktree and whose pid is alive.
+    let session = sessions::live_in(Path::new(&home), wt.to_str().unwrap_or(""))
+        .into_iter()
+        .find(|s| !s.name.is_empty())
+        .map(|s| s.name)
+        .unwrap_or_else(|| "(not found)".to_string());
+
     safe_println!("dispatched #{n} ({model}, {described}, controller {controller})");
     safe_println!("worktree: {}", wt.display());
     safe_println!("branch:   {branch}");
     safe_println!("agent:    {agent}");
+    safe_println!("session:  {session}");
     safe_println!("cleanup:  cd {primary} && merge-cleanup {branch} --repo {primary}");
     Ok(())
 }
