@@ -82,6 +82,11 @@ if [ -L "$tmp/home/.claude/hooks/wrap-background-jobs.sh" ]; then
 else
   echo "FAIL claude/hooks/wrap-background-jobs.sh not linked under the scratch HOME"; fails=1
 fi
+if [ -L "$tmp/home/.claude/hooks/worker-stop-alert.sh" ]; then
+  echo "PASS the worker-stop alert hook linked under the scratch HOME"
+else
+  echo "FAIL claude/hooks/worker-stop-alert.sh not linked under the scratch HOME"; fails=1
+fi
 # Re-running changes nothing: the second install leaves the same symlink, not a
 # .pre-flow backup of the first one's.
 HOME="$tmp/home" bash "$repo/flow/install.sh" >/dev/null 2>&1

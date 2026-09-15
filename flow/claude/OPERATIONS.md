@@ -88,6 +88,14 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   send it `SendMessage` with `notify_when_idle: true`. Why: polling loops
   and "are you done?" messages cost turns and interrupt the worker; measured
   on the socket fan-in prototype (#778).
+- A worker that stops without a successful `SendMessage` to its controller
+  since its last prompt still wakes the controller: the `Stop` hook
+  `worker-stop-alert.sh` types one line into the controller's herdr pane,
+  `worker #<n> stopped without reporting to <controller> (herdr agent
+  <name>)`. Read that agent's pane (`herdr agent read <name>`) for the report
+  it never sent. An alert that could not be delivered is a `not-sent` line in
+  `~/.claude/worker-stop-alerts.log`. Why: in the #781 trial two workers
+  finished without reporting and the run stalled ~4 h unseen (#820).
 - Long-running job: run it under `job-run --name <n> -- <cmd>` — output and
   exit survive a kill, and `job-run --status <n>` answers alive / finished /
   killed. Why: a plain background run loses its output and exit code when
