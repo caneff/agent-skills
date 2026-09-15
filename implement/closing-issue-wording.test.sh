@@ -38,6 +38,16 @@ check_in() {
       ;;
   esac
 }
+check_absent_in() {
+  local section="$1" needle="$2" where="$3"
+  case "$section" in
+    *"$needle"*)
+      echo "FAIL: implement/SKILL.md's $where still has: $needle" >&2
+      fail=1
+      ;;
+    *) ;;
+  esac
+}
 
 # Rule 1: step 5 checks closingIssuesReferences, before "PR up" goes out,
 # folded into the existing isDraft/mergeStateStatus gate rather than a
@@ -71,6 +81,13 @@ check_in "$pr_section" 'a bare line, not inside backticks or a code fence'
 # a belt-and-braces check since main can move between "PR up" and merge.
 check_in "$merge_section" 'closes what it should'
 check_in "$merge_section" 'a PR that closes nothing does not merge'
+
+# Rule 6 (#835): "each in this repo" (an entry pointing elsewhere doesn't
+# count) and a cross-repo remedy ("a cross-repo ticket needs `Closes
+# owner/repo#<n>`") can't both hold — implement-dispatch only claims
+# same-repo tickets, so a cross-repo closer can never pass rule 1's repo
+# check. The remedy must not come back into § Before the PR.
+check_absent_in "$before_pr_section" 'a cross-repo ticket needs' '§ Before the PR'
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS implement/closing-issue-wording.test.sh"
