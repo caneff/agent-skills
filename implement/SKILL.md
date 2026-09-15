@@ -275,11 +275,11 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
    `out_file` is the pass's only durable record — the command's own output
    goes to stdout otherwise, and nothing captures it. It must resolve under
-   this workspace's git-ignored `.scratch/`, never `/tmp`; the `mkdir -p`
-   above is required because the worker's own Before the PR step already
-   deleted this directory. Post it as a PR
+   this workspace's git-ignored `.scratch/`, never `/tmp`. Post it as a PR
    comment before acting on it, using that same file:
-   `gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`.
+   `gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`. The
+   `mkdir -p` above is required because the worker's own Before the PR step
+   already deleted this directory.
 
    Once that comment posts, `rm "$out_file" "$body_file"` — the comment is
    now the durable record and the ticket body lives on the issue, so
