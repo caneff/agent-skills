@@ -103,6 +103,13 @@ while IFS= read -r segment; do
   fi
 done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g')
 
+# GitHub owners are case-insensitive: `CANEFF/x` and `caneff/x` name the same
+# account, so every owner-vs-login compare lowercases both sides first. `tr`
+# over bash's `${,,}`: GitHub logins are ASCII, and `${,,}` folds by locale
+# (a Turkish locale maps `I` to dotless `ı`, not `i`), which could turn a
+# same-account match into a false block.
+ieq() { [ "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$2" | tr 'A-Z' 'a-z')" ]; }
+
 # --- Ownership of this repo, cached. ---
 # Verdict is keyed on the repo's toplevel path. Only the OWNED verdict is
 # cached: it's the hot path (allow), so caching it keeps `gh` off every
@@ -133,7 +140,7 @@ repo_is_owned() {
   target=$(gh repo view "$origin" --json owner,name,isFork,parent \
       -q 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' 2>/dev/null) || return 1
   [ -n "$me" ] && [ -n "$target" ] || return 1
-  [ "${target%%/*}" = "$me" ] || return 1
+  ieq "${target%%/*}" "$me" || return 1
 
   mkdir -p "$cache_dir" 2>/dev/null && printf '%s\n' "$target" > "$cache_dir/$key" 2>/dev/null
   return 0
@@ -210,7 +217,7 @@ merge_is_owned() {
   me=$(gh api user -q .login 2>/dev/null) || return 1
   [ -n "$me" ] || return 1
   while IFS= read -r owner; do
-    [ "$owner" = "$me" ] || return 1
+    ieq "$owner" "$me" || return 1
   done <<< "$owners"
 }
 if runs_pr_merge && ! merge_is_owned; then
