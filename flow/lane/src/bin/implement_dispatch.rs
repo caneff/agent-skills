@@ -610,4 +610,40 @@ mod tests {
         );
         assert_eq!(name, "skills-worker");
     }
+
+    #[test]
+    fn polls_past_the_session_registrys_own_write_lag_past_100ms() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
+        let pid = std::process::id();
+        // herdr answers immediately with the agent's sessionId; the
+        // SessionStart hook that writes the registry file is the one that's
+        // late here, not herdr.
+        let herdr_json = r#"{"result":{"agents":[{"agent":"implement-836","agent_session":{"value":"sess-1"}}]}}"#;
+        let herdr_list = move || Some(herdr_json.to_string());
+
+        let start = Instant::now();
+        let session_file = home.join(".claude/sessions").join(format!("{pid}.json"));
+        let cwd = wt.display().to_string();
+        let writer = std::thread::spawn(move || {
+            while start.elapsed() < Duration::from_millis(120) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            std::fs::write(&session_file, format!(r#"{{"pid":{pid},"cwd":"{cwd}","sessionId":"sess-1","name":"skills-worker"}}"#)).unwrap();
+        });
+
+        let name = poll_worker_session_name(
+            home.to_str().unwrap(),
+            wt.to_str().unwrap(),
+            "implement-836",
+            Duration::from_secs(2),
+            Duration::from_millis(20),
+            herdr_list,
+        );
+        writer.join().unwrap();
+        assert_eq!(name, "skills-worker");
+    }
 }
