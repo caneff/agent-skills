@@ -78,12 +78,16 @@ check_in "$merge_section" 'then post it as a PR comment before acting on it'
 check_in "$merge_section" '`gh pr comment <pr> --repo <owner/name> --body-file <file>`'
 
 # Rule 4: findings hold the merge; the worker disposes of them and records
-# the dispositions itself; the CLEAN check reruns; one re-run only.
+# the dispositions itself; the CLEAN check reruns; one re-run only, and
+# whatever that re-run itself finds still gets a disposition — no third
+# run means no more worker fix-and-re-run cycle, so the controller disputes
+# or files it directly rather than merging it unrecorded.
 check_in "$merge_section" 'No material findings → go to step 4. Findings → hold the merge'
 check_in "$merge_section" 'send the worker the findings and the comment URL'
 check_in "$merge_section" "adds each disposition to the PR body's Decisions made section"
 check_in "$merge_section" 'Re-run step 2 (not-draft, CLEAN'
-check_in "$merge_section" 'there is no third Codex run'
+check_in "$merge_section" 'there is no third Codex run, so whatever this second run finds is final'
+check_in "$merge_section" 'the controller itself gives each of its findings a'
 
 # Rule 5: the controller classifies and appends the trial row once the
 # merge lands, including on the ready-for-human path (which hands the

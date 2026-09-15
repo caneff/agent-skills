@@ -232,8 +232,13 @@ The controller merges on a repo Chris owns; Chris reads it after via
    the PR body's Decisions made section (`gh pr edit <pr> --repo
    <owner/name> --body-file <updated body>`), and sends "PR up" again.
    Re-run step 2 (not-draft, CLEAN — commits landed since the first check)
-   and then this pass once more on the fixes — there is no third Codex run
-   — then go to step 4.
+   and then this pass once more on the fixes — there is no third Codex run,
+   so whatever this second run finds is final: post its output as a PR
+   comment the same way, and either it has no material findings (go to
+   step 4) or the controller itself gives each of its findings a
+   `disputed: <why>` or filed disposition in the PR body — there is no
+   worker fix-and-re-run cycle left to ask for a "fixed" one — before going
+   to step 4.
 
    Classify each finding by comparing it with the PR body's round-1
    findings — `codex-only, confirmed` (fixed or filed, and no Claude axis
