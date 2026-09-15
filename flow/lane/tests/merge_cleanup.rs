@@ -257,10 +257,12 @@ fn a_closed_ticket_with_no_assignee_only_removes_the_label() {
 }
 
 #[test]
-fn a_failed_edit_names_the_exact_command_to_re_run() {
-    // #829 Codex pass: the edit's result was discarded, so an API failure
-    // after the branch and worktree are already gone reported success with
-    // no way to repair the claim later.
+fn a_failed_edit_exits_non_zero_and_names_the_exact_command_to_re_run() {
+    // #829 Codex pass found the edit's result was discarded, so an API
+    // failure after the branch and worktree are already gone reported
+    // success with no way to repair the claim later. #832: that was still
+    // wrong — the caller must see non-zero, with a message distinguishing
+    // "git cleanup completed" from "claim clearing failed, re-run this".
     let c = Cleanup::new();
     let r = c.mkfixture("r12");
     c.mk_implement_branch(&r, "49");
@@ -269,13 +271,13 @@ fn a_failed_edit_names_the_exact_command_to_re_run() {
         &["--repo", s(&r), "implement-49"],
         &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
     );
-    // Non-fatal, like this file's other post-cleanup courtesy steps
-    // (fast_forward_and_rebuild, the herdr workspace close): the branch and
-    // worktree are already gone by this point, so failing the whole run
-    // would be misleading — the loud stderr line is the recovery path.
-    assert!(run.ok, "{}", run.text());
+    assert!(!run.ok, "{}", run.text());
     assert!(!c.has_branch(&r, "implement-49"), "{}", run.text());
-    assert!(run.stderr.contains("could not clear #49's in-progress label and assignee"), "{}", run.text());
+    assert!(
+        run.stderr.contains("git cleanup completed, but could not clear #49's in-progress label and assignee"),
+        "{}",
+        run.text()
+    );
     assert!(
         run.stderr.contains("re-run: gh issue edit 49 --repo") && run.stderr.contains("--remove-label in-progress --remove-assignee caneff"),
         "{}",

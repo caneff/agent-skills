@@ -774,33 +774,36 @@ impl Cleanup {
         // Step 7 (#821) — the ticket. `merge-cleanup` was the only place in
         // the lane that never cleared a landed claim, so a closed ticket kept
         // showing in-progress and assigned. An open issue (part of a bigger
-        // ticket, or reopened) is left alone.
-        self.clear_ticket_if_closed(path, b);
-        true
+        // ticket, or reopened) is left alone. #832: a failed clear now fails
+        // the whole call — git cleanup already happened by this point, so a
+        // caller seeing failure here must not conclude the branch and
+        // worktree survived; the stderr line says so explicitly.
+        self.clear_ticket_if_closed(path, b)
     }
 
     /// #821: on a plain `implement-<n>` branch whose issue is closed and
     /// still carries `in-progress`, remove the label and its actual
     /// assignees. No ticket number, no gh, no origin, the issue still open,
     /// or the label already gone (nothing to clear, and `gh issue edit`
-    /// errors on a label a repo never defines): nothing to do. A `gh issue
-    /// view` that fails is reported, not treated as an open issue — an
-    /// outage must not silently reproduce the stale claim #821 was filed
-    /// over. A failed edit (#829 Codex pass) is reported too, with the
-    /// exact command to re-run — non-fatal, like this function's other
-    /// post-cleanup courtesy steps (`fast_forward_and_rebuild`, the herdr
-    /// workspace close), since the branch and worktree are already gone by
-    /// this point and failing the whole run would misreport what happened.
-    fn clear_ticket_if_closed(&self, path: &str, b: &str) {
-        let Some(n) = ticket_number(b) else { return };
+    /// errors on a label a repo never defines): nothing to do, and `true`. A
+    /// `gh issue view` that fails is reported, not treated as an open issue
+    /// — an outage must not silently reproduce the stale claim #821 was
+    /// filed over — but is still non-fatal, since there was never a known
+    /// edit to lose. A failed edit (#829 Codex pass found it discarded) is
+    /// different: git cleanup already succeeded by then, so #832 makes it
+    /// `false` — the caller (`cleanup_branch`) exits non-zero — with the
+    /// exact re-run command on stderr, since that command is the only
+    /// record of the edit that still needs to happen.
+    fn clear_ticket_if_closed(&self, path: &str, b: &str) -> bool {
+        let Some(n) = ticket_number(b) else { return true };
         let what = format!("clearing #{n}'s in-progress label and assignee");
         if !on_path("gh") {
             skip(&what, "gh is not on PATH");
-            return;
+            return true;
         }
         let Some(slug) = origin_slug(Path::new(path)) else {
             skip(&what, "no origin remote");
-            return;
+            return true;
         };
         let Some(issue) = quiet_stdout(
             "gh",
@@ -817,14 +820,14 @@ impl Cleanup {
             ],
         ) else {
             skip(&what, "gh issue view failed");
-            return;
+            return true;
         };
         let mut fields = issue.splitn(3, ' ');
         let state = fields.next().unwrap_or("");
         let labels_csv = fields.next().unwrap_or("");
         let assignees_csv = fields.next().unwrap_or("");
         if state != "CLOSED" || !format!(",{labels_csv},").contains(",in-progress,") {
-            return;
+            return true;
         }
         let mut edit = vec!["issue", "edit", n, "--repo", &slug, "--remove-label", "in-progress"];
         if !assignees_csv.is_empty() {
@@ -832,8 +835,13 @@ impl Cleanup {
             edit.push(assignees_csv);
         }
         if !self.step(&what, "gh", &edit) {
-            eprintln!("merge-cleanup: could not clear #{n}'s in-progress label and assignee; re-run: gh {}", edit.join(" "));
+            eprintln!(
+                "merge-cleanup: git cleanup completed, but could not clear #{n}'s in-progress label and assignee; re-run: gh {}",
+                edit.join(" ")
+            );
+            return false;
         }
+        true
     }
 }
 
