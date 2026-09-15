@@ -520,27 +520,18 @@ impl Cleanup {
         }
     }
 
-    /// #748, #834: rebuild when the installed binaries are older than the
-    /// latest flow/lane commit, not on whether *this run's* pull moved HEAD.
-    /// The controller's own trial-row auto-ship commit (implement skill §
-    /// The merge step 3) can already pull `main` to the tip before this run
-    /// starts, so this run's own `git pull --ff-only` is a no-op even though
-    /// the installed binaries are stale (#834: after #829 merged elsewhere,
-    /// `merge-cleanup implement-821` saw old_head == new_head, skipped the
-    /// rebuild, and ran the pre-#821 binary). The fix is a build sha recorded
-    /// at `~/.local/state/lane/build-sha`, written only after
-    /// `lane-install.sh` succeeds, and compared against the tip instead of
-    /// this run's own pre-pull HEAD. No recorded sha yet (first run since
-    /// this landed) falls back to this run's own pre-pull HEAD, matching the
-    /// old behavior exactly until a build sha exists to do better. A build
-    /// failure is reported with the compiler's error and never fails the
-    /// fast-forward that already happened. A dry run never pulls or rebuilds.
+    /// #834: compare against a recorded build sha, not this run's own
+    /// pre-pull HEAD — a pull elsewhere can already have landed the tip
+    /// before this run starts. No recorded sha yet falls back to this run's
+    /// own pre-pull HEAD, matching the old behavior until one exists.
     fn fast_forward_and_rebuild(&self, primary: &str, default: &str) {
+        let old_head = quiet_stdout("git", &["-C", primary, "rev-parse", "HEAD"]).unwrap_or_default();
+        self.step(&format!("fast-forwarding {default} in {primary}"), "git", &["-C", primary, "pull", "--ff-only", "--quiet"]);
+        // A dry run never pulls, so HEAD does not move; nothing past here can
+        // fire without a real pull having happened first.
         if self.dry {
             return;
         }
-        let old_head = quiet_stdout("git", &["-C", primary, "rev-parse", "HEAD"]).unwrap_or_default();
-        self.step(&format!("fast-forwarding {default} in {primary}"), "git", &["-C", primary, "pull", "--ff-only", "--quiet"]);
         let new_head = quiet_stdout("git", &["-C", primary, "rev-parse", "HEAD"]).unwrap_or_default();
         if new_head.is_empty() {
             return;
@@ -550,14 +541,10 @@ impl Cleanup {
             return;
         }
         let build_sha_file = format!("{}/.local/state/lane/build-sha", self.home);
-        let baseline = std::fs::read_to_string(&build_sha_file)
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or(old_head);
-        if baseline.is_empty() {
+        let recorded = std::fs::read_to_string(&build_sha_file).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        let Some(baseline) = recorded.or(Some(old_head).filter(|s| !s.is_empty())) else {
             return;
-        }
+        };
         if quiet_ok("git", &["-C", primary, "diff", "--quiet", &baseline, &new_head, "--", "flow/lane"]) {
             return;
         }
@@ -565,9 +552,14 @@ impl Cleanup {
         let failure = match lane::runner::run("bash", &[&install]) {
             Ok(out) if out.success => {
                 if let Some(dir) = Path::new(&build_sha_file).parent() {
-                    let _ = std::fs::create_dir_all(dir);
+                    if let Err(e) = std::fs::create_dir_all(dir) {
+                        eprintln!("merge-cleanup: could not record the build sha at {build_sha_file} ({e}); a later run may rebuild needlessly or miss a stale binary");
+                        return;
+                    }
                 }
-                let _ = std::fs::write(&build_sha_file, format!("{new_head}\n"));
+                if let Err(e) = std::fs::write(&build_sha_file, format!("{new_head}\n")) {
+                    eprintln!("merge-cleanup: could not record the build sha at {build_sha_file} ({e}); a later run may rebuild needlessly or miss a stale binary");
+                }
                 return;
             }
             Ok(out) => out.combined,
