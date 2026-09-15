@@ -200,19 +200,23 @@ The controller merges on a repo Chris owns; Chris reads it after via
    comment `Codex pass skipped: <why>` on the PR and go to step 4 — a skip
    adds no trial row.
 
-   Otherwise, from this PR's workspace, write the ticket body to a file
-   with your file-write tool — never by interpolating it into a shell
-   string, quoted or not, since a body containing `"`, `` ` ``, or `$(`
-   would then run as shell instead of reading as text — and invoke the
+   Otherwise, from this PR's workspace, fetch the ticket body yourself —
+   you did not build this ticket, so you don't already hold it —
+   `gh issue view <n> --repo <owner/name> --json body --jq .body` — and
+   write it to a file with your file-write tool. Never interpolate it into
+   a shell string, quoted or not, since a body containing `"`, `` ` ``, or
+   `$(` would then run as shell instead of reading as text. Then invoke the
    plugin's own script directly. `/codex:adversarial-review` carries
    `disable-model-invocation: true`, so the SlashCommand tool never reaches
    it here: calling the script directly bypasses the slash command's own
    markdown entirely — the `AskUserQuestion` gate lives there, not in the
    script; `handleReviewCommand` parses `--wait`/`--background` as booleans
    and never reads them, always running foreground. Keep `--wait` anyway to
-   say what's intended; it's a harmless no-op on this path.
+   say what's intended; it's a harmless no-op on this path. `git fetch
+   origin` first — a stale `origin/<default>` inflates the diff Codex reads:
 
    ```
+   git fetch origin
    body_file=<absolute path you wrote the ticket body to>
    plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
    node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"
@@ -224,19 +228,23 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
    No material findings → go to step 4. Findings → hold the merge: send the
    worker the findings and the comment URL. The worker disposes of each one
-   (fixed in a commit / `disputed: <why>` / filed) and sends "PR up" again;
-   re-run this pass once on the fixes — there is no third Codex run. Give
-   the second run's findings dispositions in the PR body, then go to
-   step 4.
+   (fixed in a commit / `disputed: <why>` / filed), adds each disposition to
+   the PR body's Decisions made section (`gh pr edit <pr> --repo
+   <owner/name> --body-file <updated body>`), and sends "PR up" again.
+   Re-run step 2 (not-draft, CLEAN — commits landed since the first check)
+   and then this pass once more on the fixes — there is no third Codex run
+   — then go to step 4.
 
-   Once the merge lands (step 4, or Chris's own merge under the
-   `ready-for-human` exception below), classify each finding by comparing
-   it with the PR body's round-1 findings — `codex-only, confirmed` (fixed
-   or filed, and no Claude axis raised it), `also found by Claude`, or
-   `disputed` (with why) — and append one row to
-   `docs/research/2026-09-14-codex-review-trial.md`: ticket, PR, counts per
-   class, one line per codex-only confirmed finding. This row is an
-   auto-ship commit on `<default>` (docs/research is not code). Count rows
+   Classify each finding by comparing it with the PR body's round-1
+   findings — `codex-only, confirmed` (fixed or filed, and no Claude axis
+   raised it), `also found by Claude`, or `disputed` (with why) — and
+   append one row to `docs/research/2026-09-14-codex-review-trial.md`:
+   ticket, PR, counts per class, one line per codex-only confirmed finding.
+   This row is an auto-ship commit on `<default>` (docs/research is not
+   code), written once the merge lands: right after step 4 here, or — under
+   the `ready-for-human` exception below — once Chris reports the PR
+   merged; the controller's watch on that ticket doesn't end at "stop" in
+   that exception, only its authority to merge or clean up does. Count rows
    as they land, not as drafted — two heavy PRs open at once will conflict
    on the file's tail, and the second to merge rebases through the true
    count. After the controller's own row brings the count to five, bring
@@ -270,9 +278,12 @@ The controller merges on a repo Chris owns; Chris reads it after via
 **The one exception: a `ready-for-human` ticket** ("Chris merges"). Nothing
 merges automatically. After step 3 (the Codex pass, if this PR is heavy
 Claude-lane), hand Chris the merge line and the cleanup line, each with the
-`! ` prefix and paths expanded, and stop; Chris merges, cleans up, and the
-`Closes` check is his. Why: Chris marked that work for his own hands, so he
-sees it before it lands.
+`! ` prefix and paths expanded, and stop merging and cleaning up yourself;
+Chris merges, cleans up, and the `Closes` check is his. Why: Chris marked
+that work for his own hands, so he sees it before it lands. If step 3 ran,
+you still owe it its trial row: wait for Chris to report the PR merged, then
+classify and append it as step 3 describes — that part of the controller's
+job on this ticket doesn't stop with the hand-off.
 
 ## Someone else's repo
 

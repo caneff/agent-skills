@@ -57,8 +57,9 @@ check_absent() {
 }
 
 # SKILL.md § The merge step 3 (controller, not the worker's § Review):
-# direct script invocation, not the disabled slash command.
-check "$skill" '**Codex adversarial-review pass (#812 trial) — heavy Claude-lane PRs'
+# direct script invocation, not the disabled slash command. Which section
+# the block sits in is codex-fourth-axis-wording.test.sh's rule, not this
+# file's — this file only pins the invocation's own shape.
 check "$skill" 'disable-model-invocation: true'
 check "$skill" "codex@openai-codex"
 check "$skill" 'installPath'
