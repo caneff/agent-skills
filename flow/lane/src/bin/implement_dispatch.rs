@@ -4,7 +4,7 @@
 //! The contract is `--help` below.
 
 use lane::runner::{self, quiet_ok, quiet_stdout, CommandOutput};
-use lane::{git_origin, proc_info, safe_print, safe_println, sessions};
+use lane::{git_origin, herdr, proc_info, safe_print, safe_println, sessions};
 use serde_json::Value;
 use std::env;
 use std::os::unix::fs::PermissionsExt;
@@ -261,6 +261,32 @@ fn json_str<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
     cur.as_str()
 }
 
+/// The worker's own Claude session name. herdr's own record of which
+/// sessionId is attached to the agent this run just started
+/// (`agent_session.value`) is the one authoritative link — matching on cwd
+/// or pid alone, as an earlier version of this did, can be fooled by
+/// another live session sharing the worktree, or by a stale registry file
+/// left behind on a reused pid; sessionId can't collide that way. A short
+/// retry covers herdr's own read-after-write lag before it reports the
+/// session. "(unavailable)" on a miss — the report stays total, no dispatch
+/// failure over it.
+fn worker_session_name(home: &str, wt: &str, agent: &str) -> String {
+    for attempt in 0..3 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let Some(out) = quiet_stdout("herdr", &["agent", "list"]) else { continue };
+        let Some(agents) = herdr::parse_agents(&out) else { continue };
+        let session_id = agents.iter().find(|a| a.name() == agent).map(|a| a.session().to_string()).filter(|s| !s.is_empty());
+        let Some(session_id) = session_id else { continue };
+        let name = sessions::live_in(Path::new(home), wt).into_iter().find(|s| s.session_id == session_id).map(|s| s.name).filter(|n| !n.is_empty());
+        if let Some(name) = name {
+            return name;
+        }
+    }
+    "(unavailable)".to_string()
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -509,16 +535,7 @@ fn run() -> Result<(), ExitCode> {
         None,
     )?;
 
-    // The worker's own Claude session name: a registry file whose cwd is in
-    // this worktree and whose pid is alive, verified against that pid's own
-    // /proc/<pid>/stat starttime — the same staleness guard find_controller
-    // makes for the --controller fallback, so a dead session's file left
-    // behind on a reused pid can't be reported as this worker.
-    let session = sessions::live_in(Path::new(&home), wt.to_str().unwrap_or(""))
-        .into_iter()
-        .find(|s| !s.name.is_empty() && s.pid.parse().ok().and_then(proc_info::read_stat).is_some_and(|stat| stat.start == s.proc_start))
-        .map(|s| s.name)
-        .unwrap_or_else(|| "(not found)".to_string());
+    let session = worker_session_name(&home, wt.to_str().unwrap_or(""), &agent);
 
     safe_println!("dispatched #{n} ({model}, {described}, controller {controller})");
     safe_println!("worktree: {}", wt.display());

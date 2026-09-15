@@ -13,11 +13,6 @@ pub struct LiveSession {
     /// The Claude session name (`~/.claude/sessions/<pid>.json`'s `name`),
     /// empty when the file has none.
     pub name: String,
-    /// The registry's own `procStart`, empty when the file has none — a
-    /// caller that needs to reject a stale file over a reused pid compares
-    /// this to that pid's own `/proc/<pid>/stat` starttime, the same check
-    /// `find_controller` makes.
-    pub proc_start: String,
 }
 
 /// Whether `path` is `root` or inside it.
@@ -51,8 +46,7 @@ pub fn live_in(home: &Path, worktree: &str) -> Vec<LiveSession> {
         if !pid.is_empty() && in_tree(cwd, worktree) && alive {
             let session_id = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
             let name = v.get("name").and_then(|s| s.as_str()).unwrap_or("").to_string();
-            let proc_start = v.get("procStart").and_then(|s| s.as_str()).unwrap_or("").to_string();
-            live.push(LiveSession { pid, session_id, name, proc_start });
+            live.push(LiveSession { pid, session_id, name });
         }
     }
     live

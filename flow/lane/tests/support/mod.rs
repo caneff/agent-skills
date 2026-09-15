@@ -29,7 +29,9 @@ impl Fixture {
         let fake = fake_path();
         std::os::unix::fs::symlink(&fake, tmp.path().join("bin/gh")).unwrap();
         std::os::unix::fs::symlink(&fake, tmp.path().join("bin/herdr")).unwrap();
-        Fixture { tmp }
+        let f = Fixture { tmp };
+        f.set_agents("[]");
+        f
     }
 
     pub fn home(&self) -> PathBuf {
@@ -37,6 +39,15 @@ impl Fixture {
     }
     pub fn call_log(&self) -> PathBuf {
         self.tmp.path().join("calls.log")
+    }
+    pub fn agents_file(&self) -> PathBuf {
+        self.tmp.path().join("agents.json")
+    }
+    /// `herdr agent list`'s agents array, as JSON — what #819's session
+    /// lookup reads to find the sessionId herdr attached to the agent it
+    /// just started.
+    pub fn set_agents(&self, agents: &str) {
+        std::fs::write(self.agents_file(), format!(r#"{{"result":{{"agents":{agents}}}}}"#)).unwrap();
     }
 
     /// Fresh ~/.claude.json with one other project, and an empty call log —
@@ -109,6 +120,7 @@ impl Fixture {
         cmd.env("PATH", self.path_env());
         cmd.env("HOME", self.home());
         cmd.env("CALL_LOG", self.call_log());
+        cmd.env("HERDR_AGENTS", self.agents_file());
         for (k, v) in scenario {
             cmd.env(k, v);
         }
@@ -133,6 +145,7 @@ impl Fixture {
         cmd.env("PATH", self.path_env());
         cmd.env("HOME", self.home());
         cmd.env("CALL_LOG", self.call_log());
+        cmd.env("HERDR_AGENTS", self.agents_file());
         for (k, v) in scenario {
             cmd.env(k, v);
         }
