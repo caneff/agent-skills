@@ -31,12 +31,20 @@ fi
 top=$(git rev-parse --show-toplevel) || { echo "pre-report gate: cannot resolve the repo root" >&2; exit 2; }
 scratch_dir="$top/.scratch"
 scratch_status=".scratch/ clear"
-if [ -d "$scratch_dir" ] && [ -n "$(ls -A "$scratch_dir" 2>/dev/null)" ]; then
-  if [ -n "${PRE_REPORT_KEEP_SCRATCH:-}" ]; then
-    scratch_status=".scratch/ kept, acknowledged: $PRE_REPORT_KEEP_SCRATCH"
-  else
-    echo "pre-report gate: .scratch/ still has content — commit any reusable finding into docs/research/ (or the relevant note) and delete .scratch/, or set PRE_REPORT_KEEP_SCRATCH=\"<why>\" and name it in the PR-up report" >&2
+if [ -d "$scratch_dir" ]; then
+  scratch_listing=$(ls -A "$scratch_dir" 2>&1)
+  ls_rc=$?
+  if [ "$ls_rc" -ne 0 ]; then
+    echo "pre-report gate: .scratch/ exists but could not be read (ls exit $ls_rc) — fix its permissions or remove it before reporting: $scratch_listing" >&2
     exit 1
+  fi
+  if [ -n "$scratch_listing" ]; then
+    if [ -n "${PRE_REPORT_KEEP_SCRATCH:-}" ]; then
+      scratch_status=".scratch/ kept, acknowledged: $PRE_REPORT_KEEP_SCRATCH"
+    else
+      echo "pre-report gate: .scratch/ still has content — commit any reusable finding into docs/research/ (or the relevant note) and delete .scratch/, or set PRE_REPORT_KEEP_SCRATCH=\"<why>\" and name it in the PR-up report" >&2
+      exit 1
+    fi
   fi
 fi
 

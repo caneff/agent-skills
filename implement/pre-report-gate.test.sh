@@ -113,6 +113,24 @@ mkdir -p "$repo/.scratch"
 run "empty .scratch/ dir passes" 0 "$tip"
 rmdir "$repo/.scratch"
 
+# An unreadable .scratch/ must fail closed, not read as empty — root
+# ignores directory permissions, so this case is skipped under root.
+if [ "$(id -u)" != "0" ]; then
+  mkdir -p "$repo/.scratch"
+  echo hidden > "$repo/.scratch/hidden.txt"
+  chmod 000 "$repo/.scratch"
+  out=$(cd "$repo" && bash "$gate" "$tip" 2>&1); rc=$?
+  chmod 755 "$repo/.scratch"
+  if [ "$rc" = 1 ] && [[ "$out" != *"clear"* ]]; then
+    echo "PASS: an unreadable .scratch/ fails closed"
+  else
+    echo "FAIL: unreadable .scratch/ — want exit 1 and no 'clear' claim, got $rc: $out"; fails=1
+  fi
+  rm -rf "$repo/.scratch"
+else
+  echo "SKIP: unreadable .scratch/ case (running as root)"
+fi
+
 # Wrong usage is a usage error, not a pass.
 out=$(cd "$repo" && bash "$gate" 2>&1); rc=$?
 if [ "$rc" = 2 ] && [[ "$out" == *"usage"* ]]; then
