@@ -520,12 +520,15 @@ impl Cleanup {
         }
     }
 
-    /// #834: compare against a recorded build sha, not this run's own
-    /// pre-pull HEAD — a pull elsewhere can already have landed the tip
-    /// before this run starts. No recorded sha yet falls back to this run's
-    /// own pre-pull HEAD, matching the old behavior until one exists.
+    /// #834 (Codex re-run): compare against a recorded build sha, not this
+    /// run's own pre-pull HEAD — a pull elsewhere can already have landed the
+    /// tip before this run starts. `flow/lane-install.sh` records the sha it
+    /// installed from on every successful install, run by hand or from here,
+    /// so a missing record is untrusted rather than a fallback to this run's
+    /// own HEAD: it rebuilds once regardless of whether this run's pull moved
+    /// anything, the same failure shape the old old_head/new_head check
+    /// missed.
     fn fast_forward_and_rebuild(&self, primary: &str, default: &str) {
-        let old_head = quiet_stdout("git", &["-C", primary, "rev-parse", "HEAD"]).unwrap_or_default();
         self.step(&format!("fast-forwarding {default} in {primary}"), "git", &["-C", primary, "pull", "--ff-only", "--quiet"]);
         // A dry run never pulls, so HEAD does not move; nothing past here can
         // fire without a real pull having happened first.
@@ -542,26 +545,15 @@ impl Cleanup {
         }
         let build_sha_file = format!("{}/.local/state/lane/build-sha", self.home);
         let recorded = std::fs::read_to_string(&build_sha_file).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        let Some(baseline) = recorded.or(Some(old_head).filter(|s| !s.is_empty())) else {
-            return;
-        };
-        if quiet_ok("git", &["-C", primary, "diff", "--quiet", &baseline, &new_head, "--", "flow/lane"]) {
-            return;
-        }
-        safe_println!("flow/lane changed: rebuilding the lane binaries");
-        let failure = match lane::runner::run("bash", &[&install]) {
-            Ok(out) if out.success => {
-                if let Some(dir) = Path::new(&build_sha_file).parent() {
-                    if let Err(e) = std::fs::create_dir_all(dir) {
-                        eprintln!("merge-cleanup: could not record the build sha at {build_sha_file} ({e}); a later run may rebuild needlessly or miss a stale binary");
-                        return;
-                    }
-                }
-                if let Err(e) = std::fs::write(&build_sha_file, format!("{new_head}\n")) {
-                    eprintln!("merge-cleanup: could not record the build sha at {build_sha_file} ({e}); a later run may rebuild needlessly or miss a stale binary");
-                }
+        if let Some(baseline) = &recorded {
+            if quiet_ok("git", &["-C", primary, "diff", "--quiet", baseline, &new_head, "--", "flow/lane"]) {
                 return;
             }
+        }
+        let why = if recorded.is_some() { "flow/lane changed" } else { "no recorded build sha" };
+        safe_println!("{why}: rebuilding the lane binaries");
+        let failure = match lane::runner::run("bash", &[&install]) {
+            Ok(out) if out.success => return,
             Ok(out) => out.combined,
             Err(e) => e.to_string(),
         };

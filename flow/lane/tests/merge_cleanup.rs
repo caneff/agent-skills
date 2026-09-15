@@ -910,25 +910,50 @@ fn rebuilds_after_a_pull_that_changed_the_crate() {
     let (log, bin) = lane_env(&c);
     let r = c.mk_lane_repo("r17", true);
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/trivial"], &[("LANE_INSTALL_LOG", &log), ("LANE_INSTALLED_BIN", &bin)]);
-    assert!(run.ok && run.has("flow/lane changed: rebuilding the lane binaries"), "{}", run.text());
+    assert!(run.ok && run.has("no recorded build sha: rebuilding the lane binaries"), "{}", run.text());
     assert_eq!(std::fs::read_to_string(&log).unwrap(), "ran\n");
     assert_eq!(std::fs::read_to_string(&bin).unwrap(), "NEW\n");
-    // #834: a successful rebuild records the sha it built from, so a later
-    // run with no pull of its own can still tell the binaries are current.
+    // #834 (Codex re-run): `flow/lane-install.sh` records the sha it built
+    // from on every successful install, so a later run with no pull of its
+    // own can still tell whether the binaries are current.
     let build_sha_file = c.home().join(".local/state/lane/build-sha");
     assert_eq!(std::fs::read_to_string(&build_sha_file).unwrap().trim(), c.rev(&r, "main"));
 }
 
+/// #834 (Codex re-run): a missing record is untrusted, not a green light —
+/// it rebuilds even when the pull that just ran did not touch flow/lane, the
+/// same as when it did. `flow/lane-install.sh` now always writes the record
+/// on success, so this is the recovery path for whatever ran before that
+/// existed (a plain install, a lost or corrupted file).
 #[test]
-fn skips_the_rebuild_when_the_pull_did_not_touch_the_crate() {
+fn no_recorded_build_sha_rebuilds_even_when_the_pull_did_not_touch_the_crate() {
     let c = Cleanup::new();
     let (log, bin) = lane_env(&c);
     let r = c.mk_lane_repo("r18", false);
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/trivial"], &[("LANE_INSTALL_LOG", &log), ("LANE_INSTALLED_BIN", &bin)]);
-    assert!(run.ok && !run.has("rebuilding the lane binaries"), "{}", run.text());
-    assert_eq!(std::fs::read_to_string(&log).unwrap(), "");
-    assert_eq!(std::fs::read_to_string(&bin).unwrap(), "OLD\n");
+    assert!(run.ok && run.has("no recorded build sha: rebuilding the lane binaries"), "{}", run.text());
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "ran\n");
+    assert_eq!(std::fs::read_to_string(&bin).unwrap(), "NEW\n");
     assert_eq!(c.rev(&r, "main"), c.rev(&r, "origin/main"));
+}
+
+/// #834 (Codex re-run): the exact reported failure shape — no record at all
+/// (a plain lane-install ran before it existed), and main is already at the
+/// tip when this run starts, so this run's own `git pull --ff-only` moves
+/// nothing. The old old_head/new_head check read that as "nothing to do";
+/// a missing record must rebuild anyway.
+#[test]
+fn no_recorded_build_sha_rebuilds_even_when_this_runs_pull_moves_nothing() {
+    let c = Cleanup::new();
+    let (log, bin) = lane_env(&c);
+    let r = c.mk_lane_repo("r23", true);
+    // Simulate main already advanced by another process before this run
+    // starts, so this run's own `git pull --ff-only` is a no-op.
+    c.git_ok(&["-C", r.to_str().unwrap(), "merge", "-q", "--ff-only", "origin/main"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/trivial"], &[("LANE_INSTALL_LOG", &log), ("LANE_INSTALLED_BIN", &bin)]);
+    assert!(run.ok && run.has("no recorded build sha: rebuilding the lane binaries"), "{}", run.text());
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "ran\n");
+    assert_eq!(std::fs::read_to_string(&bin).unwrap(), "NEW\n");
 }
 
 #[test]

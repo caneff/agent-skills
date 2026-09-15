@@ -38,7 +38,7 @@ impl Cleanup {
         for (dir, stubs) in [("full", &["gh", "herdr"][..]), ("nogh", &["herdr"][..]), ("noherdr", &["gh"][..])] {
             let d = c.root().join(dir);
             std::fs::create_dir_all(&d).unwrap();
-            for t in ["git", "bash", "sh", "cat", "env"] {
+            for t in ["git", "bash", "sh", "cat", "env", "mkdir", "dirname"] {
                 symlink(which(t), d.join(t)).unwrap();
             }
             for s in stubs {
@@ -211,7 +211,7 @@ impl Cleanup {
         std::fs::create_dir_all(dir.join("flow/lane")).unwrap();
         std::fs::write(
             dir.join("flow/lane-install.sh"),
-            "#!/usr/bin/env bash\nif [ -n \"${LANE_INSTALL_FAIL:-}\" ]; then\n  echo \"compile error: boom\" >&2\n  exit 1\nfi\necho ran >> \"$LANE_INSTALL_LOG\"\necho NEW > \"$LANE_INSTALLED_BIN\"\n",
+            "#!/usr/bin/env bash\nset -euo pipefail\nif [ -n \"${LANE_INSTALL_FAIL:-}\" ]; then\n  echo \"compile error: boom\" >&2\n  exit 1\nfi\necho ran >> \"$LANE_INSTALL_LOG\"\necho NEW > \"$LANE_INSTALLED_BIN\"\nhere=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nstate_dir=\"$HOME/.local/state/lane\"\nmkdir -p \"$state_dir\"\ngit -C \"$here/..\" rev-parse HEAD > \"$state_dir/build-sha\"\n",
         )
         .unwrap();
         std::fs::write(dir.join("flow/lane/main.rs"), "fn1\n").unwrap();
