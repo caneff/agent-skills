@@ -73,14 +73,13 @@ so there was no second review invocation to time — not a gap in the tool.
   single verification round, scoped to round-1 findings and fix commits,
   can itself take longer than the first review round when there's a lot to
   re-check.
-- **Six tickets show real controller-wait time** (817, 819, 820\*, 821,
-  822, 824, 367, 368) once the incoming-message detector was fixed to
-  require a plain-text envelope rather than substring-matching any
-  serialized content (§ corrections above) — several of these read as 0.0
-  before that fix, undercounting a wait a false "reply" had closed early.
-  \*820's own wait rounds to 0.0 at one decimal (a few seconds); every
-  other ticket not listed here never blocked on a controller reply long
-  enough to register.
+- **Seven tickets show real controller-wait time** (817, 819, 821, 822,
+  824, 367, 368) once the incoming-message detector was fixed to require a
+  plain-text envelope rather than substring-matching any serialized
+  content (§ corrections above) — several of these read as 0.0 before that
+  fix, undercounting a wait a false "reply" had closed early. 820's own
+  wait rounds to 0.0 at one decimal (a few seconds); every other ticket not
+  listed here never blocked on a controller reply long enough to register.
 - The ~4 h-of-8.5 h sudokumaker "one unsent report" loss the ticket cites
   is not in this table: it isn't `implement-367` or `implement-368` — those
   two are ordinary-length builds (21.7 and 87.6 min total). Whatever

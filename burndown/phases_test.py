@@ -273,18 +273,36 @@ def test_a_subagents_edit_call_does_not_count_as_the_workers_build():
 def test_multiple_session_files_merge_in_timestamp_order_not_filename_order():
     """#826 correctness finding H4: a resumed session writes a second
     session-id jsonl file that can sort after the first one by filename
-    while its entries are chronologically first."""
+    while its entries are chronologically first. Filename order is the
+    reverse of time order here, so a fixture where they happen to agree
+    (verification-pass finding, first fixture) can't witness the sort."""
     with tempfile.TemporaryDirectory() as tmp:
         project = os.path.join(tmp, PROJECT_DIR)
-        _write(os.path.join(project, "z-later-file.jsonl"), [
+        _write(os.path.join(project, "a-alphabetically-first.jsonl"), [
             _first_user("2026-01-01T00:05:00.000Z"),
         ])
-        _write(os.path.join(project, "a-earlier-file.jsonl"), [
+        _write(os.path.join(project, "z-alphabetically-last.jsonl"), [
             _first_user("2026-01-01T00:00:00.000Z"),
         ])
         r = _run(tmp, WORKTREE)
         lines = _lines(r.stdout, WORKTREE)
         assert lines["dispatch"] == ("2026-01-01T00:00:00.000Z", "-")
+
+
+def test_timestamps_sort_by_parsed_time_not_string_order():
+    """#826 correctness finding C4: a non-UTC offset sorts wrong as a raw
+    string. `...T00:00:00.500+01:00` (= 2025-12-31T23:00:00.500Z, earlier)
+    raw-string-sorts *after* `...T00:00:00.000Z` (2026-01-01T00:00:00.000Z,
+    later) — '5' > '0' at the first differing character — even though it
+    names the chronologically earlier instant."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _write(os.path.join(tmp, PROJECT_DIR, "s.jsonl"), [
+            _first_user("2026-01-01T00:00:00.000Z"),
+            _first_user("2026-01-01T00:00:00.500+01:00"),
+        ])
+        r = _run(tmp, WORKTREE)
+        lines = _lines(r.stdout, WORKTREE)
+        assert lines["dispatch"] == ("2026-01-01T00:00:00.500+01:00", "-")
 
 
 def test_ambiguous_ticket_number_disambiguates_its_identifier():
@@ -347,17 +365,28 @@ def test_two_outgoing_messages_before_one_reply_count_the_wait_once():
 
 
 def test_piped_output_exits_clean_on_a_closed_reader():
+    """#826 correctness finding C9: with enough output in flight that the
+    writer is still mid-`print` when the reader goes away, the old
+    substring-matched code raised BrokenPipeError to a bare traceback. A
+    single worktree's ~7 lines fit inside the OS pipe buffer and the
+    process exits before a reader can even close it, so this needs enough
+    volume (many repeated args, passed as a real argv list to dodge the
+    shell's argument-length limit) to force the write to block past the
+    close — a `sleep`-based race would be flaky instead."""
     with tempfile.TemporaryDirectory() as tmp:
         _write(os.path.join(tmp, PROJECT_DIR, "s.jsonl"), [
             _first_user("2026-01-01T00:00:00.000Z"),
         ])
-        script = (f"import subprocess, sys, os; "
-                  f"p = subprocess.Popen([sys.executable, {PHASES!r}, {WORKTREE!r}], "
-                  f"stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, "
-                  f"env={{**os.environ, 'BURNDOWN_PROJECTS_DIR': {tmp!r}}}); "
-                  f"p.stdout.readline(); p.stdout.close(); p.wait(timeout=5)")
-        r = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
-        assert "Traceback" not in r.stderr, r.stderr
+        proc = subprocess.Popen(
+            [sys.executable, PHASES, *([WORKTREE] * 2000)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env={**os.environ, "BURNDOWN_PROJECTS_DIR": tmp},
+        )
+        proc.stdout.read(1024)
+        proc.stdout.close()
+        _, stderr = proc.communicate(timeout=5)
+        assert "Traceback" not in stderr, stderr
+        assert "BrokenPipeError" not in stderr, stderr
 
 
 def test_a_ticket_number_resolves_to_its_matching_project_dir():
@@ -369,6 +398,18 @@ def test_a_ticket_number_resolves_to_its_matching_project_dir():
         assert r.returncode == 0, r.stdout + r.stderr
         lines = _lines(r.stdout, "9")
         assert lines["dispatch"] == ("2026-01-01T00:00:00.000Z", "-")
+
+
+def test_an_unmatched_ticket_number_warns_on_stderr_but_still_prints_dashes():
+    """A dash-filled row alone (the format every other case prints) would
+    be indistinguishable from a real worktree whose transcript is simply
+    missing — the stderr line is what tells the two apart."""
+    with tempfile.TemporaryDirectory() as tmp:
+        r = _run(tmp, "404")
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "404" in r.stderr
+        lines = _lines(r.stdout, "404")
+        assert lines["dispatch"] == ("-", "-")
 
 
 def test_a_missing_transcript_prints_dashes_and_does_not_die():

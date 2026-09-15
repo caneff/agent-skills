@@ -283,6 +283,10 @@ def main(argv):
         for arg in argv[1:]:
             matches = resolve_worktrees(arg, projects_root)
             if not matches:
+                # No ticket number matched any project dir — distinct from
+                # a real worktree with an empty/missing transcript, whose
+                # dash-filled row below looks identical on stdout.
+                print(f"no ticket-number match for {arg!r}", file=sys.stderr)
                 _print_phases(arg, compute_phases([], {}))
                 continue
             for identifier, project_dir in matches:
