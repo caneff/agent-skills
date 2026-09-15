@@ -24,6 +24,11 @@ if [ -n "$dirty" ]; then
   exit 1
 fi
 
+if [ -d .scratch ] && [ -n "$(ls -A .scratch 2>/dev/null)" ]; then
+  echo "pre-report gate: .scratch/ still has content — commit any reusable finding into docs/research/ (or the relevant note) and delete .scratch/, or name what you're keeping in the PR-up report" >&2
+  exit 1
+fi
+
 if ! git merge-base --is-ancestor "$sha" "$tip_sha"; then
   echo "pre-report gate: ${sha:0:12} is not an ancestor of ${tip} (${tip_sha:0:12}) — an amend or a rebase destroyed it" >&2
   exit 1

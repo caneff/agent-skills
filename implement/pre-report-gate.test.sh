@@ -58,6 +58,19 @@ echo three >> "$repo/a.txt"
 run "modified file fails the gate" 1 "$tip" "uncommitted"
 git -C "$repo" checkout -q -- a.txt
 
+# A leftover .scratch/ is as blocking as a dirty tree, even though it's
+# git-ignored and git status stays clean.
+mkdir -p "$repo/.scratch"
+echo leftover > "$repo/.scratch/leftover.txt"
+echo '.scratch/' > "$repo/.gitignore"
+git -C "$repo" add .gitignore; git -C "$repo" commit -qm gitignore
+tip=$(git -C "$repo" rev-parse HEAD)
+run ".scratch/ with content fails the gate" 1 "$tip" ".scratch/"
+rm -rf "$repo/.scratch"
+mkdir -p "$repo/.scratch"
+run "empty .scratch/ dir passes" 0 "$tip"
+rmdir "$repo/.scratch"
+
 # Wrong usage is a usage error, not a pass.
 out=$(cd "$repo" && bash "$gate" 2>&1); rc=$?
 if [ "$rc" = 2 ] && [[ "$out" == *"usage"* ]]; then
