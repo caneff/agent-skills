@@ -37,12 +37,18 @@ IFS=$'\t' read -r n controller < <(entries | jq -r '
 [ -n "${controller:-}" ] || exit 0
 
 # The controller's live registry entry: its session id and messaging socket.
+# Live means the pid's /proc starttime (field 22, after the `(comm)` field)
+# equals the record's procStart — a stale record whose pid was reused has
+# another, as in flow/lane's sessions reader.
 ctl_session="" ctl_socket=""
 for f in "$HOME"/.claude/sessions/*.json; do
   [ -e "$f" ] || continue
-  IFS=$'\t' read -r pid sid sock < <(jq -r --arg c "$controller" \
-    'select(.name == $c) | "\(.pid)\t\(.sessionId // "")\t\(.messagingSocketPath // "")"' "$f" 2>/dev/null)
-  [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null || continue
+  IFS=$'\t' read -r pid start sid sock < <(jq -r --arg c "$controller" \
+    'select(.name == $c) | "\(.pid)\t\(.procStart // "")\t\(.sessionId // "")\t\(.messagingSocketPath // "")"' "$f" 2>/dev/null)
+  [[ "${pid:-}" =~ ^[0-9]+$ ]] || continue
+  stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || continue
+  read -ra fields <<<"${stat##*) }"
+  [ -n "$start" ] && [ "${fields[19]:-}" = "$start" ] || continue
   ctl_session="$sid" ctl_socket="$sock"
   break
 done
@@ -75,20 +81,38 @@ grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
 
 logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$1" "$2" >> "$log"; }
 
-worker_agent="$(timeout 5 herdr agent get "${HERDR_PANE_ID:-}" 2>/dev/null | jq -r '.result.agent.name // empty' 2>/dev/null)"
+# Every herdr call below ends by a 12 s deadline, so the log line is written
+# inside the hook's 15 s timeout.
+deadline=$((SECONDS + 12))
+
+worker_agent="$(timeout 2 herdr agent get "${HERDR_PANE_ID:-}" 2>/dev/null | jq -r '.result.agent.name // empty' 2>/dev/null)"
 worker_agent="${worker_agent:-${HERDR_PANE_ID:-unknown pane}}"
 alert="[worker-stop-alert] worker #$n stopped without reporting to $controller (herdr agent $worker_agent)"
 
 pane=""
-[ -n "$ctl_session" ] && pane="$(timeout 5 herdr agent list 2>/dev/null | jq -r --arg s "$ctl_session" \
+[ -n "$ctl_session" ] && pane="$(timeout 2 herdr agent list 2>/dev/null | jq -r --arg s "$ctl_session" \
   '.result.agents[]? | select(.agent_session.value == $s) | .pane_id' 2>/dev/null | head -n1)"
 if [ -z "$pane" ]; then
   logline "not-sent" "no herdr pane for controller $controller: $alert"
   exit 0
 fi
 
-if out="$(timeout 5 herdr agent prompt "$pane" "$alert" 2>&1)"; then
-  logline "sent" "$pane: $alert"
+# herdr refuses a prompt to a blocked agent (`agent_blocked`) before sending
+# any input, so retry that refusal with backoff while the deadline allows.
+attempts=0 backoff=1
+while :; do
+  attempts=$((attempts + 1))
+  if out="$(timeout 3 herdr agent prompt "$pane" "$alert" 2>&1)"; then
+    logline "sent" "$pane: $alert"
+    exit 0
+  fi
+  blocked="$(jq -r 'select(.error.code == "agent_blocked") | "yes"' <<<"$out" 2>/dev/null)"
+  [ "$blocked" = yes ] && [ $((SECONDS + backoff + 3)) -le "$deadline" ] || break
+  sleep "$backoff"
+  backoff=$((backoff * 2))
+done
+if [ "$blocked" = yes ]; then
+  logline "not-sent" "controller blocked: herdr agent prompt $pane refused agent_blocked on all $attempts attempts: $alert"
 else
   logline "not-sent" "herdr agent prompt $pane failed: $(tr '\n' ' ' <<<"$out")"
 fi

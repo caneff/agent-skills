@@ -23,6 +23,11 @@ case "\$1 \$2" in
   "agent get") printf '{"result":{"agent":{"name":"skills-820","pane_id":"%s"}}}\n' "\$3" ;;
   "agent prompt")
     [ -n "\${HERDR_PROMPT_HANG:-}" ] && exec sleep 30
+    # HERDR_PROMPT_BLOCKED=<k>: the first k prompts are refused as blocked.
+    tries=\$(( \$(cat "$tmp/prompt.tries" 2>/dev/null || echo 0) + 1 )); echo "\$tries" > "$tmp/prompt.tries"
+    if [ "\$tries" -le "\${HERDR_PROMPT_BLOCKED:-0}" ]; then
+      echo '{"error":{"code":"agent_blocked","message":"agent is blocked"},"id":"cli:agent:prompt"}'; exit 1
+    fi
     printf '%s' "\$3" > "$tmp/prompt.pane"; printf '%s' "\$4" > "$tmp/prompt.text"
     exit "\${HERDR_PROMPT_RC:-0}" ;;
 esac
@@ -31,8 +36,10 @@ chmod +x "$stubdir/herdr"
 
 home="$tmp/home"
 mkdir -p "$home/.claude/sessions"
-# The controller session is this test's own shell: a live pid.
-printf '{"pid":%s,"sessionId":"ctl-session","name":"skills-b6"}\n' "$$" > "$home/.claude/sessions/$$.json"
+# The controller session is this test's own shell: a live pid whose
+# procStart is its /proc starttime (field 22).
+stat=$(cat /proc/$$/stat); ctl_start=$(set -- ${stat##*) }; echo "${20}")
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 agents_ok='{"result":{"agents":[{"pane_id":"w9:p1","agent_session":{"value":"ctl-session"}},{"pane_id":"w0:p1","agent_session":{"value":"dead-session"}}]}}'
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 log="$home/.claude/worker-stop-alerts.log"
@@ -146,7 +153,7 @@ run "name with ref" "$t"
 expect_none "a SendMessage to 'controller [ref]' counts as reported"
 
 reset_log
-printf '{"pid":%s,"sessionId":"ctl-session","name":"skills-b6","messagingSocketPath":"/run/ctl.sock"}\n' "$$" > "$home/.claude/sessions/$$.json"
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6","messagingSocketPath":"/run/ctl.sock"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 t="$tmp/uds.jsonl"
 { human "$brief"; peer "ruling"; send u1 "uds:/run/ctl.sock"; ok u1; } > "$t"
 run "uds reply" "$t"
@@ -211,6 +218,14 @@ run "dead registry entry" "$t"
 expect_alert "a dead registry entry with the controller's name is skipped"
 rm -f "$home/.claude/sessions/0.json"
 
+# A stale record whose pid was reused by a live process is skipped: its
+# procStart does not match that pid's starttime.
+reset_log
+printf '{"pid":%s,"procStart":"1","sessionId":"dead-session","name":"skills-b6"}\n' "$$" > "$home/.claude/sessions/0.json"
+run "reused pid" "$t"
+expect_alert "a same-name record with a reused pid does not hide the real controller"
+rm -f "$home/.claude/sessions/0.json"
+
 # Failure paths log and exit 0.
 reset_log
 HERDR_PROMPT_RC=1 run "prompt rejected" "$t"
@@ -219,6 +234,21 @@ if grep -q 'not-sent' "$log" 2>/dev/null; then
 else
   echo "FAIL: a rejected prompt left no not-sent log line"; fails=1
 fi
+
+# A blocked controller: retry with backoff inside the hook's budget.
+reset_log; rm -f "$tmp/prompt.tries"
+HERDR_PROMPT_BLOCKED=2 run "blocked, then free" "$t"
+expect_alert "a prompt refused as blocked is retried until the controller accepts it"
+reset_log; rm -f "$tmp/prompt.tries"
+start=$SECONDS
+HERDR_PROMPT_BLOCKED=99 run "blocked throughout" "$t"
+if [ -z "$pane" ] && [ "$(cat "$tmp/prompt.tries")" -ge 2 ] && [ $((SECONDS - start)) -lt 15 ] \
+   && grep -q $'not-sent\tcontroller blocked:' "$log" 2>/dev/null; then
+  echo "PASS: a controller blocked throughout is retried, then logged as not-sent: blocked, within 15 s"
+else
+  echo "FAIL: blocked controller — tries $(cat "$tmp/prompt.tries"), $((SECONDS - start)) s, log: $(cat "$log" 2>/dev/null)"; fails=1
+fi
+rm -f "$tmp/prompt.tries"
 
 reset_log
 HERDR_PROMPT_HANG=1 run "prompt hangs" "$t"

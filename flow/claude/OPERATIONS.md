@@ -92,10 +92,15 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   since its last prompt, with none of its subagents still out, still wakes
   the controller: the `Stop` hook `worker-stop-alert.sh` types one line into
   the controller's herdr pane, `[worker-stop-alert] worker #<n> stopped
-  without reporting to <controller> (herdr agent <name>)`. Read that agent's pane (`herdr agent read <name>`) for the report
-  it never sent. An alert that could not be delivered is a `not-sent` line in
-  `~/.claude/worker-stop-alerts.log`. Why: in the #781 trial two workers
-  finished without reporting and the run stalled ~4 h unseen (#820).
+  without reporting to <controller> (herdr agent <name>)`. Read that agent's
+  pane (`herdr agent read <name>`) for the report it never sent. herdr
+  refuses a prompt to a blocked pane; the hook retries with backoff for up to
+  12 s, then writes a `not-sent` line (`controller blocked: …`) to
+  `~/.claude/worker-stop-alerts.log`. So while workers are out, read the
+  `not-sent` lines added to that log since your last read, on every wake and
+  before ending a turn — the one read the rule above allows. Why: in the
+  #781 trial two workers finished without reporting and the run stalled ~4 h
+  unseen (#820).
 - Long-running job: run it under `job-run --name <n> -- <cmd>` — output and
   exit survive a kill, and `job-run --status <n>` answers alive / finished /
   killed. Why: a plain background run loses its output and exit code when
