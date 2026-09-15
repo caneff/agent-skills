@@ -509,12 +509,14 @@ fn run() -> Result<(), ExitCode> {
         None,
     )?;
 
-    // The worker's own Claude session name, read the same way the
-    // --controller fallback reads a session's name: the registry file whose
-    // cwd is in this worktree and whose pid is alive.
+    // The worker's own Claude session name: a registry file whose cwd is in
+    // this worktree and whose pid is alive, verified against that pid's own
+    // /proc/<pid>/stat starttime — the same staleness guard find_controller
+    // makes for the --controller fallback, so a dead session's file left
+    // behind on a reused pid can't be reported as this worker.
     let session = sessions::live_in(Path::new(&home), wt.to_str().unwrap_or(""))
         .into_iter()
-        .find(|s| !s.name.is_empty())
+        .find(|s| !s.name.is_empty() && s.pid.parse().ok().and_then(proc_info::read_stat).is_some_and(|stat| stat.start == s.proc_start))
         .map(|s| s.name)
         .unwrap_or_else(|| "(not found)".to_string());
 

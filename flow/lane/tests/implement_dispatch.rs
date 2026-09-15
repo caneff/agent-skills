@@ -283,6 +283,15 @@ fn the_report_names_path_branch_agent_and_the_cleanup_line() {
 
 // --- #819: the report also names the worker's Claude session -------------
 
+/// A real, live child process's own pid and its registry `procStart` (its
+/// `/proc/<pid>/stat` starttime) — what a real Claude session's file would
+/// carry, so the procStart guard has something real to check.
+fn spawn_live() -> (std::process::Child, String) {
+    let child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+    let start = lane::proc_info::read_stat(child.id() as i32).unwrap().start;
+    (child, start)
+}
+
 #[test]
 fn the_report_names_the_workers_claude_session_beside_the_herdr_agent() {
     let f = Fixture::new();
@@ -291,19 +300,17 @@ fn the_report_names_the_workers_claude_session_beside_the_herdr_agent() {
     let wt = repo.join(".claude/worktrees/implement-395");
     // A live worker session already registered in the new worktree, the way
     // Claude Code's own session file lands there once the worker starts.
-    let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+    let (mut child, proc_start) = spawn_live();
     std::fs::write(
         f.home().join(".claude/sessions").join(format!("{}.json", child.id())),
-        format!(r#"{{"pid":{},"cwd":"{}","name":"implement-395-42"}}"#, child.id(), wt.display()),
+        format!(r#"{{"pid":{},"cwd":"{}","name":"implement-395-42","procStart":"{proc_start}"}}"#, child.id(), wt.display()),
     )
     .unwrap();
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
     let _ = child.kill();
     let _ = child.wait();
     assert!(out.status.success(), "{}", out_text(&out));
-    let text = out_text(&out);
-    assert!(text.contains("agent:    sudokumaker-custom-constrain-395"), "{text}");
-    assert!(text.contains("session:  implement-395-42"), "{text}");
+    assert!(out_text(&out).contains("session:  implement-395-42"), "{}", out_text(&out));
 }
 
 #[test]
@@ -314,6 +321,29 @@ fn no_matching_worker_session_reports_not_found_instead_of_failing() {
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     assert!(out_text(&out).contains("session:  (not found)"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_stale_session_file_over_a_reused_pid_is_not_reported_as_the_worker() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let wt = repo.join(".claude/worktrees/implement-395");
+    // A registry file whose pid is alive and whose cwd matches, but whose
+    // procStart does not match that pid's own /proc/<pid>/stat starttime —
+    // the shape left behind when a dead session's pid gets reused, the same
+    // staleness find_controller guards against.
+    let (mut child, _real_start) = spawn_live();
+    std::fs::write(
+        f.home().join(".claude/sessions").join(format!("{}.json", child.id())),
+        format!(r#"{{"pid":{},"cwd":"{}","name":"stale-worker","procStart":"not-the-real-start"}}"#, child.id(), wt.display()),
+    )
+    .unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(out_text(&out).contains("session:  (not found)"), "a stale procStart should not be reported as the worker: {}", out_text(&out));
 }
 
 #[test]
