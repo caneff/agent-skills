@@ -190,6 +190,19 @@ impl Cleanup {
         std::fs::write(self.pr_heads().join(branch.replace('/', "__")), self.rev(repo, rev)).unwrap();
     }
 
+    /// A merged `implement-<n>` branch in `repo`, for the #821 ticket-clearing
+    /// tests: pushed, its tip recorded as a merged PR's head, main left
+    /// checked out.
+    pub fn mk_implement_branch(&self, repo: &Path, n: &str) {
+        let d = repo.to_str().unwrap();
+        let b = format!("implement-{n}");
+        self.git_ok(&["-C", d, "checkout", "-q", "-b", &b, "main"]);
+        self.commit_line(d, &b, &b);
+        self.git_ok(&["-C", d, "push", "-q", "-u", "origin", &b]);
+        self.git_ok(&["-C", d, "checkout", "-q", "main"]);
+        self.record_pr_head(repo, &b, &b);
+    }
+
     /// The bash suite's `mk_lane_repo`: caneff/trivial is merged into main,
     /// and origin/main is one commit ahead that touches flow/lane or not.
     pub fn mk_lane_repo(&self, rel: &str, touch_lane: bool) -> PathBuf {

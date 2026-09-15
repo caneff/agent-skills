@@ -208,6 +208,32 @@ fn without_gh_an_ancestor_branch_is_cleaned_and_a_squash_is_refused() {
     assert!(!run.ok && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
 }
 
+// --- 8. a closed ticket's in-progress label and assignee are cleared --------
+
+#[test]
+fn a_closed_tickets_in_progress_label_and_assignee_are_cleared() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r5");
+    c.mk_implement_branch(&r, "42");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-42"], &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has("clearing #42's in-progress label and assignee"), "{}", run.text());
+    assert!(c.calls().contains("gh issue edit 42"), "{}", c.calls());
+    assert!(c.calls().contains("--remove-label in-progress"), "{}", c.calls());
+    assert!(c.calls().contains("--remove-assignee @me"), "{}", c.calls());
+}
+
+#[test]
+fn an_open_tickets_label_and_assignee_are_left_alone() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r6");
+    c.mk_implement_branch(&r, "43");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-43"], &[("GH_STATE", "OPEN"), ("GH_LABELS", "in-progress")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!run.has("clearing #43"), "{}", run.text());
+    assert!(!c.calls().contains("gh issue edit 43"), "{}", c.calls());
+}
+
 // --- argument handling -------------------------------------------------------
 
 #[test]

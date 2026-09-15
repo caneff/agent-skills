@@ -761,7 +761,37 @@ impl Cleanup {
         } else {
             skip("the fast-forward", &format!("{primary} is not on {default}"));
         }
+
+        // Step 7 (#821) — the ticket. `merge-cleanup` was the only place in
+        // the lane that never cleared a landed claim, so a closed ticket kept
+        // showing in-progress and assigned. An open issue (part of a bigger
+        // ticket, or reopened) is left alone.
+        self.clear_ticket_if_closed(path, b);
         true
+    }
+
+    /// #821: on a plain `implement-<n>` branch whose issue is closed, remove
+    /// the `in-progress` label and the assignee. No ticket number, no gh, no
+    /// origin, or the issue still open: nothing to clear.
+    fn clear_ticket_if_closed(&self, path: &str, b: &str) {
+        let Some(n) = ticket_number(b) else { return };
+        let what = format!("clearing #{n}'s in-progress label and assignee");
+        if !on_path("gh") {
+            skip(&what, "gh is not on PATH");
+            return;
+        }
+        let Some(slug) = origin_slug(Path::new(path)) else {
+            skip(&what, "no origin remote");
+            return;
+        };
+        let issue =
+            quiet_stdout("gh", &["issue", "view", n, "--repo", &slug, "--json", "state,labels", "-q", ".state + \" \" + ([.labels[].name] | join(\",\"))"])
+                .unwrap_or_default();
+        let (state, _) = issue.split_once(' ').unwrap_or((issue.as_str(), ""));
+        if state != "CLOSED" {
+            return;
+        }
+        self.step(&what, "gh", &["issue", "edit", n, "--repo", &slug, "--remove-label", "in-progress", "--remove-assignee", "@me"]);
     }
 }
 
@@ -825,6 +855,14 @@ fn print_table(rows: &[[String; 4]]) {
         }
         safe_println!("{line}");
     }
+}
+
+/// The ticket a plain `implement-<n>` branch was cut for: the digits after
+/// `implement-`. `implement-spec-<n>` and any other branch name have no
+/// ticket to clear.
+fn ticket_number(b: &str) -> Option<&str> {
+    let n = b.strip_prefix("implement-")?;
+    (!n.is_empty() && n.chars().all(|c| c.is_ascii_digit())).then_some(n)
 }
 
 /// The linked worktree — not the primary checkout — that has `b` checked out.
