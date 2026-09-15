@@ -271,20 +271,44 @@ fn json_str<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
 /// session. "(unavailable)" on a miss — the report stays total, no dispatch
 /// failure over it.
 fn worker_session_name(home: &str, wt: &str, agent: &str) -> String {
-    for attempt in 0..3 {
-        if attempt > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        let Some(out) = quiet_stdout("herdr", &["agent", "list"]) else { continue };
-        let Some(agents) = herdr::parse_agents(&out) else { continue };
-        let session_id = agents.iter().find(|a| a.name() == agent).map(|a| a.session().to_string()).filter(|s| !s.is_empty());
-        let Some(session_id) = session_id else { continue };
-        let name = sessions::live_in(Path::new(home), wt).into_iter().find(|s| s.session_id == session_id).map(|s| s.name).filter(|n| !n.is_empty());
+    poll_worker_session_name(home, wt, agent, SESSION_POLL_DEADLINE, SESSION_POLL_INTERVAL, || quiet_stdout("herdr", &["agent", "list"]))
+}
+
+/// Bound on how long `worker_session_name` polls for herdr's and the
+/// session registry's records to appear — well inside the prompt wait's own
+/// 120s timeout, so a slow session name never becomes a slow dispatch.
+const SESSION_POLL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+/// Gap between polls. Wide enough that a genuine miss (the agent never gets
+/// a session, not just late) doesn't spend the whole deadline hammering
+/// `herdr agent list` — on a loaded box that spam is the exact problem this
+/// poll exists to not make worse.
+const SESSION_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// The polling core of `worker_session_name`, with the herdr read injected
+/// so a test can make it appear late without a real subprocess or a real
+/// multi-second wait.
+fn poll_worker_session_name(
+    home: &str,
+    wt: &str,
+    agent: &str,
+    deadline: std::time::Duration,
+    interval: std::time::Duration,
+    herdr_list: impl Fn() -> Option<String>,
+) -> String {
+    let start = std::time::Instant::now();
+    loop {
+        let name = herdr_list()
+            .and_then(|out| herdr::parse_agents(&out))
+            .and_then(|agents| agents.iter().find(|a| a.name() == agent).map(|a| a.session().to_string()).filter(|s| !s.is_empty()))
+            .and_then(|session_id| sessions::live_in(Path::new(home), wt).into_iter().find(|s| s.session_id == session_id).map(|s| s.name).filter(|n| !n.is_empty()));
         if let Some(name) = name {
             return name;
         }
+        if start.elapsed() >= deadline {
+            return "(unavailable)".to_string();
+        }
+        std::thread::sleep(interval);
     }
-    "(unavailable)".to_string()
 }
 
 fn main() -> ExitCode {
@@ -544,4 +568,82 @@ fn run() -> Result<(), ExitCode> {
     safe_println!("session:  {session}");
     safe_println!("cleanup:  cd {primary} && merge-cleanup {branch} --repo {primary}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+    use tempfile::TempDir;
+
+    #[test]
+    fn polls_past_herdrs_read_after_write_lag_past_100ms() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
+        let pid = std::process::id();
+        std::fs::write(
+            home.join(".claude/sessions").join(format!("{pid}.json")),
+            format!(r#"{{"pid":{pid},"cwd":"{}","sessionId":"sess-1","name":"skills-worker"}}"#, wt.display()),
+        )
+        .unwrap();
+
+        let start = Instant::now();
+        let herdr_json = r#"{"result":{"agents":[{"agent":"implement-836","agent_session":{"value":"sess-1"}}]}}"#;
+        let herdr_list = move || {
+            if start.elapsed() < Duration::from_millis(120) {
+                None
+            } else {
+                Some(herdr_json.to_string())
+            }
+        };
+
+        let name = poll_worker_session_name(
+            home.to_str().unwrap(),
+            wt.to_str().unwrap(),
+            "implement-836",
+            Duration::from_secs(2),
+            Duration::from_millis(20),
+            herdr_list,
+        );
+        assert_eq!(name, "skills-worker");
+    }
+
+    #[test]
+    fn polls_past_the_session_registrys_own_write_lag_past_100ms() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
+        let pid = std::process::id();
+        // herdr answers immediately with the agent's sessionId; the
+        // SessionStart hook that writes the registry file is the one that's
+        // late here, not herdr.
+        let herdr_json = r#"{"result":{"agents":[{"agent":"implement-836","agent_session":{"value":"sess-1"}}]}}"#;
+        let herdr_list = move || Some(herdr_json.to_string());
+
+        let start = Instant::now();
+        let session_file = home.join(".claude/sessions").join(format!("{pid}.json"));
+        let cwd = wt.display().to_string();
+        let writer = std::thread::spawn(move || {
+            while start.elapsed() < Duration::from_millis(120) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            std::fs::write(&session_file, format!(r#"{{"pid":{pid},"cwd":"{cwd}","sessionId":"sess-1","name":"skills-worker"}}"#)).unwrap();
+        });
+
+        let name = poll_worker_session_name(
+            home.to_str().unwrap(),
+            wt.to_str().unwrap(),
+            "implement-836",
+            Duration::from_secs(2),
+            Duration::from_millis(20),
+            herdr_list,
+        );
+        writer.join().unwrap();
+        assert_eq!(name, "skills-worker");
+    }
 }
