@@ -215,12 +215,72 @@ fn a_closed_tickets_in_progress_label_and_assignee_are_cleared() {
     let c = Cleanup::new();
     let r = c.mkfixture("r5");
     c.mk_implement_branch(&r, "42");
-    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-42"], &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress")]);
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-42"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff")],
+    );
     assert!(run.ok, "{}", run.text());
     assert!(run.has("clearing #42's in-progress label and assignee"), "{}", run.text());
     assert!(c.calls().contains("gh issue edit 42"), "{}", c.calls());
     assert!(c.calls().contains("--remove-label in-progress"), "{}", c.calls());
-    assert!(c.calls().contains("--remove-assignee @me"), "{}", c.calls());
+    assert!(c.calls().contains("--remove-assignee caneff"), "{}", c.calls());
+}
+
+#[test]
+fn every_actual_assignee_is_removed_not_just_the_callers_own_login() {
+    // #829 Codex pass: `--remove-assignee @me` clears only the identity
+    // running cleanup, so a ticket reassigned to someone else kept its
+    // assignee. Read the issue's real assignees and remove those.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r10");
+    c.mk_implement_branch(&r, "47");
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-47"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "alice,bob")],
+    );
+    assert!(run.ok, "{}", run.text());
+    assert!(c.calls().contains("--remove-assignee alice,bob"), "{}", c.calls());
+    assert!(!c.calls().contains("@me"), "{}", c.calls());
+}
+
+#[test]
+fn a_closed_ticket_with_no_assignee_only_removes_the_label() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r11");
+    c.mk_implement_branch(&r, "48");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-48"], &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(c.calls().contains("gh issue edit 48 --repo") && c.calls().contains("--remove-label in-progress"), "{}", c.calls());
+    assert!(!c.calls().contains("--remove-assignee"), "{}", c.calls());
+}
+
+#[test]
+fn a_failed_edit_names_the_exact_command_to_re_run() {
+    // #829 Codex pass: the edit's result was discarded, so an API failure
+    // after the branch and worktree are already gone reported success with
+    // no way to repair the claim later.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r12");
+    c.mk_implement_branch(&r, "49");
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-49"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
+    );
+    // Non-fatal, like this file's other post-cleanup courtesy steps
+    // (fast_forward_and_rebuild, the herdr workspace close): the branch and
+    // worktree are already gone by this point, so failing the whole run
+    // would be misleading — the loud stderr line is the recovery path.
+    assert!(run.ok, "{}", run.text());
+    assert!(!c.has_branch(&r, "implement-49"), "{}", run.text());
+    assert!(run.stderr.contains("could not clear #49's in-progress label and assignee"), "{}", run.text());
+    assert!(
+        run.stderr.contains("re-run: gh issue edit 49 --repo") && run.stderr.contains("--remove-label in-progress --remove-assignee caneff"),
+        "{}",
+        run.text()
+    );
 }
 
 #[test]

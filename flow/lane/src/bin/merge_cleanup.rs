@@ -771,12 +771,17 @@ impl Cleanup {
     }
 
     /// #821: on a plain `implement-<n>` branch whose issue is closed and
-    /// still carries `in-progress`, remove the label and the assignee. No
-    /// ticket number, no gh, no origin, the issue still open, or the label
-    /// already gone (nothing to clear, and `gh issue edit` errors on a
-    /// label a repo never defines): nothing to do. A `gh issue view` that
-    /// fails is reported, not treated as an open issue — an outage must not
-    /// silently reproduce the stale claim #821 was filed over.
+    /// still carries `in-progress`, remove the label and its actual
+    /// assignees. No ticket number, no gh, no origin, the issue still open,
+    /// or the label already gone (nothing to clear, and `gh issue edit`
+    /// errors on a label a repo never defines): nothing to do. A `gh issue
+    /// view` that fails is reported, not treated as an open issue — an
+    /// outage must not silently reproduce the stale claim #821 was filed
+    /// over. A failed edit (#829 Codex pass) is reported too, with the
+    /// exact command to re-run — non-fatal, like this function's other
+    /// post-cleanup courtesy steps (`fast_forward_and_rebuild`, the herdr
+    /// workspace close), since the branch and worktree are already gone by
+    /// this point and failing the whole run would misreport what happened.
     fn clear_ticket_if_closed(&self, path: &str, b: &str) {
         let Some(n) = ticket_number(b) else { return };
         let what = format!("clearing #{n}'s in-progress label and assignee");
@@ -788,17 +793,38 @@ impl Cleanup {
             skip(&what, "no origin remote");
             return;
         };
-        let Some(issue) =
-            quiet_stdout("gh", &["issue", "view", n, "--repo", &slug, "--json", "state,labels", "-q", ".state + \" \" + ([.labels[].name] | join(\",\"))"])
-        else {
+        let Some(issue) = quiet_stdout(
+            "gh",
+            &[
+                "issue",
+                "view",
+                n,
+                "--repo",
+                &slug,
+                "--json",
+                "state,labels,assignees",
+                "-q",
+                ".state + \" \" + ([.labels[].name] | join(\",\")) + \" \" + ([.assignees[].login] | join(\",\"))",
+            ],
+        ) else {
             skip(&what, "gh issue view failed");
             return;
         };
-        let (state, labels_csv) = issue.split_once(' ').unwrap_or((issue.as_str(), ""));
+        let mut fields = issue.splitn(3, ' ');
+        let state = fields.next().unwrap_or("");
+        let labels_csv = fields.next().unwrap_or("");
+        let assignees_csv = fields.next().unwrap_or("");
         if state != "CLOSED" || !format!(",{labels_csv},").contains(",in-progress,") {
             return;
         }
-        self.step(&what, "gh", &["issue", "edit", n, "--repo", &slug, "--remove-label", "in-progress", "--remove-assignee", "@me"]);
+        let mut edit = vec!["issue", "edit", n, "--repo", &slug, "--remove-label", "in-progress"];
+        if !assignees_csv.is_empty() {
+            edit.push("--remove-assignee");
+            edit.push(assignees_csv);
+        }
+        if !self.step(&what, "gh", &edit) {
+            eprintln!("merge-cleanup: could not clear #{n}'s in-progress label and assignee; re-run: gh {}", edit.join(" "));
+        }
     }
 }
 
