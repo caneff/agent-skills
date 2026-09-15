@@ -23,7 +23,7 @@ def tracked_markdown() -> list[Path]:
     return [
         ROOT / name
         for name in output.splitlines()
-        if not name.startswith("docs/research/")
+        if not name.startswith(("docs/research/", "tests/fixtures/"))
     ]
 
 
