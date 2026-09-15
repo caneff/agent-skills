@@ -316,17 +316,19 @@ impl WorktreeFiles {
     }
 
     /// "1 modified, 2 untracked file(s) would be lost: f, a, b" — the kinds
-    /// that are present, then their first names. The names chain ignored
-    /// first — the scarcest, least-recoverable class — so it is never the
-    /// one `first_names` elides behind modified/untracked (#838).
+    /// that are present, then their first names. Ignored names are never
+    /// capped, and lead the list: `--discard` destroys them unseen, so none
+    /// may fall into `first_names`' "and N more" (#838, and the six-or-more
+    /// case Codex caught on PR #847). Modified and untracked are capped.
     fn dirty_text(&self) -> String {
         let kinds: Vec<String> = [("modified", &self.modified), ("untracked", &self.untracked), ("ignored", &self.ignored)]
             .iter()
             .filter(|(_, v)| !v.is_empty())
             .map(|(k, v)| format!("{} {k}", v.len()))
             .collect();
-        let names: Vec<String> = self.ignored.iter().chain(&self.modified).chain(&self.untracked).cloned().collect();
-        format!("{} file(s) would be lost: {}", kinds.join(", "), first_names(&names))
+        let others: Vec<String> = self.modified.iter().chain(&self.untracked).cloned().collect();
+        let names: Vec<String> = self.ignored.iter().cloned().chain((!others.is_empty()).then(|| first_names(&others))).collect();
+        format!("{} file(s) would be lost: {}", kinds.join(", "), names.join(", "))
     }
 }
 

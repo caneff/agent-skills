@@ -1200,7 +1200,25 @@ fn scratch_is_never_elided_behind_bulk_modified_and_untracked_names() {
     }
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     let want = format!(
-        "merge-cleanup: refusing to remove {} — 1 modified, 4 untracked, 1 ignored file(s) would be lost: .scratch/, f, a, b, c and 1 more (--discard overrides)",
+        "merge-cleanup: refusing to remove {} — 1 modified, 4 untracked, 1 ignored file(s) would be lost: .scratch/, f, a, b, c, d (--discard overrides)",
+        wt.display()
+    );
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+}
+
+#[test]
+fn six_or_more_ignored_names_are_all_shown_none_elided() {
+    // Codex adversarial review on PR #847: dirty_text still fed every ignored
+    // name into the same NAMES_SHOWN-capped list, so six or more non-cache
+    // ignored entries could still push one — .scratch/ included — into "and N
+    // more". Non-cache ignored is exactly what --discard destroys unseen, so
+    // none of it may be capped; only modified/untracked names are.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r33", "implement-33");
+    ignored_dirs(&r, &wt, &[".scratch", "z1", "z2", "z3", "z4", "z5"]);
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — 6 ignored file(s) would be lost: .scratch/, z1/, z2/, z3/, z4/, z5/ (--discard overrides)",
         wt.display()
     );
     assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
