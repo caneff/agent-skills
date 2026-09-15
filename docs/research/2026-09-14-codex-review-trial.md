@@ -18,3 +18,6 @@ pass only repeated the Claude axes or raised noise.
 | Ticket | PR | codex-only, confirmed | also found by Claude | disputed | codex-only confirmed findings |
 |---|---|---|---|---|---|
 | #814 | #816 | 1 | 2 | 1 | Documented worker invocation interpolated the ticket body directly into a double-quoted shell string (`"<ticket body verbatim>"`), so a body containing `"`, backticks, or `$(` would run as shell instead of reading as text. |
+| #817 | #818 | 3 | 0 | 0 | Run 1 [high]: the PR body listed only disputed/filed round-1 findings, so a fixed Claude finding vanished and a matching Codex finding would be miscounted as codex-only. Run 1 [medium]: the controller invocation printed to stdout with no file bound, so no raw-output record existed to post. Run 2 [high]: the pass left its output and ticket-body files in `.scratch/`, so `merge-cleanup` (which refuses ignored `.scratch/` content without `--discard`) would stall after every pass. |
+
+The #814 row was classified by the builder (pre-#817 rule); from #817 on, rows are classified by the controller against the PR body's full round-1 list.
