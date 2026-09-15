@@ -39,7 +39,7 @@ The brief carries what neither engine can infer:
   not go fetch it.
 - The repo's gate, read from `git config land.testcmd`, and the instruction to
   run it green before finishing.
-- § Build's TDD rules: failing test first per criterion, no implementation
+- `implement/SKILL.md` § Build's TDD rules: failing test first per criterion, no implementation
   ahead of a red test, no scope beyond the ticket.
 - Commit to this branch with `Closes #<n>` in the final commit body. Do not
   push, do not open a PR.

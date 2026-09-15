@@ -19,13 +19,13 @@ form exactly as given.
 every axis runs under, so the caller does not paste them and this file does not
 restate them:
 
-- § 4 **Settled decisions** — what the owner already ruled on is closed. Build
+- `multi-axis-code-review/SKILL.md` § 4 **Settled decisions** — what the owner already ruled on is closed. Build
   the list from the caller's line *and* the issue's `**Settled:**` comments,
   which you read yourself when the issue is in reach. Never re-raise one and
   never argue it; a diff that *contradicts* one is a finding — name the
   decision, quote the hunk, stop there.
-- § 4 **A finding names the file and the intent, not the edit.**
-- § 3 — the Fowler smell baseline and the over-engineering lens, for the
+- `multi-axis-code-review/SKILL.md` § 4 **A finding names the file and the intent, not the edit.**
+- `multi-axis-code-review/SKILL.md` § 3 — the Fowler smell baseline and the over-engineering lens, for the
   standards axis.
 
 Two rules of your own: label a judgement call as one, a documented repo
@@ -41,7 +41,7 @@ that report and a scratch copy of the diff, never for the repo under review:
 ## Axes
 
 Read your axis's brief and its word cap from § 4 of that file:
-**standards** (its § 3 lenses, ending in the required `### Over-engineering`
+**standards** (`multi-axis-code-review/SKILL.md` § 3 lenses, ending in the required `### Over-engineering`
 subsection), **spec** (missing, partial, unasked-for, or wrongly implemented
 against the originating issue), or **correctness** — bugs, behaviour the ticket
 did not ask for, and every new test checked as a witness: strip the constraint

@@ -115,7 +115,7 @@ No PR and no reviewer; Chris reads the log after.
 ### Review
 
 1. One full round of `/multi-axis-code-review`: standards, spec and
-   correctness, all three waited for (its § Why separate axes says why the
+   correctness, all three waited for (`multi-axis-code-review/SKILL.md` § Why separate axes says why the
    built-in `/code-review` is not run here; `/code-review low` only when the
    owner asks). Every finding in the aggregate gets exactly one disposition:
    fixed in a commit, `disputed: <why>`, or filed as a follow-up ticket.
