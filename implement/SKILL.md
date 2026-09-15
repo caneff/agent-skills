@@ -281,16 +281,22 @@ The controller merges on a repo Chris owns; Chris reads it after via
    already deleted this directory.
 
    Once that comment posts, `rm "$out_file" "$body_file"`, then `rmdir
-   .scratch 2>/dev/null || true` in the workspace — the comment is now the
-   durable record and the ticket body lives on the issue, so nothing needs
-   them left in the workspace: `merge-cleanup` refuses to delete ignored
-   `.scratch/` content without `--discard`, and stray files (or an empty
-   directory this step's own `mkdir -p` created) there stall it on every
-   Codex pass. `rmdir` only removes an empty directory, so it undoes that
-   `mkdir -p` with no risk to anything else that might be in `.scratch/`.
-   Remove only those two named files and, if now empty, the directory —
-   never `rm -rf .scratch`, never `--discard`. If `gh pr comment` fails,
-   leave both files in place and stop before merging.
+   "$(dirname "$out_file")"` — bound to the file's own directory, not a
+   bare `.scratch` relative to wherever the controller's shell happens to
+   be sitting (usually the primary checkout, not this PR's workspace) —
+   the comment is now the durable record and the ticket body lives on the
+   issue, so nothing needs them left in the workspace: `merge-cleanup`
+   refuses to delete ignored `.scratch/` content without `--discard`, and
+   stray files (or an empty directory this step's own `mkdir -p` created)
+   there stall it on every Codex pass. `rmdir` only removes an empty
+   directory, so it undoes that `mkdir -p` with no risk to anything else
+   that might be in `.scratch/`. Remove only those two named files and, if
+   now empty, the directory — never `rm -rf .scratch`, never `--discard`.
+   If `rmdir` fails, the directory wasn't empty: report that and name it,
+   rather than hide the failure — don't silence it with `|| true`, so
+   whatever else is in there surfaces before `merge-cleanup` would refuse
+   on it anyway. If `gh pr comment` fails, leave both files in place and
+   stop before merging.
 
    No material findings → go to step 4. Findings → hold the merge: send the
    worker the findings and the comment URL. The worker disposes of each one
