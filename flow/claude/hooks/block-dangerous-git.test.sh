@@ -139,9 +139,7 @@ run "owned merge chained with a one-segment -R value allowed" 0 \
   "gh pr merge 1 --repo caneff/x && grep -R pattern ."
 run "someone else's repo on the merge still blocked beside a path --repo" 2 \
   "merge-cleanup --repo /home/caneff/.agents/skills b && gh pr merge 1 --repo someone-else/x" "BLOCKED"
-# GitHub owners are case-insensitive (#810): a named owner that differs from
-# the login only in case is still this login's repo, and a foreign owner
-# still blocks whatever case it's spelled in.
+# Same rationale as the repo_is_owned case above (#810), for a named owner.
 run "gh pr merge naming an owned repo in a different case allowed" 0 \
   "gh pr merge 1 --repo CANEFF/agent-skills"
 run "gh pr merge naming someone else's repo in a different case blocked" 2 \

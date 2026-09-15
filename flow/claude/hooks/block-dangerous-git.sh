@@ -104,8 +104,11 @@ while IFS= read -r segment; do
 done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g')
 
 # GitHub owners are case-insensitive: `CANEFF/x` and `caneff/x` name the same
-# account, so every owner-vs-login compare lowercases both sides first.
-ieq() { [ "${1,,}" = "${2,,}" ]; }
+# account, so every owner-vs-login compare lowercases both sides first. `tr`
+# over bash's `${,,}`: GitHub logins are ASCII, and `${,,}` folds by locale
+# (a Turkish locale maps `I` to dotless `ı`, not `i`), which could turn a
+# same-account match into a false block.
+ieq() { [ "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$2" | tr 'A-Z' 'a-z')" ]; }
 
 # --- Ownership of this repo, cached. ---
 # Verdict is keyed on the repo's toplevel path. Only the OWNED verdict is
