@@ -240,6 +240,14 @@ The controller merges on a repo Chris owns; Chris reads it after via
    comment before acting on it, using that same file:
    `gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`.
 
+   Once that comment posts, `rm "$out_file" "$body_file"` — the comment is
+   now the durable record and the ticket body lives on the issue, so
+   nothing needs them left in the workspace: `merge-cleanup` refuses to
+   delete ignored `.scratch/` content without `--discard`, and stray files
+   there stall it on every Codex pass. Remove only those two named files —
+   never `rm -rf .scratch`, never `--discard`. If `gh pr comment` fails,
+   leave both files in place and stop before merging.
+
    No material findings → go to step 4. Findings → hold the merge: send the
    worker the findings and the comment URL. The worker disposes of each one
    (fixed in a commit / `disputed: <why>` / filed), adds each disposition to
@@ -248,11 +256,12 @@ The controller merges on a repo Chris owns; Chris reads it after via
    Re-run step 2 (not-draft, CLEAN — commits landed since the first check)
    and then this pass once more on the fixes — there is no third Codex run,
    so whatever this second run finds is final: post its output as a PR
-   comment the same way, and either it has no material findings (go to
-   step 4) or the controller itself gives each of its findings a
-   `disputed: <why>` or filed disposition in the PR body — there is no
-   worker fix-and-re-run cycle left to ask for a "fixed" one — before going
-   to step 4.
+   comment the same way (a fresh `out_file`, since the first is already
+   removed), then remove that file too once the comment posts, and either
+   it has no material findings (go to step 4) or the controller itself
+   gives each of its findings a `disputed: <why>` or filed disposition in
+   the PR body — there is no worker fix-and-re-run cycle left to ask for a
+   "fixed" one — before going to step 4.
 
    Classify each finding by comparing it with the PR body's round-1
    findings — `codex-only, confirmed` (fixed or filed, and no Claude axis

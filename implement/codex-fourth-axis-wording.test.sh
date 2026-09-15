@@ -118,6 +118,15 @@ check_in "$merge_section" '.scratch/codex-adversarial-<pr>.out'
 check_in "$merge_section" 'adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1'
 check_in "$merge_section" "the pass's only durable record"
 
+# Rule 9 (controller Codex pass on PR #818, run 2 of 2): the pass's own
+# .scratch/ files must not linger — merge-cleanup refuses to delete
+# ignored content without --discard, so a leftover out_file or body_file
+# would stall it on every Codex pass. Only those two named files, and only
+# after the PR comment succeeds.
+check_in "$merge_section" 'rm "$out_file" "$body_file"'
+check_in "$merge_section" 'never `rm -rf .scratch`, never `--discard`'
+check_in "$merge_section" 'If `gh pr comment` fails, leave both files in place and stop before merging'
+
 if [ "$fail" -eq 0 ]; then
   echo "PASS implement/codex-fourth-axis-wording.test.sh"
 else
