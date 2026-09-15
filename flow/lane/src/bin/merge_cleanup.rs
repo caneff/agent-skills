@@ -770,9 +770,13 @@ impl Cleanup {
         true
     }
 
-    /// #821: on a plain `implement-<n>` branch whose issue is closed, remove
-    /// the `in-progress` label and the assignee. No ticket number, no gh, no
-    /// origin, or the issue still open: nothing to clear.
+    /// #821: on a plain `implement-<n>` branch whose issue is closed and
+    /// still carries `in-progress`, remove the label and the assignee. No
+    /// ticket number, no gh, no origin, the issue still open, or the label
+    /// already gone (nothing to clear, and `gh issue edit` errors on a
+    /// label a repo never defines): nothing to do. A `gh issue view` that
+    /// fails is reported, not treated as an open issue — an outage must not
+    /// silently reproduce the stale claim #821 was filed over.
     fn clear_ticket_if_closed(&self, path: &str, b: &str) {
         let Some(n) = ticket_number(b) else { return };
         let what = format!("clearing #{n}'s in-progress label and assignee");
@@ -784,11 +788,14 @@ impl Cleanup {
             skip(&what, "no origin remote");
             return;
         };
-        let issue =
+        let Some(issue) =
             quiet_stdout("gh", &["issue", "view", n, "--repo", &slug, "--json", "state,labels", "-q", ".state + \" \" + ([.labels[].name] | join(\",\"))"])
-                .unwrap_or_default();
-        let (state, _) = issue.split_once(' ').unwrap_or((issue.as_str(), ""));
-        if state != "CLOSED" {
+        else {
+            skip(&what, "gh issue view failed");
+            return;
+        };
+        let (state, labels_csv) = issue.split_once(' ').unwrap_or((issue.as_str(), ""));
+        if state != "CLOSED" || !format!(",{labels_csv},").contains(",in-progress,") {
             return;
         }
         self.step(&what, "gh", &["issue", "edit", n, "--repo", &slug, "--remove-label", "in-progress", "--remove-assignee", "@me"]);

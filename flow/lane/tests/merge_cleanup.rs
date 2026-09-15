@@ -234,6 +234,44 @@ fn an_open_tickets_label_and_assignee_are_left_alone() {
     assert!(!c.calls().contains("gh issue edit 43"), "{}", c.calls());
 }
 
+#[test]
+fn a_closed_ticket_with_no_in_progress_label_is_left_alone() {
+    // Already cleared, or never carried the label: nothing to remove, and
+    // nothing for `gh issue edit` to error on over an undefined label.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r7");
+    c.mk_implement_branch(&r, "44");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-44"], &[("GH_STATE", "CLOSED"), ("GH_LABELS", "bug")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!run.has("clearing #44"), "{}", run.text());
+    assert!(!c.calls().contains("gh issue edit 44"), "{}", c.calls());
+}
+
+#[test]
+fn a_failed_issue_read_is_reported_not_swallowed() {
+    // GH_STATE unset is the fake's "no issue" failure, not an open issue —
+    // the two must not look the same, or a real gh outage silently leaves
+    // the stale claim #821 was filed over.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r8");
+    c.mk_implement_branch(&r, "45");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-45"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has("skipped clearing #45's in-progress label and assignee (gh issue view failed)"), "{}", run.text());
+    assert!(!c.calls().contains("gh issue edit 45"), "{}", c.calls());
+}
+
+#[test]
+fn a_spec_branchs_ticket_is_never_cleared() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r9");
+    c.mk_implement_branch(&r, "spec-46");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-spec-46"], &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!run.has("clearing #"), "{}", run.text());
+    assert!(!c.calls().contains("issue edit"), "{}", c.calls());
+}
+
 // --- argument handling -------------------------------------------------------
 
 #[test]
