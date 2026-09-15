@@ -153,10 +153,16 @@ time, not from the worker: § The merge.
    `.scratch/`. Why: `merge-cleanup` refuses to remove ignored `.scratch/`
    content without `--discard` — an irreversible deletion that should never
    be the default way a run ends. Anything you cannot commit and must keep
-   is named in the PR-up report instead of deleted.
+   — run `PRE_REPORT_KEEP_SCRATCH="<why>" bash
+   ~/.agents/skills/implement/pre-report-gate.sh <sha>` for step 4 instead of
+   the bare form — and name it, with the same `<why>`, in the PR-up report.
+   (§ The merge step 3 later writes its own files into this same `.scratch/`
+   at merge time, after "PR up" — that's the controller's use, not yours,
+   and doesn't change what you clear here.)
 4. **`bash ~/.agents/skills/implement/pre-report-gate.sh <sha>`** passes on
    the sha you report — a "done" report has described work that was dirty in
-   the tree, not on the branch, or left content behind in `.scratch/`.
+   the tree, not on the branch, or left content behind in `.scratch/` with
+   no `PRE_REPORT_KEEP_SCRATCH` naming why.
 5. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus`**
    prints `false` and `CLEAN` before "PR up" goes out — a PR reported on a
    draft or a conflict fails the controller's merge. `UNKNOWN` means GitHub
@@ -236,13 +242,16 @@ The controller merges on a repo Chris owns; Chris reads it after via
    git fetch origin
    body_file=<absolute path you wrote the ticket body to>
    out_file=<this workspace's absolute path>/.scratch/codex-adversarial-<pr>.out
+   mkdir -p "$(dirname "$out_file")"
    plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
    node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1
    ```
 
    `out_file` is the pass's only durable record — the command's own output
    goes to stdout otherwise, and nothing captures it. It must resolve under
-   this workspace's git-ignored `.scratch/`, never `/tmp`. Post it as a PR
+   this workspace's git-ignored `.scratch/`, never `/tmp`; the `mkdir -p`
+   above is required because the worker's own Before the PR step already
+   deleted this directory. Post it as a PR
    comment before acting on it, using that same file:
    `gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`.
 
