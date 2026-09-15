@@ -178,6 +178,16 @@ git push -u origin implement-<n>
 gh pr create --repo <owner/name> --title "<title>" --body-file <body>
 ```
 
+**Confirm the PR actually closes the ticket**:
+`gh pr view <pr> --repo <owner/name> --json closingIssuesReferences` lists
+every ticket number this PR should close. `implement/SKILL.md` § The merge
+step 6 only checks closure after merge — a body that never registers as
+closing has nothing to fail loud before then. A ticket missing from the
+list means the closing keyword landed wrong (`Closes #<n>` inside backticks
+or a code fence doesn't register; a bare `Closes #<n>` line does) — fix the
+body (`gh pr edit <pr> --repo <owner/name> --body-file <body>`) and re-run
+the `--json closingIssuesReferences` check until every ticket appears.
+
 The body has these sections and nothing else:
 
 - **What changed** — three lines.
