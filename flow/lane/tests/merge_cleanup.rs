@@ -1185,6 +1185,27 @@ fn scratch_alongside_many_caches_is_never_elided_behind_the_cache_count() {
 }
 
 #[test]
+fn scratch_is_never_elided_behind_bulk_modified_and_untracked_names() {
+    // #838: dirty_text's own name list chained modified, untracked, then
+    // ignored, so 5+ modified/untracked names filled first_names' NAMES_SHOWN
+    // and .scratch/ (the scarcest, least-recoverable class) fell into "and N
+    // more" with nothing else naming it. Ignored goes first in the chain, so
+    // it always shows regardless of how many modified/untracked names follow.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r32", "implement-32");
+    ignored_dirs(&r, &wt, &[".scratch"]);
+    for name in ["a", "b", "c", "d", "e"] {
+        std::fs::write(wt.join(name), "unsaved\n").unwrap();
+    }
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — 5 untracked, 1 ignored file(s) would be lost: .scratch/, a, b, c, d and 1 more (--discard overrides)",
+        wt.display()
+    );
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+}
+
+#[test]
 fn an_empty_ignored_directory_still_refuses_without_discard() {
     // #823, reversed by the Codex adversarial-review pass on PR #839: a
     // process can fill the directory between the read and the removal, and
