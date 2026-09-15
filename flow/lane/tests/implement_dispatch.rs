@@ -347,6 +347,31 @@ fn a_stale_session_file_over_a_reused_pid_is_not_reported_as_the_worker() {
 }
 
 #[test]
+fn a_live_matching_session_with_no_name_key_at_all_reports_not_found() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let wt = repo.join(".claude/worktrees/implement-395");
+    // A live, cwd-matching, procStart-matching session whose registry file
+    // simply has no "name" key at all — real files sometimes don't.
+    let (mut child, proc_start) = spawn_live();
+    std::fs::write(
+        f.home().join(".claude/sessions").join(format!("{}.json", child.id())),
+        format!(r#"{{"pid":{},"cwd":"{}","procStart":"{proc_start}"}}"#, child.id(), wt.display()),
+    )
+    .unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(
+        out_text(&out).contains("session:  (not found)"),
+        "a nameless session should report (not found), not a blank name: {}",
+        out_text(&out)
+    );
+}
+
+#[test]
 fn model_reaches_agent_start_and_pane_falls_back_to_pane_list() {
     let f = Fixture::new();
     f.reset_home(true);
