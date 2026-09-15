@@ -152,10 +152,10 @@ time, not from the worker: § The merge.
    (or the relevant note) and commit it, then delete this workspace's
    `.scratch/`. Why: `merge-cleanup` refuses to remove ignored `.scratch/`
    content without `--discard` — an irreversible deletion that should never
-   be the default way a run ends. Anything you cannot commit and must keep
-   — run `PRE_REPORT_KEEP_SCRATCH="<why>" bash
+   be the default way a run ends. If something you cannot commit and must
+   keep is left in `.scratch/`, run `PRE_REPORT_KEEP_SCRATCH="<why>" bash
    ~/.agents/skills/implement/pre-report-gate.sh <sha>` for step 4 instead of
-   the bare form — and name it, with the same `<why>`, in the PR-up report.
+   the bare form, and name it, with the same `<why>`, in the PR-up report.
    (§ The merge step 3 later writes its own files into this same `.scratch/`
    at merge time, after "PR up" — that's the controller's use, not yours,
    and doesn't change what you clear here.)

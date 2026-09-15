@@ -88,6 +88,16 @@ else
   echo "FAIL: PRE_REPORT_KEEP_SCRATCH — want exit 0 + the reason quoted, got $rc: $out"; fails=1
 fi
 
+# The pass line itself — the one line the worker is told to quote — must not
+# claim .scratch/ is clear when it was kept, and stdout alone (what a
+# captured invocation keeps) must carry the acknowledgement.
+stdout_only=$(cd "$repo" && PRE_REPORT_KEEP_SCRATCH="raw probe log" bash "$gate" "$tip" 2>/dev/null)
+if [[ "$stdout_only" != *".scratch/ clear"* ]] && [[ "$stdout_only" == *"kept"* ]]; then
+  echo "PASS: the pass line doesn't call a kept .scratch/ clear"
+else
+  echo "FAIL: pass line on stdout — want no 'clear' claim and a 'kept' mention, got: $stdout_only"; fails=1
+fi
+
 # An empty reason isn't an acknowledgement — it's the unset case, so a
 # worker that forgets the reason still gets blocked, not silently waved
 # through.
