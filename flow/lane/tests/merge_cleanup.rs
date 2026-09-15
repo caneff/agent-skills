@@ -208,6 +208,130 @@ fn without_gh_an_ancestor_branch_is_cleaned_and_a_squash_is_refused() {
     assert!(!run.ok && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
 }
 
+// --- 8. a closed ticket's in-progress label and assignee are cleared --------
+
+#[test]
+fn a_closed_tickets_in_progress_label_and_assignee_are_cleared() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r5");
+    c.mk_implement_branch(&r, "42");
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-42"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff")],
+    );
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has("clearing #42's in-progress label and assignee"), "{}", run.text());
+    assert!(c.calls().contains("gh issue edit 42"), "{}", c.calls());
+    assert!(c.calls().contains("--remove-label in-progress"), "{}", c.calls());
+    assert!(c.calls().contains("--remove-assignee caneff"), "{}", c.calls());
+}
+
+#[test]
+fn every_actual_assignee_is_removed_not_just_the_callers_own_login() {
+    // #829 Codex pass: `--remove-assignee @me` clears only the identity
+    // running cleanup, so a ticket reassigned to someone else kept its
+    // assignee. Read the issue's real assignees and remove those.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r10");
+    c.mk_implement_branch(&r, "47");
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-47"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "alice,bob")],
+    );
+    assert!(run.ok, "{}", run.text());
+    assert!(c.calls().contains("--remove-assignee alice,bob"), "{}", c.calls());
+    assert!(!c.calls().contains("@me"), "{}", c.calls());
+}
+
+#[test]
+fn a_closed_ticket_with_no_assignee_only_removes_the_label() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r11");
+    c.mk_implement_branch(&r, "48");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-48"], &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(c.calls().contains("gh issue edit 48 --repo") && c.calls().contains("--remove-label in-progress"), "{}", c.calls());
+    assert!(!c.calls().contains("--remove-assignee"), "{}", c.calls());
+}
+
+#[test]
+fn a_failed_edit_names_the_exact_command_to_re_run() {
+    // #829 Codex pass: the edit's result was discarded, so an API failure
+    // after the branch and worktree are already gone reported success with
+    // no way to repair the claim later.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r12");
+    c.mk_implement_branch(&r, "49");
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-49"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
+    );
+    // Non-fatal, like this file's other post-cleanup courtesy steps
+    // (fast_forward_and_rebuild, the herdr workspace close): the branch and
+    // worktree are already gone by this point, so failing the whole run
+    // would be misleading — the loud stderr line is the recovery path.
+    assert!(run.ok, "{}", run.text());
+    assert!(!c.has_branch(&r, "implement-49"), "{}", run.text());
+    assert!(run.stderr.contains("could not clear #49's in-progress label and assignee"), "{}", run.text());
+    assert!(
+        run.stderr.contains("re-run: gh issue edit 49 --repo") && run.stderr.contains("--remove-label in-progress --remove-assignee caneff"),
+        "{}",
+        run.text()
+    );
+}
+
+#[test]
+fn an_open_tickets_label_and_assignee_are_left_alone() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r6");
+    c.mk_implement_branch(&r, "43");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-43"], &[("GH_STATE", "OPEN"), ("GH_LABELS", "in-progress")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!run.has("clearing #43"), "{}", run.text());
+    assert!(!c.calls().contains("gh issue edit 43"), "{}", c.calls());
+}
+
+#[test]
+fn a_closed_ticket_with_no_in_progress_label_is_left_alone() {
+    // Already cleared, or never carried the label: nothing to remove, and
+    // nothing for `gh issue edit` to error on over an undefined label.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r7");
+    c.mk_implement_branch(&r, "44");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-44"], &[("GH_STATE", "CLOSED"), ("GH_LABELS", "bug")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!run.has("clearing #44"), "{}", run.text());
+    assert!(!c.calls().contains("gh issue edit 44"), "{}", c.calls());
+}
+
+#[test]
+fn a_failed_issue_read_is_reported_not_swallowed() {
+    // GH_STATE unset is the fake's "no issue" failure, not an open issue —
+    // the two must not look the same, or a real gh outage silently leaves
+    // the stale claim #821 was filed over.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r8");
+    c.mk_implement_branch(&r, "45");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-45"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has("skipped clearing #45's in-progress label and assignee (gh issue view failed)"), "{}", run.text());
+    assert!(!c.calls().contains("gh issue edit 45"), "{}", c.calls());
+}
+
+#[test]
+fn a_spec_branchs_ticket_is_never_cleared() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r9");
+    c.mk_implement_branch(&r, "spec-46");
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "implement-spec-46"], &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress")]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!run.has("clearing #"), "{}", run.text());
+    assert!(!c.calls().contains("issue edit"), "{}", c.calls());
+}
+
 // --- argument handling -------------------------------------------------------
 
 #[test]

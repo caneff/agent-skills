@@ -314,7 +314,9 @@ The controller merges on a repo Chris owns; Chris reads it after via
    stops itself.
 6. **`gh issue view <n> --repo <owner/name>` shows each `Closes` issue
    closed** — a squash or rebase can rewrite the commit so the trailer never
-   fires.
+   fires. `merge-cleanup` clears a closed ticket's `in-progress` label and
+   assignee itself (#821); this step's job is only to confirm the issue
+   closed at all.
 7. Report "merged, sha X" to Chris, X being the squash commit on the default
    branch (`gh pr view <pr> --repo <owner/name> --json mergeCommit`).
 

@@ -761,7 +761,70 @@ impl Cleanup {
         } else {
             skip("the fast-forward", &format!("{primary} is not on {default}"));
         }
+
+        // Step 7 (#821) — the ticket. `merge-cleanup` was the only place in
+        // the lane that never cleared a landed claim, so a closed ticket kept
+        // showing in-progress and assigned. An open issue (part of a bigger
+        // ticket, or reopened) is left alone.
+        self.clear_ticket_if_closed(path, b);
         true
+    }
+
+    /// #821: on a plain `implement-<n>` branch whose issue is closed and
+    /// still carries `in-progress`, remove the label and its actual
+    /// assignees. No ticket number, no gh, no origin, the issue still open,
+    /// or the label already gone (nothing to clear, and `gh issue edit`
+    /// errors on a label a repo never defines): nothing to do. A `gh issue
+    /// view` that fails is reported, not treated as an open issue — an
+    /// outage must not silently reproduce the stale claim #821 was filed
+    /// over. A failed edit (#829 Codex pass) is reported too, with the
+    /// exact command to re-run — non-fatal, like this function's other
+    /// post-cleanup courtesy steps (`fast_forward_and_rebuild`, the herdr
+    /// workspace close), since the branch and worktree are already gone by
+    /// this point and failing the whole run would misreport what happened.
+    fn clear_ticket_if_closed(&self, path: &str, b: &str) {
+        let Some(n) = ticket_number(b) else { return };
+        let what = format!("clearing #{n}'s in-progress label and assignee");
+        if !on_path("gh") {
+            skip(&what, "gh is not on PATH");
+            return;
+        }
+        let Some(slug) = origin_slug(Path::new(path)) else {
+            skip(&what, "no origin remote");
+            return;
+        };
+        let Some(issue) = quiet_stdout(
+            "gh",
+            &[
+                "issue",
+                "view",
+                n,
+                "--repo",
+                &slug,
+                "--json",
+                "state,labels,assignees",
+                "-q",
+                ".state + \" \" + ([.labels[].name] | join(\",\")) + \" \" + ([.assignees[].login] | join(\",\"))",
+            ],
+        ) else {
+            skip(&what, "gh issue view failed");
+            return;
+        };
+        let mut fields = issue.splitn(3, ' ');
+        let state = fields.next().unwrap_or("");
+        let labels_csv = fields.next().unwrap_or("");
+        let assignees_csv = fields.next().unwrap_or("");
+        if state != "CLOSED" || !format!(",{labels_csv},").contains(",in-progress,") {
+            return;
+        }
+        let mut edit = vec!["issue", "edit", n, "--repo", &slug, "--remove-label", "in-progress"];
+        if !assignees_csv.is_empty() {
+            edit.push("--remove-assignee");
+            edit.push(assignees_csv);
+        }
+        if !self.step(&what, "gh", &edit) {
+            eprintln!("merge-cleanup: could not clear #{n}'s in-progress label and assignee; re-run: gh {}", edit.join(" "));
+        }
     }
 }
 
@@ -825,6 +888,14 @@ fn print_table(rows: &[[String; 4]]) {
         }
         safe_println!("{line}");
     }
+}
+
+/// The ticket a plain `implement-<n>` branch was cut for: the digits after
+/// `implement-`. `implement-spec-<n>` and any other branch name have no
+/// ticket to clear.
+fn ticket_number(b: &str) -> Option<&str> {
+    let n = b.strip_prefix("implement-")?;
+    (!n.is_empty() && n.chars().all(|c| c.is_ascii_digit())).then_some(n)
 }
 
 /// The linked worktree — not the primary checkout — that has `b` checked out.

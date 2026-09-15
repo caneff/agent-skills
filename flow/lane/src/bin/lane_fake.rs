@@ -9,7 +9,8 @@
 //! is driven by env vars, matching the bash stubs it replaces: GH_STATE,
 //! GH_LABELS, HERDR_RUNNING, HERDR_NO_ROOT_PANE, HERDR_AGENT_TAKEN,
 //! HERDR_STALL for implement-dispatch; GH_PR_HEADS, HERDR_AGENTS,
-//! HERDR_WORKSPACES, HERDR_FAIL, HERDR_PANE_CLOSE_FAIL for merge-cleanup.
+//! HERDR_WORKSPACES, HERDR_FAIL, HERDR_PANE_CLOSE_FAIL, GH_ASSIGNEES,
+//! GH_ISSUE_EDIT_FAIL for merge-cleanup.
 //! Never installed — see install.sh.
 
 use std::env;
@@ -108,7 +109,16 @@ fn run_gh(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
         let labels = env::var("GH_LABELS").unwrap_or_default();
-        println!("{state} {labels}");
+        // A third field only when a scenario opts in, so the two-field
+        // format existing tests assert on is untouched.
+        match env::var("GH_ASSIGNEES") {
+            Ok(assignees) => println!("{state} {labels} {assignees}"),
+            Err(_) => println!("{state} {labels}"),
+        }
+    }
+    if (a0, a1) == ("issue", "edit") && env_flag("GH_ISSUE_EDIT_FAIL") {
+        eprintln!("gh: issue edit failed");
+        return ExitCode::FAILURE;
     }
     if (a0, a1) == ("pr", "list") {
         return gh_pr_list(args);
