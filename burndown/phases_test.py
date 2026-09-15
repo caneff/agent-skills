@@ -125,22 +125,66 @@ def test_review_round_1_spans_the_axis_skill_call_to_its_last_agent_result():
         assert float(duration) == 300.0  # 00:10:00 -> 00:15:00 (last subagent finish)
 
 
-def test_verification_is_the_agent_call_whose_prompt_says_verify():
+def test_verification_is_the_second_review_invocation_by_order_not_wording():
+    """The ticket defines verification as "the second review invocation" —
+    classification must be ordinal, not a `"verif"` keyword match. A solo
+    Agent call with neutral wording ("Round 2 check"), arriving well after
+    round 1's burst, is still verification because it's the second one."""
     with tempfile.TemporaryDirectory() as tmp:
         project = os.path.join(tmp, PROJECT_DIR)
         _write(os.path.join(project, "s.jsonl"), [
             _first_user("2026-01-01T00:00:00.000Z"),
+            _assistant("2026-01-01T00:10:00.000Z",
+                       ("skill1", "Skill", {"skill": "multi-axis-code-review"})),
+            _assistant("2026-01-01T00:10:05.000Z",
+                       ("a1", "Agent", {"subagent_type": "diff-reviewer",
+                                        "description": "Standards axis review"})),
+            _assistant("2026-01-01T00:10:10.000Z",
+                       ("a2", "Agent", {"subagent_type": "diff-reviewer",
+                                        "description": "Spec axis review"})),
             _assistant("2026-01-01T00:20:00.000Z",
                        ("a3", "Agent", {"subagent_type": "diff-reviewer",
-                                        "description": "Verify round-1 fixes"})),
-            _result("2026-01-01T00:20:01.000Z", "a3"),  # async-launch ack, not the finish
+                                        "description": "Round 2 check"})),
         ])
-        _subagent(project, "s", "3", "a3", "Verify round-1 fixes", "2026-01-01T00:25:00.000Z")
+        _subagent(project, "s", "1", "a1", "Standards axis review", "2026-01-01T00:12:00.000Z")
+        _subagent(project, "s", "2", "a2", "Spec axis review", "2026-01-01T00:12:30.000Z")
+        _subagent(project, "s", "3", "a3", "Round 2 check", "2026-01-01T00:25:00.000Z")
         r = _run(tmp, WORKTREE)
         lines = _lines(r.stdout, WORKTREE)
         start, duration = lines["verification"]
         assert start == "2026-01-01T00:20:00.000Z"
         assert float(duration) == 300.0
+        # round 1's span is unaffected — still just a1/a2, not a3
+        r1_start, r1_duration = lines["review_round_1"]
+        assert r1_start == "2026-01-01T00:10:00.000Z"
+        assert float(r1_duration) == 150.0  # 00:10:00 -> 00:12:30
+
+
+def test_a_second_skill_call_and_its_agent_burst_also_classify_as_verification():
+    """A second full `multi-axis-code-review` invocation (its own Skill
+    call plus its own Agent burst) must classify by order too — the skill
+    call itself carries no "this is round 2" marker other than timing."""
+    with tempfile.TemporaryDirectory() as tmp:
+        project = os.path.join(tmp, PROJECT_DIR)
+        _write(os.path.join(project, "s.jsonl"), [
+            _first_user("2026-01-01T00:00:00.000Z"),
+            _assistant("2026-01-01T00:10:00.000Z",
+                       ("skill1", "Skill", {"skill": "multi-axis-code-review"})),
+            _assistant("2026-01-01T00:10:05.000Z",
+                       ("a1", "Agent", {"subagent_type": "diff-reviewer",
+                                        "description": "Standards axis review"})),
+            _assistant("2026-01-01T00:30:00.000Z",
+                       ("skill2", "Skill", {"skill": "multi-axis-code-review"})),
+            _assistant("2026-01-01T00:30:05.000Z",
+                       ("a2", "Agent", {"subagent_type": "diff-reviewer",
+                                        "description": "Standards axis review"})),
+        ])
+        _subagent(project, "s", "1", "a1", "Standards axis review", "2026-01-01T00:12:00.000Z")
+        _subagent(project, "s", "2", "a2", "Standards axis review", "2026-01-01T00:35:00.000Z")
+        r = _run(tmp, WORKTREE)
+        lines = _lines(r.stdout, WORKTREE)
+        assert lines["review_round_1"] == ("2026-01-01T00:10:00.000Z", "120.0")
+        assert lines["verification"] == ("2026-01-01T00:30:00.000Z", "300.0")
 
 
 def test_pr_open_is_the_gh_pr_create_bash_call():
@@ -231,6 +275,28 @@ def test_waiting_on_controller_sums_gaps_from_each_outgoing_to_the_next_incoming
         r = _run(tmp, WORKTREE)
         lines = _lines(r.stdout, WORKTREE)
         assert float(lines["waiting_on_controller"][1]) == 270.0
+
+
+def test_a_pr_up_report_does_not_start_a_wait():
+    """Controller ruling on #826: `waiting_on_controller` counts only a
+    SendMessage that isn't a "PR up" report — the report itself isn't a
+    question awaiting a reply, so pairing it with the next incoming
+    message (which could be minutes later, e.g. the Codex pass result)
+    inflated the wait with time that was never actually spent idle."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _write(os.path.join(tmp, PROJECT_DIR, "s.jsonl"), [
+            _first_user("2026-01-01T00:00:00.000Z"),
+            _assistant("2026-01-01T00:40:00.000Z",
+                       ("m1", "SendMessage", {"to": "controller",
+                                               "message": "PR up for #9: url"})),
+            _incoming("2026-01-01T00:47:44.000Z"),  # 464s later — not a wait
+            _assistant("2026-01-01T00:50:00.000Z",
+                       ("m2", "SendMessage", {"to": "controller", "message": "merge?"})),
+            _incoming("2026-01-01T00:53:00.000Z"),  # 180s wait — a real question
+        ])
+        r = _run(tmp, WORKTREE)
+        lines = _lines(r.stdout, WORKTREE)
+        assert float(lines["waiting_on_controller"][1]) == 180.0
 
 
 def test_a_non_string_or_malformed_timestamp_is_skipped_not_fatal():

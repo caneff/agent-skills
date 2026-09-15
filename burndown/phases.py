@@ -6,7 +6,8 @@ prints one line per phase per ticket:
     <identifier> <phase> <start-iso|-> <duration-seconds|->
 
 plus one `waiting_on_controller` line totalling the gaps from an outgoing
-SendMessage to the next incoming cross-session message.
+SendMessage that isn't a "PR up" report — a report doesn't await a reply —
+to the next incoming cross-session message.
 
 Reads only, like cost.py beside it. A worktree with no matching transcript,
 or a phase never reached, prints `-` for that phase rather than dying —
@@ -183,14 +184,37 @@ def compute_phases(entries, agent_completions):
     def is_axis_skill(t):
         return t[1] == "Skill" and t[2].get("skill") == "multi-axis-code-review"
 
-    def is_verification(t):
-        blob = (str(t[2].get("description", "")) + " " +
-                str(t[2].get("prompt", ""))).lower()
-        return "verif" in blob
+    # Verification is "the second review invocation" — ordinal, not a
+    # wording match. Cluster only the Agent spawns (never the triggering
+    # Skill call's own timestamp: the skill's own exploration before it
+    # spawns anything can itself run several minutes, longer than the true
+    # gap to a later round on a fast ticket — #826 Codex finding). Within
+    # one invocation the axis spawns land seconds apart; the true gap to
+    # the next invocation is minutes — 120s cleanly separates every ticket
+    # in docs/research/2026-09-15-phase-timings.md's corpus.
+    def cluster(calls, gap_seconds=120):
+        groups = []
+        last = None
+        for t in sorted(calls, key=lambda x: x[0]):
+            if last is None or (_parse_ts(t[0]) - last).total_seconds() > gap_seconds:
+                groups.append([])
+            groups[-1].append(t)
+            last = _parse_ts(t[0])
+        return groups
 
-    round1 = [t for t in tool_uses
-              if is_axis_skill(t) or (is_diff_reviewer(t) and not is_verification(t))]
-    round2 = [t for t in tool_uses if is_diff_reviewer(t) and is_verification(t)]
+    agent_groups = cluster([t for t in tool_uses if is_diff_reviewer(t)])
+    round1 = list(agent_groups[0]) if agent_groups else []
+    round2 = [t for g in agent_groups[1:] for t in g]
+
+    for skill_call in (t for t in tool_uses if is_axis_skill(t)):
+        # A skill call belongs to whichever invocation's Agent group it
+        # precedes — the first group starting at or after it.
+        target = round2
+        for g in agent_groups:
+            if all(t[0] >= skill_call[0] for t in g):
+                target = round1 if g is agent_groups[0] else round2
+                break
+        target.append(skill_call)
 
     def span(group):
         starts = [t[0] for t in group]
@@ -223,11 +247,18 @@ def compute_phases(entries, agent_completions):
         [t for t in tool_uses
          if t[1] == "Bash" and _GH_PR_CREATE.search(t[2].get("command") or "")])
 
-    result["report"] = first_match(
-        [t for t in tool_uses if t[1] == "SendMessage"
-         and str(t[2].get("message", "")).strip().lower().startswith("pr up")])
+    def is_pr_up_report(t):
+        return t[1] == "SendMessage" and str(t[2].get("message", "")).strip().lower() \
+            .startswith("pr up")
 
-    outgoing = sorted(t[0] for t in tool_uses if t[1] == "SendMessage")
+    result["report"] = first_match([t for t in tool_uses if is_pr_up_report(t)])
+
+    # "PR up" is a report, not a question awaiting a reply — pairing it
+    # with the next incoming message (which can arrive minutes later, e.g.
+    # a Codex pass result) inflated the wait with idle-free time (#826
+    # Codex finding).
+    outgoing = sorted(t[0] for t in tool_uses
+                       if t[1] == "SendMessage" and not is_pr_up_report(t))
     incoming = sorted(e["timestamp"] for e in entries if _is_incoming_cross_session(e))
     events = sorted([(ts, "OUT") for ts in outgoing] + [(ts, "IN") for ts in incoming])
     waiting = 0.0

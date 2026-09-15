@@ -3,19 +3,22 @@
 Read out of each worker's main-line Claude transcript with
 `burndown/phases.py <ticket-number>`, beside `burndown/cost.py`. Method:
 `burndown/phases.py`'s own docstring and `phases_test.py` say what each
-phase boundary means; this file is the output, not the tool.
+phase boundary means; this file is the output, not the tool. Regenerated
+from the shipped code after review — see "Corrections" below for what
+changed and why, so the numbers here are traceable rather than a black box.
 
-Two corrections the tool forced, both caught by the `multi-axis-code-review`
-Correctness pass reading this ticket's own diff — worth naming since they're
-exactly the kind of self-referential trap a transcript-mining tool falls into:
+## Corrections
+
+Three rounds of review on this ticket's own diff caught four bugs, each
+because the tool's own transcript (or this doc) was itself fed through it:
 
 - An `Agent` tool call's own `tool_result` on the main line only
   acknowledges the async launch, a couple of seconds after the call — not
   the subagent finishing. The real finish time is the last timestamp in
   that subagent's own transcript, `<session>/subagents/agent-*.jsonl`,
-  whose sibling `.meta.json` carries the `toolUseId` linking it back. Reading
-  the async-ack instead (my first pass) undercounted every review-phase
-  duration by roughly 10x.
+  whose sibling `.meta.json` carries the `toolUseId` linking it back.
+  Reading the async-ack instead (the first pass) undercounted every
+  review-phase duration by roughly 10x.
 - `pr_open` and `report` were first matched by bare substring
   (`"gh pr create" in command`, `"pr up" in message`). Both false-positived
   on this very ticket: a `python3 -c` heredoc inspecting past Bash calls
@@ -24,42 +27,60 @@ exactly the kind of self-referential trap a transcript-mining tool falls into:
   mid-sentence. Both are now anchored — `gh pr create` must start its own
   command segment, `pr up` must start the message (the worker's actual
   report always does, by convention).
+- `verification` was first matched by a `"verif"` keyword in the Agent
+  call's description/prompt, not by the ticket's own definition — "the
+  second review invocation." A Codex adversarial-review pass on this PR
+  caught the consequence directly: on ticket #812 the keyword match landed
+  on the *first* axis call whose description happened to contain "verif",
+  reporting a 913-second verification span that started before round 1 had
+  even finished. Verification is now classified ordinally — the Agent
+  spawns are clustered by a 120-second gap (clean on every ticket in this
+  table: every within-round gap is under 17s, every real gap to the next
+  round is over 250s), and the second cluster is verification regardless
+  of wording.
+- `waiting_on_controller` paired every outgoing `SendMessage` with the next
+  incoming cross-session message, including the "PR up" report itself —
+  which isn't a question awaiting a reply. On #820 this undercounted a
+  genuine 26.4-minute wait as 0.0 (a later, unrelated incoming message
+  closed the pairing early) and on #824 it overcounted by pairing the
+  report with the next message regardless of relevance. Fixed: a "PR up"
+  report is excluded from starting a wait.
 
 ## Table
 
 All durations in minutes. `build offset` = dispatch → first Edit/Write.
-`total` = dispatch → the "PR up" `SendMessage` finishing send — blank where
-`report` was never reached. `waiting` = total time from an outgoing
-`SendMessage` to the next incoming cross-session message (§ ticket body).
+`total` = dispatch → the "PR up" `SendMessage` finishing send. `waiting`
+= time from an outgoing `SendMessage` that isn't a "PR up" report to the
+next incoming cross-session message.
 
 | ticket | total | build offset | review round 1 | verification | pr open | waiting on controller |
 |---|---|---|---|---|---|---|
 | 801 | 14.4 | 0.8 | 4.0 | 2.6 | 0.1 | 0.0 |
 | 803 | 12.7 | 0.3 | 2.5 | 2.5 | 0.1 | 0.0 |
-| 805 | 10.5 | 1.1 | 1.3 | 6.7 | 0.0 | 0.0 |
+| 805 | 10.5 | 1.1 | 3.4 | 1.7 | 0.0 | 0.0 |
 | 808 | 14.2 | 0.3 | 3.8 | 2.2 | 0.1 | 0.0 |
 | 810 | 10.9 | 0.4 | 3.1 | 2.4 | 0.0 | 0.0 |
-| 812 | 39.3 | 0.7 | 7.4 | 15.2 | 0.0 | 0.0 |
+| 812 | 39.3 | 0.7 | 7.4 | 2.4 | 0.0 | 0.0 |
 | 814 | 22.1 | 2.0 | 10.1 | 1.7 | 0.0 | 0.0 |
-| 817 | 23.7 | 1.3 | 3.7 | 2.9 | 0.1 | 6.1 |
-| 819 | 16.1 | 0.6 | 4.3 | 2.1 | 0.0 | 3.6 |
-| 820 | 26.1 | 2.6 | 3.9 | 4.2 | 0.1 | 0.0 |
-| 821 | 12.7 | 2.2 | 3.5 | 2.2 | 0.0 | 4.1 |
-| 822 | 11.4 | 1.2 | 2.1 | 1.6 | 0.1 | 3.9 |
+| 817 | 23.7 | 1.3 | 3.7 | 2.9 | 0.1 | 0.0 |
+| 819 | 16.1 | 0.6 | 4.3 | 2.1 | 0.0 | 1.4 |
+| 820 | 26.1 | 2.6 | 3.9 | 4.2 | 0.1 | 26.4 |
+| 821 | 12.7 | 2.2 | 3.5 | 2.2 | 0.0 | 0.0 |
+| 822 | 11.4 | 1.2 | 2.1 | 1.6 | 0.1 | 3.5 |
 | 824 | 5.6 | 1.3 | 1.8 | — | 0.0 | 5.8 |
-| 367 (sudokumaker) | 21.7 | 3.1 | 3.2 | 2.9 | 0.1 | 0.4 |
-| 368 (sudokumaker) | 87.6 | 4.2 | 4.6 | 22.7 | 0.1 | 31.3 |
+| 367 (sudokumaker) | 21.7 | 3.1 | 3.2 | 2.9 | 0.1 | 0.0 |
+| 368 (sudokumaker) | 87.6 | 4.2 | 7.0 | 6.5 | 0.1 | 31.3 |
 
 `824`'s `verification` is blank: its round-1 review found nothing to fix,
-so there was no second review invocation to time — not a gap in the tool.
+so there was no second invocation to time — not a gap in the tool.
 
 ## Reading it
 
 - **Median total, dispatch → PR up: 14.4 min** across these 15 tickets.
   Review round 1 plus verification together are a **median 40% of that
-  total** (28–77% across tickets, `review_round_1 + verification` divided
+  total** (15–53% across tickets, `review_round_1 + verification` divided
   by `total`) — a real share of wall-clock, not a rounding error, though
-  rarely the majority. The worker session does sit and wait for the axis
+  rarely the majority. The worker session sits and waits for the axis
   agents rather than doing other useful work in parallel (see #817's own
   transcript: "I'll just wait passively for the next task notification
   instead of polling"), so this is real serial time on the critical path,
@@ -71,19 +92,16 @@ so there was no second review invocation to time — not a gap in the tool.
   consistent with "first commit" landing well after "first edit" (reading,
   exploring, false starts before anything is staged) rather than a
   contradiction of the estimate.
-- **#812 (39.3 min) and #368 (87.6 min) are the outliers**, both on
-  `verification`, not `review_round_1`: #812's verification pass ran 15.2
-  min, #368's 22.7 min plus 31.3 min waiting on the controller after — a
-  single verification round, scoped to round-1 findings and fix commits,
-  can itself take longer than the first review round when there's a lot to
-  re-check.
-- **Seven tickets show real controller-wait time** (817, 819, 821, 822,
-  824, 367, 368) once the incoming-message detector was fixed to require a
-  plain-text envelope rather than substring-matching any serialized
-  content (§ corrections above) — several of these read as 0.0 before that
-  fix, undercounting a wait a false "reply" had closed early. 820's own
-  wait rounds to 0.0 at one decimal (a few seconds); every other ticket not
-  listed here never blocked on a controller reply long enough to register.
+- **#812 and #368 have the longest review_round_1** (7.4 and 7.0 min) of
+  the corpus, but neither dominates its ticket's total the way the earlier,
+  keyword-classified numbers suggested — #812's real bottleneck (39.3 min
+  total) is elsewhere in the unlabeled build/fix time between phases, not
+  in review or verification.
+- **Three tickets show real controller-wait time**: #820 (26.4 min — the
+  single largest number in this table, previously misread as 0.0 by the
+  report-pairing bug above), #368 (31.3 min), and smaller waits on #819,
+  #822, #824. Every other ticket never blocked on a controller reply long
+  enough to register.
 - The ~4 h-of-8.5 h sudokumaker "one unsent report" loss the ticket cites
   is not in this table: it isn't `implement-367` or `implement-368` — those
   two are ordinary-length builds (21.7 and 87.6 min total). Whatever
