@@ -281,6 +281,112 @@ fn the_report_names_path_branch_agent_and_the_cleanup_line() {
     assert!(text.contains(&format!("cd {} && merge-cleanup implement-395 --repo {}", repo.display(), repo.display())), "{text}");
 }
 
+// --- #819: the report also names the worker's Claude session -------------
+
+const AGENT_395: &str = "sudokumaker-custom-constrain-395";
+
+/// A real, live child process — what a real Claude session's pid would be,
+/// so the registry file's alive check has something real to check.
+fn spawn_live() -> std::process::Child {
+    std::process::Command::new("sleep").arg("30").spawn().unwrap()
+}
+
+#[test]
+fn the_report_names_the_workers_claude_session_beside_the_herdr_agent() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let wt = repo.join(".claude/worktrees/implement-395");
+    // herdr reports which sessionId it attached to the agent this run just
+    // started; the registry file carrying that same sessionId is the
+    // worker's, the way merge-cleanup already resolves occupancy.
+    f.set_agents(&format!(r#"[{{"name":"{AGENT_395}","agent_session":{{"value":"sess-395"}}}}]"#));
+    let mut child = spawn_live();
+    std::fs::write(
+        f.home().join(".claude/sessions").join(format!("{}.json", child.id())),
+        format!(r#"{{"pid":{},"cwd":"{}","name":"implement-395-42","sessionId":"sess-395"}}"#, child.id(), wt.display()),
+    )
+    .unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(out_text(&out).contains("session:  implement-395-42"), "{}", out_text(&out));
+}
+
+#[test]
+fn no_matching_herdr_agent_session_reports_unavailable_instead_of_failing() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(out_text(&out).contains("session:  (unavailable)"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_non_worker_session_sharing_the_worktree_and_sorting_first_is_not_reported() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let wt = repo.join(".claude/worktrees/implement-395");
+    f.set_agents(&format!(r#"[{{"name":"{AGENT_395}","agent_session":{{"value":"sess-worker"}}}}]"#));
+    // Two live sessions share the worktree's cwd: a stray one (someone else
+    // attached a session in the same workspace) and the real worker. The
+    // stray one's registry file is named to sort first regardless of the
+    // two real pids, the way live_in's own file-name order could otherwise
+    // pick it — only the herdr-reported sessionId decides which one wins.
+    let mut other = spawn_live();
+    let mut worker = spawn_live();
+    std::fs::write(
+        f.home().join(".claude/sessions").join("0000000001.json"),
+        format!(r#"{{"pid":{},"cwd":"{}","name":"not-the-worker","sessionId":"sess-other"}}"#, other.id(), wt.display()),
+    )
+    .unwrap();
+    std::fs::write(
+        f.home().join(".claude/sessions").join(format!("{}.json", worker.id())),
+        format!(r#"{{"pid":{},"cwd":"{}","name":"implement-395-42","sessionId":"sess-worker"}}"#, worker.id(), wt.display()),
+    )
+    .unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    let _ = other.kill();
+    let _ = other.wait();
+    let _ = worker.kill();
+    let _ = worker.wait();
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(
+        out_text(&out).contains("session:  implement-395-42"),
+        "the non-worker session sorting first should not be reported: {}",
+        out_text(&out)
+    );
+}
+
+#[test]
+fn a_live_matching_session_with_no_name_key_at_all_reports_unavailable() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let wt = repo.join(".claude/worktrees/implement-395");
+    f.set_agents(&format!(r#"[{{"name":"{AGENT_395}","agent_session":{{"value":"sess-395"}}}}]"#));
+    // A live, sessionId-matching registry file with no "name" key at all —
+    // real files sometimes lack it.
+    let mut child = spawn_live();
+    std::fs::write(
+        f.home().join(".claude/sessions").join(format!("{}.json", child.id())),
+        format!(r#"{{"pid":{},"cwd":"{}","sessionId":"sess-395"}}"#, child.id(), wt.display()),
+    )
+    .unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(
+        out_text(&out).contains("session:  (unavailable)"),
+        "a nameless session should report (unavailable), not a blank name: {}",
+        out_text(&out)
+    );
+}
+
 #[test]
 fn model_reaches_agent_start_and_pane_falls_back_to_pane_list() {
     let f = Fixture::new();
