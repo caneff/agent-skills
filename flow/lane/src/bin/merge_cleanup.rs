@@ -161,6 +161,15 @@ struct Cleanup {
     removal_targets: Vec<String>,
     /// Worktrees this run removed; their herdr workspaces close at exit.
     removed_worktrees: Vec<String>,
+    /// #832: set by `clear_ticket_if_closed` when its `gh issue edit` fails,
+    /// after the git cleanup it ran alongside already succeeded. Kept
+    /// separate from `cleanup_branch`'s own bool, which callers read as
+    /// "the branch and worktree are gone" — folding this into it made a
+    /// fully cleaned branch look like a survivor, both in the sweep table
+    /// and in the single-branch `report_stale` gate. Read right after each
+    /// `cleanup_branch` call; a caller doing more than one branch resets it
+    /// itself before the next.
+    claim_clear_failed: bool,
 }
 
 /// The herdr agents whose cwd is in `wt`; `Err` when `herdr agent list`
@@ -603,11 +612,18 @@ impl Cleanup {
                 continue;
             }
             safe_println!("== {} {}", row.repo.trim_end_matches('/'), row.branch);
-            let verdict = if self.cleanup_branch(&row.repo, &row.branch) {
-                "cleaned"
-            } else {
+            self.claim_clear_failed = false;
+            let verdict = if !self.cleanup_branch(&row.repo, &row.branch) {
                 rc = ExitCode::FAILURE;
                 "FAILED"
+            } else if self.claim_clear_failed {
+                // #832: git cleanup succeeded; only the claim-clearing edit
+                // failed. A distinct word, so the table never reads like the
+                // branch survived — the exit code still fails the run.
+                rc = ExitCode::FAILURE;
+                "cleaned, claim not cleared"
+            } else {
+                "cleaned"
             };
             rows.push([row.name().to_string(), row.branch.clone(), verdict.to_string(), row.unlanded.clone()]);
         }
@@ -774,11 +790,14 @@ impl Cleanup {
         // Step 7 (#821) — the ticket. `merge-cleanup` was the only place in
         // the lane that never cleared a landed claim, so a closed ticket kept
         // showing in-progress and assigned. An open issue (part of a bigger
-        // ticket, or reopened) is left alone. #832: a failed clear now fails
-        // the whole call — git cleanup already happened by this point, so a
-        // caller seeing failure here must not conclude the branch and
-        // worktree survived; the stderr line says so explicitly.
-        self.clear_ticket_if_closed(path, b)
+        // ticket, or reopened) is left alone. #832: a failed clear does not
+        // make this call return false — the git cleanup above it already
+        // succeeded, and `false` here means "the branch and worktree are
+        // still there" to both callers (the sweep table's "cleaned" word,
+        // and `main`'s gate on `report_stale`). It sets `claim_clear_failed`
+        // instead, for the caller to fold into its own exit code.
+        self.claim_clear_failed = !self.clear_ticket_if_closed(path, b);
+        true
     }
 
     /// #821: on a plain `implement-<n>` branch whose issue is closed and
@@ -967,6 +986,7 @@ fn main() -> ExitCode {
         home: env::var("HOME").unwrap_or_default(),
         removal_targets: Vec::new(),
         removed_worktrees: Vec::new(),
+        claim_clear_failed: false,
     };
 
     if a.sweep {
@@ -1011,8 +1031,11 @@ fn main() -> ExitCode {
     }
     let ok = c.cleanup_branch(&repo, &branch);
     if ok {
+        // #832: report_stale is about this repo's other worktrees, not
+        // whether the ticket's claim got cleared — it still runs when git
+        // cleanup succeeded, even if claim_clear_failed will fail the exit.
         c.report_stale(&[repo]);
     }
     c.close_removed_herdr_workspaces();
-    if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+    if ok && !c.claim_clear_failed { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }

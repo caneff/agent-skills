@@ -286,6 +286,48 @@ fn a_failed_edit_exits_non_zero_and_names_the_exact_command_to_re_run() {
 }
 
 #[test]
+fn a_failed_claim_clear_still_reports_stale_siblings() {
+    // Review round on #832 (standards/correctness axes): folding the
+    // claim-clear failure into cleanup_branch's own bool made `ok` mean
+    // "either step failed", which silently skipped the stale report on a
+    // run whose git cleanup fully succeeded.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r13");
+    c.mk_implement_branch(&r, "50");
+    let wts = r.join(".claude/worktrees");
+    c.worktree_add(&r, &["--detach", s(&wts.join("agent-old")), "origin/main"]);
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-50"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
+    );
+    assert!(!run.ok, "{}", run.text());
+    assert!(!c.has_branch(&r, "implement-50"), "{}", run.text());
+    assert!(run.stale().contains(&wts.join("agent-old").display().to_string()), "{}", run.text());
+}
+
+#[test]
+fn a_sweep_row_for_a_claim_clear_failure_says_so_distinctly_and_still_fails_the_run() {
+    // Same round: the sweep table mapped this case to "FAILED", which reads
+    // as "the branch survived" — exactly what the new stderr line exists to
+    // rule out. A branch git fully cleaned gets its own verdict, not the
+    // one used for a branch that is still there.
+    let c = Cleanup::new();
+    let other = c.mkfixture("src2/other");
+    c.mk_implement_branch(&other, "51");
+    let root = other.parent().unwrap().to_path_buf();
+    let run = c.mc(
+        Tools::Full,
+        &["--sweep", "--root", s(&root), "--yes"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
+    );
+    assert!(!run.ok, "{}", run.text());
+    assert!(!c.has_branch(&other, "implement-51"), "{}", run.text());
+    let rows: Vec<&str> = run.stdout.lines().skip_while(|l| *l != "sweep summary").skip(1).take_while(|l| l.starts_with("  ")).collect();
+    assert!(rows.iter().any(|r| r.contains("implement-51") && r.contains("claim not cleared") && !r.contains("FAILED")), "{rows:#?}");
+}
+
+#[test]
 fn an_open_tickets_label_and_assignee_are_left_alone() {
     let c = Cleanup::new();
     let r = c.mkfixture("r6");
