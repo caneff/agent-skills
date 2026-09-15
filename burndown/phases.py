@@ -23,6 +23,12 @@ from cost import project_dir_name
 PHASES = ("dispatch", "build", "review_round_1", "verification", "pr_open",
           "report")
 
+# A real `gh pr create` invocation starts its own command segment; this
+# excludes the phrase merely quoted inside another command (a `python3 -c`
+# heredoc inspecting past Bash calls, a `grep` for it — #826 correctness
+# finding C1, first tripped by this tool reading its own transcript).
+_GH_PR_CREATE = re.compile(r'(?:^|[;&|\n]|\$\()\s*gh pr create\b')
+
 
 def _parse_ts(ts):
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -31,7 +37,10 @@ def _parse_ts(ts):
 def load_mainline_entries(root):
     """Every top-level `*.jsonl` file directly in a project dir, merged and
     time-sorted. Subagent transcripts sit one level down, under
-    `<session>/subagents/`, and `os.listdir` here never descends into them."""
+    `<session>/subagents/`, and `os.listdir` here never descends into them.
+
+    A non-string or unparseable `timestamp` is dropped, same as a
+    half-written line — one bad entry must not sink the whole run."""
     entries = []
     if not os.path.isdir(root):
         return entries
@@ -47,9 +56,17 @@ def load_mainline_entries(root):
                     entry = json.loads(line)
                 except ValueError:
                     continue  # a half-written last line is not a failure
-                if isinstance(entry, dict) and entry.get("timestamp"):
-                    entries.append(entry)
-    entries.sort(key=lambda e: e["timestamp"])
+                if not isinstance(entry, dict):
+                    continue
+                ts = entry.get("timestamp")
+                if not isinstance(ts, str):
+                    continue
+                try:
+                    _parse_ts(ts)
+                except ValueError:
+                    continue
+                entries.append(entry)
+    entries.sort(key=lambda e: _parse_ts(e["timestamp"]))
     return entries
 
 
@@ -129,14 +146,16 @@ def _tool_result_times(entries):
 
 
 def _is_incoming_cross_session(entry):
+    """A real incoming message's envelope is always plain text — a
+    `tool_result` block that happens to mention the phrase (a review
+    discussing this very detector, say) is a list and must not match."""
     if entry.get("type") != "user":
         return False
     content = entry.get("message", {}).get("content")
-    text = content if isinstance(content, str) else json.dumps(content)
-    return "cross-session-message" in text
+    return isinstance(content, str) and "cross-session-message" in content
 
 
-def compute_phases(entries, agent_completions=None):
+def compute_phases(entries, agent_completions):
     """{phase: (start_iso, duration_seconds)} plus `waiting_on_controller`
     (start is always None for that one — it's a total, not a point). A
     phase this transcript never reached maps to (None, None).
@@ -144,7 +163,6 @@ def compute_phases(entries, agent_completions=None):
     `agent_completions` is the `tool_use_id -> finish timestamp` map from
     `_agent_completion_times` — the review-phase spans need it because an
     Agent call's own mainline `tool_result` is only the async-launch ack."""
-    agent_completions = agent_completions or {}
     result = {p: (None, None) for p in PHASES}
     result["waiting_on_controller"] = (None, 0.0)
     if not entries:
@@ -189,21 +207,25 @@ def compute_phases(entries, agent_completions=None):
     result["review_round_1"] = span(round1)
     result["verification"] = span(round2)
 
-    pr_creates = [t for t in tool_uses
-                  if t[1] == "Bash" and "gh pr create" in (t[2].get("command") or "")]
-    if pr_creates:
-        t = min(pr_creates, key=lambda x: x[0])
+    def first_match(candidates):
+        """The earliest matching call's own (start, duration) — `duration`
+        from its mainline `tool_result`, which for a synchronous call
+        (Bash, SendMessage) really is the finish, unlike an async Agent
+        spawn's launch-only ack."""
+        if not candidates:
+            return (None, None)
+        t = min(candidates, key=lambda x: x[0])
         end = result_times.get(t[3])
         dur = (_parse_ts(end) - _parse_ts(t[0])).total_seconds() if end else None
-        result["pr_open"] = (t[0], dur)
+        return (t[0], dur)
 
-    reports = [t for t in tool_uses
-               if t[1] == "SendMessage" and "pr up" in str(t[2].get("message", "")).lower()]
-    if reports:
-        t = min(reports, key=lambda x: x[0])
-        end = result_times.get(t[3])
-        dur = (_parse_ts(end) - _parse_ts(t[0])).total_seconds() if end else None
-        result["report"] = (t[0], dur)
+    result["pr_open"] = first_match(
+        [t for t in tool_uses
+         if t[1] == "Bash" and _GH_PR_CREATE.search(t[2].get("command") or "")])
+
+    result["report"] = first_match(
+        [t for t in tool_uses if t[1] == "SendMessage"
+         and str(t[2].get("message", "")).strip().lower().startswith("pr up")])
 
     outgoing = sorted(t[0] for t in tool_uses if t[1] == "SendMessage")
     incoming = sorted(e["timestamp"] for e in entries if _is_incoming_cross_session(e))
@@ -226,18 +248,29 @@ def resolve_worktrees(arg, projects_root):
     """A path arg is used as-is. A bare ticket number is resolved by
     scanning `projects_root` for project dirs ending in `-implement-<n>` —
     every worker's projects dir is named after its worktree path, and
-    `implement-dispatch` always names the worktree `implement-<n>`."""
+    `implement-dispatch` always names the worktree `implement-<n>`.
+
+    More than one repo can each have run their own `implement-<n>` for the
+    same ticket number, so every match is kept — but then the identifier
+    must say which is which, or the two rows are indistinguishable in the
+    output (#826 correctness finding C6)."""
     if re.fullmatch(r"\d+", arg):
         suffix = f"-implement-{arg}"
         if not os.path.isdir(projects_root):
             return []
         matches = [d for d in sorted(os.listdir(projects_root)) if d.endswith(suffix)]
-        return [(arg, m) for m in matches]
+        if len(matches) <= 1:
+            return [(arg, m) for m in matches]
+        return [(f"{arg}:{m}", m) for m in matches]
     return [(arg, project_dir_name(os.path.abspath(arg)))]
 
 
-def _fmt(value):
-    return "-" if value is None else str(value)
+def _print_phases(identifier, phases):
+    for phase in PHASES + ("waiting_on_controller",):
+        start, duration = phases[phase]
+        print(f"{identifier} {phase} "
+              f"{'-' if start is None else start} "
+              f"{'-' if duration is None else duration}")
 
 
 def main(argv):
@@ -246,20 +279,21 @@ def main(argv):
         return 2
     projects_root = os.environ.get("BURNDOWN_PROJECTS_DIR") or os.path.expanduser(
         "~/.claude/projects")
-    for arg in argv[1:]:
-        matches = resolve_worktrees(arg, projects_root)
-        if not matches:
-            print(f"{arg} - - -", file=sys.stderr)
-            continue
-        for identifier, project_dir in matches:
-            root = os.path.join(projects_root, project_dir)
-            entries = load_mainline_entries(root)
-            agent_completions = _agent_completion_times(root)
-            phases = compute_phases(entries, agent_completions)
-            for phase in PHASES:
-                start, duration = phases[phase]
-                print(f"{identifier} {phase} {_fmt(start)} {_fmt(duration)}")
-            print(f"{identifier} waiting_on_controller - {phases['waiting_on_controller'][1]}")
+    try:
+        for arg in argv[1:]:
+            matches = resolve_worktrees(arg, projects_root)
+            if not matches:
+                _print_phases(arg, compute_phases([], {}))
+                continue
+            for identifier, project_dir in matches:
+                root = os.path.join(projects_root, project_dir)
+                entries = load_mainline_entries(root)
+                agent_completions = _agent_completion_times(root)
+                _print_phases(identifier, compute_phases(entries, agent_completions))
+    except BrokenPipeError:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        return 0
     return 0
 
 

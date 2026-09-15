@@ -79,6 +79,7 @@ def test_dispatch_is_the_first_entrys_timestamp_with_no_duration():
     with tempfile.TemporaryDirectory() as tmp:
         _write(os.path.join(tmp, PROJECT_DIR, "s.jsonl"), [
             _first_user("2026-01-01T00:00:00.000Z"),
+            _first_user("2026-01-01T00:00:05.000Z"),
         ])
         r = _run(tmp, WORKTREE)
         assert r.returncode == 0, r.stdout + r.stderr
@@ -157,6 +158,27 @@ def test_pr_open_is_the_gh_pr_create_bash_call():
         assert float(duration) == 2.0
 
 
+def test_pr_open_ignores_the_phrase_quoted_inside_another_command():
+    """#826 correctness finding C1: a Bash call that merely mentions the
+    literal phrase — e.g. this tool inspecting its own past transcripts —
+    is not a real `gh pr create` invocation and must not be matched."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _write(os.path.join(tmp, PROJECT_DIR, "s.jsonl"), [
+            _first_user("2026-01-01T00:00:00.000Z"),
+            _assistant("2026-01-01T00:05:00.000Z",
+                       ("b0", "Bash", {"command":
+                        'python3 -c "if \'gh pr create\' in cmd: print(1)"'})),
+            _assistant("2026-01-01T00:30:00.000Z",
+                       ("b1", "Bash", {"command": "gh pr create --title x"})),
+            _result("2026-01-01T00:30:02.000Z", "b1"),
+        ])
+        r = _run(tmp, WORKTREE)
+        lines = _lines(r.stdout, WORKTREE)
+        start, duration = lines["pr_open"]
+        assert start == "2026-01-01T00:30:00.000Z", start
+        assert float(duration) == 2.0
+
+
 def test_report_is_the_sendmessage_mentioning_pr_up():
     with tempfile.TemporaryDirectory() as tmp:
         _write(os.path.join(tmp, PROJECT_DIR, "s.jsonl"), [
@@ -170,6 +192,28 @@ def test_report_is_the_sendmessage_mentioning_pr_up():
         lines = _lines(r.stdout, WORKTREE)
         start, duration = lines["report"]
         assert start == "2026-01-01T00:31:00.000Z"
+        assert float(duration) == 1.0
+
+
+def test_report_ignores_the_phrase_mentioned_mid_message():
+    """A planning message that merely discusses "PR up" ('before PR up has
+    no Seams...') is not the worker's actual report — the implement skill's
+    convention is that the report always *starts* with "PR up"."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _write(os.path.join(tmp, PROJECT_DIR, "s.jsonl"), [
+            _first_user("2026-01-01T00:00:00.000Z"),
+            _assistant("2026-01-01T00:20:00.000Z",
+                       ("m0", "SendMessage", {"to": "controller",
+                        "message": "#9 (check X before PR up) has no seams. Plan: ..."})),
+            _assistant("2026-01-01T00:31:00.000Z",
+                       ("m1", "SendMessage", {"to": "controller",
+                                               "message": "PR up for #9: url"})),
+            _result("2026-01-01T00:31:01.000Z", "m1"),
+        ])
+        r = _run(tmp, WORKTREE)
+        lines = _lines(r.stdout, WORKTREE)
+        start, duration = lines["report"]
+        assert start == "2026-01-01T00:31:00.000Z", start
         assert float(duration) == 1.0
 
 
@@ -187,6 +231,133 @@ def test_waiting_on_controller_sums_gaps_from_each_outgoing_to_the_next_incoming
         r = _run(tmp, WORKTREE)
         lines = _lines(r.stdout, WORKTREE)
         assert float(lines["waiting_on_controller"][1]) == 270.0
+
+
+def test_a_non_string_or_malformed_timestamp_is_skipped_not_fatal():
+    """#826 correctness findings C2/C3: a numeric timestamp used to raise
+    TypeError on sort, and a malformed string raised ValueError on parse —
+    both should be tolerated like a half-written JSON line, not kill the
+    whole run (the module's own docstring promises exactly that)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _write(os.path.join(tmp, PROJECT_DIR, "s.jsonl"), [
+            json.dumps({"type": "user", "timestamp": 12345, "message": {"content": "x"}}),
+            json.dumps({"type": "user", "timestamp": "bogus",
+                        "message": {"content": "x"}}),
+            _first_user("2026-01-01T00:00:00.000Z"),
+        ])
+        r = _run(tmp, WORKTREE)
+        assert r.returncode == 0, r.stdout + r.stderr
+        lines = _lines(r.stdout, WORKTREE)
+        assert lines["dispatch"] == ("2026-01-01T00:00:00.000Z", "-")
+
+
+def test_a_subagents_edit_call_does_not_count_as_the_workers_build():
+    """A subagent's own transcript lives one level down, under
+    `<session>/subagents/`, and is a different agent's work entirely — an
+    Edit call in there must not be read as the worker's first edit."""
+    with tempfile.TemporaryDirectory() as tmp:
+        project = os.path.join(tmp, PROJECT_DIR)
+        _write(os.path.join(project, "s.jsonl"), [
+            _first_user("2026-01-01T00:00:00.000Z"),
+            _assistant("2026-01-01T00:10:00.000Z", ("t1", "Edit", {})),
+        ])
+        subagent_dir = os.path.join(project, "s", "subagents")
+        os.makedirs(subagent_dir, exist_ok=True)
+        with open(os.path.join(subagent_dir, "agent-x.jsonl"), "w") as f:
+            f.write(_assistant("2026-01-01T00:01:00.000Z", ("t0", "Edit", {})) + "\n")
+        r = _run(tmp, WORKTREE)
+        lines = _lines(r.stdout, WORKTREE)
+        assert lines["build"] == ("2026-01-01T00:10:00.000Z", "-")
+
+
+def test_multiple_session_files_merge_in_timestamp_order_not_filename_order():
+    """#826 correctness finding H4: a resumed session writes a second
+    session-id jsonl file that can sort after the first one by filename
+    while its entries are chronologically first."""
+    with tempfile.TemporaryDirectory() as tmp:
+        project = os.path.join(tmp, PROJECT_DIR)
+        _write(os.path.join(project, "z-later-file.jsonl"), [
+            _first_user("2026-01-01T00:05:00.000Z"),
+        ])
+        _write(os.path.join(project, "a-earlier-file.jsonl"), [
+            _first_user("2026-01-01T00:00:00.000Z"),
+        ])
+        r = _run(tmp, WORKTREE)
+        lines = _lines(r.stdout, WORKTREE)
+        assert lines["dispatch"] == ("2026-01-01T00:00:00.000Z", "-")
+
+
+def test_ambiguous_ticket_number_disambiguates_its_identifier():
+    """#826 correctness finding C6: two repos can each have their own
+    implement-<n> worktree for the same ticket number; the two rows must
+    not collide under one identifier with no way to tell them apart."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _write(os.path.join(tmp, "-home-a-repo--claude-worktrees-implement-9", "s.jsonl"), [
+            _first_user("2026-01-01T00:00:00.000Z"),
+        ])
+        _write(os.path.join(tmp, "-home-b-repo--claude-worktrees-implement-9", "s.jsonl"), [
+            _first_user("2026-01-02T00:00:00.000Z"),
+        ])
+        r = _run(tmp, "9")
+        assert r.returncode == 0, r.stdout + r.stderr
+        dispatches = sorted(l.split(" ", 3)[2] for l in r.stdout.splitlines()
+                             if l.split(" ", 3)[1] == "dispatch")
+        assert dispatches == ["2026-01-01T00:00:00.000Z", "2026-01-02T00:00:00.000Z"]
+        idents = {l.split(" ", 1)[0] for l in r.stdout.splitlines()}
+        assert len(idents) == 2, idents
+
+
+def test_a_tool_result_mentioning_the_phrase_is_not_an_incoming_message():
+    """#826 correctness finding C7: the incoming-message detector substring-
+    matches serialized tool_result content too, so a review or a doc that
+    merely discusses "cross-session-message" would be misread as a reply
+    and close a pending wait early."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _write(os.path.join(tmp, PROJECT_DIR, "s.jsonl"), [
+            _first_user("2026-01-01T00:00:00.000Z"),
+            _assistant("2026-01-01T00:40:00.000Z",
+                       ("m1", "SendMessage", {"to": "controller", "message": "merge?"})),
+            _result("2026-01-01T00:40:05.000Z", "m1"),
+            json.dumps({"type": "user", "timestamp": "2026-01-01T00:41:00.000Z", "message": {
+                "content": [{"type": "tool_result", "tool_use_id": "b1", "content": [
+                    {"type": "text", "text": "docs mention cross-session-message here"}]}]}}),
+            _incoming("2026-01-01T00:43:00.000Z"),
+        ])
+        r = _run(tmp, WORKTREE)
+        lines = _lines(r.stdout, WORKTREE)
+        assert float(lines["waiting_on_controller"][1]) == 180.0  # 00:40 -> 00:43, not 00:41
+
+
+def test_two_outgoing_messages_before_one_reply_count_the_wait_once():
+    """#826 correctness finding H3: the alternating OUT/IN fixture never
+    witnessed the `if pending is None` guard — two sends before a single
+    reply must not double the wait, and it's measured from the first send."""
+    with tempfile.TemporaryDirectory() as tmp:
+        _write(os.path.join(tmp, PROJECT_DIR, "s.jsonl"), [
+            _first_user("2026-01-01T00:00:00.000Z"),
+            _assistant("2026-01-01T00:40:00.000Z",
+                       ("m1", "SendMessage", {"to": "controller", "message": "merge?"})),
+            _assistant("2026-01-01T00:41:00.000Z",
+                       ("m2", "SendMessage", {"to": "controller", "message": "still there?"})),
+            _incoming("2026-01-01T00:43:00.000Z"),
+        ])
+        r = _run(tmp, WORKTREE)
+        lines = _lines(r.stdout, WORKTREE)
+        assert float(lines["waiting_on_controller"][1]) == 180.0  # 00:40 -> 00:43, once
+
+
+def test_piped_output_exits_clean_on_a_closed_reader():
+    with tempfile.TemporaryDirectory() as tmp:
+        _write(os.path.join(tmp, PROJECT_DIR, "s.jsonl"), [
+            _first_user("2026-01-01T00:00:00.000Z"),
+        ])
+        script = (f"import subprocess, sys, os; "
+                  f"p = subprocess.Popen([sys.executable, {PHASES!r}, {WORKTREE!r}], "
+                  f"stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, "
+                  f"env={{**os.environ, 'BURNDOWN_PROJECTS_DIR': {tmp!r}}}); "
+                  f"p.stdout.readline(); p.stdout.close(); p.wait(timeout=5)")
+        r = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+        assert "Traceback" not in r.stderr, r.stderr
 
 
 def test_a_ticket_number_resolves_to_its_matching_project_dir():
