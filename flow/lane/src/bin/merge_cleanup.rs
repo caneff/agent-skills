@@ -416,8 +416,11 @@ impl Cleanup {
     /// The uncommitted-files guard (#736). `git worktree remove --force`
     /// discards everything git does not hold, so modified, untracked or
     /// ignored files refuse the removal unless --discard — `.scratch/`
-    /// included (#801). Caches (`is_cache`) never refuse; their count and
-    /// first names are printed, since they go too.
+    /// included (#801), unless it is empty on disk (#823). Caches
+    /// (`is_cache`) never refuse; their count and first names are printed as
+    /// "cache file(s)", since they go too — a label distinct from the
+    /// non-cache "ignored file(s)" refusal above (#823), so a name approved
+    /// for loss in one line is never misread as belonging to the other's.
     fn guard_files(&self, wt: &str) -> bool {
         let Some(files) = WorktreeFiles::read(wt) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there");
