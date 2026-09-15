@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+# Contract test for worker-stop-alert.sh: a synthetic Stop event on stdin, a
+# synthetic transcript, a scratch HOME holding the sessions registry, and a
+# stubbed `herdr` on PATH -> exactly one `herdr agent prompt` to the
+# controller's pane, or none. Runs offline; no real session is touched.
+# Run: bash flow/claude/hooks/worker-stop-alert.test.sh
+set -uo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+hook="$here/worker-stop-alert.sh"
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+# herdr stub: `agent list` names the controller's pane by its session id,
+# `agent get` names the worker's agent, `agent prompt` records its target and
+# its alert text in separate files.
+stubdir="$tmp/bin"
+mkdir -p "$stubdir"
+cat > "$stubdir/herdr" <<STUB
+#!/usr/bin/env bash
+case "\$1 \$2" in
+  "agent list") cat "$tmp/agent-list.json" ;;
+  "agent get") printf '{"result":{"agent":{"name":"skills-820","pane_id":"%s"}}}\n' "\$3" ;;
+  "agent prompt")
+    [ -n "\${HERDR_PROMPT_HANG:-}" ] && exec sleep 30
+    # HERDR_PROMPT_BLOCKED=<k>: the first k prompts are refused as blocked.
+    tries=\$(( \$(cat "$tmp/prompt.tries" 2>/dev/null || echo 0) + 1 )); echo "\$tries" > "$tmp/prompt.tries"
+    if [ "\$tries" -le "\${HERDR_PROMPT_BLOCKED:-0}" ]; then
+      echo '{"error":{"code":"agent_blocked","message":"agent is blocked"},"id":"cli:agent:prompt"}'; exit 1
+    fi
+    printf '%s' "\$3" > "$tmp/prompt.pane"; printf '%s' "\$4" > "$tmp/prompt.text"
+    exit "\${HERDR_PROMPT_RC:-0}" ;;
+esac
+STUB
+chmod +x "$stubdir/herdr"
+
+home="$tmp/home"
+mkdir -p "$home/.claude/sessions"
+# The controller session is this test's own shell: a live pid whose
+# procStart is its /proc starttime (field 22).
+stat=$(cat /proc/$$/stat); ctl_start=$(set -- ${stat##*) }; echo "${20}")
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+agents_ok='{"result":{"agents":[{"pane_id":"w9:p1","agent_session":{"value":"ctl-session"}},{"pane_id":"w0:p1","agent_session":{"value":"dead-session"}}]}}'
+printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
+log="$home/.claude/worker-stop-alerts.log"
+
+brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"skills-b6\"</command-args>'
+
+# Transcript lines.
+human() { printf '{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
+assistant_text() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"%s"}]}}\n' "$1"; }
+# send <id> <to> ; ok <id> ; denied <id>
+send() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"%s","name":"SendMessage","input":{"to":"%s","message":"x"}}]}}\n' "$1" "$2"; }
+ok() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"sent"}]},"toolUseResult":{"success":true,"message":"sent"}}\n' "$1"; }
+denied() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"Permission for this action has been denied.","is_error":true}]},"toolUseResult":"Error: Permission for this action has been denied."}\n' "$1"; }
+peer() { printf '{"type":"user","isMeta":true,"origin":{"kind":"peer","name":"skills-b6"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
+notification() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
+# launch <agentId> ; handback <agentId>
+launch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-%s","content":"Async agent launched"}]},"toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"%s"}}\n' "$1" "$1"; }
+handback() { printf '{"type":"user","origin":{"kind":"peer","from":"%s","senderTaskId":"%s","handback":true},"message":{"role":"user","content":"[Subagent hand-back] report"}}\n' "$1" "$1"; }
+
+fails=0
+# run <name> <transcript-file> [stop_hook_active] -> sets $pane and $text
+# (the recorded prompt's target and alert, empty if no prompt was sent)
+run() {
+  local name=$1 transcript=$2 active=${3:-false} out rc
+  rm -f "$tmp/prompt.pane" "$tmp/prompt.text"
+  out=$(jq -n --arg t "$transcript" --argjson a "$active" '{hook_event_name:"Stop",session_id:"w",transcript_path:$t,stop_hook_active:$a}' \
+        | HOME="$home" HERDR_PANE_ID="w2W:p1" PATH="$stubdir:$PATH" bash "$hook" 2>&1)
+  rc=$?
+  pane=$(cat "$tmp/prompt.pane" 2>/dev/null || true)
+  text=$(cat "$tmp/prompt.text" 2>/dev/null || true)
+  if [ "$rc" != 0 ]; then
+    echo "FAIL: $name — want exit 0, got $rc"; echo "  out: $out"; fails=1
+  fi
+}
+# expect_alert <name> [ticket]
+expect_alert() {
+  local name=$1 n=${2:-820}
+  if [ "$pane" = "w9:p1" ] && printf '%s' "$text" | grep -q "worker #$n stopped without reporting" \
+     && printf '%s' "$text" | grep -q 'skills-820'; then
+    echo "PASS: $name"
+  else
+    echo "FAIL: $name — want an alert for #$n to w9:p1"; echo "  pane: $pane text: $text"; fails=1
+  fi
+}
+expect_none() {
+  local name=$1
+  if [ -z "$pane" ]; then echo "PASS: $name"; else echo "FAIL: $name — want no prompt"; echo "  pane: $pane text: $text"; fails=1; fi
+}
+reset_log() { rm -f "$log"; }
+
+# A worker whose turn ended with no report alerts the controller.
+reset_log
+t="$tmp/no-report.jsonl"
+{ human "$brief"; assistant_text "done, report in my pane"; } > "$t"
+run "no report" "$t"
+expect_alert "worker that never reported alerts the controller's pane"
+# Read the recorded file itself: `$(...)` would strip a trailing newline.
+if [ "$(wc -l < "$tmp/prompt.text")" = 0 ] && ! grep -q '^! ' "$tmp/prompt.text"; then
+  echo "PASS: alert is one line with no \`! \` command"
+else
+  echo "FAIL: alert text is not one plain line: $text"; fails=1
+fi
+
+# The same stop, evaluated again, does not re-fire; a later stop does.
+run "same stop again" "$t"
+expect_none "a re-evaluated stop that already alerted does not re-fire"
+assistant_text "woke on a notification, still no report" >> "$t"
+run "a later stop" "$t"
+expect_alert "a later stop, still without a report, alerts again"
+
+# stop_hook_active: the harness is re-running Stop hooks for this stop.
+reset_log
+run "stop_hook_active" "$t" true
+expect_none "stop_hook_active does not alert"
+
+reset_log
+t="$tmp/reported.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; assistant_text "PR up sent"; } > "$t"
+run "reported" "$t"
+expect_none "a successful SendMessage to the controller counts as reported"
+
+reset_log
+t="$tmp/question.jsonl"
+{ human "$brief"; send q1 "skills-b6"; ok q1; assistant_text "waiting on the ruling"; } > "$t"
+run "question" "$t"
+expect_none "a question sent by SendMessage, then a stop to wait, counts as reported"
+
+reset_log
+t="$tmp/denied.jsonl"
+{ human "$brief"; send d1 "skills-b6"; denied d1; assistant_text "report denied"; } > "$t"
+run "denied" "$t"
+expect_alert "a denied SendMessage counts as not reported (#466)"
+
+reset_log
+t="$tmp/unsuccessful.jsonl"
+{ human "$brief"; send f1 "skills-b6";
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"f1","content":"not sent"}]},"toolUseResult":{"success":false,"message":"not sent"}}\n'; } > "$t"
+run "success false" "$t"
+expect_alert "a SendMessage result with success:false counts as not reported"
+
+reset_log
+t="$tmp/other-recipient.jsonl"
+{ human "$brief"; send o1 "someone-else"; ok o1; } > "$t"
+run "other recipient" "$t"
+expect_alert "a SendMessage to someone other than the controller is not a report"
+
+reset_log
+t="$tmp/ref.jsonl"
+{ human "$brief"; send r1 "skills-b6 [3fa9c1]"; ok r1; } > "$t"
+run "name with ref" "$t"
+expect_none "a SendMessage to 'controller [ref]' counts as reported"
+
+reset_log
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6","messagingSocketPath":"/run/ctl.sock"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+t="$tmp/uds.jsonl"
+{ human "$brief"; peer "ruling"; send u1 "uds:/run/ctl.sock"; ok u1; } > "$t"
+run "uds reply" "$t"
+expect_none "a reply to the controller's uds: address counts as reported"
+
+reset_log
+t="$tmp/stale-report.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "Codex findings, fix and send PR up again"; assistant_text "fixed"; } > "$t"
+run "report before the controller's next message" "$t"
+expect_alert "a report from an earlier turn does not cover a later peer-started turn"
+
+reset_log
+t="$tmp/notification.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; notification "background task done"; assistant_text "noted"; } > "$t"
+run "task notification after report" "$t"
+expect_none "a task notification does not start a turn that needs a report"
+
+# Subagents: a stop while one is out is a wait; a hand-back is not a new turn.
+reset_log
+t="$tmp/waiting.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; launch a1; launch a2; assistant_text "reviewers running"; } > "$t"
+run "reviewers out" "$t"
+expect_none "a stop while this turn's subagents are out does not alert"
+{ handback a1; assistant_text "one of two back"; } >> "$t"
+run "one reviewer back" "$t"
+expect_none "a hand-back that leaves another subagent out does not alert"
+{ notification '<task-notification><task-id>a2</task-id><status>failed</status></task-notification>'; assistant_text "all back, stopping"; } >> "$t"
+run "all reviewers back" "$t"
+expect_alert "once every subagent is back, a stop without a report alerts"
+
+reset_log
+t="$tmp/handback-report.jsonl"
+{ human "$brief"; launch a1; handback a1; send s1 "skills-b6"; ok s1; assistant_text "PR up"; } > "$t"
+run "report after hand-back" "$t"
+expect_none "a report sent after a hand-back covers the turn the hand-back did not restart"
+
+reset_log
+t="$tmp/torn.jsonl"
+{ human "$brief"; send x1 "skills-b6"; denied x1;
+  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"n1","name":"SendMessage","input":{"to":null}}]}}\n';
+  printf '{"type":"assistant","message":{"con'; } > "$t"
+run "torn last line" "$t"
+expect_alert "a half-written last line and a non-string recipient still alert"
+
+reset_log
+t="$tmp/not-worker.jsonl"
+{ human '<command-name>/implement</command-name>\n<command-args>820</command-args>'; assistant_text "dispatched"; } > "$t"
+run "dispatcher" "$t"
+expect_none "a session whose brief has no --controller is not a worker"
+
+reset_log
+t="$tmp/spec.jsonl"
+{ human '<command-name>/implement-spec</command-name>\n<command-args>776 --slots 2 --controller \"skills-b6\"</command-args>'; assistant_text "stopped"; } > "$t"
+run "spec run" "$t"
+expect_alert "an /implement-spec brief with --controller is a worker" 776
+
+# A dead session file with the controller's name is ignored: its pid is gone.
+reset_log
+printf '{"pid":999999999,"sessionId":"dead-session","name":"skills-b6"}\n' > "$home/.claude/sessions/0.json"
+t="$tmp/no-report.jsonl"
+run "dead registry entry" "$t"
+expect_alert "a dead registry entry with the controller's name is skipped"
+rm -f "$home/.claude/sessions/0.json"
+
+# A stale record whose pid was reused by a live process is skipped: its
+# procStart does not match that pid's starttime.
+reset_log
+printf '{"pid":%s,"procStart":"1","sessionId":"dead-session","name":"skills-b6"}\n' "$$" > "$home/.claude/sessions/0.json"
+run "reused pid" "$t"
+expect_alert "a same-name record with a reused pid does not hide the real controller"
+rm -f "$home/.claude/sessions/0.json"
+
+# Failure paths log and exit 0.
+reset_log
+HERDR_PROMPT_RC=1 run "prompt rejected" "$t"
+if grep -q 'not-sent' "$log" 2>/dev/null; then
+  echo "PASS: a rejected herdr prompt is logged as not-sent, exit 0"
+else
+  echo "FAIL: a rejected prompt left no not-sent log line"; fails=1
+fi
+
+# A blocked controller: retry with backoff inside the hook's budget.
+reset_log; rm -f "$tmp/prompt.tries"
+HERDR_PROMPT_BLOCKED=2 run "blocked, then free" "$t"
+expect_alert "a prompt refused as blocked is retried until the controller accepts it"
+reset_log; rm -f "$tmp/prompt.tries"
+start=$SECONDS
+HERDR_PROMPT_BLOCKED=99 run "blocked throughout" "$t"
+if [ -z "$pane" ] && [ "$(cat "$tmp/prompt.tries")" -ge 2 ] && [ $((SECONDS - start)) -lt 15 ] \
+   && grep -q $'not-sent\tcontroller blocked:' "$log" 2>/dev/null; then
+  echo "PASS: a controller blocked throughout is retried, then logged as not-sent: blocked, within 15 s"
+else
+  echo "FAIL: blocked controller — tries $(cat "$tmp/prompt.tries"), $((SECONDS - start)) s, log: $(cat "$log" 2>/dev/null)"; fails=1
+fi
+rm -f "$tmp/prompt.tries"
+
+reset_log
+HERDR_PROMPT_HANG=1 run "prompt hangs" "$t"
+if grep -q 'not-sent' "$log" 2>/dev/null; then
+  echo "PASS: a hung herdr prompt times out and is logged as not-sent"
+else
+  echo "FAIL: a hung prompt left no not-sent log line"; fails=1
+fi
+
+reset_log
+printf '{"result":{"agents":[]}}\n' > "$tmp/agent-list.json"
+run "no controller pane" "$t"
+if [ -z "$pane" ] && grep -q 'not-sent.*no herdr pane' "$log" 2>/dev/null; then
+  echo "PASS: a missing controller pane is logged as not-sent, no prompt, exit 0"
+else
+  echo "FAIL: missing controller pane not logged"; echo "  pane: $pane"; fails=1
+fi
+
+[ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

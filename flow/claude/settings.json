@@ -172,6 +172,17 @@
         ]
       }
     ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/caneff/.claude/hooks/worker-stop-alert.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
     "PermissionRequest": [
       {
         "hooks": [
