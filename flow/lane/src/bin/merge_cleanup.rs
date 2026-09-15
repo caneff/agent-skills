@@ -809,10 +809,11 @@ impl Cleanup {
     /// — an outage must not silently reproduce the stale claim #821 was
     /// filed over — but is still non-fatal, since there was never a known
     /// edit to lose. A failed edit (#829 Codex pass found it discarded) is
-    /// different: git cleanup already succeeded by then, so #832 makes it
-    /// `false` — the caller (`cleanup_branch`) exits non-zero — with the
-    /// exact re-run command on stderr, since that command is the only
-    /// record of the edit that still needs to happen.
+    /// different: git cleanup already succeeded by then, so #832 makes this
+    /// return `false` — `cleanup_branch` reads that into
+    /// `self.claim_clear_failed`, which is what actually fails the run's
+    /// exit code — with the exact re-run command on stderr, since that
+    /// command is the only record of the edit that still needs to happen.
     fn clear_ticket_if_closed(&self, path: &str, b: &str) -> bool {
         let Some(n) = ticket_number(b) else { return true };
         let what = format!("clearing #{n}'s in-progress label and assignee");
