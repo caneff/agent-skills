@@ -3,13 +3,14 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(os.environ.get("SECTION_REFERENCES_ROOT", Path(__file__).resolve().parent.parent)).resolve()
 PATH = re.compile(r"(?<![\w.-])([~\w./-]+\.md)\b")
 SECTION = re.compile(r"§\s+(\d+|[A-Za-z][^§\n]{0,160})")
 TRAILING_PUNCTUATION = ".,;:!?)]}"
@@ -49,17 +50,18 @@ def reference_label(match: re.Match[str]) -> str:
     value = match.group(1).strip()
     if value.isdigit():
         return value
-    return value.rstrip(TRAILING_PUNCTUATION).rstrip("'s").strip()
+    value = value.split(" and §", 1)[0]
+    value = re.sub(r"\s+and\s*$", "", value)
+    value = value.split("'s", 1)[0]
+    return re.split(r"[.,;:!?)}\]]", value, maxsplit=1)[0].strip()
 
 
-def matches_heading(label: str, heading: str, tail: str) -> bool:
+def matches_heading(label: str, heading: str) -> bool:
     if label.isdigit():
         return heading.startswith(f"{label}.")
+    label = " ".join(label.rstrip(TRAILING_PUNCTUATION).split())
     heading = " ".join(heading.rstrip(TRAILING_PUNCTUATION).split())
-    tail = " ".join(tail.split())
-    if not tail.startswith(heading):
-        return False
-    return len(tail) == len(heading) or not tail[len(heading)].isalnum()
+    return heading.startswith(label)
 
 
 def main() -> int:
@@ -74,6 +76,7 @@ def main() -> int:
     for source in files:
         source = source.resolve()
         latest_named_file: Path | None = None
+        previous_line_named_file: Path | None = None
         lines = source.read_text().splitlines()
         for number, line in enumerate(lines, 1):
             for pointer in SECTION.finditer(line):
@@ -87,11 +90,16 @@ def main() -> int:
                 if target is None and "of that file" in line[pointer.start() :]:
                     target = latest_named_file
                 if target is None:
+                    if previous_line_named_file not in (None, source):
+                        failures.append(
+                            f"{source.relative_to(ROOT)}:{number}: bare § {reference_label(pointer)} "
+                            f"follows {previous_line_named_file.relative_to(ROOT)}"
+                        )
+                        continue
                     target = source
 
                 label = reference_label(pointer)
-                tail = " ".join(lines[number - 1 : number + 1])[pointer.start() + 1 :].lstrip()
-                if not any(matches_heading(label, heading, tail) for heading in headings[target]):
+                if not any(matches_heading(label, heading) for heading in headings[target]):
                     failures.append(
                         f"{source.relative_to(ROOT)}:{number}: § {label} not found in "
                         f"{target.relative_to(ROOT)}"
@@ -100,9 +108,10 @@ def main() -> int:
             named_on_line = [
                 resolve(path.group(1), source, tracked) for path in PATH.finditer(line)
             ]
-            latest_named_file = next(
-                (path for path in reversed(named_on_line) if path), latest_named_file
+            previous_line_named_file = next(
+                (path for path in reversed(named_on_line) if path), None
             )
+            latest_named_file = previous_line_named_file or latest_named_file
 
     if failures:
         print("\n".join(failures), file=sys.stderr)

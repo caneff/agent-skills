@@ -8,7 +8,7 @@ by — read against the repo's default branch, which is
 `git symbolic-ref --short refs/remotes/origin/HEAD` and not assumed to be
 `main`. Inside a workspace — its own branch under `.claude/worktrees/` — you
 are the **worker**: skip to § The brief. On the default branch you are the
-**dispatcher**: § Dispatch is your whole run. On a detached HEAD you are at
+**dispatcher**: § Dispatch: this is your whole run. On a detached HEAD you are at
 neither door: say so and stop.
 
 ## Dispatch
@@ -33,7 +33,7 @@ gh issue list --repo <owner/name> --label ready-for-agent --state open \
 `implement-dispatch` claims the ticket, creates the workspace, starts the
 worker in a herdr pane, and puts the tier and your session name in the brief.
 On a `ready-for-human` ticket the report says "Chris merges" (§ The brief):
-the claim keeps that label alongside `in-progress`, so § The merge still
+the claim keeps that label alongside `in-progress`, so § The merge: it still
 reads it off the live labels after the claim.
 Its refusals are the whole claim rule (`implement-dispatch --help` lists
 them); a refusal is the answer, relayed as it stands. Relay its report and end
@@ -115,7 +115,7 @@ No PR and no reviewer; Chris reads the log after.
 ### Review
 
 1. One full round of `/multi-axis-code-review`: standards, spec and
-   correctness, all three waited for (`multi-axis-code-review/SKILL.md` § Why separate axes says why the
+   correctness, all three waited for (`multi-axis-code-review/SKILL.md` § Why separate axes: it says why the
    built-in `/code-review` is not run here; `/code-review low` only when the
    owner asks). Every finding in the aggregate gets exactly one disposition:
    fixed in a commit, `disputed: <why>`, or filed as a follow-up ticket.
@@ -185,7 +185,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    line and the cleanup line as in the exception below, and name the
    disagreement.
 2. **The PR is still not-draft and CLEAN** — the same check as § Before the
-   PR step 4, rerun because `main` may have moved since "PR up".
+   PR: step 4, rerun because `main` may have moved since "PR up".
 3. Merge:
 
    ```
