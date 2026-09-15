@@ -257,10 +257,12 @@ fn a_closed_ticket_with_no_assignee_only_removes_the_label() {
 }
 
 #[test]
-fn a_failed_edit_names_the_exact_command_to_re_run() {
-    // #829 Codex pass: the edit's result was discarded, so an API failure
-    // after the branch and worktree are already gone reported success with
-    // no way to repair the claim later.
+fn a_failed_edit_exits_non_zero_and_names_the_exact_command_to_re_run() {
+    // #829 Codex pass found the edit's result was discarded, so an API
+    // failure after the branch and worktree are already gone reported
+    // success with no way to repair the claim later. #832: that was still
+    // wrong — the caller must see non-zero, with a message distinguishing
+    // "git cleanup completed" from "claim clearing failed, re-run this".
     let c = Cleanup::new();
     let r = c.mkfixture("r12");
     c.mk_implement_branch(&r, "49");
@@ -269,18 +271,134 @@ fn a_failed_edit_names_the_exact_command_to_re_run() {
         &["--repo", s(&r), "implement-49"],
         &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
     );
-    // Non-fatal, like this file's other post-cleanup courtesy steps
-    // (fast_forward_and_rebuild, the herdr workspace close): the branch and
-    // worktree are already gone by this point, so failing the whole run
-    // would be misleading — the loud stderr line is the recovery path.
-    assert!(run.ok, "{}", run.text());
+    assert!(!run.ok, "{}", run.text());
     assert!(!c.has_branch(&r, "implement-49"), "{}", run.text());
-    assert!(run.stderr.contains("could not clear #49's in-progress label and assignee"), "{}", run.text());
+    assert!(
+        run.stderr.contains("git cleanup completed, but could not clear #49's in-progress label and assignee"),
+        "{}",
+        run.text()
+    );
     assert!(
         run.stderr.contains("re-run: gh issue edit 49 --repo") && run.stderr.contains("--remove-label in-progress --remove-assignee caneff"),
         "{}",
         run.text()
     );
+}
+
+#[test]
+fn a_failed_claim_clear_still_reports_stale_siblings() {
+    // Review round on #832 (standards/correctness axes): folding the
+    // claim-clear failure into cleanup_branch's own bool made `ok` mean
+    // "either step failed", which silently skipped the stale report on a
+    // run whose git cleanup fully succeeded.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r13");
+    c.mk_implement_branch(&r, "50");
+    let wts = r.join(".claude/worktrees");
+    c.worktree_add(&r, &["--detach", s(&wts.join("agent-old")), "origin/main"]);
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-50"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
+    );
+    assert!(!run.ok, "{}", run.text());
+    assert!(!c.has_branch(&r, "implement-50"), "{}", run.text());
+    assert!(run.stale().contains(&wts.join("agent-old").display().to_string()), "{}", run.text());
+}
+
+#[test]
+fn a_sweep_row_for_a_claim_clear_failure_says_so_distinctly_and_still_fails_the_run() {
+    // Same round: the sweep table mapped this case to "FAILED", which reads
+    // as "the branch survived" — exactly what the new stderr line exists to
+    // rule out. A branch git fully cleaned gets its own verdict, not the
+    // one used for a branch that is still there.
+    let c = Cleanup::new();
+    let other = c.mkfixture("src2/other");
+    c.mk_implement_branch(&other, "51");
+    let root = other.parent().unwrap().to_path_buf();
+    let run = c.mc(
+        Tools::Full,
+        &["--sweep", "--root", s(&root), "--yes"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
+    );
+    assert!(!run.ok, "{}", run.text());
+    assert!(!c.has_branch(&other, "implement-51"), "{}", run.text());
+    let rows: Vec<&str> = run.stdout.lines().skip_while(|l| *l != "sweep summary").skip(1).take_while(|l| l.starts_with("  ")).collect();
+    assert!(rows.iter().any(|r| r.contains("implement-51") && r.contains("claim not cleared") && !r.contains("FAILED")), "{rows:#?}");
+}
+
+#[test]
+fn a_denied_remote_delete_is_reported_non_success_but_still_clears_the_claim() {
+    // Codex pass on PR #842: `step()`'s result on `git push origin --delete`
+    // was discarded, so a denied delete (branch protection, a race) left
+    // the remote branch alive while merge-cleanup still exited 0 and, worse,
+    // would have told an operator "git cleanup completed" on a run where it
+    // hadn't. The PR merged either way, so the claim still clears.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r14");
+    c.mk_implement_branch(&r, "52");
+    let origin = c.root().join("r14.origin.git");
+    c.git_ok(&["-C", s(&origin), "config", "receive.denyDeletes", "true"]);
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-52"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff")],
+    );
+    assert!(!run.ok, "{}", run.text());
+    assert!(c.has_branch(&origin, "implement-52"), "the denied delete should have left the remote branch");
+    assert!(
+        run.stderr.contains("could not delete remote branch implement-52; re-run: git")
+            && run.stderr.contains("push origin --delete implement-52"),
+        "{}",
+        run.text()
+    );
+    assert!(c.calls().contains("gh issue edit 52") && c.calls().contains("--remove-label in-progress"), "{}", c.calls());
+}
+
+#[test]
+fn a_denied_remote_delete_changes_the_claim_clear_failure_wording() {
+    // Same pass: the claim-clear failure message unconditionally said "git
+    // cleanup completed", which would be false when the remote delete also
+    // failed — an operator reading it would think only the label needed a
+    // re-run, missing the branch still on origin.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r15");
+    c.mk_implement_branch(&r, "53");
+    let origin = c.root().join("r15.origin.git");
+    c.git_ok(&["-C", s(&origin), "config", "receive.denyDeletes", "true"]);
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-53"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
+    );
+    assert!(!run.ok, "{}", run.text());
+    assert!(
+        run.stderr.contains(
+            "git cleanup did not fully complete (the remote branch delete also failed), but could not clear #53's in-progress label and assignee"
+        ),
+        "{}",
+        run.text()
+    );
+    assert!(!run.stderr.contains("git cleanup completed, but could not clear #53"), "{}", run.text());
+}
+
+#[test]
+fn a_sweep_row_for_a_denied_remote_delete_says_so_distinctly_and_still_fails_the_run() {
+    let c = Cleanup::new();
+    let other = c.mkfixture("src3/other");
+    c.mk_implement_branch(&other, "54");
+    let origin_dir = other.parent().unwrap().join("other.origin.git");
+    c.git_ok(&["-C", s(&origin_dir), "config", "receive.denyDeletes", "true"]);
+    let root = other.parent().unwrap().to_path_buf();
+    let run = c.mc(
+        Tools::Full,
+        &["--sweep", "--root", s(&root), "--yes"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff")],
+    );
+    assert!(!run.ok, "{}", run.text());
+    assert!(c.has_branch(&origin_dir, "implement-54"), "the denied delete should have left the remote branch");
+    let rows: Vec<&str> = run.stdout.lines().skip_while(|l| *l != "sweep summary").skip(1).take_while(|l| l.starts_with("  ")).collect();
+    assert!(rows.iter().any(|r| r.contains("implement-54") && r.contains("remote branch not deleted") && !r.contains("FAILED")), "{rows:#?}");
 }
 
 #[test]
