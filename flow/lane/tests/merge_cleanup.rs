@@ -913,6 +913,10 @@ fn rebuilds_after_a_pull_that_changed_the_crate() {
     assert!(run.ok && run.has("flow/lane changed: rebuilding the lane binaries"), "{}", run.text());
     assert_eq!(std::fs::read_to_string(&log).unwrap(), "ran\n");
     assert_eq!(std::fs::read_to_string(&bin).unwrap(), "NEW\n");
+    // #834: a successful rebuild records the sha it built from, so a later
+    // run with no pull of its own can still tell the binaries are current.
+    let build_sha_file = c.home().join(".local/state/lane/build-sha");
+    assert_eq!(std::fs::read_to_string(&build_sha_file).unwrap().trim(), c.rev(&r, "main"));
 }
 
 #[test]
@@ -948,6 +952,51 @@ fn a_dry_run_never_rebuilds() {
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/trivial", "--dry-run"], &[("LANE_INSTALL_LOG", &log), ("LANE_INSTALLED_BIN", &bin)]);
     assert!(run.ok && !run.has("rebuilding"), "{}", run.text());
     assert_eq!(std::fs::read_to_string(&log).unwrap(), "");
+}
+
+/// #834: after a PR merges elsewhere, the controller's own trial-row
+/// auto-ship commit (implement skill § The merge step 3) can already pull
+/// `main` to the tip before this run's own `git pull --ff-only` executes, so
+/// that pull moves nothing. The old HEAD-movement check read "nothing moved"
+/// as "flow/lane didn't change" and skipped the rebuild, running a stale
+/// binary. The recorded build sha catches this: it is older than the tip
+/// (whose commit touches flow/lane), so this rebuilds even though the pull
+/// itself was a no-op.
+#[test]
+fn a_stale_recorded_build_sha_rebuilds_even_when_this_runs_pull_moves_nothing() {
+    let c = Cleanup::new();
+    let (log, bin) = lane_env(&c);
+    let r = c.mk_lane_repo("r21", true);
+    let stale = c.rev(&r, "main");
+    // Simulate main already advanced by another process before this run
+    // starts, so this run's own `git pull --ff-only` is a no-op.
+    c.git_ok(&["-C", r.to_str().unwrap(), "merge", "-q", "--ff-only", "origin/main"]);
+    let build_sha_file = c.home().join(".local/state/lane/build-sha");
+    std::fs::create_dir_all(build_sha_file.parent().unwrap()).unwrap();
+    std::fs::write(&build_sha_file, format!("{stale}\n")).unwrap();
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/trivial"], &[("LANE_INSTALL_LOG", &log), ("LANE_INSTALLED_BIN", &bin)]);
+    assert!(run.ok && run.has("flow/lane changed: rebuilding the lane binaries"), "{}", run.text());
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "ran\n");
+    assert_eq!(std::fs::read_to_string(&bin).unwrap(), "NEW\n");
+    assert_eq!(std::fs::read_to_string(&build_sha_file).unwrap().trim(), c.rev(&r, "main"));
+}
+
+/// #834: the mirror case — the recorded build sha is already at the tip, so
+/// even with no pull of its own this run must not rebuild.
+#[test]
+fn a_recorded_build_sha_already_at_the_tip_skips_without_a_pull_this_run() {
+    let c = Cleanup::new();
+    let (log, bin) = lane_env(&c);
+    let r = c.mk_lane_repo("r22", true);
+    c.git_ok(&["-C", r.to_str().unwrap(), "merge", "-q", "--ff-only", "origin/main"]);
+    let tip = c.rev(&r, "main");
+    let build_sha_file = c.home().join(".local/state/lane/build-sha");
+    std::fs::create_dir_all(build_sha_file.parent().unwrap()).unwrap();
+    std::fs::write(&build_sha_file, format!("{tip}\n")).unwrap();
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/trivial"], &[("LANE_INSTALL_LOG", &log), ("LANE_INSTALLED_BIN", &bin)]);
+    assert!(run.ok && !run.has("rebuilding"), "{}", run.text());
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), "");
+    assert_eq!(std::fs::read_to_string(&bin).unwrap(), "OLD\n");
 }
 
 // --- #736: uncommitted files in the worktree ---------------------------------

@@ -520,31 +520,56 @@ impl Cleanup {
         }
     }
 
-    /// #748: when the pull moves HEAD and the move touches flow/lane, the
-    /// installed lane binaries would otherwise run behind main. Rebuilds from
-    /// the freshly pulled checkout's own flow/lane-install.sh, so this works
-    /// the same whether `primary` is this tooling's own repo or, for any other
-    /// repo (no flow/lane there), is a no-op. A build failure is reported
-    /// with the compiler's error and never fails the fast-forward that
-    /// already happened — a dry run never pulls, so HEAD does not move and
-    /// this is a no-op.
+    /// #748, #834: rebuild when the installed binaries are older than the
+    /// latest flow/lane commit, not on whether *this run's* pull moved HEAD.
+    /// The controller's own trial-row auto-ship commit (implement skill §
+    /// The merge step 3) can already pull `main` to the tip before this run
+    /// starts, so this run's own `git pull --ff-only` is a no-op even though
+    /// the installed binaries are stale (#834: after #829 merged elsewhere,
+    /// `merge-cleanup implement-821` saw old_head == new_head, skipped the
+    /// rebuild, and ran the pre-#821 binary). The fix is a build sha recorded
+    /// at `~/.local/state/lane/build-sha`, written only after
+    /// `lane-install.sh` succeeds, and compared against the tip instead of
+    /// this run's own pre-pull HEAD. No recorded sha yet (first run since
+    /// this landed) falls back to this run's own pre-pull HEAD, matching the
+    /// old behavior exactly until a build sha exists to do better. A build
+    /// failure is reported with the compiler's error and never fails the
+    /// fast-forward that already happened. A dry run never pulls or rebuilds.
     fn fast_forward_and_rebuild(&self, primary: &str, default: &str) {
+        if self.dry {
+            return;
+        }
         let old_head = quiet_stdout("git", &["-C", primary, "rev-parse", "HEAD"]).unwrap_or_default();
         self.step(&format!("fast-forwarding {default} in {primary}"), "git", &["-C", primary, "pull", "--ff-only", "--quiet"]);
         let new_head = quiet_stdout("git", &["-C", primary, "rev-parse", "HEAD"]).unwrap_or_default();
-        if old_head.is_empty() || new_head.is_empty() || old_head == new_head {
+        if new_head.is_empty() {
             return;
         }
         let install = format!("{primary}/flow/lane-install.sh");
         if !Path::new(&install).is_file() {
             return;
         }
-        if quiet_ok("git", &["-C", primary, "diff", "--quiet", &old_head, &new_head, "--", "flow/lane"]) {
+        let build_sha_file = format!("{}/.local/state/lane/build-sha", self.home);
+        let baseline = std::fs::read_to_string(&build_sha_file)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(old_head);
+        if baseline.is_empty() {
+            return;
+        }
+        if quiet_ok("git", &["-C", primary, "diff", "--quiet", &baseline, &new_head, "--", "flow/lane"]) {
             return;
         }
         safe_println!("flow/lane changed: rebuilding the lane binaries");
         let failure = match lane::runner::run("bash", &[&install]) {
-            Ok(out) if out.success => return,
+            Ok(out) if out.success => {
+                if let Some(dir) = Path::new(&build_sha_file).parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                let _ = std::fs::write(&build_sha_file, format!("{new_head}\n"));
+                return;
+            }
             Ok(out) => out.combined,
             Err(e) => e.to_string(),
         };
