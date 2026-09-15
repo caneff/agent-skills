@@ -39,7 +39,7 @@ The brief carries what neither engine can infer:
   not go fetch it.
 - The repo's gate, read from `git config land.testcmd`, and the instruction to
   run it green before finishing.
-- § Build's TDD rules: failing test first per criterion, no implementation
+- `implement/SKILL.md` § Build's TDD rules: failing test first per criterion, no implementation
   ahead of a red test, no scope beyond the ticket.
 - Commit to this branch with `Closes #<n>` in the final commit body. Do not
   push, do not open a PR.
@@ -59,7 +59,7 @@ quota. In this lane they swap for:
    again; without it there is no spec axis, only taste.
 
 The one-round-plus-verification cap and the pre-report gate in
-`implement/SKILL.md` § Review and § Before the PR bind unchanged. So does the
+`implement/SKILL.md` § Review and § Before the PR: both bind unchanged. So does the
 disclosure: the PR body names the reviews that actually ran and says the diff
 was written by Codex, not Claude. A reader who assumes a Claude review
 happened is reading a claim nobody made.

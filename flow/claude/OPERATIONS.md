@@ -124,7 +124,7 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   not the working tree, and an amend erases a sha already handed over.
 - The review loop, the before-the-PR checks and the controller's merge
   (CLEAN, `Closes` verified): `implement/SKILL.md` § Heavy tier; the light
-  tier's landing and its `Closes` check: § Light tier. Why: one home, so the
+  tier's landing and its `Closes` check: `implement/SKILL.md` § Light tier. Why: one home, so the
   lane and this file cannot drift apart.
 - The controller follows every merge with
   `merge-cleanup --repo <primary checkout> <branch>`
