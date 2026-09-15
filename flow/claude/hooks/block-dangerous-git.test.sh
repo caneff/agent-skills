@@ -56,6 +56,14 @@ export STUB_LOGIN=caneff STUB_OWNER=caneff
 run "owned repo: push code to default branch allowed" 0 "git push origin main"
 run "owned repo: force-with-lease allowed" 0 "git push --force-with-lease origin main"
 
+# repo_is_owned itself compares origin owner to login case-insensitively
+# (#810): `gh repo view` can report the owner in a different case than the
+# login (or vice versa) and this checkout is still owned.
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN=caneff STUB_OWNER=CANEFF
+run "checkout owned when repo-view owner case differs from login" 0 "git push origin main"
+export STUB_LOGIN=caneff STUB_OWNER=caneff
+
 # The owned verdict is cached, so gh going away afterwards costs nothing.
 export STUB_LOGIN= STUB_OWNER=
 run "cached owned verdict survives gh failing" 0 "git push origin main"
@@ -131,6 +139,13 @@ run "owned merge chained with a one-segment -R value allowed" 0 \
   "gh pr merge 1 --repo caneff/x && grep -R pattern ."
 run "someone else's repo on the merge still blocked beside a path --repo" 2 \
   "merge-cleanup --repo /home/caneff/.agents/skills b && gh pr merge 1 --repo someone-else/x" "BLOCKED"
+# GitHub owners are case-insensitive (#810): a named owner that differs from
+# the login only in case is still this login's repo, and a foreign owner
+# still blocks whatever case it's spelled in.
+run "gh pr merge naming an owned repo in a different case allowed" 0 \
+  "gh pr merge 1 --repo CANEFF/agent-skills"
+run "gh pr merge naming someone else's repo in a different case blocked" 2 \
+  "gh pr merge 1 --repo Someone-Else/agent-skills" "BLOCKED"
 
 rm -rf "$XDG_CACHE_HOME"
 export STUB_LOGIN=caneff STUB_OWNER=someone-else
