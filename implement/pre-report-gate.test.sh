@@ -58,6 +58,79 @@ echo three >> "$repo/a.txt"
 run "modified file fails the gate" 1 "$tip" "uncommitted"
 git -C "$repo" checkout -q -- a.txt
 
+# A leftover .scratch/ is as blocking as a dirty tree, even though it's
+# git-ignored and git status stays clean.
+mkdir -p "$repo/.scratch"
+echo leftover > "$repo/.scratch/leftover.txt"
+echo '.scratch/' > "$repo/.gitignore"
+git -C "$repo" add .gitignore; git -C "$repo" commit -qm gitignore
+tip=$(git -C "$repo" rev-parse HEAD)
+run ".scratch/ with content fails the gate" 1 "$tip" ".scratch/"
+
+# The check is repo-wide, not cwd-relative: a worker's shell can sit in a
+# subdirectory when it calls the gate by absolute path.
+mkdir -p "$repo/sub"
+out=$(cd "$repo/sub" && bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *".scratch/"* ]]; then
+  echo "PASS: .scratch/ content fails the gate from a subdirectory too"
+else
+  echo "FAIL: .scratch/ content from a subdirectory — want exit 1 + '.scratch/', got $rc: $out"; fails=1
+fi
+rmdir "$repo/sub"
+
+# An acknowledged keep: the ticket's escape hatch for content the worker
+# cannot commit. The gate warns instead of blocking, and the warning must
+# carry the reason so it lands in the PR-up report.
+out=$(cd "$repo" && PRE_REPORT_KEEP_SCRATCH="raw probe log, too big for docs/research" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"raw probe log, too big for docs/research"* ]]; then
+  echo "PASS: PRE_REPORT_KEEP_SCRATCH acknowledges a kept .scratch/ and passes"
+else
+  echo "FAIL: PRE_REPORT_KEEP_SCRATCH — want exit 0 + the reason quoted, got $rc: $out"; fails=1
+fi
+
+# The pass line itself — the one line the worker is told to quote — must not
+# claim .scratch/ is clear when it was kept, and stdout alone (what a
+# captured invocation keeps) must carry the acknowledgement.
+stdout_only=$(cd "$repo" && PRE_REPORT_KEEP_SCRATCH="raw probe log" bash "$gate" "$tip" 2>/dev/null)
+if [[ "$stdout_only" != *".scratch/ clear"* ]] && [[ "$stdout_only" == *"kept"* ]]; then
+  echo "PASS: the pass line doesn't call a kept .scratch/ clear"
+else
+  echo "FAIL: pass line on stdout — want no 'clear' claim and a 'kept' mention, got: $stdout_only"; fails=1
+fi
+
+# An empty reason isn't an acknowledgement — it's the unset case, so a
+# worker that forgets the reason still gets blocked, not silently waved
+# through.
+out=$(cd "$repo" && PRE_REPORT_KEEP_SCRATCH="" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *".scratch/"* ]]; then
+  echo "PASS: an empty PRE_REPORT_KEEP_SCRATCH still fails the gate"
+else
+  echo "FAIL: empty PRE_REPORT_KEEP_SCRATCH — want exit 1, got $rc: $out"; fails=1
+fi
+
+rm -rf "$repo/.scratch"
+mkdir -p "$repo/.scratch"
+run "empty .scratch/ dir passes" 0 "$tip"
+rmdir "$repo/.scratch"
+
+# An unreadable .scratch/ must fail closed, not read as empty — root
+# ignores directory permissions, so this case is skipped under root.
+if [ "$(id -u)" != "0" ]; then
+  mkdir -p "$repo/.scratch"
+  echo hidden > "$repo/.scratch/hidden.txt"
+  chmod 000 "$repo/.scratch"
+  out=$(cd "$repo" && bash "$gate" "$tip" 2>&1); rc=$?
+  chmod 755 "$repo/.scratch"
+  if [ "$rc" = 1 ] && [[ "$out" != *"clear"* ]]; then
+    echo "PASS: an unreadable .scratch/ fails closed"
+  else
+    echo "FAIL: unreadable .scratch/ — want exit 1 and no 'clear' claim, got $rc: $out"; fails=1
+  fi
+  rm -rf "$repo/.scratch"
+else
+  echo "SKIP: unreadable .scratch/ case (running as root)"
+fi
+
 # Wrong usage is a usage error, not a pass.
 out=$(cd "$repo" && bash "$gate" 2>&1); rc=$?
 if [ "$rc" = 2 ] && [[ "$out" == *"usage"* ]]; then
