@@ -179,9 +179,11 @@ time, not from the worker: § The merge.
    code fence doesn't register, and a cross-repo ticket needs `Closes
    owner/repo#<n>`, not a bare `#<n>`) — fix the body (`gh pr edit <pr>
    --repo <owner/name> --body-file <body>`) and re-run this check once. If
-   it's still missing after that one fix-and-recheck, stop and say so in
-   the PR-up report rather than looping — the ticket may need a manual
-   `gh issue close` after merge instead.
+   it's still missing after that one fix-and-recheck, do not send "PR up" —
+   a PR that closes nothing must not reach the merge. Stop and tell the
+   controller what you tried and what `gh pr view` still returns; the
+   controller rules on it (disputed, or a manual `gh issue close` planned
+   for after merge), same as any other blocker.
 
 The final commit body carries `Closes #<n>`, and so does the PR body (see
 below) — a "done" report where only the commit carries it is not enough:
@@ -233,8 +235,11 @@ The controller merges on a repo Chris owns; Chris reads it after via
    dispatch report — do not decide alone either way: hand Chris the merge
    line and the cleanup line as in the exception below, and name the
    disagreement.
-2. **The PR is still not-draft and CLEAN** — the same check as § Before the
-   PR: step 5, rerun because `main` may have moved since "PR up".
+2. **The PR is still not-draft, CLEAN, and closes what it should** — the
+   same check as § Before the PR: step 5, rerun because `main` may have
+   moved since "PR up". `closingIssuesReferences` empty or missing the
+   ticket blocks the merge same as a draft or a conflict does — a PR that
+   closes nothing does not merge.
 3. **Codex adversarial-review pass (#812 trial) — heavy Claude-lane PRs
    only.** Not heavy, not Claude-lane (a Codex-lane build's own review step
    is `codex-lane.md`'s, unchanged), skip to step 4.
