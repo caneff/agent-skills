@@ -316,11 +316,9 @@ impl WorktreeFiles {
     }
 
     /// "1 modified, 2 untracked file(s) would be lost: f, a, b" — the kinds
-    /// that are present, in that order, then their first names. The names
-    /// chain ignored first regardless: it is the scarcest, least-recoverable
-    /// class (`.scratch/` evidence), so it is never the one `first_names`
-    /// elides into "and N more" behind a run of modified/untracked names
-    /// (#838). Modified and untracked keep no priority over each other.
+    /// that are present, then their first names. The names chain ignored
+    /// first — the scarcest, least-recoverable class — so it is never the
+    /// one `first_names` elides behind modified/untracked (#838).
     fn dirty_text(&self) -> String {
         let kinds: Vec<String> = [("modified", &self.modified), ("untracked", &self.untracked), ("ignored", &self.ignored)]
             .iter()

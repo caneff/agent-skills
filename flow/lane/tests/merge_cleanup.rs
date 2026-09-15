@@ -1194,12 +1194,13 @@ fn scratch_is_never_elided_behind_bulk_modified_and_untracked_names() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r32", "implement-32");
     ignored_dirs(&r, &wt, &[".scratch"]);
-    for name in ["a", "b", "c", "d", "e"] {
+    dirty(&wt, "modified"); // "f", already tracked in the fixture
+    for name in ["a", "b", "c", "d"] {
         std::fs::write(wt.join(name), "unsaved\n").unwrap();
     }
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     let want = format!(
-        "merge-cleanup: refusing to remove {} — 5 untracked, 1 ignored file(s) would be lost: .scratch/, a, b, c, d and 1 more (--discard overrides)",
+        "merge-cleanup: refusing to remove {} — 1 modified, 4 untracked, 1 ignored file(s) would be lost: .scratch/, f, a, b, c and 1 more (--discard overrides)",
         wt.display()
     );
     assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
