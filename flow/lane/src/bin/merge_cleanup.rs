@@ -166,10 +166,17 @@ struct Cleanup {
     /// separate from `cleanup_branch`'s own bool, which callers read as
     /// "the branch and worktree are gone" — folding this into it made a
     /// fully cleaned branch look like a survivor, both in the sweep table
-    /// and in the single-branch `report_stale` gate. Read right after each
-    /// `cleanup_branch` call; a caller doing more than one branch resets it
-    /// itself before the next.
+    /// and in the single-branch `report_stale` gate. `cleanup_branch` resets
+    /// this itself at the start of every call, so a caller doing more than
+    /// one branch reads it right after each call with no reset of its own.
     claim_clear_failed: bool,
+    /// Codex pass on PR #842: same shape as `claim_clear_failed`, for a
+    /// denied or failed `git push origin --delete`. The local branch and
+    /// worktree are still gone by the time this can be true, so it does not
+    /// make `cleanup_branch` return false either — it only fails the exit
+    /// code and, via `clear_ticket_if_closed`'s wording, stops that
+    /// function from calling git cleanup complete when it wasn't.
+    remote_delete_failed: bool,
 }
 
 /// The herdr agents whose cwd is in `wt`; `Err` when `herdr agent list`
@@ -612,16 +619,22 @@ impl Cleanup {
                 continue;
             }
             safe_println!("== {} {}", row.repo.trim_end_matches('/'), row.branch);
-            self.claim_clear_failed = false;
             let verdict = if !self.cleanup_branch(&row.repo, &row.branch) {
                 rc = ExitCode::FAILURE;
                 "FAILED"
-            } else if self.claim_clear_failed {
-                // #832: git cleanup succeeded; only the claim-clearing edit
-                // failed. A distinct word, so the table never reads like the
-                // branch survived — the exit code still fails the run.
+            } else if self.claim_clear_failed || self.remote_delete_failed {
+                // #832 / the #842 Codex pass: git cleanup succeeded (the
+                // branch and worktree are gone); only a post-cleanup step
+                // failed. A distinct word for each, so the table never reads
+                // like the branch survived — the exit code still fails the
+                // run either way.
                 rc = ExitCode::FAILURE;
-                "cleaned, claim not cleared"
+                match (self.remote_delete_failed, self.claim_clear_failed) {
+                    (true, true) => "cleaned, remote branch and claim not cleared",
+                    (true, false) => "cleaned, remote branch not deleted",
+                    (false, true) => "cleaned, claim not cleared",
+                    (false, false) => unreachable!(),
+                }
             } else {
                 "cleaned"
             };
@@ -716,6 +729,12 @@ impl Cleanup {
 
     /// Steps 3-6 for one branch.
     fn cleanup_branch(&mut self, path: &str, b: &str) -> bool {
+        // Reset here, not by each caller: every path through this function
+        // that reaches step 5 or 7 can set either flag, and a caller doing
+        // several branches (the sweep) must not read a previous branch's
+        // failure onto this one.
+        self.claim_clear_failed = false;
+        self.remote_delete_failed = false;
         let primary = primary_of(path);
         let default = default_branch(Path::new(path));
         if b == default {
@@ -773,8 +792,14 @@ impl Cleanup {
         }
 
         // Step 5 — the remote branch, if the merge did not already drop it.
+        // A denied or failed delete (branch protection, a race) used to be
+        // discarded here (#842 Codex pass), so it neither failed the run
+        // nor said the remote branch was still there.
         if quiet_ok("git", &["-C", path, "ls-remote", "--exit-code", "--heads", "origin", b]) {
-            self.step(&format!("deleting remote branch {b}"), "git", &["-C", path, "push", "origin", "--delete", b]);
+            if !self.step(&format!("deleting remote branch {b}"), "git", &["-C", path, "push", "origin", "--delete", b]) {
+                self.remote_delete_failed = true;
+                eprintln!("merge-cleanup: could not delete remote branch {b}; re-run: git -C {path} push origin --delete {b}");
+            }
         } else {
             skip("the remote branch delete", &format!("origin has no {b}"));
         }
@@ -790,12 +815,15 @@ impl Cleanup {
         // Step 7 (#821) — the ticket. `merge-cleanup` was the only place in
         // the lane that never cleared a landed claim, so a closed ticket kept
         // showing in-progress and assigned. An open issue (part of a bigger
-        // ticket, or reopened) is left alone. #832: a failed clear does not
-        // make this call return false — the git cleanup above it already
-        // succeeded, and `false` here means "the branch and worktree are
-        // still there" to both callers (the sweep table's "cleaned" word,
-        // and `main`'s gate on `report_stale`). It sets `claim_clear_failed`
-        // instead, for the caller to fold into its own exit code.
+        // ticket, or reopened) is left alone. Still runs on a failed step 5
+        // (#842 Codex pass): the PR merged either way, so the claim clears
+        // regardless of whether the remote branch did. #832: a failed clear
+        // does not make this call return false — the git cleanup above it
+        // already succeeded (or, per step 5, mostly did), and `false` here
+        // means "the branch and worktree are still there" to both callers
+        // (the sweep table's "cleaned" word, and `main`'s gate on
+        // `report_stale`). It sets `claim_clear_failed` instead, for the
+        // caller to fold into its own exit code, same as `remote_delete_failed`.
         self.claim_clear_failed = !self.clear_ticket_if_closed(path, b);
         true
     }
@@ -855,8 +883,13 @@ impl Cleanup {
             edit.push(assignees_csv);
         }
         if !self.step(&what, "gh", &edit) {
+            // #842 Codex pass: "git cleanup completed" is only true when
+            // step 5 also succeeded — said unconditionally, it would tell an
+            // operator the branch was gone from origin when it wasn't.
+            let cleanup_status =
+                if self.remote_delete_failed { "git cleanup did not fully complete (the remote branch delete also failed)" } else { "git cleanup completed" };
             eprintln!(
-                "merge-cleanup: git cleanup completed, but could not clear #{n}'s in-progress label and assignee; re-run: gh {}",
+                "merge-cleanup: {cleanup_status}, but could not clear #{n}'s in-progress label and assignee; re-run: gh {}",
                 edit.join(" ")
             );
             return false;
@@ -988,6 +1021,7 @@ fn main() -> ExitCode {
         removal_targets: Vec::new(),
         removed_worktrees: Vec::new(),
         claim_clear_failed: false,
+        remote_delete_failed: false,
     };
 
     if a.sweep {
@@ -1032,11 +1066,12 @@ fn main() -> ExitCode {
     }
     let ok = c.cleanup_branch(&repo, &branch);
     if ok {
-        // #832: report_stale is about this repo's other worktrees, not
-        // whether the ticket's claim got cleared — it still runs when git
-        // cleanup succeeded, even if claim_clear_failed will fail the exit.
+        // #832 / #842: report_stale is about this repo's other worktrees,
+        // not whether the ticket's claim or its remote branch got cleared —
+        // it still runs when git cleanup succeeded, even if
+        // claim_clear_failed or remote_delete_failed will fail the exit.
         c.report_stale(&[repo]);
     }
     c.close_removed_herdr_workspaces();
-    if ok && !c.claim_clear_failed { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+    if ok && !c.claim_clear_failed && !c.remote_delete_failed { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
