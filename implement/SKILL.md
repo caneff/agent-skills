@@ -117,8 +117,9 @@ No PR and no reviewer; Chris reads the log after.
 1. One full round of `/multi-axis-code-review`: standards, spec and
    correctness, all three waited for (`multi-axis-code-review/SKILL.md` § Why separate axes: it says why the
    built-in `/code-review` is not run here; `/code-review low` only when the
-   owner asks) — plus `/codex:adversarial-review` on the same diff, handed
-   the ticket body verbatim; without it there is no spec check, only taste.
+   owner asks) — plus `/codex:adversarial-review --base origin/<default>`
+   on the same diff, handed the ticket body verbatim — without the ticket
+   body there is no spec check, only taste.
    This is a trial fourth axis on the Claude lane, not a replacement for the
    three above (`codex-lane.md`'s own review step is unchanged). It never
    blocks a build: run `codex login status` first. Not logged in, or the
@@ -143,11 +144,14 @@ append one row to `docs/research/2026-09-14-codex-review-trial.md` in this
 same PR: ticket, PR, counts per class, one line per codex-only confirmed
 finding. The PR body says whether the pass ran or was skipped, either way.
 The trial ends after five heavy Claude-lane tickets that ran the pass
-(a skip does not count). The worker whose PR adds the fifth row says "codex
-trial complete" in "PR up"; the controller then brings Chris the table and a
-keep/drop recommendation: keep if at least one codex-only confirmed finding
-would have shipped a real bug, drop if it only repeated the Claude axes or
-raised noise. This wording stays in `SKILL.md` until Chris rules.
+(a skip does not count); count rows as they land on `<default>`, not as
+drafted, since two heavy PRs open at once will conflict on the file's tail
+and the second to merge rebases through the true count. The worker whose PR
+adds the fifth row says "codex trial complete" in "PR up"; the controller
+then brings Chris the table and a keep/drop recommendation: keep if at
+least one codex-only confirmed finding would have shipped a real bug, drop
+if it only repeated the Claude axes or raised noise. This wording stays in
+`SKILL.md` until Chris rules.
 
 ### Before the PR
 
@@ -181,7 +185,8 @@ The body has these sections and nothing else:
 - **Tests run** — the command and its result line.
 - **Decisions made** — each with its reason, including every round-1
   finding that was disputed (with the why) or filed (with its ticket number),
-  and, on a heavy Claude-lane build, every Codex finding's class.
+  and, on a heavy Claude-lane build, either every Codex finding's class or,
+  when the pass was skipped, that it was skipped and why.
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
 
 Send the controller "PR up" with the PR URL and the last reviewed sha, plus
