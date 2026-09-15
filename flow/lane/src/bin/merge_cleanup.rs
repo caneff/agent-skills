@@ -36,7 +36,10 @@ even with --yes. Ignored files include .scratch/ and every other ignored name
 except the regenerable caches: an ignored entry named node_modules,
 __pycache__, target, .venv, .pytest_cache, .ruff_cache or .mypy_cache, or
 inside one whose own .gitignore is `*`, never refuses — it is removed with the
-worktree, and the count and first names are printed. The list is fixed on purpose: an unknown ignored name is kept, since
+worktree, and its count and first names are printed as cache file(s), distinct
+from the ignored file(s) count above: the two never share a label, so a name
+Chris approved losing under one count is never misread as counted by the
+other. The list is fixed on purpose: an unknown ignored name is kept, since
 a wrongly kept cache costs a --discard and a discarded note cannot be undone.
 
 Every local branch delete first records the tip under
@@ -403,8 +406,14 @@ impl Cleanup {
     /// The uncommitted-files guard (#736). `git worktree remove --force`
     /// discards everything git does not hold, so modified, untracked or
     /// ignored files refuse the removal unless --discard — `.scratch/`
-    /// included (#801). Caches (`is_cache`) never refuse; their count and
-    /// first names are printed, since they go too.
+    /// included (#801), empty or not: a process can fill it between the read
+    /// and the removal, and an empty directory can be intentional, so
+    /// emptiness earns no exemption (#823, reversed by a Codex pass on the
+    /// PR). Caches (`is_cache`) never refuse; their count and first names
+    /// are printed as "cache file(s)", since they go too — a label distinct
+    /// from the non-cache "ignored file(s)" refusal above (#823), so a name
+    /// approved for loss in one line is never misread as belonging to the
+    /// other's.
     fn guard_files(&self, wt: &str) -> bool {
         let Some(files) = WorktreeFiles::read(wt) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there");
@@ -419,7 +428,7 @@ impl Cleanup {
         }
         if !files.caches.is_empty() {
             let would = if self.dry { "would discard" } else { "discarding" };
-            safe_println!("{would} {} ignored file(s) in {wt}: {}", files.caches.len(), first_names(&files.caches));
+            safe_println!("{would} {} cache file(s) in {wt}: {}", files.caches.len(), first_names(&files.caches));
         }
         true
     }
