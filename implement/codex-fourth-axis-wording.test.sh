@@ -127,6 +127,13 @@ check_in "$merge_section" 'rm "$out_file" "$body_file"'
 check_in "$merge_section" 'never `rm -rf .scratch`, never `--discard`'
 check_in "$merge_section" 'If `gh pr comment` fails, leave both files in place and stop before merging'
 
+# Rule 10 (#835, from PR #839's Codex finding): the step's own `mkdir -p`
+# leaves an empty `.scratch/` that stalls merge-cleanup — undo it with a
+# bare `rmdir`, which only removes an empty directory, so it carries no
+# data-loss risk beyond what the two named `rm`s already accept.
+check_in "$merge_section" 'rmdir .scratch 2>/dev/null || true'
+check_in "$merge_section" '`rmdir` only removes an empty directory'
+
 if [ "$fail" -eq 0 ]; then
   echo "PASS implement/codex-fourth-axis-wording.test.sh"
 else

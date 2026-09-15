@@ -176,8 +176,7 @@ time, not from the worker: § The merge.
    after `gh pr create` can be GitHub not having indexed the reference yet
    — poll a few seconds before treating it as a real miss. Still missing:
    the closing keyword landed wrong (`Closes #<n>` inside backticks or a
-   code fence doesn't register, and a cross-repo ticket needs `Closes
-   owner/repo#<n>`, not a bare `#<n>`) — fix the body (`gh pr edit <pr>
+   code fence doesn't register) — fix the body (`gh pr edit <pr>
    --repo <owner/name> --body-file <body>`) and re-run this check once. If
    it's still missing after that one fix-and-recheck, do not send "PR up" —
    a PR that closes nothing must not reach the merge. Stop and tell the
@@ -281,11 +280,15 @@ The controller merges on a repo Chris owns; Chris reads it after via
    `mkdir -p` above is required because the worker's own Before the PR step
    already deleted this directory.
 
-   Once that comment posts, `rm "$out_file" "$body_file"` — the comment is
-   now the durable record and the ticket body lives on the issue, so
-   nothing needs them left in the workspace: `merge-cleanup` refuses to
-   delete ignored `.scratch/` content without `--discard`, and stray files
-   there stall it on every Codex pass. Remove only those two named files —
+   Once that comment posts, `rm "$out_file" "$body_file"`, then `rmdir
+   .scratch 2>/dev/null || true` in the workspace — the comment is now the
+   durable record and the ticket body lives on the issue, so nothing needs
+   them left in the workspace: `merge-cleanup` refuses to delete ignored
+   `.scratch/` content without `--discard`, and stray files (or an empty
+   directory this step's own `mkdir -p` created) there stall it on every
+   Codex pass. `rmdir` only removes an empty directory, so it undoes that
+   `mkdir -p` with no risk to anything else that might be in `.scratch/`.
+   Remove only those two named files and, if now empty, the directory —
    never `rm -rf .scratch`, never `--discard`. If `gh pr comment` fails,
    leave both files in place and stop before merging.
 
