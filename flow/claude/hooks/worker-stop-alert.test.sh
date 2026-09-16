@@ -55,11 +55,14 @@ ok() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_
 denied() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"Permission for this action has been denied.","is_error":true}]},"toolUseResult":"Error: Permission for this action has been denied."}\n' "$1"; }
 peer() { printf '{"type":"user","isMeta":true,"origin":{"kind":"peer","name":"skills-b6"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
 notification() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
-# launch <agentId> ; teammate_launch <agentId> ; handback <agentId>
+# launch <agentId> ; teammate_launch <agentId> [name] ; handback <agentId>
 launch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-%s","content":"Async agent launched"}]},"toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"%s"}}\n' "$1" "$1"; }
 # The Agent-tool-as-teammate shape (#856): status teammate_spawned, id under
-# agent_id (snake_case), no agentId field at all.
-teammate_launch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-%s","content":"Spawned successfully."}]},"toolUseResult":{"status":"teammate_spawned","agent_id":"%s","name":"%s"}}\n' "$1" "$1" "$1"; }
+# agent_id (snake_case), no agentId field at all. <name> defaults to <agentId>
+# for a bare (unqualified) id; pass it explicitly for a qualified one
+# (`name@session-...`, #859) since the bare name is what a real report's
+# teammate_id carries.
+teammate_launch() { local id=$1 name=${2:-$1}; printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-%s","content":"Spawned successfully."}]},"toolUseResult":{"status":"teammate_spawned","agent_id":"%s","name":"%s"}}\n' "$id" "$id" "$name"; }
 handback() { printf '{"type":"user","origin":{"kind":"peer","from":"%s","senderTaskId":"%s","handback":true},"message":{"role":"user","content":"[Subagent hand-back] report"}}\n' "$1" "$1"; }
 # teammate_report <bare-id> : a named teammate's actual return shape (#859) —
 # a plain-text message with no `origin` field at all, carrying a
@@ -212,7 +215,7 @@ expect_alert "once the teammate-spawned subagent is back, a stop without a repor
 reset_log
 t="$tmp/teammate-report.jsonl"
 { human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings";
-  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-tally-859","content":"Spawned successfully."}]},"toolUseResult":{"status":"teammate_spawned","agent_id":"tally-859@session-2b7ae693","name":"tally-859"}}\n';
+  teammate_launch tally-859@session-2b7ae693 tally-859;
   assistant_text "reviewer running"; } > "$t"
 run "qualified teammate out" "$t"
 expect_none "a stop while a qualified-id teammate is out does not alert"
