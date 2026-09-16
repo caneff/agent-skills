@@ -302,9 +302,14 @@ fn the_report_names_the_workers_claude_session_beside_the_herdr_agent() {
     // worker's, the way merge-cleanup already resolves occupancy.
     f.set_agents(&format!(r#"[{{"name":"{AGENT_395}","agent_session":{{"value":"sess-395"}}}}]"#));
     let mut child = spawn_live();
+    let proc_start = lane::proc_info::read_stat(child.id() as i32).unwrap().start;
     std::fs::write(
         f.home().join(".claude/sessions").join(format!("{}.json", child.id())),
-        format!(r#"{{"pid":{},"cwd":"{}","name":"implement-395-42","sessionId":"sess-395"}}"#, child.id(), wt.display()),
+        format!(
+            r#"{{"pid":{},"cwd":"{}","name":"implement-395-42","sessionId":"sess-395","procStart":"{proc_start}"}}"#,
+            child.id(),
+            wt.display()
+        ),
     )
     .unwrap();
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
@@ -338,14 +343,24 @@ fn a_non_worker_session_sharing_the_worktree_and_sorting_first_is_not_reported()
     // pick it — only the herdr-reported sessionId decides which one wins.
     let mut other = spawn_live();
     let mut worker = spawn_live();
+    let other_start = lane::proc_info::read_stat(other.id() as i32).unwrap().start;
+    let worker_start = lane::proc_info::read_stat(worker.id() as i32).unwrap().start;
     std::fs::write(
         f.home().join(".claude/sessions").join("0000000001.json"),
-        format!(r#"{{"pid":{},"cwd":"{}","name":"not-the-worker","sessionId":"sess-other"}}"#, other.id(), wt.display()),
+        format!(
+            r#"{{"pid":{},"cwd":"{}","name":"not-the-worker","sessionId":"sess-other","procStart":"{other_start}"}}"#,
+            other.id(),
+            wt.display()
+        ),
     )
     .unwrap();
     std::fs::write(
         f.home().join(".claude/sessions").join(format!("{}.json", worker.id())),
-        format!(r#"{{"pid":{},"cwd":"{}","name":"implement-395-42","sessionId":"sess-worker"}}"#, worker.id(), wt.display()),
+        format!(
+            r#"{{"pid":{},"cwd":"{}","name":"implement-395-42","sessionId":"sess-worker","procStart":"{worker_start}"}}"#,
+            worker.id(),
+            wt.display()
+        ),
     )
     .unwrap();
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());

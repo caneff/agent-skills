@@ -514,11 +514,17 @@ fn me() -> u32 {
     std::process::id()
 }
 
+/// This test process's own `/proc` starttime, for a registry fixture whose
+/// pid is `me()` to read as live (`live_in` now checks `procStart` matches).
+fn me_start() -> String {
+    lane::proc_info::read_stat(me() as i32).unwrap().start
+}
+
 #[test]
 fn a_live_registry_pid_in_the_workspace_refuses() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r6", "implement-1");
-    c.session("live", &format!(r#"{{"pid":{},"cwd":"{}"}}"#, me(), wt.display()));
+    c.session("live", &format!(r#"{{"pid":{},"cwd":"{}","procStart":"{}"}}"#, me(), wt.display(), me_start()));
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     let want = format!("merge-cleanup: refusing to remove {} — a live session is in it: pid {}", wt.display(), me());
     assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
@@ -562,8 +568,8 @@ fn with_siblings(c: &Cleanup, r: &std::path::Path, wt: &std::path::Path) -> std:
     c.worktree_add(r, &["--detach", s(&wts.join("agent-ignored")), "origin/main"]);
     std::fs::create_dir(wts.join("agent-ignored/scratch")).unwrap();
     std::fs::write(wts.join("agent-ignored/scratch/log"), "evidence\n").unwrap();
-    c.session("sibling", &format!(r#"{{"pid":{},"cwd":"{}"}}"#, me(), wts.join("agent-live").display()));
-    c.session("prefix", &format!(r#"{{"pid":{},"cwd":"{}0"}}"#, me(), wt.display()));
+    c.session("sibling", &format!(r#"{{"pid":{},"cwd":"{}","procStart":"{}"}}"#, me(), wts.join("agent-live").display(), me_start()));
+    c.session("prefix", &format!(r#"{{"pid":{},"cwd":"{}0","procStart":"{}"}}"#, me(), wt.display(), me_start()));
     c.set_agents(&format!(r#"[{{"name":"skills-10","pane_id":"w3:p1","cwd":"{}0"}}]"#, wt.display()));
     std::fs::create_dir(wts.join("agent-orphan")).unwrap();
     std::fs::write(wts.join("agent-orphan/f"), "leftover\n").unwrap();
@@ -712,9 +718,22 @@ fn a_failed_herdr_pane_close_refuses_explicitly() {
 fn a_live_registry_pid_with_no_herdr_agent_still_refuses() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r11", "implement-6");
-    c.session("r11", &format!(r#"{{"pid":{},"cwd":"{}"}}"#, me(), wt.display()));
+    c.session("r11", &format!(r#"{{"pid":{},"cwd":"{}","procStart":"{}"}}"#, me(), wt.display(), me_start()));
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(!run.ok && run.has(&format!("pid {}", me())) && wt.is_dir(), "{}", run.text());
+}
+
+/// #851: a registry record whose pid is alive but whose `procStart` doesn't
+/// match that pid's own `/proc/<pid>/stat` starttime is a stale record from
+/// a dead session whose pid has since been reused, not a live one — the
+/// live-session guard must not refuse the removal over it.
+#[test]
+fn a_registry_pid_alive_but_reused_does_not_block_removal() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r17", "implement-851");
+    c.session("r17", &format!(r#"{{"pid":{},"cwd":"{}","procStart":"not-the-real-start"}}"#, me(), wt.display()));
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
 }
 
 #[test]
@@ -771,7 +790,7 @@ fn a_registry_session_matching_a_working_herdr_agent_refuses() {
 fn a_registry_session_with_no_matching_herdr_agent_refuses() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r16", "implement-745c");
-    c.session("r16", &format!(r#"{{"pid":{},"cwd":"{}","sessionId":"sess-16-unmatched"}}"#, me(), wt.display()));
+    c.session("r16", &format!(r#"{{"pid":{},"cwd":"{}","sessionId":"sess-16-unmatched","procStart":"{}"}}"#, me(), wt.display(), me_start()));
     c.set_agents(&format!(
         r#"[{{"name":"skills-16","pane_id":"w14:p1","cwd":"{}","agent_status":"idle","agent_session":{{"value":"sess-other"}}}}]"#,
         wt.display()
