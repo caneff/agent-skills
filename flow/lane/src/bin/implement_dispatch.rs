@@ -3,13 +3,38 @@
 //! workspace inside herdr, report, and stop. It never waits on the worker.
 //! The contract is `--help` below.
 
-use lane::runner::{self, quiet_ok, quiet_stdout, CommandOutput};
+use lane::runner::{self, quiet_ok, quiet_ok_timeout, quiet_stdout, quiet_stdout_timeout, run_timeout, CommandOutput};
 use lane::{git_origin, herdr, proc_info, safe_print, safe_println, sessions};
 use serde_json::Value;
 use std::env;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::Duration;
+
+/// OS-level bound for the herdr calls that are plain queries (status, agent
+/// get/list, pane list): a herdr server that answers at all answers within
+/// this, so a hang past it means the subprocess itself is stuck, not that
+/// the work is legitimately slow.
+const HERDR_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+/// OS-level bound for the two herdr calls that mutate state (`worktree
+/// open`, `agent start`) rather than just read it — looser than
+/// `HERDR_QUERY_TIMEOUT` because registering a workspace or spawning a
+/// claude process on a loaded box can legitimately take longer than a
+/// status query, and killing one mid-mutation risks a half-registered
+/// agent that the next retry then trips over (`herdr agent <n> already
+/// exists`) instead of cleanly retrying.
+const HERDR_MUTATION_TIMEOUT: Duration = Duration::from_secs(30);
+/// OS-level bound for `herdr agent prompt --wait --timeout 120000`: herdr's
+/// own `--timeout` is an internal flag it enforces itself, not an OS-level
+/// bound on the subprocess — this is the backstop for herdr's own wait
+/// logic hanging past the deadline it was told to keep.
+const HERDR_PROMPT_TIMEOUT: Duration = Duration::from_secs(130);
+/// Per-call bound inside `poll_worker_session_name`'s loop: short enough
+/// that one hung `herdr agent list` call can't eat the whole
+/// `SESSION_POLL_DEADLINE` by itself, since the loop's own elapsed check
+/// only runs between calls, not during one.
+const HERDR_POLL_CALL_TIMEOUT: Duration = Duration::from_secs(2);
 
 const HELP: &str = r#"What the dispatcher runs for the /implement lane: turn a ticket number into a
 worker running in its own workspace inside herdr, report, and stop. It never
@@ -271,7 +296,9 @@ fn json_str<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
 /// session. "(unavailable)" on a miss — the report stays total, no dispatch
 /// failure over it.
 fn worker_session_name(home: &str, wt: &str, agent: &str) -> String {
-    poll_worker_session_name(home, wt, agent, SESSION_POLL_DEADLINE, SESSION_POLL_INTERVAL, || quiet_stdout("herdr", &["agent", "list"]))
+    poll_worker_session_name(home, wt, agent, SESSION_POLL_DEADLINE, SESSION_POLL_INTERVAL, || {
+        quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_POLL_CALL_TIMEOUT)
+    })
 }
 
 /// Bound on how long `worker_session_name` polls for herdr's and the
@@ -433,7 +460,7 @@ fn run() -> Result<(), ExitCode> {
         return Err(die(format!("controller name cannot hold a double quote or newline: {controller}")));
     }
 
-    let status_out = quiet_stdout("herdr", &["status", "--json"]).unwrap_or_default();
+    let status_out = quiet_stdout_timeout("herdr", &["status", "--json"], HERDR_QUERY_TIMEOUT).unwrap_or_default();
     let running = serde_json::from_str::<Value>(&status_out)
         .ok()
         .and_then(|v| v.get("server").and_then(|s| s.get("running")).and_then(Value::as_bool))
@@ -452,7 +479,7 @@ fn run() -> Result<(), ExitCode> {
         return Err(die(format!("claude onboarding is not complete in {claude_json_path}; a brief would land in its dialog")));
     }
 
-    if quiet_ok("herdr", &["agent", "get", &agent]) {
+    if quiet_ok_timeout("herdr", &["agent", "get", &agent], HERDR_QUERY_TIMEOUT) {
         return Err(die(format!("herdr agent {agent} already exists")));
     }
     if !quiet_ok("git", &["-C", &primary, "fetch", "-q", "origin"]) {
@@ -502,9 +529,10 @@ fn run() -> Result<(), ExitCode> {
 
     // --cwd names the repo: without it herdr resolves the focused workspace's
     // repo and answers worktree_not_found.
-    let open = runner::run(
+    let open = run_timeout(
         "herdr",
         &["worktree", "open", "--cwd", &primary, "--path", wt.to_str().unwrap_or(""), "--label", &branch, "--no-focus", "--trust-repository"],
+        HERDR_MUTATION_TIMEOUT,
     );
     let open_out = claim.step("herdr worktree open", open, None)?;
     let open_json: Option<Value> = serde_json::from_str(&open_out).ok();
@@ -514,7 +542,7 @@ fn run() -> Result<(), ExitCode> {
         if ws.is_empty() {
             return Err(claim.fail("herdr worktree open", &format!("no workspace in its response: {open_out}")));
         }
-        let panes = claim.step("herdr pane list", runner::run("herdr", &["pane", "list", "--workspace", &ws]), None)?;
+        let panes = claim.step("herdr pane list", run_timeout("herdr", &["pane", "list", "--workspace", &ws], HERDR_QUERY_TIMEOUT), None)?;
         let panes_json: Option<Value> = serde_json::from_str(&panes).ok();
         pane = panes_json
             .as_ref()
@@ -530,7 +558,11 @@ fn run() -> Result<(), ExitCode> {
         }
     }
 
-    claim.step("herdr agent start", runner::run("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &model]), None)?;
+    claim.step(
+        "herdr agent start",
+        run_timeout("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &model], HERDR_MUTATION_TIMEOUT),
+        None,
+    )?;
 
     let (brief, described) = match mode {
         Mode::Plain => {
@@ -541,7 +573,7 @@ fn run() -> Result<(), ExitCode> {
     };
     claim.step(
         "herdr agent prompt",
-        runner::run("herdr", &["agent", "prompt", &agent, &brief, "--wait", "--until", "working", "--timeout", "120000"]),
+        run_timeout("herdr", &["agent", "prompt", &agent, &brief, "--wait", "--until", "working", "--timeout", "120000"], HERDR_PROMPT_TIMEOUT),
         None,
     )?;
 
