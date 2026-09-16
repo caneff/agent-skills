@@ -55,8 +55,11 @@ ok() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_
 denied() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"Permission for this action has been denied.","is_error":true}]},"toolUseResult":"Error: Permission for this action has been denied."}\n' "$1"; }
 peer() { printf '{"type":"user","isMeta":true,"origin":{"kind":"peer","name":"skills-b6"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
 notification() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
-# launch <agentId> ; handback <agentId>
+# launch <agentId> ; teammate_launch <agentId> ; handback <agentId>
 launch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-%s","content":"Async agent launched"}]},"toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"%s"}}\n' "$1" "$1"; }
+# The Agent-tool-as-teammate shape (#856): status teammate_spawned, id under
+# agent_id (snake_case), no agentId field at all.
+teammate_launch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-%s","content":"Spawned successfully."}]},"toolUseResult":{"status":"teammate_spawned","agent_id":"%s","name":"%s"}}\n' "$1" "$1" "$1"; }
 handback() { printf '{"type":"user","origin":{"kind":"peer","from":"%s","senderTaskId":"%s","handback":true},"message":{"role":"user","content":"[Subagent hand-back] report"}}\n' "$1" "$1"; }
 
 fails=0
@@ -183,6 +186,18 @@ expect_none "a hand-back that leaves another subagent out does not alert"
 { notification '<task-notification><task-id>a2</task-id><status>failed</status></task-notification>'; assistant_text "all back, stopping"; } >> "$t"
 run "all reviewers back" "$t"
 expect_alert "once every subagent is back, a stop without a report alerts"
+
+# A subagent launched as a teammate (Agent tool, status teammate_spawned,
+# id under agent_id) is still out: a stop while it's out is a wait, not a
+# silent stop (#856 — worker #854 was falsely flagged silent on this shape).
+reset_log
+t="$tmp/teammate-waiting.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; teammate_launch tally-854; assistant_text "reviewer running"; } > "$t"
+run "teammate reviewer out" "$t"
+expect_none "a stop while a teammate-spawned subagent is out does not alert"
+{ handback tally-854; assistant_text "back, stopping"; } >> "$t"
+run "teammate reviewer back" "$t"
+expect_alert "once the teammate-spawned subagent is back, a stop without a report alerts"
 
 reset_log
 t="$tmp/handback-report.jsonl"
