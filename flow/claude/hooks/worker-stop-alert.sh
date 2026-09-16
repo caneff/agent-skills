@@ -70,9 +70,12 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
       | select(.status == "async_launched" or .status == "teammate_spawned")
       | (.agentId // .agent_id)] as $launched
   | [$after[] | select(.type == "user") | (.origin.senderTaskId // empty),
-      (.message.content | strings | scan("<task-id>([^<]+)</task-id>")[0])] as $returned
+      (.message.content | strings | scan("<task-id>([^<]+)</task-id>")[0]),
+      (.message.content | strings | scan("<teammate-message teammate_id=\"([^\"]+)\"")[0])] as $returned
+  | [$launched[] | select(
+      . as $l | ([$l, ($l | sub("@session-[^@]*$"; ""))] - $returned | length) == 2)] as $unresolved
   | (if ($delivered | length) > 0 then "reported"
-     elif ($launched - $returned | length) > 0 then "waiting"
+     elif ($unresolved | length) > 0 then "waiting"
      else "silent" end) as $verdict
   | "\($verdict)\t\(last.uuid // "line \(length)")"')
 [ "${verdict:-}" = "silent" ] || exit 0
