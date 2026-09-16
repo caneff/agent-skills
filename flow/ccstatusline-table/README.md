@@ -42,12 +42,13 @@ in `helpers/` (versioned here):
   its `all` mode once per tick and splits the tab-separated line; the
   single-field modes (`weekly`/`session`/`wreset`/`breset`) still work
   standalone for compatibility.
-- `helpers/codex-usage.py` — Codex's own rate limit, read from the newest
-  `~/.codex/sessions/**/rollout-*.jsonl`, which is where the Codex CLI records
-  what OpenAI last told it. Renders as a labelled `Cdx 12% 6d` cell so the
-  unlabelled percentages beside it stay Claude's. Blank until Codex has run,
-  blank once the window it describes has reset, and marked `12%?` when the
-  snapshot is over a day old — Codex refreshes it only when Codex runs.
+- `helpers/codex-usage.py` — Codex's own rate limit, read from a cache file
+  under `$CODEX_HOME` (default `~/.codex`) that's refreshed inline, with a
+  ~1.5s timeout, whenever it's older than 30 minutes by calling the Codex
+  app-server's `account/rateLimits/read` — no model turn, no rollout tail.
+  Renders as a labelled `Cdx 12% 6d` cell so the unlabelled percentages
+  beside it stay Claude's. Blank when there's no usable reply, or once the
+  window it describes has reset.
 
 Git branch/changes and context tokens are computed in-script.
 
