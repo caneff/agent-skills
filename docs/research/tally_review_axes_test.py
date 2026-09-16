@@ -205,6 +205,121 @@ def test_load_issue_to_pr_override_raises_a_clear_error_on_malformed_json():
             assert "bad.json" in str(e)
 
 
+def test_parses_a_findings_sidecar_filename():
+    assert t.parse_finding_sidecar_filename("findings-standards-855.jsonl") == ("standards", 855)
+    assert t.parse_finding_sidecar_filename("findings-correctness-1.jsonl") == ("correctness", 1)
+    assert t.parse_finding_sidecar_filename("review-standards-855.md") is None
+    assert t.parse_finding_sidecar_filename("dispositions-855.jsonl") is None
+
+
+def test_parses_a_dispositions_sidecar_filename():
+    assert t.parse_disposition_sidecar_filename("dispositions-855.jsonl") == 855
+    assert t.parse_disposition_sidecar_filename("findings-standards-855.jsonl") is None
+
+
+def test_parses_a_valid_finding_line():
+    f = t.parse_finding_line(json.dumps({
+        "id": "S1", "axis": "standards", "severity": "hard",
+        "file": "foo.py", "title": "mysterious name",
+    }))
+    assert f == t.Finding(id="S1", axis="standards", severity="hard", file="foo.py", title="mysterious name")
+
+
+def test_finding_line_rejects_malformed_json_without_raising():
+    # a partial write costs one line, not the file (#855) — the parser
+    # must return None, never raise, on a truncated or malformed line.
+    assert t.parse_finding_line("{not valid json") is None
+
+
+def test_finding_line_rejects_an_invalid_severity():
+    bad = json.dumps({"id": "S1", "axis": "standards", "severity": "critical",
+                       "file": "foo.py", "title": "x"})
+    assert t.parse_finding_line(bad) is None
+
+
+def test_finding_line_rejects_a_missing_field():
+    bad = json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "foo.py"})
+    assert t.parse_finding_line(bad) is None
+
+
+def test_parses_a_valid_fixed_disposition_line():
+    d = t.parse_disposition_line(json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc123"}))
+    assert d == t.Disposition(id="S1", outcome="fixed", detail="abc123")
+
+
+def test_parses_a_valid_disputed_disposition_line():
+    d = t.parse_disposition_line(json.dumps({"id": "S2", "outcome": "disputed", "reason": "not a real issue"}))
+    assert d == t.Disposition(id="S2", outcome="disputed", detail="not a real issue")
+
+
+def test_parses_a_valid_filed_disposition_line():
+    d = t.parse_disposition_line(json.dumps({"id": "S3", "outcome": "filed", "ticket": 900}))
+    assert d == t.Disposition(id="S3", outcome="filed", detail="900")
+
+
+def test_disposition_line_rejects_missing_detail_field():
+    # outcome says "fixed" but the sha the outcome requires is absent
+    bad = json.dumps({"id": "S1", "outcome": "fixed"})
+    assert t.parse_disposition_line(bad) is None
+
+
+def test_disposition_line_rejects_malformed_json_without_raising():
+    assert t.parse_disposition_line("{not valid json") is None
+
+
+def test_find_sidecar_files_finds_both_kinds_and_skips_scratch():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-1.jsonl").write_text("")
+        (root / "skills" / "dispositions-1.jsonl").write_text("")
+        (root / "skills" / "review-standards-1.md").write_text("x")
+        (root / "scratch-1").mkdir()
+        (root / "scratch-1" / "findings-standards-2.jsonl").write_text("")
+        found = t.find_sidecar_files(root)
+        assert set(found) == {
+            ("skills", "findings-standards-1.jsonl"),
+            ("skills", "dispositions-1.jsonl"),
+        }
+
+
+def test_tally_sidecars_rolls_findings_and_dispositions_into_a_table():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-855.jsonl").write_text("\n".join([
+            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"}),
+            json.dumps({"id": "S2", "axis": "standards", "severity": "judgement", "file": "b.py", "title": "y"}),
+            json.dumps({"id": "S3", "axis": "standards", "severity": "judgement", "file": "c.py", "title": "z"}),
+        ]))
+        (root / "skills" / "dispositions-855.jsonl").write_text("\n".join([
+            json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc123"}),
+            json.dumps({"id": "S2", "outcome": "disputed", "reason": "no"}),
+        ]))
+        table = t.tally_sidecars(root)
+        assert table["skills/standards"] == {
+            "raised": 3, "fixed": 1, "disputed": 1, "filed": 0, "undisposed": 1,
+        }
+
+
+def test_tally_sidecars_keys_a_disposition_to_its_own_repo_and_issue():
+    # a disposition in one repo/issue must never resolve a same-id finding
+    # filed under a different repo or issue (#855).
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "other").mkdir()
+        (root / "skills" / "findings-standards-1.jsonl").write_text(
+            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+        )
+        (root / "other" / "dispositions-1.jsonl").write_text(
+            json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc"})
+        )
+        table = t.tally_sidecars(root)
+        assert table["skills/standards"]["undisposed"] == 1
+        assert table["skills/standards"]["fixed"] == 0
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
