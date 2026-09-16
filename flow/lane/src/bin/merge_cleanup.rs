@@ -866,34 +866,17 @@ impl Cleanup {
             skip(&what, "no origin remote");
             return true;
         };
-        let Some(issue) = quiet_stdout(
-            "gh",
-            &[
-                "issue",
-                "view",
-                n,
-                "--repo",
-                &slug,
-                "--json",
-                "state,labels,assignees",
-                "-q",
-                ".state + \" \" + ([.labels[].name] | join(\",\")) + \" \" + ([.assignees[].login] | join(\",\"))",
-            ],
-        ) else {
+        let Some(issue) = lane::issue_state::read(&slug, n) else {
             skip(&what, "gh issue view failed");
             return true;
         };
-        let mut fields = issue.splitn(3, ' ');
-        let state = fields.next().unwrap_or("");
-        let labels_csv = fields.next().unwrap_or("");
-        let assignees_csv = fields.next().unwrap_or("");
-        if state != "CLOSED" || !format!(",{labels_csv},").contains(",in-progress,") {
+        if issue.state != "CLOSED" || !issue.has_label("in-progress") {
             return true;
         }
         let mut edit = vec!["issue", "edit", n, "--repo", &slug, "--remove-label", "in-progress"];
-        if !assignees_csv.is_empty() {
+        if !issue.assignees_csv.is_empty() {
             edit.push("--remove-assignee");
-            edit.push(assignees_csv);
+            edit.push(&issue.assignees_csv);
         }
         if !self.step(&what, "gh", &edit) {
             // #842 Codex pass: "git cleanup completed" is only true when

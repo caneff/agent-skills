@@ -39,7 +39,7 @@ fn gh_issue_view_is_accepted_and_reports_the_scenario() {
         .output()
         .unwrap();
     assert!(out.status.success());
-    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "OPEN ready-for-agent");
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end_matches('\n'), "OPEN\tready-for-agent\t");
 }
 
 #[test]
