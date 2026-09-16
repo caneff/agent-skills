@@ -97,7 +97,28 @@ Every prompt carries only the **diff, the commit list, the spec/standards source
 
 Belt and braces: append to **every** prompt — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). `/tmp` is wiped at every boot here and herdr workers never set `$CLAUDE_JOB_DIR`, so these reports — the only record of what each reviewer said — need a home that survives: `~/.cache/agent-reviews/<repo>/`. Never point the report at `./.scratch/` or anywhere under the repo — an untracked file there blocks `git worktree remove` (and so `ship`).
 
-**Expand `<dir>` yourself before writing the prompt**, and prune anything untouched for 14 days, the same folder style and retention `job-run` gives `~/.cache/agent-jobs`. `<repo>` must be the repo's own name, not the worktree's — reviews always run from a task worktree, and `git rev-parse --show-toplevel` there returns the worktree path, so key on the common `.git` instead:
+**Alongside the prose, each reviewer also writes a sidecar** so counting a
+finding stops needing an LLM pass over prose (#855, #854): "Also write
+`<dir>/findings-<axis>-<n>.jsonl`, one JSON object per line, one line per
+finding: `{"id": "<letter+ordinal>", "axis": "<axis>", "severity": "hard"
+or "judgement", "file": "<path>", "title": "<short title>"}`. Assign each
+finding a stable id — the axis's first letter (`S` standards, `P` spec, `C`
+correctness) plus a per-report ordinal, e.g. `S1`, `P2`, `C3` — the
+convention `~/.cache/agent-reviews/skills/verify-790-dispositions.md`
+already reaches for by hand; formalize it, don't invent a new one. Cite the
+same id in the prose report next to each finding, so a reader can join the
+two. A partial write costs one line, not the file — readers of this
+sidecar must tolerate and skip a malformed line rather than fail the whole
+file on it. No cost tracking: never add tokens or wall-clock to this line,
+in the sidecar or the prose."
+
+**Expand `<dir>` yourself before writing the prompt**, and prune anything
+untouched for 14 days, the same folder style and retention `job-run` gives
+`~/.cache/agent-jobs` — this sidecar lives in the same directory as the
+prose report, so the same expansion and pruning cover it with no extra
+step. `<repo>` must be the repo's own name, not the worktree's — reviews
+always run from a task worktree, and `git rev-parse --show-toplevel` there
+returns the worktree path, so key on the common `.git` instead:
 
 ```
 top=$(git rev-parse --path-format=absolute --git-common-dir) || exit 1
@@ -133,6 +154,12 @@ If the spec is missing, skip the Spec sub-agent and note this in the final repor
 ### 5. Aggregate
 
 Present the reports under `## Standards`, `## Spec` and `## Correctness` headings, verbatim or lightly cleaned. Every finding every axis returned is in the aggregate — none is dropped as minor, duplicate, or already known; the caller disposes of findings, this skill only collects them. Do **not** merge or rerank findings — the axes are deliberately separate (see _Why separate axes_).
+
+Each finding carries the stable id its sidecar gave it (`S1`, `P2`, `C3`).
+A downstream pass — the verification pass's disposition, the PR body's
+Decisions made section — cites that id rather than restating the finding
+in its own prose; that's what makes the disposition sidecar joinable
+without a reading pass (#855).
 
 End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
 

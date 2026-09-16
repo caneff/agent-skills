@@ -134,6 +134,19 @@ No PR and no reviewer; Chris reads the log after.
    A round-1 finding with no disposition is the one thing this pass fails
    on.
 
+   This pass is also where the disposition gets recorded mechanically
+   (#855): the verification pass, not the worker, writes
+   `<dir>/dispositions-<n>.jsonl` in the same `~/.cache/agent-reviews/<repo>/`
+   directory as the round-1 findings sidecars — one JSON object per line,
+   joined to a round-1 finding by its `id` (`S1`/`P2`/`C3`). Each line is
+   `{"id": "<id>", "outcome": "fixed", "sha": "<sha>"}`,
+   `{"id": "<id>", "outcome": "disputed", "reason": "<why>"}`, or
+   `{"id": "<id>", "outcome": "filed", "ticket": <n>}` — the same three
+   dispositions this pass already records in prose, nothing new invented.
+   The worker never writes this file: it is the adversarial read, and the
+   worker grading its own homework is not the honest source for it. No
+   cost tracking here either.
+
 No third pass. Commits after the verification pass are unreviewed; the PR
 body's last reviewed sha says where review stopped.
 
@@ -207,7 +220,10 @@ The body has these sections and nothing else:
 - **Decisions made** — each with its reason. On a heavy Claude-lane build,
   every round-1 finding, each with its disposition (fixed, with the sha;
   disputed, with the why; or filed, with its ticket number) — § The merge
-  step 3's Codex classification reads this list. On any other build, every
+  step 3's Codex classification reads this list. Cite each finding by the
+  id its sidecar gave it (`S1`/`P2`/`C3`) rather than restating it in
+  prose (#855) — that's what makes this list joinable against
+  `dispositions-<n>.jsonl` without a reading pass. On any other build, every
   round-1 finding that was disputed (with the why) or filed (with its
   ticket number).
 - **Last reviewed sha** — and that commits after it were not re-reviewed.

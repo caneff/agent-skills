@@ -6,6 +6,8 @@ and the mechanical guards (missing cache dir, malformed override file,
 round-1 axis conflicts) — the scaffolding around the LLM classification
 pass, same convention as burndown/phases_test.py (plain test_* functions,
 no pytest)."""
+import contextlib
+import io
 import json
 import os
 import sys
@@ -203,6 +205,236 @@ def test_load_issue_to_pr_override_raises_a_clear_error_on_malformed_json():
             assert False, "expected a ValueError with a clear message"
         except ValueError as e:
             assert "bad.json" in str(e)
+
+
+def test_parses_a_findings_sidecar_filename():
+    assert t.parse_finding_sidecar_filename("findings-standards-855.jsonl") == ("standards", 855)
+    assert t.parse_finding_sidecar_filename("findings-correctness-1.jsonl") == ("correctness", 1)
+    assert t.parse_finding_sidecar_filename("review-standards-855.md") is None
+    assert t.parse_finding_sidecar_filename("dispositions-855.jsonl") is None
+
+
+def test_parses_a_dispositions_sidecar_filename():
+    assert t.parse_disposition_sidecar_filename("dispositions-855.jsonl") == 855
+    assert t.parse_disposition_sidecar_filename("findings-standards-855.jsonl") is None
+
+
+def test_parses_a_valid_finding_line():
+    f = t.parse_finding_line(json.dumps({
+        "id": "S1", "axis": "standards", "severity": "hard",
+        "file": "foo.py", "title": "mysterious name",
+    }))
+    assert f == t.Finding(id="S1", axis="standards", severity="hard", file="foo.py", title="mysterious name")
+
+
+def test_finding_line_rejects_malformed_json_without_raising():
+    # a partial write costs one line, not the file (#855) — the parser
+    # must return None, never raise, on a truncated or malformed line.
+    assert t.parse_finding_line("{not valid json") is None
+
+
+def test_finding_line_rejects_an_invalid_severity():
+    bad = json.dumps({"id": "S1", "axis": "standards", "severity": "critical",
+                       "file": "foo.py", "title": "x"})
+    assert t.parse_finding_line(bad) is None
+
+
+def test_finding_line_rejects_a_missing_field():
+    bad = json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "foo.py"})
+    assert t.parse_finding_line(bad) is None
+
+
+def test_parses_a_valid_fixed_disposition_line():
+    d = t.parse_disposition_line(json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc123"}))
+    assert d == t.Disposition(id="S1", outcome="fixed", detail="abc123")
+
+
+def test_parses_a_valid_disputed_disposition_line():
+    d = t.parse_disposition_line(json.dumps({"id": "S2", "outcome": "disputed", "reason": "not a real issue"}))
+    assert d == t.Disposition(id="S2", outcome="disputed", detail="not a real issue")
+
+
+def test_parses_a_valid_filed_disposition_line():
+    d = t.parse_disposition_line(json.dumps({"id": "S3", "outcome": "filed", "ticket": 900}))
+    assert d == t.Disposition(id="S3", outcome="filed", detail="900")
+
+
+def test_disposition_line_rejects_missing_detail_field():
+    # outcome says "fixed" but the sha the outcome requires is absent
+    bad = json.dumps({"id": "S1", "outcome": "fixed"})
+    assert t.parse_disposition_line(bad) is None
+
+
+def test_disposition_line_rejects_malformed_json_without_raising():
+    assert t.parse_disposition_line("{not valid json") is None
+
+
+def test_find_sidecar_files_finds_both_kinds_and_skips_scratch():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-1.jsonl").write_text("")
+        (root / "skills" / "dispositions-1.jsonl").write_text("")
+        (root / "skills" / "review-standards-1.md").write_text("x")
+        (root / "scratch-1").mkdir()
+        (root / "scratch-1" / "findings-standards-2.jsonl").write_text("")
+        found = t.find_sidecar_files(root)
+        assert set(found) == {
+            ("skills", "findings-standards-1.jsonl"),
+            ("skills", "dispositions-1.jsonl"),
+        }
+
+
+def test_tally_sidecars_rolls_findings_and_dispositions_into_a_table():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-855.jsonl").write_text("\n".join([
+            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"}),
+            json.dumps({"id": "S2", "axis": "standards", "severity": "judgement", "file": "b.py", "title": "y"}),
+            json.dumps({"id": "S3", "axis": "standards", "severity": "judgement", "file": "c.py", "title": "z"}),
+        ]))
+        (root / "skills" / "dispositions-855.jsonl").write_text("\n".join([
+            json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc123"}),
+            json.dumps({"id": "S2", "outcome": "disputed", "reason": "no"}),
+        ]))
+        table = t.tally_sidecars(root)
+        assert table["skills/standards"] == {
+            "raised": 3, "fixed": 1, "disputed": 1, "filed": 0, "undisposed": 1,
+        }
+
+
+def test_tally_sidecars_keys_a_disposition_to_its_own_repo_and_issue():
+    # a disposition in one repo/issue must never resolve a same-id finding
+    # filed under a different repo or issue (#855, round-1 correctness C4:
+    # the old fixture only varied repo, leaving the issue half of the key
+    # unwitnessed — this now checks both independently).
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "other").mkdir()
+        (root / "skills" / "findings-standards-1.jsonl").write_text(
+            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+        )
+        (root / "other" / "dispositions-1.jsonl").write_text(
+            json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc"})
+        )
+        # same repo as the finding, but a different issue: must not resolve either.
+        (root / "skills" / "dispositions-2.jsonl").write_text(
+            json.dumps({"id": "S1", "outcome": "fixed", "sha": "abc"})
+        )
+        table = t.tally_sidecars(root)
+        assert table["skills/standards"]["undisposed"] == 1
+        assert table["skills/standards"]["fixed"] == 0
+
+
+def test_tally_sidecars_survives_one_malformed_line_in_a_real_file():
+    # round-1 standards S4: the file-level guarantee ("a partial write
+    # costs one line, not the file") had no witness through tally_sidecars
+    # itself — only through the line-parser functions directly.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-1.jsonl").write_text("\n".join([
+            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"}),
+            "{not valid json, a truncated write",
+            json.dumps({"id": "S2", "axis": "standards", "severity": "judgement", "file": "b.py", "title": "y"}),
+        ]))
+        table = t.tally_sidecars(root)
+        assert table["skills/standards"]["raised"] == 2
+
+
+def test_tally_sidecars_skips_one_undecodable_file_without_losing_the_rest():
+    # round-1 correctness C1: a sidecar truncated mid multibyte character
+    # used to raise UnicodeDecodeError out of read_text() and kill the
+    # entire tally, losing every other repo/axis's numbers too.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-1.jsonl").write_bytes(b"\xff\xfe" + b"garbage")
+        (root / "skills" / "findings-correctness-2.jsonl").write_text(
+            json.dumps({"id": "C1", "axis": "correctness", "severity": "hard", "file": "a.py", "title": "x"})
+        )
+        table = t.tally_sidecars(root)
+        assert table["skills/correctness"]["raised"] == 1
+        assert "skills/standards" not in table
+
+
+def test_tally_sidecars_raises_on_a_duplicate_finding_id_in_one_file():
+    # round-1 correctness C2: two lines sharing an id in the same
+    # findings-*.jsonl file used to silently collapse to one, undercounting
+    # `raised` with no signal that anything was lost.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-1.jsonl").write_text("\n".join([
+            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"}),
+            json.dumps({"id": "S1", "axis": "standards", "severity": "judgement", "file": "b.py", "title": "y"}),
+        ]))
+        try:
+            t.tally_sidecars(root)
+            assert False, "expected a ValueError on the duplicate finding id"
+        except ValueError as e:
+            assert "S1" in str(e)
+
+
+def test_tally_sidecars_raises_on_a_duplicate_id_across_the_repo_alias_fold():
+    # round-1 correctness C3: the same collision, reached via fold_repo —
+    # `agent-skills` and `skills` fold to one repo name, so a same-id
+    # finding for the same issue under both directory names must not
+    # silently erase one.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "agent-skills").mkdir()
+        (root / "skills" / "findings-standards-1.jsonl").write_text(
+            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+        )
+        (root / "agent-skills" / "findings-standards-1.jsonl").write_text(
+            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+        )
+        try:
+            t.tally_sidecars(root)
+            assert False, "expected a ValueError on the cross-alias duplicate id"
+        except ValueError as e:
+            assert "S1" in str(e)
+
+
+def test_tally_sidecars_uses_the_filename_axis_over_a_mismatched_line_axis():
+    # round-1 standards S2 / spec axis: parse_finding_sidecar_filename's
+    # axis was discarded in favor of each line's own `axis` field, so a
+    # line with a wrong `axis` value silently tallied under the wrong
+    # axis. The filename — which axis wrote this file — is authoritative.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-1.jsonl").write_text(
+            json.dumps({"id": "S1", "axis": "spec", "severity": "hard", "file": "a.py", "title": "x"})
+        )
+        table = t.tally_sidecars(root)
+        assert table["skills/standards"]["raised"] == 1
+        assert "skills/spec" not in table
+
+
+def test_tally_sidecars_warns_on_an_orphan_disposition():
+    # round-1 correctness C4: a disposition whose id matches no finding
+    # used to vanish with no signal — the table just shows undisposed
+    # counts that don't add up to what the prose says was dispositioned.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-1.jsonl").write_text(
+            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+        )
+        (root / "skills" / "dispositions-1.jsonl").write_text(
+            json.dumps({"id": "S9", "outcome": "fixed", "sha": "abc"})
+        )
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            t.tally_sidecars(root)
+        err = stderr.getvalue()
+        assert "S9" in err
+        assert "orphan" in err
 
 
 def main():
