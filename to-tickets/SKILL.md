@@ -15,7 +15,7 @@ The issue tracker and triage label vocabulary should have been provided to you �
 
 Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments.
 
-If the source issue carries the `spec` label or already has sub-issues, it is already sliced — stop and list its children instead of slicing again.
+If the source issue already has sub-issues, it is already sliced — stop and list its children instead of slicing again.
 
 ### 2. Explore the codebase (optional)
 
