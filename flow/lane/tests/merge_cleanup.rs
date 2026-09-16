@@ -723,6 +723,19 @@ fn a_live_registry_pid_with_no_herdr_agent_still_refuses() {
     assert!(!run.ok && run.has(&format!("pid {}", me())) && wt.is_dir(), "{}", run.text());
 }
 
+/// #851: a registry record whose pid is alive but whose `procStart` doesn't
+/// match that pid's own `/proc/<pid>/stat` starttime is a stale record from
+/// a dead session whose pid has since been reused, not a live one — the
+/// live-session guard must not refuse the removal over it.
+#[test]
+fn a_registry_pid_alive_but_reused_does_not_block_removal() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r17", "implement-851");
+    c.session("r17", &format!(r#"{{"pid":{},"cwd":"{}","procStart":"not-the-real-start"}}"#, me(), wt.display()));
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+}
+
 #[test]
 fn a_herdr_agent_with_no_name_refuses_whatever_its_status() {
     // An agent herdr cannot name cannot be classified, so it blocks — alone

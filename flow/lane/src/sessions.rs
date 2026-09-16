@@ -20,6 +20,14 @@ pub fn in_tree(path: &str, root: &str) -> bool {
     format!("{path}/").starts_with(&format!("{root}/"))
 }
 
+/// Whether a registry record's `procStart` field matches `stat`, the pid's
+/// own `/proc/<pid>/stat` — a record with no `procStart`, or one whose
+/// starttime doesn't match, is stale: left by a dead session whose pid has
+/// since been reused by an unrelated process.
+fn proc_start_matches(record: &serde_json::Value, stat: &crate::proc_info::ProcStat) -> bool {
+    record.get("procStart").and_then(|p| p.as_str()) == Some(stat.start.as_str())
+}
+
 /// Every registry file under `<home>/.claude/sessions` whose `cwd` is in
 /// `worktree` and whose pid is alive with a `procStart` matching that pid's
 /// own `/proc/<pid>/stat` starttime — a dead pid is a crashed session, and a
@@ -45,10 +53,7 @@ pub fn live_in(home: &Path, worktree: &str) -> Vec<LiveSession> {
             _ => continue,
         };
         let cwd = v.get("cwd").and_then(|c| c.as_str()).unwrap_or("");
-        let recorded_start = v.get("procStart").and_then(|p| p.as_str());
-        let alive = pid.parse::<i32>().is_ok_and(|p| {
-            p > 0 && read_stat(p).is_some_and(|stat| recorded_start == Some(stat.start.as_str()))
-        });
+        let alive = pid.parse::<i32>().is_ok_and(|p| p > 0 && read_stat(p).is_some_and(|stat| proc_start_matches(&v, &stat)));
         if !pid.is_empty() && in_tree(cwd, worktree) && alive {
             let session_id = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
             let name = v.get("name").and_then(|s| s.as_str()).unwrap_or("").to_string();
@@ -70,8 +75,7 @@ pub fn find_controller(home: &Path, start_ancestor: i32) -> Option<String> {
         let session_file = home.join(".claude/sessions").join(format!("{ancestor}.json"));
         if let Ok(raw) = std::fs::read_to_string(&session_file) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
-                let proc_start_matches = v.get("procStart").and_then(|p| p.as_str()) == Some(stat.start.as_str());
-                if proc_start_matches {
+                if proc_start_matches(&v, &stat) {
                     if let Some(name) = v.get("name").and_then(|n| n.as_str()) {
                         if !name.is_empty() {
                             return Some(name.to_string());
@@ -110,7 +114,7 @@ mod tests {
     }
 
     #[test]
-    fn live_in_counts_a_record_whose_procstart_matches(){
+    fn live_in_counts_a_record_whose_procstart_matches() {
         let tmp = TempDir::new().unwrap();
         let home = tmp.path();
         let pid = std::process::id() as i32;
