@@ -66,7 +66,9 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
       | .id] as $sends
   | [$after[] | select(.type == "user" and (.toolUseResult | type) == "object" and .toolUseResult.success == true)
       | .message.content[]? | select(.type == "tool_result") | .tool_use_id | select(IN($sends[]))] as $delivered
-  | [$after[] | .toolUseResult? | objects | select(.status == "async_launched") | .agentId] as $launched
+  | [$after[] | .toolUseResult? | objects
+      | select(.status == "async_launched" or .status == "teammate_spawned")
+      | (.agentId // .agent_id)] as $launched
   | [$after[] | select(.type == "user") | (.origin.senderTaskId // empty),
       (.message.content | strings | scan("<task-id>([^<]+)</task-id>")[0])] as $returned
   | (if ($delivered | length) > 0 then "reported"
