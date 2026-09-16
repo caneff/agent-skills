@@ -307,7 +307,12 @@ mod tests {
         use std::time::{Duration, Instant};
         let start = Instant::now();
         let out = run_timeout("sh", &["-c", "sleep 5 & wait"], Duration::from_millis(200)).unwrap();
-        assert!(start.elapsed() < Duration::from_secs(3), "waited {:?} past a 200ms timeout", start.elapsed());
+        // Under 1s, not the READ_GRACE-sized 3s: a group kill that actually
+        // reaches the grandchild closes the pipe almost immediately, so this
+        // bound only passes when the process-group kill itself works —
+        // loosening it to fit under READ_GRACE alone would let this test
+        // keep passing with the group kill silently regressed to a no-op.
+        assert!(start.elapsed() < Duration::from_secs(1), "waited {:?} past a 200ms timeout", start.elapsed());
         assert!(!out.success);
     }
 
