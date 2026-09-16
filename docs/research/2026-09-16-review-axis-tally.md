@@ -88,7 +88,7 @@ was open with no PR when I first classified it (10 findings, all
 round-1 review came back on this note, #274 had a verification pass and a
 merged PR (#294) in the live cache. I re-read the verify pass and PR body
 and reclassified all 10 of its findings against their real dispositions
-(6 confirmed/fixed, 4 disputed) rather than leave a now-false "still open"
+(8 confirmed/fixed, 2 disputed) rather than leave a now-false "still open"
 claim in a finished note. Everything else in the tally is frozen at the
 classification pass's original snapshot; only #274 was updated, because it
 was the one place where "unclear" had gone from *no disposition exists

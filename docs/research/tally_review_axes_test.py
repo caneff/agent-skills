@@ -39,11 +39,11 @@ def test_verification_is_the_same_kind_as_verify():
 
 def test_parses_axis_specific_verify_report():
     # There is exactly one regex path for a `-verify.md` filename
-    # (_MULTI_AXIS_VERIFY_RE); a single axis is just the n=1 case of its
+    # (_AXIS_VERIFY_RE); a single axis is just the n=1 case of its
     # `axis(-axis)*` group. Round-1 review S1/S2: a second, unreachable
-    # regex (_AXIS_VERIFY_RE) used to sit ahead of this in the source with
-    # a test that stayed green even if that branch were deleted. Now there
-    # is only one implementation, so this test is a real witness of it.
+    # regex used to sit ahead of this in the source with a test that
+    # stayed green even if that branch were deleted. Now there is only
+    # one implementation, so this test is a real witness of it.
     r = t.parse_report_filename("review-correctness-368-verify.md")
     assert r.kind == "verify"
     assert r.axes == ("correctness",)
