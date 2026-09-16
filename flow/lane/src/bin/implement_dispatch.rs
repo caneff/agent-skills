@@ -381,40 +381,28 @@ fn run() -> Result<(), ExitCode> {
     let agent = format!("{repo_part}{suffix}");
 
     // Refusals first, so a refused run leaves nothing claimed or created.
-    let issue = quiet_stdout(
-        "gh",
-        &[
-            "issue",
-            "view",
-            &n,
-            "--repo",
-            &slug,
-            "--json",
-            "state,labels",
-            "-q",
-            ".state + \" \" + ([.labels[].name] | join(\",\"))",
-        ],
-    )
-    .unwrap_or_default();
-    let (state, labels_csv) = issue.split_once(' ').unwrap_or((issue.as_str(), ""));
-    if state != "OPEN" {
+    let issue = lane::issue_state::read(&slug, &n).unwrap_or(lane::issue_state::IssueState {
+        state: String::new(),
+        labels_csv: String::new(),
+        assignees_csv: String::new(),
+    });
+    if issue.state != "OPEN" {
         return Err(die(format!("#{n} is not an open issue")));
     }
-    let labels = format!(",{labels_csv},");
     // The ready label the claim swaps for in-progress. A ready-for-human
     // ticket is built the same way, but its brief says Chris merges it.
-    let (ready, chris_merges) = match (labels.contains(",ready-for-agent,"), labels.contains(",ready-for-human,")) {
+    let (ready, chris_merges) = match (issue.has_label("ready-for-agent"), issue.has_label("ready-for-human")) {
         (true, false) => ("ready-for-agent", false),
         (false, true) => ("ready-for-human", true),
         (true, true) => return Err(die(format!("#{n} is labelled both ready-for-agent and ready-for-human"))),
         (false, false) => return Err(die(format!("#{n} is not labelled ready-for-agent or ready-for-human"))),
     };
     for held in ["in-progress", "needs-info"] {
-        if labels.contains(&format!(",{held},")) {
+        if issue.has_label(held) {
             return Err(die(format!("#{n} is labelled {held}")));
         }
     }
-    match (mode, labels.contains(",spec,")) {
+    match (mode, issue.has_label("spec")) {
         (Mode::Spec { .. }, false) => return Err(die(format!("#{n} is not labelled spec"))),
         (Mode::Plain, true) => return Err(die(format!("#{n} is labelled spec; dispatch it with --spec {n} --slots <k>"))),
         (Mode::Spec { .. }, true) if chris_merges => {
@@ -422,7 +410,7 @@ fn run() -> Result<(), ExitCode> {
         }
         _ => {}
     }
-    let tier = if labels.contains(",documentation,") { "light" } else { "heavy" };
+    let tier = if issue.has_label("documentation") { "light" } else { "heavy" };
 
     let home = env::var("HOME").unwrap_or_default();
     // An empty --controller is bash's `[ -z "$controller" ]`: absent, not a

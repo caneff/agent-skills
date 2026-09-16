@@ -6,6 +6,7 @@
 pub mod git_origin;
 pub mod herdr;
 pub mod io_safe;
+pub mod issue_state;
 pub mod proc_info;
 pub mod runner;
 pub mod sessions;
