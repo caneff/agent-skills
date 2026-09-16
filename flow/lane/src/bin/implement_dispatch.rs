@@ -602,9 +602,13 @@ mod tests {
         std::fs::create_dir_all(&wt).unwrap();
         std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
         let pid = std::process::id();
+        let proc_start = lane::proc_info::read_stat(pid as i32).unwrap().start;
         std::fs::write(
             home.join(".claude/sessions").join(format!("{pid}.json")),
-            format!(r#"{{"pid":{pid},"cwd":"{}","sessionId":"sess-1","name":"skills-worker"}}"#, wt.display()),
+            format!(
+                r#"{{"pid":{pid},"cwd":"{}","sessionId":"sess-1","name":"skills-worker","procStart":"{proc_start}"}}"#,
+                wt.display()
+            ),
         )
         .unwrap();
 
@@ -637,6 +641,7 @@ mod tests {
         std::fs::create_dir_all(&wt).unwrap();
         std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
         let pid = std::process::id();
+        let proc_start = lane::proc_info::read_stat(pid as i32).unwrap().start;
         // herdr answers immediately with the agent's sessionId; the
         // SessionStart hook that writes the registry file is the one that's
         // late here, not herdr.
@@ -650,7 +655,11 @@ mod tests {
             while start.elapsed() < Duration::from_millis(120) {
                 std::thread::sleep(Duration::from_millis(5));
             }
-            std::fs::write(&session_file, format!(r#"{{"pid":{pid},"cwd":"{cwd}","sessionId":"sess-1","name":"skills-worker"}}"#)).unwrap();
+            std::fs::write(
+                &session_file,
+                format!(r#"{{"pid":{pid},"cwd":"{cwd}","sessionId":"sess-1","name":"skills-worker","procStart":"{proc_start}"}}"#),
+            )
+            .unwrap();
         });
 
         let name = poll_worker_session_name(

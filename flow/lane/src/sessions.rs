@@ -21,8 +21,11 @@ pub fn in_tree(path: &str, root: &str) -> bool {
 }
 
 /// Every registry file under `<home>/.claude/sessions` whose `cwd` is in
-/// `worktree` and whose pid is alive — a dead pid is a crashed session and
-/// is ignored. Files in name order; unreadable files are skipped.
+/// `worktree` and whose pid is alive with a `procStart` matching that pid's
+/// own `/proc/<pid>/stat` starttime — a dead pid is a crashed session, and a
+/// pid whose starttime doesn't match is a stale record whose pid has since
+/// been reused by an unrelated process; both are ignored. Files in name
+/// order; unreadable files are skipped.
 pub fn live_in(home: &Path, worktree: &str) -> Vec<LiveSession> {
     let Ok(dir) = std::fs::read_dir(home.join(".claude/sessions")) else { return Vec::new() };
     let mut files: Vec<_> = dir
@@ -42,7 +45,10 @@ pub fn live_in(home: &Path, worktree: &str) -> Vec<LiveSession> {
             _ => continue,
         };
         let cwd = v.get("cwd").and_then(|c| c.as_str()).unwrap_or("");
-        let alive = pid.parse::<i32>().is_ok_and(|p| p > 0 && read_stat(p).is_some());
+        let recorded_start = v.get("procStart").and_then(|p| p.as_str());
+        let alive = pid.parse::<i32>().is_ok_and(|p| {
+            p > 0 && read_stat(p).is_some_and(|stat| recorded_start == Some(stat.start.as_str()))
+        });
         if !pid.is_empty() && in_tree(cwd, worktree) && alive {
             let session_id = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
             let name = v.get("name").and_then(|s| s.as_str()).unwrap_or("").to_string();
@@ -84,6 +90,41 @@ mod tests {
     use super::*;
     use crate::proc_info::read_stat;
     use tempfile::TempDir;
+
+    #[test]
+    fn live_in_ignores_a_record_whose_pid_was_reused() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let pid = std::process::id() as i32;
+        std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
+        // pid is alive (it's this test process), but the recorded procStart
+        // doesn't match this pid's actual starttime — the record is stale,
+        // left by a dead session whose pid has since been reused.
+        std::fs::write(
+            home.join(".claude/sessions").join(format!("{pid}.json")),
+            format!(r#"{{"pid":{pid},"procStart":"not-the-real-start","cwd":"/work/tree","name":"stale"}}"#),
+        )
+        .unwrap();
+        let live = live_in(home, "/work/tree");
+        assert!(live.is_empty(), "stale record with mismatched procStart must not count as live");
+    }
+
+    #[test]
+    fn live_in_counts_a_record_whose_procstart_matches(){
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let pid = std::process::id() as i32;
+        let stat = read_stat(pid).unwrap();
+        std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
+        std::fs::write(
+            home.join(".claude/sessions").join(format!("{pid}.json")),
+            format!(r#"{{"pid":{pid},"procStart":"{}","cwd":"/work/tree","name":"live"}}"#, stat.start),
+        )
+        .unwrap();
+        let live = live_in(home, "/work/tree");
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].name, "live");
+    }
 
     #[test]
     fn finds_the_controller_named_by_its_own_procstart() {
