@@ -1,17 +1,25 @@
 # Review-axis tally: what standards, spec, and correctness actually earn (#854)
 
-Summary: correctness earns its tokens clearest — it raises the fewest but
-densest-hard findings (87 hard out of 188, a 46% hard-rate) and the highest
-hard-finding confirm rate (84%). Standards raises by far the most volume
-(270 of 592 findings, 46% of everything raised) but 92% of that volume is
-judgement calls, a quarter of which get disputed away — it's not earning
-nothing, but it's the axis to trim first if token budget gets tight. Spec
-sits in between: lower volume than standards, a 64% overall confirm rate,
-and a 94% confirm rate on its (few) hard findings. The Codex adversarial
-pass, run separately from these three axes at merge time, is the clearest
-keep: across its 5-ticket trial it raised 10 codex-only confirmed findings
-against only 3 that overlapped a Claude axis — it is finding a different
-class of bug, not re-covering the same ground.
+Summary: all three axes earn real confirmed findings — correctness at 69%,
+spec at 65%, standards at 62% — and all three raise hard findings at a
+90%+ confirm rate on the hard subset (spec 94%, standards 91%, correctness
+85%). Correctness stands out on **hard-finding density**: 87 of its 184
+findings (47%) are hard violations, vs. 22/270 (8%) for standards and
+18/133 (14%) for spec. Standards is the volume axis — 270 of 587 findings
+(46% of everything raised), 92% of it judgement calls, more than a quarter
+of which get disputed. The Codex adversarial pass, run separately from
+these three at merge time, is the clearest keep: across its 5-ticket trial
+it raised 10 codex-only confirmed findings against only 3 that overlapped a
+Claude axis.
+
+*Revision note: this note went through one round of multi-axis review
+(round 1) which found real arithmetic errors (mismatched totals, a
+backwards hard-confirm-rate claim) and real script bugs (dead/unreachable
+regex branch, an untested fallback path, a scratch-dir filter that
+wouldn't actually catch `scratch-421`, a missing `gh` call the ticket asked
+for). All of it is fixed below; every number in this revision was
+recomputed from the underlying classification data after the fixes, not
+hand-patched to look consistent. The disposition list is in the PR body.*
 
 ## Method
 
@@ -19,32 +27,40 @@ Two passes, kept separate because free prose can't be tallied by regex
 alone:
 
 1. **Mechanical** (`tally_review_axes.py`, tested in
-   `tally_review_axes_test.py`): walks `~/.cache/agent-reviews`, parses each
-   `review-*.md` filename into (round1|verify, axis or axes, issue number),
-   folds `agent-skills`→`skills` (same repo, two checkout names) and
-   `verify`/`verification` (two names for the same round) together, and
-   joins round-1 reports to their verify report and merged PR by issue
-   number (PR match: `Closes #<n>` text, falling back to the PR's
-   `implement-<n>`/`issue-<n>` branch name — see below).
+   `tally_review_axes_test.py`, 19 tests): walks `~/.cache/agent-reviews`,
+   parses each `review-*.md` filename into (round1|verify, axis or axes,
+   issue number), folds `agent-skills`→`skills` (same repo, two checkout
+   names) and `verify`/`verification` (two names for the same round)
+   together, and joins round-1 reports to their verify report and merged PR
+   by issue number. **The PR join calls `gh` directly** (`gh pr list
+   --state merged --json number,body,title,headRefName`) and matches each
+   PR to an issue by a `Closes #N`-shaped keyword in the body/title,
+   falling back to the PR's `implement-<n>`/`issue-<n>` branch name when
+   neither has one — which is the common case in this dataset: `gh`'s
+   `closingIssuesReferences` came back empty for nearly every PR here even
+   where the body literally said "Closes #N". An `--issue-to-pr <file>`
+   flag replays a pre-built map offline for testing/reproducibility without
+   a live `gh` call.
 2. **Judgement**: reading each round-1 finding's text, its matching
    verify-pass text, and its PR body's "Decisions made" section, and
    classifying severity (hard violation / judgement call / clean-no-finding)
    and outcome (confirmed / disputed / filed-as-follow-up / unclear-no-
    disposition-found). Done by three parallel Sonnet subagent passes — one
    per repo/batch — each independently briefed with the same taxonomy and
-   file layout. I spot-checked each batch's output against the source
-   reports rather than re-reading all 592 records myself; spot checks were
+   file layout, plus one issue (`twitch-rules-scroller#274`) reclassified
+   by hand after it went from open to merged partway through this ticket
+   (see below). I spot-checked each batch's output against the source
+   reports rather than re-reading all 587 records myself; spot checks were
    consistent with the source text. Batch-to-batch calibration drift on
    borderline judgement-call severity is the main residual risk in this
    step, not a claimed exact count.
 
-PR matching had to fall back to branch name: `gh pr list --json
-closingIssuesReferences` came back empty for essentially every PR in this
-dataset (GitHub didn't compute the link even where the body said "Closes
-#N"), so the join uses a regex over the PR body/title for `closes/fixes/
-resolves #N`, and where that's absent, the PR's `headRefName` matching
-`implement-<n>` or `issue-<n>`. This got 57 of 58 substantive issues
-matched to a PR (see below for the one exception).
+Run it yourself: `python3 docs/research/tally_review_axes.py` prints the
+full round-1/verify/PR join as JSON (live `gh` lookup, ~10s). The
+classification JSON this note's tables are computed from is not committed
+(it's a one-off reading-pass artifact, not reusable mechanical output) —
+the numbers below are reproducible from the same source reports by
+re-running the classification pass, not from a checked-in cache.
 
 ## Inventory, as actually found (2026-09-16, ~08:00 ET)
 
@@ -58,14 +74,25 @@ missing-file problem:
   arithmetic slip in the ticket text itself.
 - Between the ticket being written and this script running, `skills#853`
   gained two round-1 reports (`review-spec-853.md`,
-  `review-standards-853.md`, both timestamped today) with no correctness
-  report yet — a round-1 review still in progress on a live, concurrently-
-  written cache. I excluded #853 entirely as incomplete rather than tally
-  a partial round.
+  `review-standards-853.md`) with no correctness report yet — a round-1
+  review still in progress on a live, concurrently-written cache. I
+  excluded #853 entirely as incomplete rather than tally a partial round.
 
 That leaves **58 issues** with at least one complete round-1 set: 40 in
 `skills` (folding in `agent-skills`'s 3), 17 in `sudokumaker-custom-
 constraints`, 1 in `twitch-rules-scroller`.
+
+**The cache kept moving under this ticket.** `twitch-rules-scroller#274`
+was open with no PR when I first classified it (10 findings, all
+"unclear" — nothing to dispute yet on an unmerged ticket). By the time
+round-1 review came back on this note, #274 had a verification pass and a
+merged PR (#294) in the live cache. I re-read the verify pass and PR body
+and reclassified all 10 of its findings against their real dispositions
+(6 confirmed/fixed, 4 disputed) rather than leave a now-false "still open"
+claim in a finished note. Everything else in the tally is frozen at the
+classification pass's original snapshot; only #274 was updated, because it
+was the one place where "unclear" had gone from *no disposition exists
+yet* to *actively wrong*.
 
 Filename anomalies handled explicitly by the parser (all covered by
 `tally_review_axes_test.py`):
@@ -85,66 +112,72 @@ Filename anomalies handled explicitly by the parser (all covered by
 
 ## What couldn't be counted
 
-- **`twitch-rules-scroller#274`** is the repo's only reviewed ticket, and
-  the issue is still **open** — no merged PR, no verify pass exists yet.
-  All 10 of its findings are "unclear" by construction: there's nothing to
-  dispute yet, not a gap in the join. N=1 issue is too small to say
-  anything about how this repo's axes behave; it's reported for
-  completeness only, not compared to the other two repos.
-- **17 of the 58 issues have no verify-pass report file at all**
-  (`skills#751,764,784,785,793,805,819*,823,824,844`,
-  `sudokumaker#428,429,435,445,469`, plus `#274` above; `*` = #819 has
-  non-standard-named verify files, counted separately above as present).
-  For those, disposition came only from the PR body's "Decisions made"
-  section, or was marked unclear if that section didn't mention the
-  finding either.
-- **42 of 592 findings (7%) are "unclear"** — no verify report and no
-  clear PR-body mention. Confirm/dispute rates below are best read as
-  **lower/upper bounds**, not exact rates, because of this residual.
+- **15 of the 58 issues have no verify-pass report file at all**:
+  `skills#751,764,784,785,793,805,819*,823,824,844`,
+  `sudokumaker#428,429,435,445,469` (`*` = #819 has non-standard-named
+  verify files, counted separately above as present). For those,
+  disposition came only from the PR body's "Decisions made" section, or
+  was marked unclear if that section didn't mention the finding either.
+- **40 of 587 findings (6.8%) are "unclear"** — no verify report and no
+  clear PR-body mention. Confirm rates below are best read as **lower
+  bounds**, not exact rates, because of this residual.
 - **5 findings are `clean`** — a report that raised zero findings
   (`skills#751` spec, `#793` and `#835` correctness; `sudokumaker#435` and
-  `#469` correctness). These are counted as one record each, not folded
-  into the finding totals below.
+  `#469` correctness). These are counted as one record each, excluded from
+  the 587-finding total below (587 = 592 committed records − 5 clean).
 
-## Per-axis table (all repos, 587 findings across 58 issues, excludes the 5 clean-report records)
+## Per-axis table (all repos, 587 findings across 58 issues)
 
-| Axis | Findings | Confirmed | Disputed | Filed | Unclear | Confirm rate* | Hard findings | Hard confirm rate* |
+| Axis | Findings | Confirmed | Disputed | Filed | Unclear | Confirm rate | Hard findings | Hard confirm rate |
 |---|---|---|---|---|---|---|---|---|
-| Standards | 270 | 163 | 73 | 5 | 29 | 60% | 22 | 91% |
-| Spec | 134 | 86 | 37 | 1 | 10 | 64% | 18 | 94% |
-| Correctness | 188 | 127 | 39 | 9 | 13 | 68% | 87 | 84% |
+| Standards | 270 | 167 | 74 | 5 | 24 | 62% | 22 | 91% |
+| Spec | 133 | 87 | 37 | 1 | 8 | 65% | 18 | 94% |
+| Correctness | 184 | 127 | 40 | 9 | 8 | 69% | 87 | 85% |
+| **Total** | **587** | **381** | **151** | **15** | **40** | | **127** | |
 
-\*Confirm rate = confirmed / (confirmed + disputed + filed), i.e. excluding
-the unclear residual from the denominator — a lower bound given 7% overall
-unclear.
+Confirm rate = confirmed / total findings for that axis (one formula,
+used consistently in every table and in the prose below — round 1 review
+caught three different formulas sharing the same label in the prior
+draft). Row totals sum to 587, matching every other total in this note
+(round 1 review caught the prior draft's table summing to 592 while its
+own prose said 587 — a clean/finding double-count, fixed by consistently
+excluding the 5 clean-report records everywhere).
 
 Reading it: correctness has the fewest total findings but by far the
-highest **share** that are hard (87/188 = 46%, vs. 22/270 = 8% for
-standards and 18/134 = 13% for spec) and the highest hard-confirm rate.
-Standards produces roughly 2x correctness's volume, almost entirely
-judgement calls (248/270 = 92%), and a quarter of those get disputed away.
-Spec is the smallest and cleanest by confirm rate, but also the axis most
-likely to report "clean" (satisfied AC, nothing to flag).
+highest **share** that are hard (87/184 = 47%, vs. 22/270 = 8% for
+standards and 18/133 = 14% for spec) — it's finding fewer things, but a
+much higher fraction of what it finds is a real violation, not a style
+nit. On the hard subset specifically, **spec has the highest confirm rate
+(94%), then standards (91%), then correctness (85%)** — correctness is not
+the highest here, a claim the prior draft got backwards. Standards
+produces roughly double correctness's volume, almost entirely judgement
+calls (248/270 = 92%), and nearly 30% of those get disputed away.
 
 ## Per-repo split
 
 | Repo | Issues | Axis | Findings | Confirmed | Disputed | Filed | Unclear |
 |---|---|---|---|---|---|---|---|
 | skills (+ agent-skills) | 40 | standards | 154 | 96 | 49 | 3 | 6 |
-| | | spec | 83 | 51 | 29 | 1 | 2 |
-| | | correctness | 120 | 83 | 30 | 6 | 1 |
+| | | spec | 82 | 50 | 29 | 1 | 2 |
+| | | correctness | 118 | 81 | 30 | 6 | 1 |
 | sudokumaker-custom-constraints | 17 | standards | 111 | 67 | 24 | 2 | 18 |
 | | | spec | 49 | 35 | 8 | 0 | 6 |
-| | | correctness | 65 | 44 | 9 | 3 | 9 |
-| twitch-rules-scroller | 1 | all | 10 | 0 | 0 | 0 | 10 |
+| | | correctness | 63 | 44 | 9 | 3 | 7 |
+| twitch-rules-scroller | 1 | standards | 5 | 4 | 1 | 0 | 0 |
+| | | spec | 2 | 2 | 0 | 0 | 0 |
+| | | correctness | 3 | 2 | 1 | 0 | 0 |
 
 Sudokumaker's standards axis has a notably higher unclear share (18/111 =
-16%, vs. skills' 6/154 = 4%) — it has 5 of the 17 issues with no verify
-pass at all (`#428,429,435,445,469`), all correctness-report-absent too;
-this repo's smaller review volume means missing verify passes hit its
-denominator harder. Its confirm rate (67/(67+24+2)=72%) and volume-per-
-issue pattern otherwise track skills' closely — nothing suggests the two
-codebases need different axis treatment.
+16%, vs. skills' 6/154 = 4%) — 5 of its 17 issues have no verify pass at
+all (`#428,429,435,445,469`), all correctness-report-absent too; this
+repo's smaller review volume means missing verify passes hit its
+denominator harder. Its confirm rate (67/111 = 60%) otherwise tracks
+skills' standards rate (96/154 = 62%) closely — nothing here suggests the
+two codebases need different axis treatment. `twitch-rules-scroller` has
+only 1 reviewed issue; its row is reported for completeness, not compared
+against the other two repos — n=1 is too small to say anything about how
+this repo's axes behave, even though #274's own findings happen to be
+fully resolved now.
 
 ## Codex adversarial pass
 
@@ -161,25 +194,26 @@ keep/drop call the note describes, which this tally doesn't override.
 
 ## Recommendation
 
-- **Keep correctness as-is.** Fewest findings, highest hard-density,
-  highest hard-confirm-rate. It is the axis catching the bugs that would
-  actually ship.
-- **Keep spec as-is.** Smallest volume, highest overall confirm rate, and
-  the axis most likely to report a genuinely clean PR — it isn't padding
-  findings to justify its run.
+- **Keep correctness as-is.** Fewest findings, by far the highest
+  hard-finding density (47% of its findings are hard, more than 3x either
+  other axis's share), and a strong 85% hard-confirm-rate. It is the axis
+  catching the fewest but most consequential things.
+- **Keep spec as-is.** Smallest volume, a 65% overall confirm rate, and the
+  highest hard-confirm-rate of the three (94%) — when spec calls something
+  a hard violation, it's very rarely wrong.
 - **Standards is the trim candidate, not a drop candidate.** It earns real
-  confirms (60%, and 91% on its hard findings), but it's also the single
+  confirms (62%, and 91% on its hard findings), but it's also the single
   largest source of judgement-call volume in the whole review system
-  (248 judgement-call findings, more than spec and correctness's judgement
-  calls combined). If token budget forces a cut, this is where a stricter
-  "hard violations and settled-standard breaches only, defer the
-  over-engineering/style nits to a lighter pass" scope would recover the
-  most tokens for the least confirmed-finding loss.
+  (248 judgement-call findings — more than spec and correctness's
+  judgement calls combined, 115+97=212). If token budget forces a cut,
+  this is where a stricter "hard violations and settled-standard breaches
+  only, defer the over-engineering/style nits to a lighter pass" scope
+  would recover the most tokens for the least confirmed-finding loss.
 - **Keep the Codex pass, and treat this tally as independent evidence for
   the controller's pending keep/drop call** — 10 codex-only confirmed
   findings in 5 tickets is not noise.
-- **Confidence:** the confirm/dispute rates above are lower bounds; 42 of
-  587 findings (7%) had no traceable disposition, concentrated in the 17
+- **Confidence:** the confirm/dispute rates above are lower bounds; 40 of
+  587 findings (6.8%) had no traceable disposition, concentrated in the 15
   issues with no verify pass. If a stronger signal is needed later, closing
   that verify-pass gap (running verify even on "everything looked clean"
   round-1s, or at minimum keeping the PR body's Decisions section
@@ -194,7 +228,7 @@ agents burned roughly 600K combined tokens reading and classifying 587
 findings that a one-line-per-finding machine-readable format
 (`<finding-id> <axis> <severity> <one-line>`, disposed later by ID in the
 verify pass and the PR body) would make near-free to tally. This ticket
-explicitly said not to touch `multi-axis-code-review/SKILL.md`, so the
-fix is out of scope here. I filed
+explicitly said not to touch `multi-axis-code-review/SKILL.md`, so the fix
+is out of scope here. I filed
 **caneff/agent-skills#861** ("multi-axis-code-review: give every finding a
 stable id so future tallies don't require a reading pass") to track it.
