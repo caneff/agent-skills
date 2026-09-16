@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Codex rate-limit cell for the table statusline.
 
-Codex writes a `rate_limits` snapshot into the current session's rollout log
-after every turn, so the newest `~/.codex/sessions/**/rollout-*.jsonl` holds the
-last figure the Codex CLI itself was told. That is the only source read here:
-no credential read and no call to OpenAI's usage endpoint, matching the rule
-`usage-segment.sh` follows for Claude's own numbers.
+Reads `usedPercent`/`resetsAt` from a cache file under `$CODEX_HOME`
+(default `~/.codex`), refreshing it inline when older than `CACHE_TTL` by
+calling the Codex app-server's `account/rateLimits/read` — a plain HTTP GET
+under the hood, no model turn — instead of tailing a rollout `.jsonl`. An
+OpenAI maintainer said plainly that the rollout format is not a durable
+surface (openai/codex#43593); the app-server API is. See
+`docs/research/2026-09-16-codex-usage-percentage-sources.md` for the full
+trail.
 
 Prints one cell — `12% 6d`, primary window then secondary when the plan has
-one — or nothing at all when there is no usable snapshot. A percentage whose
-window has already reset describes a window that no longer exists, so it prints
-nothing rather than a stale number; one over a day old keeps its figure but
-carries a `?`, because Codex only refreshes it when Codex runs.
+one — or nothing at all: no cache, no live reply within the timeout, or a
+window whose reset has already passed (that percentage describes a window
+that no longer exists). No stale case is marked, because a failed refresh
+never falls back to old numbers — it prints nothing instead.
 
 Stdin is ignored (the table fans the session JSON out to every helper).
 """
@@ -19,73 +22,17 @@ Stdin is ignored (the table fans the session JSON out to every helper).
 from __future__ import annotations
 
 import json
+import os
+import select
+import subprocess
 import sys
 import time
 from pathlib import Path
 
-SESSIONS = Path.home() / ".codex" / "sessions"
-TAIL_BYTES = 256 * 1024  # enough for many turns' worth of trailing events
-STALE_AFTER = 24 * 3600
-
-
-def newest_rollout(root: Path) -> Path | None:
-    """Newest rollout log, walking year/month/day newest-first.
-
-    The tree is date-partitioned, so descending the highest-named directory at
-    each level reaches today's logs without stat-ing every session ever
-    recorded. Falls back down the list when a day's directory holds no rollout.
-    """
-    def descend(d: Path, depth: int) -> Path | None:
-        try:
-            kids = sorted((p for p in d.iterdir() if p.is_dir()), reverse=True)
-        except OSError:
-            return None
-        if depth == 0:
-            files = [p for p in d.glob("rollout-*.jsonl")]
-            return max(files, key=lambda p: p.stat().st_mtime) if files else None
-        for k in kids:
-            if (hit := descend(k, depth - 1)) is not None:
-                return hit
-        return None
-
-    return descend(root, 3)
-
-
-def last_rate_limits(path: Path) -> dict | None:
-    """The final `rate_limits` object in the log, read from the tail."""
-    try:
-        with path.open("rb") as fh:
-            fh.seek(0, 2)
-            fh.seek(max(0, fh.tell() - TAIL_BYTES))
-            chunk = fh.read()
-    except OSError:
-        return None
-    # A partial first line is expected after seeking into the middle of one.
-    for line in reversed(chunk.decode("utf-8", "replace").splitlines()):
-        if '"rate_limits"' not in line:
-            continue
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if (found := find(row)) is not None:
-            return found
-    return None
-
-
-def find(node: object) -> dict | None:
-    """First `rate_limits` mapping anywhere in a decoded event."""
-    if isinstance(node, dict):
-        if isinstance(node.get("rate_limits"), dict):
-            return node["rate_limits"]
-        for v in node.values():
-            if (hit := find(v)) is not None:
-                return hit
-    elif isinstance(node, list):
-        for v in node:
-            if (hit := find(v)) is not None:
-                return hit
-    return None
+CODEX_HOME = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
+CACHE_PATH = CODEX_HOME / "usage-cache.json"
+CACHE_TTL = 30 * 60
+RPC_TIMEOUT = 1.5
 
 
 def countdown(seconds: float) -> str:
@@ -98,38 +45,151 @@ def countdown(seconds: float) -> str:
     return "1m"
 
 
-def window(limit: object, now: float, stale: bool) -> str:
+def window(limit: object, now: float) -> str:
     if not isinstance(limit, dict):
         return ""
-    pct = limit.get("used_percent")
-    resets = limit.get("resets_at")
+    pct = limit.get("usedPercent")
+    resets = limit.get("resetsAt")
     if not isinstance(pct, (int, float)) or not isinstance(resets, (int, float)):
         return ""
     if resets <= now:
         return ""  # window already rolled over; the percentage is about nothing
-    mark = "?" if stale else ""
-    return " ".join(x for x in (f"{int(pct)}%{mark}", countdown(resets - now)) if x)
+    return " ".join(x for x in (f"{int(pct)}%", countdown(resets - now)) if x)
 
 
-def cell(limits: dict | None, snapshot_age: float, now: float) -> str:
+def cell(limits: dict | None, now: float) -> str:
     if not limits:
         return ""
-    stale = snapshot_age > STALE_AFTER
-    parts = [window(limits.get(k), now, stale) for k in ("primary", "secondary")]
+    parts = [window(limits.get(k), now) for k in ("primary", "secondary")]
     return " · ".join(p for p in parts if p)
+
+
+def read_cache(now: float) -> dict | None:
+    """Cached `primary`/`secondary` limits, or None if missing/stale."""
+    try:
+        data = json.loads(CACHE_PATH.read_text())
+    except (OSError, ValueError):
+        return None
+    fetched = data.get("fetchedAt")
+    if not isinstance(fetched, (int, float)) or now - fetched > CACHE_TTL:
+        return None
+    limits = {k: data[k] for k in ("primary", "secondary") if k in data}
+    return limits or None
+
+
+def write_cache(limits: dict, now: float) -> None:
+    payload = {"fetchedAt": now, **{k: limits.get(k) for k in ("primary", "secondary")}}
+    try:
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CACHE_PATH.write_text(json.dumps(payload))
+    except OSError:
+        pass
+
+
+def fetch_live(timeout: float = RPC_TIMEOUT) -> dict | None:
+    """`rateLimits` from a fresh `codex app-server` round trip, or None.
+
+    Speaks the app-server's line-delimited JSON-RPC: `initialize`, the
+    `initialized` notification, then `account/rateLimits/read`. Stdin stays
+    open until the matching-id reply for each request arrives — closing it
+    early makes the process exit before answering, which looks exactly like
+    a silent failure.
+    """
+    try:
+        proc = subprocess.Popen(
+            ["codex", "app-server"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+        )
+    except OSError:
+        return None
+
+    deadline = time.monotonic() + timeout
+
+    def send(obj: dict) -> bool:
+        try:
+            proc.stdin.write(json.dumps(obj) + "\n")
+            proc.stdin.flush()
+            return True
+        except (BrokenPipeError, OSError):
+            return False
+
+    def recv_until(target_id: int) -> dict | None:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            try:
+                ready, _, _ = select.select([proc.stdout], [], [], remaining)
+            except OSError:
+                return None
+            if not ready:
+                return None
+            line = proc.stdout.readline()
+            if not line:
+                return None
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            if obj.get("id") == target_id:
+                return obj
+
+    try:
+        if not send(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {
+                        "name": "ccstatusline-table",
+                        "title": "ccstatusline-table",
+                        "version": "0.0.0",
+                    }
+                },
+            }
+        ):
+            return None
+        if recv_until(1) is None:
+            return None
+        if not send({"jsonrpc": "2.0", "method": "initialized", "params": {}}):
+            return None
+        if not send(
+            {"jsonrpc": "2.0", "id": 2, "method": "account/rateLimits/read", "params": {}}
+        ):
+            return None
+        reply = recv_until(2)
+        if reply is None:
+            return None
+        result = reply.get("result")
+        limits = result.get("rateLimits") if isinstance(result, dict) else None
+        return limits if isinstance(limits, dict) else None
+    finally:
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        proc.wait()
 
 
 def main() -> None:
     sys.stdin.buffer.read()
-    path = newest_rollout(SESSIONS)
-    if path is None:
-        return
     now = time.time()
-    try:
-        age = now - path.stat().st_mtime
-    except OSError:
-        return
-    if text := cell(last_rate_limits(path), age, now):
+    limits = read_cache(now)
+    if limits is None:
+        limits = fetch_live()
+        if limits is None:
+            return
+        write_cache(limits, now)
+    if text := cell(limits, now):
         sys.stdout.write(text)
 
 
@@ -137,32 +197,40 @@ if __name__ == "__main__":
     if "--selftest" in sys.argv:
         now = 1_000_000.0
         lim = {
-            "primary": {"used_percent": 12.9, "resets_at": now + 6 * 86400 + 3600},
+            "primary": {"usedPercent": 12.9, "resetsAt": now + 6 * 86400 + 3600},
             "secondary": None,
         }
-        assert cell(lim, 60, now) == "12% 6d", cell(lim, 60, now)
-        assert cell(lim, 2 * 86400, now) == "12%? 6d"
+        assert cell(lim, now) == "12% 6d", cell(lim, now)
         both = {
-            "primary": {"used_percent": 94.0, "resets_at": now + 2 * 86400},
-            "secondary": {"used_percent": 6.0, "resets_at": now + 3 * 3600},
+            "primary": {"usedPercent": 94.0, "resetsAt": now + 2 * 86400},
+            "secondary": {"usedPercent": 6.0, "resetsAt": now + 3 * 3600},
         }
-        assert cell(both, 60, now) == "94% 2d · 6% 3h", cell(both, 60, now)
+        assert cell(both, now) == "94% 2d · 6% 3h", cell(both, now)
         # A window whose reset has passed describes nothing.
-        assert cell({"primary": {"used_percent": 80.0, "resets_at": now - 1}}, 60, now) == ""
-        assert cell(None, 60, now) == ""
-        assert cell({}, 60, now) == ""
-        assert cell({"primary": {"used_percent": 5.0}}, 60, now) == ""
+        assert cell({"primary": {"usedPercent": 80.0, "resetsAt": now - 1}}, now) == ""
+        assert cell(None, now) == ""
+        assert cell({}, now) == ""
+        assert cell({"primary": {"usedPercent": 5.0}}, now) == ""
         assert countdown(45) == "1m" and countdown(0) == ""
-        # The real shape Codex writes, straight from a rollout log.
+        # The real shape the app-server returns.
         real = {
-            "limit_id": "codex", "limit_name": None,
-            "primary": {"used_percent": 0.0, "window_minutes": 10080,
-                        "resets_at": now + 86400},
-            "secondary": None, "plan_type": "plus",
+            "primary": {"usedPercent": 0.0, "windowDurationMins": 10080, "resetsAt": now + 86400},
+            "secondary": None,
         }
-        assert cell(real, 60, now) == "0% 1d", cell(real, 60, now)
-        assert find({"payload": {"rate_limits": {"primary": None}}}) == {"primary": None}
-        assert find({"a": [{"b": 1}]}) is None
+        assert cell(real, now) == "0% 1d", cell(real, now)
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            CACHE_PATH = Path(d) / "usage-cache.json"
+            globals()["CACHE_PATH"] = CACHE_PATH
+            assert read_cache(now) is None  # no file yet
+            write_cache(both, now)
+            assert read_cache(now) == both
+            assert read_cache(now + CACHE_TTL + 1) is None  # older than 30m
+            CACHE_PATH.write_text("not json")
+            assert read_cache(now) is None  # corrupt cache fails soft
+
         print("ok")
     else:
         main()
