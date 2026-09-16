@@ -26,7 +26,7 @@ import json
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 REVIEWS_ROOT = Path.home() / ".cache" / "agent-reviews"
@@ -174,9 +174,16 @@ def parse_disposition_line(raw: str) -> Disposition | None:
 def load_jsonl(path: Path, parse_line) -> list:
     """Read a sidecar file line by line, skipping blank lines and any line
     `parse_line` rejects, rather than failing the whole file on one bad
-    write."""
+    write. A file truncated mid multibyte character fails decoding before
+    any line is even seen — that costs this one file, logged to stderr,
+    never the rest of the tally (#855 round-1 correctness C1)."""
+    try:
+        text = path.read_text()
+    except UnicodeDecodeError as e:
+        print(f"warning: skipping undecodable sidecar {path}: {e}", file=sys.stderr)
+        return []
     out = []
-    for line in path.read_text().splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -190,19 +197,7 @@ def find_sidecar_files(root: Path = REVIEWS_ROOT) -> list[tuple[str, str]]:
     """Return (repo_dir, filename) pairs for every findings-*.jsonl or
     dispositions-*.jsonl file one level under `root`, same layout and
     scratch-dir skip as find_report_files."""
-    if not root.is_dir():
-        raise FileNotFoundError(f"reviews cache not found: {root}")
-
-    out = []
-    for pattern in ("findings-*.jsonl", "dispositions-*.jsonl"):
-        for path in sorted(root.rglob(pattern)):
-            rel_parts = path.relative_to(root).parts
-            if any(part.startswith("scratch") for part in rel_parts):
-                continue
-            if len(rel_parts) != 2:
-                continue
-            out.append((rel_parts[0], path.name))
-    return out
+    return _walk_cache_layout(root, ("findings-*.jsonl", "dispositions-*.jsonl"))
 
 
 def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
@@ -210,17 +205,46 @@ def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
     sidecar under `root` into a per-repo, per-axis table of raised vs
     fixed/disputed/filed/undisposed (#855). Findings are keyed by (repo,
     issue, id), so a disposition only ever resolves the finding it names —
-    never a same-id finding filed under a different issue or repo."""
+    never a same-id finding filed under a different issue or repo.
+
+    Two conflicts are surfaced rather than silently absorbed (round-1
+    correctness C2/C3, standards S2): a duplicate id within one (repo,
+    issue) — including one reached only after the agent-skills/skills
+    alias fold — raises ValueError instead of one finding quietly
+    overwriting the other; a line's own `axis` field that disagrees with
+    the filename it came from is corrected to the filename's axis (which
+    axis wrote the file is the authoritative signal) with a stderr
+    warning, instead of silently tallying under the wrong axis. A
+    disposition whose id matches no known finding (round-1 correctness
+    C4) is similarly not just dropped — it's a stderr warning, so a
+    mismatched id doesn't vanish with no trace."""
     findings_by_key: dict[tuple[str, int, str], Finding] = {}
+    finding_sources: dict[tuple[str, int, str], tuple[str, str]] = {}
     dispositions_by_key: dict[tuple[str, int, str], Disposition] = {}
 
     for repo_dir, fname in find_sidecar_files(root):
         repo = fold_repo(repo_dir)
         parsed_finding = parse_finding_sidecar_filename(fname)
         if parsed_finding is not None:
-            _axis, issue = parsed_finding
+            axis, issue = parsed_finding
             for finding in load_jsonl(root / repo_dir / fname, parse_finding_line):
-                findings_by_key[(repo, issue, finding.id)] = finding
+                if finding.axis != axis:
+                    print(
+                        f"warning: {repo_dir}/{fname} finding {finding.id!r} "
+                        f"claims axis {finding.axis!r}, filename says {axis!r} — "
+                        f"using the filename's axis",
+                        file=sys.stderr,
+                    )
+                    finding = replace(finding, axis=axis)
+                key = (repo, issue, finding.id)
+                if key in findings_by_key:
+                    prev_repo_dir, prev_fname = finding_sources[key]
+                    raise ValueError(
+                        f"duplicate finding id {finding.id!r} for {repo}#{issue}: "
+                        f"{prev_repo_dir}/{prev_fname!r} vs {repo_dir}/{fname!r}"
+                    )
+                findings_by_key[key] = finding
+                finding_sources[key] = (repo_dir, fname)
             continue
         issue = parse_disposition_sidecar_filename(fname)
         if issue is not None:
@@ -240,6 +264,15 @@ def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
         else:
             counts[disposition.outcome] += 1
 
+    resolved_keys = {(repo, issue, fid) for (repo, issue, fid) in findings_by_key}
+    for (repo, issue, fid) in dispositions_by_key:
+        if (repo, issue, fid) not in resolved_keys:
+            print(
+                f"warning: orphan disposition {fid!r} for {repo}#{issue} "
+                f"matches no known finding",
+                file=sys.stderr,
+            )
+
     return {
         f"{repo}/{axis}": counts
         for (repo, axis), counts in sorted(table.items())
@@ -252,27 +285,37 @@ def fold_repo(repo_dir: str) -> str:
     return REPO_ALIASES.get(repo_dir, repo_dir)
 
 
+def _walk_cache_layout(root: Path, patterns: tuple[str, ...]) -> list[tuple[str, str]]:
+    """Return (repo_dir, filename) pairs for every file matching any of
+    `patterns` one level under `root`, skipping any scratch*-prefixed dir
+    (not real reports). Raises FileNotFoundError if `root` doesn't exist,
+    rather than silently reporting zero files. Shared by find_report_files
+    and find_sidecar_files (#855 round-1 standards S1) — one statement of
+    the cache layout rule, not two copies drifting apart."""
+    if not root.is_dir():
+        raise FileNotFoundError(f"reviews cache not found: {root}")
+
+    out = []
+    for pattern in patterns:
+        for path in sorted(root.rglob(pattern)):
+            rel_parts = path.relative_to(root).parts
+            if any(part.startswith("scratch") for part in rel_parts):
+                continue
+            if len(rel_parts) != 2:
+                # our cache layout is exactly root/<repo>/<file>; anything
+                # else (a stray file directly in root, or a deeper nesting) is
+                # not a real report bucket.
+                continue
+            out.append((rel_parts[0], path.name))
+    return out
+
+
 def find_report_files(root: Path = REVIEWS_ROOT) -> list[tuple[str, str]]:
     """Return (repo_dir, filename) pairs for every review-*.md file one
     level under `root`, skipping any scratch*-prefixed dir (not real
     reports). Raises FileNotFoundError if `root` doesn't exist, rather than
     silently reporting zero files."""
-    if not root.is_dir():
-        raise FileNotFoundError(f"reviews cache not found: {root}")
-
-    out = []
-    for path in sorted(root.rglob("review-*.md")):
-        rel_parts = path.relative_to(root).parts
-        if any(part.startswith("scratch") for part in rel_parts):
-            continue
-        if len(rel_parts) != 2:
-            # our cache layout is exactly root/<repo>/review-*.md; anything
-            # else (a stray file directly in root, or a deeper nesting) is
-            # not a real report bucket.
-            continue
-        repo_dir = rel_parts[0]
-        out.append((repo_dir, path.name))
-    return out
+    return _walk_cache_layout(root, ("review-*.md",))
 
 
 def build_issue_index(reports: list[tuple[str, str]]) -> dict:

@@ -38,6 +38,13 @@ a summary under 60 lines, verdict first, that names that path. `Write` is for
 that report and a scratch copy of the diff, never for the repo under review:
 `Edit` is deliberately not among your tools, and a witness check runs on a copy.
 
+**Also write the findings sidecar** the caller's prompt names —
+`findings-<axis>-<n>.jsonl` next to the report, one JSON line per finding
+with a stable `id` (your axis's letter plus an ordinal: `S1`, `P2`, `C3`),
+`axis`, `severity` (`hard` or `judgement`), `file`, and `title` (#855). This
+is the standing brief's own copy of that requirement, not just the caller's
+per-call paste, so a run whose prompt drops the sidecar line still gets one.
+
 ## Axes
 
 Read your axis's brief and its word cap from § 4 of that file:
