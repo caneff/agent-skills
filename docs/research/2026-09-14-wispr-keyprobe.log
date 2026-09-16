@@ -1,0 +1,27 @@
+kitty: not active
+Enter            b'\r'
+Shift+Enter      b'\x1b\r'
+Ctrl+Enter       b'\r'
+Alt+Enter        b'\x1b\r'
+Backspace        b'\x7f'
+Ctrl+Backspace   b'\x17'
+Alt+Backspace    b'\x1b\x7f'
+Tab              b'\t'
+Shift+Tab        b'\x1b[Z'
+Ctrl+I           b'\t'
+Esc              b'\x1b'
+Ctrl+[           b'\x1b'
+Ctrl+J           skipped
+Ctrl+M           skipped
+Ctrl+H           b'\x08'
+Ctrl+B           b'\x02'
+Ctrl+Left        b'\x1b[1;5D'
+Alt+Left         b'\x1b[1;5D'
+
+Collisions (these combos are indistinguishable):
+  Enter = Ctrl+Enter
+  Shift+Enter = Alt+Enter
+  Tab = Ctrl+I
+  Esc = Ctrl+[
+  Ctrl+Left = Alt+Left
+---
