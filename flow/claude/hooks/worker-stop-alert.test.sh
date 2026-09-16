@@ -55,12 +55,19 @@ ok() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_
 denied() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":"Permission for this action has been denied.","is_error":true}]},"toolUseResult":"Error: Permission for this action has been denied."}\n' "$1"; }
 peer() { printf '{"type":"user","isMeta":true,"origin":{"kind":"peer","name":"skills-b6"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
 notification() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"%s"}}\n' "$1"; }
-# launch <agentId> ; teammate_launch <agentId> ; handback <agentId>
+# launch <agentId> ; teammate_launch <agentId> [name] ; handback <agentId>
 launch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-%s","content":"Async agent launched"}]},"toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"%s"}}\n' "$1" "$1"; }
 # The Agent-tool-as-teammate shape (#856): status teammate_spawned, id under
-# agent_id (snake_case), no agentId field at all.
-teammate_launch() { printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-%s","content":"Spawned successfully."}]},"toolUseResult":{"status":"teammate_spawned","agent_id":"%s","name":"%s"}}\n' "$1" "$1" "$1"; }
+# agent_id (snake_case), no agentId field at all. <name> defaults to <agentId>
+# for a bare (unqualified) id; pass it explicitly for a qualified one
+# (`name@session-...`, #859) since the bare name is what a real report's
+# teammate_id carries.
+teammate_launch() { local id=$1 name=${2:-$1}; printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-%s","content":"Spawned successfully."}]},"toolUseResult":{"status":"teammate_spawned","agent_id":"%s","name":"%s"}}\n' "$id" "$id" "$name"; }
 handback() { printf '{"type":"user","origin":{"kind":"peer","from":"%s","senderTaskId":"%s","handback":true},"message":{"role":"user","content":"[Subagent hand-back] report"}}\n' "$1" "$1"; }
+# teammate_report <bare-id> : a named teammate's actual return shape (#859) —
+# a plain-text message with no `origin` field at all, carrying a
+# `<teammate-message teammate_id="...">` wrapper around an idle_notification.
+teammate_report() { printf '{"type":"user","message":{"role":"user","content":"Another Claude session sent a message:\\n<teammate-message teammate_id=\\"%s\\" color=\\"blue\\">\\n{\\"type\\":\\"idle_notification\\",\\"from\\":\\"%s\\",\\"idleReason\\":\\"available\\",\\"result\\":\\"ok\\"}\\n</teammate-message>"}}\n' "$1" "$1"; }
 
 fails=0
 # run <name> <transcript-file> [stop_hook_active] -> sets $pane and $text
@@ -198,6 +205,23 @@ expect_none "a stop while a teammate-spawned subagent is out does not alert"
 { handback tally-854; assistant_text "back, stopping"; } >> "$t"
 run "teammate reviewer back" "$t"
 expect_alert "once the teammate-spawned subagent is back, a stop without a report alerts"
+
+# The real teammate-return shape (#859): the launched id is qualified
+# (`tally-859@session-2b7ae693`), the report is a plain-text
+# `<teammate-message teammate_id="tally-859">` with no `origin` field at
+# all — not a hand-back. Once it lands, `$launched - $returned` must empty;
+# otherwise this entry is stuck `waiting` forever and a later silent stop
+# never alerts (#820's failure mode again, hidden behind a benign verdict).
+reset_log
+t="$tmp/teammate-report.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings";
+  teammate_launch tally-859@session-2b7ae693 tally-859;
+  assistant_text "reviewer running"; } > "$t"
+run "qualified teammate out" "$t"
+expect_none "a stop while a qualified-id teammate is out does not alert"
+{ teammate_report tally-859; assistant_text "reviewer reported back, stopping"; } >> "$t"
+run "qualified teammate reported" "$t"
+expect_alert "once the qualified-id teammate's report lands, a stop without a further report alerts"
 
 reset_log
 t="$tmp/handback-report.jsonl"

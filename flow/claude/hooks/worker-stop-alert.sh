@@ -7,7 +7,14 @@
 # that is not a subagent hand-back. The worker has reported when, after that
 # turn start, a SendMessage to the controller came back with `success: true`.
 # A stop while a subagent launched this turn has not handed back is a wait,
-# not a finish. Otherwise submit one line into the controller's herdr pane
+# not a finish. A launch is "handed back" in one of three shapes: an
+# `.origin.senderTaskId` peer message (an anonymous `Agent` call's
+# hand-back), a `<task-id>...</task-id>` tag (a task-notification), or a
+# named teammate's plain-text `<teammate-message teammate_id="...">` reply
+# (#859) — that last shape carries no `origin` at all, and its launch id is
+# qualified (`name@session-...`) where the reply's `teammate_id` is bare, so
+# matching strips the `@session-...` suffix before comparing. Otherwise
+# submit one line into the controller's herdr pane
 # with `herdr agent prompt` — a hook command, so the auto-mode classifier never
 # sees it (#466's report was denied there). One alert per stop: every attempt
 # is logged to ~/.claude/worker-stop-alerts.log keyed by session and the
@@ -68,11 +75,16 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
       | .message.content[]? | select(.type == "tool_result") | .tool_use_id | select(IN($sends[]))] as $delivered
   | [$after[] | .toolUseResult? | objects
       | select(.status == "async_launched" or .status == "teammate_spawned")
-      | (.agentId // .agent_id)] as $launched
+      | (.agentId // .agent_id) | select(strings)] as $launched
   | [$after[] | select(.type == "user") | (.origin.senderTaskId // empty),
-      (.message.content | strings | scan("<task-id>([^<]+)</task-id>")[0])] as $returned
+      (.message.content | strings | scan("<task-id>([^<]+)</task-id>")[0]),
+      (.message.content | strings | scan("<teammate-message teammate_id=\"([^\"]+)\"")[0])] as $returned
+  # A teammate launch id is qualified (name@session-...); its reply id is
+  # bare. Neither form appearing in $returned (both survive the set
+  # difference, so the length is 2) means this launch is still unresolved.
+  | [$launched[] | select(([., sub("@session-[^@]*$"; "")] - $returned | length) == 2)] as $unresolved
   | (if ($delivered | length) > 0 then "reported"
-     elif ($launched - $returned | length) > 0 then "waiting"
+     elif ($unresolved | length) > 0 then "waiting"
      else "silent" end) as $verdict
   | "\($verdict)\t\(last.uuid // "line \(length)")"')
 [ "${verdict:-}" = "silent" ] || exit 0
