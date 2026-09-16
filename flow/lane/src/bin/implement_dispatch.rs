@@ -12,12 +12,19 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-/// OS-level bound for the herdr calls that are plain queries or short
-/// mutations (status, agent get/list, worktree open, pane list, agent
-/// start): a herdr server that answers at all answers within this, so a
-/// hang past it means the subprocess itself is stuck, not that the work is
-/// legitimately slow.
+/// OS-level bound for the herdr calls that are plain queries (status, agent
+/// get/list, pane list): a herdr server that answers at all answers within
+/// this, so a hang past it means the subprocess itself is stuck, not that
+/// the work is legitimately slow.
 const HERDR_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+/// OS-level bound for the two herdr calls that mutate state (`worktree
+/// open`, `agent start`) rather than just read it — looser than
+/// `HERDR_QUERY_TIMEOUT` because registering a workspace or spawning a
+/// claude process on a loaded box can legitimately take longer than a
+/// status query, and killing one mid-mutation risks a half-registered
+/// agent that the next retry then trips over (`herdr agent <n> already
+/// exists`) instead of cleanly retrying.
+const HERDR_MUTATION_TIMEOUT: Duration = Duration::from_secs(30);
 /// OS-level bound for `herdr agent prompt --wait --timeout 120000`: herdr's
 /// own `--timeout` is an internal flag it enforces itself, not an OS-level
 /// bound on the subprocess — this is the backstop for herdr's own wait
@@ -539,7 +546,7 @@ fn run() -> Result<(), ExitCode> {
     let open = run_timeout(
         "herdr",
         &["worktree", "open", "--cwd", &primary, "--path", wt.to_str().unwrap_or(""), "--label", &branch, "--no-focus", "--trust-repository"],
-        HERDR_QUERY_TIMEOUT,
+        HERDR_MUTATION_TIMEOUT,
     );
     let open_out = claim.step("herdr worktree open", open, None)?;
     let open_json: Option<Value> = serde_json::from_str(&open_out).ok();
@@ -567,7 +574,7 @@ fn run() -> Result<(), ExitCode> {
 
     claim.step(
         "herdr agent start",
-        run_timeout("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &model], HERDR_QUERY_TIMEOUT),
+        run_timeout("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &model], HERDR_MUTATION_TIMEOUT),
         None,
     )?;
 
