@@ -381,11 +381,9 @@ fn run() -> Result<(), ExitCode> {
     let agent = format!("{repo_part}{suffix}");
 
     // Refusals first, so a refused run leaves nothing claimed or created.
-    let issue = lane::issue_state::read(&slug, &n).unwrap_or(lane::issue_state::IssueState {
-        state: String::new(),
-        labels_csv: String::new(),
-        assignees_csv: String::new(),
-    });
+    let Some(issue) = lane::issue_state::read(&slug, &n) else {
+        return Err(die(format!("#{n} is not an open issue")));
+    };
     if issue.state != "OPEN" {
         return Err(die(format!("#{n} is not an open issue")));
     }

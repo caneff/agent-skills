@@ -109,12 +109,10 @@ fn run_gh(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
         let labels = env::var("GH_LABELS").unwrap_or_default();
-        // A third field only when a scenario opts in, so the two-field
-        // format existing tests assert on is untouched.
-        match env::var("GH_ASSIGNEES") {
-            Ok(assignees) => println!("{state} {labels} {assignees}"),
-            Err(_) => println!("{state} {labels}"),
-        }
+        let assignees = env::var("GH_ASSIGNEES").unwrap_or_default();
+        // Tab-delimited, matching lane::issue_state::read's `-q` query: a
+        // label or login can hold a space but never a tab.
+        println!("{state}\t{labels}\t{assignees}");
     }
     if (a0, a1) == ("issue", "edit") && env_flag("GH_ISSUE_EDIT_FAIL") {
         eprintln!("gh: issue edit failed");

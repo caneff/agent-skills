@@ -16,16 +16,19 @@ pub struct IssueState {
 impl IssueState {
     /// Whether `label` is one of this issue's labels.
     pub fn has_label(&self, label: &str) -> bool {
-        format!(",{},", self.labels_csv).contains(&format!(",{label},"))
+        self.labels_csv.split(',').any(|l| l == label)
     }
 }
 
 /// Parses one line of `gh issue view`'s
-/// `.state + " " + ([.labels[].name] | join(",")) + " " + ([.assignees[].login] | join(","))`
-/// output into its three fields. Missing trailing fields come back empty,
-/// matching `gh` on an issue with no labels or no assignees.
+/// `.state + "\t" + ([.labels[].name] | join(",")) + "\t" + ([.assignees[].login] | join(","))`
+/// output into its three fields. Tab-delimited, not space-delimited: a
+/// GitHub label or login can contain a space (`good first issue`) but never
+/// a tab, so a space-bearing label can't be split across fields. Missing
+/// trailing fields come back empty, matching `gh` on an issue with no
+/// labels or no assignees.
 fn parse(line: &str) -> IssueState {
-    let mut fields = line.splitn(3, ' ');
+    let mut fields = line.splitn(3, '\t');
     IssueState {
         state: fields.next().unwrap_or("").to_string(),
         labels_csv: fields.next().unwrap_or("").to_string(),
@@ -48,7 +51,7 @@ pub fn read(slug: &str, n: &str) -> Option<IssueState> {
             "--json",
             "state,labels,assignees",
             "-q",
-            ".state + \" \" + ([.labels[].name] | join(\",\")) + \" \" + ([.assignees[].login] | join(\",\"))",
+            ".state + \"\\t\" + ([.labels[].name] | join(\",\")) + \"\\t\" + ([.assignees[].login] | join(\",\"))",
         ],
     )?;
     Some(parse(&out))
@@ -60,7 +63,7 @@ mod tests {
 
     #[test]
     fn parses_state_labels_and_assignees() {
-        let issue = parse("OPEN ready-for-agent,in-progress caneff");
+        let issue = parse("OPEN\tready-for-agent,in-progress\tcaneff");
         assert_eq!(issue.state, "OPEN");
         assert_eq!(issue.labels_csv, "ready-for-agent,in-progress");
         assert_eq!(issue.assignees_csv, "caneff");
@@ -70,10 +73,24 @@ mod tests {
 
     #[test]
     fn parses_empty_labels_and_assignees() {
-        let issue = parse("CLOSED  ");
+        let issue = parse("CLOSED");
         assert_eq!(issue.state, "CLOSED");
         assert_eq!(issue.labels_csv, "");
         assert_eq!(issue.assignees_csv, "");
         assert!(!issue.has_label("in-progress"));
+    }
+
+    #[test]
+    fn a_label_containing_a_space_does_not_bleed_into_assignees() {
+        let issue = parse("OPEN\thelp wanted,ready-for-agent\tcaneff");
+        assert_eq!(issue.labels_csv, "help wanted,ready-for-agent");
+        assert_eq!(issue.assignees_csv, "caneff");
+        assert!(issue.has_label("ready-for-agent"));
+    }
+
+    #[test]
+    fn has_label_does_not_match_a_substring_of_another_label() {
+        let issue = parse("OPEN\tready-for-agent,in-progress\t");
+        assert!(!issue.has_label("progress"));
     }
 }
