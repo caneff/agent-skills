@@ -62,7 +62,10 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   clipboard itself (slow). `config.keys` binds both `CTRL+v` and
   `SHIFT+Insert` to `wezterm.action.PasteFrom 'Clipboard'`; the probe then
   shows one bracketed paste in a single read. Cost: apps in the pane lose a
-  raw Ctrl+V (vim block-visual → Ctrl+Q; Claude Code image paste). A bare right
+  raw Ctrl+V (vim block-visual → Ctrl+Q). **Image paste into Claude Code is
+  Alt+V**: bound to `SendKey { key = 'v', mods = 'CTRL' }`, it hands the pane
+  the raw Ctrl+V so Claude Code reads the image off the clipboard itself
+  (checked working through herdr 2026-09-17). A bare right
   click is bound to paste the same way (`mouse_bindings`, once with
   `mouse_reporting = true` so it applies inside herdr); Ctrl+right-click
   still reaches herdr. What follows is the VS Code diagnosis, kept for when
