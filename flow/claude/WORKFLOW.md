@@ -45,9 +45,12 @@ that nothing imports or runs.
 ## Issue state
 
 Every open issue announces its state: `wayfinder:*`/stage if mid-pipeline,
-`spec` if a sliced spec, `needs-triage` if genuinely untriaged, `backlog` if
-parked. Why: an unlabelled issue is invisible to every queue that picks work
-by label. A spent parent (every child merged) gets closed, not relabeled. A
+`spec` if a sliced spec, `backlog` if parked, and otherwise the routing role
+its filer already knows (`ready-for-agent`, `ready-for-human`, `needs-info`).
+`needs-triage` is only for an issue someone outside opened; an agent filing
+a follow-up never uses it (`file-ticket/SKILL.md`). Why: an unlabelled issue
+is invisible to every queue that picks work by label, and a `needs-triage`
+one waits for a manual relabel before anyone can dispatch it. A spent parent (every child merged) gets closed, not relabeled. A
 ticket labelled `needs-info` goes through `/grill-with-docs` before
 `/implement` — never ad hoc questions in the terminal.
 
