@@ -121,16 +121,16 @@ No PR and no reviewer; Chris reads the log after.
 
    Every finding gets exactly one disposition: fixed in a commit,
    `disputed: <why>`, or filed as a follow-up ticket through `/file-ticket`
-   so it leaves with a routing role, never `needs-triage` — ad hoc `gh
-   issue create` skips that role. On a heavy
-   Claude-lane build, the PR body lists **every** round-1 finding with its
-   disposition (fixed, with the fixing commit's sha; `disputed: <why>`; or
-   filed, with its ticket number) — not only the disputed and filed ones. A
-   fixed finding that's allowed to vanish from the record is one the § The
-   merge step 3 Codex pass can't tell from a Codex-only one, so it can
-   misclassify a real Claude catch as `codex-only, confirmed` and corrupt
-   the trial's evidence. On any other build, the PR body lists the disputed
-   and filed ones.
+   so it leaves with a routing role, never `needs-triage` — ad hoc
+   `gh issue create` skips that role. On a heavy Claude-lane build, the PR
+   body lists **every** round-1 finding with its disposition (fixed, with
+   the fixing commit's sha; `disputed: <why>`; or filed, with its ticket
+   number) — not only the disputed and filed ones. A fixed finding that's
+   allowed to vanish from the record is one the § The merge step 3 Codex
+   pass can't tell from a Codex-only one, so it can misclassify a real
+   Claude catch as `codex-only, confirmed` and corrupt the trial's
+   evidence. On any other build, the PR body lists the disputed and filed
+   ones.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
    Pass the reviewers every disputed, ruled, or other-ticket item as settled.
    A round-1 finding with no disposition is the one thing this pass fails
