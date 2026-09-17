@@ -55,6 +55,15 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   1.20.2. herdr takes one client at a time — attaching from another terminal
   drops the current one; the server and panes keep running, so re-running
   `herdr` is the whole recovery.
+- **Toast clicks follow the host.** `[ui.toast] delivery = "system"` calls
+  `~/.local/bin/notify-send`, a shim that raises a Windows toast whose click
+  runs `herdrfocus:<pane>` → `herdr-focus.vbs` → `herdr-focus-pick.ps1`
+  (raises the host window by owning process) → `herdr-focus-latest` (focuses
+  the pane). The picker's host list is `Zed,wezterm-gui,WindowsTerminal,Code`,
+  first match wins; a host missing from it means a click raises nothing.
+  These scripts are in no git repo. Test with
+  `HERDR_TOAST_PANE=<pane id> notify-send "t" "b"` from a different
+  workspace — a toast for the already-focused pane looks like a no-op.
 - **Fallback host: WezTerm nightly**, installed and configured
   (`C:\Users\canef\.wezterm.lua`). There Wispr pastes with Ctrl+V, so
   `CTRL+v`, `SHIFT+Insert` and a bare right click are bound to
