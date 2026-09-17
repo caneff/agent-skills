@@ -255,6 +255,5 @@
   "theme": "dark-ansi",
   "remoteControlAtStartup": false,
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true,
-  "model": "claude-fable-5-1[1m]"
+  "agentPushNotifEnabled": true
 }
