@@ -10,7 +10,7 @@ Windows desktop from here — three backends, in order of preference. Never
 fires on your own intent: load it only when Chris names a window, app, or
 on-screen thing for you to look at or drive. When Chris is the one who needs
 to look at something himself, that's `wslview` /
-`code --reuse-window --goto`, not this skill
+`zed <path>[:line[:col]]`, not this skill
 (`~/.agents/skills/flow/claude/VISUAL-INSPECTION.md`); a rendered HTML page
 you produced goes through `shot-scraper`, not this skill either (see below).
 
