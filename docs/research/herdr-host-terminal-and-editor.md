@@ -69,6 +69,54 @@ Corrections to the WezTerm claims below, from doing the install:
   Flow paste — all three worked. The ConPTY kitty-mode caveat below did not
   bite on this WezTerm nightly (it bundles its own `conpty.dll` /
   `OpenConsole.exe`).
+- Image paste into Claude Code in WezTerm is **Alt+V**, bound to `SendKey {
+  key = 'v', mods = 'CTRL' }`: it forwards the raw Ctrl+V that the paste
+  binding swallows. Checked working through herdr.
+
+## Outcome, 2026-09-17: herdr runs in Zed's terminal; WezTerm is the fallback
+
+The two-window plan this note recommends was not where it ended. Later the
+same day Chris ran herdr in **Zed's own integrated terminal** (Windows Zed
+1.20.2, WSL remote) and ruled "moving to zed only":
+
+- Prefix keys, sidebar clicks, Shift+Enter in a Claude pane, Wispr Flow
+  dictation and a plain Ctrl+V image paste all worked with **no custom
+  bindings** — where WezTerm needed three. The prediction made beforehand,
+  that Zed's terminal lacked the Kitty keyboard protocol and would swallow
+  Ctrl+V, was wrong on both counts.
+- Zed's WSL terminal is a Linux pty inside the distro (via
+  `zed-remote-server`), so ConPTY is not in the path at all.
+- **herdr takes one client at a time**: attaching from Zed dropped the
+  WezTerm client. The server and panes keep running.
+- Zed has no command to pop a terminal into its own OS window (from memory,
+  unverified); `workspace: new center terminal` in a second Zed window is
+  the untested workaround.
+- Zed setup done: `~/.local/bin/zed` symlinks to the Windows install's WSL
+  launcher (`…/Programs/Zed/bin/zed` → `zed.exe --wsl user@distro`); a Linux
+  Zed 1.13.2 that shadowed it was removed. `zed <path>:<line>` opens into
+  the existing window in 0.12 s (first call ~60 s while it downloaded the
+  remote server). The ten `uberworkspace.code-workspace` folders open as one
+  multi-root window and Zed restores it on launch. Theme is a port of VS
+  Code's Dracula Theme Soft; `file_scan_exclusions` hides
+  `**/.claude/worktrees`.
+
+### VS Code diagnosis, 2026-09-14 (moved here from `flow/claude/OPERATIONS.md`)
+
+Kept in case herdr ever runs in VS Code's terminal again. Wispr Flow in
+herdr needed `{"key": "shift+insert", "command":
+"workbench.action.terminal.paste", "when": "terminalFocus"}` in the Windows
+user `keybindings.json`. Wispr pasted by simulating Shift+Insert there.
+herdr requests Kitty keyboard flags 7 (31 when a pane asks to report all
+keys), and with the protocol active VS Code encodes Shift+Insert as a key
+(`ESC[2;2~`) instead of pasting, so no text lands and Wispr reports no text
+box. The binding runs before the encoder; a raw-byte probe then shows a
+bracketed paste. Keep `terminal.integrated.enableKittyKeyboardProtocol` on —
+turning it off also fixes Wispr but makes Ctrl+Enter send the same bytes as
+Enter. Not the cause: `ui.host_cursor`, editor-vs-panel placement. Same
+class: earendil-works/pi#8778. Separately, on 2026-09-17 VS Code's terminal
+stopped delivering herdr sidebar clicks for ~36 s until the client was
+restarted (server log: no `workspace.focus` events 13:27:58–13:28:34Z while
+API requests kept succeeding); cause never found.
 
 ## Comparison — A: terminal for herdr (Windows host, WSL2 shell)
 

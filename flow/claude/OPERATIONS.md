@@ -47,39 +47,22 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   refuses an idle worker (#745). Never uninstall it; if a herdr update drops
   it, `herdr integration install claude` needs my own hands (the classifier
   denies it as self-modification). Ruled 2026-09-13, #725.
-- **herdr's host terminal is WezTerm** (nightly, since 2026-09-17), not VS
-  Code's integrated terminal, which stopped delivering sidebar clicks. Config
-  is `C:\Users\canef\.wezterm.lua`: `default_domain = 'WSL:Ubuntu-24.04'`,
-  `enable_kitty_keyboard = true`, the Dracula Soft palette, and the two
-  bindings below. The nightly is installed from the GitHub release asset, not
-  winget (the winget nightly manifest fails its hash check), so it updates by
-  re-running the installer. Prefix keys, sidebar clicks and Wispr paste were
-  checked working on `20260917-114457-b09b56c2`. The file viewer is Zed
-  (`zed <path>:<line>`, see `VISUAL-INSPECTION.md`), not VS Code.
-- **Wispr Flow in herdr needs the host terminal to own the paste key.** In
-  WezTerm Wispr pastes with Ctrl+V, not Shift+Insert: a raw-byte probe saw a
-  lone `0x16` reach the pane, which leaves the app to read the Windows
-  clipboard itself (slow). `config.keys` binds both `CTRL+v` and
-  `SHIFT+Insert` to `wezterm.action.PasteFrom 'Clipboard'`; the probe then
-  shows one bracketed paste in a single read. Cost: apps in the pane lose a
-  raw Ctrl+V (vim block-visual → Ctrl+Q). **Image paste into Claude Code is
-  Alt+V**: bound to `SendKey { key = 'v', mods = 'CTRL' }`, it hands the pane
-  the raw Ctrl+V so Claude Code reads the image off the clipboard itself
-  (checked working through herdr 2026-09-17). A bare right
-  click is bound to paste the same way (`mouse_bindings`, once with
-  `mouse_reporting = true` so it applies inside herdr); Ctrl+right-click
-  still reaches herdr. What follows is the VS Code diagnosis, kept for when
-  herdr runs there: `{"key": "shift+insert", "command":
-  "workbench.action.terminal.paste", "when": "terminalFocus"}` in the Windows
-  user `keybindings.json`. Wispr pastes by simulating Shift+Insert. herdr requests Kitty keyboard flags 7
-  (31 when a pane asks to report all keys), and with the protocol active VS
-  Code encodes Shift+Insert as a key (`ESC[2;2~`) instead of pasting, so no
-  text lands and Wispr reports no text box. The binding runs before the
-  encoder; a raw-byte probe then shows a bracketed paste. Keep
-  `terminal.integrated.enableKittyKeyboardProtocol` on — turning it off also
-  fixes Wispr but makes Ctrl+Enter send the same bytes as Enter. Not the
-  cause: `ui.host_cursor`, editor-vs-panel placement. Same class:
-  earendil-works/pi#8778. Fixed 2026-09-14.
+- **herdr's host is Zed's integrated terminal** (Windows Zed over its WSL
+  remote, ruled 2026-09-17), in the same window as the file viewer
+  (`zed <path>:<line>`, see `VISUAL-INSPECTION.md`). It needs no custom
+  bindings: prefix keys, sidebar clicks, Shift+Enter, Wispr Flow dictation
+  and Ctrl+V image paste into Claude Code were all checked working on Zed
+  1.20.2. herdr takes one client at a time — attaching from another terminal
+  drops the current one; the server and panes keep running, so re-running
+  `herdr` is the whole recovery.
+- **Fallback host: WezTerm nightly**, installed and configured
+  (`C:\Users\canef\.wezterm.lua`). There Wispr pastes with Ctrl+V, so
+  `CTRL+v`, `SHIFT+Insert` and a bare right click are bound to
+  `PasteFrom 'Clipboard'`, and image paste is Alt+V (forwards the raw
+  Ctrl+V). VS Code's terminal is retired as a host: it stopped delivering
+  sidebar clicks, cause never found. The WezTerm install route, the paste
+  probe, and the VS Code Shift+Insert diagnosis (2026-09-14) are in
+  `docs/research/herdr-host-terminal-and-editor.md`.
 
 ## Control
 
