@@ -121,8 +121,8 @@ No PR and no reviewer; Chris reads the log after.
 
    Every finding gets exactly one disposition: fixed in a commit,
    `disputed: <why>`, or filed as a follow-up ticket through `/file-ticket`
-   so it leaves with a routing role, never `needs-triage` — ad hoc
-   `gh issue create` skips that role. On a heavy
+   so it leaves with a routing role, never `needs-triage` — ad hoc `gh
+   issue create` skips that role. On a heavy
    Claude-lane build, the PR body lists **every** round-1 finding with its
    disposition (fixed, with the fixing commit's sha; `disputed: <why>`; or
    filed, with its ticket number) — not only the disputed and filed ones. A
