@@ -47,10 +47,24 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   refuses an idle worker (#745). Never uninstall it; if a herdr update drops
   it, `herdr integration install claude` needs my own hands (the classifier
   denies it as self-modification). Ruled 2026-09-13, #725.
-- **Wispr Flow in herdr needs a `shift+insert` paste binding in VS Code**:
-  `{"key": "shift+insert", "command": "workbench.action.terminal.paste",
-  "when": "terminalFocus"}` in the Windows user `keybindings.json`. Wispr
-  pastes by simulating Shift+Insert. herdr requests Kitty keyboard flags 7
+- **herdr's host terminal is WezTerm** (nightly, since 2026-09-17), not VS
+  Code's integrated terminal, which stopped delivering sidebar clicks. Config
+  is `C:\Users\canef\.wezterm.lua`: `default_domain = 'WSL:Ubuntu-24.04'`,
+  `enable_kitty_keyboard = true`, the Dracula Soft palette, and the two
+  bindings below. The nightly is installed from the GitHub release asset, not
+  winget (the winget nightly manifest fails its hash check), so it updates by
+  re-running the installer. Prefix keys, sidebar clicks and Wispr paste were
+  checked working on `20260917-114457-b09b56c2`. VS Code stays the file
+  viewer (`code --reuse-window --goto`).
+- **Wispr Flow in herdr needs a `shift+insert` paste binding in the host
+  terminal.** In WezTerm: `{ key = 'Insert', mods = 'SHIFT', action =
+  wezterm.action.PasteFrom 'Clipboard' }` in `config.keys`. A bare right
+  click is bound to paste the same way (`mouse_bindings`, once with
+  `mouse_reporting = true` so it applies inside herdr); Ctrl+right-click
+  still reaches herdr. What follows is the VS Code diagnosis, kept for when
+  herdr runs there: `{"key": "shift+insert", "command":
+  "workbench.action.terminal.paste", "when": "terminalFocus"}` in the Windows
+  user `keybindings.json`. Wispr pastes by simulating Shift+Insert. herdr requests Kitty keyboard flags 7
   (31 when a pane asks to report all keys), and with the protocol active VS
   Code encodes Shift+Insert as a key (`ESC[2;2~`) instead of pasting, so no
   text lands and Wispr reports no text box. The binding runs before the
