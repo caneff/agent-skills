@@ -103,5 +103,7 @@
     "terminal.integrated.commandsToSkipShell": [
         "-workbench.action.closeActiveEditor",
         "-workbench.action.closeWindow"
-    ]
+    ],
+    "livePreview.defaultPreviewPath": "/tmp/claude-1000/-home-caneff-src-sudokumaker-custom-constraints/b2996002-0b88-4613-ba00-a7c84b072b1e/scratchpad/board27-pair34x52.html",
+    "livePreview.notifyOnOpenLooseFile": false
 }
