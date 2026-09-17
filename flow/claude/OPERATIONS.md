@@ -56,9 +56,13 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   re-running the installer. Prefix keys, sidebar clicks and Wispr paste were
   checked working on `20260917-114457-b09b56c2`. VS Code stays the file
   viewer (`code --reuse-window --goto`).
-- **Wispr Flow in herdr needs a `shift+insert` paste binding in the host
-  terminal.** In WezTerm: `{ key = 'Insert', mods = 'SHIFT', action =
-  wezterm.action.PasteFrom 'Clipboard' }` in `config.keys`. A bare right
+- **Wispr Flow in herdr needs the host terminal to own the paste key.** In
+  WezTerm Wispr pastes with Ctrl+V, not Shift+Insert: a raw-byte probe saw a
+  lone `0x16` reach the pane, which leaves the app to read the Windows
+  clipboard itself (slow). `config.keys` binds both `CTRL+v` and
+  `SHIFT+Insert` to `wezterm.action.PasteFrom 'Clipboard'`; the probe then
+  shows one bracketed paste in a single read. Cost: apps in the pane lose a
+  raw Ctrl+V (vim block-visual → Ctrl+Q; Claude Code image paste). A bare right
   click is bound to paste the same way (`mouse_bindings`, once with
   `mouse_reporting = true` so it applies inside herdr); Ctrl+right-click
   still reaches herdr. What follows is the VS Code diagnosis, kept for when
