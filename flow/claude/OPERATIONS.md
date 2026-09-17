@@ -54,8 +54,8 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   bindings below. The nightly is installed from the GitHub release asset, not
   winget (the winget nightly manifest fails its hash check), so it updates by
   re-running the installer. Prefix keys, sidebar clicks and Wispr paste were
-  checked working on `20260917-114457-b09b56c2`. VS Code stays the file
-  viewer (`code --reuse-window --goto`).
+  checked working on `20260917-114457-b09b56c2`. The file viewer is Zed
+  (`zed <path>:<line>`, see `VISUAL-INSPECTION.md`), not VS Code.
 - **Wispr Flow in herdr needs the host terminal to own the paste key.** In
   WezTerm Wispr pastes with Ctrl+V, not Shift+Insert: a raw-byte probe saw a
   lone `0x16` reach the pane, which leaves the app to read the Windows

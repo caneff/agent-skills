@@ -128,7 +128,7 @@ commits.)
 - A process kill gets its own Bash call and nothing else.
   Searching and killing safely: `~/.agents/skills/flow/claude/SHELL-SAFETY.md`.
 - Never print a path and ask me to open it — open it for me
-  (`code --reuse-window --goto`). A rendered page
+  (`zed <path>:<line>`). A rendered page
   is read through `shot-scraper`, never a browser GUI or your own headless
   Chrome. My desktop is Windows, WSL is the shell only — never a Linux GUI.
   Showing files, screenshots, windows, images, visual passes:
