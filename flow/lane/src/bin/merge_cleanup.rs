@@ -724,7 +724,7 @@ impl Cleanup {
         let (mut reaped, mut ready, mut skipped, mut failed) = (0, 0, 0, 0);
         let mut verdicts = Vec::new();
         for (wt, branch, held) in plan {
-            let verdict = match held {
+            let verdict: String = match held {
                 Some(held) => {
                     skipped += 1;
                     held
@@ -760,7 +760,11 @@ impl Cleanup {
                     }
                 }
             };
-            verdicts.push((wt, verdict));
+            // A dry run's plan above already said this about every
+            // workspace; only the run that acted has anything to repeat.
+            if act {
+                verdicts.push((wt, verdict));
+            }
         }
         let counts = if act {
             format!("{reaped} reaped, {skipped} skipped")
@@ -770,9 +774,7 @@ impl Cleanup {
         let counts = if failed > 0 { format!("{counts}, {failed} failed") } else { counts };
         safe_println!();
         safe_println!("reap summary: {counts}");
-        // Only the run that acted repeats the lines: a dry run's plan above
-        // already says the same thing about every workspace.
-        for (wt, verdict) in verdicts.iter().filter(|_| act) {
+        for (wt, verdict) in verdicts {
             safe_println!("  {wt}  {verdict}");
         }
         self.close_removed_herdr_workspaces();
@@ -802,7 +804,7 @@ impl Cleanup {
     /// removal would do. It changes nothing on disk — `is_merged` does ask
     /// the tracker and fetch, so it is not free, only harmless.
     fn reap_hold(&self, anchor: &str, wt: &str, b: &str) -> Option<String> {
-        if in_tree(&cwd_path(), wt) {
+        if in_tree(&cwd_path(), &resolved(wt)) {
             return Some("this run's own directory, not removed".into());
         }
         if self.is_merged(anchor, b).is_none() {
@@ -1144,11 +1146,19 @@ fn partly_done(verb: &str, remote_failed: bool, claim_failed: bool) -> String {
     }
 }
 
-/// This process's working directory, symlinks resolved so it compares with
-/// the paths git reports. Empty when there is none to read — a cwd that has
-/// itself been deleted — which `in_tree` then matches nothing against.
+/// This process's working directory, symlinks resolved. Empty when there is
+/// none to read — a cwd that has itself been deleted — which `in_tree` then
+/// matches nothing against.
 fn cwd_path() -> String {
     env::current_dir().and_then(|p| p.canonicalize()).map(|p| p.display().to_string()).unwrap_or_default()
+}
+
+/// A path with its symlinks resolved, or as given when it cannot be. Both
+/// sides of the cwd comparison go through this: git reports a worktree by
+/// the path it was added under, which a repo reached through a symlink
+/// spells differently from the cwd's resolved form.
+fn resolved(p: &str) -> String {
+    std::fs::canonicalize(p).map(|p| p.display().to_string()).unwrap_or_else(|_| p.to_string())
 }
 
 /// Where one repo keeps its workspaces: `<primary>/.claude/worktrees`.
