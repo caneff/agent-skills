@@ -68,6 +68,26 @@ handback() { printf '{"type":"user","origin":{"kind":"peer","from":"%s","senderT
 # a plain-text message with no `origin` field at all, carrying a
 # `<teammate-message teammate_id="...">` wrapper around an idle_notification.
 teammate_report() { printf '{"type":"user","message":{"role":"user","content":"Another Claude session sent a message:\\n<teammate-message teammate_id=\\"%s\\" color=\\"blue\\">\\n{\\"type\\":\\"idle_notification\\",\\"from\\":\\"%s\\",\\"idleReason\\":\\"available\\",\\"result\\":\\"ok\\"}\\n</teammate-message>"}}\n' "$1" "$1"; }
+# bg_launch <task-id> : a Bash with run_in_background:true — an assistant
+# tool_use plus the result whose toolUseResult carries `backgroundTaskId`
+# (#886). It is resolved by a `<task-id>` notification carrying a `<status>`.
+bg_launch() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu-%s","name":"Bash","input":{"command":"just check-full","run_in_background":true}}]}}\n' "$1"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu-%s","content":"Command running in background with ID: %s"}]},"toolUseResult":{"stdout":"","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false,"backgroundTaskId":"%s"}}\n' "$1" "$1" "$1"; }
+# monitor_launch <task-id> : the Monitor tool's launch result (#886).
+monitor_launch() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu-%s","name":"Monitor","input":{"command":"tail -F progress","description":"job progress"}}]}}\n' "$1"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu-%s","content":"Monitor started (task %s)"}]},"toolUseResult":{"taskId":"%s","timeoutMs":1800000,"persistent":false}}\n' "$1" "$1" "$1"; }
+# task_done <task-id> [status] : the terminal notification for a background
+# shell or a monitor — a `<task-id>` with a `<status>`.
+task_done() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<status>%s</status>\\n<summary>done</summary>\\n</task-notification>"}}\n' "$1" "${2:-completed}"; }
+# monitor_event <task-id> : a Monitor event notification — a `<task-id>` with
+# no `<status>`. The monitor is still running, so this is not a return.
+monitor_event() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<summary>Monitor event: job progress</summary>\\n<event>13:45:43 tick</event>\\n</task-notification>"}}\n' "$1"; }
+# task_stop <task-id> : the worker stopping a monitor itself.
+task_stop() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"ts-%s","name":"TaskStop","input":{"task_id":"%s"}}]}}\n' "$1" "$1"; }
+# work : a tool call that is not a report — the mark of a turn that did
+# something and therefore owes the controller a report (#886).
+work() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e-1","name":"Edit","input":{"file_path":"a.js"}}]}}\n'
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e-1","content":"ok"}]},"toolUseResult":{"filePath":"a.js"}}\n'; }
 
 fails=0
 # run <name> <transcript-file> [stop_hook_active] -> sets $pane and $text
@@ -171,7 +191,9 @@ expect_none "a reply to the controller's uds: address counts as reported"
 
 reset_log
 t="$tmp/stale-report.jsonl"
-{ human "$brief"; send s1 "skills-b6"; ok s1; peer "Codex findings, fix and send PR up again"; assistant_text "fixed"; } > "$t"
+# The worker did the fix work the message asked for and then stopped: work
+# since the last report is what makes the report stale (#886).
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "Codex findings, fix and send PR up again"; work; assistant_text "fixed"; } > "$t"
 run "report before the controller's next message" "$t"
 expect_alert "a report from an earlier turn does not cover a later peer-started turn"
 
@@ -228,6 +250,78 @@ t="$tmp/handback-report.jsonl"
 { human "$brief"; launch a1; handback a1; send s1 "skills-b6"; ok s1; assistant_text "PR up"; } > "$t"
 run "report after hand-back" "$t"
 expect_none "a report sent after a hand-back covers the turn the hand-back did not restart"
+
+# A background shell is out: the worker launched `just check-full` and went
+# idle waiting for it (#886, false alert 1 of 3).
+reset_log
+t="$tmp/bg-shell.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
+  bg_launch b06vc2csw; assistant_text "check-full running"; } > "$t"
+run "background shell out" "$t"
+expect_none "a stop while a background shell is out does not alert"
+{ task_done b06vc2csw completed; assistant_text "check green, stopping"; } >> "$t"
+run "background shell done" "$t"
+expect_alert "once the background shell completes, a stop without a report alerts"
+
+# A Monitor task is out (#886, false alert 2 of 3). Its event notifications
+# carry a `<task-id>` and no `<status>`: the monitor is still running, so an
+# event is not its return.
+reset_log
+t="$tmp/monitor.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
+  monitor_launch boirnz0ok; assistant_text "watching the job"; } > "$t"
+run "monitor out" "$t"
+expect_none "a stop while a Monitor task is out does not alert"
+{ monitor_event boirnz0ok; assistant_text "tick noted, still waiting"; } >> "$t"
+run "monitor event" "$t"
+expect_none "a Monitor event does not end the monitor, so the stop still does not alert"
+{ task_done boirnz0ok completed; assistant_text "job done, stopping"; } >> "$t"
+run "monitor ended" "$t"
+expect_alert "once the monitor ends, a stop without a report alerts"
+
+# A monitor the worker stopped itself is no longer outstanding — otherwise
+# the entry sits `waiting` forever and no later silent stop ever alerts.
+reset_log
+t="$tmp/monitor-stopped.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
+  monitor_launch bq1w2e3r4; task_stop bq1w2e3r4; assistant_text "stopped watching"; } > "$t"
+run "monitor stopped by the worker" "$t"
+expect_alert "a monitor the worker stopped with TaskStop is not still outstanding"
+
+# Already reported, then answered a message that needed no reply (#886,
+# false alert 3 of 3 — the one a diligent controller manufactures for
+# itself by closing its own loops). Nothing was done since the report, so
+# the report still stands.
+reset_log
+t="$tmp/loop-closed.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "merged, sha 1a2b3c — nothing needed"; assistant_text "noted"; } > "$t"
+run "message needing no reply" "$t"
+expect_none "a message needing no reply, answered with no work, does not alert"
+
+# A report sent inside this turn stands even though the worker kept working
+# after it — the other half of the reported verdict, which the loop-closed
+# rule below does not cover because work followed the report.
+reset_log
+t="$tmp/reported-then-worked.jsonl"
+{ human "$brief"; peer "what does the failing check say?"; work; send s1 "skills-b6"; ok s1;
+  work; assistant_text "answered, then kept going"; } > "$t"
+run "reported this turn, then kept working" "$t"
+expect_none "a report inside this turn covers the stop even when work followed it"
+
+# The outstanding set is this turn's, and that bound is load-bearing: 45% of
+# real background tasks never emit a terminal notification, so a set carried
+# across turns would let one stale id hold the verdict at `waiting` for the
+# rest of the session and the alert would never fire again (#900, and
+# docs/research/2026-09-19-background-task-terminal-states.md). The price is
+# the case below: a job that never finished does not cover a later stop.
+reset_log
+t="$tmp/bg-across-turns.jsonl"
+{ human "$brief"; bg_launch bnever1; assistant_text "check-full running"; } > "$t"
+run "background shell out" "$t"
+expect_none "a stop while a background shell is out does not alert"
+{ peer "new task: fix the flaky test"; work; assistant_text "fixed it"; } >> "$t"
+run "stale never-finished job" "$t"
+expect_alert "a never-terminated job does not suppress a later genuine silent stop"
 
 reset_log
 t="$tmp/torn.jsonl"

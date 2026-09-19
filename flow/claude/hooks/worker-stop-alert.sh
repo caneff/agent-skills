@@ -6,15 +6,20 @@
 # `--controller "<name>"`. A turn starts at a human prompt or a peer message
 # that is not a subagent hand-back. The worker has reported when, after that
 # turn start, a SendMessage to the controller came back with `success: true`.
-# A stop while a subagent launched this turn has not handed back is a wait,
-# not a finish. A launch is "handed back" in one of three shapes: an
+# A stop while something launched this turn is still out is a wait, not a
+# finish. A subagent is "handed back" in one of three shapes: an
 # `.origin.senderTaskId` peer message (an anonymous `Agent` call's
 # hand-back), a `<task-id>...</task-id>` tag (a task-notification), or a
 # named teammate's plain-text `<teammate-message teammate_id="...">` reply
 # (#859) — that last shape carries no `origin` at all, and its launch id is
 # qualified (`name@session-...`) where the reply's `teammate_id` is bare, so
-# matching strips the `@session-...` suffix before comparing. Otherwise
-# submit one line into the controller's herdr pane
+# matching strips the `@session-...` suffix before comparing. A background
+# shell and a Monitor task are out on the same footing (#886), and end only
+# at a status-bearing task-notification or a `TaskStop`. Also not a silent
+# stop: a worker that reported and has done nothing since — an inbound peer
+# message starts a turn, so a controller closing its own loop (`merged, sha
+# X`) otherwise manufactures an alert on that worker's next stop (#886).
+# Otherwise submit one line into the controller's herdr pane
 # with `herdr agent prompt` — a hook command, so the auto-mode classifier never
 # sees it (#466's report was denied there). One alert per stop: every attempt
 # is logged to ~/.claude/worker-stop-alerts.log keyed by session and the
@@ -63,28 +68,68 @@ done
 # The verdict for this stop: `reported`, `waiting` on a subagent, or `silent`,
 # plus the transcript's last entry as the stop's key.
 IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg sock "$ctl_socket" '
-  (to_entries | map(select(.value.type == "user"
+  to_entries as $all
+  | ($all | map(select(.value.type == "user"
       and (.value.origin.kind == "human" or (.value.origin.kind == "peer" and .value.origin.handback != true))))
    | last | .key // 0) as $start
   | .[($start + 1):] as $after
-  | [$after[] | select(.type == "assistant") | .message.content[]?
+  | [$all[] | select(.value.type == "assistant") | .value.message.content[]?
       | select(.type == "tool_use" and .name == "SendMessage")
       | select(.input.to | strings | . == $c or startswith($c + " [") or ($sock != "" and . == "uds:" + $sock))
       | .id] as $sends
-  | [$after[] | select(.type == "user" and (.toolUseResult | type) == "object" and .toolUseResult.success == true)
-      | .message.content[]? | select(.type == "tool_result") | .tool_use_id | select(IN($sends[]))] as $delivered
+  # Every delivered report, by its position in the transcript.
+  | [$all[] | select(.value.type == "user" and (.value.toolUseResult | type) == "object"
+        and .value.toolUseResult.success == true)
+      | select([.value.message.content[]? | select(.type == "tool_result")
+                | .tool_use_id | select(IN($sends[]))] | length > 0)
+      | .key] as $reports
+  | [$reports[] | select(. > $start)] as $delivered
+  # An inbound peer message starts a turn, so a controller closing a loop
+  # (`merged, sha X`) used to manufacture an alert on the next stop (#886).
+  # A report still stands while nothing has happened since it: any tool call
+  # or tool result after the last delivered report is work that owes the
+  # controller a new one.
+  | ($reports | last) as $reported_at
+  | [$all[] | select($reported_at != null and .key > $reported_at)
+      | select((.value.type == "assistant"
+                and ([.value.message.content[]? | select(.type == "tool_use")] | length > 0))
+               or (.value.toolUseResult != null))] as $since_report
   | [$after[] | .toolUseResult? | objects
       | select(.status == "async_launched" or .status == "teammate_spawned")
       | (.agentId // .agent_id) | select(strings)] as $launched
   | [$after[] | select(.type == "user") | (.origin.senderTaskId // empty),
       (.message.content | strings | scan("<task-id>([^<]+)</task-id>")[0]),
       (.message.content | strings | scan("<teammate-message teammate_id=\"([^\"]+)\"")[0])] as $returned
+  # Background tasks: the launch result of a background shell carries
+  # `backgroundTaskId`, the launch result of a Monitor carries `taskId`
+  # (#886). One ends at a `<task-id>` notification that also carries a
+  # `<status>`, or at a `TaskStop` the worker ran itself. Monitor event
+  # notifications carry a `<task-id>` and no `<status>` while the monitor
+  # keeps running, so an event is not a return. Scanned over this turn, not
+  # the whole transcript: 45% of the background tasks in ~/.claude/projects
+  # never emit a terminal notification at all (docs/research/
+  # 2026-09-19-background-task-terminal-states.md), and a whole-transcript
+  # set difference lets one such id hold the verdict at `waiting` for the
+  # rest of the session — the alert would never fire again, however silently
+  # the worker stopped. The cost of the turn bound is the other way round: a
+  # message that arrives mid-job restarts the turn, so that stop alerts
+  # while the job is still running. A false alert costs a pane read; a
+  # suppressed one costs the signal. #900 holds the wider question.
+  | [$after[] | .toolUseResult? | objects
+      | (.backgroundTaskId // .taskId) | select(strings)] as $tasks
+  | [($after[] | select(.type == "user") | .message.content | strings
+       | select(test("<status>")) | scan("<task-id>([^<]+)</task-id>")[0]),
+     ($after[] | select(.type == "assistant") | .message.content[]?
+       | select(.type == "tool_use" and .name == "TaskStop")
+       | (.input.task_id // .input.shell_id) | select(strings))] as $finished
+  | ($tasks - $finished) as $unfinished
   # A teammate launch id is qualified (name@session-...); its reply id is
   # bare. Neither form appearing in $returned (both survive the set
   # difference, so the length is 2) means this launch is still unresolved.
   | [$launched[] | select(([., sub("@session-[^@]*$"; "")] - $returned | length) == 2)] as $unresolved
   | (if ($delivered | length) > 0 then "reported"
-     elif ($unresolved | length) > 0 then "waiting"
+     elif $reported_at != null and ($since_report | length) == 0 then "reported"
+     elif (($unresolved | length) + ($unfinished | length)) > 0 then "waiting"
      else "silent" end) as $verdict
   | "\($verdict)\t\(last.uuid // "line \(length)")"')
 [ "${verdict:-}" = "silent" ] || exit 0
