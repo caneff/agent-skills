@@ -1546,4 +1546,68 @@ fn help_describes_reap_as_dry_run_by_default_and_unable_to_discard() {
     assert!(run.stdout.contains("--reap cleans up one repo's own implement-* workspaces"), "{}", run.stdout);
     assert!(run.stdout.contains("dry run by default: it removes nothing without --yes"), "{}", run.stdout);
     assert!(run.stdout.contains("no --discard and no --force"), "{}", run.stdout);
+    assert!(run.stdout.contains("this run's own directory is in is skipped"), "{}", run.stdout);
+}
+
+#[test]
+fn reap_run_from_inside_a_workspace_never_deletes_the_ground_it_stands_on() {
+    // The correctness axis on PR #876: with no --repo the repo is the cwd,
+    // and a run started inside a workspace listed itself, removed the
+    // directory it was standing in, and then reported nonsense about every
+    // workspace after it.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r39", &["112", "113"]);
+    let (here, next) = (r.join(".claude/worktrees/implement-112"), r.join(".claude/worktrees/implement-113"));
+    let tip = c.rev(&r, "implement-113");
+    let short = c.git_out(&["-C", s(&r), "rev-parse", "--short", &tip]);
+
+    let run = c.mc_in(Tools::Full, &here, &["--reap", "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(here.is_dir() && c.has_branch(&r, "implement-112"), "{}", run.text());
+    assert!(run.has(&format!("  {}  this run's own directory, not removed", here.display())), "{}", run.text());
+    assert!(!next.exists() && !c.has_branch(&r, "implement-113"), "{}", run.text());
+    assert_eq!(c.git_out(&["-C", s(&r), "ls-remote", "--heads", "origin", "implement-113"]), "", "{}", run.text());
+    assert_eq!(c.rev(&r, &format!("refs/deleted/implement-113@{short}")), tip, "{}", run.text());
+    assert!(run.has("reap summary: 1 reaped, 1 skipped"), "{}", run.text());
+}
+
+#[test]
+fn a_workspace_that_goes_dirty_between_the_plan_and_the_removal_is_refused_not_failed() {
+    // The spec axis on PR #876: pass 2 re-runs the guards, and a guard that
+    // refuses there is an answer — "skipped and named", exit 0 — not a
+    // failure of the run. A pre-push hook fired by the first workspace's own
+    // cleanup drops a file in the second one, which is the race in the small.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r40", &["114", "115"]);
+    let (first, second) = (r.join(".claude/worktrees/implement-114"), r.join(".claude/worktrees/implement-115"));
+    let hook = r.join(".git/hooks/pre-push");
+    std::fs::write(&hook, format!("#!/bin/sh\necho unsaved > {}/notes\n", second.display())).unwrap();
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!first.exists() && !c.has_branch(&r, "implement-114"), "{}", run.text());
+    let want = format!("  {}  dirty, not removed: 1 untracked file(s) would be lost: notes (refused at removal)", second.display());
+    assert!(run.has(&want), "{}", run.text());
+    assert!(second.is_dir() && c.has_branch(&r, "implement-115"), "{}", run.text());
+    assert!(run.has("reap summary: 1 reaped, 1 skipped"), "{}", run.text());
+}
+
+#[test]
+fn reap_pointed_at_a_workspace_still_cleans_up_every_workspace() {
+    // --repo may name a linked worktree, which is itself a candidate. Every
+    // git call anchors at the primary checkout, so removing that one does
+    // not pull the ground out from under the workspaces after it.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r41", &["116", "117"]);
+    let wts = r.join(".claude/worktrees");
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&wts.join("implement-116")), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    for n in ["116", "117"] {
+        assert!(!wts.join(format!("implement-{n}")).exists(), "implement-{n}: {}", run.text());
+        assert!(!c.has_branch(&r, &format!("implement-{n}")), "implement-{n}: {}", run.text());
+        assert_eq!(c.git_out(&["-C", s(&r), "ls-remote", "--heads", "origin", &format!("implement-{n}")]), "", "{}", run.text());
+    }
+    assert_eq!(deleted_records(&c, &r).len(), 2, "{:?}", deleted_records(&c, &r));
+    assert!(run.has("reap summary: 2 reaped, 0 skipped"), "{}", run.text());
 }

@@ -39,7 +39,8 @@ each refuse exactly as they do there. It prints one line per workspace with
 its disposition, and a summary count. Unlike the two forms above, it is a
 dry run by default: it removes nothing without --yes, and it has
 no --discard and no --force to override a refusal with — a workspace those
-guards refuse is named and skipped, which is the point of it.
+guards refuse is named and skipped, which is the point of it. The workspace
+this run's own directory is in is skipped the same way.
 
 A linked worktree with modified, untracked or ignored files is never removed:
 the single-branch form refuses, naming them, and --discard removes it anyway
@@ -658,24 +659,14 @@ impl Cleanup {
             safe_println!("== {} {}", row.repo.trim_end_matches('/'), row.branch);
             let verdict = if !self.cleanup_branch(&row.repo, &row.branch) {
                 rc = ExitCode::FAILURE;
-                "FAILED"
+                "FAILED".to_string()
             } else if self.claim_clear_failed || self.remote_delete_failed {
-                // #832 / the #842 Codex pass: git cleanup succeeded (the
-                // branch and worktree are gone); only a post-cleanup step
-                // failed. A distinct word for each, so the table never reads
-                // like the branch survived — the exit code still fails the
-                // run either way.
                 rc = ExitCode::FAILURE;
-                match (self.remote_delete_failed, self.claim_clear_failed) {
-                    (true, true) => "cleaned, remote branch and claim not cleared",
-                    (true, false) => "cleaned, remote branch not deleted",
-                    (false, true) => "cleaned, claim not cleared",
-                    (false, false) => unreachable!(),
-                }
+                partly_done("cleaned", self.remote_delete_failed, self.claim_clear_failed)
             } else {
-                "cleaned"
+                "cleaned".to_string()
             };
-            rows.push([row.name().to_string(), row.branch.clone(), verdict.to_string(), row.unlanded.clone()]);
+            rows.push([row.name().to_string(), row.branch.clone(), verdict, row.unlanded.clone()]);
         }
         safe_println!();
         safe_println!("sweep summary");
@@ -696,6 +687,17 @@ impl Cleanup {
     /// single-branch guards would refuse is named and skipped, which is the
     /// safety property, not an obstacle.
     fn reap(&mut self, repo: &str, yes: bool) -> ExitCode {
+        // Every git call anchors at the primary checkout, never at the path
+        // the run was pointed at: with no --repo that path is the cwd, and a
+        // run started inside a workspace would `git -C` its way into the
+        // directory it had just removed — reaping one workspace and then
+        // calling every workspace after it unmerged (the correctness axis on
+        // PR #876). A repo with no primary checkout git can name is left as
+        // it was passed.
+        let anchor = match primary_of(repo) {
+            p if p.is_empty() => repo.to_string(),
+            p => p,
+        };
         let root = worktrees_root(repo);
         let candidates = implement_workspaces(repo);
         if candidates.is_empty() {
@@ -711,74 +713,99 @@ impl Cleanup {
         // of them is touched, so a removal never runs ahead of its own report.
         let mut plan = Vec::new();
         for (wt, branch) in candidates {
-            let held = self.reap_hold(repo, &wt, &branch);
-            let line = held.clone().unwrap_or_else(|| if act { "to reap" } else { "would reap" }.into());
-            safe_println!("  {wt}  {line}");
+            let held = self.reap_hold(&anchor, &wt, &branch);
+            safe_println!("  {wt}  {}", held.as_deref().unwrap_or(if act { "to reap" } else { "would reap" }));
             plan.push((wt, branch, held));
         }
         // Pass 2 — the cleanup, through the single-branch path unchanged: it
         // re-runs every guard the plan only read, so a workspace that went
         // live or dirty since pass 1 still refuses.
         let mut rc = ExitCode::SUCCESS;
-        let (mut reaped, mut skipped, mut failed) = (0, 0, 0);
+        let (mut reaped, mut ready, mut skipped, mut failed) = (0, 0, 0, 0);
         let mut verdicts = Vec::new();
         for (wt, branch, held) in plan {
-            let Some(held) = held else {
-                if !act {
-                    reaped += 1;
+            let verdict = match held {
+                Some(held) => {
+                    skipped += 1;
+                    held
+                }
+                None if !act => {
+                    ready += 1;
                     continue;
                 }
-                safe_println!("== {} {branch}", repo.trim_end_matches('/'));
-                let verdict = if !self.cleanup_branch(repo, &branch) {
-                    failed += 1;
-                    rc = ExitCode::FAILURE;
-                    "FAILED"
-                } else if self.claim_clear_failed || self.remote_delete_failed {
-                    // The workspace and branch are gone; only a step after
-                    // them failed — the sweep's own distinction (#832, #842).
-                    reaped += 1;
-                    rc = ExitCode::FAILURE;
-                    match (self.remote_delete_failed, self.claim_clear_failed) {
-                        (true, true) => "reaped, remote branch and claim not cleared",
-                        (true, false) => "reaped, remote branch not deleted",
-                        (false, true) => "reaped, claim not cleared",
-                        (false, false) => unreachable!(),
+                None => {
+                    safe_println!("== {anchor} {branch}");
+                    match self.reap_one(&anchor, &wt, &branch) {
+                        Reaped::Gone(word) => {
+                            reaped += 1;
+                            word
+                        }
+                        Reaped::PartlyGone(word) => {
+                            reaped += 1;
+                            rc = ExitCode::FAILURE;
+                            word
+                        }
+                        // A guard that refused between the plan and the
+                        // removal is an answer, not a failure — the same
+                        // reading --sweep gives a "dirty, not removed" row.
+                        Reaped::Refused(held) => {
+                            skipped += 1;
+                            format!("{held} (refused at removal)")
+                        }
+                        Reaped::Failed => {
+                            failed += 1;
+                            rc = ExitCode::FAILURE;
+                            "FAILED".into()
+                        }
                     }
-                } else {
-                    reaped += 1;
-                    "reaped"
-                };
-                verdicts.push((wt, verdict.to_string()));
-                continue;
+                }
             };
-            skipped += 1;
-            verdicts.push((wt, held));
+            verdicts.push((wt, verdict));
         }
         let counts = if act {
             format!("{reaped} reaped, {skipped} skipped")
         } else {
-            format!("{reaped} would be reaped, {skipped} skipped (dry run; --yes removes)")
+            format!("{ready} would be reaped, {skipped} skipped (dry run; --yes removes)")
         };
         let counts = if failed > 0 { format!("{counts}, {failed} failed") } else { counts };
         safe_println!();
         safe_println!("reap summary: {counts}");
         // Only the run that acted repeats the lines: a dry run's plan above
         // already says the same thing about every workspace.
-        if act {
-            for (wt, verdict) in verdicts {
-                safe_println!("  {wt}  {verdict}");
-            }
+        for (wt, verdict) in verdicts.iter().filter(|_| act) {
+            safe_println!("  {wt}  {verdict}");
         }
         self.close_removed_herdr_workspaces();
         rc
     }
 
-    /// Why the reaper leaves a workspace alone, if it does: the same three
-    /// refusals the single-branch path makes, read without side effects, so
-    /// the disposition line says what a removal would do before one is
-    /// attempted.
-    fn reap_hold(&self, repo: &str, wt: &str, b: &str) -> Option<String> {
-        if self.is_merged(repo, b).is_none() {
+    /// One workspace through the single-branch path, and what became of it.
+    fn reap_one(&mut self, anchor: &str, wt: &str, b: &str) -> Reaped {
+        if !self.cleanup_branch(anchor, b) {
+            // Which guard refused is on stderr already; ask again what holds
+            // the workspace, so a refusal reads as one rather than as a
+            // failure of the run.
+            return match self.reap_hold(anchor, wt, b) {
+                Some(held) => Reaped::Refused(held),
+                None => Reaped::Failed,
+            };
+        }
+        if self.claim_clear_failed || self.remote_delete_failed {
+            return Reaped::PartlyGone(partly_done("reaped", self.remote_delete_failed, self.claim_clear_failed));
+        }
+        Reaped::Gone("reaped".into())
+    }
+
+    /// Why the reaper leaves a workspace alone, if it does: the three
+    /// refusals the single-branch path makes, plus this run's own cwd, read
+    /// before anything is removed so the disposition line says what a
+    /// removal would do. It changes nothing on disk — `is_merged` does ask
+    /// the tracker and fetch, so it is not free, only harmless.
+    fn reap_hold(&self, anchor: &str, wt: &str, b: &str) -> Option<String> {
+        if in_tree(&cwd_path(), wt) {
+            return Some("this run's own directory, not removed".into());
+        }
+        if self.is_merged(anchor, b).is_none() {
             return Some("not merged, not removed".into());
         }
         match WorktreeFiles::read(wt) {
@@ -1089,6 +1116,41 @@ fn ticket_number(b: &str) -> Option<&str> {
     (!n.is_empty() && n.chars().all(|c| c.is_ascii_digit())).then_some(n)
 }
 
+/// What became of one workspace the reaper put through the cleanup.
+enum Reaped {
+    /// Gone.
+    Gone(String),
+    /// Gone, but a step after the removal did not run — `partly_done` words it.
+    PartlyGone(String),
+    /// A guard refused, and names itself.
+    Refused(String),
+    /// The cleanup failed with no guard holding the workspace.
+    Failed,
+}
+
+/// The word for a branch whose git cleanup succeeded — the branch and
+/// worktree are gone — but whose remote delete or claim clear did not
+/// (#832, and the #842 Codex pass), `verb` being the caller's own past
+/// tense for the cleanup. Shared by --sweep and --reap so a half-done
+/// cleanup can never be called one thing in one form's table and another in
+/// the other's, and so neither ever reads like the branch survived; the
+/// exit code fails the run either way.
+fn partly_done(verb: &str, remote_failed: bool, claim_failed: bool) -> String {
+    match (remote_failed, claim_failed) {
+        (true, true) => format!("{verb}, remote branch and claim not cleared"),
+        (true, false) => format!("{verb}, remote branch not deleted"),
+        (false, true) => format!("{verb}, claim not cleared"),
+        (false, false) => unreachable!(),
+    }
+}
+
+/// This process's working directory, symlinks resolved so it compares with
+/// the paths git reports. Empty when there is none to read — a cwd that has
+/// itself been deleted — which `in_tree` then matches nothing against.
+fn cwd_path() -> String {
+    env::current_dir().and_then(|p| p.canonicalize()).map(|p| p.display().to_string()).unwrap_or_default()
+}
+
 /// Where one repo keeps its workspaces: `<primary>/.claude/worktrees`.
 fn worktrees_root(repo: &str) -> String {
     format!("{}/.claude/worktrees", primary_of(repo))
@@ -1109,6 +1171,10 @@ fn implement_workspaces(repo: &str) -> Vec<(String, String)> {
         if let Some(p) = line.strip_prefix("worktree ") {
             current = p;
         } else if let Some(b) = line.strip_prefix("branch refs/heads/")
+            // The primary checkout cannot sit under its own
+            // .claude/worktrees, so this is belt and braces on top of
+            // in_tree — kept, and deliberately unwitnessed, because the
+            // cost of being wrong is a repo's own checkout's branch.
             && current != primary
             && in_tree(current, &root)
             && b.starts_with("implement-")
