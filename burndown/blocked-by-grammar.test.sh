@@ -28,7 +28,12 @@ flatten() { tr '\n' ' ' | tr -s ' '; }
 
 grammar_text="$(flatten <"$grammar")"
 skill_text="$(flatten <"$skill")"
-to_tickets_text="$(flatten <"$to_tickets")"
+# Scope the to-tickets needles to its publishing step, the way
+# implement/closing-issue-wording.test.sh scopes each needle to its section —
+# a phrase as generic as "in addition to" must not be satisfied by unrelated
+# prose elsewhere in the file.
+to_tickets_text="$(sed -n '/^### 5\. Publish the tickets/,/^<local-ticket-template>/p' "$to_tickets" | flatten)"
+[ -n "$to_tickets_text" ] || { echo "FAIL: could not extract step 5 from to-tickets/SKILL.md" >&2; exit 1; }
 
 fail=0
 check_in() {
@@ -60,7 +65,7 @@ check_in "$skill_text" 'frontier.py' burndown/SKILL.md
 
 # Rule 5: /to-tickets writes what the reader parses — the section on every
 # ticket, native edges as well where the tracker has them, in that grammar.
-check_in "$to_tickets_text" 'native blocking' to-tickets/SKILL.md
+check_in "$to_tickets_text" '--add-blocked-by' to-tickets/SKILL.md
 check_in "$to_tickets_text" 'in addition to' to-tickets/SKILL.md
 check_in "$to_tickets_text" 'frontier.md' to-tickets/SKILL.md
 check_in "$to_tickets_text" 'never omit' to-tickets/SKILL.md

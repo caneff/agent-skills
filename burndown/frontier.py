@@ -21,6 +21,7 @@ import json
 import re
 import subprocess
 import sys
+from urllib.parse import quote
 
 # An ATX heading whose text is exactly "Blocked by", any level, any case —
 # `##` is what `/to-tickets` emits and what the grammar specifies.
@@ -36,6 +37,12 @@ _REFERENCE = re.compile(r"(?<![0-9A-Za-z_/#-])#(\d+)")
 _NONE = re.compile(r"^[-*\s]*none\b", re.IGNORECASE)
 
 CLAIMED_LABEL = "in-progress"
+
+
+class FrontierError(Exception):
+    """The tracker could not be read. One stderr line, never a traceback:
+    this reader's whole point is that an answer it cannot get has a name."""
+
 
 
 def blocked_by_section(body):
@@ -135,27 +142,43 @@ def classify(issues, state_of):
     return buckets
 
 
-def _gh_json(*args):
-    out = subprocess.run(["gh", *args], capture_output=True, text=True)
-    if out.returncode != 0:
-        raise RuntimeError(out.stderr.strip() or f"gh {' '.join(args)} failed")
-    return json.loads(out.stdout or "null")
-
-
-def fetch_issues(repo, label):
-    """Every open issue with `label`, from the REST endpoint — the GraphQL
-    one `gh issue list` uses does not carry `issue_dependencies_summary`."""
-    return _gh_json("api", "--paginate",
-                    f"repos/{repo}/issues?state=open&per_page=100&labels={label}")
-
-
-def fetch_state(repo, number):
-    """`"open"` / `"closed"` for one issue, or `None` when it cannot be read
-    — a number that names nothing in this repo is not a closed blocker."""
+def gh_json(args):
+    """`gh <args>` parsed as JSON. Raises `FrontierError` on anything that
+    stops it answering — the caller decides whether that is fatal."""
     try:
-        return (_gh_json("api", f"repos/{repo}/issues/{number}") or {}).get("state")
-    except (RuntimeError, ValueError):
+        out = subprocess.run(["gh", *args], capture_output=True, text=True)
+    except OSError as exc:  # gh not installed, not executable, ...
+        raise FrontierError(f"gh: {exc}") from exc
+    if out.returncode != 0:
+        raise FrontierError(out.stderr.strip() or f"gh {' '.join(args)} failed")
+    try:
+        return json.loads(out.stdout or "null")
+    except ValueError as exc:
+        raise FrontierError(f"gh {' '.join(args)}: unreadable JSON") from exc
+
+
+def fetch_issues(repo, label, run=gh_json):
+    """Every open issue with `label`, from the REST endpoint — the GraphQL
+    one `gh issue list` uses does not carry `issue_dependencies_summary`.
+
+    The label and repo are percent-encoded into the path: a `#` in a raw URL
+    is a fragment marker `gh` drops, which answers a broader queue with exit
+    0 — the wrong queue reported as a good one — and a space hangs the
+    request. An empty answer is an empty queue, not `None`."""
+    path = (f"repos/{quote(repo, safe='/')}/issues"
+            f"?state=open&per_page=100&labels={quote(label, safe='')}")
+    return run(["api", "--paginate", path]) or []
+
+
+def fetch_state(repo, number, run=gh_json):
+    """`"open"` / `"closed"` for one issue, or `None` when it cannot be read
+    — a number that names nothing in this repo is not a closed blocker, and
+    neither is one whose lookup failed."""
+    try:
+        answer = run(["api", f"repos/{quote(repo, safe='/')}/issues/{int(number)}"])
+    except (FrontierError, OSError):
         return None
+    return (answer or {}).get("state")
 
 
 def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state):
@@ -189,7 +212,12 @@ def main(argv):
     if len(argv) != 3:
         print("usage: frontier.py <owner/repo> <label>", file=sys.stderr)
         return 2
-    print(render(frontier(argv[1], argv[2])))
+    try:
+        buckets = frontier(argv[1], argv[2])
+    except FrontierError as exc:
+        print(f"frontier.py: {exc}", file=sys.stderr)
+        return 1
+    print(render(buckets))
     return 0
 
 

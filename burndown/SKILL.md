@@ -21,7 +21,7 @@ nothing — is read by `burndown/frontier.py`, not by a regex at the call site:
 `## Blocked by` section as the fallback, and a ticket with neither is
 **unresolved** — never dispatched on the assumption that silence means clear.
 The grammar and the three sources:
-[`references/frontier.md`](~/.agents/skills/burndown/references/frontier.md).
+[`references/frontier.md`](references/frontier.md).
 Written against the lane being rebuilt; the loop that will call it is parked
 with the rest of this skill.
 

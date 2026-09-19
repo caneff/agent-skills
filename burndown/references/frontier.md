@@ -8,7 +8,7 @@ buckets, not two.
 
 ```
 unblocked   901 The closure resolver
-blocked     903 § The loop  (blocked by #901)
+blocked     903 The dispatch loop  (blocked by #901)
 unresolved  907 Liveness  (no native dependencies and no `## Blocked by` section)
 ```
 

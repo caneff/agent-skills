@@ -223,6 +223,42 @@ def test_the_cli_refuses_a_wrong_argument_count():
     assert "usage: frontier.py <owner/repo> <label>" in r.stderr, r.stderr
 
 
+# --- The `gh` adapters -----------------------------------------------------
+
+def test_a_label_with_odd_characters_is_encoded_into_the_url():
+    # `#` in a raw URL is a fragment marker: gh drops it and answers a
+    # broader queue with exit 0, which is the wrong answer reported as a
+    # good one. A space hangs the request outright.
+    calls = []
+    got = F.fetch_issues("owner/repo", "needs info#1",
+                         run=lambda args: calls.append(args) or [])
+    assert got == [], got
+    assert calls[0][-1].endswith("labels=needs%20info%231"), calls
+
+
+def test_a_gh_call_that_answers_nothing_is_an_empty_queue():
+    # A zero-exit `gh` with empty stdout parsed to None, and the frontier
+    # then died on `TypeError: 'NoneType' object is not iterable`.
+    assert F.fetch_issues("owner/repo", "l", run=lambda args: None) == []
+
+
+def test_a_missing_gh_leaves_a_blocker_state_unread():
+    def explode(args):
+        raise FileNotFoundError(2, "No such file or directory", "gh")
+
+    assert F.fetch_state("owner/repo", 7, run=explode) is None
+
+
+def test_the_cli_reports_a_failed_gh_call_on_one_line():
+    r = subprocess.run([sys.executable, FRONTIER, "owner/repo", "l"],
+                       capture_output=True, text=True,
+                       env={**os.environ, "PATH": "/nonexistent"})
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert r.stderr.count("\n") == 1, r.stderr
+    assert "frontier.py: " in r.stderr, r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
