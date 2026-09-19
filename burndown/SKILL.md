@@ -12,6 +12,19 @@ disable-model-invocation: true
 > executable policy until the lane is rebuilt. Full text:
 > `git show 7c7eb30:burndown/SKILL.md`.
 
+## The frontier
+
+Which tickets a run may dispatch next — open, labelled, unclaimed, waiting on
+nothing — is read by `burndown/frontier.py`, not by a regex at the call site:
+`python3 burndown/frontier.py <owner/repo> <label>` prints the `unblocked`,
+`blocked` and `unresolved` buckets. Native tracker dependencies first, the
+`## Blocked by` section as the fallback, and a ticket with neither is
+**unresolved** — never dispatched on the assumption that silence means clear.
+The grammar and the three sources:
+[`references/frontier.md`](~/.agents/skills/burndown/references/frontier.md).
+Written against the lane being rebuilt; the loop that will call it is parked
+with the rest of this skill.
+
 A single spec's slices in one workspace are
 [`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this
 skill's — also parked.
