@@ -18,9 +18,8 @@
 # at a status-bearing task-notification or a `TaskStop`. Also not a silent
 # stop: a worker that reported and has done nothing since — an inbound peer
 # message starts a turn, so a controller closing its own loop (`merged, sha
-# X`) otherwise manufactures an alert on the worker next stop (#886).
-# Otherwise
-# submit one line into the controller's herdr pane
+# X`) otherwise manufactures an alert on that worker's next stop (#886).
+# Otherwise submit one line into the controller's herdr pane
 # with `herdr agent prompt` — a hook command, so the auto-mode classifier never
 # sees it (#466's report was denied there). One alert per stop: every attempt
 # is logged to ~/.claude/worker-stop-alerts.log keyed by session and the
@@ -106,12 +105,14 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
   # (#886). One ends at a `<task-id>` notification that also carries a
   # `<status>`, or at a `TaskStop` the worker ran itself. Monitor event
   # notifications carry a `<task-id>` and no `<status>` while the monitor
-  # keeps running, so an event is not a return.
-  | [$after[] | .toolUseResult? | objects
+  # keeps running, so an event is not a return. Scanned over the whole
+  # transcript, not this turn: an inbound message starts a turn but does
+  # not put a running job back on the ground.
+  | [$all[].value | .toolUseResult? | objects
       | (.backgroundTaskId // .taskId) | select(strings)] as $tasks
-  | [($after[] | select(.type == "user") | .message.content | strings
+  | [($all[].value | select(.type == "user") | .message.content | strings
        | select(test("<status>")) | scan("<task-id>([^<]+)</task-id>")[0]),
-     ($after[] | select(.type == "assistant") | .message.content[]?
+     ($all[].value | select(.type == "assistant") | .message.content[]?
        | select(.type == "tool_use" and .name == "TaskStop")
        | (.input.task_id // .input.shell_id) | select(strings))] as $finished
   | ($tasks - $finished) as $unfinished

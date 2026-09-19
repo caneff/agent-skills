@@ -86,8 +86,8 @@ monitor_event() { printf '{"type":"user","origin":{"kind":"task-notification"},"
 task_stop() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"ts-%s","name":"TaskStop","input":{"task_id":"%s"}}]}}\n' "$1" "$1"; }
 # work : a tool call that is not a report — the mark of a turn that did
 # something and therefore owes the controller a report (#886).
-work() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e-%s","name":"Edit","input":{"file_path":"a.js"}}]}}\n' "$RANDOM"
-  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e-x","content":"ok"}]},"toolUseResult":{"filePath":"a.js"}}\n'; }
+work() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e-1","name":"Edit","input":{"file_path":"a.js"}}]}}\n'
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e-1","content":"ok"}]},"toolUseResult":{"filePath":"a.js"}}\n'; }
 
 fails=0
 # run <name> <transcript-file> [stop_hook_active] -> sets $pane and $text
@@ -297,6 +297,31 @@ t="$tmp/loop-closed.jsonl"
 { human "$brief"; send s1 "skills-b6"; ok s1; peer "merged, sha 1a2b3c — nothing needed"; assistant_text "noted"; } > "$t"
 run "message needing no reply" "$t"
 expect_none "a message needing no reply, answered with no work, does not alert"
+
+# A report sent inside this turn stands even though the worker kept working
+# after it — the other half of the reported verdict, which the loop-closed
+# rule below does not cover because work followed the report.
+reset_log
+t="$tmp/reported-then-worked.jsonl"
+{ human "$brief"; peer "what does the failing check say?"; work; send s1 "skills-b6"; ok s1;
+  work; assistant_text "answered, then kept going"; } > "$t"
+run "reported this turn, then kept working" "$t"
+expect_none "a report inside this turn covers the stop even when work followed it"
+
+# A background shell launched in an earlier turn is still out: an inbound
+# message that starts a turn does not put the job back on the ground (#886,
+# causes 1 and 3 composed).
+reset_log
+t="$tmp/bg-across-turns.jsonl"
+{ human "$brief"; bg_launch bcross1; assistant_text "check-full running"; } > "$t"
+run "background shell out, before the message" "$t"
+expect_none "a stop while a background shell is out does not alert"
+{ peer "fyi: merged the other PR"; work; assistant_text "noted, still waiting"; } >> "$t"
+run "background shell out, across a message" "$t"
+expect_none "a message arriving mid-job does not turn the wait into a silent stop"
+{ task_done bcross1 completed; assistant_text "check green, stopping"; } >> "$t"
+run "background shell done, across a message" "$t"
+expect_alert "once the job ends, a stop without a report alerts"
 
 reset_log
 t="$tmp/torn.jsonl"
