@@ -1037,14 +1037,27 @@ impl Cleanup {
             skip(&what, "no origin remote");
             return true;
         };
-        let tickets = landed_tickets(&slug, b, n);
+        // The union, ascending and each once: the tickets the merged PR
+        // closes, plus the branch's own. The PR's closingIssuesReferences is
+        // the clump's list and needs no bookkeeping of its own; keeping the
+        // branch's ticket in the set whatever the PR says is what makes a PR
+        // whose closing keyword never registered, and a --force run with no
+        // merged PR to read, clear exactly what they cleared before #889.
+        // Sorted by length then text rather than by parsed number: these are
+        // digit strings straight from a branch name, and a number too long
+        // for u64 must not silently drop out of the set.
+        let mut tickets: Vec<String> = vec![n.to_string()];
+        tickets.extend(pr_closed_tickets(&slug, b).iter().map(u64::to_string));
+        tickets.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+        tickets.dedup();
+
         let mut ok = true;
         let mut cleared: Vec<String> = Vec::new();
         for t in &tickets {
             match self.clear_one(&slug, t) {
-                Some(true) => cleared.push(format!("#{t}")),
-                Some(false) => ok = false,
-                None => {}
+                Cleared::Done => cleared.push(format!("#{t}")),
+                Cleared::Failed => ok = false,
+                Cleared::Nothing => {}
             }
         }
         // Only a clump gets the summary: on a one-ticket PR the per-ticket
@@ -1056,22 +1069,18 @@ impl Cleanup {
         ok
     }
 
-    /// One ticket's claim. `None` when there is nothing to do — the issue
-    /// still open (part of a bigger ticket, or reopened), the label already
-    /// gone (and `gh issue edit` errors on a label a repo never defines),
-    /// or the read itself failed. A `gh issue view` that fails is reported,
-    /// not treated as an open issue — an outage must not silently reproduce
-    /// the stale claim #821 was filed over — but is still non-fatal, since
-    /// there was never a known edit to lose. `Some(false)` is a failed
-    /// edit, which the caller folds into the run's exit code.
-    fn clear_one(&self, slug: &str, n: &str) -> Option<bool> {
+    /// One ticket's claim. A `gh issue view` that fails is reported, not
+    /// treated as an open issue — an outage must not silently reproduce the
+    /// stale claim #821 was filed over — but is still `Nothing`, since there
+    /// was never a known edit to lose.
+    fn clear_one(&self, slug: &str, n: &str) -> Cleared {
         let what = format!("clearing #{n}'s in-progress label and assignee");
         let Some(issue) = lane::issue_state::read(slug, n) else {
             skip(&what, "gh issue view failed");
-            return None;
+            return Cleared::Nothing;
         };
         if issue.state != "CLOSED" || !issue.has_label("in-progress") {
-            return None;
+            return Cleared::Nothing;
         }
         let mut edit = vec!["issue", "edit", n, "--repo", slug, "--remove-label", "in-progress"];
         if !issue.assignees_csv.is_empty() {
@@ -1088,10 +1097,24 @@ impl Cleanup {
                 "merge-cleanup: {cleanup_status}, but could not clear #{n}'s in-progress label and assignee; re-run: gh {}",
                 edit.join(" ")
             );
-            return Some(false);
+            return Cleared::Failed;
         }
-        Some(true)
+        Cleared::Done
     }
+}
+
+/// What `clear_one` did with one ticket's claim.
+enum Cleared {
+    /// Nothing to do: the issue is still open (part of a bigger ticket, or
+    /// reopened), it no longer carries `in-progress` (already cleared, and
+    /// `gh issue edit` errors on a label a repo never defines), or it could
+    /// not be read.
+    Nothing,
+    /// The label and the issue's assignees came off.
+    Done,
+    /// The edit failed. The caller folds this into the run's exit code; the
+    /// re-run command is already on stderr.
+    Failed,
 }
 
 /// One merged branch the sweep will clean.
@@ -1156,26 +1179,13 @@ fn print_table(rows: &[[String; 4]]) {
     }
 }
 
-/// Every ticket this branch's landing closed: the branch's own ticket, plus
-/// the tickets of every merged PR whose head is this branch — a clump's PR
-/// closes all of them, and `closingIssuesReferences` is GitHub's own record
-/// of which, needing no ticket-list bookkeeping of its own. Ascending, each
-/// once. The branch's own ticket stays in the set whatever the PR says, so a
-/// PR whose closing keyword never registered, and a `--force` run with no
-/// merged PR to read, both clear exactly what they cleared before #889.
-fn landed_tickets(slug: &str, b: &str, n: &str) -> Vec<String> {
-    let mut out: Vec<u64> = n.parse().into_iter().collect();
-    out.extend(pr_closed_tickets(slug, b));
-    out.sort_unstable();
-    out.dedup();
-    out.iter().map(u64::to_string).collect()
-}
-
 /// The issues the merged PRs on head `b` close, restricted to `slug`'s own
-/// repo. A reference elsewhere is dropped: every edit here goes out with
-/// `--repo <slug>`, so acting on that number would edit an unrelated issue
-/// that happens to share it. An unreadable or empty answer is no tickets,
-/// which leaves `landed_tickets` with the branch's own.
+/// repo. A reference elsewhere is dropped and named on its own skip line:
+/// every edit here goes out with `--repo <slug>`, so acting on that number
+/// would edit an unrelated issue that happens to share it — and a claim this
+/// run is leaving alone has to say so, or a cross-repo clump reads as
+/// cleared when it is not. An unreadable or empty answer is no tickets,
+/// which leaves the caller with the branch's own.
 fn pr_closed_tickets(slug: &str, b: &str) -> Vec<u64> {
     let Some((owner, name)) = slug.rsplit_once('/') else { return Vec::new() };
     let Some(out) = quiet_stdout(
@@ -1195,12 +1205,12 @@ fn pr_closed_tickets(slug: &str, b: &str) -> Vec<u64> {
             let repo = r.get("repository");
             let r_name = repo.and_then(|v| v.get("name")).and_then(serde_json::Value::as_str).unwrap_or("");
             let r_owner = repo.and_then(|v| v.get("owner")).and_then(|v| v.get("login")).and_then(serde_json::Value::as_str).unwrap_or("");
+            let Some(number) = r.get("number").and_then(serde_json::Value::as_u64) else { continue };
             if (r_owner, r_name) != (owner, name) {
+                skip(&format!("clearing {r_owner}/{r_name}#{number}"), &format!("another repo; this run only edits {slug}"));
                 continue;
             }
-            if let Some(number) = r.get("number").and_then(serde_json::Value::as_u64) {
-                tickets.push(number);
-            }
+            tickets.push(number);
         }
     }
     tickets

@@ -127,12 +127,11 @@ fn run_gh(args: &[String]) -> ExitCode {
         println!("{row}");
     }
     if (a0, a1) == ("issue", "edit") {
-        // "1" fails every edit, as it always did; a comma-separated list of
-        // ticket numbers fails only those, which is how a clump test makes
-        // one ticket's edit fail among several.
+        // A comma-separated list of the ticket numbers whose edit fails, so
+        // a clump test can fail one ticket's edit among several.
         let which = env::var("GH_ISSUE_EDIT_FAIL").unwrap_or_default();
         let n = args.get(2).map(String::as_str).unwrap_or("");
-        if which == "1" || (!which.is_empty() && which.split(',').any(|t| t == n)) {
+        if which.split(',').any(|t| !t.is_empty() && t == n) {
             eprintln!("gh: issue edit failed");
             return ExitCode::FAILURE;
         }

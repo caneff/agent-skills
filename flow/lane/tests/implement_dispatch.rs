@@ -736,7 +736,7 @@ fn help_documents_both_modes() {
         "ready-for-human",
         "--chris-merges",
         "Several issue numbers are one clump",
-        "implement-<n>\nfor the lowest number named",
+        "for the lowest number named",
     ] {
         assert!(text.contains(want), "help lacks {want:?}:\n{text}");
     }
@@ -964,6 +964,26 @@ fn the_same_ticket_named_twice_is_refused() {
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "437", "437"], &default_scenario());
     assert!(refused(&out, &f.calls(), &repo, "437", "#437 is named twice"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_leading_zero_does_not_make_a_second_ticket() {
+    // An issue number is the number: `007` and `7` are one ticket. Compared
+    // as text they are two, and the clump would claim and brief the same
+    // issue twice while `0437` named the branch.
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "0437", "437"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "437", "#437 is named twice"), "{}", out_text(&out));
+
+    let f2 = Fixture::new();
+    f2.reset_home(true);
+    let repo2 = f2.mkfixture("sudokumaker-custom-constraints", "main");
+    let out2 = f2.dispatch(&["--repo", repo2.to_str().unwrap(), "0438"], &default_scenario());
+    assert!(out2.status.success(), "{}", out_text(&out2));
+    assert!(f2.calls().contains("/implement 438 --tier"), "{}", f2.calls());
+    assert!(repo2.join(".claude/worktrees/implement-438").is_dir(), "{}", f2.calls());
 }
 
 #[test]

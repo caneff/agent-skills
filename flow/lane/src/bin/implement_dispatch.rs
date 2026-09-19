@@ -66,22 +66,22 @@ of the nearest ancestor process whose file is live (its procStart matches) —
 the Claude session running this. Session names can hold spaces, hence the
 quotes.
 
-The claim swaps ready-for-agent for in-progress on every ticket in the
-clump. A ready-for-human ticket
-keeps ready-for-human and adds in-progress beside it, so the live labels
-still show Chris-merges after the claim, and a second dispatch still refuses
-on the held in-progress label. Release on a failed claim undoes only what the
-claim did: in-progress off, the ready label back on for ready-for-agent, and
-the assignee removed. A claim that fails partway through a clump releases the
-tickets it had already claimed, so nothing is left half-claimed.
+The claim swaps ready-for-agent for in-progress on every ticket in the clump.
+A ready-for-human ticket keeps ready-for-human and adds in-progress beside it,
+so the live labels still show Chris-merges after the claim, and a second
+dispatch still refuses on the held in-progress label. Release on a failed
+claim undoes only what the claim did: in-progress off, the ready label back on
+for ready-for-agent, and the assignee removed. A claim that fails partway
+through a clump releases the tickets it had already claimed, so nothing is
+left half-claimed.
 
 Refuses, with nothing claimed or created, when any named issue is not open and
-labelled exactly one of ready-for-agent and ready-for-human, it carries a
-held label (in-progress, needs-info), spec mode names an issue without the
-spec label or with ready-for-human or names more than one, plain mode names
-one with the spec label, no controller is named or found, the herdr server is not running,
-claude onboarding is incomplete, the herdr agent name is taken, or the
-workspace path or branch already exists.
+labelled exactly one of ready-for-agent and ready-for-human, it carries a held
+label (in-progress, needs-info), the same number is named twice, spec mode
+names an issue without the spec label or with ready-for-human or names more
+than one, plain mode names one with the spec label, no controller is named or
+found, the herdr server is not running, claude onboarding is incomplete, the
+herdr agent name is taken, or the workspace path or branch already exists.
 After the workspace exists, any herdr failure exits non-zero with herdr's own
 error and leaves the workspace in place for inspection. There is no
 bare-claude fallback.
@@ -399,20 +399,25 @@ fn run() -> Result<(), ExitCode> {
     if args.ns.is_empty() {
         return Err(die("name one issue number"));
     }
+    // Parsed, not just digit-checked, and then rendered back: an issue
+    // number is the number, so `007` and `7` are one ticket. Compared as
+    // text they are two, and the clump would claim and brief the same issue
+    // twice — the outcome the repeat check below exists to prevent — while
+    // `007` also named the branch, the workspace and the agent.
+    let mut numbers: Vec<u64> = Vec::new();
     for n in &args.ns {
-        if n.is_empty() || !n.chars().all(|c| c.is_ascii_digit()) {
-            return Err(die("name one issue number"));
+        match n.parse::<u64>() {
+            Ok(v) if n.chars().all(|c| c.is_ascii_digit()) => numbers.push(v),
+            _ => return Err(die("name one issue number")),
         }
     }
     // Ascending, so the lowest names the branch, the workspace and the
-    // agent however the clump was typed. A repeat is a mistake worth
-    // surfacing rather than silently collapsing: the claim would run twice
-    // on it and the brief would list it twice.
-    let mut ns: Vec<String> = args.ns.clone();
-    ns.sort_by_key(|n| n.parse::<u64>().unwrap_or(u64::MAX));
-    if let Some(dup) = ns.windows(2).find(|w| w[0] == w[1]) {
+    // agent however the clump was typed.
+    numbers.sort_unstable();
+    if let Some(dup) = numbers.windows(2).find(|w| w[0] == w[1]) {
         return Err(die(format!("#{} is named twice", dup[0])));
     }
+    let ns: Vec<String> = numbers.iter().map(u64::to_string).collect();
     let n = ns[0].clone();
     let mode = match (&args.slots, args.spec) {
         (None, false) => Mode::Plain,

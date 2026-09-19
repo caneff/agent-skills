@@ -269,7 +269,7 @@ fn a_failed_edit_exits_non_zero_and_names_the_exact_command_to_re_run() {
     let run = c.mc(
         Tools::Full,
         &["--repo", s(&r), "implement-49"],
-        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "49")],
     );
     assert!(!run.ok, "{}", run.text());
     assert!(!c.has_branch(&r, "implement-49"), "{}", run.text());
@@ -299,7 +299,7 @@ fn a_failed_claim_clear_still_reports_stale_siblings() {
     let run = c.mc(
         Tools::Full,
         &["--repo", s(&r), "implement-50"],
-        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "50")],
     );
     assert!(!run.ok, "{}", run.text());
     assert!(!c.has_branch(&r, "implement-50"), "{}", run.text());
@@ -319,7 +319,7 @@ fn a_sweep_row_for_a_claim_clear_failure_says_so_distinctly_and_still_fails_the_
     let run = c.mc(
         Tools::Full,
         &["--sweep", "--root", s(&root), "--yes"],
-        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "51")],
     );
     assert!(!run.ok, "{}", run.text());
     assert!(!c.has_branch(&other, "implement-51"), "{}", run.text());
@@ -369,7 +369,7 @@ fn a_denied_remote_delete_changes_the_claim_clear_failure_wording() {
     let run = c.mc(
         Tools::Full,
         &["--repo", s(&r), "implement-53"],
-        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "1")],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_ISSUE_EDIT_FAIL", "53")],
     );
     assert!(!run.ok, "{}", run.text());
     assert!(
@@ -443,6 +443,8 @@ fn a_clump_ticket_in_another_repo_is_never_edited() {
     assert!(run.ok, "{}", run.text());
     assert!(c.calls().contains("gh issue edit 63 --repo"), "{}", c.calls());
     assert!(!c.calls().contains("gh issue edit 64"), "{}", c.calls());
+    // Named, not silently dropped: a claim this run leaves alone has to say so.
+    assert!(run.has("skipped clearing caneff/elsewhere#64 (another repo"), "{}", run.text());
 }
 
 #[test]
@@ -493,7 +495,11 @@ fn a_pr_that_closes_nothing_still_clears_the_branchs_own_ticket() {
     );
     assert!(run.ok, "{}", run.text());
     assert!(c.calls().contains("gh issue edit 69 --repo"), "{}", c.calls());
-    assert!(!run.has("cleared #69,"), "one ticket reports as it always did: {}", run.text());
+    assert!(
+        !run.stdout.lines().any(|l| l.starts_with("cleared ")),
+        "one ticket reports as it always did, with no clump summary line: {}",
+        run.text()
+    );
 }
 
 #[test]
