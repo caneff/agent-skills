@@ -21,6 +21,9 @@
 # script's `handleReviewCommand` never reads either flag.
 # This is a prose assertion over the two files, not a behavioral test —
 # there is no harness that runs the skills' own prose.
+# #877: both of SKILL.md's ticket reads must fetch `--json body,comments`, a
+# comment having been invisible to both. What that fetch then renders is
+# executed, not grepped, by implement/ticket_comment_render_test.py.
 # A caller's leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR/
 # GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES would point
 # show-toplevel at that caller's repo instead of this one (#620); resolving
@@ -43,13 +46,25 @@ check() {
       ;;
   esac
 }
+check_count() {
+  local file="$1" needle="$2" want="$3"
+  local flat got
+  flat="$(tr '\n' ' ' <"$file" | tr -s ' ')"
+  # grep exits 1 on no match, which `set -e`/`pipefail` would turn into a
+  # silent abort of the whole suite instead of the FAIL line below.
+  got="$(printf '%s' "$flat" | { grep -o -F -- "$needle" || true; } | wc -l)"
+  if [ "$got" -ne "$want" ]; then
+    echo "FAIL: $file has $got occurrences of '$needle', want $want" >&2
+    fail=1
+  fi
+}
 check_absent() {
-  local file="$1" needle="$2"
+  local file="$1" needle="$2" why="$3"
   local flat
   flat="$(tr '\n' ' ' <"$file" | tr -s ' ')"
   case "$flat" in
     *"$needle"*)
-      echo "FAIL: $file still has the naive, unsafe form: $needle" >&2
+      echo "FAIL: $file still has $why: $needle" >&2
       fail=1
       ;;
     *) ;;
@@ -63,11 +78,16 @@ check_absent() {
 check "$skill" 'disable-model-invocation: true'
 check "$skill" "codex@openai-codex"
 check "$skill" 'installPath'
-check "$skill" 'body_file=<absolute path you wrote the ticket body to>'
+check "$skill" 'body_file=<absolute path you wrote the ticket body and comments to>'
 check "$skill" 'codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"'
 check "$skill" 'the `AskUserQuestion` gate lives there, not in the script'
 check "$skill" '`handleReviewCommand` parses `--wait`/`--background` as booleans and'
-check_absent "$skill" '"<ticket body verbatim>"'
+check_absent "$skill" '"<ticket body verbatim>"' 'the naive, unsafe form'
+
+# #877: two ticket reads, so two comment-carrying fetches, and no read left
+# on the comment-less form.
+check_count "$skill" '--json body,comments --jq' 2
+check_absent "$skill" '--json body --jq .body' 'a comment-less ticket read'
 
 # codex-lane.md § The reviews: same requirement, both commands it names.
 check "$lane" 'disable-model-invocation: true'
@@ -76,7 +96,7 @@ check "$lane" 'installPath'
 check "$lane" 'body_file=<absolute path you wrote the ticket body to>'
 check "$lane" 'codex-companion.mjs" review --wait'
 check "$lane" 'codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"'
-check_absent "$lane" '"<ticket body verbatim>"'
+check_absent "$lane" '"<ticket body verbatim>"' 'the naive, unsafe form'
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS implement/codex-adversarial-invocation.test.sh"
