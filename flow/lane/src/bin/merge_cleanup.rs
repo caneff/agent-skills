@@ -783,6 +783,18 @@ impl Cleanup {
 
     /// One workspace through the single-branch path, and what became of it.
     fn reap_one(&mut self, anchor: &str, wt: &str, b: &str) -> Reaped {
+        // The plan named this workspace, but `cleanup_branch` resolves the
+        // branch for itself. A branch moved between the two would put a
+        // worktree the plan never listed — one outside .claude/worktrees/
+        // included — in reach of the removal, so the scope is proved again
+        // here, at the destructive call, and not only at enumeration (the
+        // Codex pass on PR #878). A branch whose worktree simply went away
+        // still cleans up: there is nothing left to remove out of scope.
+        if let Some(now) = linked_worktree_holding(anchor, b)
+            && now != wt
+        {
+            return Reaped::Refused(format!("moved since the plan, not removed: {now} now holds {b}"));
+        }
         if !self.cleanup_branch(anchor, b) {
             // Which guard refused is on stderr already; ask again what holds
             // the workspace, so a refusal reads as one rather than as a
@@ -1158,7 +1170,21 @@ fn cwd_path() -> String {
 /// the path it was added under, which a repo reached through a symlink
 /// spells differently from the cwd's resolved form.
 fn resolved(p: &str) -> String {
-    std::fs::canonicalize(p).map(|p| p.display().to_string()).unwrap_or_else(|_| p.to_string())
+    resolved_under(p).unwrap_or_else(|| p.to_string())
+}
+
+/// A path resolved for a containment test: symlinks followed, and a
+/// directory that is already gone resolved through its parent — git still
+/// registers a workspace whose folder was deleted, and that one is still a
+/// candidate. `None` when not even the parent resolves, which is a path
+/// this run cannot prove is inside anything.
+fn resolved_under(p: &str) -> Option<String> {
+    if let Ok(r) = std::fs::canonicalize(p) {
+        return Some(r.display().to_string());
+    }
+    let path = Path::new(p);
+    let parent = std::fs::canonicalize(path.parent()?).ok()?;
+    Some(parent.join(path.file_name()?).display().to_string())
 }
 
 /// Where one repo keeps its workspaces: `<primary>/.claude/worktrees`.
@@ -1173,7 +1199,7 @@ fn worktrees_root(repo: &str) -> String {
 /// worktree elsewhere on disk is left out however its branch is named.
 fn implement_workspaces(repo: &str) -> Vec<(String, String)> {
     let primary = primary_of(repo);
-    let root = worktrees_root(repo);
+    let Some(root) = resolved_under(&worktrees_root(repo)) else { return Vec::new() };
     let out = quiet_stdout("git", &["-C", repo, "worktree", "list", "--porcelain"]).unwrap_or_default();
     let mut found = Vec::new();
     let mut current = "";
@@ -1186,7 +1212,12 @@ fn implement_workspaces(repo: &str) -> Vec<(String, String)> {
             // in_tree — kept, and deliberately unwitnessed, because the
             // cost of being wrong is a repo's own checkout's branch.
             && current != primary
-            && in_tree(current, &root)
+            // Both sides resolved, the same way the cwd hold resolves them:
+            // a path that cannot be proved inside the root is not a
+            // candidate. git records a worktree by its resolved path, so
+            // this is the class closed rather than a hole plugged (the
+            // Codex pass on PR #878).
+            && resolved_under(current).is_some_and(|here| in_tree(&here, &root))
             && b.starts_with("implement-")
         {
             found.push((current.to_string(), b.to_string()));

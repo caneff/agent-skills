@@ -1611,3 +1611,75 @@ fn reap_pointed_at_a_workspace_still_cleans_up_every_workspace() {
     assert_eq!(deleted_records(&c, &r).len(), 2, "{:?}", deleted_records(&c, &r));
     assert!(run.has("reap summary: 2 reaped, 0 skipped"), "{}", run.text());
 }
+
+#[test]
+fn a_branch_that_moved_to_another_worktree_since_the_plan_is_refused() {
+    // Codex pass on PR #878: the plan names a workspace, but the cleanup
+    // re-resolves the branch for itself. A branch moved in between — here by
+    // a pre-push hook the first workspace's own cleanup fires — would put a
+    // worktree the plan never listed, outside .claude/worktrees/ at that,
+    // in reach of the removal.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r42", &["118", "119"]);
+    let (first, planned) = (r.join(".claude/worktrees/implement-118"), r.join(".claude/worktrees/implement-119"));
+    let moved_to = c.root().join("r42-elsewhere");
+    let hook = r.join(".git/hooks/pre-push");
+    std::fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n\
+             git -C {repo} worktree remove --force {planned}\n\
+             git -C {repo} worktree add -q {moved} implement-119\n",
+            repo = r.display(),
+            planned = planned.display(),
+            moved = moved_to.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!first.exists() && !c.has_branch(&r, "implement-118"), "{}", run.text());
+    assert!(moved_to.is_dir() && c.has_branch(&r, "implement-119"), "the moved worktree was touched:\n{}", run.text());
+    let want = format!("  {}  moved since the plan, not removed: {} now holds implement-119", planned.display(), moved_to.display());
+    assert!(run.has(&want), "{}", run.text());
+    assert!(run.has("reap summary: 1 reaped, 1 skipped"), "{}", run.text());
+}
+
+#[test]
+fn a_workspace_whose_path_resolves_outside_the_repo_is_not_a_candidate() {
+    // The boundary the Codex pass on PR #878 asked about. git resolves a
+    // worktree's path when it registers it, so `git worktree add` through a
+    // symlink under .claude/worktrees/ records the outside path — this test
+    // states the boundary, and the containment check resolving both sides is
+    // what keeps it true if git's own spelling ever changes.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r43", &["120"]);
+    let outside = c.root().join("r43-outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    c.mk_implement_branch(&r, "121");
+    std::os::unix::fs::symlink(&outside, r.join(".claude/worktrees/link")).unwrap();
+    c.worktree_add(&r, &[s(&r.join(".claude/worktrees/link/implement-121")), "implement-121"]);
+
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok && run.has("reap plan: 1 implement-* workspace(s) under"), "{}", run.text());
+    assert!(outside.join("implement-121").is_dir() && c.has_branch(&r, "implement-121"), "{}", run.text());
+    assert!(!run.has("implement-121"), "{}", run.text());
+    assert!(!r.join(".claude/worktrees/implement-120").exists(), "{}", run.text());
+}
+
+#[test]
+fn a_workspace_whose_directory_is_already_gone_still_has_its_branch_cleaned_up() {
+    // resolved_under falls back to the parent for exactly this: git still
+    // registers a workspace whose folder was deleted by hand, and it is
+    // still a candidate.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r44", &["122"]);
+    let wt = r.join(".claude/worktrees/implement-122");
+    std::fs::remove_dir_all(&wt).unwrap();
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!c.has_branch(&r, "implement-122"), "{}", run.text());
+    assert!(run.has(&format!("  {}  reaped", wt.display())), "{}", run.text());
+}
