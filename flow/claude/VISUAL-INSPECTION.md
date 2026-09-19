@@ -32,7 +32,12 @@ and never your own headless Chrome:
   most "did this render right" questions on its own.
 - `shot-scraper <file-or-url> -o out.png [-w 1280] [-h 900] [--selector SEL]
   [--wait 500] [--wait-for '<expr>']` — a PNG to read. `--selector` shoots one
-  element, which is usually the crop you actually wanted.
+  element, which is usually the crop you actually wanted. **Add `--silent`
+  whenever the URL itself must not reach the transcript**: this subcommand
+  writes `Screenshot of '<url>' written to '<file>'` to *stderr*, so a bare run
+  or a `2>&1` prints the whole URL. That is how a 10 KB puzzle link has twice
+  been echoed into chat against the rule forbidding it. `accessibility`,
+  `javascript` and `html` print no such line.
 - `shot-scraper javascript <file-or-url> "<expr>"` — JSON out. It wants an
   **expression**, so wrap statements in an IIFE and reach elements through
   `document.getElementById` (a bare `sort` is not a global); that same IIFE is
