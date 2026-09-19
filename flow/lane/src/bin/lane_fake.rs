@@ -10,7 +10,7 @@
 //! GH_LABELS, HERDR_RUNNING, HERDR_NO_ROOT_PANE, HERDR_AGENT_TAKEN,
 //! HERDR_STALL for implement-dispatch; GH_PR_HEADS, HERDR_AGENTS,
 //! HERDR_WORKSPACES, HERDR_FAIL, HERDR_PANE_CLOSE_FAIL, GH_ASSIGNEES,
-//! GH_ISSUE_EDIT_FAIL for merge-cleanup.
+//! GH_ISSUE_EDIT_FAIL, GH_PR_CLOSES, GH_PR_CLOSES_FAIL for merge-cleanup.
 //! Never installed — see install.sh.
 
 use std::env;
@@ -103,27 +103,50 @@ fn run_gh(args: &[String]) -> ExitCode {
     let a0 = args.first().map(String::as_str).unwrap_or("");
     let a1 = args.get(1).map(String::as_str).unwrap_or("");
     if (a0, a1) == ("issue", "view") {
-        let state = env::var("GH_STATE").unwrap_or_default();
-        if state.is_empty() {
+        // A clump's tickets differ from each other, so GH_ISSUE_<n> gives
+        // one ticket its own `<state>\t<labels>\t<assignees>` row; an empty
+        // one is the fake's "no issue" failure for that ticket alone. The
+        // GH_STATE/GH_LABELS/GH_ASSIGNEES trio still answers every ticket
+        // with no row of its own.
+        let n = args.get(2).map(String::as_str).unwrap_or("");
+        let row = match env::var(format!("GH_ISSUE_{n}")) {
+            Ok(row) => row,
+            Err(_) => {
+                let state = env::var("GH_STATE").unwrap_or_default();
+                let labels = env::var("GH_LABELS").unwrap_or_default();
+                let assignees = env::var("GH_ASSIGNEES").unwrap_or_default();
+                format!("{state}\t{labels}\t{assignees}")
+            }
+        };
+        if row.starts_with('\t') || row.is_empty() {
             eprintln!("no issue");
             return ExitCode::FAILURE;
         }
-        let labels = env::var("GH_LABELS").unwrap_or_default();
-        let assignees = env::var("GH_ASSIGNEES").unwrap_or_default();
         // Tab-delimited, matching lane::issue_state::read's `-q` query: a
         // label or login can hold a space but never a tab.
-        println!("{state}\t{labels}\t{assignees}");
+        println!("{row}");
     }
-    if (a0, a1) == ("issue", "edit") && env_flag("GH_ISSUE_EDIT_FAIL") {
-        eprintln!("gh: issue edit failed");
-        return ExitCode::FAILURE;
+    if (a0, a1) == ("issue", "edit") {
+        // A comma-separated list of the ticket numbers whose edit fails, so
+        // a clump test can fail one ticket's edit among several.
+        let which = env::var("GH_ISSUE_EDIT_FAIL").unwrap_or_default();
+        let n = args.get(2).map(String::as_str).unwrap_or("");
+        if which.split(',').any(|t| !t.is_empty() && t == n) {
+            eprintln!("gh: issue edit failed");
+            return ExitCode::FAILURE;
+        }
     }
     if (a0, a1) == ("pr", "list") {
         return gh_pr_list(args);
     }
     if (a0, a1) == ("pr", "view") {
+        let pr = args.get(2).map(String::as_str).unwrap_or("");
+        if args.windows(2).any(|w| w[0] == "--json" && w[1].contains("closingIssuesReferences")) {
+            let repo = args.windows(2).find(|w| w[0] == "--repo").map(|w| w[1].as_str()).unwrap_or("");
+            return gh_pr_closes(pr, repo);
+        }
         // PR 7 is caneff/merged-one, the bash stub's one resolvable PR.
-        if args.get(2).map(String::as_str) != Some("7") {
+        if pr != "7" {
             return ExitCode::FAILURE;
         }
         println!("caneff/merged-one");
@@ -134,17 +157,87 @@ fn run_gh(args: &[String]) -> ExitCode {
 /// `pr list --head <b> --state merged --json ... --jq ...`: a merged PR #7
 /// for each branch with a file under `$GH_PR_HEADS` (`/` spelled `__`)
 /// holding the sha that PR merged at; nothing for any other branch.
+/// The `closingIssuesReferences` form is answered separately, from
+/// `$GH_PR_CLOSES`.
 fn gh_pr_list(args: &[String]) -> ExitCode {
     let head = args.windows(2).find(|w| w[0] == "--head").map(|w| w[1].as_str()).unwrap_or("");
     let jq = args.iter().any(|a| a == "--jq");
     let dir = env::var("GH_PR_HEADS").unwrap_or_default();
-    let recorded = std::fs::read_to_string(Path::new(&dir).join(head.replace('/', "__")));
-    match (recorded, jq) {
-        (Ok(oid), true) => println!("7 {}", oid.trim()),
-        (Ok(oid), false) => println!("[{{\"number\":7,\"headRefOid\":\"{}\"}}]", oid.trim()),
-        (Err(_), false) => println!("[]"),
-        (Err(_), true) => {}
+    let Ok(body) = std::fs::read_to_string(Path::new(&dir).join(head.replace('/', "__"))) else {
+        if !jq {
+            println!("[]");
+        }
+        return ExitCode::SUCCESS;
+    };
+    // One merged PR per line, `<number> <oid>`. A line holding an oid alone
+    // is PR 7, the one-PR shape every fixture but the branch-name-reuse one
+    // records.
+    let prs: Vec<(String, String)> = body
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| match l.split_whitespace().collect::<Vec<_>>()[..] {
+            [n, oid] => (n.to_string(), oid.to_string()),
+            _ => ("7".to_string(), l.trim().to_string()),
+        })
+        .collect();
+    if jq {
+        for (n, oid) in &prs {
+            println!("{n} {oid}");
+        }
+    } else {
+        let items: Vec<String> = prs.iter().map(|(n, oid)| format!("{{\"number\":{n},\"headRefOid\":\"{oid}\"}}")).collect();
+        println!("[{}]", items.join(","));
     }
+    ExitCode::SUCCESS
+}
+
+/// `pr view <n> --json closingIssuesReferences`: PR `<n>` closes the tickets
+/// listed in `$GH_PR_CLOSES/<n>`, one per line, each either `<number>` for a
+/// ticket in the PR's own repo or `<owner>/<name>#<number>` for one
+/// elsewhere. Keyed by PR number, not by branch: a branch name can carry
+/// several merged PRs over its life, and only the one matching the landing
+/// says what that landing closed. No file for the PR means it closes
+/// nothing. A bare number's repository is `--repo`'s own slug, so the
+/// caller's same-repo filter sees a match whatever the scratch origin is
+/// named.
+fn gh_pr_closes(pr: &str, repo: &str) -> ExitCode {
+    // The ways the real call stops being an authoritative answer: it fails
+    // outright, answers something that is not JSON, or answers JSON of the
+    // wrong shape.
+    match env::var("GH_PR_CLOSES_FAIL").unwrap_or_default().as_str() {
+        "fail" => {
+            eprintln!("gh: could not read the pull request");
+            return ExitCode::FAILURE;
+        }
+        "garbage" => {
+            println!("not json at all");
+            return ExitCode::SUCCESS;
+        }
+        "wrong-shape" => {
+            println!(r#"{{"closingIssuesReferences":"nope"}}"#);
+            return ExitCode::SUCCESS;
+        }
+        "no-number" => {
+            println!(r#"{{"closingIssuesReferences":[{{"repository":{{"name":"x","owner":{{"login":"y"}}}}}}]}}"#);
+            return ExitCode::SUCCESS;
+        }
+        _ => {}
+    }
+    let dir = env::var("GH_PR_CLOSES").unwrap_or_default();
+    let body = std::fs::read_to_string(Path::new(&dir).join(pr)).unwrap_or_default();
+    let refs: Vec<String> = body
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|line| {
+            let (slug, n) = match line.trim().split_once('#') {
+                Some((slug, n)) => (slug, n),
+                None => (repo, line.trim()),
+            };
+            let (owner, name) = slug.rsplit_once('/').unwrap_or(("", slug));
+            format!(r#"{{"number":{n},"repository":{{"name":"{name}","owner":{{"login":"{owner}"}}}}}}"#)
+        })
+        .collect();
+    println!(r#"{{"closingIssuesReferences":[{}]}}"#, refs.join(","));
     ExitCode::SUCCESS
 }
 

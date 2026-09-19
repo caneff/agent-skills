@@ -727,7 +727,18 @@ fn help_documents_both_modes() {
     let out = f.dispatch(&["--help"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     let text = out_text(&out);
-    for want in ["<issue number>", "/implement <n> --tier", "--spec <n> --slots <k>", "/implement-spec <n> --slots <k>", "spec-<n>", "ready-for-human", "--chris-merges"] {
+    for want in [
+        "<issue number> [<issue number>...]",
+        "/implement <n>... --tier",
+        "--spec <n> --slots <k>",
+        "/implement-spec <n> --slots <k>",
+        "spec-<n>",
+        "ready-for-human",
+        "--chris-merges",
+        "Several issue numbers are one clump",
+        "a clump is always heavy",
+        "for the lowest number named",
+    ] {
         assert!(text.contains(want), "help lacks {want:?}:\n{text}");
     }
 }
@@ -828,4 +839,165 @@ fn spec_mode_briefs_the_parsed_slot_count_and_honours_model() {
             == format!("herdr agent prompt {name} /implement-spec 395 --slots 7 --controller \"skills-ctl\" --wait --until working --timeout 120000")),
         "{calls}"
     );
+}
+
+// --- #889: a clump — one workspace, every ticket claimed ---------------------
+
+const SLUG: &str = "caneff/sudokumaker-custom-constraints";
+
+fn claim_line(n: &str) -> String {
+    format!("gh issue edit {n} --repo {SLUG} --remove-label ready-for-agent --add-label in-progress --add-assignee @me")
+}
+
+#[test]
+fn a_clump_claims_every_ticket_and_names_one_workspace_for_the_lowest() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    // Named out of order on purpose: the lowest names the workspace, not
+    // the first one typed.
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "421", "420", "422"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let calls = f.calls();
+    for n in ["420", "421", "422"] {
+        assert!(calls.lines().any(|l| l == claim_line(n)), "#{n} was not claimed: {calls}");
+    }
+    assert_eq!(calls.lines().filter(|l| l.starts_with("herdr worktree open")).count(), 1, "one workspace only: {calls}");
+    assert!(calls.contains("--label implement-420"), "{calls}");
+    assert!(repo.join(".claude/worktrees/implement-420").is_dir(), "{calls}");
+    assert!(!repo.join(".claude/worktrees/implement-421").exists(), "{calls}");
+    assert!(out_text(&out).contains("dispatched #420 #421 #422 (sonnet, heavy tier, controller skills-ctl)"), "{}", out_text(&out));
+    assert!(out_text(&out).contains("branch:   implement-420"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_clumps_brief_carries_every_ticket_in_it() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "424", "423"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(
+        f.calls().lines().any(|l| l
+            == "herdr agent prompt sudokumaker-custom-constrain-423 /implement 423 424 --tier heavy --controller \"skills-ctl\" --wait --until working --timeout 120000"),
+        "{}",
+        f.calls()
+    );
+}
+
+#[test]
+fn a_clump_holding_one_unclaimable_ticket_claims_nothing() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_ISSUE_427", "OPEN\tready-for-agent,in-progress\t")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "425", "426", "427"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "425", "#427 is labelled in-progress"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_claim_that_fails_partway_releases_the_tickets_already_claimed() {
+    // The claim is one gh call per ticket, so "no partial claim" cannot be a
+    // pre-check alone: a call that fails after its siblings succeeded has to
+    // put them back.
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_ISSUE_EDIT_FAIL", "430")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "428", "429", "430"], &scenario);
+    assert!(!out.status.success(), "{}", out_text(&out));
+    assert!(out_text(&out).contains("could not claim #430"), "{}", out_text(&out));
+    let calls = f.calls();
+    for n in ["428", "429"] {
+        assert!(
+            calls.lines().any(|l| l
+                == format!("gh issue edit {n} --repo {SLUG} --remove-label in-progress --add-label ready-for-agent --remove-assignee @me")),
+            "#{n} was claimed and never released: {calls}"
+        );
+    }
+    assert!(!calls.contains("worktree open"), "{calls}");
+    assert!(!repo.join(".claude/worktrees/implement-428").exists(), "{calls}");
+}
+
+#[test]
+fn a_clump_is_always_heavy_even_when_every_ticket_is_documentation() {
+    // Light tier lands straight on the default branch with no PR, and the
+    // merged PR's closingIssuesReferences is the only record merge-cleanup
+    // can clear a clump's claims from — so a light clump would land with
+    // every ticket but the branch's own still claimed.
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let docs = "OPEN\tdocumentation,ready-for-agent\t";
+    let all_docs = with(&default_scenario(), &[("GH_ISSUE_431", docs), ("GH_ISSUE_432", docs)]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "431", "432"], &all_docs);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(f.calls().contains("/implement 431 432 --tier heavy"), "{}", f.calls());
+    assert!(!f.calls().contains("--tier light"), "{}", f.calls());
+
+    // One documentation ticket is unchanged: still light.
+    let f2 = Fixture::new();
+    f2.reset_home(true);
+    let repo2 = f2.mkfixture("sudokumaker-custom-constraints", "main");
+    let one = with(&default_scenario(), &[("GH_ISSUE_433", docs)]);
+    let out2 = f2.dispatch(&["--repo", repo2.to_str().unwrap(), "433"], &one);
+    assert!(out2.status.success(), "{}", out_text(&out2));
+    assert!(f2.calls().contains("/implement 433 --tier light"), "{}", f2.calls());
+}
+
+#[test]
+fn a_clump_holding_a_ready_for_human_ticket_is_briefed_chris_merges() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_ISSUE_436", "OPEN\tenhancement,ready-for-human\t")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "435", "436"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let calls = f.calls();
+    assert!(calls.lines().any(|l| l == claim_line("435")), "{calls}");
+    assert!(
+        calls.lines().any(|l| l == format!("gh issue edit 436 --repo {SLUG} --add-label in-progress --add-assignee @me")),
+        "ready-for-human must survive the claim: {calls}"
+    );
+    assert!(calls.contains("/implement 435 436 --tier heavy --controller \"skills-ctl\" --chris-merges"), "{calls}");
+    assert!(out_text(&out).contains("dispatched #435 #436 (sonnet, heavy tier, Chris merges, controller skills-ctl)"), "{}", out_text(&out));
+}
+
+#[test]
+fn the_same_ticket_named_twice_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "437", "437"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "437", "#437 is named twice"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_leading_zero_does_not_make_a_second_ticket() {
+    // An issue number is the number: `007` and `7` are one ticket. Compared
+    // as text they are two, and the clump would claim and brief the same
+    // issue twice while `0437` named the branch.
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "0437", "437"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "437", "#437 is named twice"), "{}", out_text(&out));
+
+    let f2 = Fixture::new();
+    f2.reset_home(true);
+    let repo2 = f2.mkfixture("sudokumaker-custom-constraints", "main");
+    let out2 = f2.dispatch(&["--repo", repo2.to_str().unwrap(), "0438"], &default_scenario());
+    assert!(out2.status.success(), "{}", out_text(&out2));
+    assert!(f2.calls().contains("/implement 438 --tier"), "{}", f2.calls());
+    assert!(repo2.join(".claude/worktrees/implement-438").is_dir(), "{}", f2.calls());
+}
+
+#[test]
+fn spec_mode_still_takes_one_ticket_only() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "438", "--slots", "2", "439"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "438", "one ticket at a time"), "{}", out_text(&out));
 }

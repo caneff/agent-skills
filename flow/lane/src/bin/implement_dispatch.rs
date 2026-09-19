@@ -41,15 +41,22 @@ worker running in its own workspace inside herdr, report, and stop. It never
 waits on the worker.
 
   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
-                     <issue number>
+                     <issue number> [<issue number>...]
   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
                      --spec <n> --slots <k>
 
-Plain mode: the brief is `/implement <n> --tier light|heavy --controller
-"<name>"`, light when the issue carries the documentation label, heavy
-otherwise. A ready-for-human ticket's brief ends with --chris-merges: the
-worker builds it and Chris merges its PR. Branch and workspace are
-implement-<n>; --model defaults to sonnet.
+Plain mode: the brief is `/implement <n>... --tier light|heavy --controller
+"<name>"`, light when one issue is named and it carries the documentation
+label, heavy otherwise — a clump is always heavy, because light tier lands
+without a PR and a merged PR's closingIssuesReferences is the only record
+merge-cleanup can clear a clump's claims from. A ready-for-human issue among
+them ends the brief with --chris-merges: the worker builds the clump and
+Chris merges its PR. --model defaults to sonnet.
+
+Several issue numbers are one clump: one worker, one workspace, one branch
+and one PR that closes all of them. Branch and workspace are implement-<n>
+for the lowest number named, whatever order they are typed in, and the brief
+carries the whole list, lowest first. The same number twice is refused.
 
 Spec mode (--spec): the brief is `/implement-spec <n> --slots <k> --controller
 "<name>"`, a nested run over a spec issue. Branch and workspace are spec-<n>,
@@ -61,19 +68,22 @@ of the nearest ancestor process whose file is live (its procStart matches) —
 the Claude session running this. Session names can hold spaces, hence the
 quotes.
 
-The claim swaps ready-for-agent for in-progress. A ready-for-human ticket
-keeps ready-for-human and adds in-progress beside it, so the live labels
-still show Chris-merges after the claim, and a second dispatch still refuses
-on the held in-progress label. Release on a failed claim undoes only what the
-claim did: in-progress off, plus the ready label back on for ready-for-agent.
+The claim swaps ready-for-agent for in-progress on every ticket in the clump.
+A ready-for-human ticket keeps ready-for-human and adds in-progress beside it,
+so the live labels still show Chris-merges after the claim, and a second
+dispatch still refuses on the held in-progress label. Release on a failed
+claim undoes only what the claim did: in-progress off, the ready label back on
+for ready-for-agent, and the assignee removed. A claim that fails partway
+through a clump releases the tickets it had already claimed, so nothing is
+left half-claimed.
 
-Refuses, with nothing claimed or created, when the issue is not open and
-labelled exactly one of ready-for-agent and ready-for-human, it carries a
-held label (in-progress, needs-info), spec mode names an issue without the
-spec label or with ready-for-human, plain mode names one with the spec
-label, no controller is named or found, the herdr server is not running,
-claude onboarding is incomplete, the herdr agent name is taken, or the
-workspace path or branch already exists.
+Refuses, with nothing claimed or created, when any named issue is not open and
+labelled exactly one of ready-for-agent and ready-for-human, it carries a held
+label (in-progress, needs-info), the same number is named twice, spec mode
+names an issue without the spec label or with ready-for-human or names more
+than one, plain mode names one with the spec label, no controller is named or
+found, the herdr server is not running, claude onboarding is incomplete, the
+herdr agent name is taken, or the workspace path or branch already exists.
 After the workspace exists, any herdr failure exits non-zero with herdr's own
 error and leaves the workspace in place for inspection. There is no
 bare-claude fallback.
@@ -88,7 +98,9 @@ struct Args {
     repo: Option<String>,
     model: Option<String>,
     controller: Option<String>,
-    n: Option<String>,
+    /// The clump: every ticket named on the command line, in the order
+    /// typed. Spec mode's one ticket arrives here too.
+    ns: Vec<String>,
     spec: bool,
     slots: Option<String>,
 }
@@ -127,7 +139,7 @@ fn parse_args(argv: Vec<String>) -> Parsed {
     let mut repo = None;
     let mut model = None;
     let mut controller = None;
-    let mut n: Option<String> = None;
+    let mut ns: Vec<String> = Vec::new();
     let mut spec = false;
     let mut slots = None;
     let mut it = argv.into_iter();
@@ -146,10 +158,10 @@ fn parse_args(argv: Vec<String>) -> Parsed {
                 None => return Parsed::Err("--controller needs a value".into()),
             },
             "--spec" => match it.next() {
-                Some(_) if n.is_some() => return Parsed::Err("one ticket at a time".into()),
+                Some(_) if !ns.is_empty() => return Parsed::Err("one ticket at a time".into()),
                 Some(v) => {
                     spec = true;
-                    n = Some(v);
+                    ns.push(v);
                 }
                 None => return Parsed::Err("--spec needs a value".into()),
             },
@@ -160,14 +172,16 @@ fn parse_args(argv: Vec<String>) -> Parsed {
             "-h" | "--help" => return Parsed::Help,
             s if s.starts_with('-') => return Parsed::Err(format!("unknown flag: {s}")),
             _ => {
-                if n.is_some() {
+                // A clump is several tickets in plain mode; a spec run is
+                // one nested run over one spec issue, and never a clump.
+                if spec {
                     return Parsed::Err("one ticket at a time".into());
                 }
-                n = Some(a);
+                ns.push(a);
             }
         }
     }
-    Parsed::Args(Args { repo, model, controller, n, spec, slots })
+    Parsed::Args(Args { repo, model, controller, ns, spec, slots })
 }
 
 /// Handles the hidden `--seed-trust <claude.json path> <workspace path>`
@@ -232,13 +246,35 @@ fn valid_slug(s: &str) -> bool {
     !a.is_empty() && !b.is_empty() && !a.contains(':') && !b.contains(':') && !b.contains('/')
 }
 
-/// The claimed ticket: what a failure past the claim needs to say how to
+/// One ticket of the clump, as the refusal pass read it: which ready label
+/// its claim swaps (a `ready-for-human` one keeps its own), and whether its
+/// label makes this a docs-only build.
+struct Ticket {
+    n: String,
+    ready: &'static str,
+    chris_merges: bool,
+    documentation: bool,
+}
+
+/// The `gh issue edit` that undoes one ticket's claim: in-progress off, the
+/// ready label back on for a `ready-for-agent` ticket — a `ready-for-human`
+/// one never lost it — and the assignee the claim added removed. Both the
+/// automatic rollback of a half-made claim and the release line a failure
+/// past the claim prints are this, so the two can never drift.
+fn release_args<'a>(t: &'a Ticket, slug: &'a str) -> Vec<&'a str> {
+    let mut args = vec!["issue", "edit", &t.n, "--repo", slug, "--remove-label", "in-progress"];
+    if !t.chris_merges {
+        args.extend(["--add-label", t.ready]);
+    }
+    args.extend(["--remove-assignee", "@me"]);
+    args
+}
+
+/// The claimed clump: what a failure past the claim needs to say how to
 /// release it, and where the workspace would be if it exists.
 struct Claim<'a> {
-    n: &'a str,
+    tickets: &'a [Ticket],
     slug: &'a str,
-    ready: &'a str,
-    chris_merges: bool,
     wt: &'a Path,
 }
 
@@ -248,15 +284,10 @@ impl Claim<'_> {
         if self.wt.exists() {
             eprintln!("workspace left in place at {}", self.wt.display());
         }
-        // A ready-for-human claim never removed its ready label, so release
-        // only undoes the in-progress side of it.
-        if self.chris_merges {
-            eprintln!("release the ticket: gh issue edit {} --repo {} --remove-label in-progress", self.n, self.slug);
-        } else {
-            eprintln!(
-                "release the ticket: gh issue edit {} --repo {} --remove-label in-progress --add-label {}",
-                self.n, self.slug, self.ready
-            );
+        // One line per ticket: the whole clump was claimed, so the whole
+        // clump has to be released.
+        for t in self.tickets {
+            eprintln!("release the ticket: gh {}", release_args(t, self.slug).join(" "));
         }
         ExitCode::FAILURE
     }
@@ -367,10 +398,29 @@ fn run() -> Result<(), ExitCode> {
         Parsed::Args(a) => a,
     };
 
-    let n = match &args.n {
-        Some(n) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => n.clone(),
-        _ => return Err(die("name one issue number")),
-    };
+    if args.ns.is_empty() {
+        return Err(die("name one issue number"));
+    }
+    // Parsed, not just digit-checked, and then rendered back: an issue
+    // number is the number, so `007` and `7` are one ticket. Compared as
+    // text they are two, and the clump would claim and brief the same issue
+    // twice — the outcome the repeat check below exists to prevent — while
+    // `007` also named the branch, the workspace and the agent.
+    let mut numbers: Vec<u64> = Vec::new();
+    for n in &args.ns {
+        match n.parse::<u64>() {
+            Ok(v) if n.chars().all(|c| c.is_ascii_digit()) => numbers.push(v),
+            _ => return Err(die("name one issue number")),
+        }
+    }
+    // Ascending, so the lowest names the branch, the workspace and the
+    // agent however the clump was typed.
+    numbers.sort_unstable();
+    if let Some(dup) = numbers.windows(2).find(|w| w[0] == w[1]) {
+        return Err(die(format!("#{} is named twice", dup[0])));
+    }
+    let ns: Vec<String> = numbers.iter().map(u64::to_string).collect();
+    let n = ns[0].clone();
     let mode = match (&args.slots, args.spec) {
         (None, false) => Mode::Plain,
         (None, true) => return Err(die("--spec needs --slots <k>")),
@@ -407,35 +457,55 @@ fn run() -> Result<(), ExitCode> {
     let repo_part: String = repo_name.chars().take(cut).collect();
     let agent = format!("{repo_part}{suffix}");
 
-    // Refusals first, so a refused run leaves nothing claimed or created.
-    let Some(issue) = lane::issue_state::read(&slug, &n) else {
-        return Err(die(format!("#{n} is not an open issue")));
-    };
-    if issue.state != "OPEN" {
-        return Err(die(format!("#{n} is not an open issue")));
-    }
-    // The ready label the claim swaps for in-progress. A ready-for-human
-    // ticket is built the same way, but its brief says Chris merges it.
-    let (ready, chris_merges) = match (issue.has_label("ready-for-agent"), issue.has_label("ready-for-human")) {
-        (true, false) => ("ready-for-agent", false),
-        (false, true) => ("ready-for-human", true),
-        (true, true) => return Err(die(format!("#{n} is labelled both ready-for-agent and ready-for-human"))),
-        (false, false) => return Err(die(format!("#{n} is not labelled ready-for-agent or ready-for-human"))),
-    };
-    for held in ["in-progress", "needs-info"] {
-        if issue.has_label(held) {
-            return Err(die(format!("#{n} is labelled {held}")));
+    // Refusals first, so a refused run leaves nothing claimed or created —
+    // and every ticket of the clump is read before any of them is claimed,
+    // which is what makes the claim all-or-nothing.
+    let mut tickets: Vec<Ticket> = Vec::new();
+    for n in &ns {
+        let Some(issue) = lane::issue_state::read(&slug, n) else {
+            return Err(die(format!("#{n} is not an open issue")));
+        };
+        if issue.state != "OPEN" {
+            return Err(die(format!("#{n} is not an open issue")));
         }
-    }
-    match (mode, issue.has_label("spec")) {
-        (Mode::Spec { .. }, false) => return Err(die(format!("#{n} is not labelled spec"))),
-        (Mode::Plain, true) => return Err(die(format!("#{n} is labelled spec; dispatch it with --spec {n} --slots <k>"))),
-        (Mode::Spec { .. }, true) if chris_merges => {
-            return Err(die(format!("#{n} is labelled ready-for-human; a spec run has no Chris-merges brief")));
+        // The ready label the claim swaps for in-progress. A ready-for-human
+        // ticket is built the same way, but its brief says Chris merges it.
+        let (ready, chris_merges) = match (issue.has_label("ready-for-agent"), issue.has_label("ready-for-human")) {
+            (true, false) => ("ready-for-agent", false),
+            (false, true) => ("ready-for-human", true),
+            (true, true) => return Err(die(format!("#{n} is labelled both ready-for-agent and ready-for-human"))),
+            (false, false) => return Err(die(format!("#{n} is not labelled ready-for-agent or ready-for-human"))),
+        };
+        for held in ["in-progress", "needs-info"] {
+            if issue.has_label(held) {
+                return Err(die(format!("#{n} is labelled {held}")));
+            }
         }
-        _ => {}
+        match (mode, issue.has_label("spec")) {
+            (Mode::Spec { .. }, false) => return Err(die(format!("#{n} is not labelled spec"))),
+            (Mode::Plain, true) => return Err(die(format!("#{n} is labelled spec; dispatch it with --spec {n} --slots <k>"))),
+            (Mode::Spec { .. }, true) if chris_merges => {
+                return Err(die(format!("#{n} is labelled ready-for-human; a spec run has no Chris-merges brief")));
+            }
+            _ => {}
+        }
+        tickets.push(Ticket { n: n.clone(), ready, chris_merges, documentation: issue.has_label("documentation") });
     }
-    let tier = if issue.has_label("documentation") { "light" } else { "heavy" };
+    // The clump lands as one diff. Light is the docs-only tier, so one
+    // ticket that is not docs-only makes the whole diff code — the same
+    // reading as a worker raising light to heavy the moment its diff turns
+    // out to hold code.
+    let chris_merges = tickets.iter().any(|t| t.chris_merges);
+    // A clump is always heavy, whatever its labels say. Light tier pushes
+    // straight to the default branch with no PR, and the merged PR's
+    // closingIssuesReferences is the only authoritative record of which
+    // tickets a landing closed — so a light clump lands with nothing for
+    // merge-cleanup to read, and every ticket but the branch's own keeps its
+    // claim. That is the state #889 exists to end, so the tier that cannot
+    // carry a clump does not get one. The cost is real and small: a
+    // docs-only clump gets a PR it would not have had alone. One ticket is
+    // unchanged — its documentation label still decides its tier.
+    let tier = if tickets.len() == 1 && tickets[0].documentation { "light" } else { "heavy" };
 
     let home = env::var("HOME").unwrap_or_default();
     // An empty --controller is bash's `[ -z "$controller" ]`: absent, not a
@@ -499,21 +569,35 @@ fn run() -> Result<(), ExitCode> {
         return Err(die(format!("no origin/{default} to branch from")));
     }
 
-    // Past here the ticket is claimed; a failure says how to release it. A
+    // Past here the clump is claimed; a failure says how to release it. A
     // ready-for-human ticket keeps its ready label through the build, so the
     // live labels stay a Chris-merges signal that outlives this session; a
     // ready-for-agent ticket still swaps its ready label for in-progress.
-    let mut claim_args: Vec<&str> = vec!["issue", "edit", &n, "--repo", &slug];
-    if !chris_merges {
-        claim_args.extend(["--remove-label", ready]);
+    // A claim is one gh call per ticket, so a call that fails after its
+    // siblings succeeded rolls them back: the clump is claimed whole or not
+    // at all, and a half-claimed clump is the state nobody can dispatch
+    // from and nobody thinks to clear.
+    let mut claimed: Vec<&Ticket> = Vec::new();
+    for t in &tickets {
+        let mut claim_args: Vec<&str> = vec!["issue", "edit", &t.n, "--repo", &slug];
+        if !t.chris_merges {
+            claim_args.extend(["--remove-label", t.ready]);
+        }
+        claim_args.extend(["--add-label", "in-progress", "--add-assignee", "@me"]);
+        match runner::run("gh", &claim_args) {
+            Ok(c) if c.success => claimed.push(t),
+            _ => {
+                for done in &claimed {
+                    let release = release_args(done, &slug);
+                    if !matches!(runner::run("gh", &release), Ok(o) if o.success) {
+                        eprintln!("implement-dispatch: could not release #{}; re-run: gh {}", done.n, release.join(" "));
+                    }
+                }
+                return Err(die(format!("could not claim #{}", t.n)));
+            }
+        }
     }
-    claim_args.extend(["--add-label", "in-progress", "--add-assignee", "@me"]);
-    let claimed = runner::run("gh", &claim_args);
-    match claimed {
-        Ok(c) if c.success => {}
-        _ => return Err(die(format!("could not claim #{n}"))),
-    }
-    let claim = Claim { n: &n, slug: &slug, ready, chris_merges, wt: &wt };
+    let claim = Claim { tickets: &tickets, slug: &slug, wt: &wt };
 
     let wa = runner::run_in(
         None,
@@ -567,7 +651,9 @@ fn run() -> Result<(), ExitCode> {
     let (brief, described) = match mode {
         Mode::Plain => {
             let (marker, merger) = if chris_merges { (" --chris-merges", ", Chris merges") } else { ("", "") };
-            (format!("/implement {n} --tier {tier} --controller \"{controller}\"{marker}"), format!("{tier} tier{merger}"))
+            // The whole clump, lowest first: the worker builds every ticket
+            // in it and its one PR closes them all.
+            (format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}", ns.join(" ")), format!("{tier} tier{merger}"))
         }
         Mode::Spec { slots } => (format!("/implement-spec {n} --slots {slots} --controller \"{controller}\""), format!("spec, {slots} slots")),
     };
@@ -579,7 +665,8 @@ fn run() -> Result<(), ExitCode> {
 
     let session = worker_session_name(&home, wt.to_str().unwrap_or(""), &agent);
 
-    safe_println!("dispatched #{n} ({model}, {described}, controller {controller})");
+    let dispatched: Vec<String> = ns.iter().map(|n| format!("#{n}")).collect();
+    safe_println!("dispatched {} ({model}, {described}, controller {controller})", dispatched.join(" "));
     safe_println!("worktree: {}", wt.display());
     safe_println!("branch:   {branch}");
     safe_println!("agent:    {agent}");

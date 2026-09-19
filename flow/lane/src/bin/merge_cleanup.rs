@@ -55,6 +55,11 @@ Chris approved losing under one count is never misread as counted by the
 other. The list is fixed on purpose: an unknown ignored name is kept, since
 a wrongly kept cache costs a --discard and a discarded note cannot be undone.
 
+The claim clears with the merge: every ticket the branch's merged PR closes
+in this repo, plus the branch's own implement-<n>, loses its in-progress
+label and its assignees once that issue is closed. A clump lands as one PR
+closing several tickets, and its closingIssuesReferences is that list.
+
 Every local branch delete first records the tip under
 refs/deleted/<branch>@<short sha>, which
 `git branch <branch> refs/deleted/<branch>@<short sha>` restores.
@@ -161,10 +166,15 @@ fn head_of(path: &str) -> Option<String> {
     quiet_stdout("git", &["-C", path, "rev-parse", "--abbrev-ref", "HEAD"])
 }
 
-/// What proved a branch merged: the sha it is landed up to, and the proof.
+/// What proved a branch merged: the sha it is landed up to, the proof, and
+/// the merged PR's number when a PR is what proved it. The number matters
+/// past the display string (#889): a branch name can carry several merged
+/// PRs over its life, and only the one whose head is this tip says which
+/// tickets this landing closed.
 struct Merged {
     at: String,
     by: String,
+    pr: Option<String>,
 }
 
 struct Cleanup {
@@ -859,7 +869,7 @@ impl Cleanup {
                 let mut f = line.split_whitespace();
                 let (n, h) = (f.next().unwrap_or(""), f.next().unwrap_or(""));
                 if !h.is_empty() && h == tip {
-                    return Some(Merged { at: h.to_string(), by: format!("PR #{n}") });
+                    return Some(Merged { at: h.to_string(), by: format!("PR #{n}"), pr: Some(n.to_string()) });
                 }
             }
         }
@@ -869,7 +879,7 @@ impl Cleanup {
             return None;
         }
         let at = quiet_stdout("git", &["-C", path, "rev-parse", &base]).unwrap_or_default();
-        Some(Merged { at, by: base })
+        Some(Merged { at, by: base, pr: None })
     }
 
     /// Step 4's delete. `-d` first: it is the honest question, and it
@@ -920,12 +930,21 @@ impl Cleanup {
             eprintln!("merge-cleanup: refusing to delete the default branch {b}");
             return false;
         }
-        if self.force {
+        // Kept, not discarded: step 7 needs the PR this landing came from,
+        // and by then the branch is deleted, so the tip it was matched on is
+        // gone and the match cannot be redone.
+        let merged = if self.force {
             safe_println!("--force: skipping the merged check for {b}");
-        } else if self.is_merged(path, b).is_none() {
-            eprintln!("merge-cleanup: {b} is not merged — nothing cleaned up (--force overrides)");
-            return false;
-        }
+            None
+        } else {
+            match self.is_merged(path, b) {
+                None => {
+                    eprintln!("merge-cleanup: {b} is not merged — nothing cleaned up (--force overrides)");
+                    return false;
+                }
+                Some(m) => Some(m),
+            }
+        };
 
         // Step 3 — the workspace. A linked worktree holding the branch makes
         // `git branch -d` fail with "used by worktree", so it goes first, by
@@ -1003,25 +1022,25 @@ impl Cleanup {
         // (the sweep table's "cleaned" word, and `main`'s gate on
         // `report_stale`). It sets `claim_clear_failed` instead, for the
         // caller to fold into its own exit code, same as `remote_delete_failed`.
-        self.claim_clear_failed = !self.clear_ticket_if_closed(path, b);
+        self.claim_clear_failed = !self.clear_landed_claims(path, b, merged.as_ref().and_then(|m| m.pr.as_deref()));
         true
     }
 
-    /// #821: on a plain `implement-<n>` branch whose issue is closed and
-    /// still carries `in-progress`, remove the label and its actual
-    /// assignees. No ticket number, no gh, no origin, the issue still open,
-    /// or the label already gone (nothing to clear, and `gh issue edit`
-    /// errors on a label a repo never defines): nothing to do, and `true`. A
-    /// `gh issue view` that fails is reported, not treated as an open issue
-    /// — an outage must not silently reproduce the stale claim #821 was
-    /// filed over — but is still non-fatal, since there was never a known
-    /// edit to lose. A failed edit (#829 Codex pass found it discarded) is
-    /// different: git cleanup already succeeded by then, so #832 makes this
-    /// return `false` — `cleanup_branch` reads that into
-    /// `self.claim_clear_failed`, which is what actually fails the run's
-    /// exit code — with the exact re-run command on stderr, since that
-    /// command is the only record of the edit that still needs to happen.
-    fn clear_ticket_if_closed(&self, path: &str, b: &str) -> bool {
+    /// #821, widened for clumps by #889: clear `in-progress` and the
+    /// assignee from every ticket this branch's merge landed. A clump is
+    /// one worker, one branch, one PR closing several tickets, so the PR's
+    /// `closingIssuesReferences` is the list — the branch's own ticket
+    /// alone left the rest of a clump showing a stale claim, hand-cleared
+    /// six times on one trial clump. The branch must still be a plain
+    /// `implement-<n>`: a branch the lane did not cut is not a claim this
+    /// command owns. No gh or no origin: nothing to do, and `true`. A
+    /// failed edit (#829 Codex pass found it discarded) is different: git
+    /// cleanup already succeeded by then, so #832 makes this return
+    /// `false` — `cleanup_branch` reads that into `self.claim_clear_failed`,
+    /// which is what actually fails the run's exit code — with the exact
+    /// re-run command on stderr, since that command is the only record of
+    /// the edit that still needs to happen.
+    fn clear_landed_claims(&self, path: &str, b: &str, pr: Option<&str>) -> bool {
         let Some(n) = ticket_number(b) else { return true };
         let what = format!("clearing #{n}'s in-progress label and assignee");
         if !on_path("gh") {
@@ -1032,14 +1051,68 @@ impl Cleanup {
             skip(&what, "no origin remote");
             return true;
         };
-        let Some(issue) = lane::issue_state::read(&slug, n) else {
+        // The union, ascending and each once: the tickets the merged PR
+        // closes, plus the branch's own. The PR's closingIssuesReferences is
+        // the clump's list and needs no bookkeeping of its own; keeping the
+        // branch's ticket in the set whatever the PR says is what makes a PR
+        // whose closing keyword never registered, and a --force run with no
+        // merged PR to read, clear exactly what they cleared before #889.
+        // Sorted by length then text rather than by parsed number: these are
+        // digit strings straight from a branch name, and a number too long
+        // for u64 must not silently drop out of the set.
+        let mut tickets: Vec<String> = vec![n.to_string()];
+        let mut ok = true;
+        match pr_closed_tickets(&slug, pr) {
+            Ok(closed) => tickets.extend(closed.iter().map(u64::to_string)),
+            // A lookup that failed is not a PR that closed nothing. Read as
+            // one, it clears the branch's ticket, prints success and leaves
+            // the rest of the clump claimed — the exact stale state #889
+            // exists to end. So the run fails, and the message names the
+            // read to redo, because by now the branch is gone and re-running
+            // merge-cleanup cannot repeat it.
+            Err(why) => {
+                ok = false;
+                let pr = pr.unwrap_or("?");
+                eprintln!(
+                    "merge-cleanup: could not read which tickets PR #{pr} closes ({why}); any other ticket in \
+                     its clump is still claimed — re-run: gh pr view {pr} --repo {slug} --json closingIssuesReferences"
+                );
+            }
+        }
+        tickets.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+        tickets.dedup();
+
+        let mut cleared: Vec<String> = Vec::new();
+        for t in &tickets {
+            match self.clear_one(&slug, t) {
+                Cleared::Done => cleared.push(format!("#{t}")),
+                Cleared::Failed => ok = false,
+                Cleared::Nothing => {}
+            }
+        }
+        // Only a clump gets the summary: on a one-ticket PR the per-ticket
+        // line above is already the whole report, and it is the line #821's
+        // callers and tests read.
+        if tickets.len() > 1 && !cleared.is_empty() {
+            safe_println!("cleared {}", cleared.join(", "));
+        }
+        ok
+    }
+
+    /// One ticket's claim. A `gh issue view` that fails is reported, not
+    /// treated as an open issue — an outage must not silently reproduce the
+    /// stale claim #821 was filed over — but is still `Nothing`, since there
+    /// was never a known edit to lose.
+    fn clear_one(&self, slug: &str, n: &str) -> Cleared {
+        let what = format!("clearing #{n}'s in-progress label and assignee");
+        let Some(issue) = lane::issue_state::read(slug, n) else {
             skip(&what, "gh issue view failed");
-            return true;
+            return Cleared::Nothing;
         };
         if issue.state != "CLOSED" || !issue.has_label("in-progress") {
-            return true;
+            return Cleared::Nothing;
         }
-        let mut edit = vec!["issue", "edit", n, "--repo", &slug, "--remove-label", "in-progress"];
+        let mut edit = vec!["issue", "edit", n, "--repo", slug, "--remove-label", "in-progress"];
         if !issue.assignees_csv.is_empty() {
             edit.push("--remove-assignee");
             edit.push(&issue.assignees_csv);
@@ -1054,10 +1127,24 @@ impl Cleanup {
                 "merge-cleanup: {cleanup_status}, but could not clear #{n}'s in-progress label and assignee; re-run: gh {}",
                 edit.join(" ")
             );
-            return false;
+            return Cleared::Failed;
         }
-        true
+        Cleared::Done
     }
+}
+
+/// What `clear_one` did with one ticket's claim.
+enum Cleared {
+    /// Nothing to do: the issue is still open (part of a bigger ticket, or
+    /// reopened), it no longer carries `in-progress` (already cleared, and
+    /// `gh issue edit` errors on a label a repo never defines), or it could
+    /// not be read.
+    Nothing,
+    /// The label and the issue's assignees came off.
+    Done,
+    /// The edit failed. The caller folds this into the run's exit code; the
+    /// re-run command is already on stderr.
+    Failed,
 }
 
 /// One merged branch the sweep will clean.
@@ -1120,6 +1207,60 @@ fn print_table(rows: &[[String; 4]]) {
         }
         safe_println!("{line}");
     }
+}
+
+/// The issues the merged PR `pr` closes, restricted to `slug`'s own repo. A
+/// reference elsewhere is dropped and named on its own skip line: every edit
+/// here goes out with `--repo <slug>`, so acting on that number would edit
+/// an unrelated issue that happens to share it — and a claim this run is
+/// leaving alone has to say so, or a cross-repo clump reads as cleared when
+/// it is not.
+///
+/// One PR, named by the caller, not every merged PR the branch name ever
+/// carried: a name is reused, and an earlier landing's tickets are not this
+/// one's to unclaim. `is_merged` already picked the PR whose head is this
+/// tip; this reads that one.
+///
+/// `Ok(vec![])` is GitHub's own answer that the PR closes nothing, and
+/// `pr: None` — a `--force` run, or a merge proved by the ancestor test with
+/// no PR to name — is the same: the caller falls back to the branch's own
+/// ticket, as it did before #889. `Err` is not that. The call failed, the
+/// answer is not JSON, or it is JSON of the wrong shape: a
+/// `closingIssuesReferences` that is not an array, or a reference with no
+/// number. Those must not collapse into the empty answer — a cleanup that
+/// cannot read the clump's list must not report success.
+fn pr_closed_tickets(slug: &str, pr: Option<&str>) -> Result<Vec<u64>, String> {
+    let Some(pr) = pr else { return Ok(Vec::new()) };
+    // No owner/name to compare against means the same-repo filter below
+    // cannot run, and every reference would be dropped in silence — the
+    // same failure as an unreadable answer, so it is reported the same way.
+    let Some((owner, name)) = slug.rsplit_once('/') else {
+        return Err(format!("origin slug {slug} names no owner/name"));
+    };
+    let Some(out) = quiet_stdout("gh", &["pr", "view", pr, "--repo", slug, "--json", "closingIssuesReferences"]) else {
+        return Err("gh pr view failed".into());
+    };
+    let Ok(body) = serde_json::from_str::<serde_json::Value>(&out) else {
+        return Err("gh pr view answered something that is not JSON".into());
+    };
+    let Some(refs) = body.get("closingIssuesReferences").and_then(serde_json::Value::as_array) else {
+        return Err("gh pr view answered no closingIssuesReferences array".into());
+    };
+    let mut tickets = Vec::new();
+    for r in refs {
+        let repo = r.get("repository");
+        let r_name = repo.and_then(|v| v.get("name")).and_then(serde_json::Value::as_str).unwrap_or("");
+        let r_owner = repo.and_then(|v| v.get("owner")).and_then(|v| v.get("login")).and_then(serde_json::Value::as_str).unwrap_or("");
+        let Some(number) = r.get("number").and_then(serde_json::Value::as_u64) else {
+            return Err("a closing reference has no issue number".into());
+        };
+        if (r_owner, r_name) != (owner, name) {
+            skip(&format!("clearing {r_owner}/{r_name}#{number}"), &format!("another repo; this run only edits {slug}"));
+            continue;
+        }
+        tickets.push(number);
+    }
+    Ok(tickets)
 }
 
 /// The ticket a plain `implement-<n>` branch was cut for: the digits after
