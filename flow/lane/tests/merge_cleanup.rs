@@ -401,6 +401,101 @@ fn a_sweep_row_for_a_denied_remote_delete_says_so_distinctly_and_still_fails_the
     assert!(rows.iter().any(|r| r.contains("implement-54") && r.contains("remote branch not deleted") && !r.contains("FAILED")), "{rows:#?}");
 }
 
+// --- 8b. a clump: every ticket the merged PR closes (#889) ------------------
+
+#[test]
+fn every_ticket_the_merged_pr_closes_has_its_claim_cleared() {
+    // A clump lands as one PR closing several tickets. Before #889 only the
+    // branch's own ticket was cleared and the rest kept a stale in-progress
+    // label and assignee, cleared by hand — six of them on one trial clump.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r20");
+    c.mk_implement_branch(&r, "60");
+    c.record_pr_closes("implement-60", &["60", "61", "62"]);
+    let closed = ("CLOSED\tin-progress\tcaneff", "");
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-60"],
+        &[("GH_ISSUE_60", closed.0), ("GH_ISSUE_61", closed.0), ("GH_ISSUE_62", closed.0), ("GH_STATE", closed.1)],
+    );
+    assert!(run.ok, "{}", run.text());
+    for n in ["60", "61", "62"] {
+        assert!(c.calls().contains(&format!("gh issue edit {n} --repo")), "#{n} was not cleared: {}", c.calls());
+        assert!(run.has(&format!("clearing #{n}'s in-progress label and assignee")), "{}", run.text());
+    }
+    assert!(run.has("cleared #60, #61, #62"), "{}", run.text());
+}
+
+#[test]
+fn a_clump_ticket_in_another_repo_is_never_edited() {
+    // closingIssuesReferences can name an issue in another repo, and every
+    // edit here goes out with this repo's --repo: editing that number here
+    // would hit an unrelated issue that happens to share it.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r21");
+    c.mk_implement_branch(&r, "63");
+    c.record_pr_closes("implement-63", &["63", "caneff/elsewhere#64"]);
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-63"],
+        &[("GH_ISSUE_63", "CLOSED\tin-progress\tcaneff"), ("GH_ISSUE_64", "CLOSED\tin-progress\tcaneff")],
+    );
+    assert!(run.ok, "{}", run.text());
+    assert!(c.calls().contains("gh issue edit 63 --repo"), "{}", c.calls());
+    assert!(!c.calls().contains("gh issue edit 64"), "{}", c.calls());
+}
+
+#[test]
+fn a_clump_ticket_still_open_is_left_alone_while_its_siblings_clear() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r22");
+    c.mk_implement_branch(&r, "65");
+    c.record_pr_closes("implement-65", &["65", "66"]);
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-65"],
+        &[("GH_ISSUE_65", "CLOSED\tin-progress\tcaneff"), ("GH_ISSUE_66", "OPEN\tin-progress\tcaneff")],
+    );
+    assert!(run.ok, "{}", run.text());
+    assert!(c.calls().contains("gh issue edit 65 --repo"), "{}", c.calls());
+    assert!(!c.calls().contains("gh issue edit 66"), "{}", c.calls());
+}
+
+#[test]
+fn one_clump_tickets_failed_edit_fails_the_run_and_names_only_that_ticket() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r23");
+    c.mk_implement_branch(&r, "67");
+    c.record_pr_closes("implement-67", &["67", "68"]);
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-67"],
+        &[("GH_ISSUE_67", "CLOSED\tin-progress\tcaneff"), ("GH_ISSUE_68", "CLOSED\tin-progress\tcaneff"), ("GH_ISSUE_EDIT_FAIL", "68")],
+    );
+    assert!(!run.ok, "{}", run.text());
+    assert!(run.stderr.contains("could not clear #68's in-progress label and assignee"), "{}", run.text());
+    assert!(!run.stderr.contains("could not clear #67"), "{}", run.text());
+    assert!(c.calls().contains("gh issue edit 67 --repo"), "the sibling still clears: {}", c.calls());
+}
+
+#[test]
+fn a_pr_that_closes_nothing_still_clears_the_branchs_own_ticket() {
+    // A one-ticket PR whose closing reference never registered, and the
+    // --force path where no merged PR was read at all: the branch name is
+    // still the ticket, exactly as before #889.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r24");
+    c.mk_implement_branch(&r, "69");
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-69"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff")],
+    );
+    assert!(run.ok, "{}", run.text());
+    assert!(c.calls().contains("gh issue edit 69 --repo"), "{}", c.calls());
+    assert!(!run.has("cleared #69,"), "one ticket reports as it always did: {}", run.text());
+}
+
 #[test]
 fn an_open_tickets_label_and_assignee_are_left_alone() {
     let c = Cleanup::new();

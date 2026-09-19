@@ -34,6 +34,7 @@ impl Cleanup {
         let c = Cleanup { tmp };
         std::fs::create_dir_all(c.home().join(".claude/sessions")).unwrap();
         std::fs::create_dir_all(c.pr_heads()).unwrap();
+        std::fs::create_dir_all(c.pr_closes()).unwrap();
         let fake = PathBuf::from(env!("CARGO_BIN_EXE_lane-fake"));
         for (dir, stubs) in [("full", &["gh", "herdr"][..]), ("nogh", &["herdr"][..]), ("noherdr", &["gh"][..])] {
             let d = c.root().join(dir);
@@ -60,6 +61,9 @@ impl Cleanup {
     }
     pub fn pr_heads(&self) -> PathBuf {
         self.root().join("gh-pr-heads")
+    }
+    pub fn pr_closes(&self) -> PathBuf {
+        self.root().join("gh-pr-closes")
     }
     pub fn call_log(&self) -> PathBuf {
         self.root().join("calls.log")
@@ -185,6 +189,13 @@ impl Cleanup {
         dir
     }
 
+    /// Records the tickets the merged PR for `branch` closes: a bare
+    /// number for one in the same repo, `<owner>/<name>#<number>` for one
+    /// elsewhere.
+    pub fn record_pr_closes(&self, branch: &str, tickets: &[&str]) {
+        std::fs::write(self.pr_closes().join(branch.replace('/', "__")), tickets.join("\n")).unwrap();
+    }
+
     /// Records that a merged PR's head for `branch` is `rev` in `repo`.
     pub fn record_pr_head(&self, repo: &Path, branch: &str, rev: &str) {
         std::fs::write(self.pr_heads().join(branch.replace('/', "__")), self.rev(repo, rev)).unwrap();
@@ -249,6 +260,7 @@ impl Cleanup {
             .env("HOME", self.home())
             .env("CALL_LOG", self.call_log())
             .env("GH_PR_HEADS", self.pr_heads())
+            .env("GH_PR_CLOSES", self.pr_closes())
             .env("HERDR_AGENTS", self.root().join("agents.json"))
             .env("HERDR_WORKSPACES", self.root().join("workspaces.json"));
         for (k, v) in env {
