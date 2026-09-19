@@ -10,6 +10,15 @@
   before adding a dependency or changing a database schema. A *tracked* file
   removed in a commit is undoable — delete it in place, no ask needed. The bar
   is "can I undo it," not "is it a deletion."
+  Two things are *not* history rewrites for this rule, because neither can
+  reach `main` and both are recoverable: resolving a conflict inside a rebase
+  already under way (`git checkout --ours|--theirs <paths>`, `git rebase
+  --continue|--abort`), and `git push --force-with-lease` to a worker's own
+  `implement-*` branch — `--lease` refuses if anyone else pushed, and the
+  branch is disposable by design. Any force-push to `main`, any `--force`
+  without a lease, and any rebase or reset I did not already sanction: still
+  ask. (2026-09-19: a worker sat parked for hours mid-rebase because the lane
+  mandated the rebase and every way to finish it was gated.)
 - **Gate 1 — whose repo?** Mine (origin owner = my gh login) → agents land
   directly. Anyone else's → push the branch, stop before the PR, hand me the
   PR command.
