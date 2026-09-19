@@ -213,7 +213,7 @@ def test_the_report_says_why_a_ticket_is_unresolved():
     got = read([issue(1, body="no section here")])
     line = F.render(got)
     assert line.startswith("unresolved  1 ticket 1  (no native dependencies "
-                           "and no `## Blocked by` section)"), line
+                           "and no `Blocked by` of any form)"), line
 
 
 def test_the_cli_refuses_a_wrong_argument_count():
@@ -257,6 +257,54 @@ def test_the_cli_reports_a_failed_gh_call_on_one_line():
     assert r.stderr.count("\n") == 1, r.stderr
     assert "frontier.py: " in r.stderr, r.stderr
     assert "Traceback" not in r.stderr, r.stderr
+
+
+# --- The two inline forms the tree also writes -----------------------------
+
+def test_an_inline_blocked_by_line_names_blockers():
+    # `docs/agents/issue-tracker.md`: a `Blocked by: #<n>, #<n>` line at the
+    # top of the body, which is what /wayfinder children carry.
+    body = "Part of #500\n\nBlocked by: #7, #8\n\nSome prose.\n"
+    got = read([issue(1, body=body)], states={7: "closed", 8: "open"})
+    assert numbers(got["blocked"]) == [1], got
+    assert got["blocked"][0]["blockers"] == [8], got
+
+
+def test_a_bold_inline_blocked_by_line_is_the_same_form():
+    # `to-tickets`'s local ticket template writes `**Blocked by:** ...`.
+    body = "**Blocked by:** None — can start immediately.\n"
+    got = read([issue(1, body=body)])
+    assert numbers(got["unblocked"]) == [1], got
+
+
+def test_a_closing_bold_marker_is_not_part_of_the_answer():
+    # `**Blocked by**: None` puts the colon outside the markers; the answer
+    # is what follows them, not `*: None`.
+    got = read([issue(1, body="**Blocked by**: None — can start immediately.\n")])
+    assert numbers(got["unblocked"]) == [1], got
+
+
+def test_an_inline_line_reaches_only_to_its_end():
+    body = "Blocked by: None — can start immediately.\n\nRelated: #7\n"
+    got = read([issue(1, body=body)], states={7: "open"})
+    assert numbers(got["unblocked"]) == [1], got
+
+
+def test_the_section_wins_over_an_inline_line():
+    body = "Blocked by: #7\n\n## Blocked by\n\nNone.\n"
+    got = read([issue(1, body=body)], states={7: "open"})
+    assert numbers(got["unblocked"]) == [1], got
+
+
+def test_prose_mentioning_a_blocker_mid_sentence_is_not_a_declaration():
+    got = read([issue(1, body="This one is blocked by #7, we think.\n")],
+               states={7: "open"})
+    assert numbers(got["unresolved"]) == [1], got
+
+
+def test_an_empty_inline_line_is_unresolved():
+    got = read([issue(1, body="**Blocked by:**\n\nmore prose\n")])
+    assert numbers(got["unresolved"]) == [1], got
 
 
 def main():

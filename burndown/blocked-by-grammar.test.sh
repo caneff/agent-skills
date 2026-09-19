@@ -19,8 +19,9 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 grammar="$here/references/frontier.md"
 skill="$here/SKILL.md"
 to_tickets="$here/../to-tickets/SKILL.md"
+tracker="$here/../docs/agents/issue-tracker.md"
 
-for f in "$grammar" "$skill" "$to_tickets"; do
+for f in "$grammar" "$skill" "$to_tickets" "$tracker"; do
   [ -f "$f" ] || { echo "FAIL: missing $f" >&2; exit 1; }
 done
 
@@ -34,6 +35,8 @@ skill_text="$(flatten <"$skill")"
 # prose elsewhere in the file.
 to_tickets_text="$(sed -n '/^### 5\. Publish the tickets/,/^<local-ticket-template>/p' "$to_tickets" | flatten)"
 [ -n "$to_tickets_text" ] || { echo "FAIL: could not extract step 5 from to-tickets/SKILL.md" >&2; exit 1; }
+
+tracker_text="$(flatten <"$tracker")"
 
 fail=0
 check_in() {
@@ -55,6 +58,11 @@ check_in "$grammar_text" '## Blocked by' references/frontier.md
 check_in "$grammar_text" '#NNN' references/frontier.md
 check_in "$grammar_text" 'None — can start immediately' references/frontier.md
 
+# Rule 2b: all three written forms the tree uses are in the grammar, so a
+# ticket written to any of the repo's own templates is not read as silence.
+check_in "$grammar_text" 'Blocked by: #7, #8' references/frontier.md
+check_in "$grammar_text" '`**Blocked by:** ...`' references/frontier.md
+
 # Rule 3: silence is its own answer, and it is never read as unblocked.
 check_in "$grammar_text" 'unresolved' references/frontier.md
 check_in "$grammar_text" 'never dispatched' references/frontier.md
@@ -69,6 +77,14 @@ check_in "$to_tickets_text" '--add-blocked-by' to-tickets/SKILL.md
 check_in "$to_tickets_text" 'in addition to' to-tickets/SKILL.md
 check_in "$to_tickets_text" 'frontier.md' to-tickets/SKILL.md
 check_in "$to_tickets_text" 'never omit' to-tickets/SKILL.md
+
+# Rule 6: the standing tracker doc agrees with the grammar — the same three
+# forms, and a frontier of three buckets rather than two. Before #890 its
+# "Frontier query" dropped blocked tickets and dispatched everything else,
+# so a ticket that stated nothing went to a worker.
+check_in "$tracker_text" 'three forms the frontier reader parses' docs/agents/issue-tracker.md
+check_in "$tracker_text" 'unresolved' docs/agents/issue-tracker.md
+check_in "$tracker_text" 'Silence is unresolved, never unblocked' docs/agents/issue-tracker.md
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS burndown/blocked-by-grammar.test.sh"

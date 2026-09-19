@@ -28,6 +28,14 @@ from urllib.parse import quote
 _HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+blocked by[ \t]*:?[ \t]*$",
                       re.IGNORECASE)
 _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
+# The inline forms the tree also writes: `Blocked by: #7, #8` at the top of a
+# /wayfinder child (docs/agents/issue-tracker.md), and `**Blocked by:** ...`
+# in to-tickets' local ticket template. Anchored at the line start and
+# allowing no `#` before the words, so a heading is never read as one of
+# these and prose that merely says "blocked by #7" mid-sentence is not a
+# declaration.
+_INLINE = re.compile(r"^[ \t]*[*_]{0,2}[ \t]*blocked by[ \t]*:?[ \t]*[*_]{0,2}[ \t]*:?[ \t]*(.*)$",
+                     re.IGNORECASE)
 # A bare `#NNN`. The lookbehind keeps `owner/repo#7` and `abc#7` out: a
 # cross-repo reference is outside the grammar, and reading its tail as a
 # local number would gate a ticket on an unrelated issue.
@@ -46,10 +54,14 @@ class FrontierError(Exception):
 
 
 def blocked_by_section(body):
-    """The lines under the `## Blocked by` heading, up to the next heading of
-    any level, or `None` when the body has no such heading at all. A ticket
-    that never states the relationship is not a ticket that states it has no
-    blockers."""
+    """What the ticket states about its blockers, or `None` when it states
+    nothing at all — a ticket that never mentions the relationship is not a
+    ticket that says it has none.
+
+    Three written forms, the section first because it is the one
+    `/to-tickets` emits: the lines under a `## Blocked by` heading up to the
+    next heading of any level, or the rest of an inline `Blocked by:` /
+    `**Blocked by:**` line."""
     lines = (body or "").splitlines()
     for i, line in enumerate(lines):
         if not _HEADING.match(line):
@@ -60,6 +72,10 @@ def blocked_by_section(body):
                 break
             section.append(rest)
         return "\n".join(section).strip()
+    for line in lines:
+        inline = _INLINE.match(line)
+        if inline:
+            return inline.group(1).strip()
     return None
 
 
@@ -68,14 +84,14 @@ def section_blockers(section):
     names, or `None` references plus the reason when the section says
     nothing this grammar can read."""
     if not section:
-        return None, "`## Blocked by` section is empty"
+        return None, "the ticket's `Blocked by` states nothing"
     references = [int(n) for n in _REFERENCE.findall(section)]
     if references:
         # dedup, keep the order they were written in
         return list(dict.fromkeys(references)), None
     if _NONE.match(section):
         return [], None
-    return None, "`## Blocked by` section names no `#NNN` and does not say None"
+    return None, "`Blocked by` names no `#NNN` and does not say None"
 
 
 def _is_claimed(issue):
@@ -114,7 +130,7 @@ def classify(issues, state_of):
             continue
         section = blocked_by_section(issue.get("body"))
         if section is None:
-            entry["why"] = "no native dependencies and no `## Blocked by` section"
+            entry["why"] = "no native dependencies and no `Blocked by` of any form"
             buckets["unresolved"].append(entry)
             continue
         references, why = section_blockers(section)
@@ -126,7 +142,7 @@ def classify(issues, state_of):
         states = [(n, state_of(n)) for n in references]
         unreadable = [n for n, state in states if state is None]
         if unreadable:
-            entry["why"] = ("`## Blocked by` names "
+            entry["why"] = ("`Blocked by` names "
                             + ", ".join(f"#{n}" for n in unreadable)
                             + ", whose state could not be read")
             buckets["unresolved"].append(entry)
@@ -134,10 +150,10 @@ def classify(issues, state_of):
         open_blockers = [n for n, state in states if state == "open"]
         if open_blockers:
             entry["blockers"] = open_blockers
-            entry["why"] = "`## Blocked by` names an open ticket"
+            entry["why"] = "`Blocked by` names an open ticket"
             buckets["blocked"].append(entry)
         else:
-            entry["why"] = "`## Blocked by` names only closed tickets"
+            entry["why"] = "`Blocked by` names only closed tickets"
             buckets["unblocked"].append(entry)
     return buckets
 

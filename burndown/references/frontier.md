@@ -30,7 +30,7 @@ not an answer, and the reader falls through to the section. Where native
 edges exist they win: they are live, and the section is prose someone typed
 once.
 
-**2. The `## Blocked by` section**, for a repo whose tickets carry the
+**2. A stated `Blocked by`**, for a repo whose tickets carry the
 relationship as prose. The reader parses the grammar below and nothing else.
 
 **3. Nothing at all** — no native edges and no section. That ticket is
@@ -50,10 +50,22 @@ links, the edges lived in `## Blocked by` sections, and **8 of 21**
 This is what `/to-tickets` emits and what the fallback reader parses. Nothing
 outside it is read as an edge.
 
-- **The heading** is an ATX heading whose text is exactly `Blocked by` —
-  `## Blocked by` canonically; any level and any case is accepted, with an
-  optional trailing colon. The section runs from that heading to the next
-  heading of any level, or to the end of the body.
+- **Three written forms**, because the tree already writes three, and a
+  ticket written to one of the repo's own templates must not read as silence:
+  - a **section** under an ATX heading whose text is exactly `Blocked by` —
+    `## Blocked by` canonically, any level, any case, optional trailing
+    colon. It runs to the next heading of any level, or to the end of the
+    body. This is what `/to-tickets` emits.
+  - an **inline line** — `Blocked by: #7, #8` at the top of the body, the
+    form `docs/agents/issue-tracker.md` gives `/wayfinder` children.
+  - a **bold inline line** — `**Blocked by:** ...`, from `/to-tickets`'s
+    local ticket template. The markers are not part of the answer, whichever
+    side of them the colon sits on.
+
+  An inline line reaches to the end of that line and no further. The words
+  must start the line: prose that says "this one is blocked by #7, we think"
+  mid-sentence is not a declaration. Where a ticket carries both a section
+  and an inline line, the section wins.
 - **A blocker** is a bare `#NNN` reference to an issue in the same repo,
   anywhere in the section — one per list item is the house form. A ticket is
   blocked when any referenced issue is open, and unblocked when every one of
@@ -61,7 +73,8 @@ outside it is read as an edge.
 - **No blockers** is the literal word `None`, optionally with a list marker
   and a trailing clause: `None — can start immediately.` That is a statement,
   and it reads as unblocked.
-- **Anything else is unresolved.** An empty section states nothing. Prose
+- **Anything else is unresolved.** An empty section, or an inline line
+  with nothing after it, states nothing. Prose
   naming no `#NNN` ("the database work, probably") states nothing this
   grammar can read. A cross-repo `owner/repo#NNN` is outside the grammar —
   the reader will not read its tail as a local `#NNN`, because gating a
