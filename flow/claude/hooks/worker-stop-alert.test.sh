@@ -308,20 +308,20 @@ t="$tmp/reported-then-worked.jsonl"
 run "reported this turn, then kept working" "$t"
 expect_none "a report inside this turn covers the stop even when work followed it"
 
-# A background shell launched in an earlier turn is still out: an inbound
-# message that starts a turn does not put the job back on the ground (#886,
-# causes 1 and 3 composed).
+# The outstanding set is this turn's, and that bound is load-bearing: 45% of
+# real background tasks never emit a terminal notification, so a set carried
+# across turns would let one stale id hold the verdict at `waiting` for the
+# rest of the session and the alert would never fire again (#900, and
+# docs/research/2026-09-19-background-task-terminal-states.md). The price is
+# the case below: a job that never finished does not cover a later stop.
 reset_log
 t="$tmp/bg-across-turns.jsonl"
-{ human "$brief"; bg_launch bcross1; assistant_text "check-full running"; } > "$t"
-run "background shell out, before the message" "$t"
+{ human "$brief"; bg_launch bnever1; assistant_text "check-full running"; } > "$t"
+run "background shell out" "$t"
 expect_none "a stop while a background shell is out does not alert"
-{ peer "fyi: merged the other PR"; work; assistant_text "noted, still waiting"; } >> "$t"
-run "background shell out, across a message" "$t"
-expect_none "a message arriving mid-job does not turn the wait into a silent stop"
-{ task_done bcross1 completed; assistant_text "check green, stopping"; } >> "$t"
-run "background shell done, across a message" "$t"
-expect_alert "once the job ends, a stop without a report alerts"
+{ peer "new task: fix the flaky test"; work; assistant_text "fixed it"; } >> "$t"
+run "stale never-finished job" "$t"
+expect_alert "a never-terminated job does not suppress a later genuine silent stop"
 
 reset_log
 t="$tmp/torn.jsonl"

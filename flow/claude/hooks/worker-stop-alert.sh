@@ -105,14 +105,21 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
   # (#886). One ends at a `<task-id>` notification that also carries a
   # `<status>`, or at a `TaskStop` the worker ran itself. Monitor event
   # notifications carry a `<task-id>` and no `<status>` while the monitor
-  # keeps running, so an event is not a return. Scanned over the whole
-  # transcript, not this turn: an inbound message starts a turn but does
-  # not put a running job back on the ground.
-  | [$all[].value | .toolUseResult? | objects
+  # keeps running, so an event is not a return. Scanned over this turn, not
+  # the whole transcript: 45% of the background tasks in ~/.claude/projects
+  # never emit a terminal notification at all (docs/research/
+  # 2026-09-19-background-task-terminal-states.md), and a whole-transcript
+  # set difference lets one such id hold the verdict at `waiting` for the
+  # rest of the session — the alert would never fire again, however silently
+  # the worker stopped. The cost of the turn bound is the other way round: a
+  # message that arrives mid-job restarts the turn, so that stop alerts
+  # while the job is still running. A false alert costs a pane read; a
+  # suppressed one costs the signal. #900 holds the wider question.
+  | [$after[] | .toolUseResult? | objects
       | (.backgroundTaskId // .taskId) | select(strings)] as $tasks
-  | [($all[].value | select(.type == "user") | .message.content | strings
+  | [($after[] | select(.type == "user") | .message.content | strings
        | select(test("<status>")) | scan("<task-id>([^<]+)</task-id>")[0]),
-     ($all[].value | select(.type == "assistant") | .message.content[]?
+     ($after[] | select(.type == "assistant") | .message.content[]?
        | select(.type == "tool_use" and .name == "TaskStop")
        | (.input.task_id // .input.shell_id) | select(strings))] as $finished
   | ($tasks - $finished) as $unfinished
