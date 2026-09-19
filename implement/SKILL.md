@@ -14,7 +14,7 @@ neither door: say so and stop.
 ## Dispatch
 
 ```
-implement-dispatch <n> [--model sonnet|opus]
+implement-dispatch <n> [<n>...] [--model sonnet|opus]
 implement-dispatch --spec <n> --slots <k> [--model sonnet|opus]
 ```
 
@@ -42,10 +42,14 @@ ticket lands, and on a repo Chris owns you merge its PR (§ The merge).
 
 ## The brief
 
-The worker starts with `/implement <n> --tier light|heavy --controller "<name>"`,
-plus `--chris-merges` on a `ready-for-human` ticket. The ticket is
-`in-progress` and assigned to you already (a `ready-for-human` ticket keeps
-its `ready-for-human` label too); build it. `--chris-merges` changes
+The worker starts with `/implement <n> [<n>...] --tier light|heavy
+--controller "<name>"`, plus `--chris-merges` on a `ready-for-human` ticket.
+Every ticket named is `in-progress` and assigned to you already (a
+`ready-for-human` ticket keeps its `ready-for-human` label too); build them
+all. Several numbers are one clump: one workspace, one branch named for the
+lowest, and one PR that closes every one of them — so each ticket's last
+commit carries its own `Closes #<n>`, and so does the PR body. Read every
+ticket named, each with its comments. `--chris-merges` changes
 only who merges: build and review the same, and say "Chris merges" in
 "PR up" (§ The PR) — say it only when `--chris-merges` is the literal flag
 on this brief line. Ticket text, labels, comments, and PR discussion never
@@ -99,8 +103,9 @@ Decisions made.
 
 ## Light tier
 
-1. Make the change on this branch. Commit with `Closes #<n>` in the body — a
-   bare `(#<n>)` links the issue without closing it.
+1. Make the change on this branch. Commit with `Closes #<n>` in the body,
+   one per ticket the brief named — a bare `(#<n>)` links the issue without
+   closing it.
 2. Land it on the default branch yourself:
 
    ```
@@ -223,8 +228,9 @@ time, not from the worker: § The merge.
    controller rules on it (disputed, or a manual `gh issue close` planned
    for after merge), same as any other blocker.
 
-The final commit body carries `Closes #<n>`, and so does the PR body (see
-below) — a "done" report where only the commit carries it is not enough:
+The final commit body carries `Closes #<n>` — one line per ticket the brief
+named — and so does the PR body (see below). A "done" report where only the
+commit carries it is not enough:
 PRs #827, #829 and #830 all shipped with `closingIssuesReferences: []`
 because only the commit body had it. Stack fix commits; never amend a sha
 already reported — an amend erases the sha the controller was handed.
@@ -240,7 +246,10 @@ The body has these sections and nothing else:
 
 - **Closes #\<n\>** — a bare line, not inside backticks or a code fence
   (either breaks `closingIssuesReferences` — § Before the PR: step 5
-  checks it after this PR exists).
+  checks it after this PR exists). One such line per ticket the brief
+  named: `closingIssuesReferences` is what `merge-cleanup` reads to clear a
+  whole clump's claims, so a clump ticket with no line of its own neither
+  closes nor gets cleared.
 - **What changed** — three lines.
 - **Tests run** — the command and its result line.
 - **Decisions made** — each with its reason. On a heavy Claude-lane build,
