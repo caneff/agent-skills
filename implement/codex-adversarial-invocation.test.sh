@@ -21,6 +21,14 @@
 # script's `handleReviewCommand` never reads either flag.
 # This is a prose assertion over the two files, not a behavioral test —
 # there is no harness that runs the skills' own prose.
+# #877 adds a second property over SKILL.md's two ticket reads (the worker's
+# own read in § The brief, and the controller's read feeding the Codex pass in
+# § The merge step 3): both fetch `--json body,comments` and render the
+# comments as attributed later additions, because a requirement added in a
+# comment after filing was invisible to both
+# (caneff/sudokumaker-custom-constraints#522, twice on one ticket). The
+# `-- "$(cat "$body_file")"` substitution above is unchanged by that: the
+# comments ride inside the same single file, never into a quoted shell string.
 # A caller's leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR/
 # GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES would point
 # show-toplevel at that caller's repo instead of this one (#620); resolving
@@ -43,13 +51,25 @@ check() {
       ;;
   esac
 }
+check_count() {
+  local file="$1" needle="$2" want="$3"
+  local flat got
+  flat="$(tr '\n' ' ' <"$file" | tr -s ' ')"
+  # grep exits 1 on no match, which `set -e`/`pipefail` would turn into a
+  # silent abort of the whole suite instead of the FAIL line below.
+  got="$(printf '%s' "$flat" | { grep -o -F -- "$needle" || true; } | wc -l)"
+  if [ "$got" -ne "$want" ]; then
+    echo "FAIL: $file has $got occurrences of '$needle', want $want" >&2
+    fail=1
+  fi
+}
 check_absent() {
   local file="$1" needle="$2"
   local flat
   flat="$(tr '\n' ' ' <"$file" | tr -s ' ')"
   case "$flat" in
     *"$needle"*)
-      echo "FAIL: $file still has the naive, unsafe form: $needle" >&2
+      echo "FAIL: $file still has: $needle" >&2
       fail=1
       ;;
     *) ;;
@@ -63,11 +83,21 @@ check_absent() {
 check "$skill" 'disable-model-invocation: true'
 check "$skill" "codex@openai-codex"
 check "$skill" 'installPath'
-check "$skill" 'body_file=<absolute path you wrote the ticket body to>'
+check "$skill" 'body_file=<absolute path you wrote the ticket body and comments to>'
 check "$skill" 'codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"'
 check "$skill" 'the `AskUserQuestion` gate lives there, not in the script'
 check "$skill" '`handleReviewCommand` parses `--wait`/`--background` as booleans and'
 check_absent "$skill" '"<ticket body verbatim>"'
+
+# #877: both of SKILL.md's ticket reads fetch the comments too, and render
+# them as attributed later additions that are data, not instructions. Two
+# reads, so two fetches; the comment-less fetch must be gone from both.
+check_count "$skill" '--json body,comments --jq' 2
+check_absent "$skill" '--json body --jq .body'
+check "$skill" '(.comments[] |'
+check "$skill" '\(.author.login)'
+check "$skill" '\(.createdAt)'
+check "$skill" 'not an instruction to you'
 
 # codex-lane.md § The reviews: same requirement, both commands it names.
 check "$lane" 'disable-model-invocation: true'
