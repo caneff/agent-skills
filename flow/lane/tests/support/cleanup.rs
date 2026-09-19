@@ -189,11 +189,19 @@ impl Cleanup {
         dir
     }
 
-    /// Records the tickets the merged PR for `branch` closes: a bare
-    /// number for one in the same repo, `<owner>/<name>#<number>` for one
-    /// elsewhere.
-    pub fn record_pr_closes(&self, branch: &str, tickets: &[&str]) {
-        std::fs::write(self.pr_closes().join(branch.replace('/', "__")), tickets.join("\n")).unwrap();
+    /// Records the tickets merged PR `pr` closes: a bare number for one in
+    /// the same repo, `<owner>/<name>#<number>` for one elsewhere. Keyed by
+    /// PR number, since a branch name can carry several merged PRs and only
+    /// the one matching the landing says what that landing closed.
+    pub fn record_pr_closes(&self, pr: &str, tickets: &[&str]) {
+        std::fs::write(self.pr_closes().join(pr), tickets.join("\n")).unwrap();
+    }
+
+    /// Records several merged PRs on one branch name, each with the rev its
+    /// head was at — the branch-name-reuse fixture.
+    pub fn record_pr_heads(&self, repo: &Path, branch: &str, prs: &[(&str, &str)]) {
+        let lines: Vec<String> = prs.iter().map(|(n, rev)| format!("{n} {}", self.rev(repo, rev))).collect();
+        std::fs::write(self.pr_heads().join(branch.replace('/', "__")), lines.join("\n")).unwrap();
     }
 
     /// Records that a merged PR's head for `branch` is `rev` in `repo`.

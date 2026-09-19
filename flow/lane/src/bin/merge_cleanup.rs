@@ -166,10 +166,15 @@ fn head_of(path: &str) -> Option<String> {
     quiet_stdout("git", &["-C", path, "rev-parse", "--abbrev-ref", "HEAD"])
 }
 
-/// What proved a branch merged: the sha it is landed up to, and the proof.
+/// What proved a branch merged: the sha it is landed up to, the proof, and
+/// the merged PR's number when a PR is what proved it. The number matters
+/// past the display string (#889): a branch name can carry several merged
+/// PRs over its life, and only the one whose head is this tip says which
+/// tickets this landing closed.
 struct Merged {
     at: String,
     by: String,
+    pr: Option<String>,
 }
 
 struct Cleanup {
@@ -864,7 +869,7 @@ impl Cleanup {
                 let mut f = line.split_whitespace();
                 let (n, h) = (f.next().unwrap_or(""), f.next().unwrap_or(""));
                 if !h.is_empty() && h == tip {
-                    return Some(Merged { at: h.to_string(), by: format!("PR #{n}") });
+                    return Some(Merged { at: h.to_string(), by: format!("PR #{n}"), pr: Some(n.to_string()) });
                 }
             }
         }
@@ -874,7 +879,7 @@ impl Cleanup {
             return None;
         }
         let at = quiet_stdout("git", &["-C", path, "rev-parse", &base]).unwrap_or_default();
-        Some(Merged { at, by: base })
+        Some(Merged { at, by: base, pr: None })
     }
 
     /// Step 4's delete. `-d` first: it is the honest question, and it
@@ -925,12 +930,21 @@ impl Cleanup {
             eprintln!("merge-cleanup: refusing to delete the default branch {b}");
             return false;
         }
-        if self.force {
+        // Kept, not discarded: step 7 needs the PR this landing came from,
+        // and by then the branch is deleted, so the tip it was matched on is
+        // gone and the match cannot be redone.
+        let merged = if self.force {
             safe_println!("--force: skipping the merged check for {b}");
-        } else if self.is_merged(path, b).is_none() {
-            eprintln!("merge-cleanup: {b} is not merged — nothing cleaned up (--force overrides)");
-            return false;
-        }
+            None
+        } else {
+            match self.is_merged(path, b) {
+                None => {
+                    eprintln!("merge-cleanup: {b} is not merged — nothing cleaned up (--force overrides)");
+                    return false;
+                }
+                Some(m) => Some(m),
+            }
+        };
 
         // Step 3 — the workspace. A linked worktree holding the branch makes
         // `git branch -d` fail with "used by worktree", so it goes first, by
@@ -1008,7 +1022,7 @@ impl Cleanup {
         // (the sweep table's "cleaned" word, and `main`'s gate on
         // `report_stale`). It sets `claim_clear_failed` instead, for the
         // caller to fold into its own exit code, same as `remote_delete_failed`.
-        self.claim_clear_failed = !self.clear_landed_claims(path, b);
+        self.claim_clear_failed = !self.clear_landed_claims(path, b, merged.as_ref().and_then(|m| m.pr.as_deref()));
         true
     }
 
@@ -1026,7 +1040,7 @@ impl Cleanup {
     /// which is what actually fails the run's exit code — with the exact
     /// re-run command on stderr, since that command is the only record of
     /// the edit that still needs to happen.
-    fn clear_landed_claims(&self, path: &str, b: &str) -> bool {
+    fn clear_landed_claims(&self, path: &str, b: &str, pr: Option<&str>) -> bool {
         let Some(n) = ticket_number(b) else { return true };
         let what = format!("clearing #{n}'s in-progress label and assignee");
         if !on_path("gh") {
@@ -1048,7 +1062,7 @@ impl Cleanup {
         // for u64 must not silently drop out of the set.
         let mut tickets: Vec<String> = vec![n.to_string()];
         let mut ok = true;
-        match pr_closed_tickets(&slug, b) {
+        match pr_closed_tickets(&slug, pr) {
             Ok(closed) => tickets.extend(closed.iter().map(u64::to_string)),
             // A lookup that failed is not a PR that closed nothing. Read as
             // one, it clears the branch's ticket, prints success and leaves
@@ -1058,10 +1072,10 @@ impl Cleanup {
             // merge-cleanup cannot repeat it.
             Err(why) => {
                 ok = false;
+                let pr = pr.unwrap_or("?");
                 eprintln!(
-                    "merge-cleanup: could not read which tickets the merged PR for {b} closes ({why}); \
-                     any other ticket in its clump is still claimed — re-run: gh pr list --repo {slug} --head {b} \
-                     --state merged --json number,closingIssuesReferences"
+                    "merge-cleanup: could not read which tickets PR #{pr} closes ({why}); any other ticket in \
+                     its clump is still claimed — re-run: gh pr view {pr} --repo {slug} --json closingIssuesReferences"
                 );
             }
         }
@@ -1195,52 +1209,56 @@ fn print_table(rows: &[[String; 4]]) {
     }
 }
 
-/// The issues the merged PRs on head `b` close, restricted to `slug`'s own
-/// repo. A reference elsewhere is dropped and named on its own skip line:
-/// every edit here goes out with `--repo <slug>`, so acting on that number
-/// would edit an unrelated issue that happens to share it — and a claim this
-/// run is leaving alone has to say so, or a cross-repo clump reads as
-/// cleared when it is not.
+/// The issues the merged PR `pr` closes, restricted to `slug`'s own repo. A
+/// reference elsewhere is dropped and named on its own skip line: every edit
+/// here goes out with `--repo <slug>`, so acting on that number would edit
+/// an unrelated issue that happens to share it — and a claim this run is
+/// leaving alone has to say so, or a cross-repo clump reads as cleared when
+/// it is not.
 ///
-/// `Ok(vec![])` is GitHub's own answer that this head has no merged PR, or
-/// one that closes nothing — a `--force` run, or a PR whose closing keyword
-/// never registered — and the caller falls back to the branch's own ticket.
-/// `Err` is not that: the call failed, or answered something that is not
-/// JSON. The two must not share a return value. An earlier version gave
-/// both the empty vector, reasoning that `is_merged` reads the same list so
-/// a transient gets reported there — but when this comes back empty there
-/// are no other tickets to read, so nothing reports, and the unparseable
-/// case is not transient at all.
-fn pr_closed_tickets(slug: &str, b: &str) -> Result<Vec<u64>, String> {
+/// One PR, named by the caller, not every merged PR the branch name ever
+/// carried: a name is reused, and an earlier landing's tickets are not this
+/// one's to unclaim. `is_merged` already picked the PR whose head is this
+/// tip; this reads that one.
+///
+/// `Ok(vec![])` is GitHub's own answer that the PR closes nothing, and
+/// `pr: None` — a `--force` run, or a merge proved by the ancestor test with
+/// no PR to name — is the same: the caller falls back to the branch's own
+/// ticket, as it did before #889. `Err` is not that. The call failed, the
+/// answer is not JSON, or it is JSON of the wrong shape: a
+/// `closingIssuesReferences` that is not an array, or a reference with no
+/// number. Those must not collapse into the empty answer — a cleanup that
+/// cannot read the clump's list must not report success.
+fn pr_closed_tickets(slug: &str, pr: Option<&str>) -> Result<Vec<u64>, String> {
+    let Some(pr) = pr else { return Ok(Vec::new()) };
     // No owner/name to compare against means the same-repo filter below
     // cannot run, and every reference would be dropped in silence — the
     // same failure as an unreadable answer, so it is reported the same way.
     let Some((owner, name)) = slug.rsplit_once('/') else {
         return Err(format!("origin slug {slug} names no owner/name"));
     };
-    let Some(out) = quiet_stdout(
-        "gh",
-        &["pr", "list", "--repo", slug, "--head", b, "--state", "merged", "--json", "number,closingIssuesReferences"],
-    ) else {
-        return Err("gh pr list failed".into());
+    let Some(out) = quiet_stdout("gh", &["pr", "view", pr, "--repo", slug, "--json", "closingIssuesReferences"]) else {
+        return Err("gh pr view failed".into());
     };
-    let Ok(prs) = serde_json::from_str::<serde_json::Value>(&out) else {
-        return Err("gh pr list answered something that is not JSON".into());
+    let Ok(body) = serde_json::from_str::<serde_json::Value>(&out) else {
+        return Err("gh pr view answered something that is not JSON".into());
+    };
+    let Some(refs) = body.get("closingIssuesReferences").and_then(serde_json::Value::as_array) else {
+        return Err("gh pr view answered no closingIssuesReferences array".into());
     };
     let mut tickets = Vec::new();
-    for pr in prs.as_array().map(Vec::as_slice).unwrap_or_default() {
-        let refs = pr.get("closingIssuesReferences").and_then(serde_json::Value::as_array);
-        for r in refs.map(Vec::as_slice).unwrap_or_default() {
-            let repo = r.get("repository");
-            let r_name = repo.and_then(|v| v.get("name")).and_then(serde_json::Value::as_str).unwrap_or("");
-            let r_owner = repo.and_then(|v| v.get("owner")).and_then(|v| v.get("login")).and_then(serde_json::Value::as_str).unwrap_or("");
-            let Some(number) = r.get("number").and_then(serde_json::Value::as_u64) else { continue };
-            if (r_owner, r_name) != (owner, name) {
-                skip(&format!("clearing {r_owner}/{r_name}#{number}"), &format!("another repo; this run only edits {slug}"));
-                continue;
-            }
-            tickets.push(number);
+    for r in refs {
+        let repo = r.get("repository");
+        let r_name = repo.and_then(|v| v.get("name")).and_then(serde_json::Value::as_str).unwrap_or("");
+        let r_owner = repo.and_then(|v| v.get("owner")).and_then(|v| v.get("login")).and_then(serde_json::Value::as_str).unwrap_or("");
+        let Some(number) = r.get("number").and_then(serde_json::Value::as_u64) else {
+            return Err("a closing reference has no issue number".into());
+        };
+        if (r_owner, r_name) != (owner, name) {
+            skip(&format!("clearing {r_owner}/{r_name}#{number}"), &format!("another repo; this run only edits {slug}"));
+            continue;
         }
+        tickets.push(number);
     }
     Ok(tickets)
 }

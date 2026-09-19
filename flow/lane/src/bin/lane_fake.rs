@@ -140,8 +140,13 @@ fn run_gh(args: &[String]) -> ExitCode {
         return gh_pr_list(args);
     }
     if (a0, a1) == ("pr", "view") {
+        let pr = args.get(2).map(String::as_str).unwrap_or("");
+        if args.windows(2).any(|w| w[0] == "--json" && w[1].contains("closingIssuesReferences")) {
+            let repo = args.windows(2).find(|w| w[0] == "--repo").map(|w| w[1].as_str()).unwrap_or("");
+            return gh_pr_closes(pr, repo);
+        }
         // PR 7 is caneff/merged-one, the bash stub's one resolvable PR.
-        if args.get(2).map(String::as_str) != Some("7") {
+        if pr != "7" {
             return ExitCode::FAILURE;
         }
         println!("caneff/merged-one");
@@ -156,48 +161,70 @@ fn run_gh(args: &[String]) -> ExitCode {
 /// `$GH_PR_CLOSES`.
 fn gh_pr_list(args: &[String]) -> ExitCode {
     let head = args.windows(2).find(|w| w[0] == "--head").map(|w| w[1].as_str()).unwrap_or("");
-    if args.windows(2).any(|w| w[0] == "--json" && w[1].contains("closingIssuesReferences")) {
-        // The two ways the real call stops being an authoritative answer:
-        // it fails outright, or it answers something that is not JSON.
-        match env::var("GH_PR_CLOSES_FAIL").unwrap_or_default().as_str() {
-            "fail" => {
-                eprintln!("gh: could not list pull requests");
-                return ExitCode::FAILURE;
-            }
-            "garbage" => {
-                println!("not json at all");
-                return ExitCode::SUCCESS;
-            }
-            _ => {}
-        }
-        let repo = args.windows(2).find(|w| w[0] == "--repo").map(|w| w[1].as_str()).unwrap_or("");
-        return gh_pr_closes(head, repo);
-    }
     let jq = args.iter().any(|a| a == "--jq");
     let dir = env::var("GH_PR_HEADS").unwrap_or_default();
-    let recorded = std::fs::read_to_string(Path::new(&dir).join(head.replace('/', "__")));
-    match (recorded, jq) {
-        (Ok(oid), true) => println!("7 {}", oid.trim()),
-        (Ok(oid), false) => println!("[{{\"number\":7,\"headRefOid\":\"{}\"}}]", oid.trim()),
-        (Err(_), false) => println!("[]"),
-        (Err(_), true) => {}
+    let Ok(body) = std::fs::read_to_string(Path::new(&dir).join(head.replace('/', "__"))) else {
+        if !jq {
+            println!("[]");
+        }
+        return ExitCode::SUCCESS;
+    };
+    // One merged PR per line, `<number> <oid>`. A line holding an oid alone
+    // is PR 7, the one-PR shape every fixture but the branch-name-reuse one
+    // records.
+    let prs: Vec<(String, String)> = body
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| match l.split_whitespace().collect::<Vec<_>>()[..] {
+            [n, oid] => (n.to_string(), oid.to_string()),
+            _ => ("7".to_string(), l.trim().to_string()),
+        })
+        .collect();
+    if jq {
+        for (n, oid) in &prs {
+            println!("{n} {oid}");
+        }
+    } else {
+        let items: Vec<String> = prs.iter().map(|(n, oid)| format!("{{\"number\":{n},\"headRefOid\":\"{oid}\"}}")).collect();
+        println!("[{}]", items.join(","));
     }
     ExitCode::SUCCESS
 }
 
-/// `pr list --head <b> --state merged --json number,closingIssuesReferences`:
-/// the one merged PR #7 closes the tickets listed in `$GH_PR_CLOSES/<branch>`
-/// (`/` spelled `__`), one per line, each either `<number>` for a ticket in
-/// the PR's own repo or `<owner>/<name>#<number>` for one elsewhere. No file
-/// for the branch means no merged PR, which `gh` answers as an empty array.
-/// A bare number's repository is `--repo`'s own slug, so the caller's
-/// same-repo filter sees a match whatever the scratch origin is named.
-fn gh_pr_closes(head: &str, repo: &str) -> ExitCode {
+/// `pr view <n> --json closingIssuesReferences`: PR `<n>` closes the tickets
+/// listed in `$GH_PR_CLOSES/<n>`, one per line, each either `<number>` for a
+/// ticket in the PR's own repo or `<owner>/<name>#<number>` for one
+/// elsewhere. Keyed by PR number, not by branch: a branch name can carry
+/// several merged PRs over its life, and only the one matching the landing
+/// says what that landing closed. No file for the PR means it closes
+/// nothing. A bare number's repository is `--repo`'s own slug, so the
+/// caller's same-repo filter sees a match whatever the scratch origin is
+/// named.
+fn gh_pr_closes(pr: &str, repo: &str) -> ExitCode {
+    // The ways the real call stops being an authoritative answer: it fails
+    // outright, answers something that is not JSON, or answers JSON of the
+    // wrong shape.
+    match env::var("GH_PR_CLOSES_FAIL").unwrap_or_default().as_str() {
+        "fail" => {
+            eprintln!("gh: could not read the pull request");
+            return ExitCode::FAILURE;
+        }
+        "garbage" => {
+            println!("not json at all");
+            return ExitCode::SUCCESS;
+        }
+        "wrong-shape" => {
+            println!(r#"{{"closingIssuesReferences":"nope"}}"#);
+            return ExitCode::SUCCESS;
+        }
+        "no-number" => {
+            println!(r#"{{"closingIssuesReferences":[{{"repository":{{"name":"x","owner":{{"login":"y"}}}}}}]}}"#);
+            return ExitCode::SUCCESS;
+        }
+        _ => {}
+    }
     let dir = env::var("GH_PR_CLOSES").unwrap_or_default();
-    let Ok(body) = std::fs::read_to_string(Path::new(&dir).join(head.replace('/', "__"))) else {
-        println!("[]");
-        return ExitCode::SUCCESS;
-    };
+    let body = std::fs::read_to_string(Path::new(&dir).join(pr)).unwrap_or_default();
     let refs: Vec<String> = body
         .lines()
         .filter(|l| !l.trim().is_empty())
@@ -210,7 +237,7 @@ fn gh_pr_closes(head: &str, repo: &str) -> ExitCode {
             format!(r#"{{"number":{n},"repository":{{"name":"{name}","owner":{{"login":"{owner}"}}}}}}"#)
         })
         .collect();
-    println!(r#"[{{"number":7,"closingIssuesReferences":[{}]}}]"#, refs.join(","));
+    println!(r#"{{"closingIssuesReferences":[{}]}}"#, refs.join(","));
     ExitCode::SUCCESS
 }
 

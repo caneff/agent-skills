@@ -49,9 +49,9 @@ Plain mode: the brief is `/implement <n>... --tier light|heavy --controller
 "<name>"`, light when one issue is named and it carries the documentation
 label, heavy otherwise — a clump is always heavy, because light tier lands
 without a PR and a merged PR's closingIssuesReferences is the only record
-merge-cleanup can clear a clump's claims from. A ready-for-human issue among them ends the brief with
---chris-merges: the worker builds the clump and Chris merges its PR.
---model defaults to sonnet.
+merge-cleanup can clear a clump's claims from. A ready-for-human issue among
+them ends the brief with --chris-merges: the worker builds the clump and
+Chris merges its PR. --model defaults to sonnet.
 
 Several issue numbers are one clump: one worker, one workspace, one branch
 and one PR that closes all of them. Branch and workspace are implement-<n>

@@ -411,7 +411,7 @@ fn every_ticket_the_merged_pr_closes_has_its_claim_cleared() {
     let c = Cleanup::new();
     let r = c.mkfixture("r20");
     c.mk_implement_branch(&r, "60");
-    c.record_pr_closes("implement-60", &["60", "61", "62"]);
+    c.record_pr_closes("7", &["60", "61", "62"]);
     let closed = ("CLOSED\tin-progress\tcaneff", "");
     let run = c.mc(
         Tools::Full,
@@ -434,7 +434,7 @@ fn a_clump_ticket_in_another_repo_is_never_edited() {
     let c = Cleanup::new();
     let r = c.mkfixture("r21");
     c.mk_implement_branch(&r, "63");
-    c.record_pr_closes("implement-63", &["63", "caneff/elsewhere#64"]);
+    c.record_pr_closes("7", &["63", "caneff/elsewhere#64"]);
     let run = c.mc(
         Tools::Full,
         &["--repo", s(&r), "implement-63"],
@@ -452,7 +452,7 @@ fn a_clump_ticket_still_open_is_left_alone_while_its_siblings_clear() {
     let c = Cleanup::new();
     let r = c.mkfixture("r22");
     c.mk_implement_branch(&r, "65");
-    c.record_pr_closes("implement-65", &["65", "66"]);
+    c.record_pr_closes("7", &["65", "66"]);
     let run = c.mc(
         Tools::Full,
         &["--repo", s(&r), "implement-65"],
@@ -468,7 +468,7 @@ fn one_clump_tickets_failed_edit_fails_the_run_and_names_only_that_ticket() {
     let c = Cleanup::new();
     let r = c.mkfixture("r23");
     c.mk_implement_branch(&r, "67");
-    c.record_pr_closes("implement-67", &["67", "68"]);
+    c.record_pr_closes("7", &["67", "68"]);
     let run = c.mc(
         Tools::Full,
         &["--repo", s(&r), "implement-67"],
@@ -494,8 +494,8 @@ fn a_failed_pr_list_fails_the_run_instead_of_reading_as_a_pr_that_closed_nothing
         &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_PR_CLOSES_FAIL", "fail")],
     );
     assert!(!run.ok, "a failed lookup must fail the run: {}", run.text());
-    assert!(run.stderr.contains("could not read which tickets the merged PR for implement-70 closes (gh pr list failed)"), "{}", run.text());
-    assert!(run.stderr.contains("re-run: gh pr list --repo"), "the message names the read to redo: {}", run.text());
+    assert!(run.stderr.contains("could not read which tickets PR #7 closes (gh pr view failed)"), "{}", run.text());
+    assert!(run.stderr.contains("re-run: gh pr view 7 --repo"), "the message names the read to redo: {}", run.text());
     // The branch's own ticket is still known, so it still clears.
     assert!(c.calls().contains("gh issue edit 70 --repo"), "{}", c.calls());
 }
@@ -514,6 +514,53 @@ fn an_unparseable_pr_list_answer_fails_the_run_too() {
     );
     assert!(!run.ok, "{}", run.text());
     assert!(run.stderr.contains("answered something that is not JSON"), "{}", run.text());
+}
+
+#[test]
+fn only_the_pr_that_landed_this_tip_decides_the_clump_not_every_pr_the_branch_name_ever_had() {
+    // Branch names are reused. Unioning every merged PR on the name strips
+    // labels and assignees off issues that belonged to an earlier landing —
+    // tickets this run has no business unclaiming.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r27");
+    c.mk_implement_branch(&r, "72");
+    // PR 7 is this landing, at the branch tip; PR 8 was an older landing on
+    // the same name, at a sha this branch has moved past.
+    c.record_pr_heads(&r, "implement-72", &[("8", "main"), ("7", "implement-72")]);
+    c.record_pr_closes("7", &["72", "73"]);
+    c.record_pr_closes("8", &["80", "81"]);
+    let closed = "CLOSED\tin-progress\tcaneff";
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-72"],
+        &[("GH_ISSUE_72", closed), ("GH_ISSUE_73", closed), ("GH_ISSUE_80", closed), ("GH_ISSUE_81", closed)],
+    );
+    assert!(run.ok, "{}", run.text());
+    for n in ["72", "73"] {
+        assert!(c.calls().contains(&format!("gh issue edit {n} --repo")), "this landing's #{n} was not cleared: {}", c.calls());
+    }
+    for n in ["80", "81"] {
+        assert!(!c.calls().contains(&format!("gh issue edit {n}")), "an older landing's #{n} was cleared: {}", c.calls());
+    }
+}
+
+#[test]
+fn a_wrong_shape_pr_answer_fails_the_run_like_an_unparseable_one() {
+    // Valid JSON of the wrong shape is the same defect as no JSON at all:
+    // read as "closes nothing", it clears the branch ticket, reports success
+    // and leaves the clump claimed.
+    for (scenario, want) in [("wrong-shape", "no closingIssuesReferences array"), ("no-number", "a closing reference has no issue number")] {
+        let c = Cleanup::new();
+        let r = c.mkfixture(&format!("r28-{scenario}"));
+        c.mk_implement_branch(&r, "74");
+        let run = c.mc(
+            Tools::Full,
+            &["--repo", s(&r), "implement-74"],
+            &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_PR_CLOSES_FAIL", scenario)],
+        );
+        assert!(!run.ok, "{scenario}: {}", run.text());
+        assert!(run.stderr.contains(want), "{scenario}: {}", run.text());
+    }
 }
 
 #[test]
