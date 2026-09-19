@@ -79,11 +79,19 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
   | [$after[] | select(.type == "user") | (.origin.senderTaskId // empty),
       (.message.content | strings | scan("<task-id>([^<]+)</task-id>")[0]),
       (.message.content | strings | scan("<teammate-message teammate_id=\"([^\"]+)\"")[0])] as $returned
-  # Background shells: the launch result carries `backgroundTaskId`, and only
-  # a `<task-id>` notification that also carries a `<status>` ends one (#886).
-  | [$after[] | .toolUseResult? | objects | .backgroundTaskId | select(strings)] as $tasks
-  | [$after[] | select(.type == "user") | .message.content | strings
-      | select(test("<status>")) | scan("<task-id>([^<]+)</task-id>")[0]] as $finished
+  # Background tasks: the launch result of a background shell carries
+  # `backgroundTaskId`, the launch result of a Monitor carries `taskId`
+  # (#886). One ends at a `<task-id>` notification that also carries a
+  # `<status>`, or at a `TaskStop` the worker ran itself. Monitor event
+  # notifications carry a `<task-id>` and no `<status>` while the monitor
+  # keeps running, so an event is not a return.
+  | [$after[] | .toolUseResult? | objects
+      | (.backgroundTaskId // .taskId) | select(strings)] as $tasks
+  | [($after[] | select(.type == "user") | .message.content | strings
+       | select(test("<status>")) | scan("<task-id>([^<]+)</task-id>")[0]),
+     ($after[] | select(.type == "assistant") | .message.content[]?
+       | select(.type == "tool_use" and .name == "TaskStop")
+       | (.input.task_id // .input.shell_id) | select(strings))] as $finished
   | ($tasks - $finished) as $unfinished
   # A teammate launch id is qualified (name@session-...); its reply id is
   # bare. Neither form appearing in $returned (both survive the set

@@ -261,6 +261,31 @@ expect_none "a stop while a background shell is out does not alert"
 run "background shell done" "$t"
 expect_alert "once the background shell completes, a stop without a report alerts"
 
+# A Monitor task is out (#886, false alert 2 of 3). Its event notifications
+# carry a `<task-id>` and no `<status>`: the monitor is still running, so an
+# event is not its return.
+reset_log
+t="$tmp/monitor.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
+  monitor_launch boirnz0ok; assistant_text "watching the job"; } > "$t"
+run "monitor out" "$t"
+expect_none "a stop while a Monitor task is out does not alert"
+{ monitor_event boirnz0ok; assistant_text "tick noted, still waiting"; } >> "$t"
+run "monitor event" "$t"
+expect_none "a Monitor event does not end the monitor, so the stop still does not alert"
+{ task_done boirnz0ok completed; assistant_text "job done, stopping"; } >> "$t"
+run "monitor ended" "$t"
+expect_alert "once the monitor ends, a stop without a report alerts"
+
+# A monitor the worker stopped itself is no longer outstanding — otherwise
+# the entry sits `waiting` forever and no later silent stop ever alerts.
+reset_log
+t="$tmp/monitor-stopped.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
+  monitor_launch bq1w2e3r4; task_stop bq1w2e3r4; assistant_text "stopped watching"; } > "$t"
+run "monitor stopped by the worker" "$t"
+expect_alert "a monitor the worker stopped with TaskStop is not still outstanding"
+
 reset_log
 t="$tmp/torn.jsonl"
 { human "$brief"; send x1 "skills-b6"; denied x1;
