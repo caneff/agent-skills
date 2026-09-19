@@ -191,7 +191,9 @@ expect_none "a reply to the controller's uds: address counts as reported"
 
 reset_log
 t="$tmp/stale-report.jsonl"
-{ human "$brief"; send s1 "skills-b6"; ok s1; peer "Codex findings, fix and send PR up again"; assistant_text "fixed"; } > "$t"
+# The worker did the fix work the message asked for and then stopped: work
+# since the last report is what makes the report stale (#886).
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "Codex findings, fix and send PR up again"; work; assistant_text "fixed"; } > "$t"
 run "report before the controller's next message" "$t"
 expect_alert "a report from an earlier turn does not cover a later peer-started turn"
 
@@ -285,6 +287,16 @@ t="$tmp/monitor-stopped.jsonl"
   monitor_launch bq1w2e3r4; task_stop bq1w2e3r4; assistant_text "stopped watching"; } > "$t"
 run "monitor stopped by the worker" "$t"
 expect_alert "a monitor the worker stopped with TaskStop is not still outstanding"
+
+# Already reported, then answered a message that needed no reply (#886,
+# false alert 3 of 3 — the one a diligent controller manufactures for
+# itself by closing its own loops). Nothing was done since the report, so
+# the report still stands.
+reset_log
+t="$tmp/loop-closed.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "merged, sha 1a2b3c — nothing needed"; assistant_text "noted"; } > "$t"
+run "message needing no reply" "$t"
+expect_none "a message needing no reply, answered with no work, does not alert"
 
 reset_log
 t="$tmp/torn.jsonl"

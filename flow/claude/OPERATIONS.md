@@ -102,8 +102,9 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   and "are you done?" messages cost turns and interrupt the worker; measured
   on the socket fan-in prototype (#778).
 - A worker that stops without a successful `SendMessage` to its controller
-  since its last prompt, with none of its subagents still out, still wakes
-  the controller: the `Stop` hook `worker-stop-alert.sh` types one line into
+  since its last prompt still wakes the controller — unless it is waiting
+  (a subagent, a background shell or a Monitor task still out) or it already
+  reported and has done nothing since (#886): the `Stop` hook `worker-stop-alert.sh` types one line into
   the controller's herdr pane, `[worker-stop-alert] worker #<n> stopped
   without reporting to <controller> (herdr agent <name>)`. Read that agent's
   pane (`herdr agent read <name>`) for the report it never sent. herdr
