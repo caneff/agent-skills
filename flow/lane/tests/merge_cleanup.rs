@@ -1370,3 +1370,316 @@ fn a_reader_that_closes_early_gets_a_clean_nonzero_exit_no_panic_text() {
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(!stderr.contains("Broken pipe"), "{stderr}");
 }
+
+// --- #876: --reap, the scoped reaper -----------------------------------------
+
+/// A repo whose `.claude/worktrees/implement-<n>` workspaces hold merged
+/// `implement-<n>` branches — what the reaper is pointed at.
+fn reap_repo(c: &Cleanup, rel: &str, ns: &[&str]) -> std::path::PathBuf {
+    let r = c.mkfixture(rel);
+    for n in ns {
+        c.mk_implement_branch(&r, n);
+        let b = format!("implement-{n}");
+        c.worktree_add(&r, &[s(&r.join(".claude/worktrees").join(&b)), &b]);
+    }
+    r
+}
+
+#[test]
+fn reap_without_yes_lists_each_workspace_and_removes_nothing() {
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r30", &["101"]);
+    let wt = r.join(".claude/worktrees/implement-101");
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r)], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has(&format!("  {}  would reap", wt.display())), "{}", run.text());
+    assert!(run.has("reap summary: 1 would be reaped, 0 skipped (dry run; --yes removes)"), "{}", run.text());
+    assert!(wt.is_dir() && c.has_branch(&r, "implement-101"), "{}", run.text());
+}
+
+#[test]
+fn reap_with_yes_removes_the_landed_workspace_and_leaves_the_rest() {
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r31", &["101", "102"]);
+    let (landed, kept) = (r.join(".claude/worktrees/implement-101"), r.join(".claude/worktrees/implement-102"));
+    // implement-102 kept going past the sha its merged PR covers.
+    std::fs::write(kept.join("f"), "one\nmore\n").unwrap();
+    c.git_ok(&["-C", s(&kept), "commit", "-qam", "past the PR"]);
+    let tip = c.rev(&r, "implement-101");
+    let short = c.git_out(&["-C", s(&r), "rev-parse", "--short", &tip]);
+
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!landed.exists() && !c.has_branch(&r, "implement-101"), "{}", run.text());
+    assert_eq!(c.git_out(&["-C", s(&r), "ls-remote", "--heads", "origin", "implement-101"]), "", "{}", run.text());
+    assert_eq!(c.rev(&r, &format!("refs/deleted/implement-101@{short}")), tip);
+    assert!(kept.is_dir() && c.has_branch(&r, "implement-102"), "{}", run.text());
+    assert!(run.has(&format!("  {}  reaped", landed.display())), "{}", run.text());
+    assert!(run.has(&format!("  {}  not merged, not removed", kept.display())), "{}", run.text());
+    assert!(run.has("reap summary: 1 reaped, 1 skipped"), "{}", run.text());
+}
+
+#[test]
+fn reap_skips_a_workspace_holding_work_and_names_the_files() {
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r32", &["103"]);
+    let wt = r.join(".claude/worktrees/implement-103");
+    std::fs::write(wt.join("notes"), "unsaved\n").unwrap();
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    let want = format!("  {}  dirty, not removed: 1 untracked file(s) would be lost: notes", wt.display());
+    assert!(run.has(&want), "{}", run.text());
+    assert!(wt.is_dir() && c.has_branch(&r, "implement-103"), "{}", run.text());
+    assert!(run.has("reap summary: 0 reaped, 1 skipped"), "{}", run.text());
+}
+
+#[test]
+fn reap_skips_a_workspace_with_a_live_session_and_names_it() {
+    for who in ["registry", "herdr"] {
+        let c = Cleanup::new();
+        let r = reap_repo(&c, "r33", &["104"]);
+        let wt = r.join(".claude/worktrees/implement-104");
+        let want = match who {
+            "registry" => {
+                c.session("live", &format!(r#"{{"pid":{},"cwd":"{}","procStart":"{}"}}"#, me(), wt.display(), me_start()));
+                format!("live session, not removed: pid {}", me())
+            }
+            _ => {
+                c.set_agents(&format!(
+                    r#"[{{"name":"skills-33","pane_id":"w33:p1","cwd":"{}","agent_status":"working"}}]"#,
+                    wt.display()
+                ));
+                "live session, not removed: herdr agent skills-33 (w33:p1)".to_string()
+            }
+        };
+        let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+        assert!(run.ok, "{who}: {}", run.text());
+        assert!(run.has(&format!("  {}  {want}", wt.display())), "{who}: {}", run.text());
+        assert!(wt.is_dir() && c.has_branch(&r, "implement-104"), "{who}: {}", run.text());
+        assert!(!c.calls().contains("pane close"), "{who}: {}", c.calls());
+    }
+}
+
+#[test]
+fn reap_considers_only_this_repos_implement_workspaces() {
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r34", &["105"]);
+    let other = reap_repo(&c, "r35", &["109"]);
+    let wts = r.join(".claude/worktrees");
+    // Landed, clean and dead like implement-105, and every one of them out
+    // of the reaper's reach: a branch that is not implement-*, a workspace
+    // outside .claude/worktrees/, one under a directory that merely starts
+    // with that path, and another repo's workspace.
+    c.worktree_add(&r, &[s(&wts.join("agent-old")), "caneff/merged-one"]);
+    for (n, at) in [("107", r.join("elsewhere/implement-107")), ("108", r.join(".claude/worktrees-evil/implement-108"))] {
+        c.mk_implement_branch(&r, n);
+        c.worktree_add(&r, &[s(&at), &format!("implement-{n}")]);
+    }
+
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has("reap plan: 1 implement-* workspace(s) under"), "{}", run.text());
+    assert!(!c.has_branch(&r, "implement-105"), "{}", run.text());
+    for at in [
+        wts.join("agent-old"),
+        r.join("elsewhere/implement-107"),
+        r.join(".claude/worktrees-evil/implement-108"),
+        other.join(".claude/worktrees/implement-109"),
+    ] {
+        assert!(at.is_dir(), "{} was removed:\n{}", at.display(), run.text());
+        assert!(!run.has(&at.display().to_string()), "{} was listed:\n{}", at.display(), run.text());
+    }
+    assert!(c.has_branch(&r, "caneff/merged-one") && c.has_branch(&r, "implement-107"), "{}", run.text());
+    assert!(c.has_branch(&r, "implement-108") && c.has_branch(&other, "implement-109"), "{}", run.text());
+}
+
+#[test]
+fn reap_refuses_every_flag_that_would_let_it_override_a_guard() {
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r36", &["110"]);
+    let wt = r.join(".claude/worktrees/implement-110");
+    let cases: &[(&[&str], &str)] = &[
+        (&["--reap", "--repo", s(&r), "implement-110"], "merge-cleanup: --reap takes no branch or PR"),
+        (&["--reap", "--repo", s(&r), "7"], "merge-cleanup: --reap takes no branch or PR"),
+        (&["--reap", "--repo", s(&r), "--yes", "--discard"], "merge-cleanup: --discard takes one branch, not --reap"),
+        (&["--reap", "--repo", s(&r), "--yes", "--force"], "merge-cleanup: --force takes one branch, not --reap"),
+        (&["--reap", "--sweep"], "merge-cleanup: --reap and --sweep are different forms"),
+        (&["--reap", "--repo", s(&r), "--root", "/x"], "merge-cleanup: --root takes --sweep, not --reap"),
+    ];
+    for (args, want) in cases {
+        let run = c.mc(Tools::Full, args, &[]);
+        assert!(!run.ok && run.stderr.trim_end() == *want, "{args:?}: {}", run.text());
+        assert!(wt.is_dir() && c.has_branch(&r, "implement-110"), "{args:?}: {}", run.text());
+    }
+}
+
+#[test]
+fn reap_with_both_dry_run_and_yes_removes_nothing() {
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r37", &["111"]);
+    let wt = r.join(".claude/worktrees/implement-111");
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes", "--dry-run"], &[]);
+    assert!(run.ok && run.has("reap plan (dry run):"), "{}", run.text());
+    assert!(wt.is_dir() && c.has_branch(&r, "implement-111"), "{}", run.text());
+}
+
+#[test]
+fn reap_on_a_repo_with_no_implement_workspaces_says_so() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r38");
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r)], &[]);
+    let want = format!("nothing to reap under {}", r.join(".claude/worktrees").display());
+    assert!(run.ok && run.has(&want), "{}", run.text());
+}
+
+/// #875: every claim here is one a test above holds the behaviour to — the
+/// dry-run default (`reap_without_yes_...`), what --yes then does
+/// (`reap_with_yes_...`), the missing overrides
+/// (`reap_refuses_every_flag_...`) and the reach
+/// (`reap_considers_only_this_repos_...`).
+#[test]
+fn help_describes_reap_as_dry_run_by_default_and_unable_to_discard() {
+    let c = Cleanup::new();
+    let run = c.mc(Tools::Full, &["--help"], &[]);
+    assert!(run.ok);
+    assert!(run.stdout.contains("  merge-cleanup --reap [--repo <path>] [--yes] [--dry-run]\n"), "{}", run.stdout);
+    assert!(run.stdout.contains("--reap cleans up one repo's own implement-* workspaces"), "{}", run.stdout);
+    assert!(run.stdout.contains("dry run by default: it removes nothing without --yes"), "{}", run.stdout);
+    assert!(run.stdout.contains("no --discard and no --force"), "{}", run.stdout);
+    assert!(run.stdout.contains("this run's own directory is in is skipped"), "{}", run.stdout);
+}
+
+#[test]
+fn reap_run_from_inside_a_workspace_never_deletes_the_ground_it_stands_on() {
+    // The correctness axis on PR #876: with no --repo the repo is the cwd,
+    // and a run started inside a workspace listed itself, removed the
+    // directory it was standing in, and then reported nonsense about every
+    // workspace after it.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r39", &["112", "113"]);
+    let (here, next) = (r.join(".claude/worktrees/implement-112"), r.join(".claude/worktrees/implement-113"));
+    let tip = c.rev(&r, "implement-113");
+    let short = c.git_out(&["-C", s(&r), "rev-parse", "--short", &tip]);
+
+    let run = c.mc_in(Tools::Full, &here, &["--reap", "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(here.is_dir() && c.has_branch(&r, "implement-112"), "{}", run.text());
+    assert!(run.has(&format!("  {}  this run's own directory, not removed", here.display())), "{}", run.text());
+    assert!(!next.exists() && !c.has_branch(&r, "implement-113"), "{}", run.text());
+    assert_eq!(c.git_out(&["-C", s(&r), "ls-remote", "--heads", "origin", "implement-113"]), "", "{}", run.text());
+    assert_eq!(c.rev(&r, &format!("refs/deleted/implement-113@{short}")), tip, "{}", run.text());
+    assert!(run.has("reap summary: 1 reaped, 1 skipped"), "{}", run.text());
+}
+
+#[test]
+fn a_workspace_that_goes_dirty_between_the_plan_and_the_removal_is_refused_not_failed() {
+    // The spec axis on PR #876: pass 2 re-runs the guards, and a guard that
+    // refuses there is an answer — "skipped and named", exit 0 — not a
+    // failure of the run. A pre-push hook fired by the first workspace's own
+    // cleanup drops a file in the second one, which is the race in the small.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r40", &["114", "115"]);
+    let (first, second) = (r.join(".claude/worktrees/implement-114"), r.join(".claude/worktrees/implement-115"));
+    let hook = r.join(".git/hooks/pre-push");
+    std::fs::write(&hook, format!("#!/bin/sh\necho unsaved > {}/notes\n", second.display())).unwrap();
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!first.exists() && !c.has_branch(&r, "implement-114"), "{}", run.text());
+    let want = format!("  {}  dirty, not removed: 1 untracked file(s) would be lost: notes (refused at removal)", second.display());
+    assert!(run.has(&want), "{}", run.text());
+    assert!(second.is_dir() && c.has_branch(&r, "implement-115"), "{}", run.text());
+    assert!(run.has("reap summary: 1 reaped, 1 skipped"), "{}", run.text());
+}
+
+#[test]
+fn reap_pointed_at_a_workspace_still_cleans_up_every_workspace() {
+    // --repo may name a linked worktree, which is itself a candidate. Every
+    // git call anchors at the primary checkout, so removing that one does
+    // not pull the ground out from under the workspaces after it.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r41", &["116", "117"]);
+    let wts = r.join(".claude/worktrees");
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&wts.join("implement-116")), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    for n in ["116", "117"] {
+        assert!(!wts.join(format!("implement-{n}")).exists(), "implement-{n}: {}", run.text());
+        assert!(!c.has_branch(&r, &format!("implement-{n}")), "implement-{n}: {}", run.text());
+        assert_eq!(c.git_out(&["-C", s(&r), "ls-remote", "--heads", "origin", &format!("implement-{n}")]), "", "{}", run.text());
+    }
+    assert_eq!(deleted_records(&c, &r).len(), 2, "{:?}", deleted_records(&c, &r));
+    assert!(run.has("reap summary: 2 reaped, 0 skipped"), "{}", run.text());
+}
+
+#[test]
+fn a_branch_that_moved_to_another_worktree_since_the_plan_is_refused() {
+    // Codex pass on PR #878: the plan names a workspace, but the cleanup
+    // re-resolves the branch for itself. A branch moved in between — here by
+    // a pre-push hook the first workspace's own cleanup fires — would put a
+    // worktree the plan never listed, outside .claude/worktrees/ at that,
+    // in reach of the removal.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r42", &["118", "119"]);
+    let (first, planned) = (r.join(".claude/worktrees/implement-118"), r.join(".claude/worktrees/implement-119"));
+    let moved_to = c.root().join("r42-elsewhere");
+    let hook = r.join(".git/hooks/pre-push");
+    std::fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n\
+             git -C {repo} worktree remove --force {planned}\n\
+             git -C {repo} worktree add -q {moved} implement-119\n",
+            repo = r.display(),
+            planned = planned.display(),
+            moved = moved_to.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!first.exists() && !c.has_branch(&r, "implement-118"), "{}", run.text());
+    assert!(moved_to.is_dir() && c.has_branch(&r, "implement-119"), "the moved worktree was touched:\n{}", run.text());
+    let want = format!("  {}  moved since the plan, not removed: {} now holds implement-119", planned.display(), moved_to.display());
+    assert!(run.has(&want), "{}", run.text());
+    assert!(run.has("reap summary: 1 reaped, 1 skipped"), "{}", run.text());
+}
+
+#[test]
+fn a_workspace_whose_path_resolves_outside_the_repo_is_not_a_candidate() {
+    // The boundary the Codex pass on PR #878 asked about. git resolves a
+    // worktree's path when it registers it, so `git worktree add` through a
+    // symlink under .claude/worktrees/ records the outside path — this test
+    // states the boundary, and the containment check resolving both sides is
+    // what keeps it true if git's own spelling ever changes.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r43", &["120"]);
+    let outside = c.root().join("r43-outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    c.mk_implement_branch(&r, "121");
+    std::os::unix::fs::symlink(&outside, r.join(".claude/worktrees/link")).unwrap();
+    c.worktree_add(&r, &[s(&r.join(".claude/worktrees/link/implement-121")), "implement-121"]);
+
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok && run.has("reap plan: 1 implement-* workspace(s) under"), "{}", run.text());
+    assert!(outside.join("implement-121").is_dir() && c.has_branch(&r, "implement-121"), "{}", run.text());
+    assert!(!run.has("implement-121"), "{}", run.text());
+    assert!(!r.join(".claude/worktrees/implement-120").exists(), "{}", run.text());
+}
+
+#[test]
+fn a_workspace_whose_directory_is_already_gone_still_has_its_branch_cleaned_up() {
+    // resolved_under falls back to the parent for exactly this: git still
+    // registers a workspace whose folder was deleted by hand, and it is
+    // still a candidate.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r44", &["122"]);
+    let wt = r.join(".claude/worktrees/implement-122");
+    std::fs::remove_dir_all(&wt).unwrap();
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!c.has_branch(&r, "implement-122"), "{}", run.text());
+    assert!(run.has(&format!("  {}  reaped", wt.display())), "{}", run.text());
+}

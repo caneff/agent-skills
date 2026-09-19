@@ -51,3 +51,7 @@ _Avoid_: notification, ping, callback
 **Live-session guard**:
 The refusal in `merge-cleanup` to remove a workspace while a session is alive in it.
 _Avoid_: safety check, lock
+
+**Reap**:
+`merge-cleanup --reap`: tearing down every workspace of one repo whose ticket landed and whose worker is gone, without anyone naming a branch. A dead controller's leftovers, not a merge's tail.
+_Avoid_: sweep (that is every repo under a root), clean up, garbage collect

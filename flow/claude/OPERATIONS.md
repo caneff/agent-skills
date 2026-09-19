@@ -154,7 +154,7 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   lane and this file cannot drift apart.
 - The controller follows every merge with
   `merge-cleanup --repo <primary checkout> <branch>`
-  (`--help` for PR/URL and `--sweep`). The sweep shows its plan and asks
+  (`--help` for PR/URL, `--sweep` and `--reap`). The sweep shows its plan and asks
   before deleting; `--yes` answers for an unattended run. It removes the
   workspace, deletes the branch local and remote (the tip stays under
   `refs/deleted/<branch>`; `git branch <branch> refs/deleted/<branch>`
@@ -164,3 +164,11 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   still refuses. Why: nothing else cleans up after a merge, worktrees pile
   up, and closing an idle worker's pane by hand was a chore Chris no longer
   does.
+- A controller that died mid-run never makes that call, so its worker's
+  workspace is stranded. `merge-cleanup --reap --repo <primary checkout>`
+  lists that one repo's `implement-*` workspaces with a disposition each and
+  removes nothing; `--yes` then tears down the landed, clean, dead ones
+  through the same single-branch path. It has no `--discard` and no
+  `--force`: a workspace holding work, a live session, or an unmerged branch
+  is named and skipped. Why: nothing else reaps after a dead controller, and
+  a reaper that could override a guard would be a sweep.

@@ -263,6 +263,13 @@ impl Cleanup {
         Run::from(out)
     }
 
+    /// The same, from `cwd` — what a run started inside a workspace, rather
+    /// than pointed at a repo with --repo, sees.
+    pub fn mc_in(&self, tools: Tools, cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
+        let out = self.command(tools, args, env).current_dir(cwd).stdin(Stdio::null()).output().unwrap();
+        Run::from(out)
+    }
+
     /// Runs merge-cleanup with its stdout read one line then closed, the way
     /// `| head -n1` or quitting `less` early leaves it — for #758's broken
     /// pipe. Returns the exit code (`None` if killed by a signal) and
