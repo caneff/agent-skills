@@ -8,14 +8,27 @@ Open it for me; never print a path and ask me to open it. Why: that hands me
 a step your own hands can do.
 
 - A source file: `zed <path>[:line[:col]]` — it lands in the Zed window I
-  already have open (the ten repos of `~/src/uberworkspace.code-workspace`;
-  Zed restores it on launch). `zed` on the WSL PATH is a symlink to the
+  already have open (the ten repos of `~/src/uberworkspace.code-workspace`).
+  `zed` on the WSL PATH is a symlink to the
   Windows install's own launcher
   (`/mnt/c/Users/canef/AppData/Local/Programs/Zed/bin/zed`), which runs
   `zed.exe --wsl caneff@Ubuntu-24.04`; never install a Linux Zed over it. A
   path under `.claude/worktrees` still opens, but Zed's
   `file_scan_exclusions` hides those directories from its tree and search.
   Switched from `code --reuse-window --goto` on 2026-09-17.
+- Launching Zed itself (not opening a file): the Start-menu **Zed (WSL)**
+  shortcut runs `Zed.exe --wsl caneff@Ubuntu-24.04 /home/caneff/src`, so a
+  cold launch comes up on the WSL tree. `restore_on_startup` is not that
+  mechanism — it is `last_session` by default, which restores nothing after
+  the last window is closed, and a bare launch then shows `empty project`.
+  Use `Zed.exe` (GUI subsystem, takes `--wsl`), never `bin/zed.exe` (console
+  subsystem, flashes a console window) in a shortcut. The plain `Zed.lnk` is
+  rewritten by Zed's installer on update, which wipes its arguments; the
+  separately named `Zed (WSL).lnk` is what survives. `/home/caneff/src` is
+  also listed under `wsl_connections` in the Windows
+  `AppData/Roaming/Zed/settings.json`, so it shows up in the launchpad.
+  Added 2026-09-19.
+
 - A rendered HTML page I should look at myself: `wslview <file>` opens it in
   my Windows browser. That is my opener, not your reader — you read the page
   through `shot-scraper` below.
