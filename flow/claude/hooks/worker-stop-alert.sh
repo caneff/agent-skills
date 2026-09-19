@@ -79,12 +79,18 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
   | [$after[] | select(.type == "user") | (.origin.senderTaskId // empty),
       (.message.content | strings | scan("<task-id>([^<]+)</task-id>")[0]),
       (.message.content | strings | scan("<teammate-message teammate_id=\"([^\"]+)\"")[0])] as $returned
+  # Background shells: the launch result carries `backgroundTaskId`, and only
+  # a `<task-id>` notification that also carries a `<status>` ends one (#886).
+  | [$after[] | .toolUseResult? | objects | .backgroundTaskId | select(strings)] as $tasks
+  | [$after[] | select(.type == "user") | .message.content | strings
+      | select(test("<status>")) | scan("<task-id>([^<]+)</task-id>")[0]] as $finished
+  | ($tasks - $finished) as $unfinished
   # A teammate launch id is qualified (name@session-...); its reply id is
   # bare. Neither form appearing in $returned (both survive the set
   # difference, so the length is 2) means this launch is still unresolved.
   | [$launched[] | select(([., sub("@session-[^@]*$"; "")] - $returned | length) == 2)] as $unresolved
   | (if ($delivered | length) > 0 then "reported"
-     elif ($unresolved | length) > 0 then "waiting"
+     elif (($unresolved | length) + ($unfinished | length)) > 0 then "waiting"
      else "silent" end) as $verdict
   | "\($verdict)\t\(last.uuid // "line \(length)")"')
 [ "${verdict:-}" = "silent" ] || exit 0

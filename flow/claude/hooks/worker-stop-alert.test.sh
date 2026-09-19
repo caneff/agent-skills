@@ -68,6 +68,26 @@ handback() { printf '{"type":"user","origin":{"kind":"peer","from":"%s","senderT
 # a plain-text message with no `origin` field at all, carrying a
 # `<teammate-message teammate_id="...">` wrapper around an idle_notification.
 teammate_report() { printf '{"type":"user","message":{"role":"user","content":"Another Claude session sent a message:\\n<teammate-message teammate_id=\\"%s\\" color=\\"blue\\">\\n{\\"type\\":\\"idle_notification\\",\\"from\\":\\"%s\\",\\"idleReason\\":\\"available\\",\\"result\\":\\"ok\\"}\\n</teammate-message>"}}\n' "$1" "$1"; }
+# bg_launch <task-id> : a Bash with run_in_background:true — an assistant
+# tool_use plus the result whose toolUseResult carries `backgroundTaskId`
+# (#886). It is resolved by a `<task-id>` notification carrying a `<status>`.
+bg_launch() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu-%s","name":"Bash","input":{"command":"just check-full","run_in_background":true}}]}}\n' "$1"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu-%s","content":"Command running in background with ID: %s"}]},"toolUseResult":{"stdout":"","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false,"backgroundTaskId":"%s"}}\n' "$1" "$1" "$1"; }
+# monitor_launch <task-id> : the Monitor tool's launch result (#886).
+monitor_launch() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu-%s","name":"Monitor","input":{"command":"tail -F progress","description":"job progress"}}]}}\n' "$1"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu-%s","content":"Monitor started (task %s)"}]},"toolUseResult":{"taskId":"%s","timeoutMs":1800000,"persistent":false}}\n' "$1" "$1" "$1"; }
+# task_done <task-id> [status] : the terminal notification for a background
+# shell or a monitor — a `<task-id>` with a `<status>`.
+task_done() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<status>%s</status>\\n<summary>done</summary>\\n</task-notification>"}}\n' "$1" "${2:-completed}"; }
+# monitor_event <task-id> : a Monitor event notification — a `<task-id>` with
+# no `<status>`. The monitor is still running, so this is not a return.
+monitor_event() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<summary>Monitor event: job progress</summary>\\n<event>13:45:43 tick</event>\\n</task-notification>"}}\n' "$1"; }
+# task_stop <task-id> : the worker stopping a monitor itself.
+task_stop() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"ts-%s","name":"TaskStop","input":{"task_id":"%s"}}]}}\n' "$1" "$1"; }
+# work : a tool call that is not a report — the mark of a turn that did
+# something and therefore owes the controller a report (#886).
+work() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e-%s","name":"Edit","input":{"file_path":"a.js"}}]}}\n' "$RANDOM"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e-x","content":"ok"}]},"toolUseResult":{"filePath":"a.js"}}\n'; }
 
 fails=0
 # run <name> <transcript-file> [stop_hook_active] -> sets $pane and $text
@@ -228,6 +248,18 @@ t="$tmp/handback-report.jsonl"
 { human "$brief"; launch a1; handback a1; send s1 "skills-b6"; ok s1; assistant_text "PR up"; } > "$t"
 run "report after hand-back" "$t"
 expect_none "a report sent after a hand-back covers the turn the hand-back did not restart"
+
+# A background shell is out: the worker launched `just check-full` and went
+# idle waiting for it (#886, false alert 1 of 3).
+reset_log
+t="$tmp/bg-shell.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
+  bg_launch b06vc2csw; assistant_text "check-full running"; } > "$t"
+run "background shell out" "$t"
+expect_none "a stop while a background shell is out does not alert"
+{ task_done b06vc2csw completed; assistant_text "check green, stopping"; } >> "$t"
+run "background shell done" "$t"
+expect_alert "once the background shell completes, a stop without a report alerts"
 
 reset_log
 t="$tmp/torn.jsonl"
