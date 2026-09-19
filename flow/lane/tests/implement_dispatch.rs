@@ -736,6 +736,7 @@ fn help_documents_both_modes() {
         "ready-for-human",
         "--chris-merges",
         "Several issue numbers are one clump",
+        "a clump is always heavy",
         "for the lowest number named",
     ] {
         assert!(text.contains(want), "help lacks {want:?}:\n{text}");
@@ -919,7 +920,11 @@ fn a_claim_that_fails_partway_releases_the_tickets_already_claimed() {
 }
 
 #[test]
-fn a_clump_is_light_only_when_every_ticket_is_documentation() {
+fn a_clump_is_always_heavy_even_when_every_ticket_is_documentation() {
+    // Light tier lands straight on the default branch with no PR, and the
+    // merged PR's closingIssuesReferences is the only record merge-cleanup
+    // can clear a clump's claims from — so a light clump would land with
+    // every ticket but the branch's own still claimed.
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
@@ -927,16 +932,17 @@ fn a_clump_is_light_only_when_every_ticket_is_documentation() {
     let all_docs = with(&default_scenario(), &[("GH_ISSUE_431", docs), ("GH_ISSUE_432", docs)]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "431", "432"], &all_docs);
     assert!(out.status.success(), "{}", out_text(&out));
-    assert!(f.calls().contains("/implement 431 432 --tier light"), "{}", f.calls());
+    assert!(f.calls().contains("/implement 431 432 --tier heavy"), "{}", f.calls());
+    assert!(!f.calls().contains("--tier light"), "{}", f.calls());
 
+    // One documentation ticket is unchanged: still light.
     let f2 = Fixture::new();
     f2.reset_home(true);
     let repo2 = f2.mkfixture("sudokumaker-custom-constraints", "main");
-    // One ticket's diff is code, so the clump's single diff is code.
-    let mixed = with(&default_scenario(), &[("GH_ISSUE_433", docs)]);
-    let out2 = f2.dispatch(&["--repo", repo2.to_str().unwrap(), "433", "434"], &mixed);
+    let one = with(&default_scenario(), &[("GH_ISSUE_433", docs)]);
+    let out2 = f2.dispatch(&["--repo", repo2.to_str().unwrap(), "433"], &one);
     assert!(out2.status.success(), "{}", out_text(&out2));
-    assert!(f2.calls().contains("/implement 433 434 --tier heavy"), "{}", f2.calls());
+    assert!(f2.calls().contains("/implement 433 --tier light"), "{}", f2.calls());
 }
 
 #[test]

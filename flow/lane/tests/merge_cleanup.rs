@@ -481,6 +481,42 @@ fn one_clump_tickets_failed_edit_fails_the_run_and_names_only_that_ticket() {
 }
 
 #[test]
+fn a_failed_pr_list_fails_the_run_instead_of_reading_as_a_pr_that_closed_nothing() {
+    // The clump's list could not be read, so the run does not get to say it
+    // cleared the clump: an empty answer and a failed one must not look the
+    // same, or the siblings stay claimed under a success report.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r25");
+    c.mk_implement_branch(&r, "70");
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-70"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_PR_CLOSES_FAIL", "fail")],
+    );
+    assert!(!run.ok, "a failed lookup must fail the run: {}", run.text());
+    assert!(run.stderr.contains("could not read which tickets the merged PR for implement-70 closes (gh pr list failed)"), "{}", run.text());
+    assert!(run.stderr.contains("re-run: gh pr list --repo"), "the message names the read to redo: {}", run.text());
+    // The branch's own ticket is still known, so it still clears.
+    assert!(c.calls().contains("gh issue edit 70 --repo"), "{}", c.calls());
+}
+
+#[test]
+fn an_unparseable_pr_list_answer_fails_the_run_too() {
+    // Worse than a transient: a non-JSON answer is not retried into
+    // correctness by anything else in the run.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r26");
+    c.mk_implement_branch(&r, "71");
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-71"],
+        &[("GH_STATE", "CLOSED"), ("GH_LABELS", "in-progress"), ("GH_ASSIGNEES", "caneff"), ("GH_PR_CLOSES_FAIL", "garbage")],
+    );
+    assert!(!run.ok, "{}", run.text());
+    assert!(run.stderr.contains("answered something that is not JSON"), "{}", run.text());
+}
+
+#[test]
 fn a_pr_that_closes_nothing_still_clears_the_branchs_own_ticket() {
     // A one-ticket PR whose closing reference never registered, and the
     // --force path where no merged PR was read at all: the branch name is

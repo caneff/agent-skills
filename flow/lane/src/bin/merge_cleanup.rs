@@ -1047,11 +1047,27 @@ impl Cleanup {
         // digit strings straight from a branch name, and a number too long
         // for u64 must not silently drop out of the set.
         let mut tickets: Vec<String> = vec![n.to_string()];
-        tickets.extend(pr_closed_tickets(&slug, b).iter().map(u64::to_string));
+        let mut ok = true;
+        match pr_closed_tickets(&slug, b) {
+            Ok(closed) => tickets.extend(closed.iter().map(u64::to_string)),
+            // A lookup that failed is not a PR that closed nothing. Read as
+            // one, it clears the branch's ticket, prints success and leaves
+            // the rest of the clump claimed — the exact stale state #889
+            // exists to end. So the run fails, and the message names the
+            // read to redo, because by now the branch is gone and re-running
+            // merge-cleanup cannot repeat it.
+            Err(why) => {
+                ok = false;
+                eprintln!(
+                    "merge-cleanup: could not read which tickets the merged PR for {b} closes ({why}); \
+                     any other ticket in its clump is still claimed — re-run: gh pr list --repo {slug} --head {b} \
+                     --state merged --json number,closingIssuesReferences"
+                );
+            }
+        }
         tickets.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
         tickets.dedup();
 
-        let mut ok = true;
         let mut cleared: Vec<String> = Vec::new();
         for t in &tickets {
             match self.clear_one(&slug, t) {
@@ -1184,20 +1200,33 @@ fn print_table(rows: &[[String; 4]]) {
 /// every edit here goes out with `--repo <slug>`, so acting on that number
 /// would edit an unrelated issue that happens to share it — and a claim this
 /// run is leaving alone has to say so, or a cross-repo clump reads as
-/// cleared when it is not. An unreadable or empty answer is no tickets,
-/// which leaves the caller with the branch's own.
-fn pr_closed_tickets(slug: &str, b: &str) -> Vec<u64> {
-    let Some((owner, name)) = slug.rsplit_once('/') else { return Vec::new() };
+/// cleared when it is not.
+///
+/// `Ok(vec![])` is GitHub's own answer that this head has no merged PR, or
+/// one that closes nothing — a `--force` run, or a PR whose closing keyword
+/// never registered — and the caller falls back to the branch's own ticket.
+/// `Err` is not that: the call failed, or answered something that is not
+/// JSON. The two must not share a return value. An earlier version gave
+/// both the empty vector, reasoning that `is_merged` reads the same list so
+/// a transient gets reported there — but when this comes back empty there
+/// are no other tickets to read, so nothing reports, and the unparseable
+/// case is not transient at all.
+fn pr_closed_tickets(slug: &str, b: &str) -> Result<Vec<u64>, String> {
+    // No owner/name to compare against means the same-repo filter below
+    // cannot run, and every reference would be dropped in silence — the
+    // same failure as an unreadable answer, so it is reported the same way.
+    let Some((owner, name)) = slug.rsplit_once('/') else {
+        return Err(format!("origin slug {slug} names no owner/name"));
+    };
     let Some(out) = quiet_stdout(
         "gh",
         &["pr", "list", "--repo", slug, "--head", b, "--state", "merged", "--json", "number,closingIssuesReferences"],
     ) else {
-        // Not a skip line: `is_merged` already read this same PR list, so a
-        // gh that answers there and not here is the same transient the
-        // per-ticket read reports on its own.
-        return Vec::new();
+        return Err("gh pr list failed".into());
     };
-    let Ok(prs) = serde_json::from_str::<serde_json::Value>(&out) else { return Vec::new() };
+    let Ok(prs) = serde_json::from_str::<serde_json::Value>(&out) else {
+        return Err("gh pr list answered something that is not JSON".into());
+    };
     let mut tickets = Vec::new();
     for pr in prs.as_array().map(Vec::as_slice).unwrap_or_default() {
         let refs = pr.get("closingIssuesReferences").and_then(serde_json::Value::as_array);
@@ -1213,7 +1242,7 @@ fn pr_closed_tickets(slug: &str, b: &str) -> Vec<u64> {
             tickets.push(number);
         }
     }
-    tickets
+    Ok(tickets)
 }
 
 /// The ticket a plain `implement-<n>` branch was cut for: the digits after

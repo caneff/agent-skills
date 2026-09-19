@@ -10,7 +10,7 @@
 //! GH_LABELS, HERDR_RUNNING, HERDR_NO_ROOT_PANE, HERDR_AGENT_TAKEN,
 //! HERDR_STALL for implement-dispatch; GH_PR_HEADS, HERDR_AGENTS,
 //! HERDR_WORKSPACES, HERDR_FAIL, HERDR_PANE_CLOSE_FAIL, GH_ASSIGNEES,
-//! GH_ISSUE_EDIT_FAIL for merge-cleanup.
+//! GH_ISSUE_EDIT_FAIL, GH_PR_CLOSES, GH_PR_CLOSES_FAIL for merge-cleanup.
 //! Never installed — see install.sh.
 
 use std::env;
@@ -157,6 +157,19 @@ fn run_gh(args: &[String]) -> ExitCode {
 fn gh_pr_list(args: &[String]) -> ExitCode {
     let head = args.windows(2).find(|w| w[0] == "--head").map(|w| w[1].as_str()).unwrap_or("");
     if args.windows(2).any(|w| w[0] == "--json" && w[1].contains("closingIssuesReferences")) {
+        // The two ways the real call stops being an authoritative answer:
+        // it fails outright, or it answers something that is not JSON.
+        match env::var("GH_PR_CLOSES_FAIL").unwrap_or_default().as_str() {
+            "fail" => {
+                eprintln!("gh: could not list pull requests");
+                return ExitCode::FAILURE;
+            }
+            "garbage" => {
+                println!("not json at all");
+                return ExitCode::SUCCESS;
+            }
+            _ => {}
+        }
         let repo = args.windows(2).find(|w| w[0] == "--repo").map(|w| w[1].as_str()).unwrap_or("");
         return gh_pr_closes(head, repo);
     }

@@ -46,8 +46,10 @@ waits on the worker.
                      --spec <n> --slots <k>
 
 Plain mode: the brief is `/implement <n>... --tier light|heavy --controller
-"<name>"`, light only when every issue carries the documentation label, heavy
-otherwise. A ready-for-human issue among them ends the brief with
+"<name>"`, light when one issue is named and it carries the documentation
+label, heavy otherwise — a clump is always heavy, because light tier lands
+without a PR and a merged PR's closingIssuesReferences is the only record
+merge-cleanup can clear a clump's claims from. A ready-for-human issue among them ends the brief with
 --chris-merges: the worker builds the clump and Chris merges its PR.
 --model defaults to sonnet.
 
@@ -494,7 +496,16 @@ fn run() -> Result<(), ExitCode> {
     // reading as a worker raising light to heavy the moment its diff turns
     // out to hold code.
     let chris_merges = tickets.iter().any(|t| t.chris_merges);
-    let tier = if tickets.iter().all(|t| t.documentation) { "light" } else { "heavy" };
+    // A clump is always heavy, whatever its labels say. Light tier pushes
+    // straight to the default branch with no PR, and the merged PR's
+    // closingIssuesReferences is the only authoritative record of which
+    // tickets a landing closed — so a light clump lands with nothing for
+    // merge-cleanup to read, and every ticket but the branch's own keeps its
+    // claim. That is the state #889 exists to end, so the tier that cannot
+    // carry a clump does not get one. The cost is real and small: a
+    // docs-only clump gets a PR it would not have had alone. One ticket is
+    // unchanged — its documentation label still decides its tier.
+    let tier = if tickets.len() == 1 && tickets[0].documentation { "light" } else { "heavy" };
 
     let home = env::var("HOME").unwrap_or_default();
     // An empty --controller is bash's `[ -z "$controller" ]`: absent, not a
