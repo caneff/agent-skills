@@ -184,10 +184,11 @@ def classify(issues, state_of):
     buckets = {"unblocked": [], "blocked": [], "unresolved": [], "spec": []}
 
     def rank(issue, entry):
-        """`(bucket, declared)` from this ticket's blocking state alone.
-        `declared` is whether the ticket said anything about blockers at
-        all — silence and an unreadable declaration are both `unresolved`,
-        and the spec override below has to tell them apart."""
+        """`(bucket, stated)` from this ticket's blocking state alone.
+        `stated` is whether the ticket said anything about blockers at all,
+        not whether it said it was blocked: silence and an unreadable
+        declaration are both `unresolved`, and the spec override below is
+        the one caller that has to tell them apart."""
         native = _native(issue)
         if native is not None:
             entry["why"] = "native dependencies"
@@ -222,9 +223,9 @@ def classify(issues, state_of):
             continue
         entry = {"number": issue.get("number"), "title": issue.get("title"),
                  "blockers": [], "why": ""}
-        name, declared = rank(issue, entry)
+        name, stated = rank(issue, entry)
         if SPEC_LABEL in _labels(issue) and (
-                name == "unblocked" or (name == "unresolved" and not declared)):
+                name == "unblocked" or (name == "unresolved" and not stated)):
             # The prerequisites are checked *first*, so `blocked` outranks
             # `spec` on one entry: both are true claims, but only `spec`
             # carries a dispatch verb, and a controller copies lines like
