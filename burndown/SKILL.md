@@ -12,6 +12,79 @@ disable-model-invocation: true
 > executable policy until the lane is rebuilt. Full text:
 > `git show 7c7eb30:burndown/SKILL.md`.
 
+## The loop
+
+The dispatch loop — pick the next jobs, start them, wait, start more as slots
+free up — lives **here and nowhere else** (#779). Its mechanical steps are
+`burndown/loop.py`; why each rule reads the way it does, with the evidence it
+came from: [`references/loop.md`](references/loop.md). Written against the
+lane being rebuilt, and parked with the rest of this skill.
+
+**Where the controller runs.** Any primary checkout's **default branch** —
+read from `refs/remotes/origin/HEAD`, never assumed to be `main` — and not
+necessarily the target repo's checkout: the loop addresses the target with
+`--repo` on every tracker call. `python3 burndown/loop.py seat` refuses a
+linked worktree and says why, because inside one `/implement`'s front-door
+rule reads the session as a **worker** and the same prompt would start a
+build instead of a run. It refuses a detached HEAD and a non-default branch
+too.
+
+**Open the run.**
+
+1. Take the seat (above), then `runfile.py start` the run with its slot
+   budget and the controller's own herdr agent name (§ Run state). Resuming
+   an existing run instead: `runfile.py resume`, and then **one message per
+   live, unlanded worker** — its `announce` bucket and only that one, via
+   `loop.announce`. A landed clump's worker gets none however its agent
+   looks; a vanished one gets none either, and is reconciled or parked by
+   hand. The bucket names each worker by its **herdr agent name**, which is
+   the durable key and not an address: resolve it to a reachable session at
+   **send time** (#923), and never write a resolved address into the run
+   file.
+2. Read the frontier (§ The frontier) over the **whole queue**, not the first
+   wave's worth, and clump it (§ Clumping). That exploration is the run's
+   **frozen** candidate set: a ticket filed while the run is going waits for
+   the next run. The one exception is a ticket filed *during* the run
+   **because the run is stuck on what it fixes** — `loop.admit` takes it only
+   with the clump it unblocks named.
+3. The **opening report** carries `closure.py`'s announcement line verbatim,
+   so the reader can tell all three declaration states apart: a declared
+   directive, a **declared None** — the repo has no include graph — and
+   **silence**, which clumps conservatively by directory subtree. A
+   controller reading "conservative" has to know which of the last two it
+   got.
+
+**Then, until the queue and the slots are both empty:**
+
+4. **Recompute the frontier at each landing** and dispatch into every free
+   slot. Refill is **continuous**: no waves, because a wave holds slots
+   empty waiting for its slowest clump.
+5. **At each dispatch, re-resolve that clump's closure** against current
+   `main` — **one hop** — and check it against every **in-flight** workspace.
+   A clump whose closure intersects a live workspace's is **off the
+   frontier**: `loop.py dispatch` picks from what is left and names what
+   holds the rest. Two consequences, stated because neither is visible from
+   the frontier's own definition — a run drains **out of ticket order**, and
+   on a repo with one hot shared file a single parked worker can hold a
+   **whole family** of tickets off the frontier until it lands. A controller
+   reading only "open, unblocked, unclaimed" would dispatch into the
+   collision.
+6. **Full re-exploration fires on one trigger**: a landing whose diff touched
+   a **hub** — a file two or more candidates' closures share
+   (`loop.py hub`). Every other landing gets step 5's one-hop re-resolution
+   and nothing more.
+7. **Box check before every dispatch** — `uptime` and `free -g` against the
+   **28**-process cap, counting every process on the shared box rather than
+   this run's, and the ~**24 GB** ceiling on the sum of the per-process
+   `ulimit -v` caps (`loop.py box`). A refusal holds the slot empty; it is
+   not a reason to dispatch anyway.
+8. Dispatch and merge through
+   [`implement`](~/.agents/skills/implement/SKILL.md) § Dispatch, which
+   claims the clump and starts the worker; `implement/SKILL.md` § The merge,
+   which merges and cleans up, is the controller's own step there. The loop
+   restates neither grammar. Record each landing with `runfile.py land`, so a
+   restart can pick the run back up.
+
 ## The frontier
 
 Which tickets a run may dispatch next — open, labelled, unclaimed, waiting on

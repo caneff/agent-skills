@@ -194,7 +194,8 @@ def resume_state():
 
 def test_resume_sends_exactly_one_message_per_live_unlanded_worker():
     sent = []
-    loop.announce(resume_state(), lambda agent, message: sent.append((agent, message)))
+    loop.announce(resume_state(),
+                  lambda agent, msg: sent.append((agent, msg)))
     assert [agent for agent, _ in sent] == ["burn-455"]
     assert sent[0][1].count("skills-dc") == 1, sent[0][1]
     assert "#455" in sent[0][1]
@@ -249,11 +250,12 @@ def test_a_stuck_on_ticket_the_run_never_had_is_refused():
         raise AssertionError("the stuck clump has to be one of this run's")
 
 
+LOOP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop.py")
+
+
 def loop_py(*args, cwd=None):
-    return subprocess.run(
-        [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                      "loop.py"), *args],
-        capture_output=True, text=True, timeout=60, cwd=cwd)
+    return subprocess.run([sys.executable, LOOP, *args],
+                          capture_output=True, text=True, timeout=60, cwd=cwd)
 
 
 def test_the_cli_refuses_the_seat_inside_this_worktree():
@@ -262,11 +264,13 @@ def test_the_cli_refuses_the_seat_inside_this_worktree():
     # whichever seat it is really in, and both answers are the contract.
     here = os.path.dirname(os.path.abspath(__file__))
     got = loop_py("seat", cwd=here)
-    linked = os.path.realpath(subprocess.run(
+    # Independent of the check under test: git lays a linked worktree's git
+    # dir out under `<common>/worktrees/<name>`, so the path says which seat
+    # this is without recomputing the comparison `seat` makes.
+    git_dir = subprocess.run(
         ["git", "rev-parse", "--absolute-git-dir"], cwd=here, text=True,
-        capture_output=True).stdout.strip()) != os.path.realpath(
-            subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=here,
-                           text=True, capture_output=True).stdout.strip())
+        capture_output=True).stdout.strip()
+    linked = "/worktrees/" in git_dir
     if linked:
         assert got.returncode == 1, got
         assert "worktree" in got.stderr, got.stderr
