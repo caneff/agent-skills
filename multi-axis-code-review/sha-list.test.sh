@@ -68,6 +68,8 @@ trap 'rm -rf "$scratch"' EXIT
   echo two >keep-b.txt;  git add keep-b.txt;  git commit -qm "keep B"
   echo y >other-y.txt;   git add other-y.txt; git commit -qm "somebody else Y"
   echo three >keep-c.txt; git add keep-c.txt; git commit -qm "keep C"
+  echo z >other-z.txt;   git add other-z.txt; git commit -qm "somebody else Z"
+  echo again >>keep-a.txt; git commit -qam "keep D"   # touches keep-a.txt again
   git commit -q --allow-empty -m "an empty commit"
   git checkout -q -b side main
   echo s >side.txt; git add side.txt; git commit -qm side
@@ -77,6 +79,7 @@ trap 'rm -rf "$scratch"' EXIT
 repo="$scratch/repo"
 sha() { git -C "$repo" rev-parse "$(git -C "$repo" log --format='%H %s' | grep -F -m1 -- "$1" | cut -d' ' -f1)"; }
 a="$(sha 'keep A')"; b="$(sha 'keep B')"; c="$(sha 'keep C')"
+d="$(sha 'keep D')"
 empty="$(sha 'an empty commit')"; merge="$(sha 'a merge')"
 
 # `dir` comes from § 4's directory preamble, which diff-capture.test.sh
@@ -92,7 +95,7 @@ run_block() { # <shas...> -> stdout of the block; exit status is the block's
   ( cd "$scratch" && bash "$scratch/block.sh" )
 }
 
-out="$(run_block "$a" "$b" "$c")" || { echo "FAIL: the block refused a good three-sha list" >&2; fail=1; }
+out="$(run_block "$c" "$a" "$b")" || { echo "FAIL: the block refused a good three-sha list" >&2; fail=1; }
 patch="$(printf '%s\n' "$out" | tail -1 | awk '{print $NF}')"
 if [ -z "$patch" ] || [ ! -s "$patch" ]; then
   echo "FAIL: the block published no capture for a three-sha list" >&2
@@ -113,13 +116,56 @@ else
   order="$(awk '/^commit /{printf "%s ", $2}' "$patch")"
   case "$order" in
     "$a $b $c "*) ;;
-    *) echo "FAIL: the capture orders the commits '$order', not oldest-first '$a $b $c'" >&2; fail=1 ;;
+    *) echo "FAIL: the capture orders the commits '$order', not oldest-first '$a $b $c' (named c,a,b)" >&2; fail=1 ;;
   esac
   # A sha named twice is one commit, not two copies of its diff.
-  dupes="$(run_block "$a" "$b" "$a" | tail -1 | awk '{print $NF}')"
-  hits="$(grep -c '^diff --git a/keep-a.txt' "$dupes" || true)"
-  [ "$hits" -eq 1 ] ||
-    { echo "FAIL: a sha named twice put its diff in the capture $hits times" >&2; fail=1; }
+  if dupe_out="$(run_block "$a" "$b" "$a")"; then
+    dupes="$(printf '%s\n' "$dupe_out" | tail -1 | awk '{print $NF}')"
+    hits="$(grep -c '^diff --git a/keep-a.txt' "$dupes" || true)"
+    [ "$hits" -eq 1 ] ||
+      { echo "FAIL: a sha named twice put its diff in the capture $hits times" >&2; fail=1; }
+  else
+    echo "FAIL: the block refused a list naming one sha twice: $dupe_out" >&2
+    fail=1
+  fi
+
+  # Two named shas touching one file: both changes are in the capture, in
+  # apply order. The union is a set of changes, not a final-state diff, so
+  # neither hunk set is the file as it now stands.
+  if overlap_out="$(run_block "$d" "$a")"; then
+    overlap="$(printf '%s\n' "$overlap_out" | tail -1 | awk '{print $NF}')"
+    sets="$(grep -c '^diff --git a/keep-a.txt' "$overlap" || true)"
+    [ "$sets" -eq 2 ] ||
+      { echo "FAIL: two named shas touching keep-a.txt gave $sets hunk sets, not 2" >&2; fail=1; }
+    ovorder="$(awk '/^commit /{printf "%s ", $2}' "$overlap")"
+    [ "$ovorder" = "$a $d " ] ||
+      { echo "FAIL: the overlapping capture orders '$ovorder', not '$a $d '" >&2; fail=1; }
+    # The creating commit's hunk must still be there: a final-state diff of
+    # the two would show only the later append.
+    grep -q '^+one$' "$overlap" ||
+      { echo "FAIL: the capture lost the first named commit's change to keep-a.txt" >&2; fail=1; }
+  else
+    echo "FAIL: the block refused two named shas touching one file: $overlap_out" >&2
+    fail=1
+  fi
+
+  # A list of one is a list, not a fixed point: b's own first-parent diff, not
+  # everything that landed after b. This is the shape a caller reaches for
+  # first, after a single squash-merge.
+  if one_out="$(run_block "$b")"; then
+    one="$(printf '%s\n' "$one_out" | tail -1 | awk '{print $NF}')"
+    grep -q '^diff --git a/keep-b.txt' "$one" ||
+      { echo "FAIL: a one-element list lost its own commit's diff" >&2; fail=1; }
+    for f in keep-c.txt other-y.txt other-z.txt keep-a.txt; do
+      if grep -q "$f" "$one"; then
+        echo "FAIL: a one-element list swept in $f — it was read as a fixed point" >&2
+        fail=1
+      fi
+    done
+  else
+    echo "FAIL: the block refused a one-element sha list: $one_out" >&2
+    fail=1
+  fi
 fi
 
 # #776's recurring defect: an absent or malformed answer read as a benign one.
@@ -149,8 +195,11 @@ refuses 'a commit that changes no files' 'changes no files' "$a" "$empty"
 printf '%s\n' "$recipe" |
   sed -e "s|^n=<.*|n=932|" -e "s|^worktree=<.*|worktree=$repo|" -e "s|^set -- <.*|set -- $a|" \
   >"$scratch/nodir.sh"
-if ( cd "$scratch" && unset dir; bash "$scratch/nodir.sh" >/dev/null 2>&1 ); then
+if nodir_out="$( cd "$scratch" && unset dir; bash "$scratch/nodir.sh" 2>&1 )"; then
   echo "FAIL: the block ran with no report directory set" >&2
+  fail=1
+elif ! printf '%s' "$nodir_out" | grep -qF 'run the report-directory preamble'; then
+  echo "FAIL: the block refused an unset report directory for the wrong reason: $nodir_out" >&2
   fail=1
 fi
 

@@ -1,6 +1,6 @@
 ---
 name: multi-axis-code-review
-description: Review the changes since a fixed point (commit, branch, tag, or merge-base), or the union of a list of landed shas along three axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the over-engineering lens?), Spec (does the code match what the originating issue/spec asked for?) and Correctness (how does it fail in the field, and does every new test actually witness its claim?). Runs the three reviews in parallel sub-agents, waits for all of them, and reports every finding side by side. It replaces the built-in `/code-review` in the implement lane. Use when the user wants a branch, PR, or work-in-progress diff checked against its spec, the repo's standards, and runtime failure.
+description: Review the changes since a fixed point (commit, branch, tag, or merge-base) — or the union of a list of landed shas — along three axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the over-engineering lens?), Spec (does the code match what the originating issue/spec asked for?) and Correctness (how does it fail in the field, and does every new test actually witness its claim?). Runs the three reviews in parallel sub-agents, waits for all of them, and reports every finding side by side. It replaces the built-in `/code-review` in the implement lane. Use when the user wants a branch, PR, or work-in-progress diff checked against its spec, the repo's standards, and runtime failure.
 ---
 
 Review of the diff between `HEAD` and a fixed point the user supplies — or of
@@ -19,7 +19,15 @@ The issue tracker should have been provided to you — run `/setup-matt-pocock-s
 
 ### 1. Pin the fixed point, or take the sha list
 
-Whatever the user said is the fixed point — a commit SHA, branch name, tag, `HEAD~5`, etc. If they gave one, use it as-is and skip straight to capturing the diff command below.
+**Which input is this?** Decide before anything else. A list of commits *to
+review* — one sha or twenty — is sha-list mode (below), never a fixed point.
+Take that branch first, because a single named commit reads as both and the two
+answers differ: as a fixed point it means everything that landed *after* that
+commit, as a one-element list it means that commit's own first-parent diff. A
+list means the second, whatever its length, and a list of one is the shape a
+caller reaches for first — after a single squash-merge.
+
+Otherwise, whatever the user said is the fixed point — a commit SHA, branch name, tag, `HEAD~5`, etc. If they gave one, use it as-is and skip straight to capturing the diff command below.
 
 If they didn't specify one, don't default to the local default branch — in a long-lived worktree it can sit far behind the remote, and a diff against it pulls in commits that were already squash-merged upstream, producing findings on code that isn't part of this change. Instead, resolve the fixed point fresh:
 
@@ -67,6 +75,14 @@ The axes read the union as **one change**. A file two named commits both touch
 appears twice in the capture; that is the same file edited in sequence, not two
 conflicting versions of it, and the oldest-first order is what makes it read
 that way.
+
+The union is a **set of changes, not a final-state diff**. The last hunk set
+for a file is that commit's change to it, not the file as it now stands, and
+nothing in the capture shows the final state of a file two named commits
+touched. An axis that reads the last hunk set as "the change to this file"
+reviews an intermediate — the same shape of misread as #937's
+replaced-but-non-empty patch: readable, plausible, and not what the reader
+thinks it is. Say so in the prompt alongside the capture path.
 
 **Every malformed list refuses by name.** An empty list, a sha that does not
 resolve here, a merge commit (no single parent diff to take — name the commits
@@ -204,9 +220,9 @@ way.
 
 **Sha-list mode captures the union** (§ 1). Run the `$dir` preamble above
 first — same directory, same 14-day sweep — then this block instead of the
-`git diff` one. It reads each named commit against its own first parent and
-concatenates, oldest first; the key carries a digest of the resolved list
-rather than a single `HEAD`, since there is no single revision under review:
+`git diff` one. § 1 has the semantics; what is specific to the block is the
+key — a digest of the resolved list rather than a single `HEAD`, since there is
+no single revision under review:
 
 ```
 : "${dir:?sha-list review: run the report-directory preamble above first}"
@@ -274,22 +290,38 @@ If the completion notification comes back missing or empty, read that file befor
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec if there is one (so "behaviour the ticket did not ask for" has a referent), the test command the repo uses, and the settled decisions.
-- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it. Isolate the mutation in a throwaway worktree and re-run only the suite that covers the mutated test, never the whole gate — both below, and the checkout is left exactly as found. Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
+- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it. Isolate the mutation in a throwaway worktree — `git worktree add --detach <a path outside the checkout> HEAD`, removed afterwards with `git worktree remove --force` — and never in a copy of the tree, which on a linked worktree shares the checkout's own index. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. The checkout is left exactly as found. Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
 
-**What the witness check costs to run** (#939). The check itself is the most
-valuable thing a review does — the `paths()` fail-open in #893, the zero-cores
-default in #894 and the suppressed contradictions in #897 all came out of it in
-one day. These two lines are about its price, not about running it less.
+**What the witness check costs, and what actually isolates it** (#939). The
+check itself is the most valuable thing a review does — the `paths()` fail-open
+in #893, the zero-cores default in #894 and the suppressed contradictions in
+#897 all came out of it in one day. Neither line below runs it less.
 
-*Isolation.* `git worktree add` a throwaway worktree rather than copying the
-tree: it shares the object store, so it costs no copy of the 419 MB / 529
-tracked files this repo carries, and the isolation is stronger — a worktree
-cannot write back into the checkout by accident. `HEAD` is the revision the
-captured diff ends at, so the mutation lands on exactly the code under review:
+*Isolation.* `git worktree add` a throwaway worktree. **Never `cp -a`**, or any
+other byte copy of the reviewed tree: a linked worktree's `.git` is a *file
+holding a gitdir pointer*, not a directory, so a copy of one still points at
+the original's gitdir and shares its index, HEAD and refs. Reviews in this lane
+always run on a linked worktree, so the copy is not weaker isolation — it is
+none. On 2026-09-20 a worker followed the wording this replaces, copied its
+tree with `cp -a`, and two `git rm --cached` runs inside the "isolated" copy
+staged deletions in the real checkout's index; it noticed only because those
+two mutations happened to be staged ones. A worktree has its own index and
+HEAD, so the same command cannot reach the checkout, and `git clone
+--no-hardlinks` is the other safe answer. Sharing the object store also costs
+no copy of the 419 MB / 529 tracked files this repo carries. `HEAD` is the
+revision the captured diff ends at, so the mutation lands on exactly the code
+under review:
 
 ```
 worktree=<the worktree under review>
-witness=$(mktemp -d)/witness            # outside the checkout, never under it
+top=$(git -C "$worktree" rev-parse --show-toplevel) || exit 1
+witness=$(mktemp -d)/witness
+# Checked, not assumed: a TMPDIR under the reviewed tree would put the
+# throwaway worktree inside the checkout, and that untracked directory then
+# blocks `git worktree remove` and `ship` long after the review reported green.
+case "$witness" in "$top"/*)
+  echo "witness check: TMPDIR is inside the checkout ($witness)" >&2; exit 1;;
+esac
 git -C "$worktree" worktree add --detach -q "$witness" HEAD || exit 1
 # <strip the constraint in "$witness", then run only the suite that covers it>
 git -C "$worktree" worktree remove --force "$witness" || exit 1
