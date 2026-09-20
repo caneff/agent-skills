@@ -31,6 +31,22 @@ cutting — the key predates the parking commit `207fee4`, which touched only
 live skills. Anything claiming to detect parked state matches exactly the
 parked files and no live skill; that property is the test.)
 
+### Recurring defect classes
+
+Three shapes have each been caught more than four times here since
+2026-09-14, every one in code written to prevent the thing it failed at.
+Check for them by name — a worker before reporting done, a review axis as
+part of its brief:
+
+1. **An absent or malformed answer read as a benign one.** Could this
+   success have been produced by the thing not running at all?
+2. **A stated fallback with no mechanism behind it.** A rule is not shipped
+   until something can carry it out.
+3. **A test that passes for a reason other than the one it claims.** When a
+   mutation goes red, read the message and confirm it is your assertion.
+
+The shapes, the checks and every instance: `docs/agents/defect-classes.md`.
+
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
