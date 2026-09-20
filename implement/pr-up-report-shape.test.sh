@@ -51,6 +51,14 @@ check_in "$pr_flat" 'the tip equals the last reviewed sha'
 check_in "$pr_flat" 'diff class'
 check_in "$pr_flat" 'without diffing it blind'
 
+# Rule 2b (Codex pass on PR #908): the tip field names its source — the
+# same remote `headRefOid` the CLEAN sha comes from, not a local tip — and
+# each commit past the reviewed sha is cited by its own sha, so the list can
+# be checked against the PR instead of taken on the worker's word.
+check_in "$pr_flat" 'the same `headRefOid`'
+check_in "$pr_flat" 'never your local `git rev-parse HEAD`'
+check_in "$pr_flat" 'its own sha beside its diff class'
+
 # Rule 3: a mutation check when the deliverable is a test or a gate.
 check_in "$pr_flat" 'when the ticket'"'"'s deliverable is a test or a gate'
 check_in "$pr_flat" 'name one change that makes the new test or gate fail'

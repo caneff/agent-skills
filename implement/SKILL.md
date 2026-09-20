@@ -273,7 +273,8 @@ Send the controller "PR up" in this shape:
 PR up: <pr url>
 Last reviewed sha: <sha>
 CLEAN observed at: <sha>
-Tip: <sha> — <"same as last reviewed sha", or one diff class per commit past it>
+Tip: <headRefOid> — <"no commits past the reviewed sha", or one
+  "<sha> — <diff class>" line per commit past it>
 Mutation check: <the change that made it fail, and that you saw it fail
   — or "n/a, deliverable is not a test or a gate">
 ```
@@ -286,12 +287,17 @@ Mutation check: <the change that made it fail, and that you saw it fail
   explicit instead of a race this report silently loses. (#456 reported
   CLEAN at a sha two pushes stale; the PR read UNSTABLE seconds later — one
   controller wake.)
-- **The tip, accounted for** — either the tip equals the last reviewed sha,
-  or state the **diff class** of every commit past it: what kind of change it
-  is (wording only, test-only, the fix for finding `S1`), so the controller
-  can rule on whether it needs another review round without diffing it blind.
-  4 of 7 reports in the #781 burn carried a tip past the reviewed sha, and the
-  controller diffed each one by hand.
+- **The tip, accounted for** — the same `headRefOid`, read after your final
+  push, never your local `git rev-parse HEAD`: an unpushed commit or a
+  branch that moved since your last remote read gives a tip that is not the
+  PR's, and commits genuinely on the PR then go unlisted. Either the tip
+  equals the last reviewed sha — say so — or give every commit past it
+  **its own sha beside its diff class**: what kind of change it is (wording
+  only, test-only, the fix for finding `S1`). A list of shas the controller can
+  check against the PR; a bare list of classes it cannot. That is what lets
+  it rule on another review round without diffing it blind. 4 of 7 reports
+  in the #781 burn carried a tip past the reviewed sha, and the controller
+  diffed each one by hand.
 - **A mutation check**, when the ticket's deliverable is a test or a gate:
   name one change that makes the new test or gate fail, and that you saw it
   fail. Nothing else in the report tells a gate from a test that always
