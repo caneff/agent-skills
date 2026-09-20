@@ -146,6 +146,10 @@ resume procedure: [`references/run-file.md`](references/run-file.md).
 Written against the lane being rebuilt; the loop that will drive it is parked
 with the rest of this skill.
 
+A single spec's slices in one workspace are
+[`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this
+skill's — also parked.
+
 ## Liveness
 
 How a controller knows its workers are alive, in rank order. The measurements
@@ -155,13 +159,12 @@ behind the ranking, and what each source costs when it is read the other way:
 1. **The wake is primary.** A worker's `SendMessage` reaches an idle
    controller as its next turn, about a second after the send (#778). Nothing
    replaces it, and nothing below is read as a report that has not arrived.
-2. **The stop alert is a hint.** It means *read this pane* — it does not mean
-   a worker is stuck. Across the two #781 runs it fired **six times** and was
-   wrong six times, from three benign causes: an outstanding background
-   shell, outstanding Monitor tasks, and a worker that had already reported
-   and was answering a message needing no reply. So a controller reads the
-   pane the alert names and rules from what that pane says; it never parks a
-   clump, holds a slot or calls a worker stalled on the alert alone.
+2. **The stop alert is a hint.** It means *read this pane*, and never that a
+   worker is stuck: across the two #781 runs it fired **six times** and was
+   wrong six times, from three benign causes the reference names. So a
+   controller reads the pane the alert names and rules from what that pane
+   says; it never parks a clump, holds a slot or calls a worker stalled on
+   the alert alone.
 3. **The backstop is a bounded sweep.** `python3 burndown/loop.py sweep
    --workers <run file's clumps>` probes each live slot once through `herdr
    agent get` — no retry, no wait, one call per slot and none for a landed
@@ -183,16 +186,16 @@ names that job and its **core count** in its report, and a worker that
 launched none **says so explicitly**: silence is not zero. A worker that
 forgot to declare reads exactly like one that ran nothing, and the controller
 would charge zero against the free slots either way — the same fail-closed
-posture the `--declared` reader takes one layer down. The controller charges it
-against the free slots, because a slot is one core's worth of machine until a
-worker says otherwise: an 8-core job holds eight slots' worth, and
-`loop.py dispatch --declared <clump>=<cores>` takes the cores past the job's
-own slot off the free ones and prints the line that says which clump is
-holding what. That line goes in the controller's **status line** while any
-declaration is outstanding, and the declaration is charged until the worker
-reports the job done. The budget was in slots and the contention was in
-cores, with nothing bridging the two: on #781 the box hit 25.8 load with no
-dispatch pending, so no box check could have caught it.
+posture the `--declared` reader takes one layer down. The controller charges
+it against the free slots, because a slot is one core's worth of machine until
+a worker says otherwise: `loop.py dispatch --declared <clump>=<cores>` takes
+the cores past the job's own slot off the free ones. So "heavy" needs no
+threshold — every declared job is charged, a 2-core one holds one further
+slot and an 8-core one holds seven, which on a run of three slots is every
+slot there is. The charge stands until the worker reports the job done, and
+the line the reader prints — which clump declared what, and what is left —
+goes in the controller's **status line** while any declaration is
+outstanding.
 
 ## Parking and escalation
 
@@ -216,13 +219,12 @@ prevent. **Two consecutive parks with no landing between them stop the run** —
 a run that has stopped landing has stopped working, and the next thing it
 does is report to Chris rather than dispatch again.
 
-**Escalation.** The controller's own escalation list is
-[`CONTEXT.md`](../CONTEXT.md)'s Controller entry, which this skill points at
-rather than restates. Two of its shapes matter to a run in flight: *the spec
-is silent on something the user needs* — a gap, not a change to a ruling,
-because there was no ruling — and *a lane-mandated step the harness refuses*,
-the one escalation where the controller **structurally** cannot act, since
-every other route either launders a denial or breaks a hard rule.
+**Escalation.** The controller's escalation list lives in
+[`CONTEXT.md`](../CONTEXT.md)'s Controller entry. Two of its shapes are this
+run's to recognise: *the spec is silent on something the user needs*, which is
+a gap and not a change to a ruling, and *a lane-mandated step the harness
+refuses*, the one escalation where the controller **structurally** cannot
+act.
 
 **A bounded probe before escalating.** A controller **may commission a bounded
 probe** from a worker before it escalates — a named, small, time-boxed
@@ -246,7 +248,3 @@ each: [`references/parking.md`](references/parking.md).
    before it reaches the worker. The controller is not a courier: a plausible
    remedy forwarded unread can spend a worker's last review round on a
    regression.
-
-A single spec's slices in one workspace are
-[`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this
-skill's — also parked.

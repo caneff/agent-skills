@@ -80,13 +80,16 @@ check_in "$reference_text" 'six' references/liveness.md
 check_in "$reference_text" '25.8' references/liveness.md
 check_in "$reference_text" '#925' references/liveness.md
 
-# Rule 7, the load-bearing one: nowhere in the skill does the stop alert on
-# its own carry an instruction to park, hold or wait. Every sentence naming
-# the alert is read, and one that also reaches for a park must carry the
-# negation that makes it a prohibition rather than an instruction.
+# Rule 7, the load-bearing one: nowhere in the skill does the alert on its own
+# carry an instruction to park, hold or wait. Every sentence naming it is read,
+# and one that also reaches for a park must carry `never` — the prohibition
+# itself, not merely some negation somewhere in the sentence. "If the stop
+# alert fires and **no** reply has arrived, hold the slot" is an instruction to
+# hold on the alert alone, and a filter that exempted `no ` passed it.
 offenders="$(tr '\n' ' ' <"$skill" | sed 's/\([.!?]\) /\1\n/g' |
-  grep -i 'stop alert' | grep -iE 'park|stall|stuck|hold|wait' |
-  grep -viE "never|not |no ") " || true
+  grep -iE 'stop alert|stop hook|worker-stop-alert' |
+  grep -iE 'park|stall|stuck|hold|wait' |
+  grep -vi 'never') " || true
 if [ -n "${offenders//[[:space:]]/}" ]; then
   echo "FAIL: burndown/SKILL.md parks on the stop alert alone:" >&2
   echo "$offenders" >&2

@@ -758,7 +758,12 @@ def in_flight_clumps():
 def test_a_declared_heavy_job_holds_the_free_slots():
     state = loop.core_room(2, in_flight_clumps(), {351: 8})
     assert state["room"] == 0, state
-    assert "#351" in state["line"] and "8" in state["line"], state["line"]
+    line = loop.render_cores(state, 2)
+    assert "#351" in line and "8" in line, line
+
+
+def test_an_undeclared_run_has_nothing_to_say_about_cores():
+    assert loop.render_cores(loop.core_room(2, in_flight_clumps(), {}), 2) == ""
 
 
 def test_an_undeclared_run_has_every_free_slot():
@@ -863,6 +868,79 @@ def test_the_cli_sweep_probes_each_live_slot_once_through_herdr():
         with open(calls) as fh:
             assert fh.read().split() == ["skills-1", "skills-2", "skills-3"], \
                 "the sweep probes each live slot exactly once"
+
+
+def test_a_clump_declared_twice_is_refused_rather_than_last_wins():
+    try:
+        loop.parse_declared("351=8,351=1")
+    except loop.LoopError as exc:
+        assert "#351" in str(exc) and "twice" in str(exc), exc
+    else:
+        raise AssertionError("a second declaration must not drop the first")
+
+
+def test_a_clump_with_no_agent_name_is_one_verdict_not_a_dead_sweep():
+    calls = []
+    clumps = live_clumps()
+    clumps[0]["agent"] = ""
+    get = agent_stub({"skills-2": herdr_agent("idle"),
+                      "skills-3": HERDR_GONE}, calls)
+    state = loop.sweep(clumps, get)
+    verdicts = [w["verdict"] for w in state["workers"]]
+    assert verdicts == ["unnamed", "idle", "vanished"], verdicts
+    assert calls == ["skills-2", "skills-3"], calls
+    assert state["calls"] == 2, state
+
+
+def test_the_cli_sweep_refuses_a_box_with_no_herdr_rather_than_reporting_death():
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = os.path.join(tmp, "bin")
+        os.mkdir(bindir)
+        workers = os.path.join(tmp, "workers.json")
+        with open(workers, "w") as fh:
+            json.dump([{"tickets": [1], "workspace": "/w/1",
+                        "agent": "skills-1"}], fh)
+        # PATH holds one empty directory: herdr cannot be found at all.
+        env = dict(os.environ, PATH=bindir)
+        got = subprocess.run([sys.executable, LOOP, "sweep", "--workers",
+                              workers], capture_output=True, text=True,
+                             timeout=60, env=env)
+        assert got.returncode == 1, got
+        assert "herdr is not on PATH" in got.stderr, got.stderr
+        assert "unreachable" not in got.stdout, got.stdout
+
+
+def test_the_cli_sweep_refuses_a_workers_file_it_cannot_read():
+    with tempfile.TemporaryDirectory() as tmp:
+        workers = os.path.join(tmp, "workers.json")
+        for content in ('{"tickets": [1]}', '[{"tickets": []}]',
+                        '[{"tickets": ["1"]}]', 'not json'):
+            with open(workers, "w") as fh:
+                fh.write(content)
+            got = loop_py("sweep", "--workers", workers)
+            assert got.returncode == 1, (content, got)
+            assert "Traceback" not in got.stderr, got.stderr
+            assert len(got.stderr.strip().splitlines()) == 1, got.stderr
+
+
+def test_the_cli_says_the_declared_job_holds_the_slot_and_not_the_box():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [500], "closure": ["fresh.py"]}], fh)
+        with open(live, "w") as fh:
+            json.dump(in_flight_clumps(), fh)
+        # The box is at its cap *and* a declared job holds the slot. The
+        # answer names the job, because that is what a controller can act on.
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "28", "--committed-gb",
+                      "4", "--declared", "351=8")
+        assert got.returncode == 0, got
+        assert "#351" in got.stdout, got.stdout
+        assert "every free slot is held by a declared job" in got.stdout, \
+            got.stdout
+        assert got.stderr == "", got.stderr
 
 
 def main():
