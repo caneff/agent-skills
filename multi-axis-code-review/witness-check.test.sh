@@ -111,6 +111,7 @@ check_in "$correctness" 'never counted as an assertion that held' 'the correctne
 # the sub-agent is handed, so it carries the counting command itself rather than
 # pointing at prose only the caller reads (#939).
 check_in "$correctness" 'ps -eo comm= | grep -cx claude' 'the correctness axis brief'
+check_in "$correctness" 'never `ps aux | grep`' 'the correctness axis brief'
 check_in "$costs" 'ps -eo comm= | grep -cx claude' 'the witness-cost section'
 # The anti-pattern is asserted with its negation attached: a bare 'ps aux'
 # needle passes just as well on prose recommending it.

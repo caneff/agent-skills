@@ -401,7 +401,7 @@ show() {
   n=$(wc -l <"$root/$1.out" 2>/dev/null || echo 0)
   if [ "$n" -le 50 ]; then cat "$root/$1.out"
   else head -25 "$root/$1.out"
-       printf '... %s lines omitted; the whole file is %s until cleanup ...\n' "$(( n - 50 ))" "$root/$1.out"
+       printf '... %s lines omitted from the middle ...\n' "$(( n - 50 ))"
        tail -25 "$root/$1.out"
   fi 2>/dev/null | awk -v p="  $1| " '{print p $0}'
 }
