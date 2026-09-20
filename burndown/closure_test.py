@@ -10,6 +10,7 @@ Every case is a fixture repo written to a temp directory: a declaration in
 generator, because nothing in the resolver may.
 """
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,10 +30,38 @@ DECLARED = """# Fixture repo
 """
 
 
+# Every fixture repo this run made, so that `clean_fixtures` can remove them
+# whatever the run did. Forty per run, left behind, is how a shared box ends
+# up carrying 1,863 of them (measured, 84 MB): the leak is inodes, not size.
+FIXTURES = []
+
+
+def clean_fixtures():
+    """Remove every fixture repo this run made, and return the ones that
+    survived. Some tests take a directory's or a file's read permission away,
+    so each is opened back up before the tree goes — a fixture that cannot be
+    removed must be reported, never ignored."""
+    left = []
+    while FIXTURES:
+        root = FIXTURES.pop()
+        for dirpath, dirnames, filenames in os.walk(root):
+            for name in dirnames + filenames:
+                try:
+                    os.chmod(os.path.join(dirpath, name), 0o700)
+                except OSError:
+                    pass
+        shutil.rmtree(root, ignore_errors=True)
+        if os.path.exists(root):
+            left.append(root)
+    return left
+
+
 def repo(files, agents=DECLARED):
     """A fixture repo on disk: `{path: text}` plus an `AGENTS.md`, or no
-    `AGENTS.md` at all when `agents` is None."""
+    `AGENTS.md` at all when `agents` is None. Removed by `clean_fixtures` at
+    the end of the run, pass or fail."""
     root = tempfile.mkdtemp(prefix="closure-fixture-")
+    FIXTURES.append(root)
     if agents is not None:
         files = {**files, "AGENTS.md": agents}
     for path, text in files.items():
@@ -494,12 +523,47 @@ def test_a_file_that_cannot_be_opened_is_not_a_file_with_no_includes():
         os.chmod(hidden, 0o644)
 
 
+# --- The fixtures do not outlive the run (Codex round 2 on PR #920: F2) ---
+
+def test_a_fixture_repo_is_removed_even_after_its_permissions_are_taken_away():
+    root = repo({"a/one.js": "x\n"})
+    os.chmod(os.path.join(root, "a"), 0o000)
+    assert os.path.exists(root), root
+    left = clean_fixtures()
+    assert left == [], left
+    assert not os.path.exists(root), root
+
+
+def test_the_suite_leaves_no_fixture_directory_behind():
+    # The witness for `main`'s teardown, run as its own process with its own
+    # TMPDIR so that what it leaves is countable. The child skips this test —
+    # without the guard it would spawn a suite per suite, forever.
+    if os.environ.get("CLOSURE_TEST_CHILD"):
+        return
+    own_tmp = tempfile.mkdtemp(prefix="closure-fixture-")
+    FIXTURES.append(own_tmp)
+    env = {**os.environ, "TMPDIR": own_tmp, "CLOSURE_TEST_CHILD": "1"}
+    out = subprocess.run([sys.executable, __file__], capture_output=True,
+                         text=True, env=env)
+    assert out.returncode == 0, out.stdout[-2000:] + out.stderr[-2000:]
+    strays = [n for n in os.listdir(own_tmp) if n.startswith("closure-fixture-")]
+    assert strays == [], strays
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"ok  {test.__name__}")
-    print(f"{len(tests)} passed")
+    try:
+        for test in tests:
+            test()
+            print(f"ok  {test.__name__}")
+        print(f"{len(tests)} passed")
+    finally:
+        # In `finally`, because a failing assertion is exactly the run that
+        # would otherwise leave its fixtures behind.
+        left = clean_fixtures()
+        if left:
+            print(f"fixtures left behind: {', '.join(left)}", file=sys.stderr)
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":
