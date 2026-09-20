@@ -25,6 +25,22 @@ The grammar and the three sources:
 Written against the lane being rebuilt; the loop that will call it is parked
 with the rest of this skill.
 
+## Clumping
+
+Which candidates are one clump — one worker, one workspace, one PR — is read
+by `burndown/closure.py`, not from the tickets' declared seams:
+`python3 burndown/closure.py <repo-root> <n>=<path>[,<path>]...` prints the
+mode and the connected components of the collision graph over each
+candidate's **include closure**. The repo declares its include directive and
+its generator command in `AGENTS.md`; the resolver follows that declaration
+one hop and **never runs the generator**. A repo that declares nothing is
+clumped conservatively by directory subtree, and the run's **opening report
+carries the announcement line** the reader returns, so a controller can see
+which of the three modes it got. The grammar and the evidence:
+[`references/closure.md`](references/closure.md).
+Written against the lane being rebuilt; the loop that will call it is parked
+with the rest of this skill.
+
 A single spec's slices in one workspace are
 [`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this
 skill's — also parked.
