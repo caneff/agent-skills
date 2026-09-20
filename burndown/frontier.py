@@ -58,6 +58,17 @@ _FENCE_OPEN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 
 CLAIMED_LABEL = "in-progress"
 
+# Labels that put a ticket off the frontier by its own nature rather than by
+# a blocking relationship. `implement-dispatch` refuses each of them on the
+# label alone (`flow/lane/src/bin/implement_dispatch.rs`), so a ticket
+# carrying one is not work this reader may offer, however its blockers read.
+# `needs-info` waits on grilling; reporting it as `unresolved` says "a human
+# must determine this ticket's blocking state", which is the wrong question
+# about it and costs a controller a decision it cannot act on.
+# `in-progress` is refused too, and is handled as a claim instead: an
+# assignee says the same thing without a label.
+NON_DISPATCHABLE_LABELS = frozenset({"needs-info"})
+
 
 class FrontierError(Exception):
     """The tracker could not be read. One stderr line, never a traceback:
@@ -126,9 +137,19 @@ def section_blockers(section):
     return None, "`Blocked by` names no `#NNN` and does not say None"
 
 
+def _labels(issue):
+    return {label.get("name") for label in issue.get("labels") or []}
+
+
 def _is_claimed(issue):
-    labels = {label.get("name") for label in issue.get("labels") or []}
-    return bool(issue.get("assignees")) or CLAIMED_LABEL in labels
+    return bool(issue.get("assignees")) or CLAIMED_LABEL in _labels(issue)
+
+
+def _is_non_dispatchable(issue):
+    """A ticket no run may dispatch whatever its blockers say, because a
+    label puts it out of reach. Read before any bucket is decided: the
+    question a bucket answers does not apply to it."""
+    return bool(_labels(issue) & NON_DISPATCHABLE_LABELS)
 
 
 def _native(issue):
@@ -151,7 +172,8 @@ def classify(issues, state_of):
     bucket at all — it is off the frontier."""
     buckets = {"unblocked": [], "blocked": [], "unresolved": []}
     for issue in sorted(issues, key=lambda i: i.get("number") or 0):
-        if issue.get("pull_request") or _is_claimed(issue):
+        if (issue.get("pull_request") or _is_claimed(issue)
+                or _is_non_dispatchable(issue)):
             continue
         entry = {"number": issue.get("number"), "title": issue.get("title"),
                  "blockers": [], "why": ""}

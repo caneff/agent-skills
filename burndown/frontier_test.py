@@ -179,6 +179,37 @@ def test_a_pull_request_is_not_a_ticket():
     assert got == {"unblocked": [], "blocked": [], "unresolved": []}, got
 
 
+# --- Non-dispatchable tickets are off the frontier -------------------------
+
+def test_a_needs_info_ticket_is_off_the_frontier():
+    # `implement-dispatch` refuses a needs-info ticket outright: it waits on
+    # grilling, not on another ticket. It is off the frontier by its own
+    # nature, the way a claimed ticket is — not by a blocking relationship.
+    got = read([issue(1, labels=("ready-for-agent", "needs-info"),
+                      body="## Blocked by\n\nNone.\n")])
+    assert got == {"unblocked": [], "blocked": [], "unresolved": []}, got
+
+
+def test_a_needs_info_ticket_with_no_blocked_by_is_dropped_not_unresolved():
+    # The drop happens before any bucket is decided, so a silent body never
+    # reaches the grammar. `unresolved` asks a human to determine this
+    # ticket's blocking state; that is not the question a needs-info ticket
+    # is waiting on, and padding the bucket with it trains a controller to
+    # skim the one bucket that exists to be read.
+    got = read([issue(1, labels=("ready-for-agent", "needs-info"),
+                      body="Some body with no declaration at all.\n")])
+    assert got == {"unblocked": [], "blocked": [], "unresolved": []}, got
+
+
+def test_a_ticket_without_a_non_dispatchable_label_is_still_classified():
+    # The filter takes only what it names: an ordinary ticket beside a
+    # dropped one is unaffected.
+    got = read([issue(1, labels=("ready-for-agent", "needs-info"),
+                      body="## Blocked by\n\nNone.\n"),
+                issue(2, body="## Blocked by\n\nNone.\n")])
+    assert numbers(got["unblocked"]) == [2], got
+
+
 # --- Shape -----------------------------------------------------------------
 
 def test_buckets_are_ordered_by_number():
