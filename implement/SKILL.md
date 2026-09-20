@@ -207,17 +207,21 @@ time, not from the worker: § The merge.
    content without `--discard` — an irreversible deletion that should never
    be the default way a run ends. If something you cannot commit and must
    keep is left in `.scratch/`, run `PRE_REPORT_KEEP_SCRATCH="<why>" bash
-   ~/.agents/skills/implement/pre-report-gate.sh <sha>` for step 4 instead of
+   ~/.agents/skills/implement/pre-report-gate.sh <sha>` for step 5 instead of
    the bare form, and name it, with the same `<why>`, in the PR-up report.
    (§ The merge step 3's Codex pass writes nothing into this `.scratch/`:
    its files live in `~/.cache/agent-reviews/<repo>/`, outside the
    workspace, precisely so clearing this directory — or the pass launching
    while you are still working — cannot destroy the other's files.)
-4. **`bash ~/.agents/skills/implement/pre-report-gate.sh <sha>`** passes on
+4. **Read your own diff against the three recurring defect classes** named
+   in `AGENTS.md` § Recurring defect classes;
+   `docs/agents/defect-classes.md` carries the checks and every instance.
+   This step is the pointer, not a third copy.
+5. **`bash ~/.agents/skills/implement/pre-report-gate.sh <sha>`** passes on
    the sha you report — a "done" report has described work that was dirty in
    the tree, not on the branch, or left content behind in `.scratch/` with
    no `PRE_REPORT_KEEP_SCRATCH` naming why.
-5. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
+6. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
    prints `false` and `CLEAN` before "PR up" goes out — a PR reported on a
    draft or a conflict fails the controller's merge. `headRefOid` is the sha
    GitHub computed that reading against, and it is the one the report's
@@ -259,7 +263,7 @@ gh pr create --repo <owner/name> --title "<title>" --body-file <body>
 The body has these sections and nothing else:
 
 - **Closes #\<n\>** — a bare line, not inside backticks or a code fence
-  (either breaks `closingIssuesReferences` — § Before the PR: step 5
+  (either breaks `closingIssuesReferences` — § Before the PR: step 6
   checks it after this PR exists). One such line per ticket the brief
   named: `closingIssuesReferences` is what `merge-cleanup` reads to clear a
   whole clump's claims, so a clump ticket with no line of its own neither
@@ -357,7 +361,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    line and the cleanup line as in the exception below, and name the
    disagreement.
 2. **The PR is still not-draft, CLEAN, and closes what it should** — the
-   same check as § Before the PR: step 5, rerun because `main` may have
+   same check as § Before the PR: step 6, rerun because `main` may have
    moved since "PR up". `closingIssuesReferences` empty or missing the
    ticket blocks the merge same as a draft or a conflict does — a PR that
    closes nothing does not merge.
