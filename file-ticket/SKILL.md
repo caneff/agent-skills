@@ -46,15 +46,16 @@ guess and do not create an issue until the target is confirmed.
   enhancement, add that label too.
 - **Blocked by**: a `## Blocked by` section, last in the body, on every
   ticket this skill files — one bare `#NNN` per blocking issue **in the
-  repo you are filing into**, one per list item, or the literal `None — can
-  start immediately.` when nothing blocks it. Never omit it, and never leave it to the filer's
-  judgement: a ticket carrying neither native dependency edges nor that
-  section reads as **unresolved** to the frontier reader — neither blocked
-  nor unblocked, and never dispatched — so a controller resolves it by hand
-  before any wave. You are usually filing a finding raised inside a known
-  piece of work, so the blocker is known here: it is the ticket whose build
-  raised this finding, whenever that build has to land before this one can
-  start. The grammar and what each answer means:
+  repo you are filing into**, one per list item, or the literal `None —
+  can start immediately.` when nothing blocks it. Never omit it, and
+  never leave it to the filer's judgement: a ticket carrying neither
+  native dependency edges nor that section reads as **unresolved** to
+  the frontier reader — neither blocked nor unblocked, and never
+  dispatched — so a controller resolves it by hand before any wave. You
+  are usually filing a finding raised inside a known piece of work, so
+  the blocker is known here: it is the ticket whose build raised this
+  finding, whenever that build has to land before this one can start.
+  The grammar and what each answer means:
   `~/.agents/skills/burndown/references/frontier.md`.
 
 ## Create it
@@ -80,13 +81,14 @@ EOF
 )"
 ```
 
-With blockers, that last line becomes one `- #<n>` line per blocking issue,
-and `--blocked-by <#,#>` names the same issues — the tracker's **native**
-edge, set **in addition to** the section and never instead of it. Drop the
-bracketed flag when nothing blocks the ticket. Native edges are the live gate: closing a blocker moves the count with
-nobody editing prose. The section is the fallback the reader parses where
-the tracker holds no edges, so where `gh` rejects the flag it still states
-the relationship on its own.
+With blockers, that last line becomes one `- #<n>` line per blocking
+issue, and `--blocked-by <#,#>` names the same issues — the tracker's
+**native** edge, set **in addition to** the section and never instead of
+it. Drop the bracketed flag when nothing blocks the ticket. Native edges
+are the live gate: closing a blocker moves the count with nobody editing
+prose. The section is the fallback the reader parses where the tracker
+holds no edges, so where `gh` rejects the flag it still states the
+relationship on its own.
 
 Filing more than one target prints one URL per line, in the order the
 targets were given.

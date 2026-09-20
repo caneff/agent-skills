@@ -19,9 +19,23 @@ skill="$here/SKILL.md"
 # file's line wrapping flattened — the shape burndown/blocked-by-grammar.test.sh
 # uses, and for its reason: a phrase as generic as "in addition to" must not
 # be satisfied by unrelated prose elsewhere in the file.
-section() { sed -n "/^## $1\$/,/^## $2\$/p" "$skill" | tr '\n' ' ' | tr -s ' '; }
+# `$2` is the heading the range stops at, or `$` for the last section — an
+# unmatched end address would run the haystack to EOF and quietly widen the
+# scope these needles exist to narrow.
+section() {
+  local end="/^## $2\$/"
+  [ "$2" = '$' ] && end='$'
+  sed -n "/^## $1\$/,${end}p" "$skill" | tr '\n' ' ' | tr -s ' '
+}
 write_text="$(section 'Write the issue' 'Create it')"
 create_text="$(section 'Create it' '$')"
+
+# § Create it is read to EOF, which is only its own scope while it is the
+# last section. A section appended after it would silently widen that
+# haystack, so say so here rather than let the scoping rot unnoticed.
+last="$(awk '/^(```|~~~)/ { fenced = !fenced; next } !fenced && /^## / { seen = $0 } END { print seen }' "$skill")"
+[ "$last" = '## Create it' ] ||
+  { echo "FAIL: § Create it is no longer the last section (found: $last) — give section() its end heading" >&2; exit 1; }
 [ -n "$write_text" ] && [ -n "$create_text" ] ||
   { echo "FAIL: file-ticket/SKILL.md is missing § Write the issue or § Create it" >&2; exit 1; }
 
