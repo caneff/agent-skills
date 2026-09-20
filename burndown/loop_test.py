@@ -459,6 +459,39 @@ def test_the_cli_dispatch_takes_only_what_the_box_has_room_for():
         assert "room for 1 of 3" in got.stdout, got.stdout
 
 
+def test_a_closure_that_is_not_a_list_of_paths_is_refused():
+    # `set("shared.py")` is a set of six letters, which intersects no real
+    # path set — so a malformed closure would read as a clump that collides
+    # with nobody and dispatch a second worker into a held file.
+    for closure in ("shared.py", {"a": 1}, ["shared.py", 7], [""], []):
+        clump = {"tickets": [1], "closure": closure}
+        try:
+            loop.paths(clump)
+        except loop.LoopError as exc:
+            assert "#1" in str(exc), (closure, exc)
+        else:
+            raise AssertionError(f"{closure!r} must not read as a path set")
+
+
+def test_a_malformed_closure_reaches_the_cli_as_one_line():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(live, "w") as fh:
+            json.dump([{"tickets": [2], "workspace": "/w/2",
+                        "closure": ["shared.py"]}], fh)
+        for closure in ("shared.py", {"a": 1}, ["shared.py", 7]):
+            with open(cand, "w") as fh:
+                json.dump([{"tickets": [1], "closure": closure}], fh)
+            got = loop_py("dispatch", "--candidates", cand, "--in-flight",
+                          live, "--free", "1", "--processes", "4",
+                          "--committed-gb", "4")
+            assert got.returncode == 1, (closure, got)
+            assert "dispatch" not in got.stdout, (closure, got.stdout)
+            assert "Traceback" not in got.stderr, got.stderr
+            assert len(got.stderr.strip().splitlines()) == 1, got.stderr
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

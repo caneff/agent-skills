@@ -69,10 +69,24 @@ def paths(clump):
     """The files a clump owns: its resolved closure where there is one, its
     named files where there is not. `closure.py` emits `closure` only in the
     two modes that resolved one — in subtree mode there is no closure, and the
-    exclusion below still has to read something."""
+    exclusion below still has to read something.
+
+    A value that is not a non-empty list of non-empty strings is refused
+    rather than read: `set("shared.py")` is a set of six letters, which
+    intersects no real path set, so a malformed closure would read as a clump
+    colliding with nobody and put a second worker in a file a live workspace
+    holds. Fails closed, as `closure.py` does one layer down (#891).
+    """
     for key in ("closure", "files"):
-        if clump.get(key):
-            return set(clump[key])
+        value = clump.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, list) or not value or not all(
+                isinstance(p, str) and p.strip() for p in value):
+            raise LoopError(
+                f"clump #{key_of(clump)}: {key} is not a list of paths: "
+                f"{value!r}")
+        return set(value)
     raise LoopError(f"clump #{key_of(clump)} names no files")
 
 
