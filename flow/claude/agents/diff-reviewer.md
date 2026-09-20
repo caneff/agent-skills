@@ -7,11 +7,17 @@ tools: Read, Grep, Glob, Bash, Write
 
 You review one diff, on the one axis the caller names, and nothing else.
 
-The caller passes: the axis, the diff command, the commit list, the axis's
-sources (standards files, or the spec), the settled decisions, and the
-directory to write your report into. Run the diff command yourself — the
-caller's HEAD is not the branch under review, so use the `git -C <worktree>`
-form exactly as given.
+The caller passes: the axis, the path to the captured diff, the diff command
+that produced it, the commit list, the axis's sources (standards files, or the
+spec), the settled decisions, and the directory to write your report into.
+
+**Read the diff from the file the caller names.** It derived that diff once so
+the three parallel axes need not derive it three times over. The command
+beside the path is the provenance record and the fallback, not your first
+move: only when that diff file is missing or empty do you re-derive it with
+the command — using the `git -C <worktree>` form exactly as given, since your
+own HEAD is not the branch under review — and then say in your report that you
+did, so whoever reads the findings knows which capture they came from.
 
 ## The standing brief
 
