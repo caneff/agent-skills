@@ -50,6 +50,15 @@ worker's own probe failure either — a herdr that answers for two workers and
 not the third still tells the controller about two, and the third is reported
 as `unreachable`, which is a different fact from `vanished`.
 
+**One deadline covers the sweep, not each probe.** A per-probe bound looks
+sufficient and is not: it composes. Five live workers with hung panes, at ten
+seconds each, is fifty seconds inside one tool call — the controller is deaf
+for all of it, and the worst case grows with the wave size instead of staying
+a constant. So the budget belongs to the sweep: each probe is handed what is
+left of it, and a slot the deadline never reached is `unswept` rather than
+anything about that pane. It costs nothing to leave one for later, because
+the sweep only ever runs on a wake the controller already had.
+
 It is **not a timer**. A timer means either a sleep or a poll, and both put
 the controller inside a tool call while workers are out, which is the one
 state the primary path cannot survive. The sweep runs on an idle wake with
@@ -76,9 +85,18 @@ cores, and nothing bridged the two.
 The bridge is the worker's own declaration, because the worker is the only
 party that knows. A slot is one core's worth of machine until a worker says
 otherwise; the cores past the job's own slot come off the free slots for as
-long as the job is out, and `loop.py dispatch --declared <clump>=<cores>`
-prints which clump is holding what so the controller's status line can carry
-it.
+long as the job is out, and the reader prints which clump is holding what so
+the controller's status line can carry it.
+
+**The declaration is state on the clump, not an argument to a dispatch.** It
+lives in the run file — `running` with its core count, `none` when the worker
+says it launched nothing, `done` when it reports the job finished — because a
+controller that restarts mid-run has only that file. A hold that lived in one
+command line is a hold the resume cannot recover, and the free slot it then
+dispatches into is the 25.8 load above, reached a second time by a controller
+that had already been told. For the same reason a live clump with no record
+at all is refused by name rather than charged zero: silence is not zero one
+layer up, and the reader obeys the same rule.
 
 The controller's attempted fix that day is the counter-example for how
 **not** to rule on this: it ordered the job down to one worker, applying an

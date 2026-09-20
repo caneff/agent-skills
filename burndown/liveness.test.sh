@@ -54,6 +54,10 @@ check_in "$liveness_text" 'six times' 'burndown/SKILL.md § Liveness'
 # blocking call — a controller inside a tool call hears no worker at all.
 check_in "$liveness_text" 'bounded' 'burndown/SKILL.md § Liveness'
 check_in "$liveness_text" 'never a timer' 'burndown/SKILL.md § Liveness'
+# One deadline for the whole sweep: a per-probe bound composes into N times
+# the wait, which is the same deafness by another route.
+check_in "$liveness_text" 'one deadline for the whole sweep' 'burndown/SKILL.md § Liveness'
+check_in "$liveness_text" 'unswept' 'burndown/SKILL.md § Liveness'
 check_in "$liveness_text" 'blocking' 'burndown/SKILL.md § Liveness'
 check_in "$liveness_text" 'nothing else to do' 'burndown/SKILL.md § Liveness'
 check_in "$liveness_text" 'burndown/loop.py sweep' 'burndown/SKILL.md § Liveness'
@@ -66,7 +70,10 @@ check_in "$liveness_text" '#925' 'burndown/SKILL.md § Liveness'
 # Rule 5: a worker declares its parallel job's core count, and the controller
 # holds the free slots against it and says so.
 check_in "$liveness_text" 'core count' 'burndown/SKILL.md § Liveness'
-check_in "$liveness_text" '--declared' 'burndown/SKILL.md § Liveness'
+check_in "$liveness_text" 'runfile.py job' 'burndown/SKILL.md § Liveness'
+# The declaration is state on the clump, not an argument to one dispatch: a
+# hold that lives in argv is a hold a resumed controller cannot recover.
+check_in "$liveness_text" 'never from its own argv' 'burndown/SKILL.md § Liveness'
 check_in "$liveness_text" 'status line' 'burndown/SKILL.md § Liveness'
 # A worker that launched no parallel job says so: silence read as zero is a
 # worker that forgot, charged as a worker that ran nothing.

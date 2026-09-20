@@ -132,7 +132,8 @@ A run's state is **one JSON file per run** at `~/.cache/burndown/<run-id>.json`,
 read and written by `burndown/runfile.py` — not the controller's context, and
 not a per-repo log. It holds the run id, the slot budget, the controller's
 herdr agent name, and per clump its ticket list, workspace, worker's herdr
-agent name and squash sha once it lands. `runfile.py resume <run-id> --live
+agent name, the parallel job its worker has out (§ Liveness) and squash sha
+once it lands. `runfile.py resume <run-id> --live
 <names> --controller <my agent name>` reads it back and splits the clumps into
 the live workers to **re-announce** the controller to, the vanished ones to
 reconcile by hand, and the landings already banked — the live names read off
@@ -173,6 +174,13 @@ behind the ranking, and what each source costs when it is read the other way:
    is the primary path, and a controller sitting in a blocking call while
    workers are out cannot hear any of them.
 
+   Bounded is **one deadline for the whole sweep**, not one per probe — a
+   per-probe bound composes, and five hung panes at ten seconds each is
+   fifty seconds deaf, which is the same deafness by another route. Each
+   probe gets what is left of it, and a slot the deadline did not reach is
+   `unswept`: nobody asked, it is read on the next wake, and it is never
+   confused with a pane that answered.
+
    A **vanished** pane — herdr has no agent by that name — is the sweep's own
    verdict, distinct from an `idle` one, and it is the only failure nothing
    else in the lane can find (#778). What the sweep cannot see is the
@@ -186,16 +194,22 @@ names that job and its **core count** in its report, and a worker that
 launched none **says so explicitly**: silence is not zero. A worker that
 forgot to declare reads exactly like one that ran nothing, and the controller
 would charge zero against the free slots either way — the same fail-closed
-posture the `--declared` reader takes one layer down. The controller charges
-it against the free slots, because a slot is one core's worth of machine until
-a worker says otherwise: `loop.py dispatch --declared <clump>=<cores>` takes
-the cores past the job's own slot off the free ones. So "heavy" needs no
-threshold — every declared job is charged, a 2-core one holds one further
-slot and an 8-core one holds seven, which on a run of three slots is every
-slot there is. The charge stands until the worker reports the job done, and
-the line the reader prints — which clump declared what, and what is left —
-goes in the controller's **status line** while any declaration is
-outstanding.
+posture the reader takes one layer down. The controller records it on the
+clump — `runfile.py job <run-id> --clump <n> --cores <k>`, or `--none`, or
+`--done` when the worker reports it finished — and `loop.py dispatch` reads
+the charge from **that record**, never from its own argv: a declaration that
+lived in one command line is a hold a restart cannot recover, and the free
+slot a resumed controller then dispatches into is the contention #351
+produced.
+
+The charge is arithmetic, so "heavy" needs no threshold: a slot is one core's
+worth of machine until a worker says otherwise, and the cores past the job's
+own slot come off the free ones — a 2-core job holds one further slot, an
+8-core job holds seven, which on a run of three slots is every slot there is.
+A live clump with **no record at all** is not charged zero; the dispatch
+refuses it by name and says which worker to record. The line the reader
+prints — which clump declared what, and what is left — goes in the
+controller's **status line** while any declaration is outstanding.
 
 ## Parking and escalation
 
