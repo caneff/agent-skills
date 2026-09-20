@@ -36,7 +36,7 @@ fixed_point="origin/$default"
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
-The diff *itself* is captured to a file in step 4, where the report directory and the issue number are both known. The command keeps its place in every prompt as the provenance record and the fallback, but no axis has to re-run it.
+The diff *itself* is captured to a file in step 4, where the report directory and the issue number are both known; the command keeps its place in every prompt as the provenance record and the fallback.
 
 Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here — not inside three parallel sub-agents.
 
@@ -127,40 +127,49 @@ top=$(git rev-parse --path-format=absolute --git-common-dir) || exit 1
 dir="$HOME/.cache/agent-reviews/$(basename "$(dirname "$top")")"
 mkdir -p "$dir"
 find "$dir" -maxdepth 1 -type f -mtime +13 -delete  # +13, not +14: find's -mtime +N means "older than N+1 days"
-git -C <worktree> diff <fixed-point>...HEAD >"$dir/diff-<n>.patch"
-[ -s "$dir/diff-<n>.patch" ] || exit 1  # an empty capture fails here, not inside three sub-agents
+n=<issue number from step 2, or the branch name>
+worktree=<the worktree under review>
+fixed_point=<the fixed point from step 1>
+git -C "$worktree" diff "$fixed_point"...HEAD >"$dir/diff-$n.patch" || exit 1
+[ -s "$dir/diff-$n.patch" ] || exit 1   # a failed or empty write fails here, not inside three sub-agents
+wc -l "$dir/diff-$n.patch"              # the count goes in every prompt beside the path
 ```
 
-**Capture the diff once, by the caller** (#937). Those last two lines derive
-the diff one time into `<dir>/diff-<n>.patch`, and every axis prompt carries
-that path beside the command that produced it, so three reviewers read one
-capture instead of each re-running the same `git diff` and cold-reading the
-same files. The duplication sat on the critical path of every axis: the axes
-run in parallel, so a round costs `max(axes)`, and round 1 is a median 3.7
-minutes (`docs/research/2026-09-15-phase-timings.md`). Use the same `git -C
-<worktree>` form the prompts carry — the caller's HEAD is not always the
-branch under review, and a capture taken against the wrong HEAD is worse than
-no capture. The command stays in the prompt as the provenance record and as
-the fallback: an axis whose diff file is missing or empty re-derives with it
-and says so in its report, rather than reviewing nothing.
+**Capture the diff once, by the caller** (#937). Those lines derive the diff
+one time into `<dir>/diff-<n>.patch` and print its length; every axis prompt
+carries that path, that count, and the command that produced it, so three
+reviewers read one capture instead of each re-running the same `git diff`.
+The axes run in parallel, so the duplication sat on the critical path of all
+three. Keep the block runnable shell — `<n>` left unexpanded inside those
+quotes is a literal the write and the guard agree on, so the capture lands
+under a name no prompt points at and every axis silently falls back. `git -C
+"$worktree"` rather than a bare `git diff` because the caller's HEAD is not
+always the branch under review.
+
+**Re-capture at the start of every round.** The file is keyed on `<n>` alone,
+so a verification round that reuses the prompts without re-running the block
+leaves round 1's diff in place — present and non-empty, so nothing below
+notices. The command stays in the prompt as the provenance record and as the
+fallback: an axis whose diff file is missing or empty re-derives with it and
+says so in its report, rather than reviewing nothing.
 
 If the completion notification comes back missing or empty, read that file before treating the report as absent.
 
 **Standards sub-agent prompt** — include:
 
-- The captured diff file, the diff command that produced it, and the commit list.
+- The captured diff at `<dir>/diff-<n>.patch` and its line count, the diff command that produced it, and the commit list.
 - The list of standards-source files you found in step 3, and the settled decisions. The smell baseline and the over-engineering lens are the agent definition's to read from § 3; paste them only in the no-definition fallback above.
 - The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. For any test in the diff that claims to prove a behaviour, check the verdict depends on it — strip the constraint under test and see whether the assertion still passes; one that survives is a hollow witness, flag it. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the over-engineering lens over the diff and list what to cut, one line each in `location: <tag> <what>. <replacement>.` form using the five tags. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Under 550 words."
 
 **Spec sub-agent prompt** — include:
 
-- The captured diff file, the diff command that produced it, and the commit list.
+- The captured diff at `<dir>/diff-<n>.patch` and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec, and the settled decisions.
 - The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Under 400 words."
 
 **Correctness sub-agent prompt** — include:
 
-- The captured diff file, the diff command that produced it, and the commit list.
+- The captured diff at `<dir>/diff-<n>.patch` and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec if there is one (so "behaviour the ticket did not ask for" has a referent), the test command the repo uses, and the settled decisions.
 - The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it (do it on a scratch copy of the tree outside the checkout, made with Bash; the checkout is left exactly as found). Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
 

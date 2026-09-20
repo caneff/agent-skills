@@ -41,16 +41,24 @@ check_in() {
 # Rule 1: the caller captures the diff to a file once, in the same directory
 # as the reports, and fails there on an empty capture rather than inside
 # three sub-agents.
-check_in "$spawn_text" 'diff-<n>.patch' 'multi-axis-code-review/SKILL.md § 4'
-check_in "$spawn_text" 'git -C <worktree> diff <fixed-point>...HEAD >"$dir/diff-' 'multi-axis-code-review/SKILL.md § 4'
 check_in "$spawn_text" 'once, by the caller' 'multi-axis-code-review/SKILL.md § 4'
+# The capture line stays runnable shell, variables not angle brackets (S1/C1):
+# `<n>` left unexpanded is a literal inside the quotes, so the guard below
+# checks the same literal it just wrote, passes, and every axis then silently
+# falls back to re-deriving — the round costs exactly what it cost before.
+check_in "$spawn_text" 'git -C "$worktree" diff "$fixed_point"...HEAD >"$dir/diff-$n.patch"' 'multi-axis-code-review/SKILL.md § 4'
+check_in "$spawn_text" '[ -s "$dir/diff-$n.patch" ]' 'multi-axis-code-review/SKILL.md § 4'
+# C3/P1: the file is keyed on <n> alone, so a second round that skips this
+# block leaves round 1's diff in place — present and non-empty, so the
+# missing-or-empty fallback never fires and three axes review a stale diff.
+check_in "$spawn_text" 'Re-capture at the start of every round' 'multi-axis-code-review/SKILL.md § 4'
 
 # Rule 2: every axis prompt carries the path AND the command — the path so it
 # reads, the command as the provenance record and the fallback. The count is
 # the assertion a needle cannot make: an axis bullet that silently drops the
 # path fails here even though the other two still carry it.
 bullets="$(printf '%s\n' "$spawn" |
-  grep -cF 'The captured diff file, the diff command that produced it, and the commit list.' || true)"
+  grep -cF 'The captured diff at `<dir>/diff-<n>.patch` and its line count, the diff command that produced it, and the commit list.' || true)"
 if [ "$bullets" -ne 3 ]; then
   echo "FAIL: § 4 hands the captured diff to $bullets axis prompts, not 3" >&2
   fail=1
@@ -62,10 +70,11 @@ fi
 # completion notification, so the needle names the diff file itself.
 check_in "$spawn_text" 'diff file is missing or empty' 'multi-axis-code-review/SKILL.md § 4'
 check_in "$reviewer_text" 'Read the diff from the file the caller names' flow/claude/agents/diff-reviewer.md
-check_in "$reviewer_text" 'missing or empty' flow/claude/agents/diff-reviewer.md  # no such prose there yet
-check_in "$reviewer_text" 're-derive it with the command' flow/claude/agents/diff-reviewer.md
+check_in "$reviewer_text" 'only when that diff file is missing or empty do you re-derive it' flow/claude/agents/diff-reviewer.md
 check_in "$reviewer_text" 'say in your report that you did' flow/claude/agents/diff-reviewer.md
-check_in "$reviewer_text" 'git -C <worktree>' flow/claude/agents/diff-reviewer.md
+# C2: `Read` stops at 2000 lines by default, and a patch read to line 2000
+# looks exactly like a patch that ended there.
+check_in "$reviewer_text" 'read it to the end' flow/claude/agents/diff-reviewer.md
 
 # Rule 4: what #937 ruled out of scope stays put — the axes are Opus and the
 # witness check survives. This ticket removes duplicated I/O, not review.
