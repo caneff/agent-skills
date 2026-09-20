@@ -70,20 +70,42 @@ fi
 #
 # Known limit: Python's `logging.error()` writes `ERROR:root:<msg>` at column
 # 0, and `2>&1` folds stderr into what is scanned here, so a green `*_test.py`
-# suite that exercises a logging path would be failed by this scan and cannot
-# reach the indent hatch without setting its own `basicConfig(format=...)` or
-# capturing the logger. No suite in this repo does that today.
+# suite that exercises a logging path is failed by this scan and cannot reach
+# the indent hatch. Testing an error path is ordinary work, so this is a real
+# false positive rather than a hypothetical one — recoverable, but not
+# discoverable from the failure alone. `logging_remedy` below prints the two
+# ways out at the moment the gate rejects such a line, because a reader whose
+# green suite just went red is not reading this comment.
 failure_signature='^(FAIL|Traceback|ERROR)'
 
 # Both loop branches end a run the same way: the label, an optional note, the
 # suite's whole output, exit 1.
 report_failure() { # <label> <output> [<note>...]
-  local label=$1 output=$2
+  local label=$1 output=$2 note
   shift 2
   echo "FAIL $label"
-  if [ "$#" -gt 0 ]; then printf '%s\n' "$@"; fi
+  # Skip empty notes: a caller passing a conditional note it decided not to
+  # produce would otherwise print a blank line into the failure report.
+  for note in "$@"; do
+    [ -n "$note" ] && printf '%s\n' "$note"
+  done
   printf '%s\n' "$output"
   exit 1
+}
+
+# The known limit above is recoverable but undiscoverable: both ways out of a
+# logging false positive sit in a comment nobody is reading at the moment a
+# green suite goes red. Say them where that person is looking instead. Printed
+# only when the matched line has the shape of a logging record
+# (`LEVEL:logger:`), because on a genuine `FAIL:` catch this advice is noise
+# pointing away from a real failure.
+logging_remedy() { # <matched line>
+  printf '%s\n' "$1" | grep -qE '^[A-Z]+:[A-Za-z0-9_.]*:' || return 0
+  printf '%s\n' \
+    "  That line looks like a logging record rather than this suite's own verdict." \
+    "  If the suite is meant to exercise a logging path, either assert on the log" \
+    "  in the test (unittest assertLogs, pytest caplog) so it never reaches stderr," \
+    "  or give the logger a format that does not start the line at column 0."
 }
 
 count=0
@@ -92,7 +114,8 @@ while IFS=$'\t' read -r label cmd; do
     if hit=$(printf '%s\n' "$out" | grep -m1 -E "$failure_signature"); then
       report_failure "$label" "$out" \
         "tests/all.sh: exited 0, but its output carries a failure line:" \
-        "  $hit"
+        "  $hit" \
+        "$(logging_remedy "$hit")"
     fi
     echo "PASS $label"
     count=$((count + 1))

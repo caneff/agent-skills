@@ -48,7 +48,17 @@ run_gate() { # <fixture name>
 
 # Direction 1: a column-0 signature word with exit 0 must fail the gate, which
 # must name both the suite and the line that matched.
-while IFS='|' read -r fixture signature; do
+#
+# The third column is whether the report must also carry the logging remedy.
+# It is checked in both directions on purpose: asserting only that the remedy
+# appears for the logging case would pass just as well if the gate printed it
+# on every failure, and an unconditional remedy points away from a real
+# failure on a genuine `FAIL:` catch. `remedy_marker` is a phrase from the
+# note alone — no fixture prints it — so the assertion cannot be satisfied by
+# the suite's own output being echoed back.
+remedy_marker='looks like a logging record'
+
+while IFS='|' read -r fixture signature remedy; do
   out=$(run_gate "$fixture"); rc=$?
   [ "$rc" = 99 ] && fail "could not build the scratch repo for $fixture"
   if [ "$rc" = 0 ]; then
@@ -58,10 +68,17 @@ while IFS='|' read -r fixture signature; do
     || fail "gate failed but never named the offending suite ($fixture)"$'\n'"$out"
   printf '%s\n' "$out" | grep -q "$signature" \
     || fail "gate failed but never showed the line that matched ($fixture)"$'\n'"$out"
+  if [ "$remedy" = yes ]; then
+    printf '%s\n' "$out" | grep -q "$remedy_marker" \
+      || fail "gate failed on a logging-shaped line without naming the way out ($fixture)"$'\n'"$out"
+  else
+    printf '%s\n' "$out" | grep -q "$remedy_marker" \
+      && fail "gate offered the logging remedy on a line that is not a logging record ($fixture)"$'\n'"$out"
+  fi
 done <<'CASES'
-silent-failure|FAIL: config/app.yaml declares a port
-silent-traceback|Traceback (most recent call last):
-silent-error|ERROR:root:manifest checksum did not match
+silent-failure|FAIL: config/app.yaml declares a port|no
+silent-traceback|Traceback (most recent call last):|no
+silent-error|ERROR:root:manifest checksum did not match|yes
 CASES
 
 # Direction 2: the same three words, mid-line where a quoted child failure
