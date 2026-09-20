@@ -271,15 +271,19 @@ def questions(clump, outstanding):
     A bare string is refused rather than iterated: `"is it ok?"` is ten
     characters, so it would read as ten outstanding questions and answer
     none of them — the same fail-closed rule `paths` applies one layer down.
+    A question is one line, because each step prints as one.
     """
-    if outstanding is None:
-        return []
     if isinstance(outstanding, str) or not isinstance(
             outstanding, (list, tuple)) or not all(
             isinstance(q, str) and q.strip() for q in outstanding):
         raise LoopError(
             f"clump #{key_of(clump)}: not a list of outstanding worker "
             f"questions: {outstanding!r}")
+    for question in outstanding:
+        if "\n" in question or "\r" in question:
+            raise LoopError(
+                f"clump #{key_of(clump)}: a question is one line, and this "
+                f"one is not: {question!r}")
     return list(outstanding)
 
 
@@ -450,6 +454,12 @@ def main(argv):
                 lines = f"box: room for {room} of {args.free}\n{lines}"
             print(lines)
         elif args.command == "landing":
+            if args.clump < 1:
+                raise LoopError(f"not a ticket number: {args.clump}")
+            if not args.agent.strip():
+                raise LoopError(
+                    "no agent named — the refusal's whole job is to name the "
+                    "worker that is owed an answer")
             clump = {"tickets": [args.clump], "agent": args.agent}
             for step in landing_steps(clump, args.outstanding):
                 print(f"answer    {step['agent']}  {step['question']}"
@@ -469,6 +479,12 @@ def main(argv):
     except LoopError as exc:
         print(f"loop.py: {exc}", file=sys.stderr)
         return 1
+    except BrokenPipeError:
+        # `loop.py landing ... | head -1` closes the pipe mid-print. Point
+        # stdout at /dev/null so the interpreter's flush at exit has
+        # somewhere to go, rather than raising again with a traceback.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
     return 0
 
 

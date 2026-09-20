@@ -576,6 +576,43 @@ def test_the_cli_landing_clears_cleanup_once_nothing_is_outstanding():
     assert got.stdout.splitlines() == ["merge", "cleanup"], got.stdout
 
 
+def test_a_question_with_a_newline_in_it_is_refused():
+    # Each step prints as one line, so a question carrying a newline would
+    # emit a line the reader cannot tell from a step of its own.
+    try:
+        loop.landing_steps(landed_454(), ["one?\ntwo?"])
+    except loop.LoopError as exc:
+        assert "#454" in str(exc), exc
+        assert "one line" in str(exc), exc
+    else:
+        raise AssertionError("a multi-line question must be refused")
+
+
+def test_the_cli_landing_refuses_an_empty_agent_and_a_non_positive_clump():
+    # A refusal whose job is to name the worker must not name nobody, and a
+    # clump is a ticket number.
+    for args in (("--clump", "454", "--agent", ""),
+                 ("--clump", "0", "--agent", "burn-1"),
+                 ("--clump", "-5", "--agent", "burn-1")):
+        got = loop_py("landing", *args, "--outstanding", "q?")
+        assert got.returncode == 1, (args, got)
+        assert "Traceback" not in got.stderr, got.stderr
+        assert len(got.stderr.strip().splitlines()) == 1, got.stderr
+
+
+def test_the_cli_landing_survives_a_reader_that_closes_early():
+    # `loop.py landing ... | head -1`: the interpreter's flush at exit would
+    # print the traceback this module promises never to print.
+    got = subprocess.run(
+        ["bash", "-c",
+         f"set -o pipefail; {sys.executable} {LOOP} landing --clump 454 "
+         "--agent burn-454 | head -1"],
+        capture_output=True, text=True, timeout=60)
+    assert got.returncode == 0, got
+    assert "Traceback" not in got.stderr, got.stderr
+    assert got.stdout.strip() == "merge", got.stdout
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
