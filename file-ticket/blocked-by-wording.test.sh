@@ -74,8 +74,13 @@ check "$write_text" 'swallows the `## Blocked by` section below' 'Write the issu
 # A native edge where the blocker is known at filing time — as well as the
 # section, never instead of it, the same rule #890 gave `/to-tickets`. The
 # flag is in the command template, not only in the prose under it.
-check "$create_text" '[--blocked-by <#,#>] \' 'Create it'
-check "$create_text" '**in addition to** the section and never instead of it' 'Create it'
+check "$create_text" 'gh issue edit <n> --repo <owner>/<repo> --add-blocked-by <#>' 'Create it'
+check "$create_text" 'In addition to the section, never instead of it' 'Create it'
+# The edge is a second command precisely so a tracker that cannot make one
+# still gets a filed, readable ticket — and so the failure is spoken aloud.
+check "$create_text" 'The edge comes second' 'Create it'
+check "$create_text" 'rather than a filing that never happened' 'Create it'
+check "$create_text" 'Say so in your reply when the edge fails' 'Create it'
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS file-ticket/blocked-by-wording.test.sh"

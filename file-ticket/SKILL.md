@@ -76,7 +76,6 @@ Build the body through a heredoc so evidence text (backticks, `$(...)`,
 ```
 gh issue create --repo <owner>/<repo> --title "<title>" \
   --label "<role label>[,<bug-or-enhancement label>]" \
-  [--blocked-by <#,#>] \
   --body "$(cat <<'EOF'
 <body>
 
@@ -88,13 +87,24 @@ EOF
 ```
 
 With blockers, that last line becomes one `- #<n>` line per blocking
-issue, and `--blocked-by <#,#>` names the same issues — the tracker's
-**native** edge, set **in addition to** the section and never instead of
-it. Drop the bracketed flag when nothing blocks the ticket. Native edges
-are the live gate: closing a blocker moves the count with nobody editing
-prose. The section is the fallback the reader parses where the tracker
-holds no edges, so where `gh` rejects the flag it still states the
-relationship on its own.
+issue. **Then** add the tracker's native edge, as a second command over
+the issue the first one printed:
+
+```
+gh issue edit <n> --repo <owner>/<repo> --add-blocked-by <#>
+```
+
+In addition to the section, never instead of it: native edges are the live
+gate — closing a blocker moves the count with nobody editing prose — and
+the section is the fallback the reader parses where the tracker holds no
+edges. The edge comes second so that the ticket exists and reads correctly
+whatever the edge does: an old `gh` without the flag, or a tracker with no
+dependency support, is a reported failure over a filed, readable ticket
+rather than a filing that never happened. (`gh` 2.95.0 has both
+`--add-blocked-by` here and `--blocked-by` on the create; the second
+command is for the machines that do not.) Say so in your reply when the
+edge fails — the section still states the relationship, and nobody has to
+find out from the tracker later.
 
 Filing more than one target prints one URL per line, in the order the
 targets were given.
