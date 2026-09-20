@@ -171,12 +171,13 @@ def test_the_candidate_grammar_is_closures_own():
     same candidate strings, and two spellings of that grammar are two places
     for it to drift."""
     view = FakeView({371: []})
+    refused = None
     try:
         T.candidates_from("caneff/agent-skills", ["371"], run=view)
-    except C.ClosureError:
-        pass
-    else:
-        raise AssertionError("a spec with no files was accepted")
+    except C.ClosureError as exc:
+        refused = exc
+    assert refused is not None, "a spec with no files was accepted"
+    assert view.calls == [], "the tracker was read for a spec that is not one"
 
 
 def test_usage_is_an_exit_2_not_a_traceback():
