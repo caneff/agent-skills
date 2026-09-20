@@ -387,7 +387,18 @@ impl WorktreeFiles {
         };
         let mut files = Self::default();
         for line in out.lines().filter(|l| l.len() > 3) {
-            let (code, name) = (&line[..2], unquote(&line[3..]));
+            let (code, rest) = (&line[..2], &line[3..]);
+            // Porcelain v1 writes a rename or a copy as `<orig> -> <new>`,
+            // each path quoted on its own, so those decode by halves:
+            // unquoting the line whole strips the outer pair and strands the
+            // inner quotes. Only for R and C — in any other entry ` -> ` is
+            // just part of a filename, and splitting on it would corrupt one.
+            let name = match code.as_bytes()[0] {
+                b'R' | b'C' => rest
+                    .split_once(" -> ")
+                    .map_or_else(|| unquote(rest), |(from, to)| format!("{} -> {}", unquote(from), unquote(to))),
+                _ => unquote(rest),
+            };
             match code {
                 "??" => files.untracked.push(name),
                 "!!" if is_cache(wt, &name) => files.caches.push(name),

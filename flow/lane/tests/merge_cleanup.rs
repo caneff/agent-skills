@@ -1566,6 +1566,29 @@ fn the_empty_directory_line_is_not_printed_when_nothing_is_removed() {
 }
 
 #[test]
+fn a_quoted_rename_decodes_both_of_its_paths() {
+    // Verification pass V1 on the C1 fix: porcelain v1 writes a rename as
+    // `<orig> -> <new>` with each path quoted on its own, so decoding the
+    // line as one path stripped the outer quotes and left the inner pair
+    // stranded — `"a" -> "b"` read as `a" -> "b`. Only the displayed name was
+    // affected, never a refusal, but a guard that exists to say what is about
+    // to be destroyed has to name it correctly.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r39", "implement-39");
+    std::fs::write(wt.join("café.txt"), "x\n").unwrap();
+    c.git_ok(&["-C", s(&wt), "add", "café.txt"]);
+    c.git_ok(&["-C", s(&wt), "commit", "-qm", "add it"]);
+    c.git_ok(&["-C", s(&wt), "mv", "café.txt", "naïve.txt"]);
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--force"], &[]);
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — 1 modified file(s) would be lost: café.txt -> naïve.txt (--discard overrides)",
+        wt.display()
+    );
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+}
+
+#[test]
 fn a_sibling_holding_only_caches_is_not_listed_stale() {
     let c = Cleanup::new();
     let r = c.mkfixture("r29");
