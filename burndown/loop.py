@@ -4,7 +4,7 @@
 memory:
 
     python3 burndown/loop.py seat
-    python3 burndown/loop.py box --processes <n> --committed-gb <g> [--add-gb <g>]
+    python3 burndown/loop.py box [--processes <n>] --committed-gb <g> [--add-gb <g>]
     python3 burndown/loop.py sweep --workers <clumps.json>
 
 The judgment steps stay in the skill. What lives here is what a run got wrong
@@ -203,14 +203,48 @@ PROCESS_CAP = 28
 VM_BUDGET_GB = 24
 
 
-def box_check(processes, committed_gb, add_gb=0, workers=1):
+AGENT_COUNTER = "`ps -eo comm=` lines equal to claude"
+
+
+def count_agent_processes(run=None):
+    """The agent processes on the box, counted by command name: one per
+    `claude` session (subagents run inside it). Counting by name and not by
+    argument (`pgrep -f claude`) keeps plugin scripts and hook shims, whose
+    arguments merely mention a claude path, out of the count.
+
+    A count that could not be taken raises: a failed or empty `ps` is not
+    "0 agents, the box is wide open". `run` takes the command and returns
+    (exit status, stdout).
+    """
+    if run is None:
+        def run(cmd):
+            try:
+                done = subprocess.run(cmd, capture_output=True, text=True,
+                                      timeout=10)
+            except (OSError, subprocess.SubprocessError) as exc:
+                return 1, f"{exc}"
+            return done.returncode, done.stdout
+    status, out = run(["ps", "-eo", "comm="])
+    names = [line.strip() for line in out.splitlines() if line.strip()]
+    if status != 0 or not names:
+        raise LoopError(
+            "could not count the agent processes on the box (`ps -eo comm=` "
+            "failed or listed nothing), and an unmeasured box is not an "
+            "empty one: refusing to dispatch — pass --processes <n> with a "
+            "count you took")
+    return sum(1 for name in names if name == "claude")
+
+
+def box_check(processes, committed_gb, add_gb=0, workers=1,
+              counter=AGENT_COUNTER):
     """Whether the box has room for one more worker, and every reason it does
     not.
 
-    `processes` is every process on the box, not this run's — the readings
-    come from `uptime` and `free -g` and the process table before each
-    dispatch, because the box is shared with other agents and a dispatch that
-    fits this run's own count can still be the 29th process on the machine.
+    `processes` is the agent processes on the box — Claude sessions, not OS
+    processes, and not only this run's. The cap is Chris's "no more than 28
+    cores TOTAL" on a box shared with other agents, so a dispatch that fits
+    this run's own count can still be the 29th agent on the machine, while
+    the ~190 OS processes of an idle box are not what it counts.
     `workers` is how many this tick would start: three picks are three
     processes and three `ulimit -v` caps, so asking about one more worker
     passes a tick that starts three.
@@ -218,9 +252,10 @@ def box_check(processes, committed_gb, add_gb=0, workers=1):
     refusals = []
     if processes + workers > PROCESS_CAP:
         refusals.append(
-            f"{processes} processes on the box already, {workers} more would "
-            f"pass the cap of {PROCESS_CAP}, which counts every process on "
-            "it and not this run's")
+            f"{processes} agent processes on the box already ({counter}), "
+            f"{workers} more would pass the cap of {PROCESS_CAP}, which "
+            "counts agent processes — Claude sessions, subagents included "
+            "— not OS processes")
     if committed_gb + add_gb * workers > VM_BUDGET_GB:
         refusals.append(
             f"{committed_gb} GB of ulimit -v caps committed plus {add_gb} GB "
@@ -229,15 +264,23 @@ def box_check(processes, committed_gb, add_gb=0, workers=1):
     return {"ok": not refusals, "refusals": refusals}
 
 
-def box_room(processes, committed_gb, add_gb, want):
+def agent_count(args):
+    """(count, counter label): the override when one was passed, else a
+    measurement — never a default that reads as zero."""
+    if args.processes is not None:
+        return args.processes, "passed by --processes"
+    return count_agent_processes(), AGENT_COUNTER
+
+
+def box_room(processes, committed_gb, add_gb, want, counter=AGENT_COUNTER):
     """How many of `want` workers the box has room for, and the refusals if
     that is none. Fewer than asked is the normal answer on a shared box, and
     holding the extra slots empty is the point."""
     for workers in range(want, 0, -1):
-        verdict = box_check(processes, committed_gb, add_gb, workers)
+        verdict = box_check(processes, committed_gb, add_gb, workers, counter)
         if verdict["ok"]:
             return workers, []
-    return 0, box_check(processes, committed_gb, add_gb, 1)["refusals"]
+    return 0, box_check(processes, committed_gb, add_gb, 1, counter)["refusals"]
 
 
 def job_cores(key, record):
@@ -600,9 +643,13 @@ def run(argv):
             "so is `landing`'s answer step, which is why `landing` reports "
             "what is owed and gates cleanup rather than answering anything."))
     subs = parser.add_subparsers(dest="command", required=True)
+    AGENT_HELP = ("Override for the agent processes on the box (Claude "
+                  "sessions, subagents included), not OS processes; never "
+                  "`ps | wc -l`.")
     subs.add_parser("seat", help="refuse unless this is a controller's seat")
     box = subs.add_parser("box", help="room on the box for one more worker")
-    box.add_argument("--processes", type=int, required=True)
+    box.add_argument("--processes", type=int,
+                     help=AGENT_HELP + " Default: measured by " + AGENT_COUNTER + ".")
     box.add_argument("--committed-gb", type=float, required=True)
     box.add_argument("--add-gb", type=float, default=0)
     dispatch = subs.add_parser(
@@ -610,9 +657,10 @@ def run(argv):
     dispatch.add_argument("--candidates", required=True)
     dispatch.add_argument("--in-flight")
     dispatch.add_argument("--free", type=int, required=True)
-    # Required, not optional: the box check runs before *every* dispatch, and
-    # an optional flag is the step a controller forgets.
-    dispatch.add_argument("--processes", type=int, required=True)
+    # Measured when omitted, so the box check cannot be skipped by a
+    # controller who does not know what number to pass.
+    dispatch.add_argument("--processes", type=int,
+                          help=AGENT_HELP + " Default: measured by " + AGENT_COUNTER + ".")
     dispatch.add_argument("--committed-gb", type=float, required=True)
     dispatch.add_argument("--add-gb", type=float, default=0)
     sweep_cmd = subs.add_parser(
@@ -638,7 +686,9 @@ def run(argv):
         if args.command == "seat":
             print(seat(git))
         elif args.command == "box":
-            verdict = box_check(args.processes, args.committed_gb, args.add_gb)
+            count, counter = agent_count(args)
+            verdict = box_check(count, args.committed_gb, args.add_gb,
+                                counter=counter)
             if not verdict["ok"]:
                 for refusal in verdict["refusals"]:
                     print(f"loop.py: {refusal}", file=sys.stderr)
@@ -664,8 +714,9 @@ def run(argv):
                       "declared job")
                 print(render_dispatch([], frontier(candidates, in_flight)))
                 return 0
-            room, refusals = box_room(args.processes, args.committed_gb,
-                                      args.add_gb, cores["room"])
+            count, counter = agent_count(args)
+            room, refusals = box_room(count, args.committed_gb,
+                                      args.add_gb, cores["room"], counter)
             if refusals:
                 for refusal in refusals:
                     print(f"loop.py: {refusal}", file=sys.stderr)

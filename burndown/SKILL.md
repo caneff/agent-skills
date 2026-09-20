@@ -84,12 +84,20 @@ too.
    a **hub** — a file two or more candidates' closures share
    (`loop.py hub`). Every other landing gets step 5 and nothing more.
 7. **Box check before every dispatch** — read `uptime` and `free -g`, and
-   pass both readings to `loop.py dispatch`, which weighs every worker the
-   tick would start, takes only as many as the box has room for, and refuses
-   outright when that is none: the **28**-process cap counts every process on
-   the shared box, not this run's, and the ~**24 GB** ceiling is on the sum
-   of the per-process `ulimit -v` caps. A slot the box cannot afford stays
-   empty; that is not a reason to dispatch into it anyway.
+   pass the committed `ulimit -v` GB to `loop.py dispatch`, which weighs every
+   worker the tick would start, takes only as many as the box has room for,
+   and refuses outright when that is none. The **28** cap counts **agent
+   processes** — Claude sessions, subagents included — across the whole
+   shared box, not this run's and **not OS processes**: an idle WSL box holds
+   ~190 of those, so `ps | wc -l` refuses every dispatch. `loop.py` measures
+   the agent count itself (`ps -eo comm= | grep -cx claude`, by command name:
+   `pgrep -f claude` also matches plugin scripts and hook shims and
+   overcounts more than 2x); `--processes <n>` overrides it, and the refusal
+   names the number and the counter. A box it cannot measure is refused,
+   never read as empty. The ~**24 GB**
+   ceiling is on the sum of the per-process `ulimit -v` caps. A slot the box
+   cannot afford stays empty; that is not a reason to dispatch into it
+   anyway.
 8. Dispatch and merge through
    [`implement`](~/.agents/skills/implement/SKILL.md) § Dispatch, which
    claims the clump and starts the worker; `implement/SKILL.md` § The merge,

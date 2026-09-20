@@ -178,9 +178,55 @@ def test_box_check_refuses_when_the_ulimit_sum_breaks_the_budget():
 
 def test_box_check_refuses_at_the_process_cap_boundary():
     # The cap is the box's, so the reading it is checked against counts
-    # every process on the box — 27 leaves room for one more, 28 does not.
+    # agent processes on the box — 27 leaves room for one more, 28 does not.
     assert loop.box_check(processes=27, committed_gb=0, add_gb=0)["ok"] is True
     assert loop.box_check(processes=28, committed_gb=0, add_gb=0)["ok"] is False
+
+
+def test_an_idle_boxs_os_process_count_is_not_the_cap_reading():
+    # A WSL box idles at ~190 OS processes. The cap counts agent processes,
+    # so the CLI must dispatch when the agent count is small, and the
+    # refusal must name what it counted.
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        with open(cand, "w") as fh:
+            json.dump(candidates_781(), fh)
+        idle = loop_py("dispatch", "--candidates", cand, "--free", "1",
+                       "--processes", "19", "--committed-gb", "0")
+        assert idle.returncode == 0, idle.stderr
+        assert "dispatch  #" in idle.stdout, idle.stdout
+        full = loop_py("dispatch", "--candidates", cand, "--free", "1",
+                       "--processes", "28", "--committed-gb", "0")
+        assert full.returncode == 1
+        assert "28 agent processes" in full.stderr, full.stderr
+        assert "not OS processes" in full.stderr, full.stderr
+
+
+def test_agent_processes_are_counted_by_command_name_not_arguments():
+    listing = "bash\nclaude\nnode\nclaude\nchrome\nclaude-hook\n"
+    assert loop.count_agent_processes(lambda cmd: (0, listing)) == 2
+    assert loop.count_agent_processes(lambda cmd: (0, "bash\nnode\n")) == 0
+
+
+def test_an_unmeasurable_box_is_a_refusal_not_zero_agents():
+    for failed in ((1, ""), (0, ""), (1, "bash\nclaude\n")):
+        try:
+            loop.count_agent_processes(lambda cmd, r=failed: r)
+        except loop.LoopError as exc:
+            assert "could not count" in str(exc), exc
+        else:
+            raise AssertionError(f"{failed} read as a count")
+
+
+def test_the_cli_refuses_when_ps_cannot_be_run():
+    with tempfile.TemporaryDirectory() as tmp:
+        env = {**os.environ, "PATH": tmp}
+        got = subprocess.run([sys.executable, LOOP, "box", "--committed-gb",
+                              "0"], capture_output=True, text=True,
+                             timeout=60, env=env)
+    assert got.returncode == 1, got
+    assert "could not count" in got.stderr, got.stderr
+    assert "box ok" not in got.stdout, got.stdout
 
 
 def resume_state():
@@ -270,7 +316,7 @@ def test_the_cli_box_check_exits_nonzero_on_a_refusal():
     assert ok.returncode == 0, ok.stderr
     refused = loop_py("box", "--processes", "40", "--committed-gb", "0")
     assert refused.returncode == 1
-    assert "cap of 28" in refused.stderr, refused.stderr
+    assert "agent processes" in refused.stderr, refused.stderr
 
 
 def test_the_cli_dispatch_prints_the_picks_and_what_holds_the_rest():
@@ -398,7 +444,7 @@ def test_the_cli_dispatch_refuses_when_the_box_has_no_room():
                       "--processes", "40", "--committed-gb", "0")
         assert got.returncode == 1, got
         assert "dispatch" not in got.stdout, got.stdout
-        assert "cap of 28" in got.stderr, got.stderr
+        assert "agent processes" in got.stderr, got.stderr
 
 
 def test_the_cli_refuses_a_seat_in_a_worktree_it_makes_itself():
