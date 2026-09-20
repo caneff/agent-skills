@@ -275,6 +275,17 @@ def box_check(processes, committed_gb, add_gb=0, workers=1,
     return {"ok": not refusals, "refusals": refusals}
 
 
+def process_count(text):
+    """A `--processes` override: 0 is a deliberate count, a negative one would
+    sit under the cap and disarm the gate."""
+    count = int(text)
+    if count < 0:
+        raise argparse.ArgumentTypeError(
+            f"--processes {count} is negative; give the agent processes you "
+            "counted, 0 or more")
+    return count
+
+
 def agent_count(args, ps=None):
     """(count, counter label): the override when one was passed, else a
     measurement — never a default that reads as zero."""
@@ -660,7 +671,7 @@ def run(argv):
                   "`ps | wc -l`. Default: measured by " + AGENT_COUNTER + ".")
     subs.add_parser("seat", help="refuse unless this is a controller's seat")
     box = subs.add_parser("box", help="room on the box for one more worker")
-    box.add_argument("--processes", type=int,
+    box.add_argument("--processes", type=process_count,
                      help=agent_help)
     box.add_argument("--committed-gb", type=float, required=True)
     box.add_argument("--add-gb", type=float, default=0)
@@ -671,7 +682,7 @@ def run(argv):
     dispatch.add_argument("--free", type=int, required=True)
     # Measured when omitted, so the box check cannot be skipped by a
     # controller who does not know what number to pass.
-    dispatch.add_argument("--processes", type=int,
+    dispatch.add_argument("--processes", type=process_count,
                           help=agent_help)
     dispatch.add_argument("--committed-gb", type=float, required=True)
     dispatch.add_argument("--add-gb", type=float, default=0)

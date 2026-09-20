@@ -250,6 +250,35 @@ def test_a_processes_override_of_zero_is_used_not_measured():
         0, "passed by --processes")
 
 
+def test_the_cli_refuses_a_negative_processes_override():
+    # A negative count would sit under the cap for any workers asked about,
+    # so the documented escape hatch would switch the gate off on a typo.
+    for cmd in (("box",), ("dispatch", "--candidates", "x", "--free", "1")):
+        got = loop_py(*cmd, "--processes", "-1", "--committed-gb", "0")
+        assert got.returncode != 0, got
+        assert "box ok" not in got.stdout and "dispatch" not in got.stdout
+        assert "--processes" in got.stderr and "negative" in got.stderr, \
+            got.stderr
+    zero = loop_py("box", "--processes", "0", "--committed-gb", "0")
+    assert zero.returncode == 0, zero.stderr
+
+
+def test_the_cli_dispatch_refuses_when_ps_cannot_be_run():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        with open(cand, "w") as fh:
+            json.dump(candidates_781(), fh)
+        nobin = os.path.join(tmp, "empty-path")
+        os.mkdir(nobin)
+        got = subprocess.run(
+            [sys.executable, LOOP, "dispatch", "--candidates", cand,
+             "--free", "1", "--committed-gb", "0"], capture_output=True,
+            text=True, timeout=60, env={**os.environ, "PATH": nobin})
+    assert got.returncode == 1, got
+    assert "dispatch  #" not in got.stdout, got.stdout
+    assert "--processes" in got.stderr, got.stderr
+
+
 def test_the_cli_refuses_when_ps_cannot_be_run():
     with tempfile.TemporaryDirectory() as tmp:
         env = {**os.environ, "PATH": tmp}
