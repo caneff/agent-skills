@@ -713,6 +713,48 @@ def test_a_lock_someone_else_holds_times_out_as_a_refusal():
     assert runfile.load("burn-1", root=root)["clumps"] == []
 
 
+# --- The environment reads: the same clean-refusal boundary -----------------
+
+def test_a_malformed_environment_value_is_a_refusal_not_a_traceback():
+    # Round 1's F4 was malformed persisted state escaping the clean-refusal
+    # path; an unguarded `float()` on an inherited env value is the same
+    # contract with a new surface. A bad value inherited from a parent shell
+    # must not turn a restart recovery into a stack trace.
+    root = cache()
+    cli(root, "start", "burn-1", "--slots", "2")
+    for name, value in (("BURNDOWN_RUNFILE_LOCK_TIMEOUT", "30s"),
+                        ("BURNDOWN_RUNFILE_LOCK_TIMEOUT", "inf"),
+                        ("BURNDOWN_RUNFILE_LOCK_TIMEOUT", "nan"),
+                        ("BURNDOWN_RUNFILE_LOCK_TIMEOUT", "-5"),
+                        ("BURNDOWN_RUNFILE_DELAY_MS", "abc"),
+                        ("BURNDOWN_RUNFILE_DELAY_MS", "-1"),
+                        ("BURNDOWN_RUNFILE_DELAY_MS", "nan")):
+        got = subprocess.run(
+            [sys.executable, RUNFILE, "clump", "burn-1", "--tickets", "901",
+             "--workspace", "/w/a", "--agent", "agent-a"],
+            capture_output=True, text=True, timeout=30,
+            env={**os.environ, "BURNDOWN_CACHE_DIR": root, name: value})
+        assert got.returncode == 1, (name, value, got.stdout, got.stderr)
+        assert "Traceback" not in got.stderr, got.stderr
+        assert len(got.stderr.strip().splitlines()) == 1, got.stderr
+        assert name in got.stderr, got.stderr
+    assert runfile.load("burn-1", root=root)["clumps"] == []
+
+
+def test_an_empty_environment_value_reads_as_unset():
+    # `VAR=` is the shell's own way to clear an override, and every one of
+    # these has a documented default to fall back to.
+    root = cache()
+    got = subprocess.run(
+        [sys.executable, RUNFILE, "start", "burn-1", "--slots", "1"],
+        capture_output=True, text=True, timeout=30,
+        env={**os.environ, "BURNDOWN_CACHE_DIR": root,
+             "BURNDOWN_RUNFILE_LOCK_TIMEOUT": "",
+             "BURNDOWN_RUNFILE_DELAY_MS": ""})
+    assert got.returncode == 0, got.stderr
+    assert runfile.load("burn-1", root=root)["slots"] == 1
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     try:

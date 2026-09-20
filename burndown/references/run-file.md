@@ -151,3 +151,10 @@ rather than the traceback.
 `BURNDOWN_CACHE_DIR` moves the whole directory, which is how the tests stay
 off the real one. The CLI resolves it once and passes it down; an in-process
 caller passes `root` instead.
+
+Every environment read goes through one guarded conversion, so a value
+inherited from a parent shell is a refusal and not a traceback: unset or empty
+means the documented default (`VAR=` is the shell's own way to clear an
+override), and anything that is not a non-negative finite number — `30s`,
+`inf`, `nan`, `-5` — is refused by name. `inf` would wait forever and `nan`
+compares false against every deadline, which is the same wait without a name.

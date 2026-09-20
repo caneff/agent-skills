@@ -21,6 +21,7 @@ those reasons live rather than being restated here.
 import contextlib
 import fcntl
 import json
+import math
 import os
 import re
 import sys
@@ -61,6 +62,27 @@ class RunFileError(Exception):
     never a traceback: a resumed controller needs the reason, not a stack."""
 
 
+def env_number(name, default):
+    """A non-negative, finite number from the environment, or `default` when
+    the variable is unset or empty (`VAR=` is the shell's way to clear an
+    override). Every environment read in this module goes through here: an
+    unguarded `float()` turns a value inherited from a parent shell into a
+    traceback, and the one moment these are read is a controller recovering
+    from a restart, which needs the diagnostic. `inf` parses and would wait
+    forever; `nan` parses and compares false against every deadline, which is
+    the same wait with no name."""
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        raise RunFileError(f"{name} is not a number: {raw!r}") from None
+    if not math.isfinite(value) or value < 0:
+        raise RunFileError(f"{name} is not a non-negative, finite number: {raw!r}")
+    return value
+
+
 def slot_budget(slots):
     """A run's slot budget: a positive count, and not a bool."""
     if isinstance(slots, bool) or not isinstance(slots, int) or slots < 1:
@@ -93,8 +115,7 @@ def locked(run_id, root=None):
     The lock lives beside the run file as `<run-id>.json.lock`, because the run
     file itself does not exist yet when `start` takes the lock."""
     lock_path = path(run_id, root) + ".lock"
-    timeout = float(os.environ.get("BURNDOWN_RUNFILE_LOCK_TIMEOUT")
-                    or LOCK_TIMEOUT)
+    timeout = env_number("BURNDOWN_RUNFILE_LOCK_TIMEOUT", LOCK_TIMEOUT)
     try:
         os.makedirs(os.path.dirname(lock_path), exist_ok=True)
         fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -115,9 +136,9 @@ def locked(run_id, root=None):
         # Only ever set by a test, to hold this critical section open past
         # another writer's read: nothing else can witness the lock rather than
         # pass on how two processes happen to interleave.
-        delay = os.environ.get("BURNDOWN_RUNFILE_DELAY_MS")
+        delay = env_number("BURNDOWN_RUNFILE_DELAY_MS", 0)
         if delay:
-            time.sleep(float(delay) / 1000)
+            time.sleep(delay / 1000)
         yield
     finally:
         try:
