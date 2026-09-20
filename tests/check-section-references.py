@@ -14,6 +14,17 @@ ROOT = Path(os.environ.get("SECTION_REFERENCES_ROOT", Path(__file__).resolve().p
 PATH = re.compile(r"(?<![\w.-])([~\w./-]+\.md)\b")
 SECTION = re.compile(r"§\s+(\d+|[A-Za-z][^§\n]{0,160})")
 TRAILING_PUNCTUATION = ".,;:!?)]}"
+# "§ The merge step 3 ..." points at the section "The merge" and its third
+# numbered step; whatever follows the locator is prose, not part of the name.
+# The non-empty name and the mandatory whitespace before "step" are joint
+# guards on a heading that is itself "Step 3: ...": either one alone keeps
+# the locator from matching there, so relax both at once and every
+# "§ Step N" label becomes "", which matches_heading accepts against any
+# heading at all.
+# Known limit: a reference to such a heading that carries prose after it
+# ("§ Step 3 and then ...") is still over-read, and the step number itself
+# is never checked against the target's numbered list.
+STEP_LOCATOR = re.compile(r"^(.+?)\s+[Ss]tep\s+\d+\b")
 
 
 def tracked_markdown() -> list[Path]:
@@ -53,7 +64,9 @@ def reference_label(match: re.Match[str]) -> str:
     value = value.split(" and §", 1)[0]
     value = re.sub(r"\s+and\s*$", "", value)
     value = value.split("'s", 1)[0]
-    return re.split(r"[.,;:!?)}\]]", value, maxsplit=1)[0].strip()
+    value = re.split(r"[.,;:!?)}\]]", value, maxsplit=1)[0].strip()
+    locator = STEP_LOCATOR.match(value)
+    return locator.group(1).strip() if locator else value
 
 
 def matches_heading(label: str, heading: str) -> bool:
