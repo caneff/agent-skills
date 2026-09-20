@@ -30,12 +30,9 @@ def seat(run):
     seat is not a controller's.
 
     `run(args) -> stdout` is `git` with the arguments given. Three refusals:
-    a linked worktree, where `/implement`'s front-door rule would read the
-    session as a *worker*; a detached HEAD, which is neither door; and any
-    branch other than this checkout's default — read from
-    `refs/remotes/origin/HEAD`, never assumed to be `main`. The repo this
-    checkout holds need not be the repo the run targets: the loop addresses
-    that one with `--repo`.
+    a linked worktree, a detached HEAD, and any branch other than this
+    checkout's default. Why each, and why the checkout need not hold the
+    target repo: `references/loop.md`.
     """
     git_dir = os.path.realpath(run(["rev-parse", "--absolute-git-dir"]).strip())
     common = run(["rev-parse", "--git-common-dir"]).strip()
@@ -187,7 +184,7 @@ PROCESS_CAP = 28
 VM_BUDGET_GB = 24
 
 
-def box_check(processes, committed_gb, add_gb=0):
+def box_check(processes, committed_gb, add_gb=0, workers=1):
     """Whether the box has room for one more worker, and every reason it does
     not.
 
@@ -195,17 +192,33 @@ def box_check(processes, committed_gb, add_gb=0):
     come from `uptime` and `free -g` and the process table before each
     dispatch, because the box is shared with other agents and a dispatch that
     fits this run's own count can still be the 29th process on the machine.
+    `workers` is how many this tick would start: three picks are three
+    processes and three `ulimit -v` caps, so asking about one more worker
+    passes a tick that starts three.
     """
     refusals = []
-    if processes + 1 > PROCESS_CAP:
+    if processes + workers > PROCESS_CAP:
         refusals.append(
-            f"{processes} processes on the box already, and the cap is "
-            f"{PROCESS_CAP} counting every process on it, not this run's")
-    if committed_gb + add_gb > VM_BUDGET_GB:
+            f"{processes} processes on the box already, {workers} more would "
+            f"pass the cap of {PROCESS_CAP}, which counts every process on "
+            "it and not this run's")
+    if committed_gb + add_gb * workers > VM_BUDGET_GB:
         refusals.append(
             f"{committed_gb} GB of ulimit -v caps committed plus {add_gb} GB "
-            f"for this worker is over the ~{VM_BUDGET_GB} GB budget")
+            f"for each of {workers} workers is over the ~{VM_BUDGET_GB} GB "
+            "budget")
     return {"ok": not refusals, "refusals": refusals}
+
+
+def box_room(processes, committed_gb, add_gb, want):
+    """How many of `want` workers the box has room for, and the refusals if
+    that is none. Fewer than asked is the normal answer on a shared box, and
+    holding the extra slots empty is the point."""
+    for workers in range(want, 0, -1):
+        verdict = box_check(processes, committed_gb, add_gb, workers)
+        if verdict["ok"]:
+            return workers, []
+    return 0, box_check(processes, committed_gb, add_gb, 1)["refusals"]
 
 
 def announce(state, send):
@@ -213,15 +226,10 @@ def announce(state, send):
     one message each, and nothing to anyone else.
 
     `state` is `runfile.reconcile`'s answer and `send(agent, message)` is the
-    caller's messenger, because sending is `SendMessage` and a Python module
-    cannot call it. The bucket is `announce` and only that one: a landed
-    clump's worker is done however its agent looks, and a vanished one is
-    reconciled or parked by hand rather than messaged.
-
-    The agent named is the worker's **herdr agent name**, which is the durable
-    key and not an address: resolving it to the session a message can reach is
-    the caller's, at send time (#923). A resolved address written into the run
-    file is what aged and broke the last trial.
+    caller's messenger. The bucket is `announce` and only that one, and the
+    agent it names is the worker's herdr agent name, which the caller
+    resolves to an address itself. Why each of those three:
+    `references/loop.md`.
     """
     sent = []
     for entry in state["announce"]:
@@ -245,13 +253,11 @@ def announce(state, send):
 def admit(candidates, clump, stuck_on=None):
     """The frozen candidate set, plus the one ticket allowed to join it.
 
-    The set is frozen at the initial exploration — which covers the **whole
-    queue**, not the first wave's worth — so a ticket filed while the run is
-    going does not extend it: the run drains what it explored and a later run
-    takes the rest. The one exception is a ticket filed *during* the run
-    **because the run is stuck on what it fixes**; `stuck_on` names the
-    clump it unblocks, which has to be one of this run's, and that ticket is
-    dispatched into this run. Returns a new list; the frozen set is never
+    A ticket filed while the run is going does not extend it. The one
+    exception is a ticket filed *during* the run **because the run is stuck
+    on what it fixes**; `stuck_on` names the clump it unblocks, which has to
+    be one of this run's. Why the freeze and why the exception is narrow:
+    `references/loop.md`. Returns a new list; the frozen set is never
     mutated in place.
     """
     if stuck_on is None:
@@ -266,9 +272,12 @@ def admit(candidates, clump, stuck_on=None):
     return list(candidates) + [clump]
 
 
-def read_clumps(path):
+def read_clumps(path, live=False):
     """A clump list from a JSON file — `closure.py`'s own `clumps` entries,
     each with the `workspace` an in-flight one sits in.
+
+    `live=True` for the in-flight list, whose entries are also named in
+    every held-clump line and so must carry a `workspace`.
 
     Validated field by field, as `runfile.py` validates its own state: a
     hand-built or half-written file is the normal case here, and it reaches
@@ -291,6 +300,11 @@ def read_clumps(path):
                 isinstance(n, int) and not isinstance(n, bool) and n > 0
                 for n in tickets):
             raise LoopError(f"{path}: not a clump's ticket list: {tickets!r}")
+        if live and not isinstance(entry.get("workspace"), str) or (
+                live and not entry.get("workspace", "").strip()):
+            raise LoopError(
+                f"{path}: clump #{min(tickets)} names no workspace, and an "
+                "in-flight clump is reported by the workspace holding it")
         paths(entry)
     return clumps
 
@@ -344,15 +358,19 @@ def main(argv):
             print("box ok")
         elif args.command == "dispatch":
             candidates = read_clumps(args.candidates)
-            in_flight = read_clumps(args.in_flight) if args.in_flight else []
-            verdict = box_check(args.processes, args.committed_gb,
-                                args.add_gb)
-            if not verdict["ok"]:
-                for refusal in verdict["refusals"]:
+            in_flight = (read_clumps(args.in_flight, live=True)
+                         if args.in_flight else [])
+            room, refusals = box_room(args.processes, args.committed_gb,
+                                      args.add_gb, max(args.free, 0))
+            if refusals:
+                for refusal in refusals:
                     print(f"loop.py: {refusal}", file=sys.stderr)
                 return 1
             state = frontier(candidates, in_flight)
-            print(render_dispatch(picks(state, args.free), state))
+            lines = render_dispatch(picks(state, room), state)
+            if room < args.free:
+                lines = f"box: room for {room} of {args.free}\n{lines}"
+            print(lines)
         elif args.command == "hub":
             landed = [p for p in args.landed.replace(",", " ").split() if p]
             hub_files = hubs(read_clumps(args.candidates))

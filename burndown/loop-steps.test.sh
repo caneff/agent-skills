@@ -95,7 +95,9 @@ check_in "$loop_text" 'send time' 'burndown/SKILL.md § The loop'
 # workspace and agent — and re-resolves closures through the clumper. Without
 # either, step 1's announce bucket is empty and step 5 checks stale closures.
 check_in "$loop_text" 'runfile.py clump' 'burndown/SKILL.md § The loop'
-check_in "$loop_text" 'closure.py' 'burndown/SKILL.md § The loop'
+# The re-resolve step names the clumper itself — not merely somewhere in the
+# section, which step 3's announcement line already satisfied.
+check_in "$loop_text" 'through `closure.py`' 'burndown/SKILL.md § The loop'
 
 # Rule 9: the reader is reachable, and so is the reference that holds the why.
 check_in "$loop_text" 'burndown/loop.py' 'burndown/SKILL.md § The loop'

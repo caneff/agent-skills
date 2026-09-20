@@ -264,7 +264,7 @@ def test_the_cli_box_check_exits_nonzero_on_a_refusal():
     assert ok.returncode == 0, ok.stderr
     refused = loop_py("box", "--processes", "40", "--committed-gb", "0")
     assert refused.returncode == 1
-    assert "cap is 28" in refused.stderr, refused.stderr
+    assert "cap of 28" in refused.stderr, refused.stderr
 
 
 def test_the_cli_dispatch_prints_the_picks_and_what_holds_the_rest():
@@ -392,7 +392,7 @@ def test_the_cli_dispatch_refuses_when_the_box_has_no_room():
                       "--processes", "40", "--committed-gb", "0")
         assert got.returncode == 1, got
         assert "dispatch" not in got.stdout, got.stdout
-        assert "cap is 28" in got.stderr, got.stderr
+        assert "cap of 28" in got.stderr, got.stderr
 
 
 def test_the_cli_refuses_a_seat_in_a_worktree_it_makes_itself():
@@ -414,6 +414,49 @@ def test_the_cli_refuses_a_seat_in_a_worktree_it_makes_itself():
         assert "worktree" in got.stderr and "worker" in got.stderr, got.stderr
         subprocess.run(["git", "-C", primary, "worktree", "remove", "--force",
                         linked], check=True, timeout=60)
+
+
+def test_an_in_flight_entry_with_no_workspace_is_one_line_not_a_traceback():
+    # The other flag's hand-built file: `frontier` indexes `workspace` on
+    # every live entry, so the reader has to require it there.
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump(candidates_781(), fh)
+        with open(live, "w") as fh:
+            json.dump([{"tickets": [455], "closure": [HOT]}], fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "2", "--committed-gb", "0")
+        assert got.returncode == 1, got
+        assert "Traceback" not in got.stderr, got.stderr
+        assert "workspace" in got.stderr, got.stderr
+        assert len(got.stderr.strip().splitlines()) == 1, got.stderr
+
+
+def test_box_check_weighs_every_worker_a_dispatch_would_start():
+    # Three workers at once is three processes and three ulimit caps, not
+    # one: a gate that asks about one more worker passes a tick that starts
+    # three.
+    assert loop.box_check(processes=27, committed_gb=0, workers=1)["ok"] is True
+    assert loop.box_check(processes=27, committed_gb=0, workers=3)["ok"] is False
+    assert loop.box_check(processes=2, committed_gb=21, add_gb=1,
+                          workers=4)["ok"] is False
+
+
+def test_the_cli_dispatch_takes_only_what_the_box_has_room_for():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [452], "closure": ["a.js"]},
+                       {"tickets": [457], "closure": ["b.js"]},
+                       {"tickets": [458], "closure": ["c.js"]}], fh)
+        got = loop_py("dispatch", "--candidates", cand, "--free", "3",
+                      "--processes", "27", "--committed-gb", "23",
+                      "--add-gb", "1")
+        assert got.returncode == 0, got.stderr
+        assert got.stdout.count("dispatch  ") == 1, got.stdout
+        assert "room for 1 of 3" in got.stdout, got.stdout
 
 
 def main():

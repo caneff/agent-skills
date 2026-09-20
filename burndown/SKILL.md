@@ -74,11 +74,12 @@ too.
    a **hub** — a file two or more candidates' closures share
    (`loop.py hub`). Every other landing gets step 5 and nothing more.
 7. **Box check before every dispatch** — read `uptime` and `free -g`, and
-   pass both readings to `loop.py dispatch`, which refuses rather than
-   picking when the box is out of room: the **28**-process cap counts every
-   process on the shared box, not this run's, and the ~**24 GB** ceiling is
-   on the sum of the per-process `ulimit -v` caps. A refusal holds the slot
-   empty; it is not a reason to dispatch anyway.
+   pass both readings to `loop.py dispatch`, which weighs every worker the
+   tick would start, takes only as many as the box has room for, and refuses
+   outright when that is none: the **28**-process cap counts every process on
+   the shared box, not this run's, and the ~**24 GB** ceiling is on the sum
+   of the per-process `ulimit -v` caps. A slot the box cannot afford stays
+   empty; that is not a reason to dispatch into it anyway.
 8. Dispatch and merge through
    [`implement`](~/.agents/skills/implement/SKILL.md) § Dispatch, which
    claims the clump and starts the worker; `implement/SKILL.md` § The merge,
