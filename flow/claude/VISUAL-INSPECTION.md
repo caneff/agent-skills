@@ -14,7 +14,14 @@ a step your own hands can do.
   (`/mnt/c/Users/canef/AppData/Local/Programs/Zed/bin/zed`), which runs
   `zed.exe --wsl caneff@Ubuntu-24.04`; never install a Linux Zed over it. A
   path under `.claude/worktrees` still opens, but Zed's
-  `file_scan_exclusions` hides those directories from its tree and search.
+  `file_scan_exclusions` hides those directories from its tree and search --
+  and, because the exclusion turns off the file watcher there, **a tab on such
+  a path never reloads when you rewrite the file underneath it.** Re-running
+  `zed <path>` only focuses the stale tab. So anything Chris is meant to read
+  or paste goes in a git-ignored dir OUTSIDE `.claude/worktrees` (the primary
+  checkout's own `.scratch/` is watched and survives a WSL restart); the
+  worktree `.scratch/` is for your own intermediates. If a stale tab does
+  happen, the palette action is `workspace: reload active item`.
   Switched from `code --reuse-window --goto` on 2026-09-17.
 - Launching Zed itself (not opening a file): the Start-menu **Zed (WSL)**
   shortcut runs `Zed.exe --wsl caneff@Ubuntu-24.04 /home/caneff/src`, so a
