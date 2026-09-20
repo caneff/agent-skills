@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """The frontier of a ticket queue: `python3 burndown/frontier.py <owner/repo>
-<label>` prints the open, unclaimed, dispatchable tickets split three ways —
+<label>` prints the open, unclaimed, dispatchable tickets split four ways —
 
     unblocked   <n> <title>
     blocked     <n> <title>  (blocked by #a, #b)
     unresolved  <n> <title>  (<why>)
+    spec        <n> <title>  (a spec parent: dispatch with ... --spec <n> ...)
 
 Three sources, in order: the tracker's native dependencies where it has them
 (`issue_dependencies_summary.blocked_by`, open blockers only, the live gate),

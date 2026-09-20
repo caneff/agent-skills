@@ -3,14 +3,21 @@
 The **frontier** is the set of tickets a run may dispatch right now: open,
 carrying the run's label, unclaimed, and not waiting on anything. Reading it
 is `burndown/frontier.py` — `python3 burndown/frontier.py <owner/repo>
-<label>`, or `frontier(repo, label)` in process — and it answers in three
+<label>`, or `frontier(repo, label)` in process — and it answers in four
 buckets, not two.
 
 ```
 unblocked   901 The closure resolver
 blocked     903 The dispatch loop  (blocked by #901)
 unresolved  907 Liveness  (no native dependencies and no `## Blocked by` section)
+spec        885 Spec: the lane rebuilt  (a spec parent: dispatch with `implement-dispatch --spec 885 --slots <k>`)
 ```
+
+**A bucket is a claim about what an entry is**, so an entry that fits no
+existing bucket gets a bucket rather than the nearest wrong one. Silence is
+`unresolved` for the same reason: it is the honest answer, not the
+convenient one. That is the rule behind the fourth bucket below, and the
+reason not to collapse it back into `unresolved` for tidiness.
 
 A claimed ticket — one with an assignee, or the `in-progress` label — is in
 no bucket at all. It is off the frontier because someone already has it.
@@ -30,6 +37,29 @@ determined, so a human must look", and that is the wrong question to ask
 about a ticket no run may dispatch either way. Padding the bucket with items
 a controller cannot act on trains them to skim it, which is the failure the
 bucket was created to prevent.
+
+## `spec` — dispatchable, by a different verb
+
+A `spec`-labelled parent is **neither** of the above, which is why it has a
+bucket of its own (#910).
+
+It is not a drop: `implement-dispatch` refuses it in plain mode *while
+naming the route that takes it* — `implement-dispatch --spec <n> --slots
+<k>`, the nested run #897 landed. It is dispatchable work, and dropping it
+hides real work from the only reader that surfaces it.
+
+It is not `unresolved` either: nothing about its blocking state is in doubt,
+and no human needs to look. What it needs is a different verb.
+
+So the entry **names that verb**, with the ticket's own number filled in.
+That is the point of the bucket rather than a decoration on it: a controller
+reading the frontier can act on the line without opening another document.
+An entry that said "this is a spec" and no more would have moved the problem
+rather than answered it.
+
+A claim outranks it. A spec parent that is assigned or `in-progress` is off
+the frontier like any other claimed ticket — someone already has it, so
+there is no route left to offer.
 
 ## Three sources, in order
 
