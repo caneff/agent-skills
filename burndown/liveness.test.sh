@@ -68,6 +68,9 @@ check_in "$liveness_text" '#925' 'burndown/SKILL.md § Liveness'
 check_in "$liveness_text" 'core count' 'burndown/SKILL.md § Liveness'
 check_in "$liveness_text" '--declared' 'burndown/SKILL.md § Liveness'
 check_in "$liveness_text" 'status line' 'burndown/SKILL.md § Liveness'
+# A worker that launched no parallel job says so: silence read as zero is a
+# worker that forgot, charged as a worker that ran nothing.
+check_in "$liveness_text" 'silence is not zero' 'burndown/SKILL.md § Liveness'
 
 # Rule 6: the reference carries the evidence, so the next reader can weigh the
 # demotion rather than only obey it.

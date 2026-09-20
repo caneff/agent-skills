@@ -179,7 +179,11 @@ behind the ranking, and what each source costs when it is read the other way:
    what herdr says it is doing — never whether the work is progressing.
 
 **A worker declares its job size.** A worker that launches a parallel job
-names the job's **core count** in its report. The controller charges it
+names that job and its **core count** in its report, and a worker that
+launched none **says so explicitly**: silence is not zero. A worker that
+forgot to declare reads exactly like one that ran nothing, and the controller
+would charge zero against the free slots either way — the same fail-closed
+posture the `--declared` reader takes one layer down. The controller charges it
 against the free slots, because a slot is one core's worth of machine until a
 worker says otherwise: an 8-core job holds eight slots' worth, and
 `loop.py dispatch --declared <clump>=<cores>` takes the cores past the job's
