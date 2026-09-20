@@ -205,17 +205,49 @@ def test_an_idle_boxs_os_process_count_is_not_the_cap_reading():
 def test_agent_processes_are_counted_by_command_name_not_arguments():
     listing = "bash\nclaude\nnode\nclaude\nchrome\nclaude-hook\n"
     assert loop.count_agent_processes(lambda cmd: (0, listing)) == 2
-    assert loop.count_agent_processes(lambda cmd: (0, "bash\nnode\n")) == 0
 
 
 def test_an_unmeasurable_box_is_a_refusal_not_zero_agents():
-    for failed in ((1, ""), (0, ""), (1, "bash\nclaude\n")):
+    # The last: a healthy listing with no claude in it. The controller is one,
+    # so zero means the name did not match, and reading it as zero agents
+    # would switch the cap off.
+    for failed in ((1, ""), (0, ""), (1, "bash\nclaude\n"),
+                   (0, "bash\nnode\n" * 95)):
         try:
             loop.count_agent_processes(lambda cmd, r=failed: r)
         except loop.LoopError as exc:
-            assert "could not count" in str(exc), exc
+            assert "count" in str(exc) and "--processes" in str(exc), exc
         else:
             raise AssertionError(f"{failed} read as a count")
+
+
+def idle_box_listing(agents):
+    """~190 OS processes, `agents` of them claude sessions."""
+    others = ["bash", "node"] * ((190 - agents) // 2)
+    return "\n".join(["claude"] * agents + others) + "\n"
+
+
+def test_a_measured_idle_box_dispatches_and_agent_pressure_refuses():
+    class Args:
+        processes = None
+    idle = idle_box_listing(19)
+    assert len(idle.split()) >= 189
+    count, counter = loop.agent_count(Args, lambda cmd: (0, idle))
+    assert count == 19
+    assert loop.box_check(count, 0, counter=counter)["ok"] is True
+    count, counter = loop.agent_count(
+        Args, lambda cmd: (0, idle_box_listing(28)))
+    refused = loop.box_check(count, 0, counter=counter)
+    assert refused["ok"] is False
+    assert "28 agent processes" in refused["refusals"][0], refused
+    assert "comm=" in refused["refusals"][0], refused
+
+
+def test_a_processes_override_of_zero_is_used_not_measured():
+    class Args:
+        processes = 0
+    assert loop.agent_count(Args, lambda cmd: (1, "")) == (
+        0, "passed by --processes")
 
 
 def test_the_cli_refuses_when_ps_cannot_be_run():
@@ -225,7 +257,7 @@ def test_the_cli_refuses_when_ps_cannot_be_run():
                               "0"], capture_output=True, text=True,
                              timeout=60, env=env)
     assert got.returncode == 1, got
-    assert "could not count" in got.stderr, got.stderr
+    assert "--processes" in got.stderr, got.stderr
     assert "box ok" not in got.stdout, got.stdout
 
 
