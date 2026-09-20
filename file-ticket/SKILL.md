@@ -29,6 +29,9 @@ guess and do not create an issue until the target is confirmed.
   concrete detail that makes it checkable: a grep hit, an error string, a
   repro step), and a trailing "Filed from" line naming the source
   (conversation, review, digest).
+  Close every code fence you paste: the frontier reader treats everything
+  after an unterminated ``` as quoted, which swallows the `## Blocked by`
+  section below and reads the ticket as **unresolved**.
 - **Label**: the triage-label mapping should have been provided to you —
   it maps each role below to this repo's label string. Give the ticket
   exactly one of three roles: `ready-for-agent` when it is fully specified
@@ -42,9 +45,9 @@ guess and do not create an issue until the target is confirmed.
   before anyone can dispatch it. When the finding is obviously a bug or an
   enhancement, add that label too.
 - **Blocked by**: a `## Blocked by` section, last in the body, on every
-  ticket this skill files — one bare `#NNN` per blocking issue in this repo,
-  one per list item, or the literal `None — can start immediately.` when
-  nothing blocks it. Never omit it, and never leave it to the filer's
+  ticket this skill files — one bare `#NNN` per blocking issue **in the
+  repo you are filing into**, one per list item, or the literal `None — can
+  start immediately.` when nothing blocks it. Never omit it, and never leave it to the filer's
   judgement: a ticket carrying neither native dependency edges nor that
   section reads as **unresolved** to the frontier reader — neither blocked
   nor unblocked, and never dispatched — so a controller resolves it by hand
@@ -66,6 +69,7 @@ Build the body through a heredoc so evidence text (backticks, `$(...)`,
 ```
 gh issue create --repo <owner>/<repo> --title "<title>" \
   --label "<role label>[,<bug-or-enhancement label>]" \
+  [--blocked-by <#,#>] \
   --body "$(cat <<'EOF'
 <body>
 
@@ -76,10 +80,10 @@ EOF
 )"
 ```
 
-With blockers, that last line becomes one `- #<n>` line per blocking issue
-in this repo — and set the tracker's **native** edge as well, `--blocked-by
-<#,#>` on the create, **in addition to** the section and never instead of
-it. Native edges are the live gate: closing a blocker moves the count with
+With blockers, that last line becomes one `- #<n>` line per blocking issue,
+and `--blocked-by <#,#>` names the same issues — the tracker's **native**
+edge, set **in addition to** the section and never instead of it. Drop the
+bracketed flag when nothing blocks the ticket. Native edges are the live gate: closing a blocker moves the count with
 nobody editing prose. The section is the fallback the reader parses where
 the tracker holds no edges, so where `gh` rejects the flag it still states
 the relationship on its own.

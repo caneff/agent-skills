@@ -45,12 +45,17 @@ def filed(body):
 
 def classify(body, states=None):
     """Which bucket the frontier reader puts this filed ticket in. No native
-    dependency data: the fallback grammar is what the body has to satisfy."""
+    dependency data: the fallback grammar is what the body has to satisfy.
+
+    `"no bucket"` rather than a traceback if the fixture ever stops being a
+    ticket the reader ranks at all — a failed check is one line here, the
+    way `frontier.py` gives a failed read one line."""
     states = states or {}
     issue = {"number": 42, "title": "a filed finding", "body": body,
              "assignees": [], "labels": [{"name": "ready-for-agent"}]}
     buckets = F.classify([issue], lambda n: states.get(n))
-    return next(name for name, entries in buckets.items() if entries)
+    named = [name for name, entries in buckets.items() if entries]
+    return named[0] if named else "no bucket"
 
 
 def case(name, got, want):
@@ -66,16 +71,25 @@ def main():
     fail += case("template as shipped", classify(filed(BODY)), "unblocked")
 
     # The blocker form the skill documents: the `None` line replaced by one
-    # bare reference per blocking issue.
+    # bare reference per blocking issue. Its absence is a scored failure
+    # rather than an assert, so the cases below it still run and report.
     blocked = filed(BODY).replace("- None — can start immediately.", "- #890")
-    assert "#890" in blocked, "the template's `None` line is not the documented form"
+    fail += case("the template states `None` the documented way",
+                 "#890" in blocked, True)
     fail += case("one open blocker", classify(blocked, {890: "open"}), "blocked")
     fail += case("blocker since closed", classify(blocked, {890: "closed"}), "unblocked")
 
-    # The evidence a filed body carries — a `#NNN` in prose, in the preamble —
-    # is not what answers for the ticket: the shipped template reads unblocked
-    # although the body names #906, so only the section speaks.
-    assert "#906" in BODY, "the fixture body must carry a prose reference"
+    # Only the section answers. The same body without it carries `#906` in
+    # its prose and still reads as silence — which is why the skill cannot
+    # leave the section to the filer's judgement.
+    fail += case("prose reference, no section", classify(BODY, {906: "open"}),
+                 "unresolved")
+
+    # Evidence pasted as a fenced block is quoted material to the reader; a
+    # closed fence leaves the section below it visible.
+    fenced = filed(BODY + "\n\n```\n## Blocked by\n\n- #906\n```")
+    fail += case("fenced evidence below the body", classify(fenced, {906: "open"}),
+                 "unblocked")
 
     if fail:
         sys.exit(1)

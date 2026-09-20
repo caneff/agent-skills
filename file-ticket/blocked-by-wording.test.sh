@@ -15,36 +15,49 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"
 [ -f "$skill" ] || { echo "FAIL: missing $skill" >&2; exit 1; }
 
-# Needles are matched against the file with its line wrapping flattened, so
-# a needle can be a whole clause rather than whatever fragment happens to
-# fit one line — the same shape burndown/blocked-by-grammar.test.sh uses.
-skill_text="$(tr '\n' ' ' <"$skill" | tr -s ' ')"
+# Needles are scoped to the section that owns the rule, and matched with the
+# file's line wrapping flattened — the shape burndown/blocked-by-grammar.test.sh
+# uses, and for its reason: a phrase as generic as "in addition to" must not
+# be satisfied by unrelated prose elsewhere in the file.
+section() { sed -n "/^## $1\$/,/^## $2\$/p" "$skill" | tr '\n' ' ' | tr -s ' '; }
+write_text="$(section 'Write the issue' 'Create it')"
+create_text="$(section 'Create it' '$')"
+[ -n "$write_text" ] && [ -n "$create_text" ] ||
+  { echo "FAIL: file-ticket/SKILL.md is missing § Write the issue or § Create it" >&2; exit 1; }
 
 fail=0
 check() {
-  case "$skill_text" in
-    *"$1"*) ;;
-    *) echo "FAIL: file-ticket/SKILL.md is missing: $1" >&2; fail=1 ;;
+  local haystack="$1" needle="$2" where="$3"
+  case "$haystack" in
+    *"$needle"*) ;;
+    *) echo "FAIL: file-ticket/SKILL.md § $where is missing: $needle" >&2; fail=1 ;;
   esac
 }
 
 # The section is mandatory on every ticket, and not the filer's call.
-check '**Blocked by**: a `## Blocked by` section, last in the body, on every ticket this skill files'
-check 'Never omit it, and never leave it to the filer'
+check "$write_text" '**Blocked by**: a `## Blocked by` section, last in the body, on every ticket this skill files' 'Write the issue'
+check "$write_text" "Never omit it, and never leave it to the filer's judgement" 'Write the issue'
 
 # The grammar is #890's, named where the filer can read it rather than
 # restated here in words that could drift from the parser.
-check 'one bare `#NNN` per blocking issue in this repo'
-check 'None — can start immediately.'
-check 'burndown/references/frontier.md'
+check "$write_text" 'one bare `#NNN` per blocking issue **in the repo you are filing into**' 'Write the issue'
+check "$write_text" 'the literal `None — can start immediately.` when nothing blocks it' 'Write the issue'
+check "$write_text" 'burndown/references/frontier.md' 'Write the issue'
 
 # Silence is its own answer, which is why the section cannot be skipped.
-check 'reads as **unresolved** to the frontier reader'
-check 'never dispatched'
+check "$write_text" 'reads as **unresolved** to the frontier reader' 'Write the issue'
+check "$write_text" 'never dispatched' 'Write the issue'
+
+# An unterminated fence in the pasted evidence swallows the section, so the
+# ticket the filer wrote a section for still reads as silence.
+check "$write_text" 'Close every code fence you paste' 'Write the issue'
+check "$write_text" 'swallows the `## Blocked by` section below' 'Write the issue'
 
 # A native edge where the blocker is known at filing time — as well as the
-# section, never instead of it, the same rule #890 gave `/to-tickets`.
-check '`--blocked-by <#,#>` on the create, **in addition to** the section and never instead of it'
+# section, never instead of it, the same rule #890 gave `/to-tickets`. The
+# flag is in the command template, not only in the prose under it.
+check "$create_text" '[--blocked-by <#,#>] \' 'Create it'
+check "$create_text" '**in addition to** the section and never instead of it' 'Create it'
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS file-ticket/blocked-by-wording.test.sh"
