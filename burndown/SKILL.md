@@ -46,13 +46,21 @@ too.
    **frozen** candidate set: a ticket filed while the run is going waits for
    the next run. The one exception is a ticket filed *during* the run
    **because the run is stuck on what it fixes** — `loop.admit` takes it only
-   with the clump it unblocks named.
+   with the clump it unblocks named. Then **tag the tier before any
+   dispatch** (§ Tier tagging): `python3 burndown/tier.py <owner/repo>
+   <n>=<path>[,<path>]...` writes the missing `documentation` label onto
+   every docs-only candidate, because the tier is read off the ticket at
+   dispatch and a label written after that is a label that came too late.
 3. The **opening report** carries `closure.py`'s announcement line verbatim,
    so the reader can tell all three declaration states apart: a declared
    directive, a **declared None** — the repo has no include graph — and
    **silence**, which clumps conservatively by directory subtree. A
    controller reading "conservative" has to know which of the last two it
-   got.
+   got. It also carries `tier.py`'s line (§ Tier tagging), which **names
+   every label the exploration pass wrote** and says `labels written: none`
+   when it wrote none — a report silent about labels reads the same from a
+   pass that wrote nothing and a pass that never ran, and the difference
+   between those two is a ticket dispatched at the wrong tier.
 
 **Then, until the queue and the slots are both empty:**
 
@@ -104,9 +112,13 @@ too.
 Which tickets a run may dispatch next — open, labelled, unclaimed, waiting on
 nothing — is read by `burndown/frontier.py`, not by a regex at the call site:
 `python3 burndown/frontier.py <owner/repo> <label>` prints the `unblocked`,
-`blocked` and `unresolved` buckets. Native tracker dependencies first, the
-`## Blocked by` section as the fallback, and a ticket with neither is
-**unresolved** — never dispatched on the assumption that silence means clear.
+`blocked`, `unresolved` and `spec` buckets. Native tracker dependencies
+first, the `## Blocked by` section as the fallback, and a ticket with neither
+is **unresolved** — never dispatched on the assumption that silence means
+clear. A `spec`-labelled parent is none of those three: it is dispatchable by
+a different verb, and its entry names that verb —
+`implement-dispatch --spec <n> --slots <k>` — so a controller can act on the
+line without opening another document.
 The grammar and the three sources:
 [`references/frontier.md`](references/frontier.md).
 Written against the lane being rebuilt; the loop that will call it is parked
@@ -125,6 +137,26 @@ clumped conservatively by directory subtree, and the run's **opening report
 carries the announcement line** the reader returns, so a controller can see
 which of the three modes it got. The grammar and the evidence:
 [`references/closure.md`](references/closure.md).
+
+## Tier tagging
+
+A candidate's **tier** is read off its `documentation` label at dispatch, so
+a docs-only ticket whose author forgot the label takes TDD, a three-axis
+review and a PR for a page of prose (#781's `#371`). After clumping and
+**before the first dispatch**, `burndown/tier.py` writes that missing label
+onto the ticket — `python3 burndown/tier.py <owner/repo>
+<n>=<path>[,<path>]... [--dry-run]`, the clumper's own candidate grammar. The
+label, not a flag: `merge-cleanup`, `/landed` and a resumed controller all
+read the ticket, and a flag is gone the moment dispatch returns.
+
+It **only ever adds**. A candidate is docs-only when every file it targets is
+prose — `.md`, `.markdown`, `.txt`, `.rst`, and never a `SKILL.md` — and
+anything else it cannot read as prose counts as code, which is deliberately
+stricter than `flow/claude/WORKFLOW.md` § Gate 2: light tier lands with no PR
+and no reviewer, so a wrong label there ships code unreviewed. A worker's
+right to raise light to heavy is untouched, and nothing lowers heavy to
+light. The grammar, the divergence and the evidence:
+[`references/tier.md`](references/tier.md).
 
 ## Run state
 
