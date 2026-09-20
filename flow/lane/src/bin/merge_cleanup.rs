@@ -42,10 +42,11 @@ no --discard and no --force to override a refusal with — a workspace those
 guards refuse is named and skipped, which is the point of it. The workspace
 this run's own directory is in is skipped the same way.
 
-A linked worktree with modified, untracked or ignored files is never removed:
-the single-branch form refuses, naming them, and --discard removes it anyway
-(--force only skips the merged check); --sweep lists it "dirty, not removed"
-even with --yes. Ignored files include .scratch/ and every other ignored name
+A linked worktree with modified, untracked or ignored files is never removed
+— bar an ignored directory holding no file at all, which loses nothing and is
+covered below. The single-branch form refuses, naming them, and
+--discard removes it anyway (--force only skips the merged check); --sweep
+lists it "dirty, not removed" even with --yes. Ignored files include .scratch/ and every other ignored name
 except the regenerable caches: an ignored entry named node_modules,
 __pycache__, target, .venv, .pytest_cache, .ruff_cache or .mypy_cache, or
 inside one whose own .gitignore is `*`, never refuses — it is removed with the
@@ -290,7 +291,7 @@ struct WorktreeFiles {
     caches: Vec<String>,
     /// Ignored directory entries holding no file anywhere beneath them: the
     /// removal takes them and nothing is lost, so they are not work (#946).
-    empty: Vec<String>,
+    empty_dirs: Vec<String>,
 }
 
 /// How many names a message lists before "and <n> more".
@@ -315,6 +316,58 @@ fn is_cache(wt: &str, entry: &str) -> bool {
     })
 }
 
+/// Git quotes a porcelain path holding a non-ASCII byte, a `"`, a backslash
+/// or a control character (`core.quotePath`, on by default): it wraps the
+/// path in `"` and C-escapes the inside, so a quoted directory entry ends
+/// with `"` rather than `/` and reads as a plain file to anything matching on
+/// the slash. Left encoded, an ignored `café/` holding hundreds of files was
+/// never walked and still refused as "1 ignored file(s)" — both of the bugs
+/// #946 fixes, surviving for every name git quotes. Decode once here, at the
+/// boundary, so `is_cache`, the walk and every printed name see the path git
+/// means rather than its transport encoding. Bytes that are not UTF-8 decode
+/// lossily: the replacement character names no file on disk, so the walk
+/// cannot open it and the entry stays `ignored` — fail closed, the same
+/// answer #801 wants for any directory we cannot read. A string git did not
+/// quote is returned untouched.
+fn unquote(entry: &str) -> String {
+    let Some(inner) = entry.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
+        return entry.to_string();
+    };
+    let mut out: Vec<u8> = Vec::with_capacity(inner.len());
+    let mut bytes = inner.bytes().peekable();
+    while let Some(b) = bytes.next() {
+        if b != b'\\' {
+            out.push(b);
+            continue;
+        }
+        match bytes.next() {
+            Some(b'n') => out.push(b'\n'),
+            Some(b't') => out.push(b'\t'),
+            Some(b'r') => out.push(b'\r'),
+            Some(b'b') => out.push(0x08),
+            Some(b'f') => out.push(0x0c),
+            Some(b'v') => out.push(0x0b),
+            Some(b'a') => out.push(0x07),
+            // Up to three octal digits: how git writes any byte it has to
+            // escape, one escape per byte of a multi-byte character.
+            Some(d @ b'0'..=b'7') => {
+                let mut v = u32::from(d - b'0');
+                for _ in 0..2 {
+                    let Some(n @ b'0'..=b'7') = bytes.peek().copied() else { break };
+                    bytes.next();
+                    v = v * 8 + u32::from(n - b'0');
+                }
+                out.push(v as u8);
+            }
+            // An escaped quote or backslash, and anything else: the byte.
+            Some(c) => out.push(c),
+            // A trailing backslash is malformed; keep it rather than guess.
+            None => out.push(b'\\'),
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// `dir/.gitignore` has a `*` line: the tool that made `dir` ignores it whole.
 fn ignores_all(dir: &Path) -> bool {
     std::fs::read_to_string(dir.join(".gitignore")).is_ok_and(|s| s.lines().any(|l| l.trim() == "*"))
@@ -334,7 +387,7 @@ impl WorktreeFiles {
         };
         let mut files = Self::default();
         for line in out.lines().filter(|l| l.len() > 3) {
-            let (code, name) = (&line[..2], line[3..].to_string());
+            let (code, name) = (&line[..2], unquote(&line[3..]));
             match code {
                 "??" => files.untracked.push(name),
                 "!!" if is_cache(wt, &name) => files.caches.push(name),
@@ -363,7 +416,7 @@ impl WorktreeFiles {
             return;
         }
         match files_under(&Path::new(wt).join(entry.trim_end_matches('/'))) {
-            Some(f) if f.is_empty() => self.empty.push(entry),
+            Some(f) if f.is_empty() => self.empty_dirs.push(entry),
             Some(f) => self.ignored.extend(f.into_iter().map(|rel| format!("{entry}{rel}"))),
             None => self.ignored.push(entry),
         }
@@ -520,42 +573,57 @@ impl Cleanup {
     /// The uncommitted-files guard (#736). `git worktree remove --force`
     /// discards everything git does not hold, so modified, untracked or
     /// ignored files refuse the removal unless --discard — `.scratch/`
-    /// included (#801). An ignored directory holding no file anywhere beneath
-    /// it is not among them (#869, #946, reversing #823): there is nothing to
-    /// lose, so it never costs a --discard, and it is named on its own line
-    /// here because the run stays a full account of what cleanup touched.
-    /// Caches (`is_cache`) never refuse; their count and first names
-    /// are printed as "cache file(s)", since they go too — a label distinct
-    /// from the non-cache "ignored file(s)" refusal above (#823), so a name
-    /// approved for loss in one line is never misread as belonging to the
-    /// other's.
-    fn guard_files(&self, wt: &str) -> bool {
+    /// included (#801). Caches (`is_cache`) never refuse; their count and
+    /// first names are printed as "cache file(s)", since they go too — a
+    /// label distinct from the non-cache "ignored file(s)" refusal above
+    /// (#823), so a name approved for loss in one line is never misread as
+    /// belonging to the other's.
+    ///
+    /// An ignored directory holding no file anywhere beneath it is not among
+    /// them (#869, #946). #823 ruled the other way, and its reasoning was
+    /// deny-by-default carried to its end: git reports an ignored directory
+    /// as one entry whether or not it has contents, a process can fill it
+    /// between this read and the removal, an empty directory can itself be
+    /// intentional, and a caller who really means it has --discard. What
+    /// beat that was not a preference but a cost nobody had counted: agents
+    /// are denied --discard, so every such refusal spends one of Chris's
+    /// hands, and `e2e-artifacts/` — recreated by every `npm test` run —
+    /// spent six in a row on 2026-09-16. A guard that cries wolf on the case
+    /// with nothing to lose is not stricter, it is noisier, and the noise is
+    /// paid for in the attention the real refusals need. So the posture is
+    /// narrowed, not abandoned: only a directory proved file-free by a walk
+    /// is exempt, an unreadable one still refuses, and everything #823
+    /// worried about for a directory with contents still holds.
+    ///
+    /// `None` refuses. Otherwise the empty ignored directories, for the
+    /// caller to name once the removal has actually happened: the ruling
+    /// asks that the output stay a full account of what cleanup touched, and
+    /// this guard runs before `guard_live`, so a line printed here would
+    /// announce a removal that a live session then goes on to refuse.
+    fn guard_files(&self, wt: &str) -> Option<Vec<String>> {
         let Some(files) = WorktreeFiles::read(wt) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there");
-            return false;
+            return None;
         };
         if files.is_dirty() {
             if !self.discard {
                 eprintln!("merge-cleanup: refusing to remove {wt} — {} (--discard overrides)", files.dirty_text());
-                return false;
+                return None;
             }
             safe_println!("--discard: {wt} — {}", files.dirty_text());
-        }
-        for dir in &files.empty {
-            let verb = if self.dry { "would remove" } else { "removing" };
-            safe_println!("{verb} the empty ignored directory at {wt}/{}", dir.trim_end_matches('/'));
         }
         if !files.caches.is_empty() {
             let would = if self.dry { "would discard" } else { "discarding" };
             safe_println!("{would} {} cache file(s) in {wt}: {}", files.caches.len(), first_names(&files.caches));
         }
-        true
+        Some(files.empty_dirs)
     }
 
     /// Other workspaces under <repo>/.claude/worktrees the guard would clear,
     /// no commits ahead of the default branch and nothing on disk git does
     /// not hold (ignored files and caches included — .scratch evidence is
-    /// work too):
+    /// work too; an ignored directory with no file beneath it is not, so a
+    /// sibling holding only one is listed here):
     /// listed for the owner, never removed. A folder there that git no
     /// longer tracks as a worktree is listed too, marked. This run's removal
     /// targets are not "other".
@@ -1016,14 +1084,20 @@ impl Cleanup {
         if let Some(wt) = linked_worktree_holding(path, b) {
             // Before the live-session guard, which closes idle panes: a
             // removal refused for its files must not have touched herdr.
-            if !self.guard_files(&wt) {
+            let Some(empty_dirs) = self.guard_files(&wt) else {
                 return false;
-            }
+            };
             if !self.guard_live(&wt) {
                 return false;
             }
             self.removal_targets.push(wt.clone());
             if self.step(&format!("removing the linked worktree at {wt}"), "git", &["-C", path, "worktree", "remove", "--force", &wt]) {
+                // After the removal, never before it: these went with the
+                // worktree, so the line accounts for what was actually taken.
+                let verb = if self.dry { "would remove" } else { "removing" };
+                for dir in &empty_dirs {
+                    safe_println!("{verb} the empty ignored directory at {wt}/{}", dir.trim_end_matches('/'));
+                }
                 self.removed_worktrees.push(wt);
             }
         }

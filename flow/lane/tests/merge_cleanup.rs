@@ -1500,12 +1500,69 @@ fn an_unreadable_ignored_directory_still_refuses() {
     std::fs::create_dir(&at).unwrap();
     std::fs::write(at.join("shot.png"), "x\n").unwrap();
     std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read_dir(&at).is_ok() {
+        // Root, or a filesystem that ignores modes: the directory is still
+        // readable, so this run would witness nothing. Say so rather than
+        // fail, and leave the tree as found.
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o755)).unwrap();
+        eprintln!("skipped: chmod 000 did not make the directory unreadable here");
+        return;
+    }
 
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o755)).unwrap();
     let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: e2e-artifacts/ (--discard overrides)", wt.display());
     assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
     assert!(at.join("shot.png").is_file() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn a_quoted_ignored_directory_is_classified_by_its_contents_too() {
+    // Correctness axis C1 on the round-1 diff: git quotes a porcelain path
+    // holding a non-ASCII byte (`core.quotePath`), and the quoted form ends
+    // with `"`, not `/`. Matching on the slash filed `café/` as a plain file
+    // and never walked it, so both bugs survived intact for such a name — the
+    // empty one still forced a --discard, and a full one still claimed "1
+    // ignored file(s)" whatever it held.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r37", "implement-37");
+    std::fs::write(r.join(".git/info/exclude"), "café/\n").unwrap();
+    std::fs::create_dir(wt.join("café")).unwrap();
+    for f in ["a.png", "b.png"] {
+        std::fs::write(wt.join("café").join(f), "x\n").unwrap();
+    }
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — 2 ignored file(s) would be lost: café/a.png, café/b.png (--discard overrides)",
+        wt.display()
+    );
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+
+    // The same name, emptied: nothing to lose, so it is removed and named.
+    for f in ["a.png", "b.png"] {
+        std::fs::remove_file(wt.join("café").join(f)).unwrap();
+    }
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && run.has(&format!("removing the empty ignored directory at {}", wt.join("café").display())), "{}", run.text());
+    assert!(!wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn the_empty_directory_line_is_not_printed_when_nothing_is_removed() {
+    // Correctness C2 / spec P1: the line was printed inside guard_files,
+    // which runs before the live-session guard, so a worktree someone was
+    // still working in announced a removal that never happened — the inverse
+    // of the full account of what cleanup touched that the line exists for.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r38", "implement-38");
+    std::fs::write(r.join(".git/info/exclude"), "e2e-artifacts/\n").unwrap();
+    std::fs::create_dir(wt.join("e2e-artifacts")).unwrap();
+    c.session("live", &format!(r#"{{"pid":{},"cwd":"{}","procStart":"{}"}}"#, me(), wt.display(), me_start()));
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains("a live session is in it"), "{}", run.text());
+    assert!(!run.stdout.contains("the empty ignored directory"), "{}", run.text());
+    assert!(wt.join("e2e-artifacts").is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
 }
 
 #[test]
