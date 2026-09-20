@@ -55,6 +55,12 @@ _TICKET = re.compile(r"[0-9]+\Z")
 # inside the first read a resumed controller does.
 _KEYS = ("run_id", "slots", "controller", "clumps")
 _CLUMP_KEYS = ("tickets", "workspace", "agent", "landed")
+# A clump's parallel-job state. `None` is "nothing on record", which is not
+# the same fact as "no job": a worker that never declared and a worker that
+# declared none read alike to a controller charging cores, and silence read
+# as zero is the #351 dispatch into a box already at 25.8 load. Absent from
+# a #892-era file, so it is filled in on load rather than demanded.
+_JOB_STATES = ("running", "none", "done")
 
 
 class RunFileError(Exception):
@@ -230,6 +236,9 @@ def load(run_id, root=None):
             ticket_numbers(entry["tickets"])
             named(entry["workspace"], "workspace path")
             named(entry["agent"], "herdr agent name")
+            # Filled in rather than demanded: a run file written before jobs
+            # were recorded is still that controller's run.
+            entry["job"] = job_record(entry.get("job"))
             if entry["landed"] is not None:
                 checked_sha(entry["landed"])
     except RunFileError as exc:
@@ -264,6 +273,49 @@ def ticket_numbers(tickets):
             raise RunFileError(f"not a ticket number: {ticket!r}")
         out.append(ticket)
     return sorted(set(out))
+
+
+def job_record(value):
+    """A clump's job state as the run file holds it: `None` when nothing is
+    on record, else `{"state": <running|none|done>, "cores": <n>}`. A running
+    job names at least one core; the other two states name none."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise RunFileError(f"not a job record: {value!r}")
+    state, cores = value.get("state"), value.get("cores", 0)
+    if state not in _JOB_STATES:
+        raise RunFileError(
+            f"not a job state: {state!r} — one of {', '.join(_JOB_STATES)}")
+    if isinstance(cores, bool) or not isinstance(cores, int) or cores < 0:
+        raise RunFileError(f"not a core count: {cores!r}")
+    if state == "running" and cores < 1:
+        raise RunFileError("a running job names at least one core")
+    if state != "running" and cores:
+        raise RunFileError(
+            f"a {state} job holds no cores, so it names none, not {cores}")
+    return {"state": state, "cores": cores}
+
+
+def job(run_id, lowest, state, cores=0, root=None):
+    """Record what parallel job a clump's worker has out: `running` with its
+    core count, `none` when the worker declared it launched none, or `done`
+    when it reports the job finished.
+
+    The declaration lives here and not in a dispatch's argv, because a
+    controller that restarts mid-run has only this file: a hold that lived in
+    one command line is a hold a resume cannot recover, and the free slot it
+    then dispatches into is the contention #351 produced."""
+    record = job_record({"state": state, "cores": cores})
+    with locked(run_id, root):
+        run = load(run_id, root)
+        for entry in run["clumps"]:
+            if entry["tickets"][0] != lowest:
+                continue
+            entry["job"] = record
+            save(run, root)
+            return run
+    raise RunFileError(f"run {run_id} has no clump #{lowest}")
 
 
 def named(value, what):
@@ -305,7 +357,8 @@ def clump(run_id, tickets, workspace, agent, root=None):
                     f"{', '.join(f'#{n}' for n in dropped)} — re-registering "
                     "may grow a clump, never drop a ticket out of the run")
         entry = {"tickets": tickets, "workspace": workspace, "agent": agent,
-                 "landed": same["landed"] if same else None}
+                 "landed": same["landed"] if same else None,
+                 "job": same["job"] if same else None}
         run["clumps"] = sorted(
             [c for c in run["clumps"] if c is not same] + [entry],
             key=lambda c: c["tickets"][0])
@@ -385,8 +438,20 @@ def render(run):
     for entry in run["clumps"]:
         state = f"landed {entry['landed']}" if entry["landed"] else "in flight"
         lines.append(f"clump #{entry['tickets'][0]}  {tickets_of(entry)}  "
-                     f"{entry['agent']}  {entry['workspace']}  {state}")
+                     f"{entry['agent']}  {entry['workspace']}  {state}  "
+                     f"{render_job(entry.get('job'))}")
     return "\n".join(lines)
+
+
+def render_job(record):
+    """A clump's job state as a controller reads it back, including the state
+    that is not a fact: nothing on record."""
+    if record is None:
+        return "job: not declared"
+    if record["state"] == "running":
+        return f"job: {record['cores']} cores"
+    return ("job: no parallel job" if record["state"] == "none"
+            else "job: done")
 
 
 def tickets_of(entry):
@@ -447,6 +512,18 @@ def main(argv):
                       help="the clump's lowest ticket")
     done.add_argument("--sha", required=True)
 
+    work = subs.add_parser("job", help="record a clump's parallel-job state")
+    work.add_argument("run_id")
+    work.add_argument("--clump", type=int, required=True,
+                      help="the clump's lowest ticket")
+    size = work.add_mutually_exclusive_group(required=True)
+    size.add_argument("--cores", type=int,
+                      help="cores of the job this worker has out")
+    size.add_argument("--none", action="store_true",
+                      help="the worker declared it launched no parallel job")
+    size.add_argument("--done", action="store_true",
+                      help="the worker reports its job finished")
+
     out = subs.add_parser("show", help="print the run file")
     out.add_argument("run_id")
 
@@ -469,6 +546,11 @@ def main(argv):
                                args.workspace, args.agent, root)))
         elif args.command == "land":
             print(render(land(args.run_id, args.clump, args.sha, root)))
+        elif args.command == "job":
+            state = ("running" if args.cores is not None
+                     else "none" if args.none else "done")
+            print(render(job(args.run_id, args.clump, state,
+                             args.cores or 0, root)))
         elif args.command == "show":
             print(render(load(args.run_id, root)))
         elif args.command == "resume":

@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import loop  # noqa: E402
@@ -73,6 +74,10 @@ def test_seat_refuses_a_detached_head():
 # parked `#455` holds open in its workspace; `#501` is outside `examples/`
 # entirely. Closures as `closure.py` resolves them — the candidates' own files
 # plus every file that includes one of them, one hop.
+# What the run file holds for a worker that declared it launched no parallel
+# job — the explicit answer, which is not the same as no record at all.
+NO_JOB = {"state": "none", "cores": 0}
+
 HOT = "examples/_shared/line-kind.js"
 
 
@@ -87,7 +92,8 @@ def candidates_781():
 
 def parked_455():
     return [{"tickets": [455], "workspace": "/w/implement-455",
-             "agent": "burn-455", "closure": ["examples/renban.js", HOT]}]
+             "agent": "burn-455", "closure": ["examples/renban.js", HOT],
+             "job": NO_JOB}]
 
 
 def test_a_clump_sharing_a_file_with_a_live_workspace_is_off_the_frontier():
@@ -479,7 +485,7 @@ def test_a_malformed_closure_reaches_the_cli_as_one_line():
         live = os.path.join(tmp, "live.json")
         with open(live, "w") as fh:
             json.dump([{"tickets": [2], "workspace": "/w/2",
-                        "closure": ["shared.py"]}], fh)
+                        "closure": ["shared.py"], "job": NO_JOB}], fh)
         for closure in ("shared.py", {"a": 1}, ["shared.py", 7]):
             with open(cand, "w") as fh:
                 json.dump([{"tickets": [1], "closure": closure}], fh)
@@ -652,6 +658,403 @@ def test_the_cli_landing_survives_a_reader_that_closes_mid_output():
     assert got.returncode == 1, got
     assert "Traceback" not in got.stderr, got.stderr
     assert "Exception ignored" not in got.stderr, got.stderr
+def agent_stub(answers, calls):
+    """Stands in for `herdr agent get <name>` as the sweep calls it: one
+    decoded answer per agent, and a list the test reads to count the calls."""
+    def get(agent, timeout):
+        calls.append(agent)
+        assert timeout > 0, f"a probe was called with {timeout}s left"
+        answer = answers[agent]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    return get
+
+
+def herdr_agent(status):
+    return {"id": "cli:agent:get", "result": {"agent": "claude",
+                                              "agent_status": status,
+                                              "name": "skills-1"}}
+
+
+HERDR_GONE = {"id": "cli:agent:get",
+              "error": {"code": "agent_not_found",
+                        "message": "agent target skills-3 not found"}}
+
+
+def live_clumps():
+    return [
+        {"tickets": [1], "workspace": "/w/1", "agent": "skills-1"},
+        {"tickets": [2], "workspace": "/w/2", "agent": "skills-2"},
+        {"tickets": [3], "workspace": "/w/3", "agent": "skills-3"},
+    ]
+
+
+def test_the_sweep_tells_a_vanished_pane_from_a_working_and_an_idle_one():
+    calls = []
+    get = agent_stub({"skills-1": herdr_agent("working"),
+                      "skills-2": herdr_agent("idle"),
+                      "skills-3": HERDR_GONE}, calls)
+    state = loop.sweep(live_clumps(), get)
+    verdicts = {w["agent"]: w["verdict"] for w in state["workers"]}
+    assert verdicts == {"skills-1": "working", "skills-2": "idle",
+                        "skills-3": "vanished"}, verdicts
+    assert [w["agent"] for w in state["vanished"]] == ["skills-3"], state
+
+
+def test_the_sweep_is_bounded_at_one_probe_per_live_slot():
+    calls = []
+    get = agent_stub({"skills-1": herdr_agent("working"),
+                      "skills-2": herdr_agent("idle"),
+                      "skills-3": HERDR_GONE}, calls)
+    state = loop.sweep(live_clumps(), get)
+    assert calls == ["skills-1", "skills-2", "skills-3"], calls
+    assert state["calls"] == 3, state
+
+
+def test_the_sweep_skips_a_landed_clump():
+    calls = []
+    clumps = live_clumps()
+    clumps[1]["landed"] = "a1b2c3d"
+    get = agent_stub({"skills-1": herdr_agent("working"),
+                      "skills-3": HERDR_GONE}, calls)
+    state = loop.sweep(clumps, get)
+    assert calls == ["skills-1", "skills-3"], calls
+
+
+def test_a_probe_that_fails_is_one_worker_unreachable_not_a_dead_sweep():
+    calls = []
+    get = agent_stub({"skills-1": RuntimeError("herdr socket is gone"),
+                      "skills-2": herdr_agent("idle"),
+                      "skills-3": HERDR_GONE}, calls)
+    state = loop.sweep(live_clumps(), get)
+    verdicts = {w["agent"]: w["verdict"] for w in state["workers"]}
+    assert verdicts["skills-1"] == "unreachable", verdicts
+    assert verdicts["skills-2"] == "idle", verdicts
+    assert calls == ["skills-1", "skills-2", "skills-3"], calls
+
+
+def test_an_unrecognised_status_is_its_own_verdict():
+    calls = []
+    get = agent_stub({"skills-1": herdr_agent("wedged")}, calls)
+    state = loop.sweep(live_clumps()[:1], get)
+    assert state["workers"][0]["verdict"] == "unknown", state
+    assert "wedged" in state["workers"][0]["detail"], state
+
+
+def test_the_sweep_names_the_vanished_worker_distinctly_when_rendered():
+    calls = []
+    get = agent_stub({"skills-1": herdr_agent("working"),
+                      "skills-2": herdr_agent("idle"),
+                      "skills-3": HERDR_GONE}, calls)
+    rendered = loop.render_sweep(loop.sweep(live_clumps(), get))
+    assert "vanished  #3" in rendered, rendered
+    assert "working   #1" in rendered, rendered
+    assert "idle      #2" in rendered, rendered
+
+
+def in_flight_clumps(job=None, other=None):
+    """Two live clumps as `loop.py dispatch --in-flight` reads them: the run
+    file's entries, each carrying its worker's job state, plus the closure
+    re-resolved at dispatch."""
+    return [
+        {"tickets": [351], "workspace": "/w/351", "agent": "sm-351",
+         "closure": ["verify.py"], "job": job},
+        {"tickets": [412], "workspace": "/w/412", "agent": "sm-412",
+         "closure": ["other.py"], "job": other},
+    ]
+
+
+def dispatch_files(tmp, job, candidate_closure="fresh.py"):
+    """The two files `loop.py dispatch` reads: one fresh candidate, and the
+    live clumps as the run file holds them — each with its worker's job
+    state, and its closure re-resolved at dispatch."""
+    cand = os.path.join(tmp, "candidates.json")
+    live = os.path.join(tmp, "live.json")
+    with open(cand, "w") as fh:
+        json.dump([{"tickets": [500], "closure": [candidate_closure]}], fh)
+    with open(live, "w") as fh:
+        json.dump(in_flight_clumps(job=job, other=NO_JOB), fh)
+    return cand, live
+
+
+def test_the_cli_holds_the_slot_and_says_so_in_its_status_line():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live = dispatch_files(tmp, {"state": "running", "cores": 8})
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "4", "--committed-gb", "4")
+        assert got.returncode == 0, got
+        assert "cores" in got.stdout and "#351" in got.stdout, got.stdout
+        assert "dispatch  #500" not in got.stdout, got.stdout
+
+
+def test_the_cli_refuses_a_dispatch_while_a_worker_is_unrecorded():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live = dispatch_files(tmp, None)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "4", "--committed-gb", "4")
+        assert got.returncode == 1, got
+        assert "dispatch" not in got.stdout, got.stdout
+        assert "#351" in got.stderr and "runfile.py job" in got.stderr, \
+            got.stderr
+        assert len(got.stderr.strip().splitlines()) == 1, got.stderr
+
+
+def test_a_declared_heavy_job_holds_the_free_slots():
+    state = loop.core_room(2, in_flight_clumps(
+        job={"state": "running", "cores": 8}, other=NO_JOB))
+    assert state["room"] == 0, state
+    line = loop.render_cores(state, 2)
+    assert "#351" in line and "8" in line, line
+
+
+def test_a_run_whose_workers_all_declared_none_has_every_free_slot():
+    state = loop.core_room(2, in_flight_clumps(job=NO_JOB, other=NO_JOB))
+    assert state["room"] == 2, state
+    assert loop.render_cores(state, 2) == "", state
+
+
+def test_a_finished_job_stops_holding_its_slots():
+    state = loop.core_room(2, in_flight_clumps(
+        job={"state": "done", "cores": 0}, other=NO_JOB))
+    assert state["room"] == 2, state
+
+
+def test_a_declaration_charges_only_the_cores_past_its_own_slot():
+    state = loop.core_room(3, in_flight_clumps(
+        job={"state": "running", "cores": 2}, other=NO_JOB))
+    assert state["room"] == 2, state
+
+
+def test_a_live_clump_with_no_job_on_record_is_refused_by_name():
+    """Silence is not zero: the reader obeys the rule the skill states, so a
+    worker nobody recorded cannot be charged as if it declared none."""
+    try:
+        loop.core_room(2, in_flight_clumps(job=None, other=NO_JOB))
+    except loop.LoopError as exc:
+        assert "#351" in str(exc), exc
+        assert "#412" not in str(exc), exc
+        assert "runfile.py job" in str(exc), exc
+    else:
+        raise AssertionError("an unrecorded worker must not read as zero")
+
+
+def test_a_job_record_that_is_not_one_is_refused():
+    for record in ({"state": "running", "cores": 0},
+                   {"state": "running", "cores": "8"},
+                   {"state": "spinning", "cores": 1},
+                   {"state": "running", "cores": True}, "8"):
+        try:
+            loop.core_room(2, in_flight_clumps(job=record, other=NO_JOB))
+        except loop.LoopError as exc:
+            assert "#351" in str(exc), (record, exc)
+        else:
+            raise AssertionError(f"{record!r} is not a job record")
+
+
+HERDR_STUB = """#!/usr/bin/env bash
+# Stands in for herdr: one canned answer per agent name, and a line per call
+# appended to $CALLS so the test can count them.
+echo "$3" >> "$CALLS"
+case "$3" in
+  skills-1) echo '{"result":{"agent_status":"working"}}' ;;
+  skills-2) echo '{"result":{"agent_status":"idle"}}' ;;
+  *) echo '{"error":{"code":"agent_not_found","message":"agent target '"$3"' not found"}}'
+     exit 1 ;;
+esac
+"""
+
+
+def test_the_cli_sweep_probes_each_live_slot_once_through_herdr():
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = os.path.join(tmp, "bin")
+        os.mkdir(bindir)
+        stub = os.path.join(bindir, "herdr")
+        with open(stub, "w") as fh:
+            fh.write(HERDR_STUB)
+        os.chmod(stub, 0o755)
+        workers = os.path.join(tmp, "workers.json")
+        calls = os.path.join(tmp, "calls")
+        with open(workers, "w") as fh:
+            json.dump([{"tickets": [1], "workspace": "/w/1",
+                        "agent": "skills-1"},
+                       {"tickets": [2], "workspace": "/w/2",
+                        "agent": "skills-2"},
+                       {"tickets": [3], "workspace": "/w/3",
+                        "agent": "skills-3"},
+                       {"tickets": [4], "workspace": "/w/4",
+                        "agent": "skills-4", "landed": "a1b2c3d"}], fh)
+        env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"],
+                   CALLS=calls)
+        got = subprocess.run([sys.executable, LOOP, "sweep", "--workers",
+                              workers], capture_output=True, text=True,
+                             timeout=60, env=env)
+        assert got.returncode == 0, got
+        assert "working   #1" in got.stdout, got.stdout
+        assert "idle      #2" in got.stdout, got.stdout
+        assert "vanished  #3" in got.stdout, got.stdout
+        assert "#4" not in got.stdout, got.stdout
+        with open(calls) as fh:
+            assert fh.read().split() == ["skills-1", "skills-2", "skills-3"], \
+                "the sweep probes each live slot exactly once"
+
+
+def test_a_clump_with_no_agent_name_is_one_verdict_not_a_dead_sweep():
+    calls = []
+    clumps = live_clumps()
+    clumps[0]["agent"] = ""
+    get = agent_stub({"skills-2": herdr_agent("idle"),
+                      "skills-3": HERDR_GONE}, calls)
+    state = loop.sweep(clumps, get)
+    verdicts = [w["verdict"] for w in state["workers"]]
+    assert verdicts == ["unnamed", "idle", "vanished"], verdicts
+    assert calls == ["skills-2", "skills-3"], calls
+    assert state["calls"] == 2, state
+
+
+def test_the_cli_sweep_refuses_a_box_with_no_herdr_rather_than_reporting_death():
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = os.path.join(tmp, "bin")
+        os.mkdir(bindir)
+        workers = os.path.join(tmp, "workers.json")
+        with open(workers, "w") as fh:
+            json.dump([{"tickets": [1], "workspace": "/w/1",
+                        "agent": "skills-1"}], fh)
+        # PATH holds one empty directory: herdr cannot be found at all.
+        env = dict(os.environ, PATH=bindir)
+        got = subprocess.run([sys.executable, LOOP, "sweep", "--workers",
+                              workers], capture_output=True, text=True,
+                             timeout=60, env=env)
+        assert got.returncode == 1, got
+        assert "herdr is not on PATH" in got.stderr, got.stderr
+        assert "unreachable" not in got.stdout, got.stdout
+
+
+def test_the_cli_sweep_refuses_a_workers_file_it_cannot_read():
+    with tempfile.TemporaryDirectory() as tmp:
+        workers = os.path.join(tmp, "workers.json")
+        for content in ('{"tickets": [1]}', '[{"tickets": []}]',
+                        '[{"tickets": ["1"]}]', 'not json'):
+            with open(workers, "w") as fh:
+                fh.write(content)
+            got = loop_py("sweep", "--workers", workers)
+            assert got.returncode == 1, (content, got)
+            assert "Traceback" not in got.stderr, got.stderr
+            assert len(got.stderr.strip().splitlines()) == 1, got.stderr
+
+
+def test_the_cli_says_the_declared_job_holds_the_slot_and_not_the_box():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live = dispatch_files(tmp, {"state": "running", "cores": 8})
+        # The box is at its cap *and* a declared job holds the slot. The
+        # answer names the job, because that is what a controller can act on.
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "28", "--committed-gb",
+                      "4")
+        assert got.returncode == 0, got
+        assert "#351" in got.stdout, got.stdout
+        assert "every free slot is held by a declared job" in got.stdout, \
+            got.stdout
+        assert got.stderr == "", got.stderr
+
+
+SLOW_HERDR = """#!/usr/bin/env bash
+sleep 30
+"""
+
+
+def test_a_probe_that_never_answers_is_given_up_on():
+    """C3's witness: the sweep is bounded on the wall clock too, because a
+    controller waiting on a hung herdr is inside a tool call, where no worker
+    can reach it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = os.path.join(tmp, "bin")
+        os.mkdir(bindir)
+        stub = os.path.join(bindir, "herdr")
+        with open(stub, "w") as fh:
+            fh.write(SLOW_HERDR)
+        os.chmod(stub, 0o755)
+        original_path = os.environ["PATH"]
+        os.environ["PATH"] = bindir + os.pathsep + original_path
+        try:
+            started = time.monotonic()
+            state = loop.sweep(
+                [{"tickets": [1], "workspace": "/w/1", "agent": "skills-1"}],
+                loop.herdr_get, budget=0.3)
+            waited = time.monotonic() - started
+        finally:
+            os.environ["PATH"] = original_path
+    assert state["workers"][0]["verdict"] == "unreachable", state
+    assert "did not answer" in state["workers"][0]["detail"], state
+    assert waited < 5, f"the sweep waited {waited:.1f}s on one hung probe"
+
+
+def test_a_held_clump_is_still_named_when_declared_jobs_hold_every_slot():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live = dispatch_files(tmp, {"state": "running", "cores": 8},
+                                    candidate_closure="verify.py")
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "4", "--committed-gb", "4")
+        assert got.returncode == 0, got
+        assert "held      #500  by #351" in got.stdout, got.stdout
+
+
+def test_the_whole_sweep_is_bounded_by_one_deadline_not_one_per_probe():
+    """N hung panes must not hold the controller for N timeouts: the worst
+    case is a constant, because a controller inside a tool call hears no
+    worker at all (#778)."""
+    ticks = iter([0.0, 0.0, 10.0, 10.0, 10.0])
+    calls = []
+
+    def hung(agent, timeout):
+        calls.append((agent, timeout))
+        raise loop.LoopError(f"herdr agent get {agent} did not answer in "
+                             f"{timeout:g}s")
+
+    state = loop.sweep(live_clumps(), hung, budget=10.0,
+                       clock=lambda: next(ticks))
+    verdicts = [w["verdict"] for w in state["workers"]]
+    assert verdicts == ["unreachable", "unswept", "unswept"], verdicts
+    assert [agent for agent, _ in calls] == ["skills-1"], calls
+    assert state["calls"] == 1, state
+    for worker in state["workers"][1:]:
+        assert "next wake" in worker["detail"], worker
+
+
+def test_a_probe_is_given_only_the_budget_that_is_left():
+    ticks = iter([0.0, 0.0, 4.0, 4.0])
+    seen = []
+
+    def get(agent, timeout):
+        seen.append((agent, timeout))
+        return herdr_agent("idle")
+
+    loop.sweep(live_clumps()[:2], get, budget=10.0, clock=lambda: next(ticks))
+    assert seen == [("skills-1", 10.0), ("skills-2", 6.0)], seen
+
+
+def test_the_cli_sweep_of_several_hung_panes_returns_within_one_deadline():
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = os.path.join(tmp, "bin")
+        os.mkdir(bindir)
+        stub = os.path.join(bindir, "herdr")
+        with open(stub, "w") as fh:
+            fh.write(SLOW_HERDR)
+        os.chmod(stub, 0o755)
+        workers = os.path.join(tmp, "workers.json")
+        with open(workers, "w") as fh:
+            json.dump([{"tickets": [n], "workspace": f"/w/{n}",
+                        "agent": f"skills-{n}"} for n in (1, 2, 3, 4)], fh)
+        env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"],
+                   BURNDOWN_SWEEP_BUDGET="1")
+        started = time.monotonic()
+        got = subprocess.run([sys.executable, LOOP, "sweep", "--workers",
+                              workers], capture_output=True, text=True,
+                             timeout=60, env=env)
+        waited = time.monotonic() - started
+    assert got.returncode == 0, got
+    assert waited < 8, f"four hung panes held the sweep {waited:.1f}s"
+    assert got.stdout.count("unswept") >= 2, got.stdout
 
 
 def main():

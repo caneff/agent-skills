@@ -5,19 +5,24 @@ memory:
 
     python3 burndown/loop.py seat
     python3 burndown/loop.py box --processes <n> --committed-gb <g> [--add-gb <g>]
+    python3 burndown/loop.py sweep --workers <clumps.json>
 
 The judgment steps stay in the skill. What lives here is what a run got wrong
 by hand: which clumps are dispatchable once the live workspaces are excluded,
 whether a landing was a hub landing, whether the box has room for one more
-worker, and which live workers a resumed controller owes a message.
+worker, which live slots still have a pane behind them, how many free slots a
+declared parallel job leaves, and which live workers a resumed controller owes
+a message.
 
 Why each rule reads the way it does: `references/loop.md`.
 """
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import time
 
 
 class LoopError(Exception):
@@ -235,6 +240,72 @@ def box_room(processes, committed_gb, add_gb, want):
     return 0, box_check(processes, committed_gb, add_gb, 1)["refusals"]
 
 
+def job_cores(key, record):
+    """A live clump's outstanding parallel job, as cores to charge.
+
+    `None` is not zero. A worker nobody recorded and a worker that declared it
+    launched nothing read alike from here, and charging the first as the
+    second is the #351 dispatch into a box already at 25.8 load — so the
+    absent record is refused by name, one layer under the skill's own rule
+    that silence is not zero.
+    """
+    if record is None:
+        raise LoopError(
+            f"#{key} is live with no job record — record what that worker has "
+            "out with `runfile.py job` (its cores, or --none) before "
+            "dispatching, because silence is not zero")
+    if not isinstance(record, dict):
+        raise LoopError(f"#{key}: not a job record: {record!r}")
+    state, cores = record.get("state"), record.get("cores", 0)
+    if state not in ("running", "none", "done"):
+        raise LoopError(f"#{key}: not a job state: {state!r}")
+    if isinstance(cores, bool) or not isinstance(cores, int) or cores < 0:
+        raise LoopError(f"#{key}: not a core count: {cores!r}")
+    if state != "running":
+        return 0
+    if cores < 1:
+        raise LoopError(f"#{key}: a running job names at least one core")
+    return cores
+
+
+def core_room(free, in_flight):
+    """The free slots a run really has, once every outstanding parallel job's
+    declared cores are charged against them.
+
+    A slot is one core's worth of machine until a worker says otherwise, so a
+    worker that declares an 8-core job is holding eight slots' worth and the
+    seven past its own come off the free ones. That is the bridge the trial
+    had nothing for: the controller's budget was in slots, the contention was
+    in cores, and a run with a free slot dispatched into a box already at
+    25.8 load (#351).
+
+    Each declaration is read off the **clump's own** `job` record, which the
+    run file holds, so it survives the restart that a declaration living in
+    one dispatch's argv would not.
+    """
+    held = []
+    charged = 0
+    for clump in sorted(in_flight, key=key_of):
+        key = key_of(clump)
+        cores = job_cores(key, clump.get("job"))
+        if cores > 1:
+            charged += cores - 1
+            held.append((key, cores))
+    return {"room": max(0, free - charged), "held": held, "charged": charged}
+
+
+def render_cores(state, free):
+    """The declared jobs as a controller's status line carries them, or
+    nothing to say when no worker declared one."""
+    if not state["held"]:
+        return ""
+    jobs = ", ".join(f"#{key} declared {cores} cores"
+                     for key, cores in state["held"])
+    return (f"cores: {jobs} — {state['charged']} of {free} free "
+            f"{'slot' if free == 1 else 'slots'} held, room for "
+            f"{state['room']}")
+
+
 def announce(state, send):
     """Tell every live, unlanded worker who its controller is now — exactly
     one message each, and nothing to anyone else.
@@ -322,6 +393,107 @@ def cleanup_ready(clump, outstanding=()):
     return True
 
 
+# The pane states `herdr agent get` reports that the sweep passes through as
+# its verdict. A state herdr grows later reads as `unknown` and is reported
+# with the word herdr used, rather than being silently folded into `working` —
+# which is the reading that would let a stuck worker pass as healthy.
+_AGENT_STATES = frozenset({"working", "idle", "blocked"})
+# One deadline for the **whole** sweep, not one per probe. A per-probe bound
+# composes: N hung panes would hold the controller inside one tool call for N
+# timeouts, and a controller in a tool call hears no worker at all (#778). So
+# the worst case is this constant, whatever the wave size; a slot the deadline
+# did not reach is read on the next wake, which costs nothing because the
+# sweep only ever runs on a wake the controller already had.
+SWEEP_BUDGET = 10.0
+
+
+def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
+    """One probe per live slot: which workers herdr still has a pane for, and
+    what each of those panes is doing.
+
+    `get(agent, timeout) -> decoded herdr answer` is the caller's probe —
+    `herdr agent get <name>`, which the controller runs itself. **Bounded**
+    twice over: at most one call per live, unlanded clump, no retry and no
+    wait, and the whole sweep inside one `budget` seconds however many slots
+    there are. Each probe is handed the budget that is **left**, and a slot
+    the deadline did not reach is `unswept` — a slot nobody asked about, read
+    on the next wake, which is a different fact from a pane that answered.
+    It is the backstop under the wake, not a substitute for it, and it is
+    never a timer: a controller inside a tool call hears no worker at all
+    (#778).
+
+    A vanished pane — herdr has no agent by that name — is the one failure
+    only this sweep can find, and it is reported as its own verdict rather
+    than as an idle worker. What the sweep cannot see is the other shape: a
+    pane that is present and busy looks `working` whatever it is busy with
+    (#925). Nothing about one clump ends the sweep: a probe that fails, and a
+    clump the run file left with no agent name, are each that one worker's
+    verdict, so a herdr that answers for two workers and not the third still
+    tells the controller about two.
+    """
+    workers = [c for c in clumps if not c.get("landed")]
+    started = clock()
+    calls = 0
+    read = []
+    for clump in workers:
+        agent = clump.get("agent")
+        if not isinstance(agent, str) or not agent.strip():
+            read.append({"agent": "-", "tickets": clump["tickets"],
+                         "workspace": clump.get("workspace", ""),
+                         "verdict": "unnamed",
+                         "detail": "the run file names no herdr agent for this "
+                                   "clump, and the sweep probes by name"})
+            continue
+        left = budget - (clock() - started)
+        if left <= 0:
+            read.append({"agent": agent, "tickets": clump["tickets"],
+                         "workspace": clump.get("workspace", ""),
+                         "verdict": "unswept",
+                         "detail": f"the sweep's {budget:g}s deadline expired "
+                                   "before this slot — read on the next wake"})
+            continue
+        calls += 1
+        try:
+            answer = get(agent, left)
+        except Exception as exc:
+            verdict, detail = "unreachable", str(exc)
+        else:
+            verdict, detail = _verdict(answer)
+        read.append({"agent": agent, "tickets": clump["tickets"],
+                     "workspace": clump.get("workspace", ""),
+                     "verdict": verdict, "detail": detail})
+    return {"calls": calls, "workers": read,
+            "vanished": [w for w in read if w["verdict"] == "vanished"]}
+
+
+def _verdict(answer):
+    """One herdr answer read as a verdict and the detail behind it."""
+    if not isinstance(answer, dict):
+        return "unknown", f"herdr answered {answer!r}"
+    error = answer.get("error")
+    if isinstance(error, dict):
+        code = error.get("code", "")
+        if code == "agent_not_found":
+            return "vanished", error.get("message", code)
+        return "unreachable", error.get("message", code) or "herdr errored"
+    result = answer.get("result")
+    if not isinstance(result, dict):
+        return "unknown", f"herdr answered {answer!r}"
+    status = result.get("agent_status")
+    if status in _AGENT_STATES:
+        return status, str(status)
+    return "unknown", f"herdr reports agent_status {status!r}"
+
+
+def render_sweep(state):
+    """The sweep as a controller reads it: one line per live slot, the
+    vanished ones named as vanished and not as idle."""
+    lines = [f"{w['verdict']:<9} #{key_of(w)}  {w['agent']}  {w['workspace']}"
+             f"  {w['detail']}".rstrip()
+             for w in state["workers"]]
+    return "\n".join(lines) or "no live slots to sweep"
+
+
 def admit(candidates, clump, stuck_on=None):
     """The frozen candidate set, plus the one ticket allowed to join it.
 
@@ -344,12 +516,14 @@ def admit(candidates, clump, stuck_on=None):
     return list(candidates) + [clump]
 
 
-def read_clumps(path, live=False):
+def read_clumps(path, live=False, closure=True):
     """A clump list from a JSON file — `closure.py`'s own `clumps` entries,
     each with the `workspace` an in-flight one sits in.
 
     `live=True` for the in-flight list, whose entries are also named in
-    every held-clump line and so must carry a `workspace`.
+    every held-clump line and so must carry a `workspace`. `closure=False`
+    for the sweep's list, which is the run file's own entries: the sweep asks
+    about panes and not about files, and a run file holds no closure.
 
     Validated field by field, as `runfile.py` validates its own state: a
     hand-built or half-written file is the normal case here, and it reaches
@@ -377,8 +551,35 @@ def read_clumps(path, live=False):
             raise LoopError(
                 f"{path}: clump #{min(tickets)} names no workspace, and an "
                 "in-flight clump is reported by the workspace holding it")
-        paths(entry)
+        if closure:
+            paths(entry)
     return clumps
+
+
+def herdr_get(agent, timeout):
+    """`herdr agent get <name>` decoded — the sweep's probe as the controller
+    runs it. herdr exits non-zero for an agent it has no pane for and still
+    prints the `agent_not_found` answer, so the output is read either way and
+    only an unparseable one is an error.
+
+    `timeout` is what the sweep has left of its whole deadline, not a fresh
+    allowance: "bounded" has to mean the wall clock too, and a herdr that
+    never answers would otherwise hold the controller inside a tool call,
+    where no worker can reach it at all."""
+    try:
+        done = subprocess.run(["herdr", "agent", "get", agent],
+                              capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise LoopError(
+            f"herdr agent get {agent} did not answer in {timeout:g}s"
+        ) from None
+    text = done.stdout.strip() or done.stderr.strip()
+    try:
+        return json.loads(text)
+    except ValueError:
+        raise LoopError(
+            f"herdr agent get {agent} answered {text or '(nothing)'!r}"
+        ) from None
 
 
 def render_dispatch(picked, state):
@@ -414,6 +615,11 @@ def run(argv):
     dispatch.add_argument("--processes", type=int, required=True)
     dispatch.add_argument("--committed-gb", type=float, required=True)
     dispatch.add_argument("--add-gb", type=float, default=0)
+    sweep_cmd = subs.add_parser(
+        "sweep", help="one herdr probe per live slot, the backstop under the "
+                      "wake")
+    sweep_cmd.add_argument("--workers", required=True,
+                           help="the run's clumps, as the run file holds them")
     hub = subs.add_parser(
         "hub", help="whether a landing asks for full re-exploration")
     hub.add_argument("--candidates", required=True)
@@ -442,16 +648,32 @@ def run(argv):
             candidates = read_clumps(args.candidates)
             in_flight = (read_clumps(args.in_flight, live=True)
                          if args.in_flight else [])
+            free = max(args.free, 0)
+            cores = core_room(free, in_flight)
+            cores_line = render_cores(cores, free)
+            if cores_line:
+                print(cores_line)
+            if cores["room"] == 0 and free:
+                # The declared jobs hold every free slot. Said here rather
+                # than left to the box check, whose refusal would name a
+                # process cap that is not what is holding the slot — and with
+                # the held-clump lines, which a controller reads to see which
+                # live workspace holds which candidate whatever stopped the
+                # dispatch.
+                print("nothing to dispatch: every free slot is held by a "
+                      "declared job")
+                print(render_dispatch([], frontier(candidates, in_flight)))
+                return 0
             room, refusals = box_room(args.processes, args.committed_gb,
-                                      args.add_gb, max(args.free, 0))
+                                      args.add_gb, cores["room"])
             if refusals:
                 for refusal in refusals:
                     print(f"loop.py: {refusal}", file=sys.stderr)
                 return 1
             state = frontier(candidates, in_flight)
             lines = render_dispatch(picks(state, room), state)
-            if room < args.free:
-                lines = f"box: room for {room} of {args.free}\n{lines}"
+            if room < cores["room"]:
+                lines = f"box: room for {room} of {cores['room']}\n{lines}"
             print(lines)
         elif args.command == "landing":
             if args.clump < 1:
@@ -477,6 +699,20 @@ def run(argv):
                 for step in landing_steps(clump, args.outstanding):
                     print(step["step"])
             cleanup_ready(clump, args.outstanding)
+        elif args.command == "sweep":
+            # Checked once, before any probe: without it every slot reads
+            # `unreachable`, which is a dead roster and a missing tool telling
+            # the same story — and § Parking would park the run on it.
+            if shutil.which("herdr") is None:
+                raise LoopError(
+                    "herdr is not on PATH, so the sweep has nothing to ask — "
+                    "this is a broken controller box, not a roster of dead "
+                    "workers")
+            budget = float(os.environ.get("BURNDOWN_SWEEP_BUDGET")
+                           or SWEEP_BUDGET)
+            print(render_sweep(
+                sweep(read_clumps(args.workers, closure=False), herdr_get,
+                      budget=budget)))
         elif args.command == "hub":
             landed = [p for p in args.landed.replace(",", " ").split() if p]
             hub_files = hubs(read_clumps(args.candidates))

@@ -123,7 +123,8 @@ def test_a_clump_records_its_tickets_workspace_and_herdr_agent_name():
                   root=root)
     got = runfile.load("burn-1", root=root)["clumps"]
     assert got == [{"tickets": [901, 902], "workspace": "/w/implement-901",
-                    "agent": "implement-901-42", "landed": None}], got
+                    "agent": "implement-901-42", "landed": None,
+                    "job": None}], got
 
 
 def test_a_clump_is_keyed_by_its_lowest_ticket_and_re_registers_in_place():
@@ -753,6 +754,89 @@ def test_an_empty_environment_value_reads_as_unset():
              "BURNDOWN_RUNFILE_DELAY_MS": ""})
     assert got.returncode == 0, got.stderr
     assert runfile.load("burn-1", root=root)["slots"] == 1
+
+
+def test_a_clump_starts_with_no_job_on_record():
+    root = cache()
+    runfile.start("r-job", 3, "dc", root)
+    run = runfile.clump("r-job", [351], "/w/351", "sm-351", root)
+    assert run["clumps"][0]["job"] is None, run
+
+
+def test_a_declared_job_survives_a_restart():
+    """The whole point: a controller that restarts mid-run recovers the hold.
+    The declaration lived in one argv before, so a resume dispatched into the
+    contention #351 produced."""
+    root = cache()
+    runfile.start("r-job2", 3, "dc", root)
+    runfile.clump("r-job2", [351], "/w/351", "sm-351", root)
+    runfile.job("r-job2", 351, "running", 8, root)
+    # A fresh read stands in for the restart.
+    run = runfile.load("r-job2", root)
+    assert run["clumps"][0]["job"] == {"state": "running", "cores": 8}, run
+    runfile.job("r-job2", 351, "done", root=root)
+    assert runfile.load("r-job2", root)["clumps"][0]["job"] == {
+        "state": "done", "cores": 0}
+
+
+def test_a_worker_that_launched_no_job_is_recorded_as_having_said_so():
+    root = cache()
+    runfile.start("r-job3", 3, "dc", root)
+    runfile.clump("r-job3", [351], "/w/351", "sm-351", root)
+    runfile.job("r-job3", 351, "none", root=root)
+    assert runfile.load("r-job3", root)["clumps"][0]["job"] == {
+        "state": "none", "cores": 0}
+
+
+def test_a_job_record_that_is_not_one_is_refused():
+    root = cache()
+    runfile.start("r-job4", 3, "dc", root)
+    runfile.clump("r-job4", [351], "/w/351", "sm-351", root)
+    for state, cores in (("running", 0), ("running", "8"), ("spinning", 1),
+                         ("running", True), ("none", 4)):
+        try:
+            runfile.job("r-job4", 351, state, cores, root)
+        except runfile.RunFileError:
+            pass
+        else:
+            raise AssertionError(f"{state!r}/{cores!r} is not a job record")
+    try:
+        runfile.job("r-job4", 999, "none", root=root)
+    except runfile.RunFileError as exc:
+        assert "#999" in str(exc), exc
+    else:
+        raise AssertionError("a job must name a clump of this run")
+
+
+def test_a_run_file_written_before_jobs_existed_still_reads():
+    """#892's files have no `job` key. A controller resuming one of those
+    must get its run back, not a refusal about a field that did not exist."""
+    root = cache()
+    runfile.start("r-old", 2, "dc", root)
+    runfile.clump("r-old", [401], "/w/401", "sm-401", root)
+    target = runfile.path("r-old", root)
+    with open(target) as fh:
+        raw = json.load(fh)
+    del raw["clumps"][0]["job"]
+    with open(target, "w") as fh:
+        json.dump(raw, fh)
+    run = runfile.load("r-old", root)
+    assert run["clumps"][0]["job"] is None, run
+
+
+def test_the_cli_records_a_job_and_shows_it():
+    root = cache()
+    assert cli(root, "start", "r-job5", "--slots", "2").returncode == 0
+    assert cli(root, "clump", "r-job5", "--tickets", "351", "--workspace",
+               "/w/351", "--agent", "sm-351").returncode == 0
+    got = cli(root, "job", "r-job5", "--clump", "351", "--cores", "8")
+    assert got.returncode == 0, got
+    assert "8 cores" in got.stdout, got.stdout
+    shown = cli(root, "show", "r-job5")
+    assert "8 cores" in shown.stdout, shown.stdout
+    none = cli(root, "job", "r-job5", "--clump", "351", "--none")
+    assert none.returncode == 0, none
+    assert "no parallel job" in cli(root, "show", "r-job5").stdout
 
 
 def main():

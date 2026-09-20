@@ -8,6 +8,7 @@ state, and a per-repo log is not this run.
 ```
 python3 burndown/runfile.py start  <run-id> --slots <k> [--controller <agent>]
 python3 burndown/runfile.py clump  <run-id> --tickets 901,902 --workspace <path> --agent <name>
+python3 burndown/runfile.py job    <run-id> --clump 901 --cores 8 | --none | --done
 python3 burndown/runfile.py land   <run-id> --clump 901 --sha <sha>
 python3 burndown/runfile.py show   <run-id>
 python3 burndown/runfile.py resume <run-id> --live a,b [--controller <agent>]
@@ -22,9 +23,11 @@ python3 burndown/runfile.py resume <run-id> --live a,b [--controller <agent>]
   "controller": "burn-ctl-1a",
   "clumps": [
     {"tickets": [901, 902], "workspace": "/home/c/src/x/.claude/worktrees/implement-901",
-     "agent": "implement-901-42", "landed": null},
+     "agent": "implement-901-42", "job": {"state": "running", "cores": 8},
+     "landed": null},
     {"tickets": [905], "workspace": "/home/c/src/x/.claude/worktrees/implement-905",
-     "agent": "implement-905-7", "landed": "0123456789abcdef0123456789abcdef01234567"}
+     "agent": "implement-905-7", "job": {"state": "none", "cores": 0},
+     "landed": "0123456789abcdef0123456789abcdef01234567"}
   ]
 }
 ```
@@ -51,6 +54,23 @@ python3 burndown/runfile.py resume <run-id> --live a,b [--controller <agent>]
 - **`landed`** is the clump's squash sha, or `null`. It must be a git object
   name, and once written a *different* sha is refused: the squash sha is
   final, so a second one is a stale writer rather than a correction.
+
+
+## The job record
+
+Each clump carries what parallel job its worker has out: `null` when nothing
+is on record, `{"state": "running", "cores": <n>}` while a job is out,
+`{"state": "none", "cores": 0}` when the worker declared it launched none, and
+`{"state": "done", "cores": 0}` once it reports the job finished.
+`runfile.py job <run-id> --clump <n> --cores <k> | --none | --done` writes it.
+
+Three states and not a bare number, because `null` and `none` are different
+facts: a worker nobody recorded and a worker that declared nothing read alike
+to a controller charging cores, and charging the first as the second is the
+dispatch into a loaded box that #894 exists to stop. A file written before
+this field existed still loads — the field is filled in as `null`, which is
+the honest reading of a run that never recorded one.
+
 
 ## Why `~/.cache/burndown/<run-id>.json`
 
