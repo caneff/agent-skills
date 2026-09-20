@@ -88,7 +88,10 @@ check_in "$skill_text" 'closing_ticket.py' implement-spec/SKILL.md
 # Rule 6: the spec-level review is handed shas, and the reason a range is
 # wrong is stated where the reader decides.
 check_in "$skill_text" 'list of merge shas' implement-spec/SKILL.md
-check_in "$skill_text" 'run file' implement-spec/SKILL.md
+# `run file` alone is satisfied by the loop-pointer paragraph above, which
+# names the frontier and the run file in passing; the needle has to be the
+# spec-level review's own sentence.
+check_in "$skill_text" 'read off the run file' implement-spec/SKILL.md
 check_in "$skill_text" 'never a git range' implement-spec/SKILL.md
 
 # Rule 7: both references are reachable from the skill and carry the evidence
@@ -97,6 +100,10 @@ check_in "$skill_text" 'references/exploration.md' implement-spec/SKILL.md
 check_in "$skill_text" 'references/closing-ticket.md' implement-spec/SKILL.md
 check_in "$exploration_text" '#781' implement-spec/references/exploration.md
 check_in "$exploration_text" '#367' implement-spec/references/exploration.md
+# The line between the two verdicts that carry the rule, and the tiebreak —
+# without it the pass reads the #781 decisions either way (C1).
+check_in "$exploration_text" 'begins' implement-spec/references/exploration.md
+check_in "$exploration_text" 'tiebreak' implement-spec/references/exploration.md
 check_in "$closing_text" '#781' implement-spec/references/closing-ticket.md
 check_in "$closing_text" 'End-to-end seam' implement-spec/references/closing-ticket.md
 check_in "$closing_text" 'Blind to' implement-spec/references/closing-ticket.md
@@ -104,7 +111,8 @@ check_in "$closing_text" 'Blind to' implement-spec/references/closing-ticket.md
 # Rule 8: the handoff is a pointer — it says when a burn hands a spec over and
 # where the policy lives, and states none of that policy itself.
 check_in "$handoff_text" 'implement-spec' burndown/references/spec-handoff.md
-check_in "$handoff_text" 'spec' burndown/references/spec-handoff.md
+# When to read it at all — `spec` alone is tautological in a file about specs.
+check_in "$handoff_text" 'parent issue carries the `spec` label' burndown/references/spec-handoff.md
 for needle in 'contradiction' 'blind spot' 'merge shas'; do
   check_not_in "$handoff_text" "$needle" burndown/references/spec-handoff.md
 done

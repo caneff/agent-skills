@@ -22,10 +22,9 @@ a burn owes the handoff is only this:
 - Every open slice of that spec leaves this burn's own candidate set at
   handoff, ready or blocked alike. A slice already in flight under a burn
   worker finishes where it is; the spec run picks up from its landing.
-- The spec run's slots come out of **this burn's** budget, so the handoff
-  costs slots rather than adding them.
 - The spec run is a worker to this burn. It reports, parks and escalates as
-  one, and its workspaces are its own to hold and to tear down.
+  one; its workspaces are its own to hold and to tear down; and what its
+  slots cost this burn is stated where the nesting is, not here.
 
 A slice whose parent carries no `spec` label is an ordinary candidate. A spec
 with one open slice is still handed off: the run's closing ticket and

@@ -38,6 +38,18 @@ So the generator refuses a seam with no stated blind spot. A worker told only
 where to drive the spec reads a green run as coverage; a worker told what the
 seam cannot see knows what its green run does not mean.
 
+## A worked blind spot
+
+This repo's own seam is `bash tests/all.sh`, and what it cannot see is
+anything a human reads rather than a test asserts: whether a model actually
+follows a skill's prose, whether a `SKILL.md` instruction that is present is
+also unambiguous, and how the harness behaves around both. The sharpest
+instance is a worker spinning on identical no-op tool calls — healthy on
+every signal the suite can check, and an hour gone before a human noticed.
+
+A blind spot reads like that: not "the tests are incomplete", but the class of
+failure the seam structurally cannot witness.
+
 ## One open of the real thing
 
 Where the spec puts a user-visible surface beyond the seam's reach, the

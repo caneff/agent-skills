@@ -54,14 +54,13 @@ def clean_fixtures():
 
 
 def test_the_body_names_the_repos_declared_seam():
-    got = T.body(repo(), spec=366, shas=SHAS)
+    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
     assert "`npm run test:e2e` over the headless solver bundle" in got, got
 
 
 def test_the_body_names_what_the_seam_is_blind_to():
-    got = T.body(repo(), spec=366, shas=SHAS)
-    assert "grid rendering at 4x4 and 6x6" in got.lower() or \
-           "grid rendering at 4x4 and 6x6" in got, got
+    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
+    assert "grid rendering at 4x4 and 6x6" in got, got
     assert "blind" in got.lower(), got
 
 
@@ -73,12 +72,12 @@ def test_a_surface_beyond_the_seam_buys_one_open_of_the_real_thing():
 
 
 def test_with_no_surface_beyond_the_seam_the_body_asks_for_no_manual_open():
-    got = T.body(repo(), spec=366, shas=SHAS)
+    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
     assert "open of the real thing" not in got, got
 
 
 def test_the_review_is_handed_the_merge_shas_and_no_git_range():
-    got = T.body(repo(), spec=366, shas=SHAS)
+    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
     for sha in SHAS:
         assert sha in got, got
     # `a866bf3..origin/main` held this spec's three squash commits and ~17
@@ -88,7 +87,8 @@ def test_the_review_is_handed_the_merge_shas_and_no_git_range():
 
 def test_a_repo_that_declares_no_seam_is_refused():
     try:
-        T.body(repo(agents="# Fixture repo\n"), spec=366, shas=SHAS)
+        T.body(repo(agents="# Fixture repo\n"), spec=366, shas=SHAS,
+               surfaces=[])
     except T.SeamError as exc:
         assert "End-to-end seam" in str(exc), exc
     else:
@@ -97,7 +97,8 @@ def test_a_repo_that_declares_no_seam_is_refused():
 
 def test_the_exploration_pass_can_supply_a_seam_the_repo_does_not_declare():
     got = T.body(repo(agents="# Fixture repo\n"), spec=366, shas=SHAS,
-                 seam="`pytest tests/e2e`", blind_to="anything the browser draws")
+                 surfaces=[], seam="`pytest tests/e2e`",
+                 blind_to="anything the browser draws")
     assert "`pytest tests/e2e`" in got, got
     assert "anything the browser draws" in got, got
 
@@ -111,7 +112,7 @@ def test_a_seam_with_no_blind_spot_is_refused():
 ## End-to-end seam
 
 - **Seam**: `npm run test:e2e`
-"""), spec=366, shas=SHAS)
+"""), spec=366, shas=SHAS, surfaces=[])
     except T.SeamError as exc:
         assert "Blind to" in str(exc), exc
     else:
@@ -134,10 +135,121 @@ def test_the_cli_fails_loud_when_no_seam_is_declared():
     import subprocess
     out = subprocess.run(
         [sys.executable, GENERATOR, repo(agents="# Fixture repo\n"), "366",
-         "--shas", SHAS[0]],
+         "--shas", SHAS[0], "--no-surface"],
         capture_output=True, text=True)
     assert out.returncode == 1, out.stdout
     assert "End-to-end seam" in out.stderr, out.stderr
+
+
+def test_a_fenced_example_is_not_a_declaration():
+    # #890's rule, as `burndown/references/closure.md` states it for the
+    # include declaration: a grammar shown inside a fence is an example.
+    # `references/closing-ticket.md` shows this very grammar in a fence, so
+    # the first repo that pastes the doc would otherwise declare the sample.
+    fenced = """# Fixture repo
+
+## End-to-end seam
+
+```
+- **Seam**: `npm run test:e2e` over the headless solver bundle
+- **Blind to**: the live editor
+```
+"""
+    try:
+        T.body(repo(agents=fenced), spec=366, shas=SHAS, surfaces=[])
+    except T.SeamError as exc:
+        assert "declares no" in str(exc), exc
+    else:
+        raise AssertionError("a fenced example was read as a declaration")
+
+
+def test_the_colon_may_sit_inside_the_emphasis():
+    # `- **Seam:** x` is as common in the wild as `- **Seam**: x`, and read
+    # by the stricter grammar it yields a seam beginning with `**` — silently,
+    # into the ticket body.
+    got = T.body(repo(agents="""# Fixture repo
+
+## End-to-end seam
+
+- **Seam:** `npm run e2e`
+- **Blind to:** the live editor
+"""), spec=366, shas=SHAS, surfaces=[])
+    assert "- **Seam**: `npm run e2e`" in got, got
+    assert "**Seam**: **" not in got, got
+
+
+def test_a_root_that_is_not_a_directory_is_not_a_missing_declaration():
+    # A typo'd root reported as "this repo declares no seam" sends the
+    # operator to edit an `AGENTS.md` that was never the problem.
+    try:
+        T.body(os.path.join(repo(), "no-such-dir"), spec=366, shas=SHAS,
+               surfaces=[])
+    except T.SeamError as exc:
+        assert "not a directory" in str(exc), exc
+        assert "declares no" not in str(exc), exc
+    else:
+        raise AssertionError("a missing root was accepted")
+
+
+def test_an_agents_file_that_is_not_utf8_is_reported_not_raised():
+    root = repo(agents=None)
+    with open(os.path.join(root, "AGENTS.md"), "wb") as fh:
+        fh.write("## End-to-end seam\n\n- **Seam**: caf\xe9 e2e\n".encode("latin-1"))
+    # Decoded leniently rather than crashed on: the run this generates a
+    # ticket in is unattended, and a five-frame traceback from `<frozen
+    # codecs>` reads as a broken tool, not as a repo with an odd byte.
+    try:
+        T.body(root, spec=366, shas=SHAS, surfaces=[])
+    except T.SeamError as exc:
+        assert "Blind to" in str(exc), exc
+    else:
+        raise AssertionError("the latin-1 seam declaration was not read")
+
+
+def test_an_empty_sha_list_is_refused():
+    try:
+        T.body(repo(), spec=366, shas=[], surfaces=[])
+    except T.SeamError as exc:
+        assert "sha" in str(exc), exc
+    else:
+        raise AssertionError("a closing ticket with nothing to review was built")
+
+
+def test_the_surfaces_question_must_be_answered():
+    # Not "no surfaces by default": the #781 failure was a surface nobody
+    # asked about. An unanswered question is refused, an explicit none is
+    # fine.
+    try:
+        T.body(repo(), spec=366, shas=SHAS)
+    except T.SeamError as exc:
+        assert "surface" in str(exc), exc
+    else:
+        raise AssertionError("the surfaces question went unanswered")
+
+
+def test_the_body_says_where_the_test_goes():
+    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
+    assert "`npm run test:e2e` over the headless solver bundle" in got, got
+    assert "runs it" in got, got
+
+
+def test_the_cli_takes_an_explicit_none_for_the_surfaces():
+    import subprocess
+    out = subprocess.run(
+        [sys.executable, GENERATOR, repo(), "366", "--shas", SHAS[0],
+         "--no-surface"],
+        capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert "open of the real thing" not in out.stdout, out.stdout
+
+
+def test_the_cli_refuses_an_unanswered_surfaces_question():
+    import subprocess
+    out = subprocess.run(
+        [sys.executable, GENERATOR, repo(), "366", "--shas", SHAS[0]],
+        capture_output=True, text=True)
+    assert out.returncode != 0, out.stdout
+    assert "surface" in (out.stderr + out.stdout), out.stderr
 
 
 def main():

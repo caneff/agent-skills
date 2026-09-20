@@ -60,8 +60,13 @@ contradiction. A decision the code has never heard of, that no slice builds,
 is a summary line too: a gap in the slicing, for the controller to close by
 filing, not drift for Chris to rule on.
 
-The three verdicts, the input the reader takes, and the run this rule came
-from: [`references/exploration.md`](references/exploration.md).
+Which of those two a decision is — the code has not got there yet, or the
+code does it another way — is the pass's own reading, and the line between
+them is drawn in the reference. Where both readings honestly fit, it is the
+first: the channel that reaches Chris is the one that has to stay clean.
+
+The three verdicts, that boundary, the input the reader takes, and the run
+this rule came from: [`references/exploration.md`](references/exploration.md).
 
 ## The closing ticket
 

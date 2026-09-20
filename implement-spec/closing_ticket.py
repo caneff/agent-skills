@@ -13,15 +13,32 @@ surface the seam cannot reach.
 
 The declaration grammar and the evidence: `references/closing-ticket.md`.
 """
+import argparse
 import os
 import re
 import sys
 
+# #890's fence reader, imported rather than reimplemented: a fenced region is
+# an example, never a declaration, and a second copy of that rule is a second
+# place for the bug it fixed. `references/closing-ticket.md` shows this very
+# grammar inside a fence, so a repo that pastes the doc must declare nothing
+# by showing it. The import is the same coupling this skill already has —
+# `implement-spec` is policy over `burndown`, and does not run without it.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                os.pardir, "burndown"))
+from frontier import unfenced  # noqa: E402
+
 _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
 _SEAM_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+end-to-end seam[ \t]*:?[ \t]*$",
                            re.IGNORECASE)
+# `- **Seam**: <what>` and `- **Seam:** <what>` both: the emphasis may close
+# on either side of the colon, and read by the stricter grammar the second
+# form yields a value beginning with `**`, silently, into the ticket body. A
+# closing emphasis run only counts when whitespace or the line end follows it,
+# so a value that is itself bold — `- **Seam**: **the app**` — keeps its own
+# markers.
 _KEY = re.compile(r"^[ \t]*[-*+][ \t]*[*_]{0,2}([A-Za-z][A-Za-z -]*?)[*_]{0,2}"
-                  r"[ \t]*:[ \t]*(.*?)[ \t]*$")
+                  r"[ \t]*:(?:[*_]{1,2}(?=[ \t]|$))?[ \t]*(.*?)[ \t]*$")
 
 
 class SeamError(Exception):
@@ -33,12 +50,12 @@ def declaration(text):
     """`{seam, blind to}` from a document's `## End-to-end seam` section, or
     `None` when it has no such section — silence, which is not a
     declaration."""
-    lines = (text or "").splitlines()
-    for pos, line in enumerate(lines):
+    visible = list(unfenced((text or "").splitlines()))
+    for pos, (_, line) in enumerate(visible):
         if not _SEAM_HEADING.match(line):
             continue
         found = {}
-        for rest in lines[pos + 1:]:
+        for _, rest in visible[pos + 1:]:
             if _ANY_HEADING.match(rest):
                 break
             match = _KEY.match(rest)
@@ -52,9 +69,16 @@ def seam_of(root, seam=None, blind_to=None):
     """The repo's declared seam and blind spot, with the exploration pass's
     own answers taking precedence — a repo that declares nothing still has a
     seam once the pass has found one. Refuses when either half is missing."""
-    found = {}
+    if not os.path.isdir(root):
+        # Distinct from a repo that declares nothing: a typo'd root reported
+        # as a policy gap sends the reader to edit an `AGENTS.md` that was
+        # never the problem.
+        raise SeamError(f"{root} is not a directory")
     try:
-        with open(os.path.join(root, "AGENTS.md")) as fh:
+        # Leniently decoded rather than crashed on: this generates a ticket
+        # inside an unattended run, and a traceback out of `<frozen codecs>`
+        # reads as a broken tool rather than as a repo with an odd byte.
+        with open(os.path.join(root, "AGENTS.md"), errors="replace") as fh:
             found = declaration(fh.read()) or {}
     except OSError:
         found = {}
@@ -74,7 +98,7 @@ def seam_of(root, seam=None, blind_to=None):
     return seam, blind_to
 
 
-def body(root, spec, shas, surfaces=(), seam=None, blind_to=None):
+def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):
     """The closing ticket's body for one spec: the seam it drives, what that
     seam cannot see, and the merge shas the spec-level review is handed.
 
@@ -83,6 +107,14 @@ def body(root, spec, shas, surfaces=(), seam=None, blind_to=None):
     this spec's three commits and ~17 unrelated ones from other sessions, and
     `/multi-axis-code-review` takes one fixed point.
     """
+    if surfaces is None:
+        # Not defaulted to none: the #781 failure was a user-visible surface
+        # nobody asked about. The exploration pass answers the question, with
+        # an empty list where the seam reaches everything.
+        raise SeamError(
+            "the closing ticket must answer whether the spec has a "
+            "user-visible surface the seam cannot reach — pass the surfaces, "
+            "or an empty list to say there are none")
     seam, blind_to = seam_of(root, seam, blind_to)
     shas = [s.strip() for s in shas if s and s.strip()]
     if not shas:
@@ -110,7 +142,7 @@ def body(root, spec, shas, surfaces=(), seam=None, blind_to=None):
     lines += [f"- `{sha}`" for sha in shas]
     lines += ["", "## Acceptance criteria", "",
               "- [ ] One end-to-end test drives the whole spec's acceptance "
-              "criteria at the seam above",
+              f"criteria at the seam above, and lives where `{seam}` runs it",
               "- [ ] What the seam is blind to is stated in the test's own "
               "comment, so the next reader knows what a green run does not "
               "cover",
@@ -123,28 +155,28 @@ def body(root, spec, shas, surfaces=(), seam=None, blind_to=None):
 
 
 def main(argv):
-    args, shas, surfaces, seam, blind_to = list(argv[1:]), [], [], None, None
-    positional = []
-    while args:
-        arg = args.pop(0)
-        if arg == "--shas":
-            shas += (args.pop(0) if args else "").split(",")
-        elif arg == "--surface":
-            surfaces.append(args.pop(0) if args else "")
-        elif arg == "--seam":
-            seam = args.pop(0) if args else ""
-        elif arg == "--blind-to":
-            blind_to = args.pop(0) if args else ""
-        else:
-            positional.append(arg)
-    if len(positional) != 2:
-        print("usage: closing_ticket.py <repo-root> <spec> --shas <sha>[,<sha>...] "
-              "[--surface <what>]... [--seam <what> --blind-to <what>]",
-              file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser(
+        prog="closing_ticket.py",
+        description="The closing ticket's body for one spec.")
+    parser.add_argument("root", help="the repo root whose AGENTS.md declares "
+                                     "the end-to-end seam")
+    parser.add_argument("spec", type=int, help="the spec's issue number")
+    parser.add_argument("--shas", required=True, action="append", default=[],
+                        help="this run's merge shas, comma-separated; repeatable")
+    surfaces = parser.add_mutually_exclusive_group(required=True)
+    surfaces.add_argument("--surface", action="append", default=[],
+                          help="a user-visible surface the seam cannot reach; "
+                               "repeatable")
+    surfaces.add_argument("--no-surface", action="store_true",
+                          help="the seam reaches every surface this spec touches")
+    parser.add_argument("--seam", help="the seam, where the repo declares none")
+    parser.add_argument("--blind-to", help="what that seam cannot see")
+    args = parser.parse_args(argv[1:])
+
+    shas = [sha for group in args.shas for sha in group.split(",")]
     try:
-        print(body(positional[0], positional[1], shas, surfaces, seam, blind_to),
-              end="")
+        print(body(args.root, args.spec, shas, args.surface, args.seam,
+                   args.blind_to), end="")
     except SeamError as exc:
         print(f"closing_ticket.py: {exc}", file=sys.stderr)
         return 1

@@ -39,6 +39,28 @@ An unknown `found` value fails closed for the same reason — a reader that
 guesses at a spelling it does not know is a reader that can call a
 contradiction "not yet built".
 
+## Where `absent` ends and `differs` begins
+
+The two verdicts carry the whole rule, so the pass needs a line between them:
+
+- **`differs`** — the code does *the thing this decision describes*, by
+  another route. Replace the decision with what the code does and you have
+  two answers to one question.
+- **`absent`** — the behaviour the decision describes is simply not there
+  yet. The code answers no question, so there is nothing to disagree with.
+
+`RULES_PREFIX` hardcoded in `build_doc`, against a decision that `build_doc`
+take the prefix as an argument, is `absent`: a caller-supplied prefix does not
+exist in that tree. Had `build_doc` read the prefix from an environment
+variable, that would be `differs` — the decision's own behaviour, done another
+way.
+
+**The tiebreak, where both readings honestly fit**: read it `absent`, and let
+the summary line name the ticket that builds it. Chris's channel is the one
+that has to stay clean for a real contradiction to be visible in it, and a
+drift missed here still meets the slice's own review, its PR and its
+reviewers. The reverse mistake meets nothing — it is already on his desk.
+
 ## What the reader takes
 
 One JSON object: the spec's `tickets`, and its `decisions` — each with an

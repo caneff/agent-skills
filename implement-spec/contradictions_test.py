@@ -28,7 +28,7 @@ BUILT_BY_A_SLICE = {
     "decision": "build_doc takes the rules prefix as an argument",
     "found": "absent",
     "built_by": 367,
-    "evidence": "build_doc hardcodes RULES_PREFIX",
+    "evidence": "build_doc hardcodes RULES_PREFIX — a caller-supplied prefix is absent, not done another way",
 }
 
 
@@ -148,7 +148,26 @@ def test_the_cli_fails_loud_on_a_malformed_exploration_file():
     finally:
         os.unlink(path)
     assert out.returncode == 1, out.stdout
-    assert "missing decision" in out.stderr, out.stderr
+    assert "is missing" in out.stderr and "D9" in out.stderr, out.stderr
+
+
+def test_a_ticket_list_entry_that_is_not_a_number_is_refused():
+    # The list is what the whole defence is checked against; a malformed
+    # entry silently dropped would turn a "not yet built" into a
+    # contradiction on Chris's desk.
+    try:
+        C.check([BUILT_BY_A_SLICE], [366, "three-six-seven", 368])
+    except C.SpecError as exc:
+        assert "not a ticket number" in str(exc), exc
+    else:
+        raise AssertionError("a malformed ticket list was accepted")
+
+
+def test_the_fixture_evidence_states_which_side_of_the_boundary_it_is_on():
+    # C1: `absent` and `differs` are the whole rule, so the evidence a pass
+    # records has to say which it saw — "the code hardcodes it" reads as
+    # both until the decision's own behaviour is named.
+    assert "absent" in BUILT_BY_A_SLICE["evidence"], BUILT_BY_A_SLICE
 
 
 def main():
