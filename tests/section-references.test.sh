@@ -17,8 +17,9 @@ run_fixture() {
 
 run_fixture text-suffix-valid
 run_fixture heading-trailing-punctuation-valid
+run_fixture step-locator-valid
 
-for fixture in pointer-suffix-invalid bare-cross-file-collision; do
+for fixture in pointer-suffix-invalid bare-cross-file-collision step-heading-name-invalid; do
   if run_fixture "$fixture"; then
     echo "FAIL: checker accepted fixture $fixture"
     exit 1
