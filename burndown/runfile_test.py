@@ -5,6 +5,8 @@ path's re-announce step against a stub agent list.
 
 `BURNDOWN_CACHE_DIR` keeps every case off the real `~/.cache/burndown`.
 """
+import fcntl
+import json
 import os
 import shutil
 import subprocess
@@ -94,6 +96,12 @@ def test_a_run_id_that_would_leave_the_cache_dir_is_refused():
             continue
         raise AssertionError(f"accepted run id {bad!r}")
     assert os.listdir(root) == [], os.listdir(root)
+
+
+def runs_in(root):
+    """The run files in a cache dir. A `<run-id>.json.lock` is the advisory
+    lock, not a run."""
+    return sorted(n for n in os.listdir(root) if n.endswith(".json"))
 
 
 def test_loading_a_run_that_was_never_started_names_the_path():
@@ -237,12 +245,16 @@ def test_resume_splits_live_from_vanished_workers_and_from_landings():
     assert [c["tickets"] for c in got["landed"]] == [[905]], got
 
 
-def test_resume_recovers_the_slot_budget_and_counts_the_free_slots():
+def test_a_vanished_clumps_slot_is_not_free_until_it_is_reconciled():
+    # Three slots: one live worker, one vanished and unlanded, one landed. The
+    # vanished worker may still be holding its tickets, so refilling its slot
+    # puts a second worker in the same files.
     root = cache()
     three_clumps(root)
     got = runfile.resume("burn-1", ["agent-a"], root=root)
     assert got["slots"] == 3, got
-    assert got["free"] == 2, got  # one live worker holds one of the three
+    assert [c["agent"] for c in got["vanished"]] == ["agent-b"], got
+    assert got["free"] == 1, got
 
 
 def test_a_landed_clump_is_never_re_announced_even_if_its_agent_is_alive():
@@ -250,7 +262,17 @@ def test_a_landed_clump_is_never_re_announced_even_if_its_agent_is_alive():
     three_clumps(root)
     got = runfile.resume("burn-1", ["agent-a", "agent-c"], root=root)
     assert [c["agent"] for c in got["announce"]] == ["agent-a"], got
-    assert got["free"] == 2, got
+    # agent-c landed, so its slot is genuinely free; agent-b's is not.
+    assert got["free"] == 1, got
+
+
+def test_a_landing_frees_the_slot_a_vanished_clump_was_holding():
+    root = cache()
+    three_clumps(root)
+    before = runfile.resume("burn-1", ["agent-a"], root=root)["free"]
+    runfile.land("burn-1", 903, "def5678", root=root)
+    after = runfile.resume("burn-1", ["agent-a"], root=root)["free"]
+    assert (before, after) == (1, 2), (before, after)
 
 
 def test_resume_writes_the_controllers_current_agent_name_into_the_run_file():
@@ -295,7 +317,8 @@ def test_a_write_that_dies_before_it_finishes_leaves_the_old_run_intact():
         os.replace = replace
 
     assert open(runfile.path("burn-1", root=root)).read() == before
-    assert os.listdir(root) == ["burn-1.json"], os.listdir(root)
+    assert runs_in(root) == ["burn-1.json"], os.listdir(root)
+    assert not [n for n in os.listdir(root) if n.endswith(".tmp")], os.listdir(root)
 
 
 
@@ -407,7 +430,7 @@ def test_a_trailing_newline_does_not_sneak_through_a_run_id_or_a_sha():
         pass
     else:
         raise AssertionError("a sha with a newline was accepted")
-    assert os.listdir(root) == ["burn-1.json"], os.listdir(root)
+    assert runs_in(root) == ["burn-1.json"], os.listdir(root)
 
 
 def test_a_slot_budget_that_is_not_a_positive_count_is_refused():
@@ -418,7 +441,7 @@ def test_a_slot_budget_that_is_not_a_positive_count_is_refused():
         except runfile.RunFileError:
             continue
         raise AssertionError(f"accepted slots {bad!r}")
-    assert os.listdir(root) == [], os.listdir(root)
+    assert runs_in(root) == [], os.listdir(root)
 
 
 def test_a_file_that_is_not_a_run_is_refused_rather_than_half_read():
@@ -577,6 +600,117 @@ def test_the_cli_expands_a_tilde_in_the_cache_dir_override():
     assert os.path.isfile(os.path.join(home, "cachedir", "burn-1.json")), \
         sorted(os.listdir(root))
     assert "~" not in os.listdir(root), os.listdir(root)
+
+
+# --- F4: the shape check reaches every field --------------------------------
+
+def test_a_run_file_whose_fields_are_the_wrong_type_is_refused_cleanly():
+    # The guarantee is that an unrecognised run file is refused, and this is
+    # the moment it is load-bearing: a controller recovering from a restart
+    # needs a diagnostic, not a traceback three calls later.
+    root = cache()
+    good = {"run_id": "burn-1", "slots": 2, "controller": "ctl",
+            "clumps": [{"tickets": [901], "workspace": "/w/a",
+                        "agent": "agent-a", "landed": None}]}
+    bad = [
+        ("slots", "2"), ("slots", 0), ("slots", True), ("slots", 1.5),
+        ("controller", 7), ("controller", ""),
+        ("run_id", "burn-2"), ("run_id", 1),
+    ]
+    for key, value in bad:
+        run = json.loads(json.dumps(good))
+        run[key] = value
+        write_run(root, "burn-1", run)
+        try:
+            runfile.load("burn-1", root=root)
+        except runfile.RunFileError as exc:
+            assert "burn-1.json" in str(exc), (key, value, exc)
+            continue
+        raise AssertionError(f"accepted {key}={value!r}")
+
+    for key, value in (("tickets", ["901"]), ("tickets", [0]),
+                       ("workspace", ""), ("workspace", None),
+                       ("agent", 7), ("agent", "  "),
+                       ("landed", "HEAD"), ("landed", 1234567)):
+        run = json.loads(json.dumps(good))
+        run["clumps"][0][key] = value
+        write_run(root, "burn-1", run)
+        try:
+            runfile.load("burn-1", root=root)
+        except runfile.RunFileError:
+            continue
+        raise AssertionError(f"accepted clump {key}={value!r}")
+
+    write_run(root, "burn-1", good)
+    assert runfile.load("burn-1", root=root)["slots"] == 2
+
+
+def test_a_run_file_that_resume_cannot_arithmetic_on_never_reaches_resume():
+    root = cache()
+    write_run(root, "burn-1", {"run_id": "burn-1", "slots": "2",
+                               "controller": None, "clumps": []})
+    try:
+        runfile.resume("burn-1", [], root=root)
+    except runfile.RunFileError as exc:
+        assert "slot budget" in str(exc), exc
+    else:
+        raise AssertionError("resume did arithmetic on a string slot budget")
+
+
+def write_run(root, run_id, run):
+    with open(os.path.join(root, f"{run_id}.json"), "w") as fh:
+        json.dump(run, fh)
+
+
+# --- F3: one writer at a time, enforced ------------------------------------
+
+def test_two_concurrent_writers_do_not_lose_an_update():
+    # Each process holds its critical section open past the other's read, so
+    # without the lock the second replace would write back a run that never
+    # saw the first clump. The delay is what makes this witness the lock
+    # rather than pass on how two processes happen to interleave (the same
+    # device flow/lane's two_concurrent_dispatches test uses).
+    root = cache()
+    cli(root, "start", "burn-1", "--slots", "4")
+    env = {**os.environ, "BURNDOWN_CACHE_DIR": root,
+           "BURNDOWN_RUNFILE_DELAY_MS": "400"}
+    procs = [subprocess.Popen(
+        [sys.executable, RUNFILE, "clump", "burn-1", "--tickets", str(n),
+         "--workspace", f"/w/{n}", "--agent", f"agent-{n}"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        for n in (901, 902, 903)]
+    for proc in procs:
+        out, err = proc.communicate(timeout=60)
+        assert proc.returncode == 0, err
+
+    got = runfile.load("burn-1", root=root)["clumps"]
+    assert [c["tickets"][0] for c in got] == [901, 902, 903], got
+
+
+def test_a_lock_someone_else_holds_times_out_as_a_refusal():
+    root = cache()
+    cli(root, "start", "burn-1", "--slots", "2")
+    lock = runfile.path("burn-1", root=root) + ".lock"
+    fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        # Bounded: a waiter that never gives up would otherwise hang the suite
+        # instead of failing it, which is how this guard regresses unseen.
+        got = subprocess.run(
+            [sys.executable, RUNFILE, "clump", "burn-1", "--tickets", "901",
+             "--workspace", "/w/a", "--agent", "agent-a"],
+            capture_output=True, text=True, timeout=20,
+            env={**os.environ, "BURNDOWN_CACHE_DIR": root,
+                 "BURNDOWN_RUNFILE_LOCK_TIMEOUT": "1"})
+    except subprocess.TimeoutExpired:
+        raise AssertionError("the writer never gave up waiting for the lock")
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    assert got.returncode == 1, got
+    assert "lock" in got.stderr, got.stderr
+    assert "Traceback" not in got.stderr, got.stderr
+    assert runfile.load("burn-1", root=root)["clumps"] == []
 
 
 def main():

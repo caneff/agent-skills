@@ -18,12 +18,18 @@ Why one file per run, why `~/.cache`, why the herdr agent name and why each
 write replaces the file in one step: `references/run-file.md`, which is where
 those reasons live rather than being restated here.
 """
+import contextlib
+import fcntl
 import json
 import os
 import re
 import sys
+import time
 
 CACHE_DIR = "~/.cache/burndown"
+# How long a writer waits for the run file's lock before refusing, matching the
+# `flock -w 30` the dispatch lane already waits with.
+LOCK_TIMEOUT = 30.0
 
 # A run id becomes a filename, so it is letters, digits, dash, dot and
 # underscore, starting with a letter or a digit: a `/` or a `..` would write
@@ -55,6 +61,13 @@ class RunFileError(Exception):
     never a traceback: a resumed controller needs the reason, not a stack."""
 
 
+def slot_budget(slots):
+    """A run's slot budget: a positive count, and not a bool."""
+    if isinstance(slots, bool) or not isinstance(slots, int) or slots < 1:
+        raise RunFileError(f"not a slot budget: {slots!r}")
+    return slots
+
+
 def checked_run_id(run_id):
     if not isinstance(run_id, str) or not _RUN_ID.match(run_id) or ".." in run_id:
         raise RunFileError(f"not a run id: {run_id!r}")
@@ -67,6 +80,50 @@ def cache_root(root=None):
 
 def path(run_id, root=None):
     return os.path.join(cache_root(root), f"{checked_run_id(run_id)}.json")
+
+
+@contextlib.contextmanager
+def locked(run_id, root=None):
+    """Hold the run file's advisory lock across a read-modify-replace. Without
+    it two commands racing both read, both replace, and the second writes back
+    a run that never saw the first — a landing's sha overwritten by a stale
+    `landed: null`, and a resumed controller re-dispatching work that already
+    landed. `flock`, the same lock the dispatch lane waits on.
+
+    The lock lives beside the run file as `<run-id>.json.lock`, because the run
+    file itself does not exist yet when `start` takes the lock."""
+    lock_path = path(run_id, root) + ".lock"
+    timeout = float(os.environ.get("BURNDOWN_RUNFILE_LOCK_TIMEOUT")
+                    or LOCK_TIMEOUT)
+    try:
+        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError as exc:
+        raise RunFileError(f"could not open the lock {lock_path}: {exc}") from exc
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise RunFileError(
+                        f"timed out after {timeout:g}s waiting for the lock "
+                        f"{lock_path} — another writer is holding it") from None
+                time.sleep(0.05)
+        # Only ever set by a test, to hold this critical section open past
+        # another writer's read: nothing else can witness the lock rather than
+        # pass on how two processes happen to interleave.
+        delay = os.environ.get("BURNDOWN_RUNFILE_DELAY_MS")
+        if delay:
+            time.sleep(float(delay) / 1000)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def save(run, root=None):
@@ -130,30 +187,48 @@ def load(run_id, root=None):
         raise RunFileError(
             f"{target} holds clumps as {type(run['clumps']).__name__}, "
             "not a list")
-    for entry in run["clumps"]:
-        if not isinstance(entry, dict):
+    # Every field, not just the keys: a resumed controller meeting a run file
+    # the code no longer recognises needs a diagnostic, and a `slots` that is
+    # a string reaches arithmetic in `reconcile` two calls later.
+    try:
+        if run["run_id"] != run_id:
             raise RunFileError(
-                f"{target} holds a clump as {type(entry).__name__}")
-        absent = [key for key in _CLUMP_KEYS if key not in entry]
-        if absent:
-            raise RunFileError(
-                f"{target} has a clump missing {', '.join(absent)}")
-        if not isinstance(entry["tickets"], list) or not entry["tickets"]:
-            raise RunFileError(f"{target} has a clump with no tickets")
+                f"{target} says it is run {run['run_id']!r}, not {run_id!r}")
+        slot_budget(run["slots"])
+        if run["controller"] is not None:
+            named(run["controller"], "herdr agent name")
+        for entry in run["clumps"]:
+            if not isinstance(entry, dict):
+                raise RunFileError(
+                    f"holds a clump as {type(entry).__name__}")
+            absent = [key for key in _CLUMP_KEYS if key not in entry]
+            if absent:
+                raise RunFileError(f"has a clump missing {', '.join(absent)}")
+            if not isinstance(entry["tickets"], list):
+                raise RunFileError("has a clump whose tickets are not a list")
+            ticket_numbers(entry["tickets"])
+            named(entry["workspace"], "workspace path")
+            named(entry["agent"], "herdr agent name")
+            if entry["landed"] is not None:
+                checked_sha(entry["landed"])
+    except RunFileError as exc:
+        raise RunFileError(f"{target}: {exc}") from None
     return run
 
 
 def start(run_id, slots, controller=None, root=None):
-    if isinstance(slots, bool) or not isinstance(slots, int) or slots < 1:
-        raise RunFileError(f"not a slot budget: {slots!r}")
+    slots = slot_budget(slots)
+    if controller is not None:
+        controller = named(controller, "herdr agent name")
     target = path(run_id, root)
-    if os.path.exists(target):
-        raise RunFileError(
-            f"run {run_id} already has a file at {target} — resume reads it, "
-            "and a second start would wipe it")
-    run = {"run_id": run_id, "slots": slots, "controller": controller,
-           "clumps": []}
-    save(run, root)
+    with locked(run_id, root):
+        if os.path.exists(target):
+            raise RunFileError(
+                f"run {run_id} already has a file at {target} — resume reads "
+                "it, and a second start would wipe it")
+        run = {"run_id": run_id, "slots": slots, "controller": controller,
+               "clumps": []}
+        save(run, root)
     return run
 
 
@@ -191,45 +266,53 @@ def clump(run_id, tickets, workspace, agent, root=None):
     tickets = ticket_numbers(tickets)
     workspace = named(workspace, "workspace path")
     agent = named(agent, "herdr agent name")
-    run = load(run_id, root)
-    same = next((c for c in run["clumps"] if c["tickets"][0] == tickets[0]), None)
-    for other in run["clumps"]:
-        shared = sorted(set(other["tickets"]) & set(tickets))
-        if other is not same and shared:
-            raise RunFileError(
-                f"ticket(s) {', '.join(f'#{n}' for n in shared)} are already "
-                f"in clump #{other['tickets'][0]}")
-    if same:
-        dropped = sorted(set(same["tickets"]) - set(tickets))
-        if dropped:
-            raise RunFileError(
-                f"clump #{tickets[0]} already holds "
-                f"{', '.join(f'#{n}' for n in dropped)} — re-registering may "
-                "grow a clump, never drop a ticket out of the run")
-    entry = {"tickets": tickets, "workspace": workspace, "agent": agent,
-             "landed": same["landed"] if same else None}
-    run["clumps"] = sorted(
-        [c for c in run["clumps"] if c is not same] + [entry],
-        key=lambda c: c["tickets"][0])
-    save(run, root)
+    with locked(run_id, root):
+        run = load(run_id, root)
+        same = next(
+            (c for c in run["clumps"] if c["tickets"][0] == tickets[0]), None)
+        for other in run["clumps"]:
+            shared = sorted(set(other["tickets"]) & set(tickets))
+            if other is not same and shared:
+                raise RunFileError(
+                    f"ticket(s) {', '.join(f'#{n}' for n in shared)} are "
+                    f"already in clump #{other['tickets'][0]}")
+        if same:
+            dropped = sorted(set(same["tickets"]) - set(tickets))
+            if dropped:
+                raise RunFileError(
+                    f"clump #{tickets[0]} already holds "
+                    f"{', '.join(f'#{n}' for n in dropped)} — re-registering "
+                    "may grow a clump, never drop a ticket out of the run")
+        entry = {"tickets": tickets, "workspace": workspace, "agent": agent,
+                 "landed": same["landed"] if same else None}
+        run["clumps"] = sorted(
+            [c for c in run["clumps"] if c is not same] + [entry],
+            key=lambda c: c["tickets"][0])
+        save(run, root)
     return run
+
+
+def checked_sha(sha):
+    if not isinstance(sha, str) or not _SHA.match(sha):
+        raise RunFileError(f"not a squash sha: {sha!r}")
+    return sha
 
 
 def land(run_id, lowest, sha, root=None):
     """Record a clump's squash sha. The sha is final: a second, different one
     is a stale writer, not a correction."""
-    if not isinstance(sha, str) or not _SHA.match(sha):
-        raise RunFileError(f"not a squash sha: {sha!r}")
-    run = load(run_id, root)
-    for entry in run["clumps"]:
-        if entry["tickets"][0] != lowest:
-            continue
-        if entry["landed"] not in (None, sha):
-            raise RunFileError(
-                f"clump #{lowest} already landed at {entry['landed']}")
-        entry["landed"] = sha
-        save(run, root)
-        return run
+    checked_sha(sha)
+    with locked(run_id, root):
+        run = load(run_id, root)
+        for entry in run["clumps"]:
+            if entry["tickets"][0] != lowest:
+                continue
+            if entry["landed"] not in (None, sha):
+                raise RunFileError(
+                    f"clump #{lowest} already landed at {entry['landed']}")
+            entry["landed"] = sha
+            save(run, root)
+            return run
     raise RunFileError(f"run {run_id} has no clump #{lowest}")
 
 
@@ -248,9 +331,14 @@ def reconcile(run, live_agents):
             announce.append(entry)
         else:
             vanished.append(entry)
+    # A vanished clump counts against the budget with the live ones: its
+    # worker may still be holding its tickets, so refilling its slot before
+    # anyone has reconciled it puts a second worker in the same files. Only a
+    # landing frees a slot for certain.
+    held = len(announce) + len(vanished)
     return {"run_id": run["run_id"], "slots": run["slots"],
             "controller": run["controller"],
-            "free": max(0, run["slots"] - len(announce)),
+            "free": max(0, run["slots"] - held), "held": held,
             "announce": announce, "vanished": vanished, "landed": landed}
 
 
@@ -258,10 +346,13 @@ def resume(run_id, live_agents, controller=None, root=None):
     """Read the run back and reconcile it against the live agents. Given the
     controller's current herdr agent name, record it: the address every live
     worker's brief carries is the one the restart just invalidated."""
-    run = load(run_id, root)
-    if controller is not None and controller != run["controller"]:
-        run["controller"] = controller
-        save(run, root)
+    if controller is not None:
+        named(controller, "herdr agent name")
+    with locked(run_id, root):
+        run = load(run_id, root)
+        if controller is not None and controller != run["controller"]:
+            run["controller"] = controller
+            save(run, root)
     return reconcile(run, live_agents)
 
 
@@ -286,7 +377,8 @@ def render_resume(state):
     workers to re-announce itself to, the vanished ones to reconcile by hand,
     and the landings already banked."""
     lines = [f"run {state['run_id']}  slots {state['slots']}  "
-             f"free {state['free']}  controller {state['controller'] or '-'}"]
+             f"held {state['held']}  free {state['free']}  "
+             f"controller {state['controller'] or '-'}"]
     for entry in state["announce"]:
         lines.append(f"re-announce  {entry['agent']}  {tickets_of(entry)}  "
                      f"{entry['workspace']}")
