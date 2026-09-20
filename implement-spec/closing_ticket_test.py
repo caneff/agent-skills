@@ -81,8 +81,12 @@ def test_the_review_is_handed_the_merge_shas_and_no_git_range():
     for sha in SHAS:
         assert sha in got, got
     # `a866bf3..origin/main` held this spec's three squash commits and ~17
-    # unrelated commits from other sessions; the review takes one fixed point.
-    assert ".." not in got.replace("...", ""), got
+    # unrelated commits from other sessions. What must not appear is a range
+    # against the default branch; `../review-spec-366` and the skill's own
+    # `<fixed point>...HEAD` are not that.
+    import re
+    assert "origin/" not in got, got
+    assert not re.search(r"[0-9a-f]{7,40}\.\.[^.]", got), got
 
 
 def test_a_repo_that_declares_no_seam_is_refused():
@@ -250,6 +254,69 @@ def test_the_cli_refuses_an_unanswered_surfaces_question():
         capture_output=True, text=True)
     assert out.returncode != 0, out.stdout
     assert "surface" in (out.stderr + out.stdout), out.stderr
+
+
+def test_the_declaration_outranks_the_exploration_pass():
+    # A declaration an inferred value can silently override is not a
+    # declaration: a stale exploration result would replace the repo's
+    # canonical seam and nothing would say so.
+    try:
+        T.body(repo(), spec=366, shas=SHAS, surfaces=[],
+               seam="`pytest tests/e2e`", blind_to="the browser")
+    except T.SeamError as exc:
+        assert "npm run test:e2e" in str(exc), exc
+        assert "pytest tests/e2e" in str(exc), exc
+        assert "AGENTS.md" in str(exc), exc
+    else:
+        raise AssertionError("an exploration value overrode the declaration")
+
+
+def test_the_exploration_pass_fills_only_what_the_declaration_omits():
+    half = """# Fixture repo
+
+## End-to-end seam
+
+- **Seam**: `npm run test:e2e` over the headless solver bundle
+"""
+    got = T.body(repo(agents=half), spec=366, shas=SHAS, surfaces=[],
+                 blind_to="anything the browser draws")
+    assert "`npm run test:e2e` over the headless solver bundle" in got, got
+    assert "anything the browser draws" in got, got
+
+
+def test_an_exploration_value_equal_to_the_declaration_is_not_a_conflict():
+    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[],
+                 seam="`npm run test:e2e` over the headless solver bundle")
+    assert "`npm run test:e2e` over the headless solver bundle" in got, got
+
+
+def test_the_review_procedure_is_executable_over_the_sha_list():
+    # `/multi-axis-code-review` pins one fixed point and reads
+    # `<fixed point>...HEAD`; it cannot take disjoint commits. A ticket that
+    # says "review these shas" and stops leaves the worker to invent a
+    # range — the shared-`main` failure this criterion exists to prevent.
+    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
+    assert f"git worktree add" in got, got
+    # HEAD is the last of this spec's commits, the fixed point is what the
+    # first one landed on, and the cherry-picks put the rest in between.
+    assert f"/multi-axis-code-review {SHAS[0]}~1" in got, got
+    assert f"git cherry-pick {SHAS[1]}" in got, got
+    assert "origin/main" not in got, got
+
+
+def test_a_single_sha_needs_no_cherry_pick():
+    got = T.body(repo(), spec=366, shas=[SHAS[0]], surfaces=[])
+    assert "git cherry-pick" not in got, got
+    assert f"/multi-axis-code-review {SHAS[0]}~1" in got, got
+
+
+def test_the_procedure_says_how_to_fall_back_and_how_to_tear_down():
+    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
+    # A cherry-pick of a spec's own squash commits usually applies, but a
+    # conflict must not leave the worker inventing a range either.
+    assert "conflict" in got, got
+    assert f"/multi-axis-code-review {SHAS[1]}~1" in got, got
+    assert "git worktree remove" in got, got
 
 
 def main():

@@ -44,7 +44,26 @@ def check(decisions, tickets):
     list, which is what separates "not yet built" from a real contradiction.
     """
     numbers = set(_ticket_numbers(tickets))
-    return [_verdict(_validated(d, numbers)) for d in decisions]
+    out = []
+    for decision in decisions:
+        # Per decision, not per run: raising on the first malformed entry
+        # emitted nothing for any of them, so one stale `built_by` hid every
+        # `differs` behind it — a blind spot in the check whose whole job is
+        # to surface contradictions. An entry the reader cannot classify is
+        # reported as an exploration error and the rest are still read.
+        try:
+            out.append(_verdict(_validated(decision, numbers)))
+        except SpecError as exc:
+            out.append(Result(_label(decision), "error", False,
+                              f"{_label(decision)} EXPLORATION ERROR: {exc}"))
+    return out
+
+
+def _label(decision):
+    """Something to name a decision by, even when it is what is malformed."""
+    if isinstance(decision, dict) and str(decision.get("id") or "").strip():
+        return str(decision["id"]).strip()
+    return "<decision with no id>"
 
 
 def _ticket_numbers(tickets):
@@ -104,6 +123,12 @@ def _verdict(decision):
                   f"{name} unbuilt, no ticket of this spec builds it: {what}{trailer}")
 
 
+def errors(results):
+    """The decisions the reader could not classify. Never silent: an entry
+    dropped here is a decision nobody checked."""
+    return [r for r in results if r.verdict == "error"]
+
+
 def render(results):
     """The exploration summary: every decision one line, escalations last so
     the controller's eye lands on what it must carry to Chris."""
@@ -111,7 +136,12 @@ def render(results):
     lines += [r.line for r in results if r.escalates]
     escalating = sum(1 for r in results if r.escalates)
     noun = "contradiction" if escalating == 1 else "contradictions"
-    lines.append(f"{len(results)} decisions checked, {escalating} {noun} for Chris")
+    tally = f"{len(results)} decisions checked, {escalating} {noun} for Chris"
+    broken = len(errors(results))
+    if broken:
+        tally += (f", {broken} exploration error"
+                  f"{'' if broken == 1 else 's'} to fix and re-run")
+    lines.append(tally)
     return "\n".join(lines)
 
 
@@ -124,12 +154,18 @@ def main(argv):
             payload = json.load(fh)
         if not isinstance(payload, dict):
             raise SpecError("the exploration file is not a JSON object")
-        print(render(check(payload.get("decisions") or [],
-                           payload.get("tickets") or [])))
+        results = check(payload.get("decisions") or [],
+                        payload.get("tickets") or [])
+        print(render(results))
     except (OSError, ValueError, SpecError) as exc:
+        # A malformed file, or a malformed ticket list — the list every
+        # defence is checked against, so nothing below it can be read.
         print(f"contradictions.py: {exc}", file=sys.stderr)
         return 1
-    return 0
+    broken = errors(results)
+    for result in broken:
+        print(f"contradictions.py: {result.line}", file=sys.stderr)
+    return 1 if broken else 0
 
 
 if __name__ == "__main__":

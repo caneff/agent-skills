@@ -93,6 +93,14 @@ check_in "$skill_text" 'list of merge shas' implement-spec/SKILL.md
 # spec-level review's own sentence.
 check_in "$skill_text" 'read off the run file' implement-spec/SKILL.md
 check_in "$skill_text" 'never a git range' implement-spec/SKILL.md
+# And the list is paired with a procedure that can run over it: naming shas
+# and stopping is an instruction `/multi-axis-code-review` cannot carry out.
+check_in "$skill_text" 'pins one fixed point' implement-spec/SKILL.md
+check_in "$closing_text" 'cherry-picked' implement-spec/references/closing-ticket.md
+# The declaration outranks what the pass inferred, or it is not a declaration.
+check_in "$closing_text" 'outranks the exploration pass' implement-spec/references/closing-ticket.md
+# One unreadable decision must not hide the contradictions behind it.
+check_in "$exploration_text" 'per decision' implement-spec/references/exploration.md
 
 # Rule 7: both references are reachable from the skill and carry the evidence
 # their rules came from, so the next reader can weigh them.

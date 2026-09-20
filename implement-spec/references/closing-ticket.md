@@ -21,6 +21,14 @@ seam: the exploration pass supplies both halves instead (`--seam`,
 `--blind-to`), and a spec run that can supply neither has found something
 worth telling the controller before it writes a closing ticket at all.
 
+**The declaration outranks the exploration pass.** The pass fills only what
+the declaration omits, and where both are present and differ the generator
+refuses, naming both. A declaration an inferred value may silently override
+is not a declaration: a stale exploration result would replace the repo's
+canonical seam with nothing said about it. Where the two disagree, either the
+pass is stale or the declaration is wrong, and the repo's own file is where
+the second gets fixed.
+
 Where the declaration belongs is the repo's own `AGENTS.md`, so the answer
 sits where every later reader of that repo — not only this run — will find
 it.
@@ -58,11 +66,25 @@ surface per surface. This is the end-of-spec form of the standing rule that a
 ruling about runtime behaviour is checked against the thing that ships, not
 against a proxy for it.
 
-## The shas, not a range
+## The shas, and the procedure that can actually run over them
 
 The spec-level review is handed the run file's landings as a list. On #781
 the range a reader would reach for — the spec's first slice to
 `origin/main` — held the spec's three squash commits and ~17 unrelated
-commits from other sessions, and `/multi-axis-code-review` takes one fixed
-point. The generator refuses an empty sha list: a closing ticket with nothing
-to review is a review that will be invented at the last minute.
+commits from other sessions.
+
+The list alone is not enough, because `/multi-axis-code-review` pins **one**
+fixed point and reads `<fixed point>...HEAD`: it cannot take disjoint
+commits. A ticket that names the shas and stops states a procedure nothing
+can carry out, and a worker handed one invents the range the list exists to
+prevent. So the generated ticket carries the procedure that builds the
+comparison out of those commits: a detached worktree at the first sha, the
+rest cherry-picked on in landing order, and the review run against
+`<first>~1`, with the worktree removed after. HEAD is then this spec's
+commits and nothing else. Where a cherry-pick conflicts, the fallback is one
+run per sha against its own parent — also written out, because "fall back to
+per-sha" with no commands is the same unexecutable instruction one level
+down.
+
+The generator refuses an empty sha list: a closing ticket with nothing to
+review is a review that will be invented at the last minute.

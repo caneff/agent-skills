@@ -80,10 +80,11 @@ python3 implement-spec/closing_ticket.py <repo-root> <spec> --shas <sha>,<sha> [
 ```
 
 - It names the repo's **end-to-end seam** and **what that seam is blind
-  to** — from the repo's `## End-to-end seam` declaration, or from the
-  exploration pass when the repo declares none. A seam with no stated blind
-  spot is refused: a green run at a seam that has drifted from the shipping
-  surface is the failure this names.
+  to** — from the repo's `## End-to-end seam` declaration, which outranks
+  the exploration pass; the pass fills only what the declaration omits, and
+  where both are present and differ the generator refuses and names both. A
+  seam with no stated blind spot is refused too: a green run at a seam that
+  has drifted from the shipping surface is the failure this names.
 - Where the spec has a **user-visible surface the seam cannot reach**, the
   ticket says so, and its acceptance carries **one open of the real thing**
   for each — checked in the shipping surface, not in the seam.
@@ -93,9 +94,14 @@ The declaration grammar and the evidence:
 
 ## The spec-level review
 
-The closing ticket hands `/multi-axis-code-review` the **list of merge
-shas** — this run's landings, read off the run file — and **never a git
-range**. `/multi-axis-code-review` takes one fixed point, and on a shared
+The closing ticket hands the review the **list of merge shas** — this run's
+landings, read off the run file — and **never a git range**. On a shared
 default branch the obvious range holds every other session's work: the #781
 spec run's three squash commits sat in a range with ~17 commits nobody in
-that spec wrote. The review reads exactly the listed commits.
+that spec wrote.
+
+`/multi-axis-code-review` pins one fixed point, so the list alone is not a
+procedure it can run. The generated ticket carries the one that builds the
+comparison out of those commits — a detached worktree, the rest cherry-picked
+on, the review against the first sha's parent — so that the worker is never
+left inventing the range this replaces.

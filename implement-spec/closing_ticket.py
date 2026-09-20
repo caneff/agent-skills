@@ -66,9 +66,16 @@ def declaration(text):
 
 
 def seam_of(root, seam=None, blind_to=None):
-    """The repo's declared seam and blind spot, with the exploration pass's
-    own answers taking precedence — a repo that declares nothing still has a
-    seam once the pass has found one. Refuses when either half is missing."""
+    """The repo's declared seam and blind spot.
+
+    **The declaration wins.** The exploration pass fills only what the
+    declaration omits — a repo that declares nothing still has a seam once
+    the pass has found one — and where both are present and differ, this
+    refuses and names them both. A declaration an inferred value may silently
+    override is not a declaration, and a stale exploration result would
+    replace the repo's canonical answer with nothing said. Refuses when
+    either half is missing from both sources.
+    """
     if not os.path.isdir(root):
         # Distinct from a repo that declares nothing: a typo'd root reported
         # as a policy gap sends the reader to edit an `AGENTS.md` that was
@@ -82,8 +89,8 @@ def seam_of(root, seam=None, blind_to=None):
             found = declaration(fh.read()) or {}
     except OSError:
         found = {}
-    seam = (seam or found.get("seam") or "").strip()
-    blind_to = (blind_to or found.get("blind to") or "").strip()
+    seam = _settled("**Seam**", root, found.get("seam"), seam)
+    blind_to = _settled("**Blind to**", root, found.get("blind to"), blind_to)
     if not seam:
         raise SeamError(
             f"{root} declares no `## End-to-end seam` section and the "
@@ -96,6 +103,74 @@ def seam_of(root, seam=None, blind_to=None):
             "that same spec; a seam with no stated blind spot sends the "
             "closing worker at it anyway")
     return seam, blind_to
+
+
+def _review_procedure(spec, shas):
+    """How to run the spec-level review over a list of commits.
+
+    `/multi-axis-code-review` pins **one** fixed point and reads
+    `<fixed point>...HEAD`, so it cannot take disjoint commits. A ticket that
+    names the shas and stops states a procedure nothing can carry out, and
+    the worker falls back to inventing a range on a shared default branch —
+    which is the failure the sha list exists to prevent. So the comparison is
+    **built** first, out of the shas themselves.
+    """
+    first, rest = shas[0], shas[1:]
+    tree = f"../review-spec-{spec}"
+    lines = [
+        "`/multi-axis-code-review` takes one fixed point and reads",
+        "`<fixed point>...HEAD`, so build the comparison out of those commits",
+        "first — never a range on the default branch, which carries every",
+        "other session's work:",
+        "",
+        "```",
+        f"git worktree add {tree} --detach {first}",
+        f"cd {tree}",
+    ]
+    lines += [f"git cherry-pick {sha}" for sha in rest]
+    lines += [
+        f"/multi-axis-code-review {first}~1",
+        f"git worktree remove {tree}",
+        "```",
+        "",
+        f"HEAD is then this spec's commits and nothing else, and `{first}~1` "
+        "is what",
+        "the first of them landed on.",
+    ]
+    if rest:
+        lines += [
+            "",
+            "Where a cherry-pick **conflicts** — the spec's own squash commits "
+            "usually",
+            "apply clean, but a spec that rewrote its own work may not — abort "
+            "it and",
+            "review the commits one at a time instead, each against its own "
+            "parent:",
+            "",
+            "```",
+            "git cherry-pick --abort",
+        ]
+        for sha in shas:
+            lines += [f"git worktree add ../review-{sha[:7]} --detach {sha}",
+                      f"cd ../review-{sha[:7]} && /multi-axis-code-review {sha}~1",
+                      f"cd - && git worktree remove ../review-{sha[:7]}"]
+        lines.append("```")
+    return "\n".join(lines)
+
+
+def _settled(key, root, declared, explored):
+    """One half of the seam: the declaration where there is one, and the
+    exploration pass's answer only where there is not."""
+    declared = (declared or "").strip()
+    explored = (explored or "").strip()
+    if declared and explored and declared != explored:
+        raise SeamError(
+            f"{key}: {os.path.join(root, 'AGENTS.md')} declares "
+            f"{declared!r} and the exploration pass supplied {explored!r}. "
+            "The declaration is authoritative, so this is not a value to "
+            "pick between: either the pass is stale, or the declaration is "
+            "wrong and the repo's own file is where that gets fixed")
+    return declared or explored
 
 
 def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):
@@ -137,9 +212,10 @@ def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):
         lines += [f"- {s}" for s in surfaces]
         lines.append("")
     lines += ["## The spec-level review", "",
-              "`/multi-axis-code-review` over this spec's merge commits — the "
-              "list below, from the run file, not a git range:", ""]
+              "This spec's merge commits, from the run file, in landing "
+              "order:", ""]
     lines += [f"- `{sha}`" for sha in shas]
+    lines += ["", _review_procedure(spec, shas)]
     lines += ["", "## Acceptance criteria", "",
               "- [ ] One end-to-end test drives the whole spec's acceptance "
               f"criteria at the seam above, and lives where `{seam}` runs it",

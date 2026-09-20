@@ -28,12 +28,21 @@ against Chris's attention.
 | does not have it | yes | `not-yet-built` | no — a summary line naming that ticket |
 | does not have it | no | `unbuilt` | no — a summary line, a gap in the slicing |
 | does it as decided | — | `consistent` | no |
+| — (the entry cannot be read) | — | `error` | no — an exploration error to fix and re-run |
 
 A `built_by` naming a ticket **outside** this spec is refused outright rather
 than read either way: the whole defence is that *this spec* closes the gap
 before it ships. Read as a defence it would excuse real drift; read as a
 contradiction it would escalate a typo. Neither is an answer a reader may
 pick on its own, so it fails closed and the pass says which decision it was.
+
+Both refusals are **per decision**, never per run: the reader reports the
+entry it cannot classify as an `error` line and goes on reading the rest.
+Raising on the first one emitted nothing for any of them, so a single stale
+`built_by` hid every `differs` behind it — a blind spot in the check whose
+whole job is to surface contradictions. The one refusal that still stops
+everything is a malformed **ticket list**, since that is what every defence
+is checked against.
 
 An unknown `found` value fails closed for the same reason — a reader that
 guesses at a spelling it does not know is a reader that can call a

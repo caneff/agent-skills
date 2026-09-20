@@ -93,26 +93,39 @@ def test_the_summary_counts_what_the_controller_must_carry_to_chris():
     assert out.splitlines()[-2].startswith("D2 CONTRADICTED"), out
 
 
-def test_a_decision_built_by_a_ticket_outside_this_spec_is_refused():
+def test_a_decision_built_by_a_ticket_outside_this_spec_is_an_error():
     # The defence is "a ticket of *this spec* closes the gap before it ships".
     # A number from somewhere else is not that, and guessing which way to read
-    # it either excuses real drift or escalates noise.
+    # it either excuses real drift or escalates noise — so it is neither
+    # verdict, it is an error against that decision.
     stranger = {**BUILT_BY_A_SLICE, "built_by": 999}
-    try:
-        C.check([stranger], TICKETS)
-    except C.SpecError as exc:
-        assert "#999" in str(exc) and "not a ticket of this spec" in str(exc), exc
-    else:
-        raise AssertionError("a built_by outside the spec was accepted")
+    got = C.check([stranger], TICKETS)
+    assert [r.verdict for r in got] == ["error"], got
+    assert [r.escalates for r in got] == [False], got
+    assert "#999" in got[0].line and "not a ticket of this spec" in got[0].line, got
 
 
-def test_an_unknown_found_value_is_refused():
-    try:
-        C.check([{**BUILT_BY_A_SLICE, "found": "CONTRADICTED"}], TICKETS)
-    except C.SpecError as exc:
-        assert "found is" in str(exc), exc
-    else:
-        raise AssertionError("an unknown `found` value was accepted")
+def test_an_unknown_found_value_is_an_error():
+    got = C.check([{**BUILT_BY_A_SLICE, "found": "CONTRADICTED"}], TICKETS)
+    assert [r.verdict for r in got] == ["error"], got
+    assert "found is" in got[0].line, got
+
+
+def test_one_malformed_decision_does_not_hide_a_real_contradiction():
+    # The check's whole job is to surface a contradiction. Raising on the
+    # first bad `built_by` emitted nothing for anything, so one stale entry
+    # blinded the pass to every `differs` behind it.
+    stranger = {**BUILT_BY_A_SLICE, "built_by": 999}
+    got = C.check([stranger, IMPLEMENTED_DIFFERENTLY, NOT_IN_THE_CODE], TICKETS)
+    assert [r.verdict for r in got] == ["error", "contradicted", "unbuilt"], got
+    assert [r.id for r in got if r.escalates] == ["D2"], got
+
+
+def test_the_summary_counts_the_errors_beside_the_contradictions():
+    stranger = {**BUILT_BY_A_SLICE, "built_by": 999}
+    out = C.render(C.check([stranger, IMPLEMENTED_DIFFERENTLY], TICKETS))
+    assert "1 exploration error" in out, out
+    assert "1 contradiction for Chris" in out, out
 
 
 def test_the_cli_reads_an_exploration_file_and_prints_the_summary():
@@ -138,7 +151,8 @@ def test_the_cli_fails_loud_on_a_malformed_exploration_file():
     import json
     import subprocess
     import tempfile
-    payload = {"tickets": TICKETS, "decisions": [{"id": "D9"}]}
+    payload = {"tickets": TICKETS,
+               "decisions": [{"id": "D9"}, IMPLEMENTED_DIFFERENTLY]}
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
         json.dump(payload, fh)
         path = fh.name
