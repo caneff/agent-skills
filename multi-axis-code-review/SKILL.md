@@ -362,19 +362,26 @@ mutate() { :; }   # <$1 the id, $2 the witness worktree, $3 a marker path: strip
 # the wrapper shell around it. An interrupted run may print a job notice.
 set -m
 top=$(git -C "$worktree" rev-parse --show-toplevel) || exit 1
-# An empty list is a failed enumeration upstream, not a clean check: both loops
+# Split into an array with pathname expansion OFF, and use that array from here
+# on. An unquoted `$ids` expands before any validation can see it, so `ids='*'`
+# becomes the checkout's filenames - each of which passes the character check
+# below - and the run mutates a set nobody asked for while omitting the id that
+# was actually requested.
+set -f
+mutations=( $ids )
+set +f
+# An empty list is a failed enumeration upstream, not a clean check: every loop
 # below would run zero times, cleanup would succeed, and the run would report
 # success having witnessed nothing. Refused before anything is created.
-case "$ids" in
-  *[![:space:]]*) ;;
-  *) echo "witness check: no mutations supplied - nothing was checked" >&2; exit 2;;
-esac
+if [ "${#mutations[@]}" -eq 0 ]; then
+  echo "witness check: no mutations supplied - nothing was checked" >&2; exit 2
+fi
 # An id names a directory and an output file, so it is checked before anything
 # exists: a pytest nodeid (`tests/a.py::t1[x]`) would put a mutation's output
 # file inside its own worktree and break the per-id prefixing below. Refused by
 # name — map the test to a short id and report the mapping — never mangled.
 seen=" "
-for id in $ids; do
+for id in "${mutations[@]}"; do
   case "$id" in ''|*[!A-Za-z0-9._-]*)
     echo "witness check: '$id' is not usable as a mutation id (letters, digits, . - _)" >&2; exit 2;;
   esac
@@ -457,7 +464,7 @@ show() {
        tail -25 "$root/output/$1"
   fi 2>/dev/null | awk -v p="  $1| " '{print p $0}'
 }
-for id in $ids; do
+for id in "${mutations[@]}"; do
   while [ "$(jobs -pr | wc -l)" -ge "$slots" ]; do wait -n; done
   witness="$root/worktrees/$id"
   if ! git -C "$worktree" worktree add --detach -q "$witness" HEAD; then
@@ -471,17 +478,21 @@ for id in $ids; do
     printf '%s\n' "$?" >"$root/status/$id"; } &
 done
 wait
-for id in $ids; do
-  # The marker first, and it outranks both the status and the output: a wrapper
-  # that dies before the covering suite - a missing test path, a denied command -
-  # exits nonzero and writes an error, and every proxy for "the suite ran" short
-  # of the marker reads that as an assertion witnessed. Class 1, one layer out
-  # from the branch that exists to stop it.
+for id in "${mutations[@]}"; do
+  # The marker says the wrapper reached the line before the covering suite - a
+  # wrapper that dies earlier (a missing test path, a denied command) exits
+  # nonzero and writes an error, and without this that reads as an assertion
+  # witnessed.
   if [ ! -e "$root/ran/$id" ]; then
     printf '%s: unknown — it never reached its covering suite, whatever it exited with\n' "$id"
     continue
   fi
+  # 126 and 127 are the kernel answering directly: the command was not
+  # executable, or was not found, so it never started. The marker cannot know
+  # that - it is written on the line before - and every proxy for "the suite
+  # ran" is a proxy. Where a real answer exists, take it instead of inferring.
   case "$(cat "$root/status/$id" 2>/dev/null)" in
+    126|127) printf '%s: unknown — its covering suite command never executed (not found, or not executable)\n' "$id" ;;
     0) printf '%s: HOLLOW — the assertion still passed with its constraint stripped\n' "$id" ;;
     [1-9]*) printf '%s: red — its own message follows; confirm it is your assertion, not a missing file or a denied path\n' "$id"
             show "$id" ;;

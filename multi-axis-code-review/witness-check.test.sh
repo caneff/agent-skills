@@ -583,6 +583,51 @@ elif ! grep -q 'no mutations supplied' "$scratch/empty.out"; then
   fail=1
 fi
 
+# The marker proves the wrapper reached the line before the suite, not that the
+# suite started. A command that does not exist writes the marker, exits 127, and
+# without the kernel's own answer being read that is a red whose failure message
+# is "command not found" — the same unreached-suite defect, one line further on.
+substitute 'e1' ": >\"\$3\"; /nonexistent/covering-suite" >"$scratch/recipe-noexec.sh"
+( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-noexec.sh" ) \
+  >"$scratch/noexec.out" 2>&1 || true
+if ! grep -i 'unknown' "$scratch/noexec.out" | grep -q 'e1'; then
+  echo "FAIL: a marked mutation whose suite command never executed was not reported as unknown" >&2
+  cat "$scratch/noexec.out" >&2
+  fail=1
+fi
+if grep -q 'e1: red' "$scratch/noexec.out"; then
+  echo "FAIL: a command-not-found was reported as a red with its own failure message" >&2
+  cat "$scratch/noexec.out" >&2
+  fail=1
+fi
+
+# `ids='*'` must not expand before validation: unquoted, it becomes the
+# checkout's filenames, every one of which passes the character check, and the
+# run mutates a set nobody asked for while omitting the requested id.
+substitute '*' ": >\"\$3\"; echo \"MUTANT-\$1\"; exit 1" >"$scratch/recipe-glob.sh"
+if ( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-glob.sh" ) \
+     >"$scratch/glob.out" 2>&1; then
+  echo "FAIL: ids='*' was accepted" >&2
+  cat "$scratch/glob.out" >&2
+  fail=1
+fi
+if grep -q 'MUTANT-' "$scratch/glob.out"; then
+  echo "FAIL: ids='*' expanded to the checkout's files and mutated them" >&2
+  cat "$scratch/glob.out" >&2
+  fail=1
+fi
+if ! grep -q 'not usable as a mutation id' "$scratch/glob.out"; then
+  echo "FAIL: ids='*' was rejected for some reason other than the id check" >&2
+  cat "$scratch/glob.out" >&2
+  fail=1
+fi
+trees_glob="$(git -C "$repo" worktree list | wc -l)"
+if [ "$trees_glob" -ne 2 ]; then
+  echo "FAIL: the ids='*' run created $trees_glob worktrees, not the fixture's 2" >&2
+  git -C "$repo" worktree list >&2
+  fail=1
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "PASS multi-axis-code-review/witness-check.test.sh"
 else
