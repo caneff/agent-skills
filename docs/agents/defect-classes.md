@@ -28,8 +28,8 @@ success have been produced by the thing not running at all?**
   string became a set of its characters and intersected no real path set:
   the clump read as colliding with nobody.
 - `#894` — `--declared` defaulted to `""`, so a missing core declaration was
-  charged as zero cores. One layer up, the same skill's § Liveness says in
-  words: *silence is not zero*.
+  charged as zero cores. One layer up, the same skill's Liveness section
+  says it in words: *silence is not zero*.
 - `#897` — one invalid `built_by` raised on the first entry, so a single
   malformed decision suppressed every real contradiction.
 - `#899` — the lane sweep discarded `grep`'s exit status: a tree with 380
@@ -39,8 +39,8 @@ success have been produced by the thing not running at all?**
   passed with all three modules deleted.
 - `#937` — the capture guard tested for *absence* when the hazard was
   *wrongness*: a replaced-but-non-empty patch read as valid.
-- `#944` — the § cross-reference gate prints real misses and exits 0, so
-  `tests/all.sh` counts it green.
+- `#944` — the cross-reference gate for section headings prints real misses
+  and exits 0, so `tests/all.sh` counts it green.
 - `#946` — an unreadable ignored directory could read as "holds nothing",
   which would approve a destructive removal on a permission error.
 - `#950` — the retry that runs *because* the early pass degraded was the one
