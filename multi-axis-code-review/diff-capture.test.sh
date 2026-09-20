@@ -82,16 +82,15 @@ check_in "$reviewer_text" 'say in your report that you did' flow/claude/agents/d
 # looks exactly like a patch that ended there.
 check_in "$reviewer_text" 'read it to the end' flow/claude/agents/diff-reviewer.md
 
-# Rule 4: what #937 ruled out of scope stays put — the axes are Opus and the
-# witness check survives. This ticket removes duplicated I/O, not review.
+# Rule 4: what #937 ruled out of scope stays put — the axes are Opus. This
+# ticket removes duplicated I/O, not review.
+# That the witness check survives, and which single axis owns it since #938,
+# is witness-check.test.sh's `-ne 1` count over this same § 4 extraction and
+# this same reviewer file; it strictly implies anything this suite could say
+# about it, so this suite says nothing. Two suites, one claim, is the thing
+# the standing brief calls a finding reported twice.
 check_in "$reviewer_text" 'model: opus' flow/claude/agents/diff-reviewer.md
-check_in "$reviewer_text" 'strip the constraint under test' flow/claude/agents/diff-reviewer.md
 check_in "$skill_text" 'Pass `model: opus` to all three' multi-axis-code-review/SKILL.md
-witness="$(printf '%s\n' "$spawn" | grep -cF 'strip the constraint under test' || true)"
-if [ "$witness" -ne 2 ]; then
-  echo "FAIL: § 4 states the witness check in $witness axis briefs, not 2" >&2
-  fail=1
-fi
 
 # Rule 5 (PR #943 round 2): run the documented block itself, twice, for the
 # same issue number at two distinct revisions, and prove the second capture

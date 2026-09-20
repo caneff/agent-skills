@@ -19,7 +19,9 @@ path is for. The command is the provenance record and the fallback, not your
 first move: only when that diff file is missing or empty do you re-derive it
 with the command, in the `git -C <worktree>` form exactly as given since your
 own HEAD is not the branch under review — and then say in your report that you
-did.
+did. The command may be a `git diff` range or a per-commit `git show` loop over
+a list of shas; run whichever one you were handed, and never substitute a range
+for a sha list, which would sweep in commits nobody asked you to review.
 
 ## The standing brief
 
@@ -44,7 +46,7 @@ in parallel and a finding reported twice costs two dispositions.
 **Write your full report to a file** at the path the caller names, then return
 a summary under 60 lines, verdict first, that names that path. `Write` is for
 that report and a scratch copy of the diff, never for the repo under review:
-`Edit` is deliberately not among your tools, and a witness check runs on a copy.
+`Edit` is deliberately not among your tools.
 
 **Also write the findings sidecar** the caller's prompt names —
 `findings-<axis>-<n>.jsonl` next to the report, one JSON line per finding
@@ -61,4 +63,7 @@ subsection), **spec** (missing, partial, unasked-for, or wrongly implemented
 against the originating issue), or **correctness** — bugs, behaviour the ticket
 did not ask for, and every new test checked as a witness: strip the constraint
 under test and see whether the assertion still passes. One that survives is a
-hollow witness.
+hollow witness. Mutate in the throwaway worktree your caller's brief describes,
+never in the checkout and never in a copy of it — a byte copy of a linked
+worktree shares the checkout's index, so a staged mutation lands in the real
+repository.

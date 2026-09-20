@@ -1,9 +1,10 @@
 ---
 name: multi-axis-code-review
-description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along three axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the over-engineering lens?), Spec (does the code match what the originating issue/spec asked for?) and Correctness (how does it fail in the field, and does every new test actually witness its claim?). Runs the three reviews in parallel sub-agents, waits for all of them, and reports every finding side by side. It replaces the built-in `/code-review` in the implement lane. Use when the user wants a branch, PR, or work-in-progress diff checked against its spec, the repo's standards, and runtime failure.
+description: Review the changes since a fixed point (commit, branch, tag, or merge-base) — or the union of a list of landed shas — along three axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the over-engineering lens?), Spec (does the code match what the originating issue/spec asked for?) and Correctness (how does it fail in the field, and does every new test actually witness its claim?). Runs the three reviews in parallel sub-agents, waits for all of them, and reports every finding side by side. It replaces the built-in `/code-review` in the implement lane. Use when the user wants a branch, PR, or work-in-progress diff checked against its spec, the repo's standards, and runtime failure.
 ---
 
-Review of the diff between `HEAD` and a fixed point the user supplies, along
+Review of the diff between `HEAD` and a fixed point the user supplies — or of
+the union of a list of landed shas (§ Sha-list mode) — along
 three axes (it was two until #732; callers still saying "two-axis" mean this):
 
 - **Standards** — does the code conform to this repo's documented coding standards?
@@ -16,9 +17,17 @@ The issue tracker should have been provided to you — run `/setup-matt-pocock-s
 
 ## Process
 
-### 1. Pin the fixed point
+### 1. Pin the fixed point, or take the sha list
 
-Whatever the user said is the fixed point — a commit SHA, branch name, tag, `HEAD~5`, etc. If they gave one, use it as-is and skip straight to capturing the diff command below.
+**Which input is this?** Decide before anything else. A list of commits *to
+review* — one sha or twenty — is sha-list mode (below), never a fixed point.
+Take that branch first, because a single named commit reads as both and the two
+answers differ: as a fixed point it means everything that landed *after* that
+commit, as a one-element list it means that commit's own first-parent diff. A
+list means the second, whatever its length, and a list of one is the shape a
+caller reaches for first — after a single squash-merge.
+
+Otherwise, whatever the user said is the fixed point — a commit SHA, branch name, tag, `HEAD~5`, etc. If they gave one, use it as-is and skip straight to capturing the diff command below.
 
 If they didn't specify one, don't default to the local default branch — in a long-lived worktree it can sit far behind the remote, and a diff against it pulls in commits that were already squash-merged upstream, producing findings on code that isn't part of this change. Instead, resolve the fixed point fresh:
 
@@ -39,6 +48,52 @@ Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so th
 The diff *itself* is captured to a file in step 4, where the report directory and the issue number are both known; the command keeps its place in every prompt as the provenance record and the fallback.
 
 Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here — not inside three parallel sub-agents.
+
+#### Sha-list mode
+
+When the caller names **commits** rather than a fixed point — N landed shas,
+not necessarily contiguous — this is **sha-list mode**, and there is no fixed
+point to pin. Take it whenever the request is a list of commits; never pick one
+of them as a fixed point and build a range around it. That invention is the
+failure the mode exists to prevent (#932): #897's closing ticket hands the
+spec-level review a sha list precisely so a review on a shared `main` cannot
+sweep in other people's merged work.
+
+**What the three-dot semantics become.** Three-dot exists to compare against
+the merge-base, so commits that landed on the base after the fork point stay
+out of the diff. With no single fixed point there is no merge-base to take, so
+the list does that job instead, and more narrowly: each named commit is read
+against **its own first parent**, and the capture is those per-commit diffs
+concatenated, oldest first. A commit nobody named cannot appear, however it is
+interleaved — which is a tighter guarantee than three-dot gives, since
+three-dot still carries everything on the branch side of the fork point. The
+two-dot form is what the mode is a defence against: in the #888 Codex trial one
+two-dot comparison read 18 files and 1080 deletions of other people's merged
+work, against 2 files and 37 insertions three-dot.
+
+The axes read the union as **one change**. A file two named commits both touch
+appears twice in the capture; that is the same file edited in sequence, not two
+conflicting versions of it, and the oldest-first order is what makes it read
+that way.
+
+The union is a **set of changes, not a final-state diff**. The last hunk set
+for a file is that commit's change to it, not the file as it now stands, and
+nothing in the capture shows the final state of a file two named commits
+touched. An axis that reads the last hunk set as "the change to this file"
+reviews an intermediate — the same shape of misread as #937's
+replaced-but-non-empty patch: readable, plausible, and not what the reader
+thinks it is. Say so in the prompt alongside the capture path.
+
+**Every malformed list refuses by name.** An empty list, a sha that does not
+resolve here, a merge commit (no single parent diff to take — name the commits
+it merged instead), and a named commit that changes no files each stop the
+review with a message saying which. None of them may reach the axes as "no
+changes found": a review that silently found nothing is indistinguishable from
+a clean one.
+
+The capture block is in § 4; the rest of this skill is unchanged — step 2 reads
+the spec off the named commits' messages, and steps 3 to 5 do not know which
+mode produced the patch.
 
 ### 2. Identify the spec source
 
@@ -163,6 +218,56 @@ invocation the exact path the block printed, never a pattern. More files, not
 more lifetime — the 14-day sweep above collects them under this key the same
 way.
 
+**Sha-list mode captures the union** (§ 1). Run the `$dir` preamble above
+first — same directory, same 14-day sweep — then this block instead of the
+`git diff` one. § 1 has the semantics; what is specific to the block is the
+key — a digest of the resolved list rather than a single `HEAD`, since there is
+no single revision under review:
+
+```
+: "${dir:?sha-list review: run the report-directory preamble above first}"
+n=<issue number from step 2, or the branch name>
+worktree=<the worktree under review>
+set -- <the commits the caller named, space-separated>
+[ "$#" -gt 0 ] || { echo "sha-list review: the commit list is empty" >&2; exit 1; }
+resolved=""
+for s in "$@"; do
+  full=$(git -C "$worktree" rev-parse --verify --quiet "$s^{commit}") || {
+    echo "sha-list review: '$s' does not resolve to a commit here" >&2; exit 1; }
+  if git -C "$worktree" rev-parse --verify --quiet "$full^2" >/dev/null; then
+    echo "sha-list review: $full is a merge commit — name the commits it merged" >&2; exit 1
+  fi
+  resolved="$resolved $full"
+done
+# Oldest first, by ancestor count: an ancestor always reaches strictly fewer
+# commits than its descendant, so a file two named commits both touch reads in
+# apply order. Not commit date — two commits landed in the same second sort
+# arbitrarily by it, and a test repo builds them all in one. Unrelated commits
+# with equal counts tie-break on the sha, so the order is at least stable. The
+# awk dedupes, so a sha named twice contributes one diff.
+ordered=$(for s in $resolved; do
+    printf '%s %s\n' "$(git -C "$worktree" rev-list --count "$s")" "$s"
+  done | sort -n -k1,1 -k2,2 | awk '!seen[$2]++ {print $2}')
+key=$(printf '%s\n' "$ordered" | git -C "$worktree" hash-object --stdin | cut -c1-12)
+patch="$dir/diff-$n-list$key-$$.patch"   # list digest plus nonce, as above
+tmp=$(mktemp "$dir/.diff-$n.XXXXXX") || exit 1
+for s in $ordered; do
+  one=$(git -C "$worktree" show --format='commit %H%n%n    %s%n' --patch "$s") || {
+    rm -f "$tmp"; echo "sha-list review: could not read $s" >&2; exit 1; }
+  printf '%s\n' "$one" | grep -q '^diff --git ' || {
+    rm -f "$tmp"; echo "sha-list review: $s changes no files" >&2; exit 1; }
+  printf '%s\n' "$one" >>"$tmp"
+done
+[ -s "$tmp" ] || { rm -f "$tmp"; echo "sha-list review: the capture is empty" >&2; exit 1; }
+mv "$tmp" "$patch"                       # atomic publish, as above
+wc -l "$patch"                           # this exact path and this count go in every prompt
+```
+
+In this mode the provenance every axis prompt carries is **this per-commit
+`git show` loop and the resolved list**, not a `git diff` range — a range is
+the thing the mode refuses to invent, and an axis handed one would re-derive
+the contaminated diff the moment its file went missing.
+
 The command stays in the prompt as the provenance record and as the fallback:
 an axis whose diff file is missing or empty re-derives with it and says so in
 its report, rather than reviewing nothing.
@@ -173,19 +278,74 @@ If the completion notification comes back missing or empty, read that file befor
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The list of standards-source files you found in step 3, and the settled decisions. The smell baseline and the over-engineering lens are the agent definition's to read from § 3; paste them only in the no-definition fallback above.
-- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. For any test in the diff that claims to prove a behaviour, check the verdict depends on it — strip the constraint under test and see whether the assertion still passes; one that survives is a hollow witness, flag it. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the over-engineering lens over the diff and list what to cut, one line each in `location: <tag> <what>. <replacement>.` form using the five tags. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Under 550 words."
+- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Check `docs/agents/defect-classes.md` by name — the three shapes this repo keeps shipping, with every instance. Skip anything tooling enforces, and skip the hollow-witness check — the correctness axis owns it (#938), and two opus agents mutating the same tests over the same diff cost two dispositions for one finding. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the over-engineering lens over the diff and list what to cut, one line each in `location: <tag> <what>. <replacement>.` form using the five tags. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Under 550 words."
 
 **Spec sub-agent prompt** — include:
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec, and the settled decisions.
-- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Under 400 words."
+- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Check `docs/agents/defect-classes.md` by name. Under 400 words."
 
 **Correctness sub-agent prompt** — include:
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec if there is one (so "behaviour the ticket did not ask for" has a referent), the test command the repo uses, and the settled decisions.
-- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it (do it on a scratch copy of the tree outside the checkout, made with Bash; the checkout is left exactly as found). Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
+- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) `docs/agents/defect-classes.md` checked by name, class 1 (an absent or malformed answer read as a benign one) and class 3 (a test that passes for a reason other than the one it claims) especially, since you own the witness check; (d) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it — and when a mutation goes red, read the message and confirm the failure is your assertion and not a missing file or a denied path, which is class 3 again. Isolate the mutation in a throwaway worktree — `git worktree add --detach <a path outside the checkout> HEAD`, removed afterwards with `git worktree remove --force` — and never in a copy of the tree, which on a linked worktree shares the checkout's own index. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. The checkout is left exactly as found. Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
+
+**What the witness check costs, and what actually isolates it** (#939). The
+check itself is the most valuable thing a review does — the `paths()` fail-open
+in #893, the zero-cores default in #894 and the suppressed contradictions in
+#897 all came out of it in one day. Neither line below runs it less.
+
+*Isolation.* `git worktree add` a throwaway worktree. **Never `cp -a`**, or any
+other byte copy of the reviewed tree: a linked worktree's `.git` is a *file
+holding a gitdir pointer*, not a directory, so a copy of one still points at
+the original's gitdir and shares its index, HEAD and refs. Reviews in this lane
+always run on a linked worktree, so the copy is not weaker isolation — it is
+none. On 2026-09-20 a worker followed the wording this replaces, copied its
+tree with `cp -a`, and two `git rm --cached` runs inside the "isolated" copy
+staged deletions in the real checkout's index; it noticed only because those
+two mutations happened to be staged ones. A worktree has its own index and
+HEAD, so the same command cannot reach the checkout, and `git clone
+--no-hardlinks` is the other safe answer. Sharing the object store also costs
+no copy of the 419 MB / 529 tracked files this repo carries. `HEAD` is the
+revision the captured diff ends at, so the mutation lands on exactly the code
+under review:
+
+```
+worktree=<the worktree under review>
+top=$(git -C "$worktree" rev-parse --show-toplevel) || exit 1
+witness=$(mktemp -d)/witness
+# Checked, not assumed: a TMPDIR under the reviewed tree would put the
+# throwaway worktree inside the checkout, and that untracked directory then
+# blocks `git worktree remove` and `ship` long after the review reported green.
+case "$witness" in "$top"/*)
+  echo "witness check: TMPDIR is inside the checkout ($witness)" >&2; exit 1;;
+esac
+git -C "$worktree" worktree add --detach -q "$witness" HEAD || exit 1
+# The trap goes on immediately, because a witness check that WORKS makes the
+# covering suite fail — that failure is the whole point, and it is the
+# ordinary outcome, not the exceptional one. Cleaning up only where the suite
+# passes leaves a registered worktree behind on nearly every check, and they
+# accumulate across reviews.
+trap 'git -C "$worktree" worktree remove --force "$witness" 2>/dev/null
+      rmdir "$(dirname "$witness")" 2>/dev/null' EXIT
+# <strip the constraint in "$witness", then run only the suite that covers it>
+git -C "$worktree" worktree remove --force "$witness" || exit 1
+rmdir "$(dirname "$witness")"
+trap - EXIT
+```
+
+`git worktree remove`, never `rm -rf`: a directory deleted out from under the
+registration leaves a stale entry that stalls the next `worktree remove` and
+any later `merge-cleanup` on this repo.
+
+*Scope.* Re-run the suite that covers the mutated test — the file it lives in,
+run the way `tests/all.sh` would run it (`bash <name>.test.sh`, `python3
+<name>_test.py`) — not the whole gate. `bash tests/all.sh` is 2m51s wall over
+62 suites here, so a diff adding five tests would pay it five times inside one
+axis, while the covering suite finishes in seconds. The whole gate belongs to
+the worker's own pre-report gate, where it already runs once.
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report. The Correctness sub-agent still runs; replace its part (b) with "(b) say 'no spec available'".
 
