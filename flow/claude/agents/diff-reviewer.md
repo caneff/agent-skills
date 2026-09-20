@@ -19,7 +19,9 @@ path is for. The command is the provenance record and the fallback, not your
 first move: only when that diff file is missing or empty do you re-derive it
 with the command, in the `git -C <worktree>` form exactly as given since your
 own HEAD is not the branch under review — and then say in your report that you
-did.
+did. The command may be a `git diff` range or a per-commit `git show` loop over
+a list of shas; run whichever one you were handed, and never substitute a range
+for a sha list, which would sweep in commits nobody asked you to review.
 
 ## The standing brief
 

@@ -1,9 +1,10 @@
 ---
 name: multi-axis-code-review
-description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along three axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the over-engineering lens?), Spec (does the code match what the originating issue/spec asked for?) and Correctness (how does it fail in the field, and does every new test actually witness its claim?). Runs the three reviews in parallel sub-agents, waits for all of them, and reports every finding side by side. It replaces the built-in `/code-review` in the implement lane. Use when the user wants a branch, PR, or work-in-progress diff checked against its spec, the repo's standards, and runtime failure.
+description: Review the changes since a fixed point (commit, branch, tag, or merge-base), or the union of a list of landed shas along three axes — Standards (does the code follow this repo's documented coding standards, the Fowler smell baseline, and the over-engineering lens?), Spec (does the code match what the originating issue/spec asked for?) and Correctness (how does it fail in the field, and does every new test actually witness its claim?). Runs the three reviews in parallel sub-agents, waits for all of them, and reports every finding side by side. It replaces the built-in `/code-review` in the implement lane. Use when the user wants a branch, PR, or work-in-progress diff checked against its spec, the repo's standards, and runtime failure.
 ---
 
-Review of the diff between `HEAD` and a fixed point the user supplies, along
+Review of the diff between `HEAD` and a fixed point the user supplies — or of
+the union of a list of landed shas (§ Sha-list mode) — along
 three axes (it was two until #732; callers still saying "two-axis" mean this):
 
 - **Standards** — does the code conform to this repo's documented coding standards?
@@ -16,7 +17,7 @@ The issue tracker should have been provided to you — run `/setup-matt-pocock-s
 
 ## Process
 
-### 1. Pin the fixed point
+### 1. Pin the fixed point, or take the sha list
 
 Whatever the user said is the fixed point — a commit SHA, branch name, tag, `HEAD~5`, etc. If they gave one, use it as-is and skip straight to capturing the diff command below.
 
@@ -39,6 +40,44 @@ Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so th
 The diff *itself* is captured to a file in step 4, where the report directory and the issue number are both known; the command keeps its place in every prompt as the provenance record and the fallback.
 
 Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here — not inside three parallel sub-agents.
+
+#### Sha-list mode
+
+When the caller names **commits** rather than a fixed point — N landed shas,
+not necessarily contiguous — this is **sha-list mode**, and there is no fixed
+point to pin. Take it whenever the request is a list of commits; never pick one
+of them as a fixed point and build a range around it. That invention is the
+failure the mode exists to prevent (#932): #897's closing ticket hands the
+spec-level review a sha list precisely so a review on a shared `main` cannot
+sweep in other people's merged work.
+
+**What the three-dot semantics become.** Three-dot exists to compare against
+the merge-base, so commits that landed on the base after the fork point stay
+out of the diff. With no single fixed point there is no merge-base to take, so
+the list does that job instead, and more narrowly: each named commit is read
+against **its own first parent**, and the capture is those per-commit diffs
+concatenated, oldest first. A commit nobody named cannot appear, however it is
+interleaved — which is a tighter guarantee than three-dot gives, since
+three-dot still carries everything on the branch side of the fork point. The
+two-dot form is what the mode is a defence against: in the #888 Codex trial one
+two-dot comparison read 18 files and 1080 deletions of other people's merged
+work, against 2 files and 37 insertions three-dot.
+
+The axes read the union as **one change**. A file two named commits both touch
+appears twice in the capture; that is the same file edited in sequence, not two
+conflicting versions of it, and the oldest-first order is what makes it read
+that way.
+
+**Every malformed list refuses by name.** An empty list, a sha that does not
+resolve here, a merge commit (no single parent diff to take — name the commits
+it merged instead), and a named commit that changes no files each stop the
+review with a message saying which. None of them may reach the axes as "no
+changes found": a review that silently found nothing is indistinguishable from
+a clean one.
+
+The capture block is in § 4; the rest of this skill is unchanged — step 2 reads
+the spec off the named commits' messages, and steps 3 to 5 do not know which
+mode produced the patch.
 
 ### 2. Identify the spec source
 
@@ -162,6 +201,56 @@ spec context, with no error anywhere (PR #943). Hand every axis of one
 invocation the exact path the block printed, never a pattern. More files, not
 more lifetime — the 14-day sweep above collects them under this key the same
 way.
+
+**Sha-list mode captures the union** (§ 1). Run the `$dir` preamble above
+first — same directory, same 14-day sweep — then this block instead of the
+`git diff` one. It reads each named commit against its own first parent and
+concatenates, oldest first; the key carries a digest of the resolved list
+rather than a single `HEAD`, since there is no single revision under review:
+
+```
+: "${dir:?sha-list review: run the report-directory preamble above first}"
+n=<issue number from step 2, or the branch name>
+worktree=<the worktree under review>
+set -- <the commits the caller named, space-separated>
+[ "$#" -gt 0 ] || { echo "sha-list review: the commit list is empty" >&2; exit 1; }
+resolved=""
+for s in "$@"; do
+  full=$(git -C "$worktree" rev-parse --verify --quiet "$s^{commit}") || {
+    echo "sha-list review: '$s' does not resolve to a commit here" >&2; exit 1; }
+  if git -C "$worktree" rev-parse --verify --quiet "$full^2" >/dev/null; then
+    echo "sha-list review: $full is a merge commit — name the commits it merged" >&2; exit 1
+  fi
+  resolved="$resolved $full"
+done
+# Oldest first, by ancestor count: an ancestor always reaches strictly fewer
+# commits than its descendant, so a file two named commits both touch reads in
+# apply order. Not commit date — two commits landed in the same second sort
+# arbitrarily by it, and a test repo builds them all in one. Unrelated commits
+# with equal counts tie-break on the sha, so the order is at least stable. The
+# awk dedupes, so a sha named twice contributes one diff.
+ordered=$(for s in $resolved; do
+    printf '%s %s\n' "$(git -C "$worktree" rev-list --count "$s")" "$s"
+  done | sort -n -k1,1 -k2,2 | awk '!seen[$2]++ {print $2}')
+key=$(printf '%s\n' "$ordered" | git -C "$worktree" hash-object --stdin | cut -c1-12)
+patch="$dir/diff-$n-list$key-$$.patch"   # list digest plus nonce, as above
+tmp=$(mktemp "$dir/.diff-$n.XXXXXX") || exit 1
+for s in $ordered; do
+  one=$(git -C "$worktree" show --format='commit %H%n%n    %s%n' --patch "$s") || {
+    rm -f "$tmp"; echo "sha-list review: could not read $s" >&2; exit 1; }
+  printf '%s\n' "$one" | grep -q '^diff --git ' || {
+    rm -f "$tmp"; echo "sha-list review: $s changes no files" >&2; exit 1; }
+  printf '%s\n' "$one" >>"$tmp"
+done
+[ -s "$tmp" ] || { rm -f "$tmp"; echo "sha-list review: the capture is empty" >&2; exit 1; }
+mv "$tmp" "$patch"                       # atomic publish, as above
+wc -l "$patch"                           # this exact path and this count go in every prompt
+```
+
+In this mode the provenance every axis prompt carries is **this per-commit
+`git show` loop and the resolved list**, not a `git diff` range — a range is
+the thing the mode refuses to invent, and an axis handed one would re-derive
+the contaminated diff the moment its file went missing.
 
 The command stays in the prompt as the provenance record and as the fallback:
 an axis whose diff file is missing or empty re-derives with it and says so in
