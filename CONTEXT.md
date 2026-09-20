@@ -55,3 +55,7 @@ _Avoid_: safety check, lock
 **Reap**:
 `merge-cleanup --reap`: tearing down every workspace of one repo whose ticket landed and whose worker is gone, without anyone naming a branch. A dead controller's leftovers, not a merge's tail.
 _Avoid_: sweep (that is every repo under a root), clean up, garbage collect
+
+**Run file**:
+One JSON file per run at `~/.cache/burndown/<run-id>.json` holding that run's whole state: run id, slot budget, controller, and per clump its tickets, workspace, herdr agent name and squash sha. What a resumed controller reads instead of its own context.
+_Avoid_: progress file, state file, log

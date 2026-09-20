@@ -7,8 +7,8 @@ disable-model-invocation: true
 > **Parked** until the multi-worker lane is rebuilt on the herdr lane — see
 > [#700](https://github.com/caneff/agent-skills/issues/700)'s "Out of scope"
 > note. Everything this skill described — the batch loop, exploration and
-> clumping, worker dispatch, the review round, and the progress and cost
-> bookkeeping — is retired with the tool it ran on; nothing below is
+> clumping, worker dispatch, the review round, and the per-repo progress and
+> cost bookkeeping — is retired with the tool it ran on; nothing below is
 > executable policy until the lane is rebuilt. Full text:
 > `git show 7c7eb30:burndown/SKILL.md`.
 
@@ -38,6 +38,26 @@ clumped conservatively by directory subtree, and the run's **opening report
 carries the announcement line** the reader returns, so a controller can see
 which of the three modes it got. The grammar and the evidence:
 [`references/closure.md`](references/closure.md).
+
+## Run state
+
+A run's state is **one JSON file per run** at `~/.cache/burndown/<run-id>.json`,
+read and written by `burndown/runfile.py` — not the controller's context, and
+not a per-repo log. It holds the run id, the slot budget, the controller's
+herdr agent name, and per clump its ticket list, workspace, worker's herdr
+agent name and squash sha once it lands. `runfile.py resume <run-id> --live
+<names> --controller <my agent name>` reads it back and splits the clumps into
+the live workers to **re-announce** the controller to, the vanished ones to
+reconcile by hand, and the landings already banked — the live names read off
+the machine, never off the file.
+
+A worker is addressed by its **herdr agent name** throughout, because a WSL
+restart renames every Claude session and every brief hard-codes
+`--controller "<name>"`. The retired per-repo `~/.cache/burndown/<repo>.progress`
+file is gone; nothing reads or writes one. The contract, the JSON shape and the
+resume procedure: [`references/run-file.md`](references/run-file.md).
+Written against the lane being rebuilt; the loop that will drive it is parked
+with the rest of this skill.
 
 A single spec's slices in one workspace are
 [`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this
