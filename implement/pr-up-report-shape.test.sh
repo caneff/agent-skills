@@ -60,6 +60,13 @@ check_in "$pr_flat" 'a test that always passes'
 # copying the template cannot omit one.
 template="$(printf '%s\n' "$pr_section" | sed -n '/^PR up:/,/^```$/p')"
 [ -n "$template" ] || { echo "FAIL: implement/SKILL.md § The PR has no 'PR up:' report template" >&2; exit 1; }
+# Same unmatched-end-address shape as the section range above: without a
+# closing fence the template runs to the end of § The PR, and every field
+# check below passes on prose that is not in the template at all.
+case "$(printf '%s\n' "$template" | tail -n 1)" in
+  '```') ;;
+  *) echo "FAIL: implement/SKILL.md's 'PR up:' template has no closing fence" >&2; exit 1 ;;
+esac
 for field in 'Last reviewed sha:' 'CLEAN observed at:' 'Tip:' 'Mutation check:'; do
   check_in "$template" "$field"
 done

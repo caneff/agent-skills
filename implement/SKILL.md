@@ -212,9 +212,10 @@ time, not from the worker: § The merge.
    draft or a conflict fails the controller's merge. `headRefOid` is the sha
    GitHub computed that reading against, and it is the one the report's
    "CLEAN observed at" carries (§ The PR) — never `git rev-parse HEAD`, which
-   is your local tip and may be a commit GitHub has not read yet. `UNKNOWN` means GitHub
-   is still computing; poll a few seconds. `closingIssuesReferences` must
-   list the ticket this PR was dispatched for (`<n>`) and any other ticket
+   is your local tip and may be a commit GitHub has not read yet. `UNKNOWN`
+   means GitHub is still computing; poll a few seconds.
+   `closingIssuesReferences` must list the ticket this PR was dispatched for
+   (`<n>`) and any other ticket
    its body names with a closing keyword, each in this repo — an entry's
    `repository` field pointing elsewhere doesn't count, and a `Part of
    #<n>` parent issue never should be closed by this PR. § The merge step 6
@@ -273,16 +274,18 @@ PR up: <pr url>
 Last reviewed sha: <sha>
 CLEAN observed at: <sha>
 Tip: <sha> — <"same as last reviewed sha", or one diff class per commit past it>
-Mutation check: <the change that made it fail, and that you saw it fail — or "n/a, deliverable is not a test or a gate">
+Mutation check: <the change that made it fail, and that you saw it fail
+  — or "n/a, deliverable is not a test or a gate">
 ```
 
 - **The sha CLEAN was observed at** — step 5's `headRefOid`, the commit
-  GitHub read not-draft and `CLEAN` on, which is not always the tip by the time you send
-  the report: your own last push restarts the checks, so a bare "CLEAN" is a
-  claim the controller cannot date. § The merge: step 2 re-checks and is the
-  only authority; naming the sha makes the staleness explicit instead of a
-  race this report silently loses. (#456 reported CLEAN at a sha two pushes
-  stale; the PR read UNSTABLE seconds later — one controller wake.)
+  GitHub read not-draft and `CLEAN` on, which is not always the tip by the
+  time you send the report: your own last push restarts the checks, so a
+  bare "CLEAN" is a claim the controller cannot date. § The merge: step 2
+  re-checks and is the only authority; naming the sha makes the staleness
+  explicit instead of a race this report silently loses. (#456 reported
+  CLEAN at a sha two pushes stale; the PR read UNSTABLE seconds later — one
+  controller wake.)
 - **The tip, accounted for** — either the tip equals the last reviewed sha,
   or state the **diff class** of every commit past it: what kind of change it
   is (wording only, test-only, the fix for finding `S1`), so the controller
