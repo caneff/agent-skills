@@ -74,6 +74,11 @@ check_in "$merge_section" '`~/.cache/agent-reviews/<repo>/`, never this workspac
 check_in "$merge_section" "the worker's own § Before the PR step 3 deletes it" 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'codex-adversarial-<n>.json' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'the workspace HEAD at launch and again at completion' 'implement/SKILL.md § The merge'
+# The gate can only refuse an errored run if the block that writes the
+# record captures the node call's exit status — pin the field, not just the
+# prose that reads it.
+check_in "$merge_section" 'status=$?' 'implement/SKILL.md § The merge'
+check_in "$merge_section" '"status": %d' 'implement/SKILL.md § The merge'
 
 # Rule 4: the gate is fail-closed, and names every way a verdict fails to
 # be current — including the race, which is what backgrounding introduces.
