@@ -481,8 +481,17 @@ The controller merges on a repo Chris owns; Chris reads it after via
    No `--delete-branch`: git refuses to delete a branch a worktree has
    checked out, and the merge fails on it; `merge-cleanup` removes the
    workspace and deletes the branch after.
-5. **Wait for the worker to go idle** (`SendMessage` with
-   `notify_when_idle: true`), then clean up from the primary checkout:
+5. **Answer every outstanding question from this worker first**, then
+   **wait for it to go idle** (`SendMessage` with `notify_when_idle: true`),
+   then clean up from the primary checkout — cleanup is the last act, and
+   the answer goes **before cleanup**, not merely before the merge:
+   `merge-cleanup` closes the worker's pane, and an answer sent after that
+   reaches nobody (#781: `#454`'s worker asked for a ruling in good faith
+   and the send failed with `No agent named 'implement-454-12' is
+   reachable`). A question the controller means to refuse, or to answer
+   "filed, build it as it stands", is outstanding too. The ordering, and the
+   collision procedure for two branches in the same files:
+   [`burndown/references/merge-tail.md`](~/.agents/skills/burndown/references/merge-tail.md).
 
    ```
    cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>

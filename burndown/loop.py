@@ -264,6 +264,60 @@ def announce(state, send):
     return sent
 
 
+def questions(clump, outstanding):
+    """The worker questions still unanswered for this clump, checked before
+    anything is ordered around them.
+
+    A bare string is refused rather than iterated: `"is it ok?"` is ten
+    characters, so it would read as ten outstanding questions and answer
+    none of them — the same fail-closed rule `paths` applies one layer down.
+    """
+    if outstanding is None:
+        return []
+    if isinstance(outstanding, str) or not isinstance(
+            outstanding, (list, tuple)) or not all(
+            isinstance(q, str) and q.strip() for q in outstanding):
+        raise LoopError(
+            f"clump #{key_of(clump)}: not a list of outstanding worker "
+            f"questions: {outstanding!r}")
+    return list(outstanding)
+
+
+def landing_steps(clump, outstanding=()):
+    """A landing's tail, in the order it runs: **answer** every outstanding
+    worker question, then **merge**, then **cleanup**.
+
+    Cleanup is the last act because cleanup is what closes the worker's
+    pane. On #781 a controller merged `#454`, ran `merge-cleanup`, and then
+    sent the ruling its worker had asked for in good faith — to an agent
+    that no longer existed. Answering before the *merge* is not the rule and
+    would write the same bug in a new place: a question answered between
+    merge and cleanup is answered, and one answered after cleanup is lost.
+    Why, with the rest of the merge tail: `references/merge-tail.md`.
+    """
+    return [{"step": "answer", "agent": clump["agent"], "question": q}
+            for q in questions(clump, outstanding)] + [
+        {"step": "merge"}, {"step": "cleanup"}]
+
+
+def cleanup_ready(clump, outstanding=()):
+    """True when nothing is owed this clump's worker, or the refusal naming
+    what is — the gate immediately before `merge-cleanup`.
+
+    It names the agent and the questions, not just the count: a controller
+    that hits this refusal has to *send* the answers, and a refusal it has
+    to go looking behind is a refusal it works around.
+    """
+    owed = questions(clump, outstanding)
+    if owed:
+        raise LoopError(
+            f"clump #{key_of(clump)}: {clump['agent']} is still owed an "
+            f"answer to "
+            + "; ".join(repr(q) for q in owed)
+            + " — cleanup closes its pane, so the answer goes first")
+    return True
+
+
 def admit(candidates, clump, stuck_on=None):
     """The frozen candidate set, plus the one ticket allowed to join it.
 
@@ -337,7 +391,9 @@ def main(argv):
     parser = argparse.ArgumentParser(
         prog="loop.py", description=(
             "The burn loop's mechanical steps. `announce` has no subcommand: "
-            "sending is SendMessage, which the controller calls itself."))
+            "sending is SendMessage, which the controller calls itself — and "
+            "so is `landing`'s answer step, which is why `landing` reports "
+            "what is owed and gates cleanup rather than answering anything."))
     subs = parser.add_subparsers(dest="command", required=True)
     subs.add_parser("seat", help="refuse unless this is a controller's seat")
     box = subs.add_parser("box", help="room on the box for one more worker")
@@ -359,6 +415,14 @@ def main(argv):
     hub.add_argument("--candidates", required=True)
     hub.add_argument("--landed", required=True,
                      help="comma-separated paths the landing's diff touched")
+    landing = subs.add_parser(
+        "landing", help="a landing's tail, and whether cleanup may run yet")
+    landing.add_argument("--clump", type=int, required=True,
+                         help="the clump's lowest ticket")
+    landing.add_argument("--agent", required=True,
+                         help="the worker's herdr agent name")
+    landing.add_argument("--outstanding", action="append", default=[],
+                         help="a worker question still unanswered; repeatable")
     args = parser.parse_args(argv[1:])
     try:
         if args.command == "seat":
@@ -385,6 +449,14 @@ def main(argv):
             if room < args.free:
                 lines = f"box: room for {room} of {args.free}\n{lines}"
             print(lines)
+        elif args.command == "landing":
+            clump = {"tickets": [args.clump], "agent": args.agent}
+            for step in landing_steps(clump, args.outstanding):
+                print(f"answer    {step['agent']}  {step['question']}"
+                      if step["step"] == "answer" else step["step"])
+            # The tail is printed either way: a controller refused cleanup
+            # needs the answers it owes, not only the word "no".
+            cleanup_ready(clump, args.outstanding)
         elif args.command == "hub":
             landed = [p for p in args.landed.replace(",", " ").split() if p]
             hub_files = hubs(read_clumps(args.candidates))
