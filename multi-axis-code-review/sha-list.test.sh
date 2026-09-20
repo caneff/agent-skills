@@ -86,13 +86,15 @@ empty="$(sha 'an empty commit')"; merge="$(sha 'a merge')"
 # already witnesses; this block's own refusal when it is unset is checked
 # below.
 mkdir -p "$scratch/dir"
-run_block() { # <shas...> -> stdout of the block; exit status is the block's
+run_block() { # <shas...> -> the block's output; exit status is the block's
+  # 2>&1: the refusals this suite reports on are written to stderr, so a
+  # caller that prints "$out" in a FAIL line would otherwise print nothing.
   printf 'dir=%s\n' "$scratch/dir" >"$scratch/block.sh"
   printf '%s\n' "$recipe" |
     sed -e "s|^n=<.*|n=932|" \
         -e "s|^worktree=<.*|worktree=$repo|" \
         -e "s|^set -- <.*|set -- $*|" >>"$scratch/block.sh"
-  ( cd "$scratch" && bash "$scratch/block.sh" )
+  ( cd "$scratch" && bash "$scratch/block.sh" 2>&1 )
 }
 
 out="$(run_block "$c" "$a" "$b")" || { echo "FAIL: the block refused a good three-sha list" >&2; fail=1; }

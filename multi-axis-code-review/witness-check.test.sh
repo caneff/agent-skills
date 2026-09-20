@@ -72,7 +72,10 @@ fi
 
 # The standing brief names the same one owner: diff-reviewer.md's Axes section
 # attaches the check to correctness and to no other axis.
-reviewer_witness="$(flatten <"$reviewer" | grep -oF 'strip the constraint under test' | wc -l)"
+# `|| true` because an absent phrase makes `grep -o` exit 1, and under
+# `set -euo pipefail` the suite would then die here with no output at all —
+# red for the right reason, telling the operator nothing.
+reviewer_witness="$(flatten <"$reviewer" | { grep -oF 'strip the constraint under test' || true; } | wc -l)"
 if [ "$reviewer_witness" -ne 1 ]; then
   echo "FAIL: flow/claude/agents/diff-reviewer.md states the witness check $reviewer_witness times, not 1" >&2
   fail=1
