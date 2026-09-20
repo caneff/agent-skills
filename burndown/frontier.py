@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """The frontier of a ticket queue: `python3 burndown/frontier.py <owner/repo>
-<label>` prints the open, unclaimed tickets split three ways —
+<label>` prints the open, unclaimed, dispatchable tickets split four ways —
 
     unblocked   <n> <title>
     blocked     <n> <title>  (blocked by #a, #b)
     unresolved  <n> <title>  (<why>)
+    spec        <n> <title>  (a spec parent: dispatch with ... --spec <n> ...)
 
 Three sources, in order: the tracker's native dependencies where it has them
 (`issue_dependencies_summary.blocked_by`, open blockers only, the live gate),
@@ -57,6 +58,26 @@ _FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*$")
 _FENCE_OPEN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 
 CLAIMED_LABEL = "in-progress"
+
+# Labels that put a ticket off the frontier by its own nature rather than by
+# a blocking relationship. `implement-dispatch` refuses each of them on the
+# label alone (`flow/lane/src/bin/implement_dispatch.rs`), so a ticket
+# carrying one is not work this reader may offer, however its blockers read.
+# `needs-info` waits on grilling; reporting it as `unresolved` says "a human
+# must determine this ticket's blocking state", which is the wrong question
+# about it and costs a controller a decision it cannot act on.
+# `in-progress` is refused too, and is handled as a claim instead: an
+# assignee says the same thing without a label.
+NON_DISPATCHABLE_LABELS = frozenset({"needs-info"})
+
+# A spec parent is neither of those things. `implement-dispatch` refuses it
+# in plain mode while naming the route that does take it — a nested run,
+# `--spec <n> --slots <k>` (#897) — so it is dispatchable work in a
+# different mode. Dropping it hides real work from the only reader that
+# surfaces it, and calling it `unresolved` says a human must determine its
+# blocking state when what it needs is a different verb. Both would be a
+# lie about what the entry is, so it gets its own bucket (#910).
+SPEC_LABEL = "spec"
 
 
 class FrontierError(Exception):
@@ -126,9 +147,19 @@ def section_blockers(section):
     return None, "`Blocked by` names no `#NNN` and does not say None"
 
 
+def _labels(issue):
+    return {label.get("name") for label in issue.get("labels") or []}
+
+
 def _is_claimed(issue):
-    labels = {label.get("name") for label in issue.get("labels") or []}
-    return bool(issue.get("assignees")) or CLAIMED_LABEL in labels
+    return bool(issue.get("assignees")) or CLAIMED_LABEL in _labels(issue)
+
+
+def _is_non_dispatchable(issue):
+    """A ticket no run may dispatch whatever its blockers say, because a
+    label puts it out of reach. Read before any bucket is decided: the
+    question a bucket answers does not apply to it."""
+    return bool(_labels(issue) & NON_DISPATCHABLE_LABELS)
 
 
 def _native(issue):
@@ -144,32 +175,32 @@ def _native(issue):
 
 
 def classify(issues, state_of):
-    """`{unblocked, blocked, unresolved}` over GitHub issue objects.
+    """`{unblocked, blocked, unresolved, spec}` over GitHub issue objects.
     `state_of(number) -> "open" | "closed" | None` reads a blocker's state;
     `None` means it could not be read, which is unresolved rather than a
-    guess. A claimed ticket, and anything that is really a PR, is in no
-    bucket at all — it is off the frontier."""
-    buckets = {"unblocked": [], "blocked": [], "unresolved": []}
-    for issue in sorted(issues, key=lambda i: i.get("number") or 0):
-        if issue.get("pull_request") or _is_claimed(issue):
-            continue
-        entry = {"number": issue.get("number"), "title": issue.get("title"),
-                 "blockers": [], "why": ""}
+    guess. A claimed ticket, a ticket carrying a non-dispatchable label,
+    and anything that is really a PR, is in no bucket at all — each is off
+    the frontier by its own nature, not by a blocking relationship."""
+    buckets = {"unblocked": [], "blocked": [], "unresolved": [], "spec": []}
+
+    def rank(issue, entry):
+        """`(bucket, stated)` from this ticket's blocking state alone.
+        `stated` is whether the ticket said anything about blockers at all,
+        not whether it said it was blocked: silence and an unreadable
+        declaration are both `unresolved`, and the spec override below is
+        the one caller that has to tell them apart."""
         native = _native(issue)
         if native is not None:
             entry["why"] = "native dependencies"
-            buckets["blocked" if native else "unblocked"].append(entry)
-            continue
+            return ("blocked" if native else "unblocked"), True
         section = blocked_by_section(issue.get("body"))
         if section is None:
             entry["why"] = "no native dependencies and no `Blocked by` of any form"
-            buckets["unresolved"].append(entry)
-            continue
+            return "unresolved", False
         references, why = section_blockers(section)
         if references is None:
             entry["why"] = why
-            buckets["unresolved"].append(entry)
-            continue
+            return "unresolved", True
         entry["blockers"] = references
         states = [(n, state_of(n)) for n in references]
         unreadable = [n for n, state in states if state is None]
@@ -177,16 +208,38 @@ def classify(issues, state_of):
             entry["why"] = ("`Blocked by` names "
                             + ", ".join(f"#{n}" for n in unreadable)
                             + ", whose state could not be read")
-            buckets["unresolved"].append(entry)
-            continue
+            return "unresolved", True
         open_blockers = [n for n, state in states if state == "open"]
         if open_blockers:
             entry["blockers"] = open_blockers
             entry["why"] = "`Blocked by` names an open ticket"
-            buckets["blocked"].append(entry)
-        else:
-            entry["why"] = "`Blocked by` names only closed tickets"
-            buckets["unblocked"].append(entry)
+            return "blocked", True
+        entry["why"] = "`Blocked by` names only closed tickets"
+        return "unblocked", True
+
+    for issue in sorted(issues, key=lambda i: i.get("number") or 0):
+        if (issue.get("pull_request") or _is_claimed(issue)
+                or _is_non_dispatchable(issue)):
+            continue
+        entry = {"number": issue.get("number"), "title": issue.get("title"),
+                 "blockers": [], "why": ""}
+        name, stated = rank(issue, entry)
+        if SPEC_LABEL in _labels(issue) and (
+                name == "unblocked" or (name == "unresolved" and not stated)):
+            # The prerequisites are checked *first*, so `blocked` outranks
+            # `spec` on one entry: both are true claims, but only `spec`
+            # carries a dispatch verb, and a controller copies lines like
+            # that — onto a whole nested run over blocked work.
+            #
+            # An unreadable declaration stays `unresolved` for the same
+            # reason. Silence is the case ruled into `spec`; a stated
+            # prerequisite this reader could not resolve is not silence,
+            # and an unknown prerequisite is not a met one.
+            entry["blockers"] = []
+            entry["why"] = ("a spec parent: dispatch with `implement-dispatch"
+                            f" --spec {entry['number']} --slots <k>`")
+            name = "spec"
+        buckets[name].append(entry)
     return buckets
 
 
@@ -241,8 +294,8 @@ def fetch_state(repo, number, run=gh_json):
 
 
 def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state):
-    """`(repo, label) -> {unblocked, blocked, unresolved}`. Each blocker's
-    state is read once however many tickets name it."""
+    """`(repo, label) -> {unblocked, blocked, unresolved, spec}`. Each
+    blocker's state is read once however many tickets name it."""
     seen = {}
 
     def cached(number):
@@ -255,13 +308,13 @@ def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state):
 
 def render(buckets):
     lines = []
-    for name in ("unblocked", "blocked", "unresolved"):
+    for name in ("unblocked", "blocked", "unresolved", "spec"):
         for entry in buckets[name]:
             note = ""
             if name == "blocked" and entry["blockers"]:
                 note = "  (blocked by " + ", ".join(
                     f"#{n}" for n in entry["blockers"]) + ")"
-            elif name == "unresolved":
+            elif name in ("unresolved", "spec"):
                 note = f"  ({entry['why']})"
             lines.append(f"{name:<11} {entry['number']} {entry['title']}{note}")
     return "\n".join(lines)

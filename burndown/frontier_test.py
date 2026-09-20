@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Tests for the frontier reader (#890). Seam: `frontier(repo, label)` with
-its two fetchers injected — a list of GitHub issue objects in, three buckets
-(`unblocked`, `blocked`, `unresolved`) out. No network: every case is a
-ticket fixture, which is the point of the seam.
+its two fetchers injected — a list of GitHub issue objects in, four buckets
+(`unblocked`, `blocked`, `unresolved`, `spec`) out. No network: every case is
+a ticket fixture, which is the point of the seam.
 """
 import os
 import subprocess
@@ -56,6 +56,30 @@ def read(issues, states=None):
 
 def numbers(bucket):
     return [entry["number"] for entry in bucket]
+
+
+# Every bucket empty: what a ticket that is off the frontier altogether
+# leaves behind. Spelled out rather than derived, so a bucket added without
+# a thought about the off-the-frontier cases fails here.
+EMPTY = {"unblocked": [], "blocked": [], "unresolved": [], "spec": []}
+
+
+def unresolved_count(issues, dropped, states=None):
+    """The size of the `unresolved` bucket over a fixture queue, read with
+    `dropped` as the non-dispatchable label set.
+
+    The harness behind the acceptance criterion "the unresolved count drops
+    by exactly the number of tickets a label takes off the frontier": read
+    the queue twice, once with the label set and once without, and the
+    difference is the claim. It is parameterised on the label set so the
+    claim is about any such label, not about one measured number on one
+    repo on one afternoon."""
+    original = F.NON_DISPATCHABLE_LABELS
+    F.NON_DISPATCHABLE_LABELS = frozenset(dropped)
+    try:
+        return len(read(issues, states)["unresolved"])
+    finally:
+        F.NON_DISPATCHABLE_LABELS = original
 
 
 # --- Native dependencies: the canonical path -------------------------------
@@ -164,19 +188,172 @@ def test_every_unresolved_entry_says_why():
 def test_an_assigned_ticket_is_off_the_frontier():
     got = read([issue(1, assignees=("caneff",),
                       body="## Blocked by\n\nNone.\n")])
-    assert got == {"unblocked": [], "blocked": [], "unresolved": []}, got
+    assert got == EMPTY, got
 
 
 def test_an_in_progress_ticket_is_off_the_frontier():
     got = read([issue(1, labels=("ready-for-agent", "in-progress"),
                       body="## Blocked by\n\nNone.\n")])
-    assert got == {"unblocked": [], "blocked": [], "unresolved": []}, got
+    assert got == EMPTY, got
 
 
 def test_a_pull_request_is_not_a_ticket():
     # The REST issues endpoint returns PRs too; they are not frontier work.
     got = read([issue(1, pull_request=True, body="## Blocked by\n\nNone.\n")])
-    assert got == {"unblocked": [], "blocked": [], "unresolved": []}, got
+    assert got == EMPTY, got
+
+
+# --- A spec parent is its own answer ---------------------------------------
+
+def test_a_spec_parent_lands_in_its_own_bucket():
+    # A spec parent is dispatchable work in a different mode, so it is not a
+    # drop; and it needs no human to determine anything, so it is not
+    # `unresolved`. Both available answers would be a lie about what it is.
+    got = read([issue(1, labels=("ready-for-agent", "spec"),
+                      body="No declaration at all.\n")])
+    assert numbers(got["spec"]) == [1], got
+    assert numbers(got["unblocked"]) == [], got
+    assert numbers(got["blocked"]) == [], got
+    assert numbers(got["unresolved"]) == [], got
+
+
+def test_a_spec_entry_names_the_route_that_dispatches_it():
+    # The point of the bucket: a controller reading the frontier can act on
+    # the entry without opening another document. An entry that says "this
+    # is a spec" and nothing else has only moved the problem.
+    got = read([issue(885, labels=("ready-for-agent", "spec"),
+                      body="No declaration at all.\n")])
+    why = got["spec"][0]["why"]
+    assert "implement-dispatch --spec 885 --slots" in why, why
+
+
+def test_a_spec_parent_with_a_native_open_blocker_is_blocked():
+    # `blocked` outranks `spec` on one entry: the frontier checks
+    # prerequisites before it offers a route. The entry is true either way,
+    # but `spec` carries a dispatch verb and a controller copies lines like
+    # that — onto a whole nested run over blocked work.
+    got = read([issue(1, labels=("ready-for-agent", "spec"), blocked_by=1)])
+    assert numbers(got["blocked"]) == [1], got
+    assert numbers(got["spec"]) == [], got
+
+
+def test_a_spec_parent_whose_body_names_an_open_blocker_is_blocked():
+    got = read([issue(1, labels=("ready-for-agent", "spec"),
+                      body="## Blocked by\n\n- #7\n")], states={7: "open"})
+    assert numbers(got["blocked"]) == [1], got
+    assert numbers(got["spec"]) == [], got
+
+
+def test_a_spec_parent_whose_blockers_are_all_closed_is_dispatchable():
+    # Prerequisites checked and met, so the route is the honest answer.
+    got = read([issue(1, labels=("ready-for-agent", "spec"),
+                      body="## Blocked by\n\n- #7\n")], states={7: "closed"})
+    assert numbers(got["spec"]) == [1], got
+    assert numbers(got["unblocked"]) == [], got
+
+
+def test_a_spec_parent_whose_blockers_cannot_be_read_is_unresolved():
+    # The ticket declared prerequisites this reader could not resolve, so
+    # whether one is open is unknown — and an unknown prerequisite is not a
+    # met one. Silence is the case that goes to `spec`; a declaration that
+    # cannot be read is not silence.
+    got = read([issue(1, labels=("ready-for-agent", "spec"),
+                      body="## Blocked by\n\n- #7\n")], states={})
+    assert numbers(got["unresolved"]) == [1], got
+    assert numbers(got["spec"]) == [], got
+
+
+def test_a_claimed_spec_parent_is_off_the_frontier_like_any_other():
+    # A claim outranks the bucket: someone already has it, so there is no
+    # route left to offer a controller.
+    got = read([issue(1, labels=("ready-for-agent", "spec", "in-progress"),
+                      body="No declaration at all.\n")])
+    assert got == EMPTY, got
+
+
+def test_a_spec_parent_moves_out_of_unresolved_rather_than_vanishing():
+    # AC3's measurement: the `unresolved` count drops by exactly the number
+    # of spec parents, because each one lands in `spec` instead. A drop that
+    # left the queue smaller by one would pass a count check and still hide
+    # the work, so the destination is asserted beside the count.
+    # The spec branch reads the label off the issue, so no swap is involved
+    # here and this is the shipped behaviour end to end.
+    queue = [
+        issue(1, labels=("ready-for-agent", "spec"),
+              body="No declaration at all.\n"),
+        issue(2, body="No declaration at all.\n"),
+        issue(3, body="## Blocked by\n\nNone.\n"),
+    ]
+    got = read(queue)
+    assert numbers(got["unresolved"]) == [2], got
+    assert numbers(got["spec"]) == [1], got
+    assert numbers(got["unblocked"]) == [3], got
+
+
+def test_the_rendered_report_names_the_spec_route():
+    # The reader's printed form is what a controller actually reads.
+    line = F.render(read([issue(885, title="Spec: the lane",
+                                labels=("ready-for-agent", "spec"),
+                                body="No declaration at all.\n")]))
+    assert line.startswith("spec        885 Spec: the lane  ("), line
+    assert "implement-dispatch --spec 885 --slots <k>" in line, line
+
+
+# --- Non-dispatchable tickets are off the frontier -------------------------
+
+def test_a_needs_info_ticket_is_off_the_frontier():
+    # `implement-dispatch` refuses a needs-info ticket outright: it waits on
+    # grilling, not on another ticket. It is off the frontier by its own
+    # nature, the way a claimed ticket is — not by a blocking relationship.
+    got = read([issue(1, labels=("ready-for-agent", "needs-info"),
+                      body="## Blocked by\n\nNone.\n")])
+    assert got == EMPTY, got
+
+
+def test_a_needs_info_ticket_with_no_blocked_by_is_dropped_not_unresolved():
+    # The drop happens before any bucket is decided, so a silent body never
+    # reaches the grammar. `unresolved` asks a human to determine this
+    # ticket's blocking state; that is not the question a needs-info ticket
+    # is waiting on, and padding the bucket with it trains a controller to
+    # skim the one bucket that exists to be read.
+    got = read([issue(1, labels=("ready-for-agent", "needs-info"),
+                      body="Some body with no declaration at all.\n")])
+    assert got == EMPTY, got
+
+
+def test_dropping_a_label_lowers_unresolved_by_the_tickets_it_takes():
+    # The measurement AC3 makes, as a fixture rather than a reading of one
+    # repo: the queue the ticket names under Seams under test — two silent
+    # tickets carrying the label, a claimed one, a well-formed child, and a
+    # silent one that carries nothing.
+    queue = [
+        issue(1, labels=("ready-for-agent", "needs-info"),
+              body="No declaration at all.\n"),
+        issue(2, labels=("ready-for-agent", "needs-info"),
+              body="No declaration at all.\n"),
+        issue(3, labels=("ready-for-agent", "in-progress"),
+              body="No declaration at all.\n"),
+        issue(4, body="## Blocked by\n\n- #7\n"),
+        issue(5, body="No declaration at all.\n"),
+    ]
+    states = {7: "open"}
+    # #3 is claimed and #4 is blocked, so neither is ever unresolved.
+    assert unresolved_count(queue, dropped=(), states=states) == 3, queue
+    assert unresolved_count(queue, dropped=("needs-info",), states=states) == 1, queue
+    # Bound to what ships, not only to the mechanism: reading with no swap
+    # at all has to agree with naming the label by hand. Without this line
+    # the test passes with `NON_DISPATCHABLE_LABELS` empty, which is the
+    # one thing the measurement is supposed to be about.
+    assert len(read(queue, states)["unresolved"]) == 1, F.NON_DISPATCHABLE_LABELS
+
+
+def test_a_ticket_without_a_non_dispatchable_label_is_still_classified():
+    # The filter takes only what it names: an ordinary ticket beside a
+    # dropped one is unaffected.
+    got = read([issue(1, labels=("ready-for-agent", "needs-info"),
+                      body="## Blocked by\n\nNone.\n"),
+                issue(2, body="## Blocked by\n\nNone.\n")])
+    assert numbers(got["unblocked"]) == [2], got
 
 
 # --- Shape -----------------------------------------------------------------
