@@ -626,6 +626,29 @@ def test_the_cli_landing_survives_a_reader_that_closes_early():
     assert "Exception ignored" not in got.stderr, got.stderr
 
 
+def test_the_cli_landing_survives_a_reader_that_closes_mid_output():
+    # Past the io buffer the write fails inside the command itself, not at
+    # the flush after it — the same broken pipe, a different line of code.
+    # The status is the fail-closed one: a run whose output nobody read
+    # cleared nothing, and a caller reading the exit code must not take it
+    # for permission to clean up.
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    questions = []
+    for n in range(500):
+        questions += ["--outstanding", f"question {n}?"]
+    try:
+        got = subprocess.run(
+            [sys.executable, LOOP, "landing", "--clump", "454", "--agent",
+             "burn-454", *questions],
+            stdout=write_end, stderr=subprocess.PIPE, text=True, timeout=60)
+    finally:
+        os.close(write_end)
+    assert got.returncode == 1, got
+    assert "Traceback" not in got.stderr, got.stderr
+    assert "Exception ignored" not in got.stderr, got.stderr
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

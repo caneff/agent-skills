@@ -34,21 +34,10 @@ tail_text="$(flatten <"$tail_doc")"
 # heading itself and the next one are dropped, so a needle can never be
 # satisfied by the neighbouring section's prose.
 section() {
-  local heading="$1" body
-  grep -qxF "## $heading" "$tail_doc" || {
-    echo "FAIL: references/merge-tail.md has no section: ## $heading" >&2
-    fail=1
-    return
-  }
-  body="$(awk -v want="## $heading" '
+  awk -v want="## $1" '
     $0 == want { inside = 1; next }
     inside && /^## / { exit }
-    inside { print }' "$tail_doc" | flatten)"
-  [ -n "$body" ] || {
-    echo "FAIL: references/merge-tail.md § $heading is empty" >&2
-    fail=1
-  }
-  printf '%s' "$body"
+    inside { print }' "$tail_doc" | flatten
 }
 
 # Scoped to `### The merge` **step 5** — the step that runs cleanup, and the
@@ -67,6 +56,19 @@ check_in() {
     *) echo "FAIL: $where is missing: $needle" >&2; fail=1 ;;
   esac
 }
+
+# Each rule's section must exist as a heading, checked here rather than
+# inside `section`: an assignment inside a command substitution runs in a
+# subshell and never reaches this shell's `fail`.
+for heading in 'First PR to land wins' \
+               'Generated artifacts are regenerated, never hand-merged' \
+               'An escaped collision is a defect in the include grammar' \
+               'Answer, then merge, then cleanup'; do
+  grep -qxF "## $heading" "$tail_doc" || {
+    echo "FAIL: references/merge-tail.md has no section: ## $heading" >&2
+    fail=1
+  }
+done
 
 # Rule 0: this is executable policy again. The parked stub pointed at a
 # retired tool and told a controller to read `git show` for the rest.
@@ -117,6 +119,23 @@ check_in "$ordering" 'cleanup is the last act' 'references/merge-tail.md § Answ
 # run ahead of a later answer.
 check_in "$ordering" 'closes its pane' 'references/merge-tail.md § Answer, then merge, then cleanup'
 check_in "$ordering" 'not merely before the merge' 'references/merge-tail.md § Answer, then merge, then cleanup' 
+
+# Rule 5b: the section may not state the rule and then withdraw it. A
+# substring guard witnesses that a rule is written down, never that the prose
+# means it, and the section headings above are the main defence. This is the
+# cheap second one: a blacklist of the ways the ordering was taken back when
+# this guard was adversarially mutated (#896 verification pass). It closes
+# those and claims nothing about the ones nobody has written yet.
+refuse_in() {
+  local haystack="$1" pattern="$2" where="$3"
+  if printf '%s' "$haystack" | grep -qiE "$pattern"; then
+    echo "FAIL: $where states the rule and then takes it back (/$pattern/)" >&2
+    fail=1
+  fi
+}
+refuse_in "$ordering" \
+  'not true that|clean ?up first|answer later|no longer the rule|is obsolete|not a real constraint' \
+  'references/merge-tail.md § Answer, then merge, then cleanup'
 
 # Rule 6: the reader behind the ordering is reachable from the prose.
 check_in "$ordering" 'loop.py landing' 'references/merge-tail.md § Answer, then merge, then cleanup' 

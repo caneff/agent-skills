@@ -486,16 +486,22 @@ def main(argv):
     """`run`, plus the reader that closed early.
 
     A pipe makes stdout block-buffered, so `loop.py landing ... | head -1`
-    breaks at the flush — which the interpreter does after `run` has
-    returned, where no handler inside it can reach. Flushing here brings
-    that moment inside the handler, and pointing the fd at /dev/null keeps
+    usually breaks at the flush — which the interpreter does after `run` has
+    returned, where no handler inside it can reach. Past the buffer it
+    breaks inside `run` instead, on a `print`. Both are the same dead
+    reader, so both are handled here, and pointing the fd at /dev/null keeps
     the interpreter's own exit-time flush off the dead pipe, where it would
-    print the traceback this module promises never to print. The status is
-    whatever `run` decided: stderr is a different fd, and a refusal printed
-    there arrived whatever happened to stdout.
+    print the traceback this module promises never to print.
+
+    The status is whatever `run` decided — stderr is a different fd, and a
+    refusal printed there arrived whatever happened to stdout — or, when
+    `run` never got to decide, the refusing one: a command whose output
+    nobody read cleared nothing, and a caller reading the exit code must not
+    take a dead pipe for permission.
     """
-    status = run(argv)
+    status = 1
     try:
+        status = run(argv)
         sys.stdout.flush()
     except BrokenPipeError:
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
