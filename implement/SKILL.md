@@ -160,6 +160,15 @@ No PR and no reviewer; Chris reads the log after.
    Claude catch as `codex-only, confirmed` and corrupt the trial's
    evidence. On any other build, the PR body lists the disputed and filed
    ones.
+
+   When round 1's findings are in hand, before starting the verification
+   pass, send the controller `Round 1 out: <k> findings, head <sha>` —
+   `<sha>` being `git rev-parse HEAD` in this workspace. That wake is what
+   launches the controller's Codex pass (§ The merge step 3), so the pass
+   runs alongside your verification instead of after it; sending it late
+   costs the overlap it exists to buy. You do nothing else with it: the
+   pass is the controller's, and its findings reach you, if at all, at the
+   merge gate.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
    Pass the reviewers every disputed, ruled, or other-ticket item as settled.
    A round-1 finding with no disposition is the one thing this pass fails
@@ -198,16 +207,21 @@ time, not from the worker: § The merge.
    content without `--discard` — an irreversible deletion that should never
    be the default way a run ends. If something you cannot commit and must
    keep is left in `.scratch/`, run `PRE_REPORT_KEEP_SCRATCH="<why>" bash
-   ~/.agents/skills/implement/pre-report-gate.sh <sha>` for step 4 instead of
+   ~/.agents/skills/implement/pre-report-gate.sh <sha>` for step 5 instead of
    the bare form, and name it, with the same `<why>`, in the PR-up report.
-   (§ The merge step 3 later writes its own files into this same `.scratch/`
-   at merge time, after "PR up" — that's the controller's use, not yours,
-   and doesn't change what you clear here.)
-4. **`bash ~/.agents/skills/implement/pre-report-gate.sh <sha>`** passes on
+   (§ The merge step 3's Codex pass writes nothing into this `.scratch/`:
+   its files live in `~/.cache/agent-reviews/<repo>/`, outside the
+   workspace, precisely so clearing this directory — or the pass launching
+   while you are still working — cannot destroy the other's files.)
+4. **Read your own diff against the three recurring defect classes** named
+   in `AGENTS.md` § Recurring defect classes;
+   `docs/agents/defect-classes.md` carries the checks and every instance.
+   This step is the pointer, not a third copy.
+5. **`bash ~/.agents/skills/implement/pre-report-gate.sh <sha>`** passes on
    the sha you report — a "done" report has described work that was dirty in
    the tree, not on the branch, or left content behind in `.scratch/` with
    no `PRE_REPORT_KEEP_SCRATCH` naming why.
-5. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
+6. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
    prints `false` and `CLEAN` before "PR up" goes out — a PR reported on a
    draft or a conflict fails the controller's merge. `headRefOid` is the sha
    GitHub computed that reading against, and it is the one the report's
@@ -249,7 +263,7 @@ gh pr create --repo <owner/name> --title "<title>" --body-file <body>
 The body has these sections and nothing else:
 
 - **Closes #\<n\>** — a bare line, not inside backticks or a code fence
-  (either breaks `closingIssuesReferences` — § Before the PR: step 5
+  (either breaks `closingIssuesReferences` — § Before the PR: step 6
   checks it after this PR exists). One such line per ticket the brief
   named: `closingIssuesReferences` is what `merge-cleanup` reads to clear a
   whole clump's claims, so a clump ticket with no line of its own neither
@@ -347,7 +361,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    line and the cleanup line as in the exception below, and name the
    disagreement.
 2. **The PR is still not-draft, CLEAN, and closes what it should** — the
-   same check as § Before the PR: step 5, rerun because `main` may have
+   same check as § Before the PR: step 6, rerun because `main` may have
    moved since "PR up". `closingIssuesReferences` empty or missing the
    ticket blocks the merge same as a draft or a conflict does — a PR that
    closes nothing does not merge.
@@ -360,7 +374,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    comment `Codex pass skipped: <why>` on the PR and go to step 4 — a skip
    adds no trial row.
 
-   Otherwise, from this PR's workspace, fetch the ticket yourself — you did
+   From the worker's workspace, fetch the ticket yourself — you did
    not build this ticket, so you don't already hold it — body and comments
    both, rendered as in § The brief, since a requirement added in a comment
    is part of what Codex must judge the diff against:
@@ -376,55 +390,162 @@ The controller merges on a repo Chris owns; Chris reads it after via
    a shell string, quoted or not, since a body or comment containing `"`,
    `` ` ``, or `$(` would then run as shell instead of reading as text; a
    comment is the less trusted half of the two, since anyone with repo access
-   can add one. Then invoke the plugin's own script directly.
-   `/codex:adversarial-review` carries
+   can add one.
+
+   **The focus text ends with a controller-context appendix** (#941), two
+   required lines, appended to `body_file` after the rendered ticket and
+   marked as controller context rather than ticket text. Codex reads this
+   one branch against `origin/<default>` and nothing else, so anything the
+   controller knows that the tree does not say is invisible to it — and
+   what it cannot see, it reports as a missing requirement. Three of map
+   #776's disputes were exactly that: PR #930's merge-tail pointer was in
+   PR #929, PR #940's four-bucket sentence was on `implement-898`, and
+   PR #945's `[high]` "tier tagger is unreachable from the active lane"
+   was the parked skill every ticket in that map lands into. Write both
+   lines with your file-write tool, into the same file, never interpolated
+   into a shell string — a branch name or a ticket title reaching the shell
+   is the same injection the ticket render above is already protected from:
+
+   ```
+   ## Controller context — written by the controller, not part of the ticket
+
+   **Open sibling branches.** <each open sibling branch, the files it
+   holds, and what of this PR's ask is split onto it: which file, which
+   line, which PR> — or: No sibling branch is open, and nothing in this PR
+   is split.
+
+   **Posture.** <the code under review is parked, feature-flagged off, or
+   otherwise landing ahead of its own activation, and the ticket that
+   activates it> — or: The code under review is live in the tree; its
+   posture is what the tree implies.
+   ```
+
+   Both lines are written even when there is nothing to report. An omitted
+   line and a "nothing is split" line read identically to Codex, and the
+   controller is the only party that can tell them apart. Both facts are
+   the controller's at dispatch time: it is the controller that orders a
+   cross-ticket line, and the
+   controller that knows what a map is staging behind a parked skill.
+   Without the posture line, every PR of a staged rebuild pays one `[high]`
+   whose remedy is "do the closing ticket early" (#891, #898).
+
+   **One recorded run, wherever it launches** (#942). The pass runs
+   through this block and no other, early or at this gate; `phase` is the
+   only thing that changes. A second block with weaker guarantees is how a
+   degraded run gets collected as a clean one — the path that exists to
+   handle a failure being the path with no checks. Invoke the plugin's own
+   script directly: `/codex:adversarial-review` carries
    `disable-model-invocation: true`, so the SlashCommand tool never reaches
-   it here: calling the script directly bypasses the slash command's own
-   markdown entirely — the `AskUserQuestion` gate lives there, not in the
-   script; `handleReviewCommand` parses `--wait`/`--background` as booleans
-   and never reads them, always running foreground. Keep `--wait` anyway to
-   say what's intended; it's a harmless no-op on this path. `git fetch
-   origin` first — a stale `origin/<default>` inflates the diff Codex reads:
+   it here, and calling the script directly bypasses the slash command's
+   own markdown entirely — the `AskUserQuestion` gate lives there, not in
+   the script; `handleReviewCommand` parses `--wait`/`--background` as
+   booleans and never reads them, always running foreground. Keep `--wait`
+   anyway to say what's intended; it's a harmless no-op on this path. `git
+   fetch origin` first — a stale `origin/<default>` inflates the diff Codex
+   reads:
 
    ```
-   git fetch origin
-   body_file=<absolute path you wrote the ticket body and comments to>
-   out_file=<this workspace's absolute path>/.scratch/codex-adversarial-<pr>.out
-   mkdir -p "$(dirname "$out_file")"
+   dir="$HOME/.cache/agent-reviews/<repo>"   # expanded as
+   mkdir -p "$dir"                           # multi-axis-code-review/SKILL.md does it
+   phase=early                               # or gate-retry, or second
+   body_file=<absolute path you wrote the ticket body, comments and appendix to>
+   out_file="$dir/codex-adversarial-<n>-$phase.out"
+   record="$dir/codex-adversarial-<n>-$phase.json"
    plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
+   cd <the PR's workspace> && git fetch origin
+   launch_sha=$(git rev-parse HEAD); started=$(date -Is)
    node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1
+   status=$?
+   printf '{"ticket": <n>, "phase": "%s", "status": %d, "launch_sha": "%s", "completion_sha": "%s", "body_sha256": "%s", "started": "%s", "completed": "%s"}\n' \
+     "$phase" "$status" "$launch_sha" "$(git rev-parse HEAD)" "$(sha256sum "$body_file" | cut -d" " -f1)" "$started" "$(date -Is)" >"$record"
    ```
 
-   `out_file` is the pass's only durable record — the command's own output
-   goes to stdout otherwise, and nothing captures it. It must resolve under
-   this workspace's git-ignored `.scratch/`, never `/tmp`. Post it as a PR
-   comment before acting on it, using that same file:
-   `gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`. The
-   `mkdir -p` above is required because the worker's own Before the PR step
-   already deleted this directory.
+   The record carries the node call's exit status, the workspace HEAD at
+   launch and again at completion, the `sha256sum` of `body_file`, and both
+   timestamps. The launch sha alone cannot tell a clean read from one the
+   worker committed underneath, and a run that failed and returned writes
+   an output file that looks like any other. Both files go in
+   `~/.cache/agent-reviews/<repo>/`, never this workspace's `.scratch/`:
+   the worker's own § Before the PR step 3 deletes it, which would take an
+   in-flight pass's output with it and fail the pre-report gate on a file
+   the worker never wrote — and a `.scratch/` file left behind stalls
+   `merge-cleanup`, which refuses ignored content without `--discard`.
+   That cache directory's 14-day prune covers both files, so nothing here
+   is cleaned up by hand, `rm` or `rmdir`, in any phase. The `phase` in
+   each name keeps a retry from overwriting the record it was run because
+   of.
 
-   Once that comment posts, `rm "$out_file" "$body_file"`, then `rmdir
-   "$(dirname "$out_file")"` — bound to the file's own directory, not a
-   bare `.scratch` relative to wherever the controller's shell happens to
-   be sitting (usually the primary checkout, not this PR's workspace) —
-   the comment is now the durable record and the ticket body lives on the
-   issue, so nothing needs them left in the workspace: `merge-cleanup`
-   refuses to delete ignored `.scratch/` content without `--discard`, and
-   stray files (or an empty directory this step's own `mkdir -p` created)
-   there stall it on every Codex pass. `rmdir` only removes an empty
-   directory, so it undoes that `mkdir -p` with no risk to anything else
-   that might be in `.scratch/`. Remove only those two named files and, if
-   now empty, the directory — never `rm -rf .scratch`, never `--discard`.
-   If `rmdir` fails, the directory wasn't empty: report that and name it,
-   rather than hide the failure — don't silence it with `|| true`, so
-   whatever else is in there surfaces before `merge-cleanup` would refuse
-   on it anyway. If `gh pr comment` fails, leave both files in place and
-   stop before merging.
+   **Launch at round 1** with `phase=early`, when the worker reports "Round
+   1 out", not when it reports "PR up": the diff is on the branch by then,
+   and the run overlaps the worker's own verification pass instead of being
+   bolted serially onto this gate, behind three opus axes that have already
+   read the same diff. The overlap is banked only on a round 1 whose
+   findings produce no fix commit — a fix pushed while the pass runs moves
+   the head, and the gate below refuses that verdict and reruns here after
+   all. Run the whole block in one backgrounded shell. `--background` is
+   parsed by `codex-companion.mjs` and never read on this path, so there is
+   no job id, and `status`/`result` have nothing to collect; backgrounding
+   is the shell's job, one shell per pass, one pass in flight per PR, and
+   each in-flight pass is a node process against the box cap.
+
+   **The gate is fail-closed.** Nothing merges until this step holds a
+   verdict whose `status` is 0 and whose launch sha, completion sha and the
+   PR's `headRefOid` from step 2 are one sha, with a `body_sha256` matching
+   a fresh render of ticket and appendix. Absent, unreadable, errored (a
+   non-zero `status` — not logged in, quota gone, a node that found no
+   module; the `out_file` then holds that error, not a review), raced (the
+   two shas differ, so the branch moved while Codex was reading) or stale
+   (they agree with each other but not with `headRefOid`, so a fix landed
+   after the launch) is a refusal, not a pass: do not post that verdict,
+   append its duration row with the refusal as the outcome, and rerun the
+   block here in the foreground with `phase=gate-retry`, against the
+   current head. A refused verdict's findings are never reported as
+   current — they describe a diff this PR no longer has, or a run that
+   never produced a review, and either one collected looks exactly like a
+   pass that found nothing, which is the shape this lane closed seven times
+   on 2026-09-20.
+
+   **The retry is validated by the same gate**, against the same five
+   refusals: a rerun that errors is not a pass either, and the block that
+   produced it wrote the record that says so. A `gate-retry` record that is
+   itself a refusal ends this step as `Codex pass skipped: <why>` — comment
+   it on the PR, naming the refusal and both phases' rows, and go to step
+   4 with no trial row, the same as a failed preflight. Nothing is claimed
+   about a diff nobody reviewed, and the skip is visible on the PR rather
+   than inferred from a silence. The skip clause at the top of this step
+   governs the preflight only — not logged in, no plugin entry — checked
+   before any run exists; every started run answers to this gate.
+
+   A collected verdict is this step's first pass. Post it from the cache
+   directory:
+   `gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`, before
+   acting on it. If `gh pr comment` fails, stop before merging — the
+   comment is what makes the verdict readable by anyone but you. Everything
+   after that — the dispositions, #888's conditional second pass (which
+   runs the same block with `phase=second`), the no-third-run ceiling, the
+   trial row — is unchanged by where the collected pass was launched.
+
+   **Every run records its duration**, collected or refused, as one row
+   appended to `docs/research/2026-09-20-codex-pass-durations.md`: ticket,
+   PR, phase (`early`, `gate-retry` or `second`), launched, completed,
+   duration in minutes, and outcome — `collected`, `collected-after-retry`
+   for a `gate-retry` that was collected, or the refusal that discarded it.
+   A retry reported as a plain `collected` loses the one number this change
+   exists to produce: how often the early launch actually pays. The row is
+   an auto-ship commit on `<default>`, the trial row's own rule, and is
+   written at the same time.
 
    No material findings → go to step 4. Findings → hold the merge: send the
    worker the findings and the comment URL. Note the head sha this pass ran
    against — step 2's `headRefOid` — and beside it `sha256sum "$body_file"`,
-   taken before the `rm` above removes that file. Those two are what the
+   taken before the `rm` above removes that file. That sum covers the
+   appendix as well as the rendered ticket, both being in the one file, so
+   a fresh render for that comparison is ticket and appendix — rebuilding
+   the ticket alone reads as a change that never happened and burns the
+   second pass on it. An appendix that genuinely moved — a sibling branch
+   merged since, a posture that changed — is a real input change and reruns
+   the pass, because the context Codex judged against is no longer the
+   context that holds. Those two are what the
    second pass is judged against below: the diff is only half this pass's
    input, and a requirement commented onto the ticket between the two
    passes moves the other half while the sha sits still.

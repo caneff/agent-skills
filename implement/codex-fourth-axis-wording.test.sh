@@ -73,9 +73,10 @@ check_in "$merge_section" 'Run `codex login status` first'
 check_in "$merge_section" 'comment `Codex pass skipped: <why>` on the PR'
 check_in "$merge_section" 'a skip adds no trial row'
 
-# Rule 3: raw output is a PR comment, posted before acting on it, never /tmp.
-check_in "$merge_section" "must resolve under this workspace's git-ignored \`.scratch/\`, never"
-check_in "$merge_section" '/tmp`. Post it as a PR comment before acting on it'
+# Rule 3: raw output is a PR comment, posted before acting on it, and the
+# file it is posted from survives the workspace — #942 moved it out of
+# `.scratch/` into the review cache (Rules 9-11 below carry why).
+check_in "$merge_section" 'Post it from the cache directory'
 check_in "$merge_section" '`gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`'
 
 # Rule 4: findings hold the merge; the worker disposes of them and records
@@ -111,36 +112,33 @@ check_in "$review_section" 'the PR body lists **every** round-1 finding with its
 check_in "$review_section" 'fixed, with the fixing commit'
 check_in "$pr_section" 'every round-1 finding, each with its disposition'
 
-# Rule 8 (same Codex pass): the raw output needs a bound, captured file —
-# not bare stdout — or there is nothing to post as the PR comment.
-check_in "$merge_section" 'out_file=<this workspace'
-check_in "$merge_section" '.scratch/codex-adversarial-<pr>.out'
+# Rule 8 (a controller Codex pass on PR #818 found this): the raw output
+# needs a bound, captured file — not bare stdout — or there is nothing to
+# post as the PR comment.
+check_in "$merge_section" 'out_file="$dir/codex-adversarial-<n>-$phase.out"'
 check_in "$merge_section" 'adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1'
-check_in "$merge_section" "the pass's only durable record"
+check_in "$merge_section" 'gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`, before acting on it'
+check_in "$merge_section" 'If `gh pr comment` fails, stop before merging'
 
-# Rule 9 (controller Codex pass on PR #818, run 2 of 2): the pass's own
-# .scratch/ files must not linger — merge-cleanup refuses to delete
-# ignored content without --discard, so a leftover out_file or body_file
-# would stall it on every Codex pass. Only those two named files, and only
-# after the PR comment succeeds.
-check_in "$merge_section" 'rm "$out_file" "$body_file"'
-check_in "$merge_section" 'never `rm -rf .scratch`, never `--discard`'
-check_in "$merge_section" 'If `gh pr comment` fails, leave both files in place and stop before merging'
-
-# Rule 10 (#835, from PR #839's Codex finding): the step's own `mkdir -p`
-# leaves an empty `.scratch/` that stalls merge-cleanup — undo it with
-# `rmdir`, which only removes an empty directory, so it carries no
-# data-loss risk beyond what the two named `rm`s already accept.
-check_in "$merge_section" '`rmdir` only removes an empty directory'
-
-# Rule 11 (#835, Codex re-run on PR #840): `rmdir .scratch` is relative to
-# the controller's cwd, which is usually the primary checkout, not this
-# PR's workspace — a bare `.scratch` silently misses. It must bind to
-# `$out_file`'s own directory instead, and a failure (directory not empty)
-# must be reported, not hidden behind `|| true`.
-check_in "$merge_section" 'rmdir "$(dirname "$out_file")"'
-check_absent_in "$merge_section" 'rmdir .scratch' '§ The merge'
-check_absent_in "$merge_section" '2>/dev/null || true' '§ The merge'
+# Rules 9-11 were the `.scratch/` cleanup: the pass used to write its output
+# into the PR's workspace, so it had to `rm` the two files and `rmdir` the
+# directory its own `mkdir -p` created, bound to the file's directory rather
+# than a bare `.scratch` relative to the controller's cwd, and report an
+# rmdir failure instead of silencing it — merge-cleanup refuses ignored
+# `.scratch/` content without `--discard`, so anything left there stalled it
+# on every Codex pass (#835, PRs #839 and #840). #942 removed the hazard
+# instead of guarding it: the files live in `~/.cache/agent-reviews/<repo>/`,
+# outside the workspace, where the worker's own § Before the PR step cannot
+# delete an in-flight pass's output and the directory's 14-day prune
+# collects them. So the rule is now that the pass writes nothing into the
+# workspace and cleans nothing up by hand — and no `rm`/`rmdir` may come
+# back, because a cleanup aimed at the cache directory would delete the one
+# copy of the verdict and take the Claude axes' reports with it.
+check_in "$merge_section" '`~/.cache/agent-reviews/<repo>/`, never this workspace'
+check_in "$merge_section" 'nothing here is cleaned up by hand, `rm` or `rmdir`, in any phase'
+check_absent_in "$merge_section" 'rm "$out_file" "$body_file"' '§ The merge'
+check_absent_in "$merge_section" 'rmdir "$(dirname' '§ The merge'
+check_absent_in "$merge_section" '.scratch/codex-adversarial' '§ The merge'
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS implement/codex-fourth-axis-wording.test.sh"

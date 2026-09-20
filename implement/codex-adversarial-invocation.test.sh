@@ -78,7 +78,7 @@ check_absent() {
 check "$skill" 'disable-model-invocation: true'
 check "$skill" "codex@openai-codex"
 check "$skill" 'installPath'
-check "$skill" 'body_file=<absolute path you wrote the ticket body and comments to>'
+check "$skill" 'body_file=<absolute path you wrote the ticket body, comments and appendix to>'
 check "$skill" 'codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"'
 check "$skill" 'the `AskUserQuestion` gate lives there, not in the script'
 check "$skill" '`handleReviewCommand` parses `--wait`/`--background` as booleans and'

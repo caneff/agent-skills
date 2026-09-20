@@ -71,6 +71,18 @@ quota. In this lane they swap for:
    node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"
    ```
 
+   `body_file` here carries the same two-line controller-context appendix
+   `implement/SKILL.md` § The merge step 3 requires (#941) — **Open sibling
+   branches.** and **Posture.** — in that step's shape and wording, which
+   is the one copy of it; a second copy here would drift from it, and the
+   pass would be judged against whichever the writer happened to read.
+
+   You are the worker in this lane, and you hold neither fact: ask the
+   controller for both before you compose the file, rather than inferring
+   them from the tree — the tree is precisely the source that cannot see a
+   sibling branch or a deliberate parking, which is why Codex reading it
+   alone reports both as defects.
+
 The one-round-plus-verification cap and the pre-report gate in
 `implement/SKILL.md` § Review and § Before the PR: both bind unchanged. So does the
 disclosure: the PR body names the reviews that actually ran and says the diff
