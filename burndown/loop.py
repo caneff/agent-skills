@@ -722,6 +722,9 @@ def run(argv):
             in_flight = (read_clumps(args.in_flight, live=True)
                          if args.in_flight else [])
             free = max(args.free, 0)
+            # Measured before any early return: a broken `ps` must refuse
+            # here too, not hide behind "nothing to dispatch".
+            count, counter = agent_count(args)
             cores = core_room(free, in_flight)
             cores_line = render_cores(cores, free)
             if cores_line:
@@ -737,7 +740,6 @@ def run(argv):
                       "declared job")
                 print(render_dispatch([], frontier(candidates, in_flight)))
                 return 0
-            count, counter = agent_count(args)
             room, refusals = box_room(count, args.committed_gb,
                                       args.add_gb, cores["room"], counter)
             if refusals:

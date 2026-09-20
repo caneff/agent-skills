@@ -1065,6 +1065,24 @@ def test_the_cli_says_the_declared_job_holds_the_slot_and_not_the_box():
         assert got.stderr == "", got.stderr
 
 
+def test_the_cli_dispatch_measures_before_it_says_a_declared_job_holds_the_slot():
+    # The early "nothing to dispatch" return used to run before the
+    # measurement, so a broken `ps` hid behind a healthy exit 0.
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live = dispatch_files(tmp, {"state": "running", "cores": 8})
+        nobin = os.path.join(tmp, "empty-path")
+        os.mkdir(nobin)
+        got = subprocess.run(
+            [sys.executable, LOOP, "dispatch", "--candidates", cand,
+             "--in-flight", live, "--free", "1", "--committed-gb", "4"],
+            capture_output=True, text=True, timeout=60,
+            env={**os.environ, "PATH": nobin})
+    assert got.returncode == 1, got
+    assert "held by a declared job" not in got.stdout, got.stdout
+    assert "dispatch  #" not in got.stdout, got.stdout
+    assert "--processes" in got.stderr, got.stderr
+
+
 SLOW_HERDR = """#!/usr/bin/env bash
 sleep 30
 """
