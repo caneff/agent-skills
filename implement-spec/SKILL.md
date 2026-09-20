@@ -1,15 +1,8 @@
 ---
 name: implement-spec
-description: "Parked: drive one sliced spec as a nested run — the burn's worker, its own slices' controller, with an exploration pass, a closing ticket and a spec-level review."
+description: "Drive one sliced spec as a nested run — the burn's worker, its own slices' controller, with an exploration pass, a closing ticket and a spec-level review."
 disable-model-invocation: true
 ---
-
-> **Parked** with the rest of the multi-worker lane until it is rebuilt on
-> herdr — see [#700](https://github.com/caneff/agent-skills/issues/700)'s
-> "Out of scope" note. Written against that rebuild, like
-> [`burndown`](../burndown/SKILL.md); nothing here is executable policy until
-> the lane is unparked. The retired Orca-era text, which this replaces:
-> `git show 7c7eb30:implement-spec/SKILL.md`.
 
 One spec's slices, driven as one run. A mixed-origin queue — several tickets
 from different specs — is [`burndown`](../burndown/SKILL.md)'s job.

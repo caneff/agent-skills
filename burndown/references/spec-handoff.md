@@ -1,12 +1,5 @@
 # Spec handoff
 
-> **Parked** with the rest of the burndown skill until the multi-worker lane
-> is rebuilt on herdr — see
-> [#700](https://github.com/caneff/agent-skills/issues/700)'s "Out of scope"
-> note. Written against that rebuild; not executable policy until the lane is
-> unparked. The retired Orca-era text: `git show
-> 7c7eb30:burndown/references/spec-handoff.md`.
-
 Read this when a burn's candidate turns out to be a slice — its parent issue
 carries the `spec` label. Nothing else in a burn reaches this file.
 
