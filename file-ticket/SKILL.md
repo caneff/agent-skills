@@ -41,6 +41,18 @@ guess and do not create an issue until the target is confirmed.
   state, and a ticket filed as `needs-triage` waits for a manual relabel
   before anyone can dispatch it. When the finding is obviously a bug or an
   enhancement, add that label too.
+- **Blocked by**: a `## Blocked by` section, last in the body, on every
+  ticket this skill files — one bare `#NNN` per blocking issue in this repo,
+  one per list item, or the literal `None — can start immediately.` when
+  nothing blocks it. Never omit it, and never leave it to the filer's
+  judgement: a ticket carrying neither native dependency edges nor that
+  section reads as **unresolved** to the frontier reader — neither blocked
+  nor unblocked, and never dispatched — so a controller resolves it by hand
+  before any wave. You are usually filing a finding raised inside a known
+  piece of work, so the blocker is known here: it is the ticket whose build
+  raised this finding, whenever that build has to land before this one can
+  start. The grammar and what each answer means:
+  `~/.agents/skills/burndown/references/frontier.md`.
 
 ## Create it
 
@@ -56,9 +68,21 @@ gh issue create --repo <owner>/<repo> --title "<title>" \
   --label "<role label>[,<bug-or-enhancement label>]" \
   --body "$(cat <<'EOF'
 <body>
+
+## Blocked by
+
+- None — can start immediately.
 EOF
 )"
 ```
+
+With blockers, that last line becomes one `- #<n>` line per blocking issue
+in this repo — and set the tracker's **native** edge as well, `--blocked-by
+<#,#>` on the create, **in addition to** the section and never instead of
+it. Native edges are the live gate: closing a blocker moves the count with
+nobody editing prose. The section is the fallback the reader parses where
+the tracker holds no edges, so where `gh` rejects the flag it still states
+the relationship on its own.
 
 Filing more than one target prints one URL per line, in the order the
 targets were given.
