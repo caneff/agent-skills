@@ -16,8 +16,12 @@ SECTION = re.compile(r"§\s+(\d+|[A-Za-z][^§\n]{0,160})")
 TRAILING_PUNCTUATION = ".,;:!?)]}"
 # "§ The merge step 3 ..." points at the section "The merge" and its third
 # numbered step; whatever follows the locator is prose, not part of the name.
-# The name must be non-empty, so a heading that is itself "Step 3: ..." is
-# left alone.
+# The mandatory whitespace before "step" is what leaves a heading that is
+# itself "Step 3: ..." alone: relax it to \s* and every "§ Step N" label
+# becomes "", which matches_heading accepts against any heading at all.
+# Known limit: a reference to such a heading that carries prose after it
+# ("§ Step 3 and then ...") is still over-read, and the step number itself
+# is never checked against the target's numbered list.
 STEP_LOCATOR = re.compile(r"^(.+?)\s+[Ss]tep\s+\d+\b")
 
 
