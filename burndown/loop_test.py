@@ -560,11 +560,16 @@ def test_the_cli_landing_refuses_cleanup_while_a_question_is_outstanding():
     got = loop_py("landing", "--clump", "454", "--agent",
                   "implement-454-12", "--outstanding", "may I drop 4x4?")
     assert got.returncode == 1, got
+    # Only what is owed, and a refusal saying so. `cleanup` must not appear
+    # as a step on the one path where running it destroys the channel the
+    # answer is owed on — an exit code refuses, a printed step list does not.
     assert got.stdout.splitlines() == [
+        "refused: 1 answer owed before cleanup",
         "answer    implement-454-12  may I drop 4x4?",
-        "merge",
-        "cleanup",
     ], got.stdout
+    assert "cleanup" not in got.stdout.replace(
+        "refused: 1 answer owed before cleanup", ""), got.stdout
+    assert "merge" not in got.stdout, got.stdout
     assert "Traceback" not in got.stderr, got.stderr
     assert len(got.stderr.strip().splitlines()) == 1, got.stderr
     assert "implement-454-12" in got.stderr, got.stderr

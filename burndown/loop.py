@@ -461,11 +461,21 @@ def run(argv):
                     "no agent named — the refusal's whole job is to name the "
                     "worker that is owed an answer")
             clump = {"tickets": [args.clump], "agent": args.agent}
-            for step in landing_steps(clump, args.outstanding):
-                print(f"answer    {step['agent']}  {step['question']}"
-                      if step["step"] == "answer" else step["step"])
-            # The tail is printed either way: a controller refused cleanup
-            # needs the answers it owes, not only the word "no".
+            owed = [step for step in landing_steps(clump, args.outstanding)
+                    if step["step"] == "answer"]
+            if owed:
+                # The answers, and a refusal saying they are the whole list.
+                # `merge` and `cleanup` are not printed here: an exit code
+                # refuses, a printed step list does not, and anything reading
+                # this list would be handed `cleanup` on the one path where
+                # running it closes the pane the answer is owed on.
+                print(f"refused: {len(owed)} answer"
+                      f"{'' if len(owed) == 1 else 's'} owed before cleanup")
+                for step in owed:
+                    print(f"answer    {step['agent']}  {step['question']}")
+            else:
+                for step in landing_steps(clump, args.outstanding):
+                    print(step["step"])
             cleanup_ready(clump, args.outstanding)
         elif args.command == "hub":
             landed = [p for p in args.landed.replace(",", " ").split() if p]
