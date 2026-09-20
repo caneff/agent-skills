@@ -1,6 +1,6 @@
 # Multi-worker trial: controller briefs
 
-Hand-written run briefs for the trial on the herdr lane ([agent-skills #781](https://github.com/caneff/agent-skills/issues/781)), written from the map's decisions ([#776](https://github.com/caneff/agent-skills/issues/776)) because `burndown` and `implement-spec` were parked at the time; both went live in #899, and a run today uses the skills rather than these briefs. Each brief is pasted whole into a fresh Claude session opened on the target repo's primary checkout, on its default branch. Chris watches in herdr and merges.
+Hand-written run briefs for the trial on the herdr lane ([agent-skills #781](https://github.com/caneff/agent-skills/issues/781)), written from the map's decisions ([#776](https://github.com/caneff/agent-skills/issues/776)) because `burndown` and `implement-spec` were parked at the time. Both were unparked in #899; these briefs are the record of that trial, not current procedure. Each brief is pasted whole into a fresh Claude session opened on the target repo's primary checkout, on its default branch. Chris watches in herdr and merges.
 
 Order: the spec run first (done 2026-09-14); the burn once `implement-dispatch --spec` ([#787](https://github.com/caneff/agent-skills/issues/787), landed) and the spec run's lane fixes (#819–#824) have landed.
 
