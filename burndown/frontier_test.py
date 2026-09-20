@@ -58,6 +58,24 @@ def numbers(bucket):
     return [entry["number"] for entry in bucket]
 
 
+def unresolved_count(issues, dropped, states=None):
+    """The size of the `unresolved` bucket over a fixture queue, read with
+    `dropped` as the non-dispatchable label set.
+
+    The harness behind the acceptance criterion "the unresolved count drops
+    by exactly the number of tickets a label takes off the frontier": read
+    the queue twice, once with the label set and once without, and the
+    difference is the claim. It is parameterised on the label set so the
+    claim is about any such label, not about one measured number on one
+    repo on one afternoon."""
+    original = F.NON_DISPATCHABLE_LABELS
+    F.NON_DISPATCHABLE_LABELS = frozenset(dropped)
+    try:
+        return len(read(issues, states)["unresolved"])
+    finally:
+        F.NON_DISPATCHABLE_LABELS = original
+
+
 # --- Native dependencies: the canonical path -------------------------------
 
 def test_native_open_blocker_reads_as_blocked():
@@ -199,6 +217,27 @@ def test_a_needs_info_ticket_with_no_blocked_by_is_dropped_not_unresolved():
     got = read([issue(1, labels=("ready-for-agent", "needs-info"),
                       body="Some body with no declaration at all.\n")])
     assert got == {"unblocked": [], "blocked": [], "unresolved": []}, got
+
+
+def test_dropping_a_label_lowers_unresolved_by_the_tickets_it_takes():
+    # The measurement AC3 makes, as a fixture rather than a reading of one
+    # repo: the queue the ticket names under Seams under test — two silent
+    # tickets carrying the label, a claimed one, a well-formed child, and a
+    # silent one that carries nothing.
+    queue = [
+        issue(1, labels=("ready-for-agent", "needs-info"),
+              body="No declaration at all.\n"),
+        issue(2, labels=("ready-for-agent", "needs-info"),
+              body="No declaration at all.\n"),
+        issue(3, labels=("ready-for-agent", "in-progress"),
+              body="No declaration at all.\n"),
+        issue(4, body="## Blocked by\n\n- #7\n"),
+        issue(5, body="No declaration at all.\n"),
+    ]
+    states = {7: "open"}
+    # #3 is claimed and #4 is blocked, so neither is ever unresolved.
+    assert unresolved_count(queue, dropped=(), states=states) == 3, queue
+    assert unresolved_count(queue, dropped=("needs-info",), states=states) == 1, queue
 
 
 def test_a_ticket_without_a_non_dispatchable_label_is_still_classified():

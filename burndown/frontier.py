@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The frontier of a ticket queue: `python3 burndown/frontier.py <owner/repo>
-<label>` prints the open, unclaimed tickets split three ways —
+<label>` prints the open, unclaimed, dispatchable tickets split three ways —
 
     unblocked   <n> <title>
     blocked     <n> <title>  (blocked by #a, #b)
@@ -168,8 +168,9 @@ def classify(issues, state_of):
     """`{unblocked, blocked, unresolved}` over GitHub issue objects.
     `state_of(number) -> "open" | "closed" | None` reads a blocker's state;
     `None` means it could not be read, which is unresolved rather than a
-    guess. A claimed ticket, and anything that is really a PR, is in no
-    bucket at all — it is off the frontier."""
+    guess. A claimed ticket, a ticket carrying a non-dispatchable label,
+    and anything that is really a PR, is in no bucket at all — each is off
+    the frontier by its own nature, not by a blocking relationship."""
     buckets = {"unblocked": [], "blocked": [], "unresolved": []}
     for issue in sorted(issues, key=lambda i: i.get("number") or 0):
         if (issue.get("pull_request") or _is_claimed(issue)

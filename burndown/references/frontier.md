@@ -15,6 +15,22 @@ unresolved  907 Liveness  (no native dependencies and no `## Blocked by` section
 A claimed ticket — one with an assignee, or the `in-progress` label — is in
 no bucket at all. It is off the frontier because someone already has it.
 
+**A non-dispatchable ticket is in no bucket either.** `implement-dispatch`
+refuses some tickets on a label alone, whatever their blockers say, and a
+ticket it will not take is not work this reader may offer. The set is
+`NON_DISPATCHABLE_LABELS` in the reader; it holds `needs-info` — a ticket
+waiting on grilling, not on another ticket. (`in-progress` is refused too,
+and is handled above as a claim: an assignee says the same thing without a
+label.)
+
+The drop happens **before any bucket is decided**, so such a ticket's body
+is never read. This is not the same posture as silence, and the difference
+is the point: `unresolved` means "this ticket's blocking state could not be
+determined, so a human must look", and that is the wrong question to ask
+about a ticket no run may dispatch either way. Padding the bucket with items
+a controller cannot act on trains them to skim it, which is the failure the
+bucket was created to prevent.
+
 ## Three sources, in order
 
 **1. The tracker's native dependencies, where it has them.** On GitHub that
