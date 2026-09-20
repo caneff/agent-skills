@@ -355,9 +355,20 @@ is worse than a slow one.
 ```
 worktree=<the worktree under review>
 ids=<space-separated mutation ids, one per new or changed test — the names you report by>
-mutate() { :; }   # <$1 the id, $2 the witness worktree: strip that test's constraint there, then run only the suite that covers it>
+mutate() { :; }   # <$1 the id, $2 the witness worktree, $3 a marker path: strip that test's constraint in $2, create the marker with `: >"$3"` on the line IMMEDIATELY before the covering suite's command, and run only that suite>
 
+# Job control, so each background mutation is its own process group and an
+# interrupt can reach a covering suite's whole process tree rather than only
+# the wrapper shell around it. An interrupted run may print a job notice.
+set -m
 top=$(git -C "$worktree" rev-parse --show-toplevel) || exit 1
+# An empty list is a failed enumeration upstream, not a clean check: both loops
+# below would run zero times, cleanup would succeed, and the run would report
+# success having witnessed nothing. Refused before anything is created.
+case "$ids" in
+  *[![:space:]]*) ;;
+  *) echo "witness check: no mutations supplied - nothing was checked" >&2; exit 2;;
+esac
 # An id names a directory and an output file, so it is checked before anything
 # exists: a pytest nodeid (`tests/a.py::t1[x]`) would put a mutation's output
 # file inside its own worktree and break the per-id prefixing below. Refused by
@@ -384,7 +395,7 @@ esac
 # worktree `x.out` while mutation `x` is opening its output file at that same
 # path, so `x`'s redirection fails against a directory and `x` is reported red
 # without its suite ever having run.
-mkdir -p "$root/worktrees" "$root/output" "$root/status" || exit 1
+mkdir -p "$root/worktrees" "$root/output" "$root/status" "$root/ran" || exit 1
 # Cleanup that reports rather than covers: an `rm -rf` over a worktree git
 # failed to deregister - a full disk is the plausible way - leaves exactly the
 # stale entry this recipe's own prose says never to create, and the run would
@@ -410,8 +421,23 @@ cleanup() {
 # TERM as well: this run is minutes long, so a reviewer's ctrl-C is an ordinary
 # way for it to end, and it would otherwise leave N registered worktrees behind
 # to stall the next `worktree remove` and any later `merge-cleanup`.
+# Signalling this shell does not reach its background children, so without this
+# the covering suites keep running after their worktrees are force-removed,
+# holding the box and writing into deleted paths. Stop them, reap them, and only
+# then clean up.
+stop_children() {
+  pids=$(jobs -pr)
+  [ -n "$pids" ] || return 0
+  for pid in $pids; do kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null; done
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ -n "$(jobs -pr)" ] || break
+    sleep 0.5
+  done
+  for pid in $(jobs -pr); do kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null; done
+  wait 2>/dev/null
+}
 trap cleanup EXIT
-trap 'cleanup; exit 130' INT TERM
+trap 'stop_children; cleanup; exit 130' INT TERM
 # The bound and its reason are *The bound* above. What the code adds is the
 # refusal to guess: no readable process table means a full box, not an idle one.
 if procs=$(ps -eo comm= 2>/dev/null) && [ -n "$procs" ]; then
@@ -441,23 +467,24 @@ for id in $ids; do
   # `mutate` in its own subshell: a mutation body ends in a failing suite and
   # is naturally written with `exit`, which would otherwise kill this job
   # before its status is recorded and read back below as `unknown`.
-  { ( mutate "$id" "$witness" ) >"$root/output/$id" 2>&1
+  { ( mutate "$id" "$witness" "$root/ran/$id" ) >"$root/output/$id" 2>&1
     printf '%s\n' "$?" >"$root/status/$id"; } &
 done
 wait
 for id in $ids; do
+  # The marker first, and it outranks both the status and the output: a wrapper
+  # that dies before the covering suite - a missing test path, a denied command -
+  # exits nonzero and writes an error, and every proxy for "the suite ran" short
+  # of the marker reads that as an assertion witnessed. Class 1, one layer out
+  # from the branch that exists to stop it.
+  if [ ! -e "$root/ran/$id" ]; then
+    printf '%s: unknown — it never reached its covering suite, whatever it exited with\n' "$id"
+    continue
+  fi
   case "$(cat "$root/status/$id" 2>/dev/null)" in
     0) printf '%s: HOLLOW — the assertion still passed with its constraint stripped\n' "$id" ;;
-    # A nonzero status is a red only if a suite actually said something. A
-    # wrapper that dies before reaching the suite exits nonzero with an empty
-    # output, and reported as red that is an unreached mutation read as a
-    # demonstrated assertion - class 1, in the branch that exists to stop it.
-    [1-9]*) if [ -s "$root/output/$id" ]; then
-              printf '%s: red — its own message follows; confirm it is your assertion, not a missing file or a denied path\n' "$id"
-              show "$id"
-            else
-              printf '%s: unknown — it exited nonzero with no output at all, so nothing ran that could have failed\n' "$id"
-            fi ;;
+    [1-9]*) printf '%s: red — its own message follows; confirm it is your assertion, not a missing file or a denied path\n' "$id"
+            show "$id" ;;
     *) printf '%s: unknown — the mutation never ran to completion; report it by name, never as a pass\n' "$id" ;;
   esac
 done

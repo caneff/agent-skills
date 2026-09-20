@@ -210,15 +210,17 @@ if [ -e "\$scratch/\$other.up" ]; then
 fi
 printf 'assert 1 == 2\n' >"\$wt/\$id.py"
 git -C "\$wt" rm -q --cached "\$id.py" 2>/dev/null
+: >"\$3"
 echo "MUTANT-\$id: covering suite red, its own message"
 exit 1
 MUTATE
 
 substitute() { # <ids> <mutate body> -> a runnable script on stdout
+  local body="${2//&/\\&}"   # & in a sed replacement means the whole matched line
   printf '%s\n' "$recipe" |
     sed -e "s|^worktree=<.*|worktree=$repo|" \
         -e "s|^ids=<.*|ids=\"$1\"|" \
-        -e "s|^mutate() .*|mutate() { $2; }|"
+        -e "s|^mutate() .*|mutate() { $body; }|"
 }
 
 # The recipe computes its bound from the live process table, so on a loaded box
@@ -234,7 +236,7 @@ printf 'claude\nbash\ninit\n'
 IDLE
 chmod +x "$scratch/bin/ps"
 
-substitute 'm1 m2' "bash \"$scratch/mutate.sh\" \"\$1\" \"\$2\"" >"$scratch/recipe.sh"
+substitute 'm1 m2' "bash \"$scratch/mutate.sh\" \"\$1\" \"\$2\" \"\$3\"" >"$scratch/recipe.sh"
 grep -q "^worktree=$repo\$" "$scratch/recipe.sh" ||
   { echo "FAIL: the recipe's worktree placeholder did not substitute" >&2; exit 1; }
 grep -q '^ids="m1 m2"$' "$scratch/recipe.sh" ||
@@ -328,7 +330,7 @@ exec "$real_git" "\$@"
 SHIM
 chmod +x "$scratch/bin-git/git"
 
-substitute 'ok bad' "echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-unknown.sh"
+substitute 'ok bad' ": >\"\$3\"; echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-unknown.sh"
 ( cd "$repo" && PATH="$scratch/bin-git:$scratch/bin:$PATH" bash "$scratch/recipe-unknown.sh" ) \
   >"$scratch/unknown.out" 2>&1 || true
 if ! grep -i 'unknown' "$scratch/unknown.out" | grep -q 'bad'; then
@@ -354,7 +356,7 @@ fi
 mkdir -p "$scratch/bin-nops"
 { echo '#!/usr/bin/env bash'; echo 'exit 1'; } >"$scratch/bin-nops/ps"
 chmod +x "$scratch/bin-nops/ps"
-substitute 'u1 u2' "bash \"$scratch/mutate.sh\" \"\$1\" \"\$2\"" >"$scratch/recipe-nops.sh"
+substitute 'u1 u2' "bash \"$scratch/mutate.sh\" \"\$1\" \"\$2\" \"\$3\"" >"$scratch/recipe-nops.sh"
 ( cd "$repo" && PATH="$scratch/bin-nops:$PATH" bash "$scratch/recipe-nops.sh" ) \
   >"$scratch/nops.out" 2>&1 || true
 for id in u1 u2; do
@@ -374,7 +376,7 @@ done
 mkdir -p "$scratch/bin-busy"
 { echo '#!/usr/bin/env bash'; echo 'for _ in $(seq 1 30); do echo claude; done'; } >"$scratch/bin-busy/ps"
 chmod +x "$scratch/bin-busy/ps"
-substitute 'b1 b2' "echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-busy.sh"
+substitute 'b1 b2' ": >\"\$3\"; echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-busy.sh"
 ( cd "$repo" && PATH="$scratch/bin-busy:$PATH" bash "$scratch/recipe-busy.sh" ) \
   >"$scratch/busy.out" 2>&1 || true
 for id in b1 b2; do
@@ -392,10 +394,13 @@ done
 cat >"$scratch/sleeper.sh" <<SLEEP
 #!/usr/bin/env bash
 printf '%s\n' "\$2" >"$scratch/\$1.wt"
+printf '%s\n' "\$\$" >"$scratch/\$1.pid"
+: >"\$3"
 : >"$scratch/\$1.up"
 sleep 8
+: >"$scratch/\$1.late"
 SLEEP
-substitute 'k1 k2' "bash \"$scratch/sleeper.sh\" \"\$1\" \"\$2\"" >"$scratch/recipe-kill.sh"
+substitute 'k1 k2' "bash \"$scratch/sleeper.sh\" \"\$1\" \"\$2\" \"\$3\"" >"$scratch/recipe-kill.sh"
 ( cd "$repo" && PATH="$scratch/bin:$PATH" exec bash "$scratch/recipe-kill.sh" ) >/dev/null 2>&1 &
 killpid=$!
 for _ in $(seq 1 100); do
@@ -419,12 +424,21 @@ for id in k1 k2; do
     echo "FAIL: an interrupted run left $id's throwaway worktree on disk" >&2
     fail=1
   fi
+  # Registrations and directories cannot see a surviving child: a covering suite
+  # still running after its worktree was force-removed holds the box and writes
+  # into deleted paths. The run has exited by now, so the process must be gone.
+  child="$(cat "$scratch/$id.pid" 2>/dev/null)"
+  if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then
+    echo "FAIL: $id's covering suite was still running after the interrupted run returned" >&2
+    kill -KILL "$child" 2>/dev/null || true
+    fail=1
+  fi
 done
 
 # An id that cannot name a directory and an output file is refused by name,
 # before anything is created — never mangled into a path inside its own
 # worktree, which is how a message gets attached to the wrong mutation.
-substitute 'tests/a.py::t1' "echo \"MUTANT-\$1\"; exit 1" >"$scratch/recipe-badid.sh"
+substitute 'tests/a.py::t1' ": >\"\$3\"; echo \"MUTANT-\$1\"; exit 1" >"$scratch/recipe-badid.sh"
 if ( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-badid.sh" ) \
      >"$scratch/badid.out" 2>&1; then
   echo "FAIL: a pytest nodeid was accepted as a mutation id" >&2
@@ -458,7 +472,7 @@ fi
 # parent creates first makes the other fail — a red with no suite behind it and
 # an output file inside a worktree, both at once. Disjoint directories are what
 # make this pair ordinary.
-substitute 'x x.out' "echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-collide.sh"
+substitute 'x x.out' ": >\"\$3\"; echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-collide.sh"
 ( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-collide.sh" ) \
   >"$scratch/collide.out" 2>&1 || true
 for id in x x.out; do
@@ -501,7 +515,7 @@ exec "$real_git" "\$@"
 NORM
 chmod +x "$scratch/bin-norm/git"
 cp "$scratch/bin/ps" "$scratch/bin-norm/ps"
-substitute 'r1' "echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-norm.sh"
+substitute 'r1' ": >\"\$3\"; echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-norm.sh"
 if ( cd "$repo" && PATH="$scratch/bin-norm:$PATH" bash "$scratch/recipe-norm.sh" ) \
      >"$scratch/norm.out" 2>&1; then
   echo "FAIL: a witness run whose worktree removal failed still exited 0" >&2
@@ -532,6 +546,40 @@ trees_norm="$(git -C "$repo" worktree list | wc -l)"
 if [ "$trees_norm" -ne 2 ]; then
   echo "FAIL: after the by-hand cleanup $trees_norm worktrees are registered, not the fixture's 2" >&2
   git -C "$repo" worktree list >&2
+  fail=1
+fi
+
+# Non-empty output was a proxy for "the suite ran", and it is the wrong proxy:
+# a wrapper that dies before invoking the covering suite — a missing test path, a
+# denied command — writes its error to stderr and exits nonzero, which is
+# indistinguishable from a red unless the mutation says for itself that it got
+# as far as the suite. The marker is that statement.
+substitute 'p1' "echo 'bash: no such test file' >&2; exit 2" >"$scratch/recipe-presuite.sh"
+( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-presuite.sh" ) \
+  >"$scratch/presuite.out" 2>&1 || true
+if ! grep -i 'unknown' "$scratch/presuite.out" | grep -q 'p1'; then
+  echo "FAIL: a mutation that died before its covering suite was not reported as unknown" >&2
+  cat "$scratch/presuite.out" >&2
+  fail=1
+fi
+if grep -q 'p1: red' "$scratch/presuite.out"; then
+  echo "FAIL: a pre-suite failure with stderr output was reported as a red" >&2
+  cat "$scratch/presuite.out" >&2
+  fail=1
+fi
+
+# An empty list is a failed enumeration upstream. Run as a success it is the
+# whole ticket's defect inside the tool the ticket builds: a check that
+# witnessed nothing, reporting clean.
+substitute '' ": >\"\$3\"; exit 1" >"$scratch/recipe-empty.sh"
+if ( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-empty.sh" ) \
+     >"$scratch/empty.out" 2>&1; then
+  echo "FAIL: an empty mutation list exited 0 as a clean witness check" >&2
+  cat "$scratch/empty.out" >&2
+  fail=1
+elif ! grep -q 'no mutations supplied' "$scratch/empty.out"; then
+  echo "FAIL: an empty mutation list was refused without saying so" >&2
+  cat "$scratch/empty.out" >&2
   fail=1
 fi
 
