@@ -55,6 +55,15 @@ Chris approved losing under one count is never misread as counted by the
 other. The list is fixed on purpose: an unknown ignored name is kept, since
 a wrongly kept cache costs a --discard and a discarded note cannot be undone.
 
+An ignored directory is judged by what it holds, never by its entry: git
+collapses one to a single line whether it is empty or holds hundreds. A
+directory with no file anywhere beneath it loses nothing, so it never
+refuses — it goes with the worktree, and the run prints one line naming it.
+One holding files refuses with their true count and their real names, so
+--discard is never approved against a number that understates the loss. A
+directory the walk cannot read is not known to be empty, so it still
+refuses.
+
 The claim clears with the merge: every ticket the branch's merged PR closes
 in this repo, plus the branch's own implement-<n>, loses its in-progress
 label and its assignees once that issue is closed. A clump lands as one PR
@@ -268,8 +277,9 @@ fn blockers(agents: &[Agent]) -> Vec<String> {
 }
 
 /// What `git worktree remove --force` would throw away: a worktree's
-/// `git status --porcelain --ignored` entries, by kind. An untracked or
-/// ignored directory is one entry, as git collapses it.
+/// `git status --porcelain --ignored` entries, by kind. Git collapses an
+/// untracked or ignored directory to one entry; `classify_ignored` expands
+/// the ignored ones by what is on disk beneath them.
 #[derive(Default)]
 struct WorktreeFiles {
     modified: Vec<String>,
@@ -278,6 +288,9 @@ struct WorktreeFiles {
     ignored: Vec<String>,
     /// Ignored entries `is_cache` accepts.
     caches: Vec<String>,
+    /// Ignored directory entries holding no file anywhere beneath them: the
+    /// removal takes them and nothing is lost, so they are not work (#946).
+    empty: Vec<String>,
 }
 
 /// How many names a message lists before "and <n> more".
@@ -325,11 +338,35 @@ impl WorktreeFiles {
             match code {
                 "??" => files.untracked.push(name),
                 "!!" if is_cache(wt, &name) => files.caches.push(name),
-                "!!" => files.ignored.push(name),
+                "!!" => files.classify_ignored(wt, name),
                 _ => files.modified.push(name),
             }
         }
         Some(files)
+    }
+
+    /// A `!!` directory entry stands for whatever is inside it:
+    /// `--ignored=matching` collapses it to one line whether it holds nothing
+    /// or hundreds of files, and counting entries was wrong both ways (#946)
+    /// — an empty directory forced a needless `--discard`, and a full one
+    /// reported "1 file(s) would be lost" against hundreds, so `--discard`
+    /// was approved against a count that understated the loss. Classify by
+    /// contents, not by the entry: zero files is `empty` and not work; one or
+    /// more land in `ignored` under their real names, so the refusal states
+    /// the true count and the true loss. A non-directory entry, and a
+    /// directory the walk cannot read, stay `ignored` as themselves — an
+    /// unreadable directory fails closed (#801), never read as "nothing in
+    /// there".
+    fn classify_ignored(&mut self, wt: &str, entry: String) {
+        if !entry.ends_with('/') {
+            self.ignored.push(entry);
+            return;
+        }
+        match files_under(&Path::new(wt).join(entry.trim_end_matches('/'))) {
+            Some(f) if f.is_empty() => self.empty.push(entry),
+            Some(f) => self.ignored.extend(f.into_iter().map(|rel| format!("{entry}{rel}"))),
+            None => self.ignored.push(entry),
+        }
     }
 
     /// Modified, untracked or non-cache ignored files: work a removal would
@@ -365,6 +402,28 @@ impl WorktreeFiles {
         let names: Vec<String> = self.ignored.iter().cloned().chain((!others.is_empty()).then(|| first_names(&others))).collect();
         format!("{} file(s) would be lost: {}", kinds.join(", "), names.join(", "))
     }
+}
+
+/// Every file anywhere beneath `dir`, as paths relative to it, or `None` when
+/// any part of the walk cannot be read — the caller must not read an
+/// unreadable directory as an empty one. A symlink counts as a file and is
+/// never descended, so the walk cannot cycle.
+fn files_under(dir: &Path) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    let mut stack = vec![(dir.to_path_buf(), String::new())];
+    while let Some((d, prefix)) = stack.pop() {
+        for entry in std::fs::read_dir(&d).ok()? {
+            let entry = entry.ok()?;
+            let rel = format!("{prefix}{}", entry.file_name().to_string_lossy());
+            if entry.file_type().ok()?.is_dir() {
+                stack.push((entry.path(), format!("{rel}/")));
+            } else {
+                out.push(rel);
+            }
+        }
+    }
+    out.sort();
+    Some(out)
 }
 
 /// The first `NAMES_SHOWN` names, comma-separated, then "and <n> more".
@@ -461,10 +520,11 @@ impl Cleanup {
     /// The uncommitted-files guard (#736). `git worktree remove --force`
     /// discards everything git does not hold, so modified, untracked or
     /// ignored files refuse the removal unless --discard — `.scratch/`
-    /// included (#801), empty or not: a process can fill it between the read
-    /// and the removal, and an empty directory can be intentional, so
-    /// emptiness earns no exemption (#823, reversed by a Codex pass on the
-    /// PR). Caches (`is_cache`) never refuse; their count and first names
+    /// included (#801). An ignored directory holding no file anywhere beneath
+    /// it is not among them (#869, #946, reversing #823): there is nothing to
+    /// lose, so it never costs a --discard, and it is named on its own line
+    /// here because the run stays a full account of what cleanup touched.
+    /// Caches (`is_cache`) never refuse; their count and first names
     /// are printed as "cache file(s)", since they go too — a label distinct
     /// from the non-cache "ignored file(s)" refusal above (#823), so a name
     /// approved for loss in one line is never misread as belonging to the
@@ -480,6 +540,10 @@ impl Cleanup {
                 return false;
             }
             safe_println!("--discard: {wt} — {}", files.dirty_text());
+        }
+        for dir in &files.empty {
+            let verb = if self.dry { "would remove" } else { "removing" };
+            safe_println!("{verb} the empty ignored directory at {wt}/{}", dir.trim_end_matches('/'));
         }
         if !files.caches.is_empty() {
             let would = if self.dry { "would discard" } else { "discarding" };
