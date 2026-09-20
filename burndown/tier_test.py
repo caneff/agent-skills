@@ -10,10 +10,14 @@ cannot read as prose is never labelled, because a wrong `documentation` label
 sends a code change down the light tier and it lands with no PR and no
 reviewer.
 """
+import contextlib
+import io
 import json
 import os
+import stat
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -133,7 +137,7 @@ def test_the_report_says_so_when_it_wrote_nothing():
     """A run that wrote no label has to say that in words: a report with no
     line about labels reads the same as a report from a pass that never
     ran."""
-    assert "no labels written" in T.render([])
+    assert T.render([]) == "labels written: none"
 
 
 class FakeView:
@@ -177,11 +181,132 @@ def test_the_candidate_grammar_is_closures_own():
     except C.ClosureError as exc:
         refused = exc
     assert refused is not None, "a spec with no files was accepted"
+    assert "not a candidate: 371" in str(refused), refused
     assert view.calls == [], "the tracker was read for a spec that is not one"
 
 
 def test_usage_is_an_exit_2_not_a_traceback():
     out = subprocess.run([sys.executable, TIER], capture_output=True, text=True)
+    assert out.returncode == 2, out
+    assert "usage: tier.py" in out.stderr, out.stderr
+
+
+class ExplodingGh:
+    """A tracker that answers for a while and then stops. The failure this
+    pass has to survive is the third write, not the first: what it already
+    put on the tracker is a fact the controller has to be told about."""
+
+    def __init__(self, fails_on):
+        self.fails_on = str(fails_on)
+        self.calls = []
+
+    def __call__(self, args):
+        self.calls.append(list(args))
+        if args[1] == "view":
+            return json.dumps({"labels": []})
+        if args[2] == self.fails_on:
+            raise T.TierError("'documentation' not found")
+        return ""
+
+
+@contextlib.contextmanager
+def only_gh_on_path(script):
+    """A `PATH` holding one `gh` — the given shell script — or holding no
+    `gh` at all when `script` is None. The error layer is the one part of
+    this module a fake cannot reach: every other test injects `run=`."""
+    saved = os.environ["PATH"]
+    with tempfile.TemporaryDirectory(prefix="tier-path-") as path:
+        if script is not None:
+            gh_path = os.path.join(path, "gh")
+            with open(gh_path, "w") as fh:
+                fh.write("#!/bin/sh\n" + script + "\n")
+            os.chmod(gh_path, os.stat(gh_path).st_mode | stat.S_IEXEC)
+        os.environ["PATH"] = path
+        try:
+            yield
+        finally:
+            os.environ["PATH"] = saved
+
+
+def test_a_failure_midway_still_names_the_labels_already_written():
+    """#898: "the run's report names every label the exploration pass wrote".
+    A tracker failure on the third candidate must not swallow the record of
+    the first two — those labels are on the tracker whatever happens next,
+    and a controller that never hears about them cannot act on them."""
+    gh = ExplodingGh(fails_on=373)
+    written = []
+    raised = None
+    try:
+        T.tag("caneff/agent-skills",
+              [candidate(371, ["a.md"]), candidate(372, ["b.md"]),
+               candidate(373, ["c.md"]), candidate(374, ["d.md"])],
+              run=gh, written=written)
+    except T.TierError as exc:
+        raised = exc
+    assert raised is not None, "the failure was swallowed"
+    assert [w["number"] for w in written] == [371, 372], written
+    report = T.render(written)
+    assert "#371" in report and "#372" in report, report
+
+
+def test_the_command_line_prints_that_partial_report_before_it_exits():
+    """The seam above is only worth having if `main` reaches it: the partial
+    report goes to stdout, the failure to stderr, and the exit code is still
+    a failure."""
+    gh = ExplodingGh(fails_on=372)
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = T.main(["tier.py", "caneff/agent-skills", "371=a.md", "372=b.md"],
+                      run=gh)
+    assert code == 1, code
+    assert "#371" in out.getvalue(), out.getvalue()
+    assert "'documentation' not found" in err.getvalue(), err.getvalue()
+
+
+def test_a_failing_gh_is_refused_rather_than_read_as_a_write():
+    """The guard that keeps a failed `gh issue edit` from passing for a label
+    that landed. Run against a real `gh` on `PATH`, because every other test
+    here injects `run=` and never reaches this function."""
+    with only_gh_on_path("exit 4"):
+        raised = None
+        try:
+            T.gh(["issue", "edit", "1"])
+        except T.TierError as exc:
+            raised = exc
+        assert raised is not None, "a non-zero gh exit passed for a write"
+        assert "issue edit 1" in str(raised), raised
+
+
+def test_no_gh_at_all_is_refused_too():
+    """Otherwise a box without `gh` reports `labels written: none` and every
+    docs-only ticket in the queue goes heavy with nobody told why."""
+    with only_gh_on_path(None):
+        raised = None
+        try:
+            T.gh(["issue", "edit", "1"])
+        except T.TierError as exc:
+            raised = exc
+        assert raised is not None, "a missing gh passed for a write"
+        assert "gh" in str(raised), raised
+
+
+def test_unreadable_json_from_the_tracker_is_refused():
+    """An unreadable answer is not an empty label list: read as one, the pass
+    writes the label onto a ticket that may already carry it, every tick."""
+    raised = None
+    try:
+        T.fetch_labels("caneff/agent-skills", 1, run=lambda args: "{not json")
+    except T.TierError as exc:
+        raised = exc
+    assert raised is not None, "unreadable JSON passed for an unlabelled ticket"
+    assert "unreadable JSON" in str(raised), raised
+
+
+def test_an_unknown_flag_is_usage_not_a_candidate():
+    """`tier.py <repo> --help` reached the candidate parser and exited 1 with
+    "not a candidate: --help"."""
+    out = subprocess.run([sys.executable, TIER, "caneff/agent-skills", "--help"],
+                         capture_output=True, text=True)
     assert out.returncode == 2, out
     assert "usage: tier.py" in out.stderr, out.stderr
 

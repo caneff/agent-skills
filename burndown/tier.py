@@ -86,28 +86,32 @@ def gh(args):
     return out.stdout
 
 
-def add_labels(repo, number, labels, run=gh):
-    """Add `labels` to one ticket. `--add-label` and nothing else: this pass
-    has no spelling for removing a label, which is what keeps a worker's
-    right to raise light to heavy from being undone from here."""
-    run(["issue", "edit", str(number), "--repo", repo,
-         "--add-label", ",".join(labels)])
-
-
-def tag(repo, candidates, run=gh, write=True):
+def tag(repo, candidates, run=None, write=True, written=None):
     """`(candidates) -> what was written`: one record per candidate that
     earned a label, `{"number": <n>, "labels": [...]}`, in candidate order.
 
-    `write=False` decides identically and invokes nothing — the answer is
-    the same either way, so a dry run is a readable preview of the real one
-    rather than a second code path."""
-    written = []
+    `--add-label` and nothing else — this pass has no spelling for removing a
+    label, which is what keeps a worker's right to raise light to heavy from
+    being undone from here.
+
+    `write=False` decides identically and invokes nothing, so a dry run is a
+    readable preview of the real one rather than a second code path.
+
+    `written` is the caller's own list to accumulate into. A tracker failure
+    on the third candidate leaves the first two's labels **on the tracker**,
+    and a report that never names them is the run's report lying by omission
+    — so the record has to survive the exception, which a return value does
+    not.
+    """
+    written = [] if written is None else written
+    run = run or gh
     for candidate in candidates:
         labels = labels_to_write(candidate)
         if not labels:
             continue
         if write:
-            add_labels(repo, candidate["number"], labels, run)
+            run(["issue", "edit", str(candidate["number"]), "--repo", repo,
+                 "--add-label", ",".join(labels)])
         written.append({"number": candidate["number"], "labels": labels})
     return written
 
@@ -118,17 +122,18 @@ def render(written):
     words — a report silent about labels reads the same as one from a pass
     that never ran."""
     if not written:
-        return "labels written: none — no labels written by the exploration pass"
+        return "labels written: none"
     lines = ["labels written:"]
     lines.extend(f"    #{w['number']}  {', '.join(w['labels'])}" for w in written)
     return "\n".join(lines)
 
 
-def fetch_labels(repo, number, run=gh):
+def fetch_labels(repo, number, run=None):
     """The labels one ticket carries right now. Read at pass time, never
     assumed: a run that assumed the label absent would write it again on
     every tick, and one that assumed it present would leave a docs ticket
     heavy forever."""
+    run = run or gh
     try:
         answer = json.loads(run(["issue", "view", str(number), "--repo", repo,
                                  "--json", "labels"]) or "null")
@@ -137,7 +142,7 @@ def fetch_labels(repo, number, run=gh):
     return [label.get("name") for label in (answer or {}).get("labels") or []]
 
 
-def candidates_from(repo, specs, run=gh):
+def candidates_from(repo, specs, run=None):
     """`<n>=<path>[,<path>]...` specs, each with the labels its ticket
     carries. The grammar is `closure.parse_candidate`'s and not a second
     parser here: the exploration pass hands both readers the same strings."""
@@ -149,18 +154,27 @@ def candidates_from(repo, specs, run=gh):
     return out
 
 
-def main(argv):
+def main(argv, run=None):
+    """`--dry-run` is read once, here, and an argument this reader does not
+    know is usage rather than a candidate: `tier.py <repo> --help` used to
+    reach the candidate parser and die with "not a candidate: --help"."""
+    dry_run = "--dry-run" in argv[1:]
     args = [a for a in argv[1:] if a != "--dry-run"]
-    if len(args) < 2:
+    if len(args) < 2 or any(a.startswith("-") for a in args):
         print("usage: tier.py <owner/repo> <n>=<path>[,<path>]... [--dry-run]",
               file=sys.stderr)
         return 2
+    written = []
     try:
-        candidates = candidates_from(args[0], args[1:])
-        print(render(tag(args[0], candidates, write="--dry-run" not in argv)))
+        candidates = candidates_from(args[0], args[1:], run)
+        tag(args[0], candidates, run, write=not dry_run, written=written)
     except (TierError, ClosureError) as exc:
+        # The partial report first: whatever is already on the tracker is
+        # what the next dispatch will read, failure or not.
+        print(render(written))
         print(f"tier.py: {exc}", file=sys.stderr)
         return 1
+    print(render(written))
     return 0
 
 

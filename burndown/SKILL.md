@@ -46,7 +46,11 @@ too.
    **frozen** candidate set: a ticket filed while the run is going waits for
    the next run. The one exception is a ticket filed *during* the run
    **because the run is stuck on what it fixes** — `loop.admit` takes it only
-   with the clump it unblocks named.
+   with the clump it unblocks named. Then **tag the tier before any
+   dispatch** (§ Tier tagging): `python3 burndown/tier.py <owner/repo>
+   <n>=<path>[,<path>]...` writes the missing `documentation` label onto
+   every docs-only candidate, because the tier is read off the ticket at
+   dispatch and a label written after that is a label that came too late.
 3. The **opening report** carries `closure.py`'s announcement line verbatim,
    so the reader can tell all three declaration states apart: a declared
    directive, a **declared None** — the repo has no include graph — and

@@ -2,7 +2,7 @@
 
 A ticket's **tier** is read off its `documentation` label at dispatch —
 present is light, absent is heavy (the **Tier** entry in
-`~/.agents/skills/CONTEXT.md`). A docs-only ticket whose author forgot the
+[`../../CONTEXT.md`](../../CONTEXT.md)). A docs-only ticket whose author forgot the
 label therefore gets the full heavy process for a page of prose. The exploration pass already knows each
 candidate's files before dispatch, so it **writes the missing label onto the
 ticket**. Reading it is `burndown/tier.py` — `python3 burndown/tier.py
@@ -40,9 +40,9 @@ writes anything:
   `True`, and that is the one reading of "every file is prose" that sends an
   unknown candidate down the light tier.
 
-**It only ever adds.** `add_labels` builds `--add-label` and there is no
-spelling here for `--remove-label`, so a label a human put on a ticket is
-never taken off by a run. A worker keeps its right to raise light to heavy;
+**It only ever adds.** `tag` builds `--add-label` and there is no spelling
+anywhere in this reader for `--remove-label`, so a label a human put on a
+ticket is never taken off by a run. A worker keeps its right to raise light to heavy;
 nothing raises heavy to light, and nothing here lowers it either.
 
 ## What counts as prose
@@ -86,11 +86,19 @@ session does.
 
 ## The run's opening report names every label written
 
-`render(written)` is the line the run's opening report carries — one line per
+`tag` accumulates into the caller's own list, and `render(written)` is the
+line the run's opening report carries — one line per
 ticket, with the labels that went onto it — and a pass that wrote none says
 `labels written: none` in words. A report silent about labels reads the same
 as a report from a pass that never ran, and the difference between those two
 is a ticket dispatched at the wrong tier.
+
+A tracker failure partway through the candidate list is the case that makes
+the accumulator worth its awkwardness: the labels already written are **on
+the tracker** and the next dispatch will read them, so the command prints the
+partial report to stdout before it prints the failure to stderr and exits 1.
+A report that named nothing because the run ended badly would be the run
+lying by omission.
 
 ## Where it sits in the run
 
