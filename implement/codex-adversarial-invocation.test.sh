@@ -98,16 +98,15 @@ check "$lane" 'codex-companion.mjs" review --wait'
 check "$lane" 'codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"'
 check_absent "$lane" '"<ticket body verbatim>"' 'the naive, unsafe form'
 
-# #888: step 3's second pass is conditional on new commits. A disposition of
-# `disputed` or `filed` pushes nothing, so the second run would read a diff
-# that has not changed by a single byte and return the same findings, for
-# several minutes and a token budget (sudokumaker-custom-constraints#559 at
-# `203ac7a`, agent-skills#877 at `b96aa32`). The entry condition must be the
-# head sha moving, and the no-third-run ceiling must survive the change.
+# #888: step 3's second pass is conditional on new commits — the entry
+# condition is the head sha moving, a `fixed` disposition with the sha
+# unmoved blocks, and the no-third-run ceiling survives the change.
 check "$skill" 'Note the head sha this pass ran against'
 check "$skill" 'The second pass runs only if the head sha moved'
 check "$skill" 'If every disposition was `disputed` or `filed` and the sha is unmoved'
 check "$skill" 'confirms each disposition is recorded in the Decisions made section and goes to step 4'
+check "$skill" 'A disposition that says `fixed` with the sha unmoved is neither case'
+check "$skill" 'which a skipped pass still owes'
 check_count "$skill" 'there is no third Codex run' 1
 check_absent "$skill" 'and then this pass once more on the fixes' 'the unconditional second run'
 
