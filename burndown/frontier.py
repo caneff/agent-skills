@@ -69,6 +69,15 @@ CLAIMED_LABEL = "in-progress"
 # assignee says the same thing without a label.
 NON_DISPATCHABLE_LABELS = frozenset({"needs-info"})
 
+# A spec parent is neither of those things. `implement-dispatch` refuses it
+# in plain mode while naming the route that does take it — a nested run,
+# `--spec <n> --slots <k>` (#897) — so it is dispatchable work in a
+# different mode. Dropping it hides real work from the only reader that
+# surfaces it, and calling it `unresolved` says a human must determine its
+# blocking state when what it needs is a different verb. Both would be a
+# lie about what the entry is, so it gets its own bucket (#910).
+SPEC_LABEL = "spec"
+
 
 class FrontierError(Exception):
     """The tracker could not be read. One stderr line, never a traceback:
@@ -171,13 +180,20 @@ def classify(issues, state_of):
     guess. A claimed ticket, a ticket carrying a non-dispatchable label,
     and anything that is really a PR, is in no bucket at all — each is off
     the frontier by its own nature, not by a blocking relationship."""
-    buckets = {"unblocked": [], "blocked": [], "unresolved": []}
+    buckets = {"unblocked": [], "blocked": [], "unresolved": [], "spec": []}
     for issue in sorted(issues, key=lambda i: i.get("number") or 0):
         if (issue.get("pull_request") or _is_claimed(issue)
                 or _is_non_dispatchable(issue)):
             continue
         entry = {"number": issue.get("number"), "title": issue.get("title"),
                  "blockers": [], "why": ""}
+        if SPEC_LABEL in _labels(issue):
+            # Before the sources, because none of them asks the question a
+            # spec parent answers: it is dispatched by verb, not by state.
+            entry["why"] = ("a spec parent: dispatch with `implement-dispatch"
+                            f" --spec {entry['number']} --slots <k>`")
+            buckets["spec"].append(entry)
+            continue
         native = _native(issue)
         if native is not None:
             entry["why"] = "native dependencies"
@@ -278,13 +294,13 @@ def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state):
 
 def render(buckets):
     lines = []
-    for name in ("unblocked", "blocked", "unresolved"):
+    for name in ("unblocked", "blocked", "unresolved", "spec"):
         for entry in buckets[name]:
             note = ""
             if name == "blocked" and entry["blockers"]:
                 note = "  (blocked by " + ", ".join(
                     f"#{n}" for n in entry["blockers"]) + ")"
-            elif name == "unresolved":
+            elif name in ("unresolved", "spec"):
                 note = f"  ({entry['why']})"
             lines.append(f"{name:<11} {entry['number']} {entry['title']}{note}")
     return "\n".join(lines)

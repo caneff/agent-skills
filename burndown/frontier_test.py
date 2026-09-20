@@ -58,6 +58,12 @@ def numbers(bucket):
     return [entry["number"] for entry in bucket]
 
 
+# Every bucket empty: what a ticket that is off the frontier altogether
+# leaves behind. Spelled out rather than derived, so a bucket added without
+# a thought about the off-the-frontier cases fails here.
+EMPTY = {"unblocked": [], "blocked": [], "unresolved": [], "spec": []}
+
+
 def unresolved_count(issues, dropped, states=None):
     """The size of the `unresolved` bucket over a fixture queue, read with
     `dropped` as the non-dispatchable label set.
@@ -182,19 +188,78 @@ def test_every_unresolved_entry_says_why():
 def test_an_assigned_ticket_is_off_the_frontier():
     got = read([issue(1, assignees=("caneff",),
                       body="## Blocked by\n\nNone.\n")])
-    assert got == {"unblocked": [], "blocked": [], "unresolved": []}, got
+    assert got == EMPTY, got
 
 
 def test_an_in_progress_ticket_is_off_the_frontier():
     got = read([issue(1, labels=("ready-for-agent", "in-progress"),
                       body="## Blocked by\n\nNone.\n")])
-    assert got == {"unblocked": [], "blocked": [], "unresolved": []}, got
+    assert got == EMPTY, got
 
 
 def test_a_pull_request_is_not_a_ticket():
     # The REST issues endpoint returns PRs too; they are not frontier work.
     got = read([issue(1, pull_request=True, body="## Blocked by\n\nNone.\n")])
-    assert got == {"unblocked": [], "blocked": [], "unresolved": []}, got
+    assert got == EMPTY, got
+
+
+# --- A spec parent is its own answer ---------------------------------------
+
+def test_a_spec_parent_lands_in_its_own_bucket():
+    # A spec parent is dispatchable work in a different mode, so it is not a
+    # drop; and it needs no human to determine anything, so it is not
+    # `unresolved`. Both available answers would be a lie about what it is.
+    got = read([issue(1, labels=("ready-for-agent", "spec"),
+                      body="No declaration at all.\n")])
+    assert numbers(got["spec"]) == [1], got
+    assert numbers(got["unblocked"]) == [], got
+    assert numbers(got["blocked"]) == [], got
+    assert numbers(got["unresolved"]) == [], got
+
+
+def test_a_spec_entry_names_the_route_that_dispatches_it():
+    # The point of the bucket: a controller reading the frontier can act on
+    # the entry without opening another document. An entry that says "this
+    # is a spec" and nothing else has only moved the problem.
+    got = read([issue(885, labels=("ready-for-agent", "spec"),
+                      body="No declaration at all.\n")])
+    why = got["spec"][0]["why"]
+    assert "implement-dispatch --spec 885 --slots" in why, why
+
+
+def test_a_claimed_spec_parent_is_off_the_frontier_like_any_other():
+    # A claim outranks the bucket: someone already has it, so there is no
+    # route left to offer a controller.
+    got = read([issue(1, labels=("ready-for-agent", "spec", "in-progress"),
+                      body="No declaration at all.\n")])
+    assert got == EMPTY, got
+
+
+def test_a_spec_parent_moves_out_of_unresolved_rather_than_vanishing():
+    # AC3's measurement: the `unresolved` count drops by exactly the number
+    # of spec parents, because each one lands in `spec` instead. A drop that
+    # left the queue smaller by one would pass a count check and still hide
+    # the work, so the destination is asserted beside the count.
+    queue = [
+        issue(1, labels=("ready-for-agent", "spec"),
+              body="No declaration at all.\n"),
+        issue(2, body="No declaration at all.\n"),
+        issue(3, body="## Blocked by\n\nNone.\n"),
+    ]
+    got = read(queue)
+    assert numbers(got["unresolved"]) == [2], got
+    assert numbers(got["spec"]) == [1], got
+    assert numbers(got["unblocked"]) == [3], got
+    assert len(got["unresolved"]) + len(got["spec"]) + len(got["unblocked"]) == 3, got
+
+
+def test_the_rendered_report_names_the_spec_route():
+    # The reader's printed form is what a controller actually reads.
+    line = F.render(read([issue(885, title="Spec: the lane",
+                                labels=("ready-for-agent", "spec"),
+                                body="No declaration at all.\n")]))
+    assert line.startswith("spec        885 Spec: the lane  ("), line
+    assert "implement-dispatch --spec 885 --slots <k>" in line, line
 
 
 # --- Non-dispatchable tickets are off the frontier -------------------------
@@ -205,7 +270,7 @@ def test_a_needs_info_ticket_is_off_the_frontier():
     # nature, the way a claimed ticket is — not by a blocking relationship.
     got = read([issue(1, labels=("ready-for-agent", "needs-info"),
                       body="## Blocked by\n\nNone.\n")])
-    assert got == {"unblocked": [], "blocked": [], "unresolved": []}, got
+    assert got == EMPTY, got
 
 
 def test_a_needs_info_ticket_with_no_blocked_by_is_dropped_not_unresolved():
@@ -216,7 +281,7 @@ def test_a_needs_info_ticket_with_no_blocked_by_is_dropped_not_unresolved():
     # skim the one bucket that exists to be read.
     got = read([issue(1, labels=("ready-for-agent", "needs-info"),
                       body="Some body with no declaration at all.\n")])
-    assert got == {"unblocked": [], "blocked": [], "unresolved": []}, got
+    assert got == EMPTY, got
 
 
 def test_dropping_a_label_lowers_unresolved_by_the_tickets_it_takes():
