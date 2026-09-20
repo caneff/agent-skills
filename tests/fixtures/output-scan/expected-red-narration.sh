@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # The other direction: a healthy suite whose mutation check is *supposed* to go
-# red, so it narrates the child checker's complaint and then passes. Every
-# failure word the scan hunts appears here, mid-line, where the child printed
-# it. This suite must stay green — see tests/section-references.test.sh, the
-# real instance this fixture stands in for.
+# red, so it quotes the child checker's complaint and then passes. All three
+# signature words appear here, every one of them mid-line, where a quoted
+# failure lands. Only the column-0 anchor keeps this suite green.
+#
+# tests/section-references.test.sh is the real instance this stands in for.
 echo "docs/agents/defect-classes.md:31: § Liveness says in not found in docs/agents/defect-classes.md"
-echo "checker rejected the renamed heading, as expected — ERROR text above is the point"
+echo "child checker printed FAIL and a Traceback, as this mutation requires"
+echo "renamed heading rejected, as expected — the ERROR text above is the point"
 echo "ok"
 exit 0
