@@ -84,10 +84,20 @@ too.
    [`implement`](~/.agents/skills/implement/SKILL.md) § Dispatch, which
    claims the clump and starts the worker; `implement/SKILL.md` § The merge,
    which merges and cleans up, is the controller's own step there. The loop
-   restates neither grammar. Register each dispatched clump with
+   restates neither grammar. When two in-flight branches turn out to touch
+   the same files, the collision procedure, the closure defect it implies,
+   and the rule that every outstanding worker question is answered **before**
+   cleanup: [`references/merge-tail.md`](references/merge-tail.md). Register
+   each dispatched clump with
    `runfile.py clump` — its workspace and its worker's herdr agent name, or
    step 1's resume has nothing to re-announce to — and each landing with
    `runfile.py land`, so a restart can pick the run back up.
+9. **Wait on the wake, and sweep on an idle one.** The loop waits by being
+   idle, never inside a tool call: a controller in one hears no worker until
+   it returns. What it trusts while it waits, in rank order, and the bounded
+   backstop it runs when it wakes with nothing else to do: § Liveness. A
+   clump that cannot go on parks, and a run that parks twice with no landing
+   between stops: § Parking and escalation.
 
 ## The frontier
 
@@ -135,6 +145,103 @@ file is gone; nothing reads or writes one. The contract, the JSON shape and the
 resume procedure: [`references/run-file.md`](references/run-file.md).
 Written against the lane being rebuilt; the loop that will drive it is parked
 with the rest of this skill.
+
+## Liveness
+
+How a controller knows its workers are alive, in rank order. The measurements
+behind the ranking, and what each source costs when it is read the other way:
+[`references/liveness.md`](references/liveness.md).
+
+1. **The wake is primary.** A worker's `SendMessage` reaches an idle
+   controller as its next turn, about a second after the send (#778). Nothing
+   replaces it, and nothing below is read as a report that has not arrived.
+2. **The stop alert is a hint.** It means *read this pane* — it does not mean
+   a worker is stuck. Across the two #781 runs it fired **six times** and was
+   wrong six times, from three benign causes: an outstanding background
+   shell, outstanding Monitor tasks, and a worker that had already reported
+   and was answering a message needing no reply. So a controller reads the
+   pane the alert names and rules from what that pane says; it never parks a
+   clump, holds a slot or calls a worker stalled on the alert alone.
+3. **The backstop is a bounded sweep.** `python3 burndown/loop.py sweep
+   --workers <run file's clumps>` probes each live slot once through `herdr
+   agent get` — no retry, no wait, one call per slot and none for a landed
+   clump. Run it when the controller wakes for any reason and has **nothing
+   else to do**. It is **never a timer** and never a blocking call: the wake
+   is the primary path, and a controller sitting in a blocking call while
+   workers are out cannot hear any of them.
+
+   A **vanished** pane — herdr has no agent by that name — is the sweep's own
+   verdict, distinct from an `idle` one, and it is the only failure nothing
+   else in the lane can find (#778). What the sweep cannot see is the
+   opposite shape: a pane that is present and busy reads `working` whatever
+   it is busy with, so a worker spinning on no-op calls passes every signal
+   the sweep has (#925). The sweep answers whether there is still a pane and
+   what herdr says it is doing — never whether the work is progressing.
+
+**A worker declares its job size.** A worker that launches a parallel job
+names the job's **core count** in its report. The controller charges it
+against the free slots, because a slot is one core's worth of machine until a
+worker says otherwise: an 8-core job holds eight slots' worth, and
+`loop.py dispatch --declared <clump>=<cores>` takes the cores past the job's
+own slot off the free ones and prints the line that says which clump is
+holding what. That line goes in the controller's **status line** while any
+declaration is outstanding, and the declaration is charged until the worker
+reports the job done. The budget was in slots and the contention was in
+cores, with nothing bridging the two: on #781 the box hit 25.8 load with no
+dispatch pending, so no box check could have caught it.
+
+## Parking and escalation
+
+**Three park causes, and no others.** A clump parks when:
+
+1. a question only **Chris** can answer arises;
+2. a **lane-mandated step the harness refuses** blocks it;
+3. a worker **cannot get its PR to CLEAN**.
+
+Everything else is a **controller ruling** — the controller decides it, states
+the assumption it decided under, and the run goes on. A park is a comment on
+the ticket saying which of the three it is and what it is waiting on, plus a
+label swap to `ready-for-human`. What each cause cost on #781, and why a
+fourth one is not added quietly:
+[`references/parking.md`](references/parking.md).
+
+A parked clump **keeps its workspace**, and its include closure stays **out of
+the frontier** while it is parked: releasing either invites a second worker
+into the same files, which is the collision § The loop step 5 exists to
+prevent. **Two consecutive parks with no landing between them stop the run** —
+a run that has stopped landing has stopped working, and the next thing it
+does is report to Chris rather than dispatch again.
+
+**Escalation.** The controller's own escalation list is
+[`CONTEXT.md`](../CONTEXT.md)'s Controller entry, which this skill points at
+rather than restates. Two of its shapes matter to a run in flight: *the spec
+is silent on something the user needs* — a gap, not a change to a ruling,
+because there was no ruling — and *a lane-mandated step the harness refuses*,
+the one escalation where the controller **structurally** cannot act, since
+every other route either launders a denial or breaks a hard rule.
+
+**A bounded probe before escalating.** A controller **may commission a bounded
+probe** from a worker before it escalates — a named, small, time-boxed
+measurement whose shape it states, so an abstract question reaches Chris as a
+table instead of three options in the dark. On #781 that was three clue
+counts, one browser, no givens; it came back in minutes and turned a spec
+question into a one-message ruling.
+
+## Before a controller rules
+
+Three clauses, each a ruling that went wrong on #781. The evidence behind
+each: [`references/parking.md`](references/parking.md).
+
+1. A ruling about **runtime behaviour** is checked against **the thing that
+   ships**, not a proxy. A headless bundle, a unit harness or a build artifact
+   is a proxy, and green on one is not green in the app.
+2. A ruling about a **tool's behaviour** cites the **tool's source**, not its
+   help text. Help text compresses; a conjunction reads as a disjunction and
+   the ticket filed from it is wrong.
+3. A **Codex finding's recommendation** is **evaluated by the controller**
+   before it reaches the worker. The controller is not a courier: a plausible
+   remedy forwarded unread can spend a worker's last review round on a
+   regression.
 
 A single spec's slices in one workspace are
 [`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this

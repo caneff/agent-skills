@@ -652,6 +652,217 @@ def test_the_cli_landing_survives_a_reader_that_closes_mid_output():
     assert got.returncode == 1, got
     assert "Traceback" not in got.stderr, got.stderr
     assert "Exception ignored" not in got.stderr, got.stderr
+def agent_stub(answers, calls):
+    """Stands in for `herdr agent get <name>` as the sweep calls it: one
+    decoded answer per agent, and a list the test reads to count the calls."""
+    def get(agent):
+        calls.append(agent)
+        answer = answers[agent]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    return get
+
+
+def herdr_agent(status):
+    return {"id": "cli:agent:get", "result": {"agent": "claude",
+                                              "agent_status": status,
+                                              "name": "skills-1"}}
+
+
+HERDR_GONE = {"id": "cli:agent:get",
+              "error": {"code": "agent_not_found",
+                        "message": "agent target skills-3 not found"}}
+
+
+def live_clumps():
+    return [
+        {"tickets": [1], "workspace": "/w/1", "agent": "skills-1"},
+        {"tickets": [2], "workspace": "/w/2", "agent": "skills-2"},
+        {"tickets": [3], "workspace": "/w/3", "agent": "skills-3"},
+    ]
+
+
+def test_the_sweep_tells_a_vanished_pane_from_a_working_and_an_idle_one():
+    calls = []
+    get = agent_stub({"skills-1": herdr_agent("working"),
+                      "skills-2": herdr_agent("idle"),
+                      "skills-3": HERDR_GONE}, calls)
+    state = loop.sweep(live_clumps(), get)
+    verdicts = {w["agent"]: w["verdict"] for w in state["workers"]}
+    assert verdicts == {"skills-1": "working", "skills-2": "idle",
+                        "skills-3": "vanished"}, verdicts
+    assert [w["agent"] for w in state["vanished"]] == ["skills-3"], state
+
+
+def test_the_sweep_is_bounded_at_one_probe_per_live_slot():
+    calls = []
+    get = agent_stub({"skills-1": herdr_agent("working"),
+                      "skills-2": herdr_agent("idle"),
+                      "skills-3": HERDR_GONE}, calls)
+    state = loop.sweep(live_clumps(), get)
+    assert calls == ["skills-1", "skills-2", "skills-3"], calls
+    assert state["calls"] == 3, state
+
+
+def test_the_sweep_skips_a_landed_clump():
+    calls = []
+    clumps = live_clumps()
+    clumps[1]["landed"] = "a1b2c3d"
+    get = agent_stub({"skills-1": herdr_agent("working"),
+                      "skills-3": HERDR_GONE}, calls)
+    state = loop.sweep(clumps, get)
+    assert calls == ["skills-1", "skills-3"], calls
+
+
+def test_a_probe_that_fails_is_one_worker_unreachable_not_a_dead_sweep():
+    calls = []
+    get = agent_stub({"skills-1": RuntimeError("herdr socket is gone"),
+                      "skills-2": herdr_agent("idle"),
+                      "skills-3": HERDR_GONE}, calls)
+    state = loop.sweep(live_clumps(), get)
+    verdicts = {w["agent"]: w["verdict"] for w in state["workers"]}
+    assert verdicts["skills-1"] == "unreachable", verdicts
+    assert verdicts["skills-2"] == "idle", verdicts
+    assert calls == ["skills-1", "skills-2", "skills-3"], calls
+
+
+def test_an_unrecognised_status_is_its_own_verdict():
+    calls = []
+    get = agent_stub({"skills-1": herdr_agent("wedged")}, calls)
+    state = loop.sweep(live_clumps()[:1], get)
+    assert state["workers"][0]["verdict"] == "unknown", state
+    assert "wedged" in state["workers"][0]["detail"], state
+
+
+def test_the_sweep_names_the_vanished_worker_distinctly_when_rendered():
+    calls = []
+    get = agent_stub({"skills-1": herdr_agent("working"),
+                      "skills-2": herdr_agent("idle"),
+                      "skills-3": HERDR_GONE}, calls)
+    rendered = loop.render_sweep(loop.sweep(live_clumps(), get))
+    assert "vanished  #3" in rendered, rendered
+    assert "working   #1" in rendered, rendered
+    assert "idle      #2" in rendered, rendered
+
+
+def in_flight_clumps():
+    return [
+        {"tickets": [351], "workspace": "/w/351", "agent": "sm-351",
+         "closure": ["verify.py"]},
+        {"tickets": [412], "workspace": "/w/412", "agent": "sm-412",
+         "closure": ["other.py"]},
+    ]
+
+
+def test_a_declared_heavy_job_holds_the_free_slots():
+    state = loop.core_room(2, in_flight_clumps(), {351: 8})
+    assert state["room"] == 0, state
+    assert "#351" in state["line"] and "8" in state["line"], state["line"]
+
+
+def test_an_undeclared_run_has_every_free_slot():
+    state = loop.core_room(2, in_flight_clumps(), {})
+    assert state["room"] == 2, state
+
+
+def test_a_declaration_charges_only_the_cores_past_its_own_slot():
+    state = loop.core_room(3, in_flight_clumps(), {351: 2})
+    assert state["room"] == 2, state
+
+
+def test_a_declaration_for_a_clump_nobody_is_running_is_refused():
+    try:
+        loop.core_room(2, in_flight_clumps(), {999: 8})
+    except loop.LoopError as exc:
+        assert "#999" in str(exc), exc
+    else:
+        raise AssertionError("a declaration must name a clump in flight")
+
+
+def test_a_core_count_that_is_not_one_is_refused():
+    for cores in ("8", 0, -1, True, 2.5):
+        try:
+            loop.core_room(2, in_flight_clumps(), {351: cores})
+        except loop.LoopError as exc:
+            assert "#351" in str(exc), (cores, exc)
+        else:
+            raise AssertionError(f"{cores!r} is not a core count")
+
+
+def test_a_declaration_is_read_off_the_report_as_the_controller_types_it():
+    assert loop.parse_declared("351=8,412=4") == {351: 8, 412: 4}
+    assert loop.parse_declared("") == {}
+    for bad in ("351", "351=x", "=8", "351=8=2"):
+        try:
+            loop.parse_declared(bad)
+        except loop.LoopError as exc:
+            assert bad in str(exc), (bad, exc)
+        else:
+            raise AssertionError(f"{bad!r} is not a declaration")
+
+
+def test_the_cli_holds_the_slot_and_says_so_in_its_status_line():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [500], "closure": ["fresh.py"]}], fh)
+        with open(live, "w") as fh:
+            json.dump(in_flight_clumps(), fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "4", "--committed-gb", "4",
+                      "--declared", "351=8")
+        assert got.returncode == 0, got
+        assert "cores" in got.stdout and "#351" in got.stdout, got.stdout
+        assert "dispatch  #500" not in got.stdout, got.stdout
+
+
+HERDR_STUB = """#!/usr/bin/env bash
+# Stands in for herdr: one canned answer per agent name, and a line per call
+# appended to $CALLS so the test can count them.
+echo "$3" >> "$CALLS"
+case "$3" in
+  skills-1) echo '{"result":{"agent_status":"working"}}' ;;
+  skills-2) echo '{"result":{"agent_status":"idle"}}' ;;
+  *) echo '{"error":{"code":"agent_not_found","message":"agent target '"$3"' not found"}}'
+     exit 1 ;;
+esac
+"""
+
+
+def test_the_cli_sweep_probes_each_live_slot_once_through_herdr():
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = os.path.join(tmp, "bin")
+        os.mkdir(bindir)
+        stub = os.path.join(bindir, "herdr")
+        with open(stub, "w") as fh:
+            fh.write(HERDR_STUB)
+        os.chmod(stub, 0o755)
+        workers = os.path.join(tmp, "workers.json")
+        calls = os.path.join(tmp, "calls")
+        with open(workers, "w") as fh:
+            json.dump([{"tickets": [1], "workspace": "/w/1",
+                        "agent": "skills-1"},
+                       {"tickets": [2], "workspace": "/w/2",
+                        "agent": "skills-2"},
+                       {"tickets": [3], "workspace": "/w/3",
+                        "agent": "skills-3"},
+                       {"tickets": [4], "workspace": "/w/4",
+                        "agent": "skills-4", "landed": "a1b2c3d"}], fh)
+        env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"],
+                   CALLS=calls)
+        got = subprocess.run([sys.executable, LOOP, "sweep", "--workers",
+                              workers], capture_output=True, text=True,
+                             timeout=60, env=env)
+        assert got.returncode == 0, got
+        assert "working   #1" in got.stdout, got.stdout
+        assert "idle      #2" in got.stdout, got.stdout
+        assert "vanished  #3" in got.stdout, got.stdout
+        assert "#4" not in got.stdout, got.stdout
+        with open(calls) as fh:
+            assert fh.read().split() == ["skills-1", "skills-2", "skills-3"], \
+                "the sweep probes each live slot exactly once"
 
 
 def main():
