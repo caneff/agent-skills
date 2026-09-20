@@ -8,8 +8,8 @@
 # output, because exit status alone read a suite that reported findings and
 # exited 0 as green (#954; the signature set and its reason are below).
 # `--list` prints the labels the rules select, without running anything.
-# This is the merge gate
-# (`git config land.testcmd`), not a push hook — see #633.
+# This is the merge gate (`git config land.testcmd`), not a push hook — see
+# #633.
 # -f: suite commands are word-split out of the tab-separated list, so keep
 # the shell from globbing a path that happens to contain a wildcard.
 set -uf
