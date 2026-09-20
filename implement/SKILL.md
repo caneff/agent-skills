@@ -369,66 +369,6 @@ The controller merges on a repo Chris owns; Chris reads it after via
    comment `Codex pass skipped: <why>` on the PR and go to step 4 — a skip
    adds no trial row.
 
-   **Launch at round 1, collect here** (#942). The pass launches when the
-   worker reports "Round 1 out", not when it reports "PR up": the diff is
-   on the branch by then, and the run overlaps the worker's own
-   verification pass instead of being bolted serially onto this gate,
-   behind three opus axes that have already read the same diff. Build
-   `body_file` exactly as below — ticket, comments, controller-context
-   appendix — and launch from the worker's workspace, the whole block in
-   one backgrounded shell:
-
-   ```
-   dir="$HOME/.cache/agent-reviews/<repo>"   # expanded as
-   mkdir -p "$dir"                           # multi-axis-code-review/SKILL.md does it
-   out_file="$dir/codex-adversarial-<n>.out"
-   record="$dir/codex-adversarial-<n>.json"
-   git fetch origin
-   launch_sha=$(git rev-parse HEAD); started=$(date -Is)
-   node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1
-   printf '{"ticket": <n>, "launch_sha": "%s", "completion_sha": "%s", "body_sha256": "%s", "started": "%s", "completed": "%s"}\n' \
-     "$launch_sha" "$(git rev-parse HEAD)" "$(sha256sum "$body_file" | cut -d" " -f1)" "$started" "$(date -Is)" >"$record"
-   ```
-
-   `--background` is parsed by `codex-companion.mjs` and never read on this
-   path — `handleReviewCommand` always runs foreground — so there is no job
-   id, and `status`/`result` have nothing to collect; backgrounding is the
-   shell's job, one shell per pass, and each in-flight pass is a node
-   process against the box cap. Both files go in
-   `~/.cache/agent-reviews/<repo>/`, never this workspace's `.scratch/`:
-   the worker's own § Before the PR step 3 deletes it, which would take an
-   in-flight pass's output with it and fail the pre-report gate on a file
-   the worker never wrote. That directory's 14-day prune covers them, so
-   nothing here needs cleaning by hand. The record carries the workspace
-   HEAD at launch and again at completion, the `sha256sum` of `body_file`,
-   and both timestamps — the launch sha alone cannot tell a clean read from
-   one the worker committed underneath.
-
-   **The gate is fail-closed.** Nothing merges until this step holds a
-   verdict whose launch sha, completion sha and the PR's `headRefOid` from
-   step 2 are one sha, and whose `body_sha256` matches a fresh render of
-   ticket and appendix. Absent, unreadable, raced (the two shas differ, so
-   the branch moved while Codex was reading) or stale (they agree with each
-   other but not with `headRefOid`, so a fix landed after the launch) is a
-   refusal, not a pass: discard that verdict, do not post it to the PR, and
-   run the pass here, against the current head, as the first pass. A
-   discarded verdict's findings are never reported as current — they
-   describe a diff this PR no longer has, and a verdict nobody could
-   collect looks exactly like a pass that found nothing, which is the shape
-   this lane closed seven times on 2026-09-20. A collected verdict is this
-   step's first pass: post its `out_file` as the PR comment exactly as
-   below, and everything after that — the dispositions, #888's conditional
-   second pass, the no-third-run ceiling, the trial row — is unchanged by
-   where it was launched.
-
-   **Every run records its duration**, collected or discarded, as one row
-   appended to `docs/research/2026-09-20-codex-pass-durations.md`: ticket,
-   PR, pass, launched, completed, duration in minutes, and outcome —
-   collected, or why it was discarded. No per-pass duration had ever been
-   recorded before that file: the five passes of 2026-09-20 can be bounded
-   only by output-file timestamps. The row is an auto-ship commit on
-   `<default>`, the trial row's own rule, and is written at the same time.
-
    From the worker's workspace, fetch the ticket yourself — you did
    not build this ticket, so you don't already hold it — body and comments
    both, rendered as in § The brief, since a requirement added in a comment
@@ -477,13 +417,93 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
    Both lines are written even when there is nothing to report. An omitted
    line and a "nothing is split" line read identically to Codex, and the
-   controller is the only party that can tell them apart — the absent
-   answer read as the benign one is the fail-open shape this lane closed
-   seven times on 2026-09-20. Both facts are the controller's at dispatch
-   time: it is the controller that orders a cross-ticket line, and the
+   controller is the only party that can tell them apart. Both facts are
+   the controller's at dispatch time: it is the controller that orders a
+   cross-ticket line, and the
    controller that knows what a map is staging behind a parked skill.
    Without the posture line, every PR of a staged rebuild pays one `[high]`
    whose remedy is "do the closing ticket early" (#891, #898).
+
+   **Launch at round 1, collect here** (#942). The pass launches when the
+   worker reports "Round 1 out", not when it reports "PR up": the diff is
+   on the branch by then, and the run overlaps the worker's own
+   verification pass instead of being bolted serially onto this gate,
+   behind three opus axes that have already read the same diff. The
+   overlap is banked only on a round 1 whose findings produce no fix
+   commit — a fix pushed while the pass runs moves the head, and the gate
+   below discards that verdict and runs the pass here after all. Build
+   `body_file` as above, ticket and appendix both, then launch from the
+   worker's workspace, the whole block in one backgrounded shell:
+
+   ```
+   dir="$HOME/.cache/agent-reviews/<repo>"   # expanded as
+   mkdir -p "$dir"                           # multi-axis-code-review/SKILL.md does it
+   body_file=<absolute path you wrote the ticket and appendix to>
+   out_file="$dir/codex-adversarial-<n>.out"
+   record="$dir/codex-adversarial-<n>.json"
+   plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
+   cd <the worker's workspace> && git fetch origin
+   launch_sha=$(git rev-parse HEAD); started=$(date -Is)
+   node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1
+   status=$?
+   printf '{"ticket": <n>, "status": %d, "launch_sha": "%s", "completion_sha": "%s", "body_sha256": "%s", "started": "%s", "completed": "%s"}\n' \
+     "$status" "$launch_sha" "$(git rev-parse HEAD)" "$(sha256sum "$body_file" | cut -d" " -f1)" "$started" "$(date -Is)" >"$record"
+   ```
+
+   `--background` is parsed by `codex-companion.mjs` and never read on this
+   path — `handleReviewCommand` always runs foreground — so there is no job
+   id, and `status`/`result` have nothing to collect; backgrounding is the
+   shell's job, one shell per pass, one pass in flight per PR, and each
+   in-flight pass is a node process against the box cap. Both files go in
+   `~/.cache/agent-reviews/<repo>/`, never this workspace's `.scratch/`:
+   the worker's own § Before the PR step 3 deletes it, which would take an
+   in-flight pass's output with it and fail the pre-report gate on a file
+   the worker never wrote. That directory's 14-day prune covers them, so
+   nothing here needs cleaning by hand. The record carries the node call's
+   exit status, the workspace HEAD at launch and again at completion, the
+   `sha256sum` of `body_file`, and both timestamps — the launch sha alone
+   cannot tell a clean read from one the worker committed underneath, and a
+   run that failed and returned writes an output file that looks like any
+   other.
+
+   **The gate is fail-closed.** Nothing merges until this step holds a
+   verdict whose `status` is 0 and whose launch sha, completion sha and the
+   PR's `headRefOid` from step 2 are one sha, with a `body_sha256` matching
+   a fresh render of ticket and appendix. Absent, unreadable, errored (a
+   non-zero `status` — not logged in, quota gone, a node that found no
+   module; the `out_file` then holds that error, not a review), raced (the
+   two shas differ, so the branch moved while Codex was reading) or stale
+   (they agree with each other but not with `headRefOid`, so a fix landed
+   after the launch) is a refusal, not a pass: discard that verdict, do not
+   post it to the PR, and run the pass here, against the current head, as
+   the first pass. A discarded verdict's findings are never reported as
+   current — they describe a diff this PR no longer has, and a verdict
+   nobody could collect looks exactly like a pass that found nothing, which
+   is the shape this lane closed seven times on 2026-09-20.
+
+   The skip clause above governs the preflight only — not logged in, no
+   plugin entry — which is checked before any run exists. Once a run has
+   started, its verdict is this gate's: an errored run is a refusal that
+   reruns here, and only a preflight still failing at that rerun becomes
+   `Codex pass skipped: <why>`.
+
+   A collected verdict is this step's first pass. Post it from the cache
+   directory —
+   `gh pr comment <pr> --repo <owner/name> --body-file "$dir/codex-adversarial-<n>.out"`
+   — and leave both cache files to that directory's 14-day prune: the
+   `.scratch/` cleanup below belongs to a pass run here, whose files are in
+   `.scratch/`, and running it on a collected verdict would delete the only
+   copy of the verdict and `rmdir` the directory the Claude axes' own
+   reports live in. Everything after that — the dispositions, #888's
+   conditional second pass, the no-third-run ceiling, the trial row — is
+   unchanged by where it was launched.
+
+   **Every run records its duration**, collected or discarded, as one row
+   appended to `docs/research/2026-09-20-codex-pass-durations.md`: ticket,
+   PR, pass, launched, completed, duration in minutes, and outcome —
+   collected, or why it was discarded. That file carries its own columns
+   and the reason it exists. The row is an auto-ship commit on `<default>`,
+   the trial row's own rule, and is written at the same time.
 
    Then invoke the plugin's own script directly.
    `/codex:adversarial-review` carries

@@ -72,23 +72,10 @@ quota. In this lane they swap for:
    ```
 
    `body_file` here carries the same two-line controller-context appendix
-   `implement/SKILL.md` § The merge step 3 requires (#941), in the same
-   shape and with the same "nothing to report" wording written out rather
-   than omitted:
-
-   ```
-   ## Controller context — written by the controller, not part of the ticket
-
-   **Open sibling branches.** <each open sibling branch, the files it
-   holds, and what of this ticket's ask is split onto it: which file, which
-   line, which PR> — or: No sibling branch is open, and nothing here is
-   split.
-
-   **Posture.** <the code under review is parked, feature-flagged off, or
-   otherwise landing ahead of its own activation, and the ticket that
-   activates it> — or: The code under review is live in the tree; its
-   posture is what the tree implies.
-   ```
+   `implement/SKILL.md` § The merge step 3 requires (#941) — **Open sibling
+   branches.** and **Posture.** — in that step's shape and wording, which
+   is the one copy of it; a second copy here would drift from it, and the
+   pass would be judged against whichever the writer happened to read.
 
    You are the worker in this lane, and you hold neither fact: ask the
    controller for both before you compose the file, rather than inferring

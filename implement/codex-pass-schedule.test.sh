@@ -79,7 +79,21 @@ check_in "$merge_section" 'the workspace HEAD at launch and again at completion'
 # be current — including the race, which is what backgrounding introduces.
 check_in "$merge_section" 'The gate is fail-closed' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'launch sha, completion sha and the PR' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'Absent, unreadable, raced' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'Absent, unreadable, errored' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'raced (the two shas differ' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'stale (they agree with each other but not with `headRefOid`' 'implement/SKILL.md § The merge'
+# A run that fails and returns writes a record that passes every sha test —
+# the same absent-answer-read-as-benign shape, one layer down — so the exit
+# status is in the record and the skip clause is bounded to the preflight.
+check_in "$merge_section" 'whose `status` is 0' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'The skip clause above governs the preflight only' 'implement/SKILL.md § The merge'
+# A collected verdict lives in the review cache, not `.scratch/`: running the
+# `.scratch/` cleanup on it would delete the only copy and rmdir the
+# directory the Claude axes' reports live in.
+check_in "$merge_section" 'Post it from the cache directory' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'the `.scratch/` cleanup below belongs to a pass run here' 'implement/SKILL.md § The merge'
+# The overlap is only banked when round 1 produces no fix commit.
+check_in "$merge_section" 'The overlap is banked only on a round 1 whose findings produce no fix' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'is a refusal, not a pass' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'discard that verdict, do not post it to the PR' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'run the pass here, against the current head, as the first pass' 'implement/SKILL.md § The merge'
@@ -98,7 +112,6 @@ check_in "$merge_section" 'collected, or why it was discarded' 'implement/SKILL.
 if [ -f "$durations" ]; then
   for col in ticket PR pass launched completed 'duration (min)' outcome; do
     grep -qF -- "| $col |" "$durations" ||
-      grep -qF -- "$col |" "$durations" ||
       { echo "FAIL: durations file has no '$col' column" >&2; fail=1; }
   done
 fi

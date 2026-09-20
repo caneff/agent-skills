@@ -79,8 +79,8 @@ check_in "$merge_section" 'a fresh render for that comparison is ticket and appe
 # its worker — who does not hold either fact — asks the controller rather
 # than inferring them from the tree, the one source that cannot see them.
 check_in "$lane_flat" 'the same two-line controller-context appendix' 'implement/codex-lane.md'
-check_in "$lane_flat" '**Open sibling branches.**' 'implement/codex-lane.md'
-check_in "$lane_flat" '**Posture.**' 'implement/codex-lane.md'
+check_in "$lane_flat" '**Open sibling branches.** and **Posture.**' 'implement/codex-lane.md'
+check_in "$lane_flat" 'which is the one copy of it; a second copy here would drift' 'implement/codex-lane.md'
 check_in "$lane_flat" 'ask the controller for both before you compose the file' 'implement/codex-lane.md'
 
 if [ "$fail" -eq 0 ]; then
