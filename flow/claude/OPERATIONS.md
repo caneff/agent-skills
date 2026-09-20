@@ -55,6 +55,19 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   1.20.2. herdr takes one client at a time — attaching from another terminal
   drops the current one; the server and panes keep running, so re-running
   `herdr` is the whole recovery.
+- **Zed's terminal attaches herdr by itself.** The hook is in `~/.bashrc`,
+  right after the `herdr()` wrapper: `ZED_TERM` is set only in a Zed
+  terminal, so an interactive login shell there runs `herdr && exit`. It is
+  guarded on `HERDR_PANE_ID` (unset only outside a herdr pane -- without it
+  the shells herdr starts in its own panes re-attach forever), on `$-`
+  containing `i` (never an agent Bash tool), and on `HERDR_NO_AUTOATTACH=1`,
+  which gets you a plain shell in Zed when you want one. `herdr && exit`
+  rather than `exec`, so a failed attach leaves the error on a live shell.
+  Zed's own `terminal.shell` setting is **not** the mechanism: it is ignored
+  over the WSL remote, both in the Windows `settings.json` and in a project
+  `.zed/settings.json` (checked 2026-09-20 on Zed 1.20.2 -- terminals still
+  came up `/bin/bash -l`). `~/.bashrc` is in no git repo; the backup from
+  this change is `~/.bashrc.bak-20260920-001302`.
 - **Toast clicks follow the host.** `[ui.toast] delivery = "system"` calls
   `~/.local/bin/notify-send`, a shim that raises a Windows toast whose click
   runs `herdrfocus:<pane>` → `herdr-focus.vbs` → `herdr-focus-pick.ps1`
