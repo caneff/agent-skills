@@ -362,10 +362,15 @@ top=$(git -C "$worktree" rev-parse --show-toplevel) || exit 1
 # exists: a pytest nodeid (`tests/a.py::t1[x]`) would put a mutation's output
 # file inside its own worktree and break the per-id prefixing below. Refused by
 # name — map the test to a short id and report the mapping — never mangled.
+seen=" "
 for id in $ids; do
   case "$id" in ''|*[!A-Za-z0-9._-]*)
     echo "witness check: '$id' is not usable as a mutation id (letters, digits, . - _)" >&2; exit 2;;
   esac
+  case "$seen" in *" $id "*)
+    echo "witness check: id '$id' is named twice - one mutation would overwrite the other's output" >&2; exit 2;;
+  esac
+  seen="$seen$id "
 done
 root=$(mktemp -d)
 # Checked, not assumed: a TMPDIR under the reviewed tree would put the
@@ -374,8 +379,29 @@ root=$(mktemp -d)
 case "$root" in "$top"/*)
   echo "witness check: TMPDIR is inside the checkout ($root)" >&2; exit 1;;
 esac
+# Worktrees, outputs and statuses get disjoint directories: with all three in
+# one, the ids `x` and `x.out` are both legal and collide - the parent creates
+# worktree `x.out` while mutation `x` is opening its output file at that same
+# path, so `x`'s redirection fails against a directory and `x` is reported red
+# without its suite ever having run.
+mkdir -p "$root/worktrees" "$root/output" "$root/status" || exit 1
+# Cleanup that reports rather than covers: an `rm -rf` over a worktree git
+# failed to deregister - a full disk is the plausible way - leaves exactly the
+# stale entry this recipe's own prose says never to create, and the run would
+# exit 0 having created it. A failed removal keeps its directory, keeps the
+# root, and says so.
 cleanup() {
-  for w in "$root"/*/; do git -C "$worktree" worktree remove --force "${w%/}" 2>/dev/null; done
+  cleanup_failed=0
+  for w in "$root"/worktrees/*/; do
+    [ -d "$w" ] || continue
+    git -C "$worktree" worktree remove --force "${w%/}" && continue
+    cleanup_failed=$(( cleanup_failed + 1 ))
+    echo "witness check: could not remove worktree ${w%/} - it is still registered" >&2
+  done
+  if [ "$cleanup_failed" -gt 0 ]; then
+    echo "witness check: $cleanup_failed worktree(s) left registered; keeping $root - list them with git worktree list and remove them by hand" >&2
+    return 1
+  fi
   rm -rf "$root" 2>/dev/null
 }
 # Armed before the first `worktree add` and sweeping every mutation, because a
@@ -398,36 +424,44 @@ slots=$(( (28 - busy) / 3 )); [ "$slots" -gt 4 ] && slots=4; [ "$slots" -lt 1 ] 
 # produced it: pytest puts the assertion text at the end, so the head alone cuts
 # out exactly what you are reading for.
 show() {
-  n=$(wc -l <"$root/$1.out" 2>/dev/null || echo 0)
-  if [ "$n" -le 50 ]; then cat "$root/$1.out"
-  else head -25 "$root/$1.out"
+  n=$(wc -l <"$root/output/$1" 2>/dev/null || echo 0)
+  if [ "$n" -le 50 ]; then cat "$root/output/$1"
+  else head -25 "$root/output/$1"
        printf '... %s lines omitted from the middle ...\n' "$(( n - 50 ))"
-       tail -25 "$root/$1.out"
+       tail -25 "$root/output/$1"
   fi 2>/dev/null | awk -v p="  $1| " '{print p $0}'
 }
 for id in $ids; do
   while [ "$(jobs -pr | wc -l)" -ge "$slots" ]; do wait -n; done
-  witness="$root/$id"
+  witness="$root/worktrees/$id"
   if ! git -C "$worktree" worktree add --detach -q "$witness" HEAD; then
-    printf 'unknown\n' >"$root/$id.status"   # class 1: an unreached mutation is not a pass
+    printf 'unknown\n' >"$root/status/$id"   # class 1: an unreached mutation is not a pass
     continue
   fi
   # `mutate` in its own subshell: a mutation body ends in a failing suite and
   # is naturally written with `exit`, which would otherwise kill this job
   # before its status is recorded and read back below as `unknown`.
-  { ( mutate "$id" "$witness" ) >"$root/$id.out" 2>&1
-    printf '%s\n' "$?" >"$root/$id.status"; } &
+  { ( mutate "$id" "$witness" ) >"$root/output/$id" 2>&1
+    printf '%s\n' "$?" >"$root/status/$id"; } &
 done
 wait
 for id in $ids; do
-  case "$(cat "$root/$id.status" 2>/dev/null)" in
+  case "$(cat "$root/status/$id" 2>/dev/null)" in
     0) printf '%s: HOLLOW — the assertion still passed with its constraint stripped\n' "$id" ;;
-    [1-9]*) printf '%s: red — its own message follows; confirm it is your assertion, not a missing file or a denied path\n' "$id"
-            show "$id" ;;
+    # A nonzero status is a red only if a suite actually said something. A
+    # wrapper that dies before reaching the suite exits nonzero with an empty
+    # output, and reported as red that is an unreached mutation read as a
+    # demonstrated assertion - class 1, in the branch that exists to stop it.
+    [1-9]*) if [ -s "$root/output/$id" ]; then
+              printf '%s: red — its own message follows; confirm it is your assertion, not a missing file or a denied path\n' "$id"
+              show "$id"
+            else
+              printf '%s: unknown — it exited nonzero with no output at all, so nothing ran that could have failed\n' "$id"
+            fi ;;
     *) printf '%s: unknown — the mutation never ran to completion; report it by name, never as a pass\n' "$id" ;;
   esac
 done
-cleanup
+cleanup || exit 3
 trap - EXIT INT TERM
 ```
 

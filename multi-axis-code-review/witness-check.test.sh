@@ -436,6 +436,105 @@ elif ! grep -q 'tests/a.py::t1' "$scratch/badid.out"; then
   fail=1
 fi
 
+# Class 1 again, one layer out (#961): the wrapper that never reached the suite.
+# A mutation that exits nonzero having printed nothing did not demonstrate an
+# assertion — there is no message to read — so it is `unknown`, by name, not a
+# red. Status alone cannot tell the two apart.
+substitute 's1' "exit 4" >"$scratch/recipe-silent.sh"
+( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-silent.sh" ) \
+  >"$scratch/silent.out" 2>&1 || true
+if ! grep -i 'unknown' "$scratch/silent.out" | grep -q 's1'; then
+  echo "FAIL: a mutation that exited nonzero with no output was not reported as unknown" >&2
+  cat "$scratch/silent.out" >&2
+  fail=1
+fi
+if grep -q 's1: red' "$scratch/silent.out"; then
+  echo "FAIL: a silent nonzero mutation was reported as a red with no message to read" >&2
+  fail=1
+fi
+
+# Two ids that are both legal and collide in a shared namespace: worktree
+# `x.out` and mutation `x`'s output file want the same path, and whichever the
+# parent creates first makes the other fail — a red with no suite behind it and
+# an output file inside a worktree, both at once. Disjoint directories are what
+# make this pair ordinary.
+substitute 'x x.out' "echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-collide.sh"
+( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-collide.sh" ) \
+  >"$scratch/collide.out" 2>&1 || true
+for id in x x.out; do
+  if ! grep -q "$id|.*MUTANT-$id" "$scratch/collide.out"; then
+    echo "FAIL: colliding-but-legal id $id lost its own message" >&2
+    cat "$scratch/collide.out" >&2
+    fail=1
+  fi
+done
+
+# The same id twice would have one mutation overwrite the other's output, so it
+# is refused by name rather than silently halving the check.
+substitute 'd1 d1' "exit 1" >"$scratch/recipe-dup.sh"
+if ( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-dup.sh" ) \
+     >"$scratch/dup.out" 2>&1; then
+  echo "FAIL: a duplicated mutation id was accepted" >&2
+  fail=1
+elif ! grep -q 'twice' "$scratch/dup.out"; then
+  echo "FAIL: a duplicated mutation id was refused without saying why" >&2
+  cat "$scratch/dup.out" >&2
+  fail=1
+fi
+
+# Cleanup's own failure path. `git worktree remove` failing and `rm -rf` running
+# anyway is how a stale registration gets created by the recipe whose prose
+# forbids exactly that — and the run would exit 0 having created it. This shim
+# fails every removal; the run must exit non-zero and name the worktree it could
+# not deregister.
+mkdir -p "$scratch/bin-norm"
+cat >"$scratch/bin-norm/git" <<NORM
+#!/usr/bin/env bash
+prev=""
+for a in "\$@"; do
+  if [ "\$prev" = worktree ] && [ "\$a" = remove ]; then
+    echo "fatal: shim refuses worktree remove" >&2; exit 128
+  fi
+  prev="\$a"
+done
+exec "$real_git" "\$@"
+NORM
+chmod +x "$scratch/bin-norm/git"
+cp "$scratch/bin/ps" "$scratch/bin-norm/ps"
+substitute 'r1' "echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-norm.sh"
+if ( cd "$repo" && PATH="$scratch/bin-norm:$PATH" bash "$scratch/recipe-norm.sh" ) \
+     >"$scratch/norm.out" 2>&1; then
+  echo "FAIL: a witness run whose worktree removal failed still exited 0" >&2
+  cat "$scratch/norm.out" >&2
+  fail=1
+fi
+if ! grep -q 'could not remove worktree' "$scratch/norm.out"; then
+  echo "FAIL: a failed worktree removal was not reported" >&2
+  cat "$scratch/norm.out" >&2
+  fail=1
+fi
+# The directory is still there because git never deregistered it — that is the
+# point of the fix, and the proof that nothing was `rm -rf`d out from under a
+# live registration. Clean it up with the real git so the fixture's own count
+# assertions above stay meaningful for the next reader.
+kept="$(sed -n 's/.*keeping \([^ ]*\) -.*/\1/p' "$scratch/norm.out" | head -1)"
+if [ -z "$kept" ] || [ ! -d "$kept" ]; then
+  echo "FAIL: the failed-removal run did not keep its root directory for a by-hand cleanup" >&2
+  cat "$scratch/norm.out" >&2
+  fail=1
+else
+  for w in "$kept"/worktrees/*/; do
+    [ -d "$w" ] && git -C "$repo" worktree remove --force "${w%/}" 2>/dev/null
+  done
+  rm -rf "$kept"
+fi
+trees_norm="$(git -C "$repo" worktree list | wc -l)"
+if [ "$trees_norm" -ne 2 ]; then
+  echo "FAIL: after the by-hand cleanup $trees_norm worktrees are registered, not the fixture's 2" >&2
+  git -C "$repo" worktree list >&2
+  fail=1
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "PASS multi-axis-code-review/witness-check.test.sh"
 else
