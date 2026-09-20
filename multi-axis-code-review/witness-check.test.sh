@@ -100,16 +100,22 @@ check_not_in "$correctness" 'scratch copy of the tree' 'the correctness axis bri
 # #957: the mutations run together, and the pairing survives the concurrency.
 # The serial loop cost the covering suite's runtime once per mutated test —
 # 31.96s x 10 on caneff/sudokupad-art, a 22-minute correctness pass.
-check_in "$correctness" 'at once' 'the correctness axis brief'
+# Whole clauses, not single common words: 'unknown' or 'sequential' on their
+# own are satisfied by prose that says the opposite, which is the same shape as
+# the needles the count assertions above exist to replace.
+check_in "$correctness" 'launch them at once' 'the correctness axis brief'
 check_in "$correctness" 'its own worktree and its own captured output' 'the correctness axis brief'
 # Class 1, the day's recurring defect: a mutation that never ran is not a pass.
-check_in "$correctness" 'unknown' 'the correctness axis brief'
-check_not_in "$correctness" 'one at a time' 'the correctness axis brief'
-# The bound, the count that produces it, and the degradation — all in the
-# prose, because the number is only defensible with its reason attached.
-check_in "$costs" 'ps -eo comm=' 'the witness-cost section'
-check_in "$costs" 'ps aux' 'the witness-cost section'
-check_in "$costs" 'sequential' 'the witness-cost section'
+check_in "$correctness" 'never counted as an assertion that held' 'the correctness axis brief'
+# The bound, the count that produces it, and the degradation. The brief is what
+# the sub-agent is handed, so it carries the counting command itself rather than
+# pointing at prose only the caller reads (#939).
+check_in "$correctness" 'ps -eo comm= | grep -cx claude' 'the correctness axis brief'
+check_in "$costs" 'ps -eo comm= | grep -cx claude' 'the witness-cost section'
+# The anti-pattern is asserted with its negation attached: a bare 'ps aux'
+# needle passes just as well on prose recommending it.
+check_in "$costs" 'never `ps aux | grep`' 'the witness-cost section'
+check_in "$costs" 'the sequential check this replaces' 'the witness-cost section'
 # #957: nothing is restored, because nothing is shared. Said out loud so a
 # later pass does not reintroduce a restore that reaches into the checkout.
 check_in "$costs" 'nothing to restore' 'the witness-cost section'
@@ -185,14 +191,24 @@ cat >"$scratch/mutate.sh" <<MUTATE
 id="\$1"; wt="\$2"
 scratch="$scratch"
 printf '%s\n' "\$wt" >"\$scratch/\$id.wt"
-: >"\$scratch/\$id.started"
-other=m1; [ "\$id" = m1 ] && other=m2
-for _ in \$(seq 1 100); do [ -e "\$scratch/\$other.started" ] && break; sleep 0.1; done
-if [ -d "\$wt" ] && [ -d "\$(cat "\$scratch/\$other.wt" 2>/dev/null)" ]; then
-  : >"\$scratch/\$id.overlap"
+: >"\$scratch/\$id.up"
+other="\${id%?}"; case "\$id" in *1) other="\${other}2";; *2) other="\${other}1";; esac
+# A two-phase barrier, not "the sibling started": in a SERIAL run the second
+# mutation still finds the first one's marker and its worktree on disk, since
+# nothing is removed until the whole run ends. Only a sibling that reaches the
+# barrier too is a sibling still running, and neither can pass the barrier
+# unless both were launched — which is the assertion, with no timing window.
+for _ in \$(seq 1 50); do [ -e "\$scratch/\$other.up" ] && break; sleep 0.1; done
+if [ -e "\$scratch/\$other.up" ]; then
+  : >"\$scratch/\$id.barrier"
+  for _ in \$(seq 1 50); do [ -e "\$scratch/\$other.barrier" ] && break; sleep 0.1; done
+  if [ -e "\$scratch/\$other.barrier" ] && [ -d "\$wt" ] &&
+     [ -d "\$(cat "\$scratch/\$other.wt" 2>/dev/null)" ]; then
+    : >"\$scratch/\$id.overlap"
+  fi
 fi
 printf 'assert 1 == 2\n' >"\$wt/\$id.py"
-git -C "\$wt" rm -q --cached "\$id.py"
+git -C "\$wt" rm -q --cached "\$id.py" 2>/dev/null
 echo "MUTANT-\$id: covering suite red, its own message"
 exit 1
 MUTATE
@@ -204,6 +220,19 @@ substitute() { # <ids> <mutate body> -> a runnable script on stdout
         -e "s|^mutate() .*|mutate() { $2; }|"
 }
 
+# The recipe computes its bound from the live process table, so on a loaded box
+# it degrades to sequential — the behaviour #957 mandates — and an unconditional
+# overlap assertion would go red for the machine's state rather than the code's.
+# A `ps` shim pins the box instead: this run gets an idle one, the run below a
+# full one, and both assertions become deterministic.
+mkdir -p "$scratch/bin"
+real_git="$(command -v git)"
+cat >"$scratch/bin/ps" <<'IDLE'
+#!/usr/bin/env bash
+printf 'claude\nbash\ninit\n'
+IDLE
+chmod +x "$scratch/bin/ps"
+
 substitute 'm1 m2' "bash \"$scratch/mutate.sh\" \"\$1\" \"\$2\"" >"$scratch/recipe.sh"
 grep -q "^worktree=$repo\$" "$scratch/recipe.sh" ||
   { echo "FAIL: the recipe's worktree placeholder did not substitute" >&2; exit 1; }
@@ -214,7 +243,7 @@ grep -q '^mutate() { bash ' "$scratch/recipe.sh" ||
 
 # The run itself exits non-zero or not depending on how the doc ends it; what
 # this suite asserts is what it left behind, not its status.
-( cd "$repo" && bash "$scratch/recipe.sh" ) >"$scratch/run.out" 2>&1 || true
+( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe.sh" ) >"$scratch/run.out" 2>&1 || true
 
 # Concurrent, asserted by the two worktrees existing at the same instant.
 # Serialising the launch fails exactly here, and for its own reason: the first
@@ -234,13 +263,15 @@ for id in m1 m2; do
     echo "FAIL: the run never reported $id's own failure message" >&2
     fail=1
   fi
-  line="$(grep -n "MUTANT-$id" "$scratch/run.out" | head -1 | cut -d: -f1)"
-  [ -n "$line" ] || continue
-  # The id names its own message on or above the line carrying it: a bare
-  # concatenation of N suite outputs satisfies the needle above and loses the
-  # pairing this check exists for.
-  if ! sed -n "1,${line}p" "$scratch/run.out" | grep -q "$id"; then
-    echo "FAIL: $id's message is not attributed to $id in the run output" >&2
+  # The message LINE itself carries its id: a header above a bare concatenation
+  # of N suite outputs satisfies a looser needle and loses exactly the pairing
+  # this check exists for, once two mutations are red at the same time.
+  if ! grep -q "$id|.*MUTANT-$id" "$scratch/run.out"; then
+    echo "FAIL: $id's message line is not tagged with $id in the run output" >&2
+    fail=1
+  fi
+  if grep -q "$id|.*MUTANT-$other" "$scratch/run.out"; then
+    echo "FAIL: $other's message was attributed to $id" >&2
     fail=1
   fi
 done
@@ -284,9 +315,8 @@ done
 # worktree never got created must report as `unknown` by name, never as a pass.
 # The `git` shim refuses exactly one `worktree add`, so the failure is the one
 # under test and not a broken fixture.
-mkdir -p "$scratch/bin"
-real_git="$(command -v git)"
-cat >"$scratch/bin/git" <<SHIM
+mkdir -p "$scratch/bin-git"
+cat >"$scratch/bin-git/git" <<SHIM
 #!/usr/bin/env bash
 adding=0
 for a in "\$@"; do [ "\$a" = add ] && adding=1; done
@@ -295,10 +325,10 @@ if [ "\$adding" = 1 ]; then
 fi
 exec "$real_git" "\$@"
 SHIM
-chmod +x "$scratch/bin/git"
+chmod +x "$scratch/bin-git/git"
 
 substitute 'ok bad' "echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-unknown.sh"
-( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-unknown.sh" ) \
+( cd "$repo" && PATH="$scratch/bin-git:$scratch/bin:$PATH" bash "$scratch/recipe-unknown.sh" ) \
   >"$scratch/unknown.out" 2>&1 || true
 if ! grep -i 'unknown' "$scratch/unknown.out" | grep -q 'bad'; then
   echo "FAIL: a mutation whose worktree could not be created was not reported as unknown" >&2
@@ -313,6 +343,95 @@ trees_after="$(git -C "$repo" worktree list | wc -l)"
 if [ "$trees_after" -ne 2 ]; then
   echo "FAIL: the unknown-mutation run left $trees_after worktrees registered, not 2" >&2
   git -C "$repo" worktree list >&2
+  fail=1
+fi
+
+# Class 1 on the bound itself (C3): a process table that cannot be read must
+# mean a full box, not an idle one. The buggy form counts 0 claude processes and
+# runs at maximum concurrency on an unknown machine, so the witness is the
+# ABSENCE of overlap — these two mutations must run one after the other.
+mkdir -p "$scratch/bin-nops"
+{ echo '#!/usr/bin/env bash'; echo 'exit 1'; } >"$scratch/bin-nops/ps"
+chmod +x "$scratch/bin-nops/ps"
+substitute 'u1 u2' "bash \"$scratch/mutate.sh\" \"\$1\" \"\$2\"" >"$scratch/recipe-nops.sh"
+( cd "$repo" && PATH="$scratch/bin-nops:$PATH" bash "$scratch/recipe-nops.sh" ) \
+  >"$scratch/nops.out" 2>&1 || true
+for id in u1 u2; do
+  if ! grep -q "MUTANT-$id" "$scratch/nops.out"; then
+    echo "FAIL: with no readable process table the witness check lost mutation $id" >&2
+    fail=1
+  fi
+  if [ -e "$scratch/$id.overlap" ]; then
+    echo "FAIL: an unreadable process table was read as an idle box — $id ran concurrently" >&2
+    fail=1
+  fi
+done
+
+# A full box degrades to sequential and still runs every mutation. The ticket
+# refuses the other reading: a check that declines because the machine is loaded
+# is worse than a slow one, and nothing else here would notice a refusal.
+mkdir -p "$scratch/bin-busy"
+{ echo '#!/usr/bin/env bash'; echo 'for _ in $(seq 1 30); do echo claude; done'; } >"$scratch/bin-busy/ps"
+chmod +x "$scratch/bin-busy/ps"
+substitute 'b1 b2' "echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-busy.sh"
+( cd "$repo" && PATH="$scratch/bin-busy:$PATH" bash "$scratch/recipe-busy.sh" ) \
+  >"$scratch/busy.out" 2>&1 || true
+for id in b1 b2; do
+  if ! grep -q "MUTANT-$id" "$scratch/busy.out"; then
+    echo "FAIL: on a full box the witness check lost mutation $id instead of running it sequentially" >&2
+    cat "$scratch/busy.out" >&2
+    fail=1
+  fi
+done
+
+# The EXIT/INT/TERM trap, witnessed: the normal tail cleans up by itself, so
+# only an interrupted run proves the trap is wired. A minutes-long check ended
+# with ctrl-C is the ordinary way this happens, and N leaked worktrees stall the
+# next `worktree remove` and any later `merge-cleanup`.
+cat >"$scratch/sleeper.sh" <<SLEEP
+#!/usr/bin/env bash
+printf '%s\n' "\$2" >"$scratch/\$1.wt"
+: >"$scratch/\$1.up"
+sleep 8
+SLEEP
+substitute 'k1 k2' "bash \"$scratch/sleeper.sh\" \"\$1\" \"\$2\"" >"$scratch/recipe-kill.sh"
+( cd "$repo" && PATH="$scratch/bin:$PATH" exec bash "$scratch/recipe-kill.sh" ) >/dev/null 2>&1 &
+killpid=$!
+for _ in $(seq 1 100); do
+  [ -e "$scratch/k1.up" ] && [ -e "$scratch/k2.up" ] && break
+  sleep 0.1
+done
+if [ ! -e "$scratch/k1.up" ] || [ ! -e "$scratch/k2.up" ]; then
+  echo "FAIL: the interrupted run never got both mutations started" >&2
+  fail=1
+fi
+kill -TERM "$killpid" 2>/dev/null || true
+wait "$killpid" 2>/dev/null || true
+trees_killed="$(git -C "$repo" worktree list | wc -l)"
+if [ "$trees_killed" -ne 2 ]; then
+  echo "FAIL: an interrupted run left $trees_killed worktrees registered, not the fixture's 2" >&2
+  git -C "$repo" worktree list >&2
+  fail=1
+fi
+for id in k1 k2; do
+  if [ -e "$(cat "$scratch/$id.wt" 2>/dev/null)" ]; then
+    echo "FAIL: an interrupted run left $id's throwaway worktree on disk" >&2
+    fail=1
+  fi
+done
+
+# An id that cannot name a directory and an output file is refused by name,
+# before anything is created — never mangled into a path inside its own
+# worktree, which is how a message gets attached to the wrong mutation.
+substitute 'tests/a.py::t1' "echo \"MUTANT-\$1\"; exit 1" >"$scratch/recipe-badid.sh"
+if ( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-badid.sh" ) \
+     >"$scratch/badid.out" 2>&1; then
+  echo "FAIL: a pytest nodeid was accepted as a mutation id" >&2
+  cat "$scratch/badid.out" >&2
+  fail=1
+elif ! grep -q 'tests/a.py::t1' "$scratch/badid.out"; then
+  echo "FAIL: the unusable mutation id was refused without naming it" >&2
+  cat "$scratch/badid.out" >&2
   fail=1
 fi
 
