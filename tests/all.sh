@@ -3,8 +3,12 @@
 # files, no per-file special cases: `*.test.sh` runs under bash, `*_test.py`
 # runs directly under python3, and each `audit.py` that implements
 # `--selfcheck` runs with that flag. One line per suite; exits non-zero on
-# the first failure (and prints that suite's output). `--list` prints the
-# labels the rules select, without running anything. This is the merge gate
+# the first failure (and prints that suite's output). A suite is failed on
+# its exit status *or* on a failure signature at the start of a line in its
+# output, because exit status alone read a suite that reported findings and
+# exited 0 as green (#954; the signature set and its reason are below).
+# `--list` prints the labels the rules select, without running anything.
+# This is the merge gate
 # (`git config land.testcmd`), not a push hook — see #633.
 # -f: suite commands are word-split out of the tab-separated list, so keep
 # the shell from globbing a path that happens to contain a wildcard.
@@ -43,9 +47,32 @@ if suites | cut -f2 | grep -q '^cargo test ' && ! command -v cargo >/dev/null 2>
   exit 1
 fi
 
+# A suite that exits 0 while its output opens a line with a failure word is
+# defect class 1 (`docs/agents/defect-classes.md`) sitting in the harness whose
+# whole job is to answer "is this tree good": `out` was captured and discarded
+# on success, so a suite could print real findings, say `ok`, and be counted
+# PASS (#954).
+#
+# Three words, anchored to the start of a line. The loose form is unusable:
+# `not found`, `missing` or `does not exist` matched anywhere in a line fires
+# on 14 of this repo's green suites, which narrate a child checker's complaint
+# while their own mutation check goes red by design
+# (`tests/section-references.test.sh` is the pattern). Anchoring takes those 14
+# to zero, and it doubles as the escape hatch a suite needs if it ever must
+# reprint a child's `FAIL` line while passing: indent the reprint, which is
+# also how a reader tells a quoted failure from this suite's own.
+failure_signature='^(FAIL|Traceback|ERROR)'
+
 count=0
 while IFS=$'\t' read -r label cmd; do
   if out=$($cmd 2>&1 </dev/null); then
+    if hit=$(printf '%s\n' "$out" | grep -m1 -E "$failure_signature"); then
+      echo "FAIL $label"
+      echo "tests/all.sh: exited 0, but its output carries a failure line:"
+      printf '  %s\n' "$hit"
+      printf '%s\n' "$out"
+      exit 1
+    fi
     echo "PASS $label"
     count=$((count + 1))
   else
