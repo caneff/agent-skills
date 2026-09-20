@@ -62,10 +62,18 @@ outside it is read as an edge.
     local ticket template. The markers are not part of the answer, whichever
     side of them the colon sits on.
 
-  An inline line reaches to the end of that line and no further. The words
+  An inline line reaches to the end of that line and no further, and counts
+  only in the **preamble** — the body above the first heading. The words
   must start the line: prose that says "this one is blocked by #7, we think"
   mid-sentence is not a declaration. Where a ticket carries both a section
   and an inline line, the section wins.
+- **A fenced region is quoted, never declared.** Anything between ``` or ~~~
+  fences is an example: `/to-tickets` ships a fenced issue template
+  containing a `## Blocked by` heading, and a ticket quoting this grammar
+  carries one too. A ticket whose only `Blocked by` is inside a fence has
+  stated nothing, so it is unresolved — reading the template's own
+  `None — can start immediately.` as that ticket's answer is the
+  false-ready dispatch this reader exists to stop.
 - **A blocker** is a bare `#NNN` reference to an issue in the same repo,
   anywhere in the section — one per list item is the house form. A ticket is
   blocked when any referenced issue is open, and unblocked when every one of

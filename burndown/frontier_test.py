@@ -307,6 +307,85 @@ def test_an_empty_inline_line_is_unresolved():
     assert numbers(got["unresolved"]) == [1], got
 
 
+# --- A quoted template is not a declaration -------------------------------
+
+FENCED_TEMPLATE = """The ticket template we emit:
+
+```
+## Blocked by
+
+None — can start immediately.
+```
+
+## TL;DR
+
+Ship the thing.
+"""
+
+
+def test_a_fenced_section_is_a_quoted_example_not_a_declaration():
+    # to-tickets/SKILL.md carries exactly this fenced template, and any
+    # ticket quoting the grammar carries one too. Reading it as a real
+    # declaration is the false-ready dispatch this whole reader exists to
+    # stop.
+    got = read([issue(1, body=FENCED_TEMPLATE)])
+    assert numbers(got["unresolved"]) == [1], got
+
+
+def test_a_fenced_inline_example_is_not_a_declaration():
+    # In the preamble, where a real inline declaration would count, and
+    # tilde-fenced rather than backtick-fenced.
+    body = "~~~\nBlocked by: None\n~~~\n\n## TL;DR\n\nSomething.\n"
+    got = read([issue(1, body=body)])
+    assert numbers(got["unresolved"]) == [1], got
+
+
+def test_a_real_section_after_a_fenced_example_is_still_read():
+    # The fence has to close: swallow the rest of the body and this ticket's
+    # own declaration disappears into the quoted example.
+    body = "```\n## Blocked by\n\nNone.\n```\n\n## Blocked by\n\n- #7\n"
+    got = read([issue(1, body=body)], states={7: "open"})
+    assert numbers(got["blocked"]) == [1], got
+
+
+def test_an_inline_line_counts_only_in_the_preamble():
+    # The grammar puts the inline form at the top of the body. Below a
+    # heading it is prose about blockers, not the ticket's declaration.
+    body = "## TL;DR\n\nSomething.\n\nBlocked by: None — can start immediately.\n"
+    got = read([issue(1, body=body)])
+    assert numbers(got["unresolved"]) == [1], got
+
+
+def test_a_preamble_inline_line_still_declares():
+    body = "Part of #500\n\nBlocked by: None\n\n## TL;DR\n\nSomething.\n"
+    got = read([issue(1, body=body)])
+    assert numbers(got["unblocked"]) == [1], got
+
+
+# --- A queue past one page -------------------------------------------------
+
+def test_every_page_of_a_paginated_queue_comes_back():
+    pages = [[issue(1), issue(2)], [issue(3)]]
+    got = F.fetch_issues("owner/repo", "l", run=lambda args: pages)
+    assert [i["number"] for i in got] == [1, 2, 3], got
+
+
+def test_the_paginated_fetch_asks_gh_to_slurp_the_pages():
+    calls = []
+    F.fetch_issues("owner/repo", "l", run=lambda args: calls.append(args) or [])
+    assert "--slurp" in calls[0], calls
+
+
+def test_an_answer_that_is_not_pages_of_issues_is_an_error():
+    for answer in ({"message": "Not Found"}, [{"number": 1}]):
+        try:
+            F.fetch_issues("owner/repo", "l", run=lambda args: answer)
+        except F.FrontierError as exc:
+            assert "pages" in str(exc), exc
+        else:
+            raise AssertionError(f"{answer!r} must not pass for a queue")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

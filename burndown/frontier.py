@@ -44,6 +44,13 @@ _REFERENCE = re.compile(r"(?<![0-9A-Za-z_/#-])#(\d+)")
 # immediately.` The stated way to say a ticket has no blockers.
 _NONE = re.compile(r"^[-*\s]*none\b", re.IGNORECASE)
 
+# A fenced region — ``` or ~~~ — is quoted material, never a declaration.
+# `to-tickets/SKILL.md` ships a fenced issue template containing a
+# `## Blocked by` heading, and a ticket quoting the grammar carries one too;
+# reading either as this ticket's own answer dispatches a worker on an
+# example.
+_FENCE = re.compile(r"^[ \t]*(```|~~~)")
+
 CLAIMED_LABEL = "in-progress"
 
 
@@ -51,6 +58,22 @@ class FrontierError(Exception):
     """The tracker could not be read. One stderr line, never a traceback:
     this reader's whole point is that an answer it cannot get has a name."""
 
+
+
+def unfenced(lines):
+    """Every line outside a fenced code block, as `(index, line)`."""
+    fence = None
+    for i, line in enumerate(lines):
+        opener = _FENCE.match(line)
+        if opener:
+            marker = opener.group(1)
+            if fence is None:
+                fence = marker
+            elif marker == fence:
+                fence = None
+            continue
+        if fence is None:
+            yield i, line
 
 
 def blocked_by_section(body):
@@ -62,17 +85,19 @@ def blocked_by_section(body):
     `/to-tickets` emits: the lines under a `## Blocked by` heading up to the
     next heading of any level, or the rest of an inline `Blocked by:` /
     `**Blocked by:**` line."""
-    lines = (body or "").splitlines()
-    for i, line in enumerate(lines):
+    visible = list(unfenced((body or "").splitlines()))
+    for pos, (_, line) in enumerate(visible):
         if not _HEADING.match(line):
             continue
         section = []
-        for rest in lines[i + 1:]:
+        for _, rest in visible[pos + 1:]:
             if _ANY_HEADING.match(rest):
                 break
             section.append(rest)
         return "\n".join(section).strip()
-    for line in lines:
+    for _, line in visible:
+        if _ANY_HEADING.match(line):
+            break  # the preamble ends at the first heading
         inline = _INLINE.match(line)
         if inline:
             return inline.group(1).strip()
@@ -180,10 +205,21 @@ def fetch_issues(repo, label, run=gh_json):
     The label and repo are percent-encoded into the path: a `#` in a raw URL
     is a fragment marker `gh` drops, which answers a broader queue with exit
     0 — the wrong queue reported as a good one — and a space hangs the
-    request. An empty answer is an empty queue, not `None`."""
+    request. An empty answer is an empty queue, not `None`.
+
+    `--slurp` wraps the pages in an outer array, which this flattens. Without
+    it `gh` merges array pages itself (measured on 2.95.0), but that is
+    behaviour its own help does not promise — and a queue past one page is
+    exactly where a burn needs the reader to work."""
     path = (f"repos/{quote(repo, safe='/')}/issues"
             f"?state=open&per_page=100&labels={quote(label, safe='')}")
-    return run(["api", "--paginate", path]) or []
+    pages = run(["api", "--paginate", "--slurp", path]) or []
+    issues = []
+    for page in pages:
+        if not isinstance(page, list):
+            raise FrontierError("gh answered with something other than pages of issues")
+        issues.extend(page)
+    return issues
 
 
 def fetch_state(repo, number, run=gh_json):
