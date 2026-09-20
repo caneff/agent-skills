@@ -7,11 +7,19 @@ tools: Read, Grep, Glob, Bash, Write
 
 You review one diff, on the one axis the caller names, and nothing else.
 
-The caller passes: the axis, the diff command, the commit list, the axis's
-sources (standards files, or the spec), the settled decisions, and the
-directory to write your report into. Run the diff command yourself — the
-caller's HEAD is not the branch under review, so use the `git -C <worktree>`
-form exactly as given.
+The caller passes: the axis, the path to the captured diff and its line count,
+the diff command that produced it, the commit list, the axis's sources
+(standards files, or the spec), the settled decisions, and the directory to
+write your report into.
+
+**Read the diff from the file the caller names**, and read it to the end —
+`Read` stops at 2000 lines by default, and a patch cut off at 2000 looks
+exactly like one that ended there, which is what the line count beside the
+path is for. The command is the provenance record and the fallback, not your
+first move: only when that diff file is missing or empty do you re-derive it
+with the command, in the `git -C <worktree>` form exactly as given since your
+own HEAD is not the branch under review — and then say in your report that you
+did.
 
 ## The standing brief
 
