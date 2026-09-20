@@ -1310,7 +1310,7 @@ fn a_worktree_holding_scratch_is_refused_naming_it() {
     let (r, wt) = lane_workspace(&c, "r26", "implement-26");
     ignored_dirs(&r, &wt, &[".scratch", "node_modules"]);
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
-    let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: .scratch/ (--discard overrides)", wt.display());
+    let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: .scratch/x (--discard overrides)", wt.display());
     assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
     assert!(wt.join(".scratch/x").is_file() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
 
@@ -1320,7 +1320,7 @@ fn a_worktree_holding_scratch_is_refused_naming_it() {
 
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
     assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
-    assert!(run.has(&format!("--discard: {} — 1 ignored file(s) would be lost: .scratch/", wt.display())), "{}", run.text());
+    assert!(run.has(&format!("--discard: {} — 1 ignored file(s) would be lost: .scratch/x", wt.display())), "{}", run.text());
 }
 
 #[test]
@@ -1382,7 +1382,7 @@ fn scratch_alongside_many_caches_is_never_elided_behind_the_cache_count() {
     ignored_dirs(&r, &wt, &[".scratch", "node_modules", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"]);
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
     assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
-    let dirty_line_idx = run.stdout.lines().position(|l| l.contains("--discard:") && l.contains("1 ignored file(s) would be lost: .scratch/"));
+    let dirty_line_idx = run.stdout.lines().position(|l| l.contains("--discard:") && l.contains("1 ignored file(s) would be lost: .scratch/x"));
     let cache_line_idx = run.stdout.lines().position(|l| l.contains("discarding 6 cache file(s)"));
     assert!(dirty_line_idx.is_some() && cache_line_idx.is_some() && dirty_line_idx < cache_line_idx, "{}", run.text());
 }
@@ -1403,7 +1403,7 @@ fn scratch_is_never_elided_behind_bulk_modified_and_untracked_names() {
     }
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     let want = format!(
-        "merge-cleanup: refusing to remove {} — 1 modified, 4 untracked, 1 ignored file(s) would be lost: .scratch/, f, a, b, c, d (--discard overrides)",
+        "merge-cleanup: refusing to remove {} — 1 modified, 4 untracked, 1 ignored file(s) would be lost: .scratch/x, f, a, b, c, d (--discard overrides)",
         wt.display()
     );
     assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
@@ -1421,31 +1421,171 @@ fn six_or_more_ignored_names_are_all_shown_none_elided() {
     ignored_dirs(&r, &wt, &[".scratch", "z1", "z2", "z3", "z4", "z5"]);
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
     let want = format!(
-        "merge-cleanup: refusing to remove {} — 6 ignored file(s) would be lost: .scratch/, z1/, z2/, z3/, z4/, z5/ (--discard overrides)",
+        "merge-cleanup: refusing to remove {} — 6 ignored file(s) would be lost: .scratch/x, z1/x, z2/x, z3/x, z4/x, z5/x (--discard overrides)",
         wt.display()
     );
     assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
 }
 
 #[test]
-fn an_empty_ignored_directory_still_refuses_without_discard() {
-    // #823, reversed by the Codex adversarial-review pass on PR #839: a
-    // process can fill the directory between the read and the removal, and
-    // an empty directory can be intentional, so emptiness earns no
-    // exemption. Cleanup owes nothing here that the caller can't already
-    // get with --discard. Fixing the actual source (the Codex pass leaving
-    // .scratch/ empty) belongs in implement/SKILL.md's own step, not here.
+fn an_empty_ignored_directory_is_removed_and_named() {
+    // #869/#946, reversing #823: `--ignored=matching` collapses an ignored
+    // directory to one entry whatever it holds, so an empty one read as "1
+    // ignored file(s)" and forced a needless --discard through Chris's hands
+    // — six times running in twitch-rules-scroller on 2026-09-16. Nothing is
+    // lost, so it no longer refuses; the run still names what it took, so the
+    // output stays a full account of what cleanup touched.
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r32", "implement-32");
     std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
     std::fs::create_dir(wt.join(".scratch")).unwrap();
-    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
-    let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: .scratch/ (--discard overrides)", wt.display());
-    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
-    assert!(wt.join(".scratch").is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    let at = wt.join(".scratch");
 
-    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
-    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert!(run.ok && run.has(&format!("would remove the empty ignored directory at {}", at.display())), "{}", run.text());
+    assert!(at.is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && run.has(&format!("removing the empty ignored directory at {}", at.display())), "{}", run.text());
+    assert!(!wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn an_ignored_directory_of_only_empty_subdirectories_is_empty_too() {
+    // "Zero files" means nowhere beneath it, not just at the top: a walk that
+    // stopped at the first directory entry would call this one work.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r34", "implement-34");
+    std::fs::write(r.join(".git/info/exclude"), "e2e-artifacts/\n").unwrap();
+    std::fs::create_dir_all(wt.join("e2e-artifacts/shots/full")).unwrap();
+    let at = wt.join("e2e-artifacts");
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && run.has(&format!("removing the empty ignored directory at {}", at.display())), "{}", run.text());
+    assert!(!wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn a_full_ignored_directory_refuses_with_its_real_count_and_names() {
+    // The dangerous direction of #946: one collapsed entry read as "1 ignored
+    // file(s) would be lost" however much it held, so --discard was approved
+    // against a count that understated the loss. The refusal now states every
+    // file, at any depth.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r35", "implement-35");
+    std::fs::write(r.join(".git/info/exclude"), "e2e-artifacts/\n").unwrap();
+    std::fs::create_dir_all(wt.join("e2e-artifacts/shots")).unwrap();
+    for f in ["e2e-artifacts/a.png", "e2e-artifacts/c.png", "e2e-artifacts/shots/b.png"] {
+        std::fs::write(wt.join(f), "x\n").unwrap();
+    }
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — 3 ignored file(s) would be lost: e2e-artifacts/a.png, e2e-artifacts/c.png, e2e-artifacts/shots/b.png (--discard overrides)",
+        wt.display()
+    );
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+    assert!(wt.join("e2e-artifacts/a.png").is_file() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn an_unreadable_ignored_directory_still_refuses() {
+    // Fail closed (#801): a walk that cannot read the directory says nothing
+    // about what is in it, and an io::Error read as "nothing in there" would
+    // approve a destructive removal on a permission error.
+    use std::os::unix::fs::PermissionsExt;
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r36", "implement-36");
+    std::fs::write(r.join(".git/info/exclude"), "e2e-artifacts/\n").unwrap();
+    let at = wt.join("e2e-artifacts");
+    std::fs::create_dir(&at).unwrap();
+    std::fs::write(at.join("shot.png"), "x\n").unwrap();
+    std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read_dir(&at).is_ok() {
+        // Root, or a filesystem that ignores modes: the directory is still
+        // readable, so this run would witness nothing. Say so rather than
+        // fail, and leave the tree as found.
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o755)).unwrap();
+        eprintln!("skipped: chmod 000 did not make the directory unreadable here");
+        return;
+    }
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: e2e-artifacts/ (--discard overrides)", wt.display());
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+    assert!(at.join("shot.png").is_file() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn a_quoted_ignored_directory_is_classified_by_its_contents_too() {
+    // Correctness axis C1 on the round-1 diff: git quotes a porcelain path
+    // holding a non-ASCII byte (`core.quotePath`), and the quoted form ends
+    // with `"`, not `/`. Matching on the slash filed `café/` as a plain file
+    // and never walked it, so both bugs survived intact for such a name — the
+    // empty one still forced a --discard, and a full one still claimed "1
+    // ignored file(s)" whatever it held.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r37", "implement-37");
+    std::fs::write(r.join(".git/info/exclude"), "café/\n").unwrap();
+    std::fs::create_dir(wt.join("café")).unwrap();
+    for f in ["a.png", "b.png"] {
+        std::fs::write(wt.join("café").join(f), "x\n").unwrap();
+    }
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — 2 ignored file(s) would be lost: café/a.png, café/b.png (--discard overrides)",
+        wt.display()
+    );
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+
+    // The same name, emptied: nothing to lose, so it is removed and named.
+    for f in ["a.png", "b.png"] {
+        std::fs::remove_file(wt.join("café").join(f)).unwrap();
+    }
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && run.has(&format!("removing the empty ignored directory at {}", wt.join("café").display())), "{}", run.text());
+    assert!(!wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn the_empty_directory_line_is_not_printed_when_nothing_is_removed() {
+    // Correctness C2 / spec P1: the line was printed inside guard_files,
+    // which runs before the live-session guard, so a worktree someone was
+    // still working in announced a removal that never happened — the inverse
+    // of the full account of what cleanup touched that the line exists for.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r38", "implement-38");
+    std::fs::write(r.join(".git/info/exclude"), "e2e-artifacts/\n").unwrap();
+    std::fs::create_dir(wt.join("e2e-artifacts")).unwrap();
+    c.session("live", &format!(r#"{{"pid":{},"cwd":"{}","procStart":"{}"}}"#, me(), wt.display(), me_start()));
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains("a live session is in it"), "{}", run.text());
+    assert!(!run.stdout.contains("the empty ignored directory"), "{}", run.text());
+    assert!(wt.join("e2e-artifacts").is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn a_quoted_rename_decodes_both_of_its_paths() {
+    // Verification pass V1 on the C1 fix: porcelain v1 writes a rename as
+    // `<orig> -> <new>` with each path quoted on its own, so decoding the
+    // line as one path stripped the outer quotes and left the inner pair
+    // stranded — `"a" -> "b"` read as `a" -> "b`. Only the displayed name was
+    // affected, never a refusal, but a guard that exists to say what is about
+    // to be destroyed has to name it correctly.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r39", "implement-39");
+    std::fs::write(wt.join("café.txt"), "x\n").unwrap();
+    c.git_ok(&["-C", s(&wt), "add", "café.txt"]);
+    c.git_ok(&["-C", s(&wt), "commit", "-qm", "add it"]);
+    c.git_ok(&["-C", s(&wt), "mv", "café.txt", "naïve.txt"]);
+
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one", "--force"], &[]);
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — 1 modified file(s) would be lost: café.txt -> naïve.txt (--discard overrides)",
+        wt.display()
+    );
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
 }
 
 #[test]
