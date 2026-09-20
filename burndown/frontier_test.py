@@ -227,6 +227,42 @@ def test_a_spec_entry_names_the_route_that_dispatches_it():
     assert "implement-dispatch --spec 885 --slots" in why, why
 
 
+def test_a_spec_parent_with_a_native_open_blocker_is_blocked():
+    # `blocked` outranks `spec` on one entry: the frontier checks
+    # prerequisites before it offers a route. The entry is true either way,
+    # but `spec` carries a dispatch verb and a controller copies lines like
+    # that — onto a whole nested run over blocked work.
+    got = read([issue(1, labels=("ready-for-agent", "spec"), blocked_by=1)])
+    assert numbers(got["blocked"]) == [1], got
+    assert numbers(got["spec"]) == [], got
+
+
+def test_a_spec_parent_whose_body_names_an_open_blocker_is_blocked():
+    got = read([issue(1, labels=("ready-for-agent", "spec"),
+                      body="## Blocked by\n\n- #7\n")], states={7: "open"})
+    assert numbers(got["blocked"]) == [1], got
+    assert numbers(got["spec"]) == [], got
+
+
+def test_a_spec_parent_whose_blockers_are_all_closed_is_dispatchable():
+    # Prerequisites checked and met, so the route is the honest answer.
+    got = read([issue(1, labels=("ready-for-agent", "spec"),
+                      body="## Blocked by\n\n- #7\n")], states={7: "closed"})
+    assert numbers(got["spec"]) == [1], got
+    assert numbers(got["unblocked"]) == [], got
+
+
+def test_a_spec_parent_whose_blockers_cannot_be_read_is_unresolved():
+    # The ticket declared prerequisites this reader could not resolve, so
+    # whether one is open is unknown — and an unknown prerequisite is not a
+    # met one. Silence is the case that goes to `spec`; a declaration that
+    # cannot be read is not silence.
+    got = read([issue(1, labels=("ready-for-agent", "spec"),
+                      body="## Blocked by\n\n- #7\n")], states={})
+    assert numbers(got["unresolved"]) == [1], got
+    assert numbers(got["spec"]) == [], got
+
+
 def test_a_claimed_spec_parent_is_off_the_frontier_like_any_other():
     # A claim outranks the bucket: someone already has it, so there is no
     # route left to offer a controller.

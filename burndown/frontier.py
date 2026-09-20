@@ -182,34 +182,24 @@ def classify(issues, state_of):
     and anything that is really a PR, is in no bucket at all — each is off
     the frontier by its own nature, not by a blocking relationship."""
     buckets = {"unblocked": [], "blocked": [], "unresolved": [], "spec": []}
-    for issue in sorted(issues, key=lambda i: i.get("number") or 0):
-        if (issue.get("pull_request") or _is_claimed(issue)
-                or _is_non_dispatchable(issue)):
-            continue
-        entry = {"number": issue.get("number"), "title": issue.get("title"),
-                 "blockers": [], "why": ""}
-        if SPEC_LABEL in _labels(issue):
-            # Before the sources, because none of them asks the question a
-            # spec parent answers: it is dispatched by verb, not by state.
-            entry["why"] = ("a spec parent: dispatch with `implement-dispatch"
-                            f" --spec {entry['number']} --slots <k>`")
-            buckets["spec"].append(entry)
-            continue
+
+    def rank(issue, entry):
+        """`(bucket, declared)` from this ticket's blocking state alone.
+        `declared` is whether the ticket said anything about blockers at
+        all — silence and an unreadable declaration are both `unresolved`,
+        and the spec override below has to tell them apart."""
         native = _native(issue)
         if native is not None:
             entry["why"] = "native dependencies"
-            buckets["blocked" if native else "unblocked"].append(entry)
-            continue
+            return ("blocked" if native else "unblocked"), True
         section = blocked_by_section(issue.get("body"))
         if section is None:
             entry["why"] = "no native dependencies and no `Blocked by` of any form"
-            buckets["unresolved"].append(entry)
-            continue
+            return "unresolved", False
         references, why = section_blockers(section)
         if references is None:
             entry["why"] = why
-            buckets["unresolved"].append(entry)
-            continue
+            return "unresolved", True
         entry["blockers"] = references
         states = [(n, state_of(n)) for n in references]
         unreadable = [n for n, state in states if state is None]
@@ -217,16 +207,38 @@ def classify(issues, state_of):
             entry["why"] = ("`Blocked by` names "
                             + ", ".join(f"#{n}" for n in unreadable)
                             + ", whose state could not be read")
-            buckets["unresolved"].append(entry)
-            continue
+            return "unresolved", True
         open_blockers = [n for n, state in states if state == "open"]
         if open_blockers:
             entry["blockers"] = open_blockers
             entry["why"] = "`Blocked by` names an open ticket"
-            buckets["blocked"].append(entry)
-        else:
-            entry["why"] = "`Blocked by` names only closed tickets"
-            buckets["unblocked"].append(entry)
+            return "blocked", True
+        entry["why"] = "`Blocked by` names only closed tickets"
+        return "unblocked", True
+
+    for issue in sorted(issues, key=lambda i: i.get("number") or 0):
+        if (issue.get("pull_request") or _is_claimed(issue)
+                or _is_non_dispatchable(issue)):
+            continue
+        entry = {"number": issue.get("number"), "title": issue.get("title"),
+                 "blockers": [], "why": ""}
+        name, declared = rank(issue, entry)
+        if SPEC_LABEL in _labels(issue) and (
+                name == "unblocked" or (name == "unresolved" and not declared)):
+            # The prerequisites are checked *first*, so `blocked` outranks
+            # `spec` on one entry: both are true claims, but only `spec`
+            # carries a dispatch verb, and a controller copies lines like
+            # that — onto a whole nested run over blocked work.
+            #
+            # An unreadable declaration stays `unresolved` for the same
+            # reason. Silence is the case ruled into `spec`; a stated
+            # prerequisite this reader could not resolve is not silence,
+            # and an unknown prerequisite is not a met one.
+            entry["blockers"] = []
+            entry["why"] = ("a spec parent: dispatch with `implement-dispatch"
+                            f" --spec {entry['number']} --slots <k>`")
+            name = "spec"
+        buckets[name].append(entry)
     return buckets
 
 

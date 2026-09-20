@@ -61,6 +61,23 @@ A claim outranks it. A spec parent that is assigned or `in-progress` is off
 the frontier like any other claimed ticket — someone already has it, so
 there is no route left to offer.
 
+**`blocked` outranks `spec`, and the order is not arbitrary.** A spec parent
+is dispatched by a different verb, but the frontier still checks its
+prerequisites first: one with an open blocker — native edge or stated
+section — reads `blocked`, not `spec`. Both would be true claims about the
+entry, and that is exactly the trap. Only `spec` carries a dispatch verb,
+and a controller copies a line like that; the cost of being wrong here is a
+whole nested run over blocked work, against a controller seeing `blocked`
+and having no line to copy, which is the correct experience for a ticket
+that is not ready.
+
+**An unreadable declaration stays `unresolved` too**, for the same reason a
+blocked one stays `blocked`. Silence is the case that goes to `spec` — a
+spec parent that never mentions blockers is off the frontier's blocking
+question by its own nature. A ticket that *states* prerequisites this reader
+cannot resolve has not been silent, and an unknown prerequisite is not a met
+one. The route is offered only once the prerequisites are known and met.
+
 ## Three sources, in order
 
 **1. The tracker's native dependencies, where it has them.** On GitHub that
