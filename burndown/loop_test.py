@@ -590,27 +590,40 @@ def test_a_question_with_a_newline_in_it_is_refused():
 
 def test_the_cli_landing_refuses_an_empty_agent_and_a_non_positive_clump():
     # A refusal whose job is to name the worker must not name nobody, and a
-    # clump is a ticket number.
-    for args in (("--clump", "454", "--agent", ""),
-                 ("--clump", "0", "--agent", "burn-1"),
-                 ("--clump", "-5", "--agent", "burn-1")):
-        got = loop_py("landing", *args, "--outstanding", "q?")
+    # clump is a ticket number. Nothing outstanding, so the flags are the
+    # only thing that can refuse this call — with a question outstanding the
+    # cleanup gate refuses anyway and the check would witness nothing.
+    for args, reason in ((("--clump", "454", "--agent", ""), "no agent named"),
+                         (("--clump", "0", "--agent", "burn-1"), "ticket number"),
+                         (("--clump", "-5", "--agent", "burn-1"), "ticket number")):
+        got = loop_py("landing", *args)
         assert got.returncode == 1, (args, got)
+        assert reason in got.stderr, (args, got.stderr)
         assert "Traceback" not in got.stderr, got.stderr
         assert len(got.stderr.strip().splitlines()) == 1, got.stderr
 
 
 def test_the_cli_landing_survives_a_reader_that_closes_early():
-    # `loop.py landing ... | head -1`: the interpreter's flush at exit would
-    # print the traceback this module promises never to print.
-    got = subprocess.run(
-        ["bash", "-c",
-         f"set -o pipefail; {sys.executable} {LOOP} landing --clump 454 "
-         "--agent burn-454 | head -1"],
-        capture_output=True, text=True, timeout=60)
-    assert got.returncode == 0, got
+    # `loop.py landing ... | head -1` and its kin. The read end is closed
+    # before the child runs, so the first write hits EPIPE every time —
+    # racing a real `head` would make this pass on the buffering instead of
+    # on the handler. Without it the interpreter prints, at exit, the
+    # traceback this module promises never to print.
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    try:
+        got = subprocess.run(
+            [sys.executable, LOOP, "landing", "--clump", "454", "--agent",
+             "burn-454", "--outstanding", "may I drop 4x4?"],
+            stdout=write_end, stderr=subprocess.PIPE, text=True, timeout=60)
+    finally:
+        os.close(write_end)
+    # The refusal's own exit code, because stderr is a different fd and the
+    # refusal printed there still arrived.
+    assert got.returncode == 1, got
+    assert "cleanup closes its pane" in got.stderr, got.stderr
     assert "Traceback" not in got.stderr, got.stderr
-    assert got.stdout.strip() == "merge", got.stdout
+    assert "Exception ignored" not in got.stderr, got.stderr
 
 
 def main():

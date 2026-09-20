@@ -391,7 +391,7 @@ def render_dispatch(picked, state):
     return "\n".join(lines) or "nothing to dispatch"
 
 
-def main(argv):
+def run(argv):
     parser = argparse.ArgumentParser(
         prog="loop.py", description=(
             "The burn loop's mechanical steps. `announce` has no subcommand: "
@@ -479,13 +479,27 @@ def main(argv):
     except LoopError as exc:
         print(f"loop.py: {exc}", file=sys.stderr)
         return 1
-    except BrokenPipeError:
-        # `loop.py landing ... | head -1` closes the pipe mid-print. Point
-        # stdout at /dev/null so the interpreter's flush at exit has
-        # somewhere to go, rather than raising again with a traceback.
-        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
-        return 0
     return 0
+
+
+def main(argv):
+    """`run`, plus the reader that closed early.
+
+    A pipe makes stdout block-buffered, so `loop.py landing ... | head -1`
+    breaks at the flush — which the interpreter does after `run` has
+    returned, where no handler inside it can reach. Flushing here brings
+    that moment inside the handler, and pointing the fd at /dev/null keeps
+    the interpreter's own exit-time flush off the dead pipe, where it would
+    print the traceback this module promises never to print. The status is
+    whatever `run` decided: stderr is a different fd, and a refusal printed
+    there arrived whatever happened to stdout.
+    """
+    status = run(argv)
+    try:
+        sys.stdout.flush()
+    except BrokenPipeError:
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+    return status
 
 
 def git(args):
