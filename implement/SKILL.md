@@ -277,6 +277,8 @@ Tip: <headRefOid> — <"no commits past the reviewed sha", or one
   "<sha> — <diff class>" line per commit past it>
 Mutation check: <the change that made it fail, and that you saw it fail
   — or "n/a, deliverable is not a test or a gate">
+Parallel jobs: <one "<what it was> — <n> cores" line per parallel job you
+  launched — or "none">
 ```
 
 - **The sha CLEAN was observed at** — step 5's `headRefOid`, the commit
@@ -298,6 +300,15 @@ Mutation check: <the change that made it fail, and that you saw it fail
   it rule on another review round without diffing it blind. 4 of 7 reports
   in the #781 burn carried a tip past the reviewed sha, and the controller
   diffed each one by hand.
+- **Every parallel job you launched, with its core count** — and when you
+  launched none, say "none" rather than leaving the field out. The
+  controller's budget is counted in slots and the real contention is in
+  cores, and nothing bridges the two but this line: a worker that launched
+  nothing and a worker that forgot to say produce the same silence, and the
+  controller charges zero cores for both. #351's worker ran a `verify.py`
+  that hard-codes an 8-worker CP-SAT portfolio, at ~793% CPU; box load hit
+  25.8 with **no dispatch pending**, so no box check could have caught it.
+  Declare the job's own core count, not the load you observed.
 - **A mutation check**, when the ticket's deliverable is a test or a gate:
   name one change that makes the new test or gate fail, and that you saw it
   fail. Nothing else in the report tells a gate from a test that always
