@@ -185,7 +185,38 @@ If the completion notification comes back missing or empty, read that file befor
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec if there is one (so "behaviour the ticket did not ask for" has a referent), the test command the repo uses, and the settled decisions.
-- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it (do it on a scratch copy of the tree outside the checkout, made with Bash; the checkout is left exactly as found). Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
+- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it. Isolate the mutation in a throwaway worktree and re-run only the suite that covers the mutated test, never the whole gate — both below, and the checkout is left exactly as found. Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
+
+**What the witness check costs to run** (#939). The check itself is the most
+valuable thing a review does — the `paths()` fail-open in #893, the zero-cores
+default in #894 and the suppressed contradictions in #897 all came out of it in
+one day. These two lines are about its price, not about running it less.
+
+*Isolation.* `git worktree add` a throwaway worktree rather than copying the
+tree: it shares the object store, so it costs no copy of the 419 MB / 529
+tracked files this repo carries, and the isolation is stronger — a worktree
+cannot write back into the checkout by accident. `HEAD` is the revision the
+captured diff ends at, so the mutation lands on exactly the code under review:
+
+```
+worktree=<the worktree under review>
+witness=$(mktemp -d)/witness            # outside the checkout, never under it
+git -C "$worktree" worktree add --detach -q "$witness" HEAD || exit 1
+# <strip the constraint in "$witness", then run only the suite that covers it>
+git -C "$worktree" worktree remove --force "$witness" || exit 1
+rmdir "$(dirname "$witness")"
+```
+
+`git worktree remove`, never `rm -rf`: a directory deleted out from under the
+registration leaves a stale entry that stalls the next `worktree remove` and
+any later `merge-cleanup` on this repo.
+
+*Scope.* Re-run the suite that covers the mutated test — the file it lives in,
+run the way `tests/all.sh` would run it (`bash <name>.test.sh`, `python3
+<name>_test.py`) — not the whole gate. `bash tests/all.sh` is 2m51s wall over
+62 suites here, so a diff adding five tests would pay it five times inside one
+axis, while the covering suite finishes in seconds. The whole gate belongs to
+the worker's own pre-report gate, where it already runs once.
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report. The Correctness sub-agent still runs; replace its part (b) with "(b) say 'no spec available'".
 

@@ -44,7 +44,8 @@ in parallel and a finding reported twice costs two dispositions.
 **Write your full report to a file** at the path the caller names, then return
 a summary under 60 lines, verdict first, that names that path. `Write` is for
 that report and a scratch copy of the diff, never for the repo under review:
-`Edit` is deliberately not among your tools, and a witness check runs on a copy.
+`Edit` is deliberately not among your tools, and a witness check runs in the
+throwaway worktree your caller's brief describes, never in the checkout.
 
 **Also write the findings sidecar** the caller's prompt names —
 `findings-<axis>-<n>.jsonl` next to the report, one JSON line per finding
