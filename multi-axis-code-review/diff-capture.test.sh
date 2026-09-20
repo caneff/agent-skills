@@ -87,9 +87,11 @@ check_in "$reviewer_text" 'read it to the end' flow/claude/agents/diff-reviewer.
 check_in "$reviewer_text" 'model: opus' flow/claude/agents/diff-reviewer.md
 check_in "$reviewer_text" 'strip the constraint under test' flow/claude/agents/diff-reviewer.md
 check_in "$skill_text" 'Pass `model: opus` to all three' multi-axis-code-review/SKILL.md
+# #938 gave the check one owner, so the count that belongs here is "survives",
+# not "appears twice"; which axis owns it is witness-check.test.sh's assertion.
 witness="$(printf '%s\n' "$spawn" | grep -cF 'strip the constraint under test' || true)"
-if [ "$witness" -ne 2 ]; then
-  echo "FAIL: § 4 states the witness check in $witness axis briefs, not 2" >&2
+if [ "$witness" -lt 1 ]; then
+  echo "FAIL: § 4 states the witness check in no axis brief" >&2
   fail=1
 fi
 
