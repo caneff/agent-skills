@@ -278,19 +278,19 @@ If the completion notification comes back missing or empty, read that file befor
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The list of standards-source files you found in step 3, and the settled decisions. The smell baseline and the over-engineering lens are the agent definition's to read from § 3; paste them only in the no-definition fallback above.
-- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces, and skip the hollow-witness check — the correctness axis owns it (#938), and two opus agents mutating the same tests over the same diff cost two dispositions for one finding. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the over-engineering lens over the diff and list what to cut, one line each in `location: <tag> <what>. <replacement>.` form using the five tags. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Under 550 words."
+- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Check `docs/agents/defect-classes.md` by name — the three shapes this repo keeps shipping, with every instance. Skip anything tooling enforces, and skip the hollow-witness check — the correctness axis owns it (#938), and two opus agents mutating the same tests over the same diff cost two dispositions for one finding. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the over-engineering lens over the diff and list what to cut, one line each in `location: <tag> <what>. <replacement>.` form using the five tags. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Under 550 words."
 
 **Spec sub-agent prompt** — include:
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec, and the settled decisions.
-- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Under 400 words."
+- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Check `docs/agents/defect-classes.md` by name. Under 400 words."
 
 **Correctness sub-agent prompt** — include:
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec if there is one (so "behaviour the ticket did not ask for" has a referent), the test command the repo uses, and the settled decisions.
-- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it. Isolate the mutation in a throwaway worktree — `git worktree add --detach <a path outside the checkout> HEAD`, removed afterwards with `git worktree remove --force` — and never in a copy of the tree, which on a linked worktree shares the checkout's own index. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. The checkout is left exactly as found. Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
+- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) `docs/agents/defect-classes.md` checked by name, class 1 (an absent or malformed answer read as a benign one) and class 3 (a test that passes for a reason other than the one it claims) especially, since you own the witness check; (d) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it — and when a mutation goes red, read the message and confirm the failure is your assertion and not a missing file or a denied path, which is class 3 again. Isolate the mutation in a throwaway worktree — `git worktree add --detach <a path outside the checkout> HEAD`, removed afterwards with `git worktree remove --force` — and never in a copy of the tree, which on a linked worktree shares the checkout's own index. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. The checkout is left exactly as found. Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
 
 **What the witness check costs, and what actually isolates it** (#939). The
 check itself is the most valuable thing a review does — the `paths()` fail-open
@@ -323,9 +323,17 @@ case "$witness" in "$top"/*)
   echo "witness check: TMPDIR is inside the checkout ($witness)" >&2; exit 1;;
 esac
 git -C "$worktree" worktree add --detach -q "$witness" HEAD || exit 1
+# The trap goes on immediately, because a witness check that WORKS makes the
+# covering suite fail — that failure is the whole point, and it is the
+# ordinary outcome, not the exceptional one. Cleaning up only where the suite
+# passes leaves a registered worktree behind on nearly every check, and they
+# accumulate across reviews.
+trap 'git -C "$worktree" worktree remove --force "$witness" 2>/dev/null
+      rmdir "$(dirname "$witness")" 2>/dev/null' EXIT
 # <strip the constraint in "$witness", then run only the suite that covers it>
 git -C "$worktree" worktree remove --force "$witness" || exit 1
 rmdir "$(dirname "$witness")"
+trap - EXIT
 ```
 
 `git worktree remove`, never `rm -rf`: a directory deleted out from under the

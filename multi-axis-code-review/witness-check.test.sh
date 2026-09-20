@@ -99,6 +99,17 @@ check_not_in "$correctness" 'scratch copy of the tree' 'the correctness axis bri
 # shares the checkout's index, so `cp -a` is not weak isolation, it is none.
 check_in "$costs" 'gitdir pointer' 'the witness-cost section'
 check_in "$costs" 'cp -a' 'the witness-cost section'
+# The three axis briefs point at the one copy of the defect classes; the
+# correctness axis, which owns the witness check since #938, names the two
+# classes it is most exposed to.
+for axis in standards spec correctness; do
+  eval "brief=\$$axis"
+  check_in "$brief" 'docs/agents/defect-classes.md' "the $axis axis brief"
+done
+check_in "$correctness" 'class 1' 'the correctness axis brief'
+check_in "$correctness" 'class 3' 'the correctness axis brief'
+[ -f "$here/../docs/agents/defect-classes.md" ] ||
+  { echo "FAIL: the axis briefs point at a docs/agents/defect-classes.md that does not exist" >&2; fail=1; }
 # The standing brief says the same, since an axis reads it whether or not the
 # caller's paste survived. A bare 'worktree' needle would pass on `git -C
 # <worktree>`, which that file already carried before this change.
@@ -179,6 +190,36 @@ fi
 if [ -e "$(cat "$scratch/where" 2>/dev/null)" ]; then
   echo "FAIL: the witness recipe left its throwaway worktree on disk" >&2
   fail=1
+fi
+
+# A witness check that works makes the covering suite FAIL — that failure is
+# the point, and it is the ordinary outcome. So it is the path cleanup must
+# survive: without a trap armed at `worktree add`, every real hollow-witness
+# hunt leaves a registered worktree behind, and they accumulate across
+# reviews. Same substitution as above, so a failure here is this assertion
+# and not a block that stopped being extractable.
+printf '%s\n' "$recipe" |
+  sed -e "s|^worktree=<.*|worktree=$repo|" \
+      -e "s|^# <strip the constraint.*|echo \"\$witness\" >\"$scratch/where-fail\"; exit 1|" \
+  >"$scratch/recipe-fail.sh"
+# `|| true`: this run is SUPPOSED to exit non-zero — that is the covering
+# suite failing. Without it `set -e` kills the suite here with no message.
+( cd "$repo" && bash "$scratch/recipe-fail.sh" ) >/dev/null 2>&1 || true
+failed_wt="$(cat "$scratch/where-fail" 2>/dev/null)"
+if [ -z "$failed_wt" ]; then
+  echo "FAIL: the failing-suite run never reached the mutation step" >&2
+  fail=1
+else
+  if [ -e "$failed_wt" ]; then
+    echo "FAIL: the covering suite failing left the throwaway worktree on disk" >&2
+    fail=1
+  fi
+  trees_after="$(git -C "$repo" worktree list | wc -l)"
+  if [ "$trees_after" -ne 2 ]; then
+    echo "FAIL: the covering suite failing left $trees_after worktrees registered, not the fixture's 2" >&2
+    git -C "$repo" worktree list >&2
+    fail=1
+  fi
 fi
 
 if [ "$fail" -eq 0 ]; then
