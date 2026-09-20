@@ -71,6 +71,31 @@ quota. In this lane they swap for:
    node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"
    ```
 
+   `body_file` here carries the same two-line controller-context appendix
+   `implement/SKILL.md` § The merge step 3 requires (#941), in the same
+   shape and with the same "nothing to report" wording written out rather
+   than omitted:
+
+   ```
+   ## Controller context — written by the controller, not part of the ticket
+
+   **Open sibling branches.** <each open sibling branch, the files it
+   holds, and what of this ticket's ask is split onto it: which file, which
+   line, which PR> — or: No sibling branch is open, and nothing here is
+   split.
+
+   **Posture.** <the code under review is parked, feature-flagged off, or
+   otherwise landing ahead of its own activation, and the ticket that
+   activates it> — or: The code under review is live in the tree; its
+   posture is what the tree implies.
+   ```
+
+   You are the worker in this lane, and you hold neither fact: ask the
+   controller for both before you compose the file, rather than inferring
+   them from the tree — the tree is precisely the source that cannot see a
+   sibling branch or a deliberate parking, which is why Codex reading it
+   alone reports both as defects.
+
 The one-round-plus-verification cap and the pre-report gate in
 `implement/SKILL.md` § Review and § Before the PR: both bind unchanged. So does the
 disclosure: the PR body names the reviews that actually ran and says the diff

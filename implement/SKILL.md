@@ -376,7 +376,47 @@ The controller merges on a repo Chris owns; Chris reads it after via
    a shell string, quoted or not, since a body or comment containing `"`,
    `` ` ``, or `$(` would then run as shell instead of reading as text; a
    comment is the less trusted half of the two, since anyone with repo access
-   can add one. Then invoke the plugin's own script directly.
+   can add one.
+
+   **The focus text ends with a controller-context appendix** (#941), two
+   required lines, appended to `body_file` after the rendered ticket and
+   marked as controller context rather than ticket text. Codex reads this
+   one branch against `origin/<default>` and nothing else, so anything the
+   controller knows that the tree does not say is invisible to it — and
+   what it cannot see, it reports as a missing requirement. Three of map
+   #776's disputes were exactly that: PR #930's merge-tail pointer was in
+   PR #929, PR #940's four-bucket sentence was on `implement-898`, and
+   PR #945's `[high]` "tier tagger is unreachable from the active lane"
+   was the parked skill every ticket in that map lands into. Write both
+   lines with your file-write tool, into the same file, never interpolated
+   into a shell string — a branch name or a ticket title reaching the shell
+   is the same injection the ticket render above is already protected from:
+
+   ```
+   ## Controller context — written by the controller, not part of the ticket
+
+   **Open sibling branches.** <each open sibling branch, the files it
+   holds, and what of this PR's ask is split onto it: which file, which
+   line, which PR> — or: No sibling branch is open, and nothing in this PR
+   is split.
+
+   **Posture.** <the code under review is parked, feature-flagged off, or
+   otherwise landing ahead of its own activation, and the ticket that
+   activates it> — or: The code under review is live in the tree; its
+   posture is what the tree implies.
+   ```
+
+   Both lines are written even when there is nothing to report. An omitted
+   line and a "nothing is split" line read identically to Codex, and the
+   controller is the only party that can tell them apart — the absent
+   answer read as the benign one is the fail-open shape this lane closed
+   seven times on 2026-09-20. Both facts are the controller's at dispatch
+   time: it is the controller that orders a cross-ticket line, and the
+   controller that knows what a map is staging behind a parked skill.
+   Without the posture line, every PR of a staged rebuild pays one `[high]`
+   whose remedy is "do the closing ticket early" (#891, #898).
+
+   Then invoke the plugin's own script directly.
    `/codex:adversarial-review` carries
    `disable-model-invocation: true`, so the SlashCommand tool never reaches
    it here: calling the script directly bypasses the slash command's own
@@ -424,7 +464,14 @@ The controller merges on a repo Chris owns; Chris reads it after via
    No material findings → go to step 4. Findings → hold the merge: send the
    worker the findings and the comment URL. Note the head sha this pass ran
    against — step 2's `headRefOid` — and beside it `sha256sum "$body_file"`,
-   taken before the `rm` above removes that file. Those two are what the
+   taken before the `rm` above removes that file. That sum covers the
+   appendix as well as the rendered ticket, both being in the one file, so
+   a fresh render for that comparison is ticket and appendix — rebuilding
+   the ticket alone reads as a change that never happened and burns the
+   second pass on it. An appendix that genuinely moved — a sibling branch
+   merged since, a posture that changed — is a real input change and reruns
+   the pass, because the context Codex judged against is no longer the
+   context that holds. Those two are what the
    second pass is judged against below: the diff is only half this pass's
    input, and a requirement commented onto the ticket between the two
    passes moves the other half while the sha sits still.
