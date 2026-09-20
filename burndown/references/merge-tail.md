@@ -47,8 +47,17 @@ rebased branch:
 ```
 git checkout --ours -- <generated paths>
 <the repo's declared Generator command>
-git add -A && git rebase --continue
+git add -- <generated paths> <the paths you resolved by hand>
+git diff --cached        # read it: this is what the rebase is about to commit
+git rebase --continue
 ```
+
+**Never `git add -A` here.** It stages every tracked modification and every
+untracked file the workspace happens to hold — a diagnostic script, a local
+config, a credential — and this recipe ends in a force-push, so whatever it
+swept up is published as part of a collision recovery. Stage the paths you
+named and read `git diff --cached` before continuing: a recipe written down
+is run verbatim under pressure, which is when nobody checks.
 
 The Generator command is the one declared in the repo's `AGENTS.md` § Include
 closure, never one remembered from another repo.

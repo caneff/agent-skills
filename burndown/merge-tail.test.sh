@@ -94,7 +94,13 @@ check_in "$generated" 'checkout --ours' 'references/merge-tail.md § Generated a
 # doc that says "take main's side" without that is read backwards.
 check_in "$generated" '--theirs' 'references/merge-tail.md § Generated artifacts'
 check_in "$generated" 'inverted' 'references/merge-tail.md § Generated artifacts'
-check_in "$generated" 'Generator' 'references/merge-tail.md § Generated artifacts' 
+check_in "$generated" 'Generator' 'references/merge-tail.md § Generated artifacts'
+# Rule 2b (Codex pass on PR #930): the recipe stages the paths it named and
+# reads the staged diff, because it ends in a force-push. `git add -A` here
+# publishes whatever untracked file the workspace happened to hold.
+check_in "$generated" 'git add --' 'references/merge-tail.md § Generated artifacts'
+check_in "$generated" 'git diff --cached' 'references/merge-tail.md § Generated artifacts'
+check_in "$generated" 'Never `git add -A` here' 'references/merge-tail.md § Generated artifacts' 
 
 # Rule 3: a collision that escaped the closure is a defect in the repo's
 # declared include grammar, and it is filed against the repo — otherwise the
