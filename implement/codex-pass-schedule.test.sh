@@ -61,7 +61,7 @@ check_in "$review_section" 'sending it late costs the overlap it exists to buy' 
 # Rule 2: the controller launches on that wake, not at "PR up", in a
 # backgrounded shell — because the script's own `--background` is parsed
 # and never read, so no job id exists to collect through status/result.
-check_in "$merge_section" 'Launch at round 1, collect here' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'Launch at round 1' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'not when it reports "PR up"' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'backgrounding is the shell' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'there is no job id, and `status`/`result` have nothing to collect' 'implement/SKILL.md § The merge'
@@ -72,7 +72,7 @@ check_in "$merge_section" 'each in-flight pass is a node process against the box
 # pass's output with it — into the #855 review-cache directory.
 check_in "$merge_section" '`~/.cache/agent-reviews/<repo>/`, never this workspace' 'implement/SKILL.md § The merge'
 check_in "$merge_section" "the worker's own § Before the PR step 3 deletes it" 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'codex-adversarial-<n>.json' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'record="$dir/codex-adversarial-<n>-$phase.json"' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'the workspace HEAD at launch and again at completion' 'implement/SKILL.md § The merge'
 # The gate can only refuse an errored run if the block that writes the
 # record captures the node call's exit status — pin the field, not just the
@@ -91,31 +91,51 @@ check_in "$merge_section" 'stale (they agree with each other but not with `headR
 # the same absent-answer-read-as-benign shape, one layer down — so the exit
 # status is in the record and the skip clause is bounded to the preflight.
 check_in "$merge_section" 'whose `status` is 0' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'The skip clause above governs the preflight only' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'The skip clause at the top of this step governs the preflight only' 'implement/SKILL.md § The merge'
 # A collected verdict lives in the review cache, not `.scratch/`: running the
 # `.scratch/` cleanup on it would delete the only copy and rmdir the
 # directory the Claude axes' reports live in.
 check_in "$merge_section" 'Post it from the cache directory' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'the `.scratch/` cleanup below belongs to a pass run here' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'nothing here is cleaned up by hand, `rm` or `rmdir`, in any phase' 'implement/SKILL.md § The merge'
 # The overlap is only banked when round 1 produces no fix commit.
 check_in "$merge_section" 'The overlap is banked only on a round 1 whose findings produce no fix' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'is a refusal, not a pass' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'discard that verdict, do not post it to the PR' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'run the pass here, against the current head, as the first pass' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'a verdict nobody could collect looks exactly like a pass that found nothing' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'do not post that verdict, append its duration row with the refusal as the outcome' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'rerun the block here in the foreground with `phase=gate-retry`' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'either one collected looks exactly like a pass that found nothing' 'implement/SKILL.md § The merge'
 
 # Rule 5: a collected verdict changes nothing downstream — the two-pass
 # ceiling, the dispositions and the trial row are #888's and #812's still.
 check_in "$merge_section" 'A collected verdict is this step' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'unchanged by where it was launched' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'unchanged by where the collected pass was launched' 'implement/SKILL.md § The merge'
+
+# Rule 5b (round 2 of the Codex pass on PR #950): the retry is the path that
+# exists because the early run degraded, so it is the last place that may
+# carry weaker guarantees. One block runs every phase, and the retry answers
+# to the same five refusals; a retry that is itself refused ends the step as
+# a visible skip with no trial row, never as a silent pass.
+check_in "$merge_section" 'One recorded run, wherever it launches' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'The pass runs through this block and no other' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'A second block with weaker guarantees is how a degraded run gets collected as a clean one' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'The retry is validated by the same gate' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'a rerun that errors is not a pass either' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'ends this step as `Codex pass skipped: <why>`' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'go to step 4 with no trial row' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'every started run answers to this gate' 'implement/SKILL.md § The merge'
+# The phase in each filename is what keeps the retry from overwriting the
+# record that justified it — both rows have to survive to be counted.
+check_in "$merge_section" 'keeps a retry from overwriting the record it was run because of' 'implement/SKILL.md § The merge'
 
 # Rule 6: every run is timed, discarded ones included, into a file that
 # exists and carries the columns the row is written against.
 check_in "$merge_section" 'docs/research/2026-09-20-codex-pass-durations.md' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'collected, or why it was discarded' 'implement/SKILL.md § The merge'
+check_in "$merge_section" '`collected`, `collected-after-retry` for a `gate-retry` that was collected, or the refusal that discarded it' 'implement/SKILL.md § The merge'
+# A retry counted as a plain `collected` erases the only number this change
+# produces: how often the early launch actually pays.
+check_in "$merge_section" 'A retry reported as a plain `collected` loses the one number' 'implement/SKILL.md § The merge'
 [ -f "$durations" ] || { echo "FAIL: missing docs/research/2026-09-20-codex-pass-durations.md" >&2; fail=1; }
 if [ -f "$durations" ]; then
-  for col in ticket PR pass launched completed 'duration (min)' outcome; do
+  for col in ticket PR phase launched completed 'duration (min)' outcome; do
     grep -qF -- "| $col |" "$durations" ||
       { echo "FAIL: durations file has no '$col' column" >&2; fail=1; }
   done

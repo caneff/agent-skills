@@ -15,15 +15,24 @@ five are not reconstructed here; a bound taken from an mtime is not a
 measurement, and writing it into a table would launder it into one. The
 table starts at the first pass run under #942's shape.
 
-`pass` is `first` or `second` (#888's conditional re-run). `outcome` is
-`collected`, or the reason the gate refused the verdict — `errored`,
-`raced`, `stale`, `unreadable`, or `absent` when no record was written at
-all — in which case the row still counts, because a refused run spent the
-same wall clock and the same tokens. An `absent` row is the one the
-controller writes from what it knows, the record being the thing that is
-missing.
+`phase` is where the run launched: `early` (at the worker's "Round 1 out"),
+`gate-retry` (at the merge gate, because the early record was refused) or
+`second` (#888's conditional re-run). `outcome` is `collected`,
+`collected-after-retry` for a `gate-retry` that was collected, or the reason
+the gate refused the verdict — `errored`, `raced`, `stale`, `unreadable`, or
+`absent` when no record was written at all. A refused run still gets its
+row: it spent the same wall clock and the same tokens. An `absent` row is
+the one the controller writes from what it knows, the record being the thing
+that is missing.
+
+The pair of columns is the measurement #942 exists for. `early` rows that
+read `collected` are the passes where the overlap paid; an `early` row
+refused `raced` or `stale` followed by a `gate-retry` row is a pass that
+cost its wall clock twice. Counting the two tells you whether launching
+early is worth it, which is why a `gate-retry` never reports as a plain
+`collected`.
 
 ## Table
 
-| ticket | PR | pass | launched | completed | duration (min) | outcome |
+| ticket | PR | phase | launched | completed | duration (min) | outcome |
 |---|---|---|---|---|---|---|

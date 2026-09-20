@@ -209,9 +209,10 @@ time, not from the worker: § The merge.
    keep is left in `.scratch/`, run `PRE_REPORT_KEEP_SCRATCH="<why>" bash
    ~/.agents/skills/implement/pre-report-gate.sh <sha>` for step 4 instead of
    the bare form, and name it, with the same `<why>`, in the PR-up report.
-   (§ The merge step 3 later writes its own files into this same `.scratch/`
-   at merge time, after "PR up" — that's the controller's use, not yours,
-   and doesn't change what you clear here.)
+   (§ The merge step 3's Codex pass writes nothing into this `.scratch/`:
+   its files live in `~/.cache/agent-reviews/<repo>/`, outside the
+   workspace, precisely so clearing this directory — or the pass launching
+   while you are still working — cannot destroy the other's files.)
 4. **`bash ~/.agents/skills/implement/pre-report-gate.sh <sha>`** passes on
    the sha you report — a "done" report has described work that was dirty in
    the tree, not on the branch, or left content behind in `.scratch/` with
@@ -424,47 +425,64 @@ The controller merges on a repo Chris owns; Chris reads it after via
    Without the posture line, every PR of a staged rebuild pays one `[high]`
    whose remedy is "do the closing ticket early" (#891, #898).
 
-   **Launch at round 1, collect here** (#942). The pass launches when the
-   worker reports "Round 1 out", not when it reports "PR up": the diff is
-   on the branch by then, and the run overlaps the worker's own
-   verification pass instead of being bolted serially onto this gate,
-   behind three opus axes that have already read the same diff. The
-   overlap is banked only on a round 1 whose findings produce no fix
-   commit — a fix pushed while the pass runs moves the head, and the gate
-   below discards that verdict and runs the pass here after all. Build
-   `body_file` as above, ticket and appendix both, then launch from the
-   worker's workspace, the whole block in one backgrounded shell:
+   **One recorded run, wherever it launches** (#942). The pass runs
+   through this block and no other, early or at this gate; `phase` is the
+   only thing that changes. A second block with weaker guarantees is how a
+   degraded run gets collected as a clean one — the path that exists to
+   handle a failure being the path with no checks. Invoke the plugin's own
+   script directly: `/codex:adversarial-review` carries
+   `disable-model-invocation: true`, so the SlashCommand tool never reaches
+   it here, and calling the script directly bypasses the slash command's
+   own markdown entirely — the `AskUserQuestion` gate lives there, not in
+   the script; `handleReviewCommand` parses `--wait`/`--background` as
+   booleans and never reads them, always running foreground. Keep `--wait`
+   anyway to say what's intended; it's a harmless no-op on this path. `git
+   fetch origin` first — a stale `origin/<default>` inflates the diff Codex
+   reads:
 
    ```
    dir="$HOME/.cache/agent-reviews/<repo>"   # expanded as
    mkdir -p "$dir"                           # multi-axis-code-review/SKILL.md does it
-   body_file=<absolute path you wrote the ticket and appendix to>
-   out_file="$dir/codex-adversarial-<n>.out"
-   record="$dir/codex-adversarial-<n>.json"
+   phase=early                               # or gate-retry, or second
+   body_file=<absolute path you wrote the ticket body, comments and appendix to>
+   out_file="$dir/codex-adversarial-<n>-$phase.out"
+   record="$dir/codex-adversarial-<n>-$phase.json"
    plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
-   cd <the worker's workspace> && git fetch origin
+   cd <the PR's workspace> && git fetch origin
    launch_sha=$(git rev-parse HEAD); started=$(date -Is)
    node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1
    status=$?
-   printf '{"ticket": <n>, "status": %d, "launch_sha": "%s", "completion_sha": "%s", "body_sha256": "%s", "started": "%s", "completed": "%s"}\n' \
-     "$status" "$launch_sha" "$(git rev-parse HEAD)" "$(sha256sum "$body_file" | cut -d" " -f1)" "$started" "$(date -Is)" >"$record"
+   printf '{"ticket": <n>, "phase": "%s", "status": %d, "launch_sha": "%s", "completion_sha": "%s", "body_sha256": "%s", "started": "%s", "completed": "%s"}\n' \
+     "$phase" "$status" "$launch_sha" "$(git rev-parse HEAD)" "$(sha256sum "$body_file" | cut -d" " -f1)" "$started" "$(date -Is)" >"$record"
    ```
 
-   `--background` is parsed by `codex-companion.mjs` and never read on this
-   path — `handleReviewCommand` always runs foreground — so there is no job
-   id, and `status`/`result` have nothing to collect; backgrounding is the
-   shell's job, one shell per pass, one pass in flight per PR, and each
-   in-flight pass is a node process against the box cap. Both files go in
+   The record carries the node call's exit status, the workspace HEAD at
+   launch and again at completion, the `sha256sum` of `body_file`, and both
+   timestamps. The launch sha alone cannot tell a clean read from one the
+   worker committed underneath, and a run that failed and returned writes
+   an output file that looks like any other. Both files go in
    `~/.cache/agent-reviews/<repo>/`, never this workspace's `.scratch/`:
    the worker's own § Before the PR step 3 deletes it, which would take an
    in-flight pass's output with it and fail the pre-report gate on a file
-   the worker never wrote. That directory's 14-day prune covers them, so
-   nothing here needs cleaning by hand. The record carries the node call's
-   exit status, the workspace HEAD at launch and again at completion, the
-   `sha256sum` of `body_file`, and both timestamps — the launch sha alone
-   cannot tell a clean read from one the worker committed underneath, and a
-   run that failed and returned writes an output file that looks like any
-   other.
+   the worker never wrote — and a `.scratch/` file left behind stalls
+   `merge-cleanup`, which refuses ignored content without `--discard`.
+   That cache directory's 14-day prune covers both files, so nothing here
+   is cleaned up by hand, `rm` or `rmdir`, in any phase. The `phase` in
+   each name keeps a retry from overwriting the record it was run because
+   of.
+
+   **Launch at round 1** with `phase=early`, when the worker reports "Round
+   1 out", not when it reports "PR up": the diff is on the branch by then,
+   and the run overlaps the worker's own verification pass instead of being
+   bolted serially onto this gate, behind three opus axes that have already
+   read the same diff. The overlap is banked only on a round 1 whose
+   findings produce no fix commit — a fix pushed while the pass runs moves
+   the head, and the gate below refuses that verdict and reruns here after
+   all. Run the whole block in one backgrounded shell. `--background` is
+   parsed by `codex-companion.mjs` and never read on this path, so there is
+   no job id, and `status`/`result` have nothing to collect; backgrounding
+   is the shell's job, one shell per pass, one pass in flight per PR, and
+   each in-flight pass is a node process against the box cap.
 
    **The gate is fail-closed.** Nothing merges until this step holds a
    verdict whose `status` is 0 and whose launch sha, completion sha and the
@@ -474,81 +492,44 @@ The controller merges on a repo Chris owns; Chris reads it after via
    module; the `out_file` then holds that error, not a review), raced (the
    two shas differ, so the branch moved while Codex was reading) or stale
    (they agree with each other but not with `headRefOid`, so a fix landed
-   after the launch) is a refusal, not a pass: discard that verdict, do not
-   post it to the PR, and run the pass here, against the current head, as
-   the first pass. A discarded verdict's findings are never reported as
-   current — they describe a diff this PR no longer has, and a verdict
-   nobody could collect looks exactly like a pass that found nothing, which
-   is the shape this lane closed seven times on 2026-09-20.
+   after the launch) is a refusal, not a pass: do not post that verdict,
+   append its duration row with the refusal as the outcome, and rerun the
+   block here in the foreground with `phase=gate-retry`, against the
+   current head. A refused verdict's findings are never reported as
+   current — they describe a diff this PR no longer has, or a run that
+   never produced a review, and either one collected looks exactly like a
+   pass that found nothing, which is the shape this lane closed seven times
+   on 2026-09-20.
 
-   The skip clause above governs the preflight only — not logged in, no
-   plugin entry — which is checked before any run exists. Once a run has
-   started, its verdict is this gate's: an errored run is a refusal that
-   reruns here, and only a preflight still failing at that rerun becomes
-   `Codex pass skipped: <why>`.
+   **The retry is validated by the same gate**, against the same five
+   refusals: a rerun that errors is not a pass either, and the block that
+   produced it wrote the record that says so. A `gate-retry` record that is
+   itself a refusal ends this step as `Codex pass skipped: <why>` — comment
+   it on the PR, naming the refusal and both phases' rows, and go to step
+   4 with no trial row, the same as a failed preflight. Nothing is claimed
+   about a diff nobody reviewed, and the skip is visible on the PR rather
+   than inferred from a silence. The skip clause at the top of this step
+   governs the preflight only — not logged in, no plugin entry — checked
+   before any run exists; every started run answers to this gate.
 
    A collected verdict is this step's first pass. Post it from the cache
-   directory —
-   `gh pr comment <pr> --repo <owner/name> --body-file "$dir/codex-adversarial-<n>.out"`
-   — and leave both cache files to that directory's 14-day prune: the
-   `.scratch/` cleanup below belongs to a pass run here, whose files are in
-   `.scratch/`, and running it on a collected verdict would delete the only
-   copy of the verdict and `rmdir` the directory the Claude axes' own
-   reports live in. Everything after that — the dispositions, #888's
-   conditional second pass, the no-third-run ceiling, the trial row — is
-   unchanged by where it was launched.
+   directory:
+   `gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`, before
+   acting on it. If `gh pr comment` fails, stop before merging — the
+   comment is what makes the verdict readable by anyone but you. Everything
+   after that — the dispositions, #888's conditional second pass (which
+   runs the same block with `phase=second`), the no-third-run ceiling, the
+   trial row — is unchanged by where the collected pass was launched.
 
-   **Every run records its duration**, collected or discarded, as one row
+   **Every run records its duration**, collected or refused, as one row
    appended to `docs/research/2026-09-20-codex-pass-durations.md`: ticket,
-   PR, pass, launched, completed, duration in minutes, and outcome —
-   collected, or why it was discarded. That file carries its own columns
-   and the reason it exists. The row is an auto-ship commit on `<default>`,
-   the trial row's own rule, and is written at the same time.
-
-   Then invoke the plugin's own script directly.
-   `/codex:adversarial-review` carries
-   `disable-model-invocation: true`, so the SlashCommand tool never reaches
-   it here: calling the script directly bypasses the slash command's own
-   markdown entirely — the `AskUserQuestion` gate lives there, not in the
-   script; `handleReviewCommand` parses `--wait`/`--background` as booleans
-   and never reads them, always running foreground. Keep `--wait` anyway to
-   say what's intended; it's a harmless no-op on this path. `git fetch
-   origin` first — a stale `origin/<default>` inflates the diff Codex reads:
-
-   ```
-   git fetch origin
-   body_file=<absolute path you wrote the ticket body and comments to>
-   out_file=<this workspace's absolute path>/.scratch/codex-adversarial-<pr>.out
-   mkdir -p "$(dirname "$out_file")"
-   plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
-   node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1
-   ```
-
-   `out_file` is the pass's only durable record — the command's own output
-   goes to stdout otherwise, and nothing captures it. It must resolve under
-   this workspace's git-ignored `.scratch/`, never `/tmp`. Post it as a PR
-   comment before acting on it, using that same file:
-   `gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`. The
-   `mkdir -p` above is required because the worker's own Before the PR step
-   already deleted this directory.
-
-   Once that comment posts, `rm "$out_file" "$body_file"`, then `rmdir
-   "$(dirname "$out_file")"` — bound to the file's own directory, not a
-   bare `.scratch` relative to wherever the controller's shell happens to
-   be sitting (usually the primary checkout, not this PR's workspace) —
-   the comment is now the durable record and the ticket body lives on the
-   issue, so nothing needs them left in the workspace: `merge-cleanup`
-   refuses to delete ignored `.scratch/` content without `--discard`, and
-   stray files (or an empty directory this step's own `mkdir -p` created)
-   there stall it on every Codex pass. `rmdir` only removes an empty
-   directory, so it undoes that `mkdir -p` with no risk to anything else
-   that might be in `.scratch/`. Remove only those two named files and, if
-   now empty, the directory — never `rm -rf .scratch`, never `--discard`.
-   If `rmdir` fails, the directory wasn't empty: report that and name it,
-   rather than hide the failure — don't silence it with `|| true`, so
-   whatever else is in there surfaces before `merge-cleanup` would refuse
-   on it anyway. If `gh pr comment` fails, leave both files in place and
-   stop before merging.
+   PR, phase (`early`, `gate-retry` or `second`), launched, completed,
+   duration in minutes, and outcome — `collected`, `collected-after-retry`
+   for a `gate-retry` that was collected, or the refusal that discarded it.
+   A retry reported as a plain `collected` loses the one number this change
+   exists to produce: how often the early launch actually pays. The row is
+   an auto-ship commit on `<default>`, the trial row's own rule, and is
+   written at the same time.
 
    No material findings → go to step 4. Findings → hold the merge: send the
    worker the findings and the comment URL. Note the head sha this pass ran
