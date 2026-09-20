@@ -447,6 +447,53 @@ def test_a_resolved_clump_carries_both_its_files_and_its_closure():
     assert "examples/thermo/component.js" in clump["closure"], clump
 
 
+# --- The scan fails closed (Codex pass on PR #920: F1, F2) ---------------
+
+def test_a_directive_past_the_old_megabyte_cutoff_is_still_an_edge():
+    # `read_text` used to stop at 1 MB and report the closure as complete.
+    # This repo tracks a 3.5 MB minified bundle, and a minified bundle is one
+    # enormous line, so where a truncation lands has nothing to do with the
+    # content. A missed edge is two workers in the same files.
+    filler = "// pad\n" * 200_000  # ~1.4 MB, past the old cutoff
+    root = repo({"_shared/line-kind.js": "x\n",
+                 "bundle.js": filler + "#include _shared/line-kind.js\n"})
+    got = C.resolve_closure(root, ["_shared/line-kind.js"])
+    assert "bundle.js" in got, sorted(got)
+
+
+def test_a_file_past_the_scan_limit_fails_the_resolve():
+    # The limit is a memory ceiling, not a truncation point: past it the
+    # closure is unresolved and says so.
+    root = repo({"_shared/line-kind.js": "x\n", "huge.js": "y" * 5000})
+    decl = C.declaration(root)
+    refused = None
+    try:
+        got = C.include_edges(root, decl, limit=1000)
+    except C.ClosureError as exc:
+        refused, got = str(exc), None
+    assert refused is not None, got
+    assert "scan limit" in refused and "huge.js" in refused, refused
+
+
+def test_a_file_that_cannot_be_opened_is_not_a_file_with_no_includes():
+    # `None` from read_text means "not text, so no edges here". A file that
+    # could not be opened is "I cannot tell" — the same posture the module
+    # already takes for a directory it cannot list.
+    root = repo(SHARED)
+    hidden = os.path.join(root, "examples/skyscraper/component.js")
+    os.chmod(hidden, 0o000)
+    try:
+        refused = None
+        try:
+            got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
+        except C.ClosureError as exc:
+            refused, got = str(exc), None
+        assert refused is not None, f"an unreadable includer was read as having none: {got}"
+        assert "cannot read" in refused, refused
+    finally:
+        os.chmod(hidden, 0o644)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

@@ -89,11 +89,19 @@ block is quotation by definition, so a doc that *shows* the repo's include
 line — this one does — registers no edge. Everywhere else every line counts:
 a ``` line in source code means nothing in particular, and reading it as a
 fence would hide the real directives after it, which is the under-clumping
-direction. A file that does not read as text, and the directories in
-`SKIP_DIRS` (`.git`, `node_modules`, `__pycache__`, `.claude`), hold no
-directives. A directory that cannot be read **fails the resolve** rather than
-dropping out of it: a dropped directory is a dropped includer, and a closure
-short of one file clumps two workers apart that belong together.
+direction. A file that does not read as text, and the directories in `SKIP_DIRS`
+(`.git`, `node_modules`, `__pycache__`, `.claude`), hold no directives.
+
+Everything else about the scan **fails closed**, because the direction it
+would fail in is under-clumping — a missing edge, and two workers in the same
+files. Every file is read whole, with no truncation: a repo's minified bundle
+is a single enormous line megabytes long, so any cutoff lands somewhere
+arbitrary with respect to content, and a directive past it would read as
+absent. A file past the 32 MB memory ceiling, a file that cannot be opened,
+and a directory that cannot be listed each **fail the resolve** and name
+themselves, rather than dropping quietly out of it. A closure resolved from a
+scan that partly failed is a precise-looking answer with a hole in it, and
+the hole is where two workers meet.
 
 A candidate's files get one spelling, whatever the ticket wrote: `./a/x.js`,
 `a//x.js` and an absolute path inside the repo are all `a/x.js`. Two

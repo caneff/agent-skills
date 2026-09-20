@@ -47,7 +47,12 @@ _NONE = re.compile(r"^[-*\s]*none[ \t]*([.,;:\u2014\u2013-]|$)", re.IGNORECASE)
 PATH_SLOT = "<path>"
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".claude"}
 MARKDOWN = {"md", "markdown"}
-MAX_BYTES = 1_000_000
+# A whole file is scanned, however long. This is only the ceiling on what one
+# file may cost in memory before the resolver refuses to answer at all: past
+# it the closure is unresolved and says so, never a partial scan reported as a
+# complete one. 32 MB clears every text file a repo plausibly tracks — this
+# repo's largest, a 3.5 MB minified bundle, is scanned whole.
+SCAN_LIMIT = 32_000_000
 
 
 class ClosureError(Exception):
@@ -170,15 +175,28 @@ def repo_files(root):
     return out
 
 
-def read_text(path):
-    """A file's text, or `None` when it is not text or cannot be read. Only
-    the first `MAX_BYTES` are read: an include directive that sits past a
-    megabyte of generated output is not the case this is protecting."""
+def read_text(path, limit=SCAN_LIMIT):
+    """A file's whole text, or `None` when it holds no text to read.
+
+    `None` means one thing only — this file is not text, so it declares no
+    includes. A file that could not be *opened* is not that: it is "I cannot
+    tell", and it raises. The module refuses to guess about a directory it
+    cannot list (`repo_files`), and guessing about a file it cannot open would
+    be the same answer with the opposite posture.
+
+    Nothing is truncated. A directive past a cutoff read as absent is a
+    missing edge, and a missing edge is two workers in the same files — the
+    cost #781 paid. A file past `limit` therefore fails the resolve rather
+    than being read in part and reported whole."""
     try:
         with open(path, "rb") as fh:
-            raw = fh.read(MAX_BYTES)
-    except OSError:
-        return None
+            raw = fh.read(limit + 1)
+    except OSError as exc:
+        raise ClosureError(f"cannot read {path}: {exc}") from exc
+    if len(raw) > limit:
+        raise ClosureError(
+            f"{path} is larger than the {limit}-byte scan limit; "
+            "a partial scan would report a closure it did not resolve")
     if b"\0" in raw:
         return None
     return raw.decode("utf-8", errors="ignore")
@@ -199,14 +217,18 @@ def scanned_lines(rel, text):
     return lines
 
 
-def include_edges(root, decl):
+def include_edges(root, decl, limit=SCAN_LIMIT):
     """`{included path: {files that include it}}` over the whole repo — one
     scan, whatever the queue's size. Resolving this per candidate is the
-    expense the declaration exists to avoid."""
+    expense the declaration exists to avoid.
+
+    Every failure here is fatal by design: a closure resolved from a scan that
+    partly failed is a precise-looking answer with a hole in it, and the hole
+    is where two workers meet."""
     pattern = directive_pattern(decl.directive)
     edges = {}
     for rel in repo_files(root):
-        text = read_text(os.path.join(root, rel))
+        text = read_text(os.path.join(root, rel), limit)
         if text is None:
             continue
         for line in scanned_lines(rel, text):
