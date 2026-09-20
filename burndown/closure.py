@@ -373,9 +373,10 @@ def render(clumping):
     for clump in clumping["clumps"]:
         tickets = ", ".join(f"#{n}" for n in clump["tickets"])
         paths = clump.get("closure")
-        what = "closure" if paths is not None else "files named, no closure resolved"
+        what = "in the closure" if paths is not None else "named, no closure resolved"
         paths = clump["files"] if paths is None else paths
-        lines.append(f"clump {tickets}  ({len(paths)} {what})")
+        noun = "file" if len(paths) == 1 else "files"
+        lines.append(f"clump {tickets}  ({len(paths)} {noun} {what})")
         lines.extend(f"    {path}" for path in paths)
     return "\n".join(lines)
 

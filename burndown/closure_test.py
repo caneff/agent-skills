@@ -261,6 +261,19 @@ def test_the_command_line_prints_the_mode_and_the_clumps():
     assert "clump #501" in out.stdout, out.stdout
 
 
+def test_the_command_line_says_when_no_closure_was_resolved():
+    # The conservative mode's own output shape: what it prints are the files
+    # the tickets named, and the line says so rather than calling them a
+    # closure.
+    root = repo({"a/one.js": "x\n", "b/two.js": "x\n"}, agents=None)
+    out = subprocess.run([sys.executable, CLOSURE, root, "1=a/one.js", "2=b/two.js"],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out
+    assert "conservative, by directory subtree" in out.stdout, out.stdout
+    assert "named, no closure resolved" in out.stdout, out.stdout
+    assert "in the closure" not in out.stdout, out.stdout
+
+
 def test_a_malformed_candidate_is_one_stderr_line_not_a_traceback():
     root = repo(SHARED)
     out = subprocess.run([sys.executable, CLOSURE, root, "not-a-candidate"],
