@@ -12,19 +12,11 @@ one entry per clump — its ticket list, its workspace, its worker's **herdr
 agent name**, and its squash sha once it lands. `resume` reads it back and
 splits the clumps against the agents that are alive: the live workers to
 re-announce the controller to, the vanished ones to reconcile by hand, and the
-landings already banked.
+landings already banked. Only the controller writes.
 
-One file per run, not one per repo: on #781 a per-repo append-only log already
-held five earlier burns before that run wrote its first line, so "is this run
-finished" was a question answered by eye. And `~/.cache`, not `/tmp` or a
-session scratchpad, because a WSL restart wipes those and a restart is the
-event this file exists for — the same restart renamed every Claude session
-(controller `spectest-1a` to `spectest-f3`), which is why a worker is
-addressed here by its herdr agent name and never by a session name.
-
-Only the controller writes. Every write replaces the file in one step, so a
-reader after a crash sees the old state or the new one, never a torn one. The
-contract and the resume procedure: `references/run-file.md`.
+Why one file per run, why `~/.cache`, why the herdr agent name and why each
+write replaces the file in one step: `references/run-file.md`, which is where
+those reasons live rather than being restated here.
 """
 import json
 import os
@@ -46,10 +38,12 @@ _RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 # question.
 _SHA = re.compile(r"[0-9a-f]{7,40}\Z")
 
-# What a run file must carry to be read as one at all. The file outlives the
-# code that wrote it, so a shape this module does not recognise says so here
-# rather than raising a KeyError three calls later.
+# What a run file must carry to be read as one at all, top level and per
+# clump. The file outlives the code that wrote it, so a shape this module does
+# not recognise says so here rather than raising a KeyError three calls later,
+# inside the first read a resumed controller does.
 _KEYS = ("run_id", "slots", "controller", "clumps")
+_CLUMP_KEYS = ("tickets", "workspace", "agent", "landed")
 
 
 class RunFileError(Exception):
@@ -57,19 +51,18 @@ class RunFileError(Exception):
     never a traceback: a resumed controller needs the reason, not a stack."""
 
 
-def checked(run_id):
+def checked_run_id(run_id):
     if not isinstance(run_id, str) or not _RUN_ID.match(run_id) or ".." in run_id:
         raise RunFileError(f"not a run id: {run_id!r}")
     return run_id
 
 
 def cache_root(root=None):
-    return root or os.path.expanduser(
-        os.environ.get("BURNDOWN_CACHE_DIR") or CACHE_DIR)
+    return root or os.path.expanduser(CACHE_DIR)
 
 
 def path(run_id, root=None):
-    return os.path.join(cache_root(root), f"{checked(run_id)}.json")
+    return os.path.join(cache_root(root), f"{checked_run_id(run_id)}.json")
 
 
 def save(run, root=None):
@@ -80,9 +73,9 @@ def save(run, root=None):
     old file or the new one, never a torn one."""
     target = path(run["run_id"], root)
     directory = os.path.dirname(target)
-    os.makedirs(directory, exist_ok=True)
     tmp = f"{target}.tmp.{os.getpid()}"
     try:
+        os.makedirs(directory, exist_ok=True)
         with open(tmp, "w") as fh:
             json.dump(run, fh, indent=2, sort_keys=True)
             fh.write("\n")
@@ -94,11 +87,23 @@ def save(run, root=None):
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
-    fd = os.open(directory, os.O_RDONLY)  # the rename itself, made durable
+    fsync_dir(directory)
+
+
+def fsync_dir(directory):
+    """Make the rename itself durable, best effort. The file is already
+    written and moved by the time this runs, so nothing here may raise: a
+    directory that cannot be opened or synced (mode 0300, a filesystem that
+    refuses it) must not report a write that landed as a write that failed —
+    the caller would retry and meet "already has a file"."""
+    try:
+        fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
     try:
         os.fsync(fd)
     except OSError:
-        pass  # not every filesystem allows fsync on a directory
+        pass
     finally:
         os.close(fd)
 
@@ -117,6 +122,20 @@ def load(run_id, root=None):
     missing = [key for key in _KEYS if key not in run]
     if missing:
         raise RunFileError(f"{target} is missing {', '.join(missing)}")
+    if not isinstance(run["clumps"], list):
+        raise RunFileError(
+            f"{target} holds clumps as {type(run['clumps']).__name__}, "
+            "not a list")
+    for entry in run["clumps"]:
+        if not isinstance(entry, dict):
+            raise RunFileError(
+                f"{target} holds a clump as {type(entry).__name__}")
+        absent = [key for key in _CLUMP_KEYS if key not in entry]
+        if absent:
+            raise RunFileError(
+                f"{target} has a clump missing {', '.join(absent)}")
+        if not isinstance(entry["tickets"], list) or not entry["tickets"]:
+            raise RunFileError(f"{target} has a clump with no tickets")
     return run
 
 
@@ -176,6 +195,13 @@ def clump(run_id, tickets, workspace, agent, root=None):
             raise RunFileError(
                 f"ticket(s) {', '.join(f'#{n}' for n in shared)} are already "
                 f"in clump #{other['tickets'][0]}")
+    if same:
+        dropped = sorted(set(same["tickets"]) - set(tickets))
+        if dropped:
+            raise RunFileError(
+                f"clump #{tickets[0]} already holds "
+                f"{', '.join(f'#{n}' for n in dropped)} — re-registering may "
+                "grow a clump, never drop a ticket out of the run")
     entry = {"tickets": tickets, "workspace": workspace, "agent": agent,
              "landed": same["landed"] if same else None}
     run["clumps"] = sorted(
@@ -269,10 +295,13 @@ def render_resume(state):
 
 
 def parse_tickets(text):
-    try:
-        return [int(part) for part in text.replace(",", " ").split()]
-    except ValueError:
-        raise RunFileError(f"not a ticket list: {text!r}") from None
+    """`901,902` or `901 902`. Digits only: `int()` reads `9_01` and `+901` as
+    901, and a run file that says #901 where the brief said `9_01` is a wrong
+    answer rather than a lenient one."""
+    parts = text.replace(",", " ").split()
+    if not parts or not all(part.isdigit() for part in parts):
+        raise RunFileError(f"not a ticket list: {text!r}")
+    return [int(part) for part in parts]
 
 
 def main(argv):
@@ -311,20 +340,23 @@ def main(argv):
     back.add_argument("--controller", help="the controller's current name")
 
     args = parser.parse_args(argv[1:])
+    # One seam per caller: in-process callers pass `root`, the CLI resolves the
+    # environment once here and passes it down (`cost.py` does the same).
+    root = os.environ.get("BURNDOWN_CACHE_DIR") or None
     try:
         if args.command == "start":
-            print(render(start(args.run_id, args.slots, args.controller)))
+            print(render(start(args.run_id, args.slots, args.controller, root)))
         elif args.command == "clump":
             print(render(clump(args.run_id, parse_tickets(args.tickets),
-                               args.workspace, args.agent)))
+                               args.workspace, args.agent, root)))
         elif args.command == "land":
-            print(render(land(args.run_id, args.clump, args.sha)))
+            print(render(land(args.run_id, args.clump, args.sha, root)))
         elif args.command == "show":
-            print(render(load(args.run_id)))
+            print(render(load(args.run_id, root)))
         elif args.command == "resume":
-            live = [name for name in args.live.replace(",", " ").split()]
-            print(render_resume(
-                resume(args.run_id, live, args.controller)))
+            live = args.live.replace(",", " ").split()
+            print(render_resume(resume(args.run_id, live, args.controller,
+                                       root)))
     except RunFileError as exc:
         print(f"runfile.py: {exc}", file=sys.stderr)
         return 1

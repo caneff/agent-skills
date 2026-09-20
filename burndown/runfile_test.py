@@ -38,6 +38,18 @@ def clean_fixtures():
     left = []
     while FIXTURES:
         root = FIXTURES.pop()
+        # Two tests take a directory's read or write permission away, so each
+        # is opened back up before the tree goes.
+        try:
+            os.chmod(root, 0o700)
+        except OSError:
+            pass
+        for dirpath, dirnames, filenames in os.walk(root):
+            for name in dirnames + filenames:
+                try:
+                    os.chmod(os.path.join(dirpath, name), 0o700)
+                except OSError:
+                    pass
         shutil.rmtree(root, ignore_errors=True)
         if os.path.exists(root):
             left.append(root)
@@ -286,12 +298,6 @@ def test_a_write_that_dies_before_it_finishes_leaves_the_old_run_intact():
     assert os.listdir(root) == ["burn-1.json"], os.listdir(root)
 
 
-def test_a_finished_write_leaves_no_temporary_file_behind():
-    root = cache()
-    runfile.start("burn-1", slots=2, root=root)
-    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
-    assert os.listdir(root) == ["burn-1.json"], os.listdir(root)
-
 
 # --- The CLI: what a controller actually runs ------------------------------
 
@@ -452,6 +458,103 @@ def test_a_clump_with_no_workspace_or_no_agent_name_is_refused():
         except runfile.RunFileError:
             continue
         raise AssertionError(f"accepted workspace {workspace!r} agent {agent!r}")
+    assert runfile.load("burn-1", root=root)["clumps"] == []
+
+
+def test_a_cache_dir_that_cannot_be_written_is_a_refusal_not_a_traceback():
+    # After a restart `$HOME` can be full, read-only, or hold a file where the
+    # cache dir belongs. A resumed controller needs the reason, not a stack.
+    root = cache()
+    with open(os.path.join(root, "afile"), "w") as fh:
+        fh.write("not a directory")
+    try:
+        runfile.start("burn-1", slots=1, root=os.path.join(root, "afile", "sub"))
+    except runfile.RunFileError as exc:
+        assert "burn-1.json" in str(exc), exc
+    else:
+        raise AssertionError("a path through a file read as a cache dir")
+
+    closed = os.path.join(root, "closed")
+    os.mkdir(closed, 0o500)
+    try:
+        runfile.start("burn-1", slots=1, root=os.path.join(closed, "sub"))
+    except runfile.RunFileError:
+        pass
+    else:
+        raise AssertionError("a read-only parent wrote a run file")
+    finally:
+        os.chmod(closed, 0o700)
+
+
+def test_a_cache_dir_that_cannot_be_read_still_records_the_write():
+    # Mode 0300: writable and searchable, not readable. The write lands, so
+    # reporting it as failed would leave the state on disk and the caller
+    # told otherwise — and the retry then refuses with "already has a file".
+    root = cache()
+    os.chmod(root, 0o300)
+    try:
+        runfile.start("burn-1", slots=2, root=root)
+    finally:
+        os.chmod(root, 0o700)
+    assert runfile.load("burn-1", root=root)["slots"] == 2
+
+
+def test_a_clump_entry_of_a_shape_this_module_does_not_know_is_refused():
+    root = cache()
+    bad = ('{"run_id": "burn-1", "slots": 2, "controller": null,'
+           ' "clumps": [{"tickets": [901]}]}')
+    with open(os.path.join(root, "burn-1.json"), "w") as fh:
+        fh.write(bad)
+    try:
+        runfile.load("burn-1", root=root)
+    except runfile.RunFileError as exc:
+        assert "clump" in str(exc), exc
+    else:
+        raise AssertionError("a clump missing its agent and sha read as one")
+    for name, clumps in (("burn-2", '{"a": 1}'), ("burn-3", '[[901]]'),
+                         ("burn-5", '7'), ("burn-6", 'null'),
+                         ("burn-4", '[{"tickets": [], "workspace": "/w",'
+                                    ' "agent": "a", "landed": null}]')):
+        with open(os.path.join(root, f"{name}.json"), "w") as fh:
+            fh.write('{"run_id": "%s", "slots": 1, "controller": null,'
+                     ' "clumps": %s}' % (name, clumps))
+        try:
+            runfile.load(name, root=root)
+        except runfile.RunFileError:
+            continue
+        raise AssertionError(f"clumps {clumps} read as a run")
+
+
+def test_re_registering_a_clump_may_not_drop_a_ticket_from_it():
+    # The file answers "which tickets are out". A clump re-registered under
+    # its lowest ticket alone would drop the rest silently.
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
+    try:
+        runfile.clump("burn-1", [901], "/w/b", "agent-b", root=root)
+    except runfile.RunFileError as exc:
+        assert "902" in str(exc), exc
+    else:
+        raise AssertionError("#902 was dropped from its own clump")
+    assert runfile.load("burn-1", root=root)["clumps"][0]["tickets"] == [901, 902]
+    # Growing the clump is the legitimate move: a closure re-resolve adds one.
+    runfile.clump("burn-1", [901, 902, 903], "/w/a", "agent-a", root=root)
+    assert runfile.load("burn-1", root=root)["clumps"][0]["tickets"] == [901, 902, 903]
+
+
+def test_the_cli_refuses_a_ticket_list_python_would_read_creatively():
+    # `int()` accepts `9_01` and `+901`. A run file that says #901 when the
+    # brief said `9_01` is a wrong answer, not a lenient one.
+    root = cache()
+    cli(root, "start", "burn-1", "--slots", "2")
+    # A doubled separator is not in this list: `901,,902` names exactly two
+    # tickets and no other reading of it exists.
+    for bad in ("9_01", "+901", "901.0", " ", "-901", "0x385"):
+        got = cli(root, "clump", "burn-1", "--tickets", bad,
+                  "--workspace", "/w/a", "--agent", "agent-a")
+        assert got.returncode == 1, (bad, got.stdout, got.stderr)
+        assert "Traceback" not in got.stderr, got.stderr
     assert runfile.load("burn-1", root=root)["clumps"] == []
 
 

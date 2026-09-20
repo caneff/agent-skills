@@ -38,9 +38,13 @@ python3 burndown/runfile.py resume <run-id> --live a,b [--controller <agent>]
   by `resume --controller <name>` on every resume.
 - **A clump** is keyed by its **lowest ticket** — the same number its branch
   and its workspace are named for. Registering the same lowest again moves the
-  workspace and the agent and keeps the landing sha; a ticket that already
-  sits in another clump is refused, because one ticket in two clumps is two
-  workers in the same files.
+  workspace and the agent and keeps the landing sha, and it may **grow** the
+  clump — a closure re-resolve that adds a ticket — but never drop one out of
+  the run: this file is what answers "which tickets are out". A ticket that
+  already sits in *another* clump is refused too, because one ticket in two
+  clumps is two workers in the same files.
+- **A ticket list** is digits: `901,902` or `901 902`. `9_01` and `+901` are
+  refused rather than read as 901.
 - **`landed`** is the clump's squash sha, or `null`. It must be a git object
   name, and once written a *different* sha is refused: the squash sha is
   final, so a second one is a stale writer rather than a correction.
@@ -101,13 +105,25 @@ landed       0123456789abcdef0123456789abcdef01234567  #905
 
 ## Writing
 
-Only the controller writes, one command at a time, so there is no lock. Each
-write goes to a temp file beside the target, is flushed to disk, and is moved
-over the target with `os.replace`: a reader — including a resume after a crash
-— sees the old file or the new one, never a half-written one that would read
-as a run with no clumps. A write that fails leaves the previous state in place
-and says so on stderr with a nonzero exit; every refusal in this module is one
-stderr line, never a traceback.
+Only the controller writes, one command at a time, so there is no lock: each
+command is a read, a change and a replace, and two of them racing would lose
+one update. That is a constraint on the lane, not a guarantee this file
+enforces — a run has one controller, and a second `start` on a live run id is
+refused.
+
+Each write goes to a temp file beside the target, is flushed to disk, and is
+moved over the target with `os.replace`: a reader — including a resume after a
+crash — sees the old file or the new one, never a half-written one that would
+read as a run with no clumps. The directory sync that follows is best effort,
+because by then the write has landed and reporting it as failed would send the
+controller back to a `start` that now refuses.
+
+A write that fails leaves the previous state in place and says so on stderr
+with a nonzero exit. Every refusal here is one stderr line, never a traceback,
+including the ones a restart brings: a `$HOME` that is full or read-only, a
+file where the cache dir belongs, and a run file whose shape — top level or
+per clump — this module does not recognise.
 
 `BURNDOWN_CACHE_DIR` moves the whole directory, which is how the tests stay
-off the real one.
+off the real one. The CLI resolves it once and passes it down; an in-process
+caller passes `root` instead.
