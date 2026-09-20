@@ -646,9 +646,13 @@ def run(argv):
             if cores["room"] == 0 and free:
                 # The declared jobs hold every free slot. Said here rather
                 # than left to the box check, whose refusal would name a
-                # process cap that is not what is holding the slot.
+                # process cap that is not what is holding the slot — and with
+                # the held-clump lines, which a controller reads to see which
+                # live workspace holds which candidate whatever stopped the
+                # dispatch.
                 print("nothing to dispatch: every free slot is held by a "
                       "declared job")
+                print(render_dispatch([], frontier(candidates, in_flight)))
                 return 0
             room, refusals = box_room(args.processes, args.committed_gb,
                                       args.add_gb, cores["room"])

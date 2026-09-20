@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import loop  # noqa: E402
@@ -941,6 +942,54 @@ def test_the_cli_says_the_declared_job_holds_the_slot_and_not_the_box():
         assert "every free slot is held by a declared job" in got.stdout, \
             got.stdout
         assert got.stderr == "", got.stderr
+
+
+SLOW_HERDR = """#!/usr/bin/env bash
+sleep 30
+"""
+
+
+def test_a_probe_that_never_answers_is_given_up_on():
+    """C3's witness: the sweep is bounded on the wall clock too, because a
+    controller waiting on a hung herdr is inside a tool call, where no worker
+    can reach it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = os.path.join(tmp, "bin")
+        os.mkdir(bindir)
+        stub = os.path.join(bindir, "herdr")
+        with open(stub, "w") as fh:
+            fh.write(SLOW_HERDR)
+        os.chmod(stub, 0o755)
+        original_path, original_timeout = os.environ["PATH"], loop.HERDR_TIMEOUT
+        os.environ["PATH"] = bindir + os.pathsep + original_path
+        loop.HERDR_TIMEOUT = 0.3
+        try:
+            started = time.monotonic()
+            state = loop.sweep(
+                [{"tickets": [1], "workspace": "/w/1", "agent": "skills-1"}],
+                loop.herdr_get)
+            waited = time.monotonic() - started
+        finally:
+            os.environ["PATH"] = original_path
+            loop.HERDR_TIMEOUT = original_timeout
+    assert state["workers"][0]["verdict"] == "unreachable", state
+    assert "did not answer" in state["workers"][0]["detail"], state
+    assert waited < 5, f"the sweep waited {waited:.1f}s on one hung probe"
+
+
+def test_a_held_clump_is_still_named_when_declared_jobs_hold_every_slot():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [500], "closure": ["verify.py"]}], fh)
+        with open(live, "w") as fh:
+            json.dump(in_flight_clumps(), fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "4", "--committed-gb", "4",
+                      "--declared", "351=8")
+        assert got.returncode == 0, got
+        assert "held      #500  by #351" in got.stdout, got.stdout
 
 
 def main():
