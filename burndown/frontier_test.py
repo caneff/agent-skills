@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Tests for the frontier reader (#890). Seam: `frontier(repo, label)` with
-its two fetchers injected — a list of GitHub issue objects in, three buckets
-(`unblocked`, `blocked`, `unresolved`) out. No network: every case is a
-ticket fixture, which is the point of the seam.
+its two fetchers injected — a list of GitHub issue objects in, four buckets
+(`unblocked`, `blocked`, `unresolved`, `spec`) out. No network: every case is
+a ticket fixture, which is the point of the seam.
 """
 import os
 import subprocess
@@ -240,6 +240,8 @@ def test_a_spec_parent_moves_out_of_unresolved_rather_than_vanishing():
     # of spec parents, because each one lands in `spec` instead. A drop that
     # left the queue smaller by one would pass a count check and still hide
     # the work, so the destination is asserted beside the count.
+    # The spec branch reads the label off the issue, so no swap is involved
+    # here and this is the shipped behaviour end to end.
     queue = [
         issue(1, labels=("ready-for-agent", "spec"),
               body="No declaration at all.\n"),
@@ -250,7 +252,6 @@ def test_a_spec_parent_moves_out_of_unresolved_rather_than_vanishing():
     assert numbers(got["unresolved"]) == [2], got
     assert numbers(got["spec"]) == [1], got
     assert numbers(got["unblocked"]) == [3], got
-    assert len(got["unresolved"]) + len(got["spec"]) + len(got["unblocked"]) == 3, got
 
 
 def test_the_rendered_report_names_the_spec_route():
@@ -303,6 +304,11 @@ def test_dropping_a_label_lowers_unresolved_by_the_tickets_it_takes():
     # #3 is claimed and #4 is blocked, so neither is ever unresolved.
     assert unresolved_count(queue, dropped=(), states=states) == 3, queue
     assert unresolved_count(queue, dropped=("needs-info",), states=states) == 1, queue
+    # Bound to what ships, not only to the mechanism: reading with no swap
+    # at all has to agree with naming the label by hand. Without this line
+    # the test passes with `NON_DISPATCHABLE_LABELS` empty, which is the
+    # one thing the measurement is supposed to be about.
+    assert len(read(queue, states)["unresolved"]) == 1, F.NON_DISPATCHABLE_LABELS
 
 
 def test_a_ticket_without_a_non_dispatchable_label_is_still_classified():

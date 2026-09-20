@@ -175,7 +175,7 @@ def _native(issue):
 
 
 def classify(issues, state_of):
-    """`{unblocked, blocked, unresolved}` over GitHub issue objects.
+    """`{unblocked, blocked, unresolved, spec}` over GitHub issue objects.
     `state_of(number) -> "open" | "closed" | None` reads a blocker's state;
     `None` means it could not be read, which is unresolved rather than a
     guess. A claimed ticket, a ticket carrying a non-dispatchable label,
@@ -281,8 +281,8 @@ def fetch_state(repo, number, run=gh_json):
 
 
 def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state):
-    """`(repo, label) -> {unblocked, blocked, unresolved}`. Each blocker's
-    state is read once however many tickets name it."""
+    """`(repo, label) -> {unblocked, blocked, unresolved, spec}`. Each
+    blocker's state is read once however many tickets name it."""
     seen = {}
 
     def cached(number):
