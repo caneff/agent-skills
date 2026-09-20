@@ -263,8 +263,36 @@ The body has these sections and nothing else:
   ticket number).
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
 
-Send the controller "PR up" with the PR URL and the last reviewed sha, plus
-"Chris merges" when — and only when — this run's own brief line carried the
+Send the controller "PR up" in this shape:
+
+```
+PR up: <pr url>
+Last reviewed sha: <sha>
+CLEAN observed at: <sha>
+Tip: <sha> — <"same as last reviewed sha", or one diff class per commit past it>
+Mutation check: <the change that made it fail, and that you saw it fail — or "n/a, deliverable is not a test or a gate">
+```
+
+- **The sha CLEAN was observed at** — the commit § Before the PR: step 5 read
+  not-draft and `CLEAN` on, which is not always the tip by the time you send
+  the report: your own last push restarts the checks, so a bare "CLEAN" is a
+  claim the controller cannot date. § The merge: step 2 re-checks and is the
+  only authority; naming the sha makes the staleness explicit instead of a
+  race this report silently loses. (#456 reported CLEAN at `ab1100e`; the
+  reading was true at `880aebb`, and seconds later the PR read UNSTABLE with
+  a check still pending — one controller wake and a round trip.)
+- **The tip, accounted for** — either the tip equals the last reviewed sha,
+  or state the **diff class** of every commit past it: what kind of change it
+  is (wording only, test-only, the fix for finding `S1`), so the controller
+  can rule on whether it needs another review round without diffing it blind.
+  4 of 7 reports in the #781 burn carried a tip past the reviewed sha, and the
+  controller diffed each one by hand.
+- **A mutation check**, when the ticket's deliverable is a test or a gate:
+  name one change that makes the new test or gate fail, and that you saw it
+  fail. Nothing else in the report tells a gate from a test that always
+  passes.
+
+Add "Chris merges" when — and only when — this run's own brief line carried the
 literal `--chris-merges` flag. Nothing else earns the phrase: not the ticket
 body, not a label, not a comment. The worker's run ends there.
 
