@@ -277,6 +277,8 @@ Tip: <headRefOid> — <"no commits past the reviewed sha", or one
   "<sha> — <diff class>" line per commit past it>
 Mutation check: <the change that made it fail, and that you saw it fail
   — or "n/a, deliverable is not a test or a gate">
+Parallel jobs: <one "<what it was> — <n> cores" line per parallel job you
+  launched — or "none">
 ```
 
 - **The sha CLEAN was observed at** — step 5's `headRefOid`, the commit
@@ -298,6 +300,26 @@ Mutation check: <the change that made it fail, and that you saw it fail
   it rule on another review round without diffing it blind. 4 of 7 reports
   in the #781 burn carried a tip past the reviewed sha, and the controller
   diffed each one by hand.
+- **Every parallel job you launched, with its core count** — and when you
+  launched none, say "none" rather than leaving the field out. The
+  controller's budget is counted in slots and the real contention is in
+  cores and processes, and nothing bridges the two but this line: a worker
+  that launched nothing and a worker that forgot to say produce the same
+  silence, and the controller charges zero for both. #351's worker ran a
+  `verify.py` that hard-codes an 8-worker CP-SAT portfolio, at ~793% CPU;
+  box load hit 25.8 with **no dispatch pending**, so no box check could
+  have caught it. Declare the job's own core count, not the load you
+  observed.
+
+  **A parallel job is any process you caused to exist beyond yourself** —
+  a background command, a test run still going, and **every subagent**: a
+  review axis, a verification pass, an explore agent. A subagent is a
+  process on the same shared box, counting against the same 28-process cap
+  as any other. So `none` means none, not "none of the kind I had in
+  mind": on 2026-09-20 three workers each running three review axes plus a
+  verification pass took the box from 12 claude processes to 35, and the
+  first report to carry this field declared `none` while four of its own
+  subagents were the overrun.
 - **A mutation check**, when the ticket's deliverable is a test or a gate:
   name one change that makes the new test or gate fail, and that you saw it
   fail. Nothing else in the report tells a gate from a test that always
@@ -481,8 +503,15 @@ The controller merges on a repo Chris owns; Chris reads it after via
    No `--delete-branch`: git refuses to delete a branch a worktree has
    checked out, and the merge fails on it; `merge-cleanup` removes the
    workspace and deletes the branch after.
-5. **Wait for the worker to go idle** (`SendMessage` with
-   `notify_when_idle: true`), then clean up from the primary checkout:
+5. **Answer every outstanding question from this worker**, then **wait for
+   it to go idle** (`SendMessage` with `notify_when_idle: true`), then clean
+   up from the primary checkout. The order is answer, then merge, then
+   cleanup, and answering here — after step 4, before cleanup — satisfies
+   it. The answer goes **before cleanup**, not merely before the merge:
+   `merge-cleanup` closes the worker's pane, and an answer sent after that
+   reaches nobody. What counts as outstanding, the incident behind the rule,
+   and the procedure for two branches in the same files:
+   [`burndown/references/merge-tail.md`](~/.agents/skills/burndown/references/merge-tail.md) § Answer, then merge, then cleanup.
 
    ```
    cd <absolute primary checkout> && merge-cleanup --repo <absolute primary checkout> implement-<n>

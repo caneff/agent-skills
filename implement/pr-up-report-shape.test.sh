@@ -64,6 +64,25 @@ check_in "$pr_flat" 'when the ticket'"'"'s deliverable is a test or a gate'
 check_in "$pr_flat" 'name one change that makes the new test or gate fail'
 check_in "$pr_flat" 'a test that always passes'
 
+# Rule 5 (#894's worker half, landed here because this file has one writer):
+# every parallel job the worker launched is declared with its core count, and
+# a worker that launched none says so — silence from a worker that forgot and
+# silence from a worker with nothing to declare are the same bytes, and the
+# controller charges zero cores against its free slots for both. #351's
+# `verify.py` ran an 8-worker CP-SAT portfolio at ~793% CPU and took box load
+# to 25.8 with no dispatch pending, so no box check could have caught it.
+check_in "$pr_flat" 'core count'
+check_in "$pr_flat" 'say "none"'
+check_in "$pr_flat" 'counted in slots'
+# Rule 5b (PR #930): what counts. The first report to carry this field read
+# "parallel job" as a CPU-bound job of its own and declared `none` while four
+# of its own subagents were the process overrun — so the definition names
+# them, and says `none` means none.
+check_in "$pr_flat" 'any process you caused to exist beyond yourself'
+check_in "$pr_flat" 'every subagent'
+check_in "$pr_flat" '28-process cap'
+check_in "$pr_flat" 'means none'
+
 # Rule 4: the report template itself carries all three fields, so a worker
 # copying the template cannot omit one.
 template="$(printf '%s\n' "$pr_section" | sed -n '/^PR up:/,/^```$/p')"
@@ -75,7 +94,8 @@ case "$(printf '%s\n' "$template" | tail -n 1)" in
   '```') ;;
   *) echo "FAIL: implement/SKILL.md's 'PR up:' template has no closing fence" >&2; exit 1 ;;
 esac
-for field in 'Last reviewed sha:' 'CLEAN observed at:' 'Tip:' 'Mutation check:'; do
+for field in 'Last reviewed sha:' 'CLEAN observed at:' 'Tip:' 'Mutation check:' \
+             'Parallel jobs:'; do
   check_in "$template" "$field"
 done
 

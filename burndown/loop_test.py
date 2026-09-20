@@ -492,6 +492,168 @@ def test_a_malformed_closure_reaches_the_cli_as_one_line():
             assert len(got.stderr.strip().splitlines()) == 1, got.stderr
 
 
+# The #454 fixture, as the trial actually stood: the worker asked for a ruling
+# in good faith, the controller merged and ran `merge-cleanup`, and the ruling
+# was sent after — to a pane cleanup had already closed
+# (`No agent named 'implement-454-12' is reachable`).
+def landed_454():
+    return {"tickets": [454], "workspace": "/w/implement-454",
+            "agent": "implement-454-12",
+            "closure": ["examples/renban.js"]}
+
+
+def test_the_landing_tail_answers_every_outstanding_question_before_cleanup():
+    tail = loop.landing_steps(landed_454(), ["may I drop the 4x4 case?"])
+    assert [s["step"] for s in tail] == ["answer", "merge", "cleanup"]
+    assert tail[0]["question"] == "may I drop the 4x4 case?"
+    assert tail[0]["agent"] == "implement-454-12"
+
+
+def test_a_landing_with_nothing_outstanding_is_merge_then_cleanup():
+    assert [s["step"] for s in loop.landing_steps(landed_454())] == [
+        "merge", "cleanup"]
+
+
+def test_every_outstanding_question_is_answered_not_just_the_first():
+    tail = loop.landing_steps(landed_454(), ["one?", "two?"])
+    assert [s["step"] for s in tail] == ["answer", "answer", "merge", "cleanup"]
+    assert [s["question"] for s in tail[:2]] == ["one?", "two?"]
+
+
+def test_cleanup_is_refused_while_a_question_is_outstanding():
+    # The refusal names the clump, the worker and the question, because the
+    # controller hitting it has to send the answer, not just wait.
+    try:
+        loop.cleanup_ready(landed_454(), ["may I drop the 4x4 case?"])
+    except loop.LoopError as exc:
+        assert "#454" in str(exc), exc
+        assert "implement-454-12" in str(exc), exc
+        assert "may I drop the 4x4 case?" in str(exc), exc
+    else:
+        raise AssertionError("cleanup with a question outstanding must be "
+                             "refused")
+
+
+def test_cleanup_is_ready_once_every_question_is_answered():
+    assert loop.cleanup_ready(landed_454(), []) is True
+    assert loop.cleanup_ready(landed_454()) is True
+
+
+def test_an_outstanding_list_that_is_not_a_list_of_questions_is_refused():
+    # A bare string iterates as characters, so "is it ok?" would read as ten
+    # outstanding questions and answer none of them — the same fail-closed
+    # rule `paths` applies one layer down.
+    for outstanding in ("is it ok?", {"q": 1}, ["one?", 7], [""], [None]):
+        for call in (loop.landing_steps, loop.cleanup_ready):
+            try:
+                call(landed_454(), outstanding)
+            except loop.LoopError as exc:
+                assert "#454" in str(exc), (outstanding, exc)
+            else:
+                raise AssertionError(
+                    f"{outstanding!r} must not read as a question list")
+
+
+def test_the_cli_landing_refuses_cleanup_while_a_question_is_outstanding():
+    # The exit code answers "may I clean up now?"; stdout answers "what do I
+    # owe first?".
+    got = loop_py("landing", "--clump", "454", "--agent",
+                  "implement-454-12", "--outstanding", "may I drop 4x4?")
+    assert got.returncode == 1, got
+    # Only what is owed, and a refusal saying so. `cleanup` must not appear
+    # as a step on the one path where running it destroys the channel the
+    # answer is owed on — an exit code refuses, a printed step list does not.
+    assert got.stdout.splitlines() == [
+        "refused: 1 answer owed before cleanup",
+        "answer    implement-454-12  may I drop 4x4?",
+    ], got.stdout
+    assert "cleanup" not in got.stdout.replace(
+        "refused: 1 answer owed before cleanup", ""), got.stdout
+    assert "merge" not in got.stdout, got.stdout
+    assert "Traceback" not in got.stderr, got.stderr
+    assert len(got.stderr.strip().splitlines()) == 1, got.stderr
+    assert "implement-454-12" in got.stderr, got.stderr
+
+
+def test_the_cli_landing_clears_cleanup_once_nothing_is_outstanding():
+    got = loop_py("landing", "--clump", "454", "--agent", "implement-454-12")
+    assert got.returncode == 0, got.stderr
+    assert got.stdout.splitlines() == ["merge", "cleanup"], got.stdout
+
+
+def test_a_question_with_a_newline_in_it_is_refused():
+    # Each step prints as one line, so a question carrying a newline would
+    # emit a line the reader cannot tell from a step of its own.
+    try:
+        loop.landing_steps(landed_454(), ["one?\ntwo?"])
+    except loop.LoopError as exc:
+        assert "#454" in str(exc), exc
+        assert "one line" in str(exc), exc
+    else:
+        raise AssertionError("a multi-line question must be refused")
+
+
+def test_the_cli_landing_refuses_an_empty_agent_and_a_non_positive_clump():
+    # A refusal whose job is to name the worker must not name nobody, and a
+    # clump is a ticket number. Nothing outstanding, so the flags are the
+    # only thing that can refuse this call — with a question outstanding the
+    # cleanup gate refuses anyway and the check would witness nothing.
+    for args, reason in ((("--clump", "454", "--agent", ""), "no agent named"),
+                         (("--clump", "0", "--agent", "burn-1"), "ticket number"),
+                         (("--clump", "-5", "--agent", "burn-1"), "ticket number")):
+        got = loop_py("landing", *args)
+        assert got.returncode == 1, (args, got)
+        assert reason in got.stderr, (args, got.stderr)
+        assert "Traceback" not in got.stderr, got.stderr
+        assert len(got.stderr.strip().splitlines()) == 1, got.stderr
+
+
+def test_the_cli_landing_survives_a_reader_that_closes_early():
+    # `loop.py landing ... | head -1` and its kin. The read end is closed
+    # before the child runs, so the first write hits EPIPE every time —
+    # racing a real `head` would make this pass on the buffering instead of
+    # on the handler. Without it the interpreter prints, at exit, the
+    # traceback this module promises never to print.
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    try:
+        got = subprocess.run(
+            [sys.executable, LOOP, "landing", "--clump", "454", "--agent",
+             "burn-454", "--outstanding", "may I drop 4x4?"],
+            stdout=write_end, stderr=subprocess.PIPE, text=True, timeout=60)
+    finally:
+        os.close(write_end)
+    # The refusal's own exit code, because stderr is a different fd and the
+    # refusal printed there still arrived.
+    assert got.returncode == 1, got
+    assert "cleanup closes its pane" in got.stderr, got.stderr
+    assert "Traceback" not in got.stderr, got.stderr
+    assert "Exception ignored" not in got.stderr, got.stderr
+
+
+def test_the_cli_landing_survives_a_reader_that_closes_mid_output():
+    # Past the io buffer the write fails inside the command itself, not at
+    # the flush after it — the same broken pipe, a different line of code.
+    # The status is the fail-closed one: a run whose output nobody read
+    # cleared nothing, and a caller reading the exit code must not take it
+    # for permission to clean up.
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    questions = []
+    for n in range(500):
+        questions += ["--outstanding", f"question {n}?"]
+    try:
+        got = subprocess.run(
+            [sys.executable, LOOP, "landing", "--clump", "454", "--agent",
+             "burn-454", *questions],
+            stdout=write_end, stderr=subprocess.PIPE, text=True, timeout=60)
+    finally:
+        os.close(write_end)
+    assert got.returncode == 1, got
+    assert "Traceback" not in got.stderr, got.stderr
+    assert "Exception ignored" not in got.stderr, got.stderr
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
