@@ -93,8 +93,9 @@ too.
    the agent count itself (`ps -eo comm= | grep -cx claude`, by command name:
    `pgrep -f claude` also matches plugin scripts and hook shims and
    overcounts more than 2x); `--processes <n>` overrides it, and the refusal
-   names the number and the counter. A box it cannot measure is refused,
-   never read as empty. The ~**24 GB**
+   names the number and the counter. A box it cannot measure, or
+   one listing no `claude` at all (the controller is one), is refused, never
+   read as empty; pass `--processes` with a count you took. The ~**24 GB**
    ceiling is on the sum of the per-process `ulimit -v` caps. A slot the box
    cannot afford stays empty; that is not a reason to dispatch into it
    anyway.
