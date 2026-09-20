@@ -290,49 +290,115 @@ If the completion notification comes back missing or empty, read that file befor
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec if there is one (so "behaviour the ticket did not ask for" has a referent), the test command the repo uses, and the settled decisions.
-- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) `docs/agents/defect-classes.md` checked by name, class 1 (an absent or malformed answer read as a benign one) and class 3 (a test that passes for a reason other than the one it claims) especially, since you own the witness check; (d) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it — and when a mutation goes red, read the message and confirm the failure is your assertion and not a missing file or a denied path, which is class 3 again. Isolate the mutation in a throwaway worktree — `git worktree add --detach <a path outside the checkout> HEAD`, removed afterwards with `git worktree remove --force` — and never in a copy of the tree, which on a linked worktree shares the checkout's own index. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. The checkout is left exactly as found. Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
+- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) `docs/agents/defect-classes.md` checked by name, class 1 (an absent or malformed answer read as a benign one) and class 3 (a test that passes for a reason other than the one it claims) especially, since you own the witness check; (d) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it — and when a mutation goes red, read the message and confirm the failure is your assertion and not a missing file or a denied path, which is class 3 again. Isolate each mutation in a throwaway worktree — `git worktree add --detach <a path outside the checkout> HEAD`, removed afterwards with `git worktree remove --force` — and never in a copy of the tree, which on a linked worktree shares the checkout's own index. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. Prepare every mutation and launch them at once rather than walking them in turn — at most four running together, a third of the box's 28-process headroom since your axis is one of three, and fewer, down to running them in turn again, when the box is already busy: slower, never refused. Each mutation keeps its own worktree and its own captured output, and you collect them by id when they finish, so a failure message is still read against the mutation that produced it. A mutation whose worktree, suite run or output never arrived is `unknown`, reported by that name — never counted as an assertion that held, which is class 1. Nothing is restored between mutations: each worktree is discarded whole, and the checkout is left exactly as found. Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
 
 **What the witness check costs, and what actually isolates it** (#939). The
 check itself is the most valuable thing a review does — the `paths()` fail-open
 in #893, the zero-cores default in #894 and the suppressed contradictions in
 #897 all came out of it in one day. Neither line below runs it less.
 
-*Isolation.* `git worktree add` a throwaway worktree. **Never `cp -a`**, or any
-other byte copy of the reviewed tree: a linked worktree's `.git` is a *file
-holding a gitdir pointer*, not a directory, so a copy of one still points at
-the original's gitdir and shares its index, HEAD and refs. Reviews in this lane
-always run on a linked worktree, so the copy is not weaker isolation — it is
-none. On 2026-09-20 a worker followed the wording this replaces, copied its
-tree with `cp -a`, and two `git rm --cached` runs inside the "isolated" copy
-staged deletions in the real checkout's index; it noticed only because those
-two mutations happened to be staged ones. A worktree has its own index and
-HEAD, so the same command cannot reach the checkout, and `git clone
---no-hardlinks` is the other safe answer. Sharing the object store also costs
-no copy of the 419 MB / 529 tracked files this repo carries. `HEAD` is the
-revision the captured diff ends at, so the mutation lands on exactly the code
-under review:
+*Isolation.* `git worktree add` a throwaway worktree per mutation. **Never
+`cp -a`**, or any other byte copy of the reviewed tree: a linked worktree's
+`.git` is a *file holding a gitdir pointer*, not a directory, so a copy of one
+still points at the original's gitdir and shares its index, HEAD and refs.
+Reviews in this lane always run on a linked worktree, so the copy is not weaker
+isolation — it is none. On 2026-09-20 a worker followed the wording this
+replaces, copied its tree with `cp -a`, and two `git rm --cached` runs inside
+the "isolated" copy staged deletions in the real checkout's index; it noticed
+only because those two mutations happened to be staged ones. A worktree has its
+own index and HEAD, so the same command cannot reach the checkout, and `git
+clone --no-hardlinks` is the other safe answer. Sharing the object store also
+costs no copy of the 419 MB / 529 tracked files this repo carries. `HEAD` is
+the revision the captured diff ends at, so the mutation lands on exactly the
+code under review.
+
+*Concurrency* (#957). The mutations share nothing — each has its own worktree,
+its own index and its own output file — so they run together, and the check
+costs one covering-suite run of wall clock instead of one per mutated test.
+The serial reading was an artefact of the brief being written as a list of
+steps; nobody established it as a constraint. Measured on
+`caneff/sudokupad-art` on 2026-09-20: `test_retro_waves.py` is 31.96s of a
+33.9s suite (378 of 602 tests, everything else 0.91s), and the recent work is
+in that file, so the covering suite is the slow one. A diff adding ten tests
+paid five minutes before the reviewer read anything, and that correctness pass
+took 22 minutes.
+
+Two things the concurrency must not cost. **The message stays paired with its
+mutation**: reading the message rather than the exit status is what catches
+defect class 3, and N reds collected into one stream is how that pairing is
+lost — hence one output file per id, and a collection loop that prints each
+message under the id that produced it. **An unreached mutation is `unknown`,
+not a pass**: a worktree that failed to create, a suite that never started, an
+output file that is empty. Reported by name, never folded in with the
+assertions that genuinely held — that is defect class 1, and it is the failure
+this whole block is most exposed to.
+
+There is **nothing to restore**. The serial loop restored implicitly, by moving
+on to the next test; with the mutations concurrent nothing is shared to restore
+and each worktree is discarded whole. No step here reaches back into the
+checkout to undo anything, and reintroducing one would be the `cp -a` defect by
+another route.
+
+*The bound.* The box cap is 28 claude processes machine-wide, counted
+`ps -eo comm= | grep -cx claude` — by command name, never `ps aux | grep`,
+which matches any process whose arguments merely contain a claude path and
+overcounted by more than double on 2026-09-20. This axis is one of three
+running in parallel and does not own the box, so it takes a third of the
+headroom, capped at four: past that a CPU-bound covering suite stops
+overlapping and starts contending. A busy box drives the bound to 1 — the
+sequential check this replaces, slower but still run. It never refuses:
+a witness check that declines because the machine is loaded is worse than a
+slow one.
 
 ```
 worktree=<the worktree under review>
+ids=<space-separated mutation ids, one per new or changed test — the names you report by>
+mutate() { :; }   # <$1 the id, $2 the witness worktree: strip that test's constraint there, then run only the suite that covers it>
+
 top=$(git -C "$worktree" rev-parse --show-toplevel) || exit 1
-witness=$(mktemp -d)/witness
+root=$(mktemp -d)
 # Checked, not assumed: a TMPDIR under the reviewed tree would put the
-# throwaway worktree inside the checkout, and that untracked directory then
-# blocks `git worktree remove` and `ship` long after the review reported green.
-case "$witness" in "$top"/*)
-  echo "witness check: TMPDIR is inside the checkout ($witness)" >&2; exit 1;;
+# throwaway worktrees inside the checkout, and those untracked directories then
+# block `git worktree remove` and `ship` long after the review reported green.
+case "$root" in "$top"/*)
+  echo "witness check: TMPDIR is inside the checkout ($root)" >&2; exit 1;;
 esac
-git -C "$worktree" worktree add --detach -q "$witness" HEAD || exit 1
-# The trap goes on immediately, because a witness check that WORKS makes the
-# covering suite fail — that failure is the whole point, and it is the
-# ordinary outcome, not the exceptional one. Cleaning up only where the suite
-# passes leaves a registered worktree behind on nearly every check, and they
-# accumulate across reviews.
-trap 'git -C "$worktree" worktree remove --force "$witness" 2>/dev/null
-      rmdir "$(dirname "$witness")" 2>/dev/null' EXIT
-# <strip the constraint in "$witness", then run only the suite that covers it>
-git -C "$worktree" worktree remove --force "$witness" || exit 1
-rmdir "$(dirname "$witness")"
+# The trap goes on before the first `worktree add` and sweeps every mutation,
+# because a witness check that WORKS makes the covering suite fail — that
+# failure is the whole point, and it is the ordinary outcome, not the
+# exceptional one. Cleaning up only where the suite passes leaves N registered
+# worktrees behind on nearly every check, and they accumulate across reviews.
+trap 'for w in "$root"/*/; do git -C "$worktree" worktree remove --force "${w%/}" 2>/dev/null; done
+      rm -rf "$root" 2>/dev/null' EXIT
+# The bound, with its reason: a third of the 28-process box cap, counted by
+# command name, capped at 4, floored at 1 — sequential on a busy box, never a
+# refusal.
+free=$(( 28 - $(ps -eo comm= | { grep -cx claude || true; }) ))
+slots=$(( free / 3 )); [ "$slots" -gt 4 ] && slots=4; [ "$slots" -lt 1 ] && slots=1
+for id in $ids; do
+  while [ "$(jobs -pr | wc -l)" -ge "$slots" ]; do wait -n; done
+  witness="$root/$id"
+  if ! git -C "$worktree" worktree add --detach -q "$witness" HEAD; then
+    printf 'unknown\n' >"$root/$id.status"   # class 1: an unreached mutation is not a pass
+    continue
+  fi
+  # `mutate` in its own subshell: a mutation body ends in a failing suite and
+  # is naturally written with `exit`, which would otherwise kill this job
+  # before its status is recorded and read back below as `unknown`.
+  { ( mutate "$id" "$witness" ) >"$root/$id.out" 2>&1
+    printf '%s\n' "$?" >"$root/$id.status"; } &
+done
+wait
+for id in $ids; do
+  case "$(cat "$root/$id.status" 2>/dev/null)" in
+    0) printf '%s: HOLLOW — the assertion still passed with its constraint stripped\n' "$id" ;;
+    [1-9]*) printf '%s: red — its own message follows; confirm it is your assertion, not a missing file or a denied path\n' "$id"
+            sed -n '1,40p' "$root/$id.out" 2>/dev/null | sed "s/^/  $id| /" ;;
+    *) printf '%s: unknown — the mutation never ran to completion; report it by name, never as a pass\n' "$id" ;;
+  esac
+done
+for id in $ids; do git -C "$worktree" worktree remove --force "$root/$id" 2>/dev/null; done
+rm -rf "$root"
 trap - EXIT
 ```
 

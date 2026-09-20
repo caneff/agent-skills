@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Guards #938 and #939: the hollow-witness check has one owner (correctness),
-# and it re-runs the covering suite in a throwaway git worktree rather than
-# the whole gate over a whole-tree copy.
+# Guards #938, #939 and #957: the hollow-witness check has one owner
+# (correctness), it re-runs the covering suite in a throwaway git worktree
+# rather than the whole gate over a whole-tree copy, and it runs its mutations
+# concurrently — each with its own worktree, its own captured output, and an
+# unreached mutation reported as `unknown` rather than as a pass.
 # Prose assertions over two skill files; there is no harness that runs a
 # skill's own prose.
 # BASH_SOURCE rather than `git rev-parse --show-toplevel`, and GIT_* scrubbed:
@@ -95,6 +97,23 @@ check_in "$correctness" 'git worktree add --detach' 'the correctness axis brief'
 check_in "$correctness" 'git worktree remove --force' 'the correctness axis brief'
 check_not_in "$correctness" 'scratch copy of the tree' 'the correctness axis brief'
 
+# #957: the mutations run together, and the pairing survives the concurrency.
+# The serial loop cost the covering suite's runtime once per mutated test —
+# 31.96s x 10 on caneff/sudokupad-art, a 22-minute correctness pass.
+check_in "$correctness" 'at once' 'the correctness axis brief'
+check_in "$correctness" 'its own worktree and its own captured output' 'the correctness axis brief'
+# Class 1, the day's recurring defect: a mutation that never ran is not a pass.
+check_in "$correctness" 'unknown' 'the correctness axis brief'
+check_not_in "$correctness" 'one at a time' 'the correctness axis brief'
+# The bound, the count that produces it, and the degradation — all in the
+# prose, because the number is only defensible with its reason attached.
+check_in "$costs" 'ps -eo comm=' 'the witness-cost section'
+check_in "$costs" 'ps aux' 'the witness-cost section'
+check_in "$costs" 'sequential' 'the witness-cost section'
+# #957: nothing is restored, because nothing is shared. Said out loud so a
+# later pass does not reintroduce a restore that reaches into the checkout.
+check_in "$costs" 'nothing to restore' 'the witness-cost section'
+
 # #939's real reason, not just its price: a byte copy of a LINKED worktree
 # shares the checkout's index, so `cp -a` is not weak isolation, it is none.
 check_in "$costs" 'gitdir pointer' 'the witness-cost section'
@@ -117,18 +136,19 @@ reviewer_text="$(flatten <"$reviewer")"
 check_in "$reviewer_text" 'never in a copy of it' flow/claude/agents/diff-reviewer.md
 check_not_in "$reviewer_text" 'a witness check runs on a copy' flow/claude/agents/diff-reviewer.md
 
-# Prose can claim isolation; only running the documented recipe witnesses it.
-# Extracting it out of SKILL.md rather than retyping it here is what keeps the
-# test honest — a copy in this file would pass forever while the doc drifted.
+# Prose can claim isolation and concurrency; only running the documented
+# recipe witnesses either. Extracting it out of SKILL.md rather than retyping
+# it here is what keeps the test honest — a copy in this file would pass
+# forever while the doc drifted.
 recipe="$(awk '
-  /^```$/ { if (inb) { if (buf ~ /witness=\$\(mktemp -d\)/) printf "%s", buf; buf = ""; inb = 0 }
+  /^```$/ { if (inb) { if (buf ~ /mutate\(\)/) printf "%s", buf; buf = ""; inb = 0 }
             else inb = 1
             next }
   inb { buf = buf $0 "\n" }
 ' "$skill")"
 case "$recipe" in
-  *'witness=$(mktemp -d)'*) ;;
-  *) echo "FAIL: could not extract the witness-isolation recipe from $skill" >&2; exit 1 ;;
+  *'mutate()'*) ;;
+  *) echo "FAIL: could not extract the concurrent witness recipe from $skill" >&2; exit 1 ;;
 esac
 
 scratch="$(mktemp -d)" || { echo "FAIL: mktemp -d" >&2; exit 1; }
@@ -139,8 +159,9 @@ trap 'git -C "$scratch/repo" worktree prune 2>/dev/null; rm -rf "$scratch"' EXIT
   cd repo
   git config user.email t@example.com
   git config user.name t
-  printf 'assert 1 == 1\n' >t.py
-  git add t.py
+  printf 'assert 1 == 1\n' >m1.py
+  printf 'assert 1 == 1\n' >m2.py
+  git add m1.py m2.py
   git commit -qm base
   # The reviewed tree is a LINKED worktree, which is what every review in this
   # lane runs on. Its `.git` is a file holding a gitdir pointer, so a byte copy
@@ -153,20 +174,83 @@ repo="$scratch/reviewed"
 [ -f "$repo/.git" ] ||
   { echo "FAIL: the fixture's reviewed tree is not a linked worktree" >&2; exit 1; }
 
-# The recipe's placeholders are an assignment and a one-line comment, so real
-# values substitute in without touching any other line of what the doc
-# publishes.
-printf '%s\n' "$recipe" |
-  sed -e "s|^worktree=<.*|worktree=$repo|" \
-      -e "s|^# <strip the constraint.*|printf 'assert 1 == 2\\n' >\"\$witness\"/t.py; git -C \"\$witness\" rm -q --cached t.py; echo \"\$witness\" >\"$scratch/where\"|" \
-  >"$scratch/recipe.sh"
-( cd "$repo" && bash "$scratch/recipe.sh" ) || {
-  echo "FAIL: the documented witness-isolation recipe did not run" >&2; fail=1; }
-
-if [ "$(cat "$repo/t.py")" != 'assert 1 == 1' ]; then
-  echo "FAIL: the witness recipe wrote the mutation back into the checkout" >&2
-  fail=1
+# The stand-in for "strip this test's constraint and run its covering suite".
+# It records the pair (id, worktree), waits for its sibling to start, and notes
+# whether both worktrees were on disk at that instant — the honest witness that
+# the launch really was concurrent, rather than a wall-clock assertion that
+# goes flaky on a loaded box. Then it fails, with a message of its own: a
+# working witness check MAKES the covering suite fail.
+cat >"$scratch/mutate.sh" <<MUTATE
+#!/usr/bin/env bash
+id="\$1"; wt="\$2"
+scratch="$scratch"
+printf '%s\n' "\$wt" >"\$scratch/\$id.wt"
+: >"\$scratch/\$id.started"
+other=m1; [ "\$id" = m1 ] && other=m2
+for _ in \$(seq 1 100); do [ -e "\$scratch/\$other.started" ] && break; sleep 0.1; done
+if [ -d "\$wt" ] && [ -d "\$(cat "\$scratch/\$other.wt" 2>/dev/null)" ]; then
+  : >"\$scratch/\$id.overlap"
 fi
+printf 'assert 1 == 2\n' >"\$wt/\$id.py"
+git -C "\$wt" rm -q --cached "\$id.py"
+echo "MUTANT-\$id: covering suite red, its own message"
+exit 1
+MUTATE
+
+substitute() { # <ids> <mutate body> -> a runnable script on stdout
+  printf '%s\n' "$recipe" |
+    sed -e "s|^worktree=<.*|worktree=$repo|" \
+        -e "s|^ids=<.*|ids=\"$1\"|" \
+        -e "s|^mutate() .*|mutate() { $2; }|"
+}
+
+substitute 'm1 m2' "bash \"$scratch/mutate.sh\" \"\$1\" \"\$2\"" >"$scratch/recipe.sh"
+grep -q "^worktree=$repo\$" "$scratch/recipe.sh" ||
+  { echo "FAIL: the recipe's worktree placeholder did not substitute" >&2; exit 1; }
+grep -q '^ids="m1 m2"$' "$scratch/recipe.sh" ||
+  { echo "FAIL: the recipe's ids placeholder did not substitute" >&2; exit 1; }
+grep -q '^mutate() { bash ' "$scratch/recipe.sh" ||
+  { echo "FAIL: the recipe's mutate placeholder did not substitute" >&2; exit 1; }
+
+# The run itself exits non-zero or not depending on how the doc ends it; what
+# this suite asserts is what it left behind, not its status.
+( cd "$repo" && bash "$scratch/recipe.sh" ) >"$scratch/run.out" 2>&1 || true
+
+# Concurrent, asserted by the two worktrees existing at the same instant.
+# Serialising the launch fails exactly here, and for its own reason: the first
+# mutation waits out its 10s for a sibling that has not been started yet.
+for id in m1 m2; do
+  [ -e "$scratch/$id.overlap" ] || {
+    echo "FAIL: $id never saw the other mutation's worktree — the launch was serial" >&2
+    fail=1; }
+done
+
+# Each message stays paired with the mutation that produced it. Reading the
+# message rather than the exit code is what catches defect class 3, and N
+# concurrent reds collected into one stream is how that pairing is lost.
+for id in m1 m2; do
+  other=m1; [ "$id" = m1 ] && other=m2
+  if ! grep -q "MUTANT-$id" "$scratch/run.out"; then
+    echo "FAIL: the run never reported $id's own failure message" >&2
+    fail=1
+  fi
+  line="$(grep -n "MUTANT-$id" "$scratch/run.out" | head -1 | cut -d: -f1)"
+  [ -n "$line" ] || continue
+  # The id names its own message on or above the line carrying it: a bare
+  # concatenation of N suite outputs satisfies the needle above and loses the
+  # pairing this check exists for.
+  if ! sed -n "1,${line}p" "$scratch/run.out" | grep -q "$id"; then
+    echo "FAIL: $id's message is not attributed to $id in the run output" >&2
+    fail=1
+  fi
+done
+
+for id in m1 m2; do
+  if [ "$(cat "$repo/$id.py")" != 'assert 1 == 1' ]; then
+    echo "FAIL: the witness recipe wrote $id's mutation back into the checkout" >&2
+    fail=1
+  fi
+done
 if [ -n "$(git -C "$repo" status --porcelain)" ]; then
   echo "FAIL: the witness recipe left the checkout dirty" >&2
   fail=1
@@ -181,45 +265,55 @@ if [ -n "$(git -C "$repo" diff --cached --name-only)" ]; then
 fi
 # A worktree left registered stalls the next `git worktree remove` and any
 # later `merge-cleanup` on this repo; a bare `rm -rf` would leave exactly that.
+# Every mutation failed here — the ordinary outcome of a check that works — so
+# this is the failure path's cleanup, N traps and not one.
 trees="$(git -C "$repo" worktree list | wc -l)"
 if [ "$trees" -ne 2 ]; then
   echo "FAIL: the witness recipe left $trees worktrees registered, not the fixture's 2" >&2
   git -C "$repo" worktree list >&2
   fail=1
 fi
-if [ -e "$(cat "$scratch/where" 2>/dev/null)" ]; then
-  echo "FAIL: the witness recipe left its throwaway worktree on disk" >&2
+for id in m1 m2; do
+  if [ -e "$(cat "$scratch/$id.wt" 2>/dev/null)" ]; then
+    echo "FAIL: the covering suite failing left $id's throwaway worktree on disk" >&2
+    fail=1
+  fi
+done
+
+# Defect class 1, the one this ticket would refuse a PR over: a mutation whose
+# worktree never got created must report as `unknown` by name, never as a pass.
+# The `git` shim refuses exactly one `worktree add`, so the failure is the one
+# under test and not a broken fixture.
+mkdir -p "$scratch/bin"
+real_git="$(command -v git)"
+cat >"$scratch/bin/git" <<SHIM
+#!/usr/bin/env bash
+adding=0
+for a in "\$@"; do [ "\$a" = add ] && adding=1; done
+if [ "\$adding" = 1 ]; then
+  for a in "\$@"; do case "\$a" in */bad) echo "fatal: shim refuses \$a" >&2; exit 128;; esac; done
+fi
+exec "$real_git" "\$@"
+SHIM
+chmod +x "$scratch/bin/git"
+
+substitute 'ok bad' "echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-unknown.sh"
+( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-unknown.sh" ) \
+  >"$scratch/unknown.out" 2>&1 || true
+if ! grep -i 'unknown' "$scratch/unknown.out" | grep -q 'bad'; then
+  echo "FAIL: a mutation whose worktree could not be created was not reported as unknown" >&2
+  cat "$scratch/unknown.out" >&2
   fail=1
 fi
-
-# A witness check that works makes the covering suite FAIL — that failure is
-# the point, and it is the ordinary outcome. So it is the path cleanup must
-# survive: without a trap armed at `worktree add`, every real hollow-witness
-# hunt leaves a registered worktree behind, and they accumulate across
-# reviews. Same substitution as above, so a failure here is this assertion
-# and not a block that stopped being extractable.
-printf '%s\n' "$recipe" |
-  sed -e "s|^worktree=<.*|worktree=$repo|" \
-      -e "s|^# <strip the constraint.*|echo \"\$witness\" >\"$scratch/where-fail\"; exit 1|" \
-  >"$scratch/recipe-fail.sh"
-# `|| true`: this run is SUPPOSED to exit non-zero — that is the covering
-# suite failing. Without it `set -e` kills the suite here with no message.
-( cd "$repo" && bash "$scratch/recipe-fail.sh" ) >/dev/null 2>&1 || true
-failed_wt="$(cat "$scratch/where-fail" 2>/dev/null)"
-if [ -z "$failed_wt" ]; then
-  echo "FAIL: the failing-suite run never reached the mutation step" >&2
+if ! grep -q 'MUTANT-ok' "$scratch/unknown.out"; then
+  echo "FAIL: the reachable mutation was lost when its sibling could not start" >&2
   fail=1
-else
-  if [ -e "$failed_wt" ]; then
-    echo "FAIL: the covering suite failing left the throwaway worktree on disk" >&2
-    fail=1
-  fi
-  trees_after="$(git -C "$repo" worktree list | wc -l)"
-  if [ "$trees_after" -ne 2 ]; then
-    echo "FAIL: the covering suite failing left $trees_after worktrees registered, not the fixture's 2" >&2
-    git -C "$repo" worktree list >&2
-    fail=1
-  fi
+fi
+trees_after="$(git -C "$repo" worktree list | wc -l)"
+if [ "$trees_after" -ne 2 ]; then
+  echo "FAIL: the unknown-mutation run left $trees_after worktrees registered, not 2" >&2
+  git -C "$repo" worktree list >&2
+  fail=1
 fi
 
 if [ "$fail" -eq 0 ]; then
