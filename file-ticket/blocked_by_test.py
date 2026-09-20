@@ -85,6 +85,23 @@ def main():
     fail += case("prose reference, no section", classify(BODY, {906: "open"}),
                  "unresolved")
 
+    # A quoted scrap of another ticket — `> ` per line — cannot speak for
+    # this one, so the appended section still answers.
+    quoted = filed(BODY + "\n\nThe ticket it came from says:\n\n"
+                   "> ## Blocked by\n>\n> - #906")
+    fail += case("blockquoted evidence heading", classify(quoted, {906: "open"}),
+                 "unblocked")
+
+    # The same scrap pasted bare is what the skill's quoting rule exists to
+    # stop: the reader takes the first visible declaration, so an evidence
+    # heading beats the section below it and the ticket answers with a
+    # number it never claimed. Asserted as "not the section's own verdict"
+    # rather than a bucket, since #922 changes which wrong answer it is.
+    bare = filed(BODY + "\n\nThe ticket it came from says:\n\n"
+                 "## Blocked by\n\n- #906")
+    fail += case("bare evidence heading overrides the section",
+                 classify(bare, {906: "open"}) != "unblocked", True)
+
     # Evidence pasted as a fenced block is quoted material to the reader; a
     # closed fence leaves the section below it visible.
     fenced = filed(BODY + "\n\n```\n## Blocked by\n\n- #906\n```")

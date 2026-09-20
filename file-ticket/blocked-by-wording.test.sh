@@ -62,9 +62,13 @@ check "$write_text" 'burndown/references/frontier.md' 'Write the issue'
 check "$write_text" 'reads as **unresolved** to the frontier reader' 'Write the issue'
 check "$write_text" 'never dispatched' 'Write the issue'
 
-# An unterminated fence in the pasted evidence swallows the section, so the
-# ticket the filer wrote a section for still reads as silence.
-check "$write_text" 'Close every code fence you paste' 'Write the issue'
+# Two ways the section the filer wrote goes unread: a bare `Blocked by`
+# heading in the pasted evidence outranks it (the reader takes the first
+# visible declaration), and an unterminated fence swallows it.
+check "$write_text" 'Quote every scrap of another ticket you paste' 'Write the issue'
+check "$write_text" 'beats the one the skill appends below' 'Write the issue'
+check "$write_text" 'indenting does not neutralise it' 'Write the issue'
+check "$write_text" 'An unterminated ``` is the other way a section goes unread' 'Write the issue'
 check "$write_text" 'swallows the `## Blocked by` section below' 'Write the issue'
 
 # A native edge where the blocker is known at filing time — as well as the

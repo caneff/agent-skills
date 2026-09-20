@@ -29,9 +29,15 @@ guess and do not create an issue until the target is confirmed.
   concrete detail that makes it checkable: a grep hit, an error string, a
   repro step), and a trailing "Filed from" line naming the source
   (conversation, review, digest).
-  Close every code fence you paste: the frontier reader treats everything
-  after an unterminated ``` as quoted, which swallows the `## Blocked by`
-  section below and reads the ticket as **unresolved**.
+  Quote every scrap of another ticket you paste — `> ` on each line, or
+  a closed fence around it. A bare `Blocked by` heading inside your
+  evidence is read as this ticket's own declaration and beats the one
+  the skill appends below, so the ticket reports blockers it never
+  claimed; indenting does not neutralise it, because the reader allows
+  leading whitespace on a heading. An unterminated ``` is the other way
+  a section goes unread: everything after it is quoted, which swallows
+  the `## Blocked by` section below and reads the ticket as
+  **unresolved**.
 - **Label**: the triage-label mapping should have been provided to you —
   it maps each role below to this repo's label string. Give the ticket
   exactly one of three roles: `ready-for-agent` when it is fully specified
