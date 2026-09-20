@@ -400,12 +400,30 @@ The controller merges on a repo Chris owns; Chris reads it after via
    stop before merging.
 
    No material findings → go to step 4. Findings → hold the merge: send the
-   worker the findings and the comment URL. The worker disposes of each one
+   worker the findings and the comment URL. Note the head sha this pass ran
+   against — step 2's `headRefOid`, the sha the second pass is judged
+   against below. The worker disposes of each one
    (fixed in a commit / `disputed: <why>` / filed), adds each disposition to
    the PR body's Decisions made section (`gh pr edit <pr> --repo
    <owner/name> --body-file <updated body>`), and sends "PR up" again.
-   Re-run step 2 (not-draft, CLEAN — commits landed since the first check)
-   and then this pass once more on the fixes — there is no third Codex run,
+   Re-run step 2 (not-draft, CLEAN — commits landed since the first check).
+
+   **The second pass runs only if the head sha moved.** Step 2's fresh
+   `headRefOid` differing from the sha noted above is the whole condition: a
+   `fixed` disposition pushed a commit, so there is a new diff to read.
+   If every disposition was `disputed` or `filed` and the sha is unmoved,
+   the input is byte-identical and a second run spends several minutes and a
+   token budget returning the findings you already hold. It does not run:
+   the controller instead
+   confirms each disposition is recorded in the Decisions made section and
+   goes to step 4, the same controller-level disposition the tail below
+   already allows. (#888: twice in the #781 burn —
+   `sudokumaker-custom-constraints#559` at `203ac7a`, `agent-skills#877` at
+   `b96aa32` — the sha was unmoved and the mandated run would have re-read
+   an unchanged file.)
+
+   When the sha did move, run this pass once more on the fixes — there is
+   no third Codex run,
    so whatever this second run finds is final: post its output as a PR
    comment the same way (a fresh `out_file`, since the first is already
    removed), then remove that file too once the comment posts, and either
