@@ -17,6 +17,12 @@ skill="$here/SKILL.md"
 
 flatten() { tr '\n' ' ' | tr -s ' '; }
 
+# Both range addresses must exist: sed does not require the end address to
+# match, so a renamed `### The merge` would silently widen the range to EOF
+# and every check below would read "somewhere in SKILL.md" instead.
+for heading in '^### The PR$' '^### The merge$'; do
+  grep -q "$heading" "$skill" || { echo "FAIL: implement/SKILL.md has no heading matching $heading" >&2; exit 1; }
+done
 pr_section="$(sed -n '/^### The PR$/,/^### The merge$/p' "$skill")"
 [ -n "$pr_section" ] || { echo "FAIL: could not extract § The PR from implement/SKILL.md" >&2; exit 1; }
 pr_flat="$(printf '%s\n' "$pr_section" | flatten)"

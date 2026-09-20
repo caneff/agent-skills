@@ -207,9 +207,12 @@ time, not from the worker: § The merge.
    the sha you report — a "done" report has described work that was dirty in
    the tree, not on the branch, or left content behind in `.scratch/` with
    no `PRE_REPORT_KEEP_SCRATCH` naming why.
-5. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences`**
+5. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
    prints `false` and `CLEAN` before "PR up" goes out — a PR reported on a
-   draft or a conflict fails the controller's merge. `UNKNOWN` means GitHub
+   draft or a conflict fails the controller's merge. `headRefOid` is the sha
+   GitHub computed that reading against, and it is the one the report's
+   "CLEAN observed at" carries (§ The PR) — never `git rev-parse HEAD`, which
+   is your local tip and may be a commit GitHub has not read yet. `UNKNOWN` means GitHub
    is still computing; poll a few seconds. `closingIssuesReferences` must
    list the ticket this PR was dispatched for (`<n>`) and any other ticket
    its body names with a closing keyword, each in this repo — an entry's
@@ -273,14 +276,13 @@ Tip: <sha> — <"same as last reviewed sha", or one diff class per commit past i
 Mutation check: <the change that made it fail, and that you saw it fail — or "n/a, deliverable is not a test or a gate">
 ```
 
-- **The sha CLEAN was observed at** — the commit § Before the PR: step 5 read
-  not-draft and `CLEAN` on, which is not always the tip by the time you send
+- **The sha CLEAN was observed at** — step 5's `headRefOid`, the commit
+  GitHub read not-draft and `CLEAN` on, which is not always the tip by the time you send
   the report: your own last push restarts the checks, so a bare "CLEAN" is a
   claim the controller cannot date. § The merge: step 2 re-checks and is the
   only authority; naming the sha makes the staleness explicit instead of a
-  race this report silently loses. (#456 reported CLEAN at `ab1100e`; the
-  reading was true at `880aebb`, and seconds later the PR read UNSTABLE with
-  a check still pending — one controller wake and a round trip.)
+  race this report silently loses. (#456 reported CLEAN at a sha two pushes
+  stale; the PR read UNSTABLE seconds later — one controller wake.)
 - **The tip, accounted for** — either the tip equals the last reviewed sha,
   or state the **diff class** of every commit past it: what kind of change it
   is (wording only, test-only, the fix for finding `S1`), so the controller
