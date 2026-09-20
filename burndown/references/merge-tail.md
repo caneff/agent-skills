@@ -46,9 +46,12 @@ rebased branch:
 
 ```
 git checkout --ours -- <generated paths>
-<the Generator command from the repo's AGENTS.md § Include closure>
+<the repo's declared Generator command>
 git add -A && git rebase --continue
 ```
+
+The Generator command is the one declared in the repo's `AGENTS.md` § Include
+closure, never one remembered from another repo.
 
 `--ours` is the confusing half and it is the right one: **inside a rebase the
 sides are inverted**, because git is replaying your commits onto the upstream
@@ -63,9 +66,8 @@ else's PR. On #781 four link artifacts conflicted this way and regenerating
 them took one command; reading them would have taken an afternoon and shipped
 a diff nobody could check.
 
-The command comes from the repo's declaration, never from memory. A repo that
-declares no generator has nothing to regenerate, and its conflicts are all
-hand-merges.
+A repo that declares no generator has nothing to regenerate, and its
+conflicts are all hand-merges.
 
 ## An escaped collision is a defect in the include grammar
 
