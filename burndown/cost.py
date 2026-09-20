@@ -6,11 +6,10 @@ transcripts: `python3 burndown/cost.py <worktree-path>` prints
 Reads only. A missing projects dir prints `0 0 0` and exits 0 — a burn must
 not die at settle time over a transcript it cannot find.
 
-Parked along with the rest of the burndown skill (see #700's "Out of
-scope" note) — no live caller feeds this a worktree path or reads its
-`<builder> <review> <total>` line, since burndown/SKILL.md no longer
-documents the settle step that called it. Kept green (see cost_test.py)
-against the lane being rebuilt, not because anything runs it today.
+No caller: `burndown/SKILL.md` documents no settle step that reads this
+module's `<builder> <review> <total>` line, and `implement/SKILL.md` states
+outright that its review passes do no cost tracking. Kept green (see
+cost_test.py) for whoever wires cost back into a run; nothing runs it today.
 """
 import json
 import os

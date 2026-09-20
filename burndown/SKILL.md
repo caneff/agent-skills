@@ -1,24 +1,26 @@
 ---
 name: burndown
-description: "Parked: drain a mixed-origin ticket queue to empty as one supervised run, frontier-first, one PR per ticket."
+description: "Drain a mixed-origin ticket queue to empty as one supervised run, frontier-first, one PR per ticket."
 disable-model-invocation: true
 ---
 
-> **Parked** until the multi-worker lane is rebuilt on the herdr lane — see
-> [#700](https://github.com/caneff/agent-skills/issues/700)'s "Out of scope"
-> note. Everything this skill described — the batch loop, exploration and
-> clumping, worker dispatch, the review round, and the per-repo progress and
-> cost bookkeeping — is retired with the tool it ran on; nothing below is
-> executable policy until the lane is rebuilt. Full text:
-> `git show 7c7eb30:burndown/SKILL.md`.
+A **burn**: one mixed-origin ticket queue, drained to empty as one run. You
+are the **controller** — a session on a primary checkout's default branch,
+dispatching a worker per clump and ruling on what comes back. The terms are
+`~/.agents/skills/CONTEXT.md`'s; a worker's own job is
+[`implement`](~/.agents/skills/implement/SKILL.md).
+
+One spec's slices are a different run and a different policy:
+[`implement-spec`](~/.agents/skills/implement-spec/SKILL.md). A spec that
+turns up inside a mixed queue is handed off to it whole —
+[`references/spec-handoff.md`](references/spec-handoff.md).
 
 ## The loop
 
 The dispatch loop — pick the next jobs, start them, wait, start more as slots
 free up — lives **here and nowhere else** (#779). Its mechanical steps are
 `burndown/loop.py`; why each rule reads the way it does, with the evidence it
-came from: [`references/loop.md`](references/loop.md). Written against the
-lane being rebuilt, and parked with the rest of this skill.
+came from: [`references/loop.md`](references/loop.md).
 
 **Where the controller runs.** Any primary checkout's **default branch** —
 read from `refs/remotes/origin/HEAD`, never assumed to be `main` — and not
@@ -121,8 +123,6 @@ a different verb, and its entry names that verb —
 line without opening another document.
 The grammar and the three sources:
 [`references/frontier.md`](references/frontier.md).
-Written against the lane being rebuilt; the loop that will call it is parked
-with the rest of this skill.
 
 ## Clumping
 
@@ -176,12 +176,10 @@ restart renames every Claude session and every brief hard-codes
 `--controller "<name>"`. The retired per-repo `~/.cache/burndown/<repo>.progress`
 file is gone; nothing reads or writes one. The contract, the JSON shape and the
 resume procedure: [`references/run-file.md`](references/run-file.md).
-Written against the lane being rebuilt; the loop that will drive it is parked
-with the rest of this skill.
 
 A single spec's slices in one workspace are
 [`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this
-skill's — also parked.
+skill's.
 
 ## Liveness
 
