@@ -413,7 +413,13 @@ The controller merges on a repo Chris owns; Chris reads it after via
    disposition pushed a commit, so there is a new diff to read.
    If every disposition was `disputed` or `filed` and the sha is unmoved,
    the input is byte-identical and a second run spends several minutes and a
-   token budget returning the findings you already hold. It does not run:
+   token budget returning the findings you already hold. What makes that
+   safe is the merge-base, not the sha alone: this pass reads
+   `origin/<default>...HEAD`, and a fixed head pins the fork point, so
+   `<default>` gaining any number of commits leaves the diff unchanged. The
+   skip would stop being sound only for a review taken as a two-dot diff
+   against a moving base — which reads everyone else's merged work as
+   deletions, and is not what `--base origin/<default>` above asks for. It does not run:
    the controller instead
    confirms each disposition is recorded in the Decisions made section and
    goes to step 4 — by way of the classification and trial row below, which
