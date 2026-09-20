@@ -550,12 +550,33 @@ def test_the_cli_refuses_a_ticket_list_python_would_read_creatively():
     cli(root, "start", "burn-1", "--slots", "2")
     # A doubled separator is not in this list: `901,,902` names exactly two
     # tickets and no other reading of it exists.
-    for bad in ("9_01", "+901", "901.0", " ", "-901", "0x385"):
+    # `str.isdigit()` is true for `²` (which `int()` then rejects) and for
+    # `٩` (which `int()` accepts as 9) — one is a traceback, the other is a
+    # ticket the brief never named.
+    for bad in ("9_01", "+901", "901.0", " ", "-901", "0x385", "\u00b2",
+                "\u0669" + "01"):
         got = cli(root, "clump", "burn-1", "--tickets", bad,
                   "--workspace", "/w/a", "--agent", "agent-a")
         assert got.returncode == 1, (bad, got.stdout, got.stderr)
         assert "Traceback" not in got.stderr, got.stderr
     assert runfile.load("burn-1", root=root)["clumps"] == []
+
+
+def test_the_cli_expands_a_tilde_in_the_cache_dir_override():
+    # `BURNDOWN_CACHE_DIR='~/.cache/x'` must not create a literal `./~/`
+    # directory in whatever the controller's cwd happens to be.
+    root = cache()
+    home = os.path.join(root, "home")
+    os.makedirs(home)
+    got = subprocess.run(
+        [sys.executable, RUNFILE, "start", "burn-1", "--slots", "1"],
+        capture_output=True, text=True,
+        env={**os.environ, "HOME": home, "BURNDOWN_CACHE_DIR": "~/cachedir"},
+        cwd=root)
+    assert got.returncode == 0, got.stderr
+    assert os.path.isfile(os.path.join(home, "cachedir", "burn-1.json")), \
+        sorted(os.listdir(root))
+    assert "~" not in os.listdir(root), os.listdir(root)
 
 
 def main():

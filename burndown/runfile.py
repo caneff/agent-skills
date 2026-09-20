@@ -37,6 +37,10 @@ _RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 # reader checks a landing against, and a name that moves answers a different
 # question.
 _SHA = re.compile(r"[0-9a-f]{7,40}\Z")
+# ASCII digits, and no other kind. `str.isdigit()` is true for `²`, which
+# `int()` then rejects with a traceback, and for `٩`, which `int()` accepts
+# as 9 — so `٩01` would register a ticket the brief never named.
+_TICKET = re.compile(r"[0-9]+\Z")
 
 # What a run file must carry to be read as one at all, top level and per
 # clump. The file outlives the code that wrote it, so a shape this module does
@@ -295,11 +299,11 @@ def render_resume(state):
 
 
 def parse_tickets(text):
-    """`901,902` or `901 902`. Digits only: `int()` reads `9_01` and `+901` as
-    901, and a run file that says #901 where the brief said `9_01` is a wrong
-    answer rather than a lenient one."""
+    """`901,902` or `901 902`. ASCII digits only: `int()` reads `9_01` and
+    `+901` as 901, and a run file that says #901 where the brief said `9_01` is
+    a wrong answer rather than a lenient one."""
     parts = text.replace(",", " ").split()
-    if not parts or not all(part.isdigit() for part in parts):
+    if not parts or not all(_TICKET.match(part) for part in parts):
         raise RunFileError(f"not a ticket list: {text!r}")
     return [int(part) for part in parts]
 
@@ -342,7 +346,8 @@ def main(argv):
     args = parser.parse_args(argv[1:])
     # One seam per caller: in-process callers pass `root`, the CLI resolves the
     # environment once here and passes it down (`cost.py` does the same).
-    root = os.environ.get("BURNDOWN_CACHE_DIR") or None
+    override = os.environ.get("BURNDOWN_CACHE_DIR")
+    root = os.path.expanduser(override) if override else None
     try:
         if args.command == "start":
             print(render(start(args.run_id, args.slots, args.controller, root)))
