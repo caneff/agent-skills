@@ -170,9 +170,9 @@ def test_box_check_refuses_when_the_ulimit_sum_breaks_the_budget():
     assert any("24" in r for r in got["refusals"]), got
 
 
-def test_box_check_counts_processes_it_did_not_start():
-    # 20 of the 28 belong to other agents on the same box; the cap is the
-    # box's, not this run's.
+def test_box_check_refuses_at_the_process_cap_boundary():
+    # The cap is the box's, so the reading it is checked against counts
+    # every process on the box — 27 leaves room for one more, 28 does not.
     assert loop.box_check(processes=27, committed_gb=0, add_gb=0)["ok"] is True
     assert loop.box_check(processes=28, committed_gb=0, add_gb=0)["ok"] is False
 
@@ -258,27 +258,6 @@ def loop_py(*args, cwd=None):
                           capture_output=True, text=True, timeout=60, cwd=cwd)
 
 
-def test_the_cli_refuses_the_seat_inside_this_worktree():
-    # This test file lives in a linked worktree whenever a worker is building
-    # here, and in the primary checkout otherwise — so it asserts against
-    # whichever seat it is really in, and both answers are the contract.
-    here = os.path.dirname(os.path.abspath(__file__))
-    got = loop_py("seat", cwd=here)
-    # Independent of the check under test: git lays a linked worktree's git
-    # dir out under `<common>/worktrees/<name>`, so the path says which seat
-    # this is without recomputing the comparison `seat` makes.
-    git_dir = subprocess.run(
-        ["git", "rev-parse", "--absolute-git-dir"], cwd=here, text=True,
-        capture_output=True).stdout.strip()
-    linked = "/worktrees/" in git_dir
-    if linked:
-        assert got.returncode == 1, got
-        assert "worktree" in got.stderr, got.stderr
-    else:
-        assert got.returncode in (0, 1), got
-        assert "worktree" not in got.stderr, got.stderr
-
-
 def test_the_cli_box_check_exits_nonzero_on_a_refusal():
     ok = loop_py("box", "--processes", "4", "--committed-gb", "4",
                  "--add-gb", "4")
@@ -297,7 +276,7 @@ def test_the_cli_dispatch_prints_the_picks_and_what_holds_the_rest():
         with open(live, "w") as fh:
             json.dump(parked_455(), fh)
         got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
-                      "--free", "2")
+                      "--free", "2", "--processes", "6", "--committed-gb", "4")
         assert got.returncode == 0, got.stderr
         assert "dispatch  #501" in got.stdout, got.stdout
         assert "held      #452" in got.stdout, got.stdout
@@ -315,6 +294,126 @@ def test_the_cli_hub_says_whether_a_landing_moved_the_queues_closures():
         quiet = loop_py("hub", "--candidates", cand, "--landed", "tests/all.sh")
         assert quiet.returncode == 0, quiet.stderr
         assert "no hub" in quiet.stdout, quiet.stdout
+
+
+def test_the_exclusion_reads_the_closure_and_not_the_named_files():
+    # `closure.py` in closure mode emits both keys, and the closure is the
+    # wider one: a candidate whose *named* files miss the live workspace
+    # entirely still collides through the file that includes them. Reading
+    # `files` here would under-detect exactly the collision the rule exists
+    # to stop.
+    candidates = [{"tickets": [452], "files": ["examples/thermo.js"],
+                   "closure": ["examples/thermo.js", HOT]}]
+    live = [{"tickets": [455], "workspace": "/w/implement-455",
+             "agent": "burn-455", "files": ["examples/renban.js"],
+             "closure": ["examples/renban.js", HOT]}]
+    assert loop.refill(candidates, live, 1) == []
+
+
+def test_refill_takes_nothing_for_a_free_count_below_zero():
+    # A miscounted budget reads as a negative free count, and "fill every
+    # free slot" must not read that as "fill them all".
+    assert loop.refill(candidates_781(), [], -1) == []
+
+
+def test_a_clump_with_no_files_is_refused_whatever_is_in_flight():
+    # A closure that failed to resolve is not an empty closure. Refused with
+    # nothing in flight too, where there is no live workspace to compare it
+    # against and the refusal would otherwise never fire.
+    fileless = [{"tickets": [452]}]
+    for in_flight in ([], parked_455()):
+        try:
+            loop.refill(fileless, in_flight, 1)
+        except loop.LoopError as exc:
+            assert "#452" in str(exc) and "files" in str(exc), exc
+        else:
+            raise AssertionError("a clump with no files must be refused")
+
+
+def test_a_malformed_clump_file_is_one_line_and_not_a_traceback():
+    with tempfile.TemporaryDirectory() as tmp:
+        bad = os.path.join(tmp, "candidates.json")
+        for content in ('[{"closure": ["a"]}]', '[[452]]',
+                        '{"tickets": [452]}', 'not json at all',
+                        '[{"tickets": ["452"], "closure": ["a"]}]'):
+            with open(bad, "w") as fh:
+                fh.write(content)
+            got = loop_py("dispatch", "--candidates", bad, "--free", "1",
+                          "--processes", "2", "--committed-gb", "0")
+            assert got.returncode == 1, (content, got)
+            assert "Traceback" not in got.stderr, (content, got.stderr)
+            assert got.stderr.startswith("loop.py: "), (content, got.stderr)
+            assert len(got.stderr.strip().splitlines()) == 1, got.stderr
+
+
+def test_seat_names_the_remedy_when_origin_head_is_unset():
+    def run(args):
+        if args[0] == "symbolic-ref":
+            raise loop.LoopError("git symbolic-ref failed: not a symbolic ref")
+        return git_stub()(args)
+    try:
+        loop.seat(run)
+    except loop.LoopError as exc:
+        assert "git remote set-head origin -a" in str(exc), exc
+    else:
+        raise AssertionError("an unset origin/HEAD must be refused")
+
+
+def test_announce_names_the_workers_already_reached_when_a_send_fails():
+    # A retry that re-messages an announced worker breaks the one-message
+    # rule, so the refusal has to say who was already reached.
+    state = resume_state()
+    state["announce"] = [
+        {"tickets": [455], "workspace": "/w/455", "agent": "burn-455",
+         "landed": None},
+        {"tickets": [457], "workspace": "/w/457", "agent": "burn-457",
+         "landed": None},
+    ]
+
+    def send(agent, message):
+        if agent == "burn-457":
+            raise RuntimeError("no such peer")
+
+    try:
+        loop.announce(state, send)
+    except loop.LoopError as exc:
+        assert "burn-457" in str(exc), exc
+        assert "burn-455" in str(exc), exc
+    else:
+        raise AssertionError("a failed send must refuse")
+
+
+def test_the_cli_dispatch_refuses_when_the_box_has_no_room():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        with open(cand, "w") as fh:
+            json.dump(candidates_781(), fh)
+        got = loop_py("dispatch", "--candidates", cand, "--free", "1",
+                      "--processes", "40", "--committed-gb", "0")
+        assert got.returncode == 1, got
+        assert "dispatch" not in got.stdout, got.stdout
+        assert "cap is 28" in got.stderr, got.stderr
+
+
+def test_the_cli_refuses_a_seat_in_a_worktree_it_makes_itself():
+    # Deterministic, unlike reading whichever seat the suite happens to run
+    # in: a repo with a linked worktree, built here, refused there.
+    with tempfile.TemporaryDirectory() as tmp:
+        primary = os.path.join(tmp, "primary")
+        linked = os.path.join(tmp, "linked")
+        git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t"]
+        subprocess.run(["git", "init", "-q", primary], check=True, timeout=60)
+        open(os.path.join(primary, "f"), "w").close()
+        subprocess.run([*git, "-C", primary, "add", "f"], check=True, timeout=60)
+        subprocess.run([*git, "-C", primary, "commit", "-q", "-m", "one"],
+                       check=True, timeout=60)
+        subprocess.run(["git", "-C", primary, "worktree", "add", "-q", linked,
+                        "-b", "implement-1"], check=True, timeout=60)
+        got = loop_py("seat", cwd=linked)
+        assert got.returncode == 1, got
+        assert "worktree" in got.stderr and "worker" in got.stderr, got.stderr
+        subprocess.run(["git", "-C", primary, "worktree", "remove", "--force",
+                        linked], check=True, timeout=60)
 
 
 def main():

@@ -50,9 +50,11 @@ landing the frontier is recomputed and every free slot is filled from it.
 
 ## Closure freshness, and the hub landing
 
-At each dispatch the clump's own closure is re-resolved against current
-`main` — **one hop**, `closure.py`'s declared ceiling — and checked against
-every in-flight workspace. That is cheap and it is enough for the one
+At each dispatch the closures are re-resolved against current `main` —
+**one hop**, `closure.py`'s declared ceiling — the candidate's own and every
+in-flight clump's, since the run file stores a clump's tickets and workspace
+but no closure, and a closure stored at claim time is exactly what goes
+stale. The two are what `loop.py dispatch` reads as `--in-flight`. That is cheap and it is enough for the one
 question a dispatch asks: does *this* clump collide with anyone live?
 
 A **full** re-exploration is a different question, and it fires on one
@@ -91,12 +93,14 @@ frontier's own definition:
 ## The box check
 
 Two readings, `uptime` and `free -g`, before **every** dispatch, against the
-two caps in `~/.claude/CLAUDE.md`'s memory rules: at most 28 processes on the
-box counting every process on it, including the ones this run did not start,
-and the sum of the per-process `ulimit -v` caps under about 24 GB. Two WSL
-crashes forced PC restarts when the caps summed to 66 GB. `loop.box_check`
-returns every refusal, not the first, so a controller fixes one thing and is
-not refused twice.
+two caps `~/.claude/CLAUDE.md`'s memory rules set and `loop.box_check` holds
+as its constants — a process count over the shared box, and the sum of the
+per-process `ulimit -v` caps. The numbers live there, once. Two WSL crashes
+forced PC restarts when the caps summed to nearly three times the budget.
+`box_check` returns every refusal, not the first, so a controller fixes one
+thing and is not refused twice, and `loop.py dispatch` requires both readings
+rather than taking them as optional flags: an optional one is the step a
+controller forgets.
 
 Before every dispatch, not once at the start: the box is shared, and the
 process that puts it over the cap is as likely to be another agent's as this

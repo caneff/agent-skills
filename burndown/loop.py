@@ -52,8 +52,14 @@ def seat(run):
         raise LoopError(
             "detached HEAD — neither a controller's seat nor a worker's. "
             "Check out the default branch.")
-    default = run(
-        ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).strip()
+    try:
+        default = run(
+            ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).strip()
+    except LoopError as exc:
+        raise LoopError(
+            f"{exc} — this checkout has no recorded default branch, and the "
+            "loop will not assume `main`: record it with `git remote set-head "
+            "origin -a`") from None
     default = default.split("/", 1)[1] if "/" in default else default
     if branch != default:
         raise LoopError(
@@ -93,9 +99,14 @@ def frontier(candidates, in_flight):
     """
     dispatchable, held = [], []
     for clump in sorted(candidates, key=key_of):
+        # Read before the inner loop, so a clump whose closure failed to
+        # resolve is refused with nothing in flight too — where there is no
+        # live workspace to compare it against and the refusal would
+        # otherwise never fire.
+        own = paths(clump)
         collisions = []
         for live in in_flight:
-            over = sorted(paths(clump) & paths(live))
+            over = sorted(own & paths(live))
             if over:
                 collisions.append({"clump": clump, "workspace": live["workspace"],
                                    "holder": key_of(live), "over": over})
@@ -106,21 +117,18 @@ def frontier(candidates, in_flight):
     return {"dispatchable": dispatchable, "held": held}
 
 
-def refill(candidates, in_flight, free):
-    """The clumps to dispatch into the free slots, lowest ticket first — every
-    free slot at once, not one wave's worth.
+def picks(state, free):
+    """The clumps to dispatch, taken from a frontier already read — lowest
+    ticket first, every free slot at once.
 
-    Recomputed at each landing and never held for another clump: a wave holds
-    slots empty waiting for its slowest member. The consequence, stated out
-    loud because it looks like a bug from outside: a run drains **out of
-    ticket order**, and on a repo with one hot shared file a single parked
-    worker can hold a whole family of tickets off the frontier until it
-    lands.
+    Split from `refill` so a caller that also reports what is holding the
+    rest reads the frontier once: two reads of one question can disagree
+    while a worker lands between them.
     """
     if free <= 0:
         return []
     picked = []
-    for clump in frontier(candidates, in_flight)["dispatchable"]:
+    for clump in state["dispatchable"]:
         if len(picked) == free:
             break
         # A clump picked a moment ago is in flight by the time the next one
@@ -131,6 +139,17 @@ def refill(candidates, in_flight, free):
             continue
         picked.append(clump)
     return picked
+
+
+def refill(candidates, in_flight, free):
+    """The clumps to dispatch into the free slots, lowest ticket first — every
+    free slot at once, not one wave's worth.
+
+    Recomputed at each landing and never held for another clump. Why no
+    waves, and the two consequences a controller has to state out loud:
+    `references/loop.md`.
+    """
+    return picks(frontier(candidates, in_flight), free)
 
 
 def hubs(clumps):
@@ -155,24 +174,20 @@ def hub_landing(landed_files, hub_files):
     for a **full** re-exploration.
 
     Every other landing gets the one-hop re-resolution of the next clump's
-    own closure instead. Re-exploring the whole queue after every landing
-    spends the exploration budget several times over for an answer that has
-    not changed; skipping it after a hub landing dispatches against closures
-    that have.
+    own closure instead. Why one trigger and not a schedule:
+    `references/loop.md`.
     """
     return bool(set(landed_files) & set(hub_files))
 
 
-# The box's two rules (`~/.claude/CLAUDE.md`'s memory rules): at most 28
-# processes on the shared WSL box counting every process on it, and the sum of
-# the per-process `ulimit -v` caps under about 24 GB. Two WSL crashes forced PC
-# restarts when the caps summed to 66 GB.
+# The box's two caps, from `~/.claude/CLAUDE.md`'s memory rules, which is
+# their source: this is the one place in the repo that holds the numbers, and
+# the prose says what `loop.py box` enforces rather than restating them.
 PROCESS_CAP = 28
 VM_BUDGET_GB = 24
 
 
-def box_check(processes, committed_gb, add_gb=0,
-              cap=PROCESS_CAP, budget_gb=VM_BUDGET_GB):
+def box_check(processes, committed_gb, add_gb=0):
     """Whether the box has room for one more worker, and every reason it does
     not.
 
@@ -182,14 +197,14 @@ def box_check(processes, committed_gb, add_gb=0,
     fits this run's own count can still be the 29th process on the machine.
     """
     refusals = []
-    if processes + 1 > cap:
+    if processes + 1 > PROCESS_CAP:
         refusals.append(
-            f"{processes} processes on the box already, and the cap is {cap} "
-            "counting every process on it, not this run's")
-    if committed_gb + add_gb > budget_gb:
+            f"{processes} processes on the box already, and the cap is "
+            f"{PROCESS_CAP} counting every process on it, not this run's")
+    if committed_gb + add_gb > VM_BUDGET_GB:
         refusals.append(
             f"{committed_gb} GB of ulimit -v caps committed plus {add_gb} GB "
-            f"for this worker is over the ~{budget_gb} GB budget")
+            f"for this worker is over the ~{VM_BUDGET_GB} GB budget")
     return {"ok": not refusals, "refusals": refusals}
 
 
@@ -218,9 +233,11 @@ def announce(state, send):
         try:
             send(entry["agent"], message)
         except Exception as exc:
+            reached = ", ".join(sent) or "none"
             raise LoopError(
-                f"could not re-announce to {entry['agent']} "
-                f"({tickets}): {exc}") from exc
+                f"could not re-announce to {entry['agent']} ({tickets}): "
+                f"{exc} — already reached: {reached}, so a retry covers the "
+                "rest and not these") from exc
         sent.append(entry["agent"])
     return sent
 
@@ -251,7 +268,13 @@ def admit(candidates, clump, stuck_on=None):
 
 def read_clumps(path):
     """A clump list from a JSON file — `closure.py`'s own `clumps` entries,
-    each with the `workspace` an in-flight one sits in."""
+    each with the `workspace` an in-flight one sits in.
+
+    Validated field by field, as `runfile.py` validates its own state: a
+    hand-built or half-written file is the normal case here, and it reaches
+    this reader while a controller is recovering, which needs the reason and
+    not a stack.
+    """
     try:
         with open(path) as fh:
             clumps = json.load(fh)
@@ -259,6 +282,16 @@ def read_clumps(path):
         raise LoopError(f"could not read {path}: {exc}") from exc
     if not isinstance(clumps, list):
         raise LoopError(f"{path} is not a list of clumps")
+    for entry in clumps:
+        if not isinstance(entry, dict):
+            raise LoopError(f"{path} holds something that is not a clump: "
+                            f"{entry!r}")
+        tickets = entry.get("tickets")
+        if not isinstance(tickets, list) or not tickets or not all(
+                isinstance(n, int) and not isinstance(n, bool) and n > 0
+                for n in tickets):
+            raise LoopError(f"{path}: not a clump's ticket list: {tickets!r}")
+        paths(entry)
     return clumps
 
 
@@ -288,6 +321,11 @@ def main(argv):
     dispatch.add_argument("--candidates", required=True)
     dispatch.add_argument("--in-flight")
     dispatch.add_argument("--free", type=int, required=True)
+    # Required, not optional: the box check runs before *every* dispatch, and
+    # an optional flag is the step a controller forgets.
+    dispatch.add_argument("--processes", type=int, required=True)
+    dispatch.add_argument("--committed-gb", type=float, required=True)
+    dispatch.add_argument("--add-gb", type=float, default=0)
     hub = subs.add_parser(
         "hub", help="whether a landing asks for full re-exploration")
     hub.add_argument("--candidates", required=True)
@@ -307,8 +345,14 @@ def main(argv):
         elif args.command == "dispatch":
             candidates = read_clumps(args.candidates)
             in_flight = read_clumps(args.in_flight) if args.in_flight else []
-            picked = refill(candidates, in_flight, args.free)
-            print(render_dispatch(picked, frontier(candidates, in_flight)))
+            verdict = box_check(args.processes, args.committed_gb,
+                                args.add_gb)
+            if not verdict["ok"]:
+                for refusal in verdict["refusals"]:
+                    print(f"loop.py: {refusal}", file=sys.stderr)
+                return 1
+            state = frontier(candidates, in_flight)
+            print(render_dispatch(picks(state, args.free), state))
         elif args.command == "hub":
             landed = [p for p in args.landed.replace(",", " ").split() if p]
             hub_files = hubs(read_clumps(args.candidates))

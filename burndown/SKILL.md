@@ -59,31 +59,34 @@ too.
 4. **Recompute the frontier at each landing** and dispatch into every free
    slot. Refill is **continuous**: no waves, because a wave holds slots
    empty waiting for its slowest clump.
-5. **At each dispatch, re-resolve that clump's closure** against current
-   `main` — **one hop** — and check it against every **in-flight** workspace.
-   A clump whose closure intersects a live workspace's is **off the
-   frontier**: `loop.py dispatch` picks from what is left and names what
-   holds the rest. Two consequences, stated because neither is visible from
-   the frontier's own definition — a run drains **out of ticket order**, and
-   on a repo with one hot shared file a single parked worker can hold a
-   **whole family** of tickets off the frontier until it lands. A controller
-   reading only "open, unblocked, unclaimed" would dispatch into the
-   collision.
+5. **At each dispatch, re-resolve the closures** — the clump's own and
+   every **in-flight** clump's, through `closure.py` against current `main`,
+   **one hop**; an in-flight clump's tickets and workspace come from the run
+   file, its closure from that re-resolution, and the two together are
+   `loop.py dispatch`'s `--in-flight`. A clump whose closure intersects a
+   live workspace's is **off the frontier**: `loop.py dispatch` picks from
+   what is left and names what holds the rest. Two consequences, because
+   neither is visible from the frontier's own definition — a run drains
+   **out of ticket order**, and one parked worker can hold a **whole family**
+   off the frontier until it lands. A controller reading only "open,
+   unblocked, unclaimed" would dispatch into the collision.
 6. **Full re-exploration fires on one trigger**: a landing whose diff touched
    a **hub** — a file two or more candidates' closures share
-   (`loop.py hub`). Every other landing gets step 5's one-hop re-resolution
-   and nothing more.
-7. **Box check before every dispatch** — `uptime` and `free -g` against the
-   **28**-process cap, counting every process on the shared box rather than
-   this run's, and the ~**24 GB** ceiling on the sum of the per-process
-   `ulimit -v` caps (`loop.py box`). A refusal holds the slot empty; it is
-   not a reason to dispatch anyway.
+   (`loop.py hub`). Every other landing gets step 5 and nothing more.
+7. **Box check before every dispatch** — read `uptime` and `free -g`, and
+   pass both readings to `loop.py dispatch`, which refuses rather than
+   picking when the box is out of room: the **28**-process cap counts every
+   process on the shared box, not this run's, and the ~**24 GB** ceiling is
+   on the sum of the per-process `ulimit -v` caps. A refusal holds the slot
+   empty; it is not a reason to dispatch anyway.
 8. Dispatch and merge through
    [`implement`](~/.agents/skills/implement/SKILL.md) § Dispatch, which
    claims the clump and starts the worker; `implement/SKILL.md` § The merge,
    which merges and cleans up, is the controller's own step there. The loop
-   restates neither grammar. Record each landing with `runfile.py land`, so a
-   restart can pick the run back up.
+   restates neither grammar. Register each dispatched clump with
+   `runfile.py clump` — its workspace and its worker's herdr agent name, or
+   step 1's resume has nothing to re-announce to — and each landing with
+   `runfile.py land`, so a restart can pick the run back up.
 
 ## The frontier
 

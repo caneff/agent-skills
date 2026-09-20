@@ -91,6 +91,12 @@ check_in "$loop_text" 'silence' 'burndown/SKILL.md § The loop'
 check_in "$loop_text" 'one message' 'burndown/SKILL.md § The loop'
 check_in "$loop_text" 'send time' 'burndown/SKILL.md § The loop'
 
+# Rule 8b: the loop writes what resume reads back — a dispatched clump's
+# workspace and agent — and re-resolves closures through the clumper. Without
+# either, step 1's announce bucket is empty and step 5 checks stale closures.
+check_in "$loop_text" 'runfile.py clump' 'burndown/SKILL.md § The loop'
+check_in "$loop_text" 'closure.py' 'burndown/SKILL.md § The loop'
+
 # Rule 9: the reader is reachable, and so is the reference that holds the why.
 check_in "$loop_text" 'burndown/loop.py' 'burndown/SKILL.md § The loop'
 check_in "$loop_text" 'references/loop.md' 'burndown/SKILL.md § The loop'
