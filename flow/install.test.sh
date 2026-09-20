@@ -17,18 +17,25 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY G
 # from-scratch, possibly offline, rebuild of every dependency.
 export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
 
-# A scratch repo holding only what install.sh links, plus a stale pre-push hook
-# left by an earlier install.
+# Every case installs from its own scratch repo: a copy of flow/ plus the
+# tests/all.sh install.sh's pre-push cleanup looks for, git-init'd with no
+# commits, and a no-op backup-sync.sh (--restore writes to absolute live paths,
+# the Windows VS Code settings, not $HOME, so the real one is not a no-op).
+scratch_repo() { # scratch_repo <dir>
+  local dir="$1"
+  mkdir -p "$dir/tests"
+  cp -r "$root/flow" "$dir/flow"
+  rm -rf "$dir/flow/lane/target" # a build cache, not part of the source
+  cp "$root/tests/all.sh" "$dir/tests/all.sh"
+  git -C "$dir" init -q
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/flow/backup-sync.sh"
+}
+
+# The first case's repo also carries a stale pre-push hook left by an earlier
+# install.
 repo="$tmp/repo"
-mkdir -p "$repo/tests"
-cp -r "$root/flow" "$repo/flow"
-rm -rf "$repo/flow/lane/target" # a build cache, not part of the source
-cp "$root/tests/all.sh" "$repo/tests/all.sh"
-git -C "$repo" init -q
+scratch_repo "$repo"
 ln -s "$repo/flow/../tests/all.sh" "$repo/.git/hooks/pre-push"
-# backup-sync.sh --restore writes to absolute live paths (the Windows VS Code
-# settings), not $HOME, so the scratch copy is a no-op.
-printf '#!/usr/bin/env bash\nexit 0\n' > "$repo/flow/backup-sync.sh"
 
 # An earlier install linked merge-cleanup to the bash script this repo no
 # longer has; the install must replace that dangling link with the binary.
@@ -119,13 +126,8 @@ fi
 # An empty claude/agents dir leaves the literal glob; without the guard `link`
 # fails it and set -e aborts the install before backup-sync.sh runs.
 empty="$tmp/empty"
-mkdir -p "$empty/tests"
-cp -r "$root/flow" "$empty/flow"
-rm -rf "$empty/flow/lane/target"
-cp "$root/tests/all.sh" "$empty/tests/all.sh"
-git -C "$empty" init -q
+scratch_repo "$empty"
 rm -f "$empty/flow/claude/agents"/*.md
-printf '#!/usr/bin/env bash\nexit 0\n' > "$empty/flow/backup-sync.sh"
 if HOME="$empty/home" bash "$empty/flow/install.sh" >/dev/null 2>&1 \
    && [ -L "$empty/home/.claude/hooks/refresh-landed.sh" ]; then
   echo "PASS an empty claude/agents dir does not abort the install"
@@ -136,31 +138,43 @@ fi
 # The other half of the record: when HEAD does resolve, the install writes that
 # sha, so merge-cleanup has a baseline to diff flow/lane against.
 recorded="$tmp/recorded"
-mkdir -p "$recorded/tests"
-cp -r "$root/flow" "$recorded/flow"
-rm -rf "$recorded/flow/lane/target"
-cp "$root/tests/all.sh" "$recorded/tests/all.sh"
-git -C "$recorded" init -q
-printf '#!/usr/bin/env bash\nexit 0\n' > "$recorded/flow/backup-sync.sh"
+scratch_repo "$recorded"
 git -C "$recorded" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m base
 head_sha=$(git -C "$recorded" rev-parse HEAD)
-if HOME="$recorded/home" bash "$recorded/flow/install.sh" >/dev/null 2>&1 \
-   && [ "$(cat "$recorded/home/.local/state/lane/build-sha" 2>/dev/null)" = "$head_sha" ]; then
+out=$(HOME="$recorded/home" bash "$recorded/flow/install.sh" 2>&1); rc=$?
+got=$(cat "$recorded/home/.local/state/lane/build-sha" 2>/dev/null)
+if [ "$rc" -ne 0 ]; then
+  echo "FAIL install.sh exited non-zero for a repo with a commit (rc=$rc): $out"; fails=1
+elif [ "$got" = "$head_sha" ]; then
   echo "PASS the build sha is recorded when HEAD resolves"
 else
-  echo "FAIL the build sha was not recorded for a repo with a commit"; fails=1
+  echo "FAIL build sha recorded as '$got', want '$head_sha'"; fails=1
 fi
+
+# The record is bookkeeping, so nothing in it may abort a completed install —
+# not the write, and not the mkdir that precedes it. A fresh HOME whose
+# ~/.local/state cannot be written stands in for a read-only or root-owned
+# state dir, or a full disk: the record's own mkdir is what fails there.
+ro_home="$tmp/ro-home"
+mkdir -p "$ro_home/.local/state"
+chmod 500 "$ro_home/.local/state"
+if [ -w "$ro_home/.local/state" ]; then
+  echo "SKIP unwritable state dir (running as root?)"
+else
+  out=$(HOME="$ro_home" bash "$recorded/flow/install.sh" 2>&1); rc=$?
+  if [ "$rc" -eq 0 ] && [ -L "$ro_home/.claude/hooks/refresh-landed.sh" ]; then
+    echo "PASS an unwritable state dir does not fail the install"
+  else
+    echo "FAIL an unwritable state dir failed the install (rc=$rc): $out"; fails=1
+  fi
+fi
+chmod 700 "$ro_home/.local/state"
 
 # A failing lane-install.sh (a missing cargo, a compile error) runs last and
 # must not half-install everything else — it was never a gate on the rest of
 # install.sh before #748, and still is not.
 broken="$tmp/broken"
-mkdir -p "$broken/tests"
-cp -r "$root/flow" "$broken/flow"
-rm -rf "$broken/flow/lane/target"
-cp "$root/tests/all.sh" "$broken/tests/all.sh"
-git -C "$broken" init -q
-printf '#!/usr/bin/env bash\nexit 0\n' > "$broken/flow/backup-sync.sh"
+scratch_repo "$broken"
 printf '#!/usr/bin/env bash\necho "lane-install: boom" >&2\nexit 1\n' > "$broken/flow/lane-install.sh"
 out=$(HOME="$tmp/broken-home" bash "$broken/flow/install.sh" 2>&1); rc=$?
 if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "boom" \
