@@ -89,7 +89,9 @@ session does.
 `tag` accumulates into the caller's own list, and `render(written)` is the
 line the run's opening report carries — one line per
 ticket, with the labels that went onto it — and a pass that wrote none says
-`labels written: none` in words. A report silent about labels reads the same
+`labels written: none` in words. A `--dry-run` reports the same decisions
+under `would write:`, because a preview that claims a write is worse than no
+preview: the line is the run's record of what the tracker now carries. A report silent about labels reads the same
 as a report from a pass that never ran, and the difference between those two
 is a ticket dispatched at the wrong tier.
 

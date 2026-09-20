@@ -116,14 +116,20 @@ def tag(repo, candidates, run=None, write=True, written=None):
     return written
 
 
-def render(written):
+def render(written, write=True):
     """The lines the run's opening report carries: every label this pass
     wrote, against the ticket it went on. A pass that wrote none says so in
     words — a report silent about labels reads the same as one from a pass
-    that never ran."""
+    that never ran.
+
+    A dry run reports the same decisions under `would write:`. A preview that
+    claims a write is worse than no preview at all: this line is the run's
+    record of what the tracker now carries, and a controller reading `labels
+    written:` after a dry run would take the tier as already fixed."""
+    heading = "labels written" if write else "would write"
     if not written:
-        return "labels written: none"
-    lines = ["labels written:"]
+        return f"{heading}: none"
+    lines = [f"{heading}:"]
     lines.extend(f"    #{w['number']}  {', '.join(w['labels'])}" for w in written)
     return "\n".join(lines)
 
@@ -171,10 +177,10 @@ def main(argv, run=None):
     except (TierError, ClosureError) as exc:
         # The partial report first: whatever is already on the tracker is
         # what the next dispatch will read, failure or not.
-        print(render(written))
+        print(render(written, write=not dry_run))
         print(f"tier.py: {exc}", file=sys.stderr)
         return 1
-    print(render(written))
+    print(render(written, write=not dry_run))
     return 0
 
 

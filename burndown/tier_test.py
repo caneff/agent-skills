@@ -90,7 +90,7 @@ class FakeGh:
 
     def __call__(self, args):
         self.calls.append(list(args))
-        return ""
+        return json.dumps({"labels": []}) if args[1] == "view" else ""
 
 
 def test_the_pass_writes_the_missing_label_and_only_that():
@@ -131,6 +131,23 @@ def test_the_report_names_every_label_written():
                        {"number": 372, "labels": ["documentation"]}])
     assert "#371" in report and "#372" in report
     assert report.count("documentation") == 2, report
+
+
+def test_a_dry_run_says_would_write_rather_than_written():
+    """A preview that reports a write is worse than no preview: the line is
+    the run's record of what the tracker now carries, and a controller
+    reading `labels written:` after a dry run would believe the tier was
+    already fixed."""
+    gh = FakeGh()
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = T.main(["tier.py", "caneff/agent-skills", "371=a.md", "--dry-run"],
+                      run=gh)
+    assert code == 0, code
+    assert "would write:" in out.getvalue(), out.getvalue()
+    assert "labels written" not in out.getvalue(), out.getvalue()
+    assert gh.calls == [["issue", "view", "371", "--repo", "caneff/agent-skills",
+                         "--json", "labels"]], gh.calls
 
 
 def test_the_report_says_so_when_it_wrote_nothing():
