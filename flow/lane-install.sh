@@ -26,6 +26,18 @@ done
 
 cargo install --path "$crate" --root "$HOME/.local" --force "${names[@]}"
 
+# The record is bookkeeping, not part of the install: the binaries are already
+# in place by here, so an unresolvable HEAD (a checkout with no commits, a
+# detached tree) must not fail the whole install (#883). `git rev-parse HEAD`
+# also echoes the literal "HEAD" on stdout when it fails, so the sha is taken
+# into a variable and only written once git succeeded — a redirect straight to
+# the file records that "HEAD" as the baseline. With no record, merge-cleanup
+# rebuilds rather than trusting a stale one, so removing it is the safe miss.
 state_dir="$HOME/.local/state/lane"
 mkdir -p "$state_dir"
-git -C "$here/.." rev-parse HEAD > "$state_dir/build-sha"
+if build_sha=$(git -C "$here/.." rev-parse HEAD 2>/dev/null); then
+  printf '%s\n' "$build_sha" > "$state_dir/build-sha"
+else
+  rm -f "$state_dir/build-sha"
+  echo "flow/lane-install.sh: cannot resolve HEAD; no build sha recorded" >&2
+fi

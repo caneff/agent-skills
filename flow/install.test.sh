@@ -35,8 +35,23 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$repo/flow/backup-sync.sh"
 mkdir -p "$tmp/home/.local/bin"
 ln -s "$repo/flow/bin/merge-cleanup" "$tmp/home/.local/bin/merge-cleanup"
 
+# lane-install.sh records the sha it built from at ~/.local/state/lane/build-sha,
+# and merge-cleanup reads it as the baseline for "has flow/lane changed since the
+# installed binaries were built". This scratch repo has no commits, so HEAD does
+# not resolve: the install must still succeed, and must leave no record rather
+# than a stale sha or the literal "HEAD" that `git rev-parse` echoes on failure.
+sha_file="$tmp/home/.local/state/lane/build-sha"
+mkdir -p "$(dirname "$sha_file")"
+printf '%s\n' deadbeef > "$sha_file"
+
 fails=0
 out=$(HOME="$tmp/home" bash "$repo/flow/install.sh" 2>&1) || { echo "FAIL install.sh exited non-zero"; printf '%s\n' "$out"; fails=1; }
+
+if [ ! -e "$sha_file" ]; then
+  echo "PASS an unresolvable HEAD clears the build-sha record instead of recording a bad one"
+else
+  echo "FAIL build-sha left behind for an unresolvable HEAD: $(cat "$sha_file")"; fails=1
+fi
 
 if [ -e "$repo/.git/hooks/pre-push" ] || [ -L "$repo/.git/hooks/pre-push" ]; then
   echo "FAIL .git/hooks/pre-push still present after install"; fails=1
@@ -116,6 +131,24 @@ if HOME="$empty/home" bash "$empty/flow/install.sh" >/dev/null 2>&1 \
   echo "PASS an empty claude/agents dir does not abort the install"
 else
   echo "FAIL an empty claude/agents dir aborted the install"; fails=1
+fi
+
+# The other half of the record: when HEAD does resolve, the install writes that
+# sha, so merge-cleanup has a baseline to diff flow/lane against.
+recorded="$tmp/recorded"
+mkdir -p "$recorded/tests"
+cp -r "$root/flow" "$recorded/flow"
+rm -rf "$recorded/flow/lane/target"
+cp "$root/tests/all.sh" "$recorded/tests/all.sh"
+git -C "$recorded" init -q
+printf '#!/usr/bin/env bash\nexit 0\n' > "$recorded/flow/backup-sync.sh"
+git -C "$recorded" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m base
+head_sha=$(git -C "$recorded" rev-parse HEAD)
+if HOME="$recorded/home" bash "$recorded/flow/install.sh" >/dev/null 2>&1 \
+   && [ "$(cat "$recorded/home/.local/state/lane/build-sha" 2>/dev/null)" = "$head_sha" ]; then
+  echo "PASS the build sha is recorded when HEAD resolves"
+else
+  echo "FAIL the build sha was not recorded for a repo with a commit"; fails=1
 fi
 
 # A failing lane-install.sh (a missing cargo, a compile error) runs last and
