@@ -40,15 +40,19 @@ FLOOR=200
 fail=0
 note() { echo "FAIL: $*" >&2; fail=1; }
 
-# Each marker is a POSIX ERE plus the human name the failure reports. The
-# contract every one of them meets, and the reason the frontmatter key
-# `disable-model-invocation: true` is NOT on this list: a parked marker is a
-# string that appears in the parked files and in no live skill. That key sits
-# in 53 of this repo's 79 SKILL.md files, `implement/SKILL.md` among them, so
-# it marks "not auto-invocable", never "parked" — and it predates the parking
-# commit 207fee4 (#752) in both lane skills. A marker added here without that
-# property turns this check red across half the tree, which is why the
-# zero-match assertion below reports the files it found rather than a count.
+# Each marker is a POSIX ERE plus the human name the failure reports. What
+# counts as parked state, and the property anything detecting it must have —
+# it matches exactly the parked files and no live skill — is `AGENTS.md`
+# § Skill frontmatter, which is also why `disable-model-invocation: true` is
+# not on this list.
+#
+# The first two are the canonical marks that section names. The other six are
+# the stale pointers the parking commit 207fee4 (#752) left scattered through
+# the lane's prose: each said the lane was not yet live, and each would keep
+# saying it after the two marks came off. A marker added here without the
+# property fails this check across half the tree, which is why every failure
+# below prints the files it matched rather than a count — a marker that is
+# wrong and a tree that is parked must not read the same.
 markers=(
   'frontmatter description|^description: "Parked'
   'parked banner|^> \*\*Parked\*\*'
