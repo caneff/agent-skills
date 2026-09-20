@@ -386,6 +386,71 @@ def test_an_answer_that_is_not_pages_of_issues_is_an_error():
             raise AssertionError(f"{answer!r} must not pass for a queue")
 
 
+# --- A long fence protects a fence -----------------------------------------
+
+# Four backticks are exactly what you reach for to quote content that itself
+# contains a triple-backtick fence — which is what a ticket quoting this
+# repo's own grammar doc does. One inner fence line, deliberately an odd
+# count: with an even count the heading lands back inside the fence and a
+# broken reader looks correct.
+LONG_FENCE = "\n".join([
+    "````",
+    "quoted template, showing a fence:",
+    "```",
+    "## Blocked by",
+    "",
+    "None — can start immediately",
+    "````",
+    "",
+])
+
+LONG_TILDE_FENCE = "\n".join([
+    "~~~~",
+    "quoted template, showing a fence:",
+    "~~~",
+    "## Blocked by",
+    "",
+    "None — can start immediately",
+    "~~~~",
+    "",
+])
+
+
+def test_a_shorter_fence_inside_a_longer_one_does_not_close_it():
+    got = read([issue(1, body=LONG_FENCE)])
+    assert numbers(got["unresolved"]) == [1], got
+
+
+def test_the_fence_length_rule_is_not_backtick_specific():
+    got = read([issue(1, body=LONG_TILDE_FENCE)])
+    assert numbers(got["unresolved"]) == [1], got
+
+
+def test_a_fence_closes_only_on_its_own_character():
+    # A `~~~` line inside a backtick fence is content. If it were read as a
+    # closer, everything after it — the whole quoted template — would come
+    # back as this ticket's own declaration.
+    body = "```\nquoted template:\n~~~\n\n## Blocked by\n\nNone.\n"
+    got = read([issue(1, body=body)])
+    assert numbers(got["unresolved"]) == [1], got
+
+
+def test_a_closing_fence_may_not_carry_an_info_string():
+    # CommonMark: an opener may be ```python, a closer may not. Reading one
+    # as a closer hands the rest of the quotation back as live document.
+    body = "```\nquoted example:\n```python\n\n## Blocked by\n\nNone.\n```\n"
+    got = read([issue(1, body=body)])
+    assert numbers(got["unresolved"]) == [1], got
+
+
+def test_a_longer_run_closes_a_shorter_fence():
+    # CommonMark: the closer must be at least as long as the opener, so a
+    # longer one still closes. The declaration after it is this ticket's.
+    body = "```\nquoted\n`````\n\n## Blocked by\n\n- #7\n"
+    got = read([issue(1, body=body)], states={7: "open"})
+    assert numbers(got["blocked"]) == [1], got
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

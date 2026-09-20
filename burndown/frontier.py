@@ -48,8 +48,13 @@ _NONE = re.compile(r"^[-*\s]*none\b", re.IGNORECASE)
 # `to-tickets/SKILL.md` ships a fenced issue template containing a
 # `## Blocked by` heading, and a ticket quoting the grammar carries one too;
 # reading either as this ticket's own answer dispatches a worker on an
-# example.
-_FENCE = re.compile(r"^[ \t]*(```|~~~)")
+# example. The whole run is captured, not three characters, because
+# CommonMark closes a fence only on the same character with a run at least
+# as long: a ```` fence is exactly what quotes content that itself contains
+# ```, and reading that inner line as the closer hands the rest of the
+# quotation back to the reader as live document.
+_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*$")
+_FENCE_OPEN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 
 CLAIMED_LABEL = "in-progress"
 
@@ -64,16 +69,18 @@ def unfenced(lines):
     """Every line outside a fenced code block, as `(index, line)`."""
     fence = None
     for i, line in enumerate(lines):
-        opener = _FENCE.match(line)
-        if opener:
-            marker = opener.group(1)
-            if fence is None:
-                fence = marker
-            elif marker == fence:
-                fence = None
-            continue
         if fence is None:
+            opener = _FENCE_OPEN.match(line)
+            if opener:
+                fence = opener.group(1)  # an opener may carry an info string
+                continue
             yield i, line
+            continue
+        closer = _FENCE.match(line)  # a closer may not, per CommonMark
+        if closer:
+            run = closer.group(1)
+            if run[0] == fence[0] and len(run) >= len(fence):
+                fence = None
 
 
 def blocked_by_section(body):

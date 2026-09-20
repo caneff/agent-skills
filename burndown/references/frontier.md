@@ -68,7 +68,10 @@ outside it is read as an edge.
   mid-sentence is not a declaration. Where a ticket carries both a section
   and an inline line, the section wins.
 - **A fenced region is quoted, never declared.** Anything between ``` or ~~~
-  fences is an example: `/to-tickets` ships a fenced issue template
+  fences is an example. A fence closes CommonMark's way — on the same
+  character, with a run at least as long as the opener, and nothing after it
+  on the line — so a ```` fence goes on protecting a ``` line inside it,
+  which is exactly how a ticket quotes this grammar: `/to-tickets` ships a fenced issue template
   containing a `## Blocked by` heading, and a ticket quoting this grammar
   carries one too. A ticket whose only `Blocked by` is inside a fence has
   stated nothing, so it is unresolved — reading the template's own
