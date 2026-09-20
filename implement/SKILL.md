@@ -401,40 +401,54 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
    No material findings → go to step 4. Findings → hold the merge: send the
    worker the findings and the comment URL. Note the head sha this pass ran
-   against — step 2's `headRefOid`, the sha the second pass is judged
-   against below. The worker disposes of each one
+   against — step 2's `headRefOid` — and beside it `sha256sum "$body_file"`,
+   taken before the `rm` above removes that file. Those two are what the
+   second pass is judged against below: the diff is only half this pass's
+   input, and a requirement commented onto the ticket between the two
+   passes moves the other half while the sha sits still.
+   The worker disposes of each one
    (fixed in a commit / `disputed: <why>` / filed), adds each disposition to
    the PR body's Decisions made section (`gh pr edit <pr> --repo
    <owner/name> --body-file <updated body>`), and sends "PR up" again.
    Re-run step 2 (not-draft, CLEAN — commits landed since the first check).
 
-   **The second pass runs only if the head sha moved.** Step 2's fresh
-   `headRefOid` differing from the sha noted above means a `fixed`
-   disposition pushed a commit, so there is a new diff to read.
-   If every disposition was `disputed` or `filed` and the sha is unmoved,
-   the input is byte-identical and a second run spends several minutes and a
-   token budget returning the findings you already hold. What makes that
-   safe is the merge-base, not the sha alone: this pass reads
-   `origin/<default>...HEAD`, and a fixed head pins the fork point, so
-   `<default>` gaining any number of commits leaves the diff unchanged. The
-   skip would stop being sound only for a review taken as a two-dot diff
-   against a moving base — which reads everyone else's merged work as
-   deletions, and is not what `--base origin/<default>` above asks for. It does not run:
-   the controller instead
-   confirms each disposition is recorded in the Decisions made section and
-   goes to step 4 — by way of the classification and trial row below, which
-   a skipped pass still owes, its counts being the first pass's.
-   A disposition that says `fixed` with the sha unmoved is neither case: the
-   commit it names is not on the PR, so nothing merges until the worker
-   pushes it — a push that moves the sha and runs the second pass after all.
-   (#888: twice in the #781 burn —
-   `sudokumaker-custom-constraints#559` at `203ac7a`, `agent-skills#877` at
-   `b96aa32` — the sha was unmoved and the mandated run would have re-read
-   an unchanged file.)
+   **The second pass runs only if the head sha moved or the ticket text
+   changed.** Step 2's fresh `headRefOid` differing from the sha noted above
+   means a `fixed` disposition pushed a commit, so there is a new diff to
+   read; a fresh render of the ticket hashing differently from the
+   `sha256sum` noted beside it means a comment added a requirement the first
+   pass never read. Either is a new input, and the pass runs.
 
-   When the sha did move, run this pass once more on the fixes — there is
-   no third Codex run,
-   so whatever this second run finds is final: post its output as a PR
+   If every disposition was `disputed` or `filed`, the sha is unmoved and
+   the ticket hash matches, both halves of the input are byte-identical and
+   a second run spends several minutes and a token budget returning the
+   findings you already hold. What makes the diff half safe is the
+   merge-base, not the sha alone: this pass reads `origin/<default>...HEAD`,
+   and a fixed head pins the fork point, so `<default>` gaining any number
+   of commits leaves the diff unchanged. The skip would stop being sound
+   only for a review taken as a two-dot diff against a moving base — which
+   reads everyone else's merged work as deletions, and is not what
+   `--base origin/<default>` above asks for.
+
+   It does not run. The controller instead confirms each disposition is
+   recorded in the Decisions made section and goes to step 4 — by way of
+   the classification and trial row below, which a skipped pass still owes,
+   its counts being the first pass's. A disposition that says `fixed` with
+   the sha unmoved is neither case: the commit it names is not on the PR, so
+   nothing merges until the worker pushes it — a push that moves the sha and
+   runs the second pass after all.
+
+   (#888: twice in the #781 burn — `sudokumaker-custom-constraints#559` at
+   `203ac7a`, `agent-skills#877` at `b96aa32` — the sha was unmoved and the
+   mandated run would have re-read an unchanged file. The ticket half has
+   its own incident: on 2026-09-20 every controller invocation of this pass
+   built its body file from the ticket body alone, no comments, against a
+   step that names both — a lane that treats a comment as a requirement,
+   #882, cannot skip on an input that ignores one.)
+
+   When either moved, run this pass once more on the fixes — there is no
+   third Codex run, so whatever this second run finds is final: post its
+   output as a PR
    comment the same way (a fresh `out_file`, since the first is already
    removed), then remove that file too once the comment posts, and either
    it has no material findings (go to step 4) or the controller itself
