@@ -17,6 +17,7 @@ closure empirically would cost one regeneration per candidate per wave.
 
 The grammar, the two modes and what each answers: `references/closure.md`.
 """
+import collections
 import os
 import posixpath
 import re
@@ -33,13 +34,19 @@ _CLOSURE_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+include closure[ \t]*:?[ \t]*
 # `- **Directive**: `#include <path>`` — the key in optional emphasis, the
 # value in optional backticks.
 _KEY = re.compile(r"^[ \t]*[-*+][ \t]*[*_]{0,2}([A-Za-z][A-Za-z -]*?)[*_]{0,2}[ \t]*:[ \t]*(.*?)[ \t]*$")
-# "None", however it is dressed — the stated way to say this repo has no
-# include graph at all. Silence is a different answer; see `declaration`.
-_NONE = re.compile(r"^[-*\s]*none\b", re.IGNORECASE)
+# "None", however it is dressed, as a *statement*: `None`, `- None`,
+# `None — nothing here is generated.` What follows it must end the clause, so
+# that `None of the docs are generated, but examples/ are` — a sentence
+# somebody will write in this section one day — is read as prose this grammar
+# cannot parse rather than as "this repo has no include graph", which would
+# clump every candidate alone and dispatch two workers into the same files.
+# Silence is a third answer again; see `declaration`.
+_NONE = re.compile(r"^[-*\s]*none[ \t]*([.,;:\u2014\u2013-]|$)", re.IGNORECASE)
 
 
 PATH_SLOT = "<path>"
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".claude"}
+MARKDOWN = {"md", "markdown"}
 MAX_BYTES = 1_000_000
 
 
@@ -48,23 +55,13 @@ class ClosureError(Exception):
     decides whether that is fatal or a fall back to conservative clumping."""
 
 
-class Declaration:
-    """What a repo's `AGENTS.md` says regenerates what.
-
-    `directive` is a template naming where a path sits in the repo's include
-    line — `#include <path>` — or `None` when the repo states it has no
-    include graph. `generator` is the command that regenerates, reported and
-    never run."""
-
-    def __init__(self, directive=None, generator=None, relative_to="file"):
-        self.directive = directive
-        self.generator = generator
-        self.relative_to = relative_to
-
-    def __repr__(self):
-        return (f"Declaration(directive={self.directive!r}, "
-                f"generator={self.generator!r}, "
-                f"relative_to={self.relative_to!r})")
+# What a repo's `AGENTS.md` says regenerates what. `directive` is a template
+# naming where a path sits in the repo's include line — `#include <path>` — or
+# `None` when the repo states it has no include graph at all. `generator` is
+# the command that regenerates, reported and never run.
+Declaration = collections.namedtuple(
+    "Declaration", "directive generator relative_to")
+Declaration.__new__.__defaults__ = (None, None, "file")
 
 
 def declaration_section(text):
@@ -132,12 +129,39 @@ def directive_pattern(directive):
     return re.compile(re.escape(head) + slot + re.escape(tail))
 
 
+def canonical(root, path):
+    """One repo-relative posix spelling for a candidate's file, whatever the
+    ticket or the command line wrote: `./a/x.js`, `a//x.js` and an absolute
+    path inside `root` all come back `a/x.js`.
+
+    Both modes compare paths, and two spellings of one file collide with
+    nobody — the silent under-clumping this whole reader exists to stop. A
+    path that leaves the repo is refused rather than guessed at."""
+    text = str(path).replace(os.sep, "/").strip()
+    if posixpath.isabs(text) or (len(text) > 1 and text[1] == ":"):
+        absolute = os.path.realpath(text)
+        inside = os.path.realpath(root)
+        rel = os.path.relpath(absolute, inside).replace(os.sep, "/")
+    else:
+        rel = posixpath.normpath(text)
+    if rel == ".." or rel.startswith("../"):
+        raise ClosureError(f"candidate file outside the repo: {path}")
+    return rel
+
+
 def repo_files(root):
-    """Every tracked-looking text file under `root`, as repo-relative posix
-    paths. `.git` and anything that does not read as text is skipped — a
-    generated binary holds no include directive."""
+    """Every file under `root` as a repo-relative posix path, minus the
+    directories in `SKIP_DIRS`. Text is not filtered here — `read_text` drops
+    what does not read as text, since that needs the bytes.
+
+    A directory that cannot be read raises rather than vanishing: a dropped
+    directory is a dropped includer, and a closure short of one file clumps
+    two workers apart that belong together."""
+    def refuse(error):
+        raise ClosureError(f"cannot read {getattr(error, 'filename', root)}: {error}")
+
     out = []
-    for dirpath, dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root, onerror=refuse):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         for name in sorted(filenames):
             full = os.path.join(dirpath, name)
@@ -160,6 +184,21 @@ def read_text(path):
     return raw.decode("utf-8", errors="ignore")
 
 
+def scanned_lines(rel, text):
+    """The lines of one file a directive may be read from.
+
+    In Markdown a fenced block is quotation by definition, so a doc that
+    *shows* the repo's include line — `references/closure.md` does, and so
+    will any doc explaining the grammar — must not register as an edge.
+    Everywhere else every line counts: a ``` line in source code means
+    nothing in particular, and treating it as a fence would hide the real
+    directives after it, which is the under-clumping direction."""
+    lines = text.splitlines()
+    if rel.rsplit(".", 1)[-1].lower() in MARKDOWN:
+        return [line for _, line in unfenced(lines)]
+    return lines
+
+
 def include_edges(root, decl):
     """`{included path: {files that include it}}` over the whole repo — one
     scan, whatever the queue's size. Resolving this per candidate is the
@@ -170,7 +209,7 @@ def include_edges(root, decl):
         text = read_text(os.path.join(root, rel))
         if text is None:
             continue
-        for line in text.splitlines():
+        for line in scanned_lines(rel, text):
             for match in pattern.finditer(line):
                 target = resolve_reference(rel, match.group(1).strip(),
                                            decl.relative_to)
@@ -184,10 +223,7 @@ def resolve_reference(includer, reference, relative_to):
     the default reads it against the including file's own directory, which
     is what `#include ../_shared/line-kind.js` means."""
     reference = reference.strip().strip("\"'")
-    if relative_to.startswith("root") or relative_to.endswith("root"):
-        base = ""
-    else:
-        base = posixpath.dirname(includer)
+    base = "" if "root" in relative_to else posixpath.dirname(includer)
     return posixpath.normpath(posixpath.join(base, reference))
 
 
@@ -210,7 +246,7 @@ def resolve_closure(root, files, decl=None, edges=None):
     decl = decl if decl is not None else declaration(root)
     if decl is None:
         raise ClosureError(f"{root}/AGENTS.md declares no include closure")
-    targets = {posixpath.normpath(f.replace(os.sep, "/")) for f in files}
+    targets = {canonical(root, f) for f in files}
     if not decl.directive:
         return targets
     edges = include_edges(root, decl) if edges is None else edges
@@ -235,21 +271,21 @@ ANNOUNCEMENTS = {
 }
 
 
-def announcement(decl):
-    """The line the run's opening report carries, in stated words, saying
-    which of the three modes this repo got."""
-    if decl is None:
-        return ANNOUNCEMENTS["subtree"]
-    if not decl.directive:
-        return ANNOUNCEMENTS["no-include-graph"]
-    return ANNOUNCEMENTS["closure"].format(
-        directive=decl.directive, generator=decl.generator or "none declared")
-
-
 def mode(decl):
+    """Which of the three answers this repo gave: a declared directive, a
+    stated `None`, or silence."""
     if decl is None:
         return "subtree"
     return "no-include-graph" if not decl.directive else "closure"
+
+
+def announcement(decl):
+    """The line the run's opening report carries, in stated words, saying
+    which of the three modes this repo got. One cascade, in `mode`: a fourth
+    state must not need editing in two places to be announced."""
+    return ANNOUNCEMENTS[mode(decl)].format(
+        directive=decl.directive if decl else None,
+        generator=(decl.generator if decl else None) or "none declared")
 
 
 def subtree_collides(left, right):
@@ -303,15 +339,12 @@ def clumps(root, candidates, decl=None):
     """
     decl = decl if decl is not None else declaration(root)
     how = mode(decl)
+    named = {c["number"]: {canonical(root, f) for f in c["files"]}
+             for c in candidates}
     closures = {}
     if how == "subtree":
-        for c in candidates:
-            # No closure is resolvable here; a clump reports the files its
-            # tickets named, which is all this mode ever knew.
-            closures[c["number"]] = {posixpath.normpath(f) for f in c["files"]}
-
         def collides(left, right):
-            return subtree_collides(left["files"], right["files"])
+            return subtree_collides(named[left["number"]], named[right["number"]])
     else:
         edges = include_edges(root, decl) if decl.directive else {}
         for c in candidates:
@@ -321,21 +354,29 @@ def clumps(root, candidates, decl=None):
             return bool(closures[left["number"]] & closures[right["number"]])
 
     groups = components(list(candidates), collides)
-    return {
-        "mode": how,
-        "announcement": announcement(decl),
-        "clumps": [{"tickets": g,
-                    "closure": sorted(set().union(*(closures[n] for n in g)))}
-                   for g in groups],
-    }
+    out = []
+    for g in groups:
+        clump = {"tickets": g,
+                 "files": sorted(set().union(*(named[n] for n in g)))}
+        if how != "subtree":
+            # Only where a closure was resolved. In subtree mode there is no
+            # closure, and a `closure` key holding the tickets' declared files
+            # would hand a consumer the declared seams this reader exists to
+            # stop trusting.
+            clump["closure"] = sorted(set().union(*(closures[n] for n in g)))
+        out.append(clump)
+    return {"mode": how, "announcement": announcement(decl), "clumps": out}
 
 
 def render(clumping):
     lines = [clumping["announcement"]]
     for clump in clumping["clumps"]:
         tickets = ", ".join(f"#{n}" for n in clump["tickets"])
-        lines.append(f"clump {tickets}  ({len(clump['closure'])} files)")
-        lines.extend(f"    {path}" for path in clump["closure"])
+        paths = clump.get("closure")
+        what = "closure" if paths is not None else "files named, no closure resolved"
+        paths = clump["files"] if paths is None else paths
+        lines.append(f"clump {tickets}  ({len(paths)} {what})")
+        lines.extend(f"    {path}" for path in paths)
     return "\n".join(lines)
 
 

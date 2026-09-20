@@ -270,6 +270,170 @@ def test_a_malformed_candidate_is_one_stderr_line_not_a_traceback():
     assert "Traceback" not in out.stderr, out.stderr
 
 
+# --- Two spellings of one file are one file (round 1: C1, C2) -------------
+
+def test_a_dot_slash_spelling_collides_the_same_as_a_bare_one():
+    # The conservative mode promises clumping too much, never too little, and
+    # `./a/one.js` is ordinary ticket-body and command-line spelling.
+    root = repo({"a/one.js": "x\n", "a/two.js": "x\n"}, agents=None)
+    got = C.clumps(root, [candidate(1, "./a/one.js"), candidate(2, "a/two.js")])
+    assert numbers(got) == [[1, 2]], got
+
+
+def test_an_absolute_candidate_path_is_the_file_it_names():
+    root = repo(SHARED)
+    got = C.clumps(root, [
+        candidate(451, os.path.join(root, "examples/_shared/line-kind.js")),
+        candidate(455, "examples/skyscraper/component.js")])
+    assert numbers(got) == [[451, 455]], got
+
+
+def test_a_candidate_file_outside_the_repo_is_refused_not_guessed_at():
+    root = repo(SHARED)
+    refused = None
+    try:
+        got = C.resolve_closure(root, ["../elsewhere/x.js"])
+    except C.ClosureError as exc:
+        refused, got = str(exc), None
+    assert refused is not None, got
+    assert "outside the repo" in refused, refused
+
+
+# --- What the scan reads, and what it refuses (round 1: C3, C5) -----------
+
+def test_a_fenced_directive_in_a_doc_is_an_example_not_an_edge():
+    # `references/closure.md` shows the repo's include line; so will any doc
+    # explaining the grammar. A quoted example must not join that doc to the
+    # snippet's closure.
+    root = repo({"_shared/line-kind.js": "x\n",
+                 "docs/guide.md": "example:\n\n```\n#include ../_shared/line-kind.js\n```\n"})
+    got = C.resolve_closure(root, ["_shared/line-kind.js"])
+    assert got == {"_shared/line-kind.js"}, got
+
+
+def test_a_triple_backtick_in_source_does_not_hide_the_directives_after_it():
+    # The other direction, and the expensive one: a ``` line in a source file
+    # means nothing in particular, and reading it as a fence would drop a real
+    # includer out of the closure.
+    root = repo({"_shared/line-kind.js": "x\n",
+                 "comp.js": "const doc = `\n```\n`;\n#include _shared/line-kind.js\n"})
+    got = C.resolve_closure(root, ["_shared/line-kind.js"])
+    assert "comp.js" in got, got
+
+
+def test_a_directory_that_cannot_be_read_is_refused_not_skipped():
+    root = repo(SHARED)
+    hidden = os.path.join(root, "examples/skyscraper")
+    os.chmod(hidden, 0o000)
+    try:
+        refused = None
+        try:
+            got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
+        except C.ClosureError as exc:
+            refused, got = str(exc), None
+        assert refused is not None, f"a dropped directory is a dropped includer: {got}"
+        assert "cannot read" in refused, refused
+    finally:
+        os.chmod(hidden, 0o755)
+
+
+def test_a_binary_file_is_not_scanned_for_directives():
+    root = repo({"_shared/line-kind.js": "x\n"})
+    with open(os.path.join(root, "build.bin"), "wb") as fh:
+        # The directive is spelled exactly as a text file would spell it,
+        # so the only thing keeping this file out of the closure is the
+        # binary skip itself.
+        fh.write(b"\x00\x01\n#include _shared/line-kind.js\n")
+    got = C.resolve_closure(root, ["_shared/line-kind.js"])
+    assert got == {"_shared/line-kind.js"}, got
+
+
+def test_a_skipped_directory_holds_no_edges():
+    root = repo({"_shared/line-kind.js": "x\n",
+                 "node_modules/dep/comp.js": "#include ../../_shared/line-kind.js\n"})
+    got = C.resolve_closure(root, ["_shared/line-kind.js"])
+    assert got == {"_shared/line-kind.js"}, got
+
+
+# --- The declaration's edges (round 1: C4, C7, C8, S4) --------------------
+
+def test_none_must_be_a_statement_not_the_first_word_of_prose():
+    # "None of the docs are generated, but examples/ are" declares nothing
+    # this grammar can read; reading it as a stated None clumps every
+    # candidate alone and puts two workers in the same files.
+    root = repo(SHARED,
+                agents="## Include closure\n\n"
+                       "None of the docs are generated, but examples/ are.\n")
+    got = C.clumps(root, [candidate(1, "docs/notes.md")])
+    assert got["mode"] == "subtree", got
+
+
+def test_repo_root_paths_are_read_from_the_root_not_the_includer():
+    # The two readings must disagree for this to witness anything, so the
+    # includer sits in a subdirectory: file-relative would look for
+    # `pages/parts/head.html`, which does not exist.
+    root = repo({"pages/index.html": '{% include "parts/head.html" %}\n',
+                 "parts/head.html": "<head>\n"},
+                agents='## Include closure\n\n'
+                       '- **Directive**: `{% include "<path>" %}`\n'
+                       '- **Paths**: repo-root\n'
+                       '- **Generator**: `make site`\n')
+    got = C.resolve_closure(root, ["parts/head.html"])
+    assert got == {"parts/head.html", "pages/index.html"}, got
+
+
+def test_a_directive_whose_literals_are_regex_metacharacters_is_matched_literally():
+    root = repo({"comp.js": "{{ include(shared/line-kind.js) }}\n",
+                 "shared/line-kind.js": "x\n"},
+                agents="## Include closure\n\n"
+                       "- **Directive**: `{{ include(<path>) }}`\n"
+                       "- **Paths**: repo-root\n"
+                       "- **Generator**: `make examples`\n")
+    got = C.resolve_closure(root, ["shared/line-kind.js"])
+    assert got == {"shared/line-kind.js", "comp.js"}, got
+
+
+def test_a_directive_with_no_path_slot_is_refused_by_name():
+    root = repo(SHARED, agents="## Include closure\n\n"
+                               "- **Directive**: `#include`\n"
+                               "- **Generator**: `make examples`\n")
+    refused = None
+    try:
+        got = C.clumps(root, [candidate(1, "docs/notes.md")])
+    except C.ClosureError as exc:
+        refused, got = str(exc), None
+    assert refused is not None, got
+    assert "<path>" in refused, refused
+
+
+def test_a_candidate_touching_a_root_file_collides_with_everything():
+    # Conservative means clumping too much: a change at the repo root is
+    # exactly the one nobody can bound without a declaration.
+    root = repo({"README.md": "x\n", "a/one.js": "x\n"}, agents=None)
+    got = C.clumps(root, [candidate(1, "README.md"), candidate(2, "a/one.js")])
+    assert numbers(got) == [[1, 2]], got
+
+
+# --- A subtree clump reports no closure (round 1: P3) ---------------------
+
+def test_a_subtree_clump_carries_no_closure_key():
+    # There is no closure in this mode, and a `closure` key holding the
+    # tickets' declared files would hand a consumer back the declared seams
+    # this reader exists to stop trusting.
+    root = repo({"a/one.js": "x\n"}, agents=None)
+    got = C.clumps(root, [candidate(1, "a/one.js")])
+    assert "closure" not in got["clumps"][0], got
+    assert got["clumps"][0]["files"] == ["a/one.js"], got
+
+
+def test_a_resolved_clump_carries_both_its_files_and_its_closure():
+    root = repo(SHARED)
+    got = C.clumps(root, [candidate(451, "examples/_shared/line-kind.js")])
+    clump = got["clumps"][0]
+    assert clump["files"] == ["examples/_shared/line-kind.js"], clump
+    assert "examples/thermo/component.js" in clump["closure"], clump
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

@@ -10,7 +10,7 @@ Six canonical roles, all mapped to their default label strings (`needs-triage`, 
 
 ### Include closure
 
-None — no file in this repo is generated from another, so a change closes over the files it edits and nothing else. Add a `**Directive**:` and a `**Generator**:` line to this section the day that stops being true: a run clumps its workers on what this section says, and a repo that says nothing gets clumped conservatively instead. The grammar: `burndown/references/closure.md`.
+None — no file in this repo is generated from another. Add a `**Directive**:` and a `**Generator**:` line here the day that stops being true. The grammar, and what a run does with it: `burndown/references/closure.md`.
 
 ### Domain docs
 

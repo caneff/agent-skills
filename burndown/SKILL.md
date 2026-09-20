@@ -38,8 +38,6 @@ clumped conservatively by directory subtree, and the run's **opening report
 carries the announcement line** the reader returns, so a controller can see
 which of the three modes it got. The grammar and the evidence:
 [`references/closure.md`](references/closure.md).
-Written against the lane being rebuilt; the loop that will call it is parked
-with the rest of this skill.
 
 A single spec's slices in one workspace are
 [`implement-spec`](~/.agents/skills/implement-spec/SKILL.md)'s job, not this

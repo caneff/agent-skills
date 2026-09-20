@@ -44,6 +44,12 @@ repo's convention.
   `repo-root`.
 - **Generator** is the command that regenerates. It is **reported, never
   run** — see § Never empirically.
+- **`None`** is the stated way to say this repo has no include graph at all:
+  the word, ending its clause — `None`, `None — nothing here is generated.`
+  A sentence that merely *starts* with it, like `None of the docs are
+  generated, but examples/ are`, states nothing this grammar can read, and is
+  read as silence rather than as "no include graph". Reading it the other way
+  clumps every candidate alone and puts two workers in the same files.
 - **A fenced region is quoted, never declared.** Anything between ``` or ~~~
   fences is an example, closing CommonMark's way; this is #890's rule and
   #890's code, imported rather than reimplemented. A doc that shows the
@@ -58,6 +64,10 @@ repo's convention.
 | states `None` | `no-include-graph` | the candidate's own files, and nothing else |
 | has no such section | `subtree` | not resolvable; clumping falls back to directory subtree |
 
+In `subtree` mode a clump carries **no closure at all** — only the files its
+tickets named. Handing a consumer those files under the name `closure` would
+hand back the declared seams this whole reader exists to stop trusting.
+
 The opening report carries the announcement line for whichever it got, in
 stated words:
 
@@ -71,6 +81,25 @@ somebody should close; `None` is the truth about that repo. A controller
 reading "conservative" has to know which one it is looking at, so the report
 never collapses them — the same rule #890 set for a ticket that states no
 blockers versus one that says nothing at all.
+
+## What the scan reads
+
+One scan of the repo answers for every candidate. In a Markdown file a fenced
+block is quotation by definition, so a doc that *shows* the repo's include
+line — this one does — registers no edge. Everywhere else every line counts:
+a ``` line in source code means nothing in particular, and reading it as a
+fence would hide the real directives after it, which is the under-clumping
+direction. A file that does not read as text, and the directories in
+`SKIP_DIRS` (`.git`, `node_modules`, `__pycache__`, `.claude`), hold no
+directives. A directory that cannot be read **fails the resolve** rather than
+dropping out of it: a dropped directory is a dropped includer, and a closure
+short of one file clumps two workers apart that belong together.
+
+A candidate's files get one spelling, whatever the ticket wrote: `./a/x.js`,
+`a//x.js` and an absolute path inside the repo are all `a/x.js`. Two
+spellings of one file collide with nobody, which is the same silent
+under-clumping by another route. A path that leaves the repo is refused, not
+guessed at.
 
 ## One hop
 
