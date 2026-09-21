@@ -82,19 +82,30 @@ a="$(sha 'keep A')"; b="$(sha 'keep B')"; c="$(sha 'keep C')"
 d="$(sha 'keep D')"
 empty="$(sha 'an empty commit')"; merge="$(sha 'a merge')"
 
-# `dir` comes from § 4's directory preamble, which diff-capture.test.sh
-# already witnesses; this block's own refusal when it is unset is checked
-# below.
-mkdir -p "$scratch/dir"
+# `dir`, `n`, `worktree` and the publish functions come from § 4's preamble
+# (#948), run for real ahead of the block, with HOME scratched so its sweep
+# and its directory are the test's own. This block's own refusal when the
+# preamble was not run is checked below.
+preamble="$(awk '
+  /^```/ { if (inb) { if (index(buf, "publish_capture()")) printf "%s", buf; buf = ""; inb = 0 }
+           else inb = 1
+           next }
+  inb { buf = buf $0 "\n" }
+' "$skill")"
+case "$preamble" in
+  *'publish_capture()'*) ;;
+  *) echo "FAIL: could not extract the report-directory preamble from $skill" >&2; exit 1 ;;
+esac
+mkdir -p "$scratch/home"
+scratch_dir="$scratch/home/.cache/agent-reviews/repo"
 run_block() { # <shas...> -> the block's output; exit status is the block's
   # 2>&1: the refusals this suite reports on are written to stderr, so a
   # caller that prints "$out" in a FAIL line would otherwise print nothing.
-  printf 'dir=%s\n' "$scratch/dir" >"$scratch/block.sh"
-  printf '%s\n' "$recipe" |
+  { printf '%s\n' "$preamble"; printf '%s\n' "$recipe"; } |
     sed -e "s|^n=<.*|n=932|" \
         -e "s|^worktree=<.*|worktree=$repo|" \
-        -e "s|^set -- <.*|set -- $*|" >>"$scratch/block.sh"
-  ( cd "$scratch" && bash "$scratch/block.sh" 2>&1 )
+        -e "s|^set -- <.*|set -- $*|" >"$scratch/block.sh"
+  ( cd "$repo" && HOME="$scratch/home" bash "$scratch/block.sh" 2>&1 )
 }
 
 out="$(run_block "$c" "$a" "$b")" || { echo "FAIL: the block refused a good three-sha list" >&2; fail=1; }
@@ -195,8 +206,7 @@ refuses 'a commit that changes no files' 'changes no files' "$a" "$empty"
 # Pasted without § 4's preamble, `dir` is unset: the block must say so rather
 # than write its capture to the filesystem root or silently produce nothing.
 printf '%s\n' "$recipe" |
-  sed -e "s|^n=<.*|n=932|" -e "s|^worktree=<.*|worktree=$repo|" -e "s|^set -- <.*|set -- $a|" \
-  >"$scratch/nodir.sh"
+  sed -e "s|^set -- <.*|set -- $a|" >"$scratch/nodir.sh"
 if nodir_out="$( cd "$scratch" && unset dir; bash "$scratch/nodir.sh" 2>&1 )"; then
   echo "FAIL: the block ran with no report directory set" >&2
   fail=1
@@ -206,7 +216,7 @@ elif ! printf '%s' "$nodir_out" | grep -qF 'run the report-directory preamble'; 
 fi
 
 # No temp file left behind to be handed to an axis or to stall merge-cleanup.
-leftovers="$(find "$scratch/dir" -maxdepth 1 -type f ! -name '*.patch' | wc -l)"
+leftovers="$(find "$scratch_dir" -maxdepth 1 -type f ! -name '*.patch' | wc -l)"
 [ "$leftovers" -eq 0 ] ||
   { echo "FAIL: the block left $leftovers non-patch file(s) beside the captures" >&2; fail=1; }
 

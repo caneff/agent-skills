@@ -52,7 +52,7 @@ check_in "$spawn_text" '[ -s "$tmp" ]' 'multi-axis-code-review/SKILL.md § 4'
 # and the publish is a rename — a guard that tests for absence cannot catch a
 # file replaced under a reader that is still reading it.
 check_in "$spawn_text" 'rev-parse --short HEAD' 'multi-axis-code-review/SKILL.md § 4'
-check_in "$spawn_text" 'mv "$tmp" "$patch"' 'multi-axis-code-review/SKILL.md § 4'
+check_in "$spawn_text" 'mv "$tmp" "$1"' 'multi-axis-code-review/SKILL.md § 4'
 check_in "$spawn_text" 'not a pattern' 'multi-axis-code-review/SKILL.md § 4'
 # C3/P1: the file is keyed on <n> alone, so a second round that skips this
 # block leaves round 1's diff in place — present and non-empty, so the
@@ -98,11 +98,40 @@ check_in "$skill_text" 'Pass `model: opus` to all three' multi-axis-code-review/
 # rather than retyping it here is what makes this a witness of the shell a
 # caller actually pastes; a copy in this file would pass forever while the
 # doc drifted.
-block="$(awk '/^```$/{inb=!inb; next} inb' "$skill" | sed -n '/git rev-parse --path-format=absolute/,/^wc -l/p')"
+fenced() { # <needle> -> every fenced block of § 4 containing the needle, fences dropped
+  awk -v m="$1" '
+    /^```/ { if (inb) { if (index(buf, m)) printf "%s", buf; buf = ""; inb = 0 } else inb = 1; next }
+    inb { buf = buf $0 "\n" }
+  ' <<<"$spawn"
+}
+preamble="$(fenced 'rev-parse --path-format=absolute')"
+block="$(fenced 'diff "$fixed_point"...HEAD')"
+case "$preamble" in
+  *'publish_capture()'*) ;;
+  *) echo "FAIL: could not extract § 4's report-directory preamble from multi-axis-code-review/SKILL.md" >&2; exit 1 ;;
+esac
 case "$block" in
-  *'rev-parse --path-format=absolute'*) ;;
+  *'publish_capture "$patch"'*) ;;
   *) echo "FAIL: could not extract § 4's capture block from multi-axis-code-review/SKILL.md" >&2; exit 1 ;;
 esac
+
+# The two capture modes share one publish protocol, stated once in the
+# preamble (#948). Run end-to-end, each suite only catches a break inside its
+# own block; this is the check that fails when the range block and the
+# sha-list block disagree about it — one keeps its own nonce scheme, its own
+# `mv`, or its own retention. Neither mode may restate a step of the
+# protocol, and both must call it.
+modes="$(printf '%s\n%s\n' "$block" "$(fenced 'sha-list review: the commit list is empty')")"
+for step in 'mktemp' 'mv ' 'wc -l' 'find ' '-mtime'; do
+  if grep -qF -- "$step" <<<"$modes"; then
+    echo "FAIL: a capture mode restates the shared publish protocol step '$step' instead of calling the preamble's" >&2
+    fail=1
+  fi
+done
+for fn in new_capture 'publish_capture "$patch"'; do
+  calls="$(grep -cF -- "$fn" <<<"$modes" || true)"
+  [ "$calls" -eq 2 ] || { echo "FAIL: $calls capture mode(s) call $fn, not both" >&2; fail=1; }
+done
 
 scratch="$(mktemp -d)" || { echo "FAIL: mktemp -d" >&2; exit 1; }
 trap 'rm -rf "$scratch"' EXIT
@@ -128,7 +157,7 @@ rev_c="$(git -C "$repo" rev-parse HEAD)"
 run_block() { # <rev> -> prints the published path
   local rev="$1"
   git -C "$repo" checkout -q "$rev"
-  printf '%s\n' "$block" |
+  { printf '%s\n' "$preamble"; printf '%s\n' "$block"; } |
     sed -e "s|^n=<.*|n=937|" \
         -e "s|^worktree=<.*|worktree=$repo|" \
         -e "s|^fixed_point=<.*|fixed_point=main|" >"$scratch/block.sh"

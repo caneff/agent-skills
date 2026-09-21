@@ -184,17 +184,28 @@ mkdir -p "$dir"
 find "$dir" -maxdepth 1 -type f -mtime +13 -delete  # +13, not +14: find's -mtime +N means "older than N+1 days"
 n=<issue number from step 2, or the branch name>
 worktree=<the worktree under review>
+# The publish protocol, stated once for both capture modes below. Each mode sets
+# its own `patch` name, calls new_capture, writes into "$tmp", then publish_capture.
+new_capture() { tmp=$(mktemp "$dir/.diff-$n.XXXXXX"); }   # unique per invocation
+publish_capture() { # <patch>: fail on an empty write here, not inside three sub-agents
+  [ -s "$tmp" ] || { rm -f "$tmp"; echo "capture is empty" >&2; return 1; }
+  mv "$tmp" "$1" &&                     # atomic publish: no axis ever reads a half-written patch
+    wc -l "$1"                          # this exact path and this count go in every prompt
+}
+```
+
+Then, for a fixed point, the range capture:
+
+```
 fixed_point=<the fixed point from step 1>
 head=$(git -C "$worktree" rev-parse --short HEAD) || exit 1
 patch="$dir/diff-$n-$head-$$.patch"     # revision plus nonce: this invocation's own file
-tmp=$(mktemp "$dir/.diff-$n.XXXXXX") || exit 1
+new_capture || exit 1
 git -C "$worktree" diff "$fixed_point"...HEAD >"$tmp" || { rm -f "$tmp"; exit 1; }
-[ -s "$tmp" ] || { rm -f "$tmp"; exit 1; } # a failed or empty write fails here, not inside three sub-agents
-mv "$tmp" "$patch"                      # atomic publish: no axis ever reads a half-written patch
-wc -l "$patch"                          # this exact path and this count go in every prompt
+publish_capture "$patch" || exit 1
 ```
 
-**Capture the diff once, by the caller** (#937). Those lines derive the diff
+**Capture the diff once, by the caller** (#937). Those blocks derive the diff
 one time into `<dir>/diff-<n>.patch` and print its length; every axis prompt
 carries that path, that count, and the command that produced it, so three
 reviewers read one capture instead of each re-running the same `git diff`.
@@ -226,8 +237,6 @@ no single revision under review:
 
 ```
 : "${dir:?sha-list review: run the report-directory preamble above first}"
-n=<issue number from step 2, or the branch name>
-worktree=<the worktree under review>
 set -- <the commits the caller named, space-separated>
 [ "$#" -gt 0 ] || { echo "sha-list review: the commit list is empty" >&2; exit 1; }
 resolved=""
@@ -249,8 +258,8 @@ ordered=$(for s in $resolved; do
     printf '%s %s\n' "$(git -C "$worktree" rev-list --count "$s")" "$s"
   done | sort -n -k1,1 -k2,2 | awk '!seen[$2]++ {print $2}')
 key=$(printf '%s\n' "$ordered" | git -C "$worktree" hash-object --stdin | cut -c1-12)
-patch="$dir/diff-$n-list$key-$$.patch"   # list digest plus nonce, as above
-tmp=$(mktemp "$dir/.diff-$n.XXXXXX") || exit 1
+patch="$dir/diff-$n-list$key-$$.patch"   # list digest plus nonce
+new_capture || exit 1
 for s in $ordered; do
   one=$(git -C "$worktree" show --format='commit %H%n%n    %s%n' --patch "$s") || {
     rm -f "$tmp"; echo "sha-list review: could not read $s" >&2; exit 1; }
@@ -258,9 +267,7 @@ for s in $ordered; do
     rm -f "$tmp"; echo "sha-list review: $s changes no files" >&2; exit 1; }
   printf '%s\n' "$one" >>"$tmp"
 done
-[ -s "$tmp" ] || { rm -f "$tmp"; echo "sha-list review: the capture is empty" >&2; exit 1; }
-mv "$tmp" "$patch"                       # atomic publish, as above
-wc -l "$patch"                           # this exact path and this count go in every prompt
+publish_capture "$patch" || exit 1
 ```
 
 In this mode the provenance every axis prompt carries is **this per-commit
