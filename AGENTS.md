@@ -58,7 +58,7 @@ Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agent
 
 ## End-to-end seam
 
-- **Seam**: `bash tests/all.sh` (the shell and Python suites the gate runs)
+- **Seam**: `bash tests/all.sh`
 - **Blind to**: anything a human reads rather than a test asserts: whether a model follows a skill's prose, whether a present `SKILL.md` instruction is also unambiguous, and the harness behaviours around them (a hook denying a step, a worker spinning on no-op tool calls, a pane closing before a question is answered, #925)
 
-The grammar and its reader: `implement-spec/references/closing-ticket.md`.
+The gate runs the repo's shell and Python suites. The grammar and its reader: `implement-spec/references/closing-ticket.md`.
