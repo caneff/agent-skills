@@ -35,8 +35,19 @@ _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
 _CLOSURE_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+include closure[ \t]*:?[ \t]*$",
                               re.IGNORECASE)
 # `- **Directive**: `#include <path>`` — the key in optional emphasis, the
-# value in optional backticks.
-_KEY = re.compile(r"^[ \t]*[-*+][ \t]*[*_]{0,2}([A-Za-z][A-Za-z -]*?)[*_]{0,2}[ \t]*:[ \t]*(.*?)[ \t]*$")
+# value in optional backticks. The colon may sit inside the emphasis
+# (`**Directive:**`): that closing run is consumed whatever follows it, since
+# the key's own emphasis is balanced and `**Directive:**`#include <path>``
+# is a valid line. A colon after the emphasis (`**Directive**:`) keeps a bold
+# value's markers, `**Directive**:**x**` reading as the value `**x**`. The
+# key is group `inside` or group `outside`, whichever alternative matched.
+# `implement-spec/closing_ticket.py` has a similar `_KEY` that still uses the
+# lookahead form (#928, #1000): it does not read the no-space case.
+_KEY = re.compile(
+    r"^[ \t]*[-*+][ \t]*(?:"
+    r"[*_]{1,2}(?P<inside>[A-Za-z][A-Za-z -]*?)[ \t]*:[*_]{1,2}"
+    r"|[*_]{0,2}(?P<outside>[A-Za-z][A-Za-z -]*?)[*_]{0,2}[ \t]*:"
+    r")[ \t]*(?P<value>.*?)[ \t]*$")
 # "None", however it is dressed, as a *statement*: `None`, `- None`,
 # `None — nothing here is generated.` What follows it must end the clause, so
 # that `None of the docs are generated, but examples/ are` — a sentence
@@ -98,7 +109,8 @@ def parse_declaration(text):
     for line in section.splitlines():
         key = _KEY.match(line)
         if key:
-            fields[key.group(1).strip().lower()] = key.group(2).strip().strip("`")
+            name = key.group("inside") or key.group("outside")
+            fields[name.strip().lower()] = key.group("value").strip().strip("`")
     directive = fields.get("directive")
     if not directive:
         # A stated `None` is an answer: this repo generates nothing, so a
