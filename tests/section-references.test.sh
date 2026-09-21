@@ -15,6 +15,8 @@ run_fixture() {
   SECTION_REFERENCES_ROOT="$fixture" bash tests/check-section-references.sh
 }
 
+python3 tests/section-reference-trimmers.test.py
+
 run_fixture text-suffix-valid
 run_fixture heading-trailing-punctuation-valid
 run_fixture step-locator-valid
