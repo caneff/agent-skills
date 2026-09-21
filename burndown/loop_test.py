@@ -178,9 +178,45 @@ def test_box_check_refuses_when_the_ulimit_sum_breaks_the_budget():
 
 def test_box_check_refuses_at_the_process_cap_boundary():
     # The cap is the box's, so the reading it is checked against counts
-    # agent processes on the box — 27 leaves room for one more, 28 does not.
-    assert loop.box_check(processes=27, committed_gb=0, add_gb=0)["ok"] is True
-    assert loop.box_check(processes=28, committed_gb=0, add_gb=0)["ok"] is False
+    # agent processes on the box — a new worker is charged at its peak, so 23
+    # leaves room for one more and 24 does not.
+    assert loop.box_check(processes=23, committed_gb=0, add_gb=0)["ok"] is True
+    assert loop.box_check(processes=24, committed_gb=0, add_gb=0)["ok"] is False
+
+
+def test_a_live_worker_keeps_its_fan_out_headroom_against_the_cap():
+    # #933: a live worker is one process now and five at its review peak, so
+    # 2 live workers on a box measured at 12 project 12+8+5=25 and fit; a
+    # 3rd live worker projects 29 against the cap of 28 and is refused.
+    assert loop.box_check(12, 0, live=2)["ok"] is True
+    got = loop.box_check(12, 0, live=3)
+    assert got["ok"] is False
+    assert any("12 of review fan-out headroom for 3 live" in r
+               for r in got["refusals"]), got
+
+
+def test_the_cli_dispatch_charges_live_workers_at_their_peak():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump(candidates_781(), fh)
+        with open(live, "w") as fh:
+            json.dump(parked_455(), fh)
+        # 1 live worker, 16 measured: 16 + 4 + 5 = 25 fits.
+        ok = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                     "--free", "1", "--processes", "16",
+                     "--committed-gb", "0")
+        assert ok.returncode == 0, ok.stderr
+        assert ("peak: 16 agent processes measured, 1 live worker holding 4 "
+                "of fan-out headroom") in ok.stdout, ok.stdout
+        assert "1 more at 5 each projects 25" in ok.stdout, ok.stdout
+        # 20 measured: 20 + 4 + 5 = 29 is over the cap of 28.
+        refused = loop_py("dispatch", "--candidates", cand, "--in-flight",
+                          live, "--free", "1", "--processes", "20",
+                          "--committed-gb", "0")
+        assert refused.returncode == 1
+        assert "4 of review fan-out headroom for 1 live" in refused.stderr
 
 
 def test_an_idle_boxs_os_process_count_is_not_the_cap_reading():
@@ -191,11 +227,11 @@ def test_an_idle_boxs_os_process_count_is_not_the_cap_reading():
         cand = os.path.join(tmp, "candidates.json")
         with open(cand, "w") as fh:
             json.dump(candidates_781(), fh)
-        idle = loop_py("dispatch", "--candidates", cand, "--free", "1",
+        idle = loop_py("dispatch", "--in-flight", EMPTY_LIVE, "--candidates", cand, "--free", "1",
                        "--processes", "19", "--committed-gb", "0")
         assert idle.returncode == 0, idle.stderr
         assert "dispatch  #" in idle.stdout, idle.stdout
-        full = loop_py("dispatch", "--candidates", cand, "--free", "1",
+        full = loop_py("dispatch", "--in-flight", EMPTY_LIVE, "--candidates", cand, "--free", "1",
                        "--processes", "28", "--committed-gb", "0")
         assert full.returncode == 1
         assert "28 agent processes" in full.stderr, full.stderr
@@ -253,13 +289,15 @@ def test_a_processes_override_of_zero_is_used_not_measured():
 def test_the_cli_refuses_a_negative_processes_override():
     # A negative count would sit under the cap for any workers asked about,
     # so the documented escape hatch would switch the gate off on a typo.
-    for cmd in (("box",), ("dispatch", "--candidates", "x", "--free", "1")):
+    for cmd in (("box", "--live", "0"),
+                ("dispatch", "--candidates", "x", "--free", "1")):
         got = loop_py(*cmd, "--processes", "-1", "--committed-gb", "0")
         assert got.returncode != 0, got
         assert "box ok" not in got.stdout and "dispatch" not in got.stdout
         assert "--processes" in got.stderr and "negative" in got.stderr, \
             got.stderr
-    zero = loop_py("box", "--processes", "0", "--committed-gb", "0")
+    zero = loop_py("box", "--processes", "0", "--committed-gb", "0",
+                    "--live", "0")
     assert zero.returncode == 0, zero.stderr
 
 
@@ -271,7 +309,7 @@ def test_the_cli_dispatch_refuses_when_ps_cannot_be_run():
         nobin = os.path.join(tmp, "empty-path")
         os.mkdir(nobin)
         got = subprocess.run(
-            [sys.executable, LOOP, "dispatch", "--candidates", cand,
+            [sys.executable, LOOP, "dispatch", "--in-flight", EMPTY_LIVE, "--candidates", cand,
              "--free", "1", "--committed-gb", "0"], capture_output=True,
             text=True, timeout=60, env={**os.environ, "PATH": nobin})
     assert got.returncode == 1, got
@@ -283,7 +321,7 @@ def test_the_cli_refuses_when_ps_cannot_be_run():
     with tempfile.TemporaryDirectory() as tmp:
         env = {**os.environ, "PATH": tmp}
         got = subprocess.run([sys.executable, LOOP, "box", "--committed-gb",
-                              "0"], capture_output=True, text=True,
+                              "0", "--live", "0"], capture_output=True, text=True,
                              timeout=60, env=env)
     assert got.returncode == 1, got
     assert "--processes" in got.stderr, got.stderr
@@ -366,6 +404,14 @@ def test_a_stuck_on_ticket_the_run_never_had_is_refused():
 LOOP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop.py")
 
 
+# `dispatch` demands its in-flight snapshot; an explicit empty list is how a
+# test says no worker is live.
+_EMPTY = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+_EMPTY.write("[]")
+_EMPTY.close()
+EMPTY_LIVE = _EMPTY.name
+
+
 def loop_py(*args, cwd=None):
     return subprocess.run([sys.executable, LOOP, *args],
                           capture_output=True, text=True, timeout=60, cwd=cwd)
@@ -373,11 +419,46 @@ def loop_py(*args, cwd=None):
 
 def test_the_cli_box_check_exits_nonzero_on_a_refusal():
     ok = loop_py("box", "--processes", "4", "--committed-gb", "4",
-                 "--add-gb", "4")
+                 "--add-gb", "4", "--live", "0")
     assert ok.returncode == 0, ok.stderr
-    refused = loop_py("box", "--processes", "40", "--committed-gb", "0")
+    refused = loop_py("box", "--processes", "40", "--committed-gb", "0",
+                     "--live", "0")
     assert refused.returncode == 1
     assert "agent processes" in refused.stderr, refused.stderr
+
+
+def test_the_cli_box_charges_live_workers_and_demands_the_count():
+    # 12 measured + 2 live x 4 + 1 new x 5 = 25 fits; 3 live makes 29.
+    ok = loop_py("box", "--processes", "12", "--committed-gb", "0",
+                 "--live", "2")
+    assert ok.returncode == 0, ok.stderr
+    refused = loop_py("box", "--processes", "12", "--committed-gb", "0",
+                      "--live", "3")
+    assert refused.returncode == 1
+    assert "12 of review fan-out headroom for 3 live" in refused.stderr
+    # Absent or negative is refused, never read as zero live workers.
+    for extra in ((), ("--live", "-1")):
+        got = loop_py("box", "--processes", "27", "--committed-gb", "0",
+                      *extra)
+        assert got.returncode != 0 and "box ok" not in got.stdout, got
+    assert "--live" in got.stderr and "negative" in got.stderr, got.stderr
+
+
+def test_a_landed_clump_is_not_a_live_worker_for_the_peak_charge():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump(candidates_781(), fh)
+        clumps = parked_455()
+        for c in clumps:
+            c["landed"] = "abc1234"
+        with open(live, "w") as fh:
+            json.dump(clumps, fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "20",
+                      "--committed-gb", "0")
+        assert "0 live workers" in got.stdout + got.stderr, got
 
 
 def test_the_cli_dispatch_prints_the_picks_and_what_holds_the_rest():
@@ -451,7 +532,7 @@ def test_a_malformed_clump_file_is_one_line_and_not_a_traceback():
                         '[{"tickets": ["452"], "closure": ["a"]}]'):
             with open(bad, "w") as fh:
                 fh.write(content)
-            got = loop_py("dispatch", "--candidates", bad, "--free", "1",
+            got = loop_py("dispatch", "--in-flight", EMPTY_LIVE, "--candidates", bad, "--free", "1",
                           "--processes", "2", "--committed-gb", "0")
             assert got.returncode == 1, (content, got)
             assert "Traceback" not in got.stderr, (content, got.stderr)
@@ -501,7 +582,7 @@ def test_the_cli_dispatch_refuses_when_the_box_has_no_room():
         cand = os.path.join(tmp, "candidates.json")
         with open(cand, "w") as fh:
             json.dump(candidates_781(), fh)
-        got = loop_py("dispatch", "--candidates", cand, "--free", "1",
+        got = loop_py("dispatch", "--in-flight", EMPTY_LIVE, "--candidates", cand, "--free", "1",
                       "--processes", "40", "--committed-gb", "0")
         assert got.returncode == 1, got
         assert "dispatch" not in got.stdout, got.stdout
@@ -551,8 +632,8 @@ def test_box_check_weighs_every_worker_a_dispatch_would_start():
     # Three workers at once is three processes and three ulimit caps, not
     # one: a gate that asks about one more worker passes a tick that starts
     # three.
-    assert loop.box_check(processes=27, committed_gb=0, workers=1)["ok"] is True
-    assert loop.box_check(processes=27, committed_gb=0, workers=3)["ok"] is False
+    assert loop.box_check(processes=13, committed_gb=0, workers=3)["ok"] is True
+    assert loop.box_check(processes=14, committed_gb=0, workers=3)["ok"] is False
     assert loop.box_check(processes=2, committed_gb=21, add_gb=1,
                           workers=4)["ok"] is False
 
@@ -564,8 +645,8 @@ def test_the_cli_dispatch_takes_only_what_the_box_has_room_for():
             json.dump([{"tickets": [452], "closure": ["a.js"]},
                        {"tickets": [457], "closure": ["b.js"]},
                        {"tickets": [458], "closure": ["c.js"]}], fh)
-        got = loop_py("dispatch", "--candidates", cand, "--free", "3",
-                      "--processes", "27", "--committed-gb", "23",
+        got = loop_py("dispatch", "--in-flight", EMPTY_LIVE, "--candidates", cand, "--free", "3",
+                      "--processes", "23", "--committed-gb", "23",
                       "--add-gb", "1")
         assert got.returncode == 0, got.stderr
         assert got.stdout.count("dispatch  ") == 1, got.stdout
@@ -1182,6 +1263,21 @@ def test_the_cli_sweep_of_several_hung_panes_returns_within_one_deadline():
     assert got.stdout.count("unswept") >= 2, got.stdout
 
 
+def test_dispatch_without_an_in_flight_snapshot_is_refused():
+    # An omitted snapshot must not read as "no worker is live" (#933).
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        with open(cand, "w") as fh:
+            json.dump(candidates_781(), fh)
+        got = subprocess.run(
+            [sys.executable, LOOP, "dispatch", "--candidates", cand,
+             "--free", "1", "--processes", "1", "--committed-gb", "0"],
+            capture_output=True, text=True, timeout=60)
+    assert got.returncode != 0, got
+    assert "--in-flight" in got.stderr, got.stderr
+    assert "dispatch  #" not in got.stdout, got.stdout
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
@@ -1192,3 +1288,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
