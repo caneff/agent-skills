@@ -2033,6 +2033,27 @@ fn a_branch_that_moved_into_the_primary_checkout_since_the_plan_is_refused() {
 }
 
 #[test]
+fn a_branch_with_no_holder_at_all_since_the_plan_still_reaps() {
+    // #881: the re-check refuses a holder that is not the planned workspace;
+    // no holder at all is the vanished-worktree case and still cleans up.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r44", &["118", "119"]);
+    let planned = r.join(".claude/worktrees/implement-119");
+    let hook = r.join(".git/hooks/pre-push");
+    std::fs::write(
+        &hook,
+        format!("#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\ngit -C {} worktree remove --force {} || true\n", r.display(), planned.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!c.has_branch(&r, "implement-119"), "{}", run.text());
+    assert!(run.has("reap summary: 2 reaped, 0 skipped"), "{}", run.text());
+}
+
+#[test]
 fn a_workspace_whose_path_resolves_outside_the_repo_is_not_a_candidate() {
     // The boundary the Codex pass on PR #878 asked about. git resolves a
     // worktree's path when it registers it, so `git worktree add` through a
