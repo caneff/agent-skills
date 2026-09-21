@@ -99,6 +99,22 @@ for field in 'Last reviewed sha:' 'CLEAN observed at:' 'Tip:' 'Mutation check:' 
   check_in "$template" "$field"
 done
 
+# Rule 6 (#963): the template ends with the controller trailer, so a
+# controller cleared since dispatch reads its obligation and the exact cleanup
+# line off the message itself. The trailer is the template's last field, and
+# `PR up:` stays its first line.
+[ "$(printf '%s\n' "$template" | sed -n '1p')" = 'PR up: <pr url>' ] || {
+  echo "FAIL: 'PR up:' template's first line is not 'PR up: <pr url>'" >&2; fail=1; }
+trailer_at="$(printf '%s\n' "$template" | grep -n '^Controller: ' | head -n 1 | cut -d: -f1)"
+last_field_at="$(printf '%s\n' "$template" | grep -n '^[A-Z][A-Za-z ]*: ' | tail -n 1 | cut -d: -f1)"
+[ -n "$trailer_at" ] && [ "$trailer_at" = "$last_field_at" ] || {
+  echo "FAIL: 'PR up:' template's last field is not the 'Controller:' trailer" >&2; fail=1; }
+check_in "$template" 'answer my outstanding questions'
+check_in "$template" 'merge-cleanup --repo <primary checkout> implement-<n>'
+check_in "$pr_flat" 'Chris merges this PR; you dispatched me'
+check_in "$pr_flat" '! gh pr merge <pr> --repo <owner/name> --squash'
+check_in "$pr_flat" 'the first entry of `git worktree list`'
+
 if [ "$fail" -eq 0 ]; then
   echo "PASS implement/pr-up-report-shape.test.sh"
 else
