@@ -107,8 +107,12 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
   # would hold the verdict at `waiting` for the rest of the session. Returns
   # and finishes are read over the whole transcript; an id ends wherever it
   # ends. A launch this turn needs no evidence.
+  # A probe counts only once it has an answer: a poll the classifier denied,
+  # or one that errored, is a call and not evidence of life.
+  | [$after[] | select(.type == "user") | .message.content | arrays[]
+      | select(.type == "tool_result" and .is_error != true) | .tool_use_id] as $answered
   | ([$after[] | select(.type == "assistant") | .message.content[]?
-        | select(.type == "tool_use") | .input | objects
+        | select(.type == "tool_use" and (.id | IN($answered[]))) | .input | objects
         | (.task_id, .shell_id, .bash_id, .agentId, .agent_id, .to) | strings]
      + [$after[] | select(.type == "user" and .origin.kind == "task-notification")
         | .message.content | strings | select(test("<status>") | not)

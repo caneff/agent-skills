@@ -90,7 +90,14 @@ work() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"
   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e-1","content":"ok"}]},"toolUseResult":{"filePath":"a.js"}}\n'; }
 
 # task_poll <id> : a TaskOutput poll of a background task or subagent (#900).
-task_poll() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"po-%s","name":"TaskOutput","input":{"task_id":"%s"}}]}}\n' "$1" "$1"; }
+task_poll() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"po-%s","name":"TaskOutput","input":{"task_id":"%s"}}]}}\n' "$1" "$1"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"po-%s","content":"still running"}]},"toolUseResult":{"retrieval_status":"not_ready"}}\n' "$1"; }
+# task_poll_denied / task_poll_errored <id> : the same poll, answered by a
+# permission denial or a tool error — a call that got no answer about the task.
+task_poll_denied() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"po-%s","name":"TaskOutput","input":{"task_id":"%s"}}]}}\n' "$1" "$1"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"po-%s","content":"Permission for this action has been denied.","is_error":true}]},"toolUseResult":"Error: Permission for this action has been denied."}\n' "$1"; }
+task_poll_errored() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"po-%s","name":"TaskOutput","input":{"task_id":"%s"}}]}}\n' "$1" "$1"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"po-%s","content":"No task found with ID: %s","is_error":true}]},"toolUseResult":"Error: No task found"}\n' "$1" "$1"; }
 # bash_cmd <text> : a Bash call whose command merely mentions text.
 bash_cmd() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"bc-1","name":"Bash","input":{"command":"%s"}}]}}\n' "$1"; }
 
@@ -401,6 +408,18 @@ t="$tmp/finished-earlier.jsonl"
 { human "$brief"; bg_launch bfin1; task_done bfin1 completed; peer "status?"; task_poll bfin1; assistant_text "finished already"; } > "$t"
 run "task finished last turn, polled this turn" "$t"
 expect_alert "a task that finished in an earlier turn is not out because it was polled"
+
+reset_log
+t="$tmp/poll-denied.jsonl"
+{ human "$brief"; bg_launch bden1; assistant_text "check-full running"; peer "status?"; task_poll_denied bden1; assistant_text "asking in my pane"; } > "$t"
+run "poll denied" "$t"
+expect_alert "a denied poll is not evidence of life"
+
+reset_log
+t="$tmp/poll-errored.jsonl"
+{ human "$brief"; launch r4; assistant_text "reviewer running"; peer "status?"; task_poll_errored r4; assistant_text "gone?"; } > "$t"
+run "poll errored" "$t"
+expect_alert "a poll that errored is not evidence of life"
 
 reset_log
 t="$tmp/torn.jsonl"
