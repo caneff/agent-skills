@@ -25,14 +25,20 @@ does not resolve.
   follows the section sign. Anything else (bold, quotes, underscores) is not
   matched, so the reference is silently unchecked: write the plain heading.
 - The name runs from the section sign to the first of `. , ; : ! ? ) } ]`, a
-  `'s`, another section sign, or a backtick (the close of a code span, as in `<sign> Build`);
-  a trailing ` and` is dropped. It has no length cap: with
-  none of those, it runs to the end of the line. Write the heading, then
-  punctuation.
-- **The sign as a word.** Every `§` followed by a name is a reference, so a
-  sentence that uses the sign as a word fails as a missing heading. Write
-  it `\§` (backslash before it) and the checker never reads it. `<sign>`
-  alone in backticks, or followed by no name, is not read either.
+  `'s`, another section sign, or a backtick (the close of a code span); a
+  trailing ` and` is dropped. It has no length cap: with none of those, it
+  runs to the end of the line. Write the heading, then punctuation. A
+  heading whose name holds a code span cannot be named in full: the name
+  stops at the first backtick, so it resolves against any heading that
+  starts with the words before it.
+- **The sign as a word.** Every section sign followed by a name is a
+  reference, so a sentence that uses the sign as a word fails as a missing
+  heading. Prefer rewording ("the Liveness section"). To keep the sign,
+  write it with a backslash before it and the checker never reads it; the
+  backslash is not a Markdown escape for this character, so it shows in
+  rendered pages. The sign alone in backticks, or followed by no name, is
+  not read either. Inside this doc, `<sign>` (defined under The step
+  locator) is the placeholder for a sign that must not be read.
 - A heading only has to start with the name, so a reference reading "The merge"
   matches a heading "The merge: who and when". Use enough words to be
   unambiguous. Matching ignores trailing punctuation and repeated whitespace.

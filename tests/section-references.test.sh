@@ -30,7 +30,7 @@ for fixture in pointer-suffix-invalid bare-cross-file-collision step-heading-nam
   step-number-invalid step-range-invalid \
   step-colon-invalid step-descending-invalid step-emdash-invalid step-fence-steps-invalid \
   step-fence-nested-invalid step-fence-char-invalid step-fence-length-invalid \
-  step-fence-info-invalid step-colon-name-invalid mention-unescaped-invalid; do
+  step-fence-info-invalid step-colon-name-invalid mention-unescaped-invalid long-name-step-invalid; do
   if run_fixture "$fixture"; then
     echo "FAIL: checker accepted fixture $fixture"
     exit 1
