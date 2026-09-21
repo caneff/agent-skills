@@ -45,3 +45,4 @@ early is worth it, which is why a `gate-retry` never reports as a plain
 | 948+961 | #968 | second | 2026-09-21T11:19:40-04:00 | 2026-09-21T11:22:26-04:00 | 2.8 | collected |
 | 970 | (pending) | early | 2026-09-21T14:06:22-04:00 | 2026-09-21T14:07:27-04:00 | 1.1 | raced: launch e535e3d, completion 423b4d3 — round-1 fixes pushed while Codex read; verdict (approve) discarded, rerun at the gate |
 | 970 | #972 | gate-retry | 2026-09-21T14:12:59-04:00 | 2026-09-21T14:14:02-04:00 | 1.1 | collected-after-retry |
+| 871 | (pending) | early | 2026-09-21T14:19:19-04:00 | 2026-09-21T14:20:15-04:00 | 0.9 | raced: launch 670d99c, completion c3a5733 — round-1 fixes pushed while Codex read; verdict discarded, rerun at the gate |
