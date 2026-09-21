@@ -363,16 +363,19 @@ def components(candidates, collides):
 MAX_CLUMP = 3
 
 
-def split(family, closures, cap=MAX_CLUMP):
-    """A family's clumps: tickets with identical closures, lowest first, cut
-    into runs of at most `cap`. Identical closures would only rebase onto
-    each other; closures that merely overlap wait on each other instead,
-    through `loop.py dispatch`'s hold."""
+def split(family, closures):
+    """`(clumps, capped)`: a family's tickets with identical closures, lowest
+    first, cut into runs of at most `MAX_CLUMP` — and whether that cap cut
+    any of them. Identical closures would only rebase onto each other;
+    closures that merely overlap wait on each other instead, through
+    `loop.py dispatch`'s hold."""
     same = {}
     for n in family:
         same.setdefault(frozenset(closures[n]), []).append(n)
-    out = [g[i:i + cap] for g in same.values() for i in range(0, len(g), cap)]
-    return sorted(out, key=lambda g: g[0])
+    out = [g[i:i + MAX_CLUMP] for g in same.values()
+           for i in range(0, len(g), MAX_CLUMP)]
+    return (sorted(out, key=lambda g: g[0]),
+            any(len(g) > MAX_CLUMP for g in same.values()))
 
 
 def clumps(root, candidates, decl=None):
@@ -423,13 +426,11 @@ def clumps(root, candidates, decl=None):
 
     families = []
     for family in components(list(candidates), collides):
-        parts = [family] if how == "subtree" else split(family, closures)
-        closed = [frozenset(closures.get(p[0], ())) for p in parts]
+        parts, capped = (([family], False) if how == "subtree"
+                         else split(family, closures))
         families.append({"tickets": family,
                          "clumps": [clump(p) for p in parts],
-                         # Two clumps with one closure exist only because the
-                         # cap cut them apart.
-                         "capped": len(set(closed)) < len(closed)})
+                         "capped": capped})
     return {"mode": how, "announcement": announcement(decl),
             "families": families}
 

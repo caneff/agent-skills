@@ -163,8 +163,9 @@ def numbers(clumping):
     return [c["tickets"] for c in C.clump_list(clumping)]
 
 
-def family_numbers(clumping):
-    return [f["tickets"] for f in clumping["families"]]
+def families(clumping):
+    """Each family's clumps, as ticket lists."""
+    return [[c["tickets"] for c in f["clumps"]] for f in clumping["families"]]
 
 
 def test_two_candidates_sharing_an_include_are_one_family():
@@ -175,8 +176,7 @@ def test_two_candidates_sharing_an_include_are_one_family():
     root = repo(SHARED)
     got = C.clumps(root, [candidate(451, "examples/_shared/line-kind.js"),
                           candidate(455, "examples/skyscraper/component.js")])
-    assert family_numbers(got) == [[451, 455]], got
-    assert numbers(got) == [[451], [455]], got
+    assert families(got) == [[[451], [455]]], got
 
 
 def test_a_candidate_colliding_with_nothing_clumps_alone():
@@ -187,10 +187,6 @@ def test_a_candidate_colliding_with_nothing_clumps_alone():
 
 
 # --- Families: a component is run serially, not shipped whole (#970) ------
-
-def families(clumping):
-    return [[c["tickets"] for c in f["clumps"]] for f in clumping["families"]]
-
 
 # `burn-2026-09-21-0930`, in small. That repo declares None, so a closure is
 # a candidate's own files; each of five candidates names its own file and the
@@ -424,7 +420,7 @@ def test_an_absolute_candidate_path_is_the_file_it_names():
     got = C.clumps(root, [
         candidate(451, os.path.join(root, "examples/_shared/line-kind.js")),
         candidate(455, "examples/skyscraper/component.js")])
-    assert family_numbers(got) == [[451, 455]], got
+    assert families(got) == [[[451], [455]]], got
 
 
 def test_a_candidate_file_outside_the_repo_is_refused_not_guessed_at():
