@@ -305,6 +305,34 @@ impl ClaimLock {
     }
 }
 
+const IDENTITY_GUARD: &str = include_str!("../../hooks/commit-identity-guard.sh");
+const IDENTITY_GUARD_MARK: &str = "# lane commit-identity guard";
+
+/// Installs the commit-identity guard (#934) as the repo's pre-commit hook.
+/// Worktrees share the primary's hooks dir, so one install covers every
+/// workspace the lane creates. Rewrites our own hook to the current text;
+/// refuses rather than overwrite a pre-commit hook that is someone else's.
+fn install_identity_guard(primary: &str) -> Result<(), String> {
+    let dir = quiet_stdout("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| format!("cannot resolve the hooks dir of {primary}"))?;
+    let path = Path::new(&dir).join("pre-commit");
+    match std::fs::read_to_string(&path) {
+        Ok(cur) if cur == IDENTITY_GUARD => return Ok(()),
+        Ok(cur) if !cur.contains(IDENTITY_GUARD_MARK) => {
+            return Err(format!("{} is a pre-commit hook the lane did not install; merge the identity guard into it by hand (flow/lane/hooks/commit-identity-guard.sh)", path.display()));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
+    std::fs::write(&path, IDENTITY_GUARD).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).map_err(|e| format!("cannot chmod {}: {e}", path.display()))
+}
+
 fn primary_worktree(repo: &str) -> Option<String> {
     let out = quiet_stdout("git", &["-C", repo, "worktree", "list", "--porcelain"])?;
     let first = out.lines().next()?;
@@ -528,6 +556,9 @@ fn run() -> Result<(), ExitCode> {
     let slug = git_origin::origin_slug(Path::new(&primary)).unwrap_or_default();
     if !valid_slug(&slug) {
         return Err(die(format!("origin in {primary} names no GitHub owner/name")));
+    }
+    if let Err(e) = install_identity_guard(&primary) {
+        return Err(die(e));
     }
     let branch = format!("{}-{n}", mode.branch_prefix());
     let wt = PathBuf::from(&primary).join(".claude/worktrees").join(&branch);

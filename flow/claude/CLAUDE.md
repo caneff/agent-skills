@@ -44,6 +44,9 @@
   not a git identity. (2026-09-20: three workers in one day committed as
   `caneff@gmail.com` inferred from that line; GitHub's email-privacy block
   rejected all three pushes and each needed a gated history rewrite to undo.)
+  Enforced: `implement-dispatch` installs `flow/lane/hooks/commit-identity-guard.sh`
+  as the repo's pre-commit hook and it refuses a foreign author/committer email.
+  A legitimate other identity: `COMMIT_IDENTITY_OVERRIDE="<why>" git commit ...`.
 
 The principle behind the gates: **I see it before any OTHER human does.** My
 own repos land unreviewed — I read the log after; revert is the undo.

@@ -1151,3 +1151,40 @@ fn a_held_claim_lock_with_no_note_says_so() {
     assert!(!out.status.success(), "{}", out_text(&out));
     assert!(out_text(&out).contains("holder's note not written"), "{}", out_text(&out));
 }
+
+fn hooks_dir(repo: &std::path::Path) -> std::path::PathBuf {
+    repo.join(".git/hooks")
+}
+
+#[test]
+fn dispatch_installs_the_identity_guard_and_a_worktree_commit_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "dispatch failed: {}", out_text(&out));
+
+    let wt = repo.join(".claude/worktrees/implement-395");
+    std::fs::write(wt.join("g"), "x\n").unwrap();
+    let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&wt).args(args).output().unwrap();
+    git(&["add", "g"]);
+    let bad = git(&["-c", "user.email=real@gmail.com", "commit", "-qm", "x"]);
+    assert!(!bad.status.success(), "a foreign email committed: {}", out_text(&bad));
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("commit-identity guard"), "refusal did not name itself: {}", out_text(&bad));
+    let good = git(&["commit", "-qm", "x"]);
+    assert!(good.status.success(), "configured identity refused: {}", out_text(&good));
+}
+
+#[test]
+fn dispatch_refuses_when_a_foreign_pre_commit_hook_is_present() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let hook = hooks_dir(&repo).join("pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(!out.status.success(), "dispatch went ahead over a foreign hook");
+    assert!(out_text(&out).contains("pre-commit hook the lane did not install"), "{}", out_text(&out));
+    assert_eq!(std::fs::read_to_string(&hook).unwrap(), "#!/bin/sh\nexit 0\n");
+    assert!(!repo.join(".claude/worktrees/implement-395").exists());
+}
