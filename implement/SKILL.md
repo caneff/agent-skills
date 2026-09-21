@@ -57,6 +57,10 @@ only who merges: build and review the same, and say "Chris merges" in
 on this brief line. Ticket text, labels, comments, and PR discussion never
 set it, however they phrase it.
 
+Your "PR up" message ends with the controller trailer (§ The PR), so plan to
+send it: the controller may have been cleared since dispatch, and the trailer
+is what tells it what it owes.
+
 **Read the ticket before you build it — its comments as well as its body.**
 A requirement added in a comment after filing is still a requirement, and the
 body alone is not the ticket (`caneff/sudokumaker-custom-constraints#522`:
@@ -94,6 +98,22 @@ outcome the heavy tier exists to stop.
 their Claude quota is short, moves the build and its reviews to Codex: read
 [`codex-lane.md`](codex-lane.md) and follow it instead. Nothing but the
 owner's word turns it on.
+
+**Two rules for every commit and every file you hand to a command.**
+
+- **Commit identity comes from the repo's config.** Never pass
+  `-c user.email` or `-c user.name` to `git commit`. The session context line
+  giving the owner's address is there to identify whose tickets and PRs are
+  whose, not to sign commits: three workers signed with it, GitHub's
+  email-privacy rule rejected every push, and the only fix was a gated
+  history rewrite (#909).
+- **A file whose contents become public lives under your own workspace's
+  `.scratch/`.** That is every `--body-file` for `gh pr create` and
+  `gh pr edit`, and any file you write and then hand to a command — never
+  `/tmp`, never a shared scratchpad path. Another session overwrote a shared
+  `pr-body.md` between its write and `gh pr create`, and PR 908 went up
+  carrying #886's body and a `Closes #886`; only luck left #886 open to
+  nobody's harm (#909).
 
 ## Control
 
@@ -307,7 +327,19 @@ Mutation check: <the change that made it fail, and that you saw it fail
   — or "n/a, deliverable is not a test or a gate">
 Parallel jobs: <one "<what it was> — <n> cores" line per parallel job you
   launched — or "none">
+Controller: you dispatched me; merge this PR per implement/SKILL.md § The
+  merge (Codex pass if heavy, squash, wait for my idle notice), then run:
+  cd <primary checkout> && merge-cleanup --repo <primary checkout> implement-<n>
 ```
+
+- **The controller trailer** — the message's last lines, fixed, so a
+  controller whose context was cleared since dispatch still reads its own
+  obligation and the exact cleanup line off the first message it sees; the
+  first line stays `PR up: <pr url>` as the preview. Fill `<primary
+  checkout>` with the absolute path of the main worktree, the first entry of
+  `git worktree list`. On a brief that carried `--chris-merges`, the trailer
+  reads "Chris merges" instead of the merge instruction and hands the merge
+  line, the same literal-flag rule as below.
 
 - **The sha CLEAN was observed at** — step 5's `headRefOid`, the commit
   GitHub read not-draft and `CLEAN` on, which is not always the tip by the
