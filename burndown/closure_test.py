@@ -160,17 +160,23 @@ def candidate(number, *files):
 
 
 def numbers(clumping):
-    return [c["tickets"] for c in clumping["clumps"]]
+    return [c["tickets"] for c in C.clump_list(clumping)]
 
 
-def test_two_candidates_sharing_an_include_are_one_clump():
+def family_numbers(clumping):
+    return [f["tickets"] for f in clumping["families"]]
+
+
+def test_two_candidates_sharing_an_include_are_one_family():
     # #781's costliest finding, as a fixture: #451 targets the shared
     # snippet, #455 targets the skyscraper component, and nothing in either
-    # ticket names the other's file.
+    # ticket names the other's file. Their closures differ, so they are two
+    # clumps that wait on each other, not one clump (#970).
     root = repo(SHARED)
     got = C.clumps(root, [candidate(451, "examples/_shared/line-kind.js"),
                           candidate(455, "examples/skyscraper/component.js")])
-    assert numbers(got) == [[451, 455]], got
+    assert family_numbers(got) == [[451, 455]], got
+    assert numbers(got) == [[451], [455]], got
 
 
 def test_a_candidate_colliding_with_nothing_clumps_alone():
@@ -178,6 +184,94 @@ def test_a_candidate_colliding_with_nothing_clumps_alone():
     got = C.clumps(root, [candidate(451, "examples/_shared/line-kind.js"),
                           candidate(501, "docs/notes.md")])
     assert numbers(got) == [[451], [501]], got
+
+
+# --- Families: a component is run serially, not shipped whole (#970) ------
+
+def families(clumping):
+    return [[c["tickets"] for c in f["clumps"]] for f in clumping["families"]]
+
+
+# `burn-2026-09-21-0930`, in small. That repo declares None, so a closure is
+# a candidate's own files; each of five candidates names its own file and the
+# same hub (`implement/SKILL.md` there). One component — and on that run the
+# only move the loop had was one worker holding all 27 tickets.
+NONE_DECLARED = "## Include closure\n\nNone \u2014 nothing here is generated.\n"
+HUB = {"hub.md": "x\n", **{f"c{n}/own.md": "x\n" for n in range(1, 6)}}
+
+
+def test_one_hub_file_chains_five_candidates_into_one_family_of_five_clumps():
+    root = repo(HUB, agents=NONE_DECLARED)
+    got = C.clumps(root, [candidate(n, "hub.md", f"c{n}/own.md")
+                          for n in range(1, 6)])
+    assert families(got) == [[[1], [2], [3], [4], [5]]], got
+    assert got["families"][0]["tickets"] == [1, 2, 3, 4, 5], got
+
+
+def test_two_candidates_with_identical_closures_are_one_clump_of_two():
+    # They would only rebase onto each other, so one worker takes both.
+    root = repo(HUB, agents=NONE_DECLARED)
+    got = C.clumps(root, [candidate(7, "c1/own.md", "hub.md"),
+                          candidate(3, "hub.md", "./c1/own.md")])
+    assert families(got) == [[[3, 7]]], got
+
+
+def test_four_identical_closures_are_capped_at_a_clump_of_three_and_one():
+    root = repo(HUB, agents=NONE_DECLARED)
+    got = C.clumps(root, [candidate(n, "hub.md") for n in (4, 1, 3, 2)])
+    assert families(got) == [[[1, 2, 3], [4]]], got
+
+
+def test_a_family_split_by_the_cap_says_so_when_rendered():
+    root = repo(HUB, agents=NONE_DECLARED)
+    capped = C.render(C.clumps(root, [candidate(n, "hub.md") for n in range(1, 5)]))
+    assert f"split at MAX_CLUMP={C.MAX_CLUMP}" in capped, capped
+    uncapped = C.render(C.clumps(root, [candidate(n, "hub.md") for n in range(1, 4)]))
+    assert "MAX_CLUMP" not in uncapped, uncapped
+
+
+def closure_json(root, *specs):
+    """`closure.py --json`, written where `loop.py dispatch --candidates`
+    would read it."""
+    out = subprocess.run([sys.executable, CLOSURE, "--json", root, *specs],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out
+    path = os.path.join(root, "candidates.json")
+    with open(path, "w") as fh:
+        fh.write(out.stdout)
+    return path, out
+
+
+def test_the_json_output_round_trips_through_read_clumps():
+    import loop
+    root = repo(HUB, agents=NONE_DECLARED)
+    specs = [f"{n}=hub.md,c{n}/own.md" for n in (1, 2)] + ["3=c3/own.md"]
+    path, out = closure_json(root, *specs)
+    got = loop.read_clumps(path)
+    want = C.clump_list(C.clumps(root, [C.parse_candidate(s) for s in specs]))
+    assert got == want, (got, want)
+    assert [c["tickets"] for c in got] == [[1], [2], [3]], got
+    # The announcement is not dropped: it goes where the redirect does not.
+    assert out.stderr.startswith("clumping: include closure"), out.stderr
+
+
+def test_one_live_family_member_holds_the_rest_and_another_family_dispatches():
+    # The serialization needs no new mechanism: `loop.py dispatch` already
+    # holds a clump sharing a file with a live workspace. #1 is live; #2 and
+    # #3 share the hub with it, and #4 is a different family.
+    import loop
+    root = repo(HUB, agents=NONE_DECLARED)
+    path, _ = closure_json(root, *[f"{n}=hub.md,c{n}/own.md" for n in (1, 2, 3)],
+                           "4=c4/own.md")
+    listed = loop.read_clumps(path)
+    live = [dict(c, workspace="/w/implement-1") for c in listed
+            if c["tickets"] == [1]]
+    rest = [c for c in listed if c["tickets"] != [1]]
+    state = loop.frontier(rest, live)
+    assert [c["tickets"] for c in state["dispatchable"]] == [[4]], state
+    assert sorted(h["clump"]["tickets"] for h in state["held"]) == [[2], [3]], state
+    assert all(h["over"] == ["hub.md"] for h in state["held"]), state
+    assert [c["tickets"] for c in loop.refill(rest, live, 3)] == [[4]]
 
 
 # --- The conservative fallback, and what the report says it got ------------
@@ -203,7 +297,7 @@ def test_the_fallback_is_announced_in_stated_words():
     assert got["announcement"] == (
         "clumping: conservative, by directory subtree \u2014 AGENTS.md declares "
         "no include closure, so any two candidates touching the same "
-        "directory subtree are one clump"), got
+        "directory subtree are one clump, and a family is never split"), got
 
 
 def test_a_declared_grammar_is_announced_with_its_directive_and_generator():
@@ -212,7 +306,8 @@ def test_a_declared_grammar_is_announced_with_its_directive_and_generator():
     assert got["mode"] == "closure", got
     assert got["announcement"] == (
         "clumping: include closure, from AGENTS.md "
-        "(directive `#include <path>`, generator `make examples`)"), got
+        "(directive `#include <path>`, generator `make examples`); each "
+        "family runs as clumps of identical closures"), got
 
 
 def test_a_declared_none_is_announced_as_its_own_third_answer():
@@ -224,7 +319,8 @@ def test_a_declared_none_is_announced_as_its_own_third_answer():
     assert got["mode"] == "no-include-graph", got
     assert got["announcement"] == (
         "clumping: include closure, from AGENTS.md (declared None: this repo "
-        "has no include graph, so each candidate closes over its own files)"), got
+        "has no include graph, so each candidate closes over its own files); "
+        "each family runs as clumps of identical closures"), got
 
 
 # --- The cost ceiling ------------------------------------------------------
@@ -286,8 +382,9 @@ def test_the_command_line_prints_the_mode_and_the_clumps():
         capture_output=True, text=True)
     assert out.returncode == 0, out
     assert "directive `#include <path>`" in out.stdout, out.stdout
-    assert "clump #451, #455" in out.stdout, out.stdout
-    assert "clump #501" in out.stdout, out.stdout
+    assert "family #451, #455  (2 clumps)" in out.stdout, out.stdout
+    assert "clump #451  (" in out.stdout, out.stdout
+    assert "family #501  (1 clump)" in out.stdout, out.stdout
 
 
 def test_the_command_line_says_when_no_closure_was_resolved():
@@ -327,7 +424,7 @@ def test_an_absolute_candidate_path_is_the_file_it_names():
     got = C.clumps(root, [
         candidate(451, os.path.join(root, "examples/_shared/line-kind.js")),
         candidate(455, "examples/skyscraper/component.js")])
-    assert numbers(got) == [[451, 455]], got
+    assert family_numbers(got) == [[451, 455]], got
 
 
 def test_a_candidate_file_outside_the_repo_is_refused_not_guessed_at():
@@ -464,14 +561,14 @@ def test_a_subtree_clump_carries_no_closure_key():
     # this reader exists to stop trusting.
     root = repo({"a/one.js": "x\n"}, agents=None)
     got = C.clumps(root, [candidate(1, "a/one.js")])
-    assert "closure" not in got["clumps"][0], got
-    assert got["clumps"][0]["files"] == ["a/one.js"], got
+    assert "closure" not in C.clump_list(got)[0], got
+    assert C.clump_list(got)[0]["files"] == ["a/one.js"], got
 
 
 def test_a_resolved_clump_carries_both_its_files_and_its_closure():
     root = repo(SHARED)
     got = C.clumps(root, [candidate(451, "examples/_shared/line-kind.js")])
-    clump = got["clumps"][0]
+    clump = C.clump_list(got)[0]
     assert clump["files"] == ["examples/_shared/line-kind.js"], clump
     assert "examples/thermo/component.js" in clump["closure"], clump
 
