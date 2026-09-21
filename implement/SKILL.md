@@ -153,15 +153,22 @@ No PR and no reviewer; Chris reads the log after.
    Every finding gets exactly one disposition: fixed in a commit,
    `disputed: <why>`, or filed as a follow-up ticket through `/file-ticket`
    so it leaves with a routing role, never `needs-triage` — ad hoc
-   `gh issue create` skips that role. On a heavy Claude-lane build, the PR
+   `gh issue create` skips that role. On a repo whose `origin` owner isn't
+   your `gh` login, `/file-ticket` hands the command back instead of filing,
+   so there is no ticket number: the disposition is `handed back: <the
+   gh issue create command>`, the command exactly as `/file-ticket` gave it.
+   It counts as filed for every rule below except the sidecar, which keeps
+   its own `handed-back` outcome; Chris files it after he has seen the work
+   (§ Someone else's repo). On a heavy Claude-lane build, the PR
    body lists **every** round-1 finding with its disposition (fixed, with
-   the fixing commit's sha; `disputed: <why>`; or filed, with its ticket
-   number) — not only the disputed and filed ones. A fixed finding that's
+   the fixing commit's sha; `disputed: <why>`; filed, with its ticket
+   number; or handed back, with the command) — not only the disputed,
+   filed and handed-back ones. A fixed finding that's
    allowed to vanish from the record is one the § The merge step 3 Codex
    pass can't tell from a Codex-only one, so it can misclassify a real
    Claude catch as `codex-only, confirmed` and corrupt the trial's
-   evidence. On any other build, the PR body lists the disputed and filed
-   ones.
+   evidence. On any other build, the PR body lists the disputed, filed and
+   handed-back ones.
 
    When round 1's findings are in hand, before starting the verification
    pass, send the controller `Round 1 out: <k> findings, head <sha>` —
@@ -183,8 +190,12 @@ No PR and no reviewer; Chris reads the log after.
    joined to a round-1 finding by its `id` (`S1`/`P2`/`C3`). Each line is
    `{"id": "<id>", "outcome": "fixed", "sha": "<sha>"}`,
    `{"id": "<id>", "outcome": "disputed", "reason": "<why>"}`, or
-   `{"id": "<id>", "outcome": "filed", "ticket": <n>}` — the same three
-   dispositions this pass already records in prose, nothing new invented.
+   `{"id": "<id>", "outcome": "filed", "ticket": <n>}`, or
+   `{"id": "<id>", "outcome": "handed-back", "command": "<the command>"}` —
+   the same four dispositions this pass already records in prose. `command`
+   is the command JSON-encoded as one string, its newlines and quotes
+   escaped: `/file-ticket`'s command is a multi-line heredoc, and a line
+   split across lines breaks the join.
    The worker never writes this file: it is the adversarial read, and the
    worker grading its own homework is not the honest source for it. No
    cost tracking here either.
@@ -274,13 +285,14 @@ The body has these sections and nothing else:
 - **Tests run** — the command and its result line.
 - **Decisions made** — each with its reason. On a heavy Claude-lane build,
   every round-1 finding, each with its disposition (fixed, with the sha;
-  disputed, with the why; or filed, with its ticket number) — § The merge
+  disputed, with the why; filed, with its ticket number; or handed back,
+  with the command) — § The merge
   step 3's Codex classification reads this list. Cite each finding by the
   id its sidecar gave it (`S1`/`P2`/`C3`) rather than restating it in
   prose (#855) — that's what makes this list joinable against
   `dispositions-<n>.jsonl` without a reading pass. On any other build, every
-  round-1 finding that was disputed (with the why) or filed (with its
-  ticket number).
+  round-1 finding that was disputed (with the why), filed (with its
+  ticket number) or handed back (with the command).
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
 
 Send the controller "PR up" in this shape:
@@ -666,3 +678,7 @@ When `origin`'s owner is not Chris, either tier: commit on the branch, and
 send the controller the push and `gh pr create` lines instead of running them.
 The controller merges nothing there. The git hook blocks every push to a repo
 Chris does not own, and Chris sees the work before any other human does.
+
+Each handed-back finding's `gh issue create` command goes in that same
+message, one per finding beside its id, so Chris can file it after he has
+seen the work. Nothing files it before then.
