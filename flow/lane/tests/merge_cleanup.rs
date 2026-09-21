@@ -2000,6 +2000,39 @@ fn a_branch_that_moved_to_another_worktree_since_the_plan_is_refused() {
 }
 
 #[test]
+fn a_branch_that_moved_into_the_primary_checkout_since_the_plan_is_refused() {
+    // #881: the re-check used the linked-only lookup, so a primary checkout
+    // holding the branch read as no holder and the cleanup switched it off
+    // the branch and deleted the branch.
+    let c = Cleanup::new();
+    let r = reap_repo(&c, "r43", &["118", "119"]);
+    let (first, planned) = (r.join(".claude/worktrees/implement-118"), r.join(".claude/worktrees/implement-119"));
+    let hook = r.join(".git/hooks/pre-push");
+    std::fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n\
+             git -C {repo} worktree remove --force {planned}\n\
+             git -C {repo} checkout -q implement-119\n",
+            repo = r.display(),
+            planned = planned.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!first.exists() && !c.has_branch(&r, "implement-118"), "{}", run.text());
+    assert!(c.has_branch(&r, "implement-119"), "the branch the primary checkout holds was deleted:\n{}", run.text());
+    let head = c.git_out(&["-C", s(&r), "branch", "--show-current"]);
+    assert_eq!(head.trim(), "implement-119", "the primary checkout was moved off it:\n{}", run.text());
+    let want = format!("  {}  moved since the plan, not removed: {} now holds implement-119", planned.display(), r.display());
+    assert!(run.has(&want), "{}", run.text());
+    assert!(run.has("reap summary: 1 reaped, 1 skipped"), "{}", run.text());
+}
+
+#[test]
 fn a_workspace_whose_path_resolves_outside_the_repo_is_not_a_candidate() {
     // The boundary the Codex pass on PR #878 asked about. git resolves a
     // worktree's path when it registers it, so `git worktree add` through a

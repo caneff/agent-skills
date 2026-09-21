@@ -944,10 +944,12 @@ impl Cleanup {
         // included — in reach of the removal, so the scope is proved again
         // here, at the destructive call, and not only at enumeration (the
         // Codex pass on PR #878). A branch whose worktree simply went away
-        // still cleans up: there is nothing left to remove out of scope.
-        if let Some(now) = linked_worktree_holding(anchor, b)
-            && now != wt
-        {
+        // still cleans up: there is nothing left to remove out of scope. The
+        // primary checkout counts as a holder (#881): it is not a removal
+        // target, but a branch moved into it is still not the branch the plan
+        // named, and `cleanup_branch` would switch it off and delete it.
+        let now = worktree_holding(anchor, b);
+        if !now.is_empty() && now != wt {
             return Reaped::Refused(format!("moved since the plan, not removed: {now} now holds {b}"));
         }
         if !self.cleanup_branch(anchor, b) {
