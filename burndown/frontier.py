@@ -26,16 +26,17 @@ from urllib.parse import quote
 
 # An ATX heading whose text is exactly "Blocked by", any level, any case —
 # `##` is what `/to-tickets` emits and what the grammar specifies.
-_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+blocked by[ \t]*:?[ \t]*$",
+_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+blocked by[ \t]*:?[ \t]*$",
                       re.IGNORECASE)
-_ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
+_ANY_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+\S")
 # The inline forms the tree also writes: `Blocked by: #7, #8` at the top of a
 # /wayfinder child (docs/agents/issue-tracker.md), and `**Blocked by:** ...`
 # in to-tickets' local ticket template. Anchored at the line start and
 # allowing no `#` before the words, so a heading is never read as one of
 # these and prose that merely says "blocked by #7" mid-sentence is not a
-# declaration.
-_INLINE = re.compile(r"^[ \t]*[*_]{0,2}[ \t]*blocked by[ \t]*:?[ \t]*[*_]{0,2}[ \t]*:?[ \t]*(.*)$",
+# declaration. All three allow at most three spaces of indent: four or more
+# is an indented code block in CommonMark, a quotation and not a declaration.
+_INLINE = re.compile(r"^ {0,3}[*_]{0,2}[ \t]*blocked by[ \t]*:?[ \t]*[*_]{0,2}[ \t]*:?[ \t]*(.*)$",
                      re.IGNORECASE)
 # A bare `#NNN`. The lookbehind keeps `owner/repo#7` and `abc#7` out: a
 # cross-repo reference is outside the grammar, and reading its tail as a
@@ -104,16 +105,23 @@ def unfenced(lines):
                 fence = None
 
 
+AMBIGUOUS = object()  # `blocked_by_section`'s answer to two declarations
+
+
 def blocked_by_section(body):
     """What the ticket states about its blockers, or `None` when it states
     nothing at all — a ticket that never mentions the relationship is not a
-    ticket that says it has none.
+    ticket that says it has none. `AMBIGUOUS` when it states it more than
+    once: which one is the ticket's own cannot be told from the text, and a
+    quotation of another ticket's declaration reads the same as the real one.
 
     Three written forms, the section first because it is the one
     `/to-tickets` emits: the lines under a `## Blocked by` heading up to the
     next heading of any level, or the rest of an inline `Blocked by:` /
-    `**Blocked by:**` line."""
+    `**Blocked by:**` line in the preamble. Every visible occurrence of
+    either form is one declaration."""
     visible = list(unfenced((body or "").splitlines()))
+    answers = []
     for pos, (_, line) in enumerate(visible):
         if not _HEADING.match(line):
             continue
@@ -122,14 +130,16 @@ def blocked_by_section(body):
             if _ANY_HEADING.match(rest):
                 break
             section.append(rest)
-        return "\n".join(section).strip()
+        answers.append("\n".join(section).strip())
     for _, line in visible:
         if _ANY_HEADING.match(line):
             break  # the preamble ends at the first heading
         inline = _INLINE.match(line)
         if inline:
-            return inline.group(1).strip()
-    return None
+            answers.append(inline.group(1).strip())
+    if len(answers) > 1:
+        return AMBIGUOUS
+    return answers[0] if answers else None
 
 
 def section_blockers(section):
@@ -197,6 +207,10 @@ def classify(issues, state_of):
         if section is None:
             entry["why"] = "no native dependencies and no `Blocked by` of any form"
             return "unresolved", False
+        if section is AMBIGUOUS:
+            entry["why"] = ("the ticket's `Blocked by` is declared more than "
+                            "once, so which one is its own is ambiguous")
+            return "unresolved", True
         references, why = section_blockers(section)
         if references is None:
             entry["why"] = why
