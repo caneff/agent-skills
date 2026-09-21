@@ -35,8 +35,11 @@ _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
 _CLOSURE_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+include closure[ \t]*:?[ \t]*$",
                               re.IGNORECASE)
 # `- **Directive**: `#include <path>`` — the key in optional emphasis, the
-# value in optional backticks.
-_KEY = re.compile(r"^[ \t]*[-*+][ \t]*[*_]{0,2}([A-Za-z][A-Za-z -]*?)[*_]{0,2}[ \t]*:[ \t]*(.*?)[ \t]*$")
+# value in optional backticks. The colon may sit inside the emphasis
+# (`**Directive:**`); that closing run counts only when whitespace or the line
+# end follows it, so a value that is itself bold keeps its own markers.
+_KEY = re.compile(r"^[ \t]*[-*+][ \t]*[*_]{0,2}([A-Za-z][A-Za-z -]*?)[*_]{0,2}"
+                  r"[ \t]*:(?:[*_]{1,2}(?=[ \t]|$))?[ \t]*(.*?)[ \t]*$")
 # "None", however it is dressed, as a *statement*: `None`, `- None`,
 # `None — nothing here is generated.` What follows it must end the clause, so
 # that `None of the docs are generated, but examples/ are` — a sentence

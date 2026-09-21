@@ -91,6 +91,19 @@ SHARED = {
 }
 
 
+def test_a_colon_inside_the_emphasis_is_not_part_of_the_value():
+    text = DECLARED.replace("**Directive**:", "**Directive:**").replace(
+        "**Generator**:", "**Generator:**")
+    got = C.parse_declaration(text)
+    assert got.directive == "#include <path>", got
+    assert got.generator == "make examples", got
+
+
+def test_a_bold_value_keeps_its_own_markers():
+    text = "## Include closure\n- **Directive**:**#include <path>**\n"
+    assert C.parse_declaration(text).directive == "**#include <path>**"
+
+
 def test_the_closure_is_every_file_that_includes_the_target():
     root = repo(SHARED)
     got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
