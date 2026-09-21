@@ -94,6 +94,13 @@ fn die(msg: impl AsRef<str>) -> ExitCode {
     ExitCode::FAILURE
 }
 
+/// What a clump's worker is told beyond `/implement`'s own text (#901). One
+/// line, because the brief is one herdr prompt. The per-ticket `Closes #n`
+/// wording lives in `implement/SKILL.md` (#889) and is not repeated here.
+const CLUMP_NOTE: &str = " -- Clump: a blocker that is another ticket of this clump is ignored, so build them in dependency order and do not park; \
+per-ticket shas do not survive the squash merge, so pin nothing to a sha of yours; \
+the PR-up report is one report for the clump, not one per ticket.";
+
 struct Args {
     repo: Option<String>,
     model: Option<String>,
@@ -653,7 +660,10 @@ fn run() -> Result<(), ExitCode> {
             let (marker, merger) = if chris_merges { (" --chris-merges", ", Chris merges") } else { ("", "") };
             // The whole clump, lowest first: the worker builds every ticket
             // in it and its one PR closes them all.
-            (format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}", ns.join(" ")), format!("{tier} tier{merger}"))
+            // Only a clump carries the note: a lone ticket has no internal
+            // blockers, no sibling shas and one report already (#901).
+            let note = if ns.len() > 1 { CLUMP_NOTE } else { "" };
+            (format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}{note}", ns.join(" ")), format!("{tier} tier{merger}"))
         }
         Mode::Spec { slots } => (format!("/implement-spec {n} --slots {slots} --controller \"{controller}\""), format!("spec, {slots} slots")),
     };
