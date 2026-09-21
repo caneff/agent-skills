@@ -35,10 +35,32 @@ does not resolve.
 
 ## The step locator
 
-`§ <Heading> step <n> ...` names the section `<Heading>`; `step <n>` and
-whatever follows are locator and prose, not part of the name. The step number
-is not checked against the target's numbered list. The keyword is `step` or
-`Step`.
+`§ <Heading> step <n>` names the section `<Heading>` and its numbered step
+`<n>`; the locator and whatever follows it are not part of the name. The
+forms the checker reads, all case-insensitive:
 
-The rule for a reference named "Step 3" itself is stated by the comment above
-`STEP_LOCATOR` in the checker. Whatever the name, put punctuation right after it.
+- `step` or `steps`, then a number, or a spelled-out number from one to ten:
+  `§ The merge step 3`, `§ The merge Step three`.
+- A range with a hyphen, en dash or em dash: `§ Before the PR steps 3-5`. It
+  must ascend; `steps 5-3` fails.
+- An optional colon between the name and the locator: `§ Before the PR: step 6`.
+- The name holds no punctuation. `§ Build: deployment step 3` is read as the
+  heading `Build: deployment` with step 3 required, not as `Build` with no
+  step; a name the locator cannot read that way fails rather than dropping
+  the step.
+
+Every step named must exist in the target section as a `<n>.` or `<n>)` list
+item or a `Step <n>` sub-heading. Fenced code is ignored: a fence closes only
+on its own character, at least as long as the one that opened it, with
+nothing after it, so a `~~~` inside a longer backtick fence is text, and a
+numbered line inside any fence is not a step.
+
+A heading that is itself `Step 3` keeps only `Step 3` as its label, so
+`§ Step 3 and then prose` resolves to that heading and the prose does not
+join the name (fixture `step-heading-prose-valid`). Whatever the name, put
+punctuation right after it.
+
+Known limits: a spelled-out number above ten is not recognised; a second
+locator in one pointer (`step 3 and step 9`) is not read; a lazily numbered
+list (`1.` on every item) does not satisfy the check; and a step can resolve
+in a sibling heading that shares the name's prefix (#990).
