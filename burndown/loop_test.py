@@ -208,8 +208,9 @@ def test_the_cli_dispatch_charges_live_workers_at_their_peak():
                      "--free", "1", "--processes", "16",
                      "--committed-gb", "0")
         assert ok.returncode == 0, ok.stderr
-        assert "peak: 16 agent processes measured, 1 live worker" \
-            in ok.stdout, ok.stdout
+        assert ("peak: 16 agent processes measured, 1 live worker holding 4 "
+                "of fan-out headroom") in ok.stdout, ok.stdout
+        assert "1 more at 5 each projects 25" in ok.stdout, ok.stdout
         # 20 measured: 20 + 4 + 5 = 29 is over the cap of 28.
         refused = loop_py("dispatch", "--candidates", cand, "--in-flight",
                           live, "--free", "1", "--processes", "20",
