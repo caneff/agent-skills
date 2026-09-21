@@ -50,12 +50,12 @@ rc=$(fire varied.jsonl); [ "$rc" = 0 ] && [ ! -e "$tmp/prompts" ] && echo "PASS:
 # sidechain calls; neither may hide a spin (C1, C3). Built here, not committed.
 pad="$tmp/padded.jsonl"
 { head -n 1 "$fx/real-spin.jsonl"
-  for i in $(seq 1 60); do
+  for i in $(seq 1 100); do
     printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"p%s","name":"Bash","input":{"command":"echo ok"}}]}}\n' "$i"
     printf '{"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":[{"type":"tool_use","id":"sc%s","name":"Read","input":{"file_path":"/x"}}]}}\n' "$i"
     for j in 1 2 3 4 5 6; do printf '{"type":"attachment","attachment":{"n":%s}}\n' "$j"; done
   done; } > "$pad"
-if bash "$hook" --classify "$pad" | jq -e '.spinning == true and .count == 60' >/dev/null; then
+if bash "$hook" --classify "$pad" | jq -e '.spinning == true and .count == 100' >/dev/null; then
   echo "PASS: padding lines and sidechain calls do not hide a spin"
 else echo "FAIL: padded spin — got: $(bash "$hook" --classify "$pad")"; fails=1; fi
 
@@ -67,7 +67,8 @@ else echo "PASS: --classify refuses an unreadable transcript"; fi
 nb="$tmp/nobrief.jsonl"; tail -n +2 "$fx/real-spin.jsonl" > "$nb"
 rm -f "$tmp/prompts"
 printf '{"session_id":"s2","transcript_path":"%s"}' "$nb" | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook"; rc=$?
-[ "$rc" = 0 ] && [ ! -e "$tmp/prompts" ] && echo "PASS: a spin with no worker brief sends no alert" \
+[ "$rc" = 0 ] && [ ! -e "$tmp/prompts" ] && ! grep -q s2 "$tmp/home/.claude/worker-spin-alerts.log" 2>/dev/null \
+  && echo "PASS: a spin with no worker brief sends no alert and leaves no log line" \
   || { echo "FAIL: non-worker spin — rc=$rc prompts: $(cat "$tmp/prompts" 2>/dev/null)"; fails=1; }
 
 # An alert that was not sent (no controller pane) is retried on the next call.
