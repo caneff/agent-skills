@@ -28,13 +28,9 @@ The loser's worker runs it, in its own workspace:
    git diff --cached        # read it: this is what the rebase is about to commit
    git rebase --continue
    ```
-   **Never `git add -A` here.** It stages every tracked modification and every
-   untracked file the workspace happens to hold — a diagnostic script, a local
-   config, a credential — and this recipe ends in a force-push, so whatever it
-   swept up is published as part of a collision recovery. A recipe written down
-   is run verbatim under pressure, which is when nobody checks. This step is
-   the same for a generated artifact and a hand-merge; only how the file got
-   resolved differs.
+   **Never `git add -A` here.** Steps 2 and 3 repeat for every commit the
+   rebase stops on; go on to step 4 only once `git rebase --continue` reports
+   the rebase finished.
 4. Check the result against what was reviewed:
    `git diff origin/<default>...HEAD` says the same thing the reviewed diff
    said, plus the landed branch's changes, and nothing else. A rebase that
@@ -44,6 +40,14 @@ The loser's worker runs it, in its own workspace:
    disposable by design.
 6. Report the new tip to the controller, with every commit past the last
    reviewed sha named and classed, the same as any "PR up".
+
+Why step 3 names its paths: `git add -A` stages every tracked modification
+and every untracked file the workspace happens to hold — a diagnostic script,
+a local config, a credential — and this recipe ends in a force-push, so
+whatever it swept up is published as part of a collision recovery. A recipe
+written down is run verbatim under pressure, which is when nobody checks. The
+step is the same for a generated artifact and a hand-merge; only how the file
+got resolved differs.
 
 Two harness notes, because both cost a worker hours on #781: finishing a
 rebase already under way is sanctioned, as is `--force-with-lease` to the
@@ -62,7 +66,7 @@ git checkout --ours -- <generated paths>
 <the repo's declared Generator command>
 ```
 
-Then the staging step above, naming the regenerated paths beside the ones you
+Then stage as § First PR to land wins step 3 says, naming the regenerated paths beside the ones you
 resolved by hand.
 
 The Generator command is the one declared in the repo's `AGENTS.md` § Include
@@ -82,7 +86,7 @@ them took one command; reading them would have taken an afternoon and shipped
 a diff nobody could check.
 
 A repo that declares no generator has nothing to regenerate, and its
-conflicts are all hand-merges, staged by the same step 3 above.
+conflicts are all hand-merges, staged as § First PR to land wins step 3 says.
 
 ## An escaped collision is a defect in the include grammar
 
