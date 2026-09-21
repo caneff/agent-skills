@@ -89,6 +89,11 @@ task_stop() { printf '{"type":"assistant","message":{"role":"assistant","content
 work() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e-1","name":"Edit","input":{"file_path":"a.js"}}]}}\n'
   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e-1","content":"ok"}]},"toolUseResult":{"filePath":"a.js"}}\n'; }
 
+# task_poll <id> : a TaskOutput poll of a background task or subagent (#900).
+task_poll() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"po-%s","name":"TaskOutput","input":{"task_id":"%s"}}]}}\n' "$1" "$1"; }
+# bash_cmd <text> : a Bash call whose command merely mentions text.
+bash_cmd() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"bc-1","name":"Bash","input":{"command":"%s"}}]}}\n' "$1"; }
+
 fails=0
 # run <name> <transcript-file> [stop_hook_active] -> sets $pane and $text
 # (the recorded prompt's target and alert, empty if no prompt was sent)
@@ -326,8 +331,6 @@ expect_alert "a never-terminated job does not suppress a later genuine silent st
 
 # Liveness evidence (#900): a launch from an earlier turn stays out across an
 # inbound message only while something since the turn start names its id.
-# task_poll <id> : a TaskOutput poll of a background task or subagent.
-task_poll() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"po-%s","name":"TaskOutput","input":{"task_id":"%s"}}]}}\n' "$1" "$1"; }
 reset_log
 t="$tmp/bg-polled.jsonl"
 { human "$brief"; bg_launch bpoll1; assistant_text "check-full running"; peer "status?"; task_poll bpoll1; assistant_text "still running"; } > "$t"
@@ -357,6 +360,47 @@ t="$tmp/polled-then-done.jsonl"
 { human "$brief"; bg_launch bpoll2; peer "status?"; task_done bpoll2 completed; task_poll bpoll2; assistant_text "done"; } > "$t"
 run "polled after it finished" "$t"
 expect_alert "a polled task that already reached a terminal state is not out"
+
+reset_log
+t="$tmp/mention-only.jsonl"
+{ human "$brief"; launch a0037b86e988b4825; assistant_text "reviewer running"; peer "status?";
+  bash_cmd "grep -c a0037b86e988b4825 .scratch/agents.log"; assistant_text "noted"; } > "$t"
+run "id mentioned in a command" "$t"
+expect_alert "an id that only appears in a command is not evidence of life"
+
+reset_log
+t="$tmp/peer-mention.jsonl"
+{ human "$brief"; launch a0037b86e988b4826; assistant_text "reviewer running"; peer "is a0037b86e988b4826 still out?"; assistant_text "noted"; } > "$t"
+run "id named in a peer message" "$t"
+expect_alert "an id a peer message names is not evidence of life"
+
+reset_log
+t="$tmp/id-prefix.jsonl"
+{ human "$brief"; bg_launch b0kjm5mmm; bg_launch b0kjm5mmmX; assistant_text "two out"; peer "status?";
+  task_done b0kjm5mmmX completed; task_poll b0kjm5mmmX; assistant_text "one done"; } > "$t"
+run "id that prefixes another" "$t"
+expect_alert "polling one id does not keep an id it is a prefix of out"
+
+# The resolution sets are read over the whole transcript: an id that ended in
+# an earlier turn stays ended when a later poll names it.
+reset_log
+t="$tmp/handed-back-earlier.jsonl"
+{ human "$brief"; launch r3; handback r3; peer "status?"; task_poll r3; assistant_text "back already"; } > "$t"
+run "subagent handed back last turn, polled this turn" "$t"
+expect_alert "a subagent handed back in an earlier turn is not out because it was polled"
+
+reset_log
+t="$tmp/teammate-reported-earlier.jsonl"
+{ human "$brief"; teammate_launch tally-900@session-2b7ae693 tally-900; teammate_report tally-900; peer "status?";
+  task_poll tally-900; assistant_text "reported already"; } > "$t"
+run "teammate reported last turn, polled this turn" "$t"
+expect_alert "a teammate that reported in an earlier turn is not out because it was polled"
+
+reset_log
+t="$tmp/finished-earlier.jsonl"
+{ human "$brief"; bg_launch bfin1; task_done bfin1 completed; peer "status?"; task_poll bfin1; assistant_text "finished already"; } > "$t"
+run "task finished last turn, polled this turn" "$t"
+expect_alert "a task that finished in an earlier turn is not out because it was polled"
 
 reset_log
 t="$tmp/torn.jsonl"

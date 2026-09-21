@@ -96,10 +96,10 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
                 and ([.value.message.content[]? | select(.type == "tool_use")] | length > 0))
                or (.value.toolUseResult != null))] as $since_report
   # Liveness evidence (#900): a launch from an earlier turn counts as out
-  # only if something since the start of this turn names its id — a tool call by
-  # the worker (a `BashOutput`/`TaskOutput` poll, a `SendMessage` to
-  # the subagent), or a notification or teammate message carrying the id
-  # without a `<status>` (a Monitor event). A message that arrives while a
+  # only if something since the start of this turn names its id — a tool call
+  # by the worker whose task_id, shell_id, agentId or `to` is that id (a
+  # `BashOutput`/`TaskOutput` poll, a `SendMessage` to the subagent), or a
+  # task-notification carrying it without a `<status>` (a Monitor event). A message that arrives while a
   # job is out restarts the turn but not the evidence, so an id nothing has
   # touched since is treated as abandoned, not carried: 45% of launches
   # never emit a terminal notification (docs/research/
@@ -108,10 +108,16 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
   # and finishes are read over the whole transcript; an id ends wherever it
   # ends. A launch this turn needs no evidence.
   | ([$after[] | select(.type == "assistant") | .message.content[]?
-        | select(.type == "tool_use") | .input | tojson]
-     + [$after[] | select(.type == "user") | .message.content | strings
-        | select(test("<status>") | not)]) as $touched
-  | def alive: (sub("@session-[^@]*$"; "")) as $b | any($touched[]; contains($b));
+        | select(.type == "tool_use") | .input | objects
+        | (.task_id, .shell_id, .bash_id, .agentId, .agent_id, .to) | strings]
+     + [$after[] | select(.type == "user" and .origin.kind == "task-notification")
+        | .message.content | strings | select(test("<status>") | not)
+        | scan("<task-id>([^<]+)</task-id>")[0]]) as $touched
+  # An id is compared whole, in the fields that name a task or an agent, and
+  # never searched for inside free text: an id that merely appears in a
+  # command, a written file or a peer message is not evidence of life.
+  | def alive: [., sub("@session-[^@]*$"; "")] | any(.[]; IN($touched[]));
+  def outstanding($launches; $now): [$launches[] | select(IN($now[]) or alive)] | unique;
   [$all[] | .value | select(.type == "user") | .toolUseResult? | objects
       | select(.status == "async_launched" or .status == "teammate_spawned")
       | (.agentId // .agent_id) | select(strings)] as $launched_all
@@ -130,12 +136,12 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
      ($all[] | .value | select(.type == "assistant") | .message.content[]?
        | select(.type == "tool_use" and .name == "TaskStop")
        | (.input.task_id // .input.shell_id) | select(strings))] as $finished
-  | ([$tasks_all[] | select(. as $i | $tasks_now | index($i) or false) ] + [$tasks_all[] | select(alive)] | unique) as $tasks
+  | outstanding($tasks_all; $tasks_now) as $tasks
   | ($tasks - $finished) as $unfinished
   # A teammate launch id is qualified (name@session-...); its reply id is
   # bare. Neither form appearing in $returned (both survive the set
   # difference, so the length is 2) means this launch is still unresolved.
-  | ([$launched_all[] | select(. as $i | ($launched_now | index($i)) != null or alive)] | unique) as $launched
+  | outstanding($launched_all; $launched_now) as $launched
   | [$launched[] | select(([., sub("@session-[^@]*$"; "")] - $returned | length) == 2)] as $unresolved
   | (if ($delivered | length) > 0 then "reported"
      elif $reported_at != null and ($since_report | length) == 0 then "reported"
