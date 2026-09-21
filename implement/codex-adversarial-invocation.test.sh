@@ -93,7 +93,10 @@ check_absent "$skill" '--json body --jq .body' 'a comment-less ticket read'
 check "$lane" 'disable-model-invocation: true'
 check "$lane" "codex@openai-codex"
 check "$lane" 'installPath'
-check "$lane" 'body_file=<absolute path you wrote the ticket body to>'
+check "$lane" 'body_file=<absolute path you wrote the ticket body, comments and appendix to>'
+check_absent "$lane" 'you wrote the ticket body to>' 'the comment-less body_file wording (#880)'
+check_count "$lane" '--json body,comments --jq' 1
+check_absent "$lane" 'ticket body **verbatim**' 'a body-only brief (#880)'
 check "$lane" 'codex-companion.mjs" review --wait'
 check "$lane" 'codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"'
 check_absent "$lane" '"<ticket body verbatim>"' 'the naive, unsafe form'
