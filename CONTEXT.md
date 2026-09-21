@@ -32,8 +32,12 @@ _Avoid_: burn (one kind of run), batch, session
 One live worker a run may hold. `--slots` caps a run's slots; the box rule bounds the sum across every run on the machine. A nested spec run's slots are debited from the burn that dispatched it.
 _Avoid_: builder, lane, parallelism
 
+**Family**:
+The tickets of one connected component of a run's file-collision graph. It proves only that clumps sharing a file cannot be live at the same time, not that they ship together: a family runs as its clumps, each held off the frontier while a live workspace shares a file with it. In subtree mode a family is one clump.
+_Avoid_: component (the graph term), cluster
+
 **Clump**:
-The tickets of one connected component of a run's file-collision graph. One worker, one workspace, one PR that closes every ticket in it; a ticket that collides with nothing is a clump of one.
+The tickets inside one family whose closures are identical, at most three (`MAX_CLUMP` in `burndown/closure.py`); any other family member is a clump of one. One worker, one workspace, one PR that closes every ticket in it.
 _Avoid_: batch, group, cluster
 
 **Tier**:

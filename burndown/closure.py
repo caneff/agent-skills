@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""The include closure of a change, and the clumps it implies.
+"""The include closure of a change, and the families and clumps it implies.
 
-A **clump** is one connected component of a run's file-collision graph: one
-worker, one workspace, one PR. Built from each candidate's *declared seams* —
+A **family** is one connected component of a run's file-collision graph; a
+**clump** inside it — one worker, one workspace, one PR — is the tickets whose
+closures are identical, at most `MAX_CLUMP` of them. Built from each
+candidate's *declared seams* —
 prose typed by whoever filed the ticket — the graph lies. On #781 ticket #451
 named each component's `update` and `validate` and nothing about skyscraper;
 its diff touched 41 files across six example families through a shared

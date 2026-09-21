@@ -2,8 +2,8 @@
 """Tests for the include-closure clumper (#891). Two seams, both named on the
 ticket: `resolve_closure(root, files)` — the set of files a change to `files`
 regenerates — and `clumps(root, candidates)` — the connected components of
-the collision graph over those closures, plus the mode announcement the run's
-opening report carries.
+the collision graph over those closures, as families of clumps (#970), plus
+the mode announcement the run's opening report carries.
 
 Every case is a fixture repo written to a temp directory: a declaration in
 `AGENTS.md` and a few files that include each other. Nothing here runs a
