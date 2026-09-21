@@ -147,9 +147,9 @@ by `burndown/closure.py`, not from the tickets' declared seams:
 mode and the **families** — the connected components of the collision graph
 over each candidate's **include closure** — each split into its **clumps**
 (`references/closure.md` § Families run as clumps); `--json` prints the clump
-list `loop.py dispatch --candidates` reads. The repo declares its include directive and
-its generator command in `AGENTS.md`; the resolver follows that declaration
-one hop and **never runs the generator**. A repo that declares nothing is
+list `loop.py dispatch --candidates` reads. The repo declares its include
+directive and its generator command in `AGENTS.md`; the resolver follows
+that declaration one hop and **never runs the generator**. A repo that declares nothing is
 clumped conservatively by directory subtree, and the run's **opening report
 carries the announcement line** the reader returns, so a controller can see
 which of the three modes it got. The grammar and the evidence:
