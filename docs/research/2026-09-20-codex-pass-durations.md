@@ -36,3 +36,5 @@ early is worth it, which is why a `gate-retry` never reports as a plain
 
 | ticket | PR | phase | launched | completed | duration (min) | outcome |
 |---|---|---|---|---|---|---|
+| 901 | #965 | early | — | — | — | absent: the controller never launched the pass at round 1 |
+| 901 | #965 | gate-retry | 2026-09-21T09:19:19-04:00 | 2026-09-21T09:20:41-04:00 | 1.4 | collected-after-retry |
