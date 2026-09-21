@@ -119,10 +119,12 @@ in that setup.
    ```sh
    python3 ~/.agents/skills/mutation-audit/audit.py --run <target-module.py>
    ```
-   `--run` calls `uvx --with pytest mutmut run`, then `uvx mutmut results --all
+   `--run`'s argument only labels its messages; the scope is step 3's config,
+   so do step 3 first. It calls `uvx --with pytest mutmut run`, then `uvx mutmut results --all
    true`, and parses the text. **It exits 3 and prints `INCONCLUSIVE: <why>` to
-   stderr — with no rows — when `uvx` is missing, when `mutmut run` fails, or
-   when the results hold no mutant line at all.** Relay that line to the user
+   stderr — with no rows — when `uvx` is missing, when `mutmut run` or
+   `results` fails or exceeds `MUTATION_AUDIT_TIMEOUT` seconds (default 3600),
+   or when the results hold no mutant line at all.** Relay that line to the user
    as the result; an inconclusive run is not a clean run and never becomes
    "no findings". Exit 0 with no rows means mutmut ran and every mutant died.
    Known blocker (`docs/research/2026-09-20-mutmut-against-this-repo.md`):

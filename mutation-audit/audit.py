@@ -126,15 +126,26 @@ def parse_or_inconclusive(text):
 
 def run_mutmut(target):
     """Run mutmut through `uvx` in the cwd and return its `results --all true`
-    text. Raises `Inconclusive`, saying why, when uvx is missing or a mutmut
-    command fails. Never installs anything: SKILL.md step 3 scopes the config."""
+    text. Raises `Inconclusive`, saying why, when uvx is missing, a mutmut
+    command fails, or one outlives `MUTATION_AUDIT_TIMEOUT` seconds (default
+    3600). Never installs anything. `target` is for the messages only: what
+    mutmut mutates is the `source_paths` config SKILL.md step 3 writes."""
     if shutil.which("uvx") is None:
-        raise Inconclusive(f"mutmut unavailable: `uvx` is not on PATH, so {target} was not mutated")
-    run = subprocess.run(["uvx", "--with", "pytest", "mutmut", "run"], capture_output=True, text=True)
+        raise Inconclusive(f"mutmut unavailable: `uvx` is not on PATH, so nothing was mutated (target {target})")
+    limit = float(os.environ.get("MUTATION_AUDIT_TIMEOUT", "3600"))
+
+    def call(args):
+        try:
+            return subprocess.run(["uvx", *args], capture_output=True, text=True,
+                                  stdin=subprocess.DEVNULL, timeout=limit)
+        except subprocess.TimeoutExpired:
+            raise Inconclusive(f"`uvx {' '.join(args)}` timed out after {limit:g}s (target {target})") from None
+
+    run = call(["--with", "pytest", "mutmut", "run"])
     if run.returncode != 0:
         tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-5:])
-        raise Inconclusive(f"mutmut run failed (exit {run.returncode}) on {target}:\n{tail}")
-    res = subprocess.run(["uvx", "mutmut", "results", "--all", "true"], capture_output=True, text=True)
+        raise Inconclusive(f"mutmut run failed (exit {run.returncode}) (target {target}):\n{tail}")
+    res = call(["mutmut", "results", "--all", "true"])
     if res.returncode != 0:
         raise Inconclusive(f"mutmut results failed (exit {res.returncode}): {res.stderr.strip()}")
     return res.stdout
@@ -298,22 +309,29 @@ def _check_cli_path():
         assert report["total"] == pair_count + lonely_count, report
 
 
-def _run_cli(argv, path_dirs, cwd=None):
+def _run_cli(argv, path_dirs, cwd=None, extra_env=None):
     """Run audit.py as a subprocess with PATH limited to `path_dirs` plus the
     interpreter's own dir; returns (returncode, stdout, stderr)."""
-    env = dict(os.environ, PATH=os.pathsep.join([*path_dirs, os.path.dirname(sys.executable)]))
+    # PATH is exactly `path_dirs`: the interpreter is run by absolute path, and
+    # the stub uses only shell builtins, so a real uvx cannot leak in (#962).
+    env = dict(os.environ, PATH=os.pathsep.join(path_dirs), **(extra_env or {}))
     r = subprocess.run([sys.executable, os.path.abspath(__file__), *argv],
                        capture_output=True, text=True, env=env, cwd=cwd)
     return r.returncode, r.stdout, r.stderr
 
 
-def _stub_uvx(dirpath, run_exit, results_text):
+def _stub_uvx(dirpath, run_exit, results_text, results_exit=0, hang=False):
+    """A stand-in `uvx` using shell builtins only. An invocation it does not
+    model exits 99, so a changed command line cannot pass as "mutmut reported
+    nothing"."""
     stub = os.path.join(dirpath, "uvx")
+    body = "while :; do read -t 1 _ 2>/dev/null; done" if hang else f'echo "stub run output"; exit {run_exit}'
     with open(stub, "w", encoding="utf-8") as f:
         f.write("#!/bin/sh\n"
                 'case "$*" in\n'
-                f'  *"mutmut run"*) echo "stub run output"; exit {run_exit};;\n'
-                f'  *"mutmut results"*) cat <<\'EOT\'\n{results_text}\nEOT\n;;\n'
+                f"  *\"mutmut run\"*) {body};;\n"
+                f"  *\"mutmut results --all true\"*) printf '%s\\n' '{results_text}'; exit {results_exit};;\n"
+                "  *) echo \"stub uvx: unmodelled call: $*\" >&2; exit 99;;\n"
                 "esac\n")
     os.chmod(stub, 0o755)
 
@@ -344,6 +362,27 @@ def _check_inconclusive_when_mutmut_cannot_run():
         assert "INCONCLUSIVE" in err, err
 
 
+def _check_run_inconclusive_on_each_broken_mutmut_output():
+    """Each way `mutmut results` can be unusable names its own cause (#962)."""
+    with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as cwd:
+        # mutmut ran and reported nothing: the run path must not read it as clean.
+        _stub_uvx(d, 0, "no mutants here")
+        code, out, err = _run_cli(["--run", "sample.py"], [d], cwd)
+        assert code == 3 and out == "", (code, out, err)
+        assert "no mutant lines" in err, err
+        # `mutmut results` itself fails.
+        _stub_uvx(d, 0, "    sample.x_clamp__mutmut_1: survived", results_exit=1)
+        code, out, err = _run_cli(["--run", "sample.py"], [d], cwd)
+        assert code == 3 and out == "", (code, out, err)
+        assert "mutmut results failed" in err, err
+        # A hung mutmut is bounded, and says so.
+        _stub_uvx(d, 0, "", hang=True)
+        code, out, err = _run_cli(["--run", "sample.py"], [d], cwd,
+                                  extra_env={"MUTATION_AUDIT_TIMEOUT": "2"})
+        assert code == 3 and out == "", (code, out, err)
+        assert "timed out" in err, err
+
+
 def _check_run_reports_findings_when_mutmut_present():
     results = "    sample.x_clamp__mutmut_1: survived\n    sample.x_is_adult__mutmut_1: killed"
     with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as cwd:
@@ -361,6 +400,7 @@ def _check_run_reports_findings_when_mutmut_present():
 
 _CHECKS = (_check_parsing, _check_candidate_selection, _check_cli_path,
            _check_inconclusive_when_mutmut_cannot_run,
+           _check_run_inconclusive_on_each_broken_mutmut_output,
            _check_run_reports_findings_when_mutmut_present)
 
 
