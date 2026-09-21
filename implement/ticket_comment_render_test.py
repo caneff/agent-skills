@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 SKILL = Path(__file__).resolve().parent / "SKILL.md"
+LANE = Path(__file__).resolve().parent / "codex-lane.md"
 
 # `gh issue view ... --json body,comments --jq '<program>'` — the program runs
 # to the closing quote, which ends the last line of the snippet.
@@ -65,6 +66,11 @@ def _programs():
     return [m.group("program") for m in FETCH.finditer(SKILL.read_text())]
 
 
+def _lane_programs():
+    """The jq program(s) codex-lane.md's ticket read carries (#880)."""
+    return [m.group("program") for m in FETCH.finditer(LANE.read_text())]
+
+
 def _render(issue):
     """What `gh issue view --json body,comments --jq '<program>'` prints."""
     assert shutil.which("jq"), "jq must be on PATH: this suite runs the skill's jq program"
@@ -92,6 +98,13 @@ def test_both_reads_render_the_same_document():
     # program's only multi-line structure.
     shapes = {"\n".join(line.strip() for line in p.splitlines()) for p in programs}
     assert len(shapes) == 1, "SKILL.md's two ticket reads carry different jq programs"
+
+
+def test_codex_lane_renders_the_same_document_as_skill():
+    lane = _lane_programs()
+    assert len(lane) == 1, f"want 1 body+comments fetch in codex-lane.md, found {len(lane)}"
+    shape = lambda p: "\n".join(line.strip() for line in p.splitlines())
+    assert shape(lane[0]) == shape(_programs()[0]), "codex-lane.md's jq program drifted from SKILL.md's"
 
 
 def test_a_comment_less_ticket_renders_as_the_bare_body():
