@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One run's state, machine-readable, at `~/.cache/burndown/<run-id>.json`:
 
-    python3 burndown/runfile.py start  <run-id> --slots <k> [--controller <agent>]
+    python3 burndown/runfile.py start  <run-id> [--slots <k>] [--controller <agent>]
     python3 burndown/runfile.py clump  <run-id> --tickets 901,902 --workspace <path> --agent <name>
     python3 burndown/runfile.py land   <run-id> --clump 901 --sha <sha>
     python3 burndown/runfile.py show   <run-id>
@@ -87,6 +87,9 @@ def env_number(name, default):
     if not math.isfinite(value) or value < 0:
         raise RunFileError(f"{name} is not a non-negative, finite number: {raw!r}")
     return value
+
+
+DEFAULT_SLOTS = 5
 
 
 def slot_budget(slots):
@@ -246,7 +249,7 @@ def load(run_id, root=None):
     return run
 
 
-def start(run_id, slots, controller=None, root=None):
+def start(run_id, slots=DEFAULT_SLOTS, controller=None, root=None):
     slots = slot_budget(slots)
     if controller is not None:
         controller = named(controller, "herdr agent name")
@@ -496,7 +499,8 @@ def main(argv):
 
     new = subs.add_parser("start", help="create the run file")
     new.add_argument("run_id")
-    new.add_argument("--slots", type=int, required=True)
+    new.add_argument("--slots", type=int, default=DEFAULT_SLOTS,
+                     help=f"slot budget, a positive integer (default {DEFAULT_SLOTS})")
     new.add_argument("--controller", help="the controller's herdr agent name")
 
     reg = subs.add_parser("clump", help="register or re-register a clump")

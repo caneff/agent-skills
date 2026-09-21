@@ -67,6 +67,21 @@ def test_start_writes_the_run_id_and_slot_budget_and_load_reads_them_back():
     assert run["clumps"] == [], run
 
 
+def test_start_without_slots_records_the_default_of_five():
+    root = cache()
+    runfile.start("burn-1", root=root)
+    assert runfile.load("burn-1", root=root)["slots"] == 5
+
+
+def test_cli_start_without_slots_records_five_and_a_named_value_wins():
+    root = cache()
+    assert cli(root, "start", "burn-1").returncode == 0
+    assert runfile.load("burn-1", root=root)["slots"] == 5
+    assert cli(root, "start", "burn-2", "--slots", "2").returncode == 0
+    assert runfile.load("burn-2", root=root)["slots"] == 2
+    assert cli(root, "start", "burn-3", "--slots", "0").returncode != 0
+
+
 def test_the_file_lands_at_run_id_dot_json_under_the_cache_dir():
     root = cache()
     runfile.start("burn-1", slots=1, root=root)
