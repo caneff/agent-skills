@@ -129,7 +129,9 @@ outside it is read as an edge.
   only in the **preamble** — the body above the first heading. The words
   must start the line: prose that says "this one is blocked by #7, we think"
   mid-sentence is not a declaration. Neither is anything indented four or
-  more spaces: that is an indented code block, a quotation.
+  more spaces (an indented code block) or starting with `>` (a blockquote):
+  those lines are quotation everywhere, so they are not declarations and
+  not part of a real section's answer either.
 - **One declaration, or none.** Every visible section and every preamble
   inline line is a declaration. A ticket with more than one — two sections,
   two inline lines, or a section beside an inline line — is **ambiguous**,
