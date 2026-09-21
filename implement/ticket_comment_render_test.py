@@ -61,14 +61,9 @@ COMMENTS = [
 ]
 
 
-def _programs():
-    """The jq program each of SKILL.md's two ticket reads carries."""
-    return [m.group("program") for m in FETCH.finditer(SKILL.read_text())]
-
-
-def _lane_programs():
-    """The jq program(s) codex-lane.md's ticket read carries (#880)."""
-    return [m.group("program") for m in FETCH.finditer(LANE.read_text())]
+def _programs(doc=SKILL):
+    """The jq program each ticket read in `doc` carries (SKILL.md has two, codex-lane.md one)."""
+    return [m.group("program") for m in FETCH.finditer(doc.read_text())]
 
 
 def _render(issue):
@@ -101,7 +96,7 @@ def test_both_reads_render_the_same_document():
 
 
 def test_codex_lane_renders_the_same_document_as_skill():
-    lane = _lane_programs()
+    lane = _programs(LANE)
     assert len(lane) == 1, f"want 1 body+comments fetch in codex-lane.md, found {len(lane)}"
     shape = lambda p: "\n".join(line.strip() for line in p.splitlines())
     assert shape(lane[0]) == shape(_programs()[0]), "codex-lane.md's jq program drifted from SKILL.md's"
