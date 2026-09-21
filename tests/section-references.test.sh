@@ -21,10 +21,11 @@ run_fixture step-locator-valid
 run_fixture step-variants-valid
 run_fixture step-heading-prose-valid
 run_fixture step-forms-valid
+run_fixture step-sentence-valid
 
 for fixture in pointer-suffix-invalid bare-cross-file-collision step-heading-name-invalid \
   step-number-invalid step-range-invalid \
-  step-colon-invalid step-descending-invalid step-emdash-invalid; do
+  step-colon-invalid step-descending-invalid step-emdash-invalid step-fence-steps-invalid; do
   if run_fixture "$fixture"; then
     echo "FAIL: checker accepted fixture $fixture"
     exit 1

@@ -65,15 +65,19 @@ def heading_text(line: str) -> str | None:
 
 
 def sections(path: Path) -> list[tuple[str, str]]:
-    """Each heading with the text under it, down to the next heading of its
-    level or higher."""
+    """Each heading with its text, down to the next heading of its level or
+    higher. Fenced code is not a heading and not part of the text."""
     lines = path.read_text().splitlines()
     fenced = False
-    starts = []  # (line index, level, heading text); "# ..." in a fence is code
+    prose = []  # per line: a fence marker or a line inside one is not
+    starts = []  # (line index, level, heading text)
     for index, line in enumerate(lines):
         if line.lstrip().startswith(("```", "~~~")):
             fenced = not fenced
-        elif not fenced and (heading := heading_text(line)):
+            prose.append(False)
+            continue
+        prose.append(not fenced)
+        if not fenced and (heading := heading_text(line)):
             starts.append((index, len(line) - len(line.lstrip("#")), heading))
     found = []
     for position, (index, level, heading) in enumerate(starts):
@@ -81,7 +85,8 @@ def sections(path: Path) -> list[tuple[str, str]]:
             (later for later, deeper, _ in starts[position + 1 :] if deeper <= level),
             len(lines),
         )
-        found.append((heading, "\n".join(lines[index + 1 : end])))
+        body = [lines[i] for i in range(index + 1, end) if prose[i]]
+        found.append((heading, "\n".join(body)))
     return found
 
 
@@ -179,6 +184,11 @@ def main() -> int:
                 if not candidates:
                     failures.append(
                         f"{source.relative_to(ROOT)}:{number}: § {label} not found in {where}"
+                    )
+                elif steps != sorted(steps):
+                    failures.append(
+                        f"{source.relative_to(ROOT)}:{number}: § {label} steps "
+                        f"{steps} run backwards"
                     )
                 elif not any(section_has_steps(body, steps) for body in candidates):
                     failures.append(
