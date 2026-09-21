@@ -878,7 +878,8 @@ fn a_clumps_brief_carries_every_ticket_in_it() {
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "424", "423"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     let prefix = "herdr agent prompt sudokumaker-custom-constrain-423 /implement 423 424 --tier heavy --controller \"skills-ctl\"";
-    assert!(f.calls().lines().any(|l| l.starts_with(prefix)), "{}", f.calls());
+    let tail = " --wait --until working --timeout 120000";
+    assert!(f.calls().lines().any(|l| l.starts_with(prefix) && l.ends_with(tail)), "{}", f.calls());
 }
 
 // --- #901: what the clump brief tells the worker ------------------------------
@@ -912,8 +913,11 @@ fn a_single_tickets_brief_carries_no_clump_note() {
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "423"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     let line = prompt_line(&f);
-    assert!(!line.contains("squash"), "{line}");
-    assert!(!line.contains("clump"), "{line}");
+    // Equality, not absence: an empty line (no prompt sent) must not pass.
+    assert_eq!(
+        line,
+        "herdr agent prompt sudokumaker-custom-constrain-423 /implement 423 --tier heavy --controller \"skills-ctl\" --wait --until working --timeout 120000"
+    );
 }
 
 #[test]
