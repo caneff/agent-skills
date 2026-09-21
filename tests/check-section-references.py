@@ -15,7 +15,10 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get("SECTION_REFERENCES_ROOT", Path(__file__).resolve().parent.parent)).resolve()
 PATH = re.compile(r"(?<![\w.-])([~\w./-]+\.md)\b")
-SECTION = re.compile(r"§\s+(\d+|[A-Za-z][^§\n]{0,160})")
+# A reference is a section sign, whitespace, then a name that runs to the line
+# end, another section sign, or a backtick (the close of a code span). A sign
+# written "\\§" is the word, not a reference, and is never read.
+SECTION = re.compile(r"(?<!\\)§\s+(\d+|[A-Za-z][^§`\n]*)")
 TRAILING_PUNCTUATION = ".,;:!?)]}"
 # "§ The merge step 3 ..." points at the section "The merge" and its third
 # numbered step; whatever follows the locator is prose, not part of the name.
@@ -211,6 +214,24 @@ def main() -> int:
                         )
                         continue
                     target = source
+
+                # The name stops at a backtick. That is the close of a code
+                # span only when the sign sits inside one; anywhere else it is
+                # inline code in the name, and cutting there would let a prefix
+                # of the heading match after the code part is renamed.
+                cut_at_backtick = line[pointer.end() : pointer.end() + 1] == "`"
+                inside_span = line[: pointer.start()].count("`") % 2 == 1
+                if (
+                    cut_at_backtick
+                    and not inside_span
+                    and reference_targets(pointer)[-1][0] == pointer.group(1).strip()
+                ):
+                    failures.append(
+                        f"{source.relative_to(ROOT)}:{number}: § {pointer.group(1).strip()} "
+                        "is cut at inline code: inline code in a heading name is "
+                        "unsupported, write the plain heading"
+                    )
+                    continue
 
                 for label, steps in reference_targets(pointer):
                     candidates = [
