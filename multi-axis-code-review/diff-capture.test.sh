@@ -52,7 +52,7 @@ check_in "$spawn_text" '[ -s "$1" ]' 'multi-axis-code-review/SKILL.md § 4'
 # and the publish is a rename — a guard that tests for absence cannot catch a
 # file replaced under a reader that is still reading it.
 check_in "$spawn_text" 'rev-parse --short HEAD' 'multi-axis-code-review/SKILL.md § 4'
-check_in "$spawn_text" 'mv "$1" "$2"' 'multi-axis-code-review/SKILL.md § 4'
+check_in "$spawn_text" 'mv "$1" "$2-${1##*.}.patch"' 'multi-axis-code-review/SKILL.md § 4'
 check_in "$spawn_text" 'not a pattern' 'multi-axis-code-review/SKILL.md § 4'
 # C3/P1: the file is keyed on <n> alone, so a second round that skips this
 # block leaves round 1's diff in place — present and non-empty, so the
@@ -132,7 +132,7 @@ for mode in range_mode sha_mode; do
   # Each mode on its own, not the two summed: one mode calling twice and the
   # other not at all is a disagreement that a total of 2 hides. The nonce and
   # the shared file stem stay per-mode text, so they are pinned here too.
-  for fn in 'new_capture' 'publish_capture "$tmp" "$patch"' '-$$.patch' '"$dir/diff-$n-'; do
+  for fn in 'new_capture' 'publish_capture "$tmp" "$patch"' '"$dir/diff-$n-'; do
     calls="$(grep -cF -- "$fn" <<<"$body" || true)"
     [ "$calls" -eq 1 ] || { echo "FAIL: the $mode capture uses $fn $calls time(s), not once" >&2; fail=1; }
   done
@@ -198,6 +198,29 @@ fi
 leftovers="$(find "$(dirname "$first_path")" -maxdepth 1 -type f ! -name '*.patch' | wc -l)"
 [ "$leftovers" -eq 0 ] || {
   echo "FAIL: the block left $leftovers non-patch file(s) beside the captures" >&2; fail=1; }
+
+# The unique suffix is the protocol's, not a mode's, and it is per invocation
+# rather than per shell: `$$` is the same for every capture the one shell that
+# ran the preamble makes, so two captures at one revision named one final path
+# and the second `mv` replaced the first under a reader still holding it.
+if grep -qF -- '$$' <<<"$preamble$block"; then
+  echo "FAIL: a capture name is keyed on the shell's pid, which every capture in one shell shares" >&2
+  fail=1
+fi
+git -C "$repo" checkout -q "$rev_c"
+{ printf '%s\n' "$preamble"; printf '%s\n' "$block"; printf '%s\n' "$block"; } |
+  sed -e "s|^n=<.*|n=937|" -e "s|^worktree=<.*|worktree=$repo|" -e "s|^fixed_point=<.*|fixed_point=main|" >"$scratch/twice.sh"
+twice_out="$( cd "$repo" && HOME="$scratch/twice-home" bash "$scratch/twice.sh" 2>&1 )" ||
+  { echo "FAIL: two same-revision captures in one shell did not both publish: $twice_out" >&2; fail=1; }
+tw1="$(printf '%s\n' "$twice_out" | grep ' /' | sed -n 1p | awk '{print $NF}')"
+tw2="$(printf '%s\n' "$twice_out" | grep ' /' | sed -n 2p | awk '{print $NF}')"
+if [ -z "$tw1" ] || [ -z "$tw2" ] || [ "$tw1" = "$tw2" ]; then
+  echo "FAIL: two captures at one revision in one shell share a final path: '$tw1' '$tw2'" >&2
+  fail=1
+elif [ ! -s "$tw1" ]; then
+  echo "FAIL: the second same-revision capture replaced the first at $tw1" >&2
+  fail=1
+fi
 
 # The range block run in a shell that never ran the preamble refuses by name.
 printf '%s\n' "$block" |

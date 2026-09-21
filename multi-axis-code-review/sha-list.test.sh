@@ -222,6 +222,23 @@ elif ! printf '%s' "$nodir_out" | grep -qF 'run the report-directory preamble'; 
   fail=1
 fi
 
+# The same list captured twice in one shell: two distinct final paths, the
+# first still there afterwards (the mode's own name is a digest of the list, so
+# only the protocol's suffix can tell the two invocations apart).
+{ printf '%s\n' "$preamble"; printf '%s\n' "$recipe"; printf '%s\n' "$recipe"; } |
+  sed -e "s|^n=<.*|n=932|" -e "s|^worktree=<.*|worktree=$repo|" -e "s|^set -- <.*|set -- $a|" >"$scratch/twice.sh"
+twice_out="$( cd "$repo" && HOME="$scratch/home" bash "$scratch/twice.sh" 2>&1 )" ||
+  { echo "FAIL: two same-list captures in one shell did not both publish: $twice_out" >&2; fail=1; }
+tw1="$(printf '%s\n' "$twice_out" | grep ' /' | sed -n 1p | awk '{print $NF}')"
+tw2="$(printf '%s\n' "$twice_out" | grep ' /' | sed -n 2p | awk '{print $NF}')"
+if [ -z "$tw1" ] || [ -z "$tw2" ] || [ "$tw1" = "$tw2" ]; then
+  echo "FAIL: two captures of one list in one shell share a final path: '$tw1' '$tw2'" >&2
+  fail=1
+elif [ ! -s "$tw1" ]; then
+  echo "FAIL: the second same-list capture replaced the first at $tw1" >&2
+  fail=1
+fi
+
 # The preamble ran in a different shell (an agent's Bash calls share none), so
 # its functions are missing though `dir` is set: refused by name, not a bare
 # "command not found".

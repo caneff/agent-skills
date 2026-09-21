@@ -185,13 +185,15 @@ find "$dir" -maxdepth 1 -type f -mtime +13 -delete  # +13, not +14: find's -mtim
 n=<issue number from step 2, or the branch name>
 worktree=<the worktree under review>
 # The publish protocol, stated once for both capture modes below. Each mode sets
-# its own `patch` name, takes a temp path from new_capture, writes into it, then
-# hands both to publish_capture.
+# its own `patch` stem, takes a temp path from new_capture, writes into it, then
+# hands both to publish_capture, which appends the temp path's random suffix.
 new_capture() { mktemp "$dir/.diff-$n.XXXXXX"; }   # unique per invocation; prints the path
-publish_capture() { # <tmp> <patch>: fail on an empty write here, not inside three sub-agents
+publish_capture() { # <tmp> <stem>: fail on an empty write here, not inside three sub-agents
   [ -s "$1" ] || { rm -f "$1"; echo "capture for $2 is empty" >&2; return 1; }
-  mv "$1" "$2" &&                       # atomic publish: no axis ever reads a half-written patch
-    wc -l "$2"                          # this exact path and this count go in every prompt
+  # The suffix is mktemp's, unique per invocation; a shell pid is only per shell,
+  # and two captures at one revision in one shell would share it.
+  mv "$1" "$2-${1##*.}.patch" &&        # atomic publish: no axis ever reads a half-written patch
+    wc -l "$2-${1##*.}.patch"           # this exact path and this count go in every prompt
 }
 ```
 
@@ -203,7 +205,7 @@ type publish_capture >/dev/null 2>&1 ||
   { echo "range review: run the report-directory preamble above first, in this same shell" >&2; exit 1; }
 fixed_point=<the fixed point from step 1>
 head=$(git -C "$worktree" rev-parse --short HEAD) || exit 1
-patch="$dir/diff-$n-$head-$$.patch"     # revision plus nonce: this invocation's own file
+patch="$dir/diff-$n-$head"               # revision; the protocol adds the per-invocation suffix
 tmp=$(new_capture) || exit 1
 git -C "$worktree" diff "$fixed_point"...HEAD >"$tmp" || { rm -f "$tmp"; exit 1; }
 publish_capture "$tmp" "$patch" || exit 1
@@ -264,7 +266,7 @@ ordered=$(for s in $resolved; do
     printf '%s %s\n' "$(git -C "$worktree" rev-list --count "$s")" "$s"
   done | sort -n -k1,1 -k2,2 | awk '!seen[$2]++ {print $2}')
 key=$(printf '%s\n' "$ordered" | git -C "$worktree" hash-object --stdin | cut -c1-12)
-patch="$dir/diff-$n-list$key-$$.patch"   # list digest plus nonce
+patch="$dir/diff-$n-list$key"             # list digest; the protocol adds the suffix
 tmp=$(new_capture) || exit 1
 for s in $ordered; do
   one=$(git -C "$worktree" show --format='commit %H%n%n    %s%n' --patch "$s") || {
