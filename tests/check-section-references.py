@@ -215,6 +215,24 @@ def main() -> int:
                         continue
                     target = source
 
+                # The name stops at a backtick. That is the close of a code
+                # span only when the sign sits inside one; anywhere else it is
+                # inline code in the name, and cutting there would let a prefix
+                # of the heading match after the code part is renamed.
+                cut_at_backtick = line[pointer.end() : pointer.end() + 1] == "`"
+                inside_span = line[: pointer.start()].count("`") % 2 == 1
+                if (
+                    cut_at_backtick
+                    and not inside_span
+                    and reference_targets(pointer)[-1][0] == pointer.group(1).strip()
+                ):
+                    failures.append(
+                        f"{source.relative_to(ROOT)}:{number}: § {pointer.group(1).strip()} "
+                        "is cut at inline code: inline code in a heading name is "
+                        "unsupported, write the plain heading"
+                    )
+                    continue
+
                 for label, steps in reference_targets(pointer):
                     candidates = [
                         body

@@ -28,9 +28,9 @@ does not resolve.
   `'s`, another section sign, or a backtick (the close of a code span); a
   trailing ` and` is dropped. It has no length cap: with none of those, it
   runs to the end of the line. Write the heading, then punctuation. A
-  heading whose name holds a code span cannot be named in full: the name
-  stops at the first backtick, so it resolves against any heading that
-  starts with the words before it.
+  heading whose name holds a code span cannot be referenced: a name cut at a
+  backtick outside a wrapping code span fails, saying inline code in a
+  heading name is unsupported. Write the plain heading.
 - **The sign as a word.** Every section sign followed by a name is a
   reference, so a sentence that uses the sign as a word fails as a missing
   heading. Prefer rewording ("the Liveness section"). To keep the sign,
