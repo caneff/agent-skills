@@ -551,13 +551,6 @@ fn run() -> Result<(), ExitCode> {
     )
     .map_err(die)?;
 
-    // `LANE_CLAIM_DELAY_MS`, set only by the concurrency test, holds the claim
-    // critical section open from its start (before any ticket is read), like `LANE_SEED_TRUST_DELAY_MS` does the seed's.
-    if let Ok(ms) = env::var("LANE_CLAIM_DELAY_MS") {
-        if let Ok(ms) = ms.parse() {
-            std::thread::sleep(std::time::Duration::from_millis(ms));
-        }
-    }
     // Refusals first, so a refused run leaves nothing claimed or created —
     // and every ticket of the clump is read before any of them is claimed,
     // which is what makes the claim all-or-nothing.

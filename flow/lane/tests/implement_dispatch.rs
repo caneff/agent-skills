@@ -1054,18 +1054,16 @@ fn two_overlapping_dispatches_of_one_ticket_claim_it_once() {
     let repo = f.mkfixture("claimrace", "main");
     let claims = f.home().join("claims");
     std::fs::create_dir_all(&claims).unwrap();
-    // Holds the claim critical section open, so without the lock both runs
-    // read the ticket unclaimed before either edits it.
-    let scenario = with(&default_scenario(), &[("LANE_CLAIM_DELAY_MS", "400"), ("GH_CLAIM_DIR", claims.to_str().unwrap())]);
-    let lock = claim_lock(&f);
-    // B starts only once A is inside the critical section (its note is in the
-    // lock file), so the overlap does not depend on thread start-up timing.
+    // Both dispatches must reach their first read of the ticket before either
+    // can edit it: a barrier at the fake gh's issue view, independent of the
+    // lock. With the lock, the second run cannot reach its read until the
+    // first finishes claiming, so the barrier times out and it reads the
+    // claim; without it, both read the ticket free and both claim.
+    let barrier = f.home().join("barrier");
+    std::fs::create_dir_all(&barrier).unwrap();
+    let scenario = with(&default_scenario(), &[("GH_VIEW_BARRIER_DIR", barrier.to_str().unwrap()), ("GH_CLAIM_DIR", claims.to_str().unwrap())]);
     let (a, b) = std::thread::scope(|s| {
         let ta = s.spawn(|| f.dispatch(&["--repo", repo.to_str().unwrap(), "601"], &scenario));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while std::fs::read_to_string(&lock).unwrap_or_default().trim().is_empty() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
         let tb = s.spawn(|| f.dispatch(&["--repo", repo.to_str().unwrap(), "601"], &scenario));
         (ta.join().unwrap(), tb.join().unwrap())
     });

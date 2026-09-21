@@ -99,6 +99,27 @@ fn env_flag(name: &str) -> bool {
     env::var(name).is_ok_and(|v| !v.is_empty())
 }
 
+/// `GH_VIEW_BARRIER_DIR`: the first `issue view` of each dispatch (keyed by
+/// its parent pid) waits until two dispatches have reached theirs, or 3s.
+/// Independent of any lock the dispatches take, so a test can make two runs
+/// read a ticket before either edits it, and see what the lock does to that.
+fn view_barrier() {
+    let Ok(dir) = env::var("GH_VIEW_BARRIER_DIR") else { return };
+    let ppid = std::fs::read_to_string("/proc/self/stat")
+        .ok()
+        .and_then(|s| s.rsplit_once(')').and_then(|(_, r)| r.split_whitespace().nth(1).map(str::to_string)))
+        .unwrap_or_default();
+    let mine = std::path::Path::new(&dir).join(&ppid);
+    if mine.exists() {
+        return;
+    }
+    let _ = std::fs::write(&mine, "");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0) < 2 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 fn run_gh(args: &[String]) -> ExitCode {
     let a0 = args.first().map(String::as_str).unwrap_or("");
     let a1 = args.get(1).map(String::as_str).unwrap_or("");
@@ -109,6 +130,7 @@ fn run_gh(args: &[String]) -> ExitCode {
         // GH_STATE/GH_LABELS/GH_ASSIGNEES trio still answers every ticket
         // with no row of its own.
         let n = args.get(2).map(String::as_str).unwrap_or("");
+        view_barrier();
         let row = match env::var(format!("GH_ISSUE_{n}")) {
             Ok(row) => row,
             Err(_) => {
