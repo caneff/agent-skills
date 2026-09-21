@@ -122,6 +122,27 @@ fn run_gh(args: &[String]) -> ExitCode {
             eprintln!("no issue");
             return ExitCode::FAILURE;
         }
+        // `GH_CLAIM_DIR` makes a claim stick: an edit adding in-progress
+        // leaves `<dir>/<n>`, and a later view of that ticket carries the
+        // label — what lets a test see two dispatches claim one ticket.
+        // `GH_CLAIM_HIDE_UNTIL_EDIT=<n>` hides that ticket's claim from its
+        // first view only, so the ticket reads free once and held after.
+        let mut claimed = env::var("GH_CLAIM_DIR").is_ok_and(|d| std::path::Path::new(&d).join(n).exists());
+        if let (Ok(dir), Ok(hide)) = (env::var("GH_CLAIM_DIR"), env::var("GH_CLAIM_HIDE_UNTIL_EDIT")) {
+            let seen = std::path::Path::new(&dir).join(format!("{n}.viewed"));
+            if hide == n && !seen.exists() {
+                let _ = std::fs::write(&seen, "");
+                claimed = false;
+            }
+        }
+        let row = if claimed {
+            let mut f: Vec<&str> = row.splitn(3, '\t').collect();
+            f.resize(3, "");
+            let labels = if f[1].is_empty() { "in-progress".to_string() } else { format!("{},in-progress", f[1]) };
+            format!("{}\t{labels}\t{}", f[0], f[2])
+        } else {
+            row
+        };
         // Tab-delimited, matching lane::issue_state::read's `-q` query: a
         // label or login can hold a space but never a tab.
         println!("{row}");
@@ -134,6 +155,11 @@ fn run_gh(args: &[String]) -> ExitCode {
         if which.split(',').any(|t| !t.is_empty() && t == n) {
             eprintln!("gh: issue edit failed");
             return ExitCode::FAILURE;
+        }
+        if let Ok(dir) = env::var("GH_CLAIM_DIR") {
+            if args.windows(2).any(|w| w[0] == "--add-label" && w[1] == "in-progress") {
+                let _ = std::fs::write(std::path::Path::new(&dir).join(n), "");
+            }
         }
     }
     if (a0, a1) == ("pr", "list") {

@@ -1038,3 +1038,83 @@ fn spec_mode_still_takes_one_ticket_only() {
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "438", "--slots", "2", "439"], &scenario);
     assert!(refused(&out, &f.calls(), &repo, "438", "one ticket at a time"), "{}", out_text(&out));
 }
+
+fn claim_lock(f: &Fixture) -> std::path::PathBuf {
+    f.home().join(".implement-dispatch-claim-caneff__claimrace.lock")
+}
+
+fn claim_edits(calls: &str, n: &str) -> usize {
+    calls.lines().filter(|l| l.starts_with(&format!("gh issue edit {n} ")) && l.contains("--add-label in-progress")).count()
+}
+
+#[test]
+fn two_overlapping_dispatches_of_one_ticket_claim_it_once() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("claimrace", "main");
+    let claims = f.home().join("claims");
+    std::fs::create_dir_all(&claims).unwrap();
+    // Holds the claim critical section open, so without the lock both runs
+    // read the ticket unclaimed before either edits it.
+    let scenario = with(&default_scenario(), &[("LANE_CLAIM_DELAY_MS", "400"), ("GH_CLAIM_DIR", claims.to_str().unwrap())]);
+    let (a, b) = std::thread::scope(|s| {
+        let ta = s.spawn(|| f.dispatch(&["--repo", repo.to_str().unwrap(), "601"], &scenario));
+        let tb = s.spawn(|| f.dispatch(&["--repo", repo.to_str().unwrap(), "601"], &scenario));
+        (ta.join().unwrap(), tb.join().unwrap())
+    });
+    let ok = [&a, &b].iter().filter(|o| o.status.success()).count();
+    assert_eq!(ok, 1, "{}\n---\n{}", out_text(&a), out_text(&b));
+    assert_eq!(claim_edits(&f.calls(), "601"), 1, "{}", f.calls());
+    let loser = if a.status.success() { &b } else { &a };
+    assert!(out_text(loser).contains("#601 is labelled in-progress"), "{}", out_text(loser));
+}
+
+#[test]
+fn a_held_claim_lock_refuses_naming_the_holder_and_claims_nothing() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("claimrace", "main");
+    let lock = claim_lock(&f);
+    std::fs::write(&lock, "pid 4242 claiming #601\n").unwrap();
+    let mut holder = std::process::Command::new("flock").arg(&lock).args(["sleep", "5"]).spawn().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let scenario = with(&default_scenario(), &[("LANE_CLAIM_LOCK_WAIT_MS", "200")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "601"], &scenario);
+    let _ = holder.kill();
+    let _ = holder.wait();
+    assert!(!out.status.success(), "{}", out_text(&out));
+    assert!(out_text(&out).contains("pid 4242 claiming #601"), "{}", out_text(&out));
+    assert!(!f.calls().contains("issue edit"), "{}", f.calls());
+}
+
+#[test]
+fn an_abandoned_claim_lock_file_does_not_wedge_dispatch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("claimrace", "main");
+    // Content from a dead run, no flock held on it.
+    std::fs::write(claim_lock(&f), "pid 999999 claiming #601\n").unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "601"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+}
+
+#[test]
+fn a_ticket_claimed_between_the_read_and_the_edit_is_refused_and_never_released() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("claimrace", "main");
+    let claims = f.home().join("claims");
+    std::fs::create_dir_all(&claims).unwrap();
+    // #602 is claimed by someone else after the refusal pass read it free:
+    // the fake hides the claim from the first view of it only.
+    std::fs::write(claims.join("602"), "").unwrap();
+    let scenario = with(
+        &default_scenario(),
+        &[("GH_CLAIM_DIR", claims.to_str().unwrap()), ("GH_ISSUE_602", "OPEN\tenhancement,ready-for-agent\t"), ("GH_CLAIM_HIDE_UNTIL_EDIT", "602")],
+    );
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "601", "602"], &scenario);
+    assert!(!out.status.success(), "{}", out_text(&out));
+    let calls = f.calls();
+    assert_eq!(claim_edits(&calls, "602"), 0, "{calls}");
+    assert!(!calls.contains("gh issue edit 602 "), "released a ticket this run never claimed: {calls}");
+}
