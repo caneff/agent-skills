@@ -467,10 +467,11 @@ def test_an_inline_line_reaches_only_to_its_end():
     assert numbers(got["unblocked"]) == [1], got
 
 
-def test_the_section_wins_over_an_inline_line():
+def test_an_inline_line_beside_a_section_is_two_declarations():
     body = "Blocked by: #7\n\n## Blocked by\n\nNone.\n"
     got = read([issue(1, body=body)], states={7: "open"})
-    assert numbers(got["unblocked"]) == [1], got
+    assert numbers(got["unresolved"]) == [1], got
+    assert "more than once" in got["unresolved"][0]["why"], got
 
 
 def test_prose_mentioning_a_blocker_mid_sentence_is_not_a_declaration():
@@ -626,6 +627,96 @@ def test_a_longer_run_closes_a_shorter_fence():
     body = "```\nquoted\n`````\n\n## Blocked by\n\n- #7\n"
     got = read([issue(1, body=body)], states={7: "open"})
     assert numbers(got["blocked"]) == [1], got
+
+
+# --- Two visible declarations are ambiguous (#922) -----------------------
+
+QUOTED_THEN_REAL = """Evidence, quoting the other ticket:
+
+## Blocked by
+
+- #906
+
+And here is the real declaration appended by the skill:
+
+## Blocked by
+
+None — can start immediately.
+"""
+
+
+def test_two_visible_sections_are_unresolved_not_first_wins():
+    got = read([issue(1, body=QUOTED_THEN_REAL)], states={906: "open"})
+    assert numbers(got["unresolved"]) == [1], got
+    assert got["blocked"] == [] and got["unblocked"] == [], got
+
+
+def test_the_ambiguity_reason_is_not_the_silence_reason():
+    got = read([issue(1, body=QUOTED_THEN_REAL)])
+    why = got["unresolved"][0]["why"]
+    assert "more than once" in why, why
+    assert "states nothing" not in why, why
+
+
+def test_a_fenced_quotation_beside_one_declaration_is_not_ambiguous():
+    body = "```\n## Blocked by\n\n- #906\n```\n\n## Blocked by\n\nNone.\n"
+    got = read([issue(1, body=body)], states={906: "open"})
+    assert numbers(got["unblocked"]) == [1], got
+
+
+def test_an_indented_quotation_beside_one_declaration_is_not_ambiguous():
+    # Indented four spaces or more is an indented code block, not a heading.
+    body = "    ## Blocked by\n\n    - #906\n\n## Blocked by\n\nNone.\n"
+    got = read([issue(1, body=body)], states={906: "open"})
+    assert numbers(got["unblocked"]) == [1], got
+
+
+def test_two_inline_lines_in_the_preamble_are_ambiguous():
+    body = "Blocked by: #7\nBlocked by: None\n"
+    got = read([issue(1, body=body)], states={7: "open"})
+    assert numbers(got["unresolved"]) == [1], got
+    assert "more than once" in got["unresolved"][0]["why"], got
+
+
+def test_one_declaration_is_unchanged():
+    got = read([issue(1, body="## Blocked by\n\n- #7\n")], states={7: "open"})
+    assert numbers(got["blocked"]) == [1], got
+
+
+def test_an_ambiguous_spec_parent_stays_unresolved():
+    got = read([issue(1, body=QUOTED_THEN_REAL, labels=("ready-for-agent", "spec"))])
+    assert numbers(got["unresolved"]) == [1], got
+    assert "more than once" in got["unresolved"][0]["why"], got
+
+
+def test_an_indented_inline_line_is_a_quotation_not_a_declaration():
+    # Four spaces or a tab is an indented code block. Beside a real inline
+    # line it must not make the body ambiguous.
+    for quoted in ("    Blocked by: #7", "\tBlocked by: #7"):
+        body = quoted + "\nBlocked by: None\n"
+        got = read([issue(1, body=body)], states={7: "open"})
+        assert numbers(got["unblocked"]) == [1], (quoted, got)
+
+
+def test_an_indented_section_after_a_real_one_adds_nothing_to_its_answer():
+    # Codex on #996: the indent bound kept the quoted heading from counting as
+    # a second declaration, but its lines still joined the real section's
+    # payload and its `#906` blocked the ticket.
+    body = "## Blocked by\n\nNone\n\n    ## Blocked by\n\n    - #906\n"
+    got = read([issue(1, body=body)], states={906: "open"})
+    assert numbers(got["unblocked"]) == [1], got
+
+
+def test_a_quoted_line_after_a_real_section_adds_nothing_to_its_answer():
+    body = "## Blocked by\n\nNone\n\n> Blocked by: #906\n> - #906\n"
+    got = read([issue(1, body=body)], states={906: "open"})
+    assert numbers(got["unblocked"]) == [1], got
+
+
+def test_a_tab_indented_line_after_a_real_section_adds_nothing_to_its_answer():
+    body = "## Blocked by\n\nNone\n\n\t- #906\n"
+    got = read([issue(1, body=body)], states={906: "open"})
+    assert numbers(got["unblocked"]) == [1], got
 
 
 def main():
