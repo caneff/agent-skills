@@ -40,8 +40,5 @@ whatever follows are locator and prose, not part of the name. The step number
 is not checked against the target's numbered list. The keyword is `step` or
 `Step`.
 
-A reference whose name is itself "Step 3" is not this form. The name before
-`step` must be non-empty, so the locator does not match; the whole text up to
-the first punctuation is the name, and it needs a heading that starts with
-"Step 3". Prose after it joins the name and the reference fails to resolve:
-put punctuation right after the name.
+The rule for a reference named "Step 3" itself is stated by the comment above
+`STEP_LOCATOR` in the checker. Whatever the name, put punctuation right after it.
