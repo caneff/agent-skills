@@ -65,6 +65,8 @@ check_in "$merge_section" 'Launch at round 1' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'not when it reports "PR up"' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'backgrounding is the shell' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'there is no job id, and `status`/`result` have nothing to collect' 'implement/SKILL.md § The merge'
+# #951: the lane says codex-companion parses `--background` and never reads it.
+check_in "$merge_section" '`--background` is parsed by `codex-companion.mjs` and never read on this path' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'each in-flight pass is a node process against the box cap' 'implement/SKILL.md § The merge'
 
 # Rule 3: the launched pass writes outside the workspace — the worker's own

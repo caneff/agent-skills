@@ -328,8 +328,20 @@ Mutation check: <the change that made it fail, and that you saw it fail
 Parallel jobs: <one "<what it was> — <n> cores" line per parallel job you
   launched — or "none">
 Controller: you dispatched me; merge this PR per implement/SKILL.md § The
-  merge (Codex pass if heavy, squash, wait for my idle notice), then run:
+  merge (Codex pass if heavy, squash, answer my outstanding questions, wait
+  for my idle notice), then run:
   cd <primary checkout> && merge-cleanup --repo <primary checkout> implement-<n>
+```
+
+On a brief that carried `--chris-merges`, the last line block is this
+instead, the merge line being a claim for the controller to hand over:
+
+```
+Controller: Chris merges this PR; you dispatched me, so after the Codex pass
+  (if heavy) hand him the merge line and the cleanup line per implement/SKILL.md
+  § The merge, each with the `! ` prefix:
+  ! gh pr merge <pr> --repo <owner/name> --squash
+  ! cd <primary checkout> && merge-cleanup --repo <primary checkout> implement-<n>
 ```
 
 - **The controller trailer** — the message's last lines, fixed, so a
@@ -337,9 +349,9 @@ Controller: you dispatched me; merge this PR per implement/SKILL.md § The
   obligation and the exact cleanup line off the first message it sees; the
   first line stays `PR up: <pr url>` as the preview. Fill `<primary
   checkout>` with the absolute path of the main worktree, the first entry of
-  `git worktree list`. On a brief that carried `--chris-merges`, the trailer
-  reads "Chris merges" instead of the merge instruction and hands the merge
-  line, the same literal-flag rule as below.
+  `git worktree list`. The `--chris-merges` variant follows the same
+  literal-flag rule as below; the controller, not the worker, hands Chris
+  those lines, after the Codex pass.
 
 - **The sha CLEAN was observed at** — step 5's `headRefOid`, the commit
   GitHub read not-draft and `CLEAN` on, which is not always the tip by the
