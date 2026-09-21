@@ -38,6 +38,8 @@ _CLOSURE_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+include closure[ \t]*:?[ \t]*
 # value in optional backticks. The colon may sit inside the emphasis
 # (`**Directive:**`); that closing run counts only when whitespace or the line
 # end follows it, so a value that is itself bold keeps its own markers.
+# Deliberately the same clause as `_KEY` in `implement-spec/closing_ticket.py`
+# (#928): change one, change the other, until a shared parser replaces both.
 _KEY = re.compile(r"^[ \t]*[-*+][ \t]*[*_]{0,2}([A-Za-z][A-Za-z -]*?)[*_]{0,2}"
                   r"[ \t]*:(?:[*_]{1,2}(?=[ \t]|$))?[ \t]*(.*?)[ \t]*$")
 # "None", however it is dressed, as a *statement*: `None`, `- None`,

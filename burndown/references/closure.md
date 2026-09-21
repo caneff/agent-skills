@@ -35,6 +35,8 @@ repo's convention.
 - **The heading** is an ATX heading whose text is exactly `Include closure`,
   any level, any case, optional trailing colon. The section runs to the next
   heading of any level.
+- **The keys** may put the colon outside or inside the emphasis:
+  `- **Directive**: ...` and `- **Directive:** ...` read the same.
 - **Directive** is a *template*, not a regex: everything but `<path>` is
   matched literally, so a repo writes the line its own files contain —
   `#include <path>`, `{% include "<path>" %}`, `<!-- include <path> -->`.

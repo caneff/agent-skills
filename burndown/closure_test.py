@@ -80,6 +80,19 @@ def test_the_declaration_is_read_from_agents_md():
     assert decl.generator == "make examples", decl
 
 
+def test_a_colon_inside_the_emphasis_is_not_part_of_the_value():
+    text = ("## Include closure\n\n- **Directive:** `#include <path>`\n"
+            "- **Generator:** `make examples`\n")
+    got = C.parse_declaration(text)
+    assert got.directive == "#include <path>", got
+    assert got.generator == "make examples", got
+
+
+def test_a_bold_value_keeps_its_own_markers():
+    text = "## Include closure\n- **Directive**:**#include <path>**\n"
+    assert C.parse_declaration(text).directive == "**#include <path>**"
+
+
 # --- The closure: one hop from the candidate's own files -------------------
 
 SHARED = {
@@ -89,19 +102,6 @@ SHARED = {
     "examples/outside/component.js": "#include ../skyscraper/component.js\n",
     "docs/notes.md": "no include here\n",
 }
-
-
-def test_a_colon_inside_the_emphasis_is_not_part_of_the_value():
-    text = DECLARED.replace("**Directive**:", "**Directive:**").replace(
-        "**Generator**:", "**Generator:**")
-    got = C.parse_declaration(text)
-    assert got.directive == "#include <path>", got
-    assert got.generator == "make examples", got
-
-
-def test_a_bold_value_keeps_its_own_markers():
-    text = "## Include closure\n- **Directive**:**#include <path>**\n"
-    assert C.parse_declaration(text).directive == "**#include <path>**"
 
 
 def test_the_closure_is_every_file_that_includes_the_target():
