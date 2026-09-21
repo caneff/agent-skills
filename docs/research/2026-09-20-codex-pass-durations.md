@@ -43,3 +43,4 @@ early is worth it, which is why a `gate-retry` never reports as a plain
 | 948+961 | (pending) | early | 2026-09-21T11:11:14-04:00 | 2026-09-21T11:13:06-04:00 | 1.9 | raced: launch 10216f0, completion 659eb87 — the worker pushed round-1 fixes while Codex read; verdict discarded, rerun at the gate |
 | 948+961 | #968 | gate-retry | 2026-09-21T11:15:31-04:00 | 2026-09-21T11:17:03-04:00 | 1.5 | collected-after-retry |
 | 948+961 | #968 | second | 2026-09-21T11:19:40-04:00 | 2026-09-21T11:22:26-04:00 | 2.8 | collected |
+| 970 | (pending) | early | 2026-09-21T14:06:22-04:00 | 2026-09-21T14:07:27-04:00 | 1.1 | raced: launch e535e3d, completion 423b4d3 — round-1 fixes pushed while Codex read; verdict (approve) discarded, rerun at the gate |
