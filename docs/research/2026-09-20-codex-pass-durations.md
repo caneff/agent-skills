@@ -64,3 +64,4 @@ early is worth it, which is why a `gate-retry` never reports as a plain
 | 919 | #989 | gate-retry | 2026-09-21T14:58:43-04:00 | 2026-09-21T14:59:44-04:00 | 1.0 | collected-after-retry (early held by controller ruling) |
 | 909+951+963 | #987 | second | 2026-09-21T14:59:03-04:00 | 2026-09-21T15:00:32-04:00 | 1.5 | collected |
 | 913 | #986 | second | 2026-09-21T14:58:59-04:00 | 2026-09-21T15:01:23-04:00 | 2.4 | collected |
+| 925 | #992 | gate-retry | 2026-09-21T15:14:29-04:00 | 2026-09-21T15:16:00-04:00 | 1.5 | collected-after-retry (early held by controller ruling) |
