@@ -61,6 +61,12 @@ guess and do not create an issue until the target is confirmed.
   are usually filing a finding raised inside a known piece of work, so
   the blocker is known here: it is the ticket whose build raised this
   finding, whenever that build has to land before this one can start.
+  A blocker in another repo is written `owner/repo#NNN` in full, never a
+  bare `#NNN` (the reader would resolve that against this repo and gate
+  the ticket on an unrelated issue). The grammar refuses the full form on
+  purpose, so the section alone leaves the ticket **unresolved** until the
+  native edge below exists; that is the true answer, and the edge is what
+  carries the gate.
   The grammar and what each answer means:
   `~/.agents/skills/burndown/references/frontier.md`.
 
@@ -93,6 +99,11 @@ the issue the first one printed:
 ```
 gh issue edit <n> --repo <owner>/<repo> --add-blocked-by <#>
 ```
+
+For a blocker in another repo the edge takes the full issue URL, which
+`gh` accepts (2.95.0): `gh issue edit <n> --repo <owner>/<repo>
+--add-blocked-by https://github.com/<owner>/<repo>/issues/<n>`, with the
+blocker's own owner, repo and number.
 
 In addition to the section, never instead of it: native edges are the live
 gate — closing a blocker moves the count with nobody editing prose — and

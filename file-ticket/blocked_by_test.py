@@ -115,6 +115,20 @@ def main():
     fail += case("fenced evidence below the body", classify(fenced, {906: "open"}),
                  "unblocked")
 
+    # A blocker in another repo: the skill writes the full `owner/repo#N`
+    # form, which the grammar refuses on purpose. With no native edge the
+    # ticket reads unresolved (honest: never gated on an unrelated local
+    # #N, never unblocked); with the edge the live gate answers instead.
+    cross = filed(BODY).replace("- None — can start immediately.",
+                                "- caneff/sudokumaker#906")
+    fail += case("cross-repo blocker, no native edge",
+                 classify(cross, {906: "open"}), "unresolved")
+    issue = {"number": 42, "title": "a filed finding", "body": cross,
+             "assignees": [], "labels": [{"name": "ready-for-agent"}],
+             "issue_dependencies_summary": {"total_blocked_by": 1, "blocked_by": 1}}
+    named = [k for k, v in F.classify([issue], lambda n: None).items() if v]
+    fail += case("cross-repo blocker, native edge carries it", named[0], "blocked")
+
     if fail:
         sys.exit(1)
     print("ok")
