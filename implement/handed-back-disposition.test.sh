@@ -28,5 +28,14 @@ check_in "§ Review" "$review" 'handed back: <the gh issue create command>'
 check_in "§ Review sidecar" "$review" '"outcome": "handed-back", "command"'
 check_in "§ The PR" "$pr" 'handed back, with the command'
 check_in "§ Someone else's repo" "$else_repo" 'handed-back finding'
+check_in "§ Review sidecar" "$review" 'JSON-encoded as one string'
+# The command /file-ticket hands back is a multi-line heredoc; a sidecar line
+# built the way the prose says must stay one line and parse back intact.
+python3 - <<'PY' || fail=1
+import json
+cmd = "gh issue create --repo o/r --title \"t\" --body \"$(cat <<'EOF'\nbody `x`\nEOF\n)\""
+line = json.dumps({"id": "C1", "outcome": "handed-back", "command": cmd})
+assert "\n" not in line and json.loads(line)["command"] == cmd
+PY
 [ "$fail" -eq 0 ] && echo "PASS $0"
 exit "$fail"

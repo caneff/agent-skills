@@ -192,7 +192,10 @@ No PR and no reviewer; Chris reads the log after.
    `{"id": "<id>", "outcome": "disputed", "reason": "<why>"}`, or
    `{"id": "<id>", "outcome": "filed", "ticket": <n>}`, or
    `{"id": "<id>", "outcome": "handed-back", "command": "<the command>"}` —
-   the same four dispositions this pass already records in prose.
+   the same four dispositions this pass already records in prose. `command`
+   is the command JSON-encoded as one string, its newlines and quotes
+   escaped: `/file-ticket`'s command is a multi-line heredoc, and a line
+   split across lines breaks the join.
    The worker never writes this file: it is the adversarial read, and the
    worker grading its own homework is not the honest source for it. No
    cost tracking here either.
