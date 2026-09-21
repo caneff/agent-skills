@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
+/// Slot budget a `--spec` dispatch briefs when `--slots` is omitted; the same
+/// default as `DEFAULT_SLOTS` in burndown/runfile.py.
+const DEFAULT_SPEC_SLOTS: u32 = 5;
+
 /// OS-level bound for the herdr calls that are plain queries (status, agent
 /// get/list, pane list): a herdr server that answers at all answers within
 /// this, so a hang past it means the subprocess itself is stuck, not that
@@ -43,7 +47,7 @@ waits on the worker.
   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
                      <issue number> [<issue number>...]
   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
-                     --spec <n> --slots <k>
+                     --spec <n> [--slots <k>]
 
 Plain mode: the brief is `/implement <n>... --tier light|heavy --controller
 "<name>"`, light when one issue is named and it carries the documentation
@@ -61,7 +65,7 @@ carries the whole list, lowest first. The same number twice is refused.
 Spec mode (--spec): the brief is `/implement-spec <n> --slots <k> --controller
 "<name>"`, a nested run over a spec issue. Branch and workspace are spec-<n>,
 the herdr agent is <repo>-spec-<n>, and --model defaults to opus. --slots is a
-positive integer, required with --spec and refused without it.
+positive integer, 5 when omitted, and refused without --spec.
 
 The controller is --controller, else the name in ~/.claude/sessions/<pid>.json
 of the nearest ancestor process whose file is live (its procStart matches) —
@@ -430,7 +434,7 @@ fn run() -> Result<(), ExitCode> {
     let n = ns[0].clone();
     let mode = match (&args.slots, args.spec) {
         (None, false) => Mode::Plain,
-        (None, true) => return Err(die("--spec needs --slots <k>")),
+        (None, true) => Mode::Spec { slots: DEFAULT_SPEC_SLOTS },
         (Some(_), false) => return Err(die("--slots only goes with --spec")),
         (Some(k), true) => match k.parse::<u32>() {
             Ok(slots) if slots > 0 => Mode::Spec { slots },

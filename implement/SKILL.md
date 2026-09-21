@@ -15,8 +15,10 @@ neither door: say so and stop.
 
 ```
 implement-dispatch <n> [<n>...] [--model sonnet|opus]
-implement-dispatch --spec <n> --slots <k> [--model sonnet|opus]
+implement-dispatch --spec <n> [--slots <k>] [--model sonnet|opus]
 ```
+
+`--slots` defaults to 5 and goes into the nested brief either way.
 
 `sonnet` for an ordinary ticket, `opus` for a subtle seam — `--spec` mode
 defaults to `opus` instead. Plain mode refuses an issue labelled `spec`,

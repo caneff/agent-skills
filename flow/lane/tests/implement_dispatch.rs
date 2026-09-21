@@ -661,13 +661,15 @@ fn spec_mode_briefs_implement_spec_in_a_spec_workspace() {
 }
 
 #[test]
-fn spec_mode_without_slots_is_refused() {
+fn spec_mode_without_slots_defaults_to_five_in_the_brief() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent")]);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--spec", "395"], &scenario);
-    assert!(refused(&out, &f.calls(), &repo, "395", "--slots"), "{}", out_text(&out));
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(f.calls().contains("/implement-spec 395 --slots 5 --controller"), "{}", f.calls());
+    assert!(out_text(&out).contains("spec, 5 slots"), "{}", out_text(&out));
 }
 
 #[test]
@@ -730,7 +732,7 @@ fn help_documents_both_modes() {
     for want in [
         "<issue number> [<issue number>...]",
         "/implement <n>... --tier",
-        "--spec <n> --slots <k>",
+        "--spec <n> [--slots <k>]",
         "/implement-spec <n> --slots <k>",
         "spec-<n>",
         "ready-for-human",
