@@ -8,10 +8,15 @@
 # hook runs inside the turn, after every call, so it is the one place the
 # repetition is visible as it happens.
 #
-# Spin: the same tool with byte-identical input, N (default 20, SPIN_N) times
-# in a row with no other tool call between. The observed loop ran 180; a retry
-# or a sanctioned poll stays in single digits, and a `Monitor` until-loop is
-# one call. Only the transcript tail is read, so the per-call cost stays flat and `count` is a floor: a longer run reports the window it saw (the last 500 tool-call lines).
+# Spin: the same tool with the same input, N (default 20, SPIN_N) times in a
+# row with no other tool call between. "Same" is structural equality of the
+# stored input object: the transcript holds the harness's serialization, not
+# the bytes the model emitted, so byte equality cannot be tested and key order
+# alone never separates two calls. The observed loop ran 180; a retry or a
+# sanctioned poll stays in single digits, and a `Monitor` until-loop is one
+# call. Only the transcript tail is read, so the per-call cost stays flat and
+# `count` is a floor: a longer run reports the window it saw (the last 500
+# tool-call lines).
 #
 # Modes:
 #   --classify <transcript>   print {spinning, tool, input, count} and exit —
@@ -62,13 +67,15 @@ IFS=$'\t' read -r n controller < <(jq -nc '[inputs | fromjson? | objects] ' -R "
 [ -n "${controller:-}" ] || exit 0
 
 tool="$(jq -r '.tool' <<<"$verdict")"
-input="$(jq -c '.input' <<<"$verdict" | cut -c1-120)"
+full_input="$(jq -c '.input' <<<"$verdict")"
+input="$(cut -c1-120 <<<"$full_input")"   # human-facing text only
+digest="$(sha256sum <<<"$full_input" | cut -c1-16)"
 count="$(jq -r '.count' <<<"$verdict")"
 
 # One alert per run of repeats: keyed by session, tool and input, so a run
 # that keeps growing does not re-alert on every call. Only a `sent` line
 # dedupes: an alert that never reached the controller is retried on the next call.
-key="$session"$'\t'"$tool"$'\t'"$input"
+key="$session"$'\t'"$tool"$'\t'"$digest"
 grep -qF -- "$key"$'\t'"sent"$'\t' "$log" 2>/dev/null && exit 0
 logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$1" "$2" >> "$log"; }
 

@@ -83,4 +83,20 @@ if grep -q 'not-sent' "$tmp/home/.claude/worker-spin-alerts.log" && [ "$(grep -c
   echo "PASS: a not-sent alert is retried, and sent once the controller is reachable"
 else echo "FAIL: not-sent retry — log: $(cat "$tmp/home/.claude/worker-spin-alerts.log")"; fails=1; fi
 
+# Two distinct long inputs sharing a 120-character prefix are two spins: both alert.
+long="$tmp/long"; pre=$(printf 'a%.0s' $(seq 1 130))
+for v in X Y; do
+  { head -n 1 "$fx/real-spin.jsonl"
+    for i in $(seq 1 25); do
+      printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"l%s%s","name":"Bash","input":{"command":"%s%s"}}]}}\n' "$v" "$i" "$pre" "$v"
+    done; } > "$long-$v.jsonl"
+done
+rm -f "$tmp/prompts" "$tmp/home/.claude/worker-spin-alerts.log"
+for v in X Y; do
+  printf '{"session_id":"s3","transcript_path":"%s"}' "$long-$v.jsonl" | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook"
+done
+if [ "$(grep -c 'worker-spin-alert' "$tmp/prompts" 2>/dev/null)" = 2 ]; then
+  echo "PASS: two long same-prefix spins each alert"
+else echo "FAIL: same-prefix spins — prompts: $(cat "$tmp/prompts" 2>/dev/null)"; fails=1; fi
+
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
