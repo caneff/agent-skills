@@ -81,6 +81,16 @@ for ready-for-agent, and the assignee removed. A claim that fails partway
 through a clump releases the tickets it had already claimed, so nothing is
 left half-claimed.
 
+Dispatches of one repository serialize on a lock held from the first ticket
+read to the last claim edit (~/.implement-dispatch-claim-<owner>__<name>.lock,
+an OS flock: a run that dies drops it, so no stale lock wedges dispatch). A
+dispatch that cannot get it in 30s refuses, printing the holder's pid and
+tickets. Each ticket is read again just before its edit, and one taken since
+the first read refuses the run and releases only what this run claimed. The
+lock is under $HOME, so it serializes dispatches sharing a HOME; a hand claim
+or a run under another HOME is caught only by that re-read, which narrows the
+window and does not close it.
+
 Refuses, with nothing claimed or created, when any named issue is not open and
 labelled exactly one of ready-for-agent and ready-for-human, it carries a held
 label (in-progress, needs-info), the same number is named twice, spec mode
@@ -245,6 +255,56 @@ fn seed_trust(claude_json: &str, wt: &str) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// How long a dispatch waits for another dispatch of the same repository to
+/// finish claiming before it refuses. `LANE_CLAIM_LOCK_WAIT_MS` shortens it
+/// for the test that holds the lock.
+fn claim_lock_wait() -> std::time::Duration {
+    let ms = env::var("LANE_CLAIM_LOCK_WAIT_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(30_000);
+    std::time::Duration::from_millis(ms)
+}
+
+/// The per-repository claim lock: held from the first read of a clump's
+/// tickets to the last claim edit, so two dispatches naming one ticket
+/// serialize and the second reads the first's claim. An OS `flock` on the
+/// file, so a run that dies — killed, crashed — drops it and never leaves a
+/// lock behind to wedge later dispatches; the file's text is only the note
+/// a refused run prints to say who holds it.
+struct ClaimLock {
+    _file: std::fs::File,
+}
+
+impl ClaimLock {
+    fn acquire(path: &str, note: &str) -> Result<ClaimLock, String> {
+        use std::io::Write;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path)
+            .map_err(|e| format!("cannot open the claim lock {path}: {e}"))?;
+        let deadline = std::time::Instant::now() + claim_lock_wait();
+        loop {
+            match file.try_lock() {
+                Ok(()) => break,
+                Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    let holder = std::fs::read_to_string(path).unwrap_or_default();
+                    let holder = if holder.trim().is_empty() { "holder's note not written" } else { holder.trim() };
+                    return Err(format!("another dispatch holds the claim lock {path} ({holder}); it releases when that run exits"));
+                }
+                Err(std::fs::TryLockError::Error(e)) => return Err(format!("cannot lock {path}: {e}")),
+            }
+        }
+        let mut f = &file;
+        let _ = file.set_len(0);
+        let _ = writeln!(f, "{note}");
+        Ok(ClaimLock { _file: file })
+    }
+}
+
 fn primary_worktree(repo: &str) -> Option<String> {
     let out = quiet_stdout("git", &["-C", repo, "worktree", "list", "--porcelain"])?;
     let first = out.lines().next()?;
@@ -279,6 +339,18 @@ fn release_args<'a>(t: &'a Ticket, slug: &'a str) -> Vec<&'a str> {
     }
     args.extend(["--remove-assignee", "@me"]);
     args
+}
+
+/// Undoes the claims this run made, one `gh issue edit` per ticket, saying
+/// how to re-run any release that fails. Only tickets in `claimed` — never
+/// one this run did not set.
+fn release_claimed(claimed: &[&Ticket], slug: &str) {
+    for done in claimed {
+        let release = release_args(done, slug);
+        if !matches!(runner::run("gh", &release), Ok(o) if o.success) {
+            eprintln!("implement-dispatch: could not release #{}; re-run: gh {}", done.n, release.join(" "));
+        }
+    }
 }
 
 /// The claimed clump: what a failure past the claim needs to say how to
@@ -468,6 +540,17 @@ fn run() -> Result<(), ExitCode> {
     let repo_part: String = repo_name.chars().take(cut).collect();
     let agent = format!("{repo_part}{suffix}");
 
+    // One dispatch at a time per repository from the first read to the last
+    // claim edit: without it, two runs naming one ticket both read it free
+    // and both claim it, and a rollback would then remove the other run's
+    // label and assignee.
+    let claim_lock_path = format!("{}/.implement-dispatch-claim-{}.lock", env::var("HOME").unwrap_or_default(), slug.replace('/', "__"));
+    let claim_lock = ClaimLock::acquire(
+        &claim_lock_path,
+        &format!("pid {} claiming {}", std::process::id(), ns.iter().map(|n| format!("#{n}")).collect::<Vec<_>>().join(" ")),
+    )
+    .map_err(die)?;
+
     // Refusals first, so a refused run leaves nothing claimed or created —
     // and every ticket of the clump is read before any of them is claimed,
     // which is what makes the claim all-or-nothing.
@@ -590,6 +673,22 @@ fn run() -> Result<(), ExitCode> {
     // from and nobody thinks to clear.
     let mut claimed: Vec<&Ticket> = Vec::new();
     for t in &tickets {
+        // Read again right before the edit: the lock keeps other dispatches
+        // out, not a hand claim or a run that predates the lock, and a
+        // ticket taken since the refusal pass must not be claimed over —
+        // or released by our rollback, which removes labels and an
+        // assignee this run would then never have set.
+        let refusal = match lane::issue_state::read(&slug, &t.n) {
+            Some(i) if i.state != "OPEN" || i.has_label("in-progress") => {
+                Some(format!("#{} is labelled in-progress or no longer open; another dispatch took it", t.n))
+            }
+            Some(_) => None,
+            None => Some(format!("could not re-read #{} before claiming it (gh failed)", t.n)),
+        };
+        if let Some(refusal) = refusal {
+            release_claimed(&claimed, &slug);
+            return Err(die(refusal));
+        }
         let mut claim_args: Vec<&str> = vec!["issue", "edit", &t.n, "--repo", &slug];
         if !t.chris_merges {
             claim_args.extend(["--remove-label", t.ready]);
@@ -598,16 +697,12 @@ fn run() -> Result<(), ExitCode> {
         match runner::run("gh", &claim_args) {
             Ok(c) if c.success => claimed.push(t),
             _ => {
-                for done in &claimed {
-                    let release = release_args(done, &slug);
-                    if !matches!(runner::run("gh", &release), Ok(o) if o.success) {
-                        eprintln!("implement-dispatch: could not release #{}; re-run: gh {}", done.n, release.join(" "));
-                    }
-                }
+                release_claimed(&claimed, &slug);
                 return Err(die(format!("could not claim #{}", t.n)));
             }
         }
     }
+    drop(claim_lock);
     let claim = Claim { tickets: &tickets, slug: &slug, wt: &wt };
 
     let wa = runner::run_in(

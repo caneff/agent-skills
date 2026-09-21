@@ -99,6 +99,27 @@ fn env_flag(name: &str) -> bool {
     env::var(name).is_ok_and(|v| !v.is_empty())
 }
 
+/// `GH_VIEW_BARRIER_DIR`: the first `issue view` of each dispatch (keyed by
+/// its parent pid) waits until two dispatches have reached theirs, or 3s.
+/// Independent of any lock the dispatches take, so a test can make two runs
+/// read a ticket before either edits it, and see what the lock does to that.
+fn view_barrier() {
+    let Ok(dir) = env::var("GH_VIEW_BARRIER_DIR") else { return };
+    let ppid = std::fs::read_to_string("/proc/self/stat")
+        .ok()
+        .and_then(|s| s.rsplit_once(')').and_then(|(_, r)| r.split_whitespace().nth(1).map(str::to_string)))
+        .unwrap_or_default();
+    let mine = std::path::Path::new(&dir).join(&ppid);
+    if mine.exists() {
+        return;
+    }
+    let _ = std::fs::write(&mine, "");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0) < 2 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 fn run_gh(args: &[String]) -> ExitCode {
     let a0 = args.first().map(String::as_str).unwrap_or("");
     let a1 = args.get(1).map(String::as_str).unwrap_or("");
@@ -109,6 +130,7 @@ fn run_gh(args: &[String]) -> ExitCode {
         // GH_STATE/GH_LABELS/GH_ASSIGNEES trio still answers every ticket
         // with no row of its own.
         let n = args.get(2).map(String::as_str).unwrap_or("");
+        view_barrier();
         let row = match env::var(format!("GH_ISSUE_{n}")) {
             Ok(row) => row,
             Err(_) => {
@@ -122,6 +144,27 @@ fn run_gh(args: &[String]) -> ExitCode {
             eprintln!("no issue");
             return ExitCode::FAILURE;
         }
+        // `GH_CLAIM_DIR` makes a claim stick: an edit adding in-progress
+        // leaves `<dir>/<n>`, and a later view of that ticket carries the
+        // label — what lets a test see two dispatches claim one ticket.
+        // `GH_CLAIM_HIDE_UNTIL_EDIT=<n>` hides that ticket's claim from its
+        // first view only, so the ticket reads free once and held after.
+        let mut claimed = env::var("GH_CLAIM_DIR").is_ok_and(|d| std::path::Path::new(&d).join(n).exists());
+        if let (Ok(dir), Ok(hide)) = (env::var("GH_CLAIM_DIR"), env::var("GH_CLAIM_HIDE_UNTIL_EDIT")) {
+            let seen = std::path::Path::new(&dir).join(format!("{n}.viewed"));
+            if hide == n && !seen.exists() {
+                let _ = std::fs::write(&seen, "");
+                claimed = false;
+            }
+        }
+        let row = if claimed {
+            let mut f: Vec<&str> = row.splitn(3, '\t').collect();
+            f.resize(3, "");
+            let labels = if f[1].is_empty() { "in-progress".to_string() } else { format!("{},in-progress", f[1]) };
+            format!("{}\t{labels}\t{}", f[0], f[2])
+        } else {
+            row
+        };
         // Tab-delimited, matching lane::issue_state::read's `-q` query: a
         // label or login can hold a space but never a tab.
         println!("{row}");
@@ -134,6 +177,11 @@ fn run_gh(args: &[String]) -> ExitCode {
         if which.split(',').any(|t| !t.is_empty() && t == n) {
             eprintln!("gh: issue edit failed");
             return ExitCode::FAILURE;
+        }
+        if let Ok(dir) = env::var("GH_CLAIM_DIR") {
+            if args.windows(2).any(|w| w[0] == "--add-label" && w[1] == "in-progress") {
+                let _ = std::fs::write(std::path::Path::new(&dir).join(n), "");
+            }
         }
     }
     if (a0, a1) == ("pr", "list") {
