@@ -1,0 +1,363 @@
+{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"<command-name>/implement</command-name>\n<command-args>893 --tier heavy --controller \"skills-dc\"</command-args>"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"a1","name":"Agent","input":{"description":"verify","prompt":"x","model":"opus"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"a1","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e1","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e1","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e2","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e2","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e3","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e3","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e4","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e4","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e5","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e5","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e6","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e6","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e7","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e7","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e8","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e8","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e9","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e9","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e10","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e10","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e11","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e11","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e12","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e12","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e13","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e13","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e14","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e14","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e15","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e15","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e16","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e16","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e17","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e17","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e18","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e18","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e19","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e19","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e20","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e20","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e21","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e21","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e22","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e22","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e23","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e23","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e24","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e24","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e25","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e25","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e26","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e26","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e27","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e27","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e28","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e28","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e29","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e29","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e30","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e30","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e31","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e31","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e32","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e32","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e33","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e33","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e34","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e34","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e35","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e35","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e36","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e36","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e37","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e37","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e38","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e38","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e39","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e39","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e40","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e40","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e41","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e41","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e42","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e42","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e43","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e43","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e44","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e44","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e45","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e45","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e46","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e46","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e47","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e47","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e48","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e48","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e49","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e49","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e50","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e50","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e51","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e51","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e52","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e52","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e53","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e53","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e54","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e54","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e55","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e55","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e56","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e56","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e57","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e57","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e58","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e58","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e59","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e59","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e60","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e60","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e61","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e61","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e62","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e62","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e63","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e63","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e64","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e64","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e65","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e65","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e66","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e66","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e67","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e67","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e68","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e68","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e69","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e69","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e70","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e70","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e71","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e71","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e72","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e72","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e73","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e73","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e74","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e74","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e75","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e75","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e76","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e76","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e77","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e77","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e78","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e78","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e79","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e79","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e80","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e80","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e81","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e81","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e82","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e82","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e83","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e83","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e84","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e84","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e85","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e85","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e86","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e86","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e87","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e87","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e88","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e88","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e89","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e89","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e90","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e90","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e91","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e91","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e92","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e92","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e93","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e93","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e94","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e94","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e95","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e95","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e96","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e96","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e97","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e97","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e98","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e98","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e99","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e99","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e100","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e100","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e101","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e101","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e102","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e102","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e103","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e103","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e104","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e104","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e105","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e105","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e106","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e106","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e107","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e107","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e108","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e108","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e109","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e109","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e110","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e110","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e111","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e111","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e112","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e112","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e113","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e113","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e114","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e114","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e115","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e115","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e116","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e116","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e117","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e117","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e118","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e118","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e119","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e119","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e120","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e120","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e121","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e121","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e122","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e122","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e123","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e123","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e124","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e124","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e125","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e125","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e126","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e126","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e127","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e127","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e128","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e128","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e129","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e129","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e130","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e130","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e131","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e131","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e132","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e132","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e133","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e133","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e134","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e134","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e135","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e135","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e136","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e136","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e137","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e137","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e138","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e138","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e139","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e139","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e140","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e140","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e141","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e141","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e142","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e142","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e143","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e143","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e144","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e144","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e145","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e145","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e146","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e146","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e147","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e147","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e148","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e148","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e149","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e149","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e150","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e150","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e151","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e151","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e152","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e152","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e153","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e153","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e154","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e154","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e155","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e155","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e156","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e156","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e157","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e157","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e158","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e158","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e159","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e159","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e160","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e160","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e161","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e161","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e162","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e162","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e163","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e163","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e164","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e164","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e165","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e165","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e166","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e166","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e167","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e167","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e168","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e168","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e169","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e169","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e170","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e170","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e171","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e171","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e172","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e172","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e173","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e173","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e174","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e174","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e175","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e175","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e176","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e176","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e177","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e177","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e178","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e178","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e179","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e179","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e180","name":"Bash","input":{"command":"echo ok"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e180","content":"ok"}]},"toolUseResult":{"stdout":"ok"}}
