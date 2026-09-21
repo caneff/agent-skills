@@ -45,6 +45,10 @@ STEP_LOCATOR = re.compile(
     rf"^([^.,;:!?)}}\]]+?):?\s+steps?\s+{STEP_NUMBER}(?:\s*[-\u2013\u2014]\s*{STEP_NUMBER})?\b",
     re.IGNORECASE,
 )
+# A fence closes on its own character, at least as long as the one that
+# opened it, with nothing after it: "~~~" inside a longer backtick fence is text.
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+LOOSE_STEP_LOCATOR = re.compile(STEP_LOCATOR.pattern.replace("[^.,;:!?)}\\]]+?", ".+?"), re.IGNORECASE)
 HEADING_STEP = re.compile(r"^(step\s+\d+)\b", re.IGNORECASE)
 
 
@@ -68,16 +72,24 @@ def sections(path: Path) -> list[tuple[str, str]]:
     """Each heading with its text, down to the next heading of its level or
     higher. Fenced code is not a heading and not part of the text."""
     lines = path.read_text().splitlines()
-    fenced = False
+    fence = None  # (character, length) of the fence that is open
     prose = []  # per line: a fence marker or a line inside one is not
     starts = []  # (line index, level, heading text)
     for index, line in enumerate(lines):
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
+        marker = FENCE.match(line)
+        if marker and (
+            fence is None
+            or (
+                marker.group(1)[0] == fence[0]
+                and len(marker.group(1)) >= fence[1]
+                and not marker.group(2).strip()
+            )
+        ):
+            fence = None if fence else (marker.group(1)[0], len(marker.group(1)))
             prose.append(False)
             continue
-        prose.append(not fenced)
-        if not fenced and (heading := heading_text(line)):
+        prose.append(fence is None)
+        if fence is None and (heading := heading_text(line)):
             starts.append((index, len(line) - len(line.lstrip("#")), heading))
     found = []
     for position, (index, level, heading) in enumerate(starts):
@@ -115,24 +127,36 @@ def step_number(text: str) -> int:
     return int(text) if text.isdigit() else NUMBER_WORDS[text.lower()]
 
 
-def reference_target(match: re.Match[str]) -> tuple[str, list[int]]:
-    """The section name a pointer names, and the step numbers it locates."""
+def located_steps(locator: re.Match[str]) -> list[int]:
+    first = step_number(locator.group(2))
+    last = step_number(locator.group(3)) if locator.group(3) else first
+    # A descending range is a typo; name both ends so the check can fail.
+    return list(range(first, last + 1)) if last >= first else [first, last]
+
+
+def reference_targets(match: re.Match[str]) -> list[tuple[str, list[int]]]:
+    """The (section name, step numbers) readings of a pointer, best first.
+
+    The first reads the name up to the step locator whatever punctuation it
+    holds, which is right for a heading like "Build: deployment"; the last
+    stops the name at the first punctuation mark, which is right when prose
+    follows ("§ Alpha. Then step 2 matters"). The caller takes the first
+    reading that names a heading."""
     value = match.group(1).strip()
     if value.isdigit():
-        return value, []
+        return [(value, [])]
     value = value.split(" and §", 1)[0]
     value = re.sub(r"\s+and\s*$", "", value)
     value = value.split("'s", 1)[0]
-    locator = STEP_LOCATOR.match(value)
-    if locator:
-        first = step_number(locator.group(2))
-        last = step_number(locator.group(3)) if locator.group(3) else first
-        # A descending range is a typo; name both ends so the check can fail.
-        steps = list(range(first, last + 1)) if last >= first else [first, last]
-        return locator.group(1).strip(), steps
+    readings = []
+    for pattern in (LOOSE_STEP_LOCATOR, STEP_LOCATOR):
+        locator = pattern.match(value)
+        if locator:
+            readings.append((locator.group(1).strip(), located_steps(locator)))
     value = re.split(r"[.,;:!?)}\]]", value, maxsplit=1)[0].strip()
     heading_step = HEADING_STEP.match(value)
-    return (heading_step.group(1), []) if heading_step else (value, [])
+    readings.append((heading_step.group(1) if heading_step else value, []))
+    return readings
 
 
 def matches_heading(label: str, heading: str) -> bool:
@@ -168,18 +192,20 @@ def main() -> int:
                 if target is None:
                     if previous_line_named_file not in (None, source):
                         failures.append(
-                            f"{source.relative_to(ROOT)}:{number}: bare § {reference_target(pointer)[0]} "
+                            f"{source.relative_to(ROOT)}:{number}: bare § {reference_targets(pointer)[-1][0]} "
                             f"follows {previous_line_named_file.relative_to(ROOT)}"
                         )
                         continue
                     target = source
 
-                label, steps = reference_target(pointer)
-                candidates = [
-                    body
-                    for heading, body in headings[target]
-                    if matches_heading(label, heading)
-                ]
+                for label, steps in reference_targets(pointer):
+                    candidates = [
+                        body
+                        for heading, body in headings[target]
+                        if matches_heading(label, heading)
+                    ]
+                    if candidates:
+                        break
                 where = target.relative_to(ROOT)
                 if not candidates:
                     failures.append(
