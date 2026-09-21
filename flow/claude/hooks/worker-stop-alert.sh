@@ -6,8 +6,9 @@
 # `--controller "<name>"`. A turn starts at a human prompt or a peer message
 # that is not a subagent hand-back. The worker has reported when, after that
 # turn start, a SendMessage to the controller came back with `success: true`.
-# A stop while something launched this turn is still out is a wait, not a
-# finish. A subagent is "handed back" in one of three shapes: an
+# A stop while something launched this turn — or an earlier turn, with
+# liveness evidence since this turn's start (#900) — is still out is a wait,
+# not a finish. A subagent is "handed back" in one of three shapes: an
 # `.origin.senderTaskId` peer message (an anonymous `Agent` call's
 # hand-back), a `<task-id>...</task-id>` tag (a task-notification), or a
 # named teammate's plain-text `<teammate-message teammate_id="...">` reply
@@ -94,38 +95,57 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
       | select((.value.type == "assistant"
                 and ([.value.message.content[]? | select(.type == "tool_use")] | length > 0))
                or (.value.toolUseResult != null))] as $since_report
+  # Liveness evidence (#900): a launch from an earlier turn counts as out
+  # only if something since the start of this turn names its id — a tool call
+  # by the worker whose task_id, shell_id, agentId or `to` is that id (a
+  # `BashOutput`/`TaskOutput` poll, a `SendMessage` to the subagent), or a
+  # task-notification carrying it without a `<status>` (a Monitor event). A message that arrives while a
+  # job is out restarts the turn but not the evidence, so an id nothing has
+  # touched since is treated as abandoned, not carried: 45% of launches
+  # never emit a terminal notification (docs/research/
+  # 2026-09-19-background-task-terminal-states.md), and carrying every one
+  # would hold the verdict at `waiting` for the rest of the session. Returns
+  # and finishes are read over the whole transcript; an id ends wherever it
+  # ends. A launch this turn needs no evidence.
+  # A probe counts only once it has an answer: a poll the classifier denied,
+  # or one that errored, is a call and not evidence of life.
+  | [$after[] | select(.type == "user") | .message.content | arrays[]
+      | select(.type == "tool_result" and .is_error != true) | .tool_use_id] as $answered
+  | ([$after[] | select(.type == "assistant") | .message.content[]?
+        | select(.type == "tool_use" and (.id | IN($answered[]))) | .input | objects
+        | (.task_id, .shell_id, .bash_id, .agentId, .agent_id, .to) | strings]
+     + [$after[] | select(.type == "user" and .origin.kind == "task-notification")
+        | .message.content | strings | select(test("<status>") | not)
+        | scan("<task-id>([^<]+)</task-id>")[0]]) as $touched
+  # An id is compared whole, in the fields that name a task or an agent, and
+  # never searched for inside free text: an id that merely appears in a
+  # command, a written file or a peer message is not evidence of life.
+  | def alive: [., sub("@session-[^@]*$"; "")] | any(.[]; IN($touched[]));
+  def outstanding($launches; $now): [$launches[] | select(IN($now[]) or alive)] | unique;
+  [$all[] | .value | select(.type == "user") | .toolUseResult? | objects
+      | select(.status == "async_launched" or .status == "teammate_spawned")
+      | (.agentId // .agent_id) | select(strings)] as $launched_all
   | [$after[] | .toolUseResult? | objects
       | select(.status == "async_launched" or .status == "teammate_spawned")
-      | (.agentId // .agent_id) | select(strings)] as $launched
-  | [$after[] | select(.type == "user") | (.origin.senderTaskId // empty),
+      | (.agentId // .agent_id) | select(strings)] as $launched_now
+  | [$all[] | .value | select(.type == "user") | (.origin.senderTaskId // empty),
       (.message.content | strings | scan("<task-id>([^<]+)</task-id>")[0]),
       (.message.content | strings | scan("<teammate-message teammate_id=\"([^\"]+)\"")[0])] as $returned
-  # Background tasks: the launch result of a background shell carries
-  # `backgroundTaskId`, the launch result of a Monitor carries `taskId`
-  # (#886). One ends at a `<task-id>` notification that also carries a
-  # `<status>`, or at a `TaskStop` the worker ran itself. Monitor event
-  # notifications carry a `<task-id>` and no `<status>` while the monitor
-  # keeps running, so an event is not a return. Scanned over this turn, not
-  # the whole transcript: 45% of the background tasks in ~/.claude/projects
-  # never emit a terminal notification at all (docs/research/
-  # 2026-09-19-background-task-terminal-states.md), and a whole-transcript
-  # set difference lets one such id hold the verdict at `waiting` for the
-  # rest of the session — the alert would never fire again, however silently
-  # the worker stopped. The cost of the turn bound is the other way round: a
-  # message that arrives mid-job restarts the turn, so that stop alerts
-  # while the job is still running. A false alert costs a pane read; a
-  # suppressed one costs the signal. #900 holds the wider question.
+  | [$all[] | .value | select(.type == "user") | .toolUseResult? | objects
+      | (.backgroundTaskId // .taskId) | select(strings)] as $tasks_all
   | [$after[] | .toolUseResult? | objects
-      | (.backgroundTaskId // .taskId) | select(strings)] as $tasks
-  | [($after[] | select(.type == "user") | .message.content | strings
+      | (.backgroundTaskId // .taskId) | select(strings)] as $tasks_now
+  | [($all[] | .value | select(.type == "user") | .message.content | strings
        | select(test("<status>")) | scan("<task-id>([^<]+)</task-id>")[0]),
-     ($after[] | select(.type == "assistant") | .message.content[]?
+     ($all[] | .value | select(.type == "assistant") | .message.content[]?
        | select(.type == "tool_use" and .name == "TaskStop")
        | (.input.task_id // .input.shell_id) | select(strings))] as $finished
+  | outstanding($tasks_all; $tasks_now) as $tasks
   | ($tasks - $finished) as $unfinished
   # A teammate launch id is qualified (name@session-...); its reply id is
   # bare. Neither form appearing in $returned (both survive the set
   # difference, so the length is 2) means this launch is still unresolved.
+  | outstanding($launched_all; $launched_now) as $launched
   | [$launched[] | select(([., sub("@session-[^@]*$"; "")] - $returned | length) == 2)] as $unresolved
   | (if ($delivered | length) > 0 then "reported"
      elif $reported_at != null and ($since_report | length) == 0 then "reported"

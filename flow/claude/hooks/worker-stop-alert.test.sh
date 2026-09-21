@@ -89,6 +89,18 @@ task_stop() { printf '{"type":"assistant","message":{"role":"assistant","content
 work() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"e-1","name":"Edit","input":{"file_path":"a.js"}}]}}\n'
   printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"e-1","content":"ok"}]},"toolUseResult":{"filePath":"a.js"}}\n'; }
 
+# task_poll <id> : a TaskOutput poll of a background task or subagent (#900).
+task_poll() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"po-%s","name":"TaskOutput","input":{"task_id":"%s"}}]}}\n' "$1" "$1"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"po-%s","content":"still running"}]},"toolUseResult":{"retrieval_status":"not_ready"}}\n' "$1"; }
+# task_poll_denied / task_poll_errored <id> : the same poll, answered by a
+# permission denial or a tool error — a call that got no answer about the task.
+task_poll_denied() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"po-%s","name":"TaskOutput","input":{"task_id":"%s"}}]}}\n' "$1" "$1"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"po-%s","content":"Permission for this action has been denied.","is_error":true}]},"toolUseResult":"Error: Permission for this action has been denied."}\n' "$1"; }
+task_poll_errored() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"po-%s","name":"TaskOutput","input":{"task_id":"%s"}}]}}\n' "$1" "$1"
+  printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"po-%s","content":"No task found with ID: %s","is_error":true}]},"toolUseResult":"Error: No task found"}\n' "$1" "$1"; }
+# bash_cmd <text> : a Bash call whose command merely mentions text.
+bash_cmd() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"bc-1","name":"Bash","input":{"command":"%s"}}]}}\n' "$1"; }
+
 fails=0
 # run <name> <transcript-file> [stop_hook_active] -> sets $pane and $text
 # (the recorded prompt's target and alert, empty if no prompt was sent)
@@ -308,12 +320,13 @@ t="$tmp/reported-then-worked.jsonl"
 run "reported this turn, then kept working" "$t"
 expect_none "a report inside this turn covers the stop even when work followed it"
 
-# The outstanding set is this turn's, and that bound is load-bearing: 45% of
+# An id with no liveness evidence since the turn start is not out, and that bound is load-bearing: 45% of
 # real background tasks never emit a terminal notification, so a set carried
 # across turns would let one stale id hold the verdict at `waiting` for the
 # rest of the session and the alert would never fire again (#900, and
 # docs/research/2026-09-19-background-task-terminal-states.md). The price is
-# the case below: a job that never finished does not cover a later stop.
+# the case below: a job that never finished does not cover a later stop
+# unless something since the turn start names it (the tests further down).
 reset_log
 t="$tmp/bg-across-turns.jsonl"
 { human "$brief"; bg_launch bnever1; assistant_text "check-full running"; } > "$t"
@@ -322,6 +335,91 @@ expect_none "a stop while a background shell is out does not alert"
 { peer "new task: fix the flaky test"; work; assistant_text "fixed it"; } >> "$t"
 run "stale never-finished job" "$t"
 expect_alert "a never-terminated job does not suppress a later genuine silent stop"
+
+# Liveness evidence (#900): a launch from an earlier turn stays out across an
+# inbound message only while something since the turn start names its id.
+reset_log
+t="$tmp/bg-polled.jsonl"
+{ human "$brief"; bg_launch bpoll1; assistant_text "check-full running"; peer "status?"; task_poll bpoll1; assistant_text "still running"; } > "$t"
+run "background shell polled" "$t"
+expect_none "a background shell launched last turn and polled since the turn start is still out"
+
+reset_log
+t="$tmp/monitor-evented.jsonl"
+{ human "$brief"; monitor_launch bmon1; assistant_text "watching"; peer "status?"; monitor_event bmon1; assistant_text "tick"; } > "$t"
+run "monitor event this turn" "$t"
+expect_none "a monitor launched last turn with an event since the turn start is still out"
+
+reset_log
+t="$tmp/reviewer-across-message.jsonl"
+{ human "$brief"; launch r1; assistant_text "reviewer running"; peer "status?"; task_poll r1; assistant_text "still out"; } > "$t"
+run "reviewer polled across a message" "$t"
+expect_none "a subagent launched last turn and polled since the turn start is still out"
+
+reset_log
+t="$tmp/reviewer-untouched.jsonl"
+{ human "$brief"; launch r2; assistant_text "reviewer running"; peer "status?"; assistant_text "noted"; } > "$t"
+run "reviewer with no evidence" "$t"
+expect_alert "a subagent launched last turn and untouched since the turn start does not suppress a silent stop"
+
+reset_log
+t="$tmp/polled-then-done.jsonl"
+{ human "$brief"; bg_launch bpoll2; peer "status?"; task_done bpoll2 completed; task_poll bpoll2; assistant_text "done"; } > "$t"
+run "polled after it finished" "$t"
+expect_alert "a polled task that already reached a terminal state is not out"
+
+reset_log
+t="$tmp/mention-only.jsonl"
+{ human "$brief"; launch a0037b86e988b4825; assistant_text "reviewer running"; peer "status?";
+  bash_cmd "grep -c a0037b86e988b4825 .scratch/agents.log"; assistant_text "noted"; } > "$t"
+run "id mentioned in a command" "$t"
+expect_alert "an id that only appears in a command is not evidence of life"
+
+reset_log
+t="$tmp/peer-mention.jsonl"
+{ human "$brief"; launch a0037b86e988b4826; assistant_text "reviewer running"; peer "is a0037b86e988b4826 still out?"; assistant_text "noted"; } > "$t"
+run "id named in a peer message" "$t"
+expect_alert "an id a peer message names is not evidence of life"
+
+reset_log
+t="$tmp/id-prefix.jsonl"
+{ human "$brief"; bg_launch b0kjm5mmm; bg_launch b0kjm5mmmX; assistant_text "two out"; peer "status?";
+  task_done b0kjm5mmmX completed; task_poll b0kjm5mmmX; assistant_text "one done"; } > "$t"
+run "id that prefixes another" "$t"
+expect_alert "polling one id does not keep an id it is a prefix of out"
+
+# The resolution sets are read over the whole transcript: an id that ended in
+# an earlier turn stays ended when a later poll names it.
+reset_log
+t="$tmp/handed-back-earlier.jsonl"
+{ human "$brief"; launch r3; handback r3; peer "status?"; task_poll r3; assistant_text "back already"; } > "$t"
+run "subagent handed back last turn, polled this turn" "$t"
+expect_alert "a subagent handed back in an earlier turn is not out because it was polled"
+
+reset_log
+t="$tmp/teammate-reported-earlier.jsonl"
+{ human "$brief"; teammate_launch tally-900@session-2b7ae693 tally-900; teammate_report tally-900; peer "status?";
+  task_poll tally-900; assistant_text "reported already"; } > "$t"
+run "teammate reported last turn, polled this turn" "$t"
+expect_alert "a teammate that reported in an earlier turn is not out because it was polled"
+
+reset_log
+t="$tmp/finished-earlier.jsonl"
+{ human "$brief"; bg_launch bfin1; task_done bfin1 completed; peer "status?"; task_poll bfin1; assistant_text "finished already"; } > "$t"
+run "task finished last turn, polled this turn" "$t"
+expect_alert "a task that finished in an earlier turn is not out because it was polled"
+
+reset_log
+t="$tmp/poll-denied.jsonl"
+{ human "$brief"; bg_launch bden1; assistant_text "check-full running"; peer "status?"; task_poll_denied bden1; assistant_text "asking in my pane"; } > "$t"
+run "poll denied" "$t"
+expect_alert "a denied poll is not evidence of life"
+
+reset_log
+t="$tmp/poll-errored.jsonl"
+{ human "$brief"; launch r4; assistant_text "reviewer running"; peer "status?"; task_poll_errored r4; assistant_text "gone?"; } > "$t"
+run "poll errored" "$t"
+expect_alert "a poll that errored is not evidence of life"
 
 reset_log
 t="$tmp/torn.jsonl"
