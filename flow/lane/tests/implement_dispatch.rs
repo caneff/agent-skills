@@ -877,11 +877,46 @@ fn a_clumps_brief_carries_every_ticket_in_it() {
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "424", "423"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
-    assert!(
-        f.calls().lines().any(|l| l
-            == "herdr agent prompt sudokumaker-custom-constrain-423 /implement 423 424 --tier heavy --controller \"skills-ctl\" --wait --until working --timeout 120000"),
-        "{}",
-        f.calls()
+    let prefix = "herdr agent prompt sudokumaker-custom-constrain-423 /implement 423 424 --tier heavy --controller \"skills-ctl\"";
+    let tail = " --wait --until working --timeout 120000";
+    assert!(f.calls().lines().any(|l| l.starts_with(prefix) && l.ends_with(tail)), "{}", f.calls());
+}
+
+// --- #901: what the clump brief tells the worker ------------------------------
+
+fn prompt_line(f: &Fixture) -> String {
+    f.calls().lines().find(|l| l.starts_with("herdr agent prompt")).unwrap_or_default().to_string()
+}
+
+#[test]
+fn a_clumps_brief_says_internal_blockers_are_ignored_shas_do_not_survive_a_squash_and_the_report_is_one() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "424", "423"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let line = prompt_line(&f);
+    for needle in [
+        "a blocker that is another ticket of this clump is ignored",
+        "per-ticket shas do not survive the squash merge",
+        "the PR-up report is one report for the clump, not one per ticket",
+    ] {
+        assert!(line.contains(needle), "clump brief lacks {needle:?}: {line}");
+    }
+}
+
+#[test]
+fn a_single_tickets_brief_carries_no_clump_note() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "423"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let line = prompt_line(&f);
+    // Equality, not absence: an empty line (no prompt sent) must not pass.
+    assert_eq!(
+        line,
+        "herdr agent prompt sudokumaker-custom-constrain-423 /implement 423 --tier heavy --controller \"skills-ctl\" --wait --until working --timeout 120000"
     );
 }
 
