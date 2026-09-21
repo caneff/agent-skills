@@ -4,7 +4,9 @@
 The seam is what the skill writes — the issue body — so this test takes the
 body template out of `file-ticket/SKILL.md` and classifies it with
 `burndown/frontier.py`, the reader that consumes it. A ticket this skill
-files must land in `unblocked` or `blocked`, never `unresolved`: on
+files must land in `unblocked` or `blocked`, never `unresolved` (one carve-out: a
+cross-repo blocker reads `unresolved` until its native edge exists, which
+the last cases pin): on
 `agent-skills` seven of the eight unresolved `ready-for-agent` tickets on
 2026-09-20 were filed ad hoc during builds, each costing a controller a
 decision by hand.
@@ -43,7 +45,7 @@ def filed(body):
     return template().replace("<body>", body)
 
 
-def classify(body, states=None):
+def classify(body, states=None, deps=None):
     """Which bucket the frontier reader puts this filed ticket in. No native
     dependency data: the fallback grammar is what the body has to satisfy.
 
@@ -53,6 +55,8 @@ def classify(body, states=None):
     states = states or {}
     issue = {"number": 42, "title": "a filed finding", "body": body,
              "assignees": [], "labels": [{"name": "ready-for-agent"}]}
+    if deps:
+        issue["issue_dependencies_summary"] = deps
     buckets = F.classify([issue], lambda n: states.get(n))
     named = [name for name, entries in buckets.items() if entries]
     return named[0] if named else "no bucket"
@@ -114,6 +118,18 @@ def main():
     fenced = filed(BODY + "\n\n```\n## Blocked by\n\n- #906\n```")
     fail += case("fenced evidence below the body", classify(fenced, {906: "open"}),
                  "unblocked")
+
+    # A blocker in another repo: the skill writes the full `owner/repo#N`
+    # form, which the grammar refuses on purpose. With no native edge the
+    # ticket reads unresolved (honest: never gated on an unrelated local
+    # #N, never unblocked); with the edge the live gate answers instead.
+    cross = filed(BODY).replace("- None — can start immediately.",
+                                "- caneff/sudokumaker#906")
+    fail += case("cross-repo blocker, no native edge",
+                 classify(cross, {906: "open"}), "unresolved")
+    fail += case("cross-repo blocker, native edge carries it",
+                 classify(cross, deps={"total_blocked_by": 1, "blocked_by": 1}),
+                 "blocked")
 
     if fail:
         sys.exit(1)
