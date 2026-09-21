@@ -45,7 +45,8 @@ too.
    **send time** (#923), and never write a resolved address into the run
    file.
 2. Read the frontier (§ The frontier) over the **whole queue**, not the first
-   wave's worth, and clump it (§ Clumping). That exploration is the run's
+   wave's worth, and clump it (§ Clumping): `closure.py --json` into the
+   candidates file, never built by hand. That exploration is the run's
    **frozen** candidate set: a ticket filed while the run is going waits for
    the next run. The one exception is a ticket filed *during* the run
    **because the run is stuck on what it fixes** — `loop.admit` takes it only
@@ -76,7 +77,11 @@ too.
    file, its closure from that re-resolution, and the two together are
    `loop.py dispatch`'s `--in-flight`. A clump whose closure intersects a
    live workspace's is **off the frontier**: `loop.py dispatch` picks from
-   what is left and names what holds the rest. Two consequences, because
+   what is left and names what holds the rest. That hold, with `picks`'
+   same-tick guard (two clumps sharing a file are never picked in one tick,
+   and that skip prints no `held` line), is what keeps a **family's clumps**
+   apart: a clump sharing a file with a live or just-picked one waits, and
+   family members sharing no file run at once. Two consequences, because
    neither is visible from the frontier's own definition — a run drains
    **out of ticket order**, and one parked worker can hold a **whole family**
    off the frontier until it lands. A controller reading only "open,
@@ -139,10 +144,12 @@ The grammar and the three sources:
 Which candidates are one clump — one worker, one workspace, one PR — is read
 by `burndown/closure.py`, not from the tickets' declared seams:
 `python3 burndown/closure.py <repo-root> <n>=<path>[,<path>]...` prints the
-mode and the connected components of the collision graph over each
-candidate's **include closure**. The repo declares its include directive and
-its generator command in `AGENTS.md`; the resolver follows that declaration
-one hop and **never runs the generator**. A repo that declares nothing is
+mode and the **families** — the connected components of the collision graph
+over each candidate's **include closure** — each split into its **clumps**
+(`references/closure.md` § Families run as clumps); `--json` prints the clump
+list `loop.py dispatch --candidates` reads. The repo declares its include
+directive and its generator command in `AGENTS.md`; the resolver follows
+that declaration one hop and **never runs the generator**. A repo that declares nothing is
 clumped conservatively by directory subtree, and the run's **opening report
 carries the announcement line** the reader returns, so a controller can see
 which of the three modes it got. The grammar and the evidence:
