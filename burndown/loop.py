@@ -583,8 +583,8 @@ def admit(candidates, clump, stuck_on=None):
 
 
 def read_clumps(path, live=False, closure=True):
-    """A clump list from a JSON file — `closure.py`'s own `clumps` entries,
-    each with the `workspace` an in-flight one sits in.
+    """A clump list from a JSON file — `closure.py --json`'s output, each
+    entry with the `workspace` an in-flight one sits in.
 
     `live=True` for the in-flight list, whose entries are also named in
     every held-clump line and so must carry a `workspace`. `closure=False`
