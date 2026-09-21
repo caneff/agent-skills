@@ -34,6 +34,8 @@ import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -104,6 +106,38 @@ def parse_mutmut_results(text):
         row["extra"]["survived_count"] = survived_count
         row["extra"]["no_coverage_count"] = no_coverage_count
     return rows
+
+
+class Inconclusive(Exception):
+    """The audit could not produce a verdict: distinct from a clean run."""
+
+
+INCONCLUSIVE_EXIT = 3
+
+
+def parse_or_inconclusive(text):
+    """`parse_mutmut_results`, but text holding no mutant line at all (mutmut
+    absent, misconfigured, or crashed before reporting) raises `Inconclusive`
+    instead of returning `[]`, which reads as a clean run (#962)."""
+    if not any(_RESULT_LINE_RE.match(line) for line in text.splitlines()):
+        raise Inconclusive("no mutant lines in mutmut's results; mutmut did not report a run")
+    return parse_mutmut_results(text)
+
+
+def run_mutmut(target):
+    """Run mutmut through `uvx` in the cwd and return its `results --all true`
+    text. Raises `Inconclusive`, saying why, when uvx is missing or a mutmut
+    command fails. Never installs anything: SKILL.md step 3 scopes the config."""
+    if shutil.which("uvx") is None:
+        raise Inconclusive(f"mutmut unavailable: `uvx` is not on PATH, so {target} was not mutated")
+    run = subprocess.run(["uvx", "--with", "pytest", "mutmut", "run"], capture_output=True, text=True)
+    if run.returncode != 0:
+        tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-5:])
+        raise Inconclusive(f"mutmut run failed (exit {run.returncode}) on {target}:\n{tail}")
+    res = subprocess.run(["uvx", "mutmut", "results", "--all", "true"], capture_output=True, text=True)
+    if res.returncode != 0:
+        raise Inconclusive(f"mutmut results failed (exit {res.returncode}): {res.stderr.strip()}")
+    return res.stdout
 
 
 def _sibling_tests(p):
@@ -264,7 +298,70 @@ def _check_cli_path():
         assert report["total"] == pair_count + lonely_count, report
 
 
-_CHECKS = (_check_parsing, _check_candidate_selection, _check_cli_path)
+def _run_cli(argv, path_dirs, cwd=None):
+    """Run audit.py as a subprocess with PATH limited to `path_dirs` plus the
+    interpreter's own dir; returns (returncode, stdout, stderr)."""
+    env = dict(os.environ, PATH=os.pathsep.join([*path_dirs, os.path.dirname(sys.executable)]))
+    r = subprocess.run([sys.executable, os.path.abspath(__file__), *argv],
+                       capture_output=True, text=True, env=env, cwd=cwd)
+    return r.returncode, r.stdout, r.stderr
+
+
+def _stub_uvx(dirpath, run_exit, results_text):
+    stub = os.path.join(dirpath, "uvx")
+    with open(stub, "w", encoding="utf-8") as f:
+        f.write("#!/bin/sh\n"
+                'case "$*" in\n'
+                f'  *"mutmut run"*) echo "stub run output"; exit {run_exit};;\n'
+                f'  *"mutmut results"*) cat <<\'EOT\'\n{results_text}\nEOT\n;;\n'
+                "esac\n")
+    os.chmod(stub, 0o755)
+
+
+def _check_inconclusive_when_mutmut_cannot_run():
+    """A box without mutmut must say so, exit 3, and print no findings —
+    never the empty output of a clean run (#962)."""
+    with tempfile.TemporaryDirectory() as empty, tempfile.TemporaryDirectory() as cwd:
+        code, out, err = _run_cli(["--run", "sample.py"], [empty], cwd)
+        assert code == 3, (code, out, err)
+        assert "INCONCLUSIVE" in err and "uvx" in err, err
+        assert out == "", out
+
+    # uvx present but `mutmut run` fails (the subprocess-test abort of #962's comment).
+    with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as cwd:
+        _stub_uvx(d, 1, "")
+        code, out, err = _run_cli(["--run", "sample.py"], [d], cwd)
+        assert code == 3, (code, out, err)
+        assert "INCONCLUSIVE" in err and "mutmut run failed" in err, err
+        assert out == "", out
+
+    # A results file with no mutant lines at all is inconclusive, not clean.
+    with tempfile.TemporaryDirectory() as cwd:
+        empty_results = os.path.join(cwd, "r.txt")
+        open(empty_results, "w").close()
+        code, out, err = _run_cli([empty_results], [], cwd)
+        assert code == 3, (code, out, err)
+        assert "INCONCLUSIVE" in err, err
+
+
+def _check_run_reports_findings_when_mutmut_present():
+    results = "    sample.x_clamp__mutmut_1: survived\n    sample.x_is_adult__mutmut_1: killed"
+    with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as cwd:
+        _stub_uvx(d, 0, results)
+        code, out, err = _run_cli(["--run", "sample.py"], [d], cwd)
+        assert code == 0, (code, out, err)
+        rows = [json.loads(line) for line in out.splitlines()]
+        assert [r["extra"]["mutant"] for r in rows] == ["sample.x_clamp__mutmut_1"], rows
+        # An all-killed run is a real clean run: exit 0, no rows, no INCONCLUSIVE.
+        _stub_uvx(d, 0, "    sample.x_is_adult__mutmut_1: killed")
+        code, out, err = _run_cli(["--run", "sample.py"], [d], cwd)
+        assert (code, out) == (0, ""), (code, out, err)
+        assert "INCONCLUSIVE" not in err, err
+
+
+_CHECKS = (_check_parsing, _check_candidate_selection, _check_cli_path,
+           _check_inconclusive_when_mutmut_cannot_run,
+           _check_run_reports_findings_when_mutmut_present)
 
 
 def _selfcheck():
@@ -297,8 +394,19 @@ def main(argv):
         worthy = sum(1 for p in paths if _sibling_tests(p) is not None)
         print(json.dumps({"no_tests": no_test_modules(paths), "total": worthy}))
         return
-    # `--selfcheck` and the file/stdin parse path go through auditlib.run_cli.
-    auditlib.run_cli(argv, _selfcheck, parse_mutmut_results)
+    try:
+        if argv[1:2] == ["--run"]:
+            if len(argv) < 3:
+                print("usage: audit.py --run <target-module.py>", file=sys.stderr)
+                sys.exit(1)
+            for row in parse_or_inconclusive(run_mutmut(argv[2])):
+                print(json.dumps(row))
+            return
+        # `--selfcheck` and the file/stdin parse path go through auditlib.run_cli.
+        auditlib.run_cli(argv, _selfcheck, parse_or_inconclusive)
+    except Inconclusive as e:
+        print(f"INCONCLUSIVE: {e}", file=sys.stderr)
+        sys.exit(INCONCLUSIVE_EXIT)
 
 
 if __name__ == "__main__":
