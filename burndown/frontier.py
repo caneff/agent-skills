@@ -36,7 +36,7 @@ _ANY_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+\S")
 # these and prose that merely says "blocked by #7" mid-sentence is not a
 # declaration. All three allow at most three spaces of indent: four or more
 # is an indented code block in CommonMark, a quotation and not a declaration.
-_INLINE = re.compile(r"^ {0,3}[*_]{0,2}[ \t]*blocked by[ \t]*:?[ \t]*[*_]{0,2}[ \t]*:?[ \t]*(.*)$",
+_INLINE = re.compile(r"^ {0,3}(?![ \t])[*_]{0,2}[ \t]*blocked by[ \t]*:?[ \t]*[*_]{0,2}[ \t]*:?[ \t]*(.*)$",
                      re.IGNORECASE)
 # A bare `#NNN`. The lookbehind keeps `owner/repo#7` and `abc#7` out: a
 # cross-repo reference is outside the grammar, and reading its tail as a
@@ -115,7 +115,7 @@ def blocked_by_section(body):
     once: which one is the ticket's own cannot be told from the text, and a
     quotation of another ticket's declaration reads the same as the real one.
 
-    Three written forms, the section first because it is the one
+    Three written forms, the section listed first as the canonical one
     `/to-tickets` emits: the lines under a `## Blocked by` heading up to the
     next heading of any level, or the rest of an inline `Blocked by:` /
     `**Blocked by:**` line in the preamble. Every visible occurrence of

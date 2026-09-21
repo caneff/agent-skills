@@ -686,6 +686,16 @@ def test_one_declaration_is_unchanged():
 def test_an_ambiguous_spec_parent_stays_unresolved():
     got = read([issue(1, body=QUOTED_THEN_REAL, labels=("ready-for-agent", "spec"))])
     assert numbers(got["unresolved"]) == [1], got
+    assert "more than once" in got["unresolved"][0]["why"], got
+
+
+def test_an_indented_inline_line_is_a_quotation_not_a_declaration():
+    # Four spaces or a tab is an indented code block. Beside a real inline
+    # line it must not make the body ambiguous.
+    for quoted in ("    Blocked by: #7", "\tBlocked by: #7"):
+        body = quoted + "\nBlocked by: None\n"
+        got = read([issue(1, body=body)], states={7: "open"})
+        assert numbers(got["unblocked"]) == [1], (quoted, got)
 
 
 def main():

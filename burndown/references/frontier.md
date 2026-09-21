@@ -128,8 +128,14 @@ outside it is read as an edge.
   An inline line reaches to the end of that line and no further, and counts
   only in the **preamble** — the body above the first heading. The words
   must start the line: prose that says "this one is blocked by #7, we think"
-  mid-sentence is not a declaration. Where a ticket carries both a section
-  and an inline line, the section wins.
+  mid-sentence is not a declaration. Neither is anything indented four or
+  more spaces: that is an indented code block, a quotation.
+- **One declaration, or none.** Every visible section and every preamble
+  inline line is a declaration. A ticket with more than one — two sections,
+  two inline lines, or a section beside an inline line — is **ambiguous**,
+  and ambiguous is unresolved: which one is the ticket's own cannot be told
+  from the text, and a quoted copy of another ticket's blocker list looks
+  the same as the real one. The reader never takes the first.
 - **A fenced region is quoted, never declared.** Anything between ``` or ~~~
   fences is an example. A fence closes CommonMark's way — on the same
   character, with a run at least as long as the opener, and nothing after it
