@@ -83,6 +83,17 @@ first_pr="$(section 'First PR to land wins')"
 check_in "$first_pr" 'first PR to land wins' 'references/merge-tail.md § First PR to land wins'
 check_in "$first_pr" 'The other rebases onto the default branch' 'references/merge-tail.md § First PR to land wins'
 check_in "$first_pr" 'force-with-lease' 'references/merge-tail.md § First PR to land wins' 
+# Rule 1b (#936): the staging rule sits where every conflict reaches it, not
+# inside the generator-only block — a repo that declares no generator is all
+# hand-merges and never reads that block. The recipe ends in a force-push, so
+# `git add -A` publishes whatever untracked file the workspace happened to hold.
+check_in "$first_pr" 'git add -- <the paths' 'references/merge-tail.md § First PR to land wins'
+check_in "$first_pr" 'git diff --cached' 'references/merge-tail.md § First PR to land wins'
+check_in "$first_pr" 'Never `git add -A`' 'references/merge-tail.md § First PR to land wins'
+# The rebase stops once per conflicting commit, so steps 2-3 are a loop, not a
+# once-through recipe (S3/C1). The `git add -- <the paths` needle above is long
+# on purpose: bare `git add --` also matches `git add --all` (C3).
+check_in "$first_pr" 'repeat for every commit' 'references/merge-tail.md § First PR to land wins'
 
 # Rule 2: generated artifacts are regenerated, never hand-merged, and the
 # side taken for them is the default branch's. The heading carries the rule,
@@ -95,12 +106,9 @@ check_in "$generated" 'checkout --ours' 'references/merge-tail.md § Generated a
 check_in "$generated" '--theirs' 'references/merge-tail.md § Generated artifacts'
 check_in "$generated" 'inverted' 'references/merge-tail.md § Generated artifacts'
 check_in "$generated" 'Generator' 'references/merge-tail.md § Generated artifacts'
-# Rule 2b (Codex pass on PR #930): the recipe stages the paths it named and
-# reads the staged diff, because it ends in a force-push. `git add -A` here
-# publishes whatever untracked file the workspace happened to hold.
-check_in "$generated" 'git add --' 'references/merge-tail.md § Generated artifacts'
-check_in "$generated" 'git diff --cached' 'references/merge-tail.md § Generated artifacts'
-check_in "$generated" 'Never `git add -A` here' 'references/merge-tail.md § Generated artifacts' 
+# The generated block points at the shared staging step instead of restating it.
+check_in "$generated" 'First PR to land wins step 3' 'references/merge-tail.md § Generated artifacts'
+check_in "$generated" 'hand-merges, staged as' 'references/merge-tail.md § Generated artifacts'
 
 # Rule 3: a collision that escaped the closure is a defect in the repo's
 # declared include grammar, and it is filed against the repo — otherwise the
