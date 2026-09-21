@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Focus a herdr agent pane. With an argument, that pane id; without, the agent
+# that most recently finished or blocked and is not already focused.
+# Called from the Windows toast click handler via wsl.exe.
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+target="${1:-}"
+if [ -z "$target" ]; then
+  target=$(herdr agent list 2>/dev/null | jq -r '
+    .result.agents
+    | map(select((.agent_status == "idle" or .agent_status == "blocked") and .focused != true))
+    | sort_by(.state_change_seq) | last | .pane_id // empty')
+fi
+[ -z "$target" ] && exit 0
+# workspace.focus is what moves the visible client; agent.focus alone only moves server state.
+herdr workspace focus "${target%%:*}" >/dev/null 2>&1
+herdr agent focus "$target" >/dev/null 2>&1
+exit 0

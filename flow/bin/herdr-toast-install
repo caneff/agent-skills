@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Link the herdr toast scripts from this directory into ~/.local/bin and point
+# the herdrfocus: URL handler at the real file. Windows cannot follow a WSL
+# symlink over \\wsl.localhost, so everything Windows reads is addressed by
+# its flow/bin path, never by the ~/.local/bin link. Safe to re-run.
+# HERDR_TOAST_SKIP_REGISTRY=1 skips the registry write (used by the test).
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+dest="$HOME/.local/bin"
+mkdir -p "$dest"
+for n in notify-send run-hidden.vbs herdr-focus.vbs herdr-focus-pick.ps1 herdr-focus-latest; do
+  ln -sfn "$here/$n" "$dest/$n"
+done
+[ "${HERDR_TOAST_SKIP_REGISTRY:-}" = 1 ] && exit 0
+unc='\\wsl.localhost\Ubuntu-24.04'"${here//\//\\}"
+powershell.exe -NoProfile -Command "reg add 'HKCU\Software\Classes\herdrfocus\shell\open\command' /ve /d 'wscript.exe //B //Nologo ${unc}\herdr-focus.vbs %1' /f" >/dev/null

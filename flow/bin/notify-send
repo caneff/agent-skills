@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# notify-send shim for WSL: raises a silent, clickable Windows toast via PowerShell.
+# Accepts the notify-send CLI shape: [options] SUMMARY [BODY].
+# Click opens herdrfocus:<pane> (HKCU URL handler -> herdr-focus.ps1), which brings
+# VS Code forward and focuses the herdr agent pane that most recently finished/blocked.
+set -u
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+positional=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -a|--app-name|-i|--icon|-u|--urgency|-t|--expire-time|-c|--category|-h|--hint|-A|--action|-r|--replace-id)
+      shift 2 ;;
+    --app-name=*|--icon=*|--urgency=*|--expire-time=*|--category=*|--hint=*|--action=*|--replace-id=*)
+      shift ;;
+    -e|--transient|-p|--print-id|-w|--wait|-v|--version|-?|--help)
+      shift ;;
+    --) shift; positional+=("$@"); break ;;
+    -*) shift ;;
+    *) positional+=("$1"); shift ;;
+  esac
+done
+title="${positional[0]:-Notification}"
+body="${positional[1]:-}"
+# Resolve the click target. herdr's agent toasts carry "<workspace label> · <workspace number>"
+# in the body; map that to the workspace's agent pane. Fall back to the newest idle/blocked
+# agent that is not already focused. HERDR_TOAST_PANE overrides everything.
+pane="${HERDR_TOAST_PANE:-}"
+if [ -z "$pane" ] && [[ "$body" == *" · "* ]]; then
+  ws_label="${body%% · *}"; ws_number="${body##* · }"
+  pane=$(herdr api snapshot 2>/dev/null | jq -r --arg l "$ws_label" --arg n "$ws_number" '
+    .result.snapshot as $s
+    | ($s.workspaces[] | select((.number|tostring) == $n and .label == $l) | .workspace_id) as $w
+    | ($s.agents | map(select(.workspace_id == $w)) | sort_by(.state_change_seq) | last | .pane_id)
+      // ($s.panes | map(select(.workspace_id == $w)) | first | .pane_id) // empty' 2>/dev/null | head -1)
+fi
+[ -z "$pane" ] && pane=$(herdr agent list 2>/dev/null | jq -r '
+  .result.agents
+  | map(select((.agent_status == "idle" or .agent_status == "blocked") and .focused != true))
+  | sort_by(.state_change_seq) | last | .pane_id // empty')
+xml_escape() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e "s/'/\&apos;/g" -e 's/"/\&quot;/g'; }
+ps_escape() { sed "s/'/''/g"; }
+t=$(printf '%s' "$title" | xml_escape | ps_escape)
+b=$(printf '%s' "$body"  | xml_escape | ps_escape)
+launch="herdrfocus:${pane}"
+script="
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+\$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+\$xml.LoadXml('<toast activationType=\"protocol\" launch=\"$launch\"><visual><binding template=\"ToastGeneric\"><text>$t</text><text>$b</text></binding></visual><audio silent=\"true\"/></toast>')
+\$toast = New-Object Windows.UI.Notifications.ToastNotification \$xml
+\$appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe'
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(\$appId).Show(\$toast)
+"
+enc=$(printf '%s' "$script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+/mnt/c/Windows/System32/wscript.exe //B //Nologo '\\wsl.localhost\Ubuntu-24.04\home\caneff\.agents\skills\flow\bin\run-hidden.vbs' powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand "$enc" >/dev/null 2>&1 </dev/null &
+exit 0
