@@ -134,16 +134,18 @@ def located_steps(locator: re.Match[str]) -> list[int]:
     return list(range(first, last + 1)) if last >= first else [first, last]
 
 
-PUNCTUATION_TRIMMER = "sentence punctuation"
-# Applied in this order; pinned by tests/section-reference-trimmers.test.py.
-# Every trimmer before PUNCTUATION_TRIMMER runs ahead of the step-locator
-# reading, which needs the label's own punctuation ("Before the PR: step 5")
-# intact; the punctuation trimmer runs last and feeds only the final reading.
-LABEL_TRIMMERS = (
+# Pinned by tests/section_reference_trimmers_test.py. PROSE_TRIMMERS run in
+# order before the step-locator reading, which needs the label's own
+# punctuation ("Before the PR: step 5") intact; add a new one here and it runs.
+# PUNCTUATION_TRIMMER is separate and runs last, feeding only the final reading.
+PROSE_TRIMMERS = (
     ("cross-reference conjunction", lambda v: v.split(" and §", 1)[0]),
     ("trailing conjunction", lambda v: re.sub(r"\s+and\s*$", "", v)),
     ("possessive", lambda v: v.split("'s", 1)[0]),
-    (PUNCTUATION_TRIMMER, lambda v: re.split(r"[.,;:!?)}\]]", v, maxsplit=1)[0].strip()),
+)
+PUNCTUATION_TRIMMER = (
+    "sentence punctuation",
+    lambda v: re.split(r"[.,;:!?)}\]]", v, maxsplit=1)[0].strip(),
 )
 
 
@@ -158,16 +160,14 @@ def reference_targets(match: re.Match[str]) -> list[tuple[str, list[int]]]:
     value = match.group(1).strip()
     if value.isdigit():
         return [(value, [])]
-    for name, trim in LABEL_TRIMMERS:
-        if name == PUNCTUATION_TRIMMER:
-            break
+    for _, trim in PROSE_TRIMMERS:
         value = trim(value)
     readings = []
     for pattern in (LOOSE_STEP_LOCATOR, STEP_LOCATOR):
         locator = pattern.match(value)
         if locator:
             readings.append((locator.group(1).strip(), located_steps(locator)))
-    value = dict(LABEL_TRIMMERS)[PUNCTUATION_TRIMMER](value)
+    value = PUNCTUATION_TRIMMER[1](value)
     heading_step = HEADING_STEP.match(value)
     readings.append((heading_step.group(1) if heading_step else value, []))
     return readings
