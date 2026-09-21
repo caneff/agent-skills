@@ -37,9 +37,10 @@ too.
    budget (5 when `--slots` is omitted) and the controller's own herdr
    agent name (§ Run state). Resuming an existing run instead:
    `runfile.py resume`, and then **one message per live, unlanded worker**
-   — its `announce` bucket and only that one, via `loop.announce`. A landed clump's worker gets none however its agent
-   looks; a vanished one gets none either, and is reconciled or parked by
-   hand. The bucket names each worker by its **herdr agent name**, which is
+   — its `announce` bucket and only that one, via `loop.announce`. A
+   landed clump's worker gets none however its agent looks; a vanished one
+   gets none either, and is reconciled or parked by hand. The bucket
+   names each worker by its **herdr agent name**, which is
    the durable key and not an address: resolve it to a reachable session at
    **send time** (#923), and never write a resolved address into the run
    file.
