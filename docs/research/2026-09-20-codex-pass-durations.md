@@ -41,3 +41,4 @@ early is worth it, which is why a `gate-retry` never reports as a plain
 | 966 | #967 | early | — | — | — | held: the worker announced fix commits with its round-1 report, so an early run would have been refused as raced |
 | 966 | #967 | gate-retry | 2026-09-21T11:05:07-04:00 | 2026-09-21T11:06:34-04:00 | 1.5 | collected-after-retry |
 | 948+961 | (pending) | early | 2026-09-21T11:11:14-04:00 | 2026-09-21T11:13:06-04:00 | 1.9 | raced: launch 10216f0, completion 659eb87 — the worker pushed round-1 fixes while Codex read; verdict discarded, rerun at the gate |
+| 948+961 | #968 | gate-retry | 2026-09-21T11:15:31-04:00 | 2026-09-21T11:17:03-04:00 | 1.5 | collected-after-retry |
