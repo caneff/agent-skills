@@ -60,6 +60,14 @@ result. What it must never do is what it does now: pass its selfcheck as one
 of the gate's 71 green suites while being unable to produce a single finding
 about this repo.
 
+## Decision (#962)
+
+Option (c). `mutation-audit/audit.py --run` reports `INCONCLUSIVE: <why>` and
+exits 3 when uvx is missing, mutmut fails or hangs, or its results hold no
+mutant line. (a) was rejected: uvx already fetches mutmut, so the blocker is
+this repo's layout, not a missing package. (b) was not needed: the audit is
+runnable on a layout mutmut accepts, and now says so when it is not.
+
 ## Reproducing
 
 A detached worktree outside the checkout, `setup.cfg` as above, `uvx --with

@@ -117,10 +117,21 @@ in that setup.
 
 4. **Run mutmut, capture results.**
    ```sh
-   uvx --with pytest mutmut run          # add --with <pkg> for the target's own test deps
-   uvx mutmut results --all true > "${TMPDIR:-/tmp}/mutmut-results.txt"
-   python3 ~/.agents/skills/mutation-audit/audit.py "${TMPDIR:-/tmp}/mutmut-results.txt"
+   python3 ~/.agents/skills/mutation-audit/audit.py --run <target-module.py>
    ```
+   `--run`'s argument only labels its messages; the scope is step 3's config,
+   so do step 3 first. It calls `uvx --with pytest mutmut run`, then `uvx mutmut results --all
+   true`, and parses the text. **It exits 3 and prints `INCONCLUSIVE: <why>` to
+   stderr — with no rows — when `uvx` is missing, when `mutmut run` or
+   `results` fails or exceeds `MUTATION_AUDIT_TIMEOUT` seconds (default 3600),
+   or when the results hold no mutant line at all.** Relay that line to the user
+   as the result; an inconclusive run is not a clean run and never becomes
+   "no findings". Exit 0 with no rows means mutmut ran and every mutant died.
+   Known blocker (`docs/research/2026-09-20-mutmut-against-this-repo.md`):
+   mutmut 3.x aborts on a suite that runs the target as a subprocess, which
+   is most CLI modules in this repo; expect INCONCLUSIVE there.
+   Feeding a saved results file (`audit.py <file>` or stdin) applies the same
+   no-mutant-line check.
    `parse_mutmut_results(text) -> list[dict]` is the tested seam
    (`~/.agents/skills/mutation-audit/fixtures/mutmut-results.txt` +
    `~/.agents/skills/mutation-audit/fixtures/answer-key.md` back it,
