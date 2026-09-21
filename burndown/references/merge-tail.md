@@ -22,14 +22,27 @@ The loser's worker runs it, in its own workspace:
 1. `git fetch origin && git rebase origin/<default>`.
 2. Resolve each conflict — **generated artifacts by regenerating** (below),
    everything else by hand, keeping both sides' intent.
-3. Check the result against what was reviewed:
+3. Stage what you resolved, by name, and read it before continuing:
+   ```
+   git add -- <the paths you resolved>
+   git diff --cached        # read it: this is what the rebase is about to commit
+   git rebase --continue
+   ```
+   **Never `git add -A` here.** It stages every tracked modification and every
+   untracked file the workspace happens to hold — a diagnostic script, a local
+   config, a credential — and this recipe ends in a force-push, so whatever it
+   swept up is published as part of a collision recovery. A recipe written down
+   is run verbatim under pressure, which is when nobody checks. This step is
+   the same for a generated artifact and a hand-merge; only how the file got
+   resolved differs.
+4. Check the result against what was reviewed:
    `git diff origin/<default>...HEAD` says the same thing the reviewed diff
    said, plus the landed branch's changes, and nothing else. A rebase that
    silently drops a hunk is the failure mode here.
-4. Run the tests, then `git push --force-with-lease origin <branch>` — the
+5. Run the tests, then `git push --force-with-lease origin <branch>` — the
    lease refuses if anyone else pushed, and an `implement-*` branch is
    disposable by design.
-5. Report the new tip to the controller, with every commit past the last
+6. Report the new tip to the controller, with every commit past the last
    reviewed sha named and classed, the same as any "PR up".
 
 Two harness notes, because both cost a worker hours on #781: finishing a
@@ -47,17 +60,10 @@ rebased branch:
 ```
 git checkout --ours -- <generated paths>
 <the repo's declared Generator command>
-git add -- <generated paths> <the paths you resolved by hand>
-git diff --cached        # read it: this is what the rebase is about to commit
-git rebase --continue
 ```
 
-**Never `git add -A` here.** It stages every tracked modification and every
-untracked file the workspace happens to hold — a diagnostic script, a local
-config, a credential — and this recipe ends in a force-push, so whatever it
-swept up is published as part of a collision recovery. Stage the paths you
-named and read `git diff --cached` before continuing: a recipe written down
-is run verbatim under pressure, which is when nobody checks.
+Then the staging step above, naming the regenerated paths beside the ones you
+resolved by hand.
 
 The Generator command is the one declared in the repo's `AGENTS.md` § Include
 closure, never one remembered from another repo.
@@ -76,7 +82,7 @@ them took one command; reading them would have taken an afternoon and shipped
 a diff nobody could check.
 
 A repo that declares no generator has nothing to regenerate, and its
-conflicts are all hand-merges.
+conflicts are all hand-merges, staged by the same step 3 above.
 
 ## An escaped collision is a defect in the include grammar
 
