@@ -15,7 +15,10 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get("SECTION_REFERENCES_ROOT", Path(__file__).resolve().parent.parent)).resolve()
 PATH = re.compile(r"(?<![\w.-])([~\w./-]+\.md)\b")
-SECTION = re.compile(r"§\s+(\d+|[A-Za-z][^§\n]{0,160})")
+# A reference is a section sign, whitespace, then a name that runs to the line
+# end, another section sign, or a backtick (the close of a code span). A sign
+# written "\\§" is the word, not a reference, and is never read.
+SECTION = re.compile(r"(?<!\\)§\s+(\d+|[A-Za-z][^§`\n]*)")
 TRAILING_PUNCTUATION = ".,;:!?)]}"
 # "§ The merge step 3 ..." points at the section "The merge" and its third
 # numbered step; whatever follows the locator is prose, not part of the name.

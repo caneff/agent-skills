@@ -25,8 +25,14 @@ does not resolve.
   follows the section sign. Anything else (bold, quotes, underscores) is not
   matched, so the reference is silently unchecked: write the plain heading.
 - The name runs from the section sign to the first of `. , ; : ! ? ) } ]`, a
-  `'s`, or another section sign; a trailing ` and` is dropped. It is capped at
-  about 160 characters. Write the heading, then punctuation.
+  `'s`, another section sign, or a backtick (the close of a code span, as in `<sign> Build`);
+  a trailing ` and` is dropped. It has no length cap: with
+  none of those, it runs to the end of the line. Write the heading, then
+  punctuation.
+- **The sign as a word.** Every `§` followed by a name is a reference, so a
+  sentence that uses the sign as a word fails as a missing heading. Write
+  it `\§` (backslash before it) and the checker never reads it. `<sign>`
+  alone in backticks, or followed by no name, is not read either.
 - A heading only has to start with the name, so a reference reading "The merge"
   matches a heading "The merge: who and when". Use enough words to be
   unambiguous. Matching ignores trailing punctuation and repeated whitespace.
