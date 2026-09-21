@@ -104,14 +104,10 @@ too.
    read as empty; pass `--processes` with a count you took. The ~**24 GB**
    ceiling is on the sum of the per-process `ulimit -v` caps. A slot the box
    cannot afford stays empty; that is not a reason to dispatch into it
-   anyway. **A slot is budgeted at its peak, not its steady state**
-   (#933): a worker is one process until it runs `/multi-axis-code-review`,
-   then the worker plus three axes plus a verification pass — 5
-   (`SLOT_PEAK_PROCESSES` in `loop.py`, the one place the number lives). So
-   the check charges each new worker 5 and each live worker the 4 it may
-   still add, and the `peak:` line `loop.py dispatch` prints is what the
-   status line carries. A live worker already mid-fan-out is in the measured
-   count too, so the check over-reserves; that is the safe error.
+   anyway. A slot is budgeted at its **peak**, not its steady state (#933):
+   `references/loop.md` § The box check, and `loop.py dispatch` prints the
+   `peak:` line that goes in the status line below. `loop.py box` takes
+   `--live <n>`, the workers already running; omitting it is refused.
 8. Dispatch and merge through
    [`implement`](~/.agents/skills/implement/SKILL.md) § Dispatch, which
    claims the clump and starts the worker; `implement/SKILL.md` § The merge,
@@ -264,7 +260,8 @@ own slot come off the free ones — a 2-core job holds one further slot, an
 A live clump with **no record at all** is not charged zero; the dispatch
 refuses it by name and says which worker to record. The line the reader
 prints — which clump declared what, and what is left — goes in the
-controller's **status line** while any declaration is outstanding.
+controller's **status line** while any declaration is outstanding; so does
+the `peak:` line `loop.py dispatch` prints on every dispatch tick.
 
 ## Parking and escalation
 

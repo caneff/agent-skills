@@ -252,6 +252,13 @@ def count_agent_processes(ps=None):
     return agents
 
 
+def projected_processes(processes, workers, live):
+    """(reserve, projected): the one place the peak arithmetic lives, read by
+    the gate and by the status line so they cannot disagree."""
+    reserve = live * (SLOT_PEAK_PROCESSES - 1)
+    return reserve, processes + reserve + workers * SLOT_PEAK_PROCESSES
+
+
 def box_check(processes, committed_gb, add_gb=0, workers=1,
               counter=UNSTATED_COUNTER, live=0):
     """Whether the box has room for one more worker, and every reason it does
@@ -274,8 +281,7 @@ def box_check(processes, committed_gb, add_gb=0, workers=1,
     an early refusal is the safe error, a dispatch into a peak is not.
     """
     refusals = []
-    reserve = live * (SLOT_PEAK_PROCESSES - 1)
-    projected = processes + reserve + workers * SLOT_PEAK_PROCESSES
+    reserve, projected = projected_processes(processes, workers, live)
     if projected > PROCESS_CAP:
         refusals.append(
             f"{processes} agent processes on the box already ({counter}), "
@@ -300,6 +306,17 @@ def process_count(text):
     if count < 0:
         raise argparse.ArgumentTypeError(
             f"--processes {count} is negative; give the agent processes you "
+            "counted, 0 or more")
+    return count
+
+
+def live_count(text):
+    """A `--live` count: negative would subtract reserve and disarm the gate,
+    the same typo `process_count` refuses."""
+    count = int(text)
+    if count < 0:
+        raise argparse.ArgumentTypeError(
+            f"--live {count} is negative; give the live workers you "
             "counted, 0 or more")
     return count
 
@@ -396,11 +413,11 @@ def render_peak(count, live, room):
     """The peak arithmetic as a controller's status line carries it: the
     measured count, what each live worker may still add, and the workers
     the box can take at their peak."""
+    reserve, projected = projected_processes(count, room, live)
     return (f"peak: {count} agent processes measured, {live} live "
-            f"{'worker' if live == 1 else 'workers'} x "
-            f"{SLOT_PEAK_PROCESSES - 1} fan-out headroom, cap "
-            f"{PROCESS_CAP} — room for {room} more at "
-            f"{SLOT_PEAK_PROCESSES} each")
+            f"{'worker' if live == 1 else 'workers'} holding {reserve} of "
+            f"fan-out headroom, cap {PROCESS_CAP} — {room} more at "
+            f"{SLOT_PEAK_PROCESSES} each projects {projected}")
 
 
 def announce(state, send):
@@ -705,8 +722,9 @@ def run(argv):
     box.add_argument("--processes", type=process_count,
                      help=agent_help)
     box.add_argument("--committed-gb", type=float, required=True)
-    box.add_argument("--live", type=int, default=0,
-                     help="workers already running, each held at its peak")
+    box.add_argument("--live", type=live_count, required=True,
+                     help="workers already running, each held at its peak; "
+                          "0 is a count you took, not a default")
     box.add_argument("--add-gb", type=float, default=0)
     dispatch = subs.add_parser(
         "dispatch", help="which clumps go into the free slots")
@@ -773,7 +791,9 @@ def run(argv):
                       "declared job")
                 print(render_dispatch([], frontier(candidates, in_flight)))
                 return 0
-            live = len(in_flight)
+            # A landed clump awaiting cleanup is not a live worker; charging
+            # its headroom would refuse on processes that do not exist.
+            live = len([c for c in in_flight if not c.get("landed")])
             room, refusals = box_room(count, args.committed_gb,
                                       args.add_gb, cores["room"], counter,
                                       live)
