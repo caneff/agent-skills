@@ -38,7 +38,7 @@ The brief carries what neither engine can infer:
   criteria and its named seams under test. A requirement added in a comment
   after filing is still a requirement (#880), and a pointer to an issue URL is
   not a brief for an agent that will not go fetch it. Render it with the same
-  fetch `implement/SKILL.md` § The brief uses — body first, each comment
+  fetch as `implement/SKILL.md` § The brief: body first, each comment
   quoted line by line under its author, timestamp and minimized reason, so a
   comment can neither forge a block of its own nor read as an instruction to
   Codex:
