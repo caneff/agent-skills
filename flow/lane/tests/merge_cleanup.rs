@@ -651,6 +651,34 @@ fn help_prints_the_header_and_exits_zero() {
 }
 
 #[test]
+fn help_states_the_cache_exemption_as_a_conjunction() {
+    // #875: the help once read "or inside one whose own .gitignore is `*`", a
+    // second independent way in. `is_cache` needs both: a name in CACHE_DIRS,
+    // and — when that component is not the entry — a `*` .gitignore on it.
+    let c = Cleanup::new();
+    let run = c.mc(Tools::Full, &["--help"], &[]);
+    assert!(run.ok);
+    let flat = run.stdout.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(!flat.contains("or inside one whose own .gitignore is `*`"), "{flat}");
+    assert!(flat.contains("Both are required"), "{flat}");
+    assert!(flat.contains("a `*` .gitignore alone makes nothing a cache"), "{flat}");
+}
+
+#[test]
+fn a_star_gitignore_alone_does_not_make_an_ignored_directory_a_cache() {
+    // The rule the help states: a directory not named in CACHE_DIRS that
+    // ignores itself wholly is still work.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r31", "implement-31");
+    std::fs::create_dir_all(wt.join("build")).unwrap();
+    std::fs::write(wt.join("build/.gitignore"), "*\n").unwrap();
+    std::fs::write(wt.join("build/out.bin"), "evidence\n").unwrap();
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains("ignored file(s) would be lost"), "{}", run.text());
+    assert!(wt.join("build/out.bin").is_file(), "{}", run.text());
+}
+
+#[test]
 fn argument_refusals_exit_one_with_their_message() {
     let c = Cleanup::new();
     let r = c.mkfixture("r1");

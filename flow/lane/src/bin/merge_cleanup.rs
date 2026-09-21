@@ -47,9 +47,11 @@ A linked worktree with modified, untracked or ignored files is never removed
 covered below. The single-branch form refuses, naming them, and
 --discard removes it anyway (--force only skips the merged check); --sweep
 lists it "dirty, not removed" even with --yes. Ignored files include .scratch/ and every other ignored name
-except the regenerable caches: an ignored entry named node_modules,
-__pycache__, target, .venv, .pytest_cache, .ruff_cache or .mypy_cache, or
-inside one whose own .gitignore is `*`, never refuses — it is removed with the
+except the regenerable caches: an ignored entry is one only when a path
+component of it is named node_modules, __pycache__, target, .venv,
+.pytest_cache, .ruff_cache or .mypy_cache and, unless that component is the
+entry itself, that directory's own .gitignore is `*`. Both are required: a `*`
+.gitignore alone makes nothing a cache. A cache never refuses — it is removed with the
 worktree, and its count and first names are printed as cache file(s), distinct
 from the ignored file(s) count above: the two never share a label, so a name
 Chris approved losing under one count is never misread as counted by the
