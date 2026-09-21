@@ -88,7 +88,9 @@ check "$create_text" 'Say so in your reply when the edge fails' 'Create it'
 check "$write_text" 'A blocker in another repo is written `owner/repo#NNN`' 'Write the issue'
 check "$write_text" 'never a bare `#NNN`' 'Write the issue'
 check "$write_text" 'leaves the ticket **unresolved** until the native edge' 'Write the issue'
-check "$create_text" '--add-blocked-by https://github.com/<owner>/<repo>/issues/<n>' 'Create it'
+check "$create_text" '--add-blocked-by https://github.com/<blocker-owner>/<blocker-repo>/issues/<blocker-n>' 'Create it'
+
+check "$create_text" 'the ticket stays **unresolved**' 'Create it'
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS file-ticket/blocked-by-wording.test.sh"

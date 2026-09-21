@@ -93,7 +93,7 @@ EOF
 ```
 
 With blockers, that last line becomes one `- #<n>` line per blocking
-issue. **Then** add the tracker's native edge, as a second command over
+issue (`- <owner>/<repo>#<n>` for one in another repo). **Then** add the tracker's native edge, as a second command over
 the issue the first one printed:
 
 ```
@@ -102,8 +102,10 @@ gh issue edit <n> --repo <owner>/<repo> --add-blocked-by <#>
 
 For a blocker in another repo the edge takes the full issue URL, which
 `gh` accepts (2.95.0): `gh issue edit <n> --repo <owner>/<repo>
---add-blocked-by https://github.com/<owner>/<repo>/issues/<n>`, with the
-blocker's own owner, repo and number.
+--add-blocked-by https://github.com/<blocker-owner>/<blocker-repo>/issues/<blocker-n>`.
+If that edge fails, the ticket stays **unresolved**: name it as such in
+your reply so the controller resolves it by hand before the wave, as
+`frontier.md` says an unresolved ticket is.
 
 In addition to the section, never instead of it: native edges are the live
 gate — closing a blocker moves the count with nobody editing prose — and
