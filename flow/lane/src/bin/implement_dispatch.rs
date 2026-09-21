@@ -701,7 +701,15 @@ fn run() -> Result<(), ExitCode> {
     // name to a session at send time (`resolve-controller`, #923). A controller
     // that is no named herdr agent keeps its session name, which the same
     // resolver still accepts while a live session bears it.
-    let controller = if controller_flag.is_none() && !controller_session.is_empty() {
+    // A derived controller record with no sessionId cannot be looked up, and a
+    // missing field is registry skew, not proof the controller has no herdr
+    // agent: refuse rather than brief the restart-volatile session name.
+    if controller_flag.is_none() && controller_session.is_empty() {
+        return Err(die(format!(
+            "the controller's ~/.claude/sessions record ({controller}) has no sessionId, so its herdr agent name cannot be found; pass --controller <herdr agent name>"
+        )));
+    }
+    let controller = if controller_flag.is_none() {
         // A listing that failed is not "no agents": briefing the session name
         // then would write the address a restart ages, silently.
         let Some(listing) = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT) else {

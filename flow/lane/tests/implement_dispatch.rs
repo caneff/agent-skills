@@ -1270,3 +1270,21 @@ fn a_herdr_agent_name_holding_a_double_quote_is_refused_not_dropped() {
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "413"], &default_scenario());
     assert!(refused(&out, &f.calls(), &repo, "413", "double quote"), "{}", out_text(&out));
 }
+
+#[test]
+fn a_controller_record_with_no_session_id_refuses_even_when_a_named_agent_exists() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let pid = std::process::id() as i32;
+    let stat = lane::proc_info::read_stat(pid).unwrap();
+    std::fs::write(
+        f.session_file(),
+        format!(r#"{{"pid":{pid},"procStart":"{}","name":"skills-ctl"}}"#, stat.start),
+    )
+    .unwrap();
+    f.set_agents(r#"[{"name":"skills-dc","agent_session":{"value":"sid-ctl"}}]"#);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "414"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "414", "no sessionId"), "{}", out_text(&out));
+    assert!(!f.calls().contains("herdr agent prompt"), "{}", f.calls());
+}

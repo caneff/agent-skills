@@ -71,7 +71,7 @@ impl Fixture {
         let pid = std::process::id();
         std::fs::write(
             self.home().join(".claude/sessions").join(format!("{pid}.json")),
-            format!(r#"{{"pid":{pid},"procStart":"{proc_start}","name":"{name}"}}"#),
+            format!(r#"{{"pid":{pid},"sessionId":"sid-test","procStart":"{proc_start}","name":"{name}"}}"#),
         )
         .unwrap();
     }
