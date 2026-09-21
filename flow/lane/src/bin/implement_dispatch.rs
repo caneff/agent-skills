@@ -310,27 +310,32 @@ const IDENTITY_GUARD_MARK: &str = "# lane commit-identity guard";
 
 /// Installs the commit-identity guard (#934) as the repo's pre-commit hook.
 /// Worktrees share the primary's hooks dir, so one install covers every
-/// workspace the lane creates. Rewrites our own hook to the current text;
-/// refuses rather than overwrite a pre-commit hook that is someone else's.
-fn install_identity_guard(primary: &str) -> Result<(), String> {
+/// workspace the lane creates. Rewrites our own hook to the current text.
+/// A pre-commit hook that is someone else's (pre-commit.com, husky) is left
+/// alone and reported back as `Ok(Some(why))`: refusing would make the repo
+/// undispatchable, and the caller says so in the dispatch report instead.
+fn install_identity_guard(primary: &str) -> Result<Option<String>, String> {
     let dir = quiet_stdout("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"])
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| format!("cannot resolve the hooks dir of {primary}"))?;
     let path = Path::new(&dir).join("pre-commit");
     match std::fs::read_to_string(&path) {
-        Ok(cur) if cur == IDENTITY_GUARD => return Ok(()),
+        Ok(cur) if cur == IDENTITY_GUARD => return Ok(None),
         Ok(cur) if !cur.contains(IDENTITY_GUARD_MARK) => {
-            return Err(format!("{} is a pre-commit hook the lane did not install; merge the identity guard into it by hand (flow/lane/hooks/commit-identity-guard.sh)", path.display()));
+            return Ok(Some(format!("{} is a pre-commit hook the lane did not install; merge flow/lane/hooks/commit-identity-guard.sh into it by hand", path.display())));
         }
         Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
     }
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
-    std::fs::write(&path, IDENTITY_GUARD).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).map_err(|e| format!("cannot chmod {}: {e}", path.display()))
+    // Temp file then rename: a commit racing the upgrade never runs a truncated script.
+    let tmp = Path::new(&dir).join(format!("pre-commit.lane-{}", std::process::id()));
+    std::fs::write(&tmp, IDENTITY_GUARD).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(|e| format!("cannot chmod {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("cannot install {}: {e}", path.display()))?;
+    Ok(None)
 }
 
 fn primary_worktree(repo: &str) -> Option<String> {
@@ -557,8 +562,12 @@ fn run() -> Result<(), ExitCode> {
     if !valid_slug(&slug) {
         return Err(die(format!("origin in {primary} names no GitHub owner/name")));
     }
-    if let Err(e) = install_identity_guard(&primary) {
-        return Err(die(e));
+    let guard_note = match install_identity_guard(&primary) {
+        Ok(note) => note,
+        Err(e) => return Err(die(e)),
+    };
+    if let Some(why) = &guard_note {
+        eprintln!("implement-dispatch: warning: commit-identity guard NOT installed: {why}");
     }
     let branch = format!("{}-{n}", mode.branch_prefix());
     let wt = PathBuf::from(&primary).join(".claude/worktrees").join(&branch);
@@ -808,6 +817,9 @@ fn run() -> Result<(), ExitCode> {
     let dispatched: Vec<String> = ns.iter().map(|n| format!("#{n}")).collect();
     safe_println!("dispatched {} ({model}, {described}, controller {controller})", dispatched.join(" "));
     safe_println!("worktree: {}", wt.display());
+    if let Some(why) = &guard_note {
+        safe_println!("identity guard: NOT installed — {why}");
+    }
     safe_println!("branch:   {branch}");
     safe_println!("agent:    {agent}");
     safe_println!("session:  {session}");
@@ -817,6 +829,11 @@ fn run() -> Result<(), ExitCode> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_embedded_guard_carries_the_mark_that_recognises_it() {
+        assert!(super::IDENTITY_GUARD.contains(super::IDENTITY_GUARD_MARK));
+    }
+
     use super::*;
     use std::time::{Duration, Instant};
     use tempfile::TempDir;

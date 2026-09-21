@@ -1176,15 +1176,14 @@ fn dispatch_installs_the_identity_guard_and_a_worktree_commit_is_refused() {
 }
 
 #[test]
-fn dispatch_refuses_when_a_foreign_pre_commit_hook_is_present() {
+fn a_foreign_pre_commit_hook_is_left_alone_and_the_report_says_the_guard_is_absent() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let hook = hooks_dir(&repo).join("pre-commit");
     std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
-    assert!(!out.status.success(), "dispatch went ahead over a foreign hook");
-    assert!(out_text(&out).contains("pre-commit hook the lane did not install"), "{}", out_text(&out));
+    assert!(out.status.success(), "dispatch failed over a foreign hook: {}", out_text(&out));
+    assert!(out_text(&out).contains("identity guard: NOT installed"), "{}", out_text(&out));
     assert_eq!(std::fs::read_to_string(&hook).unwrap(), "#!/bin/sh\nexit 0\n");
-    assert!(!repo.join(".claude/worktrees/implement-395").exists());
 }

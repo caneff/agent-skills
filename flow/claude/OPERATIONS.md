@@ -12,6 +12,9 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   session name in the brief. Why: a claim made from inside the workspace let
   two sessions dispatch the same ticket, and a brief sent before the trust
   dialog is accepted lands in the dialog.
+  It also installs the commit-identity guard as the repo's `pre-commit` hook;
+  a foreign `pre-commit` hook is left alone and the report says `identity guard:
+  NOT installed`.
 - Every Agent call passes `model` — a bare call inherits the session's model.
   Explore/lookup → `sonnet`, review/diagnosis → `opus`. Rubric:
   `~/.agents/skills/flow/claude/subagent-tiers.md`. Why: a bare call runs a
