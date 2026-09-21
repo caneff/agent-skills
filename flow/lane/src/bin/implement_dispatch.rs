@@ -306,36 +306,57 @@ impl ClaimLock {
 }
 
 const IDENTITY_GUARD: &str = include_str!("../../hooks/commit-identity-guard.sh");
-const IDENTITY_GUARD_MARK: &str = "# lane commit-identity guard";
+const GUARD_NAME: &str = "commit-identity-guard";
+/// What the lane installs as `pre-commit` when none exists. Ownership is
+/// byte-identity with this text, never a substring: a foreign hook that has
+/// merged the guard in must never be mistaken for ours and overwritten.
+const PRE_COMMIT_WRAPPER: &str = "#!/bin/sh\n# lane commit-identity guard wrapper (#934)\nexec \"$(dirname \"$0\")/commit-identity-guard\"\n";
 
-/// Installs the commit-identity guard (#934) as the repo's pre-commit hook.
-/// Worktrees share the primary's hooks dir, so one install covers every
-/// workspace the lane creates. Rewrites our own hook to the current text.
-/// A pre-commit hook that is someone else's (pre-commit.com, husky) is left
-/// alone and reported back as `Ok(Some(why))`: refusing would make the repo
-/// undispatchable, and the caller says so in the dispatch report instead.
-fn install_identity_guard(primary: &str) -> Result<Option<String>, String> {
+/// Writes `text` to `path` as an executable, via temp file + rename so a
+/// commit racing the write never runs a truncated script.
+fn write_executable(path: &Path, text: &str) -> Result<(), String> {
+    let tmp = path.with_file_name(format!("{}.lane-{}", path.file_name().and_then(|n| n.to_str()).unwrap_or("hook"), std::process::id()));
+    std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(|e| format!("cannot chmod {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("cannot install {}: {e}", path.display()))
+}
+
+/// A foreign hook invokes the guard when a non-comment line names it.
+fn invokes_guard(hook: &str) -> bool {
+    hook.lines().any(|l| !l.trim_start().starts_with('#') && l.contains(GUARD_NAME))
+}
+
+/// Installs the commit-identity guard (#934). The guard script always goes to
+/// `<hooks>/commit-identity-guard` (refreshed in place); `pre-commit` is a
+/// two-line wrapper calling it, written only when no pre-commit exists.
+/// Worktrees share the primary's hooks dir, so one install covers them all.
+/// A foreign `pre-commit` is left byte-for-byte alone and accepted only if it
+/// already invokes the guard; otherwise dispatch refuses, because a worker
+/// whose commits the guard never sees is the failure this exists to stop.
+fn install_identity_guard(primary: &str) -> Result<(), String> {
     let dir = quiet_stdout("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"])
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| format!("cannot resolve the hooks dir of {primary}"))?;
     let path = Path::new(&dir).join("pre-commit");
-    match std::fs::read_to_string(&path) {
-        Ok(cur) if cur == IDENTITY_GUARD => return Ok(None),
-        Ok(cur) if !cur.contains(IDENTITY_GUARD_MARK) => {
-            return Ok(Some(format!("{} is a pre-commit hook the lane did not install; merge flow/lane/hooks/commit-identity-guard.sh into it by hand", path.display())));
+    let install_wrapper = match std::fs::read_to_string(&path) {
+        Ok(cur) if cur == PRE_COMMIT_WRAPPER => false,
+        Ok(cur) if invokes_guard(&cur) => false,
+        Ok(_) => {
+            return Err(format!(
+                "{} is a pre-commit hook that does not invoke the {GUARD_NAME} guard, so a worker's commits would never reach it; call \"$(dirname \"$0\")/{GUARD_NAME}\" from it (the lane installs that script beside it), then dispatch again",
+                path.display()
+            ));
         }
-        Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
         Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
-    }
+    };
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
-    // Temp file then rename: a commit racing the upgrade never runs a truncated script.
-    let tmp = Path::new(&dir).join(format!("pre-commit.lane-{}", std::process::id()));
-    std::fs::write(&tmp, IDENTITY_GUARD).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(|e| format!("cannot chmod {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, &path).map_err(|e| format!("cannot install {}: {e}", path.display()))?;
-    Ok(None)
+    write_executable(&Path::new(&dir).join(GUARD_NAME), IDENTITY_GUARD)?;
+    if install_wrapper {
+        write_executable(&path, PRE_COMMIT_WRAPPER)?;
+    }
+    Ok(())
 }
 
 fn primary_worktree(repo: &str) -> Option<String> {
@@ -562,12 +583,8 @@ fn run() -> Result<(), ExitCode> {
     if !valid_slug(&slug) {
         return Err(die(format!("origin in {primary} names no GitHub owner/name")));
     }
-    let guard_note = match install_identity_guard(&primary) {
-        Ok(note) => note,
-        Err(e) => return Err(die(e)),
-    };
-    if let Some(why) = &guard_note {
-        eprintln!("implement-dispatch: warning: commit-identity guard NOT installed: {why}");
+    if let Err(e) = install_identity_guard(&primary) {
+        return Err(die(e));
     }
     let branch = format!("{}-{n}", mode.branch_prefix());
     let wt = PathBuf::from(&primary).join(".claude/worktrees").join(&branch);
@@ -817,9 +834,6 @@ fn run() -> Result<(), ExitCode> {
     let dispatched: Vec<String> = ns.iter().map(|n| format!("#{n}")).collect();
     safe_println!("dispatched {} ({model}, {described}, controller {controller})", dispatched.join(" "));
     safe_println!("worktree: {}", wt.display());
-    if let Some(why) = &guard_note {
-        safe_println!("identity guard: NOT installed — {why}");
-    }
     safe_println!("branch:   {branch}");
     safe_println!("agent:    {agent}");
     safe_println!("session:  {session}");
@@ -830,8 +844,9 @@ fn run() -> Result<(), ExitCode> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_embedded_guard_carries_the_mark_that_recognises_it() {
-        assert!(super::IDENTITY_GUARD.contains(super::IDENTITY_GUARD_MARK));
+    fn a_foreign_hook_invokes_the_guard_only_on_a_non_comment_line() {
+        assert!(super::invokes_guard("#!/bin/sh\n\"$(dirname \"$0\")/commit-identity-guard\" || exit 1\n"));
+        assert!(!super::invokes_guard("#!/bin/sh\n# TODO call commit-identity-guard\nexit 0\n"));
     }
 
     use super::*;

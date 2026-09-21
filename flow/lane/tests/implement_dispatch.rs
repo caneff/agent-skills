@@ -1176,14 +1176,33 @@ fn dispatch_installs_the_identity_guard_and_a_worktree_commit_is_refused() {
 }
 
 #[test]
-fn a_foreign_pre_commit_hook_is_left_alone_and_the_report_says_the_guard_is_absent() {
+fn a_foreign_pre_commit_hook_without_the_guard_refuses_dispatch_and_starts_nothing() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let hook = hooks_dir(&repo).join("pre-commit");
     std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
-    assert!(out.status.success(), "dispatch failed over a foreign hook: {}", out_text(&out));
-    assert!(out_text(&out).contains("identity guard: NOT installed"), "{}", out_text(&out));
+    assert!(!out.status.success(), "dispatch went ahead over a foreign hook");
+    let text = out_text(&out);
+    assert!(text.contains("pre-commit") && text.contains("commit-identity-guard"), "{text}");
     assert_eq!(std::fs::read_to_string(&hook).unwrap(), "#!/bin/sh\nexit 0\n");
+    assert!(!repo.join(".claude/worktrees/implement-395").exists());
+    assert!(!f.calls().contains("issue edit"), "a ticket was claimed: {}", f.calls());
+}
+
+#[test]
+fn a_foreign_hook_that_invokes_the_guard_is_accepted_and_unchanged_across_two_dispatches() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let hook = hooks_dir(&repo).join("pre-commit");
+    let foreign = "#!/bin/sh\necho foreign-check\n\"$(dirname \"$0\")/commit-identity-guard\" || exit 1\n";
+    std::fs::write(&hook, foreign).unwrap();
+    for n in ["395", "396"] {
+        let out = f.dispatch(&["--repo", repo.to_str().unwrap(), n], &default_scenario());
+        assert!(out.status.success(), "dispatch #{n} failed: {}", out_text(&out));
+        assert_eq!(std::fs::read_to_string(&hook).unwrap(), foreign, "foreign hook rewritten by dispatch #{n}");
+    }
+    assert!(hooks_dir(&repo).join("commit-identity-guard").exists());
 }
