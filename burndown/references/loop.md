@@ -102,6 +102,12 @@ thing and is not refused twice, and `loop.py dispatch` requires both readings
 rather than taking them as optional flags: an optional one is the step a
 controller forgets.
 
+The process cap charges a slot at its **peak** — one worker plus its review
+fan-out, `SLOT_PEAK_PROCESSES` (5) — not the one process it is between
+reviews (#933): each new worker costs 5, each live worker keeps 4 in reserve.
+Count agent processes by command name (`ps -eo comm= | grep -cx claude`),
+never by a substring of the command line, which overcounted 2x.
+
 Before every dispatch, not once at the start: the box is shared, and the
 process that puts it over the cap is as likely to be another agent's as this
 run's.

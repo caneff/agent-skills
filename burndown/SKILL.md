@@ -104,7 +104,14 @@ too.
    read as empty; pass `--processes` with a count you took. The ~**24 GB**
    ceiling is on the sum of the per-process `ulimit -v` caps. A slot the box
    cannot afford stays empty; that is not a reason to dispatch into it
-   anyway.
+   anyway. **A slot is budgeted at its peak, not its steady state**
+   (#933): a worker is one process until it runs `/multi-axis-code-review`,
+   then the worker plus three axes plus a verification pass — 5
+   (`SLOT_PEAK_PROCESSES` in `loop.py`, the one place the number lives). So
+   the check charges each new worker 5 and each live worker the 4 it may
+   still add, and the `peak:` line `loop.py dispatch` prints is what the
+   status line carries. A live worker already mid-fan-out is in the measured
+   count too, so the check over-reserves; that is the safe error.
 8. Dispatch and merge through
    [`implement`](~/.agents/skills/implement/SKILL.md) § Dispatch, which
    claims the clump and starts the worker; `implement/SKILL.md` § The merge,

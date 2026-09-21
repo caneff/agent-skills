@@ -178,9 +178,45 @@ def test_box_check_refuses_when_the_ulimit_sum_breaks_the_budget():
 
 def test_box_check_refuses_at_the_process_cap_boundary():
     # The cap is the box's, so the reading it is checked against counts
-    # agent processes on the box — 27 leaves room for one more, 28 does not.
-    assert loop.box_check(processes=27, committed_gb=0, add_gb=0)["ok"] is True
-    assert loop.box_check(processes=28, committed_gb=0, add_gb=0)["ok"] is False
+    # agent processes on the box — a new worker is charged at its peak, so 23
+    # leaves room for one more and 24 does not.
+    assert loop.box_check(processes=23, committed_gb=0, add_gb=0)["ok"] is True
+    assert loop.box_check(processes=24, committed_gb=0, add_gb=0)["ok"] is False
+
+
+def test_a_live_worker_keeps_its_fan_out_headroom_against_the_cap():
+    # #933: a live worker is one process now and five at its review peak, so
+    # 3 live workers on a box measured at 12 leave 12+12=24 — room for one
+    # more at its peak (29 would pass 28), and none once a 4th is live.
+    assert loop.box_check(12, 0, live=2)["ok"] is True
+    got = loop.box_check(12, 0, live=3)
+    assert got["ok"] is False
+    assert any("12 of review fan-out headroom for 3 live" in r
+               for r in got["refusals"]), got
+    assert loop.SLOT_PEAK_PROCESSES == 5
+
+
+def test_the_cli_dispatch_charges_live_workers_at_their_peak():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump(candidates_781(), fh)
+        with open(live, "w") as fh:
+            json.dump(parked_455(), fh)
+        # 1 live worker, 16 measured: 16 + 4 + 5 = 25 fits.
+        ok = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                     "--free", "1", "--processes", "16",
+                     "--committed-gb", "0")
+        assert ok.returncode == 0, ok.stderr
+        assert "peak: 16 agent processes measured, 1 live worker" \
+            in ok.stdout, ok.stdout
+        # 20 measured: 20 + 4 + 5 = 29 is over the cap of 28.
+        refused = loop_py("dispatch", "--candidates", cand, "--in-flight",
+                          live, "--free", "1", "--processes", "20",
+                          "--committed-gb", "0")
+        assert refused.returncode == 1
+        assert "4 of review fan-out headroom for 1 live" in refused.stderr
 
 
 def test_an_idle_boxs_os_process_count_is_not_the_cap_reading():
@@ -551,8 +587,8 @@ def test_box_check_weighs_every_worker_a_dispatch_would_start():
     # Three workers at once is three processes and three ulimit caps, not
     # one: a gate that asks about one more worker passes a tick that starts
     # three.
-    assert loop.box_check(processes=27, committed_gb=0, workers=1)["ok"] is True
-    assert loop.box_check(processes=27, committed_gb=0, workers=3)["ok"] is False
+    assert loop.box_check(processes=13, committed_gb=0, workers=3)["ok"] is True
+    assert loop.box_check(processes=14, committed_gb=0, workers=3)["ok"] is False
     assert loop.box_check(processes=2, committed_gb=21, add_gb=1,
                           workers=4)["ok"] is False
 
@@ -565,7 +601,7 @@ def test_the_cli_dispatch_takes_only_what_the_box_has_room_for():
                        {"tickets": [457], "closure": ["b.js"]},
                        {"tickets": [458], "closure": ["c.js"]}], fh)
         got = loop_py("dispatch", "--candidates", cand, "--free", "3",
-                      "--processes", "27", "--committed-gb", "23",
+                      "--processes", "23", "--committed-gb", "23",
                       "--add-gb", "1")
         assert got.returncode == 0, got.stderr
         assert got.stdout.count("dispatch  ") == 1, got.stdout

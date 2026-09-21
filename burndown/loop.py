@@ -200,6 +200,12 @@ def hub_landing(landed_files, hub_files):
 # their source: this is the one place in the repo that holds the numbers, and
 # the prose says what `loop.py box` enforces rather than restating them.
 PROCESS_CAP = 28
+# A slot's peak, not its steady state: the worker plus the three review axes
+# `/multi-axis-code-review` runs at once, plus one for the verification pass.
+# A slot charged at 1 while it peaks at 5 is how three slots put 20 processes
+# on a box the check had read as 15 (#933). The one place the multiplier is
+# stated: `box_check` and the status line both read it here.
+SLOT_PEAK_PROCESSES = 5
 VM_BUDGET_GB = 24
 
 
@@ -247,7 +253,7 @@ def count_agent_processes(ps=None):
 
 
 def box_check(processes, committed_gb, add_gb=0, workers=1,
-              counter=UNSTATED_COUNTER):
+              counter=UNSTATED_COUNTER, live=0):
     """Whether the box has room for one more worker, and every reason it does
     not.
 
@@ -259,12 +265,24 @@ def box_check(processes, committed_gb, add_gb=0, workers=1,
     `workers` is how many this tick would start: three picks are three
     processes and three `ulimit -v` caps, so asking about one more worker
     passes a tick that starts three.
+
+    Each new worker is charged at its **peak**, `SLOT_PEAK_PROCESSES`, and
+    each of the `live` workers already running keeps the headroom between
+    the one process it holds now and that peak: its review fan-out is a
+    schedule the controller does not see. A live worker mid-fan-out is
+    already in `processes`, so this over-reserves by what it is running now;
+    an early refusal is the safe error, a dispatch into a peak is not.
     """
     refusals = []
-    if processes + workers > PROCESS_CAP:
+    reserve = live * (SLOT_PEAK_PROCESSES - 1)
+    projected = processes + reserve + workers * SLOT_PEAK_PROCESSES
+    if projected > PROCESS_CAP:
         refusals.append(
             f"{processes} agent processes on the box already ({counter}), "
-            f"{workers} more would pass the cap of {PROCESS_CAP}, which "
+            f"plus {reserve} of review fan-out headroom for {live} live "
+            f"workers, plus {workers} new at a peak of "
+            f"{SLOT_PEAK_PROCESSES} each would pass the cap of "
+            f"{PROCESS_CAP}, which "
             "counts agent processes — Claude sessions, subagents included "
             "— not OS processes")
     if committed_gb + add_gb * workers > VM_BUDGET_GB:
@@ -295,15 +313,17 @@ def agent_count(args, ps=None):
 
 
 def box_room(processes, committed_gb, add_gb, want,
-             counter=UNSTATED_COUNTER):
+             counter=UNSTATED_COUNTER, live=0):
     """How many of `want` workers the box has room for, and the refusals if
     that is none. Fewer than asked is the normal answer on a shared box, and
     holding the extra slots empty is the point."""
     for workers in range(want, 0, -1):
-        verdict = box_check(processes, committed_gb, add_gb, workers, counter)
+        verdict = box_check(processes, committed_gb, add_gb, workers, counter,
+                            live)
         if verdict["ok"]:
             return workers, []
-    return 0, box_check(processes, committed_gb, add_gb, 1, counter)["refusals"]
+    return 0, box_check(processes, committed_gb, add_gb, 1, counter,
+                        live)["refusals"]
 
 
 def job_cores(key, record):
@@ -370,6 +390,17 @@ def render_cores(state, free):
     return (f"cores: {jobs} — {state['charged']} of {free} free "
             f"{'slot' if free == 1 else 'slots'} held, room for "
             f"{state['room']}")
+
+
+def render_peak(count, live, room):
+    """The peak arithmetic as a controller's status line carries it: the
+    measured count, what each live worker may still add, and the workers
+    the box can take at their peak."""
+    return (f"peak: {count} agent processes measured, {live} live "
+            f"{'worker' if live == 1 else 'workers'} x "
+            f"{SLOT_PEAK_PROCESSES - 1} fan-out headroom, cap "
+            f"{PROCESS_CAP} — room for {room} more at "
+            f"{SLOT_PEAK_PROCESSES} each")
 
 
 def announce(state, send):
@@ -674,6 +705,8 @@ def run(argv):
     box.add_argument("--processes", type=process_count,
                      help=agent_help)
     box.add_argument("--committed-gb", type=float, required=True)
+    box.add_argument("--live", type=int, default=0,
+                     help="workers already running, each held at its peak")
     box.add_argument("--add-gb", type=float, default=0)
     dispatch = subs.add_parser(
         "dispatch", help="which clumps go into the free slots")
@@ -711,7 +744,7 @@ def run(argv):
         elif args.command == "box":
             count, counter = agent_count(args)
             verdict = box_check(count, args.committed_gb, args.add_gb,
-                                counter=counter)
+                                counter=counter, live=args.live)
             if not verdict["ok"]:
                 for refusal in verdict["refusals"]:
                     print(f"loop.py: {refusal}", file=sys.stderr)
@@ -740,12 +773,15 @@ def run(argv):
                       "declared job")
                 print(render_dispatch([], frontier(candidates, in_flight)))
                 return 0
+            live = len(in_flight)
             room, refusals = box_room(count, args.committed_gb,
-                                      args.add_gb, cores["room"], counter)
+                                      args.add_gb, cores["room"], counter,
+                                      live)
             if refusals:
                 for refusal in refusals:
                     print(f"loop.py: {refusal}", file=sys.stderr)
                 return 1
+            print(render_peak(count, live, room))
             state = frontier(candidates, in_flight)
             lines = render_dispatch(picks(state, room), state)
             if room < cores["room"]:
