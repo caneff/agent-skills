@@ -30,7 +30,7 @@ cat > "$tmp/bin/herdr" <<STUB
 case "\$1 \$2" in
   "agent list") echo '{"result":{"agents":[{"pane_id":"w9:p1","agent_session":{"value":"ctl-session"}}]}}' ;;
   "agent get") echo '{"result":{"agent":{"name":"skills-893"}}}' ;;
-  "agent prompt") printf '%s' "\$4" >> "$tmp/prompts" ;;
+  "agent prompt") printf '%s\n' "\$4" >> "$tmp/prompts" ;;
 esac
 STUB
 chmod +x "$tmp/bin/herdr"
@@ -45,5 +45,41 @@ if [ "$rc" = 0 ] && [ "$(grep -c 'worker-spin-alert' "$tmp/prompts")" = 1 ] \
 else echo "FAIL: spin alert — rc=$rc prompts: $(cat "$tmp/prompts" 2>/dev/null)"; fails=1; fi
 rm -f "$tmp/prompts"
 rc=$(fire varied.jsonl); [ "$rc" = 0 ] && [ ! -e "$tmp/prompts" ] && echo "PASS: varied work sends no alert" || { echo "FAIL: varied work alerted"; fails=1; }
+
+# A real transcript pads every call with ~8 lines and, mid-spin, subagent
+# sidechain calls; neither may hide a spin (C1, C3). Built here, not committed.
+pad="$tmp/padded.jsonl"
+{ head -n 1 "$fx/real-spin.jsonl"
+  for i in $(seq 1 60); do
+    printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"p%s","name":"Bash","input":{"command":"echo ok"}}]}}\n' "$i"
+    printf '{"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":[{"type":"tool_use","id":"sc%s","name":"Read","input":{"file_path":"/x"}}]}}\n' "$i"
+    for j in 1 2 3 4 5 6; do printf '{"type":"attachment","attachment":{"n":%s}}\n' "$j"; done
+  done; } > "$pad"
+if bash "$hook" --classify "$pad" | jq -e '.spinning == true and .count == 60' >/dev/null; then
+  echo "PASS: padding lines and sidechain calls do not hide a spin"
+else echo "FAIL: padded spin — got: $(bash "$hook" --classify "$pad")"; fails=1; fi
+
+if bash "$hook" --classify /nonexistent/t.jsonl >/dev/null 2>&1; then
+  echo "FAIL: --classify on an unreadable path answered instead of refusing"; fails=1
+else echo "PASS: --classify refuses an unreadable transcript"; fi
+
+# A spinning session with no worker brief is not a worker: no alert.
+nb="$tmp/nobrief.jsonl"; tail -n +2 "$fx/real-spin.jsonl" > "$nb"
+rm -f "$tmp/prompts"
+printf '{"session_id":"s2","transcript_path":"%s"}' "$nb" | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook"; rc=$?
+[ "$rc" = 0 ] && [ ! -e "$tmp/prompts" ] && echo "PASS: a spin with no worker brief sends no alert" \
+  || { echo "FAIL: non-worker spin — rc=$rc prompts: $(cat "$tmp/prompts" 2>/dev/null)"; fails=1; }
+
+# An alert that was not sent (no controller pane) is retried on the next call.
+printf '{"result":{"agents":[]}}\n' > "$tmp/agents.empty"
+rm -f "$tmp/prompts" "$tmp/home/.claude/worker-spin-alerts.log"
+cp "$tmp/bin/herdr" "$tmp/bin/herdr.real"
+sed -i "s|echo '{\"result\":{\"agents\":\[.*\]}}'|cat $tmp/agents.empty|" "$tmp/bin/herdr"
+fire real-spin.jsonl >/dev/null
+mv "$tmp/bin/herdr.real" "$tmp/bin/herdr"
+fire real-spin.jsonl >/dev/null
+if grep -q 'not-sent' "$tmp/home/.claude/worker-spin-alerts.log" && [ "$(grep -c 'worker-spin-alert' "$tmp/prompts")" = 1 ]; then
+  echo "PASS: a not-sent alert is retried, and sent once the controller is reachable"
+else echo "FAIL: not-sent retry — log: $(cat "$tmp/home/.claude/worker-spin-alerts.log")"; fails=1; fi
 
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

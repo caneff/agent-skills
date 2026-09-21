@@ -11,7 +11,7 @@
 # Spin: the same tool with byte-identical input, N (default 20, SPIN_N) times
 # in a row with no other tool call between. The observed loop ran 180; a retry
 # or a sanctioned poll stays in single digits, and a `Monitor` until-loop is
-# one call. Only the transcript tail is read, so the per-call cost stays flat and `count` is a floor: a longer run reports the window it saw.
+# one call. Only the transcript tail is read, so the per-call cost stays flat and `count` is a floor: a longer run reports the window it saw (the last 500 tool-call lines).
 #
 # Modes:
 #   --classify <transcript>   print {spinning, tool, input, count} and exit —
@@ -24,7 +24,11 @@ set -u
 N="${SPIN_N:-20}"
 
 classify() { # <transcript> -> JSON
-  tail -n $((N * 4 + 40)) "$1" 2>/dev/null | jq -nRc --argjson n "$N" '
+  # Bounded read: the last 4 MB, then only lines that carry a tool call. A real
+  # transcript holds ~8 lines per call (attachments, system, queue entries,
+  # subagent sidechains), so a window counted in raw lines can hold fewer than
+  # N calls and read a spin as quiet.
+  tail -c 4000000 "$1" | grep -F '"type":"tool_use"' | tail -n 500 | jq -nRc --argjson n "$N" '
     [inputs | fromjson? | objects | select(.type == "assistant" and .isSidechain != true)
       | .message.content[]? | select(.type == "tool_use") | {name, input}] | reverse as $calls
     | ($calls[0] // null) as $l
@@ -35,7 +39,11 @@ classify() { # <transcript> -> JSON
     | {spinning: ($count >= $n), tool: ($l.name // null), input: ($l.input // null), count: $count}'
 }
 
-if [ "${1:-}" = "--classify" ]; then classify "${2:?transcript path}"; exit 0; fi
+if [ "${1:-}" = "--classify" ]; then
+  # An unreadable transcript is not a quiet one: refuse, do not answer "not spinning".
+  [ -r "${2:-}" ] || { echo "worker-spin-alert: cannot read transcript '${2:-}'" >&2; exit 2; }
+  classify "$2"; exit 0
+fi
 
 log="$HOME/.claude/worker-spin-alerts.log"
 event="$(cat)"
@@ -58,9 +66,10 @@ input="$(jq -c '.input' <<<"$verdict" | cut -c1-120)"
 count="$(jq -r '.count' <<<"$verdict")"
 
 # One alert per run of repeats: keyed by session, tool and input, so a run
-# that keeps growing does not re-alert on every call.
+# that keeps growing does not re-alert on every call. Only a `sent` line
+# dedupes: an alert that never reached the controller is retried on the next call.
 key="$session"$'\t'"$tool"$'\t'"$input"
-grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
+grep -qF -- "$key"$'\t'"sent"$'\t' "$log" 2>/dev/null && exit 0
 logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$1" "$2" >> "$log"; }
 
 ctl_session=""
