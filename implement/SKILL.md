@@ -157,8 +157,9 @@ No PR and no reviewer; Chris reads the log after.
    your `gh` login, `/file-ticket` hands the command back instead of filing,
    so there is no ticket number: the disposition is `handed back: <the
    gh issue create command>`, the command exactly as `/file-ticket` gave it.
-   It counts as filed for every rule below, and the controller runs it (§
-   Someone else's repo). On a heavy Claude-lane build, the PR
+   It counts as filed for every rule below except the sidecar, which keeps
+   its own `handed-back` outcome; Chris files it after he has seen the work
+   (§ Someone else's repo). On a heavy Claude-lane build, the PR
    body lists **every** round-1 finding with its disposition (fixed, with
    the fixing commit's sha; `disputed: <why>`; filed, with its ticket
    number; or handed back, with the command) — not only the disputed,
