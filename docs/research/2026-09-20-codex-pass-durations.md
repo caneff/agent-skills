@@ -52,3 +52,4 @@ early is worth it, which is why a `gate-retry` never reports as a plain
 | 875+881+949 | #977 | gate-retry | 2026-09-21T14:27:57-04:00 | 2026-09-21T14:29:41-04:00 | 1.7 | collected-after-retry |
 | 875+881+949 | #977 | second | 2026-09-21T14:31:40-04:00 | 2026-09-21T14:32:54-04:00 | 1.2 | collected |
 | 905 | #978 | gate-retry | 2026-09-21T14:33:19-04:00 | 2026-09-21T14:34:55-04:00 | 1.6 | collected-after-retry (early held by controller ruling: four early launches this run had raced) |
+| 900 | #979 | gate-retry | 2026-09-21T14:34:30-04:00 | 2026-09-21T14:35:42-04:00 | 1.2 | collected-after-retry (early held by controller ruling) |
