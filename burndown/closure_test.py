@@ -88,6 +88,14 @@ def test_a_colon_inside_the_emphasis_is_not_part_of_the_value():
     assert got.generator == "make examples", got
 
 
+def test_a_colon_inside_the_emphasis_needs_no_space_before_the_value():
+    text = ("## Include closure\n\n- **Directive:**`#include <path>`\n"
+            "- **Generator:**`make examples`\n")
+    got = C.parse_declaration(text)
+    assert got.directive == "#include <path>", got
+    assert got.generator == "make examples", got
+
+
 def test_a_bold_value_keeps_its_own_markers():
     text = "## Include closure\n- **Directive**:**#include <path>**\n"
     assert C.parse_declaration(text).directive == "**#include <path>**"
