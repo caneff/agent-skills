@@ -24,10 +24,25 @@ TRAILING_PUNCTUATION = ".,;:!?)]}"
 # the locator from matching there, so relax both at once and every
 # "§ Step N" label becomes "", which matches_heading accepts against any
 # heading at all.
-# Known limit: a reference to such a heading that carries prose after it
-# ("§ Step 3 and then ...") is still over-read, and the step number itself
-# is never checked against the target's numbered list.
-STEP_LOCATOR = re.compile(r"^(.+?)\s+[Ss]tep\s+\d+\b")
+# A heading that is itself "Step 3: ..." keeps only "Step 3" as its label
+# (HEADING_STEP), so prose after it cannot leak into the name. The locator
+# takes "step"/"steps", any case, a number or a spelled-out one to ten, and
+# an optional range ("steps 3-5"); every number named must be a "<n>." list
+# item in the target section (section_has_steps).
+# Known limit: a range is read only as "a-b" and a spelled-out number above
+# ten is not recognised.
+NUMBER_WORDS = {
+    word: number
+    for number, word in enumerate(
+        "one two three four five six seven eight nine ten".split(), 1
+    )
+}
+STEP_NUMBER = rf"(\d+|{'|'.join(NUMBER_WORDS)})"
+STEP_LOCATOR = re.compile(
+    rf"^(.+?)\s+steps?\s+{STEP_NUMBER}(?:\s*[-\u2013]\s*{STEP_NUMBER})?\b",
+    re.IGNORECASE,
+)
+HEADING_STEP = re.compile(r"^(step\s+\d+)\b", re.IGNORECASE)
 
 
 def tracked_markdown() -> list[Path]:
@@ -46,6 +61,31 @@ def heading_text(line: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def sections(path: Path) -> list[tuple[str, str]]:
+    """Each heading with the text under it, down to the next heading of its
+    level or higher."""
+    lines = path.read_text().splitlines()
+    found = []
+    for index, line in enumerate(lines):
+        heading = heading_text(line)
+        if heading is None:
+            continue
+        level = len(line) - len(line.lstrip("#"))
+        end = len(lines)
+        for later in range(index + 1, len(lines)):
+            if heading_text(lines[later]) is not None and (
+                len(lines[later]) - len(lines[later].lstrip("#")) <= level
+            ):
+                end = later
+                break
+        found.append((heading, "\n".join(lines[index + 1 : end])))
+    return found
+
+
+def section_has_steps(body: str, steps: list[int]) -> bool:
+    return all(re.search(rf"(?m)^\s*{n}\.\s", body) for n in steps)
+
+
 def resolve(path_text: str, source: Path, tracked: set[Path]) -> Path | None:
     if path_text.startswith("~/.agents/skills/"):
         candidate = ROOT / path_text.removeprefix("~/.agents/skills/")
@@ -60,16 +100,26 @@ def resolve(path_text: str, source: Path, tracked: set[Path]) -> Path | None:
     return None
 
 
-def reference_label(match: re.Match[str]) -> str:
+def step_number(text: str) -> int:
+    return int(text) if text.isdigit() else NUMBER_WORDS[text.lower()]
+
+
+def reference_target(match: re.Match[str]) -> tuple[str, list[int]]:
+    """The section name a pointer names, and the step numbers it locates."""
     value = match.group(1).strip()
     if value.isdigit():
-        return value
+        return value, []
     value = value.split(" and §", 1)[0]
     value = re.sub(r"\s+and\s*$", "", value)
     value = value.split("'s", 1)[0]
     value = re.split(r"[.,;:!?)}\]]", value, maxsplit=1)[0].strip()
     locator = STEP_LOCATOR.match(value)
-    return locator.group(1).strip() if locator else value
+    if locator:
+        first = step_number(locator.group(2))
+        last = step_number(locator.group(3)) if locator.group(3) else first
+        return locator.group(1).strip(), list(range(first, max(first, last) + 1))
+    heading_step = HEADING_STEP.match(value)
+    return (heading_step.group(1), []) if heading_step else (value, [])
 
 
 def matches_heading(label: str, heading: str) -> bool:
@@ -83,10 +133,7 @@ def matches_heading(label: str, heading: str) -> bool:
 def main() -> int:
     files = tracked_markdown()
     tracked = {path.resolve() for path in files}
-    headings = {
-        path.resolve(): [heading for line in path.read_text().splitlines() if (heading := heading_text(line))]
-        for path in files
-    }
+    headings = {path.resolve(): sections(path) for path in files}
     failures: list[str] = []
 
     for source in files:
@@ -108,17 +155,27 @@ def main() -> int:
                 if target is None:
                     if previous_line_named_file not in (None, source):
                         failures.append(
-                            f"{source.relative_to(ROOT)}:{number}: bare § {reference_label(pointer)} "
+                            f"{source.relative_to(ROOT)}:{number}: bare § {reference_target(pointer)[0]} "
                             f"follows {previous_line_named_file.relative_to(ROOT)}"
                         )
                         continue
                     target = source
 
-                label = reference_label(pointer)
-                if not any(matches_heading(label, heading) for heading in headings[target]):
+                label, steps = reference_target(pointer)
+                candidates = [
+                    body
+                    for heading, body in headings[target]
+                    if matches_heading(label, heading)
+                ]
+                where = target.relative_to(ROOT)
+                if not candidates:
                     failures.append(
-                        f"{source.relative_to(ROOT)}:{number}: § {label} not found in "
-                        f"{target.relative_to(ROOT)}"
+                        f"{source.relative_to(ROOT)}:{number}: § {label} not found in {where}"
+                    )
+                elif not any(section_has_steps(body, steps) for body in candidates):
+                    failures.append(
+                        f"{source.relative_to(ROOT)}:{number}: § {label} steps "
+                        f"{steps} not all numbered items in {where}"
                     )
 
             named_on_line = [
