@@ -9,7 +9,7 @@
 //! is driven by env vars, matching the bash stubs it replaces: GH_STATE,
 //! GH_LABELS, HERDR_RUNNING, HERDR_NO_ROOT_PANE, HERDR_AGENT_TAKEN,
 //! HERDR_STALL for implement-dispatch; GH_PR_HEADS, HERDR_AGENTS,
-//! HERDR_WORKSPACES, HERDR_FAIL, HERDR_PANE_CLOSE_FAIL, GH_ASSIGNEES,
+//! HERDR_WORKSPACES, HERDR_LIST_FAIL (only `agent list` fails), HERDR_FAIL, HERDR_PANE_CLOSE_FAIL, GH_ASSIGNEES,
 //! GH_ISSUE_EDIT_FAIL, GH_PR_CLOSES, GH_PR_CLOSES_FAIL for merge-cleanup.
 //! Never installed — see install.sh.
 
@@ -303,6 +303,7 @@ fn run_herdr(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     }
     match (a0, a1) {
+        ("agent", "list") if env_flag("HERDR_LIST_FAIL") => return ExitCode::FAILURE,
         ("agent", "list") => cat_env_file("HERDR_AGENTS"),
         ("workspace", "list") => cat_env_file("HERDR_WORKSPACES"),
         ("pane", "close") => {

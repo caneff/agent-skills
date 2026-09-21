@@ -11,6 +11,9 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
+/// The same bound `implement-dispatch` puts on its herdr queries.
+const HERDR_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+
 fn fail(msg: &str) -> ExitCode {
     eprintln!("resolve-controller: {msg}");
     ExitCode::from(1)
@@ -27,11 +30,15 @@ fn main() -> ExitCode {
         );
         return ExitCode::SUCCESS;
     }
-    let [target] = args.as_slice() else { return fail("exactly one argument: the controller name from the brief") };
+    let [target] = args.as_slice() else { return fail("exactly one argument: a herdr agent name (the controller from the brief, or a worker)") };
     let home = std::env::var("HOME").unwrap_or_default();
     let home = Path::new(&home);
 
-    let listing = quiet_stdout_timeout("herdr", &["agent", "list"], Duration::from_secs(20)).unwrap_or_default();
+    // A listing that failed is not "herdr has no agents": say so, and never fall
+    // through to the session-name branch on an answer herdr never gave.
+    let Some(listing) = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT) else {
+        return fail("herdr agent list failed or timed out; nothing was resolved");
+    };
     let agents = match herdr::parse_agents(&listing) {
         Some(a) => a,
         None => return fail("herdr agent list gave output of an unexpected shape"),

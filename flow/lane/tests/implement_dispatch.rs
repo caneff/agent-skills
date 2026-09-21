@@ -1247,3 +1247,26 @@ fn a_controller_whose_herdr_agent_is_unnamed_keeps_its_session_name() {
     assert!(out.status.success(), "{}", out_text(&out));
     assert!(f.calls().contains("--controller \"skills-ctl\""), "{}", f.calls());
 }
+
+#[test]
+fn a_failed_agent_listing_refuses_instead_of_briefing_the_session_name() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    give_controller_a_session_id(&f, "sid-ctl");
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("HERDR_LIST_FAIL", "true")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "412"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "412", "herdr agent list"), "{}", out_text(&out));
+    assert!(!f.calls().contains("herdr agent prompt"), "{}", f.calls());
+}
+
+#[test]
+fn a_herdr_agent_name_holding_a_double_quote_is_refused_not_dropped() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    give_controller_a_session_id(&f, "sid-ctl");
+    f.set_agents(r#"[{"name":"say \"hi\"","agent_session":{"value":"sid-ctl"}}]"#);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "413"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "413", "double quote"), "{}", out_text(&out));
+}

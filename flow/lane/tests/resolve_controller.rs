@@ -87,3 +87,21 @@ fn an_unnamed_agent_is_not_addressable_by_its_kind() {
     let out = resolve(&f, "claude");
     assert!(!out.status.success(), "{}", out_text(&out));
 }
+
+#[test]
+fn a_failed_agent_listing_is_reported_as_such_and_never_falls_through_to_a_session_name() {
+    let f = Fixture::new();
+    live_session(&f, "sid-1", "skills-dc");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_resolve-controller"))
+        .arg("skills-dc")
+        .env_clear()
+        .env("PATH", f.path_env())
+        .env("HOME", f.home())
+        .env("CALL_LOG", f.call_log())
+        .env("HERDR_AGENTS", f.agents_file())
+        .env("HERDR_LIST_FAIL", "true")
+        .output()
+        .unwrap();
+    assert!(!out.status.success() && stdout(&out).is_empty(), "{}", out_text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("herdr agent list failed"), "{}", out_text(&out));
+}

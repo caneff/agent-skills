@@ -67,10 +67,12 @@ Spec mode (--spec): the brief is `/implement-spec <n> --slots <k> --controller
 the herdr agent is <repo>-spec-<n>, and --model defaults to opus. --slots is a
 positive integer, 5 when omitted, and refused without --spec.
 
-The controller is --controller, else the name in ~/.claude/sessions/<pid>.json
-of the nearest ancestor process whose file is live (its procStart matches) —
-the Claude session running this. Session names can hold spaces, hence the
-quotes.
+The controller is --controller, else the herdr agent name of the Claude
+session running this (the nearest ancestor process whose
+~/.claude/sessions/<pid>.json is live, its procStart matching; its sessionId
+looked up in herdr agent list), else that session's name when its agent has
+none. The worker resolves the brief's name to a live session name with
+resolve-controller before every send. Names can hold spaces, hence the quotes.
 
 The claim swaps ready-for-agent for in-progress on every ticket in the clump.
 A ready-for-human ticket keeps ready-for-human and adds in-progress beside it,
@@ -700,11 +702,21 @@ fn run() -> Result<(), ExitCode> {
     // that is no named herdr agent keeps its session name, which the same
     // resolver still accepts while a live session bears it.
     let controller = if controller_flag.is_none() && !controller_session.is_empty() {
-        let listing = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT).unwrap_or_default();
-        herdr::parse_agents(&listing)
-            .and_then(|agents| agents.iter().find(|a| a.session() == controller_session).and_then(|a| a.given_name().map(str::to_string)))
-            .filter(|n| !n.contains('"') && !n.contains('\n'))
-            .unwrap_or(controller)
+        // A listing that failed is not "no agents": briefing the session name
+        // then would write the address a restart ages, silently.
+        let Some(listing) = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT) else {
+            return Err(die("herdr agent list failed or timed out, so the controller's herdr agent name is unknown; pass --controller"));
+        };
+        let Some(agents) = herdr::parse_agents(&listing) else {
+            return Err(die("herdr agent list gave output of an unexpected shape; pass --controller"));
+        };
+        match agents.iter().find(|a| a.session() == controller_session).and_then(|a| a.given_name()) {
+            Some(n) if n.contains('"') || n.contains('\n') => {
+                return Err(die(format!("controller herdr agent name cannot hold a double quote or newline: {n}")));
+            }
+            Some(n) => n.to_string(),
+            None => controller,
+        }
     } else {
         controller
     };
