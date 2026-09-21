@@ -23,11 +23,11 @@ filesystem walk inside it; the caller collects `paths` (via `os.walk` or
 similar) and hands them in. Never returns "everything" — an empty list is a
 valid answer when nothing in scope looks testable.
 
-ponytail: `survived` and `no tests` statuses feed rows — `survived` as a
+`survived` and `no tests` statuses feed rows — `survived` as a
 `rewrite` candidate, `no tests` as a `no-coverage` one (mutmut's own marker
 that no test reaches the mutant). `killed` is counted and dropped. mutmut's
-remaining statuses (`timeout`, `suspicious`, `skipped`) aren't in the
-ticket's contract and are ignored here.
+remaining statuses (`timeout`, `suspicious`, `skipped`) raise `Inconclusive`:
+ignoring them would read as a clean run.
 """
 import contextlib
 import io
@@ -91,7 +91,9 @@ def parse_mutmut_results(text):
             no_coverage_count += 1
             bucket, extra = "no-coverage", {"mutant": mutant, "killed": False, "survived": False}
         else:
-            continue  # ponytail: timeout/suspicious/skipped out of scope
+            # timeout/suspicious/skipped: neither killed nor a finding, so
+            # dropping it would read as a clean run (#962).
+            raise Inconclusive(f"mutant {mutant} has status {status!r}, which this audit does not judge")
         row = auditlib.finding(
             bucket,
             module.replace(".", "/") + ".py",
@@ -383,6 +385,27 @@ def _check_run_inconclusive_on_each_broken_mutmut_output():
         assert "timed out" in err, err
 
 
+def _check_unmodelled_status_is_inconclusive():
+    """A mutant status the parser neither counts as killed nor emits (timeout,
+    suspicious, skipped) must not pass as a clean run (#962, Codex round)."""
+    for status in ("timeout", "suspicious", "skipped"):
+        line = f"    sample.x_clamp__mutmut_1: {status}"
+        with tempfile.TemporaryDirectory() as cwd:
+            path = os.path.join(cwd, "r.txt")
+            with open(path, "w") as f:
+                f.write(line + "\n")
+            code, out, err = _run_cli([path], [], cwd)
+            assert code == 3 and out == "", (status, code, out, err)
+            assert "INCONCLUSIVE" in err and status in err and "sample.x_clamp__mutmut_1" in err, err
+    # Mixed with killed mutants it is still inconclusive: the unknown one is unaccounted for.
+    try:
+        parse_mutmut_results("    sample.x_a__mutmut_1: killed\n    sample.x_a__mutmut_2: timeout")
+    except Inconclusive:
+        pass
+    else:
+        raise AssertionError("a timeout mutant beside a killed one was accepted")
+
+
 def _check_run_reports_findings_when_mutmut_present():
     results = "    sample.x_clamp__mutmut_1: survived\n    sample.x_is_adult__mutmut_1: killed"
     with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as cwd:
@@ -401,6 +424,7 @@ def _check_run_reports_findings_when_mutmut_present():
 _CHECKS = (_check_parsing, _check_candidate_selection, _check_cli_path,
            _check_inconclusive_when_mutmut_cannot_run,
            _check_run_inconclusive_on_each_broken_mutmut_output,
+           _check_unmodelled_status_is_inconclusive,
            _check_run_reports_findings_when_mutmut_present)
 
 
