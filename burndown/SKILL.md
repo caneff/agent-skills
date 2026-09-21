@@ -34,8 +34,8 @@ too.
 **Open the run.**
 
 1. Take the seat (above), then `runfile.py start` the run with its slot
-   budget (5 when `--slots` is omitted) and the controller's own herdr agent name (§ Run state). Resuming
-   an existing run instead: `runfile.py resume`, and then **one message per
+   budget (5 when `--slots` is omitted) and the controller's own herdr
+   agent name (§ Run state). Resuming an existing run instead: `runfile.py resume`, and then **one message per
    live, unlanded worker** — its `announce` bucket and only that one, via
    `loop.announce`. A landed clump's worker gets none however its agent
    looks; a vanished one gets none either, and is reconciled or parked by
@@ -171,9 +171,8 @@ light. The grammar, the divergence and the evidence:
 
 A run's state is **one JSON file per run** at `~/.cache/burndown/<run-id>.json`,
 read and written by `burndown/runfile.py` — not the controller's context, and
-not a per-repo log. It holds the run id, the slot budget (default 5, set by `runfile.py start
---slots <k>`), the controller's
-herdr agent name, and per clump its ticket list, workspace, worker's herdr
+not a per-repo log. It holds the run id, the slot budget (default 5, set by
+`runfile.py start --slots <k>`), the controller's herdr agent name, and per clump its ticket list, workspace, worker's herdr
 agent name, the parallel job its worker has out (§ Liveness) and squash sha
 once it lands. `runfile.py resume <run-id> --live
 <names> --controller <my agent name>` reads it back and splits the clumps into

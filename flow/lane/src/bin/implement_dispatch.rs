@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
+/// Slot budget a `--spec` dispatch briefs when `--slots` is omitted; the same
+/// default as `DEFAULT_SLOTS` in burndown/runfile.py.
+const DEFAULT_SPEC_SLOTS: u32 = 5;
+
 /// OS-level bound for the herdr calls that are plain queries (status, agent
 /// get/list, pane list): a herdr server that answers at all answers within
 /// this, so a hang past it means the subprocess itself is stuck, not that
@@ -430,7 +434,7 @@ fn run() -> Result<(), ExitCode> {
     let n = ns[0].clone();
     let mode = match (&args.slots, args.spec) {
         (None, false) => Mode::Plain,
-        (None, true) => Mode::Spec { slots: 5 },
+        (None, true) => Mode::Spec { slots: DEFAULT_SPEC_SLOTS },
         (Some(_), false) => return Err(die("--slots only goes with --spec")),
         (Some(k), true) => match k.parse::<u32>() {
             Ok(slots) if slots > 0 => Mode::Spec { slots },
