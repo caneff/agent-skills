@@ -109,8 +109,12 @@ owner's word turns it on.
   history rewrite (#909).
 - **A file whose contents become public lives under your own workspace's
   `.scratch/`.** That is every `--body-file` for `gh pr create` and
-  `gh pr edit`, and any file you write and then hand to a command — never
-  `/tmp`, never a shared scratchpad path. Another session overwrote a shared
+  `gh pr edit`, and any file you author and then hand to a command — never
+  `/tmp`, never a shared scratchpad path. The one exception is the
+  controller's Codex pass files (§ The merge step 3): they live in the review
+  cache, `~/.cache/agent-reviews/<repo>/`, under a ticket-and-phase name,
+  because your own clearing of `.scratch/` would take an in-flight pass's
+  output with it. Another session overwrote a shared
   `pr-body.md` between its write and `gh pr create`, and PR 908 went up
   carrying #886's body and a `Closes #886`; only luck left #886 open to
   nobody's harm (#909).
