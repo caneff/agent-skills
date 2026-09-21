@@ -39,12 +39,15 @@ does not resolve.
 `<n>`; the locator and whatever follows it are not part of the name. The
 forms the checker reads, all case-insensitive:
 
+In the examples below `<sign>` stands for the section sign, which the
+checker would otherwise read as a live reference.
+
 - `step` or `steps`, then a number, or a spelled-out number from one to ten:
-  `§ The merge step 3`, `§ The merge Step three`.
-- A range with a hyphen, en dash or em dash: `§ Before the PR steps 3-5`. It
+  `<sign> The merge step 3`, `<sign> The merge Step three`.
+- A range with a hyphen, en dash or em dash: `<sign> Before the PR steps 3-5`. It
   must ascend; `steps 5-3` fails.
-- An optional colon between the name and the locator: `§ Before the PR: step 6`.
-- The name holds no punctuation. `§ Build: deployment step 3` is read as the
+- An optional colon between the name and the locator: `<sign> Before the PR: step 6`.
+- The name holds no punctuation. `<sign> Build: deployment step 3` is read as the
   heading `Build: deployment` with step 3 required, not as `Build` with no
   step; a name the locator cannot read that way fails rather than dropping
   the step.
@@ -56,7 +59,7 @@ nothing after it, so a `~~~` inside a longer backtick fence is text, and a
 numbered line inside any fence is not a step.
 
 A heading that is itself `Step 3` keeps only `Step 3` as its label, so
-`§ Step 3 and then prose` resolves to that heading and the prose does not
+`<sign> Step 3 and then prose` resolves to that heading and the prose does not
 join the name (fixture `step-heading-prose-valid`). Whatever the name, put
 punctuation right after it.
 
