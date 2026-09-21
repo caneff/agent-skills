@@ -1057,8 +1057,15 @@ fn two_overlapping_dispatches_of_one_ticket_claim_it_once() {
     // Holds the claim critical section open, so without the lock both runs
     // read the ticket unclaimed before either edits it.
     let scenario = with(&default_scenario(), &[("LANE_CLAIM_DELAY_MS", "400"), ("GH_CLAIM_DIR", claims.to_str().unwrap())]);
+    let lock = claim_lock(&f);
+    // B starts only once A is inside the critical section (its note is in the
+    // lock file), so the overlap does not depend on thread start-up timing.
     let (a, b) = std::thread::scope(|s| {
         let ta = s.spawn(|| f.dispatch(&["--repo", repo.to_str().unwrap(), "601"], &scenario));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::fs::read_to_string(&lock).unwrap_or_default().trim().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         let tb = s.spawn(|| f.dispatch(&["--repo", repo.to_str().unwrap(), "601"], &scenario));
         (ta.join().unwrap(), tb.join().unwrap())
     });
@@ -1117,4 +1124,32 @@ fn a_ticket_claimed_between_the_read_and_the_edit_is_refused_and_never_released(
     let calls = f.calls();
     assert_eq!(claim_edits(&calls, "602"), 0, "{calls}");
     assert!(!calls.contains("gh issue edit 602 "), "released a ticket this run never claimed: {calls}");
+}
+
+#[test]
+fn a_dispatch_writes_its_pid_and_tickets_into_the_claim_lock_note() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("claimrace", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "601"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let note = std::fs::read_to_string(claim_lock(&f)).unwrap();
+    assert!(note.starts_with("pid ") && note.contains("claiming #601"), "{note}");
+}
+
+#[test]
+fn a_held_claim_lock_with_no_note_says_so() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("claimrace", "main");
+    let lock = claim_lock(&f);
+    std::fs::write(&lock, "").unwrap();
+    let mut holder = std::process::Command::new("flock").arg(&lock).args(["sleep", "5"]).spawn().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let scenario = with(&default_scenario(), &[("LANE_CLAIM_LOCK_WAIT_MS", "200")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "601"], &scenario);
+    let _ = holder.kill();
+    let _ = holder.wait();
+    assert!(!out.status.success(), "{}", out_text(&out));
+    assert!(out_text(&out).contains("holder's note not written"), "{}", out_text(&out));
 }
