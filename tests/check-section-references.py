@@ -19,18 +19,21 @@ SECTION = re.compile(r"§\s+(\d+|[A-Za-z][^§\n]{0,160})")
 TRAILING_PUNCTUATION = ".,;:!?)]}"
 # "§ The merge step 3 ..." points at the section "The merge" and its third
 # numbered step; whatever follows the locator is prose, not part of the name.
+# "§ Before the PR: step 6" is the same pointer with a colon. The name may
+# hold no punctuation, so a sentence break cannot join two clauses into one.
 # The non-empty name and the mandatory whitespace before "step" are joint
 # guards on a heading that is itself "Step 3: ...": either one alone keeps
 # the locator from matching there, so relax both at once and every
 # "§ Step N" label becomes "", which matches_heading accepts against any
-# heading at all.
-# A heading that is itself "Step 3: ..." keeps only "Step 3" as its label
-# (HEADING_STEP), so prose after it cannot leak into the name. The locator
-# takes "step"/"steps", any case, a number or a spelled-out one to ten, and
-# an optional range ("steps 3-5"); every number named must be a "<n>." list
-# item in the target section (section_has_steps).
-# Known limit: a range is read only as "a-b" and a spelled-out number above
-# ten is not recognised.
+# heading at all. Such a heading keeps only "Step 3" as its label
+# (HEADING_STEP), so prose after it cannot leak into the name.
+# The locator takes "step"/"steps", any case, a number or a spelled-out one
+# to ten, and an optional range ("steps 3-5"); every number named must be a
+# "<n>." or "<n>)" list item, or a "Step <n>" sub-heading, in the target
+# section (section_has_steps).
+# Known limits: a spelled-out number above ten is not recognised; a second
+# locator in the same pointer ("step 3 and step 9") is not read; lazily
+# numbered lists ("1." on every item) do not satisfy the check.
 NUMBER_WORDS = {
     word: number
     for number, word in enumerate(
@@ -39,7 +42,7 @@ NUMBER_WORDS = {
 }
 STEP_NUMBER = rf"(\d+|{'|'.join(NUMBER_WORDS)})"
 STEP_LOCATOR = re.compile(
-    rf"^(.+?)\s+steps?\s+{STEP_NUMBER}(?:\s*[-\u2013]\s*{STEP_NUMBER})?\b",
+    rf"^([^.,;:!?)}}\]]+?):?\s+steps?\s+{STEP_NUMBER}(?:\s*[-\u2013\u2014]\s*{STEP_NUMBER})?\b",
     re.IGNORECASE,
 )
 HEADING_STEP = re.compile(r"^(step\s+\d+)\b", re.IGNORECASE)
@@ -65,25 +68,28 @@ def sections(path: Path) -> list[tuple[str, str]]:
     """Each heading with the text under it, down to the next heading of its
     level or higher."""
     lines = path.read_text().splitlines()
-    found = []
+    fenced = False
+    starts = []  # (line index, level, heading text); "# ..." in a fence is code
     for index, line in enumerate(lines):
-        heading = heading_text(line)
-        if heading is None:
-            continue
-        level = len(line) - len(line.lstrip("#"))
-        end = len(lines)
-        for later in range(index + 1, len(lines)):
-            if heading_text(lines[later]) is not None and (
-                len(lines[later]) - len(lines[later].lstrip("#")) <= level
-            ):
-                end = later
-                break
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced and (heading := heading_text(line)):
+            starts.append((index, len(line) - len(line.lstrip("#")), heading))
+    found = []
+    for position, (index, level, heading) in enumerate(starts):
+        end = next(
+            (later for later, deeper, _ in starts[position + 1 :] if deeper <= level),
+            len(lines),
+        )
         found.append((heading, "\n".join(lines[index + 1 : end])))
     return found
 
 
 def section_has_steps(body: str, steps: list[int]) -> bool:
-    return all(re.search(rf"(?m)^\s*{n}\.\s", body) for n in steps)
+    return all(
+        re.search(rf"(?mi)^(?:\s*{n}[.)]\s|#{{1,6}}\s+step\s+{n}\b)", body)
+        for n in steps
+    )
 
 
 def resolve(path_text: str, source: Path, tracked: set[Path]) -> Path | None:
@@ -112,12 +118,14 @@ def reference_target(match: re.Match[str]) -> tuple[str, list[int]]:
     value = value.split(" and §", 1)[0]
     value = re.sub(r"\s+and\s*$", "", value)
     value = value.split("'s", 1)[0]
-    value = re.split(r"[.,;:!?)}\]]", value, maxsplit=1)[0].strip()
     locator = STEP_LOCATOR.match(value)
     if locator:
         first = step_number(locator.group(2))
         last = step_number(locator.group(3)) if locator.group(3) else first
-        return locator.group(1).strip(), list(range(first, max(first, last) + 1))
+        # A descending range is a typo; name both ends so the check can fail.
+        steps = list(range(first, last + 1)) if last >= first else [first, last]
+        return locator.group(1).strip(), steps
+    value = re.split(r"[.,;:!?)}\]]", value, maxsplit=1)[0].strip()
     heading_step = HEADING_STEP.match(value)
     return (heading_step.group(1), []) if heading_step else (value, [])
 
