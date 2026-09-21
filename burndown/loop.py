@@ -433,8 +433,9 @@ def announce(state, send):
     sent = []
     for entry in state["announce"]:
         tickets = ", ".join(f"#{n}" for n in entry["tickets"])
-        message = (f"Your controller is now {state['controller']} — re-address "
-                   f"every question and your finish notice there. Run "
+        message = (f"Your controller is now {state['controller']} — before every "
+                   f"send, resolve that name with `resolve-controller` and send "
+                   f"your questions and finish notice to what it prints. Run "
                    f"{state['run_id']}, clump {tickets}, workspace "
                    f"{entry['workspace']}.")
         try:

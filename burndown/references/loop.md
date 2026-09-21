@@ -115,7 +115,7 @@ run's.
 ## What resume owes each worker
 
 A WSL restart renames every Claude session, and every worker's brief
-hard-codes `--controller "<name>"`. So on resume the controller re-announces
+names its controller in `--controller "<name>"`, a session name that a restart invalidates when the controller had no herdr agent name. So on resume the controller re-announces
 itself — **exactly one message per live, unlanded worker**, which is
 `runfile.reconcile`'s `announce` bucket and only that one. A landed clump's
 worker is finished however its agent looks. A vanished one is reconciled or
@@ -128,5 +128,5 @@ a worker still addressing a controller that no longer exists.
 
 The agent named is the worker's **herdr agent name**. That name is the
 durable key and not an address — resolving it to a session a message can
-reach happens at **send time**, and is `#923`'s to build. A resolved address
+reach happens at **send time**, by `resolve-controller <herdr agent name>` (#923). A resolved address
 written into the run file is what aged and broke the last trial.

@@ -32,6 +32,11 @@ impl Agent {
     pub fn name(&self) -> &str {
         self.name.as_deref().or(self.agent.as_deref()).unwrap_or("")
     }
+    /// The name the agent was started with; unlike `name()`, never the
+    /// `agent` kind ("claude"), which names no one in particular.
+    pub fn given_name(&self) -> Option<&str> {
+        self.name.as_deref().filter(|n| !n.is_empty())
+    }
     pub fn status(&self) -> &str {
         self.agent_status.as_deref().unwrap_or("")
     }

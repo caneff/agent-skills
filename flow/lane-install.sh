@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs whichever of the lane's two named binaries (implement-dispatch,
+# Installs whichever of the lane's named binaries (implement-dispatch, resolve-controller,
 # merge-cleanup) the crate at flow/lane currently defines, into ~/.local/bin.
 # Never installs the test-only fake (lane-fake) — it is never named here.
 #
@@ -19,7 +19,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 crate="$here/lane"
 
 names=()
-for n in implement-dispatch merge-cleanup; do
+for n in implement-dispatch merge-cleanup resolve-controller; do
   grep -qx "name = \"$n\"" "$crate/Cargo.toml" && names+=(--bin "$n")
 done
 [ "${#names[@]}" -gt 0 ] || { echo "flow/lane-install.sh: no lane binaries found in $crate/Cargo.toml" >&2; exit 1; }

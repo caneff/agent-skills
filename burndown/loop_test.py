@@ -350,6 +350,7 @@ def test_resume_sends_exactly_one_message_per_live_unlanded_worker():
     assert [agent for agent, _ in sent] == ["burn-455"]
     assert sent[0][1].count("skills-dc") == 1, sent[0][1]
     assert "#455" in sent[0][1]
+    assert "resolve-controller" in sent[0][1], sent[0][1]
 
 
 def test_resume_sends_nothing_to_a_landed_or_vanished_worker():

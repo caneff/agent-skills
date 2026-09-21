@@ -124,7 +124,9 @@ landed       0123456789abcdef0123456789abcdef01234567  #905
    silently. The loop that performs it is
    [#893](https://github.com/caneff/agent-skills/issues/893); resolving each
    herdr agent name to a current address — it cannot be stored, only resolved —
-   is [#923](https://github.com/caneff/agent-skills/issues/923).
+   is `resolve-controller <herdr agent name>` (#923): herdr agent list's
+   `agent_session.value`, then that session's live `~/.claude/sessions` name.
+   The controller resolves each worker's agent name with it before the send.
 3. **`vanished`** is a clump the run started and cannot reach. It is not a
    landing, and its slot is **not free**: `held` counts it, because its worker
    may still be holding those tickets. The controller reads the workspace,

@@ -1206,3 +1206,85 @@ fn a_foreign_hook_that_invokes_the_guard_is_accepted_and_unchanged_across_two_di
     }
     assert!(hooks_dir(&repo).join("commit-identity-guard").exists());
 }
+
+/// Rewrites the stand-in controller's registry record with a sessionId, so a
+/// herdr agent's `agent_session.value` can name it.
+fn give_controller_a_session_id(f: &Fixture, id: &str) {
+    let pid = std::process::id() as i32;
+    let stat = lane::proc_info::read_stat(pid).unwrap();
+    std::fs::write(
+        f.session_file(),
+        format!(r#"{{"pid":{pid},"sessionId":"{id}","procStart":"{}","name":"skills-ctl"}}"#, stat.start),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_derived_controller_that_is_a_named_herdr_agent_is_briefed_by_that_name() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    give_controller_a_session_id(&f, "sid-ctl");
+    f.set_agents(r#"[{"name":"skills-dc","agent_session":{"value":"sid-ctl"}},{"agent_session":{"value":"sid-other"}}]"#);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "410"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(
+        f.calls().lines().any(|l| l
+            == "herdr agent prompt sudokumaker-custom-constrain-410 /implement 410 --tier heavy --controller \"skills-dc\" --wait --until working --timeout 120000"),
+        "{}",
+        f.calls()
+    );
+}
+
+#[test]
+fn a_controller_whose_herdr_agent_is_unnamed_keeps_its_session_name() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    give_controller_a_session_id(&f, "sid-ctl");
+    f.set_agents(r#"[{"agent":"claude","agent_session":{"value":"sid-ctl"}}]"#);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "411"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(f.calls().contains("--controller \"skills-ctl\""), "{}", f.calls());
+}
+
+#[test]
+fn a_failed_agent_listing_refuses_instead_of_briefing_the_session_name() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    give_controller_a_session_id(&f, "sid-ctl");
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("HERDR_LIST_FAIL", "true")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "412"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "412", "herdr agent list"), "{}", out_text(&out));
+    assert!(!f.calls().contains("herdr agent prompt"), "{}", f.calls());
+}
+
+#[test]
+fn a_herdr_agent_name_holding_a_double_quote_is_refused_not_dropped() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    give_controller_a_session_id(&f, "sid-ctl");
+    f.set_agents(r#"[{"name":"say \"hi\"","agent_session":{"value":"sid-ctl"}}]"#);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "413"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "413", "double quote"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_controller_record_with_no_session_id_refuses_even_when_a_named_agent_exists() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let pid = std::process::id() as i32;
+    let stat = lane::proc_info::read_stat(pid).unwrap();
+    std::fs::write(
+        f.session_file(),
+        format!(r#"{{"pid":{pid},"procStart":"{}","name":"skills-ctl"}}"#, stat.start),
+    )
+    .unwrap();
+    f.set_agents(r#"[{"name":"skills-dc","agent_session":{"value":"sid-ctl"}}]"#);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "414"], &default_scenario());
+    assert!(refused(&out, &f.calls(), &repo, "414", "no sessionId"), "{}", out_text(&out));
+    assert!(!f.calls().contains("herdr agent prompt"), "{}", f.calls());
+}

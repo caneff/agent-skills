@@ -67,10 +67,12 @@ Spec mode (--spec): the brief is `/implement-spec <n> --slots <k> --controller
 the herdr agent is <repo>-spec-<n>, and --model defaults to opus. --slots is a
 positive integer, 5 when omitted, and refused without --spec.
 
-The controller is --controller, else the name in ~/.claude/sessions/<pid>.json
-of the nearest ancestor process whose file is live (its procStart matches) —
-the Claude session running this. Session names can hold spaces, hence the
-quotes.
+The controller is --controller, else the herdr agent name of the Claude
+session running this (the nearest ancestor process whose
+~/.claude/sessions/<pid>.json is live, its procStart matching; its sessionId
+looked up in herdr agent list), else that session's name when its agent has
+none. The worker resolves the brief's name to a live session name with
+resolve-controller before every send. Names can hold spaces, hence the quotes.
 
 The claim swaps ready-for-agent for in-progress on every ticket in the clump.
 A ready-for-human ticket keeps ready-for-human and adds in-progress beside it,
@@ -662,13 +664,17 @@ fn run() -> Result<(), ExitCode> {
     // An empty --controller is bash's `[ -z "$controller" ]`: absent, not a
     // literal empty name, so it still falls through to the session lookup.
     let controller_flag = args.controller.as_deref().filter(|c| !c.is_empty());
+    let mut controller_session = String::new();
     let controller = match controller_flag {
         Some(c) => c.to_string(),
         None => {
             let self_pid = std::process::id() as i32;
             let start_ancestor = proc_info::parent_pid(self_pid).unwrap_or(0);
-            match sessions::find_controller(Path::new(&home), start_ancestor) {
-                Some(c) => c,
+            match sessions::find_controller_session(Path::new(&home), start_ancestor) {
+                Some((id, c)) => {
+                    controller_session = id;
+                    c
+                }
                 None => {
                     return Err(die(
                         "no controller: no live ancestor session has a ~/.claude/sessions/<pid>.json name; pass --controller",
@@ -689,6 +695,39 @@ fn run() -> Result<(), ExitCode> {
     if !running {
         return Err(die("no herdr server is running (herdr status)"));
     }
+
+    // A derived controller is briefed by its herdr agent name when it has one:
+    // a restart renames the session, not the agent, and the worker resolves the
+    // name to a session at send time (`resolve-controller`, #923). A controller
+    // that is no named herdr agent keeps its session name, which the same
+    // resolver still accepts while a live session bears it.
+    // A derived controller record with no sessionId cannot be looked up, and a
+    // missing field is registry skew, not proof the controller has no herdr
+    // agent: refuse rather than brief the restart-volatile session name.
+    if controller_flag.is_none() && controller_session.is_empty() {
+        return Err(die(format!(
+            "the controller's ~/.claude/sessions record ({controller}) has no sessionId, so its herdr agent name cannot be found; pass --controller <herdr agent name>"
+        )));
+    }
+    let controller = if controller_flag.is_none() {
+        // A listing that failed is not "no agents": briefing the session name
+        // then would write the address a restart ages, silently.
+        let Some(listing) = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT) else {
+            return Err(die("herdr agent list failed or timed out, so the controller's herdr agent name is unknown; pass --controller"));
+        };
+        let Some(agents) = herdr::parse_agents(&listing) else {
+            return Err(die("herdr agent list gave output of an unexpected shape; pass --controller"));
+        };
+        match agents.iter().find(|a| a.session() == controller_session).and_then(|a| a.given_name()) {
+            Some(n) if n.contains('"') || n.contains('\n') => {
+                return Err(die(format!("controller herdr agent name cannot hold a double quote or newline: {n}")));
+            }
+            Some(n) => n.to_string(),
+            None => controller,
+        }
+    } else {
+        controller
+    };
 
     let claude_json_path = format!("{home}/.claude.json");
     let onboarded = std::fs::read_to_string(&claude_json_path)
