@@ -26,7 +26,7 @@ does not resolve.
   matched, so the reference is silently unchecked: write the plain heading.
 - The name runs from the section sign to the first of `. , ; : ! ? ) } ]`, a
   `'s`, or another section sign; a trailing ` and` is dropped. It is capped at
-  160 characters. Write the heading, then punctuation.
+  about 160 characters. Write the heading, then punctuation.
 - A heading only has to start with the name, so a reference reading "The merge"
   matches a heading "The merge: who and when". Use enough words to be
   unambiguous. Matching ignores trailing punctuation and repeated whitespace.
