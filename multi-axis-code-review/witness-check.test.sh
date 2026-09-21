@@ -83,6 +83,19 @@ if [ "$reviewer_witness" -ne 1 ]; then
   fail=1
 fi
 
+# #961: a guard's body mutation reddens the unit test that calls the guard
+# directly and says nothing about whether anything calls it. The call-site
+# mutation is its own required step in the correctness brief, with a stated
+# meaning for a survivor, and it is not restated in another axis.
+check_in "$correctness" 'mutate its call site' 'the correctness axis brief'
+check_in "$correctness" 'every entry point the guard exists to protect' 'the correctness axis brief'
+check_in "$correctness" 'unprotected entry point' 'the correctness axis brief'
+check_not_in "$standards" 'mutate its call site' 'the standards axis brief'
+check_not_in "$spec" 'unprotected entry point' 'the spec axis brief'
+check_in "$costs" 'call-site mutation' 'the witness-check cost section'
+callsite="$(printf '%s\n' "$spawn" | grep -cF 'unprotected entry point' || true)"
+[ "$callsite" -eq 1 ] || { echo "FAIL: § 4 states the call-site finding in $callsite places, not 1" >&2; fail=1; }
+
 # #939, first cost: the brief never said what to re-run, so an axis could take
 # `bash tests/all.sh` (2m51s wall, 62 suites) once per mutated test. It names
 # the covering suite, and says the whole gate is not this axis's to re-run.

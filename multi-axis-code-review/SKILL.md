@@ -184,17 +184,34 @@ mkdir -p "$dir"
 find "$dir" -maxdepth 1 -type f -mtime +13 -delete  # +13, not +14: find's -mtime +N means "older than N+1 days"
 n=<issue number from step 2, or the branch name>
 worktree=<the worktree under review>
-fixed_point=<the fixed point from step 1>
-head=$(git -C "$worktree" rev-parse --short HEAD) || exit 1
-patch="$dir/diff-$n-$head-$$.patch"     # revision plus nonce: this invocation's own file
-tmp=$(mktemp "$dir/.diff-$n.XXXXXX") || exit 1
-git -C "$worktree" diff "$fixed_point"...HEAD >"$tmp" || { rm -f "$tmp"; exit 1; }
-[ -s "$tmp" ] || { rm -f "$tmp"; exit 1; } # a failed or empty write fails here, not inside three sub-agents
-mv "$tmp" "$patch"                      # atomic publish: no axis ever reads a half-written patch
-wc -l "$patch"                          # this exact path and this count go in every prompt
+# The publish protocol, stated once for both capture modes below. Each mode sets
+# its own `patch` stem, takes a temp path from new_capture, writes into it, then
+# hands both to publish_capture, which appends the temp path's random suffix.
+new_capture() { mktemp "$dir/.diff-$n.XXXXXX"; }   # unique per invocation; prints the path
+publish_capture() { # <tmp> <stem>: fail on an empty write here, not inside three sub-agents
+  [ -s "$1" ] || { rm -f "$1"; echo "capture for $2 is empty" >&2; return 1; }
+  # The suffix is mktemp's, unique per invocation; a shell pid is only per shell,
+  # and two captures at one revision in one shell would share it.
+  mv "$1" "$2-${1##*.}.patch" &&        # atomic publish: no axis ever reads a half-written patch
+    wc -l "$2-${1##*.}.patch"           # this exact path and this count go in every prompt
+}
 ```
 
-**Capture the diff once, by the caller** (#937). Those lines derive the diff
+Then, for a fixed point, the range capture — in the same shell as the preamble,
+since the functions it defines do not survive into a separate shell call:
+
+```
+type publish_capture >/dev/null 2>&1 ||
+  { echo "range review: run the report-directory preamble above first, in this same shell" >&2; exit 1; }
+fixed_point=<the fixed point from step 1>
+head=$(git -C "$worktree" rev-parse --short HEAD) || exit 1
+patch="$dir/diff-$n-$head"               # revision; the protocol adds the per-invocation suffix
+tmp=$(new_capture) || exit 1
+git -C "$worktree" diff "$fixed_point"...HEAD >"$tmp" || { rm -f "$tmp"; exit 1; }
+publish_capture "$tmp" "$patch" || exit 1
+```
+
+**Capture the diff once, by the caller** (#937). Those blocks derive the diff
 one time into `<dir>/diff-<n>.patch` and print its length; every axis prompt
 carries that path, that count, and the command that produced it, so three
 reviewers read one capture instead of each re-running the same `git diff`.
@@ -219,15 +236,15 @@ more lifetime — the 14-day sweep above collects them under this key the same
 way.
 
 **Sha-list mode captures the union** (§ 1). Run the `$dir` preamble above
-first — same directory, same 14-day sweep — then this block instead of the
+first, in the same shell — same directory, same 14-day sweep — then this block instead of the
 `git diff` one. § 1 has the semantics; what is specific to the block is the
 key — a digest of the resolved list rather than a single `HEAD`, since there is
 no single revision under review:
 
 ```
 : "${dir:?sha-list review: run the report-directory preamble above first}"
-n=<issue number from step 2, or the branch name>
-worktree=<the worktree under review>
+type publish_capture >/dev/null 2>&1 ||
+  { echo "sha-list review: run the report-directory preamble above first, in this same shell" >&2; exit 1; }
 set -- <the commits the caller named, space-separated>
 [ "$#" -gt 0 ] || { echo "sha-list review: the commit list is empty" >&2; exit 1; }
 resolved=""
@@ -249,8 +266,8 @@ ordered=$(for s in $resolved; do
     printf '%s %s\n' "$(git -C "$worktree" rev-list --count "$s")" "$s"
   done | sort -n -k1,1 -k2,2 | awk '!seen[$2]++ {print $2}')
 key=$(printf '%s\n' "$ordered" | git -C "$worktree" hash-object --stdin | cut -c1-12)
-patch="$dir/diff-$n-list$key-$$.patch"   # list digest plus nonce, as above
-tmp=$(mktemp "$dir/.diff-$n.XXXXXX") || exit 1
+patch="$dir/diff-$n-list$key"             # list digest; the protocol adds the suffix
+tmp=$(new_capture) || exit 1
 for s in $ordered; do
   one=$(git -C "$worktree" show --format='commit %H%n%n    %s%n' --patch "$s") || {
     rm -f "$tmp"; echo "sha-list review: could not read $s" >&2; exit 1; }
@@ -258,9 +275,7 @@ for s in $ordered; do
     rm -f "$tmp"; echo "sha-list review: $s changes no files" >&2; exit 1; }
   printf '%s\n' "$one" >>"$tmp"
 done
-[ -s "$tmp" ] || { rm -f "$tmp"; echo "sha-list review: the capture is empty" >&2; exit 1; }
-mv "$tmp" "$patch"                       # atomic publish, as above
-wc -l "$patch"                           # this exact path and this count go in every prompt
+publish_capture "$tmp" "$patch" || exit 1
 ```
 
 In this mode the provenance every axis prompt carries is **this per-commit
@@ -290,7 +305,7 @@ If the completion notification comes back missing or empty, read that file befor
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec if there is one (so "behaviour the ticket did not ask for" has a referent), the test command the repo uses, and the settled decisions.
-- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) `docs/agents/defect-classes.md` checked by name, class 1 (an absent or malformed answer read as a benign one) and class 3 (a test that passes for a reason other than the one it claims) especially, since you own the witness check; (d) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it — and when a mutation goes red, read the message and confirm the failure is your assertion and not a missing file or a denied path, which is class 3 again. Isolate each mutation in a throwaway worktree — `git worktree add --detach <a path outside the checkout> HEAD`, removed afterwards with `git worktree remove --force` — and never in a copy of the tree, which on a linked worktree shares the checkout's own index. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. Prepare every mutation and launch them at once rather than walking them in turn — at most four running together — a third of the headroom under the box's 28-process cap, counted `ps -eo comm= | grep -cx claude` and never `ps aux | grep`, since your axis is one of three — and fewer, down to one at a time again, when the box is already busy or its process table cannot be read: slower, never refused. Each mutation keeps its own worktree and its own captured output, and you collect them by id when they finish, so a failure message is still read against the mutation that produced it. A mutation whose worktree, suite run or output never arrived is `unknown`, reported by that name — never counted as an assertion that held, which is class 1. Nothing is restored between mutations: each worktree is discarded whole, and the checkout is left exactly as found. Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
+- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) `docs/agents/defect-classes.md` checked by name, class 1 (an absent or malformed answer read as a benign one) and class 3 (a test that passes for a reason other than the one it claims) especially, since you own the witness check; (d) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it — and when a mutation goes red, read the message and confirm the failure is your assertion and not a missing file or a denied path, which is class 3 again. (e) every safety guard the diff adds — a check that refuses, validates or fails closed — gets a second, separate mutation: mutate its call site. For every entry point the guard exists to protect, delete or neutralize the call to the guard there, run the suite that covers that entry point, and confirm it goes red at that entry point — not only in the unit test that calls the guard directly; mutating the guard's own body (d) reddens that unit test and says nothing about whether anything still calls the guard. A call-site mutation that stays green is an unprotected entry point: report it as a finding naming the entry point, since the guard can be bypassed at the only place it matters. Read the failure message as in (d), so a red from a missing file is not taken for a red from the assertion. Isolate each mutation in a throwaway worktree — `git worktree add --detach <a path outside the checkout> HEAD`, removed afterwards with `git worktree remove --force` — and never in a copy of the tree, which on a linked worktree shares the checkout's own index. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. Prepare every mutation and launch them at once rather than walking them in turn — at most four running together — a third of the headroom under the box's 28-process cap, counted `ps -eo comm= | grep -cx claude` and never `ps aux | grep`, since your axis is one of three — and fewer, down to one at a time again, when the box is already busy or its process table cannot be read: slower, never refused. Each mutation keeps its own worktree and its own captured output, and you collect them by id when they finish, so a failure message is still read against the mutation that produced it. A mutation whose worktree, suite run or output never arrived is `unknown`, reported by that name — never counted as an assertion that held, which is class 1. Nothing is restored between mutations: each worktree is discarded whole, and the checkout is left exactly as found. Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
 
 **What the witness check costs, and what actually isolates it** (#939). The
 check itself is the most valuable thing a review does — the `paths()` fail-open
@@ -322,6 +337,10 @@ steps; nobody established it as a constraint. Measured on
 in that file, so the covering suite is the slow one. A diff adding ten tests
 paid five minutes before the reviewer read anything, and that correctness pass
 took 22 minutes.
+
+A call-site mutation (correctness brief, (e)) is one more kind of mutation for
+this machinery to run: it takes the same worktree, the same output file and the
+same id as any constraint mutation, and its `unknown` is reported the same way.
 
 Two things the concurrency must not cost. **The message stays paired with its
 mutation**: reading the message rather than the exit status is what catches
