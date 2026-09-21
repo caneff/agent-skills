@@ -47,6 +47,11 @@ part of its brief:
 
 The shapes, the checks and every instance: `docs/agents/defect-classes.md`.
 
+### Section references
+
+A `§ <Heading>` cross-reference in Markdown is checked by
+`tests/check-section-references.py`. The grammar: `docs/agents/section-references.md`.
+
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.

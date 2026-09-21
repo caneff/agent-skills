@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Verify Markdown section references point at headings that still exist."""
+"""Verify Markdown section references point at headings that still exist.
+
+The grammar this enforces is written down in docs/agents/section-references.md.
+"""
 
 from __future__ import annotations
 
