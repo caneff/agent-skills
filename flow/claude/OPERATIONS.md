@@ -129,6 +129,15 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   before ending a turn — the one read the rule above allows. Why: in the
   #781 trial two workers finished without reporting and the run stalled ~4 h
   unseen (#820).
+- A worker that never stops raises no stop alert, and its transcript mtime
+  and `working` state read healthy while it spins. The `PostToolUse` hook
+  `worker-spin-alert.sh` runs inside the turn: the same tool with
+  byte-identical input 20 times in a row (no other call between) types
+  `[worker-spin-alert] worker #<n> repeated <tool> <input> at least <k>
+  times in a row` into your pane, once per run, logged to
+  `~/.claude/worker-spin-alerts.log`. To check a transcript on demand:
+  `bash ~/.claude/hooks/worker-spin-alert.sh --classify <transcript.jsonl>`.
+  Why: a worker made 180 `echo ok` calls waiting on a subagent (#925).
 - Long-running job: run it under `job-run --name <n> -- <cmd>` — output and
   exit survive a kill, and `job-run --status <n>` answers alive / finished /
   killed. Why: a plain background run loses its output and exit code when
