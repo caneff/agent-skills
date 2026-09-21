@@ -662,13 +662,17 @@ fn run() -> Result<(), ExitCode> {
     // An empty --controller is bash's `[ -z "$controller" ]`: absent, not a
     // literal empty name, so it still falls through to the session lookup.
     let controller_flag = args.controller.as_deref().filter(|c| !c.is_empty());
+    let mut controller_session = String::new();
     let controller = match controller_flag {
         Some(c) => c.to_string(),
         None => {
             let self_pid = std::process::id() as i32;
             let start_ancestor = proc_info::parent_pid(self_pid).unwrap_or(0);
-            match sessions::find_controller(Path::new(&home), start_ancestor) {
-                Some(c) => c,
+            match sessions::find_controller_session(Path::new(&home), start_ancestor) {
+                Some((id, c)) => {
+                    controller_session = id;
+                    c
+                }
                 None => {
                     return Err(die(
                         "no controller: no live ancestor session has a ~/.claude/sessions/<pid>.json name; pass --controller",
@@ -689,6 +693,21 @@ fn run() -> Result<(), ExitCode> {
     if !running {
         return Err(die("no herdr server is running (herdr status)"));
     }
+
+    // A derived controller is briefed by its herdr agent name when it has one:
+    // a restart renames the session, not the agent, and the worker resolves the
+    // name to a session at send time (`resolve-controller`, #923). A controller
+    // that is no named herdr agent keeps its session name, which the same
+    // resolver still accepts while a live session bears it.
+    let controller = if controller_flag.is_none() && !controller_session.is_empty() {
+        let listing = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT).unwrap_or_default();
+        herdr::parse_agents(&listing)
+            .and_then(|agents| agents.iter().find(|a| a.session() == controller_session).and_then(|a| a.given_name().map(str::to_string)))
+            .filter(|n| !n.contains('"') && !n.contains('\n'))
+            .unwrap_or(controller)
+    } else {
+        controller
+    };
 
     let claude_json_path = format!("{home}/.claude.json");
     let onboarded = std::fs::read_to_string(&claude_json_path)

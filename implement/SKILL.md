@@ -122,8 +122,19 @@ owner's word turns it on.
 ## Control
 
 The controller is the session named in the brief; what it rules on and what
-it escalates is its entry in `~/.agents/skills/CONTEXT.md`. Send it every question and your
-finish notice with `SendMessage` to that name — never to Chris. An ordinary
+it escalates is its entry in `~/.agents/skills/CONTEXT.md`. The brief's
+`--controller "<name>"` is the controller's herdr agent name when it has one,
+and a WSL restart renames its Claude session but not that. `SendMessage` takes
+only the session name, so **resolve before every send**:
+`resolve-controller "<name>"` prints the controller's live session name (herdr
+agent name, then that session's current name in `~/.claude/sessions`), and
+that output is the `to`. Never save the printed name for later, and never send
+to the brief's literal: it may be a herdr agent name, which `SendMessage`
+rejects. Non-zero exit means the name resolves to nothing live: retry once, then
+stop and say so in your pane, sending nothing to a guessed name. A controller announcing a
+new name (`Your controller is now <name>`) replaces the brief's. Send it every
+question and your finish notice with `SendMessage` to that resolved name —
+never to Chris. An ordinary
 call you make yourself, under an assumption you state, and list under
 Decisions made.
 
