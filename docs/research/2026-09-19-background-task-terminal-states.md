@@ -48,7 +48,8 @@ The bound `worker-stop-alert.sh` uses is the turn: only tasks launched since
 the last turn start count. Its cost is the inverse error — a message
 arriving mid-job restarts the turn, so that stop alerts while the job still
 runs. A false alert costs a pane read; a suppressed one costs the signal.
-#900 holds the question of a liveness-evidence bound (a poll of the task, a
-monitor event since the turn start) that would cover both.
+#900 added the liveness-evidence bound: an earlier-turn launch counts as out
+only while a poll of its id, or a monitor event carrying it, appears since the
+turn start.
 
 Filed from the #886 build, round-2 verification finding V1.

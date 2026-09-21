@@ -308,12 +308,13 @@ t="$tmp/reported-then-worked.jsonl"
 run "reported this turn, then kept working" "$t"
 expect_none "a report inside this turn covers the stop even when work followed it"
 
-# The outstanding set is this turn's, and that bound is load-bearing: 45% of
+# An id with no liveness evidence since the turn start is not out, and that bound is load-bearing: 45% of
 # real background tasks never emit a terminal notification, so a set carried
 # across turns would let one stale id hold the verdict at `waiting` for the
 # rest of the session and the alert would never fire again (#900, and
 # docs/research/2026-09-19-background-task-terminal-states.md). The price is
-# the case below: a job that never finished does not cover a later stop.
+# the case below: a job that never finished does not cover a later stop
+# unless something since the turn start names it (the tests further down).
 reset_log
 t="$tmp/bg-across-turns.jsonl"
 { human "$brief"; bg_launch bnever1; assistant_text "check-full running"; } > "$t"
@@ -322,6 +323,40 @@ expect_none "a stop while a background shell is out does not alert"
 { peer "new task: fix the flaky test"; work; assistant_text "fixed it"; } >> "$t"
 run "stale never-finished job" "$t"
 expect_alert "a never-terminated job does not suppress a later genuine silent stop"
+
+# Liveness evidence (#900): a launch from an earlier turn stays out across an
+# inbound message only while something since the turn start names its id.
+# task_poll <id> : a TaskOutput poll of a background task or subagent.
+task_poll() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"po-%s","name":"TaskOutput","input":{"task_id":"%s"}}]}}\n' "$1" "$1"; }
+reset_log
+t="$tmp/bg-polled.jsonl"
+{ human "$brief"; bg_launch bpoll1; assistant_text "check-full running"; peer "status?"; task_poll bpoll1; assistant_text "still running"; } > "$t"
+run "background shell polled" "$t"
+expect_none "a background shell launched last turn and polled since the turn start is still out"
+
+reset_log
+t="$tmp/monitor-evented.jsonl"
+{ human "$brief"; monitor_launch bmon1; assistant_text "watching"; peer "status?"; monitor_event bmon1; assistant_text "tick"; } > "$t"
+run "monitor event this turn" "$t"
+expect_none "a monitor launched last turn with an event since the turn start is still out"
+
+reset_log
+t="$tmp/reviewer-across-message.jsonl"
+{ human "$brief"; launch r1; assistant_text "reviewer running"; peer "status?"; task_poll r1; assistant_text "still out"; } > "$t"
+run "reviewer polled across a message" "$t"
+expect_none "a subagent launched last turn and polled since the turn start is still out"
+
+reset_log
+t="$tmp/reviewer-untouched.jsonl"
+{ human "$brief"; launch r2; assistant_text "reviewer running"; peer "status?"; assistant_text "noted"; } > "$t"
+run "reviewer with no evidence" "$t"
+expect_alert "a subagent launched last turn and untouched since the turn start does not suppress a silent stop"
+
+reset_log
+t="$tmp/polled-then-done.jsonl"
+{ human "$brief"; bg_launch bpoll2; peer "status?"; task_done bpoll2 completed; task_poll bpoll2; assistant_text "done"; } > "$t"
+run "polled after it finished" "$t"
+expect_alert "a polled task that already reached a terminal state is not out"
 
 reset_log
 t="$tmp/torn.jsonl"
