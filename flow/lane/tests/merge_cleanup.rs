@@ -427,6 +427,26 @@ fn every_ticket_the_merged_pr_closes_has_its_claim_cleared() {
 }
 
 #[test]
+fn a_branch_number_too_long_for_a_u64_still_has_its_claim_cleared() {
+    // #903: the ticket set is digit strings, not parsed numbers, because
+    // merge-cleanup reads an existing branch name and must not drop it.
+    // 23 digits: past u64::MAX (20 digits, 18446744073709551615).
+    let n = "12345678901234567890123";
+    let c = Cleanup::new();
+    let r = c.mkfixture("r20b");
+    c.mk_implement_branch(&r, n);
+    let key = format!("GH_ISSUE_{n}");
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), &format!("implement-{n}")],
+        &[(key.as_str(), "CLOSED\tin-progress\tcaneff"), ("GH_STATE", "")],
+    );
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has(&format!("clearing #{n}'s in-progress label and assignee")), "{}", run.text());
+    assert!(c.calls().contains(&format!("gh issue edit {n} --repo")), "{}", c.calls());
+}
+
+#[test]
 fn a_clump_ticket_in_another_repo_is_never_edited() {
     // closingIssuesReferences can name an issue in another repo, and every
     // edit here goes out with this repo's --repo: editing that number here
