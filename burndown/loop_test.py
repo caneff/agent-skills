@@ -227,11 +227,11 @@ def test_an_idle_boxs_os_process_count_is_not_the_cap_reading():
         cand = os.path.join(tmp, "candidates.json")
         with open(cand, "w") as fh:
             json.dump(candidates_781(), fh)
-        idle = loop_py("dispatch", "--candidates", cand, "--free", "1",
+        idle = loop_py("dispatch", "--in-flight", EMPTY_LIVE, "--candidates", cand, "--free", "1",
                        "--processes", "19", "--committed-gb", "0")
         assert idle.returncode == 0, idle.stderr
         assert "dispatch  #" in idle.stdout, idle.stdout
-        full = loop_py("dispatch", "--candidates", cand, "--free", "1",
+        full = loop_py("dispatch", "--in-flight", EMPTY_LIVE, "--candidates", cand, "--free", "1",
                        "--processes", "28", "--committed-gb", "0")
         assert full.returncode == 1
         assert "28 agent processes" in full.stderr, full.stderr
@@ -309,7 +309,7 @@ def test_the_cli_dispatch_refuses_when_ps_cannot_be_run():
         nobin = os.path.join(tmp, "empty-path")
         os.mkdir(nobin)
         got = subprocess.run(
-            [sys.executable, LOOP, "dispatch", "--candidates", cand,
+            [sys.executable, LOOP, "dispatch", "--in-flight", EMPTY_LIVE, "--candidates", cand,
              "--free", "1", "--committed-gb", "0"], capture_output=True,
             text=True, timeout=60, env={**os.environ, "PATH": nobin})
     assert got.returncode == 1, got
@@ -402,6 +402,14 @@ def test_a_stuck_on_ticket_the_run_never_had_is_refused():
 
 
 LOOP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loop.py")
+
+
+# `dispatch` demands its in-flight snapshot; an explicit empty list is how a
+# test says no worker is live.
+_EMPTY = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+_EMPTY.write("[]")
+_EMPTY.close()
+EMPTY_LIVE = _EMPTY.name
 
 
 def loop_py(*args, cwd=None):
@@ -524,7 +532,7 @@ def test_a_malformed_clump_file_is_one_line_and_not_a_traceback():
                         '[{"tickets": ["452"], "closure": ["a"]}]'):
             with open(bad, "w") as fh:
                 fh.write(content)
-            got = loop_py("dispatch", "--candidates", bad, "--free", "1",
+            got = loop_py("dispatch", "--in-flight", EMPTY_LIVE, "--candidates", bad, "--free", "1",
                           "--processes", "2", "--committed-gb", "0")
             assert got.returncode == 1, (content, got)
             assert "Traceback" not in got.stderr, (content, got.stderr)
@@ -574,7 +582,7 @@ def test_the_cli_dispatch_refuses_when_the_box_has_no_room():
         cand = os.path.join(tmp, "candidates.json")
         with open(cand, "w") as fh:
             json.dump(candidates_781(), fh)
-        got = loop_py("dispatch", "--candidates", cand, "--free", "1",
+        got = loop_py("dispatch", "--in-flight", EMPTY_LIVE, "--candidates", cand, "--free", "1",
                       "--processes", "40", "--committed-gb", "0")
         assert got.returncode == 1, got
         assert "dispatch" not in got.stdout, got.stdout
@@ -637,7 +645,7 @@ def test_the_cli_dispatch_takes_only_what_the_box_has_room_for():
             json.dump([{"tickets": [452], "closure": ["a.js"]},
                        {"tickets": [457], "closure": ["b.js"]},
                        {"tickets": [458], "closure": ["c.js"]}], fh)
-        got = loop_py("dispatch", "--candidates", cand, "--free", "3",
+        got = loop_py("dispatch", "--in-flight", EMPTY_LIVE, "--candidates", cand, "--free", "3",
                       "--processes", "23", "--committed-gb", "23",
                       "--add-gb", "1")
         assert got.returncode == 0, got.stderr
@@ -1255,6 +1263,21 @@ def test_the_cli_sweep_of_several_hung_panes_returns_within_one_deadline():
     assert got.stdout.count("unswept") >= 2, got.stdout
 
 
+def test_dispatch_without_an_in_flight_snapshot_is_refused():
+    # An omitted snapshot must not read as "no worker is live" (#933).
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        with open(cand, "w") as fh:
+            json.dump(candidates_781(), fh)
+        got = subprocess.run(
+            [sys.executable, LOOP, "dispatch", "--candidates", cand,
+             "--free", "1", "--processes", "1", "--committed-gb", "0"],
+            capture_output=True, text=True, timeout=60)
+    assert got.returncode != 0, got
+    assert "--in-flight" in got.stderr, got.stderr
+    assert "dispatch  #" not in got.stdout, got.stdout
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
@@ -1265,3 +1288,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
