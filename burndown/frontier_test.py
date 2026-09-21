@@ -698,6 +698,27 @@ def test_an_indented_inline_line_is_a_quotation_not_a_declaration():
         assert numbers(got["unblocked"]) == [1], (quoted, got)
 
 
+def test_an_indented_section_after_a_real_one_adds_nothing_to_its_answer():
+    # Codex on #996: the indent bound kept the quoted heading from counting as
+    # a second declaration, but its lines still joined the real section's
+    # payload and its `#906` blocked the ticket.
+    body = "## Blocked by\n\nNone\n\n    ## Blocked by\n\n    - #906\n"
+    got = read([issue(1, body=body)], states={906: "open"})
+    assert numbers(got["unblocked"]) == [1], got
+
+
+def test_a_quoted_line_after_a_real_section_adds_nothing_to_its_answer():
+    body = "## Blocked by\n\nNone\n\n> Blocked by: #906\n> - #906\n"
+    got = read([issue(1, body=body)], states={906: "open"})
+    assert numbers(got["unblocked"]) == [1], got
+
+
+def test_a_tab_indented_line_after_a_real_section_adds_nothing_to_its_answer():
+    body = "## Blocked by\n\nNone\n\n\t- #906\n"
+    got = read([issue(1, body=body)], states={906: "open"})
+    assert numbers(got["unblocked"]) == [1], got
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

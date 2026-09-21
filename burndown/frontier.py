@@ -108,6 +108,19 @@ def unfenced(lines):
 AMBIGUOUS = object()  # `blocked_by_section`'s answer to two declarations
 
 
+# An indented code block or a blockquote line is quotation, whatever it
+# says: four or more spaces or a tab of indent, or a `>` within three.
+_QUOTED = re.compile(r"^(?: {4}|\t| {0,3}>)")
+
+
+def visible(lines):
+    """`unfenced` minus indented code and blockquote lines: what this ticket
+    says in its own voice. One test for declaration detection and for the
+    lines a section collects, so a quotation cannot be dropped from the one
+    and still feed the other."""
+    return [(i, line) for i, line in unfenced(lines) if not _QUOTED.match(line)]
+
+
 def blocked_by_section(body):
     """What the ticket states about its blockers, or `None` when it states
     nothing at all — a ticket that never mentions the relationship is not a
@@ -120,18 +133,18 @@ def blocked_by_section(body):
     next heading of any level, or the rest of an inline `Blocked by:` /
     `**Blocked by:**` line in the preamble. Every visible occurrence of
     either form is one declaration."""
-    visible = list(unfenced((body or "").splitlines()))
+    lines = visible((body or "").splitlines())
     answers = []
-    for pos, (_, line) in enumerate(visible):
+    for pos, (_, line) in enumerate(lines):
         if not _HEADING.match(line):
             continue
         section = []
-        for _, rest in visible[pos + 1:]:
+        for _, rest in lines[pos + 1:]:
             if _ANY_HEADING.match(rest):
                 break
             section.append(rest)
         answers.append("\n".join(section).strip())
-    for _, line in visible:
+    for _, line in lines:
         if _ANY_HEADING.match(line):
             break  # the preamble ends at the first heading
         inline = _INLINE.match(line)
