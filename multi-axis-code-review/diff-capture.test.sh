@@ -47,12 +47,12 @@ check_in "$spawn_text" 'once, by the caller' 'multi-axis-code-review/SKILL.md §
 # checks the same literal it just wrote, passes, and every axis then silently
 # falls back to re-deriving — the round costs exactly what it cost before.
 check_in "$spawn_text" 'git -C "$worktree" diff "$fixed_point"...HEAD >"$tmp"' 'multi-axis-code-review/SKILL.md § 4'
-check_in "$spawn_text" '[ -s "$tmp" ]' 'multi-axis-code-review/SKILL.md § 4'
+check_in "$spawn_text" '[ -s "$1" ]' 'multi-axis-code-review/SKILL.md § 4'
 # PR #943 round 2: the key carries the revision and a per-invocation nonce,
 # and the publish is a rename — a guard that tests for absence cannot catch a
 # file replaced under a reader that is still reading it.
 check_in "$spawn_text" 'rev-parse --short HEAD' 'multi-axis-code-review/SKILL.md § 4'
-check_in "$spawn_text" 'mv "$tmp" "$1"' 'multi-axis-code-review/SKILL.md § 4'
+check_in "$spawn_text" 'mv "$1" "$2"' 'multi-axis-code-review/SKILL.md § 4'
 check_in "$spawn_text" 'not a pattern' 'multi-axis-code-review/SKILL.md § 4'
 # C3/P1: the file is keyed on <n> alone, so a second round that skips this
 # block leaves round 1's diff in place — present and non-empty, so the
@@ -110,10 +110,7 @@ case "$preamble" in
   *'publish_capture()'*) ;;
   *) echo "FAIL: could not extract § 4's report-directory preamble from multi-axis-code-review/SKILL.md" >&2; exit 1 ;;
 esac
-case "$block" in
-  *'publish_capture "$patch"'*) ;;
-  *) echo "FAIL: could not extract § 4's capture block from multi-axis-code-review/SKILL.md" >&2; exit 1 ;;
-esac
+[ -n "$block" ] || { echo "FAIL: could not extract § 4's capture block from multi-axis-code-review/SKILL.md" >&2; exit 1; }
 
 # The two capture modes share one publish protocol, stated once in the
 # preamble (#948). Run end-to-end, each suite only catches a break inside its
@@ -121,16 +118,24 @@ esac
 # sha-list block disagree about it — one keeps its own nonce scheme, its own
 # `mv`, or its own retention. Neither mode may restate a step of the
 # protocol, and both must call it.
-modes="$(printf '%s\n%s\n' "$block" "$(fenced 'sha-list review: the commit list is empty')")"
-for step in 'mktemp' 'mv ' 'wc -l' 'find ' '-mtime'; do
-  if grep -qF -- "$step" <<<"$modes"; then
-    echo "FAIL: a capture mode restates the shared publish protocol step '$step' instead of calling the preamble's" >&2
-    fail=1
-  fi
-done
-for fn in new_capture 'publish_capture "$patch"'; do
-  calls="$(grep -cF -- "$fn" <<<"$modes" || true)"
-  [ "$calls" -eq 2 ] || { echo "FAIL: $calls capture mode(s) call $fn, not both" >&2; fail=1; }
+range_mode="$block"
+sha_mode="$(fenced 'sha-list review: the commit list is empty')"
+[ -n "$sha_mode" ] || { echo "FAIL: could not extract § 4's sha-list capture block from multi-axis-code-review/SKILL.md" >&2; exit 1; }
+for mode in range_mode sha_mode; do
+  body="${!mode}"
+  for step in 'mktemp' 'mv ' 'wc -l' 'find ' '-mtime'; do
+    if grep -qF -- "$step" <<<"$body"; then
+      echo "FAIL: the $mode capture restates the shared publish protocol step '$step' instead of calling the preamble's" >&2
+      fail=1
+    fi
+  done
+  # Each mode on its own, not the two summed: one mode calling twice and the
+  # other not at all is a disagreement that a total of 2 hides. The nonce and
+  # the shared file stem stay per-mode text, so they are pinned here too.
+  for fn in 'new_capture' 'publish_capture "$tmp" "$patch"' '-$$.patch' '"$dir/diff-$n-'; do
+    calls="$(grep -cF -- "$fn" <<<"$body" || true)"
+    [ "$calls" -eq 1 ] || { echo "FAIL: the $mode capture uses $fn $calls time(s), not once" >&2; fail=1; }
+  done
 done
 
 scratch="$(mktemp -d)" || { echo "FAIL: mktemp -d" >&2; exit 1; }
@@ -193,6 +198,17 @@ fi
 leftovers="$(find "$(dirname "$first_path")" -maxdepth 1 -type f ! -name '*.patch' | wc -l)"
 [ "$leftovers" -eq 0 ] || {
   echo "FAIL: the block left $leftovers non-patch file(s) beside the captures" >&2; fail=1; }
+
+# The range block run in a shell that never ran the preamble refuses by name.
+printf '%s\n' "$block" |
+  sed -e "s|^fixed_point=<.*|fixed_point=main|" >"$scratch/nofunc.sh"
+if nofunc_out="$( cd "$repo" && HOME="$scratch/home" n=937 worktree="$repo" dir="$scratch/home" bash "$scratch/nofunc.sh" 2>&1 )"; then
+  echo "FAIL: the range block ran without the preamble's functions" >&2
+  fail=1
+elif ! printf '%s' "$nofunc_out" | grep -qF 'in this same shell'; then
+  echo "FAIL: the range block refused missing preamble functions without saying why: $nofunc_out" >&2
+  fail=1
+fi
 
 # A nonce per invocation means more files, not more lifetime: the same
 # 14-day sweep in the same block still collects a capture under the new key.

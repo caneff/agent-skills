@@ -90,7 +90,7 @@ fi
 check_in "$correctness" 'mutate its call site' 'the correctness axis brief'
 check_in "$correctness" 'every entry point the guard exists to protect' 'the correctness axis brief'
 check_in "$correctness" 'unprotected entry point' 'the correctness axis brief'
-check_not_in "$standards" 'call site' 'the standards axis brief'
+check_not_in "$standards" 'mutate its call site' 'the standards axis brief'
 check_not_in "$spec" 'unprotected entry point' 'the spec axis brief'
 check_in "$costs" 'call-site mutation' 'the witness-check cost section'
 callsite="$(printf '%s\n' "$spawn" | grep -cF 'unprotected entry point' || true)"

@@ -110,6 +110,13 @@ run_block() { # <shas...> -> the block's output; exit status is the block's
 
 out="$(run_block "$c" "$a" "$b")" || { echo "FAIL: the block refused a good three-sha list" >&2; fail=1; }
 patch="$(printf '%s\n' "$out" | tail -1 | awk '{print $NF}')"
+# The preamble's 14-day `find -delete` ran for real: it must have run over the
+# test's own directory, never the developer's ~/.cache. A HOME that failed to
+# scratch would otherwise still pass on the developer's real report directory.
+case "$patch" in
+  "$scratch_dir"/*) ;;
+  *) echo "FAIL: the capture landed at '$patch', outside the scratch HOME $scratch_dir" >&2; fail=1 ;;
+esac
 if [ -z "$patch" ] || [ ! -s "$patch" ]; then
   echo "FAIL: the block published no capture for a three-sha list" >&2
   fail=1
@@ -212,6 +219,19 @@ if nodir_out="$( cd "$scratch" && unset dir; bash "$scratch/nodir.sh" 2>&1 )"; t
   fail=1
 elif ! printf '%s' "$nodir_out" | grep -qF 'run the report-directory preamble'; then
   echo "FAIL: the block refused an unset report directory for the wrong reason: $nodir_out" >&2
+  fail=1
+fi
+
+# The preamble ran in a different shell (an agent's Bash calls share none), so
+# its functions are missing though `dir` is set: refused by name, not a bare
+# "command not found".
+printf '%s\n' "$recipe" |
+  sed -e "s|^set -- <.*|set -- $a|" >"$scratch/nofunc.sh"
+if nofunc_out="$( cd "$repo" && dir="$scratch_dir" n=932 worktree="$repo" bash "$scratch/nofunc.sh" 2>&1 )"; then
+  echo "FAIL: the block ran without the preamble's functions" >&2
+  fail=1
+elif ! printf '%s' "$nofunc_out" | grep -qF 'in this same shell'; then
+  echo "FAIL: the block refused missing preamble functions without saying why: $nofunc_out" >&2
   fail=1
 fi
 

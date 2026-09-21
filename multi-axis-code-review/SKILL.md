@@ -185,24 +185,28 @@ find "$dir" -maxdepth 1 -type f -mtime +13 -delete  # +13, not +14: find's -mtim
 n=<issue number from step 2, or the branch name>
 worktree=<the worktree under review>
 # The publish protocol, stated once for both capture modes below. Each mode sets
-# its own `patch` name, calls new_capture, writes into "$tmp", then publish_capture.
-new_capture() { tmp=$(mktemp "$dir/.diff-$n.XXXXXX"); }   # unique per invocation
-publish_capture() { # <patch>: fail on an empty write here, not inside three sub-agents
-  [ -s "$tmp" ] || { rm -f "$tmp"; echo "capture is empty" >&2; return 1; }
-  mv "$tmp" "$1" &&                     # atomic publish: no axis ever reads a half-written patch
-    wc -l "$1"                          # this exact path and this count go in every prompt
+# its own `patch` name, takes a temp path from new_capture, writes into it, then
+# hands both to publish_capture.
+new_capture() { mktemp "$dir/.diff-$n.XXXXXX"; }   # unique per invocation; prints the path
+publish_capture() { # <tmp> <patch>: fail on an empty write here, not inside three sub-agents
+  [ -s "$1" ] || { rm -f "$1"; echo "capture for $2 is empty" >&2; return 1; }
+  mv "$1" "$2" &&                       # atomic publish: no axis ever reads a half-written patch
+    wc -l "$2"                          # this exact path and this count go in every prompt
 }
 ```
 
-Then, for a fixed point, the range capture:
+Then, for a fixed point, the range capture — in the same shell as the preamble,
+since the functions it defines do not survive into a separate shell call:
 
 ```
+type publish_capture >/dev/null 2>&1 ||
+  { echo "range review: run the report-directory preamble above first, in this same shell" >&2; exit 1; }
 fixed_point=<the fixed point from step 1>
 head=$(git -C "$worktree" rev-parse --short HEAD) || exit 1
 patch="$dir/diff-$n-$head-$$.patch"     # revision plus nonce: this invocation's own file
-new_capture || exit 1
+tmp=$(new_capture) || exit 1
 git -C "$worktree" diff "$fixed_point"...HEAD >"$tmp" || { rm -f "$tmp"; exit 1; }
-publish_capture "$patch" || exit 1
+publish_capture "$tmp" "$patch" || exit 1
 ```
 
 **Capture the diff once, by the caller** (#937). Those blocks derive the diff
@@ -230,13 +234,15 @@ more lifetime — the 14-day sweep above collects them under this key the same
 way.
 
 **Sha-list mode captures the union** (§ 1). Run the `$dir` preamble above
-first — same directory, same 14-day sweep — then this block instead of the
+first, in the same shell — same directory, same 14-day sweep — then this block instead of the
 `git diff` one. § 1 has the semantics; what is specific to the block is the
 key — a digest of the resolved list rather than a single `HEAD`, since there is
 no single revision under review:
 
 ```
 : "${dir:?sha-list review: run the report-directory preamble above first}"
+type publish_capture >/dev/null 2>&1 ||
+  { echo "sha-list review: run the report-directory preamble above first, in this same shell" >&2; exit 1; }
 set -- <the commits the caller named, space-separated>
 [ "$#" -gt 0 ] || { echo "sha-list review: the commit list is empty" >&2; exit 1; }
 resolved=""
@@ -259,7 +265,7 @@ ordered=$(for s in $resolved; do
   done | sort -n -k1,1 -k2,2 | awk '!seen[$2]++ {print $2}')
 key=$(printf '%s\n' "$ordered" | git -C "$worktree" hash-object --stdin | cut -c1-12)
 patch="$dir/diff-$n-list$key-$$.patch"   # list digest plus nonce
-new_capture || exit 1
+tmp=$(new_capture) || exit 1
 for s in $ordered; do
   one=$(git -C "$worktree" show --format='commit %H%n%n    %s%n' --patch "$s") || {
     rm -f "$tmp"; echo "sha-list review: could not read $s" >&2; exit 1; }
@@ -267,7 +273,7 @@ for s in $ordered; do
     rm -f "$tmp"; echo "sha-list review: $s changes no files" >&2; exit 1; }
   printf '%s\n' "$one" >>"$tmp"
 done
-publish_capture "$patch" || exit 1
+publish_capture "$tmp" "$patch" || exit 1
 ```
 
 In this mode the provenance every axis prompt carries is **this per-commit
