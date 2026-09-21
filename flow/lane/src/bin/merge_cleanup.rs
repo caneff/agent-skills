@@ -48,8 +48,7 @@ covered below. The single-branch form refuses, naming them, and
 --discard removes it anyway (--force only skips the merged check); --sweep
 lists it "dirty, not removed" even with --yes. Ignored files include .scratch/ and every other ignored name
 except the regenerable caches: an ignored entry is one only when a path
-component of it is named node_modules, __pycache__, target, .venv,
-.pytest_cache, .ruff_cache or .mypy_cache and, unless that component is the
+component of it is named {cache_names} and, unless that component is the
 entry itself, that directory's own .gitignore is `*`. Both are required: a `*`
 .gitignore alone makes nothing a cache. A cache never refuses — it is removed with the
 worktree, and its count and first names are printed as cache file(s), distinct
@@ -331,6 +330,13 @@ const NAMES_SHOWN: usize = 5;
 /// default (#801): an unknown ignored name is kept, because a wrongly kept
 /// cache costs a --discard and a wrongly discarded note cannot be undone.
 const CACHE_DIRS: &[&str] = &["node_modules", "__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"];
+
+/// `HELP` with its cache-name list filled from `CACHE_DIRS`, so the help
+/// cannot name a set of caches the guard does not use (#875).
+fn help_text() -> String {
+    let (last, rest) = CACHE_DIRS.split_last().expect("CACHE_DIRS is not empty");
+    HELP.replace("{cache_names}", &format!("{} or {last}", rest.join(", ")))
+}
 
 /// An ignored entry in worktree `wt` is a cache when its own name is in
 /// `CACHE_DIRS` (a directory, or a symlink git lists with no trailing
@@ -1593,7 +1599,7 @@ fn subdirs(dir: &str) -> Vec<String> {
 fn main() -> ExitCode {
     let a = match parse_args(env::args().skip(1)) {
         Parsed::Help => {
-            safe_print!("{HELP}");
+            safe_print!("{}", help_text());
             return ExitCode::SUCCESS;
         }
         Parsed::Err(e) => return die(e),

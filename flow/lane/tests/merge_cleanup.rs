@@ -660,6 +660,11 @@ fn help_states_the_cache_exemption_as_a_conjunction() {
     assert!(run.ok);
     let flat = run.stdout.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(!flat.contains("or inside one whose own .gitignore is `*`"), "{flat}");
+    // The name list is built from CACHE_DIRS, so this pins the sentence to
+    // the const: a name added or dropped there changes it and reddens this.
+    assert!(!flat.contains("{cache_names}"), "{flat}");
+    let sentence = "named node_modules, __pycache__, target, .venv, .pytest_cache, .ruff_cache or .mypy_cache and,";
+    assert!(flat.contains(sentence), "{flat}");
     assert!(flat.contains("Both are required"), "{flat}");
     assert!(flat.contains("a `*` .gitignore alone makes nothing a cache"), "{flat}");
 }
