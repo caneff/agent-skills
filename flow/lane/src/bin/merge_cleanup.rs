@@ -47,9 +47,10 @@ A linked worktree with modified, untracked or ignored files is never removed
 covered below. The single-branch form refuses, naming them, and
 --discard removes it anyway (--force only skips the merged check); --sweep
 lists it "dirty, not removed" even with --yes. Ignored files include .scratch/ and every other ignored name
-except the regenerable caches: an ignored entry named node_modules,
-__pycache__, target, .venv, .pytest_cache, .ruff_cache or .mypy_cache, or
-inside one whose own .gitignore is `*`, never refuses — it is removed with the
+except the regenerable caches: an ignored entry is one only when a path
+component of it is named {cache_names} and, unless that component is the
+entry itself, that directory's own .gitignore is `*`. Both are required: a `*`
+.gitignore alone makes nothing a cache. A cache never refuses — it is removed with the
 worktree, and its count and first names are printed as cache file(s), distinct
 from the ignored file(s) count above: the two never share a label, so a name
 Chris approved losing under one count is never misread as counted by the
@@ -279,7 +280,7 @@ fn blockers(agents: &[Agent]) -> Vec<String> {
 
 /// What `git worktree remove --force` would throw away: a worktree's
 /// `git status --porcelain --ignored` entries, by kind. Git collapses an
-/// untracked or ignored directory to one entry; `classify_ignored` expands
+/// untracked or ignored directory to one entry; `file_ignored` expands
 /// the ignored ones by what is on disk beneath them.
 #[derive(Default)]
 struct WorktreeFiles {
@@ -289,9 +290,37 @@ struct WorktreeFiles {
     ignored: Vec<String>,
     /// Ignored entries `is_cache` accepts.
     caches: Vec<String>,
-    /// Ignored directory entries holding no file anywhere beneath them: the
-    /// removal takes them and nothing is lost, so they are not work (#946).
+    /// Ignored directory paths, without the trailing slash, holding no file
+    /// anywhere beneath them: the removal takes them and nothing is lost, so
+    /// they are not work (#946).
     empty_dirs: Vec<String>,
+}
+
+/// One `!!` porcelain entry, decoded once at the boundary in
+/// `WorktreeFiles::read` (#949): the path git means, with the trailing `/`
+/// git appends to a directory taken off and recorded as `is_dir`. Nothing
+/// downstream re-derives either from the shape of a string — a quoted
+/// directory ends in `"` on the wire, so a slash test on the raw text
+/// misread it as a file (#946).
+struct IgnoredEntry {
+    path: String,
+    is_dir: bool,
+}
+
+impl IgnoredEntry {
+    /// `raw` is the text after the status code, quoted or not.
+    fn parse(raw: &str) -> Self {
+        let decoded = unquote(raw);
+        match decoded.strip_suffix('/') {
+            Some(dir) => Self { path: dir.to_string(), is_dir: true },
+            None => Self { path: decoded, is_dir: false },
+        }
+    }
+
+    /// The name as printed: a directory keeps its trailing slash.
+    fn shown(&self) -> String {
+        if self.is_dir { format!("{}/", self.path) } else { self.path.clone() }
+    }
 }
 
 /// How many names a message lists before "and <n> more".
@@ -302,14 +331,21 @@ const NAMES_SHOWN: usize = 5;
 /// cache costs a --discard and a wrongly discarded note cannot be undone.
 const CACHE_DIRS: &[&str] = &["node_modules", "__pycache__", "target", ".venv", ".pytest_cache", ".ruff_cache", ".mypy_cache"];
 
+/// `HELP` with its cache-name list filled from `CACHE_DIRS`, so the help
+/// cannot name a set of caches the guard does not use (#875).
+fn help_text() -> String {
+    let (last, rest) = CACHE_DIRS.split_last().expect("CACHE_DIRS is not empty");
+    HELP.replace("{cache_names}", &format!("{} or {last}", rest.join(", ")))
+}
+
 /// An ignored entry in worktree `wt` is a cache when its own name is in
 /// `CACHE_DIRS` (a directory, or a symlink git lists with no trailing
 /// slash), or when it sits inside a directory so named that marks itself
 /// wholly ignored with a `*` .gitignore — pytest, ruff, mypy and venv write
 /// one, so git lists their contents rather than the directory. A file under
 /// a directory merely named `target/` is not a cache.
-fn is_cache(wt: &str, entry: &str) -> bool {
-    let parts: Vec<&str> = entry.trim_end_matches('/').split('/').collect();
+fn is_cache(wt: &str, entry: &IgnoredEntry) -> bool {
+    let parts: Vec<&str> = entry.path.split('/').collect();
     let last = parts.len() - 1;
     parts.iter().enumerate().any(|(i, name)| {
         CACHE_DIRS.contains(name) && (i == last || ignores_all(&Path::new(wt).join(parts[..=i].join("/"))))
@@ -388,6 +424,10 @@ impl WorktreeFiles {
         let mut files = Self::default();
         for line in out.lines().filter(|l| l.len() > 3) {
             let (code, rest) = (&line[..2], &line[3..]);
+            if code == "!!" {
+                files.file_ignored(wt, IgnoredEntry::parse(rest));
+                continue;
+            }
             // Porcelain v1 writes a rename or a copy as `<orig> -> <new>`,
             // each path quoted on its own, so those decode by halves:
             // unquoting the line whole strips the outer pair and strands the
@@ -401,15 +441,14 @@ impl WorktreeFiles {
             };
             match code {
                 "??" => files.untracked.push(name),
-                "!!" if is_cache(wt, &name) => files.caches.push(name),
-                "!!" => files.classify_ignored(wt, name),
                 _ => files.modified.push(name),
             }
         }
         Some(files)
     }
 
-    /// A `!!` directory entry stands for whatever is inside it:
+    /// Files one ignored entry as cache, work or empty. A directory entry
+    /// stands for whatever is inside it:
     /// `--ignored=matching` collapses it to one line whether it holds nothing
     /// or hundreds of files, and counting entries was wrong both ways (#946)
     /// — an empty directory forced a needless `--discard`, and a full one
@@ -421,15 +460,17 @@ impl WorktreeFiles {
     /// directory the walk cannot read, stay `ignored` as themselves — an
     /// unreadable directory fails closed (#801), never read as "nothing in
     /// there".
-    fn classify_ignored(&mut self, wt: &str, entry: String) {
-        if !entry.ends_with('/') {
-            self.ignored.push(entry);
-            return;
-        }
-        match files_under(&Path::new(wt).join(entry.trim_end_matches('/'))) {
-            Some(f) if f.is_empty() => self.empty_dirs.push(entry),
-            Some(f) => self.ignored.extend(f.into_iter().map(|rel| format!("{entry}{rel}"))),
-            None => self.ignored.push(entry),
+    fn file_ignored(&mut self, wt: &str, entry: IgnoredEntry) {
+        if is_cache(wt, &entry) {
+            self.caches.push(entry.shown());
+        } else if !entry.is_dir {
+            self.ignored.push(entry.shown());
+        } else {
+            match files_under(&Path::new(wt).join(&entry.path)) {
+                Some(f) if f.is_empty() => self.empty_dirs.push(entry.path),
+                Some(f) => self.ignored.extend(f.into_iter().map(|rel| format!("{}/{rel}", entry.path))),
+                None => self.ignored.push(entry.shown()),
+            }
         }
     }
 
@@ -942,10 +983,12 @@ impl Cleanup {
         // included — in reach of the removal, so the scope is proved again
         // here, at the destructive call, and not only at enumeration (the
         // Codex pass on PR #878). A branch whose worktree simply went away
-        // still cleans up: there is nothing left to remove out of scope.
-        if let Some(now) = linked_worktree_holding(anchor, b)
-            && now != wt
-        {
+        // still cleans up: there is nothing left to remove out of scope. The
+        // primary checkout counts as a holder (#881): it is not a removal
+        // target, but a branch moved into it is still not the branch the plan
+        // named, and `cleanup_branch` would switch it off and delete it.
+        let now = worktree_holding(anchor, b);
+        if !now.is_empty() && now != wt {
             return Reaped::Refused(format!("moved since the plan, not removed: {now} now holds {b}"));
         }
         if !self.cleanup_branch(anchor, b) {
@@ -1107,7 +1150,7 @@ impl Cleanup {
                 // worktree, so the line accounts for what was actually taken.
                 let verb = if self.dry { "would remove" } else { "removing" };
                 for dir in &empty_dirs {
-                    safe_println!("{verb} the empty ignored directory at {wt}/{}", dir.trim_end_matches('/'));
+                    safe_println!("{verb} the empty ignored directory at {wt}/{}", dir);
                 }
                 self.removed_worktrees.push(wt);
             }
@@ -1556,7 +1599,7 @@ fn subdirs(dir: &str) -> Vec<String> {
 fn main() -> ExitCode {
     let a = match parse_args(env::args().skip(1)) {
         Parsed::Help => {
-            safe_print!("{HELP}");
+            safe_print!("{}", help_text());
             return ExitCode::SUCCESS;
         }
         Parsed::Err(e) => return die(e),
