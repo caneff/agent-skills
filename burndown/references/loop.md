@@ -75,6 +75,13 @@ frontier**. A controller reading only "open, unblocked, unclaimed" would
 dispatch straight into a collision — two workers editing one file, which is a
 merge conflict the controller caused.
 
+Among what is left, `picks` offers the free slots **widest closure first**
+(#1026, grill Q12): a sweep ticket touching many files would otherwise go out
+mid-run, once the frontier finally admits it, and hold most of the queue's
+files for its whole run. Sorted before the same-tick guard walks the list, so
+a wide clump is offered a slot ahead of narrower ones instead of sitting
+behind them in ticket order.
+
 Both consequences are stated in the skill because neither is visible from the
 frontier's own definition:
 

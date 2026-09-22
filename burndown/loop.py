@@ -135,9 +135,14 @@ def frontier(candidates, in_flight):
 
 def picks(state, free):
     """`(picked, held)`: the clumps to dispatch, taken from a frontier
-    already read — lowest ticket first, every free slot at once — and every
-    clump the same-tick guard skipped, each naming the earlier pick it
-    collided with.
+    already read — widest closure first, ties broken by lowest ticket, every
+    free slot at once — and every clump the same-tick guard skipped, each
+    naming the earlier pick it collided with.
+
+    The widest-first order is read before the same-tick guard runs (#1026):
+    a wide clump sorts to the front of the candidates the guard walks, so it
+    is offered a slot ahead of narrower ones instead of sitting behind them
+    until they land — the #1024 grill's sweep-ticket case.
 
     Split from `refill` so a caller that also reports what is holding the
     rest reads the frontier once: two reads of one question can disagree
@@ -146,7 +151,8 @@ def picks(state, free):
     if free <= 0:
         return [], []
     picked, held = [], []
-    for clump in state["dispatchable"]:
+    widest_first = sorted(state["dispatchable"], key=lambda c: -len(paths(c)))
+    for clump in widest_first:
         if len(picked) == free:
             break
         # A clump picked a moment ago is in flight by the time the next one
@@ -169,8 +175,9 @@ def picks(state, free):
 
 
 def refill(candidates, in_flight, free):
-    """The clumps to dispatch into the free slots, lowest ticket first — every
-    free slot at once, not one wave's worth.
+    """The clumps to dispatch into the free slots, widest closure first,
+    ties broken by lowest ticket — every free slot at once, not one wave's
+    worth.
 
     Recomputed at each landing and never held for another clump. Why no
     waves, and the two consequences a controller has to state out loud:

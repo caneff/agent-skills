@@ -135,6 +135,40 @@ def test_picks_names_a_same_tick_collision_and_its_picked_blocker():
     assert "workspace" not in by_ticket[(457,)]
 
 
+def test_picks_takes_the_widest_closure_first():
+    # #1026: two free slots, three independent candidates (no collisions)
+    # with closure sizes 1, 4 and 2 in ticket order — the widest goes out
+    # first, then the next-widest, ahead of ticket order.
+    candidates = [
+        {"tickets": [10], "closure": ["a.js"]},
+        {"tickets": [20], "closure": ["b.js", "c.js", "d.js", "e.js"]},
+        {"tickets": [30], "closure": ["f.js", "g.js"]},
+    ]
+    picked, held = loop.picks(loop.frontier(candidates, []), 2)
+    assert [c["tickets"] for c in picked] == [[20], [30]]
+    assert held == []
+
+
+def test_the_cli_dispatch_names_the_widest_clump_first():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([
+                {"tickets": [10], "closure": ["a.js"]},
+                {"tickets": [20], "closure": ["b.js", "c.js", "d.js", "e.js"]},
+                {"tickets": [30], "closure": ["f.js", "g.js"]},
+            ], fh)
+        with open(live, "w") as fh:
+            json.dump([], fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "2", "--processes", "4", "--committed-gb", "4")
+        assert got.returncode == 0, got.stderr
+        lines = [line for line in got.stdout.splitlines()
+                if line.startswith("dispatch")]
+        assert lines == ["dispatch  #20  #20", "dispatch  #30  #30"], got.stdout
+
+
 def test_the_cli_names_a_same_tick_collision_as_a_held_line():
     with tempfile.TemporaryDirectory() as tmp:
         cand = os.path.join(tmp, "candidates.json")

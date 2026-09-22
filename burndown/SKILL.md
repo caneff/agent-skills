@@ -77,7 +77,9 @@ too.
    file, its closure from that re-resolution, and the two together are
    `loop.py dispatch`'s `--in-flight`. A clump whose closure intersects a
    live workspace's is **off the frontier**: `loop.py dispatch` picks from
-   what is left and names what holds the rest. That hold, with `picks`'
+   what is left, **widest closure first** so a wide clump does not sit
+   behind narrow ones and block them later (#1026), and names what holds
+   the rest. That hold, with `picks`'
    same-tick guard (two clumps sharing a file are never picked in one tick,
    and that skip prints its own `held` line, naming the earlier pick it
    collided with rather than a live workspace), is what keeps a **family's
