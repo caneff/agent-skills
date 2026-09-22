@@ -3,6 +3,7 @@
 //! workspace inside herdr, report, and stop. It never waits on the worker.
 //! The contract is `--help` below.
 
+use lane::herdr::HERDR_QUERY_TIMEOUT;
 use lane::runner::{self, quiet_ok, quiet_ok_timeout, quiet_stdout, quiet_stdout_timeout, run_timeout, CommandOutput};
 use lane::{git_origin, herdr, proc_info, safe_print, safe_println, sessions};
 use serde_json::Value;
@@ -16,11 +17,6 @@ use std::time::Duration;
 /// default as `DEFAULT_SLOTS` in burndown/runfile.py.
 const DEFAULT_SPEC_SLOTS: u32 = 5;
 
-/// OS-level bound for the herdr calls that are plain queries (status, agent
-/// get/list, pane list): a herdr server that answers at all answers within
-/// this, so a hang past it means the subprocess itself is stuck, not that
-/// the work is legitimately slow.
-const HERDR_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 /// OS-level bound for the two herdr calls that mutate state (`worktree
 /// open`, `agent start`) rather than just read it — looser than
 /// `HERDR_QUERY_TIMEOUT` because registering a workspace or spawning a

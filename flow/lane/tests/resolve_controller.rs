@@ -6,15 +6,24 @@ mod support;
 use support::{out_text, Fixture};
 
 fn resolve(f: &Fixture, arg: &str) -> std::process::Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_resolve-controller"))
-        .arg(arg)
+    resolve_with_env(f, arg, &[])
+}
+
+/// The one place that builds the `resolve-controller` `Command`: every test
+/// that needs an extra environment variable (`HERDR_LIST_FAIL`, say) adds it
+/// here instead of re-inlining the base environment (#1011 V1).
+fn resolve_with_env(f: &Fixture, arg: &str, extra_env: &[(&str, &str)]) -> std::process::Output {
+    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_resolve-controller"));
+    cmd.arg(arg)
         .env_clear()
         .env("PATH", f.path_env())
         .env("HOME", f.home())
         .env("CALL_LOG", f.call_log())
-        .env("HERDR_AGENTS", f.agents_file())
-        .output()
-        .unwrap()
+        .env("HERDR_AGENTS", f.agents_file());
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    cmd.output().unwrap()
 }
 
 /// This test process stands in for the live session `name` / `id`.
@@ -92,16 +101,7 @@ fn an_unnamed_agent_is_not_addressable_by_its_kind() {
 fn a_failed_agent_listing_is_reported_as_such_and_never_falls_through_to_a_session_name() {
     let f = Fixture::new();
     live_session(&f, "sid-1", "skills-dc");
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_resolve-controller"))
-        .arg("skills-dc")
-        .env_clear()
-        .env("PATH", f.path_env())
-        .env("HOME", f.home())
-        .env("CALL_LOG", f.call_log())
-        .env("HERDR_AGENTS", f.agents_file())
-        .env("HERDR_LIST_FAIL", "true")
-        .output()
-        .unwrap();
+    let out = resolve_with_env(&f, "skills-dc", &[("HERDR_LIST_FAIL", "true")]);
     assert!(!out.status.success() && stdout(&out).is_empty(), "{}", out_text(&out));
     assert!(String::from_utf8_lossy(&out.stderr).contains("herdr agent list failed"), "{}", out_text(&out));
 }
