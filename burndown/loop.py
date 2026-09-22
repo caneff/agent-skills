@@ -432,33 +432,64 @@ def render_peak(count, live, room):
             f"{SLOT_PEAK_PROCESSES} each projects {projected}")
 
 
-def announce(state, send):
+def resolve_via_binary(agent):
+    """`resolve-controller <agent>` as `announce`'s default resolver: the
+    worker's herdr agent name resolved to the live Claude session name
+    `SendMessage` can reach — the same resolution `implement-dispatch` does
+    for the controller (#923). Raises rather than guessing when the binary
+    is missing, times out, or prints nothing.
+    """
+    try:
+        done = subprocess.run(["resolve-controller", agent],
+                              capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise LoopError(
+            f"resolve-controller {agent} could not run: {exc}") from exc
+    if done.returncode != 0:
+        raise LoopError((done.stderr or done.stdout).strip()
+                        or f"resolve-controller {agent} failed")
+    name = done.stdout.strip()
+    if not name:
+        raise LoopError(f"resolve-controller {agent} printed nothing")
+    return name
+
+
+def announce(state, send, resolve=resolve_via_binary):
     """Tell every live, unlanded worker who its controller is now — exactly
     one message each, and nothing to anyone else.
 
-    `state` is `runfile.reconcile`'s answer and `send(agent, message)` is the
-    caller's messenger. The bucket is `announce` and only that one, and the
-    agent it names is the worker's herdr agent name, which the caller
-    resolves to an address itself. Why each of those three:
-    `references/loop.md`.
+    `state` is `runfile.reconcile`'s answer; `send(agent, message)` is the
+    caller's messenger and `resolve(agent) -> session name` (default
+    `resolve_via_binary`) is called immediately before each send, so `send`
+    never sees the worker's durable herdr agent name. A name that does not
+    resolve refuses by name. Why: `references/loop.md`.
     """
     sent = []
     for entry in state["announce"]:
         tickets = ", ".join(f"#{n}" for n in entry["tickets"])
+        agent = entry["agent"]
         message = (f"Your controller is now {state['controller']} — before every "
                    f"send, resolve that name with `resolve-controller` and send "
                    f"your questions and finish notice to what it prints. Run "
                    f"{state['run_id']}, clump {tickets}, workspace "
                    f"{entry['workspace']}.")
         try:
-            send(entry["agent"], message)
+            address = resolve(agent)
         except Exception as exc:
             reached = ", ".join(sent) or "none"
             raise LoopError(
-                f"could not re-announce to {entry['agent']} ({tickets}): "
+                f"could not resolve {agent} ({tickets}) to a live session: "
                 f"{exc} — already reached: {reached}, so a retry covers the "
                 "rest and not these") from exc
-        sent.append(entry["agent"])
+        try:
+            send(address, message)
+        except Exception as exc:
+            reached = ", ".join(sent) or "none"
+            raise LoopError(
+                f"could not re-announce to {agent} ({tickets}): "
+                f"{exc} — already reached: {reached}, so a retry covers the "
+                "rest and not these") from exc
+        sent.append(agent)
     return sent
 
 
