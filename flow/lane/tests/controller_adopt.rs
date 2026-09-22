@@ -286,3 +286,38 @@ fn adopt_never_reaches_a_same_named_worker_under_another_checkout() {
     assert!(out_text(&out).contains("no worker record names scroller-345 under"), "{}", out_text(&out));
     assert_eq!(holders(&f), vec![(dead, record)], "nothing moved");
 }
+
+#[test]
+fn an_adopt_killed_after_landing_leaves_the_worker_with_its_adopter_and_offered_to_no_one() {
+    // #1098 Codex [high]: a process death mid-adopt must never strand the
+    // worker in neither sidecar. The record lands in the adopter's sidecar
+    // before it leaves the dead one, so a kill in between leaves a
+    // duplicate: the adopter's copy restores, and the dead copy is inert,
+    // neither offered nor adoptable while the adopter lives. The kill is a
+    // real SIGABRT from the debug-build failpoint at exactly that window.
+    let f = Fixture::new();
+    let (own_pid, own_start) = adopter(&f);
+    let (primary, ws) = f.repo_with_workspace("scroller", BRANCH);
+    let dead = dead_pid().to_string();
+    let record = worker_record(AGENT, BRANCH, &ws, "12345");
+    workers::append(&f.home(), &dead, &record).unwrap();
+
+    let out = cmd(&f, env!("CARGO_BIN_EXE_controller-adopt"), &primary)
+        .arg(AGENT)
+        .env("LANE_ADOPT_ABORT_AFTER_LANDING", "1")
+        .output()
+        .unwrap();
+    use std::os::unix::process::ExitStatusExt;
+    assert_eq!(out.status.signal(), Some(6), "the adopt must die at the failpoint: {}", out_text(&out));
+    let mut got = holders(&f);
+    got.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut expected = vec![(dead.clone(), record), (own_pid.clone(), worker_record(AGENT, BRANCH, &ws, &own_start))];
+    expected.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(got, expected, "killed between landing and removal: a duplicate, never nothing");
+
+    let text = stdout(&restore(&f, &primary));
+    assert!(text.contains("You control implement-345 (scroller-345"), "the adopter restores it: {text}");
+    assert!(!text.contains("Orphaned"), "the dead copy is not offered while its adopter lives: {text}");
+    let again = adopt(&f, &primary, AGENT);
+    assert!(stdout(&again).contains("this session already controls scroller-345"), "{}", out_text(&again));
+}

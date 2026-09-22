@@ -242,13 +242,20 @@ fn is_orphaned(pid: &str, record: &WorkerRecord) -> bool {
 
 /// Every record whose controller is gone and whose workspace still exists,
 /// as (the dead controller's pid, record) — what a live session may adopt.
-/// A workspace already torn down has nothing left to adopt.
+/// A workspace already torn down has nothing left to adopt, and a worker a
+/// live controller holds is no orphan whatever stale copies say: adoption
+/// lands the record before removing the dead copy, so a crash between the
+/// two leaves both (#1098 Codex [high]).
 pub fn orphans(home: &Path) -> Vec<(String, WorkerRecord)> {
-    sidecars(home)
-        .into_iter()
-        .flat_map(|(pid, _)| read(home, &pid).into_iter().map(move |r| (pid.clone(), r)))
-        .filter(|(pid, r)| is_orphaned(pid, r) && Path::new(&r.workspace).is_dir())
-        .collect()
+    let all: Vec<(String, WorkerRecord)> =
+        sidecars(home).into_iter().flat_map(|(pid, _)| read(home, &pid).into_iter().map(move |r| (pid.clone(), r))).collect();
+    let held = |r: &WorkerRecord| all.iter().any(|(pid, h)| h.agent == r.agent && h.workspace == r.workspace && !is_orphaned(pid, h));
+    all.iter().filter(|(pid, r)| is_orphaned(pid, r) && !held(r) && Path::new(&r.workspace).is_dir()).cloned().collect()
+}
+
+/// The one lock every adoption holds from its scan to its landing.
+fn adopt_lock_path(home: &Path) -> PathBuf {
+    home.join(".claude/sessions/.adopt.lock")
 }
 
 /// Why `adopt` moved nothing.
@@ -265,12 +272,15 @@ pub enum AdoptRefusal {
     Io(String),
 }
 
-/// A record `adopt` moved: the dead controller's pid it came from, and the
-/// record as the adopter's sidecar now holds it.
+/// A record `adopt` moved: the dead controller's pid it came from, the
+/// record as the adopter's sidecar now holds it, and whether the dead copy
+/// could not be removed after the landing — inert, since a live controller
+/// holds the worker, and cleared with the workspace by `merge-cleanup`.
 #[derive(Debug)]
 pub struct Adopted {
     pub from_pid: String,
     pub record: WorkerRecord,
+    pub stale_copy_left: bool,
 }
 
 /// Makes the session at `own_pid` (starttime `own_start`) the controller of
@@ -281,15 +291,20 @@ pub struct Adopted {
 /// controllers for one worker is the failure this exists to prevent — and
 /// when the workspace is gone.
 ///
-/// The check and the move happen under the exclusive lock `append` and
-/// `remove_workspace` take, on both sidecars at once, taken in path order so
-/// two adopters can never each hold one and wait on the other. Two sessions
-/// adopting one record therefore serialize: the second finds it gone and
-/// gets `NotFound`. The record leaves the dead sidecar before it lands in
-/// the adopter's, so a crash between the two leaves the worker with no
-/// record rather than a record in two places; a failed write, unlike a
-/// crash, puts it back.
+/// Every adoption holds one lock, `.adopt.lock` beside the sidecars, from
+/// its scan for a live holder to its landing, so two sessions adopting one
+/// worker serialize: the second finds the first's copy alive and is
+/// refused. The move itself also takes the exclusive lock `append` and
+/// `remove_workspace` take, on both sidecars, in path order. The record
+/// lands in the adopter's sidecar before it leaves the dead one (#1098
+/// Codex [high]): a process death between the two leaves a duplicate the
+/// live copy outranks — `orphans` never offers it, and this refuses it —
+/// never a worker in neither file.
 pub fn adopt(home: &Path, agent: &str, within: &str, own_pid: &str, own_start: &str) -> Result<Adopted, AdoptRefusal> {
+    let io = |e: std::io::Error| AdoptRefusal::Io(e.to_string());
+    std::fs::create_dir_all(home.join(".claude/sessions")).map_err(io)?;
+    let guard = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(adopt_lock_path(home)).map_err(io)?;
+    guard.lock().map_err(io)?;
     let names = |r: &WorkerRecord| r.agent == agent && crate::sessions::in_tree(&r.workspace, within);
     let candidates: Vec<(String, PathBuf, Vec<WorkerRecord>)> = sidecars(home)
         .into_iter()
@@ -315,7 +330,8 @@ pub fn adopt(home: &Path, agent: &str, within: &str, own_pid: &str, own_start: &
 }
 
 /// `adopt`'s locked step for one source sidecar. `Ok(None)`: the record was
-/// no longer there once the lock was held.
+/// no longer there once the lock was held. Lands the record in the adopter's
+/// sidecar first, then removes it from the source.
 fn move_record(
     home: &Path,
     from_pid: &str,
@@ -362,25 +378,27 @@ fn move_record(
     let adopted = WorkerRecord { proc_start: own_start.to_string(), ..record };
     let line = serde_json::to_string(&adopted).map_err(|e| AdoptRefusal::Io(e.to_string()))?;
     let mut kept: Vec<&str> = lines.iter().enumerate().filter(|(i, _)| *i != at).map(|(_, l)| *l).collect();
-    match dst.as_mut() {
+    let stale_copy_left = match dst.as_mut() {
         None => {
             kept.push(&line);
             rewrite(&mut src, &kept).map_err(io)?;
+            false
         }
         Some(d) => {
-            rewrite(&mut src, &kept).map_err(io)?;
-            // A record in neither file is a worker nothing will ever offer or
-            // restore again (#1098 review C3): a failed landing puts it back.
-            if let Err(e) = d.write_all(format!("{line}\n").as_bytes()) {
-                let back = match rewrite(&mut src, &lines) {
-                    Ok(()) => format!("the record is back in {}", from.display()),
-                    Err(_) => format!("and could not be put back in {}; the record was: {line}", from.display()),
-                };
-                return Err(AdoptRefusal::Io(format!("{e}; {back}")));
+            // Landing first: a failed write leaves the source untouched
+            // (#1098 review C3), and a death after it leaves a duplicate the
+            // live copy outranks rather than a worker in neither file.
+            d.write_all(format!("{line}\n").as_bytes()).map_err(io)?;
+            #[cfg(debug_assertions)]
+            if std::env::var_os("LANE_ADOPT_ABORT_AFTER_LANDING").is_some() {
+                // Test-only failpoint, absent from a release build: a real
+                // process death in exactly that window.
+                std::process::abort();
             }
+            rewrite(&mut src, &kept).is_err()
         }
-    }
-    Ok(Some(Adopted { from_pid: from_pid.to_string(), record: adopted }))
+    };
+    Ok(Some(Adopted { from_pid: from_pid.to_string(), record: adopted, stale_copy_left }))
 }
 
 #[cfg(test)]
@@ -688,15 +706,15 @@ mod tests {
         assert!(!is_orphaned("0", &r), "pid 0 is no controller's");
     }
 
-    /// #1098 review C3: the record leaves the dead sidecar before it lands in
-    /// the adopter's, so a failed landing must put it back — a worker in
-    /// neither file is one nothing will ever offer or restore again. The
+    /// #1098 review C3: a failed landing must leave the record where it was —
+    /// a worker in neither file is one nothing will ever offer or restore
+    /// again. The
     /// adopter's sidecar is `/dev/full` here, which opens and locks but
     /// refuses every write — and reads zeros forever, so this calls
     /// `move_record`, which never reads the adopter's sidecar, rather than
     /// `adopt`, whose scan reads every sidecar.
     #[test]
-    fn a_failed_write_into_the_adopters_sidecar_puts_the_record_back() {
+    fn a_failed_write_into_the_adopters_sidecar_leaves_the_record_where_it_was() {
         let tmp = TempDir::new().unwrap();
         let home = tmp.path();
         let ws = tmp.path().join("repo/.claude/worktrees/implement-143");
@@ -765,5 +783,33 @@ mod tests {
         drop(held);
         assert!(mover.join().unwrap().unwrap().is_some());
         assert_eq!(read(&home, "4242").len(), 2);
+    }
+
+    /// #1098 Codex [high]: every adoption runs under one lock, so the scan
+    /// for a live holder and the landing are one step across all sidecars —
+    /// two adopters taking the two stale copies a crash can leave would
+    /// otherwise each find its own copy orphaned and both win. Holds that
+    /// lock externally and proves `adopt` cannot finish while it is held.
+    #[test]
+    fn every_adoption_waits_for_the_one_adoption_lock() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let ws = tmp.path().join("repo/.claude/worktrees/implement-143");
+        std::fs::create_dir_all(&ws).unwrap();
+        let ws = ws.display().to_string();
+        append(&home, &i32::MAX.to_string(), &record(&ws)).unwrap();
+
+        let held = std::fs::OpenOptions::new().create(true).write(true).open(adopt_lock_path(&home)).unwrap();
+        held.lock().unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let (h, root) = (home.clone(), tmp.path().display().to_string());
+        let adopter = std::thread::spawn(move || {
+            let got = adopt(&h, "sudokupad-art-143", &root, "4242", "1");
+            let _ = done_tx.send(());
+            got
+        });
+        assert!(done_rx.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "adopt ran without the adoption lock");
+        drop(held);
+        assert!(adopter.join().unwrap().is_ok());
     }
 }

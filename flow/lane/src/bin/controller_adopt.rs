@@ -103,6 +103,9 @@ fn main() -> ExitCode {
     let r = &adopted.record;
     safe_println!("adopted {} ({}) from controller pid {}, which is gone", r.agent, r.branch, adopted.from_pid);
     safe_println!("tell the worker — SendMessage to the session `resolve-controller {}` prints: Your controller is now {name}", r.agent);
+    if adopted.stale_copy_left {
+        safe_println!("note: the dead controller's copy of the record could not be removed; it is inert while this session lives, and merge-cleanup clears it");
+    }
     safe_println!("cleanup: {}", r.cleanup);
     ExitCode::SUCCESS
 }

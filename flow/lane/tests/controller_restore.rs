@@ -322,3 +322,19 @@ fn a_worker_session_in_its_own_orphaned_workspace_is_not_told_to_adopt_itself() 
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(stdout(&out), "", "a worker is never offered itself");
 }
+
+#[test]
+fn a_dead_copy_of_a_worker_a_live_controller_holds_is_not_offered() {
+    // #1098 Codex [high]: adoption lands the record before removing the
+    // dead copy, so a crash between leaves both. The live copy is the
+    // worker's controller; the dead one must never be offered as an orphan.
+    let f = Fixture::new();
+    live_session(&f, "controller-50");
+    let (primary, ws) = f.repo_with_workspace("scroller", "implement-345");
+    let live = LiveProc::start();
+    lane::workers::append(&f.home(), &dead_pid().to_string(), &worker_record("scroller-345", "implement-345", &ws, "12345")).unwrap();
+    lane::workers::append(&f.home(), &live.pid().to_string(), &worker_record("scroller-345", "implement-345", &ws, &live.proc_start())).unwrap();
+    let out = run_in(&f, &primary, "{}", &[]);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(stdout(&out), "", "a worker with a live controller is no orphan, whatever stale copies say");
+}
