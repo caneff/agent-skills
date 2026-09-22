@@ -126,9 +126,9 @@ it escalates is its entry in `~/.agents/skills/CONTEXT.md`. The brief's
 `--controller "<name>"` is the controller's herdr agent name when it has one,
 and a WSL restart renames its Claude session but not that. `SendMessage` takes
 only the session name, so **resolve before every send**:
-`resolve-controller "<name>"` prints the controller's live session name (herdr
-agent name, then that session's current name in `~/.claude/sessions`), and
-that output is the `to`. Never save the printed name for later, and never send
+`resolve-controller "<name>"` prints the controller's live session name: a
+herdr agent name (`herdr agent list` -> `agent_session.value` -> that
+session's current name in `~/.claude/sessions`), and that output is the `to`. Never save the printed name for later, and never send
 to the brief's literal: it may be a herdr agent name, which `SendMessage`
 rejects. Non-zero exit means the name resolves to nothing live: retry once, then
 stop and say so in your pane, sending nothing to a guessed name. A controller announcing a

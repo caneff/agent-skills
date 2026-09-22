@@ -21,8 +21,8 @@ fn main() -> ExitCode {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!(
             "usage: resolve-controller <name>\n\
-             Prints the live Claude session name SendMessage takes for <name>, any herdr\n\
-             agent name (herdr agent list -> agent_session.value ->\n\
+             Prints the live Claude session name SendMessage takes for <name>, which is\n\
+             either a herdr agent name (herdr agent list -> agent_session.value ->\n\
              ~/.claude/sessions/*.json name) or a session name a live session bears now."
         );
         return ExitCode::SUCCESS;
