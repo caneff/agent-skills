@@ -1295,6 +1295,73 @@ fn a_successful_push_leaves_no_stray_stdin_buffer_file_behind() {
     assert!(leftover.is_empty(), "the pre-push wrapper's stdin buffer leaked: {leftover:?}");
 }
 
+/// The wrapper's buffering `cat >"$stdin_buf"` ignored its own exit status
+/// (Codex gate finding on #1006, PR #1068): a copy that fails partway —
+/// disk full, an I/O error — after writing one or more complete ref lines
+/// hands both the foreign hook and the guard a truncated-but-nonempty ref
+/// list, so the guard's zero-ref refusal never fires and the ref that got
+/// cut off pushes through unchecked. Simulated here with a stub `cat` ahead
+/// on PATH that writes one line then exits 1 — the wrapper must refuse
+/// before either the foreign hook or the guard ever runs, which a marker
+/// file from each proves.
+#[test]
+fn a_failed_stdin_buffer_copy_refuses_before_either_hook_runs() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let foreign_ran = f.tmp.path().join("foreign-ran");
+    let guard_ran = f.tmp.path().join("guard-ran");
+    let hook = hooks_dir(&repo).join("pre-push");
+    let foreign = format!("#!/bin/sh\n: >{}\nexit 0\n", foreign_ran.display());
+    std::fs::write(&hook, &foreign).unwrap();
+
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "dispatch failed: {}", out_text(&out));
+
+    // A guard-ran marker is written by wrapping the installed guard binary
+    // itself, since the guard script's own content isn't ours to edit for a
+    // test — a thin stub ahead on PATH under the guard's own name would not
+    // be reached (the wrapper execs it by absolute path). Instead: rename
+    // the installed guard aside and put a marker-writing stand-in at its
+    // exact path, since that's the one thing the failed copy must never
+    // reach regardless of how it's implemented.
+    let guard_path = hooks_dir(&repo).join("commit-identity-guard-pre-push");
+    std::fs::write(&guard_path, format!("#!/bin/sh\n: >{}\nexit 0\n", guard_ran.display())).unwrap();
+    let mut perms = std::fs::metadata(&guard_path).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    std::fs::set_permissions(&guard_path, perms).unwrap();
+
+    let stub_bin = f.tmp.path().join("stub-bin");
+    std::fs::create_dir_all(&stub_bin).unwrap();
+    let stub_cat = stub_bin.join("cat");
+    std::fs::write(&stub_cat, "#!/bin/sh\necho refs/heads/main\nexit 1\n").unwrap();
+    let mut perms = std::fs::metadata(&stub_cat).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    std::fs::set_permissions(&stub_cat, perms).unwrap();
+    let real_path = std::env::var("PATH").unwrap_or_default();
+    let stubbed_path = format!("{}:{real_path}", stub_bin.display());
+
+    let wt = repo.join(".claude/worktrees/implement-395");
+    std::fs::write(wt.join("g"), "x\n").unwrap();
+    std::process::Command::new("git").arg("-C").arg(&wt).args(["add", "g"]).output().unwrap();
+    assert!(std::process::Command::new("git").arg("-C").arg(&wt).args(["commit", "-qm", "x"]).output().unwrap().status.success());
+    let push = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&wt)
+        .args(["push", "origin", "HEAD:refs/heads/stub"])
+        .env("PATH", &stubbed_path)
+        .output()
+        .unwrap();
+    assert!(!push.status.success(), "a push whose stdin buffer copy failed was not refused: {}", out_text(&push));
+    assert!(
+        String::from_utf8_lossy(&push.stderr).contains("could not buffer the pre-push ref list"),
+        "refused for a reason other than the failed copy: {}",
+        out_text(&push)
+    );
+    assert!(!foreign_ran.exists(), "the foreign hook ran despite the buffering copy having failed");
+    assert!(!guard_ran.exists(), "the guard ran despite the buffering copy having failed");
+}
+
 /// `COMMIT_IDENTITY_OVERRIDE` is the one legitimate way past the guard, same
 /// escape as the pre-commit half, and it must reach the push side too.
 #[test]
