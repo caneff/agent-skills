@@ -339,11 +339,11 @@ paid five minutes before the reviewer read anything, and that correctness pass
 took 22 minutes.
 
 A call-site mutation (correctness brief, (e)) is one more kind of mutation for
-this machinery to run: each one — one per protected entry point, enumerated
-beside the constraint mutation it accompanies — gets its own id, its own
-worktree and its own output file, allocated the same way any constraint
-mutation's are, and its `unknown` is reported the same way. No two mutations,
-call-site or constraint, ever share an id.
+this machinery to run, one per protected entry point, enumerated beside the
+constraint mutation it accompanies. Each gets its own id, its own worktree and
+its own output file — allocated the same way a constraint mutation's are — and
+its `unknown` is reported the same way. No two mutations, call-site or
+constraint, ever share an id.
 
 Two things the concurrency must not cost. **The message stays paired with its
 mutation**: reading the message rather than the exit status is what catches
