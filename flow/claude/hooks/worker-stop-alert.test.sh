@@ -82,6 +82,10 @@ task_done() { printf '{"type":"user","origin":{"kind":"task-notification"},"mess
 # monitor_event <task-id> : a Monitor event notification — a `<task-id>` with
 # no `<status>`. The monitor is still running, so this is not a return.
 monitor_event() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<summary>Monitor event: job progress</summary>\\n<event>13:45:43 tick</event>\\n</task-notification>"}}\n' "$1"; }
+# monitor_timeout <task-id> : the Monitor timeout notification (#981) — a
+# `<task-id>` with no `<status>`, same shape as monitor_event, but the
+# monitor has stopped watching, not ticked.
+monitor_timeout() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<summary>Monitor event: \\"placeholder wait\\"</summary>\\n<event>[Monitor timed out \\u2014 re-arm if needed.]</event>\\n</task-notification>"}}\n' "$1"; }
 # task_stop <task-id> : the worker stopping a monitor itself.
 task_stop() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"ts-%s","name":"TaskStop","input":{"task_id":"%s"}}]}}\n' "$1" "$1"; }
 # work : a tool call that is not a report — the mark of a turn that did
@@ -299,6 +303,19 @@ t="$tmp/monitor-stopped.jsonl"
   monitor_launch bq1w2e3r4; task_stop bq1w2e3r4; assistant_text "stopped watching"; } > "$t"
 run "monitor stopped by the worker" "$t"
 expect_alert "a monitor the worker stopped with TaskStop is not still outstanding"
+
+# A Monitor timeout notification is the monitor stopping, not a tick: it must
+# read as a finish, not a touch, or the launch it names stays outstanding
+# across every later turn and a genuine silent stop never alerts (#981).
+reset_log
+t="$tmp/monitor-timeout.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
+  monitor_launch bmto1; assistant_text "watching the job"; } > "$t"
+run "monitor out" "$t"
+expect_none "a stop while a Monitor task is out does not alert"
+{ peer "status?"; monitor_timeout bmto1; assistant_text "noted, moving on"; } >> "$t"
+run "monitor timed out this turn, nothing else touched it" "$t"
+expect_alert "a timed-out Monitor's statusless notification does not keep the launch outstanding, so a silent stop alerts"
 
 # Already reported, then answered a message that needed no reply (#886,
 # false alert 3 of 3 — the one a diligent controller manufactures for

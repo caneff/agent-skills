@@ -16,7 +16,9 @@
 # qualified (`name@session-...`) where the reply's `teammate_id` is bare, so
 # matching strips the `@session-...` suffix before comparing. A background
 # shell and a Monitor task are out on the same footing (#886), and end only
-# at a status-bearing task-notification or a `TaskStop`. Also not a silent
+# at a status-bearing task-notification, a `TaskStop`, or a Monitor timeout
+# notification (`<event>[Monitor timed out — re-arm if needed.]</event>`,
+# statusless but a finish, not a touch — #981). Also not a silent
 # stop: a worker that reported and has done nothing since — an inbound peer
 # message starts a turn, so a controller closing its own loop (`merged, sha
 # X`) otherwise manufactures an alert on that worker's next stop (#886).
@@ -111,11 +113,20 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
   # or one that errored, is a call and not evidence of life.
   | [$after[] | select(.type == "user") | .message.content | arrays[]
       | select(.type == "tool_result" and .is_error != true) | .tool_use_id] as $answered
+  # A Monitor timeout notification (`<event>[Monitor timed out — re-arm if
+  # needed.]</event>`, no `<status>`) is the monitor stopping, not a tick: it
+  # reads a finish, not a touch, or the launch it names stays outstanding
+  # across every later turn (#981).
+  | [$all[] | .value | select(.type == "user" and .origin.kind == "task-notification")
+      | .message.content | strings | select(test("<status>") | not)
+      | select(test("Monitor timed out"))
+      | scan("<task-id>([^<]+)</task-id>")[0]] as $timed_out
   | ([$after[] | select(.type == "assistant") | .message.content[]?
         | select(.type == "tool_use" and (.id | IN($answered[]))) | .input | objects
         | (.task_id, .shell_id, .bash_id, .agentId, .agent_id, .to) | strings]
      + [$after[] | select(.type == "user" and .origin.kind == "task-notification")
         | .message.content | strings | select(test("<status>") | not)
+        | select(test("Monitor timed out") | not)
         | scan("<task-id>([^<]+)</task-id>")[0]]) as $touched
   # An id is compared whole, in the fields that name a task or an agent, and
   # never searched for inside free text: an id that merely appears in a
@@ -137,6 +148,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg s
       | (.backgroundTaskId // .taskId) | select(strings)] as $tasks_now
   | [($all[] | .value | select(.type == "user") | .message.content | strings
        | select(test("<status>")) | scan("<task-id>([^<]+)</task-id>")[0]),
+     $timed_out[],
      ($all[] | .value | select(.type == "assistant") | .message.content[]?
        | select(.type == "tool_use" and .name == "TaskStop")
        | (.input.task_id // .input.shell_id) | select(strings))] as $finished
