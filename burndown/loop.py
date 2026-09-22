@@ -798,11 +798,13 @@ def run(argv):
             # here too, not hide behind "nothing to dispatch".
             count, counter = agent_count(args)
             # A landed clump awaiting cleanup is not a live worker: it is
-            # filtered out before either the core accounting or the peak
-            # live count sees it, so a run file that sets `landed` without
-            # ever clearing `job` reads as a freed slot instead of refusing
-            # the whole tick on a job record that will never be recorded
-            # (#1003).
+            # filtered out before the core accounting, the peak live count,
+            # and the frontier all see it, so a run file that sets `landed`
+            # without ever clearing `job` reads as a freed slot instead of
+            # refusing the whole tick on a job record that will never be
+            # recorded (#1003) — and its dead workspace (the change is on
+            # `main`; the next worker branches from there) never blocks a
+            # candidate sharing its closure (Codex gate, PR #1050).
             unlanded = [c for c in in_flight if not c.get("landed")]
             cores = core_room(free, unlanded)
             cores_line = render_cores(cores, free)
@@ -817,7 +819,7 @@ def run(argv):
                 # dispatch.
                 print("nothing to dispatch: every free slot is held by a "
                       "declared job")
-                print(render_dispatch([], frontier(candidates, in_flight)["held"]))
+                print(render_dispatch([], frontier(candidates, unlanded)["held"]))
                 return 0
             live = len(unlanded)
             room, refusals = box_room(count, args.committed_gb,
@@ -828,7 +830,7 @@ def run(argv):
                     print(f"loop.py: {refusal}", file=sys.stderr)
                 return 1
             print(render_peak(count, live, room))
-            state = frontier(candidates, in_flight)
+            state = frontier(candidates, unlanded)
             picked, same_tick_held = picks(state, room)
             lines = render_dispatch(picked, state["held"] + same_tick_held)
             if room < cores["room"]:

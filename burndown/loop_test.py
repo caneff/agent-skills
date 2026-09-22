@@ -1041,6 +1041,29 @@ def test_the_cli_dispatch_treats_a_landed_clumps_null_job_as_a_freed_slot():
         assert "dispatch  #500" in got.stdout, got.stdout
 
 
+def test_the_cli_dispatch_frontier_ignores_a_landed_clumps_own_closure():
+    # A landed clump's workspace is dead — its change is on main, and the
+    # next worker branches from main — so it holds nothing. `frontier` must
+    # be fed the same `unlanded` collection core_room and the peak count
+    # use, or a candidate sharing a file with the landed clump's closure
+    # reads as blocked by a workspace that no longer exists (Codex gate on
+    # PR #1050).
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [500], "closure": ["verify.py"]}], fh)
+        clumps = in_flight_clumps(job=None, other=NO_JOB)
+        clumps[0]["landed"] = "a1b2c3d"
+        with open(live, "w") as fh:
+            json.dump(clumps, fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "4", "--committed-gb", "4")
+        assert got.returncode == 0, got
+        assert "dispatch  #500" in got.stdout, got.stdout
+        assert "held" not in got.stdout, got.stdout
+
+
 def test_the_cli_refuses_a_dispatch_while_a_worker_is_unrecorded():
     with tempfile.TemporaryDirectory() as tmp:
         cand, live = dispatch_files(tmp, None)
