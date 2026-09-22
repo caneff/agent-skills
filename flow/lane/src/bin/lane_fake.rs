@@ -108,8 +108,9 @@ fn env_flag(name: &str) -> bool {
 /// by its parent pid) at its *second* view of a given ticket — the reread —
 /// until two dispatches have reached theirs, or 3s; the first view of any
 /// ticket passes straight through. Independent of any lock the dispatches
-/// take, so a test can make two runs reach the reread together and see what
-/// the lock does to that.
+/// take, so a test can make two runs reach the reread within microseconds of
+/// each other — released together, not literally simultaneously — and see
+/// what the lock does to that.
 fn view_barrier(n: &str) {
     let Ok(dir) = env::var("GH_VIEW_BARRIER_DIR") else { return };
     let ppid = std::fs::read_to_string("/proc/self/stat")
