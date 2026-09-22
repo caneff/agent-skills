@@ -58,6 +58,13 @@ check_in "$sweep_text" 'gh issue list' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'in:title' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'not one-shot' 'burndown/SKILL.md § The sweep'
 
+# #1033: a per-PR sweep found on the frontier folds into the run's own
+# sweep rather than standing beside it, so the run close still files exactly
+# one sweep ticket.
+check_in "$sweep_text" 'per-PR sweep' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" "folds its items into the run's sweep" 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'closes it with a pointer' 'burndown/SKILL.md § The sweep'
+
 # The run report's three counts. Each needle carries the bold emphasis
 # markers around its own word: a bare 'leftover' matches "leftovers" six
 # times over in surrounding prose, and a bare 'standalone' matches "stay

@@ -205,6 +205,16 @@ the loop itself stay standalone tickets (§ Before a controller rules), never
 folded into the sweep and never in any sidecar — the controller adds its own
 filed-observation count to `counts`' standalone number by hand.
 
+**A per-PR sweep found on the frontier** (`implement/SKILL.md` § Review: a
+worker with no run file under it files one of these titled `Sweep:
+leftovers from PR #<n>`) is not a second sweep ticket for this run. The
+controller folds its items into the run's sweep — the same render-and-file
+step above, its body carrying that PR's bullets alongside every other
+clump's — and closes it with a pointer to the run sweep,
+`gh issue close <n> --repo <owner/name> --comment "Folded into
+<run-sweep-url>"`, so the frontier still closes to exactly one open sweep
+per run.
+
 ## The frontier
 
 Which tickets a run may dispatch next — open, labelled, unclaimed, waiting on

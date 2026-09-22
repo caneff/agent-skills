@@ -195,9 +195,13 @@ No PR and no reviewer; Chris reads the log after.
    ad hoc `gh issue create` skips that role. `filed` is reserved for a high
    finding, under the severity mapping below. A finding that is not high and
    not fixed in the round takes `leftover`: no ticket of its own, only a
-   sidecar line (step 2) and `leftover` in prose. The sweep that collects
-   leftovers into one ticket is not built yet (#1029, #1030, #1033); until it
-   lands, the sidecar line is the only record.
+   sidecar line (step 2) and `leftover` in prose. A worker with **no run
+   file** under it — building outside a burn — files one
+   `Sweep: leftovers from PR #<n>` ticket through `/file-ticket` for its
+   PR's `leftover` lines, in #1030's body shape (grouped by file, one
+   bullet per item); no `leftover` lines files nothing, the same
+   zero-leftovers rule the burn sweep uses
+   (`burndown/SKILL.md` § The sweep).
    On a repo whose `origin` owner isn't
    your `gh` login, `/file-ticket` hands the command back instead of filing,
    so there is no ticket number: the disposition is `handed back: <the
