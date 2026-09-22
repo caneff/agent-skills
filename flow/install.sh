@@ -60,6 +60,28 @@ fi
 # Code settings and claude/settings.json.
 bash "$here/backup-sync.sh" --restore
 
+# herdr-toast-install links the toast scripts and registers the herdrfocus:
+# handler (see its own header for what it refuses and why). Runs after every
+# symlink and backup above, since it is the one step here that reaches outside
+# the filesystem (the Windows registry) and is the most likely to fail on a
+# given machine. Only its two by-design skips (a linked worktree, a path under
+# /tmp) are swallowed — its third refusal (a real directory at a link
+# destination) and every other failure are real problems on that machine, not
+# a benign skip, so they are reported as failures: the rest of the install
+# still runs, but install.sh exits nonzero at the end and names the toast step
+# (toast_failed below), rather than exiting 0 as though nothing went wrong.
+toast_failed=""
+if ! toast_out=$(bash "$here/bin/herdr-toast-install" 2>&1); then
+  if printf '%s\n' "$toast_out" | grep -qE '^refusing: .*(is under /tmp|is in a linked worktree)'; then
+    printf '%s\n' "$toast_out"
+    echo "herdr-toast-install skipped (see message above)"
+  else
+    printf '%s\n' "$toast_out" >&2
+    echo "herdr-toast-install failed (not a by-design refusal) — see above" >&2
+    toast_failed=1
+  fi
+fi
+
 # implement-dispatch (#748) and merge-cleanup (#749) are Rust binaries:
 # cargo install replaces each in place, rather than a symlink into the repo,
 # and replaces the symlink an earlier install left for either. Runs last,
@@ -73,3 +95,8 @@ bash "$here/lane-install.sh"
 
 echo
 echo "Done. The live flow tooling now points at this repo; commit to back it up."
+
+if [ -n "$toast_failed" ]; then
+  echo "herdr-toast-install failed for a non-refusal reason; the rest of the install ran anyway — see above" >&2
+  exit 1
+fi

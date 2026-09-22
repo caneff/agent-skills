@@ -8,9 +8,33 @@ set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 
-tmp=$(mktemp -d)
+# TMPDIR pinned to /tmp: the herdr-toast-install refusal case below depends on
+# every scratch repo living under /tmp, and a caller's own TMPDIR would move
+# them elsewhere without any of this file's other behavior changing.
+tmp=$(TMPDIR=/tmp mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+
+# herdr-toast-install's happy path writes the real Windows registry via
+# reg.exe. Stub it (and the powershell.exe/wslpath it also shells out to) on
+# PATH ahead of the real ones so no run in this file can reach the registry,
+# regardless of whether $tmp actually resolves under /tmp — herdr-toast-install
+# is exercised for real below (case: toast success), not only in its own
+# fixture test.
+stub="$tmp/stub"
+mkdir -p "$stub"
+for x in reg.exe powershell.exe; do
+  cat > "$stub/$x" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+done
+cat > "$stub/wslpath" <<'STUB'
+#!/usr/bin/env bash
+printf '\\\\wsl.localhost\\stub%s\n' "$(printf '%s' "$2" | tr / '\\')"
+STUB
+chmod +x "$stub/"*
+PATH="$stub:$PATH"
 
 # cargo install (run by lane-install.sh) needs its own real cache — captured
 # before HOME is overridden below — so a scratch HOME does not force a
@@ -135,6 +159,80 @@ if [ -L "$tmp/home/.claude/agents/diff-reviewer.md" ]; then
   echo "PASS reviewer agent definition linked under the scratch HOME"
 else
   echo "FAIL claude/agents/diff-reviewer.md not linked under the scratch HOME"; fails=1
+fi
+
+# herdr-toast-install (#1016) is routed from install.sh, but this scratch repo
+# sits under /tmp, so the toast installer refuses (by design) — the refusal
+# must be reported, not swallowed, and must not abort the rest of the install.
+# Both the installer's own refusal text and install.sh's own "skipped" line
+# must show up: either alone could be produced by the installer not running at
+# all (a missing/renamed bin/herdr-toast-install exits 127 with no "refusing:"
+# line, and install.sh would still print "skipped" for it if only that string
+# were checked).
+if printf '%s' "$out" | grep -q 'herdr-toast-install skipped' \
+   && printf '%s' "$out" | grep -q '^refusing: .*is under /tmp'; then
+  echo "PASS a refused herdr-toast-install is reported"
+else
+  echo "FAIL install.sh did not report a refused herdr-toast-install: $out"; fails=1
+fi
+
+# The success path: with the /tmp refusal lifted (HERDR_TOAST_ALLOW_TMP=1) and
+# the registry stubbed above, herdr-toast-install actually runs to completion —
+# not just its by-design refusal.
+succ="$tmp/succ"
+scratch_repo "$succ"
+out=$(HOME="$tmp/succ-home" HERDR_TOAST_ALLOW_TMP=1 bash "$succ/flow/install.sh" 2>&1) || { echo "FAIL install.sh exited non-zero with HERDR_TOAST_ALLOW_TMP=1: $out"; fails=1; }
+if [ -L "$tmp/succ-home/.local/bin/herdr-focus-latest" ] \
+   && [ "$(readlink "$tmp/succ-home/.local/bin/herdr-focus-latest")" = "$succ/flow/bin/herdr-focus-latest" ]; then
+  echo "PASS herdr-toast-install actually links the toast scripts when it isn't refused"
+else
+  echo "FAIL herdr-toast-install's success path was not exercised: $out"; fails=1
+fi
+if printf '%s' "$out" | grep -q 'herdr-toast-install skipped'; then
+  echo "FAIL install.sh reported a skip although herdr-toast-install ran to completion: $out"; fails=1
+else
+  echo "PASS no spurious skip message on the success path"
+fi
+
+# Codex gate finding 1: a non-refusal failure of herdr-toast-install must not
+# be swallowed as a benign skip — install.sh still runs the rest of the
+# install, but exits nonzero at the end and names the toast step.
+fail="$tmp/fail"
+scratch_repo "$fail"
+cat > "$fail/flow/bin/herdr-toast-install" <<'STUB'
+#!/usr/bin/env bash
+echo "boom: something real broke" >&2
+exit 1
+STUB
+chmod +x "$fail/flow/bin/herdr-toast-install"
+out=$(HOME="$tmp/fail-home" bash "$fail/flow/install.sh" 2>&1); rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "PASS a non-refusal herdr-toast-install failure makes install.sh exit nonzero"
+else
+  echo "FAIL install.sh exited 0 despite a non-refusal herdr-toast-install failure: $out"; fails=1
+fi
+if [ -L "$tmp/fail-home/.local/bin/job-run" ]; then
+  echo "PASS later install steps still ran after the non-refusal failure"
+else
+  echo "FAIL later install steps did not run after the non-refusal failure: $out"; fails=1
+fi
+if printf '%s' "$out" | grep -q 'herdr-toast-install' && printf '%s' "$out" | grep -qi 'fail'; then
+  echo "PASS the final summary names the toast step as failed"
+else
+  echo "FAIL no summary naming the toast step's failure: $out"; fails=1
+fi
+
+# Codex gate finding 2: the installer's third refusal (a real directory at a
+# link destination) is a real machine failure, not one of its two by-design
+# skips (/tmp, linked worktree) — it must not be swallowed as "skipped" either.
+dirref="$tmp/dirref"
+scratch_repo "$dirref"
+mkdir -p "$tmp/dirref-home/.local/bin/herdr-focus.vbs"
+out=$(HOME="$tmp/dirref-home" HERDR_TOAST_ALLOW_TMP=1 bash "$dirref/flow/install.sh" 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && ! printf '%s' "$out" | grep -q 'herdr-toast-install skipped'; then
+  echo "PASS the real-directory refusal is treated as a failure, not skipped"
+else
+  echo "FAIL the real-directory refusal was swallowed as a skip (rc=$rc): $out"; fails=1
 fi
 
 # An empty claude/agents dir leaves the literal glob; without the guard `link`
