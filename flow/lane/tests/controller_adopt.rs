@@ -320,4 +320,7 @@ fn an_adopt_killed_after_landing_leaves_the_worker_with_its_adopter_and_offered_
     assert!(!text.contains("Orphaned"), "the dead copy is not offered while its adopter lives: {text}");
     let again = adopt(&f, &primary, AGENT);
     assert!(stdout(&again).contains("this session already controls scroller-345"), "{}", out_text(&again));
+    // The killed run printed nothing, so the retry is the only place the
+    // worker's re-point message can come from (#1098 second Codex pass).
+    assert!(stdout(&again).contains("Your controller is now controller-50"), "{}", out_text(&again));
 }
