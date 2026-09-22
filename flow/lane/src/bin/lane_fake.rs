@@ -277,7 +277,11 @@ fn gh_pr_list(args: &[String]) -> ExitCode {
     // merge-cleanup's `--json number,headRefOid` below — routed on the field
     // list rather than a new flag, so the two fakes can never be confused for
     // each other by a caller that forgets to set the right env var (#1042).
-    if json_fields.contains("state") {
+    // An exact field match, not a substring one (#1042 standards S2): a
+    // future `--json number,headRefOid,state` or `--json
+    // statusCheckRollup` would contain "state" as a substring while asking
+    // for neither of these two shapes.
+    if json_fields.split(',').any(|f| f == "state") {
         return gh_pr_list_status(head, jq);
     }
     let dir = env::var("GH_PR_HEADS").unwrap_or_default();
