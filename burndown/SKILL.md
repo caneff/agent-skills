@@ -95,10 +95,10 @@ too.
 7. **Box check before every dispatch** — read `uptime` and `free -g`, and
    pass the committed `ulimit -v` GB to `loop.py dispatch`, which weighs every
    worker the tick would start, takes only as many as the box has room for,
-   and refuses outright when that is none. The **28** cap counts **agent
-   processes** — Claude sessions, subagents included — across the whole
-   shared box, not this run's and **not OS processes**: an idle WSL box holds
-   ~190 of those, so `ps | wc -l` refuses every dispatch. `loop.py` counts
+   and refuses outright when that is none. The **28** cap is on **Claude
+   sessions**, subagents included, across the whole shared box, not this
+   run's and **not OS processes**: an idle WSL box holds ~190 of those, so
+   `ps | wc -l` refuses every dispatch. `loop.py` counts
    herdr's **working** agents (`herdr agent list`, `agent_status` `working`),
    since an idle or done session costs no cores; it falls back to a process
    count (`ps -eo comm= | grep -cx claude`, by command name: `pgrep -f

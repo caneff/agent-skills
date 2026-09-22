@@ -233,6 +233,19 @@ HERDR_COUNTER = "`herdr agent list` entries with agent_status working"
 UNSTATED_COUNTER = "count supplied by the caller"
 
 
+def _run_counted(cmd):
+    """(status, stdout) for a counting command — `ps` or `herdr` — run with
+    a 10s timeout; the default `ps`/`run` both counters take when the
+    caller passes none. An `OSError` (the binary is missing) or a
+    subprocess failure reads as a failed run, not a crash: the caller
+    decides whether that is refusable."""
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 1, f"{exc}"
+    return done.returncode, done.stdout
+
+
 def count_agent_processes(ps=None):
     """The agent processes on the box, counted by command name: one per
     `claude` session (subagents run inside it). Counting by name and not by
@@ -244,13 +257,7 @@ def count_agent_processes(ps=None):
     (exit status, stdout).
     """
     if ps is None:
-        def ps(cmd):
-            try:
-                done = subprocess.run(cmd, capture_output=True, text=True,
-                                      timeout=10)
-            except (OSError, subprocess.SubprocessError) as exc:
-                return 1, f"{exc}"
-            return done.returncode, done.stdout
+        ps = _run_counted
     status, out = ps(["ps", "-eo", "comm="])
     names = [line.strip() for line in out.splitlines() if line.strip()]
     if status != 0 or not names:
@@ -275,10 +282,12 @@ def count_agent_processes(ps=None):
 def count_working_herdr_agents(run=None):
     """The box's working agents by herdr's own accounting: `herdr agent
     list` filtered to `agent_status == "working"`, which drops the idle and
-    done sessions a raw `ps` count cannot tell from a live one. A subagent
-    mid-turn is its own `claude` process that herdr lists as its own
-    working agent, so this counts the same unit the peak reserve already
-    assumes (#1075).
+    done sessions a raw `ps` count cannot tell from a live one. Like `ps`,
+    herdr counts by pane — one entry per Claude session, a review
+    fan-out's subagents included in that one entry rather than listed on
+    their own (#1075) — so a foreign controller's own fan-out is not
+    separately visible here either; this run's own peak reserve is what
+    covers its own live workers' fan-out, unchanged.
 
     `run` takes the herdr command and returns (status, stdout), the same
     contract `count_agent_processes` uses for `ps`. Raises when herdr
@@ -287,13 +296,7 @@ def count_working_herdr_agents(run=None):
     back to a process count rather than reading a broken query as zero.
     """
     if run is None:
-        def run(cmd):
-            try:
-                done = subprocess.run(cmd, capture_output=True, text=True,
-                                      timeout=10)
-            except (OSError, subprocess.SubprocessError) as exc:
-                return 1, f"{exc}"
-            return done.returncode, done.stdout
+        run = _run_counted
     status, out = run(["herdr", "agent", "list"])
     if status != 0:
         raise LoopError(

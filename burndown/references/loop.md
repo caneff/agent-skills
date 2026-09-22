@@ -125,10 +125,12 @@ reviews (#933): each new worker costs 5, each live worker keeps 4 in reserve.
 The count that gates the cap is herdr's **working** agents (`herdr agent
 list`, `agent_status` `working`), not every `claude` process on the box: an
 idle or done session costs no cores, and counting it held a run to fewer
-live workers than the box actually had room for (#1075). A subagent mid-turn
-is its own `claude` process that herdr lists as its own working agent, so
-counting working agents still catches a review fan-out — the peak reserve
-per slot is unchanged. `loop.py` falls back to a process count (`ps -eo
+live workers than the box actually had room for (#1075). Like `ps`, herdr
+counts by pane — one entry per Claude session, a review fan-out's
+subagents folded into that entry rather than listed on their own — so a
+*foreign* controller's fan-out is not separately visible in this count
+either; only this run's own peak reserve, unchanged, covers its own live
+workers' fan-out. `loop.py` falls back to a process count (`ps -eo
 comm= | grep -cx claude`, by command name, never a substring of the command
 line, which overcounted 2x) only when herdr cannot answer, and the refusal
 names which counter it used. The `peak:` line prints the working count and
