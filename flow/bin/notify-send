@@ -10,7 +10,9 @@ positional=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -a|--app-name|-i|--icon|-u|--urgency|-t|--expire-time|-c|--category|-h|--hint|-A|--action|-r|--replace-id)
-      shift 2 ;;
+      # A flag with no value left (this one is the last argument): drop it
+      # rather than `shift 2`, which leaves $# unchanged and spins forever.
+      if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
     --app-name=*|--icon=*|--urgency=*|--expire-time=*|--category=*|--hint=*|--action=*|--replace-id=*)
       shift ;;
     -e|--transient|-p|--print-id|-w|--wait|-v|--version|-?|--help)
@@ -56,5 +58,9 @@ script="
 # the ~/.local/bin symlink, so run-hidden.vbs is addressed where it really is.
 bindir_win=$(wslpath -w "$(dirname "$(readlink -f "$0")")")
 enc=$(printf '%s' "$script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
-/mnt/c/Windows/System32/wscript.exe //B //Nologo "$bindir_win\run-hidden.vbs" powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand "$enc" >/dev/null 2>&1 </dev/null &
+# A test seam: NOTIFY_SEND_WSCRIPT lets a test point this at a stub instead
+# of the real Windows binary, so the parser test can run everywhere with no
+# namespace isolation and no capability-dependent skip.
+wscript="${NOTIFY_SEND_WSCRIPT:-/mnt/c/Windows/System32/wscript.exe}"
+"$wscript" //B //Nologo "$bindir_win\run-hidden.vbs" powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand "$enc" >/dev/null 2>&1 </dev/null &
 exit 0
