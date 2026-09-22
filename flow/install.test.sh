@@ -8,7 +8,10 @@ set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 
-tmp=$(mktemp -d)
+# TMPDIR pinned to /tmp: the herdr-toast-install refusal case below depends on
+# every scratch repo living under /tmp, and a caller's own TMPDIR would move
+# them elsewhere without any of this file's other behavior changing.
+tmp=$(TMPDIR=/tmp mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
