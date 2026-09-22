@@ -5,6 +5,7 @@ stub messenger. The loop's prose — its step list, its refusals, its stated
 consequences — is guarded in `burndown/loop-steps.test.sh`; there is no
 harness that runs a skill's own text.
 """
+import contextlib
 import json
 import os
 import subprocess
@@ -394,51 +395,88 @@ def test_resume_sends_exactly_one_message_per_live_unlanded_worker():
     assert "resolve-controller" in sent[0][1], sent[0][1]
 
 
+# One canned answer per name. `burn-bad-exit` and `burn-empty-ok` exist to
+# keep resolve_via_binary's two guards from masking each other (#1013 C1):
+# each fails a different way, so a test can delete either guard on its own
+# and still see a red that only that guard would have caught.
 RESOLVE_CONTROLLER_STUB = """#!/usr/bin/env bash
-# Stands in for the `resolve-controller` binary: one canned answer per name.
 case "$1" in
   burn-455) echo "session-455" ;;
+  burn-bad-exit) echo "not-a-name"; exit 1 ;;
+  burn-empty-ok) exit 0 ;;
   *) echo "resolve-controller: $1 is neither a herdr agent name nor the name of a live session" >&2
      exit 1 ;;
 esac
 """
 
 
-def test_resolve_via_binary_prints_the_resolved_session_name():
+@contextlib.contextmanager
+def stubbed_resolve_controller(script=RESOLVE_CONTROLLER_STUB):
+    """Puts a fake `resolve-controller` on `PATH` for the block, restoring
+    `PATH` after — the ritual every test below needs, in one place rather
+    than copied three times (#1013 S1). `os.environ.get("PATH", "")` rather
+    than `None` so a caller with no `PATH` set (`env -i`) does not raise
+    concatenating past it (#1013 S2/C3)."""
     with tempfile.TemporaryDirectory() as tmp:
         stub = os.path.join(tmp, "resolve-controller")
         with open(stub, "w") as fh:
-            fh.write(RESOLVE_CONTROLLER_STUB)
+            fh.write(script)
         os.chmod(stub, 0o755)
-        old_path = os.environ.get("PATH")
+        old_path = os.environ.get("PATH", "")
         os.environ["PATH"] = tmp + os.pathsep + old_path
         try:
-            assert loop.resolve_via_binary("burn-455") == "session-455"
+            yield tmp
         finally:
             os.environ["PATH"] = old_path
 
 
+def test_resolve_via_binary_prints_the_resolved_session_name():
+    with stubbed_resolve_controller():
+        assert loop.resolve_via_binary("burn-455") == "session-455"
+
+
 def test_resolve_via_binary_refuses_a_name_that_does_not_resolve():
-    with tempfile.TemporaryDirectory() as tmp:
-        stub = os.path.join(tmp, "resolve-controller")
-        with open(stub, "w") as fh:
-            fh.write(RESOLVE_CONTROLLER_STUB)
-        os.chmod(stub, 0o755)
-        old_path = os.environ.get("PATH")
-        os.environ["PATH"] = tmp + os.pathsep + old_path
+    with stubbed_resolve_controller():
         try:
             loop.resolve_via_binary("burn-999")
         except loop.LoopError as exc:
             assert "burn-999" in str(exc), exc
         else:
             raise AssertionError("an unresolved name must be refused")
-        finally:
-            os.environ["PATH"] = old_path
+
+
+def test_resolve_via_binary_refuses_a_nonzero_exit_even_with_stdout_output():
+    # A binary that exits non-zero after printing something on stdout must
+    # not be read as a resolved name — that reading is the mask deleting
+    # the exit-status check alone would leave in place.
+    with stubbed_resolve_controller():
+        try:
+            loop.resolve_via_binary("burn-bad-exit")
+        except loop.LoopError as exc:
+            # No stderr, so the refusal falls back to the stdout it must not
+            # treat as a resolved name.
+            assert "not-a-name" in str(exc), exc
+        else:
+            raise AssertionError(
+                "a non-zero exit must be refused whatever it printed")
+
+
+def test_resolve_via_binary_refuses_a_zero_exit_with_empty_stdout():
+    # A binary that exits 0 but prints nothing must not resolve to "" — the
+    # mask deleting the empty-stdout check alone would leave in place.
+    with stubbed_resolve_controller():
+        try:
+            loop.resolve_via_binary("burn-empty-ok")
+        except loop.LoopError as exc:
+            assert "burn-empty-ok" in str(exc), exc
+        else:
+            raise AssertionError(
+                "an empty answer must be refused, not read as a name")
 
 
 def test_resolve_via_binary_refuses_when_the_binary_is_missing():
     with tempfile.TemporaryDirectory() as tmp:
-        old_path = os.environ.get("PATH")
+        old_path = os.environ.get("PATH", "")
         os.environ["PATH"] = tmp
         try:
             loop.resolve_via_binary("burn-455")
@@ -448,6 +486,24 @@ def test_resolve_via_binary_refuses_when_the_binary_is_missing():
             raise AssertionError("a missing binary must be refused, not silent")
         finally:
             os.environ["PATH"] = old_path
+
+
+def test_announce_uses_the_default_resolver_when_none_is_passed():
+    # #1013 P2: every other announce test injects its own `resolve`, so
+    # nothing exercises the wiring between `announce` and its default
+    # (`resolve_via_binary`) — a regression that swapped the default for an
+    # identity function would still pass the suite. This one calls
+    # `announce` with only `send`, over a stubbed `resolve-controller`.
+    sent = []
+
+    def send(agent, msg):
+        assert agent != "burn-455", (
+            "send must never see the durable herdr agent name")
+        sent.append((agent, msg))
+
+    with stubbed_resolve_controller():
+        loop.announce(resume_state(), send)
+    assert sent == [("session-455", sent[0][1])]
 
 
 def test_resume_sends_nothing_to_a_landed_or_vanished_worker():

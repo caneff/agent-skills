@@ -458,16 +458,11 @@ def announce(state, send, resolve=resolve_via_binary):
     """Tell every live, unlanded worker who its controller is now — exactly
     one message each, and nothing to anyone else.
 
-    `state` is `runfile.reconcile`'s answer and `send(agent, message)` is the
-    caller's messenger. The bucket is `announce` and only that one. The run
-    file keys a worker by its herdr agent name — the durable key, not an
-    address — so `resolve(agent) -> session name` resolves it to what `send`
-    can reach, immediately before each send, and nothing upstream of that
-    call ever sees the resolved name: writing it back into the run file is
-    what aged and broke the last trial. Defaults to `resolve_via_binary`; a
-    test passes its own to witness that `send` never sees the durable name.
-    A worker whose name does not resolve is refused by name, and reached
-    workers are not re-sent on retry. Why each of those: `references/loop.md`.
+    `state` is `runfile.reconcile`'s answer; `send(agent, message)` is the
+    caller's messenger and `resolve(agent) -> session name` (default
+    `resolve_via_binary`) is called immediately before each send, so `send`
+    never sees the worker's durable herdr agent name. A name that does not
+    resolve refuses by name. Why: `references/loop.md`.
     """
     sent = []
     for entry in state["announce"]:
