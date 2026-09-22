@@ -12,9 +12,12 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   session name in the brief. Why: a claim made from inside the workspace let
   two sessions dispatch the same ticket, and a brief sent before the trust
   dialog is accepted lands in the dialog.
-  It also installs the commit-identity guard beside the repo's hooks and, when
-  there is no `pre-commit`, a wrapper calling it; a foreign `pre-commit` that
-  does not call the guard refuses the dispatch, naming the hook.
+  It also installs the commit-identity guard beside the repo's hooks and
+  unconditionally makes `pre-commit` its own wrapper: a foreign `pre-commit`
+  is never trusted by its text, only taken over — moved aside under a stable
+  name, forced executable, and run by the wrapper before the wrapper always
+  runs the guard itself (`flow/lane/src/bin/implement_dispatch.rs`,
+  `install_identity_guard`, #1009).
 - Every Agent call passes `model` — a bare call inherits the session's model.
   Explore/lookup → `sonnet`, review/diagnosis → `opus`. Rubric:
   `~/.agents/skills/flow/claude/subagent-tiers.md`. Why: a bare call runs a
