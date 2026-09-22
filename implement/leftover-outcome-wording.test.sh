@@ -58,5 +58,11 @@ check_in "§ The PR" "$the_pr" 'labelled `ready-for-agent`'
 check_in "§ The PR" "$the_pr" 'None: file nothing'
 check_in "§ The PR" "$the_pr" 'folds it into its own'
 
+# Codex gate finding 2 on PR #1094: a crash after /file-ticket here is the
+# same recovery hazard #1030 already solved for the burn sweep — search by
+# the deterministic title first, update on a hit, file only on a miss.
+check_in "§ The PR" "$the_pr" 'check first, the same idempotent search'
+check_in "§ The PR" "$the_pr" 'Sweep: leftovers from PR #<n> in:title'
+
 [ "$fail" -eq 0 ] && echo "PASS $0"
 exit "$fail"

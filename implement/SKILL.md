@@ -361,13 +361,25 @@ The body has these sections and nothing else:
 **A worker with no run file under it** (§ Review) files one more ticket
 now, before sending "PR up": read this PR's own dispositions sidecar,
 `dispositions-<n>.jsonl` (§ Review step 2 already wrote it), for its
-`leftover` lines. Any: file `Sweep: leftovers from PR #<n>` through
-`/file-ticket`, labelled `ready-for-agent`, in #1030's body shape
-(`burndown/SKILL.md` § The sweep: grouped by file, one bullet per item).
-None: file nothing, the same zero-leftovers rule the burn sweep uses. A
-burn controller that later finds this ticket open on the frontier folds it
-into its own run's sweep (`burndown/SKILL.md` § The sweep) rather than
-leaving it standing beside one.
+`leftover` lines. None: file nothing, the same zero-leftovers rule the
+burn sweep uses. Any: **check first, the same idempotent search the burn
+sweep uses** (`burndown/SKILL.md` § The sweep) — a crash after
+`/file-ticket` here is the same hazard —
+
+```
+gh issue list --repo <owner/name> --state all \
+  --search "Sweep: leftovers from PR #<n> in:title"
+```
+
+found: update its body instead of filing another,
+`gh issue edit <n> --repo <owner/name> --body-file <path>`. Nothing
+found: file `Sweep: leftovers from PR #<n>` through `/file-ticket`,
+labelled `ready-for-agent`, in #1030's body shape
+(`burndown/SKILL.md` § The sweep: grouped by file, one bullet per
+item). A burn controller that later finds this ticket open on the
+frontier folds it into its own run's sweep
+(`burndown/SKILL.md` § The sweep) rather than leaving it standing
+beside one.
 
 Send the controller "PR up" in this shape:
 
