@@ -104,9 +104,11 @@ too.
    working rather than vanishing) plus every `claude` pid `ps -eo
    pid,comm` shows that no herdr pane resolves to — a subagent or
    headless run herdr does not pane-list, matched to panes through the
-   sessions registry the same way `resolve-controller` does; an unmatched
-   pid fails closed and counts, the same as a herdr pane whose session
-   cannot be resolved at all. Idle and done panes are the only thing
+   sessions registry the same way `resolve-controller` does — validated
+   against `/proc/<pid>/stat`'s own start time, since a pid recycles and a
+   stale registry record naming a live pid must not silently claim it; an
+   unmatched pid fails closed and counts, the same as a herdr pane whose
+   session cannot be resolved at all. Idle and done panes are the only thing
    excluded. It falls back to a flat process count (`ps -eo comm= |
    grep -cx claude`, by command name: `pgrep -f claude` also matches plugin
    scripts and hook shims and overcounts more than 2x) only when herdr

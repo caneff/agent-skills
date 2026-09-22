@@ -280,15 +280,54 @@ def count_agent_processes(ps=None):
     return agents
 
 
-def _session_pids(sessions_dir=None):
+def _proc_start(pid):
+    """Field 22 of `/proc/<pid>/stat` — the kernel's own start-time
+    fingerprint for that pid, the same field `agent-status.md`'s liveness
+    check and `worker-alert-lib.sh`/`resolve-controller` compare a
+    registry record's `procStart` against. `None` when the process is
+    gone or `/proc` cannot be read.
+
+    The `comm` field (2nd) is parenthesised and can itself contain spaces
+    or parens, so this splits on the *last* `)` rather than on whitespace
+    — the same reader `ps`'s own `comm=` parsing sidesteps by never
+    touching this file at all.
+    """
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+    end = text.rfind(")")
+    if end == -1:
+        return None
+    fields = text[end + 1:].split()
+    return fields[19] if len(fields) > 19 else None
+
+
+def _session_pids(sessions_dir=None, proc_start=None):
     """`{sessionId: pid}` off the live sessions registry
     (`~/.claude/sessions/<pid>.json`), the same file `agent-status.md`
-    reads and `resolve-controller` resolves through. Read fresh on every
-    call — a pane's session can end between ticks — and skipped rather
-    than raised on a directory or file this run cannot read: a registry
-    gap fails a session's *match*, which `count_working_herdr_agents`
-    already fails closed on, not the whole count."""
+    reads and `resolve-controller` resolves through — validated against
+    `/proc/<pid>/stat`'s own start time the same way both of those do.
+    A pid recycles: after a WSL restart or an ordinary pid reuse, a stale
+    record can still name a pid that is alive again as a completely
+    different process. Matching on the name alone let that stale record
+    claim the live process's pid, dropping it out of
+    `count_working_herdr_agents`'s `unlisted` bucket while the record's
+    own (often idle) status added nothing for it — a live process
+    silently uncounted (Codex gate finding on 9391bd8). A record whose
+    `procStart` does not match is not a match; its pid stays unresolved.
+
+    Read fresh on every call — a pane's session can end between ticks —
+    and skipped rather than raised on a directory or file this run cannot
+    read: a registry gap fails a session's *match*, which
+    `count_working_herdr_agents` already fails closed on, not the whole
+    count. `proc_start` takes a pid and returns field 22 or `None`
+    (default `_proc_start`, reading `/proc` directly).
+    """
     sessions_dir = sessions_dir or os.path.expanduser("~/.claude/sessions")
+    if proc_start is None:
+        proc_start = _proc_start
     mapping = {}
     try:
         names = os.listdir(sessions_dir)
@@ -303,8 +342,11 @@ def _session_pids(sessions_dir=None):
         except (OSError, ValueError):
             continue
         sid, pid = data.get("sessionId"), data.get("pid")
-        if isinstance(sid, str) and sid and isinstance(pid, int):
-            mapping[sid] = pid
+        if not (isinstance(sid, str) and sid and isinstance(pid, int)):
+            continue
+        if proc_start(pid) != data.get("procStart"):
+            continue
+        mapping[sid] = pid
     return mapping
 
 

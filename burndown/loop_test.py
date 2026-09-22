@@ -418,6 +418,33 @@ def test_a_resolved_pane_with_no_or_unknown_status_counts_as_working():
     assert (working, unlisted) == (2, 0), (working, unlisted)
 
 
+def test_a_stale_session_record_does_not_swallow_a_live_unlisted_pid():
+    # sid-A's registry record claims pid 100, but its procStart is stale
+    # (pid 100 is now a different, unlisted claude process — a WSL restart
+    # or an ordinary pid reuse). sid-B is a genuine, valid match, so the
+    # listing is not a total mismatch. Before the fix, the stale record
+    # resolved anyway, pid 100 landed in matched_pids, dropped out of
+    # unlisted, and sid-A's idle status added nothing — the live process
+    # at pid 100 went uncounted entirely.
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "100.json"), "w") as fh:
+            json.dump({"pid": 100, "sessionId": "sid-A", "procStart": "111"}, fh)
+        with open(os.path.join(tmp, "101.json"), "w") as fh:
+            json.dump({"pid": 101, "sessionId": "sid-B", "procStart": "222"}, fh)
+        proc_start = lambda pid: "222" if pid == 101 else "999"
+        sessions = lambda: loop._session_pids(tmp, proc_start=proc_start)
+        listing = herdr_listing(("sid-A", "idle"), ("sid-B", "working"))
+        ps = lambda cmd: (0, pid_comm_listing(100, 101))
+        herdr = lambda cmd: (0, listing)
+        working, unlisted = loop.count_working_herdr_agents(
+            ps=ps, herdr=herdr, sessions=sessions)
+        # pid 100 is no longer silently absorbed by sid-A's stale match —
+        # it counts, via unlisted; sid-A's own pane fails closed as
+        # working too, since it could not be resolved to any pid at all.
+        assert unlisted == 1, (working, unlisted)
+        assert working == 2, (working, unlisted)
+
+
 def test_a_herdr_listing_that_matches_none_of_the_boxs_pids_is_a_refusal():
     # Empty, and non-empty-but-unresolvable, are the same failure: herdr's
     # registry reads as broken, not the box as idle.
@@ -464,13 +491,25 @@ def test_working_herdr_agents_refuses_when_ps_pid_listing_cannot_be_taken():
 def test_session_pids_reads_the_registry_directory_given():
     with tempfile.TemporaryDirectory() as tmp:
         with open(os.path.join(tmp, "100.json"), "w") as fh:
-            json.dump({"pid": 100, "sessionId": "sid-A"}, fh)
+            json.dump({"pid": 100, "sessionId": "sid-A", "procStart": "111"}, fh)
         # Not a session file; skipped rather than raising.
         with open(os.path.join(tmp, "not-json.json"), "w") as fh:
             fh.write("{not json")
         with open(os.path.join(tmp, "ignored.txt"), "w") as fh:
             fh.write("100")
-        assert loop._session_pids(tmp) == {"sid-A": 100}
+        proc_start = lambda pid: "111" if pid == 100 else None
+        assert loop._session_pids(tmp, proc_start=proc_start) == {"sid-A": 100}
+
+
+def test_session_pids_drops_a_record_whose_procstart_no_longer_matches():
+    # pid 100 is alive, but `/proc`'s own start-time fingerprint no longer
+    # matches the registry record's — a WSL restart or an ordinary pid
+    # reuse left a stale record behind, now naming a different process.
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "100.json"), "w") as fh:
+            json.dump({"pid": 100, "sessionId": "sid-A", "procStart": "111"}, fh)
+        proc_start = lambda pid: "999"
+        assert loop._session_pids(tmp, proc_start=proc_start) == {}
 
 
 def test_session_pids_on_a_missing_directory_is_an_empty_mapping():
