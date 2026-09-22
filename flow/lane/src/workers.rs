@@ -97,9 +97,30 @@ pub fn append(home: &Path, pid: &str, record: &WorkerRecord) -> std::io::Result<
 /// failing the whole read — one bad line must not hide every other worker.
 /// No file at all reads as no workers, the ordinary case for a session that
 /// has never dispatched one.
+///
+/// Takes a shared `File::lock_shared()` before reading (#1044): without it,
+/// a read landing between `remove_workspace`'s `set_len(0)` truncate and its
+/// rewrite of the kept lines observes an empty file and returns no workers,
+/// silently — exactly the window `controller-restore`'s `SessionStart` read
+/// exists to survive a `/clear` through. `remove_workspace`'s rewrite holds
+/// its own exclusive lock across that whole window, so a shared lock here is
+/// enough to block until the rewrite completes and be read whole. No file at
+/// all still reads as no workers; a file that can be opened but not locked
+/// falls back to reading it unlocked rather than losing every worker over a
+/// lock that failed for an unrelated reason.
 pub fn read(home: &Path, pid: &str) -> Vec<WorkerRecord> {
     let path = path_for(home, pid);
-    let Ok(raw) = std::fs::read_to_string(&path) else { return Vec::new() };
+    let raw = match std::fs::OpenOptions::new().read(true).open(&path) {
+        Ok(mut f) => {
+            let _ = f.lock_shared();
+            let mut raw = String::new();
+            if std::io::Read::read_to_string(&mut f, &mut raw).is_err() {
+                return Vec::new();
+            }
+            raw
+        }
+        Err(_) => return Vec::new(),
+    };
     raw.lines().filter(|l| !l.trim().is_empty()).filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
 
@@ -333,6 +354,56 @@ mod tests {
     fn remove_workspace_with_no_sessions_dir_is_false() {
         let tmp = TempDir::new().unwrap();
         assert!(!remove_workspace(tmp.path(), "/anything"));
+    }
+
+    /// #1044: `remove_workspace`'s rewrite truncates the file (`set_len(0)`)
+    /// before writing the kept records back, all under its exclusive lock.
+    /// `read` must take that same lock (shared is enough) so a read landing
+    /// in that window blocks until the rewrite finishes, rather than
+    /// observing the truncated-but-not-yet-rewritten file and returning no
+    /// records — the torn read `controller-restore` would otherwise hit.
+    /// Simulates the pause by holding the lock across a truncate, spawning
+    /// `read` on another thread, proving it cannot return while the lock is
+    /// held, then completing the rewrite and checking `read` observes the
+    /// full post-rewrite content rather than the empty truncated file.
+    #[test]
+    fn read_waits_for_the_lock_so_it_never_observes_a_torn_truncate() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        append(&home, "111", &record("/a")).unwrap();
+        append(&home, "111", &record("/b")).unwrap();
+
+        let path = path_for(&home, "111");
+        let mut held = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        held.lock().unwrap();
+        held.set_len(0).unwrap();
+        held.seek(SeekFrom::Start(0)).unwrap();
+
+        let (read_done_tx, read_done_rx) = std::sync::mpsc::channel();
+        let h = home.clone();
+        let reader = std::thread::spawn(move || {
+            let got = read(&h, "111");
+            let _ = read_done_tx.send(());
+            got
+        });
+
+        // Proof read goes through the lock: it must not return while this
+        // test holds it, even though the file on disk is empty right now.
+        assert!(read_done_rx.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "read ran without the lock");
+
+        let mut line_a = serde_json::to_string(&record("/a")).unwrap();
+        line_a.push('\n');
+        let mut line_b = serde_json::to_string(&record("/b")).unwrap();
+        line_b.push('\n');
+        held.set_len(0).unwrap();
+        held.seek(SeekFrom::Start(0)).unwrap();
+        held.write_all(line_a.as_bytes()).unwrap();
+        held.write_all(line_b.as_bytes()).unwrap();
+        drop(held);
+
+        let got = reader.join().unwrap();
+        let workspaces: Vec<&str> = got.iter().map(|r| r.workspace.as_str()).collect();
+        assert_eq!(workspaces, vec!["/a", "/b"], "read must observe the completed rewrite, not the torn truncate");
     }
 
     /// #964 fix round 1 (Codex high): `remove_workspace`'s read/filter/write
