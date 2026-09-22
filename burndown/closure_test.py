@@ -378,6 +378,20 @@ def test_a_fenced_declaration_is_quoted_never_declared():
     assert got["mode"] == "subtree", got
 
 
+def test_an_indented_quotation_is_not_a_declaration():
+    # #999's own risk, named in the ticket: `unfenced()` now opens a fence
+    # only at CommonMark's <=3-space bound, so a 4-space-indented example is
+    # no longer hidden by an (incorrect) fence match. `declaration_section`
+    # reads raw `unfenced()` with no `_QUOTED` filter of its own, so without
+    # this it reads the quoted example as this doc's real declaration.
+    text = ("## Include closure\n\n- a doc quotes another repo's block:\n\n"
+            "    ```\n"
+            "    - **Directive**: `#include <path>`\n"
+            "    - **Generator**: `make x`\n"
+            "    ```\n")
+    assert C.parse_declaration(text) is None, C.parse_declaration(text)
+
+
 def test_a_section_that_states_nothing_readable_is_silence():
     # An empty section, or prose naming no directive and not saying None,
     # has declared nothing — and silence is the conservative fallback.

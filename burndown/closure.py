@@ -27,9 +27,14 @@ import re
 import sys
 
 # The fence rule is #890's, bug-for-bug: a declaration inside ``` or ~~~ is
-# quoted material, and a fence closes CommonMark's way. Imported rather than
-# copied — a second parser is a second place for the quoted-template bug.
-from frontier import unfenced
+# quoted material, and a fence closes CommonMark's way. `declaration_section`
+# reads `visible()` rather than the bare `unfenced()` (#999): an indented
+# quotation is quoted material too, and this reader has no filter of its own
+# to drop it. `scanned_lines` keeps the bare `unfenced()` — a repo-wide scan
+# for a literal include mention wants every non-fenced line, indented or not.
+# Imported rather than copied — a second parser is a second place for the
+# quoted-template bug.
+from frontier import unfenced, visible
 
 _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
 _CLOSURE_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+include closure[ \t]*:?[ \t]*$",
@@ -86,12 +91,12 @@ Declaration.__new__.__defaults__ = (None, None, "file")
 def declaration_section(text):
     """The lines under an `## Include closure` heading, or `None` when the
     document has no such section — silence, which is not a declaration."""
-    visible = list(unfenced((text or "").splitlines()))
-    for pos, (_, line) in enumerate(visible):
+    lines = visible((text or "").splitlines())
+    for pos, (_, line) in enumerate(lines):
         if not _CLOSURE_HEADING.match(line):
             continue
         section = []
-        for _, rest in visible[pos + 1:]:
+        for _, rest in lines[pos + 1:]:
             if _ANY_HEADING.match(rest):
                 break
             section.append(rest)
