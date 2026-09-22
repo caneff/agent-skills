@@ -96,14 +96,22 @@ python3 burndown/runfile.py leftover <run-id> --clump 905 --pr 950 --from <dispo
 reads every `outcome: leftover` line of `<dispositions sidecar>` — the
 `dispositions-<n>.jsonl` file written by `implement/SKILL.md` § Review, and
 appends one entry per line to the clump named by `--clump`; every other
-outcome —
-`fixed`, `disputed`, `filed`, `handed-back` — is not this command's to
-transcribe, and is skipped. It is idempotent per PR and finding id: running
-it twice against the same `--pr` and sidecar adds nothing a second time,
-because a controller that runs the landing step twice, or resumes after a
-restart mid-step, must not double an entry the eventual sweep ticket would
-then count twice. A clump `--clump` does not name is refused, the same as
-`land` and `job` refuse one.
+outcome — `fixed`, `disputed`, `filed`, `handed-back` — is not this
+command's to transcribe, and is skipped. It prints `copied N leftover(s)
+from <path>` after the run: not just for the controller's eyes, but because
+a wrong or wrong-shaped `--from` reads no `outcome: leftover` line either,
+and without the count a mistyped path is indistinguishable from a PR that
+genuinely left nothing.
+
+It is idempotent per PR and finding id, and *conflicting* about it: running
+it twice against the same `--pr` and sidecar adds nothing a second time
+(a controller that runs the landing step twice, or resumes after a restart
+mid-step, must not double an entry the sweep would then count twice), but a
+finding already recorded for this clump under a *different* PR is refused —
+two PR numbers for one finding id is a typo'd `--pr`, not a second landing,
+and letting it through would double-count that finding in the sweep with no
+undo but hand-editing the run file. A clump `--clump` does not name is
+refused, the same as `land` and `job` refuse one.
 
 A file written before leftovers existed still loads — the field is filled
 in as `[]`, the honest reading of a run that never recorded one.

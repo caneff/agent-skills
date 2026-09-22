@@ -290,6 +290,53 @@ def test_leftover_on_a_clump_the_run_never_dispatched_is_refused():
         raise AssertionError("a leftover recorded against no clump")
 
 
+def test_leftover_reports_how_many_it_copied():
+    # A wrong path is refused (§ hygiene), but a *readable, wrong-shaped*
+    # file — every other command's own sidecar, say — silently copies
+    # nothing today; the count is what tells a mistyped `--from` apart from
+    # a PR that genuinely left nothing (defect class 1).
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    _, added = runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    assert added == ["S3"], added
+    _, added_again = runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    assert added_again == [], added_again
+
+
+def test_leftover_against_a_sidecar_with_no_leftover_line_copies_none():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    fd, no_leftovers = tempfile.mkstemp(suffix=".jsonl")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write('{"id": "S1", "outcome": "fixed", "sha": "0123abc"}\n')
+        _, added = runfile.leftover("burn-1", 901, 950, no_leftovers,
+                                    root=root)
+        assert added == [], added
+    finally:
+        os.remove(no_leftovers)
+
+
+def test_a_second_pr_for_the_same_clump_and_finding_id_is_refused():
+    # `(pr, id)` alone lets the same finding land twice under two PR
+    # numbers — a typo'd `--pr` would double-count it for the sweep, with
+    # no undo but hand-editing the run file.
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    try:
+        runfile.leftover("burn-1", 901, 951, SIDECAR, root=root)
+    except runfile.RunFileError as exc:
+        assert "S3" in str(exc) and "950" in str(exc), exc
+    else:
+        raise AssertionError("the same finding landed under two PR numbers")
+    got = runfile.load("burn-1", root=root)["leftovers"]
+    assert len(got) == 1 and got[0]["pr"] == 950, got
+
+
 def test_cli_leftover_appends_and_show_prints_the_leftovers():
     root = cache()
     cli(root, "start", "burn-1", "--slots", "2")
@@ -298,11 +345,18 @@ def test_cli_leftover_appends_and_show_prints_the_leftovers():
     got = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
               "--from", SIDECAR)
     assert got.returncode == 0, got.stderr
+    assert "copied 1 leftover" in got.stdout, got.stdout
     shown = cli(root, "show", "burn-1")
     assert shown.returncode == 0, shown.stderr
     assert "S3" in shown.stdout, shown.stdout
     assert "burndown/loop.py" in shown.stdout, shown.stdout
     assert "PR #950" in shown.stdout, shown.stdout
+    assert "judgement" in shown.stdout, shown.stdout
+    assert "Mysterious name" in shown.stdout, shown.stdout
+    again = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
+               "--from", SIDECAR)
+    assert again.returncode == 0, again.stderr
+    assert "copied 0 leftover" in again.stdout, again.stdout
 
 
 def test_leftovers_survive_resume():

@@ -396,7 +396,16 @@ def leftover(run_id, lowest, pr, sidecar_path, root=None):
     lose them. Idempotent per PR and finding id: the sidecar does not change
     once a PR has landed, and a second run of this command — after a
     restart, or a controller that ran the landing step twice — must not
-    double an entry the sweep would then count twice."""
+    double an entry the sweep would then count twice. A finding already
+    recorded for this clump under a *different* PR is refused, the same as a
+    second, different landing sha: two PR numbers for one finding id is a
+    typo'd `--pr`, not a second landing.
+
+    Returns `(run, added)`, `added` being the finding ids this call actually
+    appended — a caller reads its length to tell "this sidecar left nothing"
+    from "this sidecar was never read": a wrong or wrong-shaped `--from`
+    reads no `outcome: leftover` line either way, and the count is what
+    makes the two distinguishable."""
     pr = pr_number(pr)
     found = read_leftover_lines(sidecar_path)
     with locked(run_id, root):
@@ -405,19 +414,26 @@ def leftover(run_id, lowest, pr, sidecar_path, root=None):
             (c for c in run["clumps"] if c["tickets"][0] == lowest), None)
         if entry is None:
             raise RunFileError(f"run {run_id} has no clump #{lowest}")
-        have = {(item["pr"], item["id"]) for item in run["leftovers"]}
+        clump_prs = {item["id"]: item["pr"] for item in run["leftovers"]
+                     if item["clump"] == lowest}
+        added = []
         for obj in found:
-            if (pr, obj["id"]) in have:
+            if clump_prs.get(obj["id"]) == pr:
                 continue
+            if obj["id"] in clump_prs:
+                raise RunFileError(
+                    f"finding {obj['id']} is already recorded under PR "
+                    f"#{clump_prs[obj['id']]}, not #{pr}")
             record = leftover_record({
                 "clump": lowest, "tickets": entry["tickets"], "pr": pr,
                 "id": obj["id"], "file": obj["file"], "title": obj["title"],
                 "severity": obj["severity"], "text": obj["text"],
             })
             run["leftovers"].append(record)
-            have.add((pr, obj["id"]))
+            clump_prs[obj["id"]] = pr
+            added.append(obj["id"])
         save(run, root)
-    return run
+    return run, added
 
 
 def job(run_id, lowest, state, cores=0, root=None):
@@ -687,8 +703,10 @@ def main(argv):
         elif args.command == "land":
             print(render(land(args.run_id, args.clump, args.sha, root)))
         elif args.command == "leftover":
-            print(render(leftover(args.run_id, args.clump, args.pr,
-                                  args.from_path, root)))
+            run, added = leftover(args.run_id, args.clump, args.pr,
+                                  args.from_path, root)
+            print(render(run))
+            print(f"copied {len(added)} leftover(s) from {args.from_path}")
         elif args.command == "job":
             state = ("running" if args.cores is not None
                      else "none" if args.none else "done")
