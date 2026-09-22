@@ -74,6 +74,14 @@ _VALID_SEVERITIES = {"hard", "judgement"}
 _OUTCOME_DETAIL_FIELD = {
     "fixed": "sha", "disputed": "reason", "filed": "ticket", "handed-back": "command",
 }
+# outcome -> the JSON type its detail field must actually be. `filed`'s
+# `ticket` is written unquoted (`"ticket": <n>`) per implement/SKILL.md, so
+# it alone is int; every other detail is prose and must be a non-empty str.
+# A str/dict/list slipping through as a "ticket" or a non-str slipping
+# through as a `command`/`sha`/`reason` still tallied under Codex's gate
+# finding on #973's own PR — `str(detail)` on a list or dict "worked" and
+# hid the malformed line as if it had parsed cleanly.
+_OUTCOME_DETAIL_TYPE = {"fixed": str, "disputed": str, "filed": int, "handed-back": str}
 
 
 @dataclass(frozen=True)
@@ -169,8 +177,13 @@ def parse_disposition_line(raw: str) -> Disposition | None:
     if not (isinstance(fid, str) and fid) or outcome not in _OUTCOME_DETAIL_FIELD:
         return None
     detail = obj.get(_OUTCOME_DETAIL_FIELD[outcome])
-    if detail is None or detail == "":
-        return None
+    expected = _OUTCOME_DETAIL_TYPE[outcome]
+    if expected is str:
+        if not (isinstance(detail, str) and detail):
+            return None
+    else:  # int — `filed`'s ticket number
+        if not isinstance(detail, int):
+            return None
     return Disposition(id=fid, outcome=outcome, detail=str(detail))
 
 
