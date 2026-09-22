@@ -93,6 +93,12 @@ check_in "$correctness" 'unprotected entry point' 'the correctness axis brief'
 check_not_in "$standards" 'mutate its call site' 'the standards axis brief'
 check_not_in "$spec" 'unprotected entry point' 'the spec axis brief'
 check_in "$costs" 'call-site mutation' 'the witness-check cost section'
+# #969: the sentence introducing call-site mutations must not read as one
+# guard's constraint mutation and its call-site mutations sharing a single id
+# — PR #968's second Codex pass read the old wording that way.
+check_in "$costs" 'gets its own id' 'the witness-cost section'
+check_not_in "$costs" 'the same worktree, the same output file and the same id as any constraint mutation' 'the witness-cost section'
+check_in "$costs" 'ever share an id' 'the witness-cost section'
 callsite="$(printf '%s\n' "$spawn" | grep -cF 'unprotected entry point' || true)"
 [ "$callsite" -eq 1 ] || { echo "FAIL: § 4 states the call-site finding in $callsite places, not 1" >&2; fail=1; }
 
