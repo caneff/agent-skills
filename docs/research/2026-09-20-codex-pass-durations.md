@@ -101,3 +101,5 @@ early is worth it, which is why a `gate-retry` never reports as a plain
 | 981 | #1057 | second | 2026-09-22T08:15:47-04:00 | 2026-09-22T08:16:54-04:00 | 1.1 | collected |
 | 982 | #1060 | gate | 2026-09-22T08:33:30-04:00 | 2026-09-22T08:34:18-04:00 | 0.8 | collected (launched at PR-up by controller ruling) |
 | 982 | #1060 | second | 2026-09-22T08:43:59-04:00 | 2026-09-22T08:45:15-04:00 | 1.3 | collected |
+| 998 | #1061 | gate | 2026-09-22T08:42:17-04:00 | 2026-09-22T08:43:18-04:00 | 1.0 | collected (launched at PR-up by controller ruling) |
+| 998 | #1061 | second | 2026-09-22T08:49:35-04:00 | 2026-09-22T08:51:04-04:00 | 1.5 | collected |
