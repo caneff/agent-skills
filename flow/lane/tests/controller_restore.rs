@@ -179,6 +179,16 @@ fn an_open_pr_is_reported_with_the_merge_pointer() {
     assert!(out.status.success(), "{}", out_text(&out));
     let line = stdout(&out);
     assert!(line.contains("PR #152 open, not merged — follow implement/SKILL.md \u{a7} The merge"), "{line}");
+    // #1042 review, P2/C3: the output assertion above can't tell a right
+    // answer from a lucky one if the invocation itself drifts — check the
+    // actual argv the real gh/herdr calls carried, not only what they
+    // printed back.
+    let calls = f.calls();
+    assert!(calls.contains("herdr agent list"), "{calls}");
+    assert!(
+        calls.contains("gh pr list --repo caneff/agent-skills --head implement-1042 --state all --json number,state"),
+        "{calls}"
+    );
 }
 
 #[test]
