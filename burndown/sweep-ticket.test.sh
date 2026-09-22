@@ -75,6 +75,13 @@ check_in "$sweep_text" 'still files this thin' 'burndown/SKILL.md § The sweep'
 # `sweep.py render` never reproduces it.
 check_in "$sweep_text" 'a fold (below) put there kept as it stands' 'burndown/SKILL.md § The sweep'
 
+# Codex gate finding 1 on PR #1094: appending the per-PR body whole would
+# carry its own `## Blocked by` into the run sweep alongside the run
+# sweep's own, reading AMBIGUOUS to `blocked_by_section` and dropping the
+# folded sweep off the frontier for good.
+check_in "$sweep_text" 'its file sections only' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'split("\n## Blocked by")[0]' 'burndown/SKILL.md § The sweep'
+
 # The run report's three counts. Each needle carries the bold emphasis
 # markers around its own word: a bare 'leftover' matches "leftovers" six
 # times over in surrounding prose, and a bare 'standalone' matches "stay

@@ -750,6 +750,23 @@ def test_an_indented_closer_does_not_end_an_unindented_fence_early():
     assert numbers(got["blocked"]) == [1], got
 
 
+def test_a_folded_per_pr_body_keeps_one_blocked_by_declaration():
+    """#1033 Codex gate finding 1: the run sweep already declares its own
+    `## Blocked by`; appending a per-PR sweep's whole body would add a
+    second one and read AMBIGUOUS, dropping the folded run sweep off the
+    frontier for good. Mirrors the split
+    `burndown/SKILL.md` § The sweep's fold uses — `gh issue view --jq
+    '.body | split("\n## Blocked by")[0]'` — to strip the per-PR body's
+    own section before it is appended."""
+    run_sweep_body = ("## a.py\n\n- bullet\n\n"
+                       "## Blocked by\n\nNone — can start immediately.\n")
+    per_pr_body = ("## b.py\n\n- another bullet\n\n"
+                    "## Blocked by\n\nNone — can start immediately.\n")
+    per_pr_files_only = per_pr_body.split("\n## Blocked by")[0]
+    folded = run_sweep_body + per_pr_files_only
+    assert F.blocked_by_section(folded) is not F.AMBIGUOUS, folded
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

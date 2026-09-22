@@ -215,16 +215,22 @@ run. `runfile.py leftover` cannot pull its items into the run file — it
 refuses any PR that is not one of this run's own landed clumps — so fold
 by body instead of by run file: its items are already rendered, in the
 same grouped-by-file shape `sweep.py render` produces, in the per-PR
-ticket's own body —
+ticket's own body — **its file sections only**, never its own
+`## Blocked by` —
 
 ```
-gh issue view <n> --repo <owner/name> --json body --jq .body
+gh issue view <n> --repo <owner/name> --json body \
+  --jq '.body | split("\n## Blocked by")[0]'
 ```
 
-prints exactly what to append. File or update the run sweep (above) with
-that text appended under its own file headers to the body `sweep.py
-render` printed, then close the per-PR ticket with a pointer to the run
-sweep —
+stops before that heading, so the run sweep still declares exactly one
+`## Blocked by`: `blocked_by_section` (§ The frontier, below) reads every
+occurrence in a body, and a second one — the per-PR ticket's own,
+appended whole — reads `AMBIGUOUS` and drops the folded sweep off the
+frontier for good. That printed text is exactly what to append. File or
+update the run sweep (above) with it appended under its own file headers
+to the body `sweep.py render` printed, then close the per-PR ticket with
+a pointer to the run sweep —
 
 ```
 gh issue close <n> --repo <owner/name> --comment "Folded into <run-sweep-url>"
