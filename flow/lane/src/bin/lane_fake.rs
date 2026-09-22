@@ -565,4 +565,10 @@ mod tests {
     fn parse_status_row_panics_on_a_third_field() {
         parse_status_row("152 OPEN extra", "b");
     }
+
+    #[test]
+    #[should_panic(expected = "has no state field")]
+    fn parse_status_row_panics_on_a_missing_state_field() {
+        parse_status_row("152", "b");
+    }
 }
