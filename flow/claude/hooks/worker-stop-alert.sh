@@ -51,25 +51,32 @@ IFS=$'\t' read -r n controller < <(entries | jq -r '
   | first // empty | "\(.n)\t\(.c)"')
 [ -n "${controller:-}" ] || exit 0
 
-# A live registry record naming `sid` (mode "sid") or `nm` (mode "name"),
-# with a non-empty `.name` — its session id, current name and socket. Joined
-# and split on `\x1f` (ASCII unit separator), not a tab: tab is one of
-# bash's default IFS-whitespace characters, so `read` collapses runs of it
-# and strips a leading/trailing one regardless of field order — an empty
-# `.sessionId` or `.messagingSocketPath` in the middle silently shifted
-# every field after it into the wrong variable (verification pass on #981,
-# #1014: confirmed against a record with a name and a socket but no
-# `.sessionId`). `\x1f` is not IFS-whitespace, so a run of it never
-# collapses and an empty field never disappears, whatever position it's in.
-# Live means the pid's /proc starttime (field 22, after the `(comm)` field)
-# equals the record's procStart — a stale record whose pid was reused has
-# another, as in flow/lane's sessions reader.
+# A live registry record naming `sid` (mode "sid") or `nm` (mode "name") —
+# its session id, current name (possibly empty) and socket. `sid` mode
+# matches on `.sessionId` alone, with no requirement that `.name` be
+# non-empty: a Claude session with no name yet is still live, still sends
+# and receives cross-session messages (every one carries `from="uds:<its
+# socket>"`, and a reply copies that address), and a report it delivered to
+# its own socket is real even though it has nothing to match by name
+# (Codex pass on PR #1057 — an earlier version of this filter required a
+# non-empty name unconditionally and dropped exactly this socket). `name`
+# mode still only matches a non-empty `.name` because it matches ON that
+# field. Joined and split on `\x1f` (ASCII unit separator), not a tab: tab
+# is one of bash's default IFS-whitespace characters, so `read` collapses
+# runs of it and strips a leading/trailing one regardless of field order —
+# an empty `.sessionId`, `.name` or `.messagingSocketPath` in the middle
+# silently shifted every field after it into the wrong variable
+# (verification pass on #981, #1014). `\x1f` is not IFS-whitespace, so a
+# run of it never collapses and an empty field never disappears, whatever
+# position it's in. Live means the pid's /proc starttime (field 22, after
+# the `(comm)` field) equals the record's procStart — a stale record whose
+# pid was reused has another, as in flow/lane's sessions reader.
 resolve_session() {
   local mode="$1" val="$2" f pid start sid nm sock stat fields
   for f in "$HOME"/.claude/sessions/*.json; do
     [ -e "$f" ] || continue
     IFS=$'\x1f' read -r pid start sid nm sock < <(jq -r --arg mode "$mode" --arg v "$val" \
-      'select((if $mode == "sid" then .sessionId else .name end) == $v and ((.name // "") != "")) |
+      'select((if $mode == "sid" then .sessionId else .name end) == $v) |
        [(.pid | tostring), (.procStart // ""), (.sessionId // ""), (.name // ""), (.messagingSocketPath // "")]
        | join("\u001f")' "$f" 2>/dev/null)
     [[ "${pid:-}" =~ ^[0-9]+$ ]] || continue
@@ -87,14 +94,19 @@ resolve_session() {
 # matching on the brief's literal alone can miss a delivered report and,
 # when an alert is owed, find no live session for the pane lookup. Resolve
 # the same two hops `resolve-controller` does — herdr agent name ->
-# `agent_session` id -> the live session record's current name and socket —
-# before either use, but keep matching the brief's own literal too: nothing
-# here requires a worker to route through `resolve-controller` first, and
-# `resolve-controller` itself refuses to resolve a live session with no
-# `name` (`sessions::name_of_session`), so a record this can't name is one a
-# compliant worker couldn't have addressed either (#1014). A worktree
-# without `herdr`, or a `herdr agent list` that fails or times out, falls
-# back the same way an older brief already carrying a session name does.
+# `agent_session` id -> the live session record's current session id, name
+# and socket — before either use, but keep matching the brief's own literal
+# too: nothing here requires a worker to route through `resolve-controller`
+# first. Unlike `resolve-controller` (`sessions::name_of_session`, which
+# needs a name because it returns one), `resolve_session` in `sid` mode
+# does not require the record to have a `.name`: a nameless live session
+# still sends and receives cross-session messages (every one carries
+# `from="uds:<its socket>"`, and a reply copies that address), so a report
+# delivered to its socket is real even with nothing to match by name (Codex
+# pass on PR #1057 — an earlier version of this file required a non-empty
+# name here and dropped exactly that socket). A worktree without `herdr`,
+# or a `herdr agent list` that fails or times out, falls back the same way
+# an older brief already carrying a session name does.
 herdr_sid="$(timeout 2 herdr agent list 2>/dev/null \
   | jq -r --arg c "$controller" '.result.agents[]? | select((.name // "") == $c) | .agent_session.value // empty' 2>/dev/null \
   | head -n1)"
@@ -105,12 +117,10 @@ ctl_session="" ctl_socket="" resolved_name=""
 if [ -n "$resolved" ]; then
   IFS=$'\x1f' read -r ctl_session resolved_name ctl_socket <<<"$resolved"
 fi
-# The pane lookup needs only a session id, not a name: a live session with
-# no `.name` isn't addressable by a compliant worker either way (matching
-# already falls back to the brief's literal), but its pane should still be
-# found so a genuinely silent stop can alert, rather than end in "no herdr
-# pane for controller" — the exact failure #1014 opens with (verification
-# pass, P2).
+# Belt and braces: resolve_session above already returns a nameless
+# record's session id, so this rarely fires, but it keeps the pane lookup
+# working even if resolve_session found nothing (a record removed between
+# the herdr list and here) while herdr's own bookkeeping still knows the id.
 [ -z "$ctl_session" ] && ctl_session="$herdr_sid"
 
 # The verdict for this stop: `reported`, `waiting` on a subagent, or `silent`,

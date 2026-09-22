@@ -539,12 +539,11 @@ run "controller record with no sessionId, report to its socket" "$t"
 expect_reported "a live record with a name and a socket but no sessionId still resolves the socket, not a field shifted by the missing one"
 printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 
-# A herdr-resolved session whose live record has no `.name` at all: no
-# worker can address it either way (matching already falls back to the
-# brief's own literal, and no name means nothing to match against), but the
-# pane lookup needs only the session id `herdr agent list` already gave —
-# falling back to it there is what keeps a genuinely silent stop from
-# ending in "no herdr pane for controller" (verification pass, P2).
+# A herdr-resolved session whose live record has no `.name` and no socket
+# either: nothing to match a report against, but the pane lookup needs only
+# the session id, which `resolve_session` now returns directly (no fallback
+# needed) — a genuinely silent stop still alerts instead of ending in "no
+# herdr pane for controller" (verification pass, P2).
 reset_log
 printf '{"pid":%s,"procStart":"%s","sessionId":"sess-nopanel"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 printf '%s\n' '{"result":{"agents":[{"name":"hctl-nopanel","pane_id":"w9:p1","agent_session":{"value":"sess-nopanel"}}]}}' > "$tmp/agent-list.json"
@@ -553,6 +552,23 @@ t="$tmp/nopanel-silent.jsonl"
 { human "$nopanel_brief"; assistant_text "done, no report"; } > "$t"
 run "herdr-resolved session id, live record has no name" "$t"
 expect_alert "the pane is found via the herdr-resolved session id alone, even though the record has nothing to match a report against"
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
+
+# The same nameless session, but WITH a socket: a nameless live session
+# still sends and receives cross-session messages (every one carries
+# `from="uds:<its socket>"`, and a reply copies that address), so a report
+# it delivers to that socket is real even though nothing can match it by
+# name. `resolve_session` must not require a non-empty `.name` to return
+# the socket, or this report reads as silent (Codex pass on PR #1057).
+reset_log
+printf '{"pid":%s,"procStart":"%s","sessionId":"sess-nosockname","messagingSocketPath":"/run/nosockname.sock"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' '{"result":{"agents":[{"name":"hctl-nosockname","pane_id":"w9:p1","agent_session":{"value":"sess-nosockname"}}]}}' > "$tmp/agent-list.json"
+nosockname_brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"hctl-nosockname\"</command-args>'
+t="$tmp/nosockname-reported.jsonl"
+{ human "$nosockname_brief"; send s1 "uds:/run/nosockname.sock"; ok s1; assistant_text "PR up sent"; } > "$t"
+run "nameless herdr-resolved session, report to its socket" "$t"
+expect_reported "a report addressed to a nameless controller's socket counts as reported"
 printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 
