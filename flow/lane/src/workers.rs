@@ -230,15 +230,19 @@ fn sidecars(home: &Path) -> Vec<(String, PathBuf)> {
 }
 
 /// Whether the controller that wrote `record` under `pid` is gone (#1098):
-/// the pid is not alive, or it is alive with a starttime other than the
-/// record's — a reused pid, an unrelated session. A record with no
-/// `proc_start` under a live pid is not orphaned: nothing proves its
-/// controller dead, and two controllers for one worker is the failure
-/// adoption must never cause.
-pub fn is_orphaned(pid: &str, record: &WorkerRecord) -> bool {
-    match pid.parse::<i32>().ok().filter(|p| *p > 0).and_then(crate::proc_info::read_stat) {
-        None => true,
-        Some(stat) => !record.proc_start.is_empty() && stat.start != record.proc_start,
+/// the pid's `/proc` entry does not exist, or it does with a starttime other
+/// than the record's — a reused pid, an unrelated session. Anything short of
+/// that proof is not orphaned: a record with no `proc_start` under a live
+/// pid, a `/proc` entry that exists but cannot be read, a sidecar named by no
+/// pid at all (#1098 review S2). Two controllers for one worker is the
+/// failure adoption must never cause, so an absent answer never reads as
+/// dead.
+fn is_orphaned(pid: &str, record: &WorkerRecord) -> bool {
+    let Some(pid) = pid.parse::<i32>().ok().filter(|p| *p > 0) else { return false };
+    match std::fs::metadata(format!("/proc/{pid}")) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+        Err(_) => false,
+        Ok(_) => crate::proc_info::read_stat(pid).is_some_and(|stat| !record.proc_start.is_empty() && stat.start != record.proc_start),
     }
 }
 
@@ -661,5 +665,16 @@ mod tests {
 
         let root = tmp.path().display().to_string();
         assert_eq!(adopt(&home, "sudokupad-art-143", &root, "1", "1").unwrap_err(), AdoptRefusal::ControllerAlive(me));
+    }
+
+    /// #1098 review S2: only a pid that verifiably does not exist is a dead
+    /// controller. A sidecar whose name is no pid proves nothing about its
+    /// controller, and reading it as dead would hand its worker a second one.
+    #[test]
+    fn only_a_pid_that_does_not_exist_is_a_dead_controller() {
+        let r = record("/w");
+        assert!(is_orphaned(&i32::MAX.to_string(), &r), "no such process");
+        assert!(!is_orphaned("not-a-pid", &r), "a name that is no pid proves nothing");
+        assert!(!is_orphaned("0", &r), "pid 0 is no controller's");
     }
 }
