@@ -1175,36 +1175,108 @@ fn dispatch_installs_the_identity_guard_and_a_worktree_commit_is_refused() {
     assert!(good.status.success(), "configured identity refused: {}", out_text(&good));
 }
 
+/// Commits a foreign-email change in the dispatched worktree for ticket `n`
+/// and asserts the guard still refuses it while a correctly-configured
+/// commit still succeeds — the end-to-end proof that whatever foreign hook
+/// was in place before dispatch, the guard runs regardless (#1009).
+fn refuses_a_foreign_email_commit(repo: &std::path::Path, n: &str) {
+    let wt = repo.join(".claude/worktrees").join(format!("implement-{n}"));
+    std::fs::write(wt.join("g"), "x\n").unwrap();
+    let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&wt).args(args).output().unwrap();
+    git(&["add", "g"]);
+    let bad = git(&["-c", "user.email=real@gmail.com", "commit", "-qm", "x"]);
+    assert!(!bad.status.success(), "a foreign email committed: {}", out_text(&bad));
+    let good = git(&["commit", "-qm", "x"]);
+    assert!(good.status.success(), "configured identity refused: {}", out_text(&good));
+}
+
+/// A foreign hook that neither names the guard nor calls it: the pre-#1009
+/// text-match check would have refused dispatch entirely over this one.
+/// Taking ownership means dispatch proceeds and the guard runs anyway.
 #[test]
-fn a_foreign_pre_commit_hook_without_the_guard_refuses_dispatch_and_starts_nothing() {
+fn a_foreign_hook_with_no_guard_reference_is_taken_over_and_still_refuses_a_foreign_email_commit() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let hook = hooks_dir(&repo).join("pre-commit");
     std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
-    assert!(!out.status.success(), "dispatch went ahead over a foreign hook");
-    let text = out_text(&out);
-    assert!(text.contains("pre-commit") && text.contains("commit-identity-guard"), "{text}");
-    assert_eq!(std::fs::read_to_string(&hook).unwrap(), "#!/bin/sh\nexit 0\n");
-    assert!(!repo.join(".claude/worktrees/implement-395").exists());
-    assert!(!f.calls().contains("issue edit"), "a ticket was claimed: {}", f.calls());
+    assert!(out.status.success(), "dispatch refused over a foreign hook: {}", out_text(&out));
+    refuses_a_foreign_email_commit(&repo, "395");
 }
 
+/// A hook that echoes the guard's name on a non-comment line without ever
+/// invoking it — exactly what the old `invokes_guard` text match would have
+/// accepted as proof the guard ran.
 #[test]
-fn a_foreign_hook_that_invokes_the_guard_is_accepted_and_unchanged_across_two_dispatches() {
+fn a_spoofed_hook_that_only_echoes_the_guards_name_still_refuses_a_foreign_email_commit() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let hook = hooks_dir(&repo).join("pre-commit");
-    let foreign = "#!/bin/sh\necho foreign-check\n\"$(dirname \"$0\")/commit-identity-guard\" || exit 1\n";
-    std::fs::write(&hook, foreign).unwrap();
-    for n in ["395", "396"] {
-        let out = f.dispatch(&["--repo", repo.to_str().unwrap(), n], &default_scenario());
-        assert!(out.status.success(), "dispatch #{n} failed: {}", out_text(&out));
-        assert_eq!(std::fs::read_to_string(&hook).unwrap(), foreign, "foreign hook rewritten by dispatch #{n}");
-    }
-    assert!(hooks_dir(&repo).join("commit-identity-guard").exists());
+    std::fs::write(&hook, "#!/bin/sh\necho commit-identity-guard\nexit 0\n").unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    refuses_a_foreign_email_commit(&repo, "395");
+}
+
+/// A hook that does call the guard, then swallows its exit code with
+/// `|| true` — the old text match saw the call and never noticed the
+/// suppression.
+#[test]
+fn a_hook_that_calls_the_guard_then_swallows_its_failure_still_refuses() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let hook = hooks_dir(&repo).join("pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\n\"$(dirname \"$0\")/commit-identity-guard\" || true\n").unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    refuses_a_foreign_email_commit(&repo, "395");
+}
+
+/// A foreign hook with no executable bit — git would never have run it at
+/// all, and the pre-#1009 accepted-hook path never checked for this either.
+/// Taking ownership forces it, and the final `pre-commit`, executable.
+#[test]
+fn a_non_executable_foreign_hook_is_taken_over_and_still_refuses_a_foreign_email_commit() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let hook = hooks_dir(&repo).join("pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
+    let mut perms = std::fs::metadata(&hook).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o644);
+    std::fs::set_permissions(&hook, perms).unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let installed = std::fs::metadata(&hook).unwrap().permissions();
+    assert!(std::os::unix::fs::PermissionsExt::mode(&installed) & 0o111 != 0, "installed pre-commit is not executable");
+    refuses_a_foreign_email_commit(&repo, "395");
+}
+
+/// Ownership is taken once: the foreign hook is moved aside under a stable
+/// name on the first dispatch, and a second dispatch — the wrapper already
+/// in place — leaves both files alone.
+#[test]
+fn a_foreign_hook_is_moved_aside_once_then_left_alone_on_a_second_dispatch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let hook = hooks_dir(&repo).join("pre-commit");
+    let foreign_text = "#!/bin/sh\necho foreign-check\n\"$(dirname \"$0\")/commit-identity-guard\" || exit 1\n";
+    std::fs::write(&hook, foreign_text).unwrap();
+    let out1 = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out1.status.success(), "{}", out_text(&out1));
+    let moved_aside = hooks_dir(&repo).join("pre-commit.foreign");
+    assert_eq!(std::fs::read_to_string(&moved_aside).unwrap(), foreign_text);
+    let wrapper_after_first = std::fs::read_to_string(&hook).unwrap();
+    assert_ne!(wrapper_after_first, foreign_text, "the foreign hook was left in place as pre-commit instead of moved aside");
+
+    let out2 = f.dispatch(&["--repo", repo.to_str().unwrap(), "396"], &default_scenario());
+    assert!(out2.status.success(), "{}", out_text(&out2));
+    assert_eq!(std::fs::read_to_string(&hook).unwrap(), wrapper_after_first, "wrapper rewritten on a second dispatch");
+    assert_eq!(std::fs::read_to_string(&moved_aside).unwrap(), foreign_text, "moved-aside hook touched on a second dispatch");
 }
 
 /// Rewrites the stand-in controller's registry record with a sessionId, so a
