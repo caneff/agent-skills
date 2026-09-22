@@ -113,3 +113,4 @@ rename landed sooner.
 | 1013 | #1067 | gate | 2026-09-22T09:28:07-04:00 | 2026-09-22T09:28:43-04:00 | 0.6 | collected (launched at PR-up by controller ruling) |
 | 1006 | #1068 | gate | 2026-09-22T09:33:59-04:00 | 2026-09-22T09:35:45-04:00 | 1.8 | collected (launched at PR-up by controller ruling) |
 | 1006 | #1068 | second | 2026-09-22T09:44:44-04:00 | 2026-09-22T09:47:07-04:00 | 2.4 | collected |
+| 1015 | #1070 | gate | 2026-09-22T09:49:35-04:00 | 2026-09-22T09:50:34-04:00 | 1.0 | collected |
