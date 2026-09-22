@@ -135,9 +135,10 @@ def frontier(candidates, in_flight):
 
 def picks(state, free):
     """`(picked, held)`: the clumps to dispatch, taken from a frontier
-    already read — lowest ticket first, every free slot at once — and every
-    clump the same-tick guard skipped, each naming the earlier pick it
-    collided with.
+    already read — widest closure first, ties broken by lowest ticket, every
+    free slot at once — and every clump the same-tick guard skipped, each
+    naming the earlier pick it collided with. Sorted before the guard runs
+    (#1026): why widest-first, and what it costs: `references/loop.md`.
 
     Split from `refill` so a caller that also reports what is holding the
     rest reads the frontier once: two reads of one question can disagree
@@ -146,7 +147,12 @@ def picks(state, free):
     if free <= 0:
         return [], []
     picked, held = [], []
-    for clump in state["dispatchable"]:
+    # The tie-break is this sort's own key, not borrowed from `frontier`'s
+    # pre-sort: a `state` built by some other caller must not silently lose
+    # it (#1026 review, S1/C2).
+    widest_first = sorted(state["dispatchable"],
+                          key=lambda c: (-len(paths(c)), key_of(c)))
+    for clump in widest_first:
         if len(picked) == free:
             break
         # A clump picked a moment ago is in flight by the time the next one
@@ -169,8 +175,9 @@ def picks(state, free):
 
 
 def refill(candidates, in_flight, free):
-    """The clumps to dispatch into the free slots, lowest ticket first — every
-    free slot at once, not one wave's worth.
+    """The clumps to dispatch into the free slots, widest closure first,
+    ties broken by lowest ticket — every free slot at once, not one wave's
+    worth.
 
     Recomputed at each landing and never held for another clump. Why no
     waves, and the two consequences a controller has to state out loud:
