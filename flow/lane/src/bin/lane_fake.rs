@@ -277,11 +277,7 @@ fn gh_pr_list(args: &[String]) -> ExitCode {
     // merge-cleanup's `--json number,headRefOid` below — routed on the field
     // list rather than a new flag, so the two fakes can never be confused for
     // each other by a caller that forgets to set the right env var (#1042).
-    // An exact field match, not a substring one (#1042 standards S2): a
-    // future `--json number,headRefOid,state` or `--json
-    // statusCheckRollup` would contain "state" as a substring while asking
-    // for neither of these two shapes.
-    if json_fields.split(',').any(|f| f == "state") {
+    if is_status_json_shape(json_fields) {
         return gh_pr_list_status(head, jq);
     }
     let dir = env::var("GH_PR_HEADS").unwrap_or_default();
@@ -313,6 +309,24 @@ fn gh_pr_list(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Whether `--json`'s field list is exactly `controller-restore`'s
+/// `number,state` shape — not merely a list that happens to mention
+/// `state` (Codex gate on #1042, fixed round 1): a future
+/// `--json number,headRefOid,state` would otherwise route here by accident
+/// and get the wrong fake's answer instead of failing loud. Test-only code:
+/// panic rather than silently fall through to `gh_pr_list`'s own
+/// `GH_PR_HEADS` shape, which would answer a `state`-bearing request with
+/// `headRefOid` data no caller asked for.
+fn is_status_json_shape(json_fields: &str) -> bool {
+    if json_fields == "number,state" {
+        return true;
+    }
+    if json_fields.split(',').any(|f| f == "state") {
+        panic!("lane-fake: gh pr list --json {json_fields:?} mentions state but is not the exact number,state shape controller-restore uses");
+    }
+    false
+}
+
 /// `pr list --head <b> --state all --json number,state --jq '...'`:
 /// `controller-restore`'s shape — the branch's most recent PR as
 /// `<number> <STATE>` (`OPEN`/`MERGED`/`CLOSED`), from the first non-empty
@@ -331,18 +345,30 @@ fn gh_pr_list_status(head: &str, jq: bool) -> ExitCode {
         }
         return ExitCode::SUCCESS;
     };
-    // Test-only code: panic rather than swallow a malformed fixture line
-    // (#1042 review, S3/C2) — a one-field line silently read as "no PR"
-    // (defect-classes class 1) instead of failing the fixture that wrote it.
-    let mut fields = line.split_whitespace();
-    let number = fields.next().unwrap_or_else(|| panic!("GH_PR_STATUS: {line:?} for {head:?} has no number field"));
-    let state = fields.next().unwrap_or_else(|| panic!("GH_PR_STATUS: {line:?} for {head:?} has no state field"));
+    let (number, state) = parse_status_row(&line, head);
     if jq {
         println!("{number} {state}");
     } else {
         println!("[{{\"number\":{number},\"state\":\"{state}\"}}]");
     }
     ExitCode::SUCCESS
+}
+
+/// Parses one `$GH_PR_STATUS` fixture line as exactly `<number> <STATE>`.
+/// Test-only code: panics rather than swallowing a malformed line (#1042
+/// review, S3/C2) — a one-field line silently read as "no PR"
+/// (defect-classes class 1) instead of failing the fixture that wrote it —
+/// and panics on a third field too (Codex gate on #1042, fixed round 1): a
+/// row like `152 OPEN extra` must fail the fixture that wrote it, not
+/// silently drop the extra field.
+fn parse_status_row(line: &str, head: &str) -> (String, String) {
+    let mut fields = line.split_whitespace();
+    let number = fields.next().unwrap_or_else(|| panic!("GH_PR_STATUS: {line:?} for {head:?} has no number field"));
+    let state = fields.next().unwrap_or_else(|| panic!("GH_PR_STATUS: {line:?} for {head:?} has no state field"));
+    if let Some(extra) = fields.next() {
+        panic!("GH_PR_STATUS: {line:?} for {head:?} has a third field {extra:?} — expected exactly <number> <STATE>");
+    }
+    (number.to_string(), state.to_string())
 }
 
 /// `pr view <n> --json closingIssuesReferences`: PR `<n>` closes the tickets
@@ -515,5 +541,28 @@ mod tests {
     #[test]
     fn gh_unknown_top_level_is_rejected() {
         assert!(!gh_allowed(&["nonexistent".into()]));
+    }
+
+    #[test]
+    fn is_status_json_shape_is_true_only_for_the_exact_field_list() {
+        assert!(is_status_json_shape("number,state"));
+        assert!(!is_status_json_shape("number,headRefOid"));
+    }
+
+    #[test]
+    #[should_panic(expected = "mentions state but is not the exact number,state shape")]
+    fn a_json_field_list_that_mentions_state_but_is_not_exactly_that_shape_panics() {
+        is_status_json_shape("number,headRefOid,state");
+    }
+
+    #[test]
+    fn parse_status_row_reads_exactly_two_fields() {
+        assert_eq!(parse_status_row("152 OPEN", "b"), ("152".to_string(), "OPEN".to_string()));
+    }
+
+    #[test]
+    #[should_panic(expected = "has a third field")]
+    fn parse_status_row_panics_on_a_third_field() {
+        parse_status_row("152 OPEN extra", "b");
     }
 }
