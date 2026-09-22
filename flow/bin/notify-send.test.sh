@@ -4,15 +4,14 @@
 # shifted nothing and the parse loop spun forever. Each such flag is run
 # alone, last, under a timeout — a timeout exit (124) is the hang, and any
 # exit other than a clean 0 fails the case: a run that never actually
-# exercised the parser (a refused namespace, a failed bind) must not read
-# as the same PASS a real, completed run gets (docs/agents/defect-
-# classes.md class 1).
+# reached the end of the parser must not read as the same PASS a real,
+# completed run gets (docs/agents/defect-classes.md class 1).
 #
-# The real toast send (wscript.exe, hardcoded by absolute path so PATH
-# stubbing can't intercept it) is isolated with a mount-namespace bind
-# mount, so a green run never pops a real Windows toast. A failed bind
-# fails the case loud (exit 97, surfaced as a FAIL) instead of silently
-# falling through to the real binary.
+# The real toast send is redirected at a no-op stub via NOTIFY_SEND_WSCRIPT
+# (a seam the shim exposes for exactly this), so this test runs everywhere
+# with no capability probe and no skip path — a run that never really
+# exercised the parser must not be able to report green by declining to run
+# at all, which a namespace-isolation skip could.
 #
 # The flag list below is checked against the parser's own case arm, so a
 # flag added to one side and not the other is caught rather than silently
@@ -23,18 +22,9 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 script="$here/notify-send"
 fails=0
 
-# `command -v unshare` only proves the binary exists, not that unprivileged
-# user namespaces are usable — on a host where they're refused this probe
-# must fail the same way the real thing would, or the skip guard reports a
-# false capability check when there is nothing to run against.
-if ! unshare -rm true 2>/dev/null; then
-  echo "SKIP notify-send.test.sh: unshare -rm not usable here (unprivileged user namespaces refused) to isolate wscript.exe" >&2
-  exit 0
-fi
-
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-stub="$tmp/wscript.exe"
+stub="$tmp/wscript-stub.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$stub"
 chmod +x "$stub"
 
@@ -58,17 +48,11 @@ else
 fi
 
 for flag in "${flags[@]}"; do
-  out=$(unshare -rm bash -c '
-    mount --bind "$1" /mnt/c/Windows/System32/wscript.exe || {
-      echo "bind mount for the wscript.exe stub failed" >&2; exit 97
-    }
-    exec env HERDR_TOAST_PANE=test-pane timeout 5 bash "$2" "$3"
-  ' _ "$stub" "$script" "$flag" 2>&1)
+  out=$(NOTIFY_SEND_WSCRIPT="$stub" HERDR_TOAST_PANE=test-pane timeout 5 bash "$script" "$flag" 2>&1)
   rc=$?
   case "$rc" in
     124) echo "FAIL '$flag' as the last argument hangs (timed out): $out"; fails=1 ;;
     0)   echo "PASS '$flag' as the last argument does not hang (rc=0)" ;;
-    97)  echo "FAIL '$flag' as the last argument: isolation setup failed, not a real run: $out"; fails=1 ;;
     *)   echo "FAIL '$flag' as the last argument exited $rc unexpectedly: $out"; fails=1 ;;
   esac
 done
