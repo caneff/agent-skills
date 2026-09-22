@@ -19,6 +19,7 @@ import closing_ticket as T  # noqa: E402
 
 GENERATOR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "closing_ticket.py")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 DECLARED = """# Fixture repo
 
@@ -317,6 +318,20 @@ def test_the_procedure_says_how_to_fall_back_and_how_to_tear_down():
     assert "conflict" in got, got
     assert f"/multi-axis-code-review {SHAS[1]}~1" in got, got
     assert "git worktree remove" in got, got
+
+
+def test_this_repos_own_agents_md_declares_a_seam_and_a_blind_spot():
+    # `implement-spec/closing_ticket_test.py` otherwise builds only synthetic
+    # fixture roots (#993, filed from #927 round 1 findings S3/C2): rewording
+    # the `## End-to-end seam` heading or the `**Seam**`/`**Blind to**` key
+    # names in this repo's own `AGENTS.md` would revert this repo to
+    # "declares nothing" with nothing here to catch it — it would surface as
+    # a `SeamError` mid spec run instead. Pinned to the actual declared text,
+    # not just non-blankness: a rewrite to something non-empty but vacuous
+    # ("- **Seam**: tbd") would otherwise still pass.
+    seam, blind_to = T.seam_of(REPO_ROOT)
+    assert seam.strip() == "`bash tests/all.sh`", seam
+    assert "a test asserts" in blind_to, blind_to
 
 
 def main():
