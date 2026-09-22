@@ -4,8 +4,8 @@ Controller: this session, seated on the primary checkout's `main`, herdr agent `
 
 ## Outcome
 
-- **25 tickets landed** in 24 clumps (one clump of three, one of two, the rest singles), plus #901 landed just before the run opened. Every landing went through the heavy tier: TDD, three review axes, a verification pass, a Codex pass at the merge gate, squash, `merge-cleanup`.
-- **1 park**: #874, cause 2 (a lane-mandated step the harness refuses). The correctness reviewer's read-only diff of `~/.local/bin` was blocked by the auto-mode classifier as Unauthorized Persistence; the prompt has sat in the worker's pane since 14:36. #964 is held behind its workspace over `flow/claude/OPERATIONS.md`.
+- **27 tickets landed** in 26 clumps (final; the report was first written at 25 with two in flight) (one clump of three, one of two, the rest singles), plus #901 landed just before the run opened. Every landing went through the heavy tier: TDD, three review axes, a verification pass, a Codex pass at the merge gate, squash, `merge-cleanup`.
+- **1 park**: #874, cause 2 (a lane-mandated step the harness refuses). The correctness reviewer's read-only diff of `~/.local/bin` was blocked by the auto-mode classifier as Unauthorized Persistence; the prompt sat in the worker's pane from 14:36 until Chris pressed `1` at 16:58. The park ended, the worker's PR (#1018) went through two Codex passes, and Chris merged it at 05:47 the next morning as a `ready-for-human` ticket; the installer ran from the primary checkout after. #964, held behind #874 over `flow/claude/OPERATIONS.md`, dispatched at 05:48, landed at 06:36 (d578e5c) after two Codex passes: three of four findings fixed in-round, one filed (#1044).
 - **0 workers vanished; 0 collisions between live workspaces.** Two stop alerts were benign (a worker replying to a controller message with a subagent still out); two were real (#905 and #934 stopped after building to ask, in their pane, whether they could run the review), and both were caught by the alert and resumed by a controller ruling.
 
 ## The loop, as run
@@ -33,4 +33,6 @@ Controller: this session, seated on the primary checkout's `main`, herdr agent `
 
 By the controller: #969, #970, #981, #982, #988, #990, #998, #999, #1003, #1005, #1009, #1013, #1014, #1015. By workers: #971, #973, #975, #976, #983, #991, #993, #994, #1000, #1006, #1011.
 
-Left for Chris: press `1` in pane `skills-874`, then merge its PR (the park added `ready-for-human`); the #951 upstream report to the Codex plugin; #867 has no state label; the three-worker ceiling under #933's box check.
+Also filed at the tail: #1044 (controller), #1016, #1017, #1031, #1032 (workers). Spec #1024 with seven slices (#1025–#1030, #1033) came out of the review of this run's follow-up count: 26 closed, 26 opened.
+
+Run closed 2026-09-22 06:40. Left for Chris: the #951 upstream report to the Codex plugin; #867 has no state label; the three-worker ceiling under #933's box check.
