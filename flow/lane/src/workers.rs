@@ -54,14 +54,22 @@ pub fn now_iso8601() -> String {
 /// append-only JSONL, one record per dispatch — never rewritten here, so two
 /// dispatches racing on the same controller each add their own line rather
 /// than clobbering the other's.
+/// One `write_all` call, not `writeln!`'s separate write of the line and
+/// its `"\n"` (#964 correctness C4): a regular file opened with `O_APPEND`
+/// gives each single `write(2)` call its own atomic offset bump on Linux, so
+/// two dispatches racing on one controller each land their whole line
+/// whole — two writes per append could interleave a line from each process
+/// between the two, corrupting both, which `read`'s per-line parse would
+/// then have silently dropped.
 pub fn append(home: &Path, pid: &str, record: &WorkerRecord) -> std::io::Result<()> {
     let path = path_for(home, pid);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let line = serde_json::to_string(record).map_err(std::io::Error::other)?;
+    let mut line = serde_json::to_string(record).map_err(std::io::Error::other)?;
+    line.push('\n');
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
-    writeln!(f, "{line}")
+    f.write_all(line.as_bytes())
 }
 
 /// Every well-formed record for the controller session at `pid`, in the

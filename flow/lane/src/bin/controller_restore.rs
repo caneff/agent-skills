@@ -25,8 +25,7 @@ use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
-const HERDR_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
-const GH_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A PR `gh pr list` reports for a worker's branch.
 struct PrStatus {
@@ -37,28 +36,61 @@ struct PrStatus {
 /// Parses one `<number> <STATE>` line — the first is the branch's most
 /// recent PR, which is all `gh pr list --head <branch>` can return (a
 /// branch carries at most one open PR, and this hook does not care about a
-/// closed-without-merging one past its own text). Anything else, including
-/// no output at all, is no PR.
+/// closed-without-merging one past its own text). Empty output is no PR.
+/// `null null` is also no PR, not a defensive guess: the `--jq` filter below
+/// asks for `.[0] // empty`, which already turns a `null` first element into
+/// no output — this is the same fact checked a second time at the Rust
+/// boundary, in case a future edit to that filter (or a `gh` behaviour
+/// change) drops the `// empty` and starts leaking `null` through again.
 fn parse_pr_status(out: &str) -> Option<PrStatus> {
     let line = out.lines().find(|l| !l.trim().is_empty())?;
     let mut fields = line.split_whitespace();
     let number = fields.next()?.to_string();
     let state = fields.next()?.to_string();
+    if number == "null" || state == "null" {
+        return None;
+    }
     Some(PrStatus { number, state })
 }
 
-/// The herdr status word for the agent named `name`, or `None` when herdr
-/// lists no such agent (its pane closed, or herdr was never asked).
-fn agent_status_word<'a>(agents: &'a [Agent], name: &str) -> Option<&'a str> {
-    agents.iter().find(|a| a.name() == name).map(Agent::status)
+/// What herdr or gh answered about one thing: a real value, a real "there is
+/// none", or "could not be asked at all" (off PATH, timed out, unparseable
+/// output) — the third must never print the same as the second. Conflating
+/// them was #964's own correctness-axis C2/standards-axis S1 finding: a
+/// wedged herdr made every worker read "no live herdr agent" as if that were
+/// a fact about the agent rather than about herdr.
+enum Asked<T> {
+    Answered(T),
+    Unknown,
+}
+
+/// herdr's answer to "is `name`'s agent alive, and what's its status" —
+/// `Answered(None)` is a real "no such agent"; `Unknown` is "herdr could not
+/// be asked".
+fn agent_status<'a>(agents: &'a Asked<Vec<Agent>>, name: &str) -> Asked<Option<&'a str>> {
+    match agents {
+        Asked::Unknown => Asked::Unknown,
+        Asked::Answered(agents) => Asked::Answered(agents.iter().find(|a| a.name() == name).map(Agent::status)),
+    }
+}
+
+/// What to say about a worker's herdr agent.
+fn describe_agent(agent: &str, status: &Asked<Option<&str>>) -> String {
+    match status {
+        Asked::Unknown => format!("{agent}, herdr status unknown — could not ask herdr"),
+        Asked::Answered(Some(s)) => format!("{agent}, agent {s}"),
+        Asked::Answered(None) => format!("{agent}, no live herdr agent"),
+    }
 }
 
 /// What to say about a worker's PR: the state, and the guidance that follows
-/// from it. `None` is "no PR yet" — the worker may still be building.
-fn describe_pr(pr: Option<&PrStatus>) -> String {
+/// from it. `Answered(None)` is "no PR yet" — the worker may still be
+/// building; `Unknown` is "gh could not be asked", never worded the same way.
+fn describe_pr(pr: &Asked<Option<PrStatus>>) -> String {
     match pr {
-        None => "no PR yet — check on the worker".to_string(),
-        Some(p) => match p.state.as_str() {
+        Asked::Unknown => "PR status unknown — could not ask gh".to_string(),
+        Asked::Answered(None) => "no PR yet — check on the worker".to_string(),
+        Asked::Answered(Some(p)) => match p.state.as_str() {
             "MERGED" => format!("PR #{} merged — run cleanup", p.number),
             "OPEN" => format!("PR #{} open, not merged — follow implement/SKILL.md \u{a7} The merge", p.number),
             "CLOSED" => format!("PR #{} closed without merging — check on the worker", p.number),
@@ -70,23 +102,44 @@ fn describe_pr(pr: Option<&PrStatus>) -> String {
 /// One restore line for `record`, e.g.:
 /// `You control implement-143 (sudokupad-art-143, agent working): PR #152
 /// open, not merged — follow implement/SKILL.md § The merge; cleanup: <line>`
-fn restore_line(record: &WorkerRecord, agent_status: Option<&str>, pr: Option<&PrStatus>) -> String {
-    let agent_clause = match agent_status {
-        Some(status) => format!("{}, agent {status}", record.agent),
-        None => format!("{}, no live herdr agent", record.agent),
-    };
+fn restore_line(record: &WorkerRecord, agent: &Asked<Option<&str>>, pr: &Asked<Option<PrStatus>>) -> String {
     let merges = if record.chris_merges { ", Chris merges" } else { "" };
-    format!("You control {} ({agent_clause}{merges}): {}; cleanup: {}", record.branch, describe_pr(pr), record.cleanup)
+    format!("You control {} ({}{merges}): {}; cleanup: {}", record.branch, describe_agent(&record.agent, agent), describe_pr(pr), record.cleanup)
 }
 
-/// Whether the hook's stdin JSON names a subagent run (`agent_id` set) — a
-/// `Task` subagent's own session start fires the same hook, and it controls
-/// nothing of its own to restore.
+/// Whether the hook's stdin JSON names a subagent run — a `Task` subagent's
+/// own session start fires the same hook, and it controls nothing of its
+/// own to restore. Checked under both spellings a hook payload might carry
+/// (`agent_id`, and `agentId` as `~/.claude/hooks/worker-stop-alert.sh`
+/// reads it from a transcript payload) — reading only one risked injecting
+/// a parent session's "You control …" lines into every subagent's context
+/// under the other.
 fn is_subagent(stdin: &str) -> bool {
-    serde_json::from_str::<Value>(stdin)
-        .ok()
-        .and_then(|v| v.get("agent_id").cloned())
-        .is_some_and(|v| !v.is_null() && v.as_str() != Some(""))
+    let Ok(v) = serde_json::from_str::<Value>(stdin) else { return false };
+    for key in ["agent_id", "agentId"] {
+        if v.get(key).is_some_and(|v| !v.is_null() && v.as_str() != Some("")) {
+            return true;
+        }
+    }
+    false
+}
+
+fn ask_agents() -> Asked<Vec<Agent>> {
+    match quiet_stdout_timeout("herdr", &["agent", "list"], QUERY_TIMEOUT).and_then(|out| herdr::parse_agents(&out)) {
+        Some(agents) => Asked::Answered(agents),
+        None => Asked::Unknown,
+    }
+}
+
+fn ask_pr(repo: &str, branch: &str) -> Asked<Option<PrStatus>> {
+    match quiet_stdout_timeout(
+        "gh",
+        &["pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "number,state", "--jq", r#".[0] // empty | "\(.number) \(.state)""#, "--limit", "1"],
+        QUERY_TIMEOUT,
+    ) {
+        Some(out) => Asked::Answered(parse_pr_status(&out)),
+        None => Asked::Unknown,
+    }
 }
 
 fn main() {
@@ -107,20 +160,12 @@ fn main() {
         return;
     }
 
-    let agents: Vec<Agent> = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT)
-        .and_then(|out| herdr::parse_agents(&out))
-        .unwrap_or_default();
+    let agents = ask_agents();
 
     for record in &records {
-        let status = agent_status_word(&agents, &record.agent);
-        let pr = quiet_stdout_timeout(
-            "gh",
-            &["pr", "list", "--repo", &record.repo, "--head", &record.branch, "--state", "all", "--json", "number,state", "--jq", r#".[0] | "\(.number) \(.state)""#, "--limit", "1"],
-            GH_QUERY_TIMEOUT,
-        )
-        .as_deref()
-        .and_then(parse_pr_status);
-        safe_println!("{}", restore_line(record, status, pr.as_ref()));
+        let status = agent_status(&agents, &record.agent);
+        let pr = ask_pr(&record.repo, &record.branch);
+        safe_println!("{}", restore_line(record, &status, &pr));
     }
 }
 
@@ -155,23 +200,34 @@ mod tests {
     }
 
     #[test]
-    fn agent_status_word_finds_by_name_and_is_none_when_absent() {
-        let agents = herdr::parse_agents(r#"{"result":{"agents":[{"name":"sudokupad-art-143","agent_status":"working"}]}}"#).unwrap();
-        assert_eq!(agent_status_word(&agents, "sudokupad-art-143"), Some("working"));
-        assert_eq!(agent_status_word(&agents, "someone-else"), None);
+    fn a_null_first_element_is_no_pr_not_a_pr_number_null() {
+        // What `.[0] | ...` (without `// empty`) actually prints for an
+        // empty gh result — the bug the jq filter and this second check
+        // both guard against (#964 correctness C1).
+        assert!(parse_pr_status("null null").is_none());
     }
 
     #[test]
-    fn describe_pr_covers_open_merged_closed_and_none() {
-        assert_eq!(describe_pr(None), "no PR yet — check on the worker");
-        assert!(describe_pr(Some(&PrStatus { number: "9".into(), state: "OPEN".into() })).starts_with("PR #9 open, not merged"));
-        assert_eq!(describe_pr(Some(&PrStatus { number: "9".into(), state: "MERGED".into() })), "PR #9 merged — run cleanup");
-        assert!(describe_pr(Some(&PrStatus { number: "9".into(), state: "CLOSED".into() })).starts_with("PR #9 closed without merging"));
+    fn agent_status_distinguishes_found_not_found_and_unknown() {
+        let agents = Asked::Answered(herdr::parse_agents(r#"{"result":{"agents":[{"name":"sudokupad-art-143","agent_status":"working"}]}}"#).unwrap());
+        assert!(matches!(agent_status(&agents, "sudokupad-art-143"), Asked::Answered(Some("working"))));
+        assert!(matches!(agent_status(&agents, "someone-else"), Asked::Answered(None)));
+        let unknown: Asked<Vec<Agent>> = Asked::Unknown;
+        assert!(matches!(agent_status(&unknown, "sudokupad-art-143"), Asked::Unknown));
+    }
+
+    #[test]
+    fn describe_pr_covers_open_merged_closed_none_and_unknown() {
+        assert_eq!(describe_pr(&Asked::Answered(None)), "no PR yet — check on the worker");
+        assert!(describe_pr(&Asked::Answered(Some(PrStatus { number: "9".into(), state: "OPEN".into() }))).starts_with("PR #9 open, not merged"));
+        assert_eq!(describe_pr(&Asked::Answered(Some(PrStatus { number: "9".into(), state: "MERGED".into() }))), "PR #9 merged — run cleanup");
+        assert!(describe_pr(&Asked::Answered(Some(PrStatus { number: "9".into(), state: "CLOSED".into() }))).starts_with("PR #9 closed without merging"));
+        assert_eq!(describe_pr(&Asked::Unknown), "PR status unknown — could not ask gh");
     }
 
     #[test]
     fn restore_line_names_the_branch_agent_status_pr_and_cleanup() {
-        let line = restore_line(&record(), Some("working"), Some(&PrStatus { number: "152".into(), state: "OPEN".into() }));
+        let line = restore_line(&record(), &Asked::Answered(Some("working")), &Asked::Answered(Some(PrStatus { number: "152".into(), state: "OPEN".into() })));
         assert_eq!(
             line,
             "You control implement-143 (sudokupad-art-143, agent working): PR #152 open, not merged — follow implement/SKILL.md \u{a7} The merge; cleanup: cd /repo && merge-cleanup implement-143 --repo /repo"
@@ -182,16 +238,27 @@ mod tests {
     fn restore_line_notes_no_live_agent_and_chris_merges() {
         let mut r = record();
         r.chris_merges = true;
-        let line = restore_line(&r, None, None);
+        let line = restore_line(&r, &Asked::Answered(None), &Asked::Answered(None));
         assert!(line.contains("no live herdr agent"), "{line}");
         assert!(line.contains("Chris merges"), "{line}");
         assert!(line.contains("no PR yet"), "{line}");
     }
 
     #[test]
-    fn is_subagent_true_only_for_a_non_empty_agent_id() {
+    fn restore_line_says_unknown_rather_than_a_guessed_state_when_it_could_not_ask() {
+        let line = restore_line(&record(), &Asked::Unknown, &Asked::Unknown);
+        assert!(line.contains("herdr status unknown — could not ask herdr"), "{line}");
+        assert!(line.contains("PR status unknown — could not ask gh"), "{line}");
+        assert!(!line.contains("no live herdr agent"), "{line}");
+        assert!(!line.contains("no PR yet"), "{line}");
+    }
+
+    #[test]
+    fn is_subagent_true_for_either_spelling_of_a_non_empty_agent_id() {
         assert!(is_subagent(r#"{"agent_id":"sub-1"}"#));
+        assert!(is_subagent(r#"{"agentId":"sub-1"}"#));
         assert!(!is_subagent(r#"{"agent_id":""}"#));
+        assert!(!is_subagent(r#"{"agentId":""}"#));
         assert!(!is_subagent(r#"{"agent_id":null}"#));
         assert!(!is_subagent(r#"{"hook_event_name":"SessionStart"}"#));
         assert!(!is_subagent(""));
