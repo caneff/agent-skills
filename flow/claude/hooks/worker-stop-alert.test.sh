@@ -336,6 +336,20 @@ expect_none "a stop while a Monitor task is out does not alert"
 run "monitor timed out this turn, nothing else touched it" "$t"
 expect_alert "a timed-out Monitor's statusless notification does not keep the launch outstanding, so a silent stop alerts"
 
+# The #981 fix has two mechanisms: excluding the timeout notification from
+# $touched (what ends a launch from an EARLIER turn, via the outstanding()
+# prefilter — witnessed above), and adding its id to $finished (what ends a
+# launch from THIS turn, where $tasks_now already makes it outstanding
+# regardless of $touched, so only $finished can remove it). Witness the
+# second directly, or removing it alone stays invisible to every fixture
+# above (verification pass, C2).
+reset_log
+t="$tmp/monitor-timeout-same-turn.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
+  monitor_launch bmto4; monitor_timeout bmto4; assistant_text "timed out, moving on"; } > "$t"
+run "monitor launched and timed out in the same turn" "$t"
+expect_alert "a same-turn Monitor timeout is removed via \$finished even though \$tasks_now already made it outstanding"
+
 # The exact-marker requirement, the other direction: a live monitor whose
 # tailed output merely mentions the timeout phrase in free text is still
 # running, so the launch stays out and a stop is not silent (#981's C3).
@@ -497,15 +511,48 @@ expect_reported "a report addressed to the resolved session name counts as repor
 # resolve-controller itself refuses a live session with no name, so a
 # session this can't name is one a compliant worker couldn't have
 # addressed either (P1).
+reset_log
 t="$tmp/herdr-name-literal.jsonl"
 { human "$herdr_brief"; send s1 "hctl-99"; ok s1; assistant_text "PR up sent"; } > "$t"
 run "herdr-name controller, report to the brief's own literal" "$t"
 expect_reported "a report addressed to the brief's literal herdr name also counts as reported"
+reset_log
 t="$tmp/herdr-name-silent.jsonl"
 { human "$herdr_brief"; assistant_text "done, no report"; } > "$t"
 run "herdr-name controller, no report" "$t"
 expect_alert "a herdr-name controller with no report still resolves the pane and alerts"
 # Restore the registry and agent list the tests below expect.
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
+
+# `resolve_session`'s fields are joined on `\x1f`, not a tab, precisely so a
+# `.sessionId`-less record doesn't shift `.name`/`.messagingSocketPath` into
+# each other's variables (verification pass on #1014, C4) — a live session
+# can genuinely lack a sessionId (`flow/lane/src/sessions.rs` defaults it to
+# `""`). Witnessed by resolving through the socket alone.
+reset_log
+printf '{"pid":%s,"procStart":"%s","name":"skills-nosid","messagingSocketPath":"/run/nosid.sock"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+nosid_brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"skills-nosid\"</command-args>'
+t="$tmp/nosid-reported.jsonl"
+{ human "$nosid_brief"; send s1 "uds:/run/nosid.sock"; ok s1; assistant_text "PR up sent"; } > "$t"
+run "controller record with no sessionId, report to its socket" "$t"
+expect_reported "a live record with a name and a socket but no sessionId still resolves the socket, not a field shifted by the missing one"
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+
+# A herdr-resolved session whose live record has no `.name` at all: no
+# worker can address it either way (matching already falls back to the
+# brief's own literal, and no name means nothing to match against), but the
+# pane lookup needs only the session id `herdr agent list` already gave —
+# falling back to it there is what keeps a genuinely silent stop from
+# ending in "no herdr pane for controller" (verification pass, P2).
+reset_log
+printf '{"pid":%s,"procStart":"%s","sessionId":"sess-nopanel"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' '{"result":{"agents":[{"name":"hctl-nopanel","pane_id":"w9:p1","agent_session":{"value":"sess-nopanel"}}]}}' > "$tmp/agent-list.json"
+nopanel_brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"hctl-nopanel\"</command-args>'
+t="$tmp/nopanel-silent.jsonl"
+{ human "$nopanel_brief"; assistant_text "done, no report"; } > "$t"
+run "herdr-resolved session id, live record has no name" "$t"
+expect_alert "the pane is found via the herdr-resolved session id alone, even though the record has nothing to match a report against"
 printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 

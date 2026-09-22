@@ -52,25 +52,31 @@ IFS=$'\t' read -r n controller < <(entries | jq -r '
 [ -n "${controller:-}" ] || exit 0
 
 # A live registry record naming `sid` (mode "sid") or `nm` (mode "name"),
-# with a non-empty `.name` — its session id, current name and socket, in
-# that order because `read` with a tab `IFS` still collapses runs of tab as
-# IFS whitespace, so an empty field belongs last or it swallows the field
-# after it (`messagingSocketPath` is the one usually missing). Live means
-# the pid's /proc starttime (field 22, after the `(comm)` field) equals the
-# record's procStart — a stale record whose pid was reused has another, as
-# in flow/lane's sessions reader.
+# with a non-empty `.name` — its session id, current name and socket. Joined
+# and split on `\x1f` (ASCII unit separator), not a tab: tab is one of
+# bash's default IFS-whitespace characters, so `read` collapses runs of it
+# and strips a leading/trailing one regardless of field order — an empty
+# `.sessionId` or `.messagingSocketPath` in the middle silently shifted
+# every field after it into the wrong variable (verification pass on #981,
+# #1014: confirmed against a record with a name and a socket but no
+# `.sessionId`). `\x1f` is not IFS-whitespace, so a run of it never
+# collapses and an empty field never disappears, whatever position it's in.
+# Live means the pid's /proc starttime (field 22, after the `(comm)` field)
+# equals the record's procStart — a stale record whose pid was reused has
+# another, as in flow/lane's sessions reader.
 resolve_session() {
   local mode="$1" val="$2" f pid start sid nm sock stat fields
   for f in "$HOME"/.claude/sessions/*.json; do
     [ -e "$f" ] || continue
-    IFS=$'\t' read -r pid start sid nm sock < <(jq -r --arg mode "$mode" --arg v "$val" \
+    IFS=$'\x1f' read -r pid start sid nm sock < <(jq -r --arg mode "$mode" --arg v "$val" \
       'select((if $mode == "sid" then .sessionId else .name end) == $v and ((.name // "") != "")) |
-       "\(.pid)\t\(.procStart // "")\t\(.sessionId // "")\t\(.name // "")\t\(.messagingSocketPath // "")"' "$f" 2>/dev/null)
+       [(.pid | tostring), (.procStart // ""), (.sessionId // ""), (.name // ""), (.messagingSocketPath // "")]
+       | join("\u001f")' "$f" 2>/dev/null)
     [[ "${pid:-}" =~ ^[0-9]+$ ]] || continue
     stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || continue
     read -ra fields <<<"${stat##*) }"
     [ -n "$start" ] && [ "${fields[19]:-}" = "$start" ] || continue
-    printf '%s\t%s\t%s\n' "$sid" "$nm" "$sock"
+    printf '%s\x1f%s\x1f%s\n' "$sid" "$nm" "$sock"
     return 0
   done
   return 1
@@ -97,8 +103,15 @@ resolved=""
 [ -n "$resolved" ] || resolved="$(resolve_session name "$controller")"
 ctl_session="" ctl_socket="" resolved_name=""
 if [ -n "$resolved" ]; then
-  IFS=$'\t' read -r ctl_session resolved_name ctl_socket <<<"$resolved"
+  IFS=$'\x1f' read -r ctl_session resolved_name ctl_socket <<<"$resolved"
 fi
+# The pane lookup needs only a session id, not a name: a live session with
+# no `.name` isn't addressable by a compliant worker either way (matching
+# already falls back to the brief's literal), but its pane should still be
+# found so a genuinely silent stop can alert, rather than end in "no herdr
+# pane for controller" — the exact failure #1014 opens with (verification
+# pass, P2).
+[ -z "$ctl_session" ] && ctl_session="$herdr_sid"
 
 # The verdict for this stop: `reported`, `waiting` on a subagent, or `silent`,
 # plus the transcript's last entry as the stop's key. `$c` is the brief's
