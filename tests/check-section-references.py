@@ -228,14 +228,20 @@ def resolve_heading(
     any number of prefix matches — a step that only exists in a sibling
     heading sharing the name's prefix must not be read as if it were in the
     named heading (#990). With no exact match, a single prefix match is the
-    answer; more than one is ambiguous and neither is returned as a body."""
+    answer; more than one is ambiguous and neither is returned as a body.
+    A duplicated exact match (two headings that normalize the same) is the
+    same ambiguity by another route and is refused the same way, rather than
+    reading "any of them holds the step" — that read is #990's own escape,
+    reopened inside this branch."""
     matches = [(heading, body) for heading, body in candidates if matches_heading(label, heading)]
     if not matches:
         return [], []
     if not label.isdigit():
-        exact = [body for heading, body in matches if normalize(heading) == normalize(label)]
-        if exact:
-            return exact, []
+        exact = [(heading, body) for heading, body in matches if normalize(heading) == normalize(label)]
+        if len(exact) == 1:
+            return [exact[0][1]], []
+        if len(exact) > 1:
+            return [], [heading for heading, _ in exact]
     if len(matches) == 1:
         return [matches[0][1]], []
     return [], [heading for heading, _ in matches]
@@ -254,6 +260,12 @@ def main() -> int:
         lines = source.read_text().splitlines()
         for number, line in enumerate(lines, 1):
             for pointer in SECTION.finditer(line):
+                # Bound once: every reading pointer offers, step-locator ones
+                # first, the plain fallback last (reference_targets' own
+                # order). Reused below instead of re-parsed per use, so
+                # "a step locator matched" is this list holding more than the
+                # one fallback entry, not a fact re-derived from scratch.
+                readings = reference_targets(pointer)
                 named = [
                     resolve(path.group(1), source, tracked)
                     for path in PATH.finditer(line)
@@ -266,7 +278,7 @@ def main() -> int:
                 if target is None:
                     if previous_line_named_file not in (None, source):
                         failures.append(
-                            f"{source.relative_to(ROOT)}:{number}: bare § {reference_targets(pointer)[-1][0]} "
+                            f"{source.relative_to(ROOT)}:{number}: bare § {readings[-1][0]} "
                             f"follows {previous_line_named_file.relative_to(ROOT)}"
                         )
                         continue
@@ -292,7 +304,7 @@ def main() -> int:
                 raw_name = pointer.group(1).strip()
                 cut_at_backtick = line[pointer.end() : pointer.end() + 1] == "`"
                 inside_span = inside_code_span(line, pointer.start())
-                has_step_locator = len(reference_targets(pointer)) > 1
+                has_step_locator = len(readings) > 1
                 if (
                     cut_at_backtick
                     and not inside_span
@@ -307,7 +319,7 @@ def main() -> int:
                     continue
 
                 ambiguous: list[str] = []
-                for label, steps in reference_targets(pointer):
+                for label, steps in readings:
                     candidates, ambiguous = resolve_heading(label, headings[target])
                     if candidates or ambiguous:
                         break
