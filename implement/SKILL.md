@@ -709,6 +709,15 @@ The controller merges on a repo Chris owns; Chris reads it after via
    the fix diff is the last review, and step 4 follows once every
    disposition is recorded.
 
+   A Codex-pass finding disposed of as `leftover`, whichever pass raised
+   it, is recorded twice. Its PR-body disposition is the first record.
+   Beside it, the controller appends one line for it to
+   `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl`, in § Review's
+   `leftover` grammar, under the Codex finding's own id. That sidecar is
+   what the sweep harvests at landing, and the verification pass wrote it
+   before any Codex pass ran, so a leftover kept only in the PR body never
+   reaches a sweep.
+
    Classify each finding by comparing it with the PR body's round-1
    findings — `codex-only, confirmed` (fixed or filed, and no Claude axis
    raised it), `also found by Claude`, or `disputed` (with why) — and

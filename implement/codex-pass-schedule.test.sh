@@ -173,6 +173,12 @@ check_in "$whole_file" "§ The merge step 3 applies the same rule to a Codex sec
 check_in "$merge_section" 'adjacent-fix rule, rather than sending it back to Codex. It re-runs step 2.' 'implement/SKILL.md § The merge'
 check_in "$merge_section" '`disputed: <why>`, filed if it is high, or `leftover`' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'no worker fix round follows it' 'implement/SKILL.md § The merge'
+# A Codex-pass leftover lives only in the PR body unless the controller
+# also writes it where the sweep harvests: the dispositions sidecar the
+# verification pass wrote, in § Review's leftover grammar (P2, ruled by the
+# controller on PR 1080).
+check_in "$merge_section" 'the controller appends one line for it to `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl`' 'implement/SKILL.md § The merge'
+check_in "$merge_section" "in § Review's \`leftover\` grammar, under the Codex finding's own id" 'implement/SKILL.md § The merge'
 check_absent_in "$whole_file" 'there is no third Codex run' 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'there is no worker fix-and-re-run cycle left' 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'the no-third-run ceiling' 'implement/SKILL.md (whole file)'
