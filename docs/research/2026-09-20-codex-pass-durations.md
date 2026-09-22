@@ -142,3 +142,4 @@ rename landed sooner.
 | 1098 | #1099 | third | 2026-09-22T19:41:53-04:00 | 2026-09-22T19:43:08-04:00 | 1.3 | collected |
 | twitch-rules-scroller#345 | twitch-rules-scroller#375 | gate | 2026-09-22T12:26:54-04:00 | 2026-09-22T12:28:20-04:00 | 1.4 | collected (row backfilled by the adopting controller; the dispatching controller died before writing it) |
 | twitch-rules-scroller#345 | twitch-rules-scroller#375 | second | 2026-09-22T19:46:43-04:00 | 2026-09-22T19:48:32-04:00 | 1.8 | collected |
+| twitch-rules-scroller#345 | twitch-rules-scroller#375 | third | 2026-09-22T19:52:19-04:00 | 2026-09-22T19:54:13-04:00 | 1.9 | collected |
