@@ -427,11 +427,14 @@ fn every_ticket_the_merged_pr_closes_has_its_claim_cleared() {
 }
 
 #[test]
-fn a_clump_with_mixed_width_ticket_numbers_clears_in_ascending_numeric_order() {
+fn a_clump_with_mixed_width_ticket_numbers_sorts_shorter_before_longer() {
     // #983: the comment on the sort claims length-then-text is why the keys
     // are digit strings, but no fixture had mixed widths to prove it. "10"
     // sorts before "9" lexicographically; a plain `tickets.sort()` would
-    // report "cleared #10, #9" here.
+    // report "cleared #10, #9" here. Named for what the sort actually does
+    // (shorter before longer, then lexicographic within a width) rather than
+    // "ascending numeric order", which it only equals for digit strings
+    // without leading zeros.
     let c = Cleanup::new();
     let r = c.mkfixture("r20c");
     c.mk_implement_branch(&r, "9");
@@ -2176,7 +2179,7 @@ fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reapi
     std::fs::write(
         &git_stub,
         format!(
-            "#!/bin/sh\ncase \" $* \" in\n  *' worktree list --porcelain '*)\n    [ -e {marker} ] && exit 1\n    ;;\nesac\nexec {real_git} \"$@\"\n",
+            "#!/bin/sh\ncase \" $* \" in\n  *' worktree list --porcelain '*)\n    [ -e \"{marker}\" ] && exit 1\n    ;;\nesac\nexec \"{real_git}\" \"$@\"\n",
             marker = marker.display(),
             real_git = real_git.display()
         ),
@@ -2187,7 +2190,7 @@ fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reapi
     let r = reap_repo(&c, "r45", &["118", "119"]);
     let planned = r.join(".claude/worktrees/implement-119");
     let hook = r.join(".git/hooks/pre-push");
-    std::fs::write(&hook, format!("#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n: > {}\n", marker.display())).unwrap();
+    std::fs::write(&hook, format!("#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n: > \"{}\"\n", marker.display())).unwrap();
     std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
 
     let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);

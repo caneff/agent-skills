@@ -1370,7 +1370,12 @@ struct PlanRow {
 
 /// A sweep plan row's worktree counts and hold: the modified, untracked and
 /// ignored counts of the linked worktree holding `b`, and a hold when it has
-/// work a removal would lose — or when git cannot say whether it does.
+/// work a removal would lose — or when git cannot say whether it does. Row
+/// only, never a removal target: `linked_worktree_holding`'s own failed-listing
+/// case reads as `None` here too, so a `git worktree list` failure prints an
+/// unheld row rather than an accurate "could not tell" one (#975 S1/P2) —
+/// misleading, not destructive, since nothing downstream of this row removes
+/// anything.
 fn worktree_plan(repo: &str, b: &str) -> (Option<String>, Option<&'static str>) {
     let Some(wt) = linked_worktree_holding(repo, b) else { return (None, None) };
     match WorktreeFiles::read(&wt) {
@@ -1580,10 +1585,14 @@ fn implement_workspaces(repo: &str) -> Vec<(String, String)> {
 
 /// The linked worktree — not the primary checkout — that has `b` checked
 /// out. A listing that could not be read is treated as no holder here, same
-/// as before: `git branch -d` still refuses "used by worktree" on its own if
-/// a linked worktree really holds `b`, so this caller is backstopped and
-/// does not need the fail-closed reading `reap_one`'s destructive-time
-/// re-check needs (#975).
+/// as before (#975). That's safe at `cleanup_branch`'s own call site: `git
+/// branch -d` still refuses "used by worktree" on its own if a linked
+/// worktree really holds `b`, so nothing is removed out of scope. At
+/// `worktree_plan`'s call site there is no such backstop — a failed listing
+/// there just reads as an accurate "nothing holds this" sweep row instead of
+/// the "unreadable, not removed" hold its sibling `WorktreeFiles::read`
+/// failure gets — but that row is informational only, never a removal
+/// target, so the cost is a misleading row, not a removal.
 fn linked_worktree_holding(path: &str, b: &str) -> Option<String> {
     let wt = worktree_holding(path, b).ok().flatten()?;
     (wt != primary_of(path)).then_some(wt)
