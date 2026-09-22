@@ -10,7 +10,8 @@
 //! GH_LABELS, HERDR_RUNNING, HERDR_NO_ROOT_PANE, HERDR_AGENT_TAKEN,
 //! HERDR_STALL for implement-dispatch; GH_PR_HEADS, HERDR_AGENTS,
 //! HERDR_WORKSPACES, HERDR_LIST_FAIL (only `agent list` fails), HERDR_FAIL, HERDR_PANE_CLOSE_FAIL, GH_ASSIGNEES,
-//! GH_ISSUE_EDIT_FAIL, GH_PR_CLOSES, GH_PR_CLOSES_FAIL for merge-cleanup.
+//! GH_ISSUE_EDIT_FAIL, GH_PR_CLOSES, GH_PR_CLOSES_FAIL for merge-cleanup;
+//! GH_PR_STATUS for controller-restore's `--json number,state` PR lookup.
 //! Never installed — see install.sh.
 
 use std::env;
@@ -271,6 +272,14 @@ fn run_gh(args: &[String]) -> ExitCode {
 fn gh_pr_list(args: &[String]) -> ExitCode {
     let head = args.windows(2).find(|w| w[0] == "--head").map(|w| w[1].as_str()).unwrap_or("");
     let jq = args.iter().any(|a| a == "--jq");
+    let json_fields = args.windows(2).find(|w| w[0] == "--json").map(|w| w[1].as_str()).unwrap_or("");
+    // `controller-restore` asks `--json number,state`, a different shape from
+    // merge-cleanup's `--json number,headRefOid` below — routed on the field
+    // list rather than a new flag, so the two fakes can never be confused for
+    // each other by a caller that forgets to set the right env var (#1042).
+    if json_fields.contains("state") {
+        return gh_pr_list_status(head, jq);
+    }
     let dir = env::var("GH_PR_HEADS").unwrap_or_default();
     let Ok(body) = std::fs::read_to_string(Path::new(&dir).join(head.replace('/', "__"))) else {
         if !jq {
@@ -296,6 +305,35 @@ fn gh_pr_list(args: &[String]) -> ExitCode {
     } else {
         let items: Vec<String> = prs.iter().map(|(n, oid)| format!("{{\"number\":{n},\"headRefOid\":\"{oid}\"}}")).collect();
         println!("[{}]", items.join(","));
+    }
+    ExitCode::SUCCESS
+}
+
+/// `pr list --head <b> --state all --json number,state --jq '...'`:
+/// `controller-restore`'s shape — the branch's most recent PR as
+/// `<number> <STATE>` (`OPEN`/`MERGED`/`CLOSED`), from the first non-empty
+/// line of `$GH_PR_STATUS/<branch-with-/-as-__>`; a missing file, an empty
+/// file, or `GH_PR_STATUS` unset all mean no PR for that branch — the same
+/// "nothing recorded, nothing to report" shape `gh_pr_list`'s own
+/// `GH_PR_HEADS` uses above (#1042).
+fn gh_pr_list_status(head: &str, jq: bool) -> ExitCode {
+    let dir = env::var("GH_PR_STATUS").unwrap_or_default();
+    let line = std::fs::read_to_string(Path::new(&dir).join(head.replace('/', "__")))
+        .ok()
+        .and_then(|body| body.lines().find(|l| !l.trim().is_empty()).map(str::to_string));
+    let Some(line) = line else {
+        if !jq {
+            println!("[]");
+        }
+        return ExitCode::SUCCESS;
+    };
+    let mut fields = line.split_whitespace();
+    let number = fields.next().unwrap_or("");
+    let state = fields.next().unwrap_or("");
+    if jq {
+        println!("{number} {state}");
+    } else {
+        println!("[{{\"number\":{number},\"state\":\"{state}\"}}]");
     }
     ExitCode::SUCCESS
 }
