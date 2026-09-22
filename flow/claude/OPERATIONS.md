@@ -148,6 +148,26 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   lines. `merge-cleanup` removes a worker's record when it removes that
   worker's workspace, so a landed and cleaned-up branch has nothing left to
   restore.
+- **A dead controller's workers can be adopted** (#1098). A controller
+  whose process exits — not a `/clear` — leaves its workers with no one to
+  report to and no one allowed to merge their PRs, and `controller-restore`
+  restores only into the same process. On every session start it also
+  prints one line per orphan: a record whose controller's pid is dead, or
+  alive under another starttime (a reused pid), whose workspace still
+  exists and sits under the session's cwd — `Orphaned worker implement-345
+  (twitch-rules-scroller-345): its controller, pid 7313, is gone — adopt it
+  with: controller-adopt twitch-rules-scroller-345`. It prints only.
+  `controller-adopt <agent>`, run from the primary checkout, moves that
+  record into this session's own `<pid>.workers.jsonl` under its starttime,
+  holding the sidecar lock on both files, so of two sessions adopting one
+  worker exactly one wins and a later `/clear` here restores it like a
+  dispatched worker. It refuses while the worker's controller is alive, when
+  the workspace is gone, and off the primary checkout. It prints `Your
+  controller is now <name>` — this session's herdr agent name, else its
+  session name — for you to `SendMessage` to the worker; that message
+  replaces the brief's controller (`implement/SKILL.md` § Control). Then the
+  worker is yours, merge included. A burn has its own path, `runfile.py
+  resume`.
 
 ## Wait
 

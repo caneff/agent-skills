@@ -201,3 +201,25 @@ fn two_sessions_adopting_one_worker_at_once_exactly_one_wins() {
     let held: Vec<String> = holders(&f).into_iter().map(|(pid, _)| pid).collect();
     assert_eq!(held, vec![pids[winners[0]].clone()], "the record lives in the winner's sidecar alone");
 }
+
+#[test]
+fn adopt_refuses_while_any_live_controller_holds_the_worker_beside_an_orphaned_copy() {
+    // A stale copy (pid 1 is alive under another starttime, and its sidecar
+    // sorts first) must not be adopted while a live controller holds the
+    // same worker: that would be two controllers.
+    let f = Fixture::new();
+    adopter(&f);
+    let (primary, ws) = f.repo_with_workspace("scroller", BRANCH);
+    let stale = worker_record(AGENT, BRANCH, &ws, "not-init's-start");
+    workers::append(&f.home(), "1", &stale).unwrap();
+    let live = LiveProc::start();
+    let held = worker_record(AGENT, BRANCH, &ws, &live.proc_start());
+    workers::append(&f.home(), &live.pid().to_string(), &held).unwrap();
+
+    let out = adopt(&f, &primary, AGENT);
+    assert!(!out.status.success(), "{}", out_text(&out));
+    assert!(out_text(&out).contains(&format!("controller, pid {}, is alive", live.pid())), "{}", out_text(&out));
+    let mut got = holders(&f);
+    got.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(got, vec![("1".to_string(), stale), (live.pid().to_string(), held)], "nothing moved");
+}
