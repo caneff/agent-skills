@@ -377,12 +377,77 @@ def resume_state():
 
 def test_resume_sends_exactly_one_message_per_live_unlanded_worker():
     sent = []
-    loop.announce(resume_state(),
-                  lambda agent, msg: sent.append((agent, msg)))
-    assert [agent for agent, _ in sent] == ["burn-455"]
+
+    def send(agent, msg):
+        assert agent != "burn-455", (
+            "send must never see the durable herdr agent name")
+        sent.append((agent, msg))
+
+    def resolve(agent):
+        assert agent == "burn-455", agent
+        return "session-455"
+
+    loop.announce(resume_state(), send, resolve)
+    assert [agent for agent, _ in sent] == ["session-455"]
     assert sent[0][1].count("skills-dc") == 1, sent[0][1]
     assert "#455" in sent[0][1]
     assert "resolve-controller" in sent[0][1], sent[0][1]
+
+
+RESOLVE_CONTROLLER_STUB = """#!/usr/bin/env bash
+# Stands in for the `resolve-controller` binary: one canned answer per name.
+case "$1" in
+  burn-455) echo "session-455" ;;
+  *) echo "resolve-controller: $1 is neither a herdr agent name nor the name of a live session" >&2
+     exit 1 ;;
+esac
+"""
+
+
+def test_resolve_via_binary_prints_the_resolved_session_name():
+    with tempfile.TemporaryDirectory() as tmp:
+        stub = os.path.join(tmp, "resolve-controller")
+        with open(stub, "w") as fh:
+            fh.write(RESOLVE_CONTROLLER_STUB)
+        os.chmod(stub, 0o755)
+        old_path = os.environ.get("PATH")
+        os.environ["PATH"] = tmp + os.pathsep + old_path
+        try:
+            assert loop.resolve_via_binary("burn-455") == "session-455"
+        finally:
+            os.environ["PATH"] = old_path
+
+
+def test_resolve_via_binary_refuses_a_name_that_does_not_resolve():
+    with tempfile.TemporaryDirectory() as tmp:
+        stub = os.path.join(tmp, "resolve-controller")
+        with open(stub, "w") as fh:
+            fh.write(RESOLVE_CONTROLLER_STUB)
+        os.chmod(stub, 0o755)
+        old_path = os.environ.get("PATH")
+        os.environ["PATH"] = tmp + os.pathsep + old_path
+        try:
+            loop.resolve_via_binary("burn-999")
+        except loop.LoopError as exc:
+            assert "burn-999" in str(exc), exc
+        else:
+            raise AssertionError("an unresolved name must be refused")
+        finally:
+            os.environ["PATH"] = old_path
+
+
+def test_resolve_via_binary_refuses_when_the_binary_is_missing():
+    with tempfile.TemporaryDirectory() as tmp:
+        old_path = os.environ.get("PATH")
+        os.environ["PATH"] = tmp
+        try:
+            loop.resolve_via_binary("burn-455")
+        except loop.LoopError as exc:
+            assert "resolve-controller" in str(exc), exc
+        else:
+            raise AssertionError("a missing binary must be refused, not silent")
+        finally:
+            os.environ["PATH"] = old_path
 
 
 def test_resume_sends_nothing_to_a_landed_or_vanished_worker():
@@ -398,11 +463,27 @@ def test_announce_returns_the_agents_it_sent_to_and_reports_a_failure():
         raise RuntimeError("no such peer")
     state = resume_state()
     try:
-        loop.announce(state, send)
+        loop.announce(state, send, resolve=lambda agent: f"session-{agent}")
     except loop.LoopError as exc:
         assert "burn-455" in str(exc), exc
     else:
         raise AssertionError("a send that fails must not read as announced")
+
+
+def test_announce_refuses_a_worker_whose_name_does_not_resolve():
+    state = resume_state()
+
+    def resolve(agent):
+        raise RuntimeError(f"{agent} is neither a herdr agent nor a live session")
+
+    try:
+        loop.announce(state, lambda agent, msg: None, resolve=resolve)
+    except loop.LoopError as exc:
+        assert "burn-455" in str(exc), exc
+        assert "#455" in str(exc), exc
+    else:
+        raise AssertionError(
+            "a worker whose herdr name does not resolve must be refused")
 
 
 def test_the_candidate_set_is_frozen_against_a_ticket_filed_mid_run():
@@ -598,11 +679,11 @@ def test_announce_names_the_workers_already_reached_when_a_send_fails():
     ]
 
     def send(agent, message):
-        if agent == "burn-457":
+        if agent == "session-457":
             raise RuntimeError("no such peer")
 
     try:
-        loop.announce(state, send)
+        loop.announce(state, send, resolve=lambda agent: f"session-{agent[5:]}")
     except loop.LoopError as exc:
         assert "burn-457" in str(exc), exc
         assert "burn-455" in str(exc), exc

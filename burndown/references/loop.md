@@ -126,7 +126,15 @@ parked by hand; messaging an agent nobody can find is not reconciliation.
 returning a partial list when a send fails: a worker that was not reached is
 a worker still addressing a controller that no longer exists.
 
-The agent named is the worker's **herdr agent name**. That name is the
-durable key and not an address — resolving it to a session a message can
-reach happens at **send time**, by `resolve-controller <herdr agent name>` (#923). A resolved address
+The run file keys each worker by its **herdr agent name**. That name is the
+durable key and not an address — `loop.announce` resolves it to a session
+`send` can reach itself, at **send time**, through its `resolve`
+argument (default: `resolve_via_binary`, which shells out to
+`resolve-controller <herdr agent name>`, the same resolution
+`implement-dispatch` does for the controller, #923). The caller's `send`
+never sees the durable name, only the resolved one — `announce`'s own test
+used to pass a permissive callback that accepted anything, so nothing
+witnessed a resolved recipient, and a resumed controller's re-announcement
+never reached a worker (#1013). A name that does not resolve refuses,
+naming the worker, rather than sending to a guess. A resolved address
 written into the run file is what aged and broke the last trial.
