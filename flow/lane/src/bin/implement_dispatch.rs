@@ -374,7 +374,7 @@ const PRE_PUSH_FOREIGN: &str = "pre-push.foreign";
 fn hook_wrapper(guard_name: &str, foreign_name: &str, buffer_stdin: bool) -> String {
     if buffer_stdin {
         format!(
-            "#!/bin/sh\n# lane commit-identity guard wrapper (#934, hardened against a foreign hook that only appears to call the guard — #1009). The ref list this hook receives arrives on stdin (#1006): buffered to a temp file first so a foreign hook that reads it cannot starve the guard of it.\ndir=\"$(dirname \"$0\")\"\nstdin_buf=\"$(mktemp)\" || exit 1\ntrap 'rm -f \"$stdin_buf\"' EXIT\ncat >\"$stdin_buf\"\nif [ -e \"$dir/{foreign_name}\" ]; then\n  \"$dir/{foreign_name}\" \"$@\" <\"$stdin_buf\" || exit $?\nfi\nexec \"$dir/{guard_name}\" \"$@\" <\"$stdin_buf\"\n"
+            "#!/bin/sh\n# lane commit-identity guard wrapper (#934, hardened against a foreign hook that only appears to call the guard — #1009). The ref list this hook receives arrives on stdin (#1006): buffered to a temp file first so a foreign hook that reads it cannot starve the guard of it. Never `exec`s the guard here (unlike the pre-commit branch below) — `exec` replaces the shell image, so the `trap ... EXIT` cleaning up the buffer would never fire on the success path and every push would leak one file in $TMPDIR.\ndir=\"$(dirname \"$0\")\"\nstdin_buf=\"$(mktemp)\" || exit 1\ntrap 'rm -f \"$stdin_buf\"' EXIT\ncat >\"$stdin_buf\"\nif [ -e \"$dir/{foreign_name}\" ]; then\n  \"$dir/{foreign_name}\" \"$@\" <\"$stdin_buf\" || exit $?\nfi\n\"$dir/{guard_name}\" \"$@\" <\"$stdin_buf\"\n"
         )
     } else {
         format!(

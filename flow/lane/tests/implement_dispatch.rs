@@ -1262,6 +1262,39 @@ fn dispatch_installs_the_pre_push_guard_and_a_replayed_foreign_email_commit_is_r
     assert!(good.status.success(), "the fixed-up identity was still refused: {}", out_text(&good));
 }
 
+/// The buffered wrapper's `mktemp` file must not leak: an earlier draft
+/// `exec`'d the guard as the wrapper's last step, which replaces the shell
+/// image and skips the `trap ... EXIT` cleaning the buffer up — every
+/// successful push would leave one file behind in `$TMPDIR` (review finding
+/// on #1006, post-verification). Runs several pushes through a `$TMPDIR` of
+/// its own and asserts it holds no stray files once they're done.
+#[test]
+fn a_successful_push_leaves_no_stray_stdin_buffer_file_behind() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "dispatch failed: {}", out_text(&out));
+
+    let scratch_tmpdir = f.tmp.path().join("push-tmpdir");
+    std::fs::create_dir_all(&scratch_tmpdir).unwrap();
+
+    let wt = repo.join(".claude/worktrees/implement-395");
+    let git = |args: &[&str]| {
+        std::process::Command::new("git").arg("-C").arg(&wt).args(args).env("TMPDIR", &scratch_tmpdir).output().unwrap()
+    };
+    for i in 0..3 {
+        std::fs::write(wt.join(format!("g{i}")), "x\n").unwrap();
+        git(&["add", &format!("g{i}")]);
+        assert!(git(&["commit", "-qm", &format!("x{i}")]).status.success());
+        let push = git(&["push", "origin", &format!("HEAD:refs/heads/push{i}")]);
+        assert!(push.status.success(), "push {i} failed: {}", out_text(&push));
+    }
+
+    let leftover: Vec<_> = std::fs::read_dir(&scratch_tmpdir).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
+    assert!(leftover.is_empty(), "the pre-push wrapper's stdin buffer leaked: {leftover:?}");
+}
+
 /// `COMMIT_IDENTITY_OVERRIDE` is the one legitimate way past the guard, same
 /// escape as the pre-commit half, and it must reach the push side too.
 #[test]
