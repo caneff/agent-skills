@@ -137,6 +137,15 @@ else
   echo "FAIL claude/agents/diff-reviewer.md not linked under the scratch HOME"; fails=1
 fi
 
+# herdr-toast-install (#1016) is routed from install.sh, but this scratch repo
+# sits under /tmp, so the toast installer refuses (by design) — the refusal
+# must be reported, not swallowed, and must not abort the rest of the install.
+if printf '%s' "$out" | grep -q 'herdr-toast-install skipped'; then
+  echo "PASS a refused herdr-toast-install is reported"
+else
+  echo "FAIL install.sh did not report a refused herdr-toast-install: $out"; fails=1
+fi
+
 # An empty claude/agents dir leaves the literal glob; without the guard `link`
 # fails it and set -e aborts the install before backup-sync.sh runs.
 empty="$tmp/empty"

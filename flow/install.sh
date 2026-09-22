@@ -56,6 +56,15 @@ if [ -L "$git_common_dir/hooks/pre-push" ]; then
   echo "removed retired pre-push hook"
 fi
 
+# herdr-toast-install links the toast scripts and registers the herdrfocus:
+# handler. It refuses from a linked worktree or a path under /tmp (both
+# disposable, so the links and the registry value would outlive them) — that
+# refusal is expected on some machines and in this repo's own scratch-repo
+# tests, so it must not abort the rest of the install.
+if ! bash "$here/bin/herdr-toast-install"; then
+  echo "herdr-toast-install skipped (see message above)"
+fi
+
 # Lay down the copy-only backups (files a symlink can't hold): the Windows VS
 # Code settings and claude/settings.json.
 bash "$here/backup-sync.sh" --restore
