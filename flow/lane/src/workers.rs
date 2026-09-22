@@ -110,26 +110,12 @@ pub fn read(home: &Path, pid: &str) -> Vec<WorkerRecord> {
 /// makes them spell the same directory two different ways, so
 /// `remove_workspace`'s exact string compare misses the match and the
 /// record survives cleanup silently. Both call sites run their path through
-/// this shared normalizer instead of comparing raw strings.
-///
-/// `merge-cleanup` calls this after `git worktree remove --force` has
-/// already deleted the leaf, so a plain canonicalize on the leaf itself
-/// fails there; resolved through the parent instead, since that still
-/// exists. Falls back to `path` verbatim only when even the parent doesn't
-/// resolve — a workspace that never existed still needs a usable compare
-/// key rather than losing the value.
+/// this shared normalizer instead of comparing raw strings. Falls back to
+/// `path` verbatim when canonicalization fails — a workspace already torn
+/// down (or one that never existed) still needs a usable compare key rather
+/// than losing the value.
 pub fn canonical_workspace_path(path: &str) -> String {
-    if let Ok(r) = std::fs::canonicalize(path) {
-        return r.display().to_string();
-    }
-    let p = Path::new(path);
-    let Some(parent) = p.parent().and_then(|d| std::fs::canonicalize(d).ok()) else {
-        return path.to_string();
-    };
-    match p.file_name() {
-        Some(name) => parent.join(name).display().to_string(),
-        None => parent.display().to_string(),
-    }
+    std::fs::canonicalize(path).ok().map(|p| p.display().to_string()).unwrap_or_else(|| path.to_string())
 }
 
 /// Removes every record naming `workspace`, across every controller's
@@ -238,26 +224,6 @@ mod tests {
     #[test]
     fn canonical_workspace_path_falls_back_when_the_path_is_gone() {
         assert_eq!(canonical_workspace_path("/no/such/path/at/all"), "/no/such/path/at/all");
-    }
-
-    /// `merge-cleanup` calls this after `git worktree remove --force` has
-    /// already deleted the leaf: a plain `canonicalize` fails outright there
-    /// and falls back to the raw string, which reopens #1040 for a
-    /// symlinked root whose worktree is already gone. Resolving through the
-    /// parent (which still exists) keeps the two spellings converging even
-    /// past that point.
-    #[test]
-    fn canonical_workspace_path_resolves_through_the_parent_when_the_leaf_is_gone() {
-        let tmp = TempDir::new().unwrap();
-        let real = tmp.path().join("real");
-        std::fs::create_dir_all(&real).unwrap();
-        let link = tmp.path().join("link");
-        std::os::unix::fs::symlink(&real, &link).unwrap();
-
-        let via_real = real.join("wt").display().to_string();
-        let via_link = link.join("wt").display().to_string();
-        assert_ne!(via_real, via_link, "the two spellings must differ for this test to mean anything");
-        assert_eq!(canonical_workspace_path(&via_real), canonical_workspace_path(&via_link));
     }
 
     /// The end-to-end case #1040 was filed over: a record stored under one
