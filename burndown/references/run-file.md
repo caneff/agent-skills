@@ -96,12 +96,18 @@ python3 burndown/runfile.py leftover <run-id> --clump 905 --pr 950 --from <dispo
 reads every `outcome: leftover` line of `<dispositions sidecar>` — the
 `dispositions-<n>.jsonl` file written by `implement/SKILL.md` § Review, and
 appends one entry per line to the clump named by `--clump`; every other
-outcome — `fixed`, `disputed`, `filed`, `handed-back` — is not this
-command's to transcribe, and is skipped. It prints `copied N leftover(s)
-from <path>` after the run: not just for the controller's eyes, but because
-a wrong or wrong-shaped `--from` reads no `outcome: leftover` line either,
-and without the count a mistyped path is indistinguishable from a PR that
-genuinely left nothing.
+*recognised* outcome — `fixed`, `disputed`, `filed`, `handed-back` — is not
+this command's to transcribe, and is skipped. A line that is not a JSON
+object, or whose `outcome` is missing or none of the five sidecar outcomes,
+is refused by name (file and line) rather than skipped: `outcome !=
+"leftover"` alone cannot tell one of the sidecar's own four other outcomes
+from a wholly unrelated file, and reading both as "skip" is how a wrong or
+wrong-shaped `--from` copies zero and exits clean, indistinguishable from a
+PR that genuinely left nothing. It also prints `copied N leftover(s) from
+<path>` for the same reason.
+
+`land` comes first: a clump with no recorded landing is refused, so a PR
+that may never land cannot persist leftovers nothing can later remove.
 
 It is idempotent per PR and finding id, and *conflicting* about it: running
 it twice against the same `--pr` and sidecar adds nothing a second time

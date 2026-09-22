@@ -70,6 +70,12 @@ _JOB_STATES = ("running", "none", "done")
 # line's own fields untouched.
 _LEFTOVER_KEYS = ("clump", "tickets", "pr", "id", "file", "title",
                   "severity", "text")
+# The five outcomes `implement/SKILL.md` § Review's dispositions sidecar can
+# carry. A line whose outcome is missing or is none of these is not a known
+# non-leftover disposition to skip — it is a wholly different file, and
+# skipping it the same way `fixed`/`disputed`/`filed`/`handed-back` are
+# skipped is how a wrong `--from` reads as a PR that genuinely left nothing.
+_SIDECAR_OUTCOMES = ("fixed", "disputed", "filed", "handed-back", "leftover")
 
 
 class RunFileError(Exception):
@@ -378,7 +384,13 @@ def read_leftover_lines(sidecar_path):
         except ValueError as exc:
             raise RunFileError(
                 f"{sidecar_path}:{n} is not readable JSON: {exc}") from exc
-        if not isinstance(obj, dict) or obj.get("outcome") != "leftover":
+        outcome = obj.get("outcome") if isinstance(obj, dict) else None
+        if outcome not in _SIDECAR_OUTCOMES:
+            raise RunFileError(
+                f"{sidecar_path}:{n} is not a dispositions sidecar line — "
+                f"its outcome is {outcome!r}, not one of "
+                f"{', '.join(_SIDECAR_OUTCOMES)}")
+        if outcome != "leftover":
             continue
         missing = [key for key in ("id", "file", "title", "severity", "text")
                    if key not in obj]
@@ -399,13 +411,12 @@ def leftover(run_id, lowest, pr, sidecar_path, root=None):
     double an entry the sweep would then count twice. A finding already
     recorded for this clump under a *different* PR is refused, the same as a
     second, different landing sha: two PR numbers for one finding id is a
-    typo'd `--pr`, not a second landing.
+    typo'd `--pr`, not a second landing. Refuses a clump with no recorded
+    landing: a PR that may never land must not persist leftovers nothing can
+    later remove.
 
-    Returns `(run, added)`, `added` being the finding ids this call actually
-    appended — a caller reads its length to tell "this sidecar left nothing"
-    from "this sidecar was never read": a wrong or wrong-shaped `--from`
-    reads no `outcome: leftover` line either way, and the count is what
-    makes the two distinguishable."""
+    Returns `(run, added)`, `added` being the finding ids this call
+    actually appended, for a caller to report a copy count."""
     pr = pr_number(pr)
     found = read_leftover_lines(sidecar_path)
     with locked(run_id, root):
@@ -414,6 +425,9 @@ def leftover(run_id, lowest, pr, sidecar_path, root=None):
             (c for c in run["clumps"] if c["tickets"][0] == lowest), None)
         if entry is None:
             raise RunFileError(f"run {run_id} has no clump #{lowest}")
+        if entry["landed"] is None:
+            raise RunFileError(
+                f"clump #{lowest} has not landed — `land` comes first")
         clump_prs = {item["id"]: item["pr"] for item in run["leftovers"]
                      if item["clump"] == lowest}
         added = []

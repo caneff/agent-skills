@@ -255,6 +255,7 @@ def test_leftover_copies_only_the_leftover_lines_with_every_field_filled():
     root = cache()
     runfile.start("burn-1", slots=2, root=root)
     runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
     got = runfile.load("burn-1", root=root)["leftovers"]
     assert len(got) == 1, got
@@ -273,6 +274,7 @@ def test_leftover_run_twice_for_the_same_pr_does_not_duplicate():
     root = cache()
     runfile.start("burn-1", slots=2, root=root)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
     got = runfile.load("burn-1", root=root)["leftovers"]
@@ -298,6 +300,7 @@ def test_leftover_reports_how_many_it_copied():
     root = cache()
     runfile.start("burn-1", slots=2, root=root)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
     _, added = runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
     assert added == ["S3"], added
     _, added_again = runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
@@ -308,6 +311,7 @@ def test_leftover_against_a_sidecar_with_no_leftover_line_copies_none():
     root = cache()
     runfile.start("burn-1", slots=2, root=root)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
     fd, no_leftovers = tempfile.mkstemp(suffix=".jsonl")
     try:
         with os.fdopen(fd, "w") as fh:
@@ -331,6 +335,7 @@ def test_a_leftover_line_missing_a_required_field_is_refused():
     root = cache()
     runfile.start("burn-1", slots=2, root=root)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
     sidecar = sidecar_of({"id": "S3", "outcome": "leftover",
                           "file": "burndown/loop.py", "title": "t",
                           "severity": "judgement"})  # no "text"
@@ -350,6 +355,7 @@ def test_a_leftover_line_with_a_blank_or_multiline_field_is_refused():
     root = cache()
     runfile.start("burn-1", slots=2, root=root)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
     for bad in (
         {"id": "S3", "outcome": "leftover", "file": "",
          "title": "t", "severity": "judgement", "text": "t"},
@@ -368,6 +374,59 @@ def test_a_leftover_line_with_a_blank_or_multiline_field_is_refused():
     assert runfile.load("burn-1", root=root)["leftovers"] == []
 
 
+def test_leftover_on_an_unlanded_clump_is_refused():
+    # A retry or an out-of-order call must not persist leftovers for a PR
+    # that may never land, with nothing able to remove them afterward.
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    try:
+        runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    except runfile.RunFileError as exc:
+        assert "901" in str(exc) and "land" in str(exc), exc
+    else:
+        raise AssertionError("leftovers recorded for an unlanded clump")
+    assert runfile.load("burn-1", root=root)["leftovers"] == []
+
+
+def test_a_line_with_no_outcome_or_an_unknown_outcome_is_refused():
+    # `outcome != "leftover"` alone cannot tell a sidecar's own four other
+    # outcomes from a wholly unrelated file (another command's sidecar, a
+    # findings-*.jsonl) — both read as "skip", and a wrong --from silently
+    # copies zero either way (defect class 1). The four recognised
+    # non-leftover outcomes must still be skipped, not refused.
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    for bad in (
+        {"id": "S3", "file": "x", "title": "t"},  # no outcome key at all
+        {"id": "S3", "outcome": "mystery"},        # unrecognised outcome
+    ):
+        sidecar = sidecar_of(bad)
+        try:
+            try:
+                runfile.leftover("burn-1", 901, 950, sidecar, root=root)
+            except runfile.RunFileError:
+                continue
+            raise AssertionError(f"accepted line {bad!r}")
+        finally:
+            os.remove(sidecar)
+
+    recognised = sidecar_of(
+        {"id": "F1", "outcome": "fixed", "sha": "abc"},
+        {"id": "F2", "outcome": "disputed", "reason": "why"},
+        {"id": "F3", "outcome": "filed", "ticket": 1},
+        {"id": "F4", "outcome": "handed-back", "command": "cmd"},
+    )
+    try:
+        _, added = runfile.leftover("burn-1", 901, 950, recognised,
+                                    root=root)
+        assert added == [], added
+    finally:
+        os.remove(recognised)
+
+
 def test_a_second_pr_for_the_same_clump_and_finding_id_is_refused():
     # `(pr, id)` alone lets the same finding land twice under two PR
     # numbers — a typo'd `--pr` would double-count it for the sweep, with
@@ -375,6 +434,7 @@ def test_a_second_pr_for_the_same_clump_and_finding_id_is_refused():
     root = cache()
     runfile.start("burn-1", slots=2, root=root)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
     try:
         runfile.leftover("burn-1", 901, 951, SIDECAR, root=root)
@@ -391,6 +451,7 @@ def test_cli_leftover_appends_and_show_prints_the_leftovers():
     cli(root, "start", "burn-1", "--slots", "2")
     cli(root, "clump", "burn-1", "--tickets", "901", "--workspace", "/w/a",
         "--agent", "agent-a")
+    cli(root, "land", "burn-1", "--clump", "901", "--sha", "abc1234")
     got = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
               "--from", SIDECAR)
     assert got.returncode == 0, got.stderr
@@ -412,6 +473,7 @@ def test_leftovers_survive_resume():
     root = cache()
     runfile.start("burn-1", slots=2, controller="ctl", root=root)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
     runfile.resume("burn-1", ["agent-a"], controller="ctl-f3", root=root)
     got = runfile.load("burn-1", root=root)["leftovers"]
