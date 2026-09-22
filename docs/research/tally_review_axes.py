@@ -69,8 +69,11 @@ _DISPOSITION_SIDECAR_RE = re.compile(r"^dispositions-(\d+)\.jsonl$")
 
 _VALID_SEVERITIES = {"hard", "judgement"}
 # outcome -> the field on that outcome's line that carries its detail
-# (the fixing commit sha / the dispute reason / the follow-up ticket).
-_OUTCOME_DETAIL_FIELD = {"fixed": "sha", "disputed": "reason", "filed": "ticket"}
+# (the fixing commit sha / the dispute reason / the follow-up ticket / the
+# handed-back `/file-ticket` command, #871's fourth outcome).
+_OUTCOME_DETAIL_FIELD = {
+    "fixed": "sha", "disputed": "reason", "filed": "ticket", "handed-back": "command",
+}
 
 
 @dataclass(frozen=True)
@@ -92,7 +95,7 @@ class Finding:
 @dataclass(frozen=True)
 class Disposition:
     id: str
-    outcome: str  # "fixed" | "disputed" | "filed"
+    outcome: str  # "fixed" | "disputed" | "filed" | "handed-back"
     detail: str  # sha / reason / ticket number, always as str
 
 
@@ -203,7 +206,7 @@ def find_sidecar_files(root: Path = REVIEWS_ROOT) -> list[tuple[str, str]]:
 def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
     """Roll every findings-<axis>-<n>.jsonl and dispositions-<n>.jsonl
     sidecar under `root` into a per-repo, per-axis table of raised vs
-    fixed/disputed/filed/undisposed (#855). Findings are keyed by (repo,
+    fixed/disputed/filed/handed-back/undisposed (#855). Findings are keyed by (repo,
     issue, id), so a disposition only ever resolves the finding it names —
     never a same-id finding filed under a different issue or repo.
 
@@ -255,7 +258,8 @@ def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
     for (repo, issue, fid), finding in findings_by_key.items():
         counts = table.setdefault(
             (repo, finding.axis),
-            {"raised": 0, "fixed": 0, "disputed": 0, "filed": 0, "undisposed": 0},
+            {"raised": 0, "fixed": 0, "disputed": 0, "filed": 0, "undisposed": 0,
+             "handed-back": 0},
         )
         counts["raised"] += 1
         disposition = dispositions_by_key.get((repo, issue, fid))
@@ -444,7 +448,7 @@ def main() -> None:
         "--sidecars",
         action="store_true",
         help="tally findings-*.jsonl/dispositions-*.jsonl sidecars (#855) into a "
-             "per-repo, per-axis raised/fixed/disputed/filed/undisposed table, "
+             "per-repo, per-axis raised/fixed/disputed/filed/handed-back/undisposed table, "
              "instead of the round1/verify/PR join",
     )
     args = parser.parse_args()
