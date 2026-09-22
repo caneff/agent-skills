@@ -146,6 +146,64 @@ too.
    backstop it runs when it wakes with nothing else to do: § Liveness. A
    clump that cannot go on parks, and a run that parks twice with no landing
    between stops: § Parking and escalation.
+10. **At run close, file the sweep** (§ The sweep) and write the closing
+    report's three counts.
+
+## The sweep
+
+Every landing's leftover findings are already in the run file — `runfile.py
+leftover`, § The loop step 8 above — kept in
+`references/run-file.md` § Leftovers: small review findings a PR left for
+later rather than fixed or filed as their own ticket. Nothing files them one
+at a time; they wait for the sweep.
+
+**Two filing moments**: at **run close**, and again whenever a run **stops
+on two parks** (§ Parking and escalation) — a stopped run still owes its
+leftovers a ticket, because the sweep is not what the run stopped on.
+
+**Filing is not one-shot, so check first.** A crash after `/file-ticket`
+creates the issue but before the controller records it, or a later run
+close following an earlier two-park stop, both re-render the same run and
+must not file a second `Sweep: leftovers from burn <run-id>`. The title is
+deterministic, so the search is the recovery: before filing, at either
+moment,
+
+```
+gh issue list --repo <owner/name> --state all \
+  --search "Sweep: leftovers from burn <run-id> in:title"
+```
+
+An issue there already **is** this run's sweep: update its body with a
+fresh render instead of filing another —
+`gh issue edit <n> --repo <owner/name> --body-file <path>`. Nothing found:
+render the run's leftovers —
+
+```
+python3 burndown/sweep.py render <run-id>
+```
+
+groups them by file, one bullet per item naming its ticket(s), clump,
+PR, finding id, severity and text — and file **its stdout** through
+`/file-ticket`, titled `Sweep: leftovers from burn <run-id>`, labelled
+`ready-for-agent`, with `## Blocked by` `None — can start immediately.` A
+run with **zero leftovers files nothing**: stdout is empty and the
+"nothing to file" notice goes to stderr, so a caller piping stdout
+straight into `/file-ticket` files nothing rather than a ticket whose body
+is that sentence, and the report says so rather than leaving the reader to
+infer it from an absent link.
+
+**The closing report carries three counts** — **fixed in-round**,
+**leftover**, **standalone** —
+
+```
+python3 burndown/sweep.py counts <run-id>
+```
+
+reads them from each landed clump's dispositions sidecar (`implement/SKILL.md` § Review), so Chris can see whether the adjacent-fix rule is doing its job
+without re-deriving it from the PRs by hand. Controller observations about
+the loop itself stay standalone tickets (§ Before a controller rules), never
+folded into the sweep and never in any sidecar — the controller adds its own
+filed-observation count to `counts`' standalone number by hand.
 
 ## The frontier
 
@@ -303,7 +361,8 @@ the frontier** while it is parked: releasing either invites a second worker
 into the same files, which is the collision § The loop step 5 exists to
 prevent. **Two consecutive parks with no landing between them stop the run** —
 a run that has stopped landing has stopped working, and the next thing it
-does is report to Chris rather than dispatch again.
+does is file the sweep (§ The sweep) and report to Chris rather than
+dispatch again.
 
 **Escalation.** The controller's escalation list lives in
 [`CONTEXT.md`](../CONTEXT.md)'s Controller entry. Two of its shapes are this
