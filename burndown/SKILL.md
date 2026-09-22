@@ -163,23 +163,31 @@ leftovers a ticket, because the sweep is not what the run stopped on. At
 either moment, render the run's leftovers —
 
 ```
-python3 burndown/sweep.py <run-id>
+python3 burndown/sweep.py render <run-id>
 ```
 
-groups them by file, one bullet per item naming its ticket(s), PR, finding
-id, severity and text — and file **its stdout** through `/file-ticket`,
-titled `Sweep: leftovers from burn <run-id>`, labelled `ready-for-agent`,
-with `## Blocked by` `None — can start immediately.` A run with **zero
-leftovers files nothing**: stdout is empty and the "nothing to file" notice
-goes to stderr, so a caller piping stdout straight into `/file-ticket` files
-nothing rather than a ticket whose body is that sentence, and the report
-says so rather than leaving the reader to infer it from an absent link.
+groups them by file, one bullet per item naming its ticket(s), clump,
+PR, finding id, severity and text — and file **its stdout** through
+`/file-ticket`, titled `Sweep: leftovers from burn <run-id>`, labelled
+`ready-for-agent`, with `## Blocked by` `None — can start immediately.` A
+run with **zero leftovers files nothing**: stdout is empty and the
+"nothing to file" notice goes to stderr, so a caller piping stdout
+straight into `/file-ticket` files nothing rather than a ticket whose body
+is that sentence, and the report says so rather than leaving the reader to
+infer it from an absent link.
 
 **The closing report carries three counts** — **fixed in-round**,
-**leftover**, **standalone** — so Chris can see whether the adjacent-fix
-rule is doing its job without re-deriving it from the PRs by hand.
-Controller observations about the loop itself stay standalone tickets
-(§ Before a controller rules), never folded into the sweep.
+**leftover**, **standalone** —
+
+```
+python3 burndown/sweep.py counts <run-id>
+```
+
+reads them from each landed clump's dispositions sidecar (`implement/SKILL.md` § Review), so Chris can see whether the adjacent-fix rule is doing its job
+without re-deriving it from the PRs by hand. Controller observations about
+the loop itself stay standalone tickets (§ Before a controller rules), never
+folded into the sweep and never in any sidecar — the controller adds its own
+filed-observation count to `counts`' standalone number by hand.
 
 ## The frontier
 

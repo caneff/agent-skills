@@ -4,6 +4,7 @@
 list, and the CLI over a fixture run file — the pattern `runfile_test.py`
 already uses for its own CLI tests.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -92,7 +93,7 @@ def test_cli_prints_the_title_and_grouped_body_for_a_run_with_leftovers():
     runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
-    got = cli(root, "burn-1")
+    got = cli(root, "render", "burn-1")
     assert got.returncode == 0, got
     assert "Sweep: leftovers from burn burn-1" in got.stdout, got.stdout
     assert "## burndown/loop.py" in got.stdout, got.stdout
@@ -104,7 +105,7 @@ def test_cli_on_a_run_with_no_leftovers_prints_nothing_to_file():
     # notice goes to stderr instead (#1030 round-1 findings S4, C3).
     root = cache()
     runfile.start("burn-2", slots=1, root=root)
-    got = cli(root, "burn-2")
+    got = cli(root, "render", "burn-2")
     assert got.returncode == 0, got
     assert got.stdout == "", got.stdout
     assert "no leftovers" in got.stderr, got.stderr
@@ -112,9 +113,96 @@ def test_cli_on_a_run_with_no_leftovers_prints_nothing_to_file():
 
 def test_cli_on_an_unknown_run_is_refused():
     root = cache()
-    got = cli(root, "burn-missing")
+    got = cli(root, "render", "burn-missing")
     assert got.returncode != 0, got
     assert "sweep.py:" in got.stderr, got.stderr
+
+
+def sidecar_dir():
+    root = tempfile.mkdtemp(prefix="sweep-sidecars-")
+    FIXTURES.append(root)
+    return root
+
+
+def write_sidecar(reviews_dir, lowest, lines):
+    path = os.path.join(reviews_dir, f"dispositions-{lowest}.jsonl")
+    with open(path, "w") as fh:
+        for obj in lines:
+            fh.write(json.dumps(obj) + "\n")
+    return path
+
+
+def test_counts_sums_fixed_adjacent_leftover_and_standalone_across_landed_clumps():
+    root = cache()
+    reviews = sidecar_dir()
+    runfile.start("burn-c", slots=2, root=root)
+    runfile.clump("burn-c", [901], "/w/a", "agent-a", root=root)
+    runfile.clump("burn-c", [905], "/w/b", "agent-b", root=root)
+    runfile.land("burn-c", 901, "abc1234", root=root)
+    runfile.land("burn-c", 905, "def5678", root=root)
+    write_sidecar(reviews, 901, [
+        {"id": "S1", "outcome": "fixed", "sha": "aaa"},
+        {"id": "S2", "outcome": "fixed", "sha": "bbb", "scope": "adjacent"},
+        {"id": "S3", "outcome": "leftover", "file": "f", "title": "t",
+         "severity": "judgement", "text": "x"},
+        {"id": "S4", "outcome": "disputed", "reason": "why"},
+    ])
+    write_sidecar(reviews, 905, [
+        {"id": "P1", "outcome": "filed", "ticket": 1234},
+        {"id": "P2", "outcome": "handed-back", "command": "gh issue create"},
+    ])
+    run = runfile.load("burn-c", root=root)
+    got = sweep.counts(run, reviews)
+    assert got == {"fixed": 2, "adjacent": 1, "leftover": 1, "standalone": 1}, got
+
+
+def test_counts_ignores_an_unlanded_clumps_sidecar():
+    root = cache()
+    reviews = sidecar_dir()
+    runfile.start("burn-d", slots=2, root=root)
+    runfile.clump("burn-d", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-d", 901, "abc1234", root=root)
+    runfile.clump("burn-d", [905], "/w/b", "agent-b", root=root)
+    write_sidecar(reviews, 901, [{"id": "S1", "outcome": "leftover",
+                                  "file": "f", "title": "t",
+                                  "severity": "judgement", "text": "x"}])
+    # 905 is not landed and has no sidecar file at all — its absence must
+    # not be refused, only a *landed* clump's missing sidecar is.
+    run = runfile.load("burn-d", root=root)
+    got = sweep.counts(run, reviews)
+    assert got == {"fixed": 0, "adjacent": 0, "leftover": 1, "standalone": 0}, got
+
+
+def test_counts_refuses_a_landed_clump_with_no_sidecar_rather_than_read_zero():
+    root = cache()
+    reviews = sidecar_dir()
+    runfile.start("burn-e", slots=1, root=root)
+    runfile.clump("burn-e", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-e", 901, "abc1234", root=root)
+    run = runfile.load("burn-e", root=root)
+    try:
+        sweep.counts(run, reviews)
+    except runfile.RunFileError as exc:
+        assert "901" in str(exc), exc
+    else:
+        raise AssertionError("a missing sidecar was read as zero")
+
+
+def test_cli_counts_prints_the_three_counts():
+    root = cache()
+    reviews = sidecar_dir()
+    runfile.start("burn-f", slots=1, root=root)
+    runfile.clump("burn-f", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-f", 901, "abc1234", root=root)
+    write_sidecar(reviews, 901, [
+        {"id": "S1", "outcome": "fixed", "sha": "aaa"},
+        {"id": "S2", "outcome": "filed", "ticket": 5},
+    ])
+    got = cli(root, "counts", "burn-f", "--reviews-dir", reviews)
+    assert got.returncode == 0, got
+    assert "fixed in-round: 1 (0 adjacent)" in got.stdout, got.stdout
+    assert "leftover: 0" in got.stdout, got.stdout
+    assert "standalone: 1" in got.stdout, got.stdout
 
 
 def main():

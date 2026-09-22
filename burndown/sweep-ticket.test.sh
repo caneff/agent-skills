@@ -46,9 +46,10 @@ check_in "$sweep_text" 'stops on two parks' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'zero' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'files nothing' 'burndown/SKILL.md § The sweep'
 
-# The renderer this section invokes, so a controller reaches the command and
-# not just a description of it.
-check_in "$sweep_text" 'burndown/sweep.py <run-id>' 'burndown/SKILL.md § The sweep'
+# The renderer and the counter this section invokes, so a controller reaches
+# the commands and not just a description of them.
+check_in "$sweep_text" 'burndown/sweep.py render <run-id>' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'burndown/sweep.py counts <run-id>' 'burndown/SKILL.md § The sweep'
 
 # The run report's three counts. Each needle carries the bold emphasis
 # markers around its own word: a bare 'leftover' matches "leftovers" six
