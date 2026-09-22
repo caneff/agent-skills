@@ -1146,6 +1146,12 @@ impl Cleanup {
         // `git branch -d` fail with "used by worktree", so it goes first, by
         // the path git itself reports — but never while a session is alive.
         if let Some(wt) = linked_worktree_holding(path, b) {
+            // #1040: canonicalized here, before removal, while the
+            // directory still exists to resolve — `remove_workspace`
+            // compares this against `implement-dispatch`'s own
+            // canonicalized spelling, and after `git worktree remove` below
+            // there is nothing left on disk to canonicalize against.
+            let wt_canonical = lane::workers::canonical_workspace_path(&wt);
             // Before the live-session guard, which closes idle panes: a
             // removal refused for its files must not have touched herdr.
             let Some(empty_dirs) = self.guard_files(&wt) else {
@@ -1167,7 +1173,7 @@ impl Cleanup {
                 // guard — a dry run announces the removal without doing it,
                 // so it must not also announce clearing a record that is
                 // still there.
-                if !self.dry && lane::workers::remove_workspace(Path::new(&self.home), &wt) {
+                if !self.dry && lane::workers::remove_workspace(Path::new(&self.home), &wt_canonical) {
                     safe_println!("cleared the controller's worker record for {wt}");
                 }
                 self.removed_worktrees.push(wt);

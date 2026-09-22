@@ -103,6 +103,21 @@ pub fn read(home: &Path, pid: &str) -> Vec<WorkerRecord> {
     raw.lines().filter(|l| !l.trim().is_empty()).filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
 
+/// Normalizes a workspace path for storage in, or a query against, a
+/// `WorkerRecord` (#1040). `implement-dispatch` builds this path itself with
+/// `PathBuf::join`; `merge-cleanup` reads one back from `git worktree list`.
+/// The two are independent construction sites, and a symlinked repo root
+/// makes them spell the same directory two different ways, so
+/// `remove_workspace`'s exact string compare misses the match and the
+/// record survives cleanup silently. Both call sites run their path through
+/// this shared normalizer instead of comparing raw strings. Falls back to
+/// `path` verbatim when canonicalization fails — a workspace already torn
+/// down (or one that never existed) still needs a usable compare key rather
+/// than losing the value.
+pub fn canonical_workspace_path(path: &str) -> String {
+    std::fs::canonicalize(path).ok().map(|p| p.display().to_string()).unwrap_or_else(|| path.to_string())
+}
+
 /// Removes every record naming `workspace`, across every controller's
 /// `<pid>.workers.jsonl` under `<home>/.claude/sessions` — `merge-cleanup`
 /// knows only the workspace path it just tore down, not which controller
@@ -182,6 +197,53 @@ mod tests {
             dispatched_at: "2026-09-21T10:00:00Z".into(),
             proc_start: "1234567".into(),
         }
+    }
+
+    /// #1040: `implement-dispatch` builds a workspace path itself
+    /// (`PathBuf::join`), `merge-cleanup` reads one back from `git worktree
+    /// list`, and a symlinked repo root makes the two spellings differ even
+    /// though they name the same directory. `canonical_workspace_path` is
+    /// the shared normalizer both call sites run through so they converge.
+    #[test]
+    fn canonical_workspace_path_matches_across_a_symlinked_root() {
+        let tmp = TempDir::new().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir_all(real.join("wt")).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let via_real = real.join("wt").display().to_string();
+        let via_link = link.join("wt").display().to_string();
+        assert_ne!(via_real, via_link, "the two spellings must differ for this test to mean anything");
+        assert_eq!(canonical_workspace_path(&via_real), canonical_workspace_path(&via_link));
+    }
+
+    /// A path that does not exist (already torn down, or never real) is
+    /// still usable as a compare key: canonicalization falls back to the
+    /// string as given rather than losing the value.
+    #[test]
+    fn canonical_workspace_path_falls_back_when_the_path_is_gone() {
+        assert_eq!(canonical_workspace_path("/no/such/path/at/all"), "/no/such/path/at/all");
+    }
+
+    /// The end-to-end case #1040 was filed over: a record stored under one
+    /// spelling of a symlinked workspace is still found and removed when
+    /// queried under the other spelling, once both sides canonicalize.
+    #[test]
+    fn remove_workspace_matches_a_symlinked_spelling_when_canonicalized() {
+        let tmp = TempDir::new().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir_all(real.join("wt")).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let home = tmp.path();
+        let stored = canonical_workspace_path(&link.join("wt").display().to_string());
+        append(home, "1", &record(&stored)).unwrap();
+
+        let queried_raw = real.join("wt").display().to_string();
+        assert!(remove_workspace(home, &canonical_workspace_path(&queried_raw)));
+        assert!(read(home, "1").is_empty());
     }
 
     #[test]
