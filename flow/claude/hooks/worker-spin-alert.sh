@@ -29,27 +29,39 @@
 set -u
 N="${SPIN_N:-20}"
 WINDOW=500
+BYTE_CAP="${SPIN_BYTE_CAP:-4000000}"   # override in tests to exercise the byte cap without a multi-MB fixture
 
 classify() { # <transcript> -> JSON
-  # Bounded read: the last 4 MB, then only lines that carry a tool call. A real
-  # transcript holds ~8 lines per call (attachments, system, queue entries,
-  # subagent sidechains), so a window counted in raw lines can hold fewer than
-  # N calls and read a spin as quiet.
+  # Bounded read: the last $BYTE_CAP bytes, then only lines that carry a tool
+  # call. A real transcript holds ~8 lines per call (attachments, system,
+  # queue entries, subagent sidechains), so a window counted in raw lines can
+  # hold fewer than N calls and read a spin as quiet.
   # run_id: the tool_use id of the earliest call in the current consecutive
   # streak — a run boundary, not just the repeated (name, input). Two spins
   # of the same call, separated by a different tool call, are two streaks
   # with two run_ids, so each alerts once instead of the second being read
-  # as a dup of the first (#998). When the streak fills the whole $WINDOW
-  # without the reduce ever finding a real boundary (a mismatched call, or
-  # the transcript's own start), the earliest call *visible* is not
-  # necessarily the streak's true start — a longer streak just slides the
-  # window past it, and treating that shifting id as the run boundary
-  # re-alerts on every call. run_id is null in that one case, which the
-  # dedupe key below reads as the pre-#998 key (session, tool, digest only):
-  # a stable id for the plateau, at the cost of not detecting an
-  # interruption buried earlier than $WINDOW calls back — the same
-  # limitation `count` already has as a floor.
-  tail -c 4000000 "$1" | grep -F '"type":"tool_use"' | tail -n "$WINDOW" | jq -nRc --argjson n "$N" --argjson w "$WINDOW" '
+  # as a dup of the first (#998).
+  #
+  # Two caps can each hide the streak's true start: the $WINDOW line cap
+  # below, and the $BYTE_CAP byte cap the `tail -c` feeds it (a spin on
+  # large inputs — a Write, an Edit, a heredoc — can average over
+  # $WINDOW/$BYTE_CAP bytes per call and exhaust the byte cap before the
+  # line cap). Either way, the reduce runs out of visible calls without
+  # ever finding a real boundary (a mismatched call, or the transcript's
+  # own genuine start), and the earliest call *visible* is not necessarily
+  # the streak's true start — a longer streak just slides the cap past it,
+  # and treating that shifting id as the run boundary re-alerts on every
+  # call. run_id is null whenever either cap could be the reason the
+  # reduce ran out, which the dedupe key below reads as the pre-#998 key
+  # (session, tool, digest only, no id): a stable key for the plateau, at
+  # the cost of not detecting an interruption buried earlier than either
+  # cap reaches — the same limitation `count` already has as a floor. A
+  # tool_use entry with no `id` at all (an older transcript shape)
+  # degrades the same way, one call at a time, since `first_id` is then
+  # null too.
+  size="$(wc -c <"$1" 2>/dev/null || echo 0)"
+  byte_capped=$([ "$size" -gt "$BYTE_CAP" ] 2>/dev/null && echo true || echo false)
+  tail -c "$BYTE_CAP" "$1" | grep -F '"type":"tool_use"' | tail -n "$WINDOW" | jq -nRc --argjson n "$N" --argjson w "$WINDOW" --argjson byte_capped "$byte_capped" '
     [inputs | fromjson? | objects | select(.type == "assistant" and .isSidechain != true)
       | .message.content[]? | select(.type == "tool_use") | {name, input, id}] | reverse as $calls
     | ($calls[0] // null) as $l
@@ -58,7 +70,7 @@ classify() { # <transcript> -> JSON
         elif ($c.name == $l.name and $c.input == $l.input) then (.n += 1 | .first_id = $c.id)
         else .stop = true end)) as $r
     | {spinning: ($r.n >= $n), tool: ($l.name // null), input: ($l.input // null), count: $r.n,
-       run_id: (if ($r.stop == false and ($calls | length) >= $w) then null else $r.first_id end)}'
+       run_id: (if ($r.stop == false and (($calls | length) >= $w or $byte_capped)) then null else $r.first_id end)}'
 }
 
 if [ "${1:-}" = "--classify" ]; then
