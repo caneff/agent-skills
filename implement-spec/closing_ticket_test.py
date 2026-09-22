@@ -319,6 +319,19 @@ def test_the_procedure_says_how_to_fall_back_and_how_to_tear_down():
     assert "git worktree remove" in got, got
 
 
+def test_this_repos_own_agents_md_declares_a_seam_and_a_blind_spot():
+    # `implement-spec/closing_ticket_test.py` otherwise builds only synthetic
+    # fixture roots (#993, filed from #927 round 1 findings S3/C2): rewording
+    # the `## End-to-end seam` heading or the `**Seam**`/`**Blind to**` keys
+    # in this repo's own `AGENTS.md`, or demoting the heading's level, would
+    # revert this repo to "declares nothing" with nothing here to catch it —
+    # it would surface as a `SeamError` mid spec run instead.
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    seam, blind_to = T.seam_of(root)
+    assert seam.strip(), seam
+    assert blind_to.strip(), blind_to
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     try:
