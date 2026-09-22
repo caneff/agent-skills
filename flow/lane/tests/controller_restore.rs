@@ -315,3 +315,17 @@ fn an_orphan_outside_this_sessions_cwd_is_not_offered() {
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(stdout(&out), "", "another repo's orphan is not this session's to adopt");
 }
+
+#[test]
+fn a_worker_session_in_its_own_orphaned_workspace_is_not_told_to_adopt_itself() {
+    // #1098 review C1/P1: the hook runs in every session, workers included,
+    // and a worker's cwd is its own workspace. Adoption belongs to a session
+    // above it — the primary checkout — never to the orphan itself.
+    let f = Fixture::new();
+    live_session(&f, "scroller-345");
+    let (_, ws) = f.repo_with_workspace("scroller", "implement-345");
+    lane::workers::append(&f.home(), &dead_pid().to_string(), &worker_record("scroller-345", "implement-345", &ws, "12345")).unwrap();
+    let out = run_in(&f, &ws, "{}", &[]);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(stdout(&out), "", "a worker is never offered itself");
+}

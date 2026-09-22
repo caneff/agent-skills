@@ -228,11 +228,12 @@ fn main() {
 
     // #1098: a dead controller's workers, offered to this session when their
     // workspaces sit under its cwd. Printed only; `controller-adopt` does the
-    // move.
+    // move. Strictly under: a worker's own session runs in its workspace, and
+    // an orphan is never told to adopt itself (#1098 review C1).
     let cwd = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default();
     if !cwd.is_empty() {
         let cwd = workers::canonical_workspace_path(&cwd);
-        for (pid, record) in workers::orphans(home).iter().filter(|(_, r)| sessions::in_tree(&r.workspace, &cwd)) {
+        for (pid, record) in workers::orphans(home).iter().filter(|(_, r)| r.workspace != cwd && sessions::in_tree(&r.workspace, &cwd)) {
             safe_println!("{}", orphan_line(pid, record));
         }
     }
