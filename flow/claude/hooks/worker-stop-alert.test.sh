@@ -657,4 +657,19 @@ else
   echo "FAIL: a hook deployed without its sibling lib — rc $rc, log: $(cat "$log" 2>/dev/null), out: $out"; fails=1
 fi
 
+# A lib that sources cleanly but is missing a function the hook calls (mid-edit
+# skew between the symlinked hook and its sibling) must be caught too — not
+# just an absent file (Codex gate pass on PR #1066).
+reset_log
+partial="$tmp/partial"; mkdir -p "$partial"; cp "$hook" "$partial/"
+sed '/^worker_alert_logline() {/,/^}/d' "$here/worker-alert-lib.sh" > "$partial/worker-alert-lib.sh"
+out=$(jq -n --arg t "$t" '{hook_event_name:"Stop",session_id:"w",transcript_path:$t,stop_hook_active:false}' \
+      | HOME="$home" HERDR_PANE_ID="w2W:p1" PATH="$stubdir:$PATH" bash "$partial/$(basename "$hook")" 2>&1)
+rc=$?
+if [ "$rc" = 0 ] && grep -q $'lib-missing\tnot-sent.*worker_alert_logline' "$log" 2>/dev/null; then
+  echo "PASS: a hook deployed with an incomplete sibling lib names the missing symbol and exits 0"
+else
+  echo "FAIL: incomplete lib — rc $rc, log: $(cat "$log" 2>/dev/null), out: $out"; fails=1
+fi
+
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

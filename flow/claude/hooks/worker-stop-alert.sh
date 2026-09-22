@@ -33,16 +33,28 @@ set -u
 
 hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 log="$HOME/.claude/worker-stop-alerts.log"
+lib_missing() { # <what's wrong> -> logs and exits 0, no lib functions required
+  mkdir -p "$(dirname "$log")"
+  printf '%s\t%s\tnot-sent\t%s\n' "$(date -u +%FT%TZ)" "lib-missing" "$1" >> "$log"
+  exit 0
+}
 # A missing lib (an installed hook whose sibling was never deployed) must not
 # join the "not a worker transcript" exit 0 below via a bare command-not-found
 # on stderr — that is exactly the silent-exit-0 hazard #991 exists to fix, one
 # layer up. Logged so a run of missing alerts has a trace to find.
-if ! source "$hook_dir/worker-alert-lib.sh" 2>/dev/null; then
-  mkdir -p "$(dirname "$log")"
-  printf '%s\t%s\tnot-sent\t%s\n' "$(date -u +%FT%TZ)" "lib-missing" \
-    "missing $hook_dir/worker-alert-lib.sh — hook cannot resolve a controller" >> "$log"
-  exit 0
-fi
+source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || \
+  lib_missing "missing $hook_dir/worker-alert-lib.sh — hook cannot resolve a controller"
+# A lib that parses but is missing a symbol this hook calls (truncated, or
+# mid-edit skew between the symlinked hook and its sibling) passes the
+# `source` above; every worker_alert_* call after it is then
+# command-not-found under `set -u` alone (no `-e`), silently reaching the
+# same "not a worker transcript" exit 0 — including the log line itself,
+# since worker_alert_logline can be exactly the missing symbol. Checked here
+# with `lib_missing`, which needs none of them (Codex gate pass on PR #1066).
+for fn in worker_alert_read_brief worker_alert_resolve_session worker_alert_logline \
+          worker_alert_worker_agent_name worker_alert_controller_pane; do
+  declare -F "$fn" >/dev/null || lib_missing "$hook_dir/worker-alert-lib.sh loaded but does not define $fn"
+done
 
 event="$(cat)"
 
