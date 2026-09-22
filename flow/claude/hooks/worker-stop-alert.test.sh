@@ -641,4 +641,20 @@ else
   echo "FAIL: missing controller pane not logged"; echo "  pane: $pane"; fails=1
 fi
 
+# A deployment missing the sibling lib (#991's own round-1 bug: install.sh
+# once linked the hook but not worker-alert-lib.sh) must fail loud, not join
+# the "not a worker transcript" exit 0 via a bare command-not-found on
+# stderr — that would be defect class 1 one layer up from the bug this hook
+# exists to catch.
+reset_log
+nolib="$tmp/nolib"; mkdir -p "$nolib"; cp "$hook" "$nolib/"
+out=$(jq -n --arg t "$t" '{hook_event_name:"Stop",session_id:"w",transcript_path:$t,stop_hook_active:false}' \
+      | HOME="$home" HERDR_PANE_ID="w2W:p1" PATH="$stubdir:$PATH" bash "$nolib/$(basename "$hook")" 2>&1)
+rc=$?
+if [ "$rc" = 0 ] && grep -q $'lib-missing\tnot-sent' "$log" 2>/dev/null; then
+  echo "PASS: a hook deployed without its sibling lib logs lib-missing and exits 0"
+else
+  echo "FAIL: a hook deployed without its sibling lib — rc $rc, log: $(cat "$log" 2>/dev/null), out: $out"; fails=1
+fi
+
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
