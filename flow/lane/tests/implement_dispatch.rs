@@ -1186,6 +1186,11 @@ fn refuses_a_foreign_email_commit(repo: &std::path::Path, n: &str) {
     git(&["add", "g"]);
     let bad = git(&["-c", "user.email=real@gmail.com", "commit", "-qm", "x"]);
     assert!(!bad.status.success(), "a foreign email committed: {}", out_text(&bad));
+    assert!(
+        String::from_utf8_lossy(&bad.stderr).contains("commit-identity guard"),
+        "refused for a reason other than the guard: {}",
+        out_text(&bad)
+    );
     let good = git(&["commit", "-qm", "x"]);
     assert!(good.status.success(), "configured identity refused: {}", out_text(&good));
 }
@@ -1277,6 +1282,54 @@ fn a_foreign_hook_is_moved_aside_once_then_left_alone_on_a_second_dispatch() {
     assert!(out2.status.success(), "{}", out_text(&out2));
     assert_eq!(std::fs::read_to_string(&hook).unwrap(), wrapper_after_first, "wrapper rewritten on a second dispatch");
     assert_eq!(std::fs::read_to_string(&moved_aside).unwrap(), foreign_text, "moved-aside hook touched on a second dispatch");
+}
+
+/// A stale version of the lane's own wrapper — it carries the ownership
+/// marker but is not byte-identical to the wrapper text this build installs,
+/// exactly as a wrapper written by an earlier build of the lane would read.
+/// Byte-identity ownership would have read this as foreign, displaced it to
+/// `pre-commit.foreign`, and had the freshly installed — structurally
+/// identical — wrapper invoke that path, which is now itself: a fork bomb,
+/// since the displaced file's own body also names and calls
+/// `pre-commit.foreign` (#1009 C1).
+#[test]
+fn a_pre_commit_that_already_carries_the_wrapper_marker_is_never_displaced_even_with_different_bytes() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let hook = hooks_dir(&repo).join("pre-commit");
+    let stale = "#!/bin/sh\n# lane commit-identity guard wrapper (#934)\nexec \"$(dirname \"$0\")/commit-identity-guard\"\n";
+    std::fs::write(&hook, stale).unwrap();
+    let mut perms = std::fs::metadata(&hook).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    std::fs::set_permissions(&hook, perms).unwrap();
+
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+
+    let moved_aside = hooks_dir(&repo).join("pre-commit.foreign");
+    assert!(!moved_aside.exists(), "a stale-but-own wrapper was displaced as if foreign");
+    assert_eq!(std::fs::read_to_string(&hook).unwrap(), stale, "a stale-but-own wrapper was rewritten");
+}
+
+/// `pre-commit.foreign` already holds a hook from an earlier takeover; a
+/// second, different hook has since been installed as `pre-commit` (husky, a
+/// setup script, a hand edit). Overwriting the slot would destroy the first
+/// preserved hook with no record (#1009 C3) — refuse instead.
+#[test]
+fn a_pre_commit_foreign_already_holding_a_different_hook_refuses_dispatch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let hook = hooks_dir(&repo).join("pre-commit");
+    let foreign_slot = hooks_dir(&repo).join("pre-commit.foreign");
+    std::fs::write(&foreign_slot, "#!/bin/sh\necho old-foreign\nexit 0\n").unwrap();
+    std::fs::write(&hook, "#!/bin/sh\necho new-foreign\nexit 0\n").unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(!out.status.success(), "dispatch went ahead over a foreign-slot collision");
+    assert!(out_text(&out).contains("pre-commit.foreign"), "{}", out_text(&out));
+    assert_eq!(std::fs::read_to_string(&foreign_slot).unwrap(), "#!/bin/sh\necho old-foreign\nexit 0\n", "existing foreign hook clobbered");
+    assert!(!repo.join(".claude/worktrees/implement-395").exists());
 }
 
 /// Rewrites the stand-in controller's registry record with a sessionId, so a
@@ -1467,7 +1520,7 @@ fn a_controller_that_resolves_to_no_live_session_dispatches_with_no_record_and_n
 fn install_hanging_fetch_git(f: &Fixture) {
     let real_git = which("git");
     let script = format!(
-        "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = fetch ]; then\n    sleep 600\n    exit 1\n  fi\ndone\nexec {} \"$@\"\n",
+        "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = fetch ]; then\n    sleep 30\n    exit 1\n  fi\ndone\nexec {} \"$@\"\n",
         real_git.display()
     );
     let path = f.tmp.path().join("bin/git");

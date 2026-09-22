@@ -320,28 +320,40 @@ impl ClaimLock {
 
 const IDENTITY_GUARD: &str = include_str!("../../hooks/commit-identity-guard.sh");
 const GUARD_NAME: &str = "commit-identity-guard";
-/// The stable name a displaced foreign `pre-commit` is moved to.
+/// The stable name a displaced foreign `pre-commit` is moved to — the one
+/// source for this name; the wrapper text below is built from it rather than
+/// hard-coding a second copy, so the two can never drift apart (#1009 S1).
 const PRE_COMMIT_FOREIGN: &str = "pre-commit.foreign";
-/// What the lane installs as `pre-commit`. Ownership is byte-identity with
-/// this text, never a substring or a text match on the foreign hook it
-/// replaces (#1009: a hook that only echoed the guard's name, called it on
-/// an unreachable branch, or suppressed its exit with `|| true` all read as
-/// "invokes the guard" under the old substring check). The wrapper runs
-/// whatever it displaced first — preserving that hook's own behavior — then
-/// always runs the guard itself, outside the displaced hook's own text, so
-/// nothing in that text can suppress the guard's exit code.
-const PRE_COMMIT_WRAPPER: &str = concat!(
-    "#!/bin/sh\n",
-    "# lane commit-identity guard wrapper (#934, hardened against a foreign hook that only appears to call the guard — #1009)\n",
-    "dir=\"$(dirname \"$0\")\"\n",
-    "if [ -e \"$dir/pre-commit.foreign\" ]; then\n",
-    "  \"$dir/pre-commit.foreign\" \"$@\" || exit $?\n",
-    "fi\n",
-    "exec \"$dir/commit-identity-guard\"\n",
-);
+/// Marks a `pre-commit` as the lane's own wrapper. Ownership is "does the
+/// file contain this marker", never byte-identity with the wrapper's current
+/// full text (#1009 C1): byte-identity would read last dispatch's own
+/// wrapper as foreign the moment this text next changes, displace it to
+/// `PRE_COMMIT_FOREIGN`, and then have the freshly installed — structurally
+/// identical — wrapper invoke that path, which is now itself: a fork bomb,
+/// since the displaced file's own body also tests for and calls
+/// `PRE_COMMIT_FOREIGN`. The marker is stable across wrapper-text edits, so a
+/// prior version of our own wrapper is always recognized and never displaced
+/// into the slot it references.
+const WRAPPER_MARKER: &str = "lane commit-identity guard wrapper";
+
+/// What the lane installs as `pre-commit`. Never a substring or a text match
+/// on the *foreign* hook it replaces (#1009: a hook that only echoed the
+/// guard's name, called it on an unreachable branch, or suppressed its exit
+/// with `|| true` all read as "invokes the guard" under the old substring
+/// check). The wrapper runs whatever it displaced first — preserving that
+/// hook's own behavior — then always runs the guard itself, outside the
+/// displaced hook's own text, so nothing in that text can suppress the
+/// guard's exit code.
+fn pre_commit_wrapper() -> String {
+    format!(
+        "#!/bin/sh\n# {WRAPPER_MARKER} (#934, hardened against a foreign hook that only appears to call the guard — #1009)\ndir=\"$(dirname \"$0\")\"\nif [ -e \"$dir/{PRE_COMMIT_FOREIGN}\" ]; then\n  \"$dir/{PRE_COMMIT_FOREIGN}\" \"$@\" || exit $?\nfi\nexec \"$dir/{GUARD_NAME}\"\n"
+    )
+}
 
 /// Writes `text` to `path` as an executable, via temp file + rename so a
-/// commit racing the write never runs a truncated script.
+/// commit racing the write never runs a truncated script, and never a window
+/// where `path` is briefly absent (#1009 C4): `rename` replaces it in one
+/// step, whatever was there before.
 fn write_executable(path: &Path, text: &str) -> Result<(), String> {
     let tmp = path.with_file_name(format!("{}.lane-{}", path.file_name().and_then(|n| n.to_str()).unwrap_or("hook"), std::process::id()));
     std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
@@ -351,15 +363,23 @@ fn write_executable(path: &Path, text: &str) -> Result<(), String> {
 
 /// Installs the commit-identity guard (#934). The guard script always goes to
 /// `<hooks>/commit-identity-guard` (refreshed in place). `pre-commit` becomes
-/// the lane's own wrapper unconditionally: whatever is there when it is not
-/// already byte-identical to that wrapper is foreign — trusted by its
-/// presence, never by parsing its source — and is moved aside to a stable
-/// name, forced executable (git silently ignores a hook without the bit, and
-/// the pre-#1009 accepted-hook path never checked it), and left in place for
-/// the wrapper to run before it always runs the guard itself. Worktrees share
-/// the primary's hooks dir, so one install covers them all. Ownership is
-/// taken once: a `pre-commit` that already is the wrapper is left alone, so a
-/// repeat dispatch does not re-displace an already-displaced hook.
+/// the lane's own wrapper unconditionally: whatever is there when it does not
+/// already carry `WRAPPER_MARKER` is foreign — trusted by its presence, never
+/// by parsing its source — and is copied aside to a stable name (the original
+/// left in place until `write_executable`'s atomic rename replaces it, so
+/// there is never a moment with no `pre-commit` at all), forced executable
+/// (git silently ignores a hook without the bit, and the pre-#1009
+/// accepted-hook path never checked it), and left for the wrapper to run
+/// before it always runs the guard itself. A `pre-commit.foreign` already
+/// holding a *different* foreign hook refuses rather than silently
+/// overwriting whatever it held (#1009 C3) — that can only mean something
+/// installed a new hook over the lane's wrapper since the last dispatch, and
+/// only a human can say which one should survive. Worktrees share the
+/// primary's hooks dir, so one install covers them all, and the call site
+/// holds the claim lock so two dispatches of the same repo can't race each
+/// other's takeover (#1009 C2). Ownership is taken once: a `pre-commit` that
+/// already carries the marker is left alone, so a repeat dispatch does not
+/// re-displace an already-displaced hook.
 fn install_identity_guard(primary: &str) -> Result<(), String> {
     let dir = quiet_stdout("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"])
         .map(|s| s.trim().to_string())
@@ -367,18 +387,41 @@ fn install_identity_guard(primary: &str) -> Result<(), String> {
         .ok_or_else(|| format!("cannot resolve the hooks dir of {primary}"))?;
     let path = Path::new(&dir).join("pre-commit");
     let foreign_path = Path::new(&dir).join(PRE_COMMIT_FOREIGN);
-    let is_ours = std::fs::read(&path).map(|b| b == PRE_COMMIT_WRAPPER.as_bytes()).unwrap_or(false);
-    if path.exists() && !is_ours {
-        std::fs::rename(&path, &foreign_path).map_err(|e| format!("cannot move {} aside to {}: {e}", path.display(), foreign_path.display()))?;
+    let wrapper = pre_commit_wrapper();
+    let current = std::fs::read(&path);
+    let exists = match &current {
+        Ok(_) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    };
+    let is_ours = current.as_ref().is_ok_and(|b| String::from_utf8_lossy(b).contains(WRAPPER_MARKER));
+    if exists && !is_ours {
+        let foreign_bytes = current.as_ref().expect("exists implies Ok");
+        if let Ok(already_there) = std::fs::read(&foreign_path) {
+            if &already_there != foreign_bytes {
+                return Err(format!(
+                    "{} already holds a different foreign hook than the one now at {}; something installed a new pre-commit here since the last dispatch — resolve by hand (merge or remove {}) before dispatching again",
+                    foreign_path.display(),
+                    path.display(),
+                    foreign_path.display()
+                ));
+            }
+        }
+        std::fs::write(&foreign_path, foreign_bytes).map_err(|e| format!("cannot copy {} aside to {}: {e}", path.display(), foreign_path.display()))?;
         let mut perms =
             std::fs::metadata(&foreign_path).map_err(|e| format!("cannot stat {}: {e}", foreign_path.display()))?.permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&foreign_path, perms).map_err(|e| format!("cannot chmod {}: {e}", foreign_path.display()))?;
+        safe_println!(
+            "implement-dispatch: took ownership of {} — the foreign hook that was there is preserved, executable, at {}",
+            path.display(),
+            foreign_path.display()
+        );
     }
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
     write_executable(&Path::new(&dir).join(GUARD_NAME), IDENTITY_GUARD)?;
     if !is_ours {
-        write_executable(&path, PRE_COMMIT_WRAPPER)?;
+        write_executable(&path, &wrapper)?;
     }
     Ok(())
 }
@@ -631,9 +674,6 @@ fn run() -> Result<(), ExitCode> {
     if !valid_slug(&slug) {
         return Err(die(format!("origin in {primary} names no GitHub owner/name")));
     }
-    if let Err(e) = install_identity_guard(&primary) {
-        return Err(die(e));
-    }
     let branch = format!("{}-{n}", mode.branch_prefix());
     let wt = PathBuf::from(&primary).join(".claude/worktrees").join(&branch);
     let suffix = match mode {
@@ -655,6 +695,15 @@ fn run() -> Result<(), ExitCode> {
         &format!("pid {} claiming {}", std::process::id(), ns.iter().map(|n| format!("#{n}")).collect::<Vec<_>>().join(" ")),
     )
     .map_err(die)?;
+
+    // Inside the claim lock (#1009 C2): two dispatches of the same repo can
+    // both find a foreign pre-commit and both try to take ownership of it —
+    // serialized here, the second sees the first's wrapper already in place
+    // and does nothing, instead of renaming the first dispatch's own install
+    // over the user's real hook.
+    if let Err(e) = install_identity_guard(&primary) {
+        return Err(die(e));
+    }
 
     // Refusals first, so a refused run leaves nothing claimed or created —
     // and every ticket of the clump is read before any of them is claimed,
