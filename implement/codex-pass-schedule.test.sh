@@ -119,7 +119,7 @@ check_absent_in "$whole_file" 'The retry is validated by the same gate' 'impleme
 # Rule 6: a collected verdict changes nothing downstream — the two-pass
 # ceiling, the dispositions and the trial row are #888's and #812's still.
 check_in "$merge_section" 'A collected verdict is this step' 'implement/SKILL.md § The merge'
-check_in "$merge_section" "is #888's and #812's, unchanged by #1015" 'implement/SKILL.md § The merge'
+check_in "$merge_section" "is #888's, #812's and #1028's, unchanged by #1015" 'implement/SKILL.md § The merge'
 check_absent_in "$whole_file" 'unchanged by where the collected pass was launched' 'implement/SKILL.md (whole file)'
 check_in "$merge_section" 'One recorded run, whichever phase writes it' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'The pass runs through this block and no other' 'implement/SKILL.md § The merge'
@@ -128,9 +128,9 @@ check_in "$merge_section" 'keeps the second pass from overwriting the record the
 
 # Rule 7: every run is timed, discarded ones included, into a file that
 # exists and carries the columns the row is written against, with phases
-# narrowed to `gate` and `second`.
+# narrowed to `gate`, `second` and `third` (#1028's conditional third run).
 check_in "$merge_section" 'docs/research/2026-09-20-codex-pass-durations.md' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'phase (`gate` or `second`)' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'phase (`gate`, `second` or `third`)' 'implement/SKILL.md § The merge'
 check_absent_in "$whole_file" 'collected-after-retry' 'implement/SKILL.md (whole file)'
 [ -f "$durations" ] || { echo "FAIL: missing docs/research/2026-09-20-codex-pass-durations.md" >&2; fail=1; }
 if [ -f "$durations" ]; then
@@ -143,6 +143,51 @@ fi
 # Rule 8: the old unconditional shape is gone — the pass is no longer
 # described as starting at the merge gate by default (pre-#942 wording).
 check_absent_in "$merge_section" 'Otherwise, from this PR' 'implement/SKILL.md § The merge'
+
+# Rule 9 (#1028): a second-pass finding small enough for § Review's
+# adjacent-fix rule is fixed by the worker in one round instead of filed, and
+# the controller reads that fix diff itself. The controller still evaluates
+# every finding before it reaches the worker. A third run happens only when
+# a fixed second-pass finding was high, and it is final — its findings are
+# disputed or leftover, never a fourth run. The old "second run is final, no
+# worker fix left" wording is retired whole-file, since a copy of it anywhere
+# would contradict the fix round.
+check_in "$merge_section" 'the controller evaluates every one before any reaches the worker' 'implement/SKILL.md § The merge'
+check_in "$merge_section" "A second-pass finding that passes § Review's adjacent-fix rule goes to the worker, who fixes it in one round" 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'the controller reads that fix diff itself' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'A third Codex run happens only when a second-pass finding fixed in the round was high.' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'The third run is final: its findings are `disputed` or `leftover`, never a fourth run.' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'phase=third' 'implement/SKILL.md § The merge'
+# The in-round fix moves the head past the second pass's verdict; without
+# saying so, the fail-closed gate reads that verdict as stale and blocks a
+# reviewed PR (C1). The ruling sends a third-run high to `leftover`, which
+# § Review's "a high finding is filed" would otherwise forbid (C2).
+check_in "$merge_section" 'The fail-closed gate does not refuse the second pass as stale over an in-round fix' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'the one place a high finding is not filed' 'implement/SKILL.md § The merge'
+# The controller's read of an in-round fix is bound to the head it read:
+# unbound, a commit pushed after the read passes step 2's CLEAN re-run and
+# merges unreviewed (Codex gate [high] on PR 1080).
+check_in "$merge_section" 'records the head sha it read the fix diff at, beside the finding it answers' 'implement/SKILL.md § The merge'
+check_in "$merge_section" "Immediately before step 4, the PR's \`headRefOid\` must still equal that sha" 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'A commit the controller has not read never merges' 'implement/SKILL.md § The merge'
+# § Review's rule text names the second pass too, so a reader starting there
+# does not take "round-1" as the rule's whole reach (P1).
+check_in "$whole_file" "§ The merge step 3 applies the same rule to a Codex second-pass finding" 'implement/SKILL.md (whole file)'
+# The rest of the fix round's contract: the CLEAN check reruns after the
+# worker's fix, a non-adjacent high is still filed, and the third run is
+# followed by no worker fix round (C3).
+check_in "$merge_section" 'adjacent-fix rule, rather than sending it back to Codex. It re-runs step 2.' 'implement/SKILL.md § The merge'
+check_in "$merge_section" '`disputed: <why>`, filed if it is high, or `leftover`' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'no worker fix round follows it' 'implement/SKILL.md § The merge'
+# A Codex-pass leftover lives only in the PR body unless the controller
+# also writes it where the sweep harvests: the dispositions sidecar the
+# verification pass wrote, in § Review's leftover grammar (P2, ruled by the
+# controller on PR 1080).
+check_in "$merge_section" 'the controller appends one line for it to `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl`' 'implement/SKILL.md § The merge'
+check_in "$merge_section" "in § Review's \`leftover\` grammar, under the Codex finding's own id" 'implement/SKILL.md § The merge'
+check_absent_in "$whole_file" 'there is no third Codex run' 'implement/SKILL.md (whole file)'
+check_absent_in "$whole_file" 'there is no worker fix-and-re-run cycle left' 'implement/SKILL.md (whole file)'
+check_absent_in "$whole_file" 'the no-third-run ceiling' 'implement/SKILL.md (whole file)'
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS implement/codex-pass-schedule.test.sh"
