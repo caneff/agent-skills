@@ -69,8 +69,19 @@ _DISPOSITION_SIDECAR_RE = re.compile(r"^dispositions-(\d+)\.jsonl$")
 
 _VALID_SEVERITIES = {"hard", "judgement"}
 # outcome -> the field on that outcome's line that carries its detail
-# (the fixing commit sha / the dispute reason / the follow-up ticket).
-_OUTCOME_DETAIL_FIELD = {"fixed": "sha", "disputed": "reason", "filed": "ticket"}
+# (the fixing commit sha / the dispute reason / the follow-up ticket / the
+# handed-back `/file-ticket` command, #871's fourth outcome).
+_OUTCOME_DETAIL_FIELD = {
+    "fixed": "sha", "disputed": "reason", "filed": "ticket", "handed-back": "command",
+}
+# outcome -> the JSON type its detail field must actually be. `filed`'s
+# `ticket` is written unquoted (`"ticket": <n>`) per implement/SKILL.md, so
+# it alone is int; every other detail is prose and must be a non-empty str.
+# A str/dict/list slipping through as a "ticket" or a non-str slipping
+# through as a `command`/`sha`/`reason` still tallied under Codex's gate
+# finding on #973's own PR — `str(detail)` on a list or dict "worked" and
+# hid the malformed line as if it had parsed cleanly.
+_OUTCOME_DETAIL_TYPE = {"fixed": str, "disputed": str, "filed": int, "handed-back": str}
 
 
 @dataclass(frozen=True)
@@ -92,7 +103,7 @@ class Finding:
 @dataclass(frozen=True)
 class Disposition:
     id: str
-    outcome: str  # "fixed" | "disputed" | "filed"
+    outcome: str  # "fixed" | "disputed" | "filed" | "handed-back"
     detail: str  # sha / reason / ticket number, always as str
 
 
@@ -166,8 +177,13 @@ def parse_disposition_line(raw: str) -> Disposition | None:
     if not (isinstance(fid, str) and fid) or outcome not in _OUTCOME_DETAIL_FIELD:
         return None
     detail = obj.get(_OUTCOME_DETAIL_FIELD[outcome])
-    if detail is None or detail == "":
-        return None
+    expected = _OUTCOME_DETAIL_TYPE[outcome]
+    if expected is str:
+        if not (isinstance(detail, str) and detail):
+            return None
+    else:  # int — `filed`'s ticket number
+        if not isinstance(detail, int):
+            return None
     return Disposition(id=fid, outcome=outcome, detail=str(detail))
 
 
@@ -203,7 +219,7 @@ def find_sidecar_files(root: Path = REVIEWS_ROOT) -> list[tuple[str, str]]:
 def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
     """Roll every findings-<axis>-<n>.jsonl and dispositions-<n>.jsonl
     sidecar under `root` into a per-repo, per-axis table of raised vs
-    fixed/disputed/filed/undisposed (#855). Findings are keyed by (repo,
+    fixed/disputed/filed/handed-back/undisposed (#855). Findings are keyed by (repo,
     issue, id), so a disposition only ever resolves the finding it names —
     never a same-id finding filed under a different issue or repo.
 
@@ -255,7 +271,10 @@ def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
     for (repo, issue, fid), finding in findings_by_key.items():
         counts = table.setdefault(
             (repo, finding.axis),
-            {"raised": 0, "fixed": 0, "disputed": 0, "filed": 0, "undisposed": 0},
+            # _OUTCOME_DETAIL_FIELD is the one place that owns which outcomes
+            # exist (S1, #973) — a future outcome needs only that one entry,
+            # not this seed too.
+            {"raised": 0, "undisposed": 0, **{o: 0 for o in _OUTCOME_DETAIL_FIELD}},
         )
         counts["raised"] += 1
         disposition = dispositions_by_key.get((repo, issue, fid))
@@ -444,7 +463,7 @@ def main() -> None:
         "--sidecars",
         action="store_true",
         help="tally findings-*.jsonl/dispositions-*.jsonl sidecars (#855) into a "
-             "per-repo, per-axis raised/fixed/disputed/filed/undisposed table, "
+             "per-repo, per-axis raised/fixed/disputed/filed/handed-back/undisposed table, "
              "instead of the round1/verify/PR join",
     )
     args = parser.parse_args()

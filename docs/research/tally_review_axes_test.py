@@ -259,6 +259,57 @@ def test_parses_a_valid_filed_disposition_line():
     assert d == t.Disposition(id="S3", outcome="filed", detail="900")
 
 
+def test_parses_a_valid_handed_back_disposition_line():
+    d = t.parse_disposition_line(json.dumps({"id": "S4", "outcome": "handed-back", "command": "gh issue create ..."}))
+    assert d == t.Disposition(id="S4", outcome="handed-back", detail="gh issue create ...")
+
+
+def test_disposition_line_rejects_a_list_command():
+    bad = json.dumps({"id": "S4", "outcome": "handed-back", "command": []})
+    assert t.parse_disposition_line(bad) is None
+
+
+def test_disposition_line_rejects_a_dict_command():
+    bad = json.dumps({"id": "S4", "outcome": "handed-back", "command": {}})
+    assert t.parse_disposition_line(bad) is None
+
+
+def test_disposition_line_rejects_a_number_command():
+    bad = json.dumps({"id": "S4", "outcome": "handed-back", "command": 12345})
+    assert t.parse_disposition_line(bad) is None
+
+
+def test_disposition_line_accepts_an_int_ticket():
+    d = t.parse_disposition_line(json.dumps({"id": "S3", "outcome": "filed", "ticket": 900}))
+    assert d == t.Disposition(id="S3", outcome="filed", detail="900")
+
+
+def test_disposition_line_rejects_a_string_ticket():
+    # implement/SKILL.md writes `"ticket": <n>` unquoted; a quoted ticket
+    # number is not the shape the producer writes, so it's rejected rather
+    # than silently str()'d through.
+    bad = json.dumps({"id": "S3", "outcome": "filed", "ticket": "900"})
+    assert t.parse_disposition_line(bad) is None
+
+
+def test_tally_sidecars_rejects_a_malformed_handed_back_command_as_undisposed():
+    # Codex gate on #973's own PR: a list/dict/number `command` used to
+    # tally as handed-back via str(detail) instead of being rejected as an
+    # unparseable line, which rolls the finding up as undisposed.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-1.jsonl").write_text(
+            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+        )
+        (root / "skills" / "dispositions-1.jsonl").write_text(
+            json.dumps({"id": "S1", "outcome": "handed-back", "command": []})
+        )
+        table = t.tally_sidecars(root)
+        assert table["skills/standards"]["undisposed"] == 1
+        assert table["skills/standards"]["handed-back"] == 0
+
+
 def test_disposition_line_rejects_missing_detail_field():
     # outcome says "fixed" but the sha the outcome requires is absent
     bad = json.dumps({"id": "S1", "outcome": "fixed"})
@@ -301,6 +352,26 @@ def test_tally_sidecars_rolls_findings_and_dispositions_into_a_table():
         table = t.tally_sidecars(root)
         assert table["skills/standards"] == {
             "raised": 3, "fixed": 1, "disputed": 1, "filed": 0, "undisposed": 1,
+            "handed-back": 0,
+        }
+
+
+def test_tally_sidecars_rolls_a_handed_back_disposition_into_the_table():
+    # #973: a fourth outcome (#871's handed-back) must not KeyError the
+    # seeded counts dict, and must not roll up as undisposed.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-855.jsonl").write_text(
+            json.dumps({"id": "S1", "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+        )
+        (root / "skills" / "dispositions-855.jsonl").write_text(
+            json.dumps({"id": "S1", "outcome": "handed-back", "command": "gh issue create ..."})
+        )
+        table = t.tally_sidecars(root)
+        assert table["skills/standards"] == {
+            "raised": 1, "fixed": 0, "disputed": 0, "filed": 0, "undisposed": 0,
+            "handed-back": 1,
         }
 
 
