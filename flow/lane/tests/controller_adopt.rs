@@ -278,3 +278,22 @@ fn adopt_refuses_before_moving_anything_when_herdr_cannot_be_asked() {
     assert!(out_text(&out).contains("herdr agent list failed"), "{}", out_text(&out));
     assert_eq!(holders(&f), vec![(dead, record)], "nothing moved");
 }
+
+#[test]
+fn adopt_never_reaches_a_same_named_worker_under_another_checkout() {
+    // #1098 review C6: only a workspace under this primary checkout is this
+    // session's to adopt; another repo's orphan with the same agent name
+    // stays where it is.
+    let f = Fixture::new();
+    adopter(&f);
+    let (primary, _) = f.repo_with_workspace("scroller", BRANCH);
+    let (_, elsewhere) = f.repo_with_workspace("other", BRANCH);
+    let dead = dead_pid().to_string();
+    let record = worker_record(AGENT, BRANCH, &elsewhere, "12345");
+    workers::append(&f.home(), &dead, &record).unwrap();
+
+    let out = adopt(&f, &primary, AGENT);
+    assert!(!out.status.success(), "{}", out_text(&out));
+    assert!(out_text(&out).contains("no worker record names scroller-345 under"), "{}", out_text(&out));
+    assert_eq!(holders(&f), vec![(dead, record)], "nothing moved");
+}

@@ -711,4 +711,58 @@ mod tests {
         assert!(matches!(got, Err(AdoptRefusal::Io(_))), "{got:?}");
         assert_eq!(read(home, &dead), vec![record(&ws)], "the record is back where it was");
     }
+
+    /// #1098 review C4: the move re-checks, under the lock, that the
+    /// controller is still gone — `adopt`'s pre-scan ran unlocked, and a
+    /// record can come alive in between (another session adopting it).
+    /// Called on `move_record` directly so the pre-scan cannot answer first.
+    #[test]
+    fn the_move_refuses_a_record_whose_controller_is_alive_under_the_lock() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let ws = tmp.path().join("repo/.claude/worktrees/implement-143");
+        std::fs::create_dir_all(&ws).unwrap();
+        let ws = ws.display().to_string();
+        let me = std::process::id().to_string();
+        let my_start = crate::proc_info::read_stat(std::process::id() as i32).unwrap().start;
+        let live = WorkerRecord { proc_start: my_start, ..record(&ws) };
+        append(home, &me, &live).unwrap();
+
+        let names = |r: &WorkerRecord| r.agent == "sudokupad-art-143";
+        let got = move_record(home, &me, &path_for(home, &me), &names, "4242", "1");
+        assert_eq!(got.unwrap_err(), AdoptRefusal::ControllerAlive(me.clone()));
+        assert_eq!(read(home, &me), vec![live]);
+        assert!(read(home, "4242").is_empty());
+    }
+
+    /// #1098 review C5: the move holds the adopter's own sidecar lock too,
+    /// so a `/clear`'s restore read or a concurrent dispatch append on the
+    /// adopter never interleaves with the landing. Holds that lock
+    /// externally and proves the move cannot finish while it is held.
+    #[test]
+    fn the_move_waits_for_the_adopters_own_sidecar_lock() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let ws = tmp.path().join("repo/.claude/worktrees/implement-143");
+        std::fs::create_dir_all(&ws).unwrap();
+        let ws = ws.display().to_string();
+        let dead = i32::MAX.to_string();
+        append(&home, &dead, &record(&ws)).unwrap();
+        append(&home, "4242", &record("/other")).unwrap();
+
+        let held = std::fs::OpenOptions::new().read(true).write(true).open(path_for(&home, "4242")).unwrap();
+        held.lock().unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let h = home.clone();
+        let mover = std::thread::spawn(move || {
+            let names = |r: &WorkerRecord| r.agent == "sudokupad-art-143" && r.workspace != "/other";
+            let got = move_record(&h, &i32::MAX.to_string(), &path_for(&h, &i32::MAX.to_string()), &names, "4242", "1");
+            let _ = done_tx.send(());
+            got
+        });
+        assert!(done_rx.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "the move ran without the adopter's lock");
+        drop(held);
+        assert!(mover.join().unwrap().unwrap().is_some());
+        assert_eq!(read(&home, "4242").len(), 2);
+    }
 }
