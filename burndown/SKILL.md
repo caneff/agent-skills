@@ -173,8 +173,11 @@ gh issue list --repo <owner/name> --state all \
   --search "Sweep: leftovers from burn <run-id> in:title"
 ```
 
-An issue there already **is** this run's sweep: update its body with a
-fresh render instead of filing another —
+An issue there already **is** this run's sweep: update its body instead
+of filing another — a fresh render of the run's own leftovers, with any
+`## <file>` section already in the current body that a fold (below) put
+there kept as it stands, since a fold's own items never reappear in
+`sweep.py render`'s output and a bare overwrite would drop them —
 `gh issue edit <n> --repo <owner/name> --body-file <path>`. Nothing found:
 render the run's leftovers —
 
@@ -218,9 +221,10 @@ ticket's own body —
 gh issue view <n> --repo <owner/name> --json body --jq .body
 ```
 
-prints exactly what to append. File or update the run sweep with that
-text appended under its own file headers to the body `sweep.py render`
-printed, then closes it with a pointer to the run sweep —
+prints exactly what to append. File or update the run sweep (above) with
+that text appended under its own file headers to the body `sweep.py
+render` printed, then close the per-PR ticket with a pointer to the run
+sweep —
 
 ```
 gh issue close <n> --repo <owner/name> --comment "Folded into <run-sweep-url>"

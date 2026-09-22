@@ -65,9 +65,15 @@ check_in "$sweep_text" 'not one-shot' 'burndown/SKILL.md § The sweep'
 # <run-sweep-url>"` and this check still passed (round-1 finding C5).
 check_in "$sweep_text" 'per-PR sweep' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'so fold by body instead of by run file' 'burndown/SKILL.md § The sweep'
-check_in "$sweep_text" 'closes it with a pointer to the run sweep' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'close the per-PR ticket with a pointer to the run sweep' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'comment "Folded into' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'still files this thin' 'burndown/SKILL.md § The sweep'
+
+# #1033 verification finding C1: a later re-render at the other filing
+# moment must not drop a section a fold already put in the body — the
+# per-PR ticket that put it there is closed by then, off the frontier, and
+# `sweep.py render` never reproduces it.
+check_in "$sweep_text" 'a fold (below) put there kept as it stands' 'burndown/SKILL.md § The sweep'
 
 # The run report's three counts. Each needle carries the bold emphasis
 # markers around its own word: a bare 'leftover' matches "leftovers" six

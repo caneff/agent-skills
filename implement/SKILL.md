@@ -198,7 +198,7 @@ No PR and no reviewer; Chris reads the log after.
    sidecar line (step 2) and `leftover` in prose. A burn's own sweep, one
    ticket per run, is `burndown/SKILL.md` § The sweep; a worker with **no
    run file** under it — dispatched directly through `/implement`, never
-   through `burndown`'s loop (`burndown/SKILL.md` § The loop step 5) —
+   through `burndown`'s loop (`burndown/SKILL.md` § The loop step 8) —
    files its own per-PR sweep instead, at report time: this file's § The PR
    below.
    On a repo whose `origin` owner isn't
