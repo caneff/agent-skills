@@ -146,6 +146,38 @@ too.
    backstop it runs when it wakes with nothing else to do: § Liveness. A
    clump that cannot go on parks, and a run that parks twice with no landing
    between stops: § Parking and escalation.
+10. **At run close, file the sweep** (§ The sweep) and write the closing
+    report's three counts.
+
+## The sweep
+
+Every landing's leftover findings are already in the run file — `runfile.py
+leftover`, § The loop step 8 above — kept in
+`references/run-file.md` § Leftovers: small review findings a PR left for
+later rather than fixed or filed as their own ticket. Nothing files them one
+at a time; they wait for the sweep.
+
+**Two filing moments**: at **run close**, and again whenever a run **stops
+on two parks** (§ Parking and escalation) — a stopped run still owes its
+leftovers a ticket, because the sweep is not what the run stopped on. At
+either moment, render the run's leftovers —
+
+```
+python3 burndown/sweep.py <run-id>
+```
+
+groups them by file, one bullet per item naming its ticket(s), PR, finding
+id, severity and text — and file what it prints through `/file-ticket`,
+titled `Sweep: leftovers from burn <run-id>`, labelled `ready-for-agent`,
+with `## Blocked by` `None — can start immediately.` A run with **zero
+leftovers files nothing**, and the report says so rather than leaving the
+reader to infer it from an absent link.
+
+**The closing report carries three counts** — **fixed in-round**,
+**leftover**, **standalone** — so Chris can see whether the adjacent-fix
+rule is doing its job without re-deriving it from the PRs by hand.
+Controller observations about the loop itself stay standalone tickets
+(§ Before a controller rules), never folded into the sweep.
 
 ## The frontier
 
