@@ -902,6 +902,16 @@ fn run() -> Result<(), ExitCode> {
     let cleanup = format!("cd {primary} && merge-cleanup {branch} --repo {primary}");
     match resolve_controller_pid(Path::new(&home), &controller_session, &controller) {
         Some(pid) => {
+            // #964 fix round 1 (Codex high): the controller session's own
+            // starttime, read fresh here rather than trusted from whichever
+            // registry lookup found `pid` — this is what lets
+            // `controller-restore` tell "this session" from "a session that
+            // now happens to reuse this pid" once the original controller is
+            // gone. Empty on a read failure (the pid died in the gap since
+            // resolution); an empty proc_start never matches a live one, so
+            // the record is simply dropped as stale on restore rather than
+            // failing this dispatch over it.
+            let proc_start = pid.parse::<i32>().ok().and_then(proc_info::read_stat).map(|s| s.start).unwrap_or_default();
             let record = lane::workers::WorkerRecord {
                 agent: agent.clone(),
                 tickets: ns.clone(),
@@ -911,6 +921,7 @@ fn run() -> Result<(), ExitCode> {
                 cleanup: cleanup.clone(),
                 chris_merges,
                 dispatched_at: lane::workers::now_iso8601(),
+                proc_start,
             };
             if let Err(e) = lane::workers::append(Path::new(&home), &pid, &record) {
                 eprintln!("implement-dispatch: could not record this worker for the controller ({e}); a /clear there will not restore it");

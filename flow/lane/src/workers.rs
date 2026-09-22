@@ -6,7 +6,7 @@
 //! `merge-cleanup` removes the record for a workspace once it tears it down.
 
 use serde::{Deserialize, Serialize};
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// One dispatched worker, as the controller needs it back after a `/clear`:
@@ -30,6 +30,17 @@ pub struct WorkerRecord {
     /// `date -u +%Y-%m-%dT%H:%M:%SZ` at dispatch time, or empty when that
     /// call failed — never fails the write over a clock it can't reach.
     pub dispatched_at: String,
+    /// The controller session's own `/proc/<pid>/stat` starttime at dispatch
+    /// time (#964 fix round 1, Codex high): pids are small and get reused,
+    /// especially across a WSL restart, so a stale record from a dead
+    /// controller must never restore into whatever session now holds that
+    /// pid. `controller-restore` drops any record whose value here does not
+    /// match the resuming session's own starttime. `#[serde(default)]` so a
+    /// record written before this field existed decodes as empty rather than
+    /// failing to parse — empty never matches a live starttime, so such a
+    /// record is dropped as stale too, the conservative direction.
+    #[serde(default)]
+    pub proc_start: String,
 }
 
 /// The sibling file beside `<home>/.claude/sessions/<pid>.json` this
@@ -61,6 +72,14 @@ pub fn now_iso8601() -> String {
 /// whole — two writes per append could interleave a line from each process
 /// between the two, corrupting both, which `read`'s per-line parse would
 /// then have silently dropped.
+///
+/// Takes the same exclusive `File::lock()` as `remove_workspace`'s rewrite
+/// (#964 fix round 1, Codex high): `O_APPEND` alone only protects one
+/// `write(2)` from another; it does nothing against `remove_workspace`'s
+/// read-filter-`fs::write` on the same file, which can land between this
+/// call's open and its write and then get overwritten whole by the rewrite,
+/// silently losing this record. The lock releases when `f` drops at the end
+/// of this function.
 pub fn append(home: &Path, pid: &str, record: &WorkerRecord) -> std::io::Result<()> {
     let path = path_for(home, pid);
     if let Some(dir) = path.parent() {
@@ -69,6 +88,7 @@ pub fn append(home: &Path, pid: &str, record: &WorkerRecord) -> std::io::Result<
     let mut line = serde_json::to_string(record).map_err(std::io::Error::other)?;
     line.push('\n');
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+    f.lock()?;
     f.write_all(line.as_bytes())
 }
 
@@ -93,6 +113,16 @@ pub fn read(home: &Path, pid: &str) -> Vec<WorkerRecord> {
 /// directory that cannot be listed removes nothing rather than erroring —
 /// this is best-effort bookkeeping alongside the workspace's own removal, not
 /// a step `merge-cleanup` can fail over.
+///
+/// Reads through the same exclusive `File::lock()` `append` takes, held for
+/// the whole read-filter-rewrite (#964 fix round 1, Codex high): reading with
+/// `fs::read_to_string` and writing with a separate `fs::write`, as an
+/// earlier version of this did, opens a window between the two where a
+/// concurrent `append` can land and then be silently discarded by this call's
+/// rewrite. One `File` handle, locked before the read, holds that window
+/// shut; the lock releases when the handle drops at the end of each loop
+/// iteration. A file this run cannot open, lock or read is skipped rather
+/// than erroring, matching every other best-effort failure mode here.
 pub fn remove_workspace(home: &Path, workspace: &str) -> bool {
     let dir = home.join(".claude/sessions");
     let Ok(entries) = std::fs::read_dir(&dir) else { return false };
@@ -102,7 +132,14 @@ pub fn remove_workspace(home: &Path, workspace: &str) -> bool {
         if !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".workers.jsonl")) {
             continue;
         }
-        let Ok(raw) = std::fs::read_to_string(&path) else { continue };
+        let Ok(mut f) = std::fs::OpenOptions::new().read(true).write(true).open(&path) else { continue };
+        if f.lock().is_err() {
+            continue;
+        }
+        let mut raw = String::new();
+        if f.read_to_string(&mut raw).is_err() {
+            continue;
+        }
         let mut kept: Vec<&str> = Vec::new();
         let mut changed = false;
         for line in raw.lines() {
@@ -121,7 +158,7 @@ pub fn remove_workspace(home: &Path, workspace: &str) -> bool {
         if !out.is_empty() {
             out.push('\n');
         }
-        if std::fs::write(&path, out).is_ok() {
+        if f.set_len(0).is_ok() && f.seek(SeekFrom::Start(0)).is_ok() && f.write_all(out.as_bytes()).is_ok() {
             removed_any = true;
         }
     }
@@ -143,6 +180,7 @@ mod tests {
             cleanup: "cd /repo && merge-cleanup implement-143 --repo /repo".into(),
             chris_merges: false,
             dispatched_at: "2026-09-21T10:00:00Z".into(),
+            proc_start: "1234567".into(),
         }
     }
 
@@ -180,6 +218,18 @@ mod tests {
         let got = read(home, "123");
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].agent, "a");
+    }
+
+    #[test]
+    fn a_record_written_before_proc_start_existed_decodes_with_it_empty() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let path = path_for(home, "123");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{\"agent\":\"a\",\"tickets\":[\"1\"],\"branch\":\"implement-1\",\"workspace\":\"/w\",\"repo\":\"o/n\",\"cleanup\":\"c\",\"chris_merges\":false,\"dispatched_at\":\"\"}\n").unwrap();
+        let got = read(home, "123");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].proc_start, "", "a pre-#964-fix record has no proc_start to be stale-checked against");
     }
 
     #[test]
@@ -221,5 +271,53 @@ mod tests {
     fn remove_workspace_with_no_sessions_dir_is_false() {
         let tmp = TempDir::new().unwrap();
         assert!(!remove_workspace(tmp.path(), "/anything"));
+    }
+
+    /// #964 fix round 1 (Codex high): `remove_workspace`'s read/filter/write
+    /// and `append`'s write must serialize on the same file lock, or an
+    /// append landing between the read and the write is silently lost. Holds
+    /// an exclusive lock externally, proves neither call can finish while it
+    /// is held — that is what makes the earlier version of both unlocked —
+    /// then releases it and checks the racing append survived the rewrite.
+    #[test]
+    fn append_and_remove_serialize_on_the_file_lock_so_a_racing_append_is_never_lost() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        append(&home, "111", &record("/a")).unwrap();
+        append(&home, "111", &record("/b")).unwrap();
+
+        let path = path_for(&home, "111");
+        let held = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        held.lock().unwrap();
+
+        let (remove_done_tx, remove_done_rx) = std::sync::mpsc::channel();
+        let h1 = home.clone();
+        let remover = std::thread::spawn(move || {
+            let removed = remove_workspace(&h1, "/b");
+            let _ = remove_done_tx.send(());
+            removed
+        });
+
+        let (append_done_tx, append_done_rx) = std::sync::mpsc::channel();
+        let h2 = home.clone();
+        let appender = std::thread::spawn(move || {
+            append(&h2, "111", &record("/c")).unwrap();
+            let _ = append_done_tx.send(());
+        });
+
+        // Neither can finish while this test holds the lock — proof both
+        // the rewrite and the append go through it, not just one of them.
+        assert!(remove_done_rx.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "remove_workspace ran without the lock");
+        assert!(append_done_rx.recv_timeout(std::time::Duration::from_millis(50)).is_err(), "append ran without the lock");
+
+        drop(held);
+        assert!(remover.join().unwrap());
+        appender.join().unwrap();
+
+        let left = read(&home, "111");
+        let workspaces: Vec<&str> = left.iter().map(|r| r.workspace.as_str()).collect();
+        assert!(workspaces.contains(&"/a"), "{workspaces:?}");
+        assert!(workspaces.contains(&"/c"), "a racing append must survive a concurrent remove: {workspaces:?}");
+        assert!(!workspaces.contains(&"/b"), "{workspaces:?}");
     }
 }

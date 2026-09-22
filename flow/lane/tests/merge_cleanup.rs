@@ -748,6 +748,7 @@ fn worker_record(workspace: &std::path::Path, branch: &str) -> lane::workers::Wo
         cleanup: "cd x && merge-cleanup y --repo x".into(),
         chris_merges: false,
         dispatched_at: "".into(),
+        proc_start: "1234567".into(),
     }
 }
 

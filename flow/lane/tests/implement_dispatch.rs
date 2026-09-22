@@ -1315,6 +1315,7 @@ fn a_dispatch_appends_a_worker_record_for_the_controllers_own_session() {
     assert_eq!(r.cleanup, format!("cd {} && merge-cleanup implement-415 --repo {}", repo.display(), repo.display()));
     assert!(!r.chris_merges);
     assert!(!r.dispatched_at.is_empty(), "dispatched_at should be stamped");
+    assert_eq!(r.proc_start, f.own_proc_start(), "#964 fix round 1: the record must carry the controller session's own starttime");
 }
 
 #[test]

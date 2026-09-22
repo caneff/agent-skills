@@ -23,9 +23,41 @@ use lane::{proc_info, safe_println};
 use serde_json::Value;
 use std::io::Read;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+/// The single deadline every query this run makes shares (#964 fix round 1,
+/// Codex medium), kept under the hook's own 15s timeout in
+/// `flow/claude/settings.json` — the old fixed 10s-per-call budget (one herdr
+/// call plus one gh call per worker) could outlive that timeout with two or
+/// more workers, and the hook's `|| true` swallowed the kill silently.
+const HOOK_BUDGET: Duration = Duration::from_secs(12);
+
+/// The rest of `deadline`, or `None` once it has passed.
+fn time_left(deadline: Instant) -> Option<Duration> {
+    let now = Instant::now();
+    (deadline > now).then(|| deadline - now)
+}
+
+/// What running `program` came to, budgeted against a shared `deadline`
+/// (#964 fix round 1, Codex medium): `NoBudget` means the deadline was
+/// already gone and the process was never started at all — kept distinct
+/// from `Ran(None)`, which means it started, and either failed or ran out
+/// the OS-level timeout given the time that was left. Conflating the two
+/// would print a worker whose query never ran the same as one whose query
+/// ran and got nothing, which is what `describe_agent`/`describe_pr`'s
+/// `unchecked` wording exists not to do.
+#[derive(Debug)]
+enum Budgeted {
+    Ran(Option<String>),
+    NoBudget,
+}
+
+fn call_budgeted(deadline: Instant, program: &str, args: &[&str]) -> Budgeted {
+    match time_left(deadline) {
+        Some(budget) => Budgeted::Ran(quiet_stdout_timeout(program, args, budget)),
+        None => Budgeted::NoBudget,
+    }
+}
 
 /// A PR `gh pr list` reports for a worker's branch.
 struct PrStatus {
@@ -54,22 +86,27 @@ fn parse_pr_status(out: &str) -> Option<PrStatus> {
 }
 
 /// What herdr or gh answered about one thing: a real value, a real "there is
-/// none", or "could not be asked at all" (off PATH, timed out, unparseable
-/// output) — the third must never print the same as the second. Conflating
-/// them was #964's own correctness-axis C2/standards-axis S1 finding: a
-/// wedged herdr made every worker read "no live herdr agent" as if that were
-/// a fact about the agent rather than about herdr.
+/// none", "could not be asked at all" (off PATH, timed out, unparseable
+/// output), or "never asked at all" (the shared deadline was already gone —
+/// #964 fix round 1, Codex medium). No two of these may ever print the same:
+/// conflating `Unknown` and `Answered(None)` was #964's own correctness-axis
+/// C2/standards-axis S1 finding — a wedged herdr made every worker read "no
+/// live herdr agent" as if that were a fact about the agent rather than about
+/// herdr — and conflating `Unchecked` with either would make a worker whose
+/// query never ran under a blown budget look like one that ran and answered.
 enum Asked<T> {
     Answered(T),
     Unknown,
+    Unchecked,
 }
 
 /// herdr's answer to "is `name`'s agent alive, and what's its status" —
 /// `Answered(None)` is a real "no such agent"; `Unknown` is "herdr could not
-/// be asked".
+/// be asked"; `Unchecked` is "herdr was never asked, the budget was gone".
 fn agent_status<'a>(agents: &'a Asked<Vec<Agent>>, name: &str) -> Asked<Option<&'a str>> {
     match agents {
         Asked::Unknown => Asked::Unknown,
+        Asked::Unchecked => Asked::Unchecked,
         Asked::Answered(agents) => Asked::Answered(agents.iter().find(|a| a.name() == name).map(Agent::status)),
     }
 }
@@ -78,6 +115,7 @@ fn agent_status<'a>(agents: &'a Asked<Vec<Agent>>, name: &str) -> Asked<Option<&
 fn describe_agent(agent: &str, status: &Asked<Option<&str>>) -> String {
     match status {
         Asked::Unknown => format!("{agent}, herdr status unknown — could not ask herdr"),
+        Asked::Unchecked => format!("{agent}, herdr status unchecked — the restore hook's time budget ran out"),
         Asked::Answered(Some(s)) => format!("{agent}, agent {s}"),
         Asked::Answered(None) => format!("{agent}, no live herdr agent"),
     }
@@ -85,10 +123,12 @@ fn describe_agent(agent: &str, status: &Asked<Option<&str>>) -> String {
 
 /// What to say about a worker's PR: the state, and the guidance that follows
 /// from it. `Answered(None)` is "no PR yet" — the worker may still be
-/// building; `Unknown` is "gh could not be asked", never worded the same way.
+/// building; `Unknown` is "gh could not be asked"; `Unchecked` is "gh was
+/// never asked, the budget was gone" — each worded distinctly.
 fn describe_pr(pr: &Asked<Option<PrStatus>>) -> String {
     match pr {
         Asked::Unknown => "PR status unknown — could not ask gh".to_string(),
+        Asked::Unchecked => "PR status unchecked — the restore hook's time budget ran out".to_string(),
         Asked::Answered(None) => "no PR yet — check on the worker".to_string(),
         Asked::Answered(Some(p)) => match p.state.as_str() {
             "MERGED" => format!("PR #{} merged — run cleanup", p.number),
@@ -124,21 +164,43 @@ fn is_subagent(stdin: &str) -> bool {
     false
 }
 
-fn ask_agents() -> Asked<Vec<Agent>> {
-    match quiet_stdout_timeout("herdr", &["agent", "list"], QUERY_TIMEOUT).and_then(|out| herdr::parse_agents(&out)) {
-        Some(agents) => Asked::Answered(agents),
-        None => Asked::Unknown,
+/// Splits `records` into (fresh, stale count) by `WorkerRecord::proc_start`
+/// against `own_start`, the resuming session's own `/proc/<pid>/stat`
+/// starttime (#964 fix round 1, Codex high). Pids are small and get reused,
+/// especially across a WSL restart, so a `<pid>.workers.jsonl` left behind by
+/// a dead controller would otherwise restore its workers into whatever
+/// unrelated session now holds that pid. A record with no `proc_start`
+/// (written before this field existed) or one recorded under `own_start`
+/// itself unknown (the resuming session's own starttime could not be read)
+/// never counts as fresh either — the conservative direction, since
+/// restoring a stale worker's state into the wrong session is worse than
+/// restoring nothing.
+fn drop_stale(records: Vec<WorkerRecord>, own_start: &str) -> (Vec<WorkerRecord>, usize) {
+    let (fresh, stale): (Vec<WorkerRecord>, Vec<WorkerRecord>) =
+        records.into_iter().partition(|r| !own_start.is_empty() && r.proc_start == own_start);
+    (fresh, stale.len())
+}
+
+fn ask_agents(deadline: Instant) -> Asked<Vec<Agent>> {
+    match call_budgeted(deadline, "herdr", &["agent", "list"]) {
+        Budgeted::NoBudget => Asked::Unchecked,
+        Budgeted::Ran(Some(out)) => match herdr::parse_agents(&out) {
+            Some(agents) => Asked::Answered(agents),
+            None => Asked::Unknown,
+        },
+        Budgeted::Ran(None) => Asked::Unknown,
     }
 }
 
-fn ask_pr(repo: &str, branch: &str) -> Asked<Option<PrStatus>> {
-    match quiet_stdout_timeout(
+fn ask_pr(repo: &str, branch: &str, deadline: Instant) -> Asked<Option<PrStatus>> {
+    match call_budgeted(
+        deadline,
         "gh",
         &["pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "number,state", "--jq", r#".[0] // empty | "\(.number) \(.state)""#, "--limit", "1"],
-        QUERY_TIMEOUT,
     ) {
-        Some(out) => Asked::Answered(parse_pr_status(&out)),
-        None => Asked::Unknown,
+        Budgeted::NoBudget => Asked::Unchecked,
+        Budgeted::Ran(Some(out)) => Asked::Answered(parse_pr_status(&out)),
+        Budgeted::Ran(None) => Asked::Unknown,
     }
 }
 
@@ -159,12 +221,31 @@ fn main() {
     if records.is_empty() {
         return;
     }
+    // #964 fix round 1 (Codex high): `find_own_pid` already proved `own_pid`
+    // alive with a matching starttime, so re-reading it here gets the exact
+    // string every fresh record must carry — a pid whose `/proc` entry is
+    // gone between that check and this one reads as `own_start` empty, which
+    // `drop_stale` treats as "prove nothing", not "trust everything".
+    let own_start = own_pid.parse::<i32>().ok().and_then(proc_info::read_stat).map(|s| s.start).unwrap_or_default();
+    let (records, dropped) = drop_stale(records, &own_start);
+    if dropped > 0 {
+        safe_println!("dropped {dropped} stale worker record(s): recorded under a pid this session does not own");
+    }
+    if records.is_empty() {
+        return;
+    }
 
-    let agents = ask_agents();
+    // One deadline shared across every query below (#964 fix round 1, Codex
+    // medium), not a fixed timeout per call: the hook's own 15s timeout in
+    // flow/claude/settings.json is shorter than one herdr call plus one gh
+    // call per worker at the old fixed 10s each, so two or more workers
+    // could get killed mid-output with the failure hidden behind `|| true`.
+    let deadline = Instant::now() + HOOK_BUDGET;
+    let agents = ask_agents(deadline);
 
     for record in &records {
         let status = agent_status(&agents, &record.agent);
-        let pr = ask_pr(&record.repo, &record.branch);
+        let pr = ask_pr(&record.repo, &record.branch, deadline);
         safe_println!("{}", restore_line(record, &status, &pr));
     }
 }
@@ -183,7 +264,79 @@ mod tests {
             cleanup: "cd /repo && merge-cleanup implement-143 --repo /repo".into(),
             chris_merges: false,
             dispatched_at: "2026-09-21T10:00:00Z".into(),
+            proc_start: "1000".into(),
         }
+    }
+
+    #[test]
+    fn call_budgeted_returns_no_budget_without_running_the_command_when_the_deadline_has_passed() {
+        // #964 fix round 1 (Codex medium): the hook's own 15s timeout is
+        // shorter than the sum of one herdr call plus one gh call per
+        // worker at the old fixed 10s each, so two workers on a slow gh
+        // could be killed mid-output. A single shared deadline instead: a
+        // query whose budget is already gone must never even start — proven
+        // here by pointing it at a command that would sleep for 5s and
+        // checking it returns almost instantly, not after (most of) that 5s.
+        std::thread::sleep(Duration::from_millis(5));
+        let past = Instant::now() - Duration::from_millis(1);
+        let start = Instant::now();
+        let result = call_budgeted(past, "sleep", &["5"]);
+        assert!(matches!(result, Budgeted::NoBudget), "expected NoBudget");
+        assert!(start.elapsed() < Duration::from_millis(500), "a 5s sleep must never have been spawned once the deadline had passed");
+    }
+
+    #[test]
+    fn call_budgeted_runs_with_whatever_time_remains_and_reports_ran_none_on_a_timeout() {
+        let deadline = Instant::now() + Duration::from_millis(200);
+        let result = call_budgeted(deadline, "sleep", &["5"]);
+        assert!(matches!(result, Budgeted::Ran(None)), "a command that outlives its own share of the budget ran, and gave nothing back — distinct from never having run at all");
+    }
+
+    #[test]
+    fn call_budgeted_runs_and_returns_output_when_there_is_time() {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let result = call_budgeted(deadline, "printf", &["%s", "hello"]);
+        assert!(matches!(result, Budgeted::Ran(Some(ref s)) if s == "hello"), "{result:?}");
+    }
+
+    #[test]
+    fn ask_agents_reports_unchecked_when_the_shared_deadline_is_already_gone() {
+        let past = Instant::now() - Duration::from_millis(1);
+        assert!(matches!(ask_agents(past), Asked::Unchecked));
+    }
+
+    #[test]
+    fn describe_agent_and_describe_pr_word_unchecked_distinctly_from_unknown() {
+        let agent_line = describe_agent("a", &Asked::Unchecked);
+        assert!(agent_line.contains("unchecked"), "{agent_line}");
+        assert_ne!(agent_line, describe_agent("a", &Asked::Unknown));
+        let pr_line = describe_pr(&Asked::Unchecked);
+        assert!(pr_line.contains("unchecked"), "{pr_line}");
+        assert_ne!(pr_line, describe_pr(&Asked::Unknown));
+    }
+
+    #[test]
+    fn drop_stale_keeps_a_matching_proc_start_and_drops_a_mismatched_or_empty_one() {
+        let mut fresh = record();
+        fresh.proc_start = "1000".into();
+        let mut stale = record();
+        stale.proc_start = "999".into(); // a reused pid's earlier, now-dead controller
+        let mut pre_fix = record();
+        pre_fix.proc_start = String::new(); // written before this field existed
+        let (kept, dropped) = drop_stale(vec![fresh.clone(), stale, pre_fix], "1000");
+        assert_eq!(kept, vec![fresh]);
+        assert_eq!(dropped, 2);
+    }
+
+    #[test]
+    fn drop_stale_against_an_unknown_own_start_drops_everything() {
+        // The resuming session's own starttime could not be read: nothing can
+        // be proven fresh, so the conservative reading is to drop it all
+        // rather than restore into a session that cannot prove it is the
+        // one that dispatched these workers.
+        let (kept, dropped) = drop_stale(vec![record()], "");
+        assert!(kept.is_empty());
+        assert_eq!(dropped, 1);
     }
 
     #[test]
