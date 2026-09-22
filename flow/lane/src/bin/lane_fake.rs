@@ -99,24 +99,47 @@ fn env_flag(name: &str) -> bool {
     env::var(name).is_ok_and(|v| !v.is_empty())
 }
 
-/// `GH_VIEW_BARRIER_DIR`: the first `issue view` of each dispatch (keyed by
-/// its parent pid) waits until two dispatches have reached theirs, or 3s.
-/// Independent of any lock the dispatches take, so a test can make two runs
-/// read a ticket before either edits it, and see what the lock does to that.
-fn view_barrier() {
+/// `GH_VIEW_BARRIER_DIR`: `implement_dispatch` reads a ticket twice — once in
+/// the refusal pass, again as the reread immediately before its claim edit
+/// (the actual critical section: the read the lock-vs-no-lock race is about).
+/// Waiting at the first read leaves both dispatches free to run unsynchronized
+/// all the way to that reread, so a witness built on it is timing-dependent,
+/// not deterministic (#982). This barrier instead holds each dispatch (keyed
+/// by its parent pid) at its *second* view of a given ticket — the reread —
+/// until two dispatches have reached theirs, or 3s; the first view of any
+/// ticket passes straight through. Independent of any lock the dispatches
+/// take, so a test can make two runs reach the reread together and see what
+/// the lock does to that.
+fn view_barrier(n: &str) {
     let Ok(dir) = env::var("GH_VIEW_BARRIER_DIR") else { return };
     let ppid = std::fs::read_to_string("/proc/self/stat")
         .ok()
         .and_then(|s| s.rsplit_once(')').and_then(|(_, r)| r.split_whitespace().nth(1).map(str::to_string)))
         .unwrap_or_default();
-    let mine = std::path::Path::new(&dir).join(&ppid);
+    let count_file = std::path::Path::new(&dir).join(format!("{ppid}.{n}.views"));
+    let seen = std::fs::read_to_string(&count_file).ok().and_then(|s| s.trim().parse::<u32>().ok()).unwrap_or(0) + 1;
+    let _ = std::fs::write(&count_file, seen.to_string());
+    if seen != 2 {
+        return;
+    }
+    let mine = std::path::Path::new(&dir).join(format!("{ppid}.{n}.reread"));
     if mine.exists() {
         return;
     }
     let _ = std::fs::write(&mine, "");
+    // A busy spin, not a sleeping poll: the two dispatches must be released
+    // within microseconds of each other, or the first one released can read,
+    // decide and complete its edit before the second even rereads — the same
+    // false "only one claimed" outcome a coarse poll produces (#982). A 20ms
+    // sleep-poll left that gap wide enough for a full read-decide-edit round
+    // trip, so the witness passed on scheduling luck instead of failing on
+    // the mutation every time.
+    let is_reread_marker = |e: &std::fs::DirEntry| e.file_name().to_string_lossy().ends_with(".reread");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-    while std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0) < 2 && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(20));
+    while std::fs::read_dir(&dir).map(|d| d.filter_map(Result::ok).filter(is_reread_marker).count()).unwrap_or(0) < 2
+        && std::time::Instant::now() < deadline
+    {
+        std::hint::spin_loop();
     }
 }
 
@@ -130,7 +153,7 @@ fn run_gh(args: &[String]) -> ExitCode {
         // GH_STATE/GH_LABELS/GH_ASSIGNEES trio still answers every ticket
         // with no row of its own.
         let n = args.get(2).map(String::as_str).unwrap_or("");
-        view_barrier();
+        view_barrier(n);
         let row = match env::var(format!("GH_ISSUE_{n}")) {
             Ok(row) => row,
             Err(_) => {
