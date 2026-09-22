@@ -799,7 +799,7 @@ mod tests {
         let ws = ws.display().to_string();
         append(&home, &i32::MAX.to_string(), &record(&ws)).unwrap();
 
-        let held = std::fs::OpenOptions::new().create(true).write(true).open(adopt_lock_path(&home)).unwrap();
+        let held = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(adopt_lock_path(&home)).unwrap();
         held.lock().unwrap();
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let (h, root) = (home.clone(), tmp.path().display().to_string());

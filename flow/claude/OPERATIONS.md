@@ -160,8 +160,11 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   with: controller-adopt twitch-rules-scroller-345`. It prints only.
   `controller-adopt <agent>`, run from the primary checkout, moves that
   record into this session's own `<pid>.workers.jsonl` under its starttime,
-  holding the sidecar lock on both files, so of two sessions adopting one
-  worker exactly one wins and a later `/clear` here restores it like a
+  landing it there before removing the dead copy and holding one adoption
+  lock (`~/.claude/sessions/.adopt.lock`) from its scan to its landing, so
+  of two sessions adopting one worker exactly one wins, a crash mid-adopt
+  leaves a duplicate the live copy outranks (never offered, never adopted)
+  rather than a lost worker, and a later `/clear` here restores it like a
   dispatched worker. It refuses while the worker's controller is alive, when
   the workspace is gone, off the primary checkout, and — before moving
   anything — when `herdr agent list` cannot answer, since the name it
