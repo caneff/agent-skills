@@ -19,29 +19,58 @@
 # tool-call lines).
 #
 # Modes:
-#   --classify <transcript>   print {spinning, tool, input, count} and exit —
-#                             what a controller runs against a transcript on demand.
+#   --classify <transcript>   print {spinning, tool, input, count, run_id} and
+#                             exit — what a controller runs against a
+#                             transcript on demand.
 #   (stdin: PostToolUse event) alert the controller's herdr pane once per run,
 #                             logged to ~/.claude/worker-spin-alerts.log.
 # Always exit 0 in hook mode — a hook failure must never block the worker.
 
 set -u
 N="${SPIN_N:-20}"
+WINDOW=500
+BYTE_CAP="${SPIN_BYTE_CAP:-4000000}"   # override in tests to exercise the byte cap without a multi-MB fixture
 
 classify() { # <transcript> -> JSON
-  # Bounded read: the last 4 MB, then only lines that carry a tool call. A real
-  # transcript holds ~8 lines per call (attachments, system, queue entries,
-  # subagent sidechains), so a window counted in raw lines can hold fewer than
-  # N calls and read a spin as quiet.
-  tail -c 4000000 "$1" | grep -F '"type":"tool_use"' | tail -n 500 | jq -nRc --argjson n "$N" '
+  # Bounded read: the last $BYTE_CAP bytes, then only lines that carry a tool
+  # call. A real transcript holds ~8 lines per call (attachments, system,
+  # queue entries, subagent sidechains), so a window counted in raw lines can
+  # hold fewer than N calls and read a spin as quiet.
+  # run_id: the tool_use id of the earliest call in the current consecutive
+  # streak — a run boundary, not just the repeated (name, input). Two spins
+  # of the same call, separated by a different tool call, are two streaks
+  # with two run_ids, so each alerts once instead of the second being read
+  # as a dup of the first (#998).
+  #
+  # Two caps can each hide the streak's true start: the $WINDOW line cap
+  # below, and the $BYTE_CAP byte cap the `tail -c` feeds it (a spin on
+  # large inputs — a Write, an Edit, a heredoc — can average over
+  # $WINDOW/$BYTE_CAP bytes per call and exhaust the byte cap before the
+  # line cap). Either way, the reduce runs out of visible calls without
+  # ever finding a real boundary (a mismatched call, or the transcript's
+  # own genuine start), and the earliest call *visible* is not necessarily
+  # the streak's true start — a longer streak just slides the cap past it,
+  # and treating that shifting id as the run boundary re-alerts on every
+  # call. run_id is null whenever either cap could be the reason the
+  # reduce ran out, which the dedupe key below reads as the pre-#998 key
+  # (session, tool, digest only, no id): a stable key for the plateau, at
+  # the cost of not detecting an interruption buried earlier than either
+  # cap reaches — the same limitation `count` already has as a floor. A
+  # tool_use entry with no `id` at all (an older transcript shape)
+  # degrades the same way, one call at a time, since `first_id` is then
+  # null too.
+  size="$(wc -c <"$1" 2>/dev/null || echo 0)"
+  byte_capped=$([ "$size" -gt "$BYTE_CAP" ] 2>/dev/null && echo true || echo false)
+  tail -c "$BYTE_CAP" "$1" | grep -F '"type":"tool_use"' | tail -n "$WINDOW" | jq -nRc --argjson n "$N" --argjson w "$WINDOW" --argjson byte_capped "$byte_capped" '
     [inputs | fromjson? | objects | select(.type == "assistant" and .isSidechain != true)
-      | .message.content[]? | select(.type == "tool_use") | {name, input}] | reverse as $calls
+      | .message.content[]? | select(.type == "tool_use") | {name, input, id}] | reverse as $calls
     | ($calls[0] // null) as $l
-    | (reduce $calls[] as $c ({n: 0, stop: false};
+    | (reduce $calls[] as $c ({n: 0, stop: false, first_id: null};
         if .stop then .
-        elif $c == $l then .n += 1
-        else .stop = true end) | .n) as $count
-    | {spinning: ($count >= $n), tool: ($l.name // null), input: ($l.input // null), count: $count}'
+        elif ($c.name == $l.name and $c.input == $l.input) then (.n += 1 | .first_id = $c.id)
+        else .stop = true end)) as $r
+    | {spinning: ($r.n >= $n), tool: ($l.name // null), input: ($l.input // null), count: $r.n,
+       run_id: (if ($r.stop == false and (($calls | length) >= $w or $byte_capped)) then null else $r.first_id end)}'
 }
 
 if [ "${1:-}" = "--classify" ]; then
@@ -71,12 +100,41 @@ full_input="$(jq -c '.input' <<<"$verdict")"
 input="$(cut -c1-120 <<<"$full_input")"   # human-facing text only
 digest="$(sha256sum <<<"$full_input" | cut -c1-16)"
 count="$(jq -r '.count' <<<"$verdict")"
+run_id="$(jq -r '.run_id // ""' <<<"$verdict")"
 
-# One alert per run of repeats: keyed by session, tool and input, so a run
-# that keeps growing does not re-alert on every call. Only a `sent` line
-# dedupes: an alert that never reached the controller is retried on the next call.
-key="$session"$'\t'"$tool"$'\t'"$digest"
-grep -qF -- "$key"$'\t'"sent"$'\t' "$log" 2>/dev/null && exit 0
+# One alert per run of repeats: keyed by session, tool, input and run_id
+# (see classify() above). Only a `sent` line dedupes: an alert that never
+# reached the controller is retried on the next call.
+#
+# A live spin's own first alert carries a real run_id (found while the
+# streak was still short enough to see its start). If that same
+# uninterrupted streak keeps growing and crosses a cap, classify() starts
+# returning run_id null (Codex adversarial review on PR #1061): a bare
+# key-equality check then sees a *different* key — same session, tool,
+# digest, but "" instead of the real id — finds no exact match, and
+# re-alerts a second time for one still-running spin. So when run_id is
+# null, "already sent" means ANY prior sent line for this (session, tool,
+# digest), whatever run_id it carries — not just an exact ""-run_id match.
+# The conservative cost is the mirror case: a second, genuinely different
+# streak of the same call that happens to also land in a capped state
+# right away (no real-id alert of its own first) is read as a dup of an
+# earlier unrelated sent line and misses its own alert. That is a missed
+# re-alert, not a duplicate one, and matches the plateau's own tradeoff
+# (see classify() above): once a streak's boundary is unknowable, this
+# hook prefers under-alerting to spamming the controller.
+key="$session"$'\t'"$tool"$'\t'"$digest"$'\t'"$run_id"
+if [ -n "$run_id" ]; then
+  grep -qF -- "$key"$'\t'"sent"$'\t' "$log" 2>/dev/null && exit 0
+else
+  # Log line shape: date\tsession\ttool\tdigest\trun_id\tstatus\tmessage
+  # (logline() below). Field position, not substring search, so a session,
+  # tool or digest value that happens to contain a tab-adjacent match to
+  # another field can never cross-match.
+  [ -r "$log" ] && awk -F'\t' -v s="$session" -v t="$tool" -v d="$digest" '
+    $2 == s && $3 == t && $4 == d && $6 == "sent" { found=1; exit }
+    END { exit !found }
+  ' "$log" && exit 0
+fi
 logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$1" "$2" >> "$log"; }
 
 ctl_session=""
