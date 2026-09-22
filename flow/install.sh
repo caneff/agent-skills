@@ -56,18 +56,26 @@ if [ -L "$git_common_dir/hooks/pre-push" ]; then
   echo "removed retired pre-push hook"
 fi
 
-# herdr-toast-install links the toast scripts and registers the herdrfocus:
-# handler. It refuses from a linked worktree or a path under /tmp (both
-# disposable, so the links and the registry value would outlive them) — that
-# refusal is expected on some machines and in this repo's own scratch-repo
-# tests, so it must not abort the rest of the install.
-if ! bash "$here/bin/herdr-toast-install"; then
-  echo "herdr-toast-install skipped (see message above)"
-fi
-
 # Lay down the copy-only backups (files a symlink can't hold): the Windows VS
 # Code settings and claude/settings.json.
 bash "$here/backup-sync.sh" --restore
+
+# herdr-toast-install links the toast scripts and registers the herdrfocus:
+# handler (see its own header for what it refuses and why). Runs after every
+# symlink and backup above, since it is the one step here that reaches outside
+# the filesystem (the Windows registry) and is the most likely to fail on a
+# given machine. Only its own by-design refusal (stderr starting "refusing: ")
+# is swallowed — anything else is a real failure, reported as one rather than
+# folded into "skipped".
+if ! toast_out=$(bash "$here/bin/herdr-toast-install" 2>&1); then
+  if printf '%s\n' "$toast_out" | grep -q '^refusing: '; then
+    printf '%s\n' "$toast_out"
+    echo "herdr-toast-install skipped (see message above)"
+  else
+    printf '%s\n' "$toast_out" >&2
+    echo "herdr-toast-install failed (not a by-design refusal) — see above" >&2
+  fi
+fi
 
 # implement-dispatch (#748) and merge-cleanup (#749) are Rust binaries:
 # cargo install replaces each in place, rather than a symlink into the repo,
