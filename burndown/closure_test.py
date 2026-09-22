@@ -491,6 +491,17 @@ def test_a_triple_backtick_in_source_does_not_hide_the_directives_after_it():
     assert "comp.js" in got, got
 
 
+def test_an_indented_directive_in_a_doc_is_an_example_not_an_edge():
+    # Codex on #999's PR: an indented block is a code block by the same
+    # CommonMark rule `declaration_section` now applies, and the same doc
+    # explaining the grammar is exactly as likely to show the include line
+    # indented as fenced.
+    root = repo({"_shared/line-kind.js": "x\n",
+                 "docs/guide.md": "example:\n\n    #include ../_shared/line-kind.js\n"})
+    got = C.resolve_closure(root, ["_shared/line-kind.js"])
+    assert got == {"_shared/line-kind.js"}, got
+
+
 def test_a_directory_that_cannot_be_read_is_refused_not_skipped():
     root = repo(SHARED)
     hidden = os.path.join(root, "examples/skyscraper")
