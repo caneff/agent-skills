@@ -99,6 +99,36 @@ fn no_session_start_hook_json_and_no_workers_file_is_silent() {
 }
 
 #[test]
+fn a_session_record_whose_procstart_does_not_match_is_never_resolved_as_this_sessions_own() {
+    // #1042 review, C1 (correctness, CONFIRMED): the test above is silent
+    // whether or not `find_own_pid`'s ancestor walk ever succeeds — a
+    // session that never dispatched a worker and a session `find_own_pid`
+    // fails to resolve both print nothing, so that test alone cannot tell
+    // the two apart, and stripping the match check would leave it green
+    // (defect-classes class 1). This one plants a worker record under this
+    // pid, then a session record for the same pid whose `procStart` does
+    // not match — a mismatch that must make `find_own_pid` fail to resolve
+    // it, so the record's existence must never leak into the printed line.
+    let f = Fixture::new();
+    let pid = std::process::id() as i32;
+    std::fs::create_dir_all(f.home().join(".claude/sessions")).unwrap();
+    std::fs::write(
+        f.session_file(),
+        format!(r#"{{"pid":{pid},"sessionId":"sid-1","procStart":"not-the-real-start","name":"controller-50"}}"#),
+    )
+    .unwrap();
+    f.set_agents(r#"[{"name":"sudokupad-art-1042","agent_status":"working"}]"#);
+    append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
+    let out = run(&f, "{}", &[]);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(
+        stdout(&out),
+        "",
+        "a session record whose procStart does not match this pid's own /proc/<pid>/stat must never be treated as this session's own"
+    );
+}
+
+#[test]
 fn a_subagents_own_session_start_is_silent_even_with_workers_present() {
     let f = Fixture::new();
     live_session(&f, "controller-50");
