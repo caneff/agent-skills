@@ -51,6 +51,13 @@ check_in "$sweep_text" 'files nothing' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'burndown/sweep.py render <run-id>' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'burndown/sweep.py counts <run-id>' 'burndown/SKILL.md § The sweep'
 
+# Idempotency: the deterministic title is the recovery, so a re-run of
+# either filing moment updates the existing issue instead of filing a
+# second one for the same run (Codex gate finding #2, PR #1090).
+check_in "$sweep_text" 'gh issue list' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'in:title' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'not one-shot' 'burndown/SKILL.md § The sweep'
+
 # The run report's three counts. Each needle carries the bold emphasis
 # markers around its own word: a bare 'leftover' matches "leftovers" six
 # times over in surrounding prose, and a bare 'standalone' matches "stay

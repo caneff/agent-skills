@@ -159,8 +159,24 @@ at a time; they wait for the sweep.
 
 **Two filing moments**: at **run close**, and again whenever a run **stops
 on two parks** (§ Parking and escalation) — a stopped run still owes its
-leftovers a ticket, because the sweep is not what the run stopped on. At
-either moment, render the run's leftovers —
+leftovers a ticket, because the sweep is not what the run stopped on.
+
+**Filing is not one-shot, so check first.** A crash after `/file-ticket`
+creates the issue but before the controller records it, or a later run
+close following an earlier two-park stop, both re-render the same run and
+must not file a second `Sweep: leftovers from burn <run-id>`. The title is
+deterministic, so the search is the recovery: before filing, at either
+moment,
+
+```
+gh issue list --repo <owner/name> --state all \
+  --search "Sweep: leftovers from burn <run-id> in:title"
+```
+
+An issue there already **is** this run's sweep: update its body with a
+fresh render instead of filing another —
+`gh issue edit <n> --repo <owner/name> --body-file <path>`. Nothing found:
+render the run's leftovers —
 
 ```
 python3 burndown/sweep.py render <run-id>
