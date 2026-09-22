@@ -223,3 +223,20 @@ fn adopt_refuses_while_any_live_controller_holds_the_worker_beside_an_orphaned_c
     got.sort_by(|a, b| a.0.cmp(&b.0));
     assert_eq!(got, vec![("1".to_string(), stale), (live.pid().to_string(), held)], "nothing moved");
 }
+
+#[test]
+fn adopting_again_a_worker_this_session_already_controls_says_so_and_succeeds() {
+    // #1098 review C2: the second run is not "another controller is alive" —
+    // that controller is this session.
+    let f = Fixture::new();
+    let (own_pid, _) = adopter(&f);
+    let (primary, ws) = f.repo_with_workspace("scroller", BRANCH);
+    workers::append(&f.home(), &dead_pid().to_string(), &worker_record(AGENT, BRANCH, &ws, "12345")).unwrap();
+    assert!(adopt(&f, &primary, AGENT).status.success());
+
+    let out = adopt(&f, &primary, AGENT);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(stdout(&out).contains("this session already controls scroller-345"), "{}", out_text(&out));
+    let held: Vec<String> = holders(&f).into_iter().map(|(pid, _)| pid).collect();
+    assert_eq!(held, vec![own_pid]);
+}

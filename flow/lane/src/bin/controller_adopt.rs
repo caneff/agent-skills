@@ -80,6 +80,10 @@ fn main() -> ExitCode {
     let adopted = match workers::adopt(home, agent, &primary, &own_pid, &own_start) {
         Ok(a) => a,
         Err(AdoptRefusal::NotFound) => return fail(&format!("no worker record names {agent} under {primary} (another session may have just adopted it)")),
+        Err(AdoptRefusal::ControllerAlive(pid)) if pid == own_pid => {
+            safe_println!("this session already controls {agent}; nothing moved");
+            return ExitCode::SUCCESS;
+        }
         Err(AdoptRefusal::ControllerAlive(pid)) => {
             return fail(&format!("{agent}'s controller, pid {pid}, is alive; a worker has one controller"));
         }
