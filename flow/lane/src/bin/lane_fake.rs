@@ -99,24 +99,78 @@ fn env_flag(name: &str) -> bool {
     env::var(name).is_ok_and(|v| !v.is_empty())
 }
 
-/// `GH_VIEW_BARRIER_DIR`: the first `issue view` of each dispatch (keyed by
-/// its parent pid) waits until two dispatches have reached theirs, or 3s.
-/// Independent of any lock the dispatches take, so a test can make two runs
-/// read a ticket before either edits it, and see what the lock does to that.
-fn view_barrier() {
+/// `GH_VIEW_BARRIER_DIR`: `implement_dispatch` reads a ticket twice — once in
+/// the refusal pass, again as the reread immediately before its claim edit
+/// (the actual critical section: the read the lock-vs-no-lock race is about).
+/// Waiting at the first read leaves both dispatches free to run unsynchronized
+/// all the way to that reread, so a witness built on it is timing-dependent,
+/// not deterministic (#982). This barrier instead holds each dispatch (keyed
+/// by its parent pid) at its *second* view of a given ticket — the reread —
+/// until two dispatches have reached theirs, or 3s; the first view of any
+/// ticket passes straight through. Independent of any lock the dispatches
+/// take, so a test can make two runs reach the reread within microseconds of
+/// each other — released together, not literally simultaneously — and see
+/// what the lock does to that.
+fn view_barrier(n: &str) {
     let Ok(dir) = env::var("GH_VIEW_BARRIER_DIR") else { return };
     let ppid = std::fs::read_to_string("/proc/self/stat")
         .ok()
         .and_then(|s| s.rsplit_once(')').and_then(|(_, r)| r.split_whitespace().nth(1).map(str::to_string)))
         .unwrap_or_default();
-    let mine = std::path::Path::new(&dir).join(&ppid);
-    if mine.exists() {
+    // Counted and marked per (pid, ticket): a clump reads several tickets in
+    // one process, and a marker keyed on pid alone would have one ticket's
+    // reread satisfy another's wait, silently disabling the barrier for
+    // every ticket after the first (#982 review, C1).
+    let count_file = std::path::Path::new(&dir).join(format!("{ppid}.{n}.views"));
+    // A dropped write or an unreadable/garbage count here must not read as
+    // "first view" — that fails the barrier open into no synchronization at
+    // all, the exact silent-pass shape `docs/agents/defect-classes.md` class
+    // 1 names, and this fake exists only to make that race deterministic
+    // (#982 review, S1/P3/C2). Test-only code: panic rather than swallow.
+    let seen = match std::fs::read_to_string(&count_file) {
+        Ok(s) if s.is_empty() => 1,
+        Ok(s) => s.trim().parse::<u32>().unwrap_or_else(|e| panic!("GH_VIEW_BARRIER_DIR: {count_file:?} held {s:?}, not a count: {e}")) + 1,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => 1,
+        Err(e) => panic!("GH_VIEW_BARRIER_DIR: could not read {count_file:?}: {e}"),
+    };
+    std::fs::write(&count_file, seen.to_string()).unwrap_or_else(|e| panic!("GH_VIEW_BARRIER_DIR: could not write {count_file:?}: {e}"));
+    if seen != 2 {
         return;
     }
-    let _ = std::fs::write(&mine, "");
+    // Reached at most once per (ppid, n): `seen` comes from a monotonically
+    // increasing file-backed counter, so this branch runs on the one call
+    // where it reads exactly 2 — no existence check needed to guard it
+    // (#982 review, over-engineering).
+    let mine = std::path::Path::new(&dir).join(format!("{ppid}.{n}.reread"));
+    std::fs::write(&mine, "").unwrap_or_else(|e| panic!("GH_VIEW_BARRIER_DIR: could not write {mine:?}: {e}"));
+    // The two dispatches must be released within microseconds of each other,
+    // or the first one released can read, decide and complete its edit
+    // before the second even rereads — the same false "only one claimed"
+    // outcome a coarse poll produces (#982). A busy spin for the first ~50ms
+    // gets that; past it, the lock-held path (where the second run never
+    // arrives) falls back to a short sleep so the ordinary passing run does
+    // not peg a core issuing read_dir syscalls for the whole 3s deadline
+    // (#982 review, S3/P2/C3).
+    let suffix = format!(".{n}.reread");
+    let is_reread_marker = |e: &std::fs::DirEntry| e.file_name().to_string_lossy().ends_with(&suffix);
+    // A failed `read_dir`, or a failed read of one of its entries, must not
+    // read as "count 0, keep waiting" — that is the same fail-open shape as
+    // the count file above, just timing out instead of racing (#982 gate,
+    // finding 2). Only the deadline is a legitimate reason to stop waiting.
+    let count = || {
+        std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("GH_VIEW_BARRIER_DIR: could not read_dir {dir:?}: {e}"))
+            .map(|entry| entry.unwrap_or_else(|e| panic!("GH_VIEW_BARRIER_DIR: could not read an entry of {dir:?}: {e}")))
+            .filter(is_reread_marker)
+            .count()
+    };
+    let spin_until = std::time::Instant::now() + std::time::Duration::from_millis(50);
+    while count() < 2 && std::time::Instant::now() < spin_until {
+        std::hint::spin_loop();
+    }
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-    while std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0) < 2 && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(20));
+    while count() < 2 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_micros(200));
     }
 }
 
@@ -130,7 +184,6 @@ fn run_gh(args: &[String]) -> ExitCode {
         // GH_STATE/GH_LABELS/GH_ASSIGNEES trio still answers every ticket
         // with no row of its own.
         let n = args.get(2).map(String::as_str).unwrap_or("");
-        view_barrier();
         let row = match env::var(format!("GH_ISSUE_{n}")) {
             Ok(row) => row,
             Err(_) => {
@@ -165,6 +218,14 @@ fn run_gh(args: &[String]) -> ExitCode {
         } else {
             row
         };
+        // The claim decision above is captured before the barrier, not
+        // after: releasing the barrier only unblocks the *return* of this
+        // call, so both dispatches decide from state that existed before
+        // either could possibly have edited — deciding after release left
+        // a real (if narrow) gap where one process could read, decide,
+        // spawn its edit and finish before the other's own post-release
+        // read even ran (Codex gate on PR #1060, finding 1).
+        view_barrier(n);
         // Tab-delimited, matching lane::issue_state::read's `-q` query: a
         // label or login can hold a space but never a tab.
         println!("{row}");

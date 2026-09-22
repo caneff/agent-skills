@@ -1054,11 +1054,13 @@ fn two_overlapping_dispatches_of_one_ticket_claim_it_once() {
     let repo = f.mkfixture("claimrace", "main");
     let claims = f.home().join("claims");
     std::fs::create_dir_all(&claims).unwrap();
-    // Both dispatches must reach their first read of the ticket before either
-    // can edit it: a barrier at the fake gh's issue view, independent of the
-    // lock. With the lock, the second run cannot reach its read until the
-    // first finishes claiming, so the barrier times out and it reads the
-    // claim; without it, both read the ticket free and both claim.
+    // Both dispatches must reach the reread immediately before the claim
+    // edit together, before either can edit: a barrier at the fake gh's
+    // second `issue view` of the ticket, independent of the lock — that
+    // reread is the actual critical section the lock protects. With the
+    // lock, the second run cannot reach its reread until the first finishes
+    // claiming, so the barrier times out and it reads the claim; without
+    // it, both reach the reread free and both claim.
     let barrier = f.home().join("barrier");
     std::fs::create_dir_all(&barrier).unwrap();
     let scenario = with(&default_scenario(), &[("GH_VIEW_BARRIER_DIR", barrier.to_str().unwrap()), ("GH_CLAIM_DIR", claims.to_str().unwrap())]);
