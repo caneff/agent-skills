@@ -545,7 +545,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    ```
    dir="$HOME/.cache/agent-reviews/<repo>"   # expanded as
    mkdir -p "$dir"                           # multi-axis-code-review/SKILL.md does it
-   phase=gate                                # or second
+   phase=gate                                # or second, or third
    body_file=<absolute path you wrote the ticket body, comments and appendix to>
    out_file="$dir/codex-adversarial-<n>-$phase.out"
    record="$dir/codex-adversarial-<n>-$phase.json"
@@ -603,7 +603,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    started run answers to this gate, and there is no retry: a refused run
    ends the step for its own phase, the same as a refused preflight. A
    refusal with no pass yet collected for this PR leaves no trial row to
-   write. A refusal of the conditional second pass is different: the gate
+   write. A refusal of the conditional second or third pass is different: the gate
    pass earlier in this same step was collected and posted, and its trial
    row is not undone by a later refusal — nothing already earned is
    discarded.
@@ -614,12 +614,12 @@ The controller merges on a repo Chris owns; Chris reads it after via
    acting on it. If `gh pr comment` fails, stop before merging — the
    comment is what makes the verdict readable by anyone but you. Everything
    after that — the dispositions, #888's conditional second pass (which
-   runs the same block with `phase=second`), the no-third-run ceiling, the
+   runs the same block with `phase=second`), the third-run ceiling, the
    trial row — is #888's and #812's, unchanged by #1015.
 
    **Every run records its duration**, collected or refused, as one row
    appended to `docs/research/2026-09-20-codex-pass-durations.md`: ticket,
-   PR, phase (`gate` or `second`), launched, completed, duration in
+   PR, phase (`gate`, `second` or `third`), launched, completed, duration in
    minutes, and outcome — `collected`, or the refusal that discarded it. A
    refused run still gets its row: it spent the same wall clock and the
    same tokens, and that cost is what #1015 measured to retire the early
@@ -680,15 +680,29 @@ The controller merges on a repo Chris owns; Chris reads it after via
    step that names both — a lane that treats a comment as a requirement,
    #882, cannot skip on an input that ignores one.)
 
-   When either moved, run this pass once more on the fixes — there is no
-   third Codex run, so whatever this second run finds is final: post its
-   output as a PR
-   comment the same way (a fresh `out_file`, since the first is already
-   removed), then remove that file too once the comment posts, and either
-   it has no material findings (go to step 4) or the controller itself
-   gives each of its findings a `disputed: <why>` or filed disposition in
-   the PR body — there is no worker fix-and-re-run cycle left to ask for a
-   "fixed" one — before going to step 4.
+   When either moved, run this pass once more on the fixes, with
+   `phase=second`, and post its output as a PR comment the same way, from
+   its own `phase`-named `out_file`. No material findings → go to step 4.
+   Findings → the controller evaluates every one before any reaches the
+   worker, as it did the first pass's. **A second-pass finding that passes
+   § Review's adjacent-fix rule goes to the worker, who fixes it in one
+   round**, each fix in a commit of its own, recorded with § Review's
+   adjacent-fix disposition and that sha in the PR body's Decisions made
+   section, and "PR up" again. Then the controller reads that fix diff itself, against
+   the finding it answers and the adjacent-fix rule, rather than sending it
+   back to Codex, and re-runs step 2. Every other second-pass finding the
+   controller disposes of in the PR body itself — `disputed: <why>`, filed
+   if it is high, or `leftover`, under § Review's severity mapping — since
+   a fix outside the rule is a change, not a round.
+
+   A third Codex run happens only when a second-pass finding fixed in the
+   round was high. The third run is final: its findings are `disputed` or
+   `leftover`, never a fourth run. It runs the same block with
+   `phase=third`, posts the same way, and the controller disposes of each
+   finding in the PR body — no worker fix round follows it. With no high
+   among the second-pass fixes, the controller's own read of the fix diff
+   is the last review, and step 4 follows once every disposition is
+   recorded.
 
    Classify each finding by comparing it with the PR body's round-1
    findings — `codex-only, confirmed` (fixed or filed, and no Claude axis

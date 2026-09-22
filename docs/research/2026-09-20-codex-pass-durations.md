@@ -16,7 +16,8 @@ measurement, and writing it into a table would launder it into one. The
 table starts at the first pass run under #942's shape.
 
 `phase` is where the run launched: `gate` (at PR-up, the merge gate) or
-`second` (#888's conditional re-run). `outcome` is `collected`, or the
+`second` (#888's conditional re-run) or `third` (#1028's, only after
+a second-pass high was fixed in the round). `outcome` is `collected`, or the
 reason the gate refused the verdict — `errored`, `raced`, `stale`,
 `unreadable`, or `absent` when no record was written at all. A refused run
 still gets its row: it spent the same wall clock and the same tokens. An

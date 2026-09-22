@@ -105,7 +105,7 @@ check_absent "$lane" '"<ticket body verbatim>"' 'the naive, unsafe form'
 # moving or the ticket text changing (a requirement commented onto the
 # ticket between the passes moves the input while the sha sits still, and
 # the pass reads `body_file`, not the diff alone), a `fixed` disposition
-# with the sha unmoved blocks, and the no-third-run ceiling survives.
+# with the sha unmoved blocks, and the third-run ceiling survives (#1028).
 check "$skill" 'Note the head sha this pass ran against'
 check "$skill" 'The second pass runs only if the head sha moved'
 check "$skill" 'The second pass runs only if the head sha moved or the ticket text changed'
@@ -115,7 +115,7 @@ check "$skill" 'If every disposition was `disputed` or `filed`, the sha is unmov
 check "$skill" 'confirms each disposition is recorded in the Decisions made section and goes to step 4'
 check "$skill" 'A disposition that says `fixed` with the sha unmoved is neither case'
 check "$skill" 'which a skipped pass still owes'
-check_count "$skill" 'there is no third Codex run' 1
+check_count "$skill" 'The third run is final' 1
 check_absent "$skill" 'and then this pass once more on the fixes' 'the unconditional second run'
 
 if [ "$fail" -eq 0 ]; then
