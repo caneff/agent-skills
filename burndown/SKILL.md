@@ -121,8 +121,11 @@ too.
    cleanup: [`references/merge-tail.md`](references/merge-tail.md). Register
    each dispatched clump with
    `runfile.py clump` — its workspace and its worker's herdr agent name, or
-   step 1's resume has nothing to re-announce to — and each landing with
-   `runfile.py land`, so a restart can pick the run back up.
+   step 1's resume has nothing to re-announce to — each landing with
+   `runfile.py land`, and each landing's leftover findings with `runfile.py
+   leftover --clump <n> --pr <n> --from <dispositions sidecar>`, so a restart
+   can pick the run back up with nothing transcribed by hand
+   (`references/run-file.md` § Leftovers).
 9. **Wait on the wake, and sweep on an idle one.** The loop waits by being
    idle, never inside a tool call: a controller in one hears no worker until
    it returns. What it trusts while it waits, in rank order, and the bounded

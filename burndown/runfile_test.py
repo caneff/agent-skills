@@ -241,6 +241,80 @@ def test_re_registering_a_landed_clump_keeps_its_sha():
     assert runfile.load("burn-1", root=root)["clumps"][0]["landed"] == "abc1234"
 
 
+# --- Leftovers: copied at landing from a PR's dispositions sidecar --------
+
+# The shared fixture `multi-axis-code-review`/`implement` test against:
+# `S1` fixed, `C2` fixed (adjacent), `P1` disputed, `C1` filed, `S2`
+# handed-back, `S3` leftover. Only `S3` is a leftover line.
+SIDECAR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "implement", "fixtures",
+    "dispositions-sidecar.jsonl")
+
+
+def test_leftover_copies_only_the_leftover_lines_with_every_field_filled():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
+    runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    got = runfile.load("burn-1", root=root)["leftovers"]
+    assert len(got) == 1, got
+    entry = got[0]
+    assert entry["clump"] == 901, entry
+    assert entry["tickets"] == [901, 902], entry
+    assert entry["pr"] == 950, entry
+    assert entry["id"] == "S3", entry
+    assert entry["file"] == "burndown/loop.py", entry
+    assert entry["title"] == "Mysterious name: `tick2`", entry
+    assert entry["severity"] == "judgement", entry
+    assert "tick2" in entry["text"], entry
+
+
+def test_leftover_run_twice_for_the_same_pr_does_not_duplicate():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    got = runfile.load("burn-1", root=root)["leftovers"]
+    assert len(got) == 1, got
+
+
+def test_leftover_on_a_clump_the_run_never_dispatched_is_refused():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    try:
+        runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    except runfile.RunFileError as exc:
+        assert "901" in str(exc), exc
+    else:
+        raise AssertionError("a leftover recorded against no clump")
+
+
+def test_cli_leftover_appends_and_show_prints_the_leftovers():
+    root = cache()
+    cli(root, "start", "burn-1", "--slots", "2")
+    cli(root, "clump", "burn-1", "--tickets", "901", "--workspace", "/w/a",
+        "--agent", "agent-a")
+    got = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
+              "--from", SIDECAR)
+    assert got.returncode == 0, got.stderr
+    shown = cli(root, "show", "burn-1")
+    assert shown.returncode == 0, shown.stderr
+    assert "S3" in shown.stdout, shown.stdout
+    assert "burndown/loop.py" in shown.stdout, shown.stdout
+    assert "PR #950" in shown.stdout, shown.stdout
+
+
+def test_leftovers_survive_resume():
+    root = cache()
+    runfile.start("burn-1", slots=2, controller="ctl", root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    runfile.resume("burn-1", ["agent-a"], controller="ctl-f3", root=root)
+    got = runfile.load("burn-1", root=root)["leftovers"]
+    assert len(got) == 1 and got[0]["id"] == "S3", got
+
+
 # --- Resume: reconcile against the live agents, re-announce the controller -
 
 def three_clumps(root):
