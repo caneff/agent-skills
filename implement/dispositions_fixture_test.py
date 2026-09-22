@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """The dispositions sidecar fixture and the grammar SKILL.md § Review states
-must agree (#1025, #1027). Every readers' test binds to the fixture, so a
-form the prose adds that the fixture lacks is a form no reader is tested on,
-and a fixture line the prose never states is a form no writer produces.
+must agree (#1025, #1027). A reader's test that binds to the fixture, as
+`multi-axis-code-review/check_adjacent_test.py` does, is tested on every
+form the prose states only while the two agree; a fixture line the prose
+never states is a form no writer produces.
 
 Seam: the sidecar forms as § Review writes them — each backticked
 `{"id": ...}` object — against the lines of `fixtures/dispositions-sidecar.jsonl`,
@@ -38,11 +39,6 @@ def fixture_forms():
     with open(FIXTURE) as fh:
         objs = [json.loads(raw) for raw in fh if raw.strip()]
     return {(o["outcome"], frozenset(o), o.get("scope")) for o in objs}
-
-
-def test_the_prose_states_every_outcome():
-    outcomes = {f[0] for f in stated_forms()}
-    assert outcomes == {"fixed", "disputed", "filed", "handed-back", "leftover"}, outcomes
 
 
 def test_every_stated_form_has_a_fixture_line():

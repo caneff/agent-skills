@@ -570,7 +570,9 @@ The brief: "Check each round-1 finding id against its fix or its claimed
 disposition. Fail the pass, naming the finding id, on any of three things:
 (a) a round-1 finding with no disposition — `leftover` counts as one, as
 do the other four outcomes; (b) a `leftover` whose finding
-is high under implement's severity mapping, since a high finding is filed;
+is high under implement's severity mapping, since a high finding is filed —
+read a correctness finding's `CONFIRMED` or `PLAUSIBLE` from its prose
+report, since its sidecar line carries only `hard` or `judgement`;
 (c) an adjacent fix that breaks `implement/SKILL.md` § Review's adjacent-fix
 rule. For (c), write the sidecar
 first, then run `python3 ~/.agents/skills/multi-axis-code-review/check_adjacent.py --repo <worktree> --base <fixed point> <dir>/dispositions-<n>.jsonl`:
