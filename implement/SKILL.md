@@ -195,9 +195,12 @@ No PR and no reviewer; Chris reads the log after.
    ad hoc `gh issue create` skips that role. `filed` is reserved for a high
    finding, under the severity mapping below. A finding that is not high and
    not fixed in the round takes `leftover`: no ticket of its own, only a
-   sidecar line (step 2) and `leftover` in prose. The sweep that collects
-   leftovers into one ticket is not built yet (#1029, #1030, #1033); until it
-   lands, the sidecar line is the only record.
+   sidecar line (step 2) and `leftover` in prose. A burn's own sweep, one
+   ticket per run, is `burndown/SKILL.md` § The sweep; a worker with **no
+   run file** under it — dispatched directly through `/implement`, never
+   through `burndown`'s loop (`burndown/SKILL.md` § The loop step 8) —
+   files its own per-PR sweep instead, at report time: this file's § The PR
+   below.
    On a repo whose `origin` owner isn't
    your `gh` login, `/file-ticket` hands the command back instead of filing,
    so there is no ticket number: the disposition is `handed back: <the
@@ -354,6 +357,29 @@ The body has these sections and nothing else:
   round-1 finding that was disputed (with the why), filed (with its
   ticket number), handed back (with the command) or left over.
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
+
+**A worker with no run file under it** (§ Review) files one more ticket
+now, before sending "PR up": read this PR's own dispositions sidecar,
+`dispositions-<n>.jsonl` (§ Review step 2 already wrote it), for its
+`leftover` lines. None: file nothing, the same zero-leftovers rule the
+burn sweep uses. Any: **check first, the same idempotent search the burn
+sweep uses** (`burndown/SKILL.md` § The sweep) — a crash after
+`/file-ticket` here is the same hazard —
+
+```
+gh issue list --repo <owner/name> --state all \
+  --search "Sweep: leftovers from PR #<n> in:title"
+```
+
+found: update its body instead of filing another,
+`gh issue edit <n> --repo <owner/name> --body-file <path>`. Nothing
+found: file `Sweep: leftovers from PR #<n>` through `/file-ticket`,
+labelled `ready-for-agent`, in #1030's body shape
+(`burndown/SKILL.md` § The sweep: grouped by file, one bullet per
+item). A burn controller that later finds this ticket open on the
+frontier folds it into its own run's sweep
+(`burndown/SKILL.md` § The sweep) rather than leaving it standing
+beside one.
 
 Send the controller "PR up" in this shape:
 

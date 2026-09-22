@@ -58,6 +58,30 @@ check_in "$sweep_text" 'gh issue list' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'in:title' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'not one-shot' 'burndown/SKILL.md § The sweep'
 
+# #1033: a per-PR sweep found on the frontier folds into the run's own
+# sweep rather than standing beside it, so the run close still files exactly
+# one sweep ticket. The pointer needle checks the actual comment text, not
+# only the word "pointer" — a prior draft dropped `--comment "Folded into
+# <run-sweep-url>"` and this check still passed (round-1 finding C5).
+check_in "$sweep_text" 'per-PR sweep' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'so fold by body instead of by run file' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'close the per-PR ticket with a pointer to the run sweep' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'comment "Folded into' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'still files this thin' 'burndown/SKILL.md § The sweep'
+
+# #1033 verification finding C1: a later re-render at the other filing
+# moment must not drop a section a fold already put in the body — the
+# per-PR ticket that put it there is closed by then, off the frontier, and
+# `sweep.py render` never reproduces it.
+check_in "$sweep_text" 'a fold (below) put there kept as it stands' 'burndown/SKILL.md § The sweep'
+
+# Codex gate finding 1 on PR #1094: appending the per-PR body whole would
+# carry its own `## Blocked by` into the run sweep alongside the run
+# sweep's own, reading AMBIGUOUS to `blocked_by_section` and dropping the
+# folded sweep off the frontier for good.
+check_in "$sweep_text" 'its file sections only' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'split("\n## Blocked by")[0]' 'burndown/SKILL.md § The sweep'
+
 # The run report's three counts. Each needle carries the bold emphasis
 # markers around its own word: a bare 'leftover' matches "leftovers" six
 # times over in surrounding prose, and a bare 'standalone' matches "stay

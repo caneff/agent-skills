@@ -173,8 +173,11 @@ gh issue list --repo <owner/name> --state all \
   --search "Sweep: leftovers from burn <run-id> in:title"
 ```
 
-An issue there already **is** this run's sweep: update its body with a
-fresh render instead of filing another —
+An issue there already **is** this run's sweep: update its body instead
+of filing another — a fresh render of the run's own leftovers, with any
+`## <file>` section already in the current body that a fold (below) put
+there kept as it stands, since a fold's own items never reappear in
+`sweep.py render`'s output and a bare overwrite would drop them —
 `gh issue edit <n> --repo <owner/name> --body-file <path>`. Nothing found:
 render the run's leftovers —
 
@@ -204,6 +207,40 @@ without re-deriving it from the PRs by hand. Controller observations about
 the loop itself stay standalone tickets (§ Before a controller rules), never
 folded into the sweep and never in any sidecar — the controller adds its own
 filed-observation count to `counts`' standalone number by hand.
+
+**A per-PR sweep found on the frontier** (`implement/SKILL.md` § The PR: a
+worker with no run file under it files one of these, titled
+`Sweep: leftovers from PR #<n>`) is not a second sweep ticket for this
+run. `runfile.py leftover` cannot pull its items into the run file — it
+refuses any PR that is not one of this run's own landed clumps — so fold
+by body instead of by run file: its items are already rendered, in the
+same grouped-by-file shape `sweep.py render` produces, in the per-PR
+ticket's own body — **its file sections only**, never its own
+`## Blocked by` —
+
+```
+gh issue view <n> --repo <owner/name> --json body \
+  --jq '.body | split("\n## Blocked by")[0]'
+```
+
+stops before that heading, so the run sweep still declares exactly one
+`## Blocked by`: `blocked_by_section` (§ The frontier, below) reads every
+occurrence in a body, and a second one — the per-PR ticket's own,
+appended whole — reads `AMBIGUOUS` and drops the folded sweep off the
+frontier for good. That printed text is exactly what to append. File or
+update the run sweep (above) with it appended under its own file headers
+to the body `sweep.py render` printed, then close the per-PR ticket with
+a pointer to the run sweep —
+
+```
+gh issue close <n> --repo <owner/name> --comment "Folded into <run-sweep-url>"
+```
+
+— so the frontier still closes to exactly one open sweep per run.
+**A run with no leftovers of its own still files this thin sweep** when a
+per-PR one is there to fold — the zero-leftovers rule above is for a run
+with nothing to fold from any source, and a per-PR sweep on the frontier
+is a source.
 
 ## The frontier
 
