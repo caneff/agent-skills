@@ -25,6 +25,16 @@ mkdir -p "$dest"
 for n in $names; do
   [ -d "$dest/$n" ] && [ ! -L "$dest/$n" ] && { echo "refusing: $dest/$n is a real directory" >&2; exit 1; }
 done
+
+# Registry first: flow/bin's files exist whether or not the links do, so a
+# failure here leaves ~/.local/bin exactly as it was and the old handler still
+# working. wslpath gives the same \\wsl.localhost\<distro>\... form the shim uses.
+# reg.exe is called directly (not through powershell.exe) so the \" escapes
+# reach it as the literal quotes a path with a space needs.
+unc=$(wslpath -w "$here")
+reg.exe add 'HKCU\Software\Classes\herdrfocus\shell\open\command' /ve \
+  /d "wscript.exe //B //Nologo \"${unc}\herdr-focus.vbs\" \"%1\"" /f >/dev/null
+
 for n in $names; do
   if [ -e "$dest/$n" ] && [ ! -L "$dest/$n" ]; then
     mv "$dest/$n" "$dest/$n.pre-flow"
@@ -32,7 +42,3 @@ for n in $names; do
   fi
   ln -sfn "$here/$n" "$dest/$n"
 done
-
-# wslpath gives the same \\wsl.localhost\<distro>\... form the shim uses.
-unc=$(wslpath -w "$here")
-powershell.exe -NoProfile -Command "reg add 'HKCU\Software\Classes\herdrfocus\shell\open\command' /ve /d 'wscript.exe //B //Nologo ${unc}\herdr-focus.vbs %1' /f" >/dev/null
