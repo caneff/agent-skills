@@ -53,6 +53,40 @@ STEP_LOCATOR = re.compile(
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 LOOSE_STEP_LOCATOR = re.compile(STEP_LOCATOR.pattern.replace("[^.,;:!?)}\\]]+?", ".+?"), re.IGNORECASE)
 HEADING_STEP = re.compile(r"^(step\s+\d+)\b", re.IGNORECASE)
+BACKTICK_RUN = re.compile(r"`+")
+
+
+def code_spans(line: str) -> list[tuple[int, int]]:
+    """(content_start, content_end) for each inline code span on the line,
+    per the CommonMark rule: a span opens on a backtick run and closes on
+    the next run of exactly the same length, not on any lone backtick — so
+    `` `§ Build` `` is one span (an outer double-backtick run around a
+    single one would leave the single run as plain text)."""
+    runs = [(m.start(), m.end()) for m in BACKTICK_RUN.finditer(line)]
+    spans = []
+    index = 0
+    while index < len(runs):
+        open_start, open_end = runs[index]
+        length = open_end - open_start
+        closer = next(
+            (
+                later
+                for later in range(index + 1, len(runs))
+                if runs[later][1] - runs[later][0] == length
+            ),
+            None,
+        )
+        if closer is None:
+            index += 1
+            continue
+        close_start, _ = runs[closer]
+        spans.append((open_end, close_start))
+        index = closer + 1
+    return spans
+
+
+def inside_code_span(line: str, position: int) -> bool:
+    return any(start <= position < end for start, end in code_spans(line))
 
 
 def tracked_markdown() -> list[Path]:
@@ -176,12 +210,35 @@ def reference_targets(match: re.Match[str]) -> list[tuple[str, list[int]]]:
     return readings
 
 
+def normalize(text: str) -> str:
+    return " ".join(text.rstrip(TRAILING_PUNCTUATION).split())
+
+
 def matches_heading(label: str, heading: str) -> bool:
     if label.isdigit():
         return heading.startswith(f"{label}.")
-    label = " ".join(label.rstrip(TRAILING_PUNCTUATION).split())
-    heading = " ".join(heading.rstrip(TRAILING_PUNCTUATION).split())
-    return heading.startswith(label)
+    return normalize(heading).startswith(normalize(label))
+
+
+def resolve_heading(
+    label: str, candidates: list[tuple[str, str]]
+) -> tuple[list[str], list[str]]:
+    """(bodies, ambiguous headings) for the label among (heading, body) pairs
+    that already pass matches_heading. An exact normalized match wins over
+    any number of prefix matches — a step that only exists in a sibling
+    heading sharing the name's prefix must not be read as if it were in the
+    named heading (#990). With no exact match, a single prefix match is the
+    answer; more than one is ambiguous and neither is returned as a body."""
+    matches = [(heading, body) for heading, body in candidates if matches_heading(label, heading)]
+    if not matches:
+        return [], []
+    if not label.isdigit():
+        exact = [body for heading, body in matches if normalize(heading) == normalize(label)]
+        if exact:
+            return exact, []
+    if len(matches) == 1:
+        return [matches[0][1]], []
+    return [], [heading for heading, _ in matches]
 
 
 def main() -> int:
@@ -219,30 +276,48 @@ def main() -> int:
                 # span only when the sign sits inside one; anywhere else it is
                 # inline code in the name, and cutting there would let a prefix
                 # of the heading match after the code part is renamed.
+                # A name is "cut" at the backtick only when nothing but
+                # ordinary sentence punctuation (PUNCTUATION_TRIMMER) sits
+                # between it and the backtick: that punctuation already ends
+                # the reference on its own, so a code span right after it is
+                # unrelated prose, not part of the name — same as a step
+                # locator matching first, which legitimately ends the name at
+                # its own boundary well before the backtick ("step 3's Codex
+                # pass ... `.scratch/`" reads as step 3, the rest is prose).
+                # A prose trimmer (possessive, conjunction) does not count as
+                # ending it — applying that first, ahead of this guard, is
+                # what let "Build's `release`" and "Build and `release`" read
+                # as the already-shortened name "Build" and skip the guard
+                # (#1005).
+                raw_name = pointer.group(1).strip()
                 cut_at_backtick = line[pointer.end() : pointer.end() + 1] == "`"
-                inside_span = line[: pointer.start()].count("`") % 2 == 1
+                inside_span = inside_code_span(line, pointer.start())
+                has_step_locator = len(reference_targets(pointer)) > 1
                 if (
                     cut_at_backtick
                     and not inside_span
-                    and reference_targets(pointer)[-1][0] == pointer.group(1).strip()
+                    and not has_step_locator
+                    and PUNCTUATION_TRIMMER[1](raw_name) == raw_name
                 ):
                     failures.append(
-                        f"{source.relative_to(ROOT)}:{number}: § {pointer.group(1).strip()} "
+                        f"{source.relative_to(ROOT)}:{number}: § {raw_name} "
                         "is cut at inline code: inline code in a heading name is "
                         "unsupported, write the plain heading"
                     )
                     continue
 
+                ambiguous: list[str] = []
                 for label, steps in reference_targets(pointer):
-                    candidates = [
-                        body
-                        for heading, body in headings[target]
-                        if matches_heading(label, heading)
-                    ]
-                    if candidates:
+                    candidates, ambiguous = resolve_heading(label, headings[target])
+                    if candidates or ambiguous:
                         break
                 where = target.relative_to(ROOT)
-                if not candidates:
+                if ambiguous:
+                    failures.append(
+                        f"{source.relative_to(ROOT)}:{number}: § {label} is ambiguous in "
+                        f"{where}: matches {', '.join(ambiguous)}"
+                    )
+                elif not candidates:
                     failures.append(
                         f"{source.relative_to(ROOT)}:{number}: § {label} not found in {where}"
                     )

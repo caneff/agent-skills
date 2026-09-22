@@ -30,7 +30,16 @@ does not resolve.
   runs to the end of the line. Write the heading, then punctuation. A
   heading whose name holds a code span cannot be referenced: a name cut at a
   backtick outside a wrapping code span fails, saying inline code in a
-  heading name is unsupported. Write the plain heading.
+  heading name is unsupported. Write the plain heading. A code span is
+  recognised by CommonMark's own rule — a backtick run opens it and only a
+  later run of the same length closes it, so `` `§ Build` `` (single
+  backticks) and ` ``§ Build`` ` (double) both wrap the name correctly. The
+  guard against inline code runs on the name before the possessive or
+  conjunction trimmer touches it, not after: `§ Build's `release`` and
+  `§ Build and `release`` both fail rather than silently downgrading to a
+  reference to an unrelated `Build` heading. A step locator (below) ending
+  the name well before the backtick is not this case — that is the locator's
+  own boundary, and the rest of the sentence is ordinary prose.
 - **The sign as a word.** Every section sign followed by a name is a
   reference, so a sentence that uses the sign as a word fails as a missing
   heading. Prefer rewording ("the Liveness section"). To keep the sign,
@@ -40,8 +49,13 @@ does not resolve.
   not read either. Inside this doc, `<sign>` (defined under The step
   locator) is the placeholder for a sign that must not be read.
 - A heading only has to start with the name, so a reference reading "The merge"
-  matches a heading "The merge: who and when". Use enough words to be
-  unambiguous. Matching ignores trailing punctuation and repeated whitespace.
+  matches a heading "The merge: who and when". Matching ignores trailing
+  punctuation and repeated whitespace. An exact normalized match wins over
+  any number of headings that only share the name's prefix — a step
+  required in "Merge" is checked against "Merge" even when a sibling
+  "Merge notes" also holds that step number (#990). With no exact match, a
+  single prefix match is the answer; more than one fails, naming every
+  heading it could mean. Use enough words to be unambiguous.
 - A bare number after the section sign matches a heading that starts with that
   number and a period.
 
@@ -76,6 +90,5 @@ join the name (fixture `step-heading-prose-valid`). Whatever the name, put
 punctuation right after it.
 
 Known limits: a spelled-out number above ten is not recognised; a second
-locator in one pointer (`step 3 and step 9`) is not read; a lazily numbered
-list (`1.` on every item) does not satisfy the check; and a step can resolve
-in a sibling heading that shares the name's prefix (#990).
+locator in one pointer (`step 3 and step 9`) is not read; and a lazily numbered
+list (`1.` on every item) does not satisfy the check.
