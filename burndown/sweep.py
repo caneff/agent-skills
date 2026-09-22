@@ -84,7 +84,12 @@ def main(argv):
     leftovers = run.get("leftovers", [])
     body = render_body(leftovers)
     if not body:
-        print(f"run {args.run_id} has no leftovers — nothing to file")
+        # To stderr, not stdout: SKILL.md tells the controller to file what
+        # this prints, and a caller piping stdout straight into `gh issue
+        # create` must see an empty string here, never a sentence that reads
+        # as a fileable body (#1030 round-1 findings S4, C3).
+        print(f"run {args.run_id} has no leftovers — nothing to file",
+              file=sys.stderr)
         return 0
     print(title(args.run_id))
     print()

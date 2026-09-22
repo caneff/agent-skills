@@ -99,12 +99,15 @@ def test_cli_prints_the_title_and_grouped_body_for_a_run_with_leftovers():
 
 
 def test_cli_on_a_run_with_no_leftovers_prints_nothing_to_file():
+    # stdout is what a caller pipes into `/file-ticket`, so it is empty here
+    # — not a sentence that reads as a fileable body. The "nothing to file"
+    # notice goes to stderr instead (#1030 round-1 findings S4, C3).
     root = cache()
     runfile.start("burn-2", slots=1, root=root)
     got = cli(root, "burn-2")
     assert got.returncode == 0, got
-    assert "no leftovers" in got.stdout, got.stdout
-    assert "Sweep:" not in got.stdout, got.stdout
+    assert got.stdout == "", got.stdout
+    assert "no leftovers" in got.stderr, got.stderr
 
 
 def test_cli_on_an_unknown_run_is_refused():

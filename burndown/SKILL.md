@@ -167,11 +167,13 @@ python3 burndown/sweep.py <run-id>
 ```
 
 groups them by file, one bullet per item naming its ticket(s), PR, finding
-id, severity and text — and file what it prints through `/file-ticket`,
+id, severity and text — and file **its stdout** through `/file-ticket`,
 titled `Sweep: leftovers from burn <run-id>`, labelled `ready-for-agent`,
 with `## Blocked by` `None — can start immediately.` A run with **zero
-leftovers files nothing**, and the report says so rather than leaving the
-reader to infer it from an absent link.
+leftovers files nothing**: stdout is empty and the "nothing to file" notice
+goes to stderr, so a caller piping stdout straight into `/file-ticket` files
+nothing rather than a ticket whose body is that sentence, and the report
+says so rather than leaving the reader to infer it from an absent link.
 
 **The closing report carries three counts** — **fixed in-round**,
 **leftover**, **standalone** — so Chris can see whether the adjacent-fix
