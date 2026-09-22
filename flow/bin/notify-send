@@ -10,7 +10,9 @@ positional=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -a|--app-name|-i|--icon|-u|--urgency|-t|--expire-time|-c|--category|-h|--hint|-A|--action|-r|--replace-id)
-      shift 2 ;;
+      # A flag with no value left (this one is the last argument): drop it
+      # rather than `shift 2`, which leaves $# unchanged and spins forever.
+      if [ $# -ge 2 ]; then shift 2; else shift; fi ;;
     --app-name=*|--icon=*|--urgency=*|--expire-time=*|--category=*|--hint=*|--action=*|--replace-id=*)
       shift ;;
     -e|--transient|-p|--print-id|-w|--wait|-v|--version|-?|--help)
