@@ -82,6 +82,15 @@ task_done() { printf '{"type":"user","origin":{"kind":"task-notification"},"mess
 # monitor_event <task-id> : a Monitor event notification — a `<task-id>` with
 # no `<status>`. The monitor is still running, so this is not a return.
 monitor_event() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<summary>Monitor event: job progress</summary>\\n<event>13:45:43 tick</event>\\n</task-notification>"}}\n' "$1"; }
+# monitor_timeout <task-id> : the Monitor timeout notification (#981) — a
+# `<task-id>` with no `<status>`, same shape as monitor_event, but the
+# monitor has stopped watching, not ticked.
+monitor_timeout() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<summary>Monitor event: \\"placeholder wait\\"</summary>\\n<event>[Monitor timed out \\u2014 re-arm if needed.]</event>\\n</task-notification>"}}\n' "$1"; }
+# monitor_event_mentioning_timeout <task-id> : a real, live Monitor tick
+# whose own tailed text merely mentions the timeout phrase — must not be
+# misread as the monitor's own timeout (#981's C3 finding: the match has to
+# be the exact marker inside `<event>`, not a bare substring test).
+monitor_event_mentioning_timeout() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<summary>Monitor event: job progress</summary>\\n<event>13:45:43 note: the other Monitor timed out, re-armed it</event>\\n</task-notification>"}}\n' "$1"; }
 # task_stop <task-id> : the worker stopping a monitor itself.
 task_stop() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"ts-%s","name":"TaskStop","input":{"task_id":"%s"}}]}}\n' "$1" "$1"; }
 # work : a tool call that is not a report — the mark of a turn that did
@@ -129,6 +138,20 @@ expect_alert() {
 expect_none() {
   local name=$1
   if [ -z "$pane" ]; then echo "PASS: $name"; else echo "FAIL: $name — want no prompt"; echo "  pane: $pane text: $text"; fails=1; fi
+}
+# expect_reported <name> : a genuine `reported` verdict, stronger than
+# expect_none — no prompt AND no `not-sent` log line. A `silent` verdict
+# whose pane lookup happens to fail also leaves no prompt, so expect_none
+# alone cannot tell a real report from a report the matching missed and the
+# missing pane then hid (#1014's hollow-witness finding, C1).
+expect_reported() {
+  local name=$1
+  if [ -z "$pane" ] && ! grep -q 'not-sent' "$log" 2>/dev/null; then
+    echo "PASS: $name"
+  else
+    echo "FAIL: $name — want a genuine reported verdict (no prompt, no not-sent log line)"
+    echo "  pane: $pane log: $(cat "$log" 2>/dev/null)"; fails=1
+  fi
 }
 reset_log() { rm -f "$log"; }
 
@@ -300,6 +323,46 @@ t="$tmp/monitor-stopped.jsonl"
 run "monitor stopped by the worker" "$t"
 expect_alert "a monitor the worker stopped with TaskStop is not still outstanding"
 
+# A Monitor timeout notification is the monitor stopping, not a tick: it must
+# read as a finish, not a touch, or the launch it names stays outstanding
+# across every later turn and a genuine silent stop never alerts (#981).
+reset_log
+t="$tmp/monitor-timeout.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
+  monitor_launch bmto1; assistant_text "watching the job"; } > "$t"
+run "monitor out" "$t"
+expect_none "a stop while a Monitor task is out does not alert"
+{ peer "status?"; monitor_timeout bmto1; assistant_text "noted, moving on"; } >> "$t"
+run "monitor timed out this turn, nothing else touched it" "$t"
+expect_alert "a timed-out Monitor's statusless notification does not keep the launch outstanding, so a silent stop alerts"
+
+# The #981 fix has two mechanisms: excluding the timeout notification from
+# $touched (what ends a launch from an EARLIER turn, via the outstanding()
+# prefilter — witnessed above), and adding its id to $finished (what ends a
+# launch from THIS turn, where $tasks_now already makes it outstanding
+# regardless of $touched, so only $finished can remove it). Witness the
+# second directly, or removing it alone stays invisible to every fixture
+# above (verification pass, C2).
+reset_log
+t="$tmp/monitor-timeout-same-turn.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
+  monitor_launch bmto4; monitor_timeout bmto4; assistant_text "timed out, moving on"; } > "$t"
+run "monitor launched and timed out in the same turn" "$t"
+expect_alert "a same-turn Monitor timeout is removed via \$finished even though \$tasks_now already made it outstanding"
+
+# The exact-marker requirement, the other direction: a live monitor whose
+# tailed output merely mentions the timeout phrase in free text is still
+# running, so the launch stays out and a stop is not silent (#981's C3).
+reset_log
+t="$tmp/monitor-timeout-mention.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
+  monitor_launch bmto2; assistant_text "watching the job"; } > "$t"
+run "monitor out" "$t"
+expect_none "a stop while a Monitor task is out does not alert"
+{ peer "status?"; monitor_event_mentioning_timeout bmto2; assistant_text "noted, still watching"; } >> "$t"
+run "monitor event mentioning the timeout phrase in free text, not the exact marker" "$t"
+expect_none "a live monitor's own text merely mentioning the timeout phrase does not read as the monitor's own end"
+
 # Already reported, then answered a message that needed no reply (#886,
 # false alert 3 of 3 — the one a diligent controller manufactures for
 # itself by closing its own loops). Nothing was done since the report, so
@@ -428,6 +491,86 @@ t="$tmp/torn.jsonl"
   printf '{"type":"assistant","message":{"con'; } > "$t"
 run "torn last line" "$t"
 expect_alert "a half-written last line and a non-string recipient still alert"
+
+# The brief carries the controller's herdr agent name (#923), which a
+# compliant worker resolves to a live session name before sending: the two
+# differ, so matching the brief's literal directly would miss a delivered
+# report and, when an alert is owed, find no session for the pane lookup
+# (#1014). Resolve through `herdr agent list` (agent name -> agent_session
+# id) and the live registry (session id -> current name) first.
+reset_log
+printf '{"pid":%s,"procStart":"%s","sessionId":"sess-hctl99","name":"skills-c7"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' '{"result":{"agents":[{"name":"hctl-99","pane_id":"w9:p1","agent_session":{"value":"sess-hctl99"}}]}}' > "$tmp/agent-list.json"
+herdr_brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"hctl-99\"</command-args>'
+t="$tmp/herdr-name-reported.jsonl"
+{ human "$herdr_brief"; send s1 "skills-c7"; ok s1; assistant_text "PR up sent"; } > "$t"
+run "herdr-name controller, report to the resolved session" "$t"
+expect_reported "a report addressed to the resolved session name counts as reported when the brief carries a herdr agent name"
+# A report addressed to the brief's own literal herdr name (never resolved)
+# also counts: nothing requires a worker to resolve before sending, and
+# resolve-controller itself refuses a live session with no name, so a
+# session this can't name is one a compliant worker couldn't have
+# addressed either (P1).
+reset_log
+t="$tmp/herdr-name-literal.jsonl"
+{ human "$herdr_brief"; send s1 "hctl-99"; ok s1; assistant_text "PR up sent"; } > "$t"
+run "herdr-name controller, report to the brief's own literal" "$t"
+expect_reported "a report addressed to the brief's literal herdr name also counts as reported"
+reset_log
+t="$tmp/herdr-name-silent.jsonl"
+{ human "$herdr_brief"; assistant_text "done, no report"; } > "$t"
+run "herdr-name controller, no report" "$t"
+expect_alert "a herdr-name controller with no report still resolves the pane and alerts"
+# Restore the registry and agent list the tests below expect.
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
+
+# `resolve_session`'s fields are joined on `\x1f`, not a tab, precisely so a
+# `.sessionId`-less record doesn't shift `.name`/`.messagingSocketPath` into
+# each other's variables (verification pass on #1014, C4) — a live session
+# can genuinely lack a sessionId (`flow/lane/src/sessions.rs` defaults it to
+# `""`). Witnessed by resolving through the socket alone.
+reset_log
+printf '{"pid":%s,"procStart":"%s","name":"skills-nosid","messagingSocketPath":"/run/nosid.sock"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+nosid_brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"skills-nosid\"</command-args>'
+t="$tmp/nosid-reported.jsonl"
+{ human "$nosid_brief"; send s1 "uds:/run/nosid.sock"; ok s1; assistant_text "PR up sent"; } > "$t"
+run "controller record with no sessionId, report to its socket" "$t"
+expect_reported "a live record with a name and a socket but no sessionId still resolves the socket, not a field shifted by the missing one"
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+
+# A herdr-resolved session whose live record has no `.name` and no socket
+# either: nothing to match a report against, but the pane lookup needs only
+# the session id, which `resolve_session` now returns directly (no fallback
+# needed) — a genuinely silent stop still alerts instead of ending in "no
+# herdr pane for controller" (verification pass, P2).
+reset_log
+printf '{"pid":%s,"procStart":"%s","sessionId":"sess-nopanel"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' '{"result":{"agents":[{"name":"hctl-nopanel","pane_id":"w9:p1","agent_session":{"value":"sess-nopanel"}}]}}' > "$tmp/agent-list.json"
+nopanel_brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"hctl-nopanel\"</command-args>'
+t="$tmp/nopanel-silent.jsonl"
+{ human "$nopanel_brief"; assistant_text "done, no report"; } > "$t"
+run "herdr-resolved session id, live record has no name" "$t"
+expect_alert "the pane is found via the herdr-resolved session id alone, even though the record has nothing to match a report against"
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
+
+# The same nameless session, but WITH a socket: a nameless live session
+# still sends and receives cross-session messages (every one carries
+# `from="uds:<its socket>"`, and a reply copies that address), so a report
+# it delivers to that socket is real even though nothing can match it by
+# name. `resolve_session` must not require a non-empty `.name` to return
+# the socket, or this report reads as silent (Codex pass on PR #1057).
+reset_log
+printf '{"pid":%s,"procStart":"%s","sessionId":"sess-nosockname","messagingSocketPath":"/run/nosockname.sock"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' '{"result":{"agents":[{"name":"hctl-nosockname","pane_id":"w9:p1","agent_session":{"value":"sess-nosockname"}}]}}' > "$tmp/agent-list.json"
+nosockname_brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"hctl-nosockname\"</command-args>'
+t="$tmp/nosockname-reported.jsonl"
+{ human "$nosockname_brief"; send s1 "uds:/run/nosockname.sock"; ok s1; assistant_text "PR up sent"; } > "$t"
+run "nameless herdr-resolved session, report to its socket" "$t"
+expect_reported "a report addressed to a nameless controller's socket counts as reported"
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 
 reset_log
 t="$tmp/not-worker.jsonl"
