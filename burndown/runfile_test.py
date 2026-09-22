@@ -241,6 +241,245 @@ def test_re_registering_a_landed_clump_keeps_its_sha():
     assert runfile.load("burn-1", root=root)["clumps"][0]["landed"] == "abc1234"
 
 
+# --- Leftovers: copied at landing from a PR's dispositions sidecar --------
+
+# The shared fixture `multi-axis-code-review`/`implement` test against:
+# `S1` fixed, `C2` fixed (adjacent), `P1` disputed, `C1` filed, `S2`
+# handed-back, `S3` leftover. Only `S3` is a leftover line.
+SIDECAR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "implement", "fixtures",
+    "dispositions-sidecar.jsonl")
+
+
+def test_leftover_copies_only_the_leftover_lines_with_every_field_filled():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    got = runfile.load("burn-1", root=root)["leftovers"]
+    assert len(got) == 1, got
+    entry = got[0]
+    assert entry["clump"] == 901, entry
+    assert entry["tickets"] == [901, 902], entry
+    assert entry["pr"] == 950, entry
+    assert entry["id"] == "S3", entry
+    assert entry["file"] == "burndown/loop.py", entry
+    assert entry["title"] == "Mysterious name: `tick2`", entry
+    assert entry["severity"] == "judgement", entry
+    assert "tick2" in entry["text"], entry
+
+
+def test_leftover_run_twice_for_the_same_pr_does_not_duplicate():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    got = runfile.load("burn-1", root=root)["leftovers"]
+    assert len(got) == 1, got
+
+
+def test_leftover_on_a_clump_the_run_never_dispatched_is_refused():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    try:
+        runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    except runfile.RunFileError as exc:
+        assert "901" in str(exc), exc
+    else:
+        raise AssertionError("a leftover recorded against no clump")
+
+
+def test_leftover_reports_how_many_it_copied():
+    # A wrong path is refused (§ hygiene), but a *readable, wrong-shaped*
+    # file — every other command's own sidecar, say — silently copies
+    # nothing today; the count is what tells a mistyped `--from` apart from
+    # a PR that genuinely left nothing (defect class 1).
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    _, added = runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    assert added == ["S3"], added
+    _, added_again = runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    assert added_again == [], added_again
+
+
+def test_leftover_against_a_sidecar_with_no_leftover_line_copies_none():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    fd, no_leftovers = tempfile.mkstemp(suffix=".jsonl")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write('{"id": "S1", "outcome": "fixed", "sha": "0123abc"}\n')
+        _, added = runfile.leftover("burn-1", 901, 950, no_leftovers,
+                                    root=root)
+        assert added == [], added
+    finally:
+        os.remove(no_leftovers)
+
+
+def sidecar_of(*lines):
+    fd, path_ = tempfile.mkstemp(suffix=".jsonl")
+    with os.fdopen(fd, "w") as fh:
+        for line in lines:
+            fh.write(json.dumps(line) + "\n")
+    return path_
+
+
+def test_a_leftover_line_missing_a_required_field_is_refused():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    sidecar = sidecar_of({"id": "S3", "outcome": "leftover",
+                          "file": "burndown/loop.py", "title": "t",
+                          "severity": "judgement"})  # no "text"
+    try:
+        try:
+            runfile.leftover("burn-1", 901, 950, sidecar, root=root)
+        except runfile.RunFileError as exc:
+            assert "text" in str(exc), exc
+        else:
+            raise AssertionError("a leftover missing a field was copied")
+    finally:
+        os.remove(sidecar)
+    assert runfile.load("burn-1", root=root)["leftovers"] == []
+
+
+def test_a_leftover_line_with_a_blank_or_multiline_field_is_refused():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    for bad in (
+        {"id": "S3", "outcome": "leftover", "file": "",
+         "title": "t", "severity": "judgement", "text": "t"},
+        {"id": "S3", "outcome": "leftover", "file": "f.py",
+         "title": "t", "severity": "judgement", "text": "line one\nline two"},
+    ):
+        sidecar = sidecar_of(bad)
+        try:
+            try:
+                runfile.leftover("burn-1", 901, 950, sidecar, root=root)
+            except runfile.RunFileError:
+                continue
+            raise AssertionError(f"accepted leftover line {bad!r}")
+        finally:
+            os.remove(sidecar)
+    assert runfile.load("burn-1", root=root)["leftovers"] == []
+
+
+def test_leftover_on_an_unlanded_clump_is_refused():
+    # A retry or an out-of-order call must not persist leftovers for a PR
+    # that may never land, with nothing able to remove them afterward.
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    try:
+        runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    except runfile.RunFileError as exc:
+        assert "901" in str(exc) and "land" in str(exc), exc
+    else:
+        raise AssertionError("leftovers recorded for an unlanded clump")
+    assert runfile.load("burn-1", root=root)["leftovers"] == []
+
+
+def test_a_line_with_no_outcome_or_an_unknown_outcome_is_refused():
+    # `outcome != "leftover"` alone cannot tell a sidecar's own four other
+    # outcomes from a wholly unrelated file (another command's sidecar, a
+    # findings-*.jsonl) — both read as "skip", and a wrong --from silently
+    # copies zero either way (defect class 1). The four recognised
+    # non-leftover outcomes must still be skipped, not refused.
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    for bad in (
+        {"id": "S3", "file": "x", "title": "t"},  # no outcome key at all
+        {"id": "S3", "outcome": "mystery"},        # unrecognised outcome
+    ):
+        sidecar = sidecar_of(bad)
+        try:
+            try:
+                runfile.leftover("burn-1", 901, 950, sidecar, root=root)
+            except runfile.RunFileError:
+                continue
+            raise AssertionError(f"accepted line {bad!r}")
+        finally:
+            os.remove(sidecar)
+
+    recognised = sidecar_of(
+        {"id": "F1", "outcome": "fixed", "sha": "abc"},
+        {"id": "F2", "outcome": "disputed", "reason": "why"},
+        {"id": "F3", "outcome": "filed", "ticket": 1},
+        {"id": "F4", "outcome": "handed-back", "command": "cmd"},
+    )
+    try:
+        _, added = runfile.leftover("burn-1", 901, 950, recognised,
+                                    root=root)
+        assert added == [], added
+    finally:
+        os.remove(recognised)
+
+
+def test_a_second_pr_for_the_same_clump_and_finding_id_is_refused():
+    # `(pr, id)` alone lets the same finding land twice under two PR
+    # numbers — a typo'd `--pr` would double-count it for the sweep, with
+    # no undo but hand-editing the run file.
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    try:
+        runfile.leftover("burn-1", 901, 951, SIDECAR, root=root)
+    except runfile.RunFileError as exc:
+        assert "S3" in str(exc) and "950" in str(exc), exc
+    else:
+        raise AssertionError("the same finding landed under two PR numbers")
+    got = runfile.load("burn-1", root=root)["leftovers"]
+    assert len(got) == 1 and got[0]["pr"] == 950, got
+
+
+def test_cli_leftover_appends_and_show_prints_the_leftovers():
+    root = cache()
+    cli(root, "start", "burn-1", "--slots", "2")
+    cli(root, "clump", "burn-1", "--tickets", "901", "--workspace", "/w/a",
+        "--agent", "agent-a")
+    cli(root, "land", "burn-1", "--clump", "901", "--sha", "abc1234")
+    got = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
+              "--from", SIDECAR)
+    assert got.returncode == 0, got.stderr
+    assert "copied 1 leftover" in got.stdout, got.stdout
+    shown = cli(root, "show", "burn-1")
+    assert shown.returncode == 0, shown.stderr
+    assert "S3" in shown.stdout, shown.stdout
+    assert "burndown/loop.py" in shown.stdout, shown.stdout
+    assert "PR #950" in shown.stdout, shown.stdout
+    assert "judgement" in shown.stdout, shown.stdout
+    assert "Mysterious name" in shown.stdout, shown.stdout
+    again = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
+               "--from", SIDECAR)
+    assert again.returncode == 0, again.stderr
+    assert "copied 0 leftover" in again.stdout, again.stdout
+
+
+def test_leftovers_survive_resume():
+    root = cache()
+    runfile.start("burn-1", slots=2, controller="ctl", root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
+    runfile.resume("burn-1", ["agent-a"], controller="ctl-f3", root=root)
+    got = runfile.load("burn-1", root=root)["leftovers"]
+    assert len(got) == 1 and got[0]["id"] == "S3", got
+
+
 # --- Resume: reconcile against the live agents, re-announce the controller -
 
 def three_clumps(root):
@@ -632,6 +871,7 @@ def test_a_run_file_whose_fields_are_the_wrong_type_is_refused_cleanly():
         ("slots", "2"), ("slots", 0), ("slots", True), ("slots", 1.5),
         ("controller", 7), ("controller", ""),
         ("run_id", "burn-2"), ("run_id", 1),
+        ("leftovers", "nope"), ("leftovers", {}),
     ]
     for key, value in bad:
         run = json.loads(json.dumps(good))
@@ -656,6 +896,25 @@ def test_a_run_file_whose_fields_are_the_wrong_type_is_refused_cleanly():
         except runfile.RunFileError:
             continue
         raise AssertionError(f"accepted clump {key}={value!r}")
+
+    good_leftover = {"clump": 901, "tickets": [901], "pr": 950, "id": "S3",
+                     "file": "burndown/loop.py", "title": "Mysterious name",
+                     "severity": "judgement", "text": "rename it"}
+    for key, value in (("clump", "901"), ("clump", 0), ("tickets", []),
+                       ("pr", 0), ("pr", True),
+                       ("id", ""), ("id", "a\nb"),
+                       ("file", ""), ("file", "a\nb"),
+                       ("title", "  "), ("severity", None),
+                       ("text", "line one\nline two")):
+        run = json.loads(json.dumps(good))
+        run["leftovers"] = [json.loads(json.dumps(good_leftover))]
+        run["leftovers"][0][key] = value
+        write_run(root, "burn-1", run)
+        try:
+            runfile.load("burn-1", root=root)
+        except runfile.RunFileError:
+            continue
+        raise AssertionError(f"accepted leftover {key}={value!r}")
 
     write_run(root, "burn-1", good)
     assert runfile.load("burn-1", root=root)["slots"] == 2

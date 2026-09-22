@@ -6,12 +6,13 @@ It is the only place a run's state lives: the controller's context is not
 state, and a per-repo log is not this run.
 
 ```
-python3 burndown/runfile.py start  <run-id> [--slots <k>] [--controller <agent>]
-python3 burndown/runfile.py clump  <run-id> --tickets 901,902 --workspace <path> --agent <name>
-python3 burndown/runfile.py job    <run-id> --clump 901 --cores 8 | --none | --done
-python3 burndown/runfile.py land   <run-id> --clump 901 --sha <sha>
-python3 burndown/runfile.py show   <run-id>
-python3 burndown/runfile.py resume <run-id> --live a,b [--controller <agent>]
+python3 burndown/runfile.py start    <run-id> [--slots <k>] [--controller <agent>]
+python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
+python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
+python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
+python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar>
+python3 burndown/runfile.py show     <run-id>
+python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 ```
 
 ## What it holds
@@ -28,6 +29,12 @@ python3 burndown/runfile.py resume <run-id> --live a,b [--controller <agent>]
     {"tickets": [905], "workspace": "/home/c/src/x/.claude/worktrees/implement-905",
      "agent": "implement-905-7", "job": {"state": "none", "cores": 0},
      "landed": "0123456789abcdef0123456789abcdef01234567"}
+  ],
+  "leftovers": [
+    {"clump": 905, "tickets": [905], "pr": 950, "id": "S3",
+     "file": "burndown/loop.py", "title": "Mysterious name: `tick2`",
+     "severity": "judgement",
+     "text": "tick2 says nothing about what it does; rename it for the frontier read it performs."}
   ]
 }
 ```
@@ -71,6 +78,54 @@ dispatch into a loaded box that #894 exists to stop. A file written before
 this field existed still loads — the field is filled in as `null`, which is
 the honest reading of a run that never recorded one.
 
+
+## Leftovers
+
+The run carries a `leftovers` list: every small review finding a landed PR
+left for later rather than fixed or filed as its own ticket
+(`implement/SKILL.md` § Review, the `leftover` disposition). Each entry
+holds the clump that carried the finding, the full ticket list that clump
+closes, the PR it landed on, and the finding's own `id`, `file`, `title`,
+`severity` and `text` — copied verbatim from the dispositions sidecar line,
+not retyped.
+
+```
+python3 burndown/runfile.py leftover <run-id> --clump 905 --pr 950 --from <dispositions sidecar>
+```
+
+reads every `outcome: leftover` line of `<dispositions sidecar>` — the
+`dispositions-<n>.jsonl` file written by `implement/SKILL.md` § Review, and
+appends one entry per line to the clump named by `--clump`; every other
+*recognised* outcome — `fixed`, `disputed`, `filed`, `handed-back` — is not
+this command's to transcribe, and is skipped. A line that is not a JSON
+object, or whose `outcome` is missing or none of the five sidecar outcomes,
+is refused by name (file and line) rather than skipped: `outcome !=
+"leftover"` alone cannot tell one of the sidecar's own four other outcomes
+from a wholly unrelated file, and reading both as "skip" is how a wrong or
+wrong-shaped `--from` copies zero and exits clean, indistinguishable from a
+PR that genuinely left nothing. It also prints `copied N leftover(s) from
+<path>` for the same reason.
+
+`land` comes first: a clump with no recorded landing is refused, so a PR
+that may never land cannot persist leftovers nothing can later remove.
+
+It is idempotent per PR and finding id, and *conflicting* about it: running
+it twice against the same `--pr` and sidecar adds nothing a second time
+(a controller that runs the landing step twice, or resumes after a restart
+mid-step, must not double an entry the sweep would then count twice), but a
+finding already recorded for this clump under a *different* PR is refused —
+two PR numbers for one finding id is a typo'd `--pr`, not a second landing,
+and letting it through would double-count that finding in the sweep with no
+undo but hand-editing the run file. A clump `--clump` does not name is
+refused, the same as `land` and `job` refuse one.
+
+A file written before leftovers existed still loads — the field is filled
+in as `[]`, the honest reading of a run that never recorded one.
+
+Nothing here builds the sweep ticket itself; that renderer and the
+`/file-ticket` call at run close are a later ticket (#1030, #1033). This
+list is only the store, so a restart does not lose what a landed PR already
+carried.
 
 ## Why `~/.cache/burndown/<run-id>.json`
 

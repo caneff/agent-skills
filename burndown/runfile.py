@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """One run's state, machine-readable, at `~/.cache/burndown/<run-id>.json`:
 
-    python3 burndown/runfile.py start  <run-id> [--slots <k>] [--controller <agent>]
-    python3 burndown/runfile.py clump  <run-id> --tickets 901,902 --workspace <path> --agent <name>
-    python3 burndown/runfile.py land   <run-id> --clump 901 --sha <sha>
-    python3 burndown/runfile.py show   <run-id>
-    python3 burndown/runfile.py resume <run-id> --live a,b [--controller <agent>]
+    python3 burndown/runfile.py start    <run-id> [--slots <k>] [--controller <agent>]
+    python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
+    python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
+    python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar>
+    python3 burndown/runfile.py show     <run-id>
+    python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 
 It holds the run id, the slot budget, the controller's herdr agent name, and
 one entry per clump — its ticket list, its workspace, its worker's **herdr
-agent name**, and its squash sha once it lands. `resume` reads it back and
-splits the clumps against the agents that are alive: the live workers to
-re-announce the controller to, the vanished ones to reconcile by hand, and the
-landings already banked. Only the controller writes.
+agent name**, and its squash sha once it lands. It also holds the run's
+**leftovers**, copied at landing from each PR's dispositions sidecar
+(`implement/SKILL.md` § Review) rather than transcribed by hand. `resume`
+reads it back and splits the clumps against the agents that are alive: the
+live workers to re-announce the controller to, the vanished ones to
+reconcile by hand, and the landings already banked. Only the controller
+writes.
 
 Why one file per run, why `~/.cache`, why the herdr agent name and why each
 write replaces the file in one step: `references/run-file.md`, which is where
@@ -61,6 +65,17 @@ _CLUMP_KEYS = ("tickets", "workspace", "agent", "landed")
 # as zero is the #351 dispatch into a box already at 25.8 load. Absent from
 # a #892-era file, so it is filled in on load rather than demanded.
 _JOB_STATES = ("running", "none", "done")
+# What one leftover entry holds: the clump that carried the finding, the
+# full ticket list that clump closes, the PR it landed on, and the sidecar
+# line's own fields untouched.
+_LEFTOVER_KEYS = ("clump", "tickets", "pr", "id", "file", "title",
+                  "severity", "text")
+# The five outcomes `implement/SKILL.md` § Review's dispositions sidecar can
+# carry. A line whose outcome is missing or is none of these is not a known
+# non-leftover disposition to skip — it is a wholly different file, and
+# skipping it the same way `fixed`/`disputed`/`filed`/`handed-back` are
+# skipped is how a wrong `--from` reads as a PR that genuinely left nothing.
+_SIDECAR_OUTCOMES = ("fixed", "disputed", "filed", "handed-back", "leftover")
 
 
 class RunFileError(Exception):
@@ -244,6 +259,13 @@ def load(run_id, root=None):
             entry["job"] = job_record(entry.get("job"))
             if entry["landed"] is not None:
                 checked_sha(entry["landed"])
+        # Filled in rather than demanded, the same as `job` above: a run file
+        # written before leftovers existed is still that controller's run.
+        leftovers = run.get("leftovers", [])
+        if not isinstance(leftovers, list):
+            raise RunFileError(
+                f"holds leftovers as {type(leftovers).__name__}, not a list")
+        run["leftovers"] = [leftover_record(item) for item in leftovers]
     except RunFileError as exc:
         raise RunFileError(f"{target}: {exc}") from None
     return run
@@ -260,7 +282,7 @@ def start(run_id, slots=DEFAULT_SLOTS, controller=None, root=None):
                 f"run {run_id} already has a file at {target} — resume reads "
                 "it, and a second start would wipe it")
         run = {"run_id": run_id, "slots": slots, "controller": controller,
-               "clumps": []}
+               "clumps": [], "leftovers": []}
         save(run, root)
     return run
 
@@ -298,6 +320,134 @@ def job_record(value):
         raise RunFileError(
             f"a {state} job holds no cores, so it names none, not {cores}")
     return {"state": state, "cores": cores}
+
+
+def pr_number(value):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise RunFileError(f"not a PR number: {value!r}")
+    return value
+
+
+def leftover_field(value, what):
+    """A leftover's id, file, title, severity or text: a non-blank string
+    with no newline — the same hygiene `dispositions_fixture_test.py` holds
+    the sidecar line to. `render` prints one line per leftover, and an
+    embedded newline would break that line in two."""
+    if not isinstance(value, str) or not value.strip() or "\n" in value:
+        raise RunFileError(f"not a {what}: {value!r}")
+    return value
+
+
+def leftover_record(value):
+    """A leftover as the run file holds it: the clump and the full ticket
+    list it closes, the PR it landed on, and the sidecar line's own `id`,
+    `file`, `title`, `severity` and `text`, each checked."""
+    if not isinstance(value, dict):
+        raise RunFileError(f"not a leftover: {value!r}")
+    missing = [key for key in _LEFTOVER_KEYS if key not in value]
+    if missing:
+        raise RunFileError(f"a leftover is missing {', '.join(missing)}")
+    clump = value["clump"]
+    if isinstance(clump, bool) or not isinstance(clump, int) or clump < 1:
+        raise RunFileError(f"not a clump ticket: {clump!r}")
+    return {
+        "clump": clump,
+        "tickets": ticket_numbers(value["tickets"]),
+        "pr": pr_number(value["pr"]),
+        "id": leftover_field(value["id"], "finding id"),
+        "file": leftover_field(value["file"], "file"),
+        "title": leftover_field(value["title"], "title"),
+        "severity": leftover_field(value["severity"], "severity"),
+        "text": leftover_field(value["text"], "finding text"),
+    }
+
+
+def read_leftover_lines(sidecar_path):
+    """Every `leftover` line of a dispositions sidecar
+    (`implement/SKILL.md` § Review), in the order the sidecar holds them.
+    Every other outcome — `fixed`, `disputed`, `filed`, `handed-back` — is
+    not this command's to read, and is skipped rather than refused: this
+    reader meets the whole sidecar, not a file trimmed for it."""
+    try:
+        with open(sidecar_path) as fh:
+            raw_lines = fh.readlines()
+    except OSError as exc:
+        raise RunFileError(
+            f"could not read {sidecar_path}: {exc.strerror}") from exc
+    out = []
+    for n, raw in enumerate(raw_lines, start=1):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            obj = json.loads(raw)
+        except ValueError as exc:
+            raise RunFileError(
+                f"{sidecar_path}:{n} is not readable JSON: {exc}") from exc
+        outcome = obj.get("outcome") if isinstance(obj, dict) else None
+        if outcome not in _SIDECAR_OUTCOMES:
+            raise RunFileError(
+                f"{sidecar_path}:{n} is not a dispositions sidecar line — "
+                f"its outcome is {outcome!r}, not one of "
+                f"{', '.join(_SIDECAR_OUTCOMES)}")
+        if outcome != "leftover":
+            continue
+        missing = [key for key in ("id", "file", "title", "severity", "text")
+                   if key not in obj]
+        if missing:
+            raise RunFileError(
+                f"{sidecar_path}:{n} is a leftover missing "
+                f"{', '.join(missing)}")
+        out.append(obj)
+    return out
+
+
+def leftover(run_id, lowest, pr, sidecar_path, root=None):
+    """Copy every `leftover` line of a landed PR's dispositions sidecar into
+    the run file, so nothing is transcribed by hand and a restart does not
+    lose them. Idempotent per PR and finding id: the sidecar does not change
+    once a PR has landed, and a second run of this command — after a
+    restart, or a controller that ran the landing step twice — must not
+    double an entry the sweep would then count twice. A finding already
+    recorded for this clump under a *different* PR is refused, the same as a
+    second, different landing sha: two PR numbers for one finding id is a
+    typo'd `--pr`, not a second landing. Refuses a clump with no recorded
+    landing: a PR that may never land must not persist leftovers nothing can
+    later remove.
+
+    Returns `(run, added)`, `added` being the finding ids this call
+    actually appended, for a caller to report a copy count."""
+    pr = pr_number(pr)
+    found = read_leftover_lines(sidecar_path)
+    with locked(run_id, root):
+        run = load(run_id, root)
+        entry = next(
+            (c for c in run["clumps"] if c["tickets"][0] == lowest), None)
+        if entry is None:
+            raise RunFileError(f"run {run_id} has no clump #{lowest}")
+        if entry["landed"] is None:
+            raise RunFileError(
+                f"clump #{lowest} has not landed — `land` comes first")
+        clump_prs = {item["id"]: item["pr"] for item in run["leftovers"]
+                     if item["clump"] == lowest}
+        added = []
+        for obj in found:
+            if clump_prs.get(obj["id"]) == pr:
+                continue
+            if obj["id"] in clump_prs:
+                raise RunFileError(
+                    f"finding {obj['id']} is already recorded under PR "
+                    f"#{clump_prs[obj['id']]}, not #{pr}")
+            record = leftover_record({
+                "clump": lowest, "tickets": entry["tickets"], "pr": pr,
+                "id": obj["id"], "file": obj["file"], "title": obj["title"],
+                "severity": obj["severity"], "text": obj["text"],
+            })
+            run["leftovers"].append(record)
+            clump_prs[obj["id"]] = pr
+            added.append(obj["id"])
+        save(run, root)
+    return run, added
 
 
 def job(run_id, lowest, state, cores=0, root=None):
@@ -443,6 +593,11 @@ def render(run):
         lines.append(f"clump #{entry['tickets'][0]}  {tickets_of(entry)}  "
                      f"{entry['agent']}  {entry['workspace']}  {state}  "
                      f"{render_job(entry.get('job'))}")
+    for item in run.get("leftovers", []):
+        lines.append(
+            f"leftover  clump #{item['clump']}  {tickets_of(item)}  "
+            f"PR #{item['pr']}  {item['id']}  {item['severity']}  "
+            f"{item['file']}  {item['title']!r}")
     return "\n".join(lines)
 
 
@@ -516,6 +671,17 @@ def main(argv):
                       help="the clump's lowest ticket")
     done.add_argument("--sha", required=True)
 
+    lo = subs.add_parser(
+        "leftover",
+        help="copy a landed PR's leftover findings from its dispositions "
+             "sidecar")
+    lo.add_argument("run_id")
+    lo.add_argument("--clump", type=int, required=True,
+                    help="the clump's lowest ticket")
+    lo.add_argument("--pr", type=int, required=True)
+    lo.add_argument("--from", dest="from_path", required=True,
+                    metavar="PATH", help="the dispositions sidecar to copy from")
+
     work = subs.add_parser("job", help="record a clump's parallel-job state")
     work.add_argument("run_id")
     work.add_argument("--clump", type=int, required=True,
@@ -550,6 +716,11 @@ def main(argv):
                                args.workspace, args.agent, root)))
         elif args.command == "land":
             print(render(land(args.run_id, args.clump, args.sha, root)))
+        elif args.command == "leftover":
+            run, added = leftover(args.run_id, args.clump, args.pr,
+                                  args.from_path, root)
+            print(render(run))
+            print(f"copied {len(added)} leftover(s) from {args.from_path}")
         elif args.command == "job":
             state = ("running" if args.cores is not None
                      else "none" if args.none else "done")
