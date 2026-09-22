@@ -319,6 +319,55 @@ def test_leftover_against_a_sidecar_with_no_leftover_line_copies_none():
         os.remove(no_leftovers)
 
 
+def sidecar_of(*lines):
+    fd, path_ = tempfile.mkstemp(suffix=".jsonl")
+    with os.fdopen(fd, "w") as fh:
+        for line in lines:
+            fh.write(json.dumps(line) + "\n")
+    return path_
+
+
+def test_a_leftover_line_missing_a_required_field_is_refused():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    sidecar = sidecar_of({"id": "S3", "outcome": "leftover",
+                          "file": "burndown/loop.py", "title": "t",
+                          "severity": "judgement"})  # no "text"
+    try:
+        try:
+            runfile.leftover("burn-1", 901, 950, sidecar, root=root)
+        except runfile.RunFileError as exc:
+            assert "text" in str(exc), exc
+        else:
+            raise AssertionError("a leftover missing a field was copied")
+    finally:
+        os.remove(sidecar)
+    assert runfile.load("burn-1", root=root)["leftovers"] == []
+
+
+def test_a_leftover_line_with_a_blank_or_multiline_field_is_refused():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    for bad in (
+        {"id": "S3", "outcome": "leftover", "file": "",
+         "title": "t", "severity": "judgement", "text": "t"},
+        {"id": "S3", "outcome": "leftover", "file": "f.py",
+         "title": "t", "severity": "judgement", "text": "line one\nline two"},
+    ):
+        sidecar = sidecar_of(bad)
+        try:
+            try:
+                runfile.leftover("burn-1", 901, 950, sidecar, root=root)
+            except runfile.RunFileError:
+                continue
+            raise AssertionError(f"accepted leftover line {bad!r}")
+        finally:
+            os.remove(sidecar)
+    assert runfile.load("burn-1", root=root)["leftovers"] == []
+
+
 def test_a_second_pr_for_the_same_clump_and_finding_id_is_refused():
     # `(pr, id)` alone lets the same finding land twice under two PR
     # numbers — a typo'd `--pr` would double-count it for the sweep, with
@@ -760,6 +809,7 @@ def test_a_run_file_whose_fields_are_the_wrong_type_is_refused_cleanly():
         ("slots", "2"), ("slots", 0), ("slots", True), ("slots", 1.5),
         ("controller", 7), ("controller", ""),
         ("run_id", "burn-2"), ("run_id", 1),
+        ("leftovers", "nope"), ("leftovers", {}),
     ]
     for key, value in bad:
         run = json.loads(json.dumps(good))
@@ -784,6 +834,25 @@ def test_a_run_file_whose_fields_are_the_wrong_type_is_refused_cleanly():
         except runfile.RunFileError:
             continue
         raise AssertionError(f"accepted clump {key}={value!r}")
+
+    good_leftover = {"clump": 901, "tickets": [901], "pr": 950, "id": "S3",
+                     "file": "burndown/loop.py", "title": "Mysterious name",
+                     "severity": "judgement", "text": "rename it"}
+    for key, value in (("clump", "901"), ("clump", 0), ("tickets", []),
+                       ("pr", 0), ("pr", True),
+                       ("id", ""), ("id", "a\nb"),
+                       ("file", ""), ("file", "a\nb"),
+                       ("title", "  "), ("severity", None),
+                       ("text", "line one\nline two")):
+        run = json.loads(json.dumps(good))
+        run["leftovers"] = [json.loads(json.dumps(good_leftover))]
+        run["leftovers"][0][key] = value
+        write_run(root, "burn-1", run)
+        try:
+            runfile.load("burn-1", root=root)
+        except runfile.RunFileError:
+            continue
+        raise AssertionError(f"accepted leftover {key}={value!r}")
 
     write_run(root, "burn-1", good)
     assert runfile.load("burn-1", root=root)["slots"] == 2
