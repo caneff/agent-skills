@@ -88,7 +88,7 @@ check_in "$merge_section" 'No material findings → go to step 4. Findings → h
 check_in "$merge_section" 'send the worker the findings and the comment URL'
 check_in "$merge_section" "adds each disposition to the PR body's Decisions made section"
 check_in "$merge_section" 'Re-run step 2 (not-draft, CLEAN'
-check_in "$merge_section" 'Every other second-pass finding the controller disposes of in the PR body itself'
+check_in "$merge_section" 'The controller disposes of every other second-pass finding in the PR body itself'
 
 # Rule 5: the controller classifies and appends the trial row once the
 # merge lands, including on the ready-for-human path (which hands the

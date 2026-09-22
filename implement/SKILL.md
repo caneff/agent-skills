@@ -686,23 +686,27 @@ The controller merges on a repo Chris owns; Chris reads it after via
    Findings → the controller evaluates every one before any reaches the
    worker, as it did the first pass's. **A second-pass finding that passes
    § Review's adjacent-fix rule goes to the worker, who fixes it in one
-   round**, each fix in a commit of its own, recorded with § Review's
-   adjacent-fix disposition and that sha in the PR body's Decisions made
-   section, and "PR up" again. Then the controller reads that fix diff itself, against
-   the finding it answers and the adjacent-fix rule, rather than sending it
-   back to Codex, and re-runs step 2. Every other second-pass finding the
-   controller disposes of in the PR body itself — `disputed: <why>`, filed
-   if it is high, or `leftover`, under § Review's severity mapping — since
-   a fix outside the rule is a change, not a round.
+   round.** The worker makes each fix in a commit of its own. It records
+   each with § Review's adjacent-fix disposition and that sha in the PR
+   body's Decisions made section, and sends "PR up" again. Then
+   the controller reads that fix diff itself, against the finding it answers and the
+   adjacent-fix rule, rather than sending it back to Codex. It re-runs
+   step 2. The fail-closed gate does not refuse the second pass as stale
+   over an in-round fix: the controller's read of the fix diff is the
+   review of every commit past the second pass's sha. The controller
+   disposes of every other second-pass finding in the PR body itself:
+   `disputed: <why>`, filed if it is high, or `leftover`, under § Review's
+   severity mapping. A fix outside the rule is a change, not a round.
 
    A third Codex run happens only when a second-pass finding fixed in the
    round was high. The third run is final: its findings are `disputed` or
-   `leftover`, never a fourth run. It runs the same block with
-   `phase=third`, posts the same way, and the controller disposes of each
-   finding in the PR body — no worker fix round follows it. With no high
-   among the second-pass fixes, the controller's own read of the fix diff
-   is the last review, and step 4 follows once every disposition is
-   recorded.
+   `leftover`, never a fourth run. That makes a third-run high the one
+   place a high finding is not filed. The third run uses the same block
+   with `phase=third` and posts the same way. The controller disposes of
+   each of its findings in the PR body; no worker fix round follows it.
+   With no high among the second-pass fixes, the controller's own read of
+   the fix diff is the last review, and step 4 follows once every
+   disposition is recorded.
 
    Classify each finding by comparing it with the PR body's round-1
    findings — `codex-only, confirmed` (fixed or filed, and no Claude axis

@@ -158,6 +158,12 @@ check_in "$merge_section" 'the controller reads that fix diff itself' 'implement
 check_in "$merge_section" 'A third Codex run happens only when a second-pass finding fixed in the round was high.' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'The third run is final: its findings are `disputed` or `leftover`, never a fourth run.' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'phase=third' 'implement/SKILL.md § The merge'
+# The in-round fix moves the head past the second pass's verdict; without
+# saying so, the fail-closed gate reads that verdict as stale and blocks a
+# reviewed PR (C1). The ruling sends a third-run high to `leftover`, which
+# § Review's "a high finding is filed" would otherwise forbid (C2).
+check_in "$merge_section" 'The fail-closed gate does not refuse the second pass as stale over an in-round fix' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'the one place a high finding is not filed' 'implement/SKILL.md § The merge'
 check_absent_in "$whole_file" 'there is no third Codex run' 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'there is no worker fix-and-re-run cycle left' 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'the no-third-run ceiling' 'implement/SKILL.md (whole file)'
