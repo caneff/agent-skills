@@ -19,14 +19,16 @@
 # tool-call lines).
 #
 # Modes:
-#   --classify <transcript>   print {spinning, tool, input, count} and exit —
-#                             what a controller runs against a transcript on demand.
+#   --classify <transcript>   print {spinning, tool, input, count, run_id} and
+#                             exit — what a controller runs against a
+#                             transcript on demand.
 #   (stdin: PostToolUse event) alert the controller's herdr pane once per run,
 #                             logged to ~/.claude/worker-spin-alerts.log.
 # Always exit 0 in hook mode — a hook failure must never block the worker.
 
 set -u
 N="${SPIN_N:-20}"
+WINDOW=500
 
 classify() { # <transcript> -> JSON
   # Bounded read: the last 4 MB, then only lines that carry a tool call. A real
@@ -37,16 +39,26 @@ classify() { # <transcript> -> JSON
   # streak — a run boundary, not just the repeated (name, input). Two spins
   # of the same call, separated by a different tool call, are two streaks
   # with two run_ids, so each alerts once instead of the second being read
-  # as a dup of the first (#998).
-  tail -c 4000000 "$1" | grep -F '"type":"tool_use"' | tail -n 500 | jq -nRc --argjson n "$N" '
+  # as a dup of the first (#998). When the streak fills the whole $WINDOW
+  # without the reduce ever finding a real boundary (a mismatched call, or
+  # the transcript's own start), the earliest call *visible* is not
+  # necessarily the streak's true start — a longer streak just slides the
+  # window past it, and treating that shifting id as the run boundary
+  # re-alerts on every call. run_id is null in that one case, which the
+  # dedupe key below reads as the pre-#998 key (session, tool, digest only):
+  # a stable id for the plateau, at the cost of not detecting an
+  # interruption buried earlier than $WINDOW calls back — the same
+  # limitation `count` already has as a floor.
+  tail -c 4000000 "$1" | grep -F '"type":"tool_use"' | tail -n "$WINDOW" | jq -nRc --argjson n "$N" --argjson w "$WINDOW" '
     [inputs | fromjson? | objects | select(.type == "assistant" and .isSidechain != true)
       | .message.content[]? | select(.type == "tool_use") | {name, input, id}] | reverse as $calls
     | ($calls[0] // null) as $l
     | (reduce $calls[] as $c ({n: 0, stop: false, first_id: null};
         if .stop then .
-        elif ($l != null and $c.name == $l.name and $c.input == $l.input) then (.n += 1 | .first_id = $c.id)
+        elif ($c.name == $l.name and $c.input == $l.input) then (.n += 1 | .first_id = $c.id)
         else .stop = true end)) as $r
-    | {spinning: ($r.n >= $n), tool: ($l.name // null), input: ($l.input // null), count: $r.n, run_id: $r.first_id}'
+    | {spinning: ($r.n >= $n), tool: ($l.name // null), input: ($l.input // null), count: $r.n,
+       run_id: (if ($r.stop == false and ($calls | length) >= $w) then null else $r.first_id end)}'
 }
 
 if [ "${1:-}" = "--classify" ]; then
@@ -78,12 +90,9 @@ digest="$(sha256sum <<<"$full_input" | cut -c1-16)"
 count="$(jq -r '.count' <<<"$verdict")"
 run_id="$(jq -r '.run_id // ""' <<<"$verdict")"
 
-# One alert per run of repeats: keyed by session, tool, input and the
-# streak's run_id (the tool-use id of the first call in it), so a run that
-# keeps growing does not re-alert on every call, but a later streak of the
-# same call after a different tool call in between — a new run_id — alerts
-# again (#998). Only a `sent` line dedupes: an alert that never reached the
-# controller is retried on the next call.
+# One alert per run of repeats: keyed by session, tool, input and run_id
+# (see classify() above). Only a `sent` line dedupes: an alert that never
+# reached the controller is retried on the next call.
 key="$session"$'\t'"$tool"$'\t'"$digest"$'\t'"$run_id"
 grep -qF -- "$key"$'\t'"sent"$'\t' "$log" 2>/dev/null && exit 0
 logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$1" "$2" >> "$log"; }

@@ -23,6 +23,8 @@ expect "a bounded retry below the threshold is not flagged" bounded-retry.jsonl 
 expect "a single repeated call is not flagged" single-call.jsonl '.spinning == false and .count == 1'
 expect "a different tool between two runs breaks the run" interrupted.jsonl '.spinning == false and .count == 15'
 expect "run_id resets to the second run's own first call" interrupted.jsonl '.run_id == "z1"'
+expect "a streak that fills the whole read window has a null run_id, not a window-relative one" window-501.jsonl \
+  '.spinning == true and .count == 500 and .run_id == null'
 
 # The hook: a spinning worker alerts the controller once; a varied one never.
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
@@ -104,12 +106,25 @@ else echo "FAIL: same-prefix spins — prompts: $(cat "$tmp/prompts" 2>/dev/null
 # A spin, a different tool call, then the same spin resumed: two streaks,
 # two run_ids, two alerts — not deduped as a repeat of the first (#998).
 rm -f "$tmp/prompts" "$tmp/home/.claude/worker-spin-alerts.log"
-printf '{"session_id":"s4","transcript_path":"%s"}' "$fx/resumed-spin-1.jsonl" \
+printf '{"session_id":"s4","transcript_path":"%s"}' "$fx/real-spin.jsonl" \
   | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook" >/dev/null
 printf '{"session_id":"s4","transcript_path":"%s"}' "$fx/resumed-spin-2.jsonl" \
   | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook" >/dev/null
 if [ "$(grep -c 'worker-spin-alert' "$tmp/prompts" 2>/dev/null)" = 2 ]; then
   echo "PASS: a resumed spin after a different call alerts a second time"
 else echo "FAIL: resumed spin — prompts: $(cat "$tmp/prompts" 2>/dev/null)"; fails=1; fi
+
+# A single uninterrupted spin that outgrows the 500-call read window must
+# still alert once, not once per call past the window (P1/C1): the window
+# slides but run_id stays null throughout the plateau, so the dedupe key
+# stays stable. window-502.jsonl is window-501.jsonl plus one more call.
+rm -f "$tmp/prompts" "$tmp/home/.claude/worker-spin-alerts.log"
+printf '{"session_id":"s5","transcript_path":"%s"}' "$fx/window-501.jsonl" \
+  | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook" >/dev/null
+printf '{"session_id":"s5","transcript_path":"%s"}' "$fx/window-502.jsonl" \
+  | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook" >/dev/null
+if [ "$(grep -c 'worker-spin-alert' "$tmp/prompts" 2>/dev/null)" = 1 ]; then
+  echo "PASS: a spin that outgrows the read window still alerts only once"
+else echo "FAIL: window-outgrowing spin — prompts: $(cat "$tmp/prompts" 2>/dev/null)"; fails=1; fi
 
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
