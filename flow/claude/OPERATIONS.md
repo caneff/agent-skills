@@ -154,7 +154,8 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   restores only into the same process. On every session start it also
   prints one line per orphan: a record whose controller's pid is dead, or
   alive under another starttime (a reused pid), whose workspace still
-  exists and sits under the session's cwd — `Orphaned worker implement-345
+  exists and sits strictly under the session's cwd, so a worker's own
+  session is never offered itself — `Orphaned worker implement-345
   (twitch-rules-scroller-345): its controller, pid 7313, is gone — adopt it
   with: controller-adopt twitch-rules-scroller-345`. It prints only.
   `controller-adopt <agent>`, run from the primary checkout, moves that
@@ -162,7 +163,10 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   holding the sidecar lock on both files, so of two sessions adopting one
   worker exactly one wins and a later `/clear` here restores it like a
   dispatched worker. It refuses while the worker's controller is alive, when
-  the workspace is gone, and off the primary checkout. It prints `Your
+  the workspace is gone, off the primary checkout, and — before moving
+  anything — when `herdr agent list` cannot answer, since the name it
+  re-points the worker at would then be a guess. A second run on a worker
+  this session already adopted says so and succeeds. It prints `Your
   controller is now <name>` — this session's herdr agent name, else its
   session name — for you to `SendMessage` to the worker; that message
   replaces the brief's controller (`implement/SKILL.md` § Control). Then the
