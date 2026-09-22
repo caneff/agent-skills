@@ -138,6 +138,20 @@ fn a_subagents_own_session_start_is_silent_even_with_workers_present() {
     assert_eq!(stdout(&out), "", "a subagent's own SessionStart controls nothing of its own to restore");
 }
 
+#[test]
+fn the_agentid_spelling_of_the_subagent_gate_is_also_silent_through_the_real_binary() {
+    // #1042 review, P3 (spec, judgement): is_subagent's own unit tests cover
+    // both `agent_id` and `agentId`, but only `agent_id` reached main()
+    // through the real binary above — worth its own case since a transcript
+    // payload is what actually carries the `agentId` spelling.
+    let f = Fixture::new();
+    live_session(&f, "controller-50");
+    append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
+    let out = run(&f, r#"{"agentId":"sub-1"}"#, &[]);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(stdout(&out), "", "the agentId spelling of the subagent gate must be silent too");
+}
+
 // --- a fresh worker record is restored ----------------------------------------
 
 #[test]
