@@ -134,27 +134,36 @@ def frontier(candidates, in_flight):
 
 
 def picks(state, free):
-    """The clumps to dispatch, taken from a frontier already read — lowest
-    ticket first, every free slot at once.
+    """`(picked, held)`: the clumps to dispatch, taken from a frontier
+    already read — lowest ticket first, every free slot at once — and every
+    clump the same-tick guard skipped, each naming the earlier pick it
+    collided with.
 
     Split from `refill` so a caller that also reports what is holding the
     rest reads the frontier once: two reads of one question can disagree
     while a worker lands between them.
     """
     if free <= 0:
-        return []
-    picked = []
+        return [], []
+    picked, held = [], []
     for clump in state["dispatchable"]:
         if len(picked) == free:
             break
         # A clump picked a moment ago is in flight by the time the next one
         # starts, so the same exclusion applies inside one tick. Candidates
         # that collide with each other are normally one clump already — this
-        # is the guard for the case where they are not.
-        if any(paths(clump) & paths(earlier) for earlier in picked):
+        # is the guard for the case where they are not. Unlike a frontier
+        # collision, there is no live workspace to name: the holder is
+        # another candidate picked this same tick, so the held entry carries
+        # no `workspace` key (#971).
+        blocker = next((earlier for earlier in picked
+                        if paths(clump) & paths(earlier)), None)
+        if blocker is not None:
+            held.append({"clump": clump, "holder": key_of(blocker),
+                        "over": sorted(paths(clump) & paths(blocker))})
             continue
         picked.append(clump)
-    return picked
+    return picked, held
 
 
 def refill(candidates, in_flight, free):
@@ -165,7 +174,8 @@ def refill(candidates, in_flight, free):
     waves, and the two consequences a controller has to state out loud:
     `references/loop.md`.
     """
-    return picks(frontier(candidates, in_flight), free)
+    picked, _ = picks(frontier(candidates, in_flight), free)
+    return picked
 
 
 def hubs(clumps):
@@ -704,9 +714,16 @@ def render_dispatch(picked, state):
     lines = [f"dispatch  #{key_of(c)}  "
              + ",".join(f"#{n}" for n in c["tickets"]) for c in picked]
     for held in state["held"]:
-        lines.append(
-            f"held      #{key_of(held['clump'])}  by #{held['holder']} in "
-            f"{held['workspace']}  over {', '.join(held['over'])}")
+        if "workspace" in held:
+            lines.append(
+                f"held      #{key_of(held['clump'])}  by #{held['holder']} "
+                f"in {held['workspace']}  over {', '.join(held['over'])}")
+        else:
+            # No live workspace: the holder is another candidate this same
+            # tick picked ahead of it (#971).
+            lines.append(
+                f"held      #{key_of(held['clump'])}  by #{held['holder']} "
+                f"this tick  over {', '.join(held['over'])}")
     return "\n".join(lines) or "nothing to dispatch"
 
 
@@ -813,7 +830,9 @@ def run(argv):
                 return 1
             print(render_peak(count, live, room))
             state = frontier(candidates, in_flight)
-            lines = render_dispatch(picks(state, room), state)
+            picked, same_tick_held = picks(state, room)
+            lines = render_dispatch(
+                picked, {"held": state["held"] + same_tick_held})
             if room < cores["room"]:
                 lines = f"box: room for {room} of {cores['room']}\n{lines}"
             print(lines)

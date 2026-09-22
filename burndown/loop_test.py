@@ -119,6 +119,37 @@ def test_refill_fills_every_free_slot_lowest_ticket_first():
     assert [c["tickets"] for c in picked] == [[452], [501]]
 
 
+def test_picks_names_a_same_tick_collision_and_its_picked_blocker():
+    # #970's own evidence: `closure.py --json` piped a hub family (452, 457,
+    # 458) and one independent ticket (501) into `dispatch --free 4` with
+    # nothing in flight. #452 is picked first and takes the hub file; #457
+    # and #458 collide with it this same tick and must not vanish silently.
+    picked, held = loop.picks(loop.frontier(candidates_781(), []), 4)
+    assert [c["tickets"] for c in picked] == [[452], [501]]
+    by_ticket = {tuple(h["clump"]["tickets"]): h for h in held}
+    assert sorted(by_ticket) == [(457,), (458,)]
+    assert by_ticket[(457,)]["holder"] == 452
+    assert by_ticket[(457,)]["over"] == [HOT]
+    assert "workspace" not in by_ticket[(457,)]
+
+
+def test_the_cli_names_a_same_tick_collision_as_a_held_line():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump(candidates_781(), fh)
+        with open(live, "w") as fh:
+            json.dump([], fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "4", "--processes", "4", "--committed-gb", "4")
+        assert got.returncode == 0, got
+        assert "dispatch  #452" in got.stdout, got.stdout
+        assert "dispatch  #501" in got.stdout, got.stdout
+        assert "held      #457  by #452 this tick" in got.stdout, got.stdout
+        assert "held      #458  by #452 this tick" in got.stdout, got.stdout
+
+
 def test_refill_takes_nothing_when_no_slot_is_free():
     assert loop.refill(candidates_781(), [], 0) == []
 
