@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # notify-send shim for WSL: raises a silent, clickable Windows toast via PowerShell.
 # Accepts the notify-send CLI shape: [options] SUMMARY [BODY].
-# Click opens herdrfocus:<pane> (HKCU URL handler -> herdr-focus.ps1), which brings
-# VS Code forward and focuses the herdr agent pane that most recently finished/blocked.
+# Click opens herdrfocus:<pane> (HKCU URL handler -> herdr-focus.vbs -> herdr-focus-pick.ps1),
+# which raises the host window and focuses the herdr agent pane that most recently
+# finished/blocked.
 set -u
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 positional=()
@@ -51,6 +52,9 @@ script="
 \$appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe'
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(\$appId).Show(\$toast)
 "
+# The real directory this script lives in, as a UNC path: Windows cannot follow
+# the ~/.local/bin symlink, so run-hidden.vbs is addressed where it really is.
+bindir_win=$(wslpath -w "$(dirname "$(readlink -f "$0")")")
 enc=$(printf '%s' "$script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
-/mnt/c/Windows/System32/wscript.exe //B //Nologo '\\wsl.localhost\Ubuntu-24.04\home\caneff\.agents\skills\flow\bin\run-hidden.vbs' powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand "$enc" >/dev/null 2>&1 </dev/null &
+/mnt/c/Windows/System32/wscript.exe //B //Nologo "$bindir_win\run-hidden.vbs" powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand "$enc" >/dev/null 2>&1 </dev/null &
 exit 0

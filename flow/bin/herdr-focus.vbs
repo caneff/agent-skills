@@ -12,6 +12,9 @@
 Set sh = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 wslHome = "\\wsl.localhost\Ubuntu-24.04\home\caneff"
+' The picker sits beside this script; the registry points at this file's real
+' location, so its own folder is the install root (no second copy of the path).
+binDir = fso.GetParentFolderName(WScript.ScriptFullName)
 
 url = ""
 If WScript.Arguments.Count > 0 Then url = WScript.Arguments(0)
@@ -28,6 +31,6 @@ End If
 
 Set env = sh.Environment("PROCESS")
 env("HERDR_MARKER") = marker
-sh.Run "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & wslHome & "\.agents\skills\flow\bin\herdr-focus-pick.ps1""", 0, True
+sh.Run "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & binDir & "\herdr-focus-pick.ps1""", 0, True
 
 sh.Run "wsl.exe -d Ubuntu-24.04 -- /home/caneff/.local/bin/herdr-focus-latest " & pane, 0, False
