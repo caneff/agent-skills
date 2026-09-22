@@ -116,30 +116,50 @@ fn view_barrier(n: &str) {
         .ok()
         .and_then(|s| s.rsplit_once(')').and_then(|(_, r)| r.split_whitespace().nth(1).map(str::to_string)))
         .unwrap_or_default();
+    // Counted and marked per (pid, ticket): a clump reads several tickets in
+    // one process, and a marker keyed on pid alone would have one ticket's
+    // reread satisfy another's wait, silently disabling the barrier for
+    // every ticket after the first (#982 review, C1).
     let count_file = std::path::Path::new(&dir).join(format!("{ppid}.{n}.views"));
-    let seen = std::fs::read_to_string(&count_file).ok().and_then(|s| s.trim().parse::<u32>().ok()).unwrap_or(0) + 1;
-    let _ = std::fs::write(&count_file, seen.to_string());
+    // A dropped write or an unreadable/garbage count here must not read as
+    // "first view" — that fails the barrier open into no synchronization at
+    // all, the exact silent-pass shape `docs/agents/defect-classes.md` class
+    // 1 names, and this fake exists only to make that race deterministic
+    // (#982 review, S1/P3/C2). Test-only code: panic rather than swallow.
+    let seen = match std::fs::read_to_string(&count_file) {
+        Ok(s) if s.is_empty() => 1,
+        Ok(s) => s.trim().parse::<u32>().unwrap_or_else(|e| panic!("GH_VIEW_BARRIER_DIR: {count_file:?} held {s:?}, not a count: {e}")) + 1,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => 1,
+        Err(e) => panic!("GH_VIEW_BARRIER_DIR: could not read {count_file:?}: {e}"),
+    };
+    std::fs::write(&count_file, seen.to_string()).unwrap_or_else(|e| panic!("GH_VIEW_BARRIER_DIR: could not write {count_file:?}: {e}"));
     if seen != 2 {
         return;
     }
+    // Reached at most once per (ppid, n): `seen` comes from a monotonically
+    // increasing file-backed counter, so this branch runs on the one call
+    // where it reads exactly 2 — no existence check needed to guard it
+    // (#982 review, over-engineering).
     let mine = std::path::Path::new(&dir).join(format!("{ppid}.{n}.reread"));
-    if mine.exists() {
-        return;
-    }
-    let _ = std::fs::write(&mine, "");
-    // A busy spin, not a sleeping poll: the two dispatches must be released
-    // within microseconds of each other, or the first one released can read,
-    // decide and complete its edit before the second even rereads — the same
-    // false "only one claimed" outcome a coarse poll produces (#982). A 20ms
-    // sleep-poll left that gap wide enough for a full read-decide-edit round
-    // trip, so the witness passed on scheduling luck instead of failing on
-    // the mutation every time.
-    let is_reread_marker = |e: &std::fs::DirEntry| e.file_name().to_string_lossy().ends_with(".reread");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-    while std::fs::read_dir(&dir).map(|d| d.filter_map(Result::ok).filter(is_reread_marker).count()).unwrap_or(0) < 2
-        && std::time::Instant::now() < deadline
-    {
+    std::fs::write(&mine, "").unwrap_or_else(|e| panic!("GH_VIEW_BARRIER_DIR: could not write {mine:?}: {e}"));
+    // The two dispatches must be released within microseconds of each other,
+    // or the first one released can read, decide and complete its edit
+    // before the second even rereads — the same false "only one claimed"
+    // outcome a coarse poll produces (#982). A busy spin for the first ~50ms
+    // gets that; past it, the lock-held path (where the second run never
+    // arrives) falls back to a short sleep so the ordinary passing run does
+    // not peg a core issuing read_dir syscalls for the whole 3s deadline
+    // (#982 review, S3/P2/C3).
+    let suffix = format!(".{n}.reread");
+    let is_reread_marker = |e: &std::fs::DirEntry| e.file_name().to_string_lossy().ends_with(&suffix);
+    let count = || std::fs::read_dir(&dir).map(|d| d.filter_map(Result::ok).filter(is_reread_marker).count()).unwrap_or(0);
+    let spin_until = std::time::Instant::now() + std::time::Duration::from_millis(50);
+    while count() < 2 && std::time::Instant::now() < spin_until {
         std::hint::spin_loop();
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while count() < 2 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_micros(200));
     }
 }
 
