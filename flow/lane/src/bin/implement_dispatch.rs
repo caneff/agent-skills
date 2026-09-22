@@ -397,8 +397,8 @@ fn install_identity_guard(primary: &str) -> Result<(), String> {
     let is_ours = current.as_ref().is_ok_and(|b| String::from_utf8_lossy(b).contains(WRAPPER_MARKER));
     if exists && !is_ours {
         let foreign_bytes = current.as_ref().expect("exists implies Ok");
-        if let Ok(already_there) = std::fs::read(&foreign_path) {
-            if &already_there != foreign_bytes {
+        match std::fs::read(&foreign_path) {
+            Ok(already_there) if &already_there != foreign_bytes => {
                 return Err(format!(
                     "{} already holds a different foreign hook than the one now at {}; something installed a new pre-commit here since the last dispatch — resolve by hand (merge or remove {}) before dispatching again",
                     foreign_path.display(),
@@ -406,6 +406,9 @@ fn install_identity_guard(primary: &str) -> Result<(), String> {
                     foreign_path.display()
                 ));
             }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("cannot read {}: {e}", foreign_path.display())),
         }
         std::fs::write(&foreign_path, foreign_bytes).map_err(|e| format!("cannot copy {} aside to {}: {e}", path.display(), foreign_path.display()))?;
         let mut perms =
