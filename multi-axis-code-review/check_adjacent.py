@@ -9,8 +9,9 @@ the branch that touches exactly one file, a file the diff from `--base` had
 already changed before that commit, with under 20 changed lines (insertions
 plus deletions, as `git show --numstat` counts them). One line per adjacent
 fix: `<id>: ok ...` or `BREACH <id>: <why>`. Exit 0 with no breach, 1 with
-any, 2 on a usage error. The other two parts of the rule — one function, no
-public seam — take a reading, not a count, and stay the verifier's.
+any, 2 on a usage error, an empty sidecar or a repo git cannot read. The
+other two parts of the rule — one function, no public seam — take a
+reading, not a count, and stay the verifier's.
 
 An unreadable line is a breach, not a skip: it may be the adjacent line, and
 an absent answer read as a clean one is the shape this check exists to stop.
@@ -70,6 +71,13 @@ def main(argv=None):
     except OSError as e:
         print(f"check_adjacent: cannot read {args.sidecar}: {e}", file=sys.stderr)
         return 2
+    # An empty sidecar is a write that failed, not a round with no fixes.
+    if not any(raw.strip() for raw in raw_lines):
+        print(f"check_adjacent: {args.sidecar} is empty; the verification pass wrote nothing", file=sys.stderr)
+        return 2
+    if git(args.repo, "rev-parse", "--git-dir").returncode != 0:
+        print(f"check_adjacent: {args.repo} is not a git repository", file=sys.stderr)
+        return 2
 
     breaches = seen = 0
     for number, raw in enumerate(raw_lines, 1):
@@ -83,10 +91,14 @@ def main(argv=None):
             print(f"BREACH line {number}: not a JSON object, so it may be an unread adjacent fix")
             breaches += 1
             continue
-        if obj.get("scope") != "adjacent":
+        if "scope" not in obj:
             continue
         seen += 1
         fid = obj.get("id") or f"line {number}"
+        if obj["scope"] != "adjacent":
+            print(f"BREACH {fid}: unknown scope {obj['scope']!r}; the only scope is 'adjacent'")
+            breaches += 1
+            continue
         kept, message = measure(args.repo, args.base, obj.get("sha"))
         if kept:
             print(f"{fid}: ok, {message}")

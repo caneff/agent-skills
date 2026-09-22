@@ -185,6 +185,47 @@ def test_a_sidecar_with_no_adjacent_line_passes_and_says_so():
     assert "no adjacent fixes" in result.stdout, result.stdout
 
 
+def write(root, name, text):
+    path = os.path.join(root, "..", os.path.basename(root) + name)
+    FIXTURES.append(path)
+    with open(path, "w") as fh:
+        fh.write(text)
+    return path
+
+
+def test_an_empty_sidecar_is_refused_rather_than_read_as_no_fixes():
+    root = repo()
+    result = run(root, write(root, "-empty.jsonl", ""))
+    assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
+    assert "is empty" in result.stderr, result.stderr
+
+
+def test_a_scope_other_than_adjacent_breaches_rather_than_being_skipped():
+    root = repo()
+    line = json.dumps({"id": "C7", "outcome": "fixed", "sha": "abc", "scope": "adjacnet"})
+    result = run(root, write(root, "-typo.jsonl", line + "\n"))
+    assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
+    assert "BREACH C7: unknown scope 'adjacnet'" in result.stdout, result.stdout
+
+
+def test_a_repo_that_is_not_a_git_repo_is_refused():
+    root = repo()
+    path = sidecar(root, "abc")
+    result = subprocess.run([sys.executable, CHECK, "--repo", root + "-missing", "--base", "base", path],
+                            capture_output=True, text=True)
+    assert result.returncode == 2, (result.returncode, result.stdout, result.stderr)
+    assert "not a git repository" in result.stderr, result.stderr
+
+
+def test_a_binary_fix_breaches_by_id_rather_than_crashing():
+    root = repo()
+    commit(root, {"a.bin": "x\0y\n"}, "binary in the diff")
+    with open(os.path.join(root, "a.bin"), "wb") as fh:
+        fh.write(b"x\0z\n")
+    git(root, "commit", "-q", "-am", "binary fix")
+    assert_breached(run(root, sidecar(root, git(root, "rev-parse", "HEAD"))), "is binary")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     try:
