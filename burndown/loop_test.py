@@ -130,6 +130,7 @@ def test_picks_names_a_same_tick_collision_and_its_picked_blocker():
     assert sorted(by_ticket) == [(457,), (458,)]
     assert by_ticket[(457,)]["holder"] == 452
     assert by_ticket[(457,)]["over"] == [HOT]
+    assert by_ticket[(457,)]["same_tick"] is True
     assert "workspace" not in by_ticket[(457,)]
 
 

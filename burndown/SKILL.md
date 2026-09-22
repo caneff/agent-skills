@@ -79,8 +79,9 @@ too.
    live workspace's is **off the frontier**: `loop.py dispatch` picks from
    what is left and names what holds the rest. That hold, with `picks`'
    same-tick guard (two clumps sharing a file are never picked in one tick,
-   and that skip prints no `held` line), is what keeps a **family's clumps**
-   apart: a clump sharing a file with a live or just-picked one waits, and
+   and that skip prints its own `held` line, naming the earlier pick it
+   collided with rather than a live workspace), is what keeps a **family's
+   clumps** apart: a clump sharing a file with a live or just-picked one waits, and
    family members sharing no file run at once. Two consequences, because
    neither is visible from the frontier's own definition — a run drains
    **out of ticket order**, and one parked worker can hold a **whole family**

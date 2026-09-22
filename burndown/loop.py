@@ -154,13 +154,15 @@ def picks(state, free):
         # that collide with each other are normally one clump already — this
         # is the guard for the case where they are not. Unlike a frontier
         # collision, there is no live workspace to name: the holder is
-        # another candidate picked this same tick, so the held entry carries
-        # no `workspace` key (#971).
+        # another candidate picked this same tick, so the held entry is
+        # tagged `same_tick` explicitly rather than distinguished by which
+        # keys it happens to carry (#971).
         blocker = next((earlier for earlier in picked
                         if paths(clump) & paths(earlier)), None)
         if blocker is not None:
             held.append({"clump": clump, "holder": key_of(blocker),
-                        "over": sorted(paths(clump) & paths(blocker))})
+                        "over": sorted(paths(clump) & paths(blocker)),
+                        "same_tick": True})
             continue
         picked.append(clump)
     return picked, held
@@ -710,20 +712,17 @@ def herdr_get(agent, timeout):
         ) from None
 
 
-def render_dispatch(picked, state):
+def render_dispatch(picked, held):
     lines = [f"dispatch  #{key_of(c)}  "
              + ",".join(f"#{n}" for n in c["tickets"]) for c in picked]
-    for held in state["held"]:
-        if "workspace" in held:
-            lines.append(
-                f"held      #{key_of(held['clump'])}  by #{held['holder']} "
-                f"in {held['workspace']}  over {', '.join(held['over'])}")
-        else:
-            # No live workspace: the holder is another candidate this same
-            # tick picked ahead of it (#971).
-            lines.append(
-                f"held      #{key_of(held['clump'])}  by #{held['holder']} "
-                f"this tick  over {', '.join(held['over'])}")
+    for entry in held:
+        # `same_tick` names the other candidate this tick picked ahead of it;
+        # otherwise the holder is a live workspace (#971).
+        where = "this tick" if entry.get("same_tick") \
+            else f"in {entry['workspace']}"
+        lines.append(
+            f"held      #{key_of(entry['clump'])}  by #{entry['holder']} "
+            f"{where}  over {', '.join(entry['over'])}")
     return "\n".join(lines) or "nothing to dispatch"
 
 
@@ -818,7 +817,7 @@ def run(argv):
                 # dispatch.
                 print("nothing to dispatch: every free slot is held by a "
                       "declared job")
-                print(render_dispatch([], frontier(candidates, in_flight)))
+                print(render_dispatch([], frontier(candidates, in_flight)["held"]))
                 return 0
             live = len(unlanded)
             room, refusals = box_room(count, args.committed_gb,
@@ -831,8 +830,7 @@ def run(argv):
             print(render_peak(count, live, room))
             state = frontier(candidates, in_flight)
             picked, same_tick_held = picks(state, room)
-            lines = render_dispatch(
-                picked, {"held": state["held"] + same_tick_held})
+            lines = render_dispatch(picked, state["held"] + same_tick_held)
             if room < cores["room"]:
                 lines = f"box: room for {room} of {cores['room']}\n{lines}"
             print(lines)
