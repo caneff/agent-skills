@@ -207,6 +207,45 @@ pub fn remove_workspace(home: &Path, workspace: &str) -> bool {
     removed_any
 }
 
+/// Every `<pid>.workers.jsonl` under `<home>/.claude/sessions`, as
+/// (pid, path), in path order.
+fn sidecars(home: &Path) -> Vec<(String, PathBuf)> {
+    let Ok(entries) = std::fs::read_dir(home.join(".claude/sessions")) else { return Vec::new() };
+    let mut out: Vec<(String, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .filter_map(|e| {
+            let name = e.file_name().to_str()?.strip_suffix(".workers.jsonl")?.to_string();
+            Some((name, e.path()))
+        })
+        .collect();
+    out.sort_by(|a, b| a.1.cmp(&b.1));
+    out
+}
+
+/// Whether the controller that wrote `record` under `pid` is gone (#1098):
+/// the pid is not alive, or it is alive with a starttime other than the
+/// record's — a reused pid, an unrelated session. A record with no
+/// `proc_start` under a live pid is not orphaned: nothing proves its
+/// controller dead, and two controllers for one worker is the failure
+/// adoption must never cause.
+pub fn is_orphaned(pid: &str, record: &WorkerRecord) -> bool {
+    match pid.parse::<i32>().ok().filter(|p| *p > 0).and_then(crate::proc_info::read_stat) {
+        None => true,
+        Some(stat) => !record.proc_start.is_empty() && stat.start != record.proc_start,
+    }
+}
+
+/// Every record whose controller is gone and whose workspace still exists,
+/// as (the dead controller's pid, record) — what a live session may adopt.
+/// A workspace already torn down has nothing left to adopt.
+pub fn orphans(home: &Path) -> Vec<(String, WorkerRecord)> {
+    sidecars(home)
+        .into_iter()
+        .flat_map(|(pid, _)| read(home, &pid).into_iter().map(move |r| (pid.clone(), r)))
+        .filter(|(pid, r)| is_orphaned(pid, r) && Path::new(&r.workspace).is_dir())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

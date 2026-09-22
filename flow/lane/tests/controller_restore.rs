@@ -9,7 +9,7 @@
 //! `resolve_controller.rs` and `merge_cleanup.rs` test at.
 
 mod support;
-use support::{out_text, Fixture};
+use support::{dead_pid, out_text, worker_record, Fixture, LiveProc};
 
 /// This test process stands in for the resuming controller session — the
 /// binary under test is spawned as this process's child, so
@@ -64,9 +64,16 @@ fn append_worker(f: &Fixture, record: &lane::workers::WorkerRecord) {
 /// mean the new fake's own "nothing recorded" case, not a fallback to a
 /// different fake entirely).
 fn run(f: &Fixture, stdin: &str, extra_env: &[(&str, &str)]) -> std::process::Output {
+    run_in(f, &f.tmp.path().display().to_string(), stdin, extra_env)
+}
+
+/// `run`, with the hook's working directory — the session's cwd — set to
+/// `cwd`.
+fn run_in(f: &Fixture, cwd: &str, stdin: &str, extra_env: &[(&str, &str)]) -> std::process::Output {
     use std::io::Write;
     let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_controller-restore"));
-    cmd.env_clear()
+    cmd.current_dir(cwd)
+        .env_clear()
         .env("PATH", f.path_env())
         .env("HOME", f.home())
         .env("CALL_LOG", f.call_log())
@@ -241,4 +248,70 @@ fn a_failed_herdr_agent_list_reports_unknown_not_no_live_agent() {
     let line = stdout(&out);
     assert!(line.contains("herdr status unknown — could not ask herdr"), "{line}");
     assert!(!line.contains("no live herdr agent"), "{line}");
+}
+
+// --- orphans of a dead controller are offered for adoption (#1098) -----------
+
+#[test]
+fn a_dead_controllers_worker_under_this_cwd_is_offered_for_adoption() {
+    let f = Fixture::new();
+    live_session(&f, "controller-50");
+    let (primary, ws) = f.repo_with_workspace("scroller", "implement-345");
+    let dead = dead_pid().to_string();
+    lane::workers::append(&f.home(), &dead, &worker_record("scroller-345", "implement-345", &ws, "12345")).unwrap();
+    let out = run_in(&f, &primary, "{}", &[]);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(
+        stdout(&out),
+        format!("Orphaned worker implement-345 (scroller-345): its controller, pid {dead}, is gone — adopt it with: controller-adopt scroller-345")
+    );
+}
+
+#[test]
+fn a_reused_pids_worker_is_offered_for_adoption() {
+    // The pid is alive, but its starttime is not the one the record was
+    // written under: the session that dispatched this worker is gone.
+    let f = Fixture::new();
+    live_session(&f, "controller-50");
+    let (primary, ws) = f.repo_with_workspace("scroller", "implement-345");
+    let other = LiveProc::start();
+    lane::workers::append(&f.home(), &other.pid().to_string(), &worker_record("scroller-345", "implement-345", &ws, "not-its-start")).unwrap();
+    let out = run_in(&f, &primary, "{}", &[]);
+    assert!(stdout(&out).contains("adopt it with: controller-adopt scroller-345"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_live_controllers_worker_is_not_offered() {
+    let f = Fixture::new();
+    live_session(&f, "controller-50");
+    let (primary, ws) = f.repo_with_workspace("scroller", "implement-345");
+    let other = LiveProc::start();
+    lane::workers::append(&f.home(), &other.pid().to_string(), &worker_record("scroller-345", "implement-345", &ws, &other.proc_start())).unwrap();
+    let out = run_in(&f, &primary, "{}", &[]);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(stdout(&out), "", "a worker whose controller is alive is not an orphan");
+}
+
+#[test]
+fn an_orphan_whose_workspace_was_torn_down_is_not_offered() {
+    let f = Fixture::new();
+    live_session(&f, "controller-50");
+    let (primary, _) = f.repo_with_workspace("scroller", "implement-345");
+    let gone = format!("{primary}/.claude/worktrees/implement-346");
+    lane::workers::append(&f.home(), &dead_pid().to_string(), &worker_record("scroller-346", "implement-346", &gone, "12345")).unwrap();
+    let out = run_in(&f, &primary, "{}", &[]);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(stdout(&out), "", "a torn-down workspace has nothing left to adopt");
+}
+
+#[test]
+fn an_orphan_outside_this_sessions_cwd_is_not_offered() {
+    let f = Fixture::new();
+    live_session(&f, "controller-50");
+    let (_, ws) = f.repo_with_workspace("scroller", "implement-345");
+    let (elsewhere, _) = f.repo_with_workspace("other", "implement-9");
+    lane::workers::append(&f.home(), &dead_pid().to_string(), &worker_record("scroller-345", "implement-345", &ws, "12345")).unwrap();
+    let out = run_in(&f, &elsewhere, "{}", &[]);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(stdout(&out), "", "another repo's orphan is not this session's to adopt");
 }
