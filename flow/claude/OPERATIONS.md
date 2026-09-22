@@ -148,6 +148,33 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   lines. `merge-cleanup` removes a worker's record when it removes that
   worker's workspace, so a landed and cleaned-up branch has nothing left to
   restore.
+- **A dead controller's workers can be adopted** (#1098). A controller
+  whose process exits — not a `/clear` — leaves its workers with no one to
+  report to and no one allowed to merge their PRs, and `controller-restore`
+  restores only into the same process. On every session start it also
+  prints one line per orphan: a record whose controller's pid is dead, or
+  alive under another starttime (a reused pid), whose workspace still
+  exists and sits strictly under the session's cwd, so a worker's own
+  session is never offered itself — `Orphaned worker implement-345
+  (twitch-rules-scroller-345): its controller, pid 7313, is gone — adopt it
+  with: controller-adopt twitch-rules-scroller-345`. It prints only.
+  `controller-adopt <agent>`, run from the primary checkout, moves that
+  record into this session's own `<pid>.workers.jsonl` under its starttime,
+  landing it there before removing the dead copy and holding one adoption
+  lock (`~/.claude/sessions/.adopt.lock`) from its scan to its landing, so
+  of two sessions adopting one worker exactly one wins, a crash mid-adopt
+  leaves a duplicate the live copy outranks (never offered, never adopted)
+  rather than a lost worker, and a later `/clear` here restores it like a
+  dispatched worker. It refuses while the worker's controller is alive, when
+  the workspace is gone, off the primary checkout, and — before moving
+  anything — when `herdr agent list` cannot answer, since the name it
+  re-points the worker at would then be a guess. A second run on a worker
+  this session already adopted says so and succeeds. It prints `Your
+  controller is now <name>` — this session's herdr agent name, else its
+  session name — for you to `SendMessage` to the worker; that message
+  replaces the brief's controller (`implement/SKILL.md` § Control). Then the
+  worker is yours, merge included. A burn has its own path, `runfile.py
+  resume`.
 
 ## Wait
 

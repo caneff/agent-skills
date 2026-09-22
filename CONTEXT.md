@@ -5,7 +5,7 @@ The skills, rules, and lane mechanics Chris's agents run under. One context; the
 ## Language
 
 **Dispatcher**:
-The session on the primary checkout's default branch that runs `implement-dispatch` to claim a ticket, create its workspace, and start its worker; it then stays that worker's controller.
+The session on the primary checkout's default branch that runs `implement-dispatch` to claim a ticket, create its workspace, and start its worker; it then stays that worker's controller unless its session exits, when another session may adopt the worker (`controller-adopt`).
 _Avoid_: coordinator, driver, parent session
 
 **Worker**:
@@ -21,7 +21,7 @@ The single prefilled prompt a worker receives at start, `/implement <n>... --tie
 _Avoid_: prompt, instructions, task description
 
 **Controller**:
-The session a worker reports to: the dispatcher that started it, named in its brief by its herdr agent name when it has one (else its session name). A worker resolves that name to the controller's current session name with `resolve-controller` before every send — the two-hop mechanism is `implement/SKILL.md` § Control, the one place that states it. It rules on the worker's questions, merges the worker's PR and runs `merge-cleanup` on a repo Chris owns (a `ready-for-human` ticket's merge goes to Chris instead), and escalates to Chris only six things: a spec-ruling change, a new dependency, an irreversible deletion, a repo Chris does not own, a spec gap (the spec is silent on something the user needs), and a lane-mandated step the harness refuses. The last is the one escalation where the controller structurally cannot act.
+The session a worker reports to: the dispatcher that started it, or the session that adopted it once that dispatcher's process exited (`controller-adopt`, #1098), named in its brief by its herdr agent name when it has one (else its session name). A worker resolves that name to the controller's current session name with `resolve-controller` before every send — the two-hop mechanism is `implement/SKILL.md` § Control, the one place that states it. It rules on the worker's questions, merges the worker's PR and runs `merge-cleanup` on a repo Chris owns (a `ready-for-human` ticket's merge goes to Chris instead), and escalates to Chris only six things: a spec-ruling change, a new dependency, an irreversible deletion, a repo Chris does not own, a spec gap (the spec is silent on something the user needs), and a lane-mandated step the harness refuses. The last is the one escalation where the controller structurally cannot act.
 Everything else it rules on itself, against `burndown/SKILL.md` § Before a controller rules.
 _Avoid_: coordinator, driver, parent session, owner
 

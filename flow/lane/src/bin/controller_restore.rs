@@ -147,6 +147,15 @@ fn restore_line(record: &WorkerRecord, agent: &Asked<Option<&str>>, pr: &Asked<O
     format!("You control {} ({}{merges}): {}; cleanup: {}", record.branch, describe_agent(&record.agent, agent), describe_pr(pr), record.cleanup)
 }
 
+/// One line for a worker whose controller at `pid` is gone (#1098), naming
+/// the command that makes this session its controller.
+fn orphan_line(pid: &str, record: &WorkerRecord) -> String {
+    format!(
+        "Orphaned worker {} ({}): its controller, pid {pid}, is gone — adopt it with: controller-adopt {}",
+        record.branch, record.agent, record.agent
+    )
+}
+
 /// Whether the hook's stdin JSON names a subagent run — a `Task` subagent's
 /// own session start fires the same hook, and it controls nothing of its
 /// own to restore. Checked under both spellings a hook payload might carry
@@ -216,6 +225,18 @@ fn main() {
     let self_pid = std::process::id() as i32;
     let Some(ancestor) = proc_info::parent_pid(self_pid) else { return };
     let Some(own_pid) = sessions::find_own_pid(home, ancestor) else { return };
+
+    // #1098: a dead controller's workers, offered to this session when their
+    // workspaces sit under its cwd. Printed only; `controller-adopt` does the
+    // move. Strictly under: a worker's own session runs in its workspace, and
+    // an orphan is never told to adopt itself (#1098 review C1).
+    let cwd = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default();
+    if !cwd.is_empty() {
+        let cwd = workers::canonical_workspace_path(&cwd);
+        for (pid, record) in workers::orphans(home).iter().filter(|(_, r)| r.workspace != cwd && sessions::in_tree(&r.workspace, &cwd)) {
+            safe_println!("{}", orphan_line(pid, record));
+        }
+    }
 
     let records = workers::read(home, &own_pid);
     if records.is_empty() {

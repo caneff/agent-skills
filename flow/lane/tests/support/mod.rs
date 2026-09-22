@@ -177,6 +177,78 @@ impl Fixture {
         let status = child.wait().unwrap();
         (status.code(), stderr)
     }
+
+    /// A primary checkout (`mkfixture`) with one linked worktree at
+    /// `.claude/worktrees/<branch>`, the layout `implement-dispatch` builds.
+    /// Returns both paths canonicalized, the spelling a `WorkerRecord`
+    /// stores (#1040).
+    pub fn repo_with_workspace(&self, name: &str, branch: &str) -> (String, String) {
+        let primary = self.mkfixture(name, "main");
+        let wt = primary.join(".claude/worktrees").join(branch);
+        run_ok("git", &["-C", primary.to_str().unwrap(), "worktree", "add", "-q", "-b", branch, wt.to_str().unwrap()], None);
+        let canon = |p: &Path| std::fs::canonicalize(p).unwrap().display().to_string();
+        (canon(&primary), canon(&wt))
+    }
+
+    /// Writes `<pid>.json` for the live process `pid`, as Claude Code does
+    /// for a session, with its real starttime.
+    pub fn live_session_at(&self, pid: i32, name: &str, session_id: &str) {
+        let start = lane::proc_info::read_stat(pid).unwrap().start;
+        std::fs::create_dir_all(self.home().join(".claude/sessions")).unwrap();
+        std::fs::write(
+            self.home().join(".claude/sessions").join(format!("{pid}.json")),
+            format!(r#"{{"pid":{pid},"sessionId":"{session_id}","procStart":"{start}","name":"{name}"}}"#),
+        )
+        .unwrap();
+    }
+}
+
+/// One dispatched worker's record, as `implement-dispatch` writes it.
+pub fn worker_record(agent: &str, branch: &str, workspace: &str, proc_start: &str) -> lane::workers::WorkerRecord {
+    lane::workers::WorkerRecord {
+        agent: agent.into(),
+        tickets: vec![branch.trim_start_matches("implement-").into()],
+        branch: branch.into(),
+        workspace: workspace.into(),
+        repo: "caneff/agent-skills".into(),
+        cleanup: format!("cd /repo && merge-cleanup {branch} --repo /repo"),
+        chris_merges: false,
+        dispatched_at: "2026-09-22T00:00:00Z".into(),
+        proc_start: proc_start.into(),
+    }
+}
+
+/// A pid that was alive a moment ago and is reaped now: a controller
+/// session whose process exited.
+pub fn dead_pid() -> i32 {
+    let mut child = Command::new("true").spawn().unwrap();
+    let pid = child.id() as i32;
+    child.wait().unwrap();
+    pid
+}
+
+/// A live process other than this test, standing in for another session;
+/// killed and reaped on drop.
+pub struct LiveProc(std::process::Child);
+
+impl LiveProc {
+    pub fn start() -> Self {
+        LiveProc(Command::new("sleep").arg("300").spawn().unwrap())
+    }
+    pub fn pid(&self) -> i32 {
+        self.0.id() as i32
+    }
+    /// Its own `/proc/<pid>/stat` starttime.
+    pub fn proc_start(&self) -> String {
+        lane::proc_info::read_stat(self.pid()).unwrap().start
+    }
+}
+
+impl Drop for LiveProc {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
 }
 
 fn run_ok(program: &str, args: &[&str], cwd: Option<&Path>) {
