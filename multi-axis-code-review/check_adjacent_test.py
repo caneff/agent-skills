@@ -101,7 +101,7 @@ def adjacent_id():
     return ids[0]
 
 
-def breached(result, why):
+def assert_breached(result, why):
     assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
     assert f"BREACH {adjacent_id()}:" in result.stdout, result.stdout
     assert why in result.stdout, result.stdout
@@ -121,7 +121,7 @@ def test_a_fix_touching_a_second_file_breaches():
     root = repo()
     sha = commit(root, {"a.py": lines(40) + "ticket work\nfix\n",
                         "a_test.py": "assert fix\n"}, "fix plus test file")
-    breached(run(root, sidecar(root, sha)), "touches 2 files")
+    assert_breached(run(root, sidecar(root, sha)), "touches 2 files")
 
 
 def test_twenty_changed_lines_breach_and_nineteen_do_not():
@@ -130,7 +130,7 @@ def test_twenty_changed_lines_breach_and_nineteen_do_not():
     base_text = lines(40) + "ticket work\n"
     twenty = lines(10, "new") + base_text.split("\n", 10)[10]
     sha = commit(root, {"a.py": twenty}, "twenty")
-    breached(run(root, sidecar(root, sha)), "20 changed lines")
+    assert_breached(run(root, sidecar(root, sha)), "20 changed lines")
 
     root = repo()
     sha = commit(root, {"a.py": base_text + lines(19, "added")}, "nineteen")
@@ -141,7 +141,7 @@ def test_twenty_changed_lines_breach_and_nineteen_do_not():
 def test_a_fix_in_a_file_the_diff_had_not_touched_breaches():
     root = repo()
     sha = commit(root, {"b.py": lines(40) + "fix\n"}, "fix elsewhere")
-    breached(run(root, sidecar(root, sha)), "was not in the diff")
+    assert_breached(run(root, sidecar(root, sha)), "was not in the diff")
 
 
 def test_a_sha_that_is_not_on_the_branch_breaches():
@@ -149,18 +149,18 @@ def test_a_sha_that_is_not_on_the_branch_breaches():
     git(root, "checkout", "-q", "-b", "side")
     sha = commit(root, {"a.py": lines(40) + "ticket work\nfix\n"}, "off branch")
     git(root, "checkout", "-q", "main")
-    breached(run(root, sidecar(root, sha)), "not on the branch")
+    assert_breached(run(root, sidecar(root, sha)), "not on the branch")
 
 
 def test_a_sha_that_resolves_to_nothing_breaches():
     root = repo()
-    breached(run(root, sidecar(root, "deadbeef")), "does not resolve")
+    assert_breached(run(root, sidecar(root, "deadbeef")), "does not resolve")
 
 
 def test_an_adjacent_line_with_no_sha_breaches_rather_than_passing():
     root = repo()
     path = sidecar(root, "")
-    breached(run(root, path), "no sha")
+    assert_breached(run(root, path), "no sha")
 
 
 def test_an_unreadable_line_fails_rather_than_being_skipped():
