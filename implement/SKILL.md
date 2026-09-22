@@ -196,7 +196,7 @@ No PR and no reviewer; Chris reads the log after.
    finding, under the severity mapping below. A finding that is not high and
    not fixed in the round takes `leftover`: no ticket of its own, only a
    sidecar line (step 2) and `leftover` in prose. The sweep that collects
-   leftovers into one ticket is not built yet (#1029, #1030); until it
+   leftovers into one ticket is not built yet (#1029, #1030, #1033); until it
    lands, the sidecar line is the only record.
    On a repo whose `origin` owner isn't
    your `gh` login, `/file-ticket` hands the command back instead of filing,
