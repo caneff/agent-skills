@@ -121,8 +121,42 @@ controller forgets.
 The process cap charges a slot at its **peak** — one worker plus its review
 fan-out, `SLOT_PEAK_PROCESSES` (5) — not the one process it is between
 reviews (#933): each new worker costs 5, each live worker keeps 4 in reserve.
-Count agent processes by command name (`ps -eo comm= | grep -cx claude`),
-never by a substring of the command line, which overcounted 2x.
+
+The count that gates the cap is herdr's **working panes plus unlisted
+claude pids** (`herdr agent list`; every `agent_status` counts except
+`idle` and `done`, so a pane with no status or one herdr hasn't grown a
+name for yet fails closed as working rather than reading as neither —
+equality against the literal `"working"` let such a pane vanish from the
+count, a Codex gate finding), not every `claude` process on the box read
+as one flat total: an idle or done pane costs no cores, and counting it
+held a run to fewer live workers than the box actually had room for
+(#1075). Like `ps`, herdr counts by pane — one
+entry per Claude session, a review fan-out's subagents folded into that
+entry rather than listed on their own — so a *foreign* controller's own
+review fan-out is not visible as extra herdr entries. What the first
+version of this fix (#1075's original build) missed is that those
+subagents are still real `claude` processes `ps` sees: `count_working_
+herdr_agents` matches each herdr pane to a pid through the sessions
+registry (`~/.claude/sessions/<pid>.json`, the same resolution
+`resolve-controller` does), validated against `/proc/<pid>/stat`'s own
+start time the same way `worker-alert-lib.sh` and `resolve-controller`
+do — a pid recycles, so a registry record surviving a WSL restart or an
+ordinary pid reuse can name a pid now held by a live, unrelated process,
+and a match on the name alone let that stale record silently claim the
+live process's pid, dropping it out of `unlisted` while the record's own
+(often idle) status counted nothing for it (Codex gate finding on
+9391bd8) — and adds every `claude` pid that matches no pane — a subagent
+or a headless run — to the count, fail-closed, the same
+way a herdr pane whose own session cannot be resolved is. A herdr listing
+that is empty, or that resolves to none of the box's actual pids while
+`claude` processes exist, is not read as an idle box: herdr's registry
+reads as broken, and the count refuses the same way an all-idle `ps`
+listing does. `loop.py` falls back to a flat process count (`ps -eo comm=
+| grep -cx claude`, by command name, never a substring of the command line,
+which overcounted 2x) only when herdr or the pid match cannot be taken at
+all, and the refusal names which counter it used. The `peak:` line prints
+the working and unlisted split beside the total, so a controller can see
+what came from panes and what came from unlisted pids.
 
 Before every dispatch, not once at the start: the box is shared, and the
 process that puts it over the cap is as likely to be another agent's as this

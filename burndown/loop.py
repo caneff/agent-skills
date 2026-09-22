@@ -229,7 +229,22 @@ VM_BUDGET_GB = 24
 
 
 AGENT_COUNTER = "`ps -eo comm=` lines equal to claude"
+HERDR_COUNTER = ("`herdr agent list` working panes plus claude pids no "
+                "pane resolves to")
 UNSTATED_COUNTER = "count supplied by the caller"
+
+
+def _run_counted(cmd):
+    """(status, stdout) for a counting command — `ps` or `herdr` — run with
+    a 10s timeout; the default `ps`/`run` both counters take when the
+    caller passes none. An `OSError` (the binary is missing) or a
+    subprocess failure reads as a failed run, not a crash: the caller
+    decides whether that is refusable."""
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 1, f"{exc}"
+    return done.returncode, done.stdout
 
 
 def count_agent_processes(ps=None):
@@ -243,13 +258,7 @@ def count_agent_processes(ps=None):
     (exit status, stdout).
     """
     if ps is None:
-        def ps(cmd):
-            try:
-                done = subprocess.run(cmd, capture_output=True, text=True,
-                                      timeout=10)
-            except (OSError, subprocess.SubprocessError) as exc:
-                return 1, f"{exc}"
-            return done.returncode, done.stdout
+        ps = _run_counted
     status, out = ps(["ps", "-eo", "comm="])
     names = [line.strip() for line in out.splitlines() if line.strip()]
     if status != 0 or not names:
@@ -269,6 +278,175 @@ def count_agent_processes(ps=None):
             "trusted, so refusing to dispatch — pass --processes <n> with a "
             "count you took")
     return agents
+
+
+def _proc_start(pid):
+    """Field 22 of `/proc/<pid>/stat` — the kernel's own start-time
+    fingerprint for that pid, the same field `agent-status.md`'s liveness
+    check and `worker-alert-lib.sh`/`resolve-controller` compare a
+    registry record's `procStart` against. `None` when the process is
+    gone or `/proc` cannot be read.
+
+    The `comm` field (2nd) is parenthesised and can itself contain spaces
+    or parens, so this splits on the *last* `)` rather than on whitespace
+    — the same reader `ps`'s own `comm=` parsing sidesteps by never
+    touching this file at all.
+    """
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+    end = text.rfind(")")
+    if end == -1:
+        return None
+    fields = text[end + 1:].split()
+    return fields[19] if len(fields) > 19 else None
+
+
+def _session_pids(sessions_dir=None, proc_start=None):
+    """`{sessionId: pid}` off the live sessions registry
+    (`~/.claude/sessions/<pid>.json`), the same file `agent-status.md`
+    reads and `resolve-controller` resolves through — validated against
+    `/proc/<pid>/stat`'s own start time the same way both of those do.
+    A pid recycles: after a WSL restart or an ordinary pid reuse, a stale
+    record can still name a pid that is alive again as a completely
+    different process. Matching on the name alone let that stale record
+    claim the live process's pid, dropping it out of
+    `count_working_herdr_agents`'s `unlisted` bucket while the record's
+    own (often idle) status added nothing for it — a live process
+    silently uncounted (Codex gate finding on 9391bd8). A record whose
+    `procStart` does not match is not a match; its pid stays unresolved.
+
+    Read fresh on every call — a pane's session can end between ticks —
+    and skipped rather than raised on a directory or file this run cannot
+    read: a registry gap fails a session's *match*, which
+    `count_working_herdr_agents` already fails closed on, not the whole
+    count. `proc_start` takes a pid and returns field 22 or `None`
+    (default `_proc_start`, reading `/proc` directly).
+    """
+    sessions_dir = sessions_dir or os.path.expanduser("~/.claude/sessions")
+    if proc_start is None:
+        proc_start = _proc_start
+    mapping = {}
+    try:
+        names = os.listdir(sessions_dir)
+    except OSError:
+        return mapping
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(sessions_dir, name)) as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        sid, pid = data.get("sessionId"), data.get("pid")
+        if not (isinstance(sid, str) and sid and isinstance(pid, int)):
+            continue
+        if proc_start(pid) != data.get("procStart"):
+            continue
+        mapping[sid] = pid
+    return mapping
+
+
+def count_working_herdr_agents(ps=None, herdr=None, sessions=None):
+    """(working, unlisted): the box's working agents, herdr's own way —
+    herdr counts by pane, one entry per Claude session, a review
+    fan-out's subagents folded into that one entry rather than listed on
+    their own. `working` is every listed pane whose `agent_status` is
+    not `idle` or `done` — those two are the only statuses read as not
+    working; a missing, null or unrecognised status fails closed as
+    working rather than vanishing from the count (Codex gate finding on
+    7a6bedd) — plus every listed pane whose session cannot be resolved to
+    a pid (a resolution failure fails closed the same way, counted as
+    working rather than dropped). `unlisted` is every `claude` pid `ps`
+    shows that no listed pane resolved to — a subagent or headless run
+    herdr does not pane-list, which still burns a core and fails closed
+    the same way (#1075 controller ruling, correcting the ticket's
+    original premise that herdr lists a subagent as its own agent).
+
+    `ps`/`herdr` take a command and return (status, stdout), the contract
+    `count_agent_processes` uses; `sessions` takes nothing and returns
+    `{sessionId: pid}` (default `_session_pids`). Raises when either `ps`
+    or herdr cannot be asked or answers something unusable, or when the
+    herdr listing is empty or resolves to none of the box's actual
+    `claude` pids while `ps` shows some exist — herdr's registry read as
+    broken, not the box read as idle, the same shape of refusal
+    `count_agent_processes` gives an all-idle `ps` listing.
+    """
+    if ps is None:
+        ps = _run_counted
+    if herdr is None:
+        herdr = _run_counted
+    if sessions is None:
+        sessions = _session_pids
+
+    pid_status, pid_out = ps(["ps", "-eo", "pid,comm"])
+    if pid_status != 0 or not pid_out.strip():
+        raise LoopError(
+            "could not list claude pids on the box (`ps -eo pid,comm` "
+            "failed or listed nothing), and an unmeasured box is not an "
+            "empty one: refusing to dispatch — pass --processes <n> with a "
+            "count you took")
+    claude_pids = set()
+    for line in pid_out.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].strip() == "claude":
+            claude_pids.add(int(parts[0]))
+    if not claude_pids:
+        # The controller running this is itself a claude session, so a
+        # healthy listing with none means the name did not match.
+        raise LoopError(
+            "`ps -eo pid,comm` listed processes and none named claude, yet "
+            "this controller is one: the pid count cannot be trusted, so "
+            "refusing to dispatch — pass --processes <n> with a count you "
+            "took")
+
+    status, out = herdr(["herdr", "agent", "list"])
+    if status != 0:
+        raise LoopError(
+            f"herdr agent list failed: {(out or '').strip() or 'no output'}")
+    try:
+        answer = json.loads(out)
+    except (TypeError, ValueError) as exc:
+        raise LoopError(f"herdr agent list did not answer JSON: {exc}") from exc
+    result = answer.get("result") if isinstance(answer, dict) else None
+    agents = result.get("agents") if isinstance(result, dict) else None
+    if not isinstance(agents, list):
+        raise LoopError(
+            f"herdr agent list answered {answer!r}, no agents list to count")
+
+    sid_to_pid = sessions()
+    working = 0
+    matched_pids = set()
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        session = agent.get("agent_session")
+        sid = session.get("value") if isinstance(session, dict) else None
+        pid = sid_to_pid.get(sid) if isinstance(sid, str) else None
+        if pid is None:
+            working += 1  # unresolved: fail closed, counted working
+            continue
+        matched_pids.add(pid)
+        # Only "idle" and "done" exclude a pane. A missing, null or
+        # unrecognised status is not known idle, so it counts as working —
+        # the same fail-closed reading an unresolved pane already gets;
+        # equality against "working" alone let a wedged or unclassified
+        # pane read as neither working nor unlisted and vanish from the
+        # count (Codex gate finding, 7a6bedd).
+        if agent.get("agent_status") not in ("idle", "done"):
+            working += 1
+
+    if not matched_pids:
+        raise LoopError(
+            f"herdr agent list named {len(agents)} agent(s) but none "
+            f"resolved to any of the {len(claude_pids)} claude pid(s) `ps` "
+            "shows on the box — herdr's registry reads as broken, not the "
+            "box as idle; pass --processes <n> with a count you took")
+
+    return working, len(claude_pids - matched_pids)
 
 
 def projected_processes(processes, workers, live):
@@ -340,12 +518,32 @@ def live_count(text):
     return count
 
 
-def agent_count(args, ps=None):
-    """(count, counter label): the override when one was passed, else a
-    measurement — never a default that reads as zero."""
+def agent_count(args, herdr=None, ps=None, sessions=None):
+    """(count, counter label, working, unlisted): the override when one
+    was passed, else herdr's (working panes + unlisted claude pids) —
+    see `count_working_herdr_agents`, which a #1075 controller ruling
+    corrected from a plain working-panes count once measurement showed
+    herdr does not list a subagent as its own agent. `working`/`unlisted`
+    are `None` when `count` did not come from that split — an override, or
+    the process-count fallback — so the peak line prints a flat number
+    rather than a fabricated one.
+
+    A herdr or `ps`-pid failure falls back to the plain process count (all
+    `claude` on the box, idle included) for `count` — an unmeasured box is
+    not an empty one, so the fallback is a measurement, never a default
+    that reads as zero — and the counter label names the fallback so a
+    refusal says which counter it used.
+    """
     if args.processes is not None:
-        return args.processes, "passed by --processes"
-    return count_agent_processes(ps), AGENT_COUNTER
+        return args.processes, "passed by --processes", None, None
+    try:
+        working, unlisted = count_working_herdr_agents(
+            ps=ps, herdr=herdr, sessions=sessions)
+    except LoopError as exc:
+        total = count_agent_processes(ps)
+        return total, (f"herdr could not answer ({exc}); fell back to "
+                       + AGENT_COUNTER), None, None
+    return working + unlisted, HERDR_COUNTER, working, unlisted
 
 
 def box_room(processes, committed_gb, add_gb, want,
@@ -428,12 +626,17 @@ def render_cores(state, free):
             f"{state['room']}")
 
 
-def render_peak(count, live, room):
+def render_peak(count, live, room, working=None, unlisted=None):
     """The peak arithmetic as a controller's status line carries it: the
     measured count, what each live worker may still add, and the workers
-    the box can take at their peak."""
+    the box can take at their peak. `working`/`unlisted` print the split
+    beside it, when both are given, so a controller can see how many of
+    the count are herdr-listed working panes versus unlisted claude pids
+    (a subagent or headless run herdr does not pane-list) (#1075)."""
     reserve, projected = projected_processes(count, room, live)
-    return (f"peak: {count} agent processes measured, {live} live "
+    split = (f" ({working} working, {unlisted} unlisted)"
+            if working is not None and unlisted is not None else "")
+    return (f"peak: {count} agent processes measured{split}, {live} live "
             f"{'worker' if live == 1 else 'workers'} holding {reserve} of "
             f"fan-out headroom, cap {PROCESS_CAP} — {room} more at "
             f"{SLOT_PEAK_PROCESSES} each projects {projected}")
@@ -772,9 +975,11 @@ def run(argv):
             "so is `landing`'s answer step, which is why `landing` reports "
             "what is owed and gates cleanup rather than answering anything."))
     subs = parser.add_subparsers(dest="command", required=True)
-    agent_help = ("Override for the agent processes on the box (Claude "
-                  "sessions, subagents included), not OS processes; never "
-                  "`ps | wc -l`. Default: measured by " + AGENT_COUNTER + ".")
+    agent_help = ("Override for the agent count this run's cap check reads "
+                  "(Claude sessions, subagents included), not OS processes; "
+                  "never `ps | wc -l`. Default: " + HERDR_COUNTER +
+                  ", falling back to " + AGENT_COUNTER +
+                  " only when herdr cannot answer.")
     subs.add_parser("seat", help="refuse unless this is a controller's seat")
     box = subs.add_parser("box", help="room on the box for one more worker")
     box.add_argument("--processes", type=process_count,
@@ -820,7 +1025,7 @@ def run(argv):
         if args.command == "seat":
             print(seat(git))
         elif args.command == "box":
-            count, counter = agent_count(args)
+            count, counter, _working, _unlisted = agent_count(args)
             verdict = box_check(count, args.committed_gb, args.add_gb,
                                 counter=counter, live=args.live)
             if not verdict["ok"]:
@@ -832,9 +1037,9 @@ def run(argv):
             candidates = read_clumps(args.candidates)
             in_flight = read_clumps(args.in_flight, live=True)
             free = max(args.free, 0)
-            # Measured before any early return: a broken `ps` must refuse
-            # here too, not hide behind "nothing to dispatch".
-            count, counter = agent_count(args)
+            # Measured before any early return: a broken herdr or `ps` must
+            # refuse here too, not hide behind "nothing to dispatch".
+            count, counter, working, unlisted = agent_count(args)
             # A landed clump awaiting cleanup is not a live worker: it is
             # filtered out before the core accounting, the peak live count,
             # and the frontier all see it, so a run file that sets `landed`
@@ -867,7 +1072,7 @@ def run(argv):
                 for refusal in refusals:
                     print(f"loop.py: {refusal}", file=sys.stderr)
                 return 1
-            print(render_peak(count, live, room))
+            print(render_peak(count, live, room, working, unlisted))
             state = frontier(candidates, unlanded)
             picked, same_tick_held = picks(state, room)
             lines = render_dispatch(picked, state["held"] + same_tick_held)

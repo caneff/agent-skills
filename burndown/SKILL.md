@@ -95,16 +95,30 @@ too.
 7. **Box check before every dispatch** — read `uptime` and `free -g`, and
    pass the committed `ulimit -v` GB to `loop.py dispatch`, which weighs every
    worker the tick would start, takes only as many as the box has room for,
-   and refuses outright when that is none. The **28** cap counts **agent
-   processes** — Claude sessions, subagents included — across the whole
-   shared box, not this run's and **not OS processes**: an idle WSL box holds
-   ~190 of those, so `ps | wc -l` refuses every dispatch. `loop.py` measures
-   the agent count itself (`ps -eo comm= | grep -cx claude`, by command name:
-   `pgrep -f claude` also matches plugin scripts and hook shims and
-   overcounts more than 2x); `--processes <n>` overrides it, and the refusal
-   names the number and the counter. A box it cannot measure, or
-   one listing no `claude` at all (the controller is one), is refused, never
-   read as empty; pass `--processes` with a count you took. The ~**24 GB**
+   and refuses outright when that is none. The **28** cap is on **Claude
+   sessions**, subagents included, across the whole shared box, not this
+   run's and **not OS processes**: an idle WSL box holds ~190 of those, so
+   `ps | wc -l` refuses every dispatch. `loop.py` counts herdr's **working**
+   panes (`herdr agent list`; every `agent_status` counts except `idle`
+   and `done`, so a missing or unrecognised status fails closed as
+   working rather than vanishing) plus every `claude` pid `ps -eo
+   pid,comm` shows that no herdr pane resolves to — a subagent or
+   headless run herdr does not pane-list, matched to panes through the
+   sessions registry the same way `resolve-controller` does — validated
+   against `/proc/<pid>/stat`'s own start time, since a pid recycles and a
+   stale registry record naming a live pid must not silently claim it; an
+   unmatched pid fails closed and counts, the same as a herdr pane whose
+   session cannot be resolved at all. Idle and done panes are the only thing
+   excluded. It falls back to a flat process count (`ps -eo comm= |
+   grep -cx claude`, by command name: `pgrep -f claude` also matches plugin
+   scripts and hook shims and overcounts more than 2x) only when herdr
+   cannot answer, or when its listing is empty or matches none of the
+   box's actual claude pids while some exist — herdr's registry read as
+   broken, not the box read as idle. `--processes <n>` overrides both, and
+   the refusal names the number and the counter it used. A box it cannot
+   measure by either counter, or a process listing no `claude` at all (the
+   controller is one), is refused, never read as empty; pass `--processes`
+   with a count you took. The ~**24 GB**
    ceiling is on the sum of the per-process `ulimit -v` caps. A slot the box
    cannot afford stays empty; that is not a reason to dispatch into it
    anyway. A slot is budgeted at its **peak**, not its steady state (#933):
