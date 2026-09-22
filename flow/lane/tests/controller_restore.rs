@@ -55,12 +55,15 @@ fn append_worker(f: &Fixture, record: &lane::workers::WorkerRecord) {
     lane::workers::append(&f.home(), &pid, record).unwrap();
 }
 
-struct RunOpts<'a> {
-    stdin: &'a str,
-    extra_env: &'a [(&'a str, &'a str)],
-}
-
-fn run(f: &Fixture, opts: RunOpts) -> std::process::Output {
+/// Runs the real binary with `stdin` on its stdin and `extra_env` layered
+/// over a base env that always carries `GH_PR_STATUS` (#1042 review, S5):
+/// every test goes through the new `gh pr list --json number,state` fake by
+/// default, not only the three that used to opt in — the no-PR tests below
+/// exercise its missing-file branch precisely because nothing wrote into
+/// `pr_status_dir()` for their branch (P1: this is what makes "no PR yet"
+/// mean the new fake's own "nothing recorded" case, not a fallback to a
+/// different fake entirely).
+fn run(f: &Fixture, stdin: &str, extra_env: &[(&str, &str)]) -> std::process::Output {
     use std::io::Write;
     let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_controller-restore"));
     cmd.env_clear()
@@ -68,14 +71,15 @@ fn run(f: &Fixture, opts: RunOpts) -> std::process::Output {
         .env("HOME", f.home())
         .env("CALL_LOG", f.call_log())
         .env("HERDR_AGENTS", f.agents_file())
+        .env("GH_PR_STATUS", f.pr_status_dir())
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    for (k, v) in opts.extra_env {
+    for (k, v) in extra_env {
         cmd.env(k, v);
     }
     let mut child = cmd.spawn().unwrap();
-    child.stdin.take().unwrap().write_all(opts.stdin.as_bytes()).unwrap();
+    child.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap();
     child.wait_with_output().unwrap()
 }
 
@@ -89,7 +93,7 @@ fn stdout(out: &std::process::Output) -> String {
 fn no_session_start_hook_json_and_no_workers_file_is_silent() {
     let f = Fixture::new();
     live_session(&f, "controller-50");
-    let out = run(&f, RunOpts { stdin: r#"{"hook_event_name":"SessionStart"}"#, extra_env: &[] });
+    let out = run(&f, r#"{"hook_event_name":"SessionStart"}"#, &[]);
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(stdout(&out), "", "a session that never dispatched a worker must print nothing");
 }
@@ -99,7 +103,7 @@ fn a_subagents_own_session_start_is_silent_even_with_workers_present() {
     let f = Fixture::new();
     live_session(&f, "controller-50");
     append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
-    let out = run(&f, RunOpts { stdin: r#"{"agent_id":"sub-1"}"#, extra_env: &[] });
+    let out = run(&f, r#"{"agent_id":"sub-1"}"#, &[]);
     assert!(out.status.success(), "{}", out_text(&out));
     assert_eq!(stdout(&out), "", "a subagent's own SessionStart controls nothing of its own to restore");
 }
@@ -112,7 +116,7 @@ fn a_worker_with_no_pr_yet_and_a_live_agent_prints_the_restore_line() {
     live_session(&f, "controller-50");
     f.set_agents(r#"[{"name":"sudokupad-art-1042","agent_status":"working"}]"#);
     append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
-    let out = run(&f, RunOpts { stdin: "{}", extra_env: &[] });
+    let out = run(&f, "{}", &[]);
     assert!(out.status.success(), "{}", out_text(&out));
     let line = stdout(&out);
     assert!(line.contains("You control implement-1042 (sudokupad-art-1042, agent working)"), "{line}");
@@ -125,7 +129,7 @@ fn a_stale_worker_record_from_a_reused_pid_is_dropped_and_reported() {
     let f = Fixture::new();
     live_session(&f, "controller-50");
     append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", "not-this-sessions-start"));
-    let out = run(&f, RunOpts { stdin: "{}", extra_env: &[] });
+    let out = run(&f, "{}", &[]);
     assert!(out.status.success(), "{}", out_text(&out));
     let line = stdout(&out);
     assert!(line.contains("dropped 1 stale worker record"), "{line}");
@@ -141,7 +145,7 @@ fn an_open_pr_is_reported_with_the_merge_pointer() {
     f.set_agents(r#"[{"name":"sudokupad-art-1042","agent_status":"working"}]"#);
     append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
     f.set_pr_status("implement-1042", "152 OPEN");
-    let out = run(&f, RunOpts { stdin: "{}", extra_env: &[("GH_PR_STATUS", f.pr_status_dir().to_str().unwrap())] });
+    let out = run(&f, "{}", &[]);
     assert!(out.status.success(), "{}", out_text(&out));
     let line = stdout(&out);
     assert!(line.contains("PR #152 open, not merged — follow implement/SKILL.md \u{a7} The merge"), "{line}");
@@ -154,7 +158,7 @@ fn a_merged_pr_is_reported_as_run_cleanup() {
     f.set_agents(r#"[{"name":"sudokupad-art-1042","agent_status":"working"}]"#);
     append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
     f.set_pr_status("implement-1042", "152 MERGED");
-    let out = run(&f, RunOpts { stdin: "{}", extra_env: &[("GH_PR_STATUS", f.pr_status_dir().to_str().unwrap())] });
+    let out = run(&f, "{}", &[]);
     assert!(out.status.success(), "{}", out_text(&out));
     assert!(stdout(&out).contains("PR #152 merged — run cleanup"), "{}", stdout(&out));
 }
@@ -166,7 +170,7 @@ fn a_closed_pr_is_reported_as_such() {
     f.set_agents(r#"[{"name":"sudokupad-art-1042","agent_status":"working"}]"#);
     append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
     f.set_pr_status("implement-1042", "152 CLOSED");
-    let out = run(&f, RunOpts { stdin: "{}", extra_env: &[("GH_PR_STATUS", f.pr_status_dir().to_str().unwrap())] });
+    let out = run(&f, "{}", &[]);
     assert!(out.status.success(), "{}", out_text(&out));
     assert!(stdout(&out).contains("PR #152 closed without merging — check on the worker"), "{}", stdout(&out));
 }
@@ -178,7 +182,7 @@ fn a_failed_herdr_agent_list_reports_unknown_not_no_live_agent() {
     let f = Fixture::new();
     live_session(&f, "controller-50");
     append_worker(&f, &worker("implement-1042", "sudokupad-art-1042", &own_start()));
-    let out = run(&f, RunOpts { stdin: "{}", extra_env: &[("HERDR_LIST_FAIL", "true")] });
+    let out = run(&f, "{}", &[("HERDR_LIST_FAIL", "true")]);
     assert!(out.status.success(), "{}", out_text(&out));
     let line = stdout(&out);
     assert!(line.contains("herdr status unknown — could not ask herdr"), "{line}");

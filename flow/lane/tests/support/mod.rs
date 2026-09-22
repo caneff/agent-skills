@@ -50,8 +50,11 @@ impl Fixture {
         self.tmp.path().join("pr-status")
     }
     /// Records the `<number> <STATE>` line (e.g. `"152 OPEN"`) `gh pr list
-    /// --head <branch>` answers with, once the caller sets `GH_PR_STATUS` to
-    /// `pr_status_dir()` in its own env. No call for a branch means no PR.
+    /// --head <branch>` answers with, for a caller whose spawned process has
+    /// `GH_PR_STATUS` set to `pr_status_dir()`. No call for a branch means no
+    /// PR — `controller_restore.rs`'s `run` sets `GH_PR_STATUS` in its own
+    /// base env for every test, so this is the only setup a PR-bearing
+    /// scenario needs.
     pub fn set_pr_status(&self, branch: &str, line: &str) {
         std::fs::create_dir_all(self.pr_status_dir()).unwrap();
         std::fs::write(self.pr_status_dir().join(branch.replace('/', "__")), format!("{line}\n")).unwrap();
