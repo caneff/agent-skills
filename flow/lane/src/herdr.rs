@@ -2,6 +2,14 @@
 //! for the bash port's `jq` filters over the same JSON.
 
 use serde::Deserialize;
+use std::time::Duration;
+
+/// OS-level bound for a plain herdr query (status, agent get/list, pane
+/// list): a herdr server that answers at all answers within this, so a hang
+/// past it means the subprocess itself is stuck, not that the work is
+/// legitimately slow. One crate-level const so `implement-dispatch` and
+/// `resolve-controller` can't drift apart on it (#1011 S4).
+pub const HERDR_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Deserialize)]
 struct AgentList {

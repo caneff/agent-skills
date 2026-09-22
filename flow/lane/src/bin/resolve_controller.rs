@@ -6,13 +6,10 @@
 //! that is no herdr agent is accepted only if a live session bears it now.
 //! Nothing resolves -> exit 1 with the reason, never a guess.
 
+use lane::herdr::HERDR_QUERY_TIMEOUT;
 use lane::{herdr, runner::quiet_stdout_timeout, sessions};
 use std::path::Path;
 use std::process::ExitCode;
-use std::time::Duration;
-
-/// The same bound `implement-dispatch` puts on its herdr queries.
-const HERDR_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn fail(msg: &str) -> ExitCode {
     eprintln!("resolve-controller: {msg}");
@@ -23,9 +20,9 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!(
-            "usage: resolve-controller <controller>\n\
-             Prints the live Claude session name SendMessage takes for <controller>, a\n\
-             herdr agent name (herdr agent list -> agent_session.value ->\n\
+            "usage: resolve-controller <name>\n\
+             Prints the live Claude session name SendMessage takes for <name>, any herdr\n\
+             agent name (herdr agent list -> agent_session.value ->\n\
              ~/.claude/sessions/*.json name) or a session name a live session bears now."
         );
         return ExitCode::SUCCESS;
