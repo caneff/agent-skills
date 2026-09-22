@@ -77,7 +77,11 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   (raises the host window by owning process) → `herdr-focus-latest` (focuses
   the pane). The picker's host list is `Zed,wezterm-gui,WindowsTerminal,Code`,
   first match wins; a host missing from it means a click raises nothing.
-  These scripts are in no git repo. Test with
+  The five live in `flow/bin/`; `flow/bin/herdr-toast-install` (run from the
+  primary checkout) links them into `~/.local/bin` and points the
+  `herdrfocus` registry handler at `flow/bin`. Windows cannot follow a WSL
+  symlink over `\\wsl.localhost`, so the `.vbs` and `.ps1` are addressed by
+  their `flow/bin` path, never the `~/.local/bin` link. Test with
   `HERDR_TOAST_PANE=<pane id> notify-send "t" "b"` from a different
   workspace — a toast for the already-focused pane looks like a no-op.
 - **Fallback host: WezTerm nightly**, installed and configured
