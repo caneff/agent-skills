@@ -1387,3 +1387,33 @@ fn a_controller_that_resolves_to_no_live_session_dispatches_with_no_record_and_n
     assert!(out.status.success(), "{}", out_text(&out));
     assert!(!workers_file(&f).exists(), "no controller record file should be created");
 }
+
+/// Installs a `git` on `f`'s scratch PATH, ahead of the real one, that hangs
+/// forever on `fetch` and delegates every other subcommand to the real git —
+/// so the claim lock's own git calls (rev-parse, worktree list, branch
+/// checks) still work and only the fetch stalls (#976).
+fn install_hanging_fetch_git(f: &Fixture) {
+    let real_git = which("git");
+    let script = format!(
+        "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = fetch ]; then\n    sleep 600\n    exit 1\n  fi\ndone\nexec {} \"$@\"\n",
+        real_git.display()
+    );
+    let path = f.tmp.path().join("bin/git");
+    std::fs::write(&path, script).unwrap();
+    let mut perms = std::fs::metadata(&path).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    std::fs::set_permissions(&path, perms).unwrap();
+}
+
+#[test]
+fn a_stalled_fetch_fails_fast_under_the_bound_instead_of_pinning_the_claim_lock() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    install_hanging_fetch_git(&f);
+    let scenario = with(&default_scenario(), &[("LANE_FETCH_TIMEOUT_MS", "200")]);
+    let start = std::time::Instant::now();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    assert!(start.elapsed() < std::time::Duration::from_secs(5), "waited {:?} past a 200ms fetch bound", start.elapsed());
+    assert!(refused(&out, &f.calls(), &repo, "395", "git fetch"), "{}", out_text(&out));
+}

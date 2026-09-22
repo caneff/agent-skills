@@ -265,6 +265,17 @@ fn claim_lock_wait() -> std::time::Duration {
     std::time::Duration::from_millis(ms)
 }
 
+/// OS-level bound for the `git fetch` inside the claim lock (#976): unlike
+/// the plain git calls around it — rev-parse, worktree list, branch checks,
+/// all local and fast — fetch hits the network, and a stalled remote pinned
+/// the claim lock for this run's whole life, refusing every other dispatch
+/// of the repo past the 30s lock wait. `LANE_FETCH_TIMEOUT_MS` shortens it
+/// for tests.
+fn fetch_timeout() -> std::time::Duration {
+    let ms = env::var("LANE_FETCH_TIMEOUT_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(120_000);
+    std::time::Duration::from_millis(ms)
+}
+
 /// The per-repository claim lock: held from the first read of a clump's
 /// tickets to the last claim edit, so two dispatches naming one ticket
 /// serialize and the second reads the first's claim. An OS `flock` on the
@@ -766,8 +777,9 @@ fn run() -> Result<(), ExitCode> {
     if quiet_ok_timeout("herdr", &["agent", "get", &agent], HERDR_QUERY_TIMEOUT) {
         return Err(die(format!("herdr agent {agent} already exists")));
     }
-    if !quiet_ok("git", &["-C", &primary, "fetch", "-q", "origin"]) {
-        return Err(die(format!("git fetch failed in {primary}")));
+    let fetch_timeout = fetch_timeout();
+    if !quiet_ok_timeout("git", &["-C", &primary, "fetch", "-q", "origin"], fetch_timeout) {
+        return Err(die(format!("git fetch failed or exceeded its {fetch_timeout:?} bound in {primary}")));
     }
     let registered_worktree = quiet_stdout("git", &["-C", &primary, "worktree", "list", "--porcelain"])
         .map(|out| out.lines().any(|l| l == format!("worktree {}", wt.display())))
