@@ -60,7 +60,7 @@ IFS=$'\t' read -r n controller < <(entries | jq -r '
 # record's procStart — a stale record whose pid was reused has another, as
 # in flow/lane's sessions reader.
 resolve_session() {
-  local mode="$1" val="$2" f pid start sid nm sock
+  local mode="$1" val="$2" f pid start sid nm sock stat fields
   for f in "$HOME"/.claude/sessions/*.json; do
     [ -e "$f" ] || continue
     IFS=$'\t' read -r pid start sid nm sock < <(jq -r --arg mode "$mode" --arg v "$val" \
@@ -78,26 +78,35 @@ resolve_session() {
 
 # The brief carries the controller's herdr agent name (#923); a compliant
 # worker resolves that to a session name or socket before sending, so
-# matching on the brief's literal can miss a delivered report and, when an
-# alert is owed, find no live session for the pane lookup. Resolve the same
-# two hops `resolve-controller` does — herdr agent name -> `agent_session`
-# id -> the live session record's current name and socket — before either
-# use, and fall back to treating the brief's value as a session name
-# directly for an older brief that already carries one (#1014).
-herdr_sid="$(timeout 3 herdr agent list 2>/dev/null \
+# matching on the brief's literal alone can miss a delivered report and,
+# when an alert is owed, find no live session for the pane lookup. Resolve
+# the same two hops `resolve-controller` does — herdr agent name ->
+# `agent_session` id -> the live session record's current name and socket —
+# before either use, but keep matching the brief's own literal too: nothing
+# here requires a worker to route through `resolve-controller` first, and
+# `resolve-controller` itself refuses to resolve a live session with no
+# `name` (`sessions::name_of_session`), so a record this can't name is one a
+# compliant worker couldn't have addressed either (#1014). A worktree
+# without `herdr`, or a `herdr agent list` that fails or times out, falls
+# back the same way an older brief already carrying a session name does.
+herdr_sid="$(timeout 2 herdr agent list 2>/dev/null \
   | jq -r --arg c "$controller" '.result.agents[]? | select((.name // "") == $c) | .agent_session.value // empty' 2>/dev/null \
   | head -n1)"
 resolved=""
 [ -n "$herdr_sid" ] && resolved="$(resolve_session sid "$herdr_sid")"
 [ -n "$resolved" ] || resolved="$(resolve_session name "$controller")"
-ctl_session="" ctl_socket="" c="$controller"
+ctl_session="" ctl_socket="" resolved_name=""
 if [ -n "$resolved" ]; then
-  IFS=$'\t' read -r ctl_session c ctl_socket <<<"$resolved"
+  IFS=$'\t' read -r ctl_session resolved_name ctl_socket <<<"$resolved"
 fi
 
 # The verdict for this stop: `reported`, `waiting` on a subagent, or `silent`,
-# plus the transcript's last entry as the stop's key.
-IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$c" --arg sock "$ctl_socket" '
+# plus the transcript's last entry as the stop's key. `$c` is the brief's
+# literal controller value (a herdr agent name or an already-live session
+# name) and `$rn` its resolved session name when resolution found one — a
+# report is counted against either, since nothing here requires a worker to
+# have resolved before sending (#1014).
+IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg rn "$resolved_name" --arg sock "$ctl_socket" '
   to_entries as $all
   | ($all | map(select(.value.type == "user"
       and (.value.origin.kind == "human" or (.value.origin.kind == "peer" and .value.origin.handback != true))))
@@ -105,7 +114,10 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$c" --arg sock "$ctl
   | .[($start + 1):] as $after
   | [$all[] | select(.value.type == "assistant") | .value.message.content[]?
       | select(.type == "tool_use" and .name == "SendMessage")
-      | select(.input.to | strings | . == $c or startswith($c + " [") or ($sock != "" and . == "uds:" + $sock))
+      | select(.input.to | strings
+          | (. == $c or startswith($c + " [")
+             or ($rn != "" and (. == $rn or startswith($rn + " ["))))
+             or ($sock != "" and . == "uds:" + $sock))
       | .id] as $sends
   # Every delivered report, by its position in the transcript.
   | [$all[] | select(.value.type == "user" and (.value.toolUseResult | type) == "object"
@@ -140,21 +152,24 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$c" --arg sock "$ctl
   # or one that errored, is a call and not evidence of life.
   | [$after[] | select(.type == "user") | .message.content | arrays[]
       | select(.type == "tool_result" and .is_error != true) | .tool_use_id] as $answered
-  # A Monitor timeout notification (`<event>[Monitor timed out — re-arm if
-  # needed.]</event>`, no `<status>`) is the monitor stopping, not a tick: it
-  # reads a finish, not a touch, or the launch it names stays outstanding
-  # across every later turn (#981).
+  # A Monitor timeout notification (exactly `<event>[Monitor timed out —
+  # re-arm if needed.]</event>`, no `<status>`) is the monitor stopping, not
+  # a tick: it reads a finish, not a touch, or the launch it names stays
+  # outstanding across every later turn (#981). Matched on the literal
+  # marker inside `<event>`, not a bare substring test, so a monitor whose
+  # own tailed output happens to mention "Monitor timed out" in free text
+  # is not misread as its own end.
   | [$all[] | .value | select(.type == "user" and .origin.kind == "task-notification")
       | .message.content | strings | select(test("<status>") | not)
-      | select(test("Monitor timed out"))
+      | select(test("<event>\\[Monitor timed out — re-arm if needed\\.\\]</event>"))
       | scan("<task-id>([^<]+)</task-id>")[0]] as $timed_out
   | ([$after[] | select(.type == "assistant") | .message.content[]?
         | select(.type == "tool_use" and (.id | IN($answered[]))) | .input | objects
         | (.task_id, .shell_id, .bash_id, .agentId, .agent_id, .to) | strings]
      + [$after[] | select(.type == "user" and .origin.kind == "task-notification")
         | .message.content | strings | select(test("<status>") | not)
-        | select(test("Monitor timed out") | not)
-        | scan("<task-id>([^<]+)</task-id>")[0]]) as $touched
+        | scan("<task-id>([^<]+)</task-id>")[0]
+        | select(IN($timed_out[]) | not)]) as $touched
   # An id is compared whole, in the fields that name a task or an agent, and
   # never searched for inside free text: an id that merely appears in a
   # command, a written file or a peer message is not evidence of life.
@@ -199,9 +214,11 @@ grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
 
 logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$1" "$2" >> "$log"; }
 
-# Every herdr call below ends by a 12 s deadline, so the log line is written
-# inside the hook's 15 s timeout.
-deadline=$((SECONDS + 12))
+# Every herdr call below ends by a 10 s deadline, measured from here — not
+# 12 s, because the controller resolution above already spent up to its own
+# 2 s budget on the same 15 s hook timeout, and this deadline has to leave
+# room for that whether or not the stop turned out silent (#1014).
+deadline=$((SECONDS + 10))
 
 worker_agent="$(timeout 2 herdr agent get "${HERDR_PANE_ID:-}" 2>/dev/null | jq -r '.result.agent.name // empty' 2>/dev/null)"
 worker_agent="${worker_agent:-${HERDR_PANE_ID:-unknown pane}}"

@@ -86,6 +86,11 @@ monitor_event() { printf '{"type":"user","origin":{"kind":"task-notification"},"
 # `<task-id>` with no `<status>`, same shape as monitor_event, but the
 # monitor has stopped watching, not ticked.
 monitor_timeout() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<summary>Monitor event: \\"placeholder wait\\"</summary>\\n<event>[Monitor timed out \\u2014 re-arm if needed.]</event>\\n</task-notification>"}}\n' "$1"; }
+# monitor_event_mentioning_timeout <task-id> : a real, live Monitor tick
+# whose own tailed text merely mentions the timeout phrase — must not be
+# misread as the monitor's own timeout (#981's C3 finding: the match has to
+# be the exact marker inside `<event>`, not a bare substring test).
+monitor_event_mentioning_timeout() { printf '{"type":"user","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\\n<task-id>%s</task-id>\\n<summary>Monitor event: job progress</summary>\\n<event>13:45:43 note: the other Monitor timed out, re-armed it</event>\\n</task-notification>"}}\n' "$1"; }
 # task_stop <task-id> : the worker stopping a monitor itself.
 task_stop() { printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"ts-%s","name":"TaskStop","input":{"task_id":"%s"}}]}}\n' "$1" "$1"; }
 # work : a tool call that is not a report — the mark of a turn that did
@@ -133,6 +138,20 @@ expect_alert() {
 expect_none() {
   local name=$1
   if [ -z "$pane" ]; then echo "PASS: $name"; else echo "FAIL: $name — want no prompt"; echo "  pane: $pane text: $text"; fails=1; fi
+}
+# expect_reported <name> : a genuine `reported` verdict, stronger than
+# expect_none — no prompt AND no `not-sent` log line. A `silent` verdict
+# whose pane lookup happens to fail also leaves no prompt, so expect_none
+# alone cannot tell a real report from a report the matching missed and the
+# missing pane then hid (#1014's hollow-witness finding, C1).
+expect_reported() {
+  local name=$1
+  if [ -z "$pane" ] && ! grep -q 'not-sent' "$log" 2>/dev/null; then
+    echo "PASS: $name"
+  else
+    echo "FAIL: $name — want a genuine reported verdict (no prompt, no not-sent log line)"
+    echo "  pane: $pane log: $(cat "$log" 2>/dev/null)"; fails=1
+  fi
 }
 reset_log() { rm -f "$log"; }
 
@@ -317,6 +336,19 @@ expect_none "a stop while a Monitor task is out does not alert"
 run "monitor timed out this turn, nothing else touched it" "$t"
 expect_alert "a timed-out Monitor's statusless notification does not keep the launch outstanding, so a silent stop alerts"
 
+# The exact-marker requirement, the other direction: a live monitor whose
+# tailed output merely mentions the timeout phrase in free text is still
+# running, so the launch stays out and a stop is not silent (#981's C3).
+reset_log
+t="$tmp/monitor-timeout-mention.jsonl"
+{ human "$brief"; send s1 "skills-b6"; ok s1; peer "fix the findings"; work;
+  monitor_launch bmto2; assistant_text "watching the job"; } > "$t"
+run "monitor out" "$t"
+expect_none "a stop while a Monitor task is out does not alert"
+{ peer "status?"; monitor_event_mentioning_timeout bmto2; assistant_text "noted, still watching"; } >> "$t"
+run "monitor event mentioning the timeout phrase in free text, not the exact marker" "$t"
+expect_none "a live monitor's own text merely mentioning the timeout phrase does not read as the monitor's own end"
+
 # Already reported, then answered a message that needed no reply (#886,
 # false alert 3 of 3 — the one a diligent controller manufactures for
 # itself by closing its own loops). Nothing was done since the report, so
@@ -459,7 +491,16 @@ herdr_brief='<command-message>implement</command-message>\n<command-name>/implem
 t="$tmp/herdr-name-reported.jsonl"
 { human "$herdr_brief"; send s1 "skills-c7"; ok s1; assistant_text "PR up sent"; } > "$t"
 run "herdr-name controller, report to the resolved session" "$t"
-expect_none "a report addressed to the resolved session name counts as reported when the brief carries a herdr agent name"
+expect_reported "a report addressed to the resolved session name counts as reported when the brief carries a herdr agent name"
+# A report addressed to the brief's own literal herdr name (never resolved)
+# also counts: nothing requires a worker to resolve before sending, and
+# resolve-controller itself refuses a live session with no name, so a
+# session this can't name is one a compliant worker couldn't have
+# addressed either (P1).
+t="$tmp/herdr-name-literal.jsonl"
+{ human "$herdr_brief"; send s1 "hctl-99"; ok s1; assistant_text "PR up sent"; } > "$t"
+run "herdr-name controller, report to the brief's own literal" "$t"
+expect_reported "a report addressed to the brief's literal herdr name also counts as reported"
 t="$tmp/herdr-name-silent.jsonl"
 { human "$herdr_brief"; assistant_text "done, no report"; } > "$t"
 run "herdr-name controller, no report" "$t"
