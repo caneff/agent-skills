@@ -2147,6 +2147,59 @@ fn a_branch_with_no_holder_at_all_since_the_plan_still_reaps() {
 }
 
 #[test]
+fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reaping() {
+    // #975: `worktree_holding`'s old `unwrap_or_default()` read a `git
+    // worktree list --porcelain` that fails the same as one that succeeded
+    // and found no holder, so `reap_one`'s destructive-time re-check waved
+    // the branch through instead of refusing it up front. `git branch -d`'s
+    // own "used by worktree" check still catches this particular case —
+    // that check reads the worktree's HEAD file directly, not the listing —
+    // but only after the run has already skipped the linked-worktree removal
+    // step and moved on to deleting the local branch, so what should be a
+    // clean, single-line refusal comes out as a `FAILED` row and a
+    // non-zero exit instead.
+    //
+    // A `git worktree list` failure has to be made to fail only that one
+    // subcommand: corrupting the repo wholesale (e.g. `.git/HEAD`) also
+    // fails `is_merged`'s own git calls in `cleanup_branch`, which then
+    // refuses first for an unrelated reason ("not merged") and the test
+    // would pass on the unpatched code too, for the wrong mechanism. So the
+    // fixture's own `git` stub, not real git, is replaced with a wrapper
+    // that fails only `worktree list --porcelain`, and only once a marker a
+    // pre-push hook drops mid-run exists — same timing as the "moved since
+    // the plan" fixtures above, but scoped to this one subcommand.
+    let c = Cleanup::new();
+    let real_git = support::cleanup::which("git");
+    let marker = c.root().join("worktree-list-broken");
+    let git_stub = c.root().join("full/git");
+    std::fs::remove_file(&git_stub).unwrap();
+    std::fs::write(
+        &git_stub,
+        format!(
+            "#!/bin/sh\ncase \" $* \" in\n  *' worktree list --porcelain '*)\n    [ -e {marker} ] && exit 1\n    ;;\nesac\nexec {real_git} \"$@\"\n",
+            marker = marker.display(),
+            real_git = real_git.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&git_stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let r = reap_repo(&c, "r45", &["118", "119"]);
+    let planned = r.join(".claude/worktrees/implement-119");
+    let hook = r.join(".git/hooks/pre-push");
+    std::fs::write(&hook, format!("#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE\n: > {}\n", marker.display())).unwrap();
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let run = c.mc(Tools::Full, &["--reap", "--repo", s(&r), "--yes"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(c.has_branch(&r, "implement-119"), "the branch was deleted despite a listing git could not read:\n{}", run.text());
+    assert!(planned.is_dir(), "the worktree was removed despite a listing git could not read:\n{}", run.text());
+    let want = format!("  {}  could not list worktrees at {}, not removed: git worktree list failed (refused at removal)", planned.display(), r.display());
+    assert!(run.has(&want), "{}", run.text());
+    assert!(run.has("reap summary: 1 reaped, 1 skipped"), "{}", run.text());
+}
+
+#[test]
 fn a_workspace_whose_path_resolves_outside_the_repo_is_not_a_candidate() {
     // The boundary the Codex pass on PR #878 asked about. git resolves a
     // worktree's path when it registers it, so `git worktree add` through a
