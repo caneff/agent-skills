@@ -990,6 +990,25 @@ def test_the_cli_holds_the_slot_and_says_so_in_its_status_line():
         assert "dispatch  #500" not in got.stdout, got.stdout
 
 
+def test_the_cli_dispatch_treats_a_landed_clumps_null_job_as_a_freed_slot():
+    # A run file sets `landed` without ever clearing `job`; charging that
+    # entry's absent job record before filtering it out refuses the whole
+    # tick with "live with no job record" (#1003).
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [500], "closure": ["fresh.py"]}], fh)
+        clumps = in_flight_clumps(job=None, other=NO_JOB)
+        clumps[0]["landed"] = "a1b2c3d"
+        with open(live, "w") as fh:
+            json.dump(clumps, fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "4", "--committed-gb", "4")
+        assert got.returncode == 0, got
+        assert "dispatch  #500" in got.stdout, got.stdout
+
+
 def test_the_cli_refuses_a_dispatch_while_a_worker_is_unrecorded():
     with tempfile.TemporaryDirectory() as tmp:
         cand, live = dispatch_files(tmp, None)

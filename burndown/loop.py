@@ -781,7 +781,14 @@ def run(argv):
             # Measured before any early return: a broken `ps` must refuse
             # here too, not hide behind "nothing to dispatch".
             count, counter = agent_count(args)
-            cores = core_room(free, in_flight)
+            # A landed clump awaiting cleanup is not a live worker: it is
+            # filtered out before either the core accounting or the peak
+            # live count sees it, so a run file that sets `landed` without
+            # ever clearing `job` reads as a freed slot instead of refusing
+            # the whole tick on a job record that will never be recorded
+            # (#1003).
+            unlanded = [c for c in in_flight if not c.get("landed")]
+            cores = core_room(free, unlanded)
             cores_line = render_cores(cores, free)
             if cores_line:
                 print(cores_line)
@@ -796,9 +803,7 @@ def run(argv):
                       "declared job")
                 print(render_dispatch([], frontier(candidates, in_flight)))
                 return 0
-            # A landed clump awaiting cleanup is not a live worker; charging
-            # its headroom would refuse on processes that do not exist.
-            live = len([c for c in in_flight if not c.get("landed")])
+            live = len(unlanded)
             room, refusals = box_room(count, args.committed_gb,
                                       args.add_gb, cores["room"], counter,
                                       live)
