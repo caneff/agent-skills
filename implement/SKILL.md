@@ -195,7 +195,9 @@ No PR and no reviewer; Chris reads the log after.
    ad hoc `gh issue create` skips that role. `filed` is reserved for a high
    finding, under the severity mapping below. A finding that is not high and
    not fixed in the round takes `leftover`: no ticket of its own, only a
-   sidecar line (step 2) a later sweep collects, and `leftover` in prose.
+   sidecar line (step 2) and `leftover` in prose. The sweep that collects
+   leftovers into one ticket is not built yet (#1029, #1030); until it
+   lands, the sidecar line is the only record.
    On a repo whose `origin` owner isn't
    your `gh` login, `/file-ticket` hands the command back instead of filing,
    so there is no ticket number: the disposition is `handed back: <the
@@ -215,9 +217,9 @@ No PR and no reviewer; Chris reads the log after.
 
    **The severity mapping.** Stated here once; the reviewer briefs in
    `multi-axis-code-review` point here. A finding is high when it is a
-   Codex `[high]` or a correctness `CONFIRMED`. Codex medium and low,
-   correctness `PLAUSIBLE`, and standards `hard` and `judgement` are not
-   high, and nothing else is.
+   Codex `[high]` or a correctness `CONFIRMED`. Nothing else is high:
+   Codex medium and low, correctness `PLAUSIBLE`, and standards `hard` and
+   `judgement` are not high.
 
    **The adjacent-fix rule.** A round-1 finding is fixed in the round, not
    filed, when all five parts hold: it sits in a file already in the diff;
@@ -229,7 +231,8 @@ No PR and no reviewer; Chris reads the log after.
    alone. Its disposition is `fixed (adjacent)`, with that sha; its sidecar
    line is step 2's adjacent form.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
-   Pass the reviewers every disputed, ruled, or other-ticket item as settled.
+   Pass the reviewers every ruled or other-ticket item as settled; a
+   disposition you claim, `disputed` included, goes as a claim to check.
    What it fails on, by finding id, is its brief's to state:
    `multi-axis-code-review/SKILL.md` § 6.
 
@@ -341,14 +344,14 @@ The body has these sections and nothing else:
 - **Tests run** — the command and its result line.
 - **Decisions made** — each with its reason. On a heavy Claude-lane build,
   every round-1 finding, each with its disposition (fixed, with the sha;
-  disputed, with the why; filed, with its ticket number; or handed back,
-  with the command) — § The merge
+  disputed, with the why; filed, with its ticket number; handed back,
+  with the command; or `leftover`) — § The merge
   step 3's Codex classification reads this list. Cite each finding by the
   id its sidecar gave it (`S1`/`P2`/`C3`) rather than restating it in
   prose (#855) — that's what makes this list joinable against
   `dispositions-<n>.jsonl` without a reading pass. On any other build, every
   round-1 finding that was disputed (with the why), filed (with its
-  ticket number) or handed back (with the command).
+  ticket number), handed back (with the command) or left over.
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
 
 Send the controller "PR up" in this shape:
