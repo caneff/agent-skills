@@ -119,6 +119,38 @@ def test_refill_fills_every_free_slot_lowest_ticket_first():
     assert [c["tickets"] for c in picked] == [[452], [501]]
 
 
+def test_picks_names_a_same_tick_collision_and_its_picked_blocker():
+    # #970's own evidence: `closure.py --json` piped a hub family (452, 457,
+    # 458) and one independent ticket (501) into `dispatch --free 4` with
+    # nothing in flight. #452 is picked first and takes the hub file; #457
+    # and #458 collide with it this same tick and must not vanish silently.
+    picked, held = loop.picks(loop.frontier(candidates_781(), []), 4)
+    assert [c["tickets"] for c in picked] == [[452], [501]]
+    by_ticket = {tuple(h["clump"]["tickets"]): h for h in held}
+    assert sorted(by_ticket) == [(457,), (458,)]
+    assert by_ticket[(457,)]["holder"] == 452
+    assert by_ticket[(457,)]["over"] == [HOT]
+    assert by_ticket[(457,)]["same_tick"] is True
+    assert "workspace" not in by_ticket[(457,)]
+
+
+def test_the_cli_names_a_same_tick_collision_as_a_held_line():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump(candidates_781(), fh)
+        with open(live, "w") as fh:
+            json.dump([], fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "4", "--processes", "4", "--committed-gb", "4")
+        assert got.returncode == 0, got
+        assert "dispatch  #452" in got.stdout, got.stdout
+        assert "dispatch  #501" in got.stdout, got.stdout
+        assert "held      #457  by #452 this tick" in got.stdout, got.stdout
+        assert "held      #458  by #452 this tick" in got.stdout, got.stdout
+
+
 def test_refill_takes_nothing_when_no_slot_is_free():
     assert loop.refill(candidates_781(), [], 0) == []
 
@@ -931,6 +963,19 @@ def test_an_unrecognised_status_is_its_own_verdict():
     assert "wedged" in state["workers"][0]["detail"], state
 
 
+HERDR_NESTED_AGENT = {
+    "id": "cli:agent:get",
+    "result": {"agent": {"agent_status": "working", "name": "skills-1",
+                          "pane": "burn-1"}}}
+
+
+def test_the_sweep_reads_agent_status_nested_under_result_agent():
+    calls = []
+    get = agent_stub({"skills-1": HERDR_NESTED_AGENT}, calls)
+    state = loop.sweep(live_clumps()[:1], get)
+    assert state["workers"][0]["verdict"] == "working", state
+
+
 def test_the_sweep_names_the_vanished_worker_distinctly_when_rendered():
     calls = []
     get = agent_stub({"skills-1": herdr_agent("working"),
@@ -975,6 +1020,48 @@ def test_the_cli_holds_the_slot_and_says_so_in_its_status_line():
         assert got.returncode == 0, got
         assert "cores" in got.stdout and "#351" in got.stdout, got.stdout
         assert "dispatch  #500" not in got.stdout, got.stdout
+
+
+def test_the_cli_dispatch_treats_a_landed_clumps_null_job_as_a_freed_slot():
+    # A run file sets `landed` without ever clearing `job`; charging that
+    # entry's absent job record before filtering it out refuses the whole
+    # tick with "live with no job record" (#1003).
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [500], "closure": ["fresh.py"]}], fh)
+        clumps = in_flight_clumps(job=None, other=NO_JOB)
+        clumps[0]["landed"] = "a1b2c3d"
+        with open(live, "w") as fh:
+            json.dump(clumps, fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "4", "--committed-gb", "4")
+        assert got.returncode == 0, got
+        assert "dispatch  #500" in got.stdout, got.stdout
+
+
+def test_the_cli_dispatch_frontier_ignores_a_landed_clumps_own_closure():
+    # A landed clump's workspace is dead — its change is on main, and the
+    # next worker branches from main — so it holds nothing. `frontier` must
+    # be fed the same `unlanded` collection core_room and the peak count
+    # use, or a candidate sharing a file with the landed clump's closure
+    # reads as blocked by a workspace that no longer exists (Codex gate on
+    # PR #1050).
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [500], "closure": ["verify.py"]}], fh)
+        clumps = in_flight_clumps(job=None, other=NO_JOB)
+        clumps[0]["landed"] = "a1b2c3d"
+        with open(live, "w") as fh:
+            json.dump(clumps, fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "4", "--committed-gb", "4")
+        assert got.returncode == 0, got
+        assert "dispatch  #500" in got.stdout, got.stdout
+        assert "held" not in got.stdout, got.stdout
 
 
 def test_the_cli_refuses_a_dispatch_while_a_worker_is_unrecorded():
@@ -1203,7 +1290,8 @@ def test_a_held_clump_is_still_named_when_declared_jobs_hold_every_slot():
         got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
                       "--free", "1", "--processes", "4", "--committed-gb", "4")
         assert got.returncode == 0, got
-        assert "held      #500  by #351" in got.stdout, got.stdout
+        assert ("held      #500  by #351 in /w/351  over verify.py"
+                in got.stdout), got.stdout
 
 
 def test_the_whole_sweep_is_bounded_by_one_deadline_not_one_per_probe():

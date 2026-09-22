@@ -134,27 +134,38 @@ def frontier(candidates, in_flight):
 
 
 def picks(state, free):
-    """The clumps to dispatch, taken from a frontier already read — lowest
-    ticket first, every free slot at once.
+    """`(picked, held)`: the clumps to dispatch, taken from a frontier
+    already read — lowest ticket first, every free slot at once — and every
+    clump the same-tick guard skipped, each naming the earlier pick it
+    collided with.
 
     Split from `refill` so a caller that also reports what is holding the
     rest reads the frontier once: two reads of one question can disagree
     while a worker lands between them.
     """
     if free <= 0:
-        return []
-    picked = []
+        return [], []
+    picked, held = [], []
     for clump in state["dispatchable"]:
         if len(picked) == free:
             break
         # A clump picked a moment ago is in flight by the time the next one
         # starts, so the same exclusion applies inside one tick. Candidates
         # that collide with each other are normally one clump already — this
-        # is the guard for the case where they are not.
-        if any(paths(clump) & paths(earlier) for earlier in picked):
+        # is the guard for the case where they are not. Unlike a frontier
+        # collision, there is no live workspace to name: the holder is
+        # another candidate picked this same tick, so the held entry is
+        # tagged `same_tick` explicitly rather than distinguished by which
+        # keys it happens to carry (#971).
+        blocker = next((earlier for earlier in picked
+                        if paths(clump) & paths(earlier)), None)
+        if blocker is not None:
+            held.append({"clump": clump, "holder": key_of(blocker),
+                        "over": sorted(paths(clump) & paths(blocker)),
+                        "same_tick": True})
             continue
         picked.append(clump)
-    return picked
+    return picked, held
 
 
 def refill(candidates, in_flight, free):
@@ -165,7 +176,8 @@ def refill(candidates, in_flight, free):
     waves, and the two consequences a controller has to state out loud:
     `references/loop.md`.
     """
-    return picks(frontier(candidates, in_flight), free)
+    picked, _ = picks(frontier(candidates, in_flight), free)
+    return picked
 
 
 def hubs(clumps):
@@ -594,7 +606,10 @@ def _verdict(answer):
     result = answer.get("result")
     if not isinstance(result, dict):
         return "unknown", f"herdr answered {answer!r}"
-    status = result.get("agent_status")
+    nested = result.get("agent")
+    status = nested.get("agent_status") if isinstance(nested, dict) else None
+    if status is None:
+        status = result.get("agent_status")
     if status in _AGENT_STATES:
         return status, str(status)
     return "unknown", f"herdr reports agent_status {status!r}"
@@ -697,13 +712,17 @@ def herdr_get(agent, timeout):
         ) from None
 
 
-def render_dispatch(picked, state):
+def render_dispatch(picked, held):
     lines = [f"dispatch  #{key_of(c)}  "
              + ",".join(f"#{n}" for n in c["tickets"]) for c in picked]
-    for held in state["held"]:
+    for entry in held:
+        # `same_tick` names the other candidate this tick picked ahead of it;
+        # otherwise the holder is a live workspace (#971).
+        where = "this tick" if entry.get("same_tick") \
+            else f"in {entry['workspace']}"
         lines.append(
-            f"held      #{key_of(held['clump'])}  by #{held['holder']} in "
-            f"{held['workspace']}  over {', '.join(held['over'])}")
+            f"held      #{key_of(entry['clump'])}  by #{entry['holder']} "
+            f"{where}  over {', '.join(entry['over'])}")
     return "\n".join(lines) or "nothing to dispatch"
 
 
@@ -778,7 +797,16 @@ def run(argv):
             # Measured before any early return: a broken `ps` must refuse
             # here too, not hide behind "nothing to dispatch".
             count, counter = agent_count(args)
-            cores = core_room(free, in_flight)
+            # A landed clump awaiting cleanup is not a live worker: it is
+            # filtered out before the core accounting, the peak live count,
+            # and the frontier all see it, so a run file that sets `landed`
+            # without ever clearing `job` reads as a freed slot instead of
+            # refusing the whole tick on a job record that will never be
+            # recorded (#1003) — and its dead workspace (the change is on
+            # `main`; the next worker branches from there) never blocks a
+            # candidate sharing its closure (Codex gate, PR #1050).
+            unlanded = [c for c in in_flight if not c.get("landed")]
+            cores = core_room(free, unlanded)
             cores_line = render_cores(cores, free)
             if cores_line:
                 print(cores_line)
@@ -791,11 +819,9 @@ def run(argv):
                 # dispatch.
                 print("nothing to dispatch: every free slot is held by a "
                       "declared job")
-                print(render_dispatch([], frontier(candidates, in_flight)))
+                print(render_dispatch([], frontier(candidates, unlanded)["held"]))
                 return 0
-            # A landed clump awaiting cleanup is not a live worker; charging
-            # its headroom would refuse on processes that do not exist.
-            live = len([c for c in in_flight if not c.get("landed")])
+            live = len(unlanded)
             room, refusals = box_room(count, args.committed_gb,
                                       args.add_gb, cores["room"], counter,
                                       live)
@@ -804,8 +830,9 @@ def run(argv):
                     print(f"loop.py: {refusal}", file=sys.stderr)
                 return 1
             print(render_peak(count, live, room))
-            state = frontier(candidates, in_flight)
-            lines = render_dispatch(picks(state, room), state)
+            state = frontier(candidates, unlanded)
+            picked, same_tick_held = picks(state, room)
+            lines = render_dispatch(picked, state["held"] + same_tick_held)
             if room < cores["room"]:
                 lines = f"box: room for {room} of {cores['room']}\n{lines}"
             print(lines)
