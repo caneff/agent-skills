@@ -62,7 +62,9 @@
       "Bash(diff:*)",
       "Bash(cat /home/caneff/.local/bin/*)",
       "Bash(head /home/caneff/.local/bin/*)",
-      "Bash(ls /home/caneff/.local/bin*)"
+      "Bash(ls /home/caneff/.local/bin*)",
+      "Bash(job-run:*)",
+      "Bash(uv run finders/*)"
     ],
     "deny": [
       "AskUserQuestion",
@@ -78,16 +80,7 @@
       "mcp__c4ai__pdf",
       "mcp__c4ai__ask"
     ],
-    "defaultMode": "auto",
-    "autoMode": {
-      "allow": [
-        "$defaults",
-        "Git worktree commands in any repository, including the `git -C <path> worktree ...` form: add, list, lock, unlock, prune, remove.",
-        "Driving the OBS e2e rig from this repo: closing OBS's window via PowerShell `Get-Process obs64` + `CloseMainWindow()`, and any obs-websocket request sent through `layout/obs-request.mjs` (including SetSourceFilterEnabled).",
-        "Editing, commenting on, closing, and labelling GitHub issues in the user's own repos with `gh issue edit|comment|close|create`, including inside a compound command that first prepares the body in the scratchpad.",
-        "Publishing, republishing, or updating an Artifact with the Artifact tool (the default publish action, with or without a url), whenever the user has asked for a page, report, or reference to be built or updated, or has already been shown one earlier in the session. The user has given blanket permission for artifact publishes."
-      ]
-    }
+    "defaultMode": "auto"
   },
   "disableClaudeAiConnectors": true,
   "skillOverrides": {
@@ -155,6 +148,15 @@
             "type": "command",
             "command": "/home/caneff/.claude/hooks/refresh-landed.sh",
             "statusMessage": "Refreshing landed page"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/caneff/.claude/hooks/worker-spin-alert.sh",
+            "timeout": 10
           }
         ]
       }
@@ -269,5 +271,20 @@
   "remoteControlAtStartup": false,
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true,
-  "model": "claude-fable-5-1[1m]"
+  "model": "claude-fable-5-1[1m]",
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Git worktree commands in any repository, including the `git -C <path> worktree ...` form: add, list, lock, unlock, prune, remove.",
+      "Driving the OBS e2e rig from this repo: closing OBS's window via PowerShell `Get-Process obs64` + `CloseMainWindow()`, and any obs-websocket request sent through `layout/obs-request.mjs` (including SetSourceFilterEnabled).",
+      "Editing, commenting on, closing, and labelling GitHub issues in the user's own repos with `gh issue edit|comment|close|create`, including inside a compound command that first prepares the body in the scratchpad.",
+      "Publishing, republishing, or updating an Artifact with the Artifact tool (the default publish action, with or without a url), whenever the user has asked for a page, report, or reference to be built or updated, or has already been shown one earlier in the session. The user has given blanket permission for artifact publishes.",
+      "Shared-box compute runs: launching CP-SAT solver runs, grid hunts, soundness fuzzes and test gates on this machine (uv run <script>, just <recipe>, node <script>, usually under job-run), with any worker count the repo docs allow, is intended work, not Interfere With Workloads. Covers launching and reading progress files; it does not cover killing jobs the session did not create."
+    ],
+    "environment": [
+      "$defaults",
+      "**Host containment**: a single shared WSL2 VM (32 cores, ~30 GB) on the user's Windows desktop, open internet, no cloud identity. Many Claude Code sessions run on it at once by design: a dispatcher (implement-dispatch) launches worker sessions into git worktrees under <repo>/.claude/worktrees/, and a controller session coordinates them. Long solver, hunt and test jobs are ordinary work here and run under the job-run wrapper (logs in ~/.cache/agent-jobs). The box has its own caps, which the agents enforce themselves: about 28 processes in total, and a per-run CP-SAT worker count the repo docs set (typically 1 to 16). A solver run inside those caps is not interference with shared infrastructure; the other sessions are the same user's workers, not neighbours to protect.",
+      "**Org-specific CLIs**: job-run (background job wrapper), implement-dispatch and merge-cleanup (worker lifecycle), herdr (terminal/agent multiplexer), gh, uv, just. All are the user's own tooling installed under ~/.local/bin and ~/.agents/skills."
+    ]
+  }
 }
