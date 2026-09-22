@@ -258,8 +258,10 @@ def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
     for (repo, issue, fid), finding in findings_by_key.items():
         counts = table.setdefault(
             (repo, finding.axis),
-            {"raised": 0, "fixed": 0, "disputed": 0, "filed": 0, "undisposed": 0,
-             "handed-back": 0},
+            # _OUTCOME_DETAIL_FIELD is the one place that owns which outcomes
+            # exist (S1, #973) — a future outcome needs only that one entry,
+            # not this seed too.
+            {"raised": 0, "undisposed": 0, **{o: 0 for o in _OUTCOME_DETAIL_FIELD}},
         )
         counts["raised"] += 1
         disposition = dispositions_by_key.get((repo, issue, fid))
