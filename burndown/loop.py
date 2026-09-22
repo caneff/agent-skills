@@ -594,7 +594,10 @@ def _verdict(answer):
     result = answer.get("result")
     if not isinstance(result, dict):
         return "unknown", f"herdr answered {answer!r}"
-    status = result.get("agent_status")
+    nested = result.get("agent")
+    status = nested.get("agent_status") if isinstance(nested, dict) else None
+    if status is None:
+        status = result.get("agent_status")
     if status in _AGENT_STATES:
         return status, str(status)
     return "unknown", f"herdr reports agent_status {status!r}"

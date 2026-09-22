@@ -931,6 +931,19 @@ def test_an_unrecognised_status_is_its_own_verdict():
     assert "wedged" in state["workers"][0]["detail"], state
 
 
+HERDR_NESTED_AGENT = {
+    "id": "cli:agent:get",
+    "result": {"agent": {"agent_status": "working", "name": "skills-1",
+                          "pane": "burn-1"}}}
+
+
+def test_the_sweep_reads_agent_status_nested_under_result_agent():
+    calls = []
+    get = agent_stub({"skills-1": HERDR_NESTED_AGENT}, calls)
+    state = loop.sweep(live_clumps()[:1], get)
+    assert state["workers"][0]["verdict"] == "working", state
+
+
 def test_the_sweep_names_the_vanished_worker_distinctly_when_rendered():
     calls = []
     get = agent_stub({"skills-1": herdr_agent("working"),
