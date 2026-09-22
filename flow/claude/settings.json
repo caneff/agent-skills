@@ -191,8 +191,8 @@
           {
             "type": "command",
             "command": "controller-restore 2>/dev/null || true",
-            "statusMessage": "Restoring controlled workers",
-            "timeout": 15
+            "timeout": 15,
+            "statusMessage": "Restoring controlled workers"
           }
         ]
       }
@@ -281,7 +281,6 @@
   "remoteControlAtStartup": false,
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true,
-  "model": "claude-fable-5-1[1m]",
   "autoMode": {
     "allow": [
       "$defaults",
