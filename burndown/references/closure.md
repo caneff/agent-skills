@@ -53,11 +53,14 @@ repo's convention.
   generated, but examples/ are`, states nothing this grammar can read, and is
   read as silence rather than as "no include graph". Reading it the other way
   clumps every candidate alone and puts two workers in the same files.
-- **A fenced region is quoted, never declared.** Anything between ``` or ~~~
-  fences is an example, closing CommonMark's way; this is #890's rule and
-  #890's code, imported rather than reimplemented. A doc that shows the
-  grammar in a fence — this one does, and so does `AGENTS.md` — has declared
-  nothing by showing it.
+- **A fenced region or an indented quotation is quoted, never declared.**
+  Anything between ``` or ~~~ fences is an example, closing CommonMark's way;
+  this is #890's rule and #890's code, imported rather than reimplemented. A
+  fence opens only at CommonMark's own bound — at most three spaces of
+  indentation; four spaces or a tab is an indented code block, quotation on
+  its own account, not a fence (#999). A doc that shows the
+  grammar in a fence, or indented as a code block — this one does, and so
+  does `AGENTS.md` — has declared nothing by showing it.
 
 ## Three answers, and the run's opening report says which it got
 
