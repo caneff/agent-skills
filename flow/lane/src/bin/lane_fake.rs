@@ -331,9 +331,12 @@ fn gh_pr_list_status(head: &str, jq: bool) -> ExitCode {
         }
         return ExitCode::SUCCESS;
     };
+    // Test-only code: panic rather than swallow a malformed fixture line
+    // (#1042 review, S3/C2) — a one-field line silently read as "no PR"
+    // (defect-classes class 1) instead of failing the fixture that wrote it.
     let mut fields = line.split_whitespace();
-    let number = fields.next().unwrap_or("");
-    let state = fields.next().unwrap_or("");
+    let number = fields.next().unwrap_or_else(|| panic!("GH_PR_STATUS: {line:?} for {head:?} has no number field"));
+    let state = fields.next().unwrap_or_else(|| panic!("GH_PR_STATUS: {line:?} for {head:?} has no state field"));
     if jq {
         println!("{number} {state}");
     } else {
