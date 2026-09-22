@@ -196,15 +196,22 @@ pub fn remove_workspace(home: &Path, workspace: &str) -> bool {
         if !changed {
             continue;
         }
-        let mut out = kept.join("\n");
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        if f.set_len(0).is_ok() && f.seek(SeekFrom::Start(0)).is_ok() && f.write_all(out.as_bytes()).is_ok() {
+        if rewrite(&mut f, &kept).is_ok() {
             removed_any = true;
         }
     }
     removed_any
+}
+
+/// Replaces the whole of a locked sidecar with `lines`, one record each.
+fn rewrite(f: &mut std::fs::File, lines: &[&str]) -> std::io::Result<()> {
+    let mut out = lines.join("\n");
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    f.set_len(0)?;
+    f.seek(SeekFrom::Start(0))?;
+    f.write_all(out.as_bytes())
 }
 
 /// Every `<pid>.workers.jsonl` under `<home>/.claude/sessions`, as
@@ -244,6 +251,122 @@ pub fn orphans(home: &Path) -> Vec<(String, WorkerRecord)> {
         .flat_map(|(pid, _)| read(home, &pid).into_iter().map(move |r| (pid.clone(), r)))
         .filter(|(pid, r)| is_orphaned(pid, r) && Path::new(&r.workspace).is_dir())
         .collect()
+}
+
+/// Why `adopt` moved nothing.
+#[derive(Debug, PartialEq)]
+pub enum AdoptRefusal {
+    /// No record under the given tree names the agent — or another session
+    /// took it between this call's scan and its lock.
+    NotFound,
+    /// The record's controller, at this pid, is alive.
+    ControllerAlive(String),
+    /// The record's workspace, this path, no longer exists.
+    TornDown(String),
+    /// A sidecar could not be opened, locked, read or written.
+    Io(String),
+}
+
+/// A record `adopt` moved: the dead controller's pid it came from, and the
+/// record as the adopter's sidecar now holds it.
+#[derive(Debug)]
+pub struct Adopted {
+    pub from_pid: String,
+    pub record: WorkerRecord,
+}
+
+/// Makes the session at `own_pid` (starttime `own_start`) the controller of
+/// the worker `agent` whose workspace sits under `within` (#1098): moves its
+/// record out of its dead controller's sidecar into `own_pid`'s, restamped
+/// with `own_start` so `controller-restore` restores it here after a
+/// `/clear`. Refuses while the record's controller is alive — two
+/// controllers for one worker is the failure this exists to prevent — and
+/// when the workspace is gone.
+///
+/// The check and the move happen under the exclusive lock `append` and
+/// `remove_workspace` take, on both sidecars at once, taken in path order so
+/// two adopters can never each hold one and wait on the other. Two sessions
+/// adopting one record therefore serialize: the second finds it gone and
+/// gets `NotFound`. The record leaves the dead sidecar before it lands in
+/// the adopter's, so a crash between the two leaves the worker with no
+/// record rather than a record in two places.
+pub fn adopt(home: &Path, agent: &str, within: &str, own_pid: &str, own_start: &str) -> Result<Adopted, AdoptRefusal> {
+    let names = |r: &WorkerRecord| r.agent == agent && crate::sessions::in_tree(&r.workspace, within);
+    let candidates: Vec<(String, PathBuf)> = sidecars(home).into_iter().filter(|(pid, _)| read(home, pid).iter().any(names)).collect();
+    // Any live holder refuses outright, before anything is locked: the
+    // worker already has a controller, whatever other copies say.
+    for (pid, _) in &candidates {
+        if read(home, pid).iter().any(|r| names(r) && !is_orphaned(pid, r)) {
+            return Err(AdoptRefusal::ControllerAlive(pid.clone()));
+        }
+    }
+    for (pid, path) in &candidates {
+        if let Some(adopted) = move_record(home, pid, path, &names, own_pid, own_start)? {
+            return Ok(adopted);
+        }
+    }
+    Err(AdoptRefusal::NotFound)
+}
+
+/// `adopt`'s locked step for one source sidecar. `Ok(None)`: the record was
+/// no longer there once the lock was held.
+fn move_record(
+    home: &Path,
+    from_pid: &str,
+    from: &Path,
+    names: &dyn Fn(&WorkerRecord) -> bool,
+    own_pid: &str,
+    own_start: &str,
+) -> Result<Option<Adopted>, AdoptRefusal> {
+    let io = |e: std::io::Error| AdoptRefusal::Io(e.to_string());
+    let own = path_for(home, own_pid);
+    let mut src = std::fs::OpenOptions::new().read(true).write(true).open(from).map_err(io)?;
+    let mut dst = if own == from {
+        None
+    } else {
+        Some(std::fs::OpenOptions::new().create(true).append(true).open(&own).map_err(io)?)
+    };
+    match &dst {
+        Some(d) if own.as_path() < from => {
+            d.lock().map_err(io)?;
+            src.lock().map_err(io)?;
+        }
+        Some(d) => {
+            src.lock().map_err(io)?;
+            d.lock().map_err(io)?;
+        }
+        None => src.lock().map_err(io)?,
+    }
+
+    let mut raw = String::new();
+    src.read_to_string(&mut raw).map_err(io)?;
+    let lines: Vec<&str> = raw.lines().filter(|l| !l.trim().is_empty()).collect();
+    let Some((at, record)) =
+        lines.iter().enumerate().find_map(|(i, l)| serde_json::from_str::<WorkerRecord>(l).ok().filter(|r| names(r)).map(|r| (i, r)))
+    else {
+        return Ok(None);
+    };
+    if !is_orphaned(from_pid, &record) {
+        return Err(AdoptRefusal::ControllerAlive(from_pid.to_string()));
+    }
+    if !Path::new(&record.workspace).is_dir() {
+        return Err(AdoptRefusal::TornDown(record.workspace));
+    }
+
+    let adopted = WorkerRecord { proc_start: own_start.to_string(), ..record };
+    let line = serde_json::to_string(&adopted).map_err(|e| AdoptRefusal::Io(e.to_string()))?;
+    let mut kept: Vec<&str> = lines.iter().enumerate().filter(|(i, _)| *i != at).map(|(_, l)| *l).collect();
+    match dst.as_mut() {
+        None => {
+            kept.push(&line);
+            rewrite(&mut src, &kept).map_err(io)?;
+        }
+        Some(d) => {
+            rewrite(&mut src, &kept).map_err(io)?;
+            d.write_all(format!("{line}\n").as_bytes()).map_err(io)?;
+        }
+    }
+    Ok(Some(Adopted { from_pid: from_pid.to_string(), record: adopted }))
 }
 
 #[cfg(test)]
@@ -497,5 +620,46 @@ mod tests {
         assert!(workspaces.contains(&"/a"), "{workspaces:?}");
         assert!(workspaces.contains(&"/c"), "a racing append must survive a concurrent remove: {workspaces:?}");
         assert!(!workspaces.contains(&"/b"), "{workspaces:?}");
+    }
+
+    /// #1098: `adopt`'s check-and-move holds the source sidecar's lock, so a
+    /// second adopter cannot read the record between the first's check and
+    /// its rewrite. Holds that lock externally and proves the move cannot
+    /// finish while it is held — called on `move_record` directly, since
+    /// `adopt`'s own pre-scan `read` would block on the shared lock first and
+    /// pass this whether or not the move locks. Then releases it: the move
+    /// lands, and a second adopter finds the worker controlled by a live
+    /// session.
+    #[test]
+    fn adopt_moves_under_the_source_lock_and_a_second_adopter_is_refused() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let ws = tmp.path().join("repo/.claude/worktrees/implement-143");
+        std::fs::create_dir_all(&ws).unwrap();
+        let ws = ws.display().to_string();
+        let dead = i32::MAX.to_string();
+        append(&home, &dead, &record(&ws)).unwrap();
+        let me = std::process::id().to_string();
+        let my_start = crate::proc_info::read_stat(std::process::id() as i32).unwrap().start;
+
+        let held = std::fs::OpenOptions::new().read(true).write(true).open(path_for(&home, &dead)).unwrap();
+        held.lock().unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let (h, root, me2, start2) = (home.clone(), tmp.path().display().to_string(), me.clone(), my_start.clone());
+        let adopter = std::thread::spawn(move || {
+            let names = |r: &WorkerRecord| r.agent == "sudokupad-art-143" && crate::sessions::in_tree(&r.workspace, &root);
+            let got = move_record(&h, &i32::MAX.to_string(), &path_for(&h, &i32::MAX.to_string()), &names, &me2, &start2);
+            let _ = done_tx.send(());
+            got
+        });
+        assert!(done_rx.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "adopt ran without the lock");
+        drop(held);
+        let adopted = adopter.join().unwrap().unwrap().expect("the record was there to move");
+        assert_eq!(adopted.from_pid, dead);
+        assert!(read(&home, &dead).is_empty());
+        assert_eq!(read(&home, &me), vec![WorkerRecord { proc_start: my_start.clone(), ..record(&ws) }]);
+
+        let root = tmp.path().display().to_string();
+        assert_eq!(adopt(&home, "sudokupad-art-143", &root, "1", "1").unwrap_err(), AdoptRefusal::ControllerAlive(me));
     }
 }

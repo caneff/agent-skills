@@ -25,6 +25,10 @@ name = "controller-restore"
 path = "src/bin/controller_restore.rs"
 
 [[bin]]
+name = "controller-adopt"
+path = "src/bin/controller_adopt.rs"
+
+[[bin]]
 name = "lane-fake"
 path = "src/bin/lane_fake.rs"
 
