@@ -335,7 +335,8 @@ the frontier** while it is parked: releasing either invites a second worker
 into the same files, which is the collision § The loop step 5 exists to
 prevent. **Two consecutive parks with no landing between them stop the run** —
 a run that has stopped landing has stopped working, and the next thing it
-does is report to Chris rather than dispatch again.
+does is file the sweep (§ The sweep) and report to Chris rather than
+dispatch again.
 
 **Escalation.** The controller's escalation list lives in
 [`CONTEXT.md`](../CONTEXT.md)'s Controller entry. Two of its shapes are this
