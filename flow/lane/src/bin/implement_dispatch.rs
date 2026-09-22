@@ -325,27 +325,62 @@ const GUARD_NAME: &str = "commit-identity-guard";
 /// hard-coding a second copy, so the two can never drift apart (#1009 S1).
 const PRE_COMMIT_FOREIGN: &str = "pre-commit.foreign";
 
-/// What the lane installs as `pre-commit`. Never a substring or a text match
-/// on the *foreign* hook it replaces (#1009: a hook that only echoed the
-/// guard's name, called it on an unreachable branch, or suppressed its exit
-/// with `|| true` all read as "invokes the guard" under the old substring
-/// check). The wrapper runs whatever it displaced first — preserving that
-/// hook's own behavior — then always runs the guard itself, outside the
-/// displaced hook's own text, so nothing in that text can suppress the
-/// guard's exit code. Ownership of `pre-commit` is byte-identity with this
-/// exact text — never a marker or any other text match on the *current*
-/// file either (#934's original ruling, reaffirmed on the Codex gate for
-/// PR #1053): a marker-based check reopens the very hole #1009 closes,
-/// since a foreign hook that merely carries the marker phrase in a comment
-/// would then read as "ours" and skip the takeover — the guard installs
-/// nowhere and never runs. A stale prior version of this text (from an
-/// earlier build of the lane) is therefore foreign too and gets displaced
+/// The pre-push half of the guard (#1006): the pre-commit guard above only
+/// fires on `git commit`, so a rebase or cherry-pick that replays a commit
+/// under a different identity — exactly what the lane's mandated
+/// rebase-onto-default before every push can do — never goes through
+/// `git commit` at all, and slips past it. This re-checks every commit about
+/// to be pushed, on the same checkout-configured-email rule and the same
+/// `COMMIT_IDENTITY_OVERRIDE` escape.
+const PUSH_GUARD: &str = include_str!("../../hooks/commit-identity-guard-pre-push.sh");
+const PUSH_GUARD_NAME: &str = "commit-identity-guard-pre-push";
+/// The stable name a displaced foreign `pre-push` is moved to, same role as
+/// `PRE_COMMIT_FOREIGN` above but for the push hook slot.
+const PRE_PUSH_FOREIGN: &str = "pre-push.foreign";
+
+/// What the lane installs as a hook slot (`pre-commit`, `pre-push`). Never a
+/// substring or a text match on the *foreign* hook it replaces (#1009: a
+/// hook that only echoed the guard's name, called it on an unreachable
+/// branch, or suppressed its exit with `|| true` all read as "invokes the
+/// guard" under the old substring check). The wrapper runs whatever it
+/// displaced first — preserving that hook's own behavior — then always runs
+/// the guard itself, outside the displaced hook's own text, so nothing in
+/// that text can suppress the guard's exit code. Ownership of the slot is
+/// byte-identity with this exact text — never a marker or any other text
+/// match on the *current* file either (#934's original ruling, reaffirmed on
+/// the Codex gate for PR #1053): a marker-based check reopens the very hole
+/// #1009 closes, since a foreign hook that merely carries the marker phrase
+/// in a comment would then read as "ours" and skip the takeover — the guard
+/// installs nowhere and never runs. A stale prior version of this text (from
+/// an earlier build of the lane) is therefore foreign too and gets displaced
 /// like any other hook; running it via the wrapper is harmless, since the
-/// pre-#1009 wrapper's only body is `exec ".../commit-identity-guard"`.
-fn pre_commit_wrapper() -> String {
-    format!(
-        "#!/bin/sh\n# lane commit-identity guard wrapper (#934, hardened against a foreign hook that only appears to call the guard — #1009)\ndir=\"$(dirname \"$0\")\"\nif [ -e \"$dir/{PRE_COMMIT_FOREIGN}\" ]; then\n  \"$dir/{PRE_COMMIT_FOREIGN}\" \"$@\" || exit $?\nfi\nexec \"$dir/{GUARD_NAME}\"\n"
-    )
+/// pre-#1009 pre-commit wrapper's only body was `exec ".../commit-identity-guard"`.
+/// Both hook slots share this one wrapper shape (#1006) — the guard name and
+/// the foreign-displacement name are its only per-slot parameters, plus
+/// `buffer_stdin` for pre-push. A `pre-push` hook's ref list arrives on
+/// stdin, not in `"$@"` (git pre-push protocol) — sharing that one stream
+/// naively between a displaced foreign hook and the guard means a foreign
+/// hook that reads stdin (a real check, not only a spoof) drains it before
+/// the guard ever sees a line, and the guard's empty `while read` then exits
+/// 0 having refused nothing (#1006 Codex/review finding S1: verified with a
+/// stdin-reading foreign hook — the guard saw 0 refs). `buffer_stdin` copies
+/// stdin to a temp file first and feeds that file to both, so draining one
+/// read cannot starve the other. `pre-commit` never gets this treatment: git
+/// does not feed it anything on stdin, and reading stdin there risks hanging
+/// an interactive `git commit` on the open terminal — so its wrapper, and
+/// its exec of the guard, stay exactly the pre-#1006 two-argument-free shape
+/// (byte-identical to the pre-#1006 build, which matters for `is_ours` below
+/// on an already-dispatched repo: #1006 Codex/review finding P1).
+fn hook_wrapper(guard_name: &str, foreign_name: &str, buffer_stdin: bool) -> String {
+    if buffer_stdin {
+        format!(
+            "#!/bin/sh\n# lane commit-identity guard wrapper (#934, hardened against a foreign hook that only appears to call the guard — #1009). The ref list this hook receives arrives on stdin (#1006): buffered to a temp file first so a foreign hook that reads it cannot starve the guard of it. Never `exec`s the guard here (unlike the pre-commit branch below) — `exec` replaces the shell image, so the `trap ... EXIT` cleaning up the buffer would never fire on the success path and every push would leak one file in $TMPDIR. The buffering copy's own exit status is checked (#1006 Codex gate finding): a copy that fails partway (disk full, an I/O error) after writing one or more complete ref lines would otherwise hand both the foreign hook and the guard a truncated-but-nonempty ref list — the guard's zero-ref refusal never fires on that, and a replayed commit on the ref that got cut off pushes through unchecked. Fail closed instead.\ndir=\"$(dirname \"$0\")\"\nstdin_buf=\"$(mktemp)\" || exit 1\ntrap 'rm -f \"$stdin_buf\"' EXIT\ncat >\"$stdin_buf\" || {{ echo \"commit-identity-guard: could not buffer the pre-push ref list; refusing the push\" >&2; exit 1; }}\nif [ -e \"$dir/{foreign_name}\" ]; then\n  \"$dir/{foreign_name}\" \"$@\" <\"$stdin_buf\" || exit $?\nfi\n\"$dir/{guard_name}\" \"$@\" <\"$stdin_buf\"\n"
+        )
+    } else {
+        format!(
+            "#!/bin/sh\n# lane commit-identity guard wrapper (#934, hardened against a foreign hook that only appears to call the guard — #1009)\ndir=\"$(dirname \"$0\")\"\nif [ -e \"$dir/{foreign_name}\" ]; then\n  \"$dir/{foreign_name}\" \"$@\" || exit $?\nfi\nexec \"$dir/{guard_name}\"\n"
+        )
+    }
 }
 
 /// Writes `text` to `path` as an executable, via temp file + rename so a
@@ -365,34 +400,32 @@ fn write_executable(path: &Path, text: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Installs the commit-identity guard (#934). The guard script always goes to
-/// `<hooks>/commit-identity-guard` (refreshed in place, and verified
-/// executable). `pre-commit` becomes the lane's own wrapper unconditionally:
-/// whatever is there when it is not already byte-identical to
-/// `pre_commit_wrapper()` is foreign — trusted by its presence, never by
-/// parsing or matching its source — and is copied aside to a stable name (the
-/// original left in place until `write_executable`'s atomic rename replaces
-/// it, so there is never a moment with no `pre-commit` at all), forced
-/// executable (git silently ignores a hook without the bit, and the
-/// pre-#1009 accepted-hook path never checked it), and left for the wrapper
-/// to run before it always runs the guard itself. A `pre-commit.foreign`
-/// already holding a *different* foreign hook refuses rather than silently
-/// overwriting whatever it held (#1009 C3) — that can only mean something
-/// installed a new hook over the lane's wrapper since the last dispatch, and
-/// only a human can say which one should survive. Worktrees share the
-/// primary's hooks dir, so one install covers them all, and the call site
-/// holds the claim lock so two dispatches of the same repo can't race each
-/// other's takeover (#1009 C2). Ownership is taken once: a `pre-commit` that
-/// is already byte-identical to the current wrapper is left alone, so a
-/// repeat dispatch does not re-displace an already-displaced hook.
-fn install_identity_guard(primary: &str) -> Result<(), String> {
-    let dir = quiet_stdout("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"])
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("cannot resolve the hooks dir of {primary}"))?;
-    let path = Path::new(&dir).join("pre-commit");
-    let foreign_path = Path::new(&dir).join(PRE_COMMIT_FOREIGN);
-    let wrapper = pre_commit_wrapper();
+/// Installs one half of the commit-identity guard (#934 pre-commit, #1006
+/// pre-push) into the hooks dir `dir`, which the caller has already created.
+/// The guard script always goes to `<dir>/<guard_name>` (refreshed in place,
+/// and verified executable). `<dir>/<slot>` becomes the lane's own wrapper
+/// unconditionally: whatever is there when it is not already byte-identical
+/// to `hook_wrapper(guard_name, foreign_name, buffer_stdin)` is foreign — trusted by its
+/// presence, never by parsing or matching its source — and is copied aside
+/// to `<dir>/<foreign_name>` (the original left in place until
+/// `write_executable`'s atomic rename replaces it, so there is never a
+/// moment with no hook at that slot at all), forced executable (git silently
+/// ignores a hook without the bit, and the pre-#1009 accepted-hook path
+/// never checked it), and left for the wrapper to run before it always runs
+/// the guard itself. A `<foreign_name>` slot already holding a *different*
+/// foreign hook refuses rather than silently overwriting whatever it held
+/// (#1009 C3) — that can only mean something installed a new hook over the
+/// lane's wrapper since the last dispatch, and only a human can say which
+/// one should survive. Worktrees share the primary's hooks dir, so one
+/// install covers them all, and the call site holds the claim lock so two
+/// dispatches of the same repo can't race each other's takeover (#1009 C2).
+/// Ownership is taken once: a slot that is already byte-identical to the
+/// current wrapper is left alone, so a repeat dispatch does not re-displace
+/// an already-displaced hook.
+fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str, guard_content: &str, buffer_stdin: bool) -> Result<(), String> {
+    let path = Path::new(dir).join(slot);
+    let foreign_path = Path::new(dir).join(foreign_name);
+    let wrapper = hook_wrapper(guard_name, foreign_name, buffer_stdin);
     let current = std::fs::read(&path);
     let exists = match &current {
         Ok(_) => true,
@@ -405,7 +438,7 @@ fn install_identity_guard(primary: &str) -> Result<(), String> {
         match std::fs::read(&foreign_path) {
             Ok(already_there) if &already_there != foreign_bytes => {
                 return Err(format!(
-                    "{} already holds a different foreign hook than the one now at {}; something installed a new pre-commit here since the last dispatch — resolve by hand (merge or remove {}) before dispatching again",
+                    "{} already holds a different foreign hook than the one now at {}; something installed a new {slot} here since the last dispatch — resolve by hand (merge or remove {}) before dispatching again",
                     foreign_path.display(),
                     path.display(),
                     foreign_path.display()
@@ -426,10 +459,34 @@ fn install_identity_guard(primary: &str) -> Result<(), String> {
             foreign_path.display()
         );
     }
-    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
-    write_executable(&Path::new(&dir).join(GUARD_NAME), IDENTITY_GUARD)?;
+    write_executable(&Path::new(dir).join(guard_name), guard_content)?;
     if !is_ours {
         write_executable(&path, &wrapper)?;
+    }
+    Ok(())
+}
+
+/// Installs both halves of the commit-identity guard: pre-commit (#934) and
+/// pre-push (#1006). The pre-commit guard alone never fires on a rebase or
+/// cherry-pick that replays a commit under a different identity, and the
+/// lane rebases onto the default branch before every push — so the pre-push
+/// half is what actually stops a replayed foreign-email commit from ever
+/// reaching `git push`, where #909's failure mode began.
+fn install_identity_guard(primary: &str) -> Result<(), String> {
+    let dir = quiet_stdout("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| format!("cannot resolve the hooks dir of {primary}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
+    // (slot, foreign_name, guard_name, guard_content, buffer_stdin) — one row
+    // per hook slot the lane owns. `buffer_stdin` is true only for pre-push,
+    // whose ref list arrives on stdin; see `hook_wrapper`.
+    let slots: [(&str, &str, &str, &str, bool); 2] = [
+        ("pre-commit", PRE_COMMIT_FOREIGN, GUARD_NAME, IDENTITY_GUARD, false),
+        ("pre-push", PRE_PUSH_FOREIGN, PUSH_GUARD_NAME, PUSH_GUARD, true),
+    ];
+    for (slot, foreign_name, guard_name, guard_content, buffer_stdin) in slots {
+        install_hook_slot(&dir, slot, foreign_name, guard_name, guard_content, buffer_stdin)?;
     }
     Ok(())
 }
