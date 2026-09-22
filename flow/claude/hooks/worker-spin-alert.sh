@@ -33,15 +33,20 @@ classify() { # <transcript> -> JSON
   # transcript holds ~8 lines per call (attachments, system, queue entries,
   # subagent sidechains), so a window counted in raw lines can hold fewer than
   # N calls and read a spin as quiet.
+  # run_id: the tool_use id of the earliest call in the current consecutive
+  # streak — a run boundary, not just the repeated (name, input). Two spins
+  # of the same call, separated by a different tool call, are two streaks
+  # with two run_ids, so each alerts once instead of the second being read
+  # as a dup of the first (#998).
   tail -c 4000000 "$1" | grep -F '"type":"tool_use"' | tail -n 500 | jq -nRc --argjson n "$N" '
     [inputs | fromjson? | objects | select(.type == "assistant" and .isSidechain != true)
-      | .message.content[]? | select(.type == "tool_use") | {name, input}] | reverse as $calls
+      | .message.content[]? | select(.type == "tool_use") | {name, input, id}] | reverse as $calls
     | ($calls[0] // null) as $l
-    | (reduce $calls[] as $c ({n: 0, stop: false};
+    | (reduce $calls[] as $c ({n: 0, stop: false, first_id: null};
         if .stop then .
-        elif $c == $l then .n += 1
-        else .stop = true end) | .n) as $count
-    | {spinning: ($count >= $n), tool: ($l.name // null), input: ($l.input // null), count: $count}'
+        elif ($l != null and $c.name == $l.name and $c.input == $l.input) then (.n += 1 | .first_id = $c.id)
+        else .stop = true end)) as $r
+    | {spinning: ($r.n >= $n), tool: ($l.name // null), input: ($l.input // null), count: $r.n, run_id: $r.first_id}'
 }
 
 if [ "${1:-}" = "--classify" ]; then
@@ -71,11 +76,15 @@ full_input="$(jq -c '.input' <<<"$verdict")"
 input="$(cut -c1-120 <<<"$full_input")"   # human-facing text only
 digest="$(sha256sum <<<"$full_input" | cut -c1-16)"
 count="$(jq -r '.count' <<<"$verdict")"
+run_id="$(jq -r '.run_id // ""' <<<"$verdict")"
 
-# One alert per run of repeats: keyed by session, tool and input, so a run
-# that keeps growing does not re-alert on every call. Only a `sent` line
-# dedupes: an alert that never reached the controller is retried on the next call.
-key="$session"$'\t'"$tool"$'\t'"$digest"
+# One alert per run of repeats: keyed by session, tool, input and the
+# streak's run_id (the tool-use id of the first call in it), so a run that
+# keeps growing does not re-alert on every call, but a later streak of the
+# same call after a different tool call in between — a new run_id — alerts
+# again (#998). Only a `sent` line dedupes: an alert that never reached the
+# controller is retried on the next call.
+key="$session"$'\t'"$tool"$'\t'"$digest"$'\t'"$run_id"
 grep -qF -- "$key"$'\t'"sent"$'\t' "$log" 2>/dev/null && exit 0
 logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$1" "$2" >> "$log"; }
 

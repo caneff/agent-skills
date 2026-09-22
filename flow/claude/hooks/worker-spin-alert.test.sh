@@ -17,10 +17,12 @@ expect() { # <label> <fixture> <jq -e filter>
 
 expect "a real spin (a 180-call echo ok loop) is flagged with tool, input and count" real-spin.jsonl \
   '.spinning == true and .tool == "Bash" and .input.command == "echo ok" and .count >= 20'
+expect "run_id is the tool-use id of the streak's first call" real-spin.jsonl '.run_id == "e1"'
 expect "varied work is never flagged" varied.jsonl '.spinning == false'
 expect "a bounded retry below the threshold is not flagged" bounded-retry.jsonl '.spinning == false'
 expect "a single repeated call is not flagged" single-call.jsonl '.spinning == false and .count == 1'
 expect "a different tool between two runs breaks the run" interrupted.jsonl '.spinning == false and .count == 15'
+expect "run_id resets to the second run's own first call" interrupted.jsonl '.run_id == "z1"'
 
 # The hook: a spinning worker alerts the controller once; a varied one never.
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
@@ -98,5 +100,16 @@ done
 if [ "$(grep -c 'worker-spin-alert' "$tmp/prompts" 2>/dev/null)" = 2 ]; then
   echo "PASS: two long same-prefix spins each alert"
 else echo "FAIL: same-prefix spins — prompts: $(cat "$tmp/prompts" 2>/dev/null)"; fails=1; fi
+
+# A spin, a different tool call, then the same spin resumed: two streaks,
+# two run_ids, two alerts — not deduped as a repeat of the first (#998).
+rm -f "$tmp/prompts" "$tmp/home/.claude/worker-spin-alerts.log"
+printf '{"session_id":"s4","transcript_path":"%s"}' "$fx/resumed-spin-1.jsonl" \
+  | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook" >/dev/null
+printf '{"session_id":"s4","transcript_path":"%s"}' "$fx/resumed-spin-2.jsonl" \
+  | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook" >/dev/null
+if [ "$(grep -c 'worker-spin-alert' "$tmp/prompts" 2>/dev/null)" = 2 ]; then
+  echo "PASS: a resumed spin after a different call alerts a second time"
+else echo "FAIL: resumed spin — prompts: $(cat "$tmp/prompts" 2>/dev/null)"; fails=1; fi
 
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
