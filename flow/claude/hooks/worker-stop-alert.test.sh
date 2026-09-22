@@ -446,6 +446,28 @@ t="$tmp/torn.jsonl"
 run "torn last line" "$t"
 expect_alert "a half-written last line and a non-string recipient still alert"
 
+# The brief carries the controller's herdr agent name (#923), which a
+# compliant worker resolves to a live session name before sending: the two
+# differ, so matching the brief's literal directly would miss a delivered
+# report and, when an alert is owed, find no session for the pane lookup
+# (#1014). Resolve through `herdr agent list` (agent name -> agent_session
+# id) and the live registry (session id -> current name) first.
+reset_log
+printf '{"pid":%s,"procStart":"%s","sessionId":"sess-hctl99","name":"skills-c7"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' '{"result":{"agents":[{"name":"hctl-99","pane_id":"w9:p1","agent_session":{"value":"sess-hctl99"}}]}}' > "$tmp/agent-list.json"
+herdr_brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"hctl-99\"</command-args>'
+t="$tmp/herdr-name-reported.jsonl"
+{ human "$herdr_brief"; send s1 "skills-c7"; ok s1; assistant_text "PR up sent"; } > "$t"
+run "herdr-name controller, report to the resolved session" "$t"
+expect_none "a report addressed to the resolved session name counts as reported when the brief carries a herdr agent name"
+t="$tmp/herdr-name-silent.jsonl"
+{ human "$herdr_brief"; assistant_text "done, no report"; } > "$t"
+run "herdr-name controller, no report" "$t"
+expect_alert "a herdr-name controller with no report still resolves the pane and alerts"
+# Restore the registry and agent list the tests below expect.
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
+
 reset_log
 t="$tmp/not-worker.jsonl"
 { human '<command-name>/implement</command-name>\n<command-args>820</command-args>'; assistant_text "dispatched"; } > "$t"

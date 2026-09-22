@@ -51,26 +51,53 @@ IFS=$'\t' read -r n controller < <(entries | jq -r '
   | first // empty | "\(.n)\t\(.c)"')
 [ -n "${controller:-}" ] || exit 0
 
-# The controller's live registry entry: its session id and messaging socket.
-# Live means the pid's /proc starttime (field 22, after the `(comm)` field)
-# equals the record's procStart — a stale record whose pid was reused has
-# another, as in flow/lane's sessions reader.
-ctl_session="" ctl_socket=""
-for f in "$HOME"/.claude/sessions/*.json; do
-  [ -e "$f" ] || continue
-  IFS=$'\t' read -r pid start sid sock < <(jq -r --arg c "$controller" \
-    'select(.name == $c) | "\(.pid)\t\(.procStart // "")\t\(.sessionId // "")\t\(.messagingSocketPath // "")"' "$f" 2>/dev/null)
-  [[ "${pid:-}" =~ ^[0-9]+$ ]] || continue
-  stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || continue
-  read -ra fields <<<"${stat##*) }"
-  [ -n "$start" ] && [ "${fields[19]:-}" = "$start" ] || continue
-  ctl_session="$sid" ctl_socket="$sock"
-  break
-done
+# A live registry record naming `sid` (mode "sid") or `nm` (mode "name"),
+# with a non-empty `.name` — its session id, current name and socket, in
+# that order because `read` with a tab `IFS` still collapses runs of tab as
+# IFS whitespace, so an empty field belongs last or it swallows the field
+# after it (`messagingSocketPath` is the one usually missing). Live means
+# the pid's /proc starttime (field 22, after the `(comm)` field) equals the
+# record's procStart — a stale record whose pid was reused has another, as
+# in flow/lane's sessions reader.
+resolve_session() {
+  local mode="$1" val="$2" f pid start sid nm sock
+  for f in "$HOME"/.claude/sessions/*.json; do
+    [ -e "$f" ] || continue
+    IFS=$'\t' read -r pid start sid nm sock < <(jq -r --arg mode "$mode" --arg v "$val" \
+      'select((if $mode == "sid" then .sessionId else .name end) == $v and ((.name // "") != "")) |
+       "\(.pid)\t\(.procStart // "")\t\(.sessionId // "")\t\(.name // "")\t\(.messagingSocketPath // "")"' "$f" 2>/dev/null)
+    [[ "${pid:-}" =~ ^[0-9]+$ ]] || continue
+    stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || continue
+    read -ra fields <<<"${stat##*) }"
+    [ -n "$start" ] && [ "${fields[19]:-}" = "$start" ] || continue
+    printf '%s\t%s\t%s\n' "$sid" "$nm" "$sock"
+    return 0
+  done
+  return 1
+}
+
+# The brief carries the controller's herdr agent name (#923); a compliant
+# worker resolves that to a session name or socket before sending, so
+# matching on the brief's literal can miss a delivered report and, when an
+# alert is owed, find no live session for the pane lookup. Resolve the same
+# two hops `resolve-controller` does — herdr agent name -> `agent_session`
+# id -> the live session record's current name and socket — before either
+# use, and fall back to treating the brief's value as a session name
+# directly for an older brief that already carries one (#1014).
+herdr_sid="$(timeout 3 herdr agent list 2>/dev/null \
+  | jq -r --arg c "$controller" '.result.agents[]? | select((.name // "") == $c) | .agent_session.value // empty' 2>/dev/null \
+  | head -n1)"
+resolved=""
+[ -n "$herdr_sid" ] && resolved="$(resolve_session sid "$herdr_sid")"
+[ -n "$resolved" ] || resolved="$(resolve_session name "$controller")"
+ctl_session="" ctl_socket="" c="$controller"
+if [ -n "$resolved" ]; then
+  IFS=$'\t' read -r ctl_session c ctl_socket <<<"$resolved"
+fi
 
 # The verdict for this stop: `reported`, `waiting` on a subagent, or `silent`,
 # plus the transcript's last entry as the stop's key.
-IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg sock "$ctl_socket" '
+IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$c" --arg sock "$ctl_socket" '
   to_entries as $all
   | ($all | map(select(.value.type == "user"
       and (.value.origin.kind == "human" or (.value.origin.kind == "peer" and .value.origin.handback != true))))
