@@ -1267,7 +1267,8 @@ def test_a_held_clump_is_still_named_when_declared_jobs_hold_every_slot():
         got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
                       "--free", "1", "--processes", "4", "--committed-gb", "4")
         assert got.returncode == 0, got
-        assert "held      #500  by #351" in got.stdout, got.stdout
+        assert ("held      #500  by #351 in /w/351  over verify.py"
+                in got.stdout), got.stdout
 
 
 def test_the_whole_sweep_is_bounded_by_one_deadline_not_one_per_probe():
