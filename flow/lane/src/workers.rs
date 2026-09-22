@@ -293,7 +293,8 @@ pub struct Adopted {
 /// adopting one record therefore serialize: the second finds it gone and
 /// gets `NotFound`. The record leaves the dead sidecar before it lands in
 /// the adopter's, so a crash between the two leaves the worker with no
-/// record rather than a record in two places.
+/// record rather than a record in two places; a failed write, unlike a
+/// crash, puts it back.
 pub fn adopt(home: &Path, agent: &str, within: &str, own_pid: &str, own_start: &str) -> Result<Adopted, AdoptRefusal> {
     let names = |r: &WorkerRecord| r.agent == agent && crate::sessions::in_tree(&r.workspace, within);
     let candidates: Vec<(String, PathBuf)> = sidecars(home).into_iter().filter(|(pid, _)| read(home, pid).iter().any(names)).collect();
@@ -367,7 +368,15 @@ fn move_record(
         }
         Some(d) => {
             rewrite(&mut src, &kept).map_err(io)?;
-            d.write_all(format!("{line}\n").as_bytes()).map_err(io)?;
+            // A record in neither file is a worker nothing will ever offer or
+            // restore again (#1098 review C3): a failed landing puts it back.
+            if let Err(e) = d.write_all(format!("{line}\n").as_bytes()) {
+                let back = match rewrite(&mut src, &lines) {
+                    Ok(()) => format!("the record is back in {}", from.display()),
+                    Err(_) => format!("and could not be put back in {}; the record was: {line}", from.display()),
+                };
+                return Err(AdoptRefusal::Io(format!("{e}; {back}")));
+            }
         }
     }
     Ok(Some(Adopted { from_pid: from_pid.to_string(), record: adopted }))
@@ -676,5 +685,30 @@ mod tests {
         assert!(is_orphaned(&i32::MAX.to_string(), &r), "no such process");
         assert!(!is_orphaned("not-a-pid", &r), "a name that is no pid proves nothing");
         assert!(!is_orphaned("0", &r), "pid 0 is no controller's");
+    }
+
+    /// #1098 review C3: the record leaves the dead sidecar before it lands in
+    /// the adopter's, so a failed landing must put it back — a worker in
+    /// neither file is one nothing will ever offer or restore again. The
+    /// adopter's sidecar is `/dev/full` here, which opens and locks but
+    /// refuses every write — and reads zeros forever, so this calls
+    /// `move_record`, which never reads the adopter's sidecar, rather than
+    /// `adopt`, whose scan reads every sidecar.
+    #[test]
+    fn a_failed_write_into_the_adopters_sidecar_puts_the_record_back() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let ws = tmp.path().join("repo/.claude/worktrees/implement-143");
+        std::fs::create_dir_all(&ws).unwrap();
+        let ws = ws.display().to_string();
+        let dead = i32::MAX.to_string();
+        append(home, &dead, &record(&ws)).unwrap();
+        std::os::unix::fs::symlink("/dev/full", path_for(home, "4242")).unwrap();
+
+        let root = tmp.path().display().to_string();
+        let names = |r: &WorkerRecord| r.agent == "sudokupad-art-143" && crate::sessions::in_tree(&r.workspace, &root);
+        let got = move_record(home, &dead, &path_for(home, &dead), &names, "4242", "1");
+        assert!(matches!(got, Err(AdoptRefusal::Io(_))), "{got:?}");
+        assert_eq!(read(home, &dead), vec![record(&ws)], "the record is back where it was");
     }
 }
