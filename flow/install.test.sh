@@ -114,6 +114,15 @@ if [ -L "$tmp/home/.claude/hooks/worker-spin-alert.sh" ]; then
 else
   echo "FAIL claude/hooks/worker-spin-alert.sh not linked under the scratch HOME"; fails=1
 fi
+# worker-stop-alert.sh and worker-spin-alert.sh source this file by
+# BASH_SOURCE-relative path, which resolves against the installed symlink's
+# own directory (~/.claude/hooks), not the repo — so it must be linked there
+# too, or both hooks silently fail to resolve any controller (#991).
+if [ -L "$tmp/home/.claude/hooks/worker-alert-lib.sh" ]; then
+  echo "PASS the shared worker-alert lib linked under the scratch HOME"
+else
+  echo "FAIL claude/hooks/worker-alert-lib.sh not linked under the scratch HOME"; fails=1
+fi
 # Re-running changes nothing: the second install leaves the same symlink, not a
 # .pre-flow backup of the first one's.
 HOME="$tmp/home" bash "$repo/flow/install.sh" >/dev/null 2>&1

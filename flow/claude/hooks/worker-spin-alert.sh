@@ -27,7 +27,6 @@
 # Always exit 0 in hook mode — a hook failure must never block the worker.
 
 set -u
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/worker-alert-lib.sh"
 N="${SPIN_N:-20}"
 WINDOW=500
 BYTE_CAP="${SPIN_BYTE_CAP:-4000000}"   # override in tests to exercise the byte cap without a multi-MB fixture
@@ -80,7 +79,20 @@ if [ "${1:-}" = "--classify" ]; then
   classify "$2"; exit 0
 fi
 
+hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 log="$HOME/.claude/worker-spin-alerts.log"
+# A missing lib (an installed hook whose sibling was never deployed) must not
+# join the "not a worker transcript" exit 0 below via a bare command-not-found
+# on stderr — that is exactly the silent-exit-0 hazard #991 exists to fix, one
+# layer up. Logged so a run of missing alerts has a trace to find. Sourced
+# only in hook mode: --classify above is self-contained and needs none of it.
+if ! source "$hook_dir/worker-alert-lib.sh" 2>/dev/null; then
+  mkdir -p "$(dirname "$log")"
+  printf '%s\t%s\tnot-sent\t%s\n' "$(date -u +%FT%TZ)" "lib-missing" \
+    "missing $hook_dir/worker-alert-lib.sh — hook cannot resolve a controller" >> "$log"
+  exit 0
+fi
+
 event="$(cat)"
 transcript="$(jq -r '.transcript_path // ""' <<<"$event" 2>/dev/null)"
 session="$(jq -r '.session_id // ""' <<<"$event" 2>/dev/null)"

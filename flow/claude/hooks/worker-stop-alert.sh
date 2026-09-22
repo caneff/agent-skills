@@ -31,9 +31,19 @@
 
 set -u
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/worker-alert-lib.sh"
-
+hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 log="$HOME/.claude/worker-stop-alerts.log"
+# A missing lib (an installed hook whose sibling was never deployed) must not
+# join the "not a worker transcript" exit 0 below via a bare command-not-found
+# on stderr — that is exactly the silent-exit-0 hazard #991 exists to fix, one
+# layer up. Logged so a run of missing alerts has a trace to find.
+if ! source "$hook_dir/worker-alert-lib.sh" 2>/dev/null; then
+  mkdir -p "$(dirname "$log")"
+  printf '%s\t%s\tnot-sent\t%s\n' "$(date -u +%FT%TZ)" "lib-missing" \
+    "missing $hook_dir/worker-alert-lib.sh — hook cannot resolve a controller" >> "$log"
+  exit 0
+fi
+
 event="$(cat)"
 
 jq -e '.stop_hook_active != true' >/dev/null 2>&1 <<<"$event" || exit 0
@@ -58,15 +68,11 @@ IFS=$'\t' read -r n controller < <(worker_alert_read_brief "$transcript")
 # and socket — before either use, but keep matching the brief's own literal
 # too: nothing here requires a worker to route through `resolve-controller`
 # first. Unlike `resolve-controller` (`sessions::name_of_session`, which
-# needs a name because it returns one), `worker_alert_resolve_session` in
-# `sid` mode does not require the record to have a `.name`: a nameless live session
-# still sends and receives cross-session messages (every one carries
-# `from="uds:<its socket>"`, and a reply copies that address), so a report
-# delivered to its socket is real even with nothing to match by name (Codex
-# pass on PR #1057 — an earlier version of this file required a non-empty
-# name here and dropped exactly that socket). A worktree without `herdr`,
-# or a `herdr agent list` that fails or times out, falls back the same way
-# an older brief already carrying a session name does.
+# needs a name because it returns one), `worker_alert_resolve_session`'s
+# `sid` mode does not require the record to have a `.name` — see its own
+# comment in worker-alert-lib.sh for why. A worktree without `herdr`, or a
+# `herdr agent list` that fails or times out, falls back the same way an
+# older brief already carrying a session name does.
 herdr_sid="$(timeout 2 herdr agent list 2>/dev/null \
   | jq -r --arg c "$controller" '.result.agents[]? | select((.name // "") == $c) | .agent_session.value // empty' 2>/dev/null \
   | head -n1)"
