@@ -105,8 +105,36 @@ run_id="$(jq -r '.run_id // ""' <<<"$verdict")"
 # One alert per run of repeats: keyed by session, tool, input and run_id
 # (see classify() above). Only a `sent` line dedupes: an alert that never
 # reached the controller is retried on the next call.
+#
+# A live spin's own first alert carries a real run_id (found while the
+# streak was still short enough to see its start). If that same
+# uninterrupted streak keeps growing and crosses a cap, classify() starts
+# returning run_id null (Codex adversarial review on PR #1061): a bare
+# key-equality check then sees a *different* key — same session, tool,
+# digest, but "" instead of the real id — finds no exact match, and
+# re-alerts a second time for one still-running spin. So when run_id is
+# null, "already sent" means ANY prior sent line for this (session, tool,
+# digest), whatever run_id it carries — not just an exact ""-run_id match.
+# The conservative cost is the mirror case: a second, genuinely different
+# streak of the same call that happens to also land in a capped state
+# right away (no real-id alert of its own first) is read as a dup of an
+# earlier unrelated sent line and misses its own alert. That is a missed
+# re-alert, not a duplicate one, and matches the plateau's own tradeoff
+# (see classify() above): once a streak's boundary is unknowable, this
+# hook prefers under-alerting to spamming the controller.
 key="$session"$'\t'"$tool"$'\t'"$digest"$'\t'"$run_id"
-grep -qF -- "$key"$'\t'"sent"$'\t' "$log" 2>/dev/null && exit 0
+if [ -n "$run_id" ]; then
+  grep -qF -- "$key"$'\t'"sent"$'\t' "$log" 2>/dev/null && exit 0
+else
+  # Log line shape: date\tsession\ttool\tdigest\trun_id\tstatus\tmessage
+  # (logline() below). Field position, not substring search, so a session,
+  # tool or digest value that happens to contain a tab-adjacent match to
+  # another field can never cross-match.
+  [ -r "$log" ] && awk -F'\t' -v s="$session" -v t="$tool" -v d="$digest" '
+    $2 == s && $3 == t && $4 == d && $6 == "sent" { found=1; exit }
+    END { exit !found }
+  ' "$log" && exit 0
+fi
 logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$1" "$2" >> "$log"; }
 
 ctl_session=""

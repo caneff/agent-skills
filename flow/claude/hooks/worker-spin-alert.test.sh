@@ -150,4 +150,28 @@ if [ "$(grep -c 'worker-spin-alert' "$tmp/prompts" 2>/dev/null)" = 1 ]; then
   echo "PASS: a spin that outgrows the byte cap alone still alerts only once"
 else echo "FAIL: byte-cap-outgrowing spin — prompts: $(cat "$tmp/prompts" 2>/dev/null)"; fails=1; fi
 
+# A live spin's first alert carries a real run_id; if that SAME streak
+# keeps growing and later crosses a cap, run_id goes null and a naive
+# exact-key dedupe reads it as a different streak and re-alerts a second
+# time for one still-running spin (Codex adversarial review, PR #1061).
+# One alert total, not two: fire just before the cap (real id) then just
+# after (null id), same session both times.
+rm -f "$tmp/prompts" "$tmp/home/.claude/worker-spin-alerts.log"
+printf '{"session_id":"s9","transcript_path":"%s"}' "$fx/real-spin.jsonl" \
+  | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook" >/dev/null
+printf '{"session_id":"s9","transcript_path":"%s"}' "$fx/window-501.jsonl" \
+  | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook" >/dev/null
+if [ "$(grep -c 'worker-spin-alert' "$tmp/prompts" 2>/dev/null)" = 1 ]; then
+  echo "PASS: a live spin crossing the line cap after its first alert does not alert twice"
+else echo "FAIL: line-cap-crossing spin — prompts: $(cat "$tmp/prompts" 2>/dev/null)"; fails=1; fi
+
+rm -f "$tmp/prompts" "$tmp/home/.claude/worker-spin-alerts.log"
+printf '{"session_id":"s10","transcript_path":"%s"}' "$fx/byte-cap-40.jsonl" \
+  | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook" >/dev/null
+printf '{"session_id":"s10","transcript_path":"%s"}' "$fx/byte-cap-41.jsonl" \
+  | SPIN_BYTE_CAP=3200 HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$hook" >/dev/null
+if [ "$(grep -c 'worker-spin-alert' "$tmp/prompts" 2>/dev/null)" = 1 ]; then
+  echo "PASS: a live spin crossing the byte cap after its first alert does not alert twice"
+else echo "FAIL: byte-cap-crossing spin — prompts: $(cat "$tmp/prompts" 2>/dev/null)"; fails=1; fi
+
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }
