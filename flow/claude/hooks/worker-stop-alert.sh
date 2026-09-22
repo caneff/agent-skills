@@ -31,6 +31,8 @@
 
 set -u
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/worker-alert-lib.sh"
+
 log="$HOME/.claude/worker-stop-alerts.log"
 event="$(cat)"
 
@@ -44,50 +46,8 @@ session="$(jq -r '.session_id // ""' <<<"$event" 2>/dev/null)"
 entries() { jq -nc '[inputs | fromjson? | objects]' -R "$transcript" 2>/dev/null; }
 
 # The brief: ticket number and controller name, or nothing for a non-worker.
-IFS=$'\t' read -r n controller < <(entries | jq -r '
-  [.[] | select(.type == "user" and .origin.kind == "human")
-       | .message.content | strings
-       | capture("<command-name>/implement(-spec)?</command-name>\\s*<command-args>(?<n>[0-9]+)\\b[^<]*--controller \"(?<c>[^\"]+)\"")]
-  | first // empty | "\(.n)\t\(.c)"')
+IFS=$'\t' read -r n controller < <(worker_alert_read_brief "$transcript")
 [ -n "${controller:-}" ] || exit 0
-
-# A live registry record naming `sid` (mode "sid") or `nm` (mode "name") —
-# its session id, current name (possibly empty) and socket. `sid` mode
-# matches on `.sessionId` alone, with no requirement that `.name` be
-# non-empty: a Claude session with no name yet is still live, still sends
-# and receives cross-session messages (every one carries `from="uds:<its
-# socket>"`, and a reply copies that address), and a report it delivered to
-# its own socket is real even though it has nothing to match by name
-# (Codex pass on PR #1057 — an earlier version of this filter required a
-# non-empty name unconditionally and dropped exactly this socket). `name`
-# mode still only matches a non-empty `.name` because it matches ON that
-# field. Joined and split on `\x1f` (ASCII unit separator), not a tab: tab
-# is one of bash's default IFS-whitespace characters, so `read` collapses
-# runs of it and strips a leading/trailing one regardless of field order —
-# an empty `.sessionId`, `.name` or `.messagingSocketPath` in the middle
-# silently shifted every field after it into the wrong variable
-# (verification pass on #981, #1014). `\x1f` is not IFS-whitespace, so a
-# run of it never collapses and an empty field never disappears, whatever
-# position it's in. Live means the pid's /proc starttime (field 22, after
-# the `(comm)` field) equals the record's procStart — a stale record whose
-# pid was reused has another, as in flow/lane's sessions reader.
-resolve_session() {
-  local mode="$1" val="$2" f pid start sid nm sock stat fields
-  for f in "$HOME"/.claude/sessions/*.json; do
-    [ -e "$f" ] || continue
-    IFS=$'\x1f' read -r pid start sid nm sock < <(jq -r --arg mode "$mode" --arg v "$val" \
-      'select((if $mode == "sid" then .sessionId else .name end) == $v) |
-       [(.pid | tostring), (.procStart // ""), (.sessionId // ""), (.name // ""), (.messagingSocketPath // "")]
-       | join("\u001f")' "$f" 2>/dev/null)
-    [[ "${pid:-}" =~ ^[0-9]+$ ]] || continue
-    stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || continue
-    read -ra fields <<<"${stat##*) }"
-    [ -n "$start" ] && [ "${fields[19]:-}" = "$start" ] || continue
-    printf '%s\x1f%s\x1f%s\n' "$sid" "$nm" "$sock"
-    return 0
-  done
-  return 1
-}
 
 # The brief carries the controller's herdr agent name (#923); a compliant
 # worker resolves that to a session name or socket before sending, so
@@ -98,8 +58,8 @@ resolve_session() {
 # and socket — before either use, but keep matching the brief's own literal
 # too: nothing here requires a worker to route through `resolve-controller`
 # first. Unlike `resolve-controller` (`sessions::name_of_session`, which
-# needs a name because it returns one), `resolve_session` in `sid` mode
-# does not require the record to have a `.name`: a nameless live session
+# needs a name because it returns one), `worker_alert_resolve_session` in
+# `sid` mode does not require the record to have a `.name`: a nameless live session
 # still sends and receives cross-session messages (every one carries
 # `from="uds:<its socket>"`, and a reply copies that address), so a report
 # delivered to its socket is real even with nothing to match by name (Codex
@@ -111,16 +71,16 @@ herdr_sid="$(timeout 2 herdr agent list 2>/dev/null \
   | jq -r --arg c "$controller" '.result.agents[]? | select((.name // "") == $c) | .agent_session.value // empty' 2>/dev/null \
   | head -n1)"
 resolved=""
-[ -n "$herdr_sid" ] && resolved="$(resolve_session sid "$herdr_sid")"
-[ -n "$resolved" ] || resolved="$(resolve_session name "$controller")"
+[ -n "$herdr_sid" ] && resolved="$(worker_alert_resolve_session sid "$herdr_sid")"
+[ -n "$resolved" ] || resolved="$(worker_alert_resolve_session name "$controller")"
 ctl_session="" ctl_socket="" resolved_name=""
 if [ -n "$resolved" ]; then
   IFS=$'\x1f' read -r ctl_session resolved_name ctl_socket <<<"$resolved"
 fi
-# Belt and braces: resolve_session above already returns a nameless
-# record's session id, so this rarely fires, but it keeps the pane lookup
-# working even if resolve_session found nothing (a record removed between
-# the herdr list and here) while herdr's own bookkeeping still knows the id.
+# Belt and braces: worker_alert_resolve_session above already returns a
+# nameless record's session id, so this rarely fires, but it keeps the pane
+# lookup working even if it found nothing (a record removed between the
+# herdr list and here) while herdr's own bookkeeping still knows the id.
 [ -z "$ctl_session" ] && ctl_session="$herdr_sid"
 
 # The verdict for this stop: `reported`, `waiting` on a subagent, or `silent`,
@@ -235,7 +195,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg r
 key="$session"$'\t'"$stop"
 grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
 
-logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$1" "$2" >> "$log"; }
+logline() { worker_alert_logline "$log" "$key" "$1" "$2"; }
 
 # Every herdr call below ends by a 10 s deadline, measured from here — not
 # 12 s, because the controller resolution above already spent up to its own
@@ -243,13 +203,10 @@ logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u
 # room for that whether or not the stop turned out silent (#1014).
 deadline=$((SECONDS + 10))
 
-worker_agent="$(timeout 2 herdr agent get "${HERDR_PANE_ID:-}" 2>/dev/null | jq -r '.result.agent.name // empty' 2>/dev/null)"
-worker_agent="${worker_agent:-${HERDR_PANE_ID:-unknown pane}}"
+worker_agent="$(worker_alert_worker_agent_name)"
 alert="[worker-stop-alert] worker #$n stopped without reporting to $controller (herdr agent $worker_agent)"
 
-pane=""
-[ -n "$ctl_session" ] && pane="$(timeout 2 herdr agent list 2>/dev/null | jq -r --arg s "$ctl_session" \
-  '.result.agents[]? | select(.agent_session.value == $s) | .pane_id' 2>/dev/null | head -n1)"
+pane="$(worker_alert_controller_pane "$ctl_session")"
 if [ -z "$pane" ]; then
   logline "not-sent" "no herdr pane for controller $controller: $alert"
   exit 0

@@ -27,6 +27,7 @@
 # Always exit 0 in hook mode — a hook failure must never block the worker.
 
 set -u
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/worker-alert-lib.sh"
 N="${SPIN_N:-20}"
 WINDOW=500
 BYTE_CAP="${SPIN_BYTE_CAP:-4000000}"   # override in tests to exercise the byte cap without a multi-MB fixture
@@ -89,10 +90,7 @@ verdict="$(classify "$transcript")"
 jq -e '.spinning == true' >/dev/null 2>&1 <<<"$verdict" || exit 0
 
 # A worker's brief names its ticket and controller; anything else is not one.
-IFS=$'\t' read -r n controller < <(jq -nc '[inputs | fromjson? | objects] ' -R "$transcript" 2>/dev/null | jq -r '
-  [.[] | select(.type == "user" and .origin.kind == "human") | .message.content | strings
-       | capture("<command-name>/implement(-spec)?</command-name>\\s*<command-args>(?<n>[0-9]+)\\b[^<]*--controller \"(?<c>[^\"]+)\"")]
-  | first // empty | "\(.n)\t\(.c)"')
+IFS=$'\t' read -r n controller < <(worker_alert_read_brief "$transcript")
 [ -n "${controller:-}" ] || exit 0
 
 tool="$(jq -r '.tool' <<<"$verdict")"
@@ -135,27 +133,16 @@ else
     END { exit !found }
   ' "$log" && exit 0
 fi
-logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$1" "$2" >> "$log"; }
+logline() { worker_alert_logline "$log" "$key" "$1" "$2"; }
 
 ctl_session=""
-for f in "$HOME"/.claude/sessions/*.json; do
-  [ -e "$f" ] || continue
-  IFS=$'\t' read -r pid start sid < <(jq -r --arg c "$controller" \
-    'select(.name == $c) | "\(.pid)\t\(.procStart // "")\t\(.sessionId // "")"' "$f" 2>/dev/null)
-  [[ "${pid:-}" =~ ^[0-9]+$ ]] || continue
-  stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || continue
-  read -ra fields <<<"${stat##*) }"
-  [ -n "$start" ] && [ "${fields[19]:-}" = "$start" ] || continue
-  ctl_session="$sid"; break
-done
+resolved="$(worker_alert_resolve_session name "$controller")"
+[ -n "$resolved" ] && IFS=$'\x1f' read -r ctl_session _ _ <<<"$resolved"
 
-worker_agent="$(timeout 2 herdr agent get "${HERDR_PANE_ID:-}" 2>/dev/null | jq -r '.result.agent.name // empty' 2>/dev/null)"
-worker_agent="${worker_agent:-${HERDR_PANE_ID:-unknown pane}}"
+worker_agent="$(worker_alert_worker_agent_name)"
 alert="[worker-spin-alert] worker #$n repeated $tool $input at least $count times in a row (herdr agent $worker_agent, controller $controller)"
 
-pane=""
-[ -n "$ctl_session" ] && pane="$(timeout 2 herdr agent list 2>/dev/null | jq -r --arg s "$ctl_session" \
-  '.result.agents[]? | select(.agent_session.value == $s) | .pane_id' 2>/dev/null | head -n1)"
+pane="$(worker_alert_controller_pane "$ctl_session")"
 if [ -z "$pane" ]; then logline "not-sent" "no herdr pane for controller $controller: $alert"; exit 0; fi
 if out="$(timeout 3 herdr agent prompt "$pane" "$alert" 2>&1)"; then
   logline "sent" "$pane: $alert"
