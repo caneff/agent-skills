@@ -38,16 +38,18 @@ fn primary_checkout(cwd: &str) -> Result<String, String> {
     Ok(primary)
 }
 
-/// The name the worker's brief-side `resolve-controller` takes for this
-/// session: its herdr agent name when it has one, which a restart keeps,
-/// else its session name — the same preference `implement-dispatch` briefs
-/// with.
-fn own_name(home: &Path, own_pid: &str) -> Option<String> {
-    let me = sessions::live_all(home).into_iter().find(|s| s.pid == own_pid)?;
-    let agent = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT)
-        .and_then(|out| herdr::parse_agents(&out))
-        .and_then(|agents| agents.iter().find(|a| !me.session_id.is_empty() && a.session() == me.session_id).and_then(|a| a.given_name()).map(str::to_string));
-    agent.or_else(|| Some(me.name).filter(|n| !n.is_empty()))
+/// The name the worker's `resolve-controller` takes for this session: its
+/// herdr agent name when it has one, which a restart keeps, else its session
+/// name — the preference `implement-dispatch` briefs with, and its refusal
+/// too: a listing that failed is not "no agent", and falling back to the
+/// session name then would hand the worker an address a restart ages.
+fn own_name(home: &Path, own_pid: &str) -> Result<String, String> {
+    let me = sessions::live_all(home).into_iter().find(|s| s.pid == own_pid).ok_or("this session's own registry record is gone")?;
+    let listing = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT)
+        .ok_or("herdr agent list failed or timed out, so this session's herdr agent name is unknown")?;
+    let agents = herdr::parse_agents(&listing).ok_or("herdr agent list gave output of an unexpected shape")?;
+    let agent = agents.iter().find(|a| !me.session_id.is_empty() && a.session() == me.session_id).and_then(|a| a.given_name());
+    agent.map(str::to_string).or(Some(me.name).filter(|n| !n.is_empty())).ok_or_else(|| "this session has no herdr agent name and no session name to re-point the worker at".to_string())
 }
 
 fn main() -> ExitCode {
@@ -77,6 +79,13 @@ fn main() -> ExitCode {
         Err(e) => return fail(&e),
     };
 
+    // Before the move: a worker adopted with no name to re-point it at has a
+    // controller it cannot reach.
+    let name = match own_name(home, &own_pid) {
+        Ok(n) => n,
+        Err(e) => return fail(&format!("{e}; nothing moved")),
+    };
+
     let adopted = match workers::adopt(home, agent, &primary, &own_pid, &own_start) {
         Ok(a) => a,
         Err(AdoptRefusal::NotFound) => return fail(&format!("no worker record names {agent} under {primary} (another session may have just adopted it)")),
@@ -93,13 +102,7 @@ fn main() -> ExitCode {
 
     let r = &adopted.record;
     safe_println!("adopted {} ({}) from controller pid {}, which is gone", r.agent, r.branch, adopted.from_pid);
-    match own_name(home, &own_pid) {
-        Some(name) => safe_println!(
-            "tell the worker — SendMessage to the session `resolve-controller {}` prints: Your controller is now {name}",
-            r.agent
-        ),
-        None => safe_println!("this session has no name to re-point the worker at: name it, then tell the worker: Your controller is now <name>"),
-    }
+    safe_println!("tell the worker — SendMessage to the session `resolve-controller {}` prints: Your controller is now {name}", r.agent);
     safe_println!("cleanup: {}", r.cleanup);
     ExitCode::SUCCESS
 }

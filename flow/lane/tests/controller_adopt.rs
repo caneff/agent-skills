@@ -170,16 +170,23 @@ fn two_sessions_adopting_one_worker_at_once_exactly_one_wins() {
     // Two adopting sessions: a `sh` each, parked on `read` until both have
     // a session record, then released together. `sh` forks the adopt (a
     // command follows it), so each adopt's ancestor walk finds its own `sh`.
+    // Each `sh` records its adopt's exit status and then parks again: a
+    // session that exited would be a dead controller, rightly adoptable by
+    // the other, so both stay alive until both results are read. The lock
+    // that makes one of them lose is witnessed in `workers.rs`'s
+    // `adopt_moves_under_the_source_lock_...`; this is the end-to-end outcome.
     use std::io::Write;
     let f = Fixture::new();
     let (primary, ws) = f.repo_with_workspace("scroller", BRANCH);
     let dead = dead_pid().to_string();
     workers::append(&f.home(), &dead, &worker_record(AGENT, BRANCH, &ws, "12345")).unwrap();
 
-    let mut sessions: Vec<std::process::Child> = (0..2)
-        .map(|_| {
+    let status: Vec<std::path::PathBuf> = (0..2).map(|i| f.tmp.path().join(format!("adopt-{i}.status"))).collect();
+    let mut sessions: Vec<std::process::Child> = status
+        .iter()
+        .map(|st| {
             cmd(&f, "sh", &primary)
-                .args(["-c", r#"read _; "$0" "$1"; exit $?"#, env!("CARGO_BIN_EXE_controller-adopt"), AGENT])
+                .args(["-c", r#"read _; "$0" "$1"; echo $? >"$2"; read _"#, env!("CARGO_BIN_EXE_controller-adopt"), AGENT, st.to_str().unwrap()])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -191,14 +198,27 @@ fn two_sessions_adopting_one_worker_at_once_exactly_one_wins() {
     for (i, c) in sessions.iter().enumerate() {
         session(&f, c.id() as i32, &format!("adopter-{i}"), &format!("sid-{i}"));
     }
-    for c in &mut sessions {
-        c.stdin.take().unwrap().write_all(b"go\n").unwrap();
+    let mut stdins: Vec<std::process::ChildStdin> = sessions.iter_mut().map(|c| c.stdin.take().unwrap()).collect();
+    for s in &mut stdins {
+        s.write_all(b"go\n").unwrap();
     }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let codes: Vec<String> = status
+        .iter()
+        .map(|st| loop {
+            if let Some(code) = std::fs::read_to_string(st).ok().filter(|c| c.ends_with('\n')) {
+                break code.trim().to_string();
+            }
+            assert!(std::time::Instant::now() < deadline, "an adopt never finished");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        })
+        .collect();
+    let held: Vec<String> = holders(&f).into_iter().map(|(pid, _)| pid).collect();
+    drop(stdins);
     let outs: Vec<Output> = sessions.into_iter().map(|c| c.wait_with_output().unwrap()).collect();
 
-    let winners: Vec<usize> = (0..2).filter(|i| outs[*i].status.success()).collect();
-    assert_eq!(winners.len(), 1, "{}\n---\n{}", out_text(&outs[0]), out_text(&outs[1]));
-    let held: Vec<String> = holders(&f).into_iter().map(|(pid, _)| pid).collect();
+    let winners: Vec<usize> = (0..2).filter(|i| codes[*i] == "0").collect();
+    assert_eq!(winners.len(), 1, "{codes:?}\n{}\n---\n{}", out_text(&outs[0]), out_text(&outs[1]));
     assert_eq!(held, vec![pids[winners[0]].clone()], "the record lives in the winner's sidecar alone");
 }
 
@@ -239,4 +259,22 @@ fn adopting_again_a_worker_this_session_already_controls_says_so_and_succeeds() 
     assert!(stdout(&out).contains("this session already controls scroller-345"), "{}", out_text(&out));
     let held: Vec<String> = holders(&f).into_iter().map(|(pid, _)| pid).collect();
     assert_eq!(held, vec![own_pid]);
+}
+
+#[test]
+fn adopt_refuses_before_moving_anything_when_herdr_cannot_be_asked() {
+    // #1098 review S1: a failed listing is not "no herdr agent" — re-pointing
+    // the worker at the session name then would brief an address a restart
+    // ages, silently (implement-dispatch refuses the same case).
+    let f = Fixture::new();
+    adopter(&f);
+    let (primary, ws) = f.repo_with_workspace("scroller", BRANCH);
+    let dead = dead_pid().to_string();
+    let record = worker_record(AGENT, BRANCH, &ws, "12345");
+    workers::append(&f.home(), &dead, &record).unwrap();
+
+    let out = cmd(&f, env!("CARGO_BIN_EXE_controller-adopt"), &primary).arg(AGENT).env("HERDR_LIST_FAIL", "true").output().unwrap();
+    assert!(!out.status.success(), "{}", out_text(&out));
+    assert!(out_text(&out).contains("herdr agent list failed"), "{}", out_text(&out));
+    assert_eq!(holders(&f), vec![(dead, record)], "nothing moved");
 }
