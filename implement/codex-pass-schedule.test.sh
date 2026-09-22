@@ -119,7 +119,7 @@ check_absent_in "$whole_file" 'The retry is validated by the same gate' 'impleme
 # Rule 6: a collected verdict changes nothing downstream — the two-pass
 # ceiling, the dispositions and the trial row are #888's and #812's still.
 check_in "$merge_section" 'A collected verdict is this step' 'implement/SKILL.md § The merge'
-check_in "$merge_section" "is #888's and #812's, unchanged by #1015" 'implement/SKILL.md § The merge'
+check_in "$merge_section" "is #888's, #812's and #1028's, unchanged by #1015" 'implement/SKILL.md § The merge'
 check_absent_in "$whole_file" 'unchanged by where the collected pass was launched' 'implement/SKILL.md (whole file)'
 check_in "$merge_section" 'One recorded run, whichever phase writes it' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'The pass runs through this block and no other' 'implement/SKILL.md § The merge'
@@ -164,6 +164,9 @@ check_in "$merge_section" 'phase=third' 'implement/SKILL.md § The merge'
 # § Review's "a high finding is filed" would otherwise forbid (C2).
 check_in "$merge_section" 'The fail-closed gate does not refuse the second pass as stale over an in-round fix' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'the one place a high finding is not filed' 'implement/SKILL.md § The merge'
+# § Review's rule text names the second pass too, so a reader starting there
+# does not take "round-1" as the rule's whole reach (P1).
+check_in "$whole_file" "§ The merge step 3 applies the same rule to a Codex second-pass finding" 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'there is no third Codex run' 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'there is no worker fix-and-re-run cycle left' 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'the no-third-run ceiling' 'implement/SKILL.md (whole file)'

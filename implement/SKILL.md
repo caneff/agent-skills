@@ -229,7 +229,8 @@ No PR and no reviewer; Chris reads the log after.
    a change, not an adjacent fix, and § Build's pre-existing-bug rule governs
    it. Make each adjacent fix in a commit of its own, so its sha measures it
    alone. Its disposition is `fixed (adjacent)`, with that sha; its sidecar
-   line is step 2's adjacent form.
+   line is step 2's adjacent form. § The merge step 3 applies the same rule
+   to a Codex second-pass finding.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
    Pass the reviewers every ruled or other-ticket item as settled; a
    disposition you claim, `disputed` included, goes as a claim to check.
@@ -615,7 +616,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    comment is what makes the verdict readable by anyone but you. Everything
    after that — the dispositions, #888's conditional second pass (which
    runs the same block with `phase=second`), the third-run ceiling, the
-   trial row — is #888's and #812's, unchanged by #1015.
+   trial row — is #888's, #812's and #1028's, unchanged by #1015.
 
    **Every run records its duration**, collected or refused, as one row
    appended to `docs/research/2026-09-20-codex-pass-durations.md`: ticket,
