@@ -508,6 +508,30 @@ fn poll_worker_session_name(
     }
 }
 
+/// The pid of the controller's own session record, to write its
+/// `<pid>.workers.jsonl` sidecar (#964). Three ways, cheapest first: the
+/// sessionId captured while deriving the controller from this process's own
+/// ancestry (set only when `--controller` was not passed); a live session
+/// already named `controller` (an explicit `--controller <session name>`, or
+/// a derived controller with no herdr agent); or, last, the same herdr-agent
+/// hop `resolve-controller` makes — `herdr agent list` for `controller`'s
+/// `agent_session.value`, then that session's own live record. `None` when
+/// none of the three finds a live session: the worker is still dispatched,
+/// the record is just not written, and a `/clear` on that controller session
+/// restores nothing for it.
+fn resolve_controller_pid(home: &Path, controller_session: &str, controller: &str) -> Option<String> {
+    if let Some(s) = sessions::find_live_by_session_id(home, controller_session) {
+        return Some(s.pid);
+    }
+    if let Some(s) = sessions::find_live_by_name(home, controller) {
+        return Some(s.pid);
+    }
+    let listing = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT)?;
+    let agents = herdr::parse_agents(&listing)?;
+    let agent = agents.iter().find(|a| a.given_name() == Some(controller))?;
+    sessions::find_live_by_session_id(home, agent.session()).map(|s| s.pid)
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -870,13 +894,49 @@ fn run() -> Result<(), ExitCode> {
 
     let session = worker_session_name(&home, wt.to_str().unwrap_or(""), &agent);
 
+    // #964: the controller's own session survives a `/clear` (the process
+    // does, only the context is wiped), so this record is what a
+    // SessionStart hook reads back to restore what it controls. Best-effort:
+    // a controller this run cannot resolve to a live session still gets its
+    // worker dispatched, just with nothing to restore for it.
+    let cleanup = format!("cd {primary} && merge-cleanup {branch} --repo {primary}");
+    match resolve_controller_pid(Path::new(&home), &controller_session, &controller) {
+        Some(pid) => {
+            // #964 fix round 1 (Codex high): the controller session's own
+            // starttime, read fresh here rather than trusted from whichever
+            // registry lookup found `pid` — this is what lets
+            // `controller-restore` tell "this session" from "a session that
+            // now happens to reuse this pid" once the original controller is
+            // gone. Empty on a read failure (the pid died in the gap since
+            // resolution); an empty proc_start never matches a live one, so
+            // the record is simply dropped as stale on restore rather than
+            // failing this dispatch over it.
+            let proc_start = pid.parse::<i32>().ok().and_then(proc_info::read_stat).map(|s| s.start).unwrap_or_default();
+            let record = lane::workers::WorkerRecord {
+                agent: agent.clone(),
+                tickets: ns.clone(),
+                branch: branch.clone(),
+                workspace: wt.display().to_string(),
+                repo: slug.clone(),
+                cleanup: cleanup.clone(),
+                chris_merges,
+                dispatched_at: lane::workers::now_iso8601(),
+                proc_start,
+            };
+            if let Err(e) = lane::workers::append(Path::new(&home), &pid, &record) {
+                eprintln!("implement-dispatch: could not record this worker for the controller ({e}); a /clear there will not restore it");
+            }
+        }
+        None => eprintln!("implement-dispatch: could not resolve the controller to a live session; a /clear there will not restore this worker"),
+    }
+
     let dispatched: Vec<String> = ns.iter().map(|n| format!("#{n}")).collect();
     safe_println!("dispatched {} ({model}, {described}, controller {controller})", dispatched.join(" "));
     safe_println!("worktree: {}", wt.display());
     safe_println!("branch:   {branch}");
     safe_println!("agent:    {agent}");
     safe_println!("session:  {session}");
-    safe_println!("cleanup:  cd {primary} && merge-cleanup {branch} --repo {primary}");
+    safe_println!("cleanup:  {cleanup}");
     Ok(())
 }
 

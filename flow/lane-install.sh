@@ -19,7 +19,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 crate="$here/lane"
 
 names=()
-for n in implement-dispatch merge-cleanup resolve-controller; do
+for n in implement-dispatch merge-cleanup resolve-controller controller-restore; do
   grep -qx "name = \"$n\"" "$crate/Cargo.toml" && names+=(--bin "$n")
 done
 [ "${#names[@]}" -gt 0 ] || { echo "flow/lane-install.sh: no lane binaries found in $crate/Cargo.toml" >&2; exit 1; }

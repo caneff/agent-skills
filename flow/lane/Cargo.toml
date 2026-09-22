@@ -21,6 +21,10 @@ name = "resolve-controller"
 path = "src/bin/resolve_controller.rs"
 
 [[bin]]
+name = "controller-restore"
+path = "src/bin/controller_restore.rs"
+
+[[bin]]
 name = "lane-fake"
 path = "src/bin/lane_fake.rs"
 

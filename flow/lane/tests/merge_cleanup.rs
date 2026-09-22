@@ -736,6 +736,54 @@ fn without_herdr_the_linked_worktree_is_removed_and_the_skip_reported() {
     assert!(run.has("skipped the herdr workspace close (herdr is not on PATH)"), "{}", run.text());
 }
 
+// --- #964: the controller/worker record is cleared with the workspace ------
+
+fn worker_record(workspace: &std::path::Path, branch: &str) -> lane::workers::WorkerRecord {
+    lane::workers::WorkerRecord {
+        agent: "a".into(),
+        tickets: vec!["1".into()],
+        branch: branch.into(),
+        workspace: workspace.display().to_string(),
+        repo: "caneff/r5b".into(),
+        cleanup: "cd x && merge-cleanup y --repo x".into(),
+        chris_merges: false,
+        dispatched_at: "".into(),
+        proc_start: "1234567".into(),
+    }
+}
+
+#[test]
+fn a_removed_worktree_clears_its_worker_record_and_leaves_an_unrelated_one() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r5b");
+    let wt = c.root().join("r5b-wt");
+    c.worktree_add(&r, &[s(&wt), "caneff/merged-one"]);
+
+    lane::workers::append(&c.home(), "111", &worker_record(&wt, "caneff/merged-one")).unwrap();
+    let elsewhere = c.root().join("elsewhere-wt");
+    lane::workers::append(&c.home(), "222", &worker_record(&elsewhere, "caneff/other")).unwrap();
+
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(run.has(&format!("cleared the controller's worker record for {}", wt.display())), "{}", run.text());
+    assert!(lane::workers::read(&c.home(), "111").is_empty(), "the removed workspace's record should be gone");
+    assert_eq!(lane::workers::read(&c.home(), "222").len(), 1, "an unrelated controller's record must survive");
+}
+
+#[test]
+fn a_dry_run_removal_leaves_the_worker_record_in_place() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r5c");
+    let wt = c.root().join("r5c-wt");
+    c.worktree_add(&r, &[s(&wt), "caneff/merged-one"]);
+    lane::workers::append(&c.home(), "111", &worker_record(&wt, "caneff/merged-one")).unwrap();
+
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert!(run.ok && wt.exists(), "{}", run.text());
+    assert!(!run.has("cleared the controller's worker record"), "{}", run.text());
+    assert_eq!(lane::workers::read(&c.home(), "111").len(), 1, "a dry run must not touch the record");
+}
+
 // --- 10. the live-session guard ----------------------------------------------
 
 /// The bash suite's r6 fixture: a workspace at the lane's own path holding

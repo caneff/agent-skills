@@ -1152,6 +1152,14 @@ impl Cleanup {
                 for dir in &empty_dirs {
                     safe_println!("{verb} the empty ignored directory at {wt}/{}", dir);
                 }
+                // #964: a dispatch's controller/worker record is bookkeeping
+                // alongside the workspace, not something worth its own
+                // guard — a dry run announces the removal without doing it,
+                // so it must not also announce clearing a record that is
+                // still there.
+                if !self.dry && lane::workers::remove_workspace(Path::new(&self.home), &wt) {
+                    safe_println!("cleared the controller's worker record for {wt}");
+                }
                 self.removed_worktrees.push(wt);
             }
         }

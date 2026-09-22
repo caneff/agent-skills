@@ -185,6 +185,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "controller-restore 2>/dev/null || true",
+            "statusMessage": "Restoring controlled workers",
+            "timeout": 15
+          }
+        ]
       }
     ],
     "Stop": [

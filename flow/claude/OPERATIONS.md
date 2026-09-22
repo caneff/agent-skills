@@ -109,6 +109,37 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   sentence. Never answer a question and delegate the same question. An idle
   notice that repeats a report already relayed gets no reply at all. Why: a
   repeated report costs me a read and carries nothing new.
+- **The controller/worker pairing survives `/clear`** (#964). `/clear` wipes
+  a session's context, not its process: the session's pid, and everything
+  keyed to it, are still there afterward. `implement-dispatch` appends one
+  record per worker it starts to `~/.claude/sessions/<pid>.workers.jsonl`,
+  a sibling of that pid's own session registry file — `{agent, tickets,
+  branch, workspace, repo, cleanup, chris_merges, dispatched_at,
+  proc_start}`, `proc_start` being the controller session's own
+  `/proc/<pid>/stat` starttime at dispatch time. A `SessionStart` hook,
+  `controller-restore` (`flow/lane/src/bin/controller_restore.rs`, wired into
+  `flow/claude/settings.json`'s `SessionStart` array), reads that file for
+  the resuming session's own pid on every session start, `/clear` included,
+  drops any record whose `proc_start` does not match the resuming session's
+  own — pids are small and get reused, especially across a WSL restart, so a
+  sidecar left behind by a dead controller must never restore into whatever
+  unrelated session now holds that pid — asks `herdr agent list` which of
+  the remaining workers' agents are still alive and `gh pr list --head
+  <branch>` whether each has an open or merged PR, and prints one line per
+  worker: `You control implement-143 (sudokupad-art-143, agent working): PR
+  #152 open, not merged — follow implement/SKILL.md § The merge; cleanup:
+  <line>`. Both queries share one 12s deadline (under the hook's own 15s
+  timeout in `settings.json`), so a worker whose query never got its turn is
+  printed `unchecked` rather than silently dropped or misread as `herdr`/`gh`
+  having failed. It is read-only besides that record file — `append` and
+  `merge-cleanup`'s own removal take the same exclusive file lock on the
+  sidecar, so the two can never interleave and lose a record — never
+  re-sends a brief, and re-arms nothing: the printed line is the whole
+  recovery; act on it the same as any other worker report. A session that
+  has dispatched nothing, or whose every record is stale, gets no worker
+  lines. `merge-cleanup` removes a worker's record when it removes that
+  worker's workspace, so a landed and cleaned-up branch has nothing left to
+  restore.
 
 ## Wait
 

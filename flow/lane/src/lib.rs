@@ -10,3 +10,4 @@ pub mod issue_state;
 pub mod proc_info;
 pub mod runner;
 pub mod sessions;
+pub mod workers;
