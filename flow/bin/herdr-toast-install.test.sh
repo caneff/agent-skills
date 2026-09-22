@@ -3,6 +3,8 @@
 # `powershell.exe` stub first on PATH that records its arguments, so the real
 # registry cannot be reached and every case asserts whether the stub was called.
 # A run that reaches the real registry is the failure this test exists to stop.
+# The stub is a PATH name: it covers the installer's bare `powershell.exe` call
+# only, so an absolute /mnt/c path added to the installer would bypass it.
 # Run from flow/bin/.
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
