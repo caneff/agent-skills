@@ -139,7 +139,10 @@ outside it is read as an edge.
   from the text, and a quoted copy of another ticket's blocker list looks
   the same as the real one. The reader never takes the first.
 - **A fenced region is quoted, never declared.** Anything between ``` or ~~~
-  fences is an example. A fence closes CommonMark's way — on the same
+  fences is an example. A fence opens only at CommonMark's own bound — at
+  most three spaces of indentation; four spaces or a tab is an indented code
+  block, the same quotation the paragraph above already drops, not a fence
+  (#999) — and closes CommonMark's way — on the same
   character, with a run at least as long as the opener, and nothing after it
   on the line — so a ```` fence goes on protecting a ``` line inside it,
   which is exactly how a ticket quotes this grammar: `/to-tickets` ships a fenced issue template

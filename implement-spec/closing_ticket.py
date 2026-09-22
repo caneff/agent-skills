@@ -22,11 +22,14 @@ import sys
 # an example, never a declaration, and a second copy of that rule is a second
 # place for the bug it fixed. `references/closing-ticket.md` shows this very
 # grammar inside a fence, so a repo that pastes the doc must declare nothing
-# by showing it. The import is the same coupling this skill already has —
-# `implement-spec` is policy over `burndown`, and does not run without it.
+# by showing it. `visible()` rather than the bare `unfenced()` (#999): an
+# indented quotation is quoted material too, and this reader has no filter
+# of its own to drop it. The import is the same coupling this skill already
+# has — `implement-spec` is policy over `burndown`, and does not run without
+# it.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 os.pardir, "burndown"))
-from frontier import unfenced  # noqa: E402
+from frontier import visible  # noqa: E402
 
 _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
 _SEAM_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+end-to-end seam[ \t]*:?[ \t]*$",
@@ -50,12 +53,12 @@ def declaration(text):
     """`{seam, blind to}` from a document's `## End-to-end seam` section, or
     `None` when it has no such section — silence, which is not a
     declaration."""
-    visible = list(unfenced((text or "").splitlines()))
-    for pos, (_, line) in enumerate(visible):
+    lines = visible((text or "").splitlines())
+    for pos, (_, line) in enumerate(lines):
         if not _SEAM_HEADING.match(line):
             continue
         found = {}
-        for _, rest in visible[pos + 1:]:
+        for _, rest in lines[pos + 1:]:
             if _ANY_HEADING.match(rest):
                 break
             match = _KEY.match(rest)

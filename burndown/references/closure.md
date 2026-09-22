@@ -53,11 +53,14 @@ repo's convention.
   generated, but examples/ are`, states nothing this grammar can read, and is
   read as silence rather than as "no include graph". Reading it the other way
   clumps every candidate alone and puts two workers in the same files.
-- **A fenced region is quoted, never declared.** Anything between ``` or ~~~
-  fences is an example, closing CommonMark's way; this is #890's rule and
-  #890's code, imported rather than reimplemented. A doc that shows the
-  grammar in a fence — this one does, and so does `AGENTS.md` — has declared
-  nothing by showing it.
+- **A fenced region or an indented quotation is quoted, never declared.**
+  Anything between ``` or ~~~ fences is an example, closing CommonMark's way;
+  this is #890's rule and #890's code, imported rather than reimplemented. A
+  fence opens only at CommonMark's own bound — at most three spaces of
+  indentation; four spaces or a tab is an indented code block, quotation on
+  its own account, not a fence (#999). A doc that shows the
+  grammar in a fence, or indented as a code block — this one does, and so
+  does `AGENTS.md` — has declared nothing by showing it.
 
 ## Three answers, and the run's opening report says which it got
 
@@ -125,8 +128,11 @@ redirect into the candidates file leaves the report line on the terminal.
 ## What the scan reads
 
 One scan of the repo answers for every candidate. In a Markdown file a fenced
-block is quotation by definition, so a doc that *shows* the repo's include
-line — this one does — registers no edge. Everywhere else every line counts:
+or indented block is quotation by definition (#999: an indented block is
+CommonMark's own <=3-space fence bound in reverse — 4+ spaces or a tab is a
+code block, not a fence), so a doc that *shows* the repo's include
+line — this one does — registers no edge, fenced or indented. Everywhere
+else every line counts:
 a ``` line in source code means nothing in particular, and reading it as a
 fence would hide the real directives after it, which is the under-clumping
 direction. A file that does not read as text, and the directories in `SKIP_DIRS`

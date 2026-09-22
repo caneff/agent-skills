@@ -168,6 +168,23 @@ def test_a_fenced_example_is_not_a_declaration():
         raise AssertionError("a fenced example was read as a declaration")
 
 
+def test_an_indented_quotation_is_not_a_declaration():
+    # #999's own risk, named in the ticket: `unfenced()` now opens a fence
+    # only at CommonMark's <=3-space bound, so a 4-space-indented example is
+    # no longer hidden by an (incorrect) fence match. `declaration` reads raw
+    # `unfenced()` with no `_QUOTED` filter of its own, so without this it
+    # reads the quoted example as this doc's real declaration. The heading
+    # itself is real and unindented, so the section is found (not `None`,
+    # the "no such section" answer) — it just states nothing readable, the
+    # same "empty section is silence" shape `or {}` already treats as one.
+    text = ("## End-to-end seam\n\n- a doc quotes another repo's block:\n\n"
+            "    ```\n"
+            "    - **Seam**: `npm run test:e2e`\n"
+            "    - **Blind to**: the live editor\n"
+            "    ```\n")
+    assert not T.declaration(text), T.declaration(text)
+
+
 def test_the_colon_may_sit_inside_the_emphasis():
     # `- **Seam:** x` is as common in the wild as `- **Seam**: x`, and read
     # by the stricter grammar it yields a seam beginning with `**` — silently,

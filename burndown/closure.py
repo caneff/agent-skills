@@ -27,9 +27,14 @@ import re
 import sys
 
 # The fence rule is #890's, bug-for-bug: a declaration inside ``` or ~~~ is
-# quoted material, and a fence closes CommonMark's way. Imported rather than
-# copied — a second parser is a second place for the quoted-template bug.
-from frontier import unfenced
+# quoted material, and a fence closes CommonMark's way. Both `declaration_section`
+# and `scanned_lines` read `visible()` rather than the bare `unfenced()`
+# (#999): an indented quotation is quoted material too — CommonMark's own
+# <=3-space fence bound means 4+ spaces or a tab is a code block, not a
+# fence — and neither reader has a filter of its own to drop it. Imported
+# rather than copied — a second parser is a second place for the
+# quoted-template bug.
+from frontier import visible
 
 _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
 _CLOSURE_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+include closure[ \t]*:?[ \t]*$",
@@ -86,12 +91,12 @@ Declaration.__new__.__defaults__ = (None, None, "file")
 def declaration_section(text):
     """The lines under an `## Include closure` heading, or `None` when the
     document has no such section — silence, which is not a declaration."""
-    visible = list(unfenced((text or "").splitlines()))
-    for pos, (_, line) in enumerate(visible):
+    lines = visible((text or "").splitlines())
+    for pos, (_, line) in enumerate(lines):
         if not _CLOSURE_HEADING.match(line):
             continue
         section = []
-        for _, rest in visible[pos + 1:]:
+        for _, rest in lines[pos + 1:]:
             if _ANY_HEADING.match(rest):
                 break
             section.append(rest)
@@ -220,15 +225,17 @@ def read_text(path, limit=SCAN_LIMIT):
 def scanned_lines(rel, text):
     """The lines of one file a directive may be read from.
 
-    In Markdown a fenced block is quotation by definition, so a doc that
-    *shows* the repo's include line — `references/closure.md` does, and so
-    will any doc explaining the grammar — must not register as an edge.
-    Everywhere else every line counts: a ``` line in source code means
+    In Markdown a fenced block, or an indented one (#999: CommonMark's own
+    <=3-space fence bound means 4+ spaces or a tab is a code block, not a
+    fence), is quotation by definition, so a doc that *shows* the repo's
+    include line — `references/closure.md` does, and so will any doc
+    explaining the grammar, fenced or indented — must not register as an
+    edge. Everywhere else every line counts: a ``` line in source code means
     nothing in particular, and treating it as a fence would hide the real
     directives after it, which is the under-clumping direction."""
     lines = text.splitlines()
     if rel.rsplit(".", 1)[-1].lower() in MARKDOWN:
-        return [line for _, line in unfenced(lines)]
+        return [line for _, line in visible(lines)]
     return lines
 
 

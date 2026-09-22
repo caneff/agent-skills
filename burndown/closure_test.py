@@ -378,6 +378,20 @@ def test_a_fenced_declaration_is_quoted_never_declared():
     assert got["mode"] == "subtree", got
 
 
+def test_an_indented_quotation_is_not_a_declaration():
+    # #999's own risk, named in the ticket: `unfenced()` now opens a fence
+    # only at CommonMark's <=3-space bound, so a 4-space-indented example is
+    # no longer hidden by an (incorrect) fence match. `declaration_section`
+    # reads raw `unfenced()` with no `_QUOTED` filter of its own, so without
+    # this it reads the quoted example as this doc's real declaration.
+    text = ("## Include closure\n\n- a doc quotes another repo's block:\n\n"
+            "    ```\n"
+            "    - **Directive**: `#include <path>`\n"
+            "    - **Generator**: `make x`\n"
+            "    ```\n")
+    assert C.parse_declaration(text) is None, C.parse_declaration(text)
+
+
 def test_a_section_that_states_nothing_readable_is_silence():
     # An empty section, or prose naming no directive and not saying None,
     # has declared nothing — and silence is the conservative fallback.
@@ -475,6 +489,17 @@ def test_a_triple_backtick_in_source_does_not_hide_the_directives_after_it():
                  "comp.js": "const doc = `\n```\n`;\n#include _shared/line-kind.js\n"})
     got = C.resolve_closure(root, ["_shared/line-kind.js"])
     assert "comp.js" in got, got
+
+
+def test_an_indented_directive_in_a_doc_is_an_example_not_an_edge():
+    # Codex on #999's PR: an indented block is a code block by the same
+    # CommonMark rule `declaration_section` now applies, and the same doc
+    # explaining the grammar is exactly as likely to show the include line
+    # indented as fenced.
+    root = repo({"_shared/line-kind.js": "x\n",
+                 "docs/guide.md": "example:\n\n    #include ../_shared/line-kind.js\n"})
+    got = C.resolve_closure(root, ["_shared/line-kind.js"])
+    assert got == {"_shared/line-kind.js"}, got
 
 
 def test_a_directory_that_cannot_be_read_is_refused_not_skipped():
