@@ -164,6 +164,12 @@ check_in "$merge_section" 'phase=third' 'implement/SKILL.md § The merge'
 # § Review's "a high finding is filed" would otherwise forbid (C2).
 check_in "$merge_section" 'The fail-closed gate does not refuse the second pass as stale over an in-round fix' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'the one place a high finding is not filed' 'implement/SKILL.md § The merge'
+# The controller's read of an in-round fix is bound to the head it read:
+# unbound, a commit pushed after the read passes step 2's CLEAN re-run and
+# merges unreviewed (Codex gate [high] on PR 1080).
+check_in "$merge_section" 'records the head sha it read the fix diff at, beside the finding it answers' 'implement/SKILL.md § The merge'
+check_in "$merge_section" "Immediately before step 4, the PR's \`headRefOid\` must still equal that sha" 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'A commit the controller has not read never merges' 'implement/SKILL.md § The merge'
 # § Review's rule text names the second pass too, so a reader starting there
 # does not take "round-1" as the rule's whole reach (P1).
 check_in "$whole_file" "§ The merge step 3 applies the same rule to a Codex second-pass finding" 'implement/SKILL.md (whole file)'

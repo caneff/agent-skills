@@ -694,8 +694,13 @@ The controller merges on a repo Chris owns; Chris reads it after via
    adjacent-fix rule, rather than sending it back to Codex. It re-runs
    step 2. The fail-closed gate does not refuse the second pass as stale
    over an in-round fix: the controller's read of the fix diff is the
-   review of every commit past the second pass's sha. The controller
-   disposes of every other second-pass finding in the PR body itself:
+   review of every commit past the second pass's sha, up to the head it
+   read. So the controller records the head sha it read the fix diff at,
+   beside the finding it answers. Immediately before step 4, the PR's
+   `headRefOid` must still equal that sha. If it moved, the controller
+   reads the new commits the same way and records the new sha, or refuses
+   the merge. A commit the controller has not read never merges. The
+   controller disposes of every other second-pass finding in the PR body itself:
    `disputed: <why>`, filed if it is high, or `leftover`, under § Review's
    severity mapping. A fix outside the rule is a change, not a round.
 
