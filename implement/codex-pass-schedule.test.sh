@@ -21,11 +21,12 @@
 # show-toplevel at that caller's repo instead of this one (#620); resolving
 # via BASH_SOURCE sidesteps it entirely rather than relying on the scrub.
 # The positive-content checks (what the current prose says) are
-# section-scoped, like codex-fourth-axis-wording.test.sh — § Review for the
-# retired wake, § The merge for the pass itself. The retired-term checks
-# (what must never come back) scan the whole file: the early-launch
-# apparatus could be reintroduced in any section — § Dispatch, § Control,
-# § The PR — not only the ones this diff touched.
+# section-scoped to § The merge, like codex-fourth-axis-wording.test.sh —
+# § Review has nothing left to say about this pass, so there is no positive
+# check there. The retired-term checks (what must never come back) scan the
+# whole file: the early-launch apparatus could be reintroduced in any
+# section — § Dispatch, § Control, § The PR — not only the ones this diff
+# touched.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"
@@ -34,10 +35,8 @@ durations="$repo/docs/research/2026-09-20-codex-pass-durations.md"
 
 flatten() { tr '\n' ' ' | tr -s ' '; }
 
-review_section="$(sed -n '/^### Review$/,/^### Before the PR$/p' "$skill" | flatten)"
 merge_section="$(sed -n '/^### The merge$/,/^## Someone else/p' "$skill" | flatten)"
 whole_file="$(flatten <"$skill")"
-[ -n "$review_section" ] || { echo "FAIL: could not extract § Review from implement/SKILL.md" >&2; exit 1; }
 [ -n "$merge_section" ] || { echo "FAIL: could not extract § The merge from implement/SKILL.md" >&2; exit 1; }
 
 fail=0
@@ -85,7 +84,8 @@ check_in "$merge_section" 'status=$?' 'implement/SKILL.md § The merge'
 check_in "$merge_section" '"status": %d' 'implement/SKILL.md § The merge'
 
 # Rule 4: the gate is fail-closed, and names every way a verdict fails to
-# be current — including the race, which detached execution introduces.
+# be current — including the race, which a branch moving mid-run can still
+# cause even though the launch is inline and foreground.
 check_in "$merge_section" 'The gate is fail-closed' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'launch sha, completion sha and the PR' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'Absent, unreadable, errored' 'implement/SKILL.md § The merge'
@@ -119,7 +119,8 @@ check_absent_in "$whole_file" 'The retry is validated by the same gate' 'impleme
 # Rule 6: a collected verdict changes nothing downstream — the two-pass
 # ceiling, the dispositions and the trial row are #888's and #812's still.
 check_in "$merge_section" 'A collected verdict is this step' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'unchanged by where the collected pass was launched' 'implement/SKILL.md § The merge'
+check_in "$merge_section" "is #888's and #812's, unchanged by #1015" 'implement/SKILL.md § The merge'
+check_absent_in "$whole_file" 'unchanged by where the collected pass was launched' 'implement/SKILL.md (whole file)'
 check_in "$merge_section" 'One recorded run, whichever phase writes it' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'The pass runs through this block and no other' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'A second block with weaker guarantees is how a degraded run gets collected as a clean one' 'implement/SKILL.md § The merge'

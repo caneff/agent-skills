@@ -582,7 +582,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    comment is what makes the verdict readable by anyone but you. Everything
    after that — the dispositions, #888's conditional second pass (which
    runs the same block with `phase=second`), the no-third-run ceiling, the
-   trial row — is unchanged by where the collected pass was launched.
+   trial row — is #888's and #812's, unchanged by #1015.
 
    **Every run records its duration**, collected or refused, as one row
    appended to `docs/research/2026-09-20-codex-pass-durations.md`: ticket,
