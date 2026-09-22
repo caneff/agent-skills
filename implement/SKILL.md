@@ -188,10 +188,15 @@ No PR and no reviewer; Chris reads the log after.
    built-in `/code-review` is not run here; `/code-review low` only when the
    owner asks).
 
-   Every finding gets exactly one disposition: fixed in a commit,
-   `disputed: <why>`, or filed as a follow-up ticket through `/file-ticket`
-   so it leaves with a routing role, never `needs-triage` — ad hoc
-   `gh issue create` skips that role. On a repo whose `origin` owner isn't
+   Every finding gets exactly one disposition, one of five outcomes:
+   `fixed`, `disputed`, `filed`, `handed-back` and `leftover`. It is fixed
+   in a commit, `disputed: <why>`, or filed as a follow-up ticket through
+   `/file-ticket` so it leaves with a routing role, never `needs-triage` —
+   ad hoc `gh issue create` skips that role. `filed` is reserved for a high
+   finding, under the severity mapping below. A finding that is not high and
+   not fixed in the round takes `leftover`: no ticket of its own, only a
+   sidecar line (step 2) a later sweep collects, and `leftover` in prose.
+   On a repo whose `origin` owner isn't
    your `gh` login, `/file-ticket` hands the command back instead of filing,
    so there is no ticket number: the disposition is `handed back: <the
    gh issue create command>`, the command exactly as `/file-ticket` gave it.
@@ -200,13 +205,19 @@ No PR and no reviewer; Chris reads the log after.
    (§ Someone else's repo). On a heavy Claude-lane build, the PR
    body lists **every** round-1 finding with its disposition (fixed, with
    the fixing commit's sha; `disputed: <why>`; filed, with its ticket
-   number; or handed back, with the command) — not only the disputed,
-   filed and handed-back ones. A fixed finding that's
+   number; handed back, with the command; or `leftover`) — not only the
+   disputed, filed, handed-back and leftover ones. A fixed finding that's
    allowed to vanish from the record is one the § The merge step 3 Codex
    pass can't tell from a Codex-only one, so it can misclassify a real
    Claude catch as `codex-only, confirmed` and corrupt the trial's
-   evidence. On any other build, the PR body lists the disputed, filed and
-   handed-back ones.
+   evidence. On any other build, the PR body lists the disputed, filed,
+   handed-back and leftover ones.
+
+   **The severity mapping.** Stated here once; the reviewer briefs in
+   `multi-axis-code-review` point here. A finding is high when it is a
+   Codex `[high]` or a correctness `CONFIRMED`. Codex medium and low,
+   correctness `PLAUSIBLE`, and standards `hard` and `judgement` are not
+   high, and nothing else is.
 
    **The adjacent-fix rule.** A round-1 finding is fixed in the round, not
    filed, when all five parts hold: it sits in a file already in the diff;
@@ -230,9 +241,14 @@ No PR and no reviewer; Chris reads the log after.
    `{"id": "<id>", "outcome": "fixed", "sha": "<sha>"}` — on an adjacent
    fix, `{"id": "<id>", "outcome": "fixed", "sha": "<sha>", "scope": "adjacent"}` —
    `{"id": "<id>", "outcome": "disputed", "reason": "<why>"}`, or
-   `{"id": "<id>", "outcome": "filed", "ticket": <n>}`, or
-   `{"id": "<id>", "outcome": "handed-back", "command": "<the command>"}` —
-   the same four dispositions this pass already records in prose. `command`
+   `{"id": "<id>", "outcome": "filed", "ticket": <n>}`,
+   `{"id": "<id>", "outcome": "handed-back", "command": "<the command>"}`, or
+   `{"id": "<id>", "outcome": "leftover", "file": "<path>", "title": "<short title>", "severity": "<the reviewer's severity word>", "text": "<one line of the finding>"}` —
+   the same five outcomes this pass records in prose. A leftover line
+   carries what a sweep needs without reopening the PR: `severity` is the
+   word its reviewer gave it — a Codex medium or low, `PLAUSIBLE`, `hard`
+   or `judgement`, since a high finding is filed instead — and `text` is
+   one line. `command`
    is the command JSON-encoded as one string, its newlines and quotes
    escaped: `/file-ticket`'s command is a multi-line heredoc, and a line
    split across lines breaks the join.

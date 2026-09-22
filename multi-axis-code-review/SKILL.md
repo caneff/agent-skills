@@ -154,6 +154,10 @@ Every prompt carries only the **diff, the commit list, the spec/standards source
 
 Belt and braces: append to **every** prompt — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). `/tmp` is wiped at every boot here and herdr workers never set `$CLAUDE_JOB_DIR`, so these reports — the only record of what each reviewer said — need a home that survives: `~/.cache/agent-reviews/<repo>/`. Never point the report at `./.scratch/` or anywhere under the repo — an untracked file there blocks `git worktree remove` (and so `ship`).
 
+Which rating counts as high is `implement/SKILL.md` § Review's severity mapping,
+stated there once; no brief here restates it, and a reviewer rates in its
+own axis's words.
+
 **Alongside the prose, each reviewer also writes a sidecar** so counting a
 finding stops needing an LLM pass over prose (#855, #854): "Also write
 `<dir>/findings-<axis>-<n>.jsonl`, one JSON object per line, one line per
@@ -563,9 +567,12 @@ It writes `dispositions-<n>.jsonl` in the grammar of `implement/SKILL.md` § Rev
 and its report to `<dir>/review-verify-<n>.md`.
 
 The brief: "Check each round-1 finding id against its fix or its claimed
-disposition. Fail the pass, naming the finding id, on either of two things:
-(a) a round-1 finding with no disposition; (b) an adjacent fix that breaks
-`implement/SKILL.md` § Review's adjacent-fix rule. For (b), write the sidecar
+disposition. Fail the pass, naming the finding id, on any of three things:
+(a) a round-1 finding with no disposition — `leftover` counts as one, as
+do the other four outcomes; (b) a `leftover` whose finding
+is high under implement's severity mapping, since a high finding is filed;
+(c) an adjacent fix that breaks `implement/SKILL.md` § Review's adjacent-fix
+rule. For (c), write the sidecar
 first, then run `python3 ~/.agents/skills/multi-axis-code-review/check_adjacent.py --repo <worktree> --base <fixed point> <dir>/dispositions-<n>.jsonl`:
 it measures every sidecar line with `"scope": "adjacent"` for one file, a
 file already in the diff and under 20 changed lines, and prints `BREACH <id>`

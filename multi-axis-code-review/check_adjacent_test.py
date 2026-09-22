@@ -171,7 +171,7 @@ def test_an_unreadable_line_fails_rather_than_being_skipped():
         fh.write('{"id": "S9", "outcome": "fixed", "sco\n')
     result = run(root, path)
     assert result.returncode == 1, (result.stdout, result.stderr)
-    assert "BREACH line 6:" in result.stdout, result.stdout
+    assert f"BREACH line {len(fixture_lines()) + 1}:" in result.stdout, result.stdout
 
 
 def test_a_sidecar_with_no_adjacent_line_passes_and_says_so():
