@@ -66,7 +66,7 @@ def test_every_field_of_a_leftover_appears_in_the_render():
                        "tick2 says nothing about what it does")]
     body = sweep.render_body(items)
     for needle in ("burndown/loop.py", "P2", "judgement", "Mysterious name",
-                   "#901", "#902", "950", "tick2 says nothing"):
+                   "clump #901", "#901", "#902", "950", "tick2 says nothing"):
         assert needle in body, (needle, body)
 
 

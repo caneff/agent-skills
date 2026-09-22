@@ -59,7 +59,8 @@ def render_body(leftovers):
             tickets = ", ".join(f"#{n}" for n in item["tickets"])
             lines.append(
                 f"- **{item['id']}** ({item['severity']}) {item['title']} "
-                f"— {tickets}, PR #{item['pr']}: {item['text']}")
+                f"— clump #{item['clump']}, {tickets}, PR #{item['pr']}: "
+                f"{item['text']}")
         lines.append("")
     return "\n".join(lines).rstrip("\n") + "\n"
 
