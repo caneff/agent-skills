@@ -167,6 +167,12 @@ check_in "$merge_section" 'the one place a high finding is not filed' 'implement
 # § Review's rule text names the second pass too, so a reader starting there
 # does not take "round-1" as the rule's whole reach (P1).
 check_in "$whole_file" "§ The merge step 3 applies the same rule to a Codex second-pass finding" 'implement/SKILL.md (whole file)'
+# The rest of the fix round's contract: the CLEAN check reruns after the
+# worker's fix, a non-adjacent high is still filed, and the third run is
+# followed by no worker fix round (C3).
+check_in "$merge_section" 'adjacent-fix rule, rather than sending it back to Codex. It re-runs step 2.' 'implement/SKILL.md § The merge'
+check_in "$merge_section" '`disputed: <why>`, filed if it is high, or `leftover`' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'no worker fix round follows it' 'implement/SKILL.md § The merge'
 check_absent_in "$whole_file" 'there is no third Codex run' 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'there is no worker fix-and-re-run cycle left' 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'the no-third-run ceiling' 'implement/SKILL.md (whole file)'
