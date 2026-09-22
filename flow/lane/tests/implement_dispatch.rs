@@ -1177,6 +1177,108 @@ fn dispatch_installs_the_identity_guard_and_a_worktree_commit_is_refused() {
     assert!(good.status.success(), "configured identity refused: {}", out_text(&good));
 }
 
+/// The pre-commit guard (#934) never fires on a replayed commit — a cherry-
+/// pick or rebase, exactly the gap #1006 files (its own probe: `-c
+/// user.email=... rebase` rewrote a replayed commit's email with exit 0).
+/// This is the end-to-end proof that the pre-push half installed alongside
+/// it catches what pre-commit cannot: cherry-pick a commit under a foreign
+/// committer email (never touching `git commit` at all), then push it.
+#[test]
+fn dispatch_installs_the_pre_push_guard_and_a_replayed_foreign_email_commit_is_refused_at_push() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "dispatch failed: {}", out_text(&out));
+
+    let wt = repo.join(".claude/worktrees/implement-395");
+    let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&wt).args(args).output().unwrap();
+
+    std::fs::write(wt.join("g"), "x\n").unwrap();
+    git(&["add", "g"]);
+    assert!(git(&["commit", "-qm", "x"]).status.success());
+    let sha = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout).unwrap().trim().to_string();
+
+    git(&["checkout", "-qb", "replay", "HEAD~1"]);
+    let cp = git(&["-c", "user.email=real@gmail.com", "cherry-pick", &sha]);
+    assert!(cp.status.success(), "cherry-pick itself failed: {}", out_text(&cp));
+    assert!(
+        !String::from_utf8_lossy(&cp.stderr).contains("commit-identity guard"),
+        "pre-commit ran on a cherry-pick, invalidating this test's premise: {}",
+        out_text(&cp)
+    );
+
+    let bad = git(&["push", "origin", "HEAD:refs/heads/replay"]);
+    assert!(!bad.status.success(), "a replayed foreign-email commit was pushed: {}", out_text(&bad));
+    assert!(
+        String::from_utf8_lossy(&bad.stderr).contains("commit-identity guard (pre-push)"),
+        "refusal did not name itself: {}",
+        out_text(&bad)
+    );
+
+    assert!(git(&["commit", "-q", "--amend", "--reset-author", "--no-edit"]).status.success());
+    let good = git(&["push", "origin", "HEAD:refs/heads/replay"]);
+    assert!(good.status.success(), "the fixed-up identity was still refused: {}", out_text(&good));
+}
+
+/// `COMMIT_IDENTITY_OVERRIDE` is the one legitimate way past the guard, same
+/// escape as the pre-commit half, and it must reach the push side too.
+#[test]
+fn the_pre_push_guard_override_escape_lets_a_foreign_email_push_through() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "dispatch failed: {}", out_text(&out));
+
+    let wt = repo.join(".claude/worktrees/implement-395");
+    let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&wt).args(args).output().unwrap();
+    std::fs::write(wt.join("g"), "x\n").unwrap();
+    git(&["add", "g"]);
+    assert!(git(&["commit", "-qm", "x"]).status.success());
+    let sha = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout).unwrap().trim().to_string();
+    git(&["checkout", "-qb", "replay", "HEAD~1"]);
+    assert!(git(&["-c", "user.email=real@gmail.com", "cherry-pick", &sha]).status.success());
+
+    let push = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&wt)
+        .args(["push", "origin", "HEAD:refs/heads/replay"])
+        .env("COMMIT_IDENTITY_OVERRIDE", "release bot")
+        .output()
+        .unwrap();
+    assert!(push.status.success(), "override did not let the push through: {}", out_text(&push));
+    assert!(String::from_utf8_lossy(&push.stderr).contains("release bot"), "override did not name its reason: {}", out_text(&push));
+}
+
+/// Whatever real pre-push hook a repo already had (tests, a size check) is
+/// preserved and still runs, same guarantee #1009 gives the pre-commit slot.
+#[test]
+fn a_foreign_pre_push_hook_is_preserved_and_the_guard_still_refuses_a_replayed_commit() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let hook = hooks_dir(&repo).join("pre-push");
+    std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "dispatch refused over a foreign pre-push hook: {}", out_text(&out));
+
+    let moved_aside = hooks_dir(&repo).join("pre-push.foreign");
+    assert_eq!(std::fs::read_to_string(&moved_aside).unwrap(), "#!/bin/sh\nexit 0\n", "the foreign pre-push hook was not preserved");
+
+    let wt = repo.join(".claude/worktrees/implement-395");
+    let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&wt).args(args).output().unwrap();
+    std::fs::write(wt.join("g"), "x\n").unwrap();
+    git(&["add", "g"]);
+    assert!(git(&["commit", "-qm", "x"]).status.success());
+    let sha = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout).unwrap().trim().to_string();
+    git(&["checkout", "-qb", "replay", "HEAD~1"]);
+    assert!(git(&["-c", "user.email=real@gmail.com", "cherry-pick", &sha]).status.success());
+    let bad = git(&["push", "origin", "HEAD:refs/heads/replay"]);
+    assert!(!bad.status.success(), "a replayed foreign-email commit was pushed over a taken-over foreign hook: {}", out_text(&bad));
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("commit-identity guard (pre-push)"), "{}", out_text(&bad));
+}
+
 /// Commits a foreign-email change in the dispatched worktree for ticket `n`
 /// and asserts the guard still refuses it while a correctly-configured
 /// commit still succeeds — the end-to-end proof that whatever foreign hook
