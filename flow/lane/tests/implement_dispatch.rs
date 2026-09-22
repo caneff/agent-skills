@@ -1288,3 +1288,101 @@ fn a_controller_record_with_no_session_id_refuses_even_when_a_named_agent_exists
     assert!(refused(&out, &f.calls(), &repo, "414", "no sessionId"), "{}", out_text(&out));
     assert!(!f.calls().contains("herdr agent prompt"), "{}", f.calls());
 }
+
+// --- #964: dispatch records the controller/worker pair for /clear to restore ---
+
+fn workers_file(f: &Fixture) -> std::path::PathBuf {
+    f.home().join(".claude/sessions").join(format!("{}.workers.jsonl", std::process::id()))
+}
+
+#[test]
+fn a_dispatch_appends_a_worker_record_for_the_controllers_own_session() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let wt = repo.join(".claude/worktrees/implement-415");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "415"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+
+    let records = lane::workers::read(&f.home(), &std::process::id().to_string());
+    assert_eq!(records.len(), 1, "{records:?}");
+    let r = &records[0];
+    assert_eq!(r.agent, "sudokumaker-custom-constrain-415");
+    assert_eq!(r.tickets, vec!["415".to_string()]);
+    assert_eq!(r.branch, "implement-415");
+    assert_eq!(r.workspace, wt.display().to_string());
+    assert_eq!(r.repo, "caneff/sudokumaker-custom-constraints");
+    assert_eq!(r.cleanup, format!("cd {} && merge-cleanup implement-415 --repo {}", repo.display(), repo.display()));
+    assert!(!r.chris_merges);
+    assert!(!r.dispatched_at.is_empty(), "dispatched_at should be stamped");
+}
+
+#[test]
+fn a_clumps_worker_record_carries_every_ticket_lowest_first() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "420", "416"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let records = lane::workers::read(&f.home(), &std::process::id().to_string());
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].tickets, vec!["416".to_string(), "420".to_string()]);
+    assert_eq!(records[0].branch, "implement-416");
+}
+
+#[test]
+fn a_ready_for_human_worker_records_chris_merges() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "ready-for-human")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "417"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let records = lane::workers::read(&f.home(), &std::process::id().to_string());
+    assert_eq!(records.len(), 1);
+    assert!(records[0].chris_merges);
+}
+
+#[test]
+fn two_dispatches_from_one_controller_append_two_records() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    assert!(f.dispatch(&["--repo", repo.to_str().unwrap(), "418"], &default_scenario()).status.success());
+    assert!(f.dispatch(&["--repo", repo.to_str().unwrap(), "419"], &default_scenario()).status.success());
+    let records = lane::workers::read(&f.home(), &std::process::id().to_string());
+    assert_eq!(records.len(), 2, "{records:?}");
+    assert_eq!(records[0].branch, "implement-418");
+    assert_eq!(records[1].branch, "implement-419");
+}
+
+#[test]
+fn an_explicit_controller_flag_resolved_only_through_the_herdr_hop_still_gets_a_record() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    // The flag ("skills-dc") is neither the live session's own name
+    // ("skills-ctl", from reset_home) nor its sessionId directly — only
+    // herdr's agent_session.value ties it back to the live session
+    // (sid-test, the fixture's fixed sessionId) that resolve_controller_pid
+    // must still find.
+    f.set_agents(r#"[{"name":"skills-dc","agent_session":{"value":"sid-test"}}]"#);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--controller", "skills-dc", "421"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let records = lane::workers::read(&f.home(), &std::process::id().to_string());
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].branch, "implement-421");
+}
+
+#[test]
+fn a_controller_that_resolves_to_no_live_session_dispatches_with_no_record_and_no_failure() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    // Names no live session and no herdr agent: the dispatch still succeeds
+    // (the brief only needs a string to print), but nothing can be resolved
+    // to a pid, so no record is written and nothing panics over it.
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--controller", "nobody-home", "422"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(!workers_file(&f).exists(), "no controller record file should be created");
+}

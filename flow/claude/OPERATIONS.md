@@ -109,6 +109,25 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   sentence. Never answer a question and delegate the same question. An idle
   notice that repeats a report already relayed gets no reply at all. Why: a
   repeated report costs me a read and carries nothing new.
+- **The controller/worker pairing survives `/clear`** (#964). `/clear` wipes
+  a session's context, not its process: the session's pid, and everything
+  keyed to it, are still there afterward. `implement-dispatch` appends one
+  record per worker it starts to `~/.claude/sessions/<pid>.workers.jsonl`,
+  a sibling of that pid's own session registry file — `{agent, tickets,
+  branch, workspace, repo, cleanup, chris_merges, dispatched_at}`. A
+  `SessionStart` hook, `controller-restore` (`flow/lane/src/bin/controller_restore.rs`,
+  wired into `flow/claude/settings.json`'s `SessionStart` array), reads that
+  file for the resuming session's own pid on every session start, `/clear`
+  included, asks `herdr agent list` which of those workers' agents are still
+  alive and `gh pr list --head <branch>` whether each has an open or merged
+  PR, and prints one line per worker: `You control implement-143
+  (sudokupad-art-143, agent working): PR #152 open, not merged — follow
+  implement/SKILL.md § The merge; cleanup: <line>`. It is read-only besides
+  that record file, never re-sends a brief, and re-arms nothing — the
+  printed line is the whole recovery; act on it the same as any other
+  worker report. A session that has dispatched nothing gets no output.
+  `merge-cleanup` removes a worker's record when it removes that worker's
+  workspace, so a landed and cleaned-up branch has nothing left to restore.
 
 ## Wait
 

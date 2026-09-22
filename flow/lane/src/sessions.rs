@@ -70,6 +70,30 @@ pub fn live_all(home: &Path) -> Vec<LiveSession> {
     live
 }
 
+/// Walks up from `start_ancestor` for the nearest `<home>/.claude/sessions/<pid>.json`
+/// whose `procStart` matches that pid's own `/proc/<pid>/stat` starttime — a
+/// file left by a dead session whose pid was reused has another procStart.
+/// Stops (returns `None`) once `/proc/<pid>/stat` can no longer be read, or
+/// once pid 1 is reached. The shared walk behind `find_controller_session` and
+/// `find_own_pid`, so the two can never disagree on which record is "the"
+/// live one for an ancestor chain.
+fn find_own_record(home: &Path, start_ancestor: i32) -> Option<(i32, serde_json::Value)> {
+    let mut ancestor = start_ancestor;
+    while ancestor > 1 {
+        let stat = read_stat(ancestor)?;
+        let session_file = home.join(".claude/sessions").join(format!("{ancestor}.json"));
+        if let Ok(raw) = std::fs::read_to_string(&session_file) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if proc_start_matches(&v, &stat) {
+                    return Some((ancestor, v));
+                }
+            }
+        }
+        ancestor = stat.ppid;
+    }
+    None
+}
+
 /// Walks up from `start_ancestor`, looking for `<home>/.claude/sessions/<pid>.json`
 /// whose `procStart` matches that pid's own `/proc/<pid>/stat` starttime — a
 /// file left by a dead session whose pid was reused has another procStart.
@@ -82,40 +106,47 @@ pub fn find_controller(home: &Path, start_ancestor: i32) -> Option<String> {
 /// `find_controller`, with the Claude sessionId beside the name (empty when
 /// the record has none) — the key a herdr agent's `agent_session.value` joins on.
 pub fn find_controller_session(home: &Path, start_ancestor: i32) -> Option<(String, String)> {
-    let mut ancestor = start_ancestor;
-    while ancestor > 1 {
-        let stat = read_stat(ancestor)?;
-        let session_file = home.join(".claude/sessions").join(format!("{ancestor}.json"));
-        if let Ok(raw) = std::fs::read_to_string(&session_file) {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
-                if proc_start_matches(&v, &stat) {
-                    if let Some(name) = v.get("name").and_then(|n| n.as_str()) {
-                        if !name.is_empty() {
-                            let id = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("");
-                            return Some((id.to_string(), name.to_string()));
-                        }
-                    }
-                }
-            }
-        }
-        ancestor = stat.ppid;
+    let (_, v) = find_own_record(home, start_ancestor)?;
+    let name = v.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty())?;
+    let id = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("");
+    Some((id.to_string(), name.to_string()))
+}
+
+/// The pid of the nearest live ancestor session record from `start_ancestor` —
+/// what a `SessionStart` hook uses to find its own session's sibling files
+/// (`<pid>.workers.jsonl`, #964), since the hook process's own pid is not the
+/// Claude session's pid, only an ancestor of it. Unlike `find_controller_session`,
+/// this accepts a record with no `name` — the hook needs its own pid whether
+/// or not the session has been named yet.
+pub fn find_own_pid(home: &Path, start_ancestor: i32) -> Option<String> {
+    find_own_record(home, start_ancestor).map(|(pid, _)| pid.to_string())
+}
+
+/// The live registry session whose Claude sessionId is `id`. `None` when `id`
+/// is empty or no live record carries it.
+pub fn find_live_by_session_id(home: &Path, id: &str) -> Option<LiveSession> {
+    if id.is_empty() {
+        return None;
     }
-    None
+    live_all(home).into_iter().find(|s| s.session_id == id)
+}
+
+/// The live registry session currently named `name`. `None` when no live
+/// record bears that name.
+pub fn find_live_by_name(home: &Path, name: &str) -> Option<LiveSession> {
+    live_all(home).into_iter().find(|s| s.name == name)
 }
 
 /// The current name of the live session `id`, the second hop of a herdr
 /// agent name's resolution. `None` when no live record carries that id or
 /// the record has no name.
 pub fn name_of_session(home: &Path, id: &str) -> Option<String> {
-    if id.is_empty() {
-        return None;
-    }
-    live_all(home).into_iter().find(|s| s.session_id == id && !s.name.is_empty()).map(|s| s.name)
+    find_live_by_session_id(home, id).map(|s| s.name).filter(|n| !n.is_empty())
 }
 
 /// Whether a live session is currently named `name`.
 pub fn is_live_name(home: &Path, name: &str) -> bool {
-    live_all(home).iter().any(|s| s.name == name)
+    find_live_by_name(home, name).is_some()
 }
 
 #[cfg(test)]
@@ -212,5 +243,52 @@ mod tests {
         assert_eq!(name_of_session(home, "sid-2"), None);
         assert_eq!(name_of_session(home, ""), None);
         assert!(is_live_name(home, "ctl-50") && !is_live_name(home, "ctl-47"));
+    }
+
+    #[test]
+    fn find_own_pid_finds_the_nearest_live_ancestor_even_with_no_name() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let pid = std::process::id() as i32;
+        let stat = read_stat(pid).unwrap();
+        std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
+        // No "name" field — find_controller_session would refuse this record,
+        // but find_own_pid must still find it: the hook needs its own pid
+        // whether or not the session has been named yet.
+        std::fs::write(
+            home.join(".claude/sessions").join(format!("{pid}.json")),
+            format!(r#"{{"pid":{pid},"procStart":"{}"}}"#, stat.start),
+        )
+        .unwrap();
+        assert_eq!(find_own_pid(home, pid), Some(pid.to_string()));
+        assert_eq!(find_controller_session(home, pid), None);
+    }
+
+    #[test]
+    fn find_own_pid_is_none_past_a_stale_record() {
+        let tmp = TempDir::new().unwrap();
+        let pid = std::process::id() as i32;
+        assert_eq!(find_own_pid(tmp.path(), pid), None);
+    }
+
+    #[test]
+    fn find_live_by_session_id_and_by_name() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let pid = std::process::id() as i32;
+        let stat = read_stat(pid).unwrap();
+        std::fs::create_dir_all(home.join(".claude/sessions")).unwrap();
+        std::fs::write(
+            home.join(".claude/sessions").join(format!("{pid}.json")),
+            format!(r#"{{"pid":{pid},"sessionId":"sid-9","procStart":"{}","cwd":"/w","name":"ctl-9"}}"#, stat.start),
+        )
+        .unwrap();
+        let by_id = find_live_by_session_id(home, "sid-9").unwrap();
+        assert_eq!(by_id.name, "ctl-9");
+        assert!(find_live_by_session_id(home, "").is_none());
+        assert!(find_live_by_session_id(home, "sid-nope").is_none());
+        let by_name = find_live_by_name(home, "ctl-9").unwrap();
+        assert_eq!(by_name.pid, pid.to_string());
+        assert!(find_live_by_name(home, "nope").is_none());
     }
 }
