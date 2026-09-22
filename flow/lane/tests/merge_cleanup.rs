@@ -427,6 +427,26 @@ fn every_ticket_the_merged_pr_closes_has_its_claim_cleared() {
 }
 
 #[test]
+fn a_clump_with_mixed_width_ticket_numbers_clears_in_ascending_numeric_order() {
+    // #983: the comment on the sort claims length-then-text is why the keys
+    // are digit strings, but no fixture had mixed widths to prove it. "10"
+    // sorts before "9" lexicographically; a plain `tickets.sort()` would
+    // report "cleared #10, #9" here.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r20c");
+    c.mk_implement_branch(&r, "9");
+    c.record_pr_closes("7", &["9", "10"]);
+    let closed = ("CLOSED\tin-progress\tcaneff", "");
+    let run = c.mc(
+        Tools::Full,
+        &["--repo", s(&r), "implement-9"],
+        &[("GH_ISSUE_9", closed.0), ("GH_ISSUE_10", closed.0), ("GH_STATE", closed.1)],
+    );
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has("cleared #9, #10"), "{}", run.text());
+}
+
+#[test]
 fn a_branch_number_too_long_for_a_u64_still_has_its_claim_cleared() {
     // #903: the ticket set is digit strings, not parsed numbers, because
     // merge-cleanup reads an existing branch name and must not drop it.
