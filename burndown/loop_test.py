@@ -343,28 +343,121 @@ def test_an_unmeasurable_box_is_a_refusal_not_zero_agents():
             raise AssertionError(f"{failed} read as a count")
 
 
-def herdr_listing(*statuses):
-    """A `herdr agent list` answer: one agent per status given."""
-    agents = [{"name": f"a{i}", "agent_status": status}
-              for i, status in enumerate(statuses)]
-    return json.dumps({"result": {"agents": agents}})
+def herdr_listing(*agents):
+    """A `herdr agent list` answer: one entry per (session_id, status)."""
+    return json.dumps({"result": {"agents": [
+        {"name": f"a{i}", "agent_status": status,
+         "agent_session": {"value": sid}}
+        for i, (sid, status) in enumerate(agents)]}})
 
 
-def test_working_herdr_agents_counts_only_the_working_status():
-    listing = herdr_listing("working", "idle", "working", "done", "blocked")
-    assert loop.count_working_herdr_agents(lambda cmd: (0, listing)) == 2
+def pid_comm_listing(*pids, comm="claude", others=(("9", "bash"),)):
+    """A `ps -eo pid,comm` answer: one `claude` line per pid given, plus
+    whatever non-claude lines `others` names."""
+    lines = [f"{pid} {comm}" for pid in pids]
+    lines += [f"{pid} {name}" for pid, name in others]
+    return "\n".join(lines) + "\n"
+
+
+def sessions_map(mapping):
+    """A `sessions` stand-in: `{sessionId: pid}` returned as-is, the
+    contract `count_working_herdr_agents` reads the registry through."""
+    return lambda: dict(mapping)
+
+
+def test_working_herdr_agents_counts_working_panes_plus_unlisted_pids():
+    # sid-A -> pid 100, working; sid-B -> pid 101, idle (matched, not
+    # working); pid 102 is a claude process no listed pane resolves to (a
+    # subagent or headless run) and fail-closes as working.
+    listing = herdr_listing(("sid-A", "working"), ("sid-B", "idle"))
+    ps = lambda cmd: (0, pid_comm_listing(100, 101, 102))
+    herdr = lambda cmd: (0, listing)
+    sessions = sessions_map({"sid-A": 100, "sid-B": 101})
+    working, unlisted = loop.count_working_herdr_agents(
+        ps=ps, herdr=herdr, sessions=sessions)
+    assert (working, unlisted) == (1, 1), (working, unlisted)
+
+
+def test_an_unresolvable_listed_pane_fails_closed_as_working():
+    # sid-A resolves and is working (so the listing is not a total
+    # mismatch); sid-B cannot be resolved to any pid at all and fails
+    # closed as working rather than being dropped.
+    listing = herdr_listing(("sid-A", "working"), ("sid-B", "idle"))
+    ps = lambda cmd: (0, pid_comm_listing(100, 101, 102))
+    herdr = lambda cmd: (0, listing)
+    sessions = sessions_map({"sid-A": 100})
+    working, unlisted = loop.count_working_herdr_agents(
+        ps=ps, herdr=herdr, sessions=sessions)
+    assert (working, unlisted) == (2, 2), (working, unlisted)
+
+
+def test_a_matched_but_all_idle_listing_is_trusted_at_zero_working():
+    listing = herdr_listing(("sid-A", "idle"), ("sid-B", "done"))
+    ps = lambda cmd: (0, pid_comm_listing(100, 101))
+    herdr = lambda cmd: (0, listing)
+    sessions = sessions_map({"sid-A": 100, "sid-B": 101})
+    working, unlisted = loop.count_working_herdr_agents(
+        ps=ps, herdr=herdr, sessions=sessions)
+    assert (working, unlisted) == (0, 0), (working, unlisted)
+
+
+def test_a_herdr_listing_that_matches_none_of_the_boxs_pids_is_a_refusal():
+    # Empty, and non-empty-but-unresolvable, are the same failure: herdr's
+    # registry reads as broken, not the box as idle.
+    ps = lambda cmd: (0, pid_comm_listing(100, 101))
+    for listing in (herdr_listing(), herdr_listing(("sid-Z", "working"))):
+        herdr = lambda cmd, l=listing: (0, l)
+        sessions = sessions_map({})
+        try:
+            loop.count_working_herdr_agents(ps=ps, herdr=herdr, sessions=sessions)
+        except loop.LoopError as exc:
+            assert "claude pid" in str(exc) or "none" in str(exc), exc
+        else:
+            raise AssertionError(f"{listing} read as a count")
 
 
 def test_an_unreadable_herdr_listing_is_a_refusal_not_zero_agents():
+    ps = lambda cmd: (0, pid_comm_listing(100))
+    sessions = sessions_map({})
     for failed in ((1, ""), (0, "not json"), (0, json.dumps({"result": {}})),
                    (0, json.dumps({"error": {"code": "some_error"}})),
                    (0, json.dumps({"result": {"agents": "nope"}}))):
         try:
-            loop.count_working_herdr_agents(lambda cmd, r=failed: r)
+            loop.count_working_herdr_agents(
+                ps=ps, herdr=lambda cmd, r=failed: r, sessions=sessions)
         except loop.LoopError as exc:
             assert "herdr agent list" in str(exc), exc
         else:
             raise AssertionError(f"{failed} read as a count")
+
+
+def test_working_herdr_agents_refuses_when_ps_pid_listing_cannot_be_taken():
+    herdr = lambda cmd: (0, herdr_listing())
+    sessions = sessions_map({})
+    for failed in ((1, ""), (0, "")):
+        try:
+            loop.count_working_herdr_agents(
+                ps=lambda cmd, r=failed: r, herdr=herdr, sessions=sessions)
+        except loop.LoopError as exc:
+            assert "pid" in str(exc), exc
+        else:
+            raise AssertionError(f"{failed} read as a count")
+
+
+def test_session_pids_reads_the_registry_directory_given():
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "100.json"), "w") as fh:
+            json.dump({"pid": 100, "sessionId": "sid-A"}, fh)
+        # Not a session file; skipped rather than raising.
+        with open(os.path.join(tmp, "not-json.json"), "w") as fh:
+            fh.write("{not json")
+        with open(os.path.join(tmp, "ignored.txt"), "w") as fh:
+            fh.write("100")
+        assert loop._session_pids(tmp) == {"sid-A": 100}
+
+
+def test_session_pids_on_a_missing_directory_is_an_empty_mapping():
+    assert loop._session_pids("/no/such/registry/dir") == {}
 
 
 def idle_box_listing(agents):
@@ -373,15 +466,24 @@ def idle_box_listing(agents):
     return "\n".join(["claude"] * agents + others) + "\n"
 
 
-def test_agent_count_prefers_herdrs_working_count_over_the_process_total():
+def dual_ps(pid_out, comm_out):
+    """A `ps` stand-in for `agent_count`'s two call shapes: `pid,comm` for
+    the herdr path, bare `comm=` for the process-count fallback."""
+    def ps(cmd):
+        return (0, pid_out) if "pid,comm" in cmd else (0, comm_out)
+    return ps
+
+
+def test_agent_count_prefers_herdrs_working_plus_unlisted_over_ps_alone():
     class Args:
         processes = None
-    listing = herdr_listing("working", "idle", "working", "done")
-    ps_out = "claude\nclaude\nclaude\nbash\n"  # 3 claude processes total
-    count, counter, total = loop.agent_count(
-        Args, herdr=lambda cmd: (0, listing), ps=lambda cmd: (0, ps_out))
-    assert count == 2
-    assert total == 3
+    listing = herdr_listing(("sid-A", "working"), ("sid-B", "idle"))
+    ps = dual_ps(pid_comm_listing(100, 101, 102),
+                "claude\nclaude\nclaude\nbash\n")
+    count, counter, working, unlisted = loop.agent_count(
+        Args, herdr=lambda cmd: (0, listing), ps=ps,
+        sessions=sessions_map({"sid-A": 100, "sid-B": 101}))
+    assert (count, working, unlisted) == (2, 1, 1)
     assert loop.box_check(count, 0, counter=counter)["ok"] is True
     assert "herdr" in counter and "working" in counter
 
@@ -390,13 +492,13 @@ def test_agent_count_falls_back_to_the_process_count_when_herdr_cannot_answer():
     class Args:
         processes = None
     idle = idle_box_listing(19)
-    count, counter, total = loop.agent_count(
+    count, counter, working, unlisted = loop.agent_count(
         Args, herdr=lambda cmd: (1, "herdr: connection refused"),
         ps=lambda cmd: (0, idle))
     assert count == 19
-    assert total == 19
+    assert (working, unlisted) == (None, None)
     assert loop.box_check(count, 0, counter=counter)["ok"] is True
-    count, counter, total = loop.agent_count(
+    count, counter, working, unlisted = loop.agent_count(
         Args, herdr=lambda cmd: (1, ""),
         ps=lambda cmd: (0, idle_box_listing(28)))
     refused = loop.box_check(count, 0, counter=counter)
@@ -406,17 +508,17 @@ def test_agent_count_falls_back_to_the_process_count_when_herdr_cannot_answer():
     assert "herdr" in refused["refusals"][0], refused
 
 
-def test_render_peak_names_the_excluded_idle_agents_beside_the_total():
-    line = loop.render_peak(6, 1, 2, total=15)
+def test_render_peak_names_the_working_and_unlisted_split():
+    line = loop.render_peak(6, 1, 2, working=4, unlisted=2)
     assert "6 agent processes measured" in line
-    assert "9 idle excluded (15 total)" in line, line
+    assert "4 working, 2 unlisted" in line, line
 
 
-def test_render_peak_omits_the_aside_when_nothing_was_excluded():
-    line = loop.render_peak(6, 1, 2, total=6)
-    assert "excluded" not in line, line
+def test_render_peak_omits_the_split_when_not_given():
+    line = loop.render_peak(6, 1, 2, working=None, unlisted=None)
+    assert "working" not in line and "unlisted" not in line, line
     line = loop.render_peak(6, 1, 2)
-    assert "excluded" not in line, line
+    assert "working" not in line and "unlisted" not in line, line
 
 
 def test_a_processes_override_of_zero_is_used_not_measured():
@@ -424,7 +526,7 @@ def test_a_processes_override_of_zero_is_used_not_measured():
         processes = 0
     got = loop.agent_count(Args, herdr=lambda cmd: (1, ""),
                            ps=lambda cmd: (1, ""))
-    assert got == (0, "passed by --processes", 0), got
+    assert got == (0, "passed by --processes", None, None), got
 
 
 def test_the_cli_refuses_a_negative_processes_override():
