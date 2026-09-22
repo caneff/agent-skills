@@ -175,7 +175,8 @@ No PR and no reviewer; Chris reads the log after.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
   report it as a follow-up. Why: an unasked fix widens the diff past what the
-  reviewers check against the ticket.
+  reviewers check against the ticket. A round-1 finding that passes
+  § Review's adjacent-fix rule is the one narrowing: it is fixed in the round.
 - Typecheck and single test files as you go, the full suite once at the end.
   Why: a failure caught at the file it came from is cheaper to place than one
   found in the full run.
@@ -206,17 +207,28 @@ No PR and no reviewer; Chris reads the log after.
    Claude catch as `codex-only, confirmed` and corrupt the trial's
    evidence. On any other build, the PR body lists the disputed, filed and
    handed-back ones.
+
+   **The adjacent-fix rule.** A round-1 finding is fixed in the round, not
+   filed, when all five parts hold: it sits in a file already in the diff;
+   the fix is confined to one function; it changes under 20 lines, its test
+   included; it adds no public seam; and it touches no second file. The
+   20-line budget cannot be split across files: a fix touching two files is
+   a change, not an adjacent fix, and § Build's pre-existing-bug rule governs
+   it. Make each adjacent fix in a commit of its own, so its sha measures it
+   alone. Its disposition is `fixed (adjacent)`, with that sha; its sidecar
+   line is step 2's adjacent form.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
    Pass the reviewers every disputed, ruled, or other-ticket item as settled.
-   A round-1 finding with no disposition is the one thing this pass fails
-   on.
+   What it fails on, by finding id, is its brief's to state:
+   `multi-axis-code-review/SKILL.md` § 6.
 
    This pass is also where the disposition gets recorded mechanically
    (#855): the verification pass, not the worker, writes
    `<dir>/dispositions-<n>.jsonl` in the same `~/.cache/agent-reviews/<repo>/`
    directory as the round-1 findings sidecars — one JSON object per line,
    joined to a round-1 finding by its `id` (`S1`/`P2`/`C3`). Each line is
-   `{"id": "<id>", "outcome": "fixed", "sha": "<sha>"}`,
+   `{"id": "<id>", "outcome": "fixed", "sha": "<sha>"}` — on an adjacent
+   fix, `{"id": "<id>", "outcome": "fixed", "sha": "<sha>", "scope": "adjacent"}` —
    `{"id": "<id>", "outcome": "disputed", "reason": "<why>"}`, or
    `{"id": "<id>", "outcome": "filed", "ticket": <n>}`, or
    `{"id": "<id>", "outcome": "handed-back", "command": "<the command>"}` —

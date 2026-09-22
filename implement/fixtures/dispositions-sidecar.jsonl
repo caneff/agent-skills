@@ -1,0 +1,5 @@
+{"id": "S1", "outcome": "fixed", "sha": "0123abc"}
+{"id": "C2", "outcome": "fixed", "sha": "4567def", "scope": "adjacent"}
+{"id": "P1", "outcome": "disputed", "reason": "the ticket's AC 2 asks for exactly this wording"}
+{"id": "C1", "outcome": "filed", "ticket": 1234}
+{"id": "S2", "outcome": "handed-back", "command": "gh issue create --repo o/r --title \"t\" --body \"$(cat <<'EOF'\nbody\nEOF\n)\""}
