@@ -58,7 +58,11 @@
       "mcp__c4ai__execute_js",
       "mcp__c4ai__screenshot",
       "Bash(git push origin --delete *)",
-      "Bash(merge-cleanup:*)"
+      "Bash(merge-cleanup:*)",
+      "Bash(diff:*)",
+      "Bash(cat /home/caneff/.local/bin/*)",
+      "Bash(head /home/caneff/.local/bin/*)",
+      "Bash(ls /home/caneff/.local/bin*)"
     ],
     "deny": [
       "AskUserQuestion",
