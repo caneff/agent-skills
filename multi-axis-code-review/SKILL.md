@@ -154,6 +154,10 @@ Every prompt carries only the **diff, the commit list, the spec/standards source
 
 Belt and braces: append to **every** prompt — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). `/tmp` is wiped at every boot here and herdr workers never set `$CLAUDE_JOB_DIR`, so these reports — the only record of what each reviewer said — need a home that survives: `~/.cache/agent-reviews/<repo>/`. Never point the report at `./.scratch/` or anywhere under the repo — an untracked file there blocks `git worktree remove` (and so `ship`).
 
+Which rating counts as high is `implement/SKILL.md` § Review's severity mapping,
+stated there once; no brief here restates it, and a reviewer rates in its
+own axis's words.
+
 **Alongside the prose, each reviewer also writes a sidecar** so counting a
 finding stops needing an LLM pass over prose (#855, #854): "Also write
 `<dir>/findings-<axis>-<n>.jsonl`, one JSON object per line, one line per
@@ -299,7 +303,7 @@ If the completion notification comes back missing or empty, read that file befor
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec, and the settled decisions.
-- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Check `docs/agents/defect-classes.md` by name. Under 400 words."
+- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep), except a change an adjacent disposition names (`fixed (adjacent)`), which implement's adjacent-fix rule sanctions; (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Check `docs/agents/defect-classes.md` by name. Under 400 words."
 
 **Correctness sub-agent prompt** — include:
 
@@ -551,6 +555,33 @@ in its own prose; that's what makes the disposition sidecar joinable
 without a reading pass (#855).
 
 End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
+
+### 6. The verification pass
+
+A caller that follows round 1 with one verification pass (implement's review
+step 2) spawns one `diff-reviewer`, `model: opus`, fire-and-return as in § 4.
+Its prompt carries the round-1 findings sidecars, a fresh capture of the fix
+commits, the worker's claimed dispositions — each a claim to check, never
+settled, and never with an outcome pre-assigned — and the settled decisions.
+It writes `dispositions-<n>.jsonl` in the grammar of `implement/SKILL.md` § Review,
+and its report to `<dir>/review-verify-<n>.md`.
+
+The brief: "Check each round-1 finding id against its fix or its claimed
+disposition. Fail the pass, naming the finding id, on any of three things:
+(a) a round-1 finding with no disposition — `leftover` counts as one, as
+do the other four outcomes; (b) a `leftover` whose finding
+is high under implement's severity mapping, since a high finding is filed —
+read a correctness finding's `CONFIRMED` or `PLAUSIBLE` from its prose
+report, since its sidecar line carries only `hard` or `judgement`;
+(c) an adjacent fix that breaks `implement/SKILL.md` § Review's adjacent-fix
+rule. For (c), write the sidecar
+first, then run `python3 ~/.agents/skills/multi-axis-code-review/check_adjacent.py --repo <worktree> --base <fixed point> <dir>/dispositions-<n>.jsonl`:
+it measures every sidecar line with `"scope": "adjacent"` for one file, a
+file already in the diff and under 20 changed lines, and prints `BREACH <id>`
+for each that breaks them, or for any line it cannot read. Judge the other
+two parts — one function and no public seam — by reading the fix commit, and
+fail by id on those the same way. Report every breach beside the finding it
+belongs to. Under 400 words."
 
 ## Why separate axes
 

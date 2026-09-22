@@ -175,7 +175,8 @@ No PR and no reviewer; Chris reads the log after.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
   report it as a follow-up. Why: an unasked fix widens the diff past what the
-  reviewers check against the ticket.
+  reviewers check against the ticket. A round-1 finding that passes
+  § Review's adjacent-fix rule is the one narrowing: it is fixed in the round.
 - Typecheck and single test files as you go, the full suite once at the end.
   Why: a failure caught at the file it came from is cheaper to place than one
   found in the full run.
@@ -187,10 +188,17 @@ No PR and no reviewer; Chris reads the log after.
    built-in `/code-review` is not run here; `/code-review low` only when the
    owner asks).
 
-   Every finding gets exactly one disposition: fixed in a commit,
-   `disputed: <why>`, or filed as a follow-up ticket through `/file-ticket`
-   so it leaves with a routing role, never `needs-triage` — ad hoc
-   `gh issue create` skips that role. On a repo whose `origin` owner isn't
+   Every finding gets exactly one disposition, one of five outcomes:
+   `fixed`, `disputed`, `filed`, `handed-back` and `leftover`. It is fixed
+   in a commit, `disputed: <why>`, or filed as a follow-up ticket through
+   `/file-ticket` so it leaves with a routing role, never `needs-triage` —
+   ad hoc `gh issue create` skips that role. `filed` is reserved for a high
+   finding, under the severity mapping below. A finding that is not high and
+   not fixed in the round takes `leftover`: no ticket of its own, only a
+   sidecar line (step 2) and `leftover` in prose. The sweep that collects
+   leftovers into one ticket is not built yet (#1029, #1030, #1033); until it
+   lands, the sidecar line is the only record.
+   On a repo whose `origin` owner isn't
    your `gh` login, `/file-ticket` hands the command back instead of filing,
    so there is no ticket number: the disposition is `handed back: <the
    gh issue create command>`, the command exactly as `/file-ticket` gave it.
@@ -199,28 +207,51 @@ No PR and no reviewer; Chris reads the log after.
    (§ Someone else's repo). On a heavy Claude-lane build, the PR
    body lists **every** round-1 finding with its disposition (fixed, with
    the fixing commit's sha; `disputed: <why>`; filed, with its ticket
-   number; or handed back, with the command) — not only the disputed,
-   filed and handed-back ones. A fixed finding that's
+   number; handed back, with the command; or `leftover`) — not only the
+   disputed, filed, handed-back and leftover ones. A fixed finding that's
    allowed to vanish from the record is one the § The merge step 3 Codex
    pass can't tell from a Codex-only one, so it can misclassify a real
    Claude catch as `codex-only, confirmed` and corrupt the trial's
-   evidence. On any other build, the PR body lists the disputed, filed and
-   handed-back ones.
+   evidence. On any other build, the PR body lists the disputed, filed,
+   handed-back and leftover ones.
+
+   **The severity mapping.** Stated here once; the reviewer briefs in
+   `multi-axis-code-review` point here. A finding is high when it is a
+   Codex `[high]` or a correctness `CONFIRMED`. Nothing else is high:
+   Codex medium and low, correctness `PLAUSIBLE`, and standards `hard` and
+   `judgement` are not high.
+
+   **The adjacent-fix rule.** A round-1 finding is fixed in the round, not
+   filed, when all five parts hold: it sits in a file already in the diff;
+   the fix is confined to one function; it changes under 20 lines, its test
+   included; it adds no public seam; and it touches no second file. The
+   20-line budget cannot be split across files: a fix touching two files is
+   a change, not an adjacent fix, and § Build's pre-existing-bug rule governs
+   it. Make each adjacent fix in a commit of its own, so its sha measures it
+   alone. Its disposition is `fixed (adjacent)`, with that sha; its sidecar
+   line is step 2's adjacent form.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
-   Pass the reviewers every disputed, ruled, or other-ticket item as settled.
-   A round-1 finding with no disposition is the one thing this pass fails
-   on.
+   Pass the reviewers every ruled or other-ticket item as settled; a
+   disposition you claim, `disputed` included, goes as a claim to check.
+   What it fails on, by finding id, is its brief's to state:
+   `multi-axis-code-review/SKILL.md` § 6.
 
    This pass is also where the disposition gets recorded mechanically
    (#855): the verification pass, not the worker, writes
    `<dir>/dispositions-<n>.jsonl` in the same `~/.cache/agent-reviews/<repo>/`
    directory as the round-1 findings sidecars — one JSON object per line,
    joined to a round-1 finding by its `id` (`S1`/`P2`/`C3`). Each line is
-   `{"id": "<id>", "outcome": "fixed", "sha": "<sha>"}`,
+   `{"id": "<id>", "outcome": "fixed", "sha": "<sha>"}` — on an adjacent
+   fix, `{"id": "<id>", "outcome": "fixed", "sha": "<sha>", "scope": "adjacent"}` —
    `{"id": "<id>", "outcome": "disputed", "reason": "<why>"}`, or
-   `{"id": "<id>", "outcome": "filed", "ticket": <n>}`, or
-   `{"id": "<id>", "outcome": "handed-back", "command": "<the command>"}` —
-   the same four dispositions this pass already records in prose. `command`
+   `{"id": "<id>", "outcome": "filed", "ticket": <n>}`,
+   `{"id": "<id>", "outcome": "handed-back", "command": "<the command>"}`, or
+   `{"id": "<id>", "outcome": "leftover", "file": "<path>", "title": "<short title>", "severity": "<the reviewer's severity word>", "text": "<one line of the finding>"}` —
+   the same five outcomes this pass records in prose. A leftover line
+   carries what a sweep needs without reopening the PR: `severity` is the
+   word its reviewer gave it — a Codex medium or low, `PLAUSIBLE`, `hard`
+   or `judgement`, since a high finding is filed instead — and `text` is
+   one line. `command`
    is the command JSON-encoded as one string, its newlines and quotes
    escaped: `/file-ticket`'s command is a multi-line heredoc, and a line
    split across lines breaks the join.
@@ -313,14 +344,14 @@ The body has these sections and nothing else:
 - **Tests run** — the command and its result line.
 - **Decisions made** — each with its reason. On a heavy Claude-lane build,
   every round-1 finding, each with its disposition (fixed, with the sha;
-  disputed, with the why; filed, with its ticket number; or handed back,
-  with the command) — § The merge
+  disputed, with the why; filed, with its ticket number; handed back,
+  with the command; or `leftover`) — § The merge
   step 3's Codex classification reads this list. Cite each finding by the
   id its sidecar gave it (`S1`/`P2`/`C3`) rather than restating it in
   prose (#855) — that's what makes this list joinable against
   `dispositions-<n>.jsonl` without a reading pass. On any other build, every
   round-1 finding that was disputed (with the why), filed (with its
-  ticket number) or handed back (with the command).
+  ticket number), handed back (with the command) or left over.
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
 
 Send the controller "PR up" in this shape:
