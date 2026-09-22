@@ -174,4 +174,31 @@ if [ "$(grep -c 'worker-spin-alert' "$tmp/prompts" 2>/dev/null)" = 1 ]; then
   echo "PASS: a live spin crossing the byte cap after its first alert does not alert twice"
 else echo "FAIL: byte-cap-crossing spin — prompts: $(cat "$tmp/prompts" 2>/dev/null)"; fails=1; fi
 
+# A deployment missing the sibling lib (#991's own round-1 bug) must fail
+# loud, not join the "not a worker transcript" exit 0 via a bare
+# command-not-found on stderr.
+rm -f "$tmp/prompts" "$tmp/home/.claude/worker-spin-alerts.log"
+nolib="$tmp/nolib"; mkdir -p "$nolib"; cp "$hook" "$nolib/"
+rc=$(printf '{"session_id":"s11","transcript_path":"%s"}' "$fx/real-spin.jsonl" \
+     | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$nolib/$(basename "$hook")" >/dev/null 2>&1; echo $?)
+if [ "$rc" = 0 ] && [ ! -e "$tmp/prompts" ] && grep -q $'lib-missing\tnot-sent' "$tmp/home/.claude/worker-spin-alerts.log" 2>/dev/null; then
+  echo "PASS: a hook deployed without its sibling lib logs lib-missing and exits 0"
+else
+  echo "FAIL: a hook deployed without its sibling lib — rc $rc, log: $(cat "$tmp/home/.claude/worker-spin-alerts.log" 2>/dev/null)"; fails=1
+fi
+
+# A lib that sources cleanly but is missing a function the hook calls (mid-edit
+# skew between the symlinked hook and its sibling) must be caught too — not
+# just an absent file (Codex gate pass on PR #1066).
+rm -f "$tmp/prompts" "$tmp/home/.claude/worker-spin-alerts.log"
+partial="$tmp/partial"; mkdir -p "$partial"; cp "$hook" "$partial/"
+sed '/^worker_alert_logline() {/,/^}/d' "$here/worker-alert-lib.sh" > "$partial/worker-alert-lib.sh"
+rc=$(printf '{"session_id":"s12","transcript_path":"%s"}' "$fx/real-spin.jsonl" \
+     | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$partial/$(basename "$hook")" >/dev/null 2>&1; echo $?)
+if [ "$rc" = 0 ] && [ ! -e "$tmp/prompts" ] && grep -q $'lib-missing\tnot-sent.*worker_alert_logline' "$tmp/home/.claude/worker-spin-alerts.log" 2>/dev/null; then
+  echo "PASS: a hook deployed with an incomplete sibling lib names the missing symbol and exits 0"
+else
+  echo "FAIL: incomplete lib — rc $rc, log: $(cat "$tmp/home/.claude/worker-spin-alerts.log" 2>/dev/null)"; fails=1
+fi
+
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

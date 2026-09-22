@@ -79,7 +79,32 @@ if [ "${1:-}" = "--classify" ]; then
   classify "$2"; exit 0
 fi
 
+hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 log="$HOME/.claude/worker-spin-alerts.log"
+lib_missing() { # <what's wrong> -> logs and exits 0, no lib functions required
+  mkdir -p "$(dirname "$log")"
+  printf '%s\t%s\tnot-sent\t%s\n' "$(date -u +%FT%TZ)" "lib-missing" "$1" >> "$log"
+  exit 0
+}
+# A missing lib (an installed hook whose sibling was never deployed) must not
+# join the "not a worker transcript" exit 0 below via a bare command-not-found
+# on stderr — that is exactly the silent-exit-0 hazard #991 exists to fix, one
+# layer up. Logged so a run of missing alerts has a trace to find. Sourced
+# only in hook mode: --classify above is self-contained and needs none of it.
+source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || \
+  lib_missing "missing $hook_dir/worker-alert-lib.sh — hook cannot resolve a controller"
+# A lib that parses but is missing a symbol this hook calls (truncated, or
+# mid-edit skew between the symlinked hook and its sibling) passes the
+# `source` above; every worker_alert_* call after it is then
+# command-not-found under `set -u` alone (no `-e`), silently reaching the
+# same "not a worker transcript" exit 0 — including the log line itself,
+# since worker_alert_logline can be exactly the missing symbol. Checked here
+# with `lib_missing`, which needs none of them (Codex gate pass on PR #1066).
+for fn in worker_alert_read_brief worker_alert_resolve_session worker_alert_logline \
+          worker_alert_worker_agent_name worker_alert_controller_pane; do
+  declare -F "$fn" >/dev/null || lib_missing "$hook_dir/worker-alert-lib.sh loaded but does not define $fn"
+done
+
 event="$(cat)"
 transcript="$(jq -r '.transcript_path // ""' <<<"$event" 2>/dev/null)"
 session="$(jq -r '.session_id // ""' <<<"$event" 2>/dev/null)"
@@ -89,10 +114,7 @@ verdict="$(classify "$transcript")"
 jq -e '.spinning == true' >/dev/null 2>&1 <<<"$verdict" || exit 0
 
 # A worker's brief names its ticket and controller; anything else is not one.
-IFS=$'\t' read -r n controller < <(jq -nc '[inputs | fromjson? | objects] ' -R "$transcript" 2>/dev/null | jq -r '
-  [.[] | select(.type == "user" and .origin.kind == "human") | .message.content | strings
-       | capture("<command-name>/implement(-spec)?</command-name>\\s*<command-args>(?<n>[0-9]+)\\b[^<]*--controller \"(?<c>[^\"]+)\"")]
-  | first // empty | "\(.n)\t\(.c)"')
+IFS=$'\t' read -r n controller < <(worker_alert_read_brief "$transcript")
 [ -n "${controller:-}" ] || exit 0
 
 tool="$(jq -r '.tool' <<<"$verdict")"
@@ -135,27 +157,16 @@ else
     END { exit !found }
   ' "$log" && exit 0
 fi
-logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$1" "$2" >> "$log"; }
+logline() { worker_alert_logline "$log" "$key" "$1" "$2"; }
 
 ctl_session=""
-for f in "$HOME"/.claude/sessions/*.json; do
-  [ -e "$f" ] || continue
-  IFS=$'\t' read -r pid start sid < <(jq -r --arg c "$controller" \
-    'select(.name == $c) | "\(.pid)\t\(.procStart // "")\t\(.sessionId // "")"' "$f" 2>/dev/null)
-  [[ "${pid:-}" =~ ^[0-9]+$ ]] || continue
-  stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || continue
-  read -ra fields <<<"${stat##*) }"
-  [ -n "$start" ] && [ "${fields[19]:-}" = "$start" ] || continue
-  ctl_session="$sid"; break
-done
+resolved="$(worker_alert_resolve_session name "$controller")"
+[ -n "$resolved" ] && IFS=$'\x1f' read -r ctl_session _ _ <<<"$resolved"
 
-worker_agent="$(timeout 2 herdr agent get "${HERDR_PANE_ID:-}" 2>/dev/null | jq -r '.result.agent.name // empty' 2>/dev/null)"
-worker_agent="${worker_agent:-${HERDR_PANE_ID:-unknown pane}}"
+worker_agent="$(worker_alert_worker_agent_name)"
 alert="[worker-spin-alert] worker #$n repeated $tool $input at least $count times in a row (herdr agent $worker_agent, controller $controller)"
 
-pane=""
-[ -n "$ctl_session" ] && pane="$(timeout 2 herdr agent list 2>/dev/null | jq -r --arg s "$ctl_session" \
-  '.result.agents[]? | select(.agent_session.value == $s) | .pane_id' 2>/dev/null | head -n1)"
+pane="$(worker_alert_controller_pane "$ctl_session")"
 if [ -z "$pane" ]; then logline "not-sent" "no herdr pane for controller $controller: $alert"; exit 0; fi
 if out="$(timeout 3 herdr agent prompt "$pane" "$alert" 2>&1)"; then
   logline "sent" "$pane: $alert"

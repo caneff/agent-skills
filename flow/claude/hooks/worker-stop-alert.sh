@@ -31,7 +31,31 @@
 
 set -u
 
+hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 log="$HOME/.claude/worker-stop-alerts.log"
+lib_missing() { # <what's wrong> -> logs and exits 0, no lib functions required
+  mkdir -p "$(dirname "$log")"
+  printf '%s\t%s\tnot-sent\t%s\n' "$(date -u +%FT%TZ)" "lib-missing" "$1" >> "$log"
+  exit 0
+}
+# A missing lib (an installed hook whose sibling was never deployed) must not
+# join the "not a worker transcript" exit 0 below via a bare command-not-found
+# on stderr — that is exactly the silent-exit-0 hazard #991 exists to fix, one
+# layer up. Logged so a run of missing alerts has a trace to find.
+source "$hook_dir/worker-alert-lib.sh" 2>/dev/null || \
+  lib_missing "missing $hook_dir/worker-alert-lib.sh — hook cannot resolve a controller"
+# A lib that parses but is missing a symbol this hook calls (truncated, or
+# mid-edit skew between the symlinked hook and its sibling) passes the
+# `source` above; every worker_alert_* call after it is then
+# command-not-found under `set -u` alone (no `-e`), silently reaching the
+# same "not a worker transcript" exit 0 — including the log line itself,
+# since worker_alert_logline can be exactly the missing symbol. Checked here
+# with `lib_missing`, which needs none of them (Codex gate pass on PR #1066).
+for fn in worker_alert_read_brief worker_alert_resolve_session worker_alert_logline \
+          worker_alert_worker_agent_name worker_alert_controller_pane; do
+  declare -F "$fn" >/dev/null || lib_missing "$hook_dir/worker-alert-lib.sh loaded but does not define $fn"
+done
+
 event="$(cat)"
 
 jq -e '.stop_hook_active != true' >/dev/null 2>&1 <<<"$event" || exit 0
@@ -44,50 +68,8 @@ session="$(jq -r '.session_id // ""' <<<"$event" 2>/dev/null)"
 entries() { jq -nc '[inputs | fromjson? | objects]' -R "$transcript" 2>/dev/null; }
 
 # The brief: ticket number and controller name, or nothing for a non-worker.
-IFS=$'\t' read -r n controller < <(entries | jq -r '
-  [.[] | select(.type == "user" and .origin.kind == "human")
-       | .message.content | strings
-       | capture("<command-name>/implement(-spec)?</command-name>\\s*<command-args>(?<n>[0-9]+)\\b[^<]*--controller \"(?<c>[^\"]+)\"")]
-  | first // empty | "\(.n)\t\(.c)"')
+IFS=$'\t' read -r n controller < <(worker_alert_read_brief "$transcript")
 [ -n "${controller:-}" ] || exit 0
-
-# A live registry record naming `sid` (mode "sid") or `nm` (mode "name") —
-# its session id, current name (possibly empty) and socket. `sid` mode
-# matches on `.sessionId` alone, with no requirement that `.name` be
-# non-empty: a Claude session with no name yet is still live, still sends
-# and receives cross-session messages (every one carries `from="uds:<its
-# socket>"`, and a reply copies that address), and a report it delivered to
-# its own socket is real even though it has nothing to match by name
-# (Codex pass on PR #1057 — an earlier version of this filter required a
-# non-empty name unconditionally and dropped exactly this socket). `name`
-# mode still only matches a non-empty `.name` because it matches ON that
-# field. Joined and split on `\x1f` (ASCII unit separator), not a tab: tab
-# is one of bash's default IFS-whitespace characters, so `read` collapses
-# runs of it and strips a leading/trailing one regardless of field order —
-# an empty `.sessionId`, `.name` or `.messagingSocketPath` in the middle
-# silently shifted every field after it into the wrong variable
-# (verification pass on #981, #1014). `\x1f` is not IFS-whitespace, so a
-# run of it never collapses and an empty field never disappears, whatever
-# position it's in. Live means the pid's /proc starttime (field 22, after
-# the `(comm)` field) equals the record's procStart — a stale record whose
-# pid was reused has another, as in flow/lane's sessions reader.
-resolve_session() {
-  local mode="$1" val="$2" f pid start sid nm sock stat fields
-  for f in "$HOME"/.claude/sessions/*.json; do
-    [ -e "$f" ] || continue
-    IFS=$'\x1f' read -r pid start sid nm sock < <(jq -r --arg mode "$mode" --arg v "$val" \
-      'select((if $mode == "sid" then .sessionId else .name end) == $v) |
-       [(.pid | tostring), (.procStart // ""), (.sessionId // ""), (.name // ""), (.messagingSocketPath // "")]
-       | join("\u001f")' "$f" 2>/dev/null)
-    [[ "${pid:-}" =~ ^[0-9]+$ ]] || continue
-    stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || continue
-    read -ra fields <<<"${stat##*) }"
-    [ -n "$start" ] && [ "${fields[19]:-}" = "$start" ] || continue
-    printf '%s\x1f%s\x1f%s\n' "$sid" "$nm" "$sock"
-    return 0
-  done
-  return 1
-}
 
 # The brief carries the controller's herdr agent name (#923); a compliant
 # worker resolves that to a session name or socket before sending, so
@@ -98,29 +80,25 @@ resolve_session() {
 # and socket — before either use, but keep matching the brief's own literal
 # too: nothing here requires a worker to route through `resolve-controller`
 # first. Unlike `resolve-controller` (`sessions::name_of_session`, which
-# needs a name because it returns one), `resolve_session` in `sid` mode
-# does not require the record to have a `.name`: a nameless live session
-# still sends and receives cross-session messages (every one carries
-# `from="uds:<its socket>"`, and a reply copies that address), so a report
-# delivered to its socket is real even with nothing to match by name (Codex
-# pass on PR #1057 — an earlier version of this file required a non-empty
-# name here and dropped exactly that socket). A worktree without `herdr`,
-# or a `herdr agent list` that fails or times out, falls back the same way
-# an older brief already carrying a session name does.
+# needs a name because it returns one), `worker_alert_resolve_session`'s
+# `sid` mode does not require the record to have a `.name` — see its own
+# comment in worker-alert-lib.sh for why. A worktree without `herdr`, or a
+# `herdr agent list` that fails or times out, falls back the same way an
+# older brief already carrying a session name does.
 herdr_sid="$(timeout 2 herdr agent list 2>/dev/null \
   | jq -r --arg c "$controller" '.result.agents[]? | select((.name // "") == $c) | .agent_session.value // empty' 2>/dev/null \
   | head -n1)"
 resolved=""
-[ -n "$herdr_sid" ] && resolved="$(resolve_session sid "$herdr_sid")"
-[ -n "$resolved" ] || resolved="$(resolve_session name "$controller")"
+[ -n "$herdr_sid" ] && resolved="$(worker_alert_resolve_session sid "$herdr_sid")"
+[ -n "$resolved" ] || resolved="$(worker_alert_resolve_session name "$controller")"
 ctl_session="" ctl_socket="" resolved_name=""
 if [ -n "$resolved" ]; then
   IFS=$'\x1f' read -r ctl_session resolved_name ctl_socket <<<"$resolved"
 fi
-# Belt and braces: resolve_session above already returns a nameless
-# record's session id, so this rarely fires, but it keeps the pane lookup
-# working even if resolve_session found nothing (a record removed between
-# the herdr list and here) while herdr's own bookkeeping still knows the id.
+# Belt and braces: worker_alert_resolve_session above already returns a
+# nameless record's session id, so this rarely fires, but it keeps the pane
+# lookup working even if it found nothing (a record removed between the
+# herdr list and here) while herdr's own bookkeeping still knows the id.
 [ -z "$ctl_session" ] && ctl_session="$herdr_sid"
 
 # The verdict for this stop: `reported`, `waiting` on a subagent, or `silent`,
@@ -235,7 +213,7 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg r
 key="$session"$'\t'"$stop"
 grep -qF -- "$key"$'\t' "$log" 2>/dev/null && exit 0
 
-logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$key" "$1" "$2" >> "$log"; }
+logline() { worker_alert_logline "$log" "$key" "$1" "$2"; }
 
 # Every herdr call below ends by a 10 s deadline, measured from here — not
 # 12 s, because the controller resolution above already spent up to its own
@@ -243,13 +221,10 @@ logline() { mkdir -p "$(dirname "$log")" && printf '%s\t%s\t%s\t%s\n' "$(date -u
 # room for that whether or not the stop turned out silent (#1014).
 deadline=$((SECONDS + 10))
 
-worker_agent="$(timeout 2 herdr agent get "${HERDR_PANE_ID:-}" 2>/dev/null | jq -r '.result.agent.name // empty' 2>/dev/null)"
-worker_agent="${worker_agent:-${HERDR_PANE_ID:-unknown pane}}"
+worker_agent="$(worker_alert_worker_agent_name)"
 alert="[worker-stop-alert] worker #$n stopped without reporting to $controller (herdr agent $worker_agent)"
 
-pane=""
-[ -n "$ctl_session" ] && pane="$(timeout 2 herdr agent list 2>/dev/null | jq -r --arg s "$ctl_session" \
-  '.result.agents[]? | select(.agent_session.value == $s) | .pane_id' 2>/dev/null | head -n1)"
+pane="$(worker_alert_controller_pane "$ctl_session")"
 if [ -z "$pane" ]; then
   logline "not-sent" "no herdr pane for controller $controller: $alert"
   exit 0
