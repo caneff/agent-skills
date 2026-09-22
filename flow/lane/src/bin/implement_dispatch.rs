@@ -1049,7 +1049,10 @@ fn run() -> Result<(), ExitCode> {
                 agent: agent.clone(),
                 tickets: ns.clone(),
                 branch: branch.clone(),
-                workspace: wt.display().to_string(),
+                // #1040: canonicalized so a symlinked `primary` (or repo
+                // root) still spells the same string `merge-cleanup` reads
+                // back off `git worktree list` and canonicalizes in turn.
+                workspace: lane::workers::canonical_workspace_path(&wt.display().to_string()),
                 repo: slug.clone(),
                 cleanup: cleanup.clone(),
                 chris_merges,
