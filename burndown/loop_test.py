@@ -401,6 +401,23 @@ def test_a_matched_but_all_idle_listing_is_trusted_at_zero_working():
     assert (working, unlisted) == (0, 0), (working, unlisted)
 
 
+def test_a_resolved_pane_with_no_or_unknown_status_counts_as_working():
+    # A missing agent_status and an unrecognised string are neither
+    # "idle" nor "done" — only those two exclude a pane, so both count.
+    agents = [
+        {"name": "a0", "agent_session": {"value": "sid-A"}},
+        {"name": "a1", "agent_status": "wedged",
+         "agent_session": {"value": "sid-B"}},
+    ]
+    listing = json.dumps({"result": {"agents": agents}})
+    ps = lambda cmd: (0, pid_comm_listing(100, 101))
+    herdr = lambda cmd: (0, listing)
+    sessions = sessions_map({"sid-A": 100, "sid-B": 101})
+    working, unlisted = loop.count_working_herdr_agents(
+        ps=ps, herdr=herdr, sessions=sessions)
+    assert (working, unlisted) == (2, 0), (working, unlisted)
+
+
 def test_a_herdr_listing_that_matches_none_of_the_boxs_pids_is_a_refusal():
     # Empty, and non-empty-but-unresolvable, are the same failure: herdr's
     # registry reads as broken, not the box as idle.

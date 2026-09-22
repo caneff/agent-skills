@@ -123,10 +123,14 @@ fan-out, `SLOT_PEAK_PROCESSES` (5) — not the one process it is between
 reviews (#933): each new worker costs 5, each live worker keeps 4 in reserve.
 
 The count that gates the cap is herdr's **working panes plus unlisted
-claude pids** (`herdr agent list`, `agent_status` `working`), not every
-`claude` process on the box read as one flat total: an idle or done pane
-costs no cores, and counting it held a run to fewer live workers than the
-box actually had room for (#1075). Like `ps`, herdr counts by pane — one
+claude pids** (`herdr agent list`; every `agent_status` counts except
+`idle` and `done`, so a pane with no status or one herdr hasn't grown a
+name for yet fails closed as working rather than reading as neither —
+equality against the literal `"working"` let such a pane vanish from the
+count, a Codex gate finding), not every `claude` process on the box read
+as one flat total: an idle or done pane costs no cores, and counting it
+held a run to fewer live workers than the box actually had room for
+(#1075). Like `ps`, herdr counts by pane — one
 entry per Claude session, a review fan-out's subagents folded into that
 entry rather than listed on their own — so a *foreign* controller's own
 review fan-out is not visible as extra herdr entries. What the first

@@ -313,13 +313,16 @@ def count_working_herdr_agents(ps=None, herdr=None, sessions=None):
     herdr counts by pane, one entry per Claude session, a review
     fan-out's subagents folded into that one entry rather than listed on
     their own. `working` is every listed pane whose `agent_status` is
-    `working`, plus every listed pane whose session cannot be resolved to
-    a pid (a resolution failure fails closed, counted as working rather
-    than dropped). `unlisted` is every `claude` pid `ps` shows that no
-    listed pane resolved to — a subagent or headless run herdr does not
-    pane-list, which still burns a core and fails closed the same way
-    (#1075 controller ruling, correcting the ticket's original premise
-    that herdr lists a subagent as its own agent).
+    not `idle` or `done` — those two are the only statuses read as not
+    working; a missing, null or unrecognised status fails closed as
+    working rather than vanishing from the count (Codex gate finding on
+    7a6bedd) — plus every listed pane whose session cannot be resolved to
+    a pid (a resolution failure fails closed the same way, counted as
+    working rather than dropped). `unlisted` is every `claude` pid `ps`
+    shows that no listed pane resolved to — a subagent or headless run
+    herdr does not pane-list, which still burns a core and fails closed
+    the same way (#1075 controller ruling, correcting the ticket's
+    original premise that herdr lists a subagent as its own agent).
 
     `ps`/`herdr` take a command and return (status, stdout), the contract
     `count_agent_processes` uses; `sessions` takes nothing and returns
@@ -385,7 +388,13 @@ def count_working_herdr_agents(ps=None, herdr=None, sessions=None):
             working += 1  # unresolved: fail closed, counted working
             continue
         matched_pids.add(pid)
-        if agent.get("agent_status") == "working":
+        # Only "idle" and "done" exclude a pane. A missing, null or
+        # unrecognised status is not known idle, so it counts as working —
+        # the same fail-closed reading an unresolved pane already gets;
+        # equality against "working" alone let a wedged or unclassified
+        # pane read as neither working nor unlisted and vanish from the
+        # count (Codex gate finding, 7a6bedd).
+        if agent.get("agent_status") not in ("idle", "done"):
             working += 1
 
     if not matched_pids:

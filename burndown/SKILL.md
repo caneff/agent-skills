@@ -99,9 +99,11 @@ too.
    sessions**, subagents included, across the whole shared box, not this
    run's and **not OS processes**: an idle WSL box holds ~190 of those, so
    `ps | wc -l` refuses every dispatch. `loop.py` counts herdr's **working**
-   panes (`herdr agent list`, `agent_status` `working`) plus every `claude`
-   pid `ps -eo pid,comm` shows that no herdr pane resolves to — a subagent
-   or headless run herdr does not pane-list, matched to panes through the
+   panes (`herdr agent list`; every `agent_status` counts except `idle`
+   and `done`, so a missing or unrecognised status fails closed as
+   working rather than vanishing) plus every `claude` pid `ps -eo
+   pid,comm` shows that no herdr pane resolves to — a subagent or
+   headless run herdr does not pane-list, matched to panes through the
    sessions registry the same way `resolve-controller` does; an unmatched
    pid fails closed and counts, the same as a herdr pane whose session
    cannot be resolved at all. Idle and done panes are the only thing
