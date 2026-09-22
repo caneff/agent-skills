@@ -25,12 +25,17 @@ run_fixture step-sentence-valid
 run_fixture step-colon-name-valid
 run_fixture mention-escaped-valid
 run_fixture code-span-name-valid
+run_fixture step-prefix-exact-valid
+run_fixture double-backtick-name-valid
+run_fixture step-locator-inline-code-valid
 
 for fixture in pointer-suffix-invalid bare-cross-file-collision step-heading-name-invalid \
   step-number-invalid step-range-invalid \
   step-colon-invalid step-descending-invalid step-emdash-invalid step-fence-steps-invalid \
   step-fence-nested-invalid step-fence-char-invalid step-fence-length-invalid \
-  step-fence-info-invalid step-colon-name-invalid mention-unescaped-invalid long-name-step-invalid inline-code-name-invalid; do
+  step-fence-info-invalid step-colon-name-invalid mention-unescaped-invalid long-name-step-invalid inline-code-name-invalid \
+  step-prefix-collision-invalid possessive-inline-code-invalid conjunction-inline-code-invalid \
+  step-duplicate-exact-invalid step-prefix-ambiguous-invalid; do
   if run_fixture "$fixture"; then
     echo "FAIL: checker accepted fixture $fixture"
     exit 1

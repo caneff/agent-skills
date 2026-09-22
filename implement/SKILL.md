@@ -342,9 +342,9 @@ Mutation check: <the change that made it fail, and that you saw it fail
   — or "n/a, deliverable is not a test or a gate">
 Parallel jobs: <one "<what it was> — <n> cores" line per parallel job you
   launched — or "none">
-Controller: you dispatched me; merge this PR per implement/SKILL.md § The
-  merge (Codex pass if heavy, squash, answer my outstanding questions, wait
-  for my idle notice), then run:
+Controller: you dispatched me; merge this PR per implement/SKILL.md § The merge
+  (Codex pass if heavy, squash, answer my outstanding questions, wait for my
+  idle notice), then run:
   cd <primary checkout> && merge-cleanup --repo <primary checkout> implement-<n>
 ```
 
