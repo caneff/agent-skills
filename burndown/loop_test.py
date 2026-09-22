@@ -114,8 +114,13 @@ def test_the_freed_slot_goes_outside_the_blocked_family():
             loop.refill(candidates_781(), parked_455(), 1)] == [[501]]
 
 
-def test_refill_fills_every_free_slot_lowest_ticket_first():
+def test_refill_fills_every_free_slot_widest_first_ticket_ties():
     # No wave: two slots free and nothing in flight, so both go at once.
+    # #452, #457 and #458 tie at closure size 2 (widest); #501 is narrower at
+    # 1. The same-tick guard holds #457 and #458 over #452's shared file, so
+    # #452 and the untied #501 are what actually goes out — this fixture
+    # cannot tell widest-first from lowest-ticket-first on its own; the
+    # untied case is `test_picks_takes_the_widest_closure_first`.
     picked = loop.refill(candidates_781(), [], 2)
     assert [c["tickets"] for c in picked] == [[452], [501]]
 
@@ -147,6 +152,20 @@ def test_picks_takes_the_widest_closure_first():
     picked, held = loop.picks(loop.frontier(candidates, []), 2)
     assert [c["tickets"] for c in picked] == [[20], [30]]
     assert held == []
+
+
+def test_a_wide_clump_held_by_a_live_workspace_stays_off_the_frontier():
+    # #1026 review, P2: the widest-first sort runs inside `picks`, on what
+    # `frontier` already filtered — a regression that moved the sort above
+    # the frontier's exclusion would dispatch #20 straight into #455's
+    # collision. #20 is the widest candidate here and still held; #30, the
+    # narrower one, is what goes out.
+    candidates = [
+        {"tickets": [20], "closure": ["b.js", "c.js", "d.js", HOT]},
+        {"tickets": [30], "closure": ["f.js", "g.js"]},
+    ]
+    picked = loop.refill(candidates, parked_455(), 2)
+    assert [c["tickets"] for c in picked] == [[30]]
 
 
 def test_the_cli_dispatch_names_the_widest_clump_first():

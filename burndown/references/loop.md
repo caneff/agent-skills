@@ -82,6 +82,15 @@ files for its whole run. Sorted before the same-tick guard walks the list, so
 a wide clump is offered a slot ahead of narrower ones instead of sitting
 behind them in ticket order.
 
+The cost: a slot can go unfilled that ticket order would have filled. Two
+free slots, nothing in flight, a wide clump sharing a file with two narrower
+ones — widest-first picks the wide one, and the same-tick guard then holds
+both narrower ones over its file, leaving the second slot idle until the
+next landing. Ticket order would have filled it from whichever narrower
+clump came first. That is the same-tick guard's ordinary behaviour, not a
+bug in the sort — the run drains a slot behind schedule rather than into a
+collision.
+
 Both consequences are stated in the skill because neither is visible from the
 frontier's own definition:
 
