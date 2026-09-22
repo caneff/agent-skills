@@ -64,16 +64,21 @@ bash "$here/backup-sync.sh" --restore
 # handler (see its own header for what it refuses and why). Runs after every
 # symlink and backup above, since it is the one step here that reaches outside
 # the filesystem (the Windows registry) and is the most likely to fail on a
-# given machine. Only its own by-design refusal (stderr starting "refusing: ")
-# is swallowed — anything else is a real failure, reported as one rather than
-# folded into "skipped".
+# given machine. Only its two by-design skips (a linked worktree, a path under
+# /tmp) are swallowed — its third refusal (a real directory at a link
+# destination) and every other failure are real problems on that machine, not
+# a benign skip, so they are reported as failures: the rest of the install
+# still runs, but install.sh exits nonzero at the end and names the toast step
+# (toast_failed below), rather than exiting 0 as though nothing went wrong.
+toast_failed=""
 if ! toast_out=$(bash "$here/bin/herdr-toast-install" 2>&1); then
-  if printf '%s\n' "$toast_out" | grep -q '^refusing: '; then
+  if printf '%s\n' "$toast_out" | grep -qE '^refusing: .*(is under /tmp|is in a linked worktree)'; then
     printf '%s\n' "$toast_out"
     echo "herdr-toast-install skipped (see message above)"
   else
     printf '%s\n' "$toast_out" >&2
     echo "herdr-toast-install failed (not a by-design refusal) — see above" >&2
+    toast_failed=1
   fi
 fi
 
@@ -90,3 +95,8 @@ bash "$here/lane-install.sh"
 
 echo
 echo "Done. The live flow tooling now points at this repo; commit to back it up."
+
+if [ -n "$toast_failed" ]; then
+  echo "herdr-toast-install failed for a non-refusal reason; the rest of the install ran anyway — see above" >&2
+  exit 1
+fi

@@ -194,6 +194,47 @@ else
   echo "PASS no spurious skip message on the success path"
 fi
 
+# Codex gate finding 1: a non-refusal failure of herdr-toast-install must not
+# be swallowed as a benign skip — install.sh still runs the rest of the
+# install, but exits nonzero at the end and names the toast step.
+fail="$tmp/fail"
+scratch_repo "$fail"
+cat > "$fail/flow/bin/herdr-toast-install" <<'STUB'
+#!/usr/bin/env bash
+echo "boom: something real broke" >&2
+exit 1
+STUB
+chmod +x "$fail/flow/bin/herdr-toast-install"
+out=$(HOME="$tmp/fail-home" bash "$fail/flow/install.sh" 2>&1); rc=$?
+if [ "$rc" -ne 0 ]; then
+  echo "PASS a non-refusal herdr-toast-install failure makes install.sh exit nonzero"
+else
+  echo "FAIL install.sh exited 0 despite a non-refusal herdr-toast-install failure: $out"; fails=1
+fi
+if [ -L "$tmp/fail-home/.local/bin/job-run" ]; then
+  echo "PASS later install steps still ran after the non-refusal failure"
+else
+  echo "FAIL later install steps did not run after the non-refusal failure: $out"; fails=1
+fi
+if printf '%s' "$out" | grep -q 'herdr-toast-install' && printf '%s' "$out" | grep -qi 'fail'; then
+  echo "PASS the final summary names the toast step as failed"
+else
+  echo "FAIL no summary naming the toast step's failure: $out"; fails=1
+fi
+
+# Codex gate finding 2: the installer's third refusal (a real directory at a
+# link destination) is a real machine failure, not one of its two by-design
+# skips (/tmp, linked worktree) — it must not be swallowed as "skipped" either.
+dirref="$tmp/dirref"
+scratch_repo "$dirref"
+mkdir -p "$tmp/dirref-home/.local/bin/herdr-focus.vbs"
+out=$(HOME="$tmp/dirref-home" HERDR_TOAST_ALLOW_TMP=1 bash "$dirref/flow/install.sh" 2>&1); rc=$?
+if [ "$rc" -ne 0 ] && ! printf '%s' "$out" | grep -q 'herdr-toast-install skipped'; then
+  echo "PASS the real-directory refusal is treated as a failure, not skipped"
+else
+  echo "FAIL the real-directory refusal was swallowed as a skip (rc=$rc): $out"; fails=1
+fi
+
 # An empty claude/agents dir leaves the literal glob; without the guard `link`
 # fails it and set -e aborts the install before backup-sync.sh runs.
 empty="$tmp/empty"
