@@ -1,25 +1,18 @@
 #!/usr/bin/env bash
-# Guards #1015: where the Codex adversarial pass fires, and what collecting
-# it costs. #942 had it launch early, at the worker's "Round 1 out" wake, to
-# overlap the worker's own verification pass instead of bolting pure serial
-# time onto the merge gate. Measured on `burn-2026-09-21-0930`
-# (docs/research/2026-09-21-burn-agent-skills-run-report.md): 4 early
-# launches, 4 raced against the worker's own round-1 fix commits, 0 banked —
-# every verdict was refused by the gate and rerun at PR-up anyway, so the
-# overlap never paid and each raced launch cost its wall clock twice. #1015
-# retires the early launch: the pass now launches once, at PR-up (§ The
-# merge step 3), in the foreground, as the gate step's own single attempt.
-# The fail-closed collection gate is unchanged by the move: with the run
-# detached from the tool call, a verdict nobody could collect looks exactly
-# like a pass that found nothing, which is the absent-answer-read-as-benign
-# shape this repo closed seven times on 2026-09-20. So the gate must still
-# refuse — not merge — on a verdict that is absent, unreadable, errored,
-# raced (the branch moved while Codex was reading) or stale (it does not
-# match the PR's `headRefOid`), and a refused verdict must never be posted
-# as if it described this PR; there is no retry of a refused gate launch,
-# only the step ending as a visible skip. The measurement stays too: every
-# run records its own duration, since five passes on 2026-09-20 could only
-# be bounded by output-file timestamps.
+# Guards #1015: the Codex adversarial pass launches once, at PR-up, not
+# early at the worker's "Round 1 out" wake (#942's design). Measured on
+# `burn-2026-09-21-0930`: 4 early launches, 4 raced against the worker's own
+# round-1 fix commits, 0 banked — every verdict was refused and rerun at
+# PR-up anyway, each raced launch costing its wall clock twice. Rows:
+# `docs/research/2026-09-20-codex-pass-durations.md`; report:
+# `docs/research/2026-09-21-burn-agent-skills-run-report.md`.
+# The fail-closed collection gate is unchanged: a verdict nobody could
+# collect must never read as a pass that found nothing (the
+# absent-answer-read-as-benign shape this repo closed seven times on
+# 2026-09-20), so the gate still refuses — not merges — on absent,
+# unreadable, errored, raced or stale, and a refusal ends the step visibly
+# rather than being posted as if it described this PR. Every run still
+# records its own duration, collected or refused.
 # This is a prose assertion over implement/SKILL.md plus an existence check
 # on the durations file — there is no harness that runs the skill's own
 # prose.
@@ -27,9 +20,12 @@
 # GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES would point
 # show-toplevel at that caller's repo instead of this one (#620); resolving
 # via BASH_SOURCE sidesteps it entirely rather than relying on the scrub.
-# Section-scoped like codex-fourth-axis-wording.test.sh: the whole pass —
-# launch and gate both — now lives in the controller's § The merge, so this
-# guards that section alone; § Review no longer owes it a wake.
+# The positive-content checks (what the current prose says) are
+# section-scoped, like codex-fourth-axis-wording.test.sh — § Review for the
+# retired wake, § The merge for the pass itself. The retired-term checks
+# (what must never come back) scan the whole file: the early-launch
+# apparatus could be reintroduced in any section — § Dispatch, § Control,
+# § The PR — not only the ones this diff touched.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"
@@ -40,6 +36,7 @@ flatten() { tr '\n' ' ' | tr -s ' '; }
 
 review_section="$(sed -n '/^### Review$/,/^### Before the PR$/p' "$skill" | flatten)"
 merge_section="$(sed -n '/^### The merge$/,/^## Someone else/p' "$skill" | flatten)"
+whole_file="$(flatten <"$skill")"
 [ -n "$review_section" ] || { echo "FAIL: could not extract § Review from implement/SKILL.md" >&2; exit 1; }
 [ -n "$merge_section" ] || { echo "FAIL: could not extract § The merge from implement/SKILL.md" >&2; exit 1; }
 
@@ -61,8 +58,7 @@ check_absent_in() {
 
 # Rule 1: the worker's round-1 report no longer carries a wake that launches
 # anything — that apparatus is retired, so § Review must not describe it.
-check_absent_in "$review_section" 'Round 1 out' 'implement/SKILL.md § Review'
-check_absent_in "$review_section" 'launches the controller'"'"'s Codex pass' 'implement/SKILL.md § Review'
+check_absent_in "$whole_file" 'launches the controller'"'"'s Codex pass' 'implement/SKILL.md (whole file)'
 
 # Rule 2: the controller launches once, at this step, in the foreground —
 # not earlier, at a worker wake.
@@ -71,9 +67,9 @@ check_in "$merge_section" 'not earlier, at the worker'"'"'s round-1 report' 'imp
 check_in "$merge_section" '4 early launches raced against the worker'"'"'s own' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'Run the whole block inline, in the foreground, as part of this step' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'each launch is still a node process against the box cap' 'implement/SKILL.md § The merge'
-check_absent_in "$merge_section" 'Launch at round 1' 'implement/SKILL.md § The merge'
-check_absent_in "$merge_section" 'phase=early' 'implement/SKILL.md § The merge'
-check_absent_in "$merge_section" 'phase=gate-retry' 'implement/SKILL.md § The merge'
+check_absent_in "$whole_file" 'Launch at round 1' 'implement/SKILL.md (whole file)'
+check_absent_in "$whole_file" 'phase=early' 'implement/SKILL.md (whole file)'
+check_absent_in "$whole_file" 'phase=gate-retry' 'implement/SKILL.md (whole file)'
 
 # Rule 3: the launched pass writes outside the workspace — the worker's own
 # Before the PR step deletes `.scratch/`, which would take an in-flight
@@ -109,18 +105,22 @@ check_in "$merge_section" 'is a refusal, not a pass' 'implement/SKILL.md § The 
 check_in "$merge_section" 'do not post that verdict, append its duration row with the refusal as the outcome' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'either one collected looks exactly like a pass that found nothing' 'implement/SKILL.md § The merge'
 
-# Rule 5: a refused gate launch ends the step — no retry, no second attempt
-# at the same phase — visible on the PR, never a silent pass.
+# Rule 5: a refused run ends the step for its own phase — no retry, no
+# second attempt at the same phase — visible on the PR, never a silent
+# pass. A refusal with nothing collected yet leaves no trial row; a
+# refusal of the conditional second pass leaves the gate pass's own
+# already-posted trial row standing, since that pass already succeeded.
 check_in "$merge_section" 'ends as `Codex pass skipped: <why>`' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'go to step 4 with no trial row' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'there is no retry: a refused gate launch ends the step' 'implement/SKILL.md § The merge'
-check_absent_in "$merge_section" 'The retry is validated by the same gate' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'refusal with no pass yet collected for this PR leaves no trial row' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'nothing already earned is discarded' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'there is no retry: a refused run ends the step for its own phase' 'implement/SKILL.md § The merge'
+check_absent_in "$whole_file" 'The retry is validated by the same gate' 'implement/SKILL.md (whole file)'
 
 # Rule 6: a collected verdict changes nothing downstream — the two-pass
 # ceiling, the dispositions and the trial row are #888's and #812's still.
 check_in "$merge_section" 'A collected verdict is this step' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'unchanged by where the collected pass was launched' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'One recorded run, wherever it launches' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'One recorded run, whichever phase writes it' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'The pass runs through this block and no other' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'A second block with weaker guarantees is how a degraded run gets collected as a clean one' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'keeps the second pass from overwriting the record the gate launch wrote' 'implement/SKILL.md § The merge'
@@ -130,7 +130,7 @@ check_in "$merge_section" 'keeps the second pass from overwriting the record the
 # narrowed to `gate` and `second`.
 check_in "$merge_section" 'docs/research/2026-09-20-codex-pass-durations.md' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'phase (`gate` or `second`)' 'implement/SKILL.md § The merge'
-check_absent_in "$merge_section" 'collected-after-retry' 'implement/SKILL.md § The merge'
+check_absent_in "$whole_file" 'collected-after-retry' 'implement/SKILL.md (whole file)'
 [ -f "$durations" ] || { echo "FAIL: missing docs/research/2026-09-20-codex-pass-durations.md" >&2; fail=1; }
 if [ -f "$durations" ]; then
   for col in ticket PR phase launched completed 'duration (min)' outcome; do

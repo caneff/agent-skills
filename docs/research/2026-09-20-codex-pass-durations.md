@@ -25,12 +25,15 @@ record being the thing that is missing.
 
 Retired by #1015: `early` (at the worker's "Round 1 out") and `gate-retry`
 (at the merge gate, retrying a refused `early` verdict) were the phases
-before 2026-09-22. The pair existed to measure whether launching at round 1
-paid off; it didn't — 4 early launches that day, 4 raced against the
-worker's own round-1 fix commits, 0 banked, every one refused and rerun at
-the gate, each costing its wall clock twice. Rows dated before 2026-09-22
-keep those phase names as recorded; `gate` is what a `gate-retry` row would
-have been called had the rename landed sooner.
+before 2026-09-22, and `collected-after-retry` (a `gate-retry` row that was
+collected) was an outcome alongside them. The trio existed to measure
+whether launching at round 1 paid off; it didn't — 4 early launches that
+day, 4 raced against the worker's own round-1 fix commits, 0 banked, every
+one refused and rerun at the gate, each costing its wall clock twice. Rows
+dated before 2026-09-22 keep those phase and outcome names as recorded;
+`gate` is what a `gate-retry` row would have been called, and plain
+`collected` what a `collected-after-retry` row would have read, had the
+rename landed sooner.
 
 ## Table
 

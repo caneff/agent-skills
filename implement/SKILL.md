@@ -493,11 +493,11 @@ The controller merges on a repo Chris owns; Chris reads it after via
    Without the posture line, every PR of a staged rebuild pays one `[high]`
    whose remedy is "do the closing ticket early" (#891, #898).
 
-   **One recorded run, wherever it launches** (#942). The pass runs
+   **One recorded run, whichever phase writes it** (#942). The pass runs
    through this block and no other, for the gate launch or the conditional
    second one; `phase` is the only thing that changes. A second block with
-   weaker guarantees is how a
-   degraded run gets collected as a clean one — the path that exists to
+   weaker guarantees is how a degraded run gets collected as a clean one —
+   the path that exists to
    handle a failure being the path with no checks. Invoke the plugin's own
    script directly: `/codex:adversarial-review` carries
    `disable-model-invocation: true`, so the SlashCommand tool never reaches
@@ -559,17 +559,21 @@ The controller merges on a repo Chris owns; Chris reads it after via
    after the launch) is a refusal, not a pass: do not post that verdict,
    append its duration row with the refusal as the outcome, and this step
    ends as `Codex pass skipped: <why>` — comment it on the PR, naming the
-   refusal, and go to step 4 with no trial row, the same as a failed
-   preflight. Nothing is claimed about a diff nobody reviewed, and the skip
-   is visible on the PR rather than inferred from a silence. A refused
-   verdict's findings are never reported as current — they describe a diff
-   this PR no longer has, or a run that never produced a review, and either
-   one collected looks exactly like a pass that found nothing, which is the
-   shape this lane closed seven times on 2026-09-20. The skip clause at the
-   top of this step governs the preflight only — not logged in, no plugin
-   entry — checked before any run exists; every started run answers to this
-   gate, and there is no retry: a refused gate launch ends the step, the
-   same as a refused preflight.
+   refusal, and go to step 4. Nothing is claimed about a diff nobody
+   reviewed, and the skip is visible on the PR rather than inferred from a
+   silence. A refused verdict's findings are never reported as current —
+   they describe a diff this PR no longer has, or a run that never produced
+   a review, and either one collected looks exactly like a pass that found
+   nothing, which is the shape this lane closed seven times on 2026-09-20.
+   The skip clause at the top of this step governs the preflight only — not
+   logged in, no plugin entry — checked before any run exists; every
+   started run answers to this gate, and there is no retry: a refused run
+   ends the step for its own phase, the same as a refused preflight. A
+   refusal with no pass yet collected for this PR leaves no trial row to
+   write. A refusal of the conditional second pass is different: the gate
+   pass earlier in this same step was collected and posted, and its trial
+   row is not undone by a later refusal — nothing already earned is
+   discarded.
 
    A collected verdict is this step's first pass. Post it from the cache
    directory:
