@@ -17,14 +17,7 @@ use support::{dead_pid, out_text, worker_record, Fixture, LiveProc};
 /// that pid's session file is what `find_own_pid`'s ancestor walk must find
 /// (the same trick `resolve_controller.rs`'s `live_session` uses).
 fn live_session(f: &Fixture, name: &str) {
-    let pid = std::process::id() as i32;
-    let stat = lane::proc_info::read_stat(pid).unwrap();
-    std::fs::create_dir_all(f.home().join(".claude/sessions")).unwrap();
-    std::fs::write(
-        f.session_file(),
-        format!(r#"{{"pid":{pid},"sessionId":"sid-1","procStart":"{}","name":"{name}"}}"#, stat.start),
-    )
-    .unwrap();
+    f.live_session_at(std::process::id() as i32, name, "sid-1");
 }
 
 /// This test process's own real `/proc/<pid>/stat` starttime — what a fresh

@@ -177,9 +177,7 @@ impl Fixture {
         let status = child.wait().unwrap();
         (status.code(), stderr)
     }
-}
 
-impl Fixture {
     /// A primary checkout (`mkfixture`) with one linked worktree at
     /// `.claude/worktrees/<branch>`, the layout `implement-dispatch` builds.
     /// Returns both paths canonicalized, the spelling a `WorkerRecord`
@@ -190,6 +188,18 @@ impl Fixture {
         run_ok("git", &["-C", primary.to_str().unwrap(), "worktree", "add", "-q", "-b", branch, wt.to_str().unwrap()], None);
         let canon = |p: &Path| std::fs::canonicalize(p).unwrap().display().to_string();
         (canon(&primary), canon(&wt))
+    }
+
+    /// Writes `<pid>.json` for the live process `pid`, as Claude Code does
+    /// for a session, with its real starttime.
+    pub fn live_session_at(&self, pid: i32, name: &str, session_id: &str) {
+        let start = lane::proc_info::read_stat(pid).unwrap().start;
+        std::fs::create_dir_all(self.home().join(".claude/sessions")).unwrap();
+        std::fs::write(
+            self.home().join(".claude/sessions").join(format!("{pid}.json")),
+            format!(r#"{{"pid":{pid},"sessionId":"{session_id}","procStart":"{start}","name":"{name}"}}"#),
+        )
+        .unwrap();
     }
 }
 

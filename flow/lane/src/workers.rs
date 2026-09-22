@@ -166,14 +166,8 @@ pub fn canonical_workspace_path(path: &str) -> String {
 /// iteration. A file this run cannot open, lock or read is skipped rather
 /// than erroring, matching every other best-effort failure mode here.
 pub fn remove_workspace(home: &Path, workspace: &str) -> bool {
-    let dir = home.join(".claude/sessions");
-    let Ok(entries) = std::fs::read_dir(&dir) else { return false };
     let mut removed_any = false;
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".workers.jsonl")) {
-            continue;
-        }
+    for (_, path) in sidecars(home) {
         let Ok(mut f) = std::fs::OpenOptions::new().read(true).write(true).open(&path) else { continue };
         if f.lock().is_err() {
             continue;
@@ -297,15 +291,22 @@ pub struct Adopted {
 /// crash, puts it back.
 pub fn adopt(home: &Path, agent: &str, within: &str, own_pid: &str, own_start: &str) -> Result<Adopted, AdoptRefusal> {
     let names = |r: &WorkerRecord| r.agent == agent && crate::sessions::in_tree(&r.workspace, within);
-    let candidates: Vec<(String, PathBuf)> = sidecars(home).into_iter().filter(|(pid, _)| read(home, pid).iter().any(names)).collect();
+    let candidates: Vec<(String, PathBuf, Vec<WorkerRecord>)> = sidecars(home)
+        .into_iter()
+        .map(|(pid, path)| {
+            let named: Vec<WorkerRecord> = read(home, &pid).into_iter().filter(|r| names(r)).collect();
+            (pid, path, named)
+        })
+        .filter(|(_, _, named)| !named.is_empty())
+        .collect();
     // Any live holder refuses outright, before anything is locked: the
     // worker already has a controller, whatever other copies say.
-    for (pid, _) in &candidates {
-        if read(home, pid).iter().any(|r| names(r) && !is_orphaned(pid, r)) {
+    for (pid, _, named) in &candidates {
+        if named.iter().any(|r| !is_orphaned(pid, r)) {
             return Err(AdoptRefusal::ControllerAlive(pid.clone()));
         }
     }
-    for (pid, path) in &candidates {
+    for (pid, path, _) in &candidates {
         if let Some(adopted) = move_record(home, pid, path, &names, own_pid, own_start)? {
             return Ok(adopted);
         }

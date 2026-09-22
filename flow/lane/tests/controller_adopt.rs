@@ -13,21 +13,10 @@ use support::{dead_pid, out_text, worker_record, Fixture, LiveProc};
 const AGENT: &str = "scroller-345";
 const BRANCH: &str = "implement-345";
 
-/// Writes `<pid>.json` for a live session, as Claude Code does.
-fn session(f: &Fixture, pid: i32, name: &str, session_id: &str) {
-    let start = lane::proc_info::read_stat(pid).unwrap().start;
-    std::fs::create_dir_all(f.home().join(".claude/sessions")).unwrap();
-    std::fs::write(
-        f.home().join(".claude/sessions").join(format!("{pid}.json")),
-        format!(r#"{{"pid":{pid},"sessionId":"{session_id}","procStart":"{start}","name":"{name}"}}"#),
-    )
-    .unwrap();
-}
-
 /// This test process as the adopting session.
 fn adopter(f: &Fixture) -> (String, String) {
     let pid = std::process::id() as i32;
-    session(f, pid, "controller-50", "sid-adopter");
+    f.live_session_at(pid, "controller-50", "sid-adopter");
     (pid.to_string(), lane::proc_info::read_stat(pid).unwrap().start)
 }
 
@@ -196,7 +185,7 @@ fn two_sessions_adopting_one_worker_at_once_exactly_one_wins() {
         .collect();
     let pids: Vec<String> = sessions.iter().map(|c| c.id().to_string()).collect();
     for (i, c) in sessions.iter().enumerate() {
-        session(&f, c.id() as i32, &format!("adopter-{i}"), &format!("sid-{i}"));
+        f.live_session_at(c.id() as i32, &format!("adopter-{i}"), &format!("sid-{i}"));
     }
     let mut stdins: Vec<std::process::ChildStdin> = sessions.iter_mut().map(|c| c.stdin.take().unwrap()).collect();
     for s in &mut stdins {
