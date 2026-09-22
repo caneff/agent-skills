@@ -12,6 +12,13 @@
 # (the reason is required and is printed).
 # The configured value is read with `-c` overrides stripped, since those are
 # exactly what this guards against.
+# Checks both AUTHOR and COMMITTER email against the checkout's configured
+# identity, on every commit in the pushed range — including one this
+# checkout never authored, such an imported commit or one with a distinct
+# original author. That refusal is correct for the lane (a rebase or
+# cherry-pick from another identity is exactly what this guards against),
+# but is a real, expected refusal on an imported/co-authored commit whose
+# author email isn't the checkout's own; use COMMIT_IDENTITY_OVERRIDE there.
 
 if [ -n "${COMMIT_IDENTITY_OVERRIDE:-}" ]; then
   echo "commit-identity guard (pre-push): override in effect — $COMMIT_IDENTITY_OVERRIDE" >&2
@@ -25,12 +32,15 @@ if [ -z "$configured" ]; then
 fi
 
 zero=0000000000000000000000000000000000000000
+remote_name=${1:-origin}
 bad=0
+saw_a_ref=0
 while read -r local_ref local_sha remote_ref remote_sha; do
+  saw_a_ref=1
   [ -z "${local_sha:-}" ] && continue
   [ "$local_sha" = "$zero" ] && continue  # deleting a ref: nothing is being pushed
   if [ -z "${remote_sha:-}" ] || [ "$remote_sha" = "$zero" ]; then
-    range=$(git rev-list "$local_sha" --not --remotes=origin) || {
+    range=$(git rev-list "$local_sha" --not --remotes="$remote_name") || {
       echo "commit-identity guard (pre-push): refused — could not enumerate the commits $local_ref is pushing (git rev-list failed); refusing rather than reading that as nothing to check." >&2
       bad=1
       continue
@@ -62,4 +72,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     done
   done
 done
+if [ "$saw_a_ref" -eq 0 ]; then
+  echo "commit-identity guard (pre-push): refused — no ref updates were read on stdin; git's pre-push protocol always sends at least one, so refusing rather than reading silence as nothing to check." >&2
+  bad=1
+fi
 exit $bad

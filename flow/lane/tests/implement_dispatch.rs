@@ -1177,6 +1177,47 @@ fn dispatch_installs_the_identity_guard_and_a_worktree_commit_is_refused() {
     assert!(good.status.success(), "configured identity refused: {}", out_text(&good));
 }
 
+/// A repo already carrying *this build's own* pre-commit wrapper from an
+/// earlier dispatch must be recognised as already-installed, byte-identity,
+/// and left alone. The hazard this guards (review finding C2 on #1006's own
+/// diff, reproduced as a fork bomb): the pre-commit wrapper's own body
+/// hard-codes the name it displaces a foreign hook to (`pre-commit.foreign`)
+/// — so if a code change ever alters the wrapper's bytes without changing
+/// what it actually needs to (here: an earlier draft added `"$@"` to the
+/// guard's `exec` line, which pre-commit never uses), every already-
+/// dispatched repo's own wrapper reads as "foreign" on the next dispatch,
+/// gets displaced to `pre-commit.foreign`, and that displaced copy's body —
+/// unaware it is not `pre-commit` any more — still checks for and calls
+/// `pre-commit.foreign`, i.e. itself: self-reference, then recursion, then a
+/// forked process for every commit.
+#[test]
+fn a_repo_already_carrying_this_builds_own_pre_commit_wrapper_is_left_alone_on_redispatch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let hook = hooks_dir(&repo).join("pre-commit");
+    let current_wrapper = "#!/bin/sh\n# lane commit-identity guard wrapper (#934, hardened against a foreign hook that only appears to call the guard — #1009)\ndir=\"$(dirname \"$0\")\"\nif [ -e \"$dir/pre-commit.foreign\" ]; then\n  \"$dir/pre-commit.foreign\" \"$@\" || exit $?\nfi\nexec \"$dir/commit-identity-guard\"\n";
+    std::fs::write(&hook, current_wrapper).unwrap();
+    let mut perms = std::fs::metadata(&hook).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    std::fs::set_permissions(&hook, perms).unwrap();
+
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+
+    assert_eq!(
+        std::fs::read_to_string(&hook).unwrap(),
+        current_wrapper,
+        "an already-installed wrapper was rewritten instead of recognised as ours — its bytes must stay stable across a dispatch that changes nothing pre-commit cares about"
+    );
+    let foreign_slot = hooks_dir(&repo).join("pre-commit.foreign");
+    assert!(
+        !foreign_slot.exists(),
+        "a wrapper this build itself installs was displaced to pre-commit.foreign — the self-recursion hazard (#1006 C2)"
+    );
+    refuses_a_foreign_email_commit(&repo, "395");
+}
+
 /// The pre-commit guard (#934) never fires on a replayed commit — a cherry-
 /// pick or rebase, exactly the gap #1006 files (its own probe: `-c
 /// user.email=... rebase` rewrote a replayed commit's email with exit 0).
@@ -1252,19 +1293,29 @@ fn the_pre_push_guard_override_escape_lets_a_foreign_email_push_through() {
 }
 
 /// Whatever real pre-push hook a repo already had (tests, a size check) is
-/// preserved and still runs, same guarantee #1009 gives the pre-commit slot.
+/// preserved and still runs, same guarantee #1009 gives the pre-commit slot
+/// — and, unlike a foreign hook that merely `exit 0`s without touching
+/// stdin, this one actually reads and discards the ref list the way a real
+/// pre-push hook typically does (a `while read` loop over stdin, same shape
+/// as `git`'s own `pre-push.sample`). A foreign hook that drains stdin
+/// before the guard gets a turn is exactly what starves the guard's own
+/// `while read` and lets it exit 0 having checked nothing (#1006 review
+/// finding C1/S1) — this is the regression test for the stdin-buffering fix
+/// that closes that hole, run through a real dispatch-installed wrapper
+/// rather than the guard script called directly.
 #[test]
 fn a_foreign_pre_push_hook_is_preserved_and_the_guard_still_refuses_a_replayed_commit() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     let hook = hooks_dir(&repo).join("pre-push");
-    std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
+    let foreign = "#!/bin/sh\nwhile read -r a b c d; do :; done\nexit 0\n";
+    std::fs::write(&hook, foreign).unwrap();
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
     assert!(out.status.success(), "dispatch refused over a foreign pre-push hook: {}", out_text(&out));
 
     let moved_aside = hooks_dir(&repo).join("pre-push.foreign");
-    assert_eq!(std::fs::read_to_string(&moved_aside).unwrap(), "#!/bin/sh\nexit 0\n", "the foreign pre-push hook was not preserved");
+    assert_eq!(std::fs::read_to_string(&moved_aside).unwrap(), foreign, "the foreign pre-push hook was not preserved");
 
     let wt = repo.join(".claude/worktrees/implement-395");
     let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&wt).args(args).output().unwrap();
@@ -1276,7 +1327,25 @@ fn a_foreign_pre_push_hook_is_preserved_and_the_guard_still_refuses_a_replayed_c
     assert!(git(&["-c", "user.email=real@gmail.com", "cherry-pick", &sha]).status.success());
     let bad = git(&["push", "origin", "HEAD:refs/heads/replay"]);
     assert!(!bad.status.success(), "a replayed foreign-email commit was pushed over a taken-over foreign hook: {}", out_text(&bad));
-    assert!(String::from_utf8_lossy(&bad.stderr).contains("commit-identity guard (pre-push)"), "{}", out_text(&bad));
+    let bad_err = String::from_utf8_lossy(&bad.stderr);
+    assert!(bad_err.contains("commit-identity guard (pre-push)"), "{bad_err}");
+    // Names the actual mismatched email, not just "no ref updates were read"
+    // (the zero-refs fallback) — proves the guard actually enumerated the
+    // pushed commit through the stdin-draining foreign hook, rather than
+    // merely refusing everything a foreign hook happens to consume stdin
+    // from (which would be an availability bug of its own, not a fix).
+    assert!(bad_err.contains("real@gmail.com"), "refused for a reason other than the mismatched email: {bad_err}");
+
+    // A correctly-configured push through the same stdin-draining foreign
+    // hook must still succeed — the buffering fix, not just a blanket
+    // "stdin exhausted, refuse" fallback.
+    git(&["checkout", "-q", "implement-395"]);
+    git(&["branch", "-qD", "replay"]);
+    std::fs::write(wt.join("h"), "y\n").unwrap();
+    git(&["add", "h"]);
+    assert!(git(&["commit", "-qm", "y"]).status.success());
+    let good = git(&["push", "origin", "HEAD:refs/heads/good"]);
+    assert!(good.status.success(), "a correctly-configured push was refused through a stdin-draining foreign hook: {}", out_text(&good));
 }
 
 /// Commits a foreign-email change in the dispatched worktree for ticket `n`

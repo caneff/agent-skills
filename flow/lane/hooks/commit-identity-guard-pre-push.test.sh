@@ -67,9 +67,45 @@ COMMIT_IDENTITY_OVERRIDE= push main
 check "empty override is not an override" 1 $?
 git reset -q --hard HEAD~1
 
-# no configured email: the guard must refuse, not read absence as a match
+# no configured email: the guard must refuse on that ground specifically —
+# not merely because the mismatch check also fires on an empty $configured,
+# which would survive deleting the no-configured-email refusal outright.
 git config --unset user.email
 git -c user.email=a@b.c commit -q --allow-empty -m none
 push main; check "no configured user.email is refused" 1 $?
+grep -q "no user.email is configured" "$tmp/out"; check "the no-configured-email refusal names itself" 0 $?
+git config user.email t@example.com
+
+# zero ref updates on stdin: git's own protocol always sends at least one
+# when the hook runs at all, so this is either a starved stdin (#1006 S1) or
+# a hook invoked some other way — refuse rather than read silence as clean.
+: | "$here/commit-identity-guard-pre-push.sh" origin "$remote" >"$tmp/out" 2>&1
+check "zero ref updates on stdin is refused" 1 $?
+grep -q "no ref updates were read" "$tmp/out"; check "the zero-refs refusal names itself" 0 $?
+
+# a remote registered under a name other than "origin": the new-branch range
+# (`rev-list --not --remotes=$1`) must key off the hook's own $1, not a
+# hard-coded "origin", or a commit already known to *origin*'s tracking refs
+# wrongly excludes it from the check when it is really new to a *different*
+# remote (#1006 S3). Reproduced concretely: land a foreign-email commit on
+# origin under cover of the override (so it is real, on-disk history, not a
+# hook artifact), fetch so a local origin-tracking ref names it, then push
+# that same commit as a brand-new branch to a second remote — a
+# hard-coded "origin" pattern would match it via the first remote's tracking
+# ref and skip it entirely on the second.
+env COMMIT_IDENTITY_OVERRIDE="seed" git -c user.email=real@gmail.com commit -q --allow-empty -m shared
+seed_sha=$(git rev-parse HEAD)
+COMMIT_IDENTITY_OVERRIDE="seed" push shared-origin
+git fetch -q origin >/dev/null 2>&1
+git reset -q --hard HEAD~1
+
+other_remote="$tmp/other.git"
+git init -q --bare "$other_remote"
+git remote add other "$other_remote"
+git checkout -qb other-feature "$seed_sha"
+git push other "HEAD:refs/heads/other-feature" >"$tmp/out" 2>&1
+check "a commit already on origin's tracking ref is still checked when pushed new to another remote" 1 $?
+git checkout -q main
+git branch -qD other-feature
 
 exit $fail

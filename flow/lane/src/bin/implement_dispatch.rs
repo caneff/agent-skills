@@ -356,11 +356,31 @@ const PRE_PUSH_FOREIGN: &str = "pre-push.foreign";
 /// like any other hook; running it via the wrapper is harmless, since the
 /// pre-#1009 pre-commit wrapper's only body was `exec ".../commit-identity-guard"`.
 /// Both hook slots share this one wrapper shape (#1006) — the guard name and
-/// the foreign-displacement name are its only per-slot parameters.
-fn hook_wrapper(guard_name: &str, foreign_name: &str) -> String {
-    format!(
-        "#!/bin/sh\n# lane commit-identity guard wrapper (#934, hardened against a foreign hook that only appears to call the guard — #1009)\ndir=\"$(dirname \"$0\")\"\nif [ -e \"$dir/{foreign_name}\" ]; then\n  \"$dir/{foreign_name}\" \"$@\" || exit $?\nfi\nexec \"$dir/{guard_name}\" \"$@\"\n"
-    )
+/// the foreign-displacement name are its only per-slot parameters, plus
+/// `buffer_stdin` for pre-push. A `pre-push` hook's ref list arrives on
+/// stdin, not in `"$@"` (git pre-push protocol) — sharing that one stream
+/// naively between a displaced foreign hook and the guard means a foreign
+/// hook that reads stdin (a real check, not only a spoof) drains it before
+/// the guard ever sees a line, and the guard's empty `while read` then exits
+/// 0 having refused nothing (#1006 Codex/review finding S1: verified with a
+/// stdin-reading foreign hook — the guard saw 0 refs). `buffer_stdin` copies
+/// stdin to a temp file first and feeds that file to both, so draining one
+/// read cannot starve the other. `pre-commit` never gets this treatment: git
+/// does not feed it anything on stdin, and reading stdin there risks hanging
+/// an interactive `git commit` on the open terminal — so its wrapper, and
+/// its exec of the guard, stay exactly the pre-#1006 two-argument-free shape
+/// (byte-identical to the pre-#1006 build, which matters for `is_ours` below
+/// on an already-dispatched repo: #1006 Codex/review finding P1).
+fn hook_wrapper(guard_name: &str, foreign_name: &str, buffer_stdin: bool) -> String {
+    if buffer_stdin {
+        format!(
+            "#!/bin/sh\n# lane commit-identity guard wrapper (#934, hardened against a foreign hook that only appears to call the guard — #1009). The ref list this hook receives arrives on stdin (#1006): buffered to a temp file first so a foreign hook that reads it cannot starve the guard of it.\ndir=\"$(dirname \"$0\")\"\nstdin_buf=\"$(mktemp)\" || exit 1\ntrap 'rm -f \"$stdin_buf\"' EXIT\ncat >\"$stdin_buf\"\nif [ -e \"$dir/{foreign_name}\" ]; then\n  \"$dir/{foreign_name}\" \"$@\" <\"$stdin_buf\" || exit $?\nfi\nexec \"$dir/{guard_name}\" \"$@\" <\"$stdin_buf\"\n"
+        )
+    } else {
+        format!(
+            "#!/bin/sh\n# lane commit-identity guard wrapper (#934, hardened against a foreign hook that only appears to call the guard — #1009)\ndir=\"$(dirname \"$0\")\"\nif [ -e \"$dir/{foreign_name}\" ]; then\n  \"$dir/{foreign_name}\" \"$@\" || exit $?\nfi\nexec \"$dir/{guard_name}\"\n"
+        )
+    }
 }
 
 /// Writes `text` to `path` as an executable, via temp file + rename so a
@@ -385,7 +405,7 @@ fn write_executable(path: &Path, text: &str) -> Result<(), String> {
 /// The guard script always goes to `<dir>/<guard_name>` (refreshed in place,
 /// and verified executable). `<dir>/<slot>` becomes the lane's own wrapper
 /// unconditionally: whatever is there when it is not already byte-identical
-/// to `hook_wrapper(guard_name, foreign_name)` is foreign — trusted by its
+/// to `hook_wrapper(guard_name, foreign_name, buffer_stdin)` is foreign — trusted by its
 /// presence, never by parsing or matching its source — and is copied aside
 /// to `<dir>/<foreign_name>` (the original left in place until
 /// `write_executable`'s atomic rename replaces it, so there is never a
@@ -402,10 +422,10 @@ fn write_executable(path: &Path, text: &str) -> Result<(), String> {
 /// Ownership is taken once: a slot that is already byte-identical to the
 /// current wrapper is left alone, so a repeat dispatch does not re-displace
 /// an already-displaced hook.
-fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str, guard_content: &str) -> Result<(), String> {
+fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str, guard_content: &str, buffer_stdin: bool) -> Result<(), String> {
     let path = Path::new(dir).join(slot);
     let foreign_path = Path::new(dir).join(foreign_name);
-    let wrapper = hook_wrapper(guard_name, foreign_name);
+    let wrapper = hook_wrapper(guard_name, foreign_name, buffer_stdin);
     let current = std::fs::read(&path);
     let exists = match &current {
         Ok(_) => true,
@@ -458,8 +478,16 @@ fn install_identity_guard(primary: &str) -> Result<(), String> {
         .filter(|s| !s.is_empty())
         .ok_or_else(|| format!("cannot resolve the hooks dir of {primary}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
-    install_hook_slot(&dir, "pre-commit", PRE_COMMIT_FOREIGN, GUARD_NAME, IDENTITY_GUARD)?;
-    install_hook_slot(&dir, "pre-push", PRE_PUSH_FOREIGN, PUSH_GUARD_NAME, PUSH_GUARD)?;
+    // (slot, foreign_name, guard_name, guard_content, buffer_stdin) — one row
+    // per hook slot the lane owns. `buffer_stdin` is true only for pre-push,
+    // whose ref list arrives on stdin; see `hook_wrapper`.
+    let slots: [(&str, &str, &str, &str, bool); 2] = [
+        ("pre-commit", PRE_COMMIT_FOREIGN, GUARD_NAME, IDENTITY_GUARD, false),
+        ("pre-push", PRE_PUSH_FOREIGN, PUSH_GUARD_NAME, PUSH_GUARD, true),
+    ];
+    for (slot, foreign_name, guard_name, guard_content, buffer_stdin) in slots {
+        install_hook_slot(&dir, slot, foreign_name, guard_name, guard_content, buffer_stdin)?;
+    }
     Ok(())
 }
 

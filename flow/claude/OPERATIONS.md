@@ -13,11 +13,16 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   two sessions dispatch the same ticket, and a brief sent before the trust
   dialog is accepted lands in the dialog.
   It also installs the commit-identity guard beside the repo's hooks and
-  unconditionally makes `pre-commit` its own wrapper: a foreign `pre-commit`
-  is never trusted by its text, only taken over — moved aside under a stable
-  name, forced executable, and run by the wrapper before the wrapper always
-  runs the guard itself (`flow/lane/src/bin/implement_dispatch.rs`,
-  `install_identity_guard`, #1009).
+  unconditionally makes `pre-commit` *and* `pre-push` its own wrapper: a
+  foreign hook at either slot is never trusted by its text, only taken
+  over — moved aside under a stable name (`pre-commit.foreign` /
+  `pre-push.foreign`), forced executable, and run by the wrapper before the
+  wrapper always runs the guard itself
+  (`flow/lane/src/bin/implement_dispatch.rs`, `install_identity_guard`,
+  #1009). `pre-commit` alone never fires on a rebase or cherry-pick that
+  replays a commit under a different identity, so `pre-push` re-checks every
+  commit about to be pushed against the same checkout-configured
+  `user.email` and the same `COMMIT_IDENTITY_OVERRIDE` escape (#1006).
 - Every Agent call passes `model` — a bare call inherits the session's model.
   Explore/lookup → `sonnet`, review/diagnosis → `opus`. Rubric:
   `~/.agents/skills/flow/claude/subagent-tiers.md`. Why: a bare call runs a
