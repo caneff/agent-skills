@@ -60,10 +60,14 @@ check_in "$sweep_text" 'not one-shot' 'burndown/SKILL.md § The sweep'
 
 # #1033: a per-PR sweep found on the frontier folds into the run's own
 # sweep rather than standing beside it, so the run close still files exactly
-# one sweep ticket.
+# one sweep ticket. The pointer needle checks the actual comment text, not
+# only the word "pointer" — a prior draft dropped `--comment "Folded into
+# <run-sweep-url>"` and this check still passed (round-1 finding C5).
 check_in "$sweep_text" 'per-PR sweep' 'burndown/SKILL.md § The sweep'
-check_in "$sweep_text" "folds its items into the run's sweep" 'burndown/SKILL.md § The sweep'
-check_in "$sweep_text" 'closes it with a pointer' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'so fold by body instead of by run file' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'closes it with a pointer to the run sweep' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'comment "Folded into' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'still files this thin' 'burndown/SKILL.md § The sweep'
 
 # The run report's three counts. Each needle carries the bold emphasis
 # markers around its own word: a bare 'leftover' matches "leftovers" six

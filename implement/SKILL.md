@@ -195,13 +195,12 @@ No PR and no reviewer; Chris reads the log after.
    ad hoc `gh issue create` skips that role. `filed` is reserved for a high
    finding, under the severity mapping below. A finding that is not high and
    not fixed in the round takes `leftover`: no ticket of its own, only a
-   sidecar line (step 2) and `leftover` in prose. A worker with **no run
-   file** under it — building outside a burn — files one
-   `Sweep: leftovers from PR #<n>` ticket through `/file-ticket` for its
-   PR's `leftover` lines, in #1030's body shape (grouped by file, one
-   bullet per item); no `leftover` lines files nothing, the same
-   zero-leftovers rule the burn sweep uses
-   (`burndown/SKILL.md` § The sweep).
+   sidecar line (step 2) and `leftover` in prose. A burn's own sweep, one
+   ticket per run, is `burndown/SKILL.md` § The sweep; a worker with **no
+   run file** under it — dispatched directly through `/implement`, never
+   through `burndown`'s loop (`burndown/SKILL.md` § The loop step 5) —
+   files its own per-PR sweep instead, at report time: this file's § The PR
+   below.
    On a repo whose `origin` owner isn't
    your `gh` login, `/file-ticket` hands the command back instead of filing,
    so there is no ticket number: the disposition is `handed back: <the
@@ -358,6 +357,17 @@ The body has these sections and nothing else:
   round-1 finding that was disputed (with the why), filed (with its
   ticket number), handed back (with the command) or left over.
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
+
+**A worker with no run file under it** (§ Review) files one more ticket
+now, before sending "PR up": read this PR's own dispositions sidecar,
+`dispositions-<n>.jsonl` (§ Review step 2 already wrote it), for its
+`leftover` lines. Any: file `Sweep: leftovers from PR #<n>` through
+`/file-ticket`, labelled `ready-for-agent`, in #1030's body shape
+(`burndown/SKILL.md` § The sweep: grouped by file, one bullet per item).
+None: file nothing, the same zero-leftovers rule the burn sweep uses. A
+burn controller that later finds this ticket open on the frontier folds it
+into its own run's sweep (`burndown/SKILL.md` § The sweep) rather than
+leaving it standing beside one.
 
 Send the controller "PR up" in this shape:
 
