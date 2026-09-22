@@ -229,6 +229,7 @@ VM_BUDGET_GB = 24
 
 
 AGENT_COUNTER = "`ps -eo comm=` lines equal to claude"
+HERDR_COUNTER = "`herdr agent list` entries with agent_status working"
 UNSTATED_COUNTER = "count supplied by the caller"
 
 
@@ -269,6 +270,45 @@ def count_agent_processes(ps=None):
             "trusted, so refusing to dispatch — pass --processes <n> with a "
             "count you took")
     return agents
+
+
+def count_working_herdr_agents(run=None):
+    """The box's working agents by herdr's own accounting: `herdr agent
+    list` filtered to `agent_status == "working"`, which drops the idle and
+    done sessions a raw `ps` count cannot tell from a live one. A subagent
+    mid-turn is its own `claude` process that herdr lists as its own
+    working agent, so this counts the same unit the peak reserve already
+    assumes (#1075).
+
+    `run` takes the herdr command and returns (status, stdout), the same
+    contract `count_agent_processes` uses for `ps`. Raises when herdr
+    cannot be asked or answers something that is not a working-agents
+    listing: an unmeasured box is not an empty one, so the caller falls
+    back to a process count rather than reading a broken query as zero.
+    """
+    if run is None:
+        def run(cmd):
+            try:
+                done = subprocess.run(cmd, capture_output=True, text=True,
+                                      timeout=10)
+            except (OSError, subprocess.SubprocessError) as exc:
+                return 1, f"{exc}"
+            return done.returncode, done.stdout
+    status, out = run(["herdr", "agent", "list"])
+    if status != 0:
+        raise LoopError(
+            f"herdr agent list failed: {(out or '').strip() or 'no output'}")
+    try:
+        answer = json.loads(out)
+    except (TypeError, ValueError) as exc:
+        raise LoopError(f"herdr agent list did not answer JSON: {exc}") from exc
+    result = answer.get("result") if isinstance(answer, dict) else None
+    agents = result.get("agents") if isinstance(result, dict) else None
+    if not isinstance(agents, list):
+        raise LoopError(
+            f"herdr agent list answered {answer!r}, no agents list to count")
+    return sum(1 for agent in agents
+              if isinstance(agent, dict) and agent.get("agent_status") == "working")
 
 
 def projected_processes(processes, workers, live):
@@ -340,12 +380,33 @@ def live_count(text):
     return count
 
 
-def agent_count(args, ps=None):
-    """(count, counter label): the override when one was passed, else a
-    measurement — never a default that reads as zero."""
+def agent_count(args, herdr=None, ps=None):
+    """(count, counter label, total): the override when one was passed,
+    else herdr's working-agent count — a process count only ever counted
+    every `claude` on the box, idle ones included, and idle sessions cost
+    no cores (#1075). `total` is the raw process count too, for the status
+    line to print beside `count` so a controller can see what was excluded;
+    it is never what gates the cap.
+
+    A herdr that cannot answer falls back to the process count for both
+    `count` and `total` — an unmeasured box is not an empty one, so the
+    fallback is a measurement, never a default that reads as zero, and the
+    counter label names the fallback so a refusal says which counter it
+    used.
+    """
     if args.processes is not None:
-        return args.processes, "passed by --processes"
-    return count_agent_processes(ps), AGENT_COUNTER
+        return args.processes, "passed by --processes", args.processes
+    try:
+        working = count_working_herdr_agents(herdr)
+    except LoopError as exc:
+        total = count_agent_processes(ps)
+        return total, (f"herdr could not answer ({exc}); fell back to "
+                       + AGENT_COUNTER), total
+    try:
+        total = count_agent_processes(ps)
+    except LoopError:
+        total = working
+    return working, HERDR_COUNTER, total
 
 
 def box_room(processes, committed_gb, add_gb, want,
@@ -428,12 +489,17 @@ def render_cores(state, free):
             f"{state['room']}")
 
 
-def render_peak(count, live, room):
+def render_peak(count, live, room, total=None):
     """The peak arithmetic as a controller's status line carries it: the
-    measured count, what each live worker may still add, and the workers
-    the box can take at their peak."""
+    measured (working) count, what each live worker may still add, and the
+    workers the box can take at their peak. `total` is the raw process
+    count beside it, when it differs from `count`, so a controller can see
+    what herdr's working-agent count excluded — idle and done sessions that
+    cost no cores (#1075)."""
     reserve, projected = projected_processes(count, room, live)
-    return (f"peak: {count} agent processes measured, {live} live "
+    excluded = (f", {total - count} idle excluded ({total} total)"
+               if total is not None and total > count else "")
+    return (f"peak: {count} agent processes measured{excluded}, {live} live "
             f"{'worker' if live == 1 else 'workers'} holding {reserve} of "
             f"fan-out headroom, cap {PROCESS_CAP} — {room} more at "
             f"{SLOT_PEAK_PROCESSES} each projects {projected}")
@@ -772,9 +838,11 @@ def run(argv):
             "so is `landing`'s answer step, which is why `landing` reports "
             "what is owed and gates cleanup rather than answering anything."))
     subs = parser.add_subparsers(dest="command", required=True)
-    agent_help = ("Override for the agent processes on the box (Claude "
-                  "sessions, subagents included), not OS processes; never "
-                  "`ps | wc -l`. Default: measured by " + AGENT_COUNTER + ".")
+    agent_help = ("Override for the agent count this run's cap check reads "
+                  "(Claude sessions, subagents included), not OS processes; "
+                  "never `ps | wc -l`. Default: " + HERDR_COUNTER +
+                  ", falling back to " + AGENT_COUNTER +
+                  " only when herdr cannot answer.")
     subs.add_parser("seat", help="refuse unless this is a controller's seat")
     box = subs.add_parser("box", help="room on the box for one more worker")
     box.add_argument("--processes", type=process_count,
@@ -820,7 +888,7 @@ def run(argv):
         if args.command == "seat":
             print(seat(git))
         elif args.command == "box":
-            count, counter = agent_count(args)
+            count, counter, _total = agent_count(args)
             verdict = box_check(count, args.committed_gb, args.add_gb,
                                 counter=counter, live=args.live)
             if not verdict["ok"]:
@@ -832,9 +900,9 @@ def run(argv):
             candidates = read_clumps(args.candidates)
             in_flight = read_clumps(args.in_flight, live=True)
             free = max(args.free, 0)
-            # Measured before any early return: a broken `ps` must refuse
-            # here too, not hide behind "nothing to dispatch".
-            count, counter = agent_count(args)
+            # Measured before any early return: a broken herdr or `ps` must
+            # refuse here too, not hide behind "nothing to dispatch".
+            count, counter, total = agent_count(args)
             # A landed clump awaiting cleanup is not a live worker: it is
             # filtered out before the core accounting, the peak live count,
             # and the frontier all see it, so a run file that sets `landed`
@@ -867,7 +935,7 @@ def run(argv):
                 for refusal in refusals:
                     print(f"loop.py: {refusal}", file=sys.stderr)
                 return 1
-            print(render_peak(count, live, room))
+            print(render_peak(count, live, room, total))
             state = frontier(candidates, unlanded)
             picked, same_tick_held = picks(state, room)
             lines = render_dispatch(picked, state["held"] + same_tick_held)

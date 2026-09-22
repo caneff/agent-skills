@@ -343,33 +343,88 @@ def test_an_unmeasurable_box_is_a_refusal_not_zero_agents():
             raise AssertionError(f"{failed} read as a count")
 
 
+def herdr_listing(*statuses):
+    """A `herdr agent list` answer: one agent per status given."""
+    agents = [{"name": f"a{i}", "agent_status": status}
+              for i, status in enumerate(statuses)]
+    return json.dumps({"result": {"agents": agents}})
+
+
+def test_working_herdr_agents_counts_only_the_working_status():
+    listing = herdr_listing("working", "idle", "working", "done", "blocked")
+    assert loop.count_working_herdr_agents(lambda cmd: (0, listing)) == 2
+
+
+def test_an_unreadable_herdr_listing_is_a_refusal_not_zero_agents():
+    for failed in ((1, ""), (0, "not json"), (0, json.dumps({"result": {}})),
+                   (0, json.dumps({"error": {"code": "some_error"}})),
+                   (0, json.dumps({"result": {"agents": "nope"}}))):
+        try:
+            loop.count_working_herdr_agents(lambda cmd, r=failed: r)
+        except loop.LoopError as exc:
+            assert "herdr agent list" in str(exc), exc
+        else:
+            raise AssertionError(f"{failed} read as a count")
+
+
 def idle_box_listing(agents):
     """~190 OS processes, `agents` of them claude sessions."""
     others = ["bash", "node"] * ((190 - agents) // 2)
     return "\n".join(["claude"] * agents + others) + "\n"
 
 
-def test_a_measured_idle_box_dispatches_and_agent_pressure_refuses():
+def test_agent_count_prefers_herdrs_working_count_over_the_process_total():
+    class Args:
+        processes = None
+    listing = herdr_listing("working", "idle", "working", "done")
+    ps_out = "claude\nclaude\nclaude\nbash\n"  # 3 claude processes total
+    count, counter, total = loop.agent_count(
+        Args, herdr=lambda cmd: (0, listing), ps=lambda cmd: (0, ps_out))
+    assert count == 2
+    assert total == 3
+    assert loop.box_check(count, 0, counter=counter)["ok"] is True
+    assert "herdr" in counter and "working" in counter
+
+
+def test_agent_count_falls_back_to_the_process_count_when_herdr_cannot_answer():
     class Args:
         processes = None
     idle = idle_box_listing(19)
-    assert len(idle.split()) >= 189
-    count, counter = loop.agent_count(Args, lambda cmd: (0, idle))
+    count, counter, total = loop.agent_count(
+        Args, herdr=lambda cmd: (1, "herdr: connection refused"),
+        ps=lambda cmd: (0, idle))
     assert count == 19
+    assert total == 19
     assert loop.box_check(count, 0, counter=counter)["ok"] is True
-    count, counter = loop.agent_count(
-        Args, lambda cmd: (0, idle_box_listing(28)))
+    count, counter, total = loop.agent_count(
+        Args, herdr=lambda cmd: (1, ""),
+        ps=lambda cmd: (0, idle_box_listing(28)))
     refused = loop.box_check(count, 0, counter=counter)
     assert refused["ok"] is False
     assert "28 agent processes" in refused["refusals"][0], refused
     assert "comm=" in refused["refusals"][0], refused
+    assert "herdr" in refused["refusals"][0], refused
+
+
+def test_render_peak_names_the_excluded_idle_agents_beside_the_total():
+    line = loop.render_peak(6, 1, 2, total=15)
+    assert "6 agent processes measured" in line
+    assert "9 idle excluded (15 total)" in line, line
+
+
+def test_render_peak_omits_the_aside_when_nothing_was_excluded():
+    line = loop.render_peak(6, 1, 2, total=6)
+    assert "excluded" not in line, line
+    line = loop.render_peak(6, 1, 2)
+    assert "excluded" not in line, line
 
 
 def test_a_processes_override_of_zero_is_used_not_measured():
     class Args:
         processes = 0
-    assert loop.agent_count(Args, lambda cmd: (1, "")) == (
-        0, "passed by --processes")
+    got = loop.agent_count(Args, herdr=lambda cmd: (1, ""),
+                           ps=lambda cmd: (1, ""))
+    assert got == (0, "passed by --processes", 0), got
 
 
 def test_the_cli_refuses_a_negative_processes_override():

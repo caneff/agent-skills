@@ -121,8 +121,19 @@ controller forgets.
 The process cap charges a slot at its **peak** — one worker plus its review
 fan-out, `SLOT_PEAK_PROCESSES` (5) — not the one process it is between
 reviews (#933): each new worker costs 5, each live worker keeps 4 in reserve.
-Count agent processes by command name (`ps -eo comm= | grep -cx claude`),
-never by a substring of the command line, which overcounted 2x.
+
+The count that gates the cap is herdr's **working** agents (`herdr agent
+list`, `agent_status` `working`), not every `claude` process on the box: an
+idle or done session costs no cores, and counting it held a run to fewer
+live workers than the box actually had room for (#1075). A subagent mid-turn
+is its own `claude` process that herdr lists as its own working agent, so
+counting working agents still catches a review fan-out — the peak reserve
+per slot is unchanged. `loop.py` falls back to a process count (`ps -eo
+comm= | grep -cx claude`, by command name, never a substring of the command
+line, which overcounted 2x) only when herdr cannot answer, and the refusal
+names which counter it used. The `peak:` line prints the working count and
+the raw process total side by side, so a controller can see what herdr
+excluded.
 
 Before every dispatch, not once at the start: the box is shared, and the
 process that puts it over the cap is as likely to be another agent's as this
