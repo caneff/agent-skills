@@ -1284,16 +1284,16 @@ fn a_foreign_hook_is_moved_aside_once_then_left_alone_on_a_second_dispatch() {
     assert_eq!(std::fs::read_to_string(&moved_aside).unwrap(), foreign_text, "moved-aside hook touched on a second dispatch");
 }
 
-/// A stale version of the lane's own wrapper — it carries the ownership
-/// marker but is not byte-identical to the wrapper text this build installs,
-/// exactly as a wrapper written by an earlier build of the lane would read.
-/// Byte-identity ownership would have read this as foreign, displaced it to
-/// `pre-commit.foreign`, and had the freshly installed — structurally
-/// identical — wrapper invoke that path, which is now itself: a fork bomb,
-/// since the displaced file's own body also names and calls
-/// `pre-commit.foreign` (#1009 C1).
+/// A stale version of the lane's own wrapper — the same comment a real
+/// wrapper carries, but not byte-identical to the wrapper text this build
+/// installs, exactly as a wrapper written by an earlier build of the lane
+/// would read. Ownership is byte-identity only, so this is foreign like any
+/// other hook: displaced to `pre-commit.foreign` and run by the fresh
+/// wrapper before the guard — harmless, since its own body is the pre-#1009
+/// two-line form (`exec .../commit-identity-guard`), not self-referential.
+/// The guard still runs and still refuses a foreign-email commit.
 #[test]
-fn a_pre_commit_that_already_carries_the_wrapper_marker_is_never_displaced_even_with_different_bytes() {
+fn a_stale_lane_wrapper_with_different_bytes_is_displaced_like_any_foreign_hook_and_the_guard_still_runs() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
@@ -1308,8 +1308,61 @@ fn a_pre_commit_that_already_carries_the_wrapper_marker_is_never_displaced_even_
     assert!(out.status.success(), "{}", out_text(&out));
 
     let moved_aside = hooks_dir(&repo).join("pre-commit.foreign");
-    assert!(!moved_aside.exists(), "a stale-but-own wrapper was displaced as if foreign");
-    assert_eq!(std::fs::read_to_string(&hook).unwrap(), stale, "a stale-but-own wrapper was rewritten");
+    assert_eq!(std::fs::read_to_string(&moved_aside).unwrap(), stale, "a stale lane wrapper was not displaced");
+    assert_ne!(std::fs::read_to_string(&hook).unwrap(), stale, "the stale wrapper was left in place instead of replaced");
+    refuses_a_foreign_email_commit(&repo, "395");
+}
+
+/// A foreign hook that carries the exact comment phrase a real lane wrapper
+/// uses — "lane commit-identity guard wrapper" — without being byte-identical
+/// to the current wrapper, and without actually invoking the guard: the
+/// spoof a marker-based (or any other source-text) ownership check would
+/// have fallen for, skipping the takeover entirely and leaving the guard
+/// never installed (the hole #1009 exists to close; caught on the Codex gate
+/// for PR #1053). Byte-identity means this is foreign like any other hook.
+#[test]
+fn a_hook_that_spoofs_the_wrapper_comment_is_still_taken_over_and_the_guard_still_runs() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let hook = hooks_dir(&repo).join("pre-commit");
+    let spoofed = "#!/bin/sh\n# lane commit-identity guard wrapper — nothing else here\nexit 0\n";
+    std::fs::write(&hook, spoofed).unwrap();
+    let mut perms = std::fs::metadata(&hook).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    std::fs::set_permissions(&hook, perms).unwrap();
+
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+
+    let moved_aside = hooks_dir(&repo).join("pre-commit.foreign");
+    assert_eq!(std::fs::read_to_string(&moved_aside).unwrap(), spoofed, "a marker-spoofing hook was not taken over");
+    refuses_a_foreign_email_commit(&repo, "395");
+}
+
+/// The same spoof, but with no executable bit — the exec-bit path (#1009's
+/// third named scenario) intersecting the marker spoof (found on the same
+/// Codex gate). Must still end up guarded.
+#[test]
+fn a_non_executable_hook_that_spoofs_the_wrapper_comment_is_still_taken_over_and_the_guard_still_runs() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let hook = hooks_dir(&repo).join("pre-commit");
+    let spoofed = "#!/bin/sh\n# lane commit-identity guard wrapper — nothing else here\nexit 0\n";
+    std::fs::write(&hook, spoofed).unwrap();
+    let mut perms = std::fs::metadata(&hook).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o644);
+    std::fs::set_permissions(&hook, perms).unwrap();
+
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+
+    let moved_aside = hooks_dir(&repo).join("pre-commit.foreign");
+    assert_eq!(std::fs::read_to_string(&moved_aside).unwrap(), spoofed, "a non-executable marker-spoofing hook was not taken over");
+    let installed = std::fs::metadata(&hook).unwrap().permissions();
+    assert!(std::os::unix::fs::PermissionsExt::mode(&installed) & 0o111 != 0, "installed pre-commit is not executable");
+    refuses_a_foreign_email_commit(&repo, "395");
 }
 
 /// `pre-commit.foreign` already holds a hook from an earlier takeover; a
