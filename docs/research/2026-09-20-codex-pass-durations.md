@@ -15,22 +15,22 @@ five are not reconstructed here; a bound taken from an mtime is not a
 measurement, and writing it into a table would launder it into one. The
 table starts at the first pass run under #942's shape.
 
-`phase` is where the run launched: `early` (at the worker's "Round 1 out"),
-`gate-retry` (at the merge gate, because the early record was refused) or
-`second` (#888's conditional re-run). `outcome` is `collected`,
-`collected-after-retry` for a `gate-retry` that was collected, or the reason
-the gate refused the verdict — `errored`, `raced`, `stale`, `unreadable`, or
-`absent` when no record was written at all. A refused run still gets its
-row: it spent the same wall clock and the same tokens. An `absent` row is
-the one the controller writes from what it knows, the record being the thing
-that is missing.
+`phase` is where the run launched: `gate` (at PR-up, the merge gate) or
+`second` (#888's conditional re-run). `outcome` is `collected`, or the
+reason the gate refused the verdict — `errored`, `raced`, `stale`,
+`unreadable`, or `absent` when no record was written at all. A refused run
+still gets its row: it spent the same wall clock and the same tokens. An
+`absent` row is the one the controller writes from what it knows, the
+record being the thing that is missing.
 
-The pair of columns is the measurement #942 exists for. `early` rows that
-read `collected` are the passes where the overlap paid; an `early` row
-refused `raced` or `stale` followed by a `gate-retry` row is a pass that
-cost its wall clock twice. Counting the two tells you whether launching
-early is worth it, which is why a `gate-retry` never reports as a plain
-`collected`.
+Retired by #1015: `early` (at the worker's "Round 1 out") and `gate-retry`
+(at the merge gate, retrying a refused `early` verdict) were the phases
+before 2026-09-22. The pair existed to measure whether launching at round 1
+paid off; it didn't — 4 early launches that day, 4 raced against the
+worker's own round-1 fix commits, 0 banked, every one refused and rerun at
+the gate, each costing its wall clock twice. Rows dated before 2026-09-22
+keep those phase names as recorded; `gate` is what a `gate-retry` row would
+have been called had the rename landed sooner.
 
 ## Table
 

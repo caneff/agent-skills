@@ -204,15 +204,6 @@ No PR and no reviewer; Chris reads the log after.
    Claude catch as `codex-only, confirmed` and corrupt the trial's
    evidence. On any other build, the PR body lists the disputed, filed and
    handed-back ones.
-
-   When round 1's findings are in hand, before starting the verification
-   pass, send the controller `Round 1 out: <k> findings, head <sha>` —
-   `<sha>` being `git rev-parse HEAD` in this workspace. That wake is what
-   launches the controller's Codex pass (§ The merge step 3), so the pass
-   runs alongside your verification instead of after it; sending it late
-   costs the overlap it exists to buy. You do nothing else with it: the
-   pass is the controller's, and its findings reach you, if at all, at the
-   merge gate.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
    Pass the reviewers every disputed, ruled, or other-ticket item as settled.
    A round-1 finding with no disposition is the one thing this pass fails
@@ -503,8 +494,9 @@ The controller merges on a repo Chris owns; Chris reads it after via
    whose remedy is "do the closing ticket early" (#891, #898).
 
    **One recorded run, wherever it launches** (#942). The pass runs
-   through this block and no other, early or at this gate; `phase` is the
-   only thing that changes. A second block with weaker guarantees is how a
+   through this block and no other, for the gate launch or the conditional
+   second one; `phase` is the only thing that changes. A second block with
+   weaker guarantees is how a
    degraded run gets collected as a clean one — the path that exists to
    handle a failure being the path with no checks. Invoke the plugin's own
    script directly: `/codex:adversarial-review` carries
@@ -520,7 +512,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    ```
    dir="$HOME/.cache/agent-reviews/<repo>"   # expanded as
    mkdir -p "$dir"                           # multi-axis-code-review/SKILL.md does it
-   phase=early                               # or gate-retry, or second
+   phase=gate                                # or second
    body_file=<absolute path you wrote the ticket body, comments and appendix to>
    out_file="$dir/codex-adversarial-<n>-$phase.out"
    record="$dir/codex-adversarial-<n>-$phase.json"
@@ -545,21 +537,16 @@ The controller merges on a repo Chris owns; Chris reads it after via
    `merge-cleanup`, which refuses ignored content without `--discard`.
    That cache directory's 14-day prune covers both files, so nothing here
    is cleaned up by hand, `rm` or `rmdir`, in any phase. The `phase` in
-   each name keeps a retry from overwriting the record it was run because
-   of.
+   each name keeps the second pass from overwriting the record the gate
+   launch wrote.
 
-   **Launch at round 1** with `phase=early`, when the worker reports "Round
-   1 out", not when it reports "PR up": the diff is on the branch by then,
-   and the run overlaps the worker's own verification pass instead of being
-   bolted serially onto this gate, behind three opus axes that have already
-   read the same diff. The overlap is banked only on a round 1 whose
-   findings produce no fix commit — a fix pushed while the pass runs moves
-   the head, and the gate below refuses that verdict and reruns here after
-   all. Run the whole block in one backgrounded shell. `--background` is
-   parsed by `codex-companion.mjs` and never read on this path, so there is
-   no job id, and `status`/`result` have nothing to collect; backgrounding
-   is the shell's job, one shell per pass, one pass in flight per PR, and
-   each in-flight pass is a node process against the box cap.
+   **The pass launches once, here, at PR-up** — not earlier, at the
+   worker's round-1 report. #1015 retired that early launch: measured on
+   `burn-2026-09-21-0930`, 4 early launches raced against the worker's own
+   round-1 fix commits and 0 were banked, so every one was refused and
+   rerun here anyway, each costing its wall clock twice. Run the whole
+   block inline, in the foreground, as part of this step; each launch is
+   still a node process against the box cap.
 
    **The gate is fail-closed.** Nothing merges until this step holds a
    verdict whose `status` is 0 and whose launch sha, completion sha and the
@@ -570,24 +557,19 @@ The controller merges on a repo Chris owns; Chris reads it after via
    two shas differ, so the branch moved while Codex was reading) or stale
    (they agree with each other but not with `headRefOid`, so a fix landed
    after the launch) is a refusal, not a pass: do not post that verdict,
-   append its duration row with the refusal as the outcome, and rerun the
-   block here in the foreground with `phase=gate-retry`, against the
-   current head. A refused verdict's findings are never reported as
-   current — they describe a diff this PR no longer has, or a run that
-   never produced a review, and either one collected looks exactly like a
-   pass that found nothing, which is the shape this lane closed seven times
-   on 2026-09-20.
-
-   **The retry is validated by the same gate**, against the same five
-   refusals: a rerun that errors is not a pass either, and the block that
-   produced it wrote the record that says so. A `gate-retry` record that is
-   itself a refusal ends this step as `Codex pass skipped: <why>` — comment
-   it on the PR, naming the refusal and both phases' rows, and go to step
-   4 with no trial row, the same as a failed preflight. Nothing is claimed
-   about a diff nobody reviewed, and the skip is visible on the PR rather
-   than inferred from a silence. The skip clause at the top of this step
-   governs the preflight only — not logged in, no plugin entry — checked
-   before any run exists; every started run answers to this gate.
+   append its duration row with the refusal as the outcome, and this step
+   ends as `Codex pass skipped: <why>` — comment it on the PR, naming the
+   refusal, and go to step 4 with no trial row, the same as a failed
+   preflight. Nothing is claimed about a diff nobody reviewed, and the skip
+   is visible on the PR rather than inferred from a silence. A refused
+   verdict's findings are never reported as current — they describe a diff
+   this PR no longer has, or a run that never produced a review, and either
+   one collected looks exactly like a pass that found nothing, which is the
+   shape this lane closed seven times on 2026-09-20. The skip clause at the
+   top of this step governs the preflight only — not logged in, no plugin
+   entry — checked before any run exists; every started run answers to this
+   gate, and there is no retry: a refused gate launch ends the step, the
+   same as a refused preflight.
 
    A collected verdict is this step's first pass. Post it from the cache
    directory:
@@ -600,13 +582,12 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
    **Every run records its duration**, collected or refused, as one row
    appended to `docs/research/2026-09-20-codex-pass-durations.md`: ticket,
-   PR, phase (`early`, `gate-retry` or `second`), launched, completed,
-   duration in minutes, and outcome — `collected`, `collected-after-retry`
-   for a `gate-retry` that was collected, or the refusal that discarded it.
-   A retry reported as a plain `collected` loses the one number this change
-   exists to produce: how often the early launch actually pays. The row is
-   an auto-ship commit on `<default>`, the trial row's own rule, and is
-   written at the same time.
+   PR, phase (`gate` or `second`), launched, completed, duration in
+   minutes, and outcome — `collected`, or the refusal that discarded it. A
+   refused run still gets its row: it spent the same wall clock and the
+   same tokens, and that cost is what #1015 measured to retire the early
+   launch. The row is an auto-ship commit on `<default>`, the trial row's
+   own rule, and is written at the same time.
 
    No material findings → go to step 4. Findings → hold the merge: send the
    worker the findings and the comment URL. Note the head sha this pass ran
