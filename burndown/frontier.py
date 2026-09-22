@@ -55,8 +55,15 @@ _NONE = re.compile(r"^[-*\s]*none\b", re.IGNORECASE)
 # as long: a ```` fence is exactly what quotes content that itself contains
 # ```, and reading that inner line as the closer hands the rest of the
 # quotation back to the reader as live document.
-_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*$")
-_FENCE_OPEN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+#
+# CommonMark recognises a fence marker only at up to three spaces of
+# indentation; four spaces or a tab is indented code, not a fence (#999). A
+# marker past that bound is quotation like any other indented line, and
+# `visible()`'s own `_QUOTED` bound below already knows to drop it — this
+# bound has to agree with that one, or a quoted fence with no matching
+# closer swallows every real line after it, declaration included.
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
+_FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
 CLAIMED_LABEL = "in-progress"
 

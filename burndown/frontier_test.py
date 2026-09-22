@@ -719,6 +719,16 @@ def test_a_tab_indented_line_after_a_real_section_adds_nothing_to_its_answer():
     assert numbers(got["unblocked"]) == [1], got
 
 
+def test_an_indented_fence_marker_in_a_quotation_does_not_swallow_the_real_declaration():
+    # #999: CommonMark reads a four-space-indented ``` as indented code, not
+    # a fence opener. A reader that opens a fence on it anyway, with no
+    # closer in the quoted block, discards every later line — including the
+    # real, unindented declaration.
+    body = "Quoting another ticket:\n\n    ```\n    some quoted code\n\n## Blocked by\n\nNone\n"
+    got = read([issue(1, body=body)])
+    assert numbers(got["unblocked"]) == [1], got
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
