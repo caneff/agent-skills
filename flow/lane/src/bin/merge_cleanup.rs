@@ -986,9 +986,19 @@ impl Cleanup {
         // still cleans up: there is nothing left to remove out of scope. The
         // primary checkout counts as a holder (#881): it is not a removal
         // target, but a branch moved into it is still not the branch the plan
-        // named, and `cleanup_branch` would switch it off and delete it.
-        let now = worktree_holding(anchor, b);
-        if !now.is_empty() && now != wt {
+        // named, and `cleanup_branch` would switch it off and delete it. A
+        // listing `git worktree list` could not produce is not "no holder"
+        // either (#975): read that way, it reaped a branch this re-check
+        // could no longer actually vouch for, so it refuses instead.
+        let now = match worktree_holding(anchor, b) {
+            Err(()) => {
+                return Reaped::Refused(format!("could not list worktrees at {anchor}, not removed: git worktree list failed"));
+            }
+            Ok(now) => now,
+        };
+        if let Some(now) = &now
+            && now != wt
+        {
             return Reaped::Refused(format!("moved since the plan, not removed: {now} now holds {b}"));
         }
         if !self.cleanup_branch(anchor, b) {
@@ -1360,7 +1370,12 @@ struct PlanRow {
 
 /// A sweep plan row's worktree counts and hold: the modified, untracked and
 /// ignored counts of the linked worktree holding `b`, and a hold when it has
-/// work a removal would lose — or when git cannot say whether it does.
+/// work a removal would lose — or when git cannot say whether it does. Row
+/// only, never a removal target: `linked_worktree_holding`'s own failed-listing
+/// case reads as `None` here too, so a `git worktree list` failure prints an
+/// unheld row rather than an accurate "could not tell" one (#975 S1/P2) —
+/// misleading, not destructive, since nothing downstream of this row removes
+/// anything.
 fn worktree_plan(repo: &str, b: &str) -> (Option<String>, Option<&'static str>) {
     let Some(wt) = linked_worktree_holding(repo, b) else { return (None, None) };
     match WorktreeFiles::read(&wt) {
@@ -1568,25 +1583,40 @@ fn implement_workspaces(repo: &str) -> Vec<(String, String)> {
     found
 }
 
-/// The linked worktree — not the primary checkout — that has `b` checked out.
+/// The linked worktree — not the primary checkout — that has `b` checked
+/// out. A listing that could not be read is treated as no holder here, same
+/// as before (#975). That's safe at `cleanup_branch`'s own call site: `git
+/// branch -d` still refuses "used by worktree" on its own if a linked
+/// worktree really holds `b`, so nothing is removed out of scope. At
+/// `worktree_plan`'s call site there is no such backstop — a failed listing
+/// there just reads as an accurate "nothing holds this" sweep row instead of
+/// the "unreadable, not removed" hold its sibling `WorktreeFiles::read`
+/// failure gets — but that row is informational only, never a removal
+/// target, so the cost is a misleading row, not a removal.
 fn linked_worktree_holding(path: &str, b: &str) -> Option<String> {
-    let wt = worktree_holding(path, b);
-    (!wt.is_empty() && wt != primary_of(path)).then_some(wt)
+    let wt = worktree_holding(path, b).ok().flatten()?;
+    (wt != primary_of(path)).then_some(wt)
 }
 
-/// The path of the worktree that has `b` checked out, or empty.
-fn worktree_holding(path: &str, b: &str) -> String {
+/// The path of the worktree that has `b` checked out: `Ok(None)` when the
+/// listing was read and nothing holds `b`, `Ok(Some(path))` when it does,
+/// and `Err(())` when `git worktree list` itself could not be read. #975:
+/// the old signature returned an empty string for both "listed, no holder"
+/// and "could not list", and `reap_one`'s destructive-time re-check read a
+/// failed listing as no holder and went on to remove the workspace and
+/// delete the branch.
+fn worktree_holding(path: &str, b: &str) -> Result<Option<String>, ()> {
     let want = format!("branch refs/heads/{b}");
     let mut current = "";
-    let out = quiet_stdout("git", &["-C", path, "worktree", "list", "--porcelain"]).unwrap_or_default();
+    let out = quiet_stdout("git", &["-C", path, "worktree", "list", "--porcelain"]).ok_or(())?;
     for line in out.lines() {
         if let Some(p) = line.strip_prefix("worktree ") {
             current = p;
         } else if line == want {
-            return current.to_string();
+            return Ok(Some(current.to_string()));
         }
     }
-    String::new()
+    Ok(None)
 }
 
 /// `"$dir"/*/`: the non-hidden directories in `dir`, sorted, as paths. A
