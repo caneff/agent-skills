@@ -107,14 +107,20 @@ pub fn append(home: &Path, pid: &str, record: &WorkerRecord) -> std::io::Result<
 /// enough to block until the rewrite completes and be read whole. No file at
 /// all still reads as no workers; a file that can be opened but not locked
 /// falls back to reading it unlocked rather than losing every worker over a
-/// lock that failed for an unrelated reason.
+/// lock that failed for an unrelated reason — noted on stderr rather than
+/// swallowed outright, since a silent fallback here is the same class of
+/// failure (#1044 review, S1/P1/C2) the lock exists to remove: nothing would
+/// otherwise distinguish "read while the lock could not be taken" from "no
+/// workers were ever dispatched."
 pub fn read(home: &Path, pid: &str) -> Vec<WorkerRecord> {
     let path = path_for(home, pid);
     let raw = match std::fs::OpenOptions::new().read(true).open(&path) {
         Ok(mut f) => {
-            let _ = f.lock_shared();
+            if let Err(e) = f.lock_shared() {
+                eprintln!("workers::read: could not lock {}, reading unlocked: {e}", path.display());
+            }
             let mut raw = String::new();
-            if std::io::Read::read_to_string(&mut f, &mut raw).is_err() {
+            if f.read_to_string(&mut raw).is_err() {
                 return Vec::new();
             }
             raw
