@@ -230,3 +230,4 @@ Filed from conversation — controller, map #776 merge tail.
 | agent-skills#1052 | #1140 | 0 | 0 | 1 | One run, one codex-only [high], disputed by the controller as unreachable: the pr-body cache is keyed by repo basename, so two same-named repos on the same issue number could collide; no two repos on this box share a basename, and the key is the review cache's existing convention. Sha unmoved, no second pass. |
 | agent-skills#1139 | #1141 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#1082 | #1143 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
+| agent-skills#1092 | #1142 | 0 | 0 | 0 | One run, approve, no material findings, at 04d03ab (after the controller ruled the ticket's `git ls-tree HEAD` half dropped: the flake was SIGPIPE under pipefail, not the index). No second pass. |
