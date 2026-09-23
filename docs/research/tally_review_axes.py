@@ -70,9 +70,11 @@ _DISPOSITION_SIDECAR_RE = re.compile(r"^dispositions-(\d+)\.jsonl$")
 _VALID_SEVERITIES = {"hard", "judgement"}
 # outcome -> the field on that outcome's line that carries its detail
 # (the fixing commit sha / the dispute reason / the follow-up ticket / the
-# handed-back `/file-ticket` command, #871's fourth outcome).
+# handed-back `/file-ticket` command, #871's fourth outcome / the leftover
+# finding's one-line text, #1027's fifth).
 _OUTCOME_DETAIL_FIELD = {
     "fixed": "sha", "disputed": "reason", "filed": "ticket", "handed-back": "command",
+    "leftover": "text",
 }
 # outcome -> the JSON type its detail field must actually be. `filed`'s
 # `ticket` is written unquoted (`"ticket": <n>`) per implement/SKILL.md, so
@@ -81,7 +83,7 @@ _OUTCOME_DETAIL_FIELD = {
 # through as a `command`/`sha`/`reason` still tallied under Codex's gate
 # finding on #973's own PR — `str(detail)` on a list or dict "worked" and
 # hid the malformed line as if it had parsed cleanly.
-_OUTCOME_DETAIL_TYPE = {"fixed": str, "disputed": str, "filed": int, "handed-back": str}
+_OUTCOME_DETAIL_TYPE = {"fixed": str, "disputed": str, "filed": int, "handed-back": str, "leftover": str}
 
 
 @dataclass(frozen=True)
@@ -103,8 +105,8 @@ class Finding:
 @dataclass(frozen=True)
 class Disposition:
     id: str
-    outcome: str  # "fixed" | "disputed" | "filed" | "handed-back"
-    detail: str  # sha / reason / ticket number, always as str
+    outcome: str  # "fixed" | "disputed" | "filed" | "handed-back" | "leftover"
+    detail: str  # the outcome's field per _OUTCOME_DETAIL_FIELD, always as str
 
 
 def parse_report_filename(filename: str) -> ReportInfo | None:
@@ -219,7 +221,7 @@ def find_sidecar_files(root: Path = REVIEWS_ROOT) -> list[tuple[str, str]]:
 def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
     """Roll every findings-<axis>-<n>.jsonl and dispositions-<n>.jsonl
     sidecar under `root` into a per-repo, per-axis table of raised vs
-    fixed/disputed/filed/handed-back/undisposed (#855). Findings are keyed by (repo,
+    fixed/disputed/filed/handed-back/leftover/undisposed (#855). Findings are keyed by (repo,
     issue, id), so a disposition only ever resolves the finding it names —
     never a same-id finding filed under a different issue or repo.
 
@@ -463,7 +465,7 @@ def main() -> None:
         "--sidecars",
         action="store_true",
         help="tally findings-*.jsonl/dispositions-*.jsonl sidecars (#855) into a "
-             "per-repo, per-axis raised/fixed/disputed/filed/handed-back/undisposed table, "
+             "per-repo, per-axis raised/fixed/disputed/filed/handed-back/leftover/undisposed table, "
              "instead of the round1/verify/PR join",
     )
     args = parser.parse_args()

@@ -264,6 +264,44 @@ def test_parses_a_valid_handed_back_disposition_line():
     assert d == t.Disposition(id="S4", outcome="handed-back", detail="gh issue create ...")
 
 
+def test_every_line_of_the_shared_sidecar_fixture_parses():
+    # The fixture is the one example of all five outcomes (#1027); a line the
+    # tally cannot parse would be counted undisposed (#1076).
+    fixture = Path(__file__).resolve().parents[2] / "implement" / "fixtures" / "dispositions-sidecar.jsonl"
+    lines = [ln for ln in fixture.read_text().splitlines() if ln.strip()]
+    parsed = [t.parse_disposition_line(ln) for ln in lines]
+    assert None not in parsed, [ln for ln, d in zip(lines, parsed) if d is None]
+    assert {d.outcome for d in parsed} == {"fixed", "disputed", "filed", "handed-back", "leftover"}
+
+
+def test_parses_a_valid_leftover_disposition_line():
+    d = t.parse_disposition_line(json.dumps({
+        "id": "S3", "outcome": "leftover", "file": "a.py", "title": "x",
+        "severity": "judgement", "text": "rename it",
+    }))
+    assert d == t.Disposition(id="S3", outcome="leftover", detail="rename it")
+
+
+def test_disposition_line_rejects_a_leftover_without_text():
+    bad = json.dumps({"id": "S3", "outcome": "leftover", "file": "a.py", "title": "x", "severity": "hard"})
+    assert t.parse_disposition_line(bad) is None
+
+
+def test_tally_sidecars_counts_the_shared_fixture_with_no_undisposed():
+    fixture = Path(__file__).resolve().parents[2] / "implement" / "fixtures" / "dispositions-sidecar.jsonl"
+    ids = [json.loads(ln)["id"] for ln in fixture.read_text().splitlines() if ln.strip()]
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-855.jsonl").write_text("\n".join(
+            json.dumps({"id": i, "axis": "standards", "severity": "hard", "file": "a.py", "title": "x"})
+            for i in ids
+        ))
+        (root / "skills" / "dispositions-855.jsonl").write_text(fixture.read_text())
+        row = t.tally_sidecars(root)["skills/standards"]
+        assert row["undisposed"] == 0 and row["leftover"] == 1 and row["raised"] == len(ids)
+
+
 def test_disposition_line_rejects_a_list_command():
     bad = json.dumps({"id": "S4", "outcome": "handed-back", "command": []})
     assert t.parse_disposition_line(bad) is None
@@ -352,7 +390,7 @@ def test_tally_sidecars_rolls_findings_and_dispositions_into_a_table():
         table = t.tally_sidecars(root)
         assert table["skills/standards"] == {
             "raised": 3, "fixed": 1, "disputed": 1, "filed": 0, "undisposed": 1,
-            "handed-back": 0,
+            "handed-back": 0, "leftover": 0,
         }
 
 
@@ -371,7 +409,7 @@ def test_tally_sidecars_rolls_a_handed_back_disposition_into_the_table():
         table = t.tally_sidecars(root)
         assert table["skills/standards"] == {
             "raised": 1, "fixed": 0, "disputed": 0, "filed": 0, "undisposed": 0,
-            "handed-back": 1,
+            "handed-back": 1, "leftover": 0,
         }
 
 
