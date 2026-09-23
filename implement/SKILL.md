@@ -347,16 +347,16 @@ already reported — an amend erases the sha the controller was handed.
 
 ### The PR
 
-```
-git push -u origin implement-<n>
-gh pr create --repo <owner/name> --title "<title>" --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md
-```
-
 Write the body to `~/.cache/agent-reviews/<repo>/pr-body-<n>.md` first
 (`mkdir -p` the directory; `<n>` is the lowest ticket of a clump), never under
 this workspace's `.scratch/`. The file's content is already the PR body on
 GitHub, and § Before the PR step 3 makes you clear `.scratch/` anyway. A
 `gh pr edit` reuses the same file.
+
+```
+git push -u origin implement-<n>
+gh pr create --repo <owner/name> --title "<title>" --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md
+```
 
 The body has these sections and nothing else:
 
