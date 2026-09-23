@@ -81,15 +81,20 @@ stale_pointers=(
 patterns=("${marks[@]}" "${stale_pointers[@]}")
 
 # --- The swept set -----------------------------------------------------------
-mapfile -t skill_dirs < <(git ls-files -- '*/SKILL.md' | cut -d/ -f1 | sort -u)
+# Read from HEAD's tree, not the index (#1092): under `tests/all.sh` a
+# `git ls-files` returned a partial listing once, for the instant the index
+# was being rewritten, and failed the must-sweep check on a file that was
+# tracked and present. A commit does not change while it is read. The
+# readability check below still holds the working tree to that listing.
+mapfile -t skill_dirs < <(git ls-tree -r --name-only HEAD | grep -E '^[^/]+/SKILL\.md$' | cut -d/ -f1 | sort -u)
 if [ "${#skill_dirs[@]}" -eq 0 ]; then
-  echo "FAIL: no skill directories found — git ls-files gave nothing" >&2
+  echo "FAIL: no skill directories found — git ls-tree gave nothing" >&2
   exit 1
 fi
-# -z and `mapfile -d ''`: `git ls-files` renders a path holding a newline or a
+# -z and `mapfile -d ''`: `git ls-tree` renders a path holding a newline or a
 # quote in C-quoted form, and a quoted path is one grep cannot open — which,
 # before the status check below, was a silent pass.
-mapfile -d '' -t swept < <(git ls-files -z -- "${skill_dirs[@]/%//}")
+mapfile -d '' -t swept < <(git ls-tree -r -z --name-only HEAD -- "${skill_dirs[@]/%//}")
 if [ "${#swept[@]}" -lt "$FLOOR" ]; then
   echo "FAIL: swept ${#swept[@]} files across ${#skill_dirs[@]} skills, under the floor of $FLOOR" >&2
   exit 1
@@ -98,7 +103,7 @@ for m in "${must_sweep[@]}"; do
   printf '%s\n' "${swept[@]}" | grep -qxF -- "$m" ||
     { echo "FAIL: the swept set does not contain $m — it is not sweeping the tree under test" >&2; exit 1; }
 done
-# The index says these files exist; the working tree is what grep reads. A
+# HEAD says these files exist; the working tree is what grep reads. A
 # sparse or half-materialised checkout makes every grep below exit 2, and
 # before this check that was indistinguishable from a clean tree.
 unreadable=()
