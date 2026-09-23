@@ -99,6 +99,9 @@ check_in "$costs" 'call-site mutation' 'the witness-check cost section'
 check_in "$costs" 'gets its own id' 'the witness-cost section'
 check_not_in "$costs" 'the same worktree, the same output file and the same id as any constraint mutation' 'the witness-cost section'
 check_in "$costs" 'ever share an id' 'the witness-cost section'
+# #1047: the same disambiguation in the text the correctness sub-agent actually
+# receives, since it never reads the caller-facing costs prose above.
+check_in "$correctness" 'call-site mutation gets its own id, distinct from the constraint mutation' 'the correctness axis brief'
 callsite="$(printf '%s\n' "$spawn" | grep -cF 'unprotected entry point' || true)"
 [ "$callsite" -eq 1 ] || { echo "FAIL: § 4 states the call-site finding in $callsite places, not 1" >&2; fail=1; }
 
