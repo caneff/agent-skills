@@ -10,7 +10,7 @@ that the run has no leftovers and prints nothing to file on stdout. This is
 the renderer #1029 left for #1030: the run file was already the store,
 nothing here writes to it.
 
-    python3 burndown/sweep.py counts <run-id> [--reviews-dir <dir>]
+    python3 burndown/sweep.py counts <run-id> --repo <checkout> | --reviews-dir <dir>
 
 prints the closing report's three counts — fixed in-round, leftover,
 standalone — read from each landed clump's dispositions sidecar
@@ -97,17 +97,26 @@ def render_body(leftovers):
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-def default_reviews_dir(repo_root=None):
+def default_reviews_dir(repo_root):
     """`~/.cache/agent-reviews/<repo>`, keyed the same way
     `multi-axis-code-review/SKILL.md`'s own dir expansion is: the primary
     checkout's basename, read off the common `.git` rather than
     `git rev-parse --show-toplevel` — a review always runs from a task
     worktree, and that command there returns the worktree's own path, not
     the repo's name every review's cache directory is keyed on."""
-    top = subprocess.run(
-        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        cwd=repo_root, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    # GIT_DIR and friends would repoint git at another repo whatever the
+    # path says, and git walks up from a subdirectory: the path must itself
+    # be a checkout root, or a mistyped one names some parent repo (#1093).
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")}
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo_root, env=env,
+                              capture_output=True, text=True,
+                              check=True).stdout.strip()
+    if os.path.realpath(git("rev-parse", "--show-toplevel")) != \
+            os.path.realpath(repo_root):
+        raise ValueError(f"{repo_root} is not the root of a git checkout")
+    top = git("rev-parse", "--path-format=absolute", "--git-common-dir")
     repo = os.path.basename(os.path.dirname(top))
     return os.path.join(os.path.expanduser("~/.cache/agent-reviews"), repo)
 
@@ -185,8 +194,12 @@ def main(argv):
         "counts",
         help="print the run's fixed-in-round/leftover/standalone counts")
     c.add_argument("run_id")
-    c.add_argument("--reviews-dir",
-                   help="override ~/.cache/agent-reviews/<repo> (tests)")
+    where = c.add_mutually_exclusive_group()
+    where.add_argument("--repo",
+                   help="the target repo's primary checkout; its name keys "
+                        "~/.cache/agent-reviews/<repo>")
+    where.add_argument("--reviews-dir",
+                   help="the sidecar directory itself, instead of --repo")
 
     args = parser.parse_args(argv[1:])
 
@@ -215,8 +228,23 @@ def main(argv):
         print(body, end="")
         return 0
 
-    reviews_dir = (os.path.expanduser(args.reviews_dir) if args.reviews_dir
-                   else default_reviews_dir())
+    # No default from the cwd: the controller may run from a different
+    # primary checkout than the run's target (#1093), and a wrong cwd reads
+    # another repo's sidecars or reports every landed clump missing.
+    if args.reviews_dir:
+        reviews_dir = os.path.expanduser(args.reviews_dir)
+    elif args.repo:
+        try:
+            reviews_dir = default_reviews_dir(os.path.expanduser(args.repo))
+        except (subprocess.CalledProcessError, OSError, ValueError) as exc:
+            print(f"sweep.py: --repo {args.repo} is not a git checkout: {exc}",
+                  file=sys.stderr)
+            return 1
+    else:
+        print("sweep.py: counts needs --repo <primary checkout> (or "
+              "--reviews-dir): the cwd's repo is not the run's target",
+              file=sys.stderr)
+        return 1
     try:
         c = counts(run, reviews_dir)
     except runfile.RunFileError as exc:

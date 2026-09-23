@@ -201,10 +201,10 @@ infer it from an absent link.
 **leftover**, **standalone** —
 
 ```
-python3 burndown/sweep.py counts <run-id>
+python3 burndown/sweep.py counts <run-id> --repo <primary checkout>
 ```
 
-reads them from each landed clump's dispositions sidecar (`implement/SKILL.md` § Review), so Chris can see whether the adjacent-fix rule is doing its job
+reads them from each landed clump's dispositions sidecar (`implement/SKILL.md` § Review) under the `--repo` checkout's cache directory — never the cwd's, which is not always the target — so Chris can see whether the adjacent-fix rule is doing its job
 without re-deriving it from the PRs by hand. Controller observations about
 the loop itself stay standalone tickets (§ Before a controller rules), never
 folded into the sweep and never in any sidecar — the controller adds its own
