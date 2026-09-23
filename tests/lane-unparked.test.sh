@@ -95,7 +95,10 @@ if [ "${#swept[@]}" -lt "$FLOOR" ]; then
   exit 1
 fi
 for m in "${must_sweep[@]}"; do
-  printf '%s\n' "${swept[@]}" | grep -qxF -- "$m" ||
+  # A here-string, not `printf | grep -q`: under `pipefail` grep -q exits on
+  # its first match, printf takes SIGPIPE, and the pipeline reads as a miss —
+  # the intermittent "does not contain <file>" failure of #1092 (5 in 300).
+  grep -qxF -- "$m" <<<"$(printf '%s\n' "${swept[@]}")" ||
     { echo "FAIL: the swept set does not contain $m — it is not sweeping the tree under test" >&2; exit 1; }
 done
 # The index says these files exist; the working tree is what grep reads. A
