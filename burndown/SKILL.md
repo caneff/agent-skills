@@ -171,16 +171,23 @@ deterministic, so the search is the recovery: before filing, at either
 moment,
 
 ```
-gh issue list --repo <owner/name> --state all \
-  --search "Sweep: leftovers from burn <run-id> in:title"
+gh issue list --repo <owner/name> --state all --limit 100 \
+  --search "Sweep: leftovers from burn <run-id> in:title" \
+  --json number,title --jq '.[] | select(.title == "Sweep: leftovers from burn <run-id>") | .number'
 ```
 
-An issue there already **is** this run's sweep: update its body instead
+The search is fuzzy, so the `--jq` keeps only an exact title match and
+prints one bare number per line: the sweep's own number, never a run or
+ticket number. A non-zero exit from the search stops the run; it is not
+zero matches, and filing on it makes a duplicate. Exit 0 and more than one
+line stops the run rather than editing a guess. Exit 0 and one line: put
+that number in `sweep`; that issue already **is** this run's sweep, so
+update its body instead
 of filing another — a fresh render of the run's own leftovers, with any
 `## <file>` section already in the current body that a fold (below) put
 there kept as it stands, since a fold's own items never reappear in
 `sweep.py render`'s output and a bare overwrite would drop them —
-`gh issue edit <n> --repo <owner/name> --body-file <path>`. Nothing found:
+`gh issue edit "$sweep" --repo <owner/name> --body-file <path>`. Exit 0 and no output:
 render the run's leftovers —
 
 ```

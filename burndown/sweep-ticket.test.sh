@@ -56,6 +56,15 @@ check_in "$sweep_text" 'burndown/sweep.py counts <run-id>' 'burndown/SKILL.md §
 # second one for the same run (Codex gate finding #2, PR #1090).
 check_in "$sweep_text" 'gh issue list' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'in:title' 'burndown/SKILL.md § The sweep'
+# #1095: the edit targets the number the search returned; the exact-title
+# filter, the result cap, the failed-search stop and the more-than-one
+# refusal are each pinned by their own clause.
+check_in "$sweep_text" '--json number,title' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'select(.title == "Sweep: leftovers from burn <run-id>")' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" '--limit 100' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'gh issue edit "$sweep"' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'A non-zero exit from the search stops the run' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'more than one line stops the run rather than editing a guess' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'not one-shot' 'burndown/SKILL.md § The sweep'
 
 # #1033: a per-PR sweep found on the frontier folds into the run's own
