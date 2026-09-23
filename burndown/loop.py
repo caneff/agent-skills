@@ -137,7 +137,10 @@ def picks(state, free):
     """`(picked, held)`: the clumps to dispatch, taken from a frontier
     already read — widest closure first, ties broken by lowest ticket, every
     free slot at once — and every clump the same-tick guard skipped, each
-    naming the earlier pick it collided with. Sorted before the guard runs
+    naming the earlier pick it collided with. The walk goes past the free
+    slots (#1049), so a clump beyond the cut that collides with a pick is
+    held too; one that collides with nothing is in neither list. Sorted
+    before the guard runs
     (#1026): why widest-first, and what it costs: `references/loop.md`.
 
     Split from `refill` so a caller that also reports what is holding the
