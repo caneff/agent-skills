@@ -108,13 +108,14 @@ owner's word turns it on.
   email-privacy rule rejected every push, and the only fix was a gated
   history rewrite (#909).
 - **A file whose contents become public lives under your own workspace's
-  `.scratch/`.** That is every `--body-file` for `gh pr create` and
-  `gh pr edit`, and any file you author and then hand to a command — never
-  `/tmp`, never a shared scratchpad path. The one exception is the
-  controller's Codex pass files (§ The merge step 3): they live in the review
-  cache, `~/.cache/agent-reviews/<repo>/`, under a ticket-and-phase name,
-  because your own clearing of `.scratch/` would take an in-flight pass's
-  output with it. Another session overwrote a shared
+  `.scratch/`.** That is any file you author and then hand to a command —
+  never `/tmp`, never a shared scratchpad path. Two exceptions live in the
+  review cache, `~/.cache/agent-reviews/<repo>/`, under a ticket-named file.
+  The controller's Codex pass files (§ The merge step 3), because your own
+  clearing of `.scratch/` would take an in-flight pass's output with it. And
+  the PR body, `pr-body-<n>.md` (§ The PR): a body left in `.scratch/` made
+  `merge-cleanup` refuse the removal on every heavy landing, and the
+  controller re-ran it with `--discard` by hand (#1052). Another session overwrote a shared
   `pr-body.md` between its write and `gh pr create`, and PR 908 went up
   carrying #886's body and a `Closes #886`; only luck left #886 open to
   nobody's harm (#909).
@@ -330,7 +331,7 @@ time, not from the worker: § The merge.
    — poll a few seconds before treating it as a real miss. Still missing:
    the closing keyword landed wrong (`Closes #<n>` inside backticks or a
    code fence doesn't register) — fix the body (`gh pr edit <pr>
-   --repo <owner/name> --body-file <body>`) and re-run this check once. If
+   --repo <owner/name> --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md`) and re-run this check once. If
    it's still missing after that one fix-and-recheck, do not send "PR up" —
    a PR that closes nothing must not reach the merge. Stop and tell the
    controller what you tried and what `gh pr view` still returns; the
@@ -348,8 +349,14 @@ already reported — an amend erases the sha the controller was handed.
 
 ```
 git push -u origin implement-<n>
-gh pr create --repo <owner/name> --title "<title>" --body-file <body>
+gh pr create --repo <owner/name> --title "<title>" --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md
 ```
+
+Write the body to `~/.cache/agent-reviews/<repo>/pr-body-<n>.md` first
+(`mkdir -p` the directory; `<n>` is the lowest ticket of a clump), never under
+this workspace's `.scratch/`. The file's content is already the PR body on
+GitHub, and § Before the PR step 3 makes you clear `.scratch/` anyway. A
+`gh pr edit` reuses the same file.
 
 The body has these sections and nothing else:
 
