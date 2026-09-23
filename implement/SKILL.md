@@ -224,6 +224,21 @@ No PR and no reviewer; Chris reads the log after.
    Codex medium and low, correctness `PLAUSIBLE`, and standards `hard` and
    `judgement` are not high.
 
+   **The reachability bar.** Stated here once, applied before severity: a
+   finding is filed, or kept as a leftover, only when whoever disposes of
+   it — the worker in round 1, the controller at merge — can name how its
+   failure occurs in our environment: this box (WSL, one user, shared 32
+   cores), our repos (all SHA-1, all `caneff/*`), and the ticket and PR
+   bodies people here actually write, not a constructed pathological
+   input. A finding that fails that bar is `disputed: unreachable — <why>`
+   in the PR body, whatever Codex's severity word, and it never becomes a
+   `leftover` sidecar line (a round-1 finding still gets its `disputed`
+   line from the verification pass, as every round-1 finding does). The
+   fix-in-round rules stand for a reachable finding; an unreachable one is
+   disputed rather than fixed, even when it would pass the adjacent-fix
+   rule. (#1086: `burn-2026-09-22-0636` filed seven tickets from second
+   and third passes; four described failures that cannot occur here.)
+
    **The adjacent-fix rule.** A round-1 finding is fixed in the round, not
    filed, when all five parts hold: it sits in a file already in the diff;
    the fix is confined to one function; it changes under 20 lines, its test
@@ -728,7 +743,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    the merge. A commit the controller has not read never merges. The
    controller disposes of every other second-pass finding in the PR body itself:
    `disputed: <why>`, filed if it is high, or `leftover`, under § Review's
-   severity mapping. A fix outside the rule is a change, not a round.
+   reachability bar first and its severity mapping second. A fix outside the rule is a change, not a round.
 
    A third Codex run happens only when a second-pass finding fixed in the
    round was high. The third run is final: its findings are `disputed` or
