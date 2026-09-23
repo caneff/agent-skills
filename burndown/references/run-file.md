@@ -90,7 +90,7 @@ closes, the PR it landed on, and the finding's own `id`, `file`, `title`,
 not retyped.
 
 ```
-python3 burndown/runfile.py leftover <run-id> --clump 905 --pr 950 --from <dispositions sidecar>
+python3 burndown/runfile.py leftover <run-id> --clump 905 --pr 950 --from <dispositions sidecar> --head-committed <ISO>
 ```
 
 reads every `outcome: leftover` line of `<dispositions sidecar>` — the
@@ -107,6 +107,15 @@ PR that genuinely left nothing. It also prints `copied N leftover(s) from
 <path>` for the same reason. `sweep.py counts` reads the same sidecars
 through the same reader (`runfile.read_dispositions`), so it refuses the same
 lines rather than counting low.
+
+`--head-committed <ISO>` is the PR head commit's committer date
+(`gh pr view <pr> --json commits --jq '.commits[-1].committedDate'`). A
+sidecar whose mtime is older is refused: a disposition changed after the
+verification pass rewrites its sidecar line
+(`implement/SKILL.md` § The merge), so an older file was never rewritten
+(#1085). `--allow-stale` skips
+the check; one of the two flags is required, so omitting the check is
+a choice and never a default.
 
 `land` comes first: a clump with no recorded landing is refused, so a PR
 that may never land cannot persist leftovers nothing can later remove.

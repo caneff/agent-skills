@@ -4,7 +4,7 @@
     python3 burndown/runfile.py start    <run-id> [--slots <k>] [--controller <agent>]
     python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
     python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
-    python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar>
+    python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --head-committed <ISO>
     python3 burndown/runfile.py show     <run-id>
     python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 
@@ -23,6 +23,7 @@ write replaces the file in one step: `references/run-file.md`, which is where
 those reasons live rather than being restated here.
 """
 import contextlib
+import datetime
 import fcntl
 import json
 import math
@@ -418,15 +419,46 @@ def read_leftover_lines(sidecar_path):
     return out
 
 
-def leftover(run_id, lowest, pr, sidecar_path, root=None):
+def refuse_stale_sidecar(sidecar_path, head_committed):
+    """A sidecar last written before the PR's head commit predates a
+    disposition change: the controller's fix read or ruling reaches the PR
+    body and the sidecar in one step (`implement/SKILL.md` § The merge), so
+    an older file is one that step never touched (#1085)."""
+    try:
+        head = datetime.datetime.fromisoformat(head_committed)
+    except (TypeError, ValueError):
+        raise RunFileError(
+            f"--head-committed {head_committed!r} is not an ISO-8601 "
+            "timestamp") from None
+    if head.tzinfo is None:
+        raise RunFileError(
+            f"--head-committed {head_committed!r} carries no UTC offset")
+    written = datetime.datetime.fromtimestamp(
+        os.path.getmtime(sidecar_path), datetime.timezone.utc)
+    if written < head:
+        raise RunFileError(
+            f"{sidecar_path} was last written {written.isoformat()}, older "
+            f"than the PR's head commit at {head.isoformat()} — a "
+            "disposition may have changed since; rewrite the sidecar line, "
+            "or pass --allow-stale")
+
+
+def leftover(run_id, lowest, pr, sidecar_path, root=None,
+             head_committed=None):
     """Copy every `leftover` line of a landed PR's dispositions sidecar into
     the run file. Idempotent per PR and finding id; a finding already
     recorded under a different PR, or a clump with no recorded landing, is
     refused — the reasons are in `references/run-file.md` § Leftovers.
 
     Returns `(run, added)`, `added` being the finding ids this call
-    actually appended, for a caller to report a copy count."""
+    actually appended, for a caller to report a copy count.
+
+    `head_committed`, an ISO-8601 timestamp with offset, is the PR head
+    commit's date: a sidecar written before it is refused. `None` skips the
+    check; the CLI never passes it without `--allow-stale`."""
     pr = pr_number(pr)
+    if head_committed is not None:
+        refuse_stale_sidecar(sidecar_path, head_committed)
     found = read_leftover_lines(sidecar_path)
     with locked(run_id, root):
         run = load(run_id, root)
@@ -680,6 +712,13 @@ def main(argv):
     lo.add_argument("--pr", type=int, required=True)
     lo.add_argument("--from", dest="from_path", required=True,
                     metavar="PATH", help="the dispositions sidecar to copy from")
+    fresh = lo.add_mutually_exclusive_group(required=True)
+    fresh.add_argument("--head-committed", metavar="ISO",
+                       help="the PR head commit's committer date, e.g. "
+                            "2026-09-22T10:00:00Z; a sidecar written before "
+                            "it is refused as stale")
+    fresh.add_argument("--allow-stale", action="store_true",
+                       help="skip the staleness check")
 
     work = subs.add_parser("job", help="record a clump's parallel-job state")
     work.add_argument("run_id")
@@ -717,7 +756,8 @@ def main(argv):
             print(render(land(args.run_id, args.clump, args.sha, root)))
         elif args.command == "leftover":
             run, added = leftover(args.run_id, args.clump, args.pr,
-                                  args.from_path, root)
+                                  args.from_path, root,
+                                  args.head_committed)
             print(render(run))
             print(f"copied {len(added)} leftover(s) from {args.from_path}")
         elif args.command == "job":
