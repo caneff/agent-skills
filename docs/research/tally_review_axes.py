@@ -105,7 +105,7 @@ class Finding:
 @dataclass(frozen=True)
 class Disposition:
     id: str
-    outcome: str  # "fixed" | "disputed" | "filed" | "handed-back" | "leftover" | "leftover"
+    outcome: str  # "fixed" | "disputed" | "filed" | "handed-back" | "leftover"
     detail: str  # sha / reason / ticket number, always as str
 
 
