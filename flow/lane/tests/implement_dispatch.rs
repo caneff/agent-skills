@@ -1868,3 +1868,62 @@ fn a_stalled_fetch_fails_fast_under_the_bound_instead_of_pinning_the_claim_lock(
     assert!(start.elapsed() < std::time::Duration::from_secs(5), "waited {:?} past a 200ms fetch bound", start.elapsed());
     assert!(refused(&out, &f.calls(), &repo, "395", "git fetch"), "{}", out_text(&out));
 }
+
+#[test]
+fn a_documentation_label_on_a_ticket_targeting_a_skill_body_dispatches_heavy_and_strips_it() {
+    // #969: the filer's hand-put `documentation` label sent a `SKILL.md`
+    // change out at light tier, and the worker pushed it straight to main.
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(
+        &default_scenario(),
+        &[
+            ("GH_LABELS", "documentation,ready-for-agent"),
+            ("GH_BODY", "Reword the step in `multi-axis-code-review/SKILL.md` § 6."),
+        ],
+    );
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "403"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let calls = f.calls();
+    assert!(calls.contains("/implement 403 --tier heavy"), "{calls}");
+    assert!(!calls.contains("--tier light"), "{calls}");
+    assert!(
+        calls.lines().any(|l| l
+            == format!("gh issue edit 403 --repo {SLUG} --remove-label ready-for-agent --remove-label documentation --add-label in-progress --add-assignee @me")),
+        "{calls}"
+    );
+    let text = out_text(&out);
+    assert!(text.contains("documentation label stripped") && text.contains("multi-axis-code-review/SKILL.md"), "{text}");
+}
+
+#[test]
+fn a_documentation_ticket_naming_only_prose_stays_light_and_keeps_its_label() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(
+        &default_scenario(),
+        &[("GH_LABELS", "documentation,ready-for-agent"), ("GH_BODY", "Add `docs/research/note.md` and update AGENTS.md.")],
+    );
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "403"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert!(f.calls().contains("/implement 403 --tier light"), "{}", f.calls());
+    assert!(!f.calls().contains("--remove-label documentation"), "{}", f.calls());
+}
+
+#[test]
+fn an_unreadable_body_dispatches_heavy_and_keeps_the_documentation_label() {
+    // Class 1: a failed read must not pass for "names no code", and it is no
+    // evidence the label was wrong, so it is not removed either.
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "documentation,ready-for-agent"), ("GH_BODY_FAIL_403", "1")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "403"], &scenario);
+    assert!(out.status.success(), "{}", out_text(&out));
+    let calls = f.calls();
+    assert!(calls.contains("/implement 403 --tier heavy"), "{calls}");
+    assert!(!calls.contains("--remove-label documentation"), "{calls}");
+    assert!(out_text(&out).contains("body unreadable, dispatched heavy: #403"), "{}", out_text(&out));
+}

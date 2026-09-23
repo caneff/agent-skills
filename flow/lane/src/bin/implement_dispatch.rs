@@ -47,7 +47,9 @@ waits on the worker.
 
 Plain mode: the brief is `/implement <n>... --tier light|heavy --controller
 "<name>"`, light when one issue is named and it carries the documentation
-label, heavy otherwise — a clump is always heavy, because light tier lands
+label and its body names no code path (a SKILL.md, or a code or config file
+by extension — otherwise the label is stripped at claim and the report says
+so; an unreadable body goes heavy and keeps the label), heavy otherwise — a clump is always heavy, because light tier lands
 without a PR and a merged PR's closingIssuesReferences is the only record
 merge-cleanup can clear a clump's claims from. A ready-for-human issue among
 them ends the brief with --chris-merges: the worker builds the clump and
@@ -507,6 +509,12 @@ struct Ticket {
     ready: &'static str,
     chris_merges: bool,
     documentation: bool,
+    /// The code path the body names on a ticket that carries `documentation`:
+    /// the label is stripped at claim and the tier goes heavy (#1045).
+    stripped_for: Option<String>,
+    /// The body could not be read on a `documentation` ticket: heavy, but the
+    /// label stays, since a failed `gh` call is no evidence it was wrong.
+    body_unreadable: bool,
 }
 
 /// The `gh issue edit` that undoes one ticket's claim: in-progress off, the
@@ -798,7 +806,21 @@ fn run() -> Result<(), ExitCode> {
             }
             _ => {}
         }
-        tickets.push(Ticket { n: n.clone(), ready, chris_merges, documentation: issue.has_label("documentation") });
+        // A `documentation` label is a filer's claim; the body's targets are
+        // the evidence. An unreadable body cannot show the ticket is prose, so
+        // it goes heavy — but nothing shows the label wrong, so it is kept.
+        let labelled = issue.has_label("documentation");
+        let body = if labelled { lane::issue_state::body(&slug, n) } else { None };
+        let body_unreadable = labelled && body.is_none();
+        let stripped_for = body.as_deref().and_then(lane::targets::first_code_target);
+        tickets.push(Ticket {
+            n: n.clone(),
+            ready,
+            chris_merges,
+            documentation: labelled && stripped_for.is_none() && !body_unreadable,
+            stripped_for,
+            body_unreadable,
+        });
     }
     // The clump lands as one diff. Light is the docs-only tier, so one
     // ticket that is not docs-only makes the whole diff code — the same
@@ -946,6 +968,9 @@ fn run() -> Result<(), ExitCode> {
         if !t.chris_merges {
             claim_args.extend(["--remove-label", t.ready]);
         }
+        if t.stripped_for.is_some() {
+            claim_args.extend(["--remove-label", "documentation"]);
+        }
         claim_args.extend(["--add-label", "in-progress", "--add-assignee", "@me"]);
         match runner::run("gh", &claim_args) {
             Ok(c) if c.success => claimed.push(t),
@@ -1015,7 +1040,14 @@ fn run() -> Result<(), ExitCode> {
             // Only a clump carries the note: a lone ticket has no internal
             // blockers, no sibling shas and one report already (#901).
             let note = if ns.len() > 1 { CLUMP_NOTE } else { "" };
-            (format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}{note}", ns.join(" ")), format!("{tier} tier{merger}"))
+            let stripped: Vec<String> =
+                tickets.iter().filter_map(|t| t.stripped_for.as_ref().map(|p| format!("#{} names {p}", t.n))).collect();
+            let mut strip_note = if stripped.is_empty() { String::new() } else { format!(", documentation label stripped: {}", stripped.join("; ")) };
+            let unread: Vec<String> = tickets.iter().filter(|t| t.body_unreadable).map(|t| format!("#{}", t.n)).collect();
+            if !unread.is_empty() {
+                strip_note.push_str(&format!(", body unreadable, dispatched heavy: {}", unread.join(" ")));
+            }
+            (format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}{note}", ns.join(" ")), format!("{tier} tier{strip_note}{merger}"))
         }
         Mode::Spec { slots } => (format!("/implement-spec {n} --slots {slots} --controller \"{controller}\""), format!("spec, {slots} slots")),
     };

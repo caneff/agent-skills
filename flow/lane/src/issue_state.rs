@@ -57,6 +57,13 @@ pub fn read(slug: &str, n: &str) -> Option<IssueState> {
     Some(parse(&out))
 }
 
+/// Reads issue `n`'s body. `None` when the call fails; the caller decides
+/// what an unreadable body means, since silence must not read as "names no
+/// code".
+pub fn body(slug: &str, n: &str) -> Option<String> {
+    quiet_stdout("gh", &["issue", "view", n, "--repo", slug, "--json", "body", "-q", ".body"])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
