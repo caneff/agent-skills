@@ -1769,6 +1769,30 @@ fn a_dispatch_appends_a_worker_record_for_the_controllers_own_session() {
     assert_eq!(r.proc_start, f.own_proc_start(), "#964 fix round 1: the record must carry the controller session's own starttime");
 }
 
+/// #1087: the record's `workspace` is `canonical_workspace_path`'s output,
+/// not the raw spelling of the path dispatch built. `primary` comes from git
+/// and is already real, so the raw spelling differs only when a component
+/// below it is a symlink: `.claude` here. Only a dispatch that calls the
+/// helper writes the resolved path.
+#[test]
+fn a_dispatch_through_a_symlinked_claude_dir_records_the_canonical_workspace() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let real_claude = repo.parent().unwrap().join("real-claude");
+    std::fs::create_dir_all(real_claude.join("worktrees")).unwrap();
+    std::os::unix::fs::symlink(&real_claude, repo.join(".claude")).unwrap();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "415"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+
+    let records = lane::workers::read(&f.home(), &std::process::id().to_string());
+    assert_eq!(records.len(), 1, "{records:?}");
+    let raw = repo.join(".claude/worktrees/implement-415");
+    let canonical = real_claude.canonicalize().unwrap().join("worktrees/implement-415");
+    assert_ne!(raw, canonical, "the raw spelling must differ for this test to mean anything");
+    assert_eq!(records[0].workspace, canonical.display().to_string());
+}
+
 #[test]
 fn a_clumps_worker_record_carries_every_ticket_lowest_first() {
     let f = Fixture::new();

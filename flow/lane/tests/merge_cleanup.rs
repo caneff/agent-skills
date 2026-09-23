@@ -5,7 +5,7 @@
 //! reads JSON itself), plus the regression tests for the bugs fixed in it.
 
 mod support;
-use support::cleanup::{Cleanup, Tools};
+use support::cleanup::{which, Cleanup, Tools};
 
 fn s(p: &std::path::Path) -> &str {
     p.to_str().unwrap()
@@ -791,6 +791,41 @@ fn a_removed_worktree_clears_its_worker_record_and_leaves_an_unrelated_one() {
     assert!(run.has(&format!("cleared the controller's worker record for {}", wt.display())), "{}", run.text());
     assert!(lane::workers::read(&c.home(), "111").is_empty(), "the removed workspace's record should be gone");
     assert_eq!(lane::workers::read(&c.home(), "222").len(), 1, "an unrelated controller's record must survive");
+}
+
+/// #1087: `implement-dispatch` records the canonical spelling of a workspace,
+/// so `merge-cleanup` must canonicalize the spelling `git worktree list`
+/// gives it before matching. Current git already prints the resolved path,
+/// so this test puts a `git` on PATH that prints the worktree through a
+/// symlink instead, as an older git or an unresolved `.git/worktrees` entry
+/// would; only a merge-cleanup that calls the helper still finds the record.
+#[test]
+fn a_worktree_listed_through_a_symlink_still_clears_its_canonically_spelled_record() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r5d");
+    let wt = c.root().join("r5d-wt");
+    c.worktree_add(&r, &[s(&wt), "caneff/merged-one"]);
+    let link = c.root().join("r5d-wt-link");
+    std::os::unix::fs::symlink(&wt, &link).unwrap();
+    lane::workers::append(&c.home(), "111", &worker_record(&wt, "caneff/merged-one")).unwrap();
+
+    let shim = c.root().join("noherdr/git");
+    std::fs::remove_file(&shim).unwrap();
+    std::fs::write(
+        &shim,
+        format!(
+            "#!/bin/bash\nfrom='{from}'\nto='{to}'\nif [[ \"$*\" == *\"worktree list\"* ]]; then\n  \"{real}\" \"$@\" | while IFS= read -r l; do echo \"${{l//\"$from\"/\"$to\"}}\"; done\nelse\n  exec \"{real}\" \"$@\"\nfi\n",
+            real = which("git").display(),
+            from = wt.display(),
+            to = link.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(lane::workers::read(&c.home(), "111").is_empty(), "the record should be cleared: {}", run.text());
 }
 
 #[test]
