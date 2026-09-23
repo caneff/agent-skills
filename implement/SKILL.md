@@ -348,7 +348,9 @@ already reported — an amend erases the sha the controller was handed.
 ### The PR
 
 Write the body to `~/.cache/agent-reviews/<repo>/pr-body-<n>.md` first
-(`mkdir -p` the directory; `<n>` is the lowest ticket of a clump), never under
+(`mkdir -p` the directory; `<n>` is the lowest ticket of a clump; `<repo>` is
+the repo's own name, taken from the common `.git` as § The merge step 3's block
+does, not the worktree's directory name), never under
 this workspace's `.scratch/`. The file's content is already the PR body on
 GitHub, and § Before the PR step 3 makes you clear `.scratch/` anyway. A
 `gh pr edit` reuses the same file.
