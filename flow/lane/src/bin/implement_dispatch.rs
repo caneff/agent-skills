@@ -459,9 +459,6 @@ fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str
         );
     }
     write_executable(&Path::new(dir).join(guard_name), guard_content)?;
-    // Even a byte-identical wrapper is rewritten: the rename is idempotent and
-    // restores the executable bit, which git needs and a chmod after install
-    // (same bytes, mode 0644) would otherwise leave inert (#1054).
     write_executable(&path, &wrapper)?;
     Ok(())
 }
