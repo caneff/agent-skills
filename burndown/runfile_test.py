@@ -361,6 +361,8 @@ def test_a_leftover_line_with_a_blank_or_multiline_field_is_refused():
          "title": "t", "severity": "judgement", "text": "t"},
         {"id": "S3", "outcome": "leftover", "file": "f.py",
          "title": "t", "severity": "judgement", "text": "line one\nline two"},
+        {"id": "S3", "outcome": "leftover", "file": "f.py",
+         "title": "t", "severity": "judgement", "text": "one\r# two"},
     ):
         sidecar = sidecar_of(bad)
         try:

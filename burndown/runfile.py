@@ -339,10 +339,12 @@ def pr_number(value):
 
 def leftover_field(value, what):
     """A leftover's id, file, title, severity or text: a non-blank string
-    with no newline — the same hygiene `dispositions_fixture_test.py` holds
-    the sidecar line to. `render` prints one line per leftover, and an
-    embedded newline would break that line in two."""
-    if not isinstance(value, str) or not value.strip() or "\n" in value:
+    with no line break (a CommonMark line ends at LF or a lone CR) — the
+    same hygiene `dispositions_fixture_test.py` holds the sidecar line to.
+    `render` prints one line per leftover, and an embedded break would split
+    that line in two."""
+    if (not isinstance(value, str) or not value.strip()
+            or "\n" in value or "\r" in value):
         raise RunFileError(f"not a {what}: {value!r}")
     return value
 
