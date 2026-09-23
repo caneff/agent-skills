@@ -59,15 +59,15 @@ def inline_safe(text):
     `<` becomes `&lt;` so raw HTML is not parsed. Backticked code spans are
     left as written. `runfile.leftover_field` already keeps the text to one
     line, so no heading or fence can start a line."""
-    def fix(chunk):
+    def defuse(chunk):
         chunk = re.sub(r"(?<!\w)@(?=\w)", "@\u200b", chunk)
         return chunk.replace("<", "&lt;")
     out, pos = [], 0
     for m in _CODE_SPAN.finditer(text):
-        out.append(fix(text[pos:m.start()]))
+        out.append(defuse(text[pos:m.start()]))
         out.append(m.group(0))
         pos = m.end()
-    out.append(fix(text[pos:]))
+    out.append(defuse(text[pos:]))
     return "".join(out)
 
 
