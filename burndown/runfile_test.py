@@ -341,32 +341,34 @@ def sidecar_of(*lines, number=901):
     return path_
 
 
-def refused_leftover(sidecar, root, *needles):
+def refusal_of(sidecar, root):
+    """The refusal `runfile.leftover` raises for `sidecar`, its message."""
     try:
         runfile.leftover("burn-1", 901, 950, sidecar, root=root)
     except runfile.RunFileError as exc:
-        for needle in needles:
-            assert needle in str(exc), exc
-    else:
-        raise AssertionError("a foreign sidecar was accepted")
-    assert runfile.load("burn-1", root=root)["leftovers"] == []
+        assert runfile.load("burn-1", root=root)["leftovers"] == []
+        return str(exc)
+    raise AssertionError("a foreign sidecar was accepted")
 
 
 def test_a_valid_sidecar_from_another_pr_is_refused():
     root = landed_root()
-    refused_leftover(named_sidecar(number=777), root, "#777", "#901")
+    got = refusal_of(named_sidecar(number=777), root)
+    assert "#777" in got and "#901" in got, got
 
 
 def test_a_foreign_sidecar_with_zero_leftovers_is_refused_not_recorded_clean():
     root = landed_root()
-    refused_leftover(
+    got = refusal_of(
         sidecar_of({"id": "S1", "outcome": "fixed", "sha": "0123abc"},
-                   number=777), root, "#777")
+                   number=777), root)
+    assert "#777" in got, got
 
 
 def test_a_sidecar_not_named_for_a_ticket_is_refused():
     root = landed_root()
-    refused_leftover(FIXTURE, root, "dispositions-<n>.jsonl")
+    got = refusal_of(FIXTURE, root)
+    assert "dispositions-<n>.jsonl" in got, got
 
 
 def test_a_sidecar_for_any_ticket_of_the_clump_is_accepted():
