@@ -278,7 +278,9 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
         "The mapping renders on one line with the rule above it.\n"
     ), body
     run_sweep = with_blocked_by(body)
-    assert frontier.blocked_by_section(run_sweep) == "- None — can start immediately."
+    # One declaration, and it names no blockers: the reader's own answer, so
+    # the tail's wording lives only where `with_blocked_by` reads it.
+    assert frontier.section_blockers(frontier.blocked_by_section(run_sweep)) == ([], None)
     assert on_the_frontier(1200, run_sweep)["unblocked"] == [1200]
 
     # 7. A per-PR sweep a worker outside the burn filed (#1033), in the same
