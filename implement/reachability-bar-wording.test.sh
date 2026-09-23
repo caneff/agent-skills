@@ -16,6 +16,10 @@ review="$(sed -n '/^### Review$/,/^### Before the PR$/p' "$skill" | flatten)"
 merge="$(sed -n '/^### The merge$/,/^## Someone else/p' "$skill" | flatten)"
 whole="$(flatten <"$skill")"
 maxis_text="$(flatten <"$maxis")"
+# A sed range whose end heading was renamed runs to EOF and would widen the
+# slice; require each end heading so a rename fails here, not silently.
+grep -q '^### Before the PR$' "$skill" && grep -q '^## Someone else' "$skill" ||
+  { echo "FAIL: an end heading the section slices need was renamed" >&2; exit 1; }
 [ -n "$review" ] && [ -n "$merge" ] || { echo "FAIL: could not extract sections" >&2; exit 1; }
 
 fail=0
@@ -24,14 +28,17 @@ check_in() {
 }
 check_in "§ Review" "$review" '**The reachability bar.**'
 check_in "§ Review" "$review" 'applied before severity'
+check_in "§ Review" "$review" 'the worker in round 1, the controller at merge'
+check_in "§ Review" "$review" 'disputed rather than fixed'
 check_in "§ Review" "$review" 'this box (WSL, one user, shared 32 cores)'
 check_in "§ Review" "$review" 'all SHA-1, all `caneff/*`'
 check_in "§ Review" "$review" '`disputed: unreachable — <why>`'
 check_in "§ Review" "$review" 'whatever Codex'"'"'s severity word'
-check_in "§ Review" "$review" 'not a sidecar line'
+check_in "§ Review" "$review" 'never becomes a `leftover` sidecar line'
 check_in "§ The merge" "$merge" "§ Review's reachability bar"
 check_in "multi-axis-code-review § 4" "$maxis_text" "§ Review's reachability bar"
 
 n="$(grep -o -F -- '**The reachability bar.**' <<<"$whole" | wc -l || true)"
 [ "$n" -eq 1 ] || { echo "FAIL: expected the bar's heading exactly once, found $n" >&2; fail=1; }
+[ "$fail" -eq 0 ] && echo "PASS $0"
 exit "$fail"

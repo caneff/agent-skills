@@ -225,16 +225,19 @@ No PR and no reviewer; Chris reads the log after.
    `judgement` are not high.
 
    **The reachability bar.** Stated here once, applied before severity: a
-   finding is filed, or kept as a leftover, only when the controller can
-   name how its failure occurs in our environment — this box (WSL, one
-   user, shared 32 cores), our repos (all SHA-1, all `caneff/*`), and
-   bodies people here actually write. A finding that fails that bar is
-   `disputed: unreachable — <why>` in the PR body, whatever Codex's
-   severity word, and it is not a sidecar line. It leaves the fix-in-round
-   rules alone: a reachable small finding is still fixed, an unreachable
-   one is not worth a round either. (#1086: `burn-2026-09-22-0636` filed
-   seven tickets from second and third passes; four described failures
-   that cannot occur here.)
+   finding is filed, or kept as a leftover, only when whoever disposes of
+   it — the worker in round 1, the controller at merge — can name how its
+   failure occurs in our environment: this box (WSL, one user, shared 32
+   cores), our repos (all SHA-1, all `caneff/*`), and the ticket and PR
+   bodies people here actually write, not a constructed pathological
+   input. A finding that fails that bar is `disputed: unreachable — <why>`
+   in the PR body, whatever Codex's severity word, and it never becomes a
+   `leftover` sidecar line (a round-1 finding still gets its `disputed`
+   line from the verification pass, as every round-1 finding does). The
+   fix-in-round rules stand for a reachable finding; an unreachable one is
+   disputed rather than fixed, even when it would pass the adjacent-fix
+   rule. (#1086: `burn-2026-09-22-0636` filed seven tickets from second
+   and third passes; four described failures that cannot occur here.)
 
    **The adjacent-fix rule.** A round-1 finding is fixed in the round, not
    filed, when all five parts hold: it sits in a file already in the diff;
