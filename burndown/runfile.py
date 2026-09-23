@@ -372,10 +372,9 @@ def leftover_record(value):
 
 def read_dispositions(sidecar_path):
     """Every line of a dispositions sidecar (`implement/SKILL.md` § Review),
-    in order, each a JSON object with one of the five sidecar outcomes. A
-    line that is not is refused by file and line, never skipped: a skipped
-    line reads as a PR that genuinely left nothing, and `sweep.py counts`
-    would report the same low count with a clean exit."""
+    in order, as `(line number, object)`. A line that is not a JSON object
+    with one of the five sidecar outcomes is refused by file and line — why
+    it is not skipped: `references/run-file.md` § Leftovers."""
     try:
         with open(sidecar_path) as fh:
             raw_lines = fh.readlines()
