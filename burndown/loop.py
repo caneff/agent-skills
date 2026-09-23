@@ -137,7 +137,10 @@ def picks(state, free):
     """`(picked, held)`: the clumps to dispatch, taken from a frontier
     already read — widest closure first, ties broken by lowest ticket, every
     free slot at once — and every clump the same-tick guard skipped, each
-    naming the earlier pick it collided with. Sorted before the guard runs
+    naming the earlier pick it collided with. The walk goes past the free
+    slots (#1049), so a clump beyond the cut that collides with a pick is
+    held too; one that collides with nothing is in neither list. Sorted
+    before the guard runs
     (#1026): why widest-first, and what it costs: `references/loop.md`.
 
     Split from `refill` so a caller that also reports what is holding the
@@ -153,8 +156,6 @@ def picks(state, free):
     widest_first = sorted(state["dispatchable"],
                           key=lambda c: (-len(paths(c)), key_of(c)))
     for clump in widest_first:
-        if len(picked) == free:
-            break
         # A clump picked a moment ago is in flight by the time the next one
         # starts, so the same exclusion applies inside one tick. Candidates
         # that collide with each other are normally one clump already — this
@@ -170,7 +171,11 @@ def picks(state, free):
                         "over": sorted(paths(clump) & paths(blocker)),
                         "same_tick": True})
             continue
-        picked.append(clump)
+        # Past the free-slot cut the walk goes on so a collision with a pick
+        # is still named (#1049); a clump that collides with nothing is only
+        # out of slots, not held.
+        if len(picked) < free:
+            picked.append(clump)
     return picked, held
 
 
