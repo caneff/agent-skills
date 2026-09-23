@@ -196,10 +196,14 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
         shared = [json.loads(raw) for raw in fh if raw.strip()]
     outcomes = sorted({line["outcome"] for line in shared})
     assert outcomes == ["disputed", "filed", "fixed", "handed-back", "leftover"], outcomes
+    def bound(shas):
+        """The shared sidecar with each named finding's sha bound to a real commit."""
+        return [dict(line, sha=shas[line["id"]]) if line["id"] in shas else line
+                for line in shared]
+
     shas = {"S1": ticket_fix, "C2": adjacent}
     sidecar_901 = os.path.join(reviews, "dispositions-901.jsonl")
-    write_jsonl(sidecar_901, [dict(line, sha=shas[line["id"]]) if line["id"] in shas else line
-                              for line in shared])
+    write_jsonl(sidecar_901, bound(shas))
     measured = cli(CHECK_ADJACENT, "--repo", repo, "--base", base, sidecar_901)
     assert measured.returncode == 0, (measured.stdout, measured.stderr)
     assert measured.stdout == "C2: ok, 3 changed lines in burndown/loop.py\n", measured.stdout
@@ -208,9 +212,7 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
                               + "ticket work, fixed\n", "burndown/cost.py": numbered(41)},
                        "C2 again, spilling into cost.py")
     breach = os.path.join(work, "dispositions-901-breach.jsonl")
-    write_jsonl(breach, [dict(line, sha=two_files) if line["id"] == "C2" else
-                         dict(line, sha=shas[line["id"]]) if line["id"] in shas else line
-                         for line in shared])
+    write_jsonl(breach, bound(dict(shas, C2=two_files)))
     failed = cli(CHECK_ADJACENT, "--repo", repo, "--base", base, breach)
     assert failed.returncode == 1, (failed.stdout, failed.stderr)
     assert "BREACH C2: touches 2 files; the rule allows one" in failed.stdout, failed.stdout
