@@ -214,3 +214,4 @@ Filed from conversation — controller, map #776 merge tail.
 | agent-skills#1049 | #1102 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#1047 | #1103 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#1000 | #1105 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
+| agent-skills#1097 | #1111 | 0 | 0 | 2 | One run, needs-attention, two codex-only mediums, both disputed by the controller. M1: a known-outcome sidecar line with no payload is counted by `counts`; unreachable as a silent wrong count, since `runfile.py leftover` refuses an incomplete leftover line at every landing, before counts runs at close. M2: `file` rendered unescaped in the sweep heading; unreachable, `file` is a repo path our reviewers write and no path here holds `@` or `<`. Sha unmoved, no second pass. |
