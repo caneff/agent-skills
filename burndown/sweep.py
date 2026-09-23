@@ -10,7 +10,7 @@ that the run has no leftovers and prints nothing to file on stdout. This is
 the renderer #1029 left for #1030: the run file was already the store,
 nothing here writes to it.
 
-    python3 burndown/sweep.py counts <run-id> [--reviews-dir <dir>]
+    python3 burndown/sweep.py counts <run-id> --repo <checkout> | --reviews-dir <dir>
 
 prints the closing report's three counts — fixed in-round, leftover,
 standalone — read from each landed clump's dispositions sidecar
@@ -185,8 +185,11 @@ def main(argv):
         "counts",
         help="print the run's fixed-in-round/leftover/standalone counts")
     c.add_argument("run_id")
+    c.add_argument("--repo",
+                   help="the target repo's primary checkout; its name keys "
+                        "~/.cache/agent-reviews/<repo>")
     c.add_argument("--reviews-dir",
-                   help="override ~/.cache/agent-reviews/<repo> (tests)")
+                   help="the sidecar directory itself, instead of --repo")
 
     args = parser.parse_args(argv[1:])
 
@@ -215,8 +218,23 @@ def main(argv):
         print(body, end="")
         return 0
 
-    reviews_dir = (os.path.expanduser(args.reviews_dir) if args.reviews_dir
-                   else default_reviews_dir())
+    # No default from the cwd: the controller may run from a different
+    # primary checkout than the run's target (#1093), and a wrong cwd reads
+    # another repo's sidecars or reports every landed clump missing.
+    if args.reviews_dir:
+        reviews_dir = os.path.expanduser(args.reviews_dir)
+    elif args.repo:
+        try:
+            reviews_dir = default_reviews_dir(os.path.expanduser(args.repo))
+        except (subprocess.CalledProcessError, OSError) as exc:
+            print(f"sweep.py: --repo {args.repo} is not a git checkout: {exc}",
+                  file=sys.stderr)
+            return 1
+    else:
+        print("sweep.py: counts needs --repo <primary checkout> (or "
+              "--reviews-dir): the cwd's repo is not the run's target",
+              file=sys.stderr)
+        return 1
     try:
         c = counts(run, reviews_dir)
     except runfile.RunFileError as exc:

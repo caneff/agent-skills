@@ -96,9 +96,11 @@ def test_title_names_the_run_id():
         "Sweep: leftovers from burn burn-2026-09-20-0905"
 
 
-def cli(root, *args):
+def cli(root, *args, cwd=None, home=None):
     env = dict(os.environ, BURNDOWN_CACHE_DIR=root)
-    return subprocess.run([sys.executable, SWEEP, *args], env=env,
+    if home:
+        env["HOME"] = home
+    return subprocess.run([sys.executable, SWEEP, *args], env=env, cwd=cwd,
                           capture_output=True, text=True)
 
 
@@ -244,6 +246,45 @@ def test_counts_refuses_a_malformed_sidecar_line_rather_than_count_low():
         got = cli(root, "counts", run_id, "--reviews-dir", reviews)
         assert got.returncode == 1, (bad, got)
         assert "dispositions-901.jsonl:2" in got.stderr, (bad, got.stderr)
+
+
+def git_repo(parent, name):
+    path = os.path.join(parent, name)
+    os.makedirs(path)
+    subprocess.run(["git", "init", "-q", path], check=True)
+    return path
+
+
+def test_cli_counts_reads_the_target_repos_sidecars_from_another_cwd():
+    # The controller runs from one primary checkout and addresses another
+    # with `--repo` (#1093): the sidecar directory is the target's, not the
+    # cwd's — and a same-named sidecar under the cwd repo must not be read.
+    root = cache()
+    home = sidecar_dir()
+    target = git_repo(home, "target-repo")
+    other = git_repo(home, "other-repo")
+    runfile.start("burn-x", slots=1, root=root)
+    runfile.clump("burn-x", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-x", 901, "abc1234", root=root)
+    for name, outcome in (("target-repo", "filed"), ("other-repo", "fixed")):
+        d = os.path.join(home, ".cache", "agent-reviews", name)
+        os.makedirs(d)
+        write_sidecar(d, 901, [{"id": "S1", "outcome": outcome, "sha": "a",
+                                "ticket": 5}])
+    got = cli(root, "counts", "burn-x", "--repo", target, cwd=other, home=home)
+    assert got.returncode == 0, got
+    assert "standalone: 1" in got.stdout, got.stdout
+    assert "fixed in-round: 0" in got.stdout, got.stdout
+
+
+def test_cli_counts_refuses_with_neither_repo_nor_reviews_dir():
+    # No cwd default: from the wrong repo it reads another repo's sidecars
+    # or reports every landed clump missing.
+    root = cache()
+    runfile.start("burn-y", slots=1, root=root)
+    got = cli(root, "counts", "burn-y", cwd=git_repo(cache(), "any"))
+    assert got.returncode == 1, got
+    assert "--repo" in got.stderr, got.stderr
 
 
 def main():
