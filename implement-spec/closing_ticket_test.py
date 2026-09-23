@@ -200,6 +200,31 @@ def test_the_colon_may_sit_inside_the_emphasis():
     assert "**Seam**: **" not in got, got
 
 
+def test_a_colon_inside_the_emphasis_needs_no_space_before_a_code_span():
+    # `- **Seam:**`npm run e2e`` is a balanced key followed directly by a
+    # code span. The lookahead grammar left the closing `**` in the value.
+    got = T.body(repo(agents="""# Fixture repo
+
+## End-to-end seam
+
+- **Seam:**`npm run e2e`
+- **Blind to:**the live editor
+"""), spec=366, shas=SHAS, surfaces=[])
+    assert "- **Seam**: `npm run e2e`" in got, got
+    assert "**Seam**: **" not in got, got
+
+
+def test_neither_reader_defines_a_key_regex_of_its_own():
+    # One key-line parser, in `frontier` (#1000): a second `_KEY` is the
+    # drift #928 fixed once already.
+    burndown = os.path.join(REPO_ROOT, "burndown")
+    for path in (GENERATOR, os.path.join(burndown, "closure.py")):
+        with open(path) as fh:
+            source = fh.read()
+        # The key grammar's own key group, under whatever name it is bound.
+        assert "[A-Za-z][A-Za-z -]*?" not in source, path
+
+
 def test_a_root_that_is_not_a_directory_is_not_a_missing_declaration():
     # A typo'd root reported as "this repo declares no seam" sends the
     # operator to edit an `AGENTS.md` that was never the problem.

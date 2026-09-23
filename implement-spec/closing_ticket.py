@@ -29,19 +29,11 @@ import sys
 # it.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 os.pardir, "burndown"))
-from frontier import visible  # noqa: E402
+from frontier import key_line, visible  # noqa: E402
 
 _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
 _SEAM_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+end-to-end seam[ \t]*:?[ \t]*$",
                            re.IGNORECASE)
-# `- **Seam**: <what>` and `- **Seam:** <what>` both: the emphasis may close
-# on either side of the colon, and read by the stricter grammar the second
-# form yields a value beginning with `**`, silently, into the ticket body. A
-# closing emphasis run only counts when whitespace or the line end follows it,
-# so a value that is itself bold — `- **Seam**: **the app**` — keeps its own
-# markers.
-_KEY = re.compile(r"^[ \t]*[-*+][ \t]*[*_]{0,2}([A-Za-z][A-Za-z -]*?)[*_]{0,2}"
-                  r"[ \t]*:(?:[*_]{1,2}(?=[ \t]|$))?[ \t]*(.*?)[ \t]*$")
 
 
 class SeamError(Exception):
@@ -61,9 +53,9 @@ def declaration(text):
         for _, rest in lines[pos + 1:]:
             if _ANY_HEADING.match(rest):
                 break
-            match = _KEY.match(rest)
-            if match:
-                found[match.group(1).strip().lower()] = match.group(2).strip()
+            key = key_line(rest)
+            if key:
+                found[key[0]] = key[1]
         return found
     return None
 

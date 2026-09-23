@@ -128,6 +128,30 @@ def visible(lines):
     return [(i, line) for i, line in unfenced(lines) if not _QUOTED.match(line)]
 
 
+# `- **Directive**: <value>` — a key in optional emphasis, then a colon. The
+# colon may sit inside the emphasis (`**Directive:**`): that closing run is
+# consumed whatever follows it, since the key's own emphasis is balanced and
+# `**Directive:**`#include <path>`` is a valid line. A colon after the
+# emphasis (`**Directive**:`) keeps a bold value's markers, `**Directive**:**x**`
+# reading as the value `**x**`. One grammar for `closure.py` and
+# `implement-spec/closing_ticket.py` (#928, #1000): two copies drifted once.
+_KEY = re.compile(
+    r"^[ \t]*[-*+][ \t]*(?:"
+    r"[*_]{1,2}(?P<inside>[A-Za-z][A-Za-z -]*?)[ \t]*:[*_]{1,2}"
+    r"|[*_]{0,2}(?P<outside>[A-Za-z][A-Za-z -]*?)[*_]{0,2}[ \t]*:"
+    r")[ \t]*(?P<value>.*?)[ \t]*$")
+
+
+def key_line(line):
+    """`(key, value)` for a `- **Key**: value` line, the key stripped and
+    lowercased and the value stripped, or `None` when the line is no key."""
+    match = _KEY.match(line)
+    if not match:
+        return None
+    key = match.group("inside") or match.group("outside")
+    return key.strip().lower(), match.group("value").strip()
+
+
 def blocked_by_section(body):
     """What the ticket states about its blockers, or `None` when it states
     nothing at all — a ticket that never mentions the relationship is not a
