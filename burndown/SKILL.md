@@ -75,7 +75,9 @@ too.
    every **in-flight** clump's, through `closure.py` against current `main`,
    **one hop**; an in-flight clump's tickets and workspace come from the run
    file, its closure from that re-resolution, and the two together are
-   `loop.py dispatch`'s `--in-flight`. A clump whose closure intersects a
+   `loop.py dispatch`'s `--in-flight`; its job record is in neither, and
+   `--run <run-id>` is required, and dispatch reads it from the run file by
+   the clump's lowest ticket, ignoring any `job` in the in-flight file. A clump whose closure intersects a
    live workspace's is **off the frontier**: `loop.py dispatch` picks from
    what is left, **widest closure first** so a wide clump does not sit
    behind narrow ones and block them later (#1026), and names what holds
@@ -362,8 +364,9 @@ forgot to declare reads exactly like one that ran nothing, and the controller
 would charge zero against the free slots either way — the same fail-closed
 posture the reader takes one layer down. The controller records it on the
 clump — `runfile.py job <run-id> --clump <n> --cores <k>`, or `--none`, or
-`--done` when the worker reports it finished — and `loop.py dispatch` reads
-the charge from **that record**, never from its own argv: a declaration that
+`--done` when the worker reports it finished — and `loop.py dispatch --run <run-id>`
+reads the charge from **that record**, never from its own argv or
+`--in-flight`: a declaration that
 lived in one command line is a hold a restart cannot recover, and the free
 slot a resumed controller then dispatches into is the contention #351
 produced.

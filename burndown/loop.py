@@ -932,6 +932,22 @@ def read_clumps(path, live=False, closure=True):
     return clumps
 
 
+def with_run_jobs(in_flight, run_id):
+    """The in-flight clumps with each `job` read from the run file, matched by
+    the clump's lowest ticket. `closure.py --json` carries no `job`, so the
+    record `runfile.py job` wrote is the only source; a clump the run file
+    holds no record for gets `None`, which `job_cores` refuses by name."""
+    import runfile
+    override = os.environ.get("BURNDOWN_CACHE_DIR")
+    root = os.path.expanduser(override) if override else None
+    try:
+        run = runfile.load(run_id, root)
+    except runfile.RunFileError as exc:
+        raise LoopError(str(exc)) from exc
+    jobs = {min(entry["tickets"]): entry["job"] for entry in run["clumps"]}
+    return [{**clump, "job": jobs.get(key_of(clump))} for clump in in_flight]
+
+
 def herdr_get(agent, timeout):
     """`herdr agent get <name>` decoded — the sweep's probe as the controller
     runs it. herdr exits non-zero for an agent it has no pane for and still
@@ -1000,6 +1016,13 @@ def run(argv):
     dispatch.add_argument("--in-flight", required=True,
                           help="the live clumps file; an empty list says no "
                                "worker is live, an omitted one is refused")
+    dispatch.add_argument("--run", required=True,
+                          help="the run id: each in-flight clump's job "
+                               "record is read from that run file, by the "
+                               "clump's lowest ticket; a `job` field in "
+                               "--in-flight is ignored. Required: an "
+                               "optional run id is the one a controller "
+                               "forgets")
     dispatch.add_argument("--free", type=int, required=True)
     # Measured when omitted, so the box check cannot be skipped by a
     # controller who does not know what number to pass.
@@ -1041,6 +1064,7 @@ def run(argv):
         elif args.command == "dispatch":
             candidates = read_clumps(args.candidates)
             in_flight = read_clumps(args.in_flight, live=True)
+            in_flight = with_run_jobs(in_flight, args.run)
             free = max(args.free, 0)
             # Measured before any early return: a broken herdr or `ps` must
             # refuse here too, not hide behind "nothing to dispatch".
