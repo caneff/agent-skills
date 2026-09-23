@@ -287,6 +287,32 @@ def test_cli_counts_refuses_with_neither_repo_nor_reviews_dir():
     assert "--repo" in got.stderr, got.stderr
 
 
+def test_cli_counts_refuses_a_repo_that_is_not_a_checkout_root():
+    # A subdirectory of a repo, or a GIT_DIR in the environment, must not
+    # resolve to some other repo's cache directory (#1093 C1, C2).
+    root = cache()
+    home = sidecar_dir()
+    outer = git_repo(home, "outer")
+    sub = os.path.join(outer, "deep")
+    os.makedirs(sub)
+    runfile.start("burn-z", slots=1, root=root)
+    got = cli(root, "counts", "burn-z", "--repo", sub, home=home)
+    assert got.returncode == 1, got
+    assert "not a git checkout" in got.stderr, got.stderr
+    assert "Traceback" not in got.stderr, got.stderr
+    got = cli(root, "counts", "burn-z", "--repo", os.path.join(home, "nope"),
+              home=home)
+    assert got.returncode == 1 and "not a git checkout" in got.stderr, got
+
+
+def test_cli_counts_refuses_both_repo_and_reviews_dir():
+    root = cache()
+    runfile.start("burn-w", slots=1, root=root)
+    got = cli(root, "counts", "burn-w", "--repo", "/x", "--reviews-dir", "/y")
+    assert got.returncode == 2, got
+    assert "not allowed with" in got.stderr, got.stderr
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     try:

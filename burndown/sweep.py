@@ -97,17 +97,26 @@ def render_body(leftovers):
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-def default_reviews_dir(repo_root=None):
+def default_reviews_dir(repo_root):
     """`~/.cache/agent-reviews/<repo>`, keyed the same way
     `multi-axis-code-review/SKILL.md`'s own dir expansion is: the primary
     checkout's basename, read off the common `.git` rather than
     `git rev-parse --show-toplevel` — a review always runs from a task
     worktree, and that command there returns the worktree's own path, not
     the repo's name every review's cache directory is keyed on."""
-    top = subprocess.run(
-        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        cwd=repo_root, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    # GIT_DIR and friends would repoint git at another repo whatever the
+    # path says, and git walks up from a subdirectory: the path must itself
+    # be a checkout root, or a mistyped one names some parent repo (#1093).
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")}
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo_root, env=env,
+                              capture_output=True, text=True,
+                              check=True).stdout.strip()
+    if os.path.realpath(git("rev-parse", "--show-toplevel")) != \
+            os.path.realpath(repo_root):
+        raise ValueError(f"{repo_root} is not the root of a git checkout")
+    top = git("rev-parse", "--path-format=absolute", "--git-common-dir")
     repo = os.path.basename(os.path.dirname(top))
     return os.path.join(os.path.expanduser("~/.cache/agent-reviews"), repo)
 
@@ -185,10 +194,11 @@ def main(argv):
         "counts",
         help="print the run's fixed-in-round/leftover/standalone counts")
     c.add_argument("run_id")
-    c.add_argument("--repo",
+    where = c.add_mutually_exclusive_group()
+    where.add_argument("--repo",
                    help="the target repo's primary checkout; its name keys "
                         "~/.cache/agent-reviews/<repo>")
-    c.add_argument("--reviews-dir",
+    where.add_argument("--reviews-dir",
                    help="the sidecar directory itself, instead of --repo")
 
     args = parser.parse_args(argv[1:])
@@ -226,7 +236,7 @@ def main(argv):
     elif args.repo:
         try:
             reviews_dir = default_reviews_dir(os.path.expanduser(args.repo))
-        except (subprocess.CalledProcessError, OSError) as exc:
+        except (subprocess.CalledProcessError, OSError, ValueError) as exc:
             print(f"sweep.py: --repo {args.repo} is not a git checkout: {exc}",
                   file=sys.stderr)
             return 1
