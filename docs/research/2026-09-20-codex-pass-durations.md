@@ -169,3 +169,4 @@ rename landed sooner.
 | 1092 | #1142 | gate | 2026-09-23T14:09:17-04:00 | 2026-09-23T14:10:21-04:00 | 1.1 | collected |
 | 1095 | #1150 | gate | 2026-09-23T14:38:26-04:00 | 2026-09-23T14:39:32-04:00 | 1.1 | collected |
 | sudokupad-art#159 | sudokupad-art#167 | gate | 2026-09-23T14:53:10-04:00 | 2026-09-23T14:54:57-04:00 | 1.8 | collected |
+| sudokupad-art#159 | sudokupad-art#167 | second | 2026-09-23T14:57:50-04:00 | 2026-09-23T14:59:39-04:00 | 1.8 | collected |
