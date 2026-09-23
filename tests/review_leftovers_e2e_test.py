@@ -63,6 +63,9 @@ BURNDOWN_SKILL = os.path.join(ROOT, "burndown", "SKILL.md")
 FILE_TICKET_SKILL = os.path.join(ROOT, "file-ticket", "SKILL.md")
 
 RUN = "burn-e2e-1024"
+# Older than any sidecar this test writes, so `runfile.py leftover` (#1084)
+# reads each sidecar as written after its PR's head commit.
+HEAD_COMMITTED = "2000-01-01T00:00:00+00:00"
 FIXTURES = []
 
 
@@ -170,14 +173,17 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
         ], fh)
     with open(live, "w") as fh:
         json.dump([], fh)
+    # `dispatch` reads the run file (#1107), so the run starts first; nothing
+    # is in flight yet, so it holds no clumps.
+    ok(cli(RUNFILE, "start", RUN, "--slots", "2", "--controller", "burn-e2e", env=env))
     dispatched = [line for line in ok(cli(
         LOOP, "dispatch", "--candidates", candidates, "--in-flight", live,
-        "--free", "2", "--processes", "4", "--committed-gb", "4")).splitlines()
+        "--run", RUN, "--free", "2", "--processes", "4", "--committed-gb", "4",
+        env=env)).splitlines()
         if line.startswith("dispatch")]
     assert dispatched == ["dispatch  #901  #901,#902", "dispatch  #910  #910"], dispatched
 
     # 2. The run file holds the two picked clumps.
-    ok(cli(RUNFILE, "start", RUN, "--slots", "2", "--controller", "burn-e2e", env=env))
     ok(cli(RUNFILE, "clump", RUN, "--tickets", "901,902", "--workspace",
            "/w/implement-901", "--agent", "w901", env=env))
     ok(cli(RUNFILE, "clump", RUN, "--tickets", "910", "--workspace",
@@ -258,13 +264,16 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     # 4. Landing copies each PR's leftovers into the run file (#1029).
     ok(cli(RUNFILE, "land", RUN, "--clump", "901", "--sha", "a1b2c3d", env=env))
     ok(cli(RUNFILE, "leftover", RUN, "--clump", "901", "--pr", "950", "--from",
-           sidecar_901, env=env))
+           sidecar_901,
+           "--head-committed", HEAD_COMMITTED, env=env))
     ok(cli(RUNFILE, "land", RUN, "--clump", "910", "--sha", "d4e5f6a", env=env))
     ok(cli(RUNFILE, "leftover", RUN, "--clump", "910", "--pr", "951", "--from",
-           sidecar_910, env=env))
+           sidecar_910,
+           "--head-committed", HEAD_COMMITTED, env=env))
     # A second copy of the same PR is a no-op, not a duplicate.
     ok(cli(RUNFILE, "leftover", RUN, "--clump", "910", "--pr", "951", "--from",
-           sidecar_910, env=env))
+           sidecar_910,
+           "--head-committed", HEAD_COMMITTED, env=env))
     # With `--controller`, as a resumed controller runs it, so `resume`
     # rewrites the run file and the leftovers must survive that write.
     ok(cli(RUNFILE, "resume", RUN, "--live", "", "--controller", "burn-e2e-resumed", env=env))
@@ -331,7 +340,8 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     sidecar_920 = os.path.join(reviews, "dispositions-920.jsonl")
     write_jsonl(sidecar_920, [{"id": "C1", "outcome": "fixed", "sha": ticket_fix}])
     ok(cli(RUNFILE, "leftover", quiet, "--clump", "920", "--pr", "970", "--from",
-           sidecar_920, env=env))
+           sidecar_920,
+           "--head-committed", HEAD_COMMITTED, env=env))
     nothing = cli(SWEEP, "render", quiet, env=env)
     assert (nothing.returncode, nothing.stdout) == (0, ""), nothing
     assert "nothing to file" in nothing.stderr, nothing.stderr
