@@ -620,10 +620,9 @@ def test_the_cli_dispatch_refuses_when_ps_cannot_be_run():
             json.dump(candidates_781(), fh)
         nobin = os.path.join(tmp, "empty-path")
         os.mkdir(nobin)
-        got = subprocess.run(
-            [sys.executable, LOOP, "dispatch", "--in-flight", EMPTY_LIVE, "--candidates", cand,
-             "--free", "1", "--committed-gb", "0"], capture_output=True,
-            text=True, timeout=60, env={**os.environ, "PATH": nobin})
+        got = loop_py("dispatch", "--in-flight", EMPTY_LIVE, "--candidates",
+                      cand, "--free", "1", "--committed-gb", "0",
+                      env={"PATH": nobin})
     assert got.returncode == 1, got
     assert "dispatch  #" not in got.stdout, got.stdout
     assert "--processes" in got.stderr, got.stderr
@@ -862,9 +861,48 @@ EMPTY_LIVE = _EMPTY.name
 
 
 def loop_py(*args, cwd=None, env=None):
-    return subprocess.run([sys.executable, LOOP, *args],
-                          capture_output=True, text=True, timeout=60, cwd=cwd,
-                          env=None if env is None else {**os.environ, **env})
+    """Runs loop.py. `dispatch` requires --run, so a call that gives none gets
+    a run file built from the `job` fields of its --in-flight file — the
+    fixture's own record of each worker's job, moved to where dispatch reads
+    it."""
+    args = list(args)
+    tmp = None
+    if args[:1] == ["dispatch"] and "--run" not in args and "--in-flight" in args:
+        tmp = tempfile.TemporaryDirectory()
+        env = {**(env or {}), "BURNDOWN_CACHE_DIR": tmp.name}
+        args += ["--run", fixture_run(tmp.name, args[args.index("--in-flight") + 1])]
+    try:
+        return subprocess.run([sys.executable, LOOP, *args],
+                              capture_output=True, text=True, timeout=60,
+                              cwd=cwd,
+                              env=None if env is None else {**os.environ, **env})
+    finally:
+        if tmp:
+            tmp.cleanup()
+
+
+def fixture_run(cache, in_flight_path):
+    """A run file in `cache` holding each in-flight fixture entry as a clump,
+    with its `job` recorded when the fixture carries one."""
+    import runfile
+    runfile.start("fixture", 5, None, root=cache)
+    with open(in_flight_path) as fh:
+        clumps = json.load(fh)
+    for entry in clumps:
+        try:
+            lowest = min(entry["tickets"])
+            runfile.clump("fixture", entry["tickets"], entry["workspace"],
+                          entry.get("agent", f"agent-{lowest}"), root=cache)
+            job = entry.get("job")
+            if job is not None:
+                runfile.job("fixture", lowest, job["state"],
+                            job.get("cores", 0), root=cache)
+        except (KeyError, TypeError, ValueError, AttributeError,
+                runfile.RunFileError):
+            # A malformed entry is the test's subject: dispatch's own reader
+            # refuses it before the run file is consulted.
+            continue
+    return "fixture"
 
 
 def test_the_cli_box_check_exits_nonzero_on_a_refusal():
@@ -1658,11 +1696,9 @@ def test_the_cli_dispatch_measures_before_it_says_a_declared_job_holds_the_slot(
         cand, live = dispatch_files(tmp, {"state": "running", "cores": 8})
         nobin = os.path.join(tmp, "empty-path")
         os.mkdir(nobin)
-        got = subprocess.run(
-            [sys.executable, LOOP, "dispatch", "--candidates", cand,
-             "--in-flight", live, "--free", "1", "--committed-gb", "4"],
-            capture_output=True, text=True, timeout=60,
-            env={**os.environ, "PATH": nobin})
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--committed-gb", "4",
+                      env={"PATH": nobin})
     assert got.returncode == 1, got
     assert "held by a declared job" not in got.stdout, got.stdout
     assert "dispatch  #" not in got.stdout, got.stdout
@@ -1879,6 +1915,39 @@ def test_dispatch_matches_a_multi_ticket_clump_by_its_lowest_ticket_1107():
                       env={"BURNDOWN_CACHE_DIR": cache})
         assert got.returncode == 0, got
         assert "#351 declared 8 cores" in got.stdout, got.stdout
+
+
+def test_dispatch_requires_a_run_id_1107():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [500], "closure": ["fresh.py"]}], fh)
+        got = subprocess.run(
+            [sys.executable, LOOP, "dispatch", "--candidates", cand,
+             "--in-flight", EMPTY_LIVE, "--free", "1", "--processes", "4",
+             "--committed-gb", "4"], capture_output=True, text=True,
+            timeout=60)
+        assert got.returncode != 0, got
+        assert "--run" in got.stderr, got.stderr
+        assert "dispatch  #500" not in got.stdout, got.stdout
+
+
+def test_a_job_field_in_the_in_flight_file_is_never_charged_1107():
+    # The in-flight file claims an 8-core job; the run file records none.
+    # Only the run file's record is charged, so the slot is free.
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live, env = run_file_dispatch(tmp, ("done",))
+        with open(live) as fh:
+            clumps = json.load(fh)
+        clumps[0]["job"] = {"state": "running", "cores": 8}
+        with open(live, "w") as fh:
+            json.dump(clumps, fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "1", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 0, got
+        assert "declared 8 cores" not in got.stdout, got.stdout
+        assert "dispatch  #500" in got.stdout, got.stdout
 
 
 if __name__ == "__main__":

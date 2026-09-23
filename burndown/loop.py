@@ -1016,11 +1016,13 @@ def run(argv):
     dispatch.add_argument("--in-flight", required=True,
                           help="the live clumps file; an empty list says no "
                                "worker is live, an omitted one is refused")
-    dispatch.add_argument("--run",
+    dispatch.add_argument("--run", required=True,
                           help="the run id: each in-flight clump's job "
                                "record is read from that run file, by the "
-                               "clump's lowest ticket, never from "
-                               "--in-flight")
+                               "clump's lowest ticket; a `job` field in "
+                               "--in-flight is ignored. Required: an "
+                               "optional run id is the one a controller "
+                               "forgets")
     dispatch.add_argument("--free", type=int, required=True)
     # Measured when omitted, so the box check cannot be skipped by a
     # controller who does not know what number to pass.
@@ -1062,8 +1064,7 @@ def run(argv):
         elif args.command == "dispatch":
             candidates = read_clumps(args.candidates)
             in_flight = read_clumps(args.in_flight, live=True)
-            if args.run:
-                in_flight = with_run_jobs(in_flight, args.run)
+            in_flight = with_run_jobs(in_flight, args.run)
             free = max(args.free, 0)
             # Measured before any early return: a broken herdr or `ps` must
             # refuse here too, not hide behind "nothing to dispatch".

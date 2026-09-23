@@ -76,8 +76,8 @@ too.
    **one hop**; an in-flight clump's tickets and workspace come from the run
    file, its closure from that re-resolution, and the two together are
    `loop.py dispatch`'s `--in-flight`; its job record is in neither, and
-   `--run <run-id>` makes dispatch read it from the run file by the clump's
-   lowest ticket. A clump whose closure intersects a
+   `--run <run-id>` is required, and dispatch reads it from the run file by
+   the clump's lowest ticket, ignoring any `job` in the in-flight file. A clump whose closure intersects a
    live workspace's is **off the frontier**: `loop.py dispatch` picks from
    what is left, **widest closure first** so a wide clump does not sit
    behind narrow ones and block them later (#1026), and names what holds
