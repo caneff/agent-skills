@@ -455,7 +455,7 @@ def test_cli_leftover_appends_and_show_prints_the_leftovers():
         "--agent", "agent-a")
     cli(root, "land", "burn-1", "--clump", "901", "--sha", "abc1234")
     got = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
-              "--from", SIDECAR)
+              "--from", SIDECAR, "--allow-stale")
     assert got.returncode == 0, got.stderr
     assert "copied 1 leftover" in got.stdout, got.stdout
     shown = cli(root, "show", "burn-1")
@@ -466,7 +466,7 @@ def test_cli_leftover_appends_and_show_prints_the_leftovers():
     assert "judgement" in shown.stdout, shown.stdout
     assert "Mysterious name" in shown.stdout, shown.stdout
     again = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
-               "--from", SIDECAR)
+               "--from", SIDECAR, "--allow-stale")
     assert again.returncode == 0, again.stderr
     assert "copied 0 leftover" in again.stdout, again.stdout
 
@@ -1113,6 +1113,101 @@ def test_the_cli_records_a_job_and_shows_it():
     none = cli(root, "job", "r-job5", "--clump", "351", "--none")
     assert none.returncode == 0, none
     assert "no parallel job" in cli(root, "show", "r-job5").stdout
+
+
+# --- A sidecar older than the PR's head commit is stale (#1085) ------------
+
+def landed_root():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    return root
+
+
+def test_a_sidecar_line_rewritten_from_leftover_to_fixed_yields_no_leftover():
+    leftover_line = {"id": "S3", "outcome": "leftover", "file": "a.py",
+                     "title": "t", "severity": "hard", "text": "x"}
+    sidecar = sidecar_of(leftover_line)
+    os.utime(sidecar, (1_000_000_000, 1_000_000_000))  # 2001, before the head
+    try:
+        root = landed_root()
+        head = "2026-09-22T10:00:00Z"
+        try:
+            runfile.leftover("burn-1", 901, 950, sidecar, root=root,
+                             head_committed=head)
+        except runfile.RunFileError:
+            pass
+        else:
+            raise AssertionError("the stale sidecar was accepted")
+        # The controller's rewrite: same finding, new outcome, fresh mtime.
+        with open(sidecar, "w") as fh:
+            fh.write(json.dumps({"id": "S3", "outcome": "fixed",
+                                 "sha": "abc1234"}) + "\n")
+        _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root,
+                                    head_committed=head)
+        assert added == [], added
+        assert runfile.load("burn-1", root=root)["leftovers"] == []
+    finally:
+        os.remove(sidecar)
+
+
+def test_a_head_committed_without_a_utc_offset_is_refused():
+    root = landed_root()
+    try:
+        runfile.leftover("burn-1", 901, 950, SIDECAR, root=root,
+                         head_committed="2026-09-22T10:00:00")
+    except runfile.RunFileError as err:
+        assert "no UTC offset" in str(err), err
+    else:
+        raise AssertionError("a naive timestamp was accepted")
+
+
+def test_a_sidecar_older_than_the_pr_head_commit_is_refused():
+    sidecar = sidecar_of({"id": "S3", "outcome": "leftover", "file": "a.py",
+                          "title": "t", "severity": "hard", "text": "x"})
+    os.utime(sidecar, (1_000_000_000, 1_000_000_000))  # 2001
+    try:
+        root = landed_root()
+        try:
+            runfile.leftover("burn-1", 901, 950, sidecar, root=root,
+                             head_committed="2026-09-22T10:00:00Z")
+        except runfile.RunFileError as err:
+            assert "older than" in str(err), err
+        else:
+            raise AssertionError("a stale sidecar was accepted")
+        assert runfile.load("burn-1", root=root)["leftovers"] == []
+        # A sidecar written after the head commit is not stale.
+        os.utime(sidecar, (1_900_000_000, 1_900_000_000))  # 2030
+        _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root,
+                                    head_committed="2026-09-22T10:00:00Z")
+        assert added == ["S3"], added
+    finally:
+        os.remove(sidecar)
+
+
+def test_cli_leftover_needs_head_committed_or_allow_stale():
+    root = landed_root()
+    bare = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
+               "--from", SIDECAR)
+    assert bare.returncode != 0, bare.stdout
+    stale = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
+                "--from", SIDECAR, "--head-committed", "2999-01-01T00:00:00Z")
+    assert stale.returncode != 0 and "older than" in stale.stderr, stale.stderr
+    ok = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
+             "--from", SIDECAR, "--allow-stale")
+    assert ok.returncode == 0, ok.stderr
+
+
+def test_a_missing_sidecar_is_refused_by_name_under_head_committed():
+    root = landed_root()
+    try:
+        runfile.leftover("burn-1", 901, 950, "/nonexistent/sidecar.jsonl",
+                         root=root, head_committed="2026-09-22T10:00:00Z")
+    except runfile.RunFileError as err:
+        assert "/nonexistent/sidecar.jsonl" in str(err), err
+    else:
+        raise AssertionError("a missing sidecar was accepted")
 
 
 def main():

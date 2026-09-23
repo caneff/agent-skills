@@ -749,6 +749,17 @@ The controller merges on a repo Chris owns; Chris reads it after via
    before any Codex pass ran, so a leftover kept only in the PR body never
    reaches a sweep.
 
+   **A disposition that changes after the verification pass rewrites its
+   sidecar line** (#1085). Whoever changes it — the controller's read of an
+   in-round fix, or a ruling — rewrites that finding's line in
+   `dispositions-<n>.jsonl` to its new outcome in the same step that records
+   it in the PR body. A `leftover` line left standing after its finding was
+   fixed is a sweep item that no longer exists (#1028: P2 ruled fixed in
+   `bda6750`, sidecar still `leftover`). `runfile.py leftover` catches part
+   of the miss at harvest: it refuses a sidecar written before the PR's head
+   commit (`--head-committed`), which is a fix pushed after the sidecar. A
+   ruling that adds no commit is not seen by it; the rewrite is the rule.
+
    Classify each finding by comparing it with the PR body's round-1
    findings — `codex-only, confirmed` (fixed or filed, and no Claude axis
    raised it), `also found by Claude`, or `disputed` (with why) — and
