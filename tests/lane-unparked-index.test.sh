@@ -16,7 +16,7 @@ trap 'rm -rf "$scratch"' EXIT
 fail=0
 
 git clone -q --no-hardlinks "$root" "$scratch/c" || { echo "FAIL: clone" >&2; exit 1; }
-# Test the working copy's script and files, not the clone's older HEAD.
+# Test the working copy's script (the clone's files are HEAD's).
 cp "$root/tests/lane-unparked.test.sh" "$scratch/c/tests/lane-unparked.test.sh"
 cd "$scratch/c" || exit 1
 
