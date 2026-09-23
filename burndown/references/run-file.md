@@ -108,6 +108,15 @@ PR that genuinely left nothing. It also prints `copied N leftover(s) from
 through the same reader (`runfile.read_dispositions`), so it refuses the same
 lines rather than counting low.
 
+`<dispositions sidecar>` must be named `dispositions-<n>.jsonl` with `<n>` one
+of the clump's tickets, else it is refused (#1084). The name is checked
+after the lines are read and the clump is found to have landed, so a
+misnamed sidecar with a malformed line is refused for that line first.
+The sidecar grammar carries no PR or ticket field, so the name is the only
+provenance there is: without the check, another PR's sidecar attributes its
+leftovers to this clump for good, and one holding no leftover records zero
+and exits clean.
+
 `--head-committed <ISO>` is the PR head commit's committer date
 (`gh pr view <pr> --json commits --jq '.commits[-1].committedDate'`). A
 sidecar whose mtime is older is refused: a disposition changed after the

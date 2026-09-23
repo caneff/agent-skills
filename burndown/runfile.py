@@ -443,10 +443,32 @@ def refuse_stale_sidecar(sidecar_path, head_committed):
             "or pass --allow-stale")
 
 
+_SIDECAR_NAME = re.compile(r"dispositions-([0-9]+)\.jsonl")
+
+
+def refuse_foreign_sidecar(sidecar_path, tickets):
+    """A sidecar is `dispositions-<n>.jsonl` for the ticket `<n>` its PR was
+    dispatched for (`implement/SKILL.md` § Review). One whose `<n>` is not a
+    ticket this clump closes is another PR's file: its leftovers would be
+    attributed here for good, and one holding no leftover would record zero
+    and exit clean, the same as a PR that left nothing (#1084)."""
+    name = os.path.basename(sidecar_path)
+    match = _SIDECAR_NAME.fullmatch(name)
+    if match is None:
+        raise RunFileError(
+            f"{name} is not named dispositions-<n>.jsonl, so it names no "
+            "ticket to check against this clump")
+    if int(match.group(1)) not in tickets:
+        raise RunFileError(
+            f"{name} belongs to ticket #{match.group(1)}, not one of this "
+            f"clump's tickets ({', '.join(f'#{t}' for t in tickets)})")
+
+
 def leftover(run_id, lowest, pr, sidecar_path, root=None,
              head_committed=None):
     """Copy every `leftover` line of a landed PR's dispositions sidecar into
-    the run file. Idempotent per PR and finding id; a finding already
+    the run file. The sidecar's `dispositions-<n>` must name one of the
+    clump's tickets. Idempotent per PR and finding id; a finding already
     recorded under a different PR, or a clump with no recorded landing, is
     refused — the reasons are in `references/run-file.md` § Leftovers.
 
@@ -466,6 +488,7 @@ def leftover(run_id, lowest, pr, sidecar_path, root=None,
         if entry["landed"] is None:
             raise RunFileError(
                 f"clump #{lowest} has not landed — `land` comes first")
+        refuse_foreign_sidecar(sidecar_path, entry["tickets"])
         clump_prs = {item["id"]: item["pr"] for item in run["leftovers"]
                      if item["clump"] == lowest}
         added = []

@@ -102,9 +102,10 @@ def cli(root, *args):
                           capture_output=True, text=True)
 
 
-SIDECAR = os.path.join(
+SIDECAR = os.path.join(cache(), "dispositions-901.jsonl")
+shutil.copyfile(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "implement", "fixtures",
-    "dispositions-sidecar.jsonl")
+    "dispositions-sidecar.jsonl"), SIDECAR)
 
 
 def test_cli_prints_the_title_and_grouped_body_for_a_run_with_leftovers():
