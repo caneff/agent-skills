@@ -115,10 +115,10 @@ owner's word turns it on.
   clearing of `.scratch/` would take an in-flight pass's output with it. And
   the PR body, `pr-body-<n>.md` (§ The PR): a body left in `.scratch/` made
   `merge-cleanup` refuse the removal on every heavy landing, and the
-  controller re-ran it with `--discard` by hand (#1052). Another session overwrote a shared
-  `pr-body.md` between its write and `gh pr create`, and PR 908 went up
-  carrying #886's body and a `Closes #886`; only luck left #886 open to
-  nobody's harm (#909).
+  controller re-ran it with `--discard` by hand (#1052). Another session
+  overwrote a shared `pr-body.md` between its write and `gh pr create`, and
+  PR 908 went up carrying #886's body and a `Closes #886`; only luck left #886
+  open to nobody's harm (#909).
 
 ## Control
 
@@ -331,8 +331,9 @@ time, not from the worker: § The merge.
    — poll a few seconds before treating it as a real miss. Still missing:
    the closing keyword landed wrong (`Closes #<n>` inside backticks or a
    code fence doesn't register) — fix the body (`gh pr edit <pr>
-   --repo <owner/name> --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md`) and re-run this check once. If
-   it's still missing after that one fix-and-recheck, do not send "PR up" —
+   --repo <owner/name> --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md`)
+   and re-run this check once. If it's still missing after that one
+   fix-and-recheck, do not send "PR up" —
    a PR that closes nothing must not reach the merge. Stop and tell the
    controller what you tried and what `gh pr view` still returns; the
    controller rules on it (disputed, or a manual `gh issue close` planned
