@@ -246,9 +246,20 @@ def test_re_registering_a_landed_clump_keeps_its_sha():
 # The shared fixture `multi-axis-code-review`/`implement` test against:
 # `S1` fixed, `C2` fixed (adjacent), `P1` disputed, `C1` filed, `S2`
 # handed-back, `S3` leftover. Only `S3` is a leftover line.
-SIDECAR = os.path.join(
+FIXTURE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "implement", "fixtures",
     "dispositions-sidecar.jsonl")
+
+
+def named_sidecar(number=901, source=FIXTURE):
+    """A copy of `source` named `dispositions-<number>.jsonl`, the name
+    `runfile.leftover` binds to a clump's tickets (#1084)."""
+    path_ = os.path.join(cache(), f"dispositions-{number}.jsonl")
+    shutil.copyfile(source, path_)
+    return path_
+
+
+SIDECAR = named_sidecar()
 
 
 def test_leftover_copies_only_the_leftover_lines_with_every_field_filled():
@@ -312,10 +323,9 @@ def test_leftover_against_a_sidecar_with_no_leftover_line_copies_none():
     runfile.start("burn-1", slots=2, root=root)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
-    fd, no_leftovers = tempfile.mkstemp(suffix=".jsonl")
+    no_leftovers = sidecar_of({"id": "S1", "outcome": "fixed",
+                               "sha": "0123abc"})
     try:
-        with os.fdopen(fd, "w") as fh:
-            fh.write('{"id": "S1", "outcome": "fixed", "sha": "0123abc"}\n')
         _, added = runfile.leftover("burn-1", 901, 950, no_leftovers,
                                     root=root)
         assert added == [], added
@@ -323,12 +333,50 @@ def test_leftover_against_a_sidecar_with_no_leftover_line_copies_none():
         os.remove(no_leftovers)
 
 
-def sidecar_of(*lines):
-    fd, path_ = tempfile.mkstemp(suffix=".jsonl")
-    with os.fdopen(fd, "w") as fh:
+def sidecar_of(*lines, number=901):
+    path_ = os.path.join(cache(), f"dispositions-{number}.jsonl")
+    with open(path_, "w") as fh:
         for line in lines:
             fh.write(json.dumps(line) + "\n")
     return path_
+
+
+def refused_leftover(sidecar, root, *needles):
+    try:
+        runfile.leftover("burn-1", 901, 950, sidecar, root=root)
+    except runfile.RunFileError as exc:
+        for needle in needles:
+            assert needle in str(exc), exc
+    else:
+        raise AssertionError("a foreign sidecar was accepted")
+    assert runfile.load("burn-1", root=root)["leftovers"] == []
+
+
+def test_a_valid_sidecar_from_another_pr_is_refused():
+    root = landed_root()
+    refused_leftover(named_sidecar(number=777), root, "#777", "#901")
+
+
+def test_a_foreign_sidecar_with_zero_leftovers_is_refused_not_recorded_clean():
+    root = landed_root()
+    refused_leftover(
+        sidecar_of({"id": "S1", "outcome": "fixed", "sha": "0123abc"},
+                   number=777), root, "#777")
+
+
+def test_a_sidecar_not_named_for_a_ticket_is_refused():
+    root = landed_root()
+    refused_leftover(FIXTURE, root, "dispositions-<n>.jsonl")
+
+
+def test_a_sidecar_for_any_ticket_of_the_clump_is_accepted():
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root)
+    runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    _, added = runfile.leftover("burn-1", 901, 950,
+                                named_sidecar(number=902), root=root)
+    assert added == ["S3"], added
 
 
 def test_a_leftover_line_missing_a_required_field_is_refused():
