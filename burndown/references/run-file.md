@@ -109,7 +109,9 @@ through the same reader (`runfile.read_dispositions`), so it refuses the same
 lines rather than counting low.
 
 `<dispositions sidecar>` must be named `dispositions-<n>.jsonl` with `<n>` one
-of the clump's tickets, else it is refused before any line is read (#1084).
+of the clump's tickets, else it is refused (#1084). The name is checked
+after the lines are read and the clump is found to have landed, so a
+misnamed sidecar with a malformed line is refused for that line first.
 The sidecar grammar carries no PR or ticket field, so the name is the only
 provenance there is: without the check, another PR's sidecar attributes its
 leftovers to this clump for good, and one holding no leftover records zero
