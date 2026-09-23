@@ -1855,5 +1855,31 @@ def test_dispatch_refuses_when_only_the_in_flight_file_carries_the_job_1107():
         assert "#351 is live with no job record" in got.stderr, got.stderr
 
 
+def test_dispatch_matches_a_multi_ticket_clump_by_its_lowest_ticket_1107():
+    # Review C2: the run file, not a stale in-flight `job`, is the charge, and
+    # the clump is found by min(tickets) whatever order its tickets are listed.
+    import runfile
+    with tempfile.TemporaryDirectory() as tmp:
+        cache = os.path.join(tmp, "cache")
+        os.makedirs(cache)
+        runfile.start("burn-t", 5, None, root=cache)
+        runfile.clump("burn-t", [351, 360], "/w/351", "sm-351", root=cache)
+        runfile.job("burn-t", 351, "running", 8, root=cache)
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [500], "closure": ["fresh.py"]}], fh)
+        with open(live, "w") as fh:
+            json.dump([{"tickets": [360, 351], "workspace": "/w/351",
+                        "agent": "sm-351", "closure": ["verify.py"],
+                        "job": NO_JOB}], fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "1", "--processes", "4",
+                      "--committed-gb", "4",
+                      env={"BURNDOWN_CACHE_DIR": cache})
+        assert got.returncode == 0, got
+        assert "#351 declared 8 cores" in got.stdout, got.stdout
+
+
 if __name__ == "__main__":
     main()
