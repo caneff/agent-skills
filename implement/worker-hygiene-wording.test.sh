@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Guards #909: a worker's commit identity comes from the repo's config, and a
-# file whose contents become public (a --body-file) lives in the worker's own
-# workspace. Both rules sit in implement/SKILL.md § The brief. A prose
+# file whose contents become public lives in the worker's own workspace (the
+# PR body is the one exception, guarded in pr-body-location.test.sh). Both rules sit in implement/SKILL.md § The brief. A prose
 # assertion, not a behavioral test — there is no harness that runs the skill's
 # own prose. (The #963 trailer is guarded in pr-up-report-shape.test.sh, the
 # #951 --background wording in codex-pass-schedule.test.sh.)
