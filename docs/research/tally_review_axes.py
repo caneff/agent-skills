@@ -106,7 +106,7 @@ class Finding:
 class Disposition:
     id: str
     outcome: str  # "fixed" | "disputed" | "filed" | "handed-back" | "leftover"
-    detail: str  # sha / reason / ticket number, always as str
+    detail: str  # the outcome's field per _OUTCOME_DETAIL_FIELD, always as str
 
 
 def parse_report_filename(filename: str) -> ReportInfo | None:
