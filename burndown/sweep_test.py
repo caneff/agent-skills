@@ -96,8 +96,8 @@ def test_title_names_the_run_id():
         "Sweep: leftovers from burn burn-2026-09-20-0905"
 
 
-def cli(root, *args, cwd=None, home=None):
-    env = dict(os.environ, BURNDOWN_CACHE_DIR=root)
+def cli(root, *args, cwd=None, home=None, extra_env=None):
+    env = dict(os.environ, BURNDOWN_CACHE_DIR=root, **(extra_env or {}))
     if home:
         env["HOME"] = home
     return subprocess.run([sys.executable, SWEEP, *args], env=env, cwd=cwd,
@@ -303,6 +303,26 @@ def test_cli_counts_refuses_a_repo_that_is_not_a_checkout_root():
     got = cli(root, "counts", "burn-z", "--repo", os.path.join(home, "nope"),
               home=home)
     assert got.returncode == 1 and "not a git checkout" in got.stderr, got
+
+
+def test_cli_counts_ignores_a_git_dir_in_the_environment():
+    # The sidecar exists only under the target's cache dir: a GIT_DIR that
+    # repointed git at the other repo would read a directory with none and
+    # refuse the landed clump as missing.
+    root = cache()
+    home = sidecar_dir()
+    target = git_repo(home, "target-repo")
+    other = git_repo(home, "other-repo")
+    runfile.start("burn-g", slots=1, root=root)
+    runfile.clump("burn-g", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-g", 901, "abc1234", root=root)
+    d = os.path.join(home, ".cache", "agent-reviews", "target-repo")
+    os.makedirs(d)
+    write_sidecar(d, 901, [{"id": "S1", "outcome": "filed", "ticket": 5}])
+    got = cli(root, "counts", "burn-g", "--repo", target, home=home,
+              extra_env={"GIT_DIR": os.path.join(other, ".git")})
+    assert got.returncode == 0, got
+    assert "standalone: 1" in got.stdout, got.stdout
 
 
 def test_cli_counts_refuses_both_repo_and_reviews_dir():
