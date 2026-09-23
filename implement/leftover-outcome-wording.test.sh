@@ -64,11 +64,16 @@ check_in "§ The PR" "$the_pr" 'folds it into its own'
 check_in "§ The PR" "$the_pr" 'check first, the same idempotent search'
 check_in "§ The PR" "$the_pr" 'Sweep: leftovers from PR #<n> in:title'
 
-# #1095: the edit targets the number the search returned, never the PR's own
-# `<n>`, and a zero or multiple match refuses instead of falling back.
+# #1095: the edit targets the number the search returned, never the PR's
+# own `<n>`; the exact-title filter, the result cap, the failed-search stop
+# and the more-than-one refusal are each pinned by their own clause.
 check_in "§ The PR" "$the_pr" '--json number,title'
+check_in "§ The PR" "$the_pr" 'select(.title == "Sweep: leftovers from PR #<n>")'
+check_in "§ The PR" "$the_pr" '--limit 100'
 check_in "§ The PR" "$the_pr" 'gh issue edit "$sweep"'
-check_in "§ The PR" "$the_pr" 'zero or more than one'
+check_in "§ The PR" "$the_pr" 'A non-zero exit from the search stops you'
+check_in "§ The PR" "$the_pr" 'More than one line is two sweeps for one PR: stop and tell the controller, and never edit `<n>` as a fallback'
+
 
 [ "$fail" -eq 0 ] && echo "PASS $0"
 exit "$fail"
