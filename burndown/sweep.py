@@ -21,7 +21,6 @@ Filing the ticket through `/file-ticket` — the label, the `## Blocked by`
 section, and when the controller calls this — is `burndown/SKILL.md`'s own
 step, not this module's: a renderer prints a body, it does not call `gh`.
 """
-import json
 import os
 import re
 import subprocess
