@@ -231,3 +231,4 @@ Filed from conversation — controller, map #776 merge tail.
 | agent-skills#1139 | #1141 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#1082 | #1143 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#1092 | #1142 | 0 | 0 | 0 | One run, approve, no material findings, at 04d03ab (after the controller ruled the ticket's `git ls-tree HEAD` half dropped: the flake was SIGPIPE under pipefail, not the index). No second pass. |
+| agent-skills#1095 | #1150 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
