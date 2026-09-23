@@ -220,6 +220,17 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     failed = cli(CHECK_ADJACENT, "--repo", repo, "--base", base, breach)
     assert failed.returncode == 1, (failed.stdout, failed.stderr)
     assert "BREACH C2: touches 2 files; the rule allows one" in failed.stdout, failed.stdout
+    # And one file, but over the line budget: 20 changed lines is not under 20.
+    too_long = commit(repo, {"burndown/loop.py": numbered(37) + "tick2 renamed again\n"
+                             + "ticket work, fixed\n"
+                             + "".join(f"padding {i}\n" for i in range(20))},
+                      "C2 again, twenty lines long")
+    over = os.path.join(work, "dispositions-901-over.jsonl")
+    write_jsonl(over, bound(dict(shas, C2=too_long)))
+    failed = cli(CHECK_ADJACENT, "--repo", repo, "--base", base, over)
+    assert failed.returncode == 1, (failed.stdout, failed.stderr)
+    assert ("BREACH C2: 20 changed lines in burndown/loop.py; the budget is under 20"
+            in failed.stdout), failed.stdout
 
     # Clump #910's verification pass: two leftovers — one in a file #901's
     # also named, so the sweep groups across clumps — and one fixed finding.
