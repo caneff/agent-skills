@@ -1125,15 +1125,42 @@ def landed_root():
     return root
 
 
-def test_a_sidecar_rewritten_from_leftover_to_fixed_yields_no_leftover():
-    sidecar = sidecar_of({"id": "S3", "outcome": "fixed", "sha": "abc1234"})
+def test_a_sidecar_line_rewritten_from_leftover_to_fixed_yields_no_leftover():
+    leftover_line = {"id": "S3", "outcome": "leftover", "file": "a.py",
+                     "title": "t", "severity": "hard", "text": "x"}
+    sidecar = sidecar_of(leftover_line)
+    os.utime(sidecar, (1_000_000_000, 1_000_000_000))  # 2001, before the head
     try:
         root = landed_root()
-        _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root)
+        head = "2026-09-22T10:00:00Z"
+        try:
+            runfile.leftover("burn-1", 901, 950, sidecar, root=root,
+                             head_committed=head)
+        except runfile.RunFileError:
+            pass
+        else:
+            raise AssertionError("the stale sidecar was accepted")
+        # The controller's rewrite: same finding, new outcome, fresh mtime.
+        with open(sidecar, "w") as fh:
+            fh.write(json.dumps({"id": "S3", "outcome": "fixed",
+                                 "sha": "abc1234"}) + "\n")
+        _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root,
+                                    head_committed=head)
         assert added == [], added
         assert runfile.load("burn-1", root=root)["leftovers"] == []
     finally:
         os.remove(sidecar)
+
+
+def test_a_head_committed_without_a_utc_offset_is_refused():
+    root = landed_root()
+    try:
+        runfile.leftover("burn-1", 901, 950, SIDECAR, root=root,
+                         head_committed="2026-09-22T10:00:00")
+    except runfile.RunFileError as err:
+        assert "no UTC offset" in str(err), err
+    else:
+        raise AssertionError("a naive timestamp was accepted")
 
 
 def test_a_sidecar_older_than_the_pr_head_commit_is_refused():
@@ -1201,4 +1228,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

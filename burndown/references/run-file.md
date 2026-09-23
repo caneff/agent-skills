@@ -10,7 +10,7 @@ python3 burndown/runfile.py start    <run-id> [--slots <k>] [--controller <agent
 python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
 python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
 python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
-python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar>
+python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --head-committed <ISO>
 python3 burndown/runfile.py show     <run-id>
 python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 ```
@@ -112,8 +112,12 @@ lines rather than counting low.
 (`gh pr view <pr> --json commits --jq '.commits[-1].committedDate'`). A
 sidecar whose mtime is older is refused: a disposition changed after the
 verification pass rewrites its sidecar line
-(`implement/SKILL.md` § The merge), so an older file was never rewritten
-(#1085). `--allow-stale` skips
+(`implement/SKILL.md` § The merge), so a file older than the head commit
+was not rewritten after the fix that commit holds (#1085). It cannot see a
+ruling that adds no commit, or a file whose mtime moved with no line
+changing. A head commit that moved with no disposition changing (a rebase,
+a fix that touched no finding) also trips it: read the sidecar against the
+PR body, then pass `--allow-stale`. `--allow-stale` skips
 the check; one of the two flags is required, so omitting the check is
 a choice and never a default.
 

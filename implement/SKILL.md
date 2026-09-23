@@ -755,9 +755,10 @@ The controller merges on a repo Chris owns; Chris reads it after via
    `dispositions-<n>.jsonl` to its new outcome in the same step that records
    it in the PR body. A `leftover` line left standing after its finding was
    fixed is a sweep item that no longer exists (#1028: P2 ruled fixed in
-   `bda6750`, sidecar still `leftover`). `runfile.py leftover` catches the
-   miss at harvest: it refuses a sidecar written before the PR's head commit
-   (`--head-committed`).
+   `bda6750`, sidecar still `leftover`). `runfile.py leftover` catches part
+   of the miss at harvest: it refuses a sidecar written before the PR's head
+   commit (`--head-committed`), which is a fix pushed after the sidecar. A
+   ruling that adds no commit is not seen by it; the rewrite is the rule.
 
    Classify each finding by comparing it with the PR body's round-1
    findings — `codex-only, confirmed` (fixed or filed, and no Claude axis
