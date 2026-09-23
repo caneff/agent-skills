@@ -104,9 +104,9 @@ is refused by name (file and line) rather than skipped: `outcome !=
 from a wholly unrelated file, and reading both as "skip" is how a wrong or
 wrong-shaped `--from` copies zero and exits clean, indistinguishable from a
 PR that genuinely left nothing. It also prints `copied N leftover(s) from
-<path>` for the same reason. `sweep.py counts` reads the same sidecars through the same reader
-(`runfile.read_dispositions`), so it refuses the same lines rather than
-counting low.
+<path>` for the same reason. `sweep.py counts` reads the same sidecars
+through the same reader (`runfile.read_dispositions`), so it refuses the same
+lines rather than counting low.
 
 `land` comes first: a clump with no recorded landing is refused, so a PR
 that may never land cannot persist leftovers nothing can later remove.
