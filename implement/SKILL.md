@@ -692,7 +692,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    The worker disposes of each one
    (fixed in a commit / `disputed: <why>` / filed), adds each disposition to
    the PR body's Decisions made section (`gh pr edit <pr> --repo
-   <owner/name> --body-file <updated body>`), and sends "PR up" again.
+   <owner/name> --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md`), and sends "PR up" again.
    Re-run step 2 (not-draft, CLEAN — commits landed since the first check).
 
    **The second pass runs only if the head sha moved or the ticket text
