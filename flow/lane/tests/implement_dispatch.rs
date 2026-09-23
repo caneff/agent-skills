@@ -1179,7 +1179,8 @@ fn dispatch_installs_the_identity_guard_and_a_worktree_commit_is_refused() {
 
 /// A repo already carrying *this build's own* pre-commit wrapper from an
 /// earlier dispatch must be recognised as already-installed, byte-identity,
-/// and left alone. The hazard this guards (review finding C2 on #1006's own
+/// and not displaced (its bytes stay stable; it is still rewritten in place
+/// so a lost executable bit is repaired, #1054). The hazard this guards (review finding C2 on #1006's own
 /// diff, reproduced as a fork bomb): the pre-commit wrapper's own body
 /// hard-codes the name it displaces a foreign hook to (`pre-commit.foreign`)
 /// — so if a code change ever alters the wrapper's bytes without changing
@@ -1191,7 +1192,7 @@ fn dispatch_installs_the_identity_guard_and_a_worktree_commit_is_refused() {
 /// `pre-commit.foreign`, i.e. itself: self-reference, then recursion, then a
 /// forked process for every commit.
 #[test]
-fn a_repo_already_carrying_this_builds_own_pre_commit_wrapper_is_left_alone_on_redispatch() {
+fn a_repo_already_carrying_this_builds_own_pre_commit_wrapper_is_not_displaced_on_redispatch() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
@@ -1208,7 +1209,7 @@ fn a_repo_already_carrying_this_builds_own_pre_commit_wrapper_is_left_alone_on_r
     assert_eq!(
         std::fs::read_to_string(&hook).unwrap(),
         current_wrapper,
-        "an already-installed wrapper was rewritten instead of recognised as ours — its bytes must stay stable across a dispatch that changes nothing pre-commit cares about"
+        "an already-installed wrapper changed bytes instead of being recognised as ours — its bytes must stay stable across a dispatch that changes nothing pre-commit cares about"
     );
     let foreign_slot = hooks_dir(&repo).join("pre-commit.foreign");
     assert!(
@@ -1216,6 +1217,32 @@ fn a_repo_already_carrying_this_builds_own_pre_commit_wrapper_is_left_alone_on_r
         "a wrapper this build itself installs was displaced to pre-commit.foreign — the self-recursion hazard (#1006 C2)"
     );
     refuses_a_foreign_email_commit(&repo, "395");
+}
+
+/// A wrapper whose bytes still match but whose executable bit was cleared
+/// after install (#1054): git silently ignores a non-executable hook, so a
+/// byte-identical wrapper must still be repaired on the next dispatch, not
+/// taken as "already ours" and left inert.
+#[test]
+fn a_byte_identical_wrapper_that_lost_its_executable_bit_is_repaired_on_redispatch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    for slot in ["pre-commit", "pre-push"] {
+        let hook = hooks_dir(&repo).join(slot);
+        std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
+    }
+
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "396"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+
+    for slot in ["pre-commit", "pre-push"] {
+        let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(hooks_dir(&repo).join(slot)).unwrap().permissions());
+        assert!(mode & 0o111 != 0, "{slot} left non-executable (mode {mode:o}) by a redispatch");
+    }
+    refuses_a_foreign_email_commit(&repo, "396");
 }
 
 /// The pre-commit guard (#934) never fires on a replayed commit — a cherry-
