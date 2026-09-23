@@ -13,8 +13,9 @@ next reader rather than a fixture standing in for it:
      `implement/SKILL.md` § Review's grammar — clump #901's is the shared
      fixture `implement/fixtures/dispositions-sidecar.jsonl`, every one of
      its five outcomes present — and `check_adjacent.py` measures the
-     adjacent fix: in budget passes, a fix touching a second file fails the
-     pass by finding id (#1025).
+     adjacent fix: in budget passes; a fix touching a second file, one over
+     the line budget, and one to a file outside the diff each fail the pass
+     by finding id (#1025).
   4. `runfile.py land` / `leftover` copy each PR's `leftover` lines into the
      run file; `show` prints them and they survive `resume` (#1029).
   5. `sweep.py counts` prints the report's three counts (#1030).
