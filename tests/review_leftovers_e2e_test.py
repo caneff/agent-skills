@@ -132,13 +132,16 @@ def with_blocked_by(body):
 
 def fold(per_pr_body):
     """The per-PR sweep's file sections, as `burndown/SKILL.md` § The sweep
-    tells a controller to take them. The skill's jq filter is asserted
-    present and applied here as the same split."""
+    tells a controller to take them: the skill's own jq filter, run by `jq`
+    over the issue JSON `gh issue view --json body` would print."""
     with open(BURNDOWN_SKILL) as fh:
         skill = fh.read()
-    assert '.body | split("\\n## Blocked by")[0]' in skill, \
+    jq_filter = '.body | split("\\n## Blocked by")[0]'
+    assert jq_filter in skill, \
         "burndown's fold no longer stops the per-PR body before its Blocked by"
-    return per_pr_body.split("\n## Blocked by")[0]
+    taken = subprocess.run(["jq", "-r", jq_filter], input=json.dumps({"body": per_pr_body}),
+                           capture_output=True, text=True, check=True).stdout
+    return taken[:-1] if taken.endswith("\n") else taken  # `-r` adds one newline
 
 
 def on_the_frontier(number, body):
