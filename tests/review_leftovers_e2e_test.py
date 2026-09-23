@@ -255,7 +255,9 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     # A second copy of the same PR is a no-op, not a duplicate.
     ok(cli(RUNFILE, "leftover", RUN, "--clump", "910", "--pr", "951", "--from",
            sidecar_910, env=env))
-    ok(cli(RUNFILE, "resume", RUN, "--live", "", env=env))
+    # With `--controller`, as a resumed controller runs it, so `resume`
+    # rewrites the run file and the leftovers must survive that write.
+    ok(cli(RUNFILE, "resume", RUN, "--live", "", "--controller", "burn-e2e-resumed", env=env))
     shown = [line for line in ok(cli(RUNFILE, "show", RUN, env=env)).splitlines()
              if line.startswith("leftover")]
     assert shown == [
