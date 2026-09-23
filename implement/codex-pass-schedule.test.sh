@@ -158,6 +158,8 @@ check_in "$merge_section" 'the controller reads that fix diff itself' 'implement
 check_in "$merge_section" 'A third Codex run happens only when a second-pass finding fixed in the round was high.' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'The third run is final: its findings are `disputed` or `leftover`, never a fourth run.' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'phase=third' 'implement/SKILL.md § The merge'
+[ "$(grep -oF 'The third run is final' <<<"$whole_file" | wc -l)" -eq 1 ] ||
+  { echo "FAIL: 'The third run is final' does not appear exactly once in implement/SKILL.md" >&2; fail=1; }
 # The in-round fix moves the head past the second pass's verdict; without
 # saying so, the fail-closed gate reads that verdict as stale and blocks a
 # reviewed PR (C1). The ruling sends a third-run high to `leftover`, which

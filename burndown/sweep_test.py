@@ -71,6 +71,26 @@ def test_every_field_of_a_leftover_appears_in_the_render():
         assert needle in body, (needle, body)
 
 
+def test_render_defuses_mentions_and_raw_html_in_finding_text():
+    # A finding's text lands in a ticket body: `@user` would notify someone
+    # and `<tag>` would be parsed as HTML (#1097 P2). Backticked code stays.
+    body = sweep.render_body([leftover(
+        901, [901], 950, "S1", "a.py", "T <b>", "hard",
+        "ping @caneff about <img src=x> and `x < y`")])
+    assert "@caneff" not in body, body
+    assert "<img" not in body and "<b>" not in body, body
+    assert "`x < y`" in body, body
+
+
+def test_render_treats_unmatched_and_escaped_backticks_as_plain_text():
+    # CommonMark: a backtick run closes only on a run of the same length, and
+    # a backslash-escaped backtick opens nothing (#1097 C1).
+    for text in ("``<img src=x>`", "\\`<img src=x>`", "``@caneff`"):
+        body = sweep.render_body([leftover(
+            901, [901], 950, "S1", "a.py", "T", "hard", text)])
+        assert "<img" not in body and "@caneff" not in body, (text, body)
+
+
 def test_title_names_the_run_id():
     assert sweep.title("burn-2026-09-20-0905") == \
         "Sweep: leftovers from burn burn-2026-09-20-0905"
@@ -203,6 +223,27 @@ def test_cli_counts_prints_the_three_counts():
     assert "fixed in-round: 1 (0 adjacent)" in got.stdout, got.stdout
     assert "leftover: 0" in got.stdout, got.stdout
     assert "standalone: 1" in got.stdout, got.stdout
+
+
+def test_counts_refuses_a_malformed_sidecar_line_rather_than_count_low():
+    # runfile.leftover refuses these same lines; a reader that skipped them
+    # would report a low count with a clean exit (codex-second-M1, #1097).
+    bad_lines = ['{"id": "S1", "outcome": "fi', '[1, 2]',
+                 '{"id": "S1", "outcome": "mystery"}']
+    for n, bad in enumerate(bad_lines):
+        root = cache()
+        reviews = sidecar_dir()
+        run_id = f"burn-m{n}"
+        runfile.start(run_id, slots=1, root=root)
+        runfile.clump(run_id, [901], "/w/a", "agent-a", root=root)
+        runfile.land(run_id, 901, "abc1234", root=root)
+        path = os.path.join(reviews, "dispositions-901.jsonl")
+        with open(path, "w") as fh:
+            fh.write('{"id": "S0", "outcome": "fixed", "sha": "aaa"}\n')
+            fh.write(bad + "\n")
+        got = cli(root, "counts", run_id, "--reviews-dir", reviews)
+        assert got.returncode == 1, (bad, got)
+        assert "dispositions-901.jsonl:2" in got.stderr, (bad, got.stderr)
 
 
 def main():
