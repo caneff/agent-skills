@@ -39,7 +39,7 @@ worker_alert_read_brief() { # <transcript> -> "n\tcontroller" on stdout, or empt
 # the `(comm)` field) equals the record's procStart — a stale record whose
 # pid was reused has another, as in flow/lane's sessions reader.
 worker_alert_resolve_session() { # <mode: sid|name> <val> -> "sid\x1fname\x1fsock" on stdout, 0; else 1
-  local mode="$1" val="$2" f pid start sid nm sock stat fields
+  local mode="$1" val="$2" f pid start sid nm sock stat fields fallback=""
   for f in "$HOME"/.claude/sessions/*.json; do
     [ -e "$f" ] || continue
     IFS=$'\x1f' read -r pid start sid nm sock < <(jq -r --arg mode "$mode" --arg v "$val" \
@@ -50,9 +50,18 @@ worker_alert_resolve_session() { # <mode: sid|name> <val> -> "sid\x1fname\x1fsoc
     stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || continue
     read -ra fields <<<"${stat##*) }"
     [ -n "$start" ] && [ "${fields[19]:-}" = "$start" ] || continue
+    # Two live records can share one sessionId (flow/lane's sessions reader
+    # scans for the later named one on purpose), so `sid` mode keeps looking
+    # past a nameless record and returns it only when no named one follows
+    # (#1059). `name` mode matches ON a non-empty name: first hit stands.
+    if [ "$mode" = sid ] && [ -z "$nm" ]; then
+      [ -n "$fallback" ] || fallback="$(printf '%s\x1f%s\x1f%s' "$sid" "$nm" "$sock")"
+      continue
+    fi
     printf '%s\x1f%s\x1f%s\n' "$sid" "$nm" "$sock"
     return 0
   done
+  [ -n "$fallback" ] && { printf '%s\n' "$fallback"; return 0; }
   return 1
 }
 

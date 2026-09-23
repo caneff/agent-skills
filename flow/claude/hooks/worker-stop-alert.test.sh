@@ -572,6 +572,26 @@ expect_reported "a report addressed to a nameless controller's socket counts as 
 printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 
+# Two live records share the controller's sessionId (the race flow/lane's
+# sessions reader documents): the lexically first is nameless, the later one
+# named, and the worker reported to the named one's session name. `sid` mode
+# must scan every live match and prefer the named record, not stop at the
+# nameless one (#1059).
+reset_log
+sleep 60 & race_pid=$!
+race_stat=$(cat /proc/$race_pid/stat); race_start=$(set -- ${race_stat##*) }; echo "${20}")
+printf '{"pid":%s,"procStart":"%s","sessionId":"sess-race","messagingSocketPath":"/run/race-nameless.sock"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '{"pid":%s,"procStart":"%s","sessionId":"sess-race","name":"skills-race","messagingSocketPath":"/run/race-named.sock"}\n' "$race_pid" "$race_start" > "$home/.claude/sessions/zz-race.json"
+printf '%s\n' '{"result":{"agents":[{"name":"hctl-race","pane_id":"w9:p1","agent_session":{"value":"sess-race"}}]}}' > "$tmp/agent-list.json"
+race_brief='<command-message>implement</command-message>\n<command-name>/implement</command-name>\n<command-args>820 --tier heavy --controller \"hctl-race\"</command-args>'
+t="$tmp/race-reported.jsonl"
+{ human "$race_brief"; send s1 "skills-race"; ok s1; assistant_text "PR up sent"; } > "$t"
+run "two live records share the controller sessionId, first nameless" "$t"
+expect_reported "a report to the later named record's session name counts even though a nameless record sorts first"
+kill "$race_pid" 2>/dev/null; rm -f "$home/.claude/sessions/zz-race.json"
+printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
+printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
+
 reset_log
 t="$tmp/not-worker.jsonl"
 { human '<command-name>/implement</command-name>\n<command-args>820</command-args>'; assistant_text "dispatched"; } > "$t"
