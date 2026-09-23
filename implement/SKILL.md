@@ -738,8 +738,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    Findings → the controller evaluates every finding and its recommendation
    before any reaches the worker, as it did the first pass's. **A
    second-pass finding that passes § Review's adjacent-fix rule goes to
-   the worker, who fixes it in one round.** The worker makes each fix in a commit of its own. It records
-   each with § Review's adjacent-fix disposition and that sha in the PR
+   the worker, who fixes it in one round.** The worker makes each fix in
+   a commit of its own. It records each with § Review's adjacent-fix disposition and that sha in the PR
    body's Decisions made section, and sends "PR up" again. Then
    the controller reads that fix diff itself, against the finding it answers and the
    adjacent-fix rule, rather than sending it back to Codex. It re-runs
