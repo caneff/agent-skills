@@ -50,10 +50,12 @@ nothing raises heavy to light, and nothing here lowers it either.
 `tier.py <owner/repo> <n>=<path>... --strip` reports `would strip:` for each
 ticket that carries `documentation` while a target is not prose (#1045: #969
 targeted a `SKILL.md`, carried the filer's label, went out light and landed on
-main unreviewed). It writes nothing. `implement-dispatch` does the removal: it
-reads the body's paths, and on a code path (`flow/claude/WORKFLOW.md` § Gate 2: `.py/.ts/.js/.sh/.rs`,
+main unreviewed). It writes nothing. `implement-dispatch` does the removal, reading the
+body's paths by extension (so an extensionless script named in a body is
+invisible to it, where this reader, given the file list, calls it code): on a code path (`flow/claude/WORKFLOW.md` § Gate 2: `.py/.ts/.js/.sh/.rs`,
 a `SKILL.md`, `settings.json`) dispatches heavy, drops `documentation` in the
-claim edit, and says so in its report. An unreadable body strips too.
+claim edit, and says so in its report. An unreadable body dispatches heavy and
+keeps the label.
 
 ## What counts as prose
 

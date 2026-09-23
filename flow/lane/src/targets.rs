@@ -6,20 +6,26 @@
 //! So the body's own targets are read too. `flow/claude/WORKFLOW.md` § Gate 2
 //! names what is code; this is the dispatcher's reading of it, and it errs
 //! toward code — a wrong heavy tier costs one review, a wrong light tier
-//! lands code unreviewed.
+//! lands code unreviewed. It reads a body's tokens, so it can only see a path
+//! with an extension: an extensionless script is invisible here, where
+//! `burndown/tier.py --strip` (which reads a candidate's file list) would call
+//! it code.
 
-/// Extensions § Gate 2 names as code.
-const CODE_EXTENSIONS: &[&str] = &["py", "ts", "js", "sh", "rs"];
+/// Extensions § Gate 2 names as code, plus the ones that wire the harness or
+/// CI (its "hooks, CI config").
+const CODE_EXTENSIONS: &[&str] = &[
+    "py", "ts", "tsx", "js", "jsx", "mjs", "cjs", "sh", "bash", "rs", "yml", "yaml", "toml", "json",
+];
 /// Basenames that are code whatever their extension: a skill's body changes
 /// what every later session does, and `settings.json` wires the harness.
-const CODE_BASENAMES: &[&str] = &["skill.md", "settings.json"];
+const CODE_BASENAMES: &[&str] = &["skill.md"];
 
 /// The first path-shaped token in `body` that is code, if any. A token is
 /// path-shaped when it has an extension after its last `.` and no other
 /// punctuation than `/ - _ .`; trailing sentence punctuation is dropped.
 pub fn first_code_target(body: &str) -> Option<String> {
     body.split(|c: char| !(c.is_alphanumeric() || "/-_.".contains(c)))
-        .map(|t| t.trim_matches('.'))
+        .map(|t| t.trim_end_matches('.'))
         .find(|t| is_code_path(t))
         .map(str::to_string)
 }
@@ -47,7 +53,10 @@ mod tests {
 
     #[test]
     fn names_the_gate_two_code_extensions() {
-        for p in ["a/b.py", "x.ts", "x.js", "hooks/g.sh", "src/lib.rs", "settings.json"] {
+        for p in [
+            "a/b.py", "x.ts", "x.js", "hooks/g.sh", "src/lib.rs", "settings.json", ".github/workflows/ci.yml", "Cargo.toml",
+            "hooks/x.bash", "a.tsx", "a.mjs", "settings.local.json",
+        ] {
             assert_eq!(first_code_target(&format!("see {p}, then")), Some(p.into()), "{p}");
         }
     }

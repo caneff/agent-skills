@@ -187,6 +187,10 @@ fn run_gh(args: &[String]) -> ExitCode {
         let n = args.get(2).map(String::as_str).unwrap_or("");
         // `--json body` is the body read: GH_BODY_<n>, else GH_BODY.
         if args.iter().any(|a| a == "body") {
+            if env::var(format!("GH_BODY_FAIL_{n}")).is_ok() {
+                eprintln!("body read failed");
+                return ExitCode::FAILURE;
+            }
             let body = env::var(format!("GH_BODY_{n}")).or_else(|_| env::var("GH_BODY")).unwrap_or_default();
             println!("{body}");
             return ExitCode::SUCCESS;

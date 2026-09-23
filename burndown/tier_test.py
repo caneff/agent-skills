@@ -101,14 +101,12 @@ def test_nothing_is_stripped_from_prose_unlabelled_or_unknown_candidates():
 def test_strip_reports_and_never_writes():
     """`--strip` only reports what dispatch will remove: this reader keeps
     its only-ever-adds rule, and the removal is `implement-dispatch`'s."""
-    gh = FakeGh()
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         T.strip_report([candidate(969, ["a/SKILL.md"], ["documentation"]),
                         candidate(970, ["docs/n.md"], ["documentation"])])
     assert "would strip" in out.getvalue() and "#969" in out.getvalue()
     assert "#970" not in out.getvalue()
-    assert all(call[1] != "edit" for call in gh.calls), gh.calls
 
 
 class FakeGh:
@@ -192,11 +190,13 @@ def test_the_command_line_strip_reads_labels_from_the_tracker_and_writes_nothing
 
     def gh(args):
         calls.append(list(args))
-        return json.dumps({"labels": [{"name": "documentation"}]})
+        # Neither candidate carries the label, so a fall-through into the
+        # tagging pass would write it onto the prose one (#372).
+        return json.dumps({"labels": [{"name": "documentation"}] if args[2] == "969" else []})
 
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        code = T.main(["tier.py", "caneff/agent-skills", "969=x/SKILL.md", "--strip"], run=gh)
+        code = T.main(["tier.py", "caneff/agent-skills", "969=x/SKILL.md", "372=docs/n.md", "--strip"], run=gh)
     assert code == 0 and "#969" in out.getvalue(), out.getvalue()
     assert all(c[1] == "view" for c in calls), calls
 
