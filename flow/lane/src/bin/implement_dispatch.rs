@@ -47,7 +47,9 @@ waits on the worker.
 
 Plain mode: the brief is `/implement <n>... --tier light|heavy --controller
 "<name>"`, light when one issue is named and it carries the documentation
-label, heavy otherwise — a clump is always heavy, because light tier lands
+label and its body names no code path (a SKILL.md, or a .py/.ts/.js/.sh/.rs
+file, or settings.json — otherwise the label is stripped at claim and the
+report says so), heavy otherwise — a clump is always heavy, because light tier lands
 without a PR and a merged PR's closingIssuesReferences is the only record
 merge-cleanup can clear a clump's claims from. A ready-for-human issue among
 them ends the brief with --chris-merges: the worker builds the clump and
@@ -507,6 +509,9 @@ struct Ticket {
     ready: &'static str,
     chris_merges: bool,
     documentation: bool,
+    /// The code path the body names on a ticket that carries `documentation`:
+    /// the label is stripped at claim and the tier goes heavy (#1045).
+    stripped_for: Option<String>,
 }
 
 /// The `gh issue edit` that undoes one ticket's claim: in-progress off, the
@@ -798,7 +803,19 @@ fn run() -> Result<(), ExitCode> {
             }
             _ => {}
         }
-        tickets.push(Ticket { n: n.clone(), ready, chris_merges, documentation: issue.has_label("documentation") });
+        // A `documentation` label is a filer's claim; the body's targets are
+        // the evidence. An unreadable body cannot show the ticket is prose,
+        // so it reads as the label being wrong too.
+        let labelled = issue.has_label("documentation");
+        let stripped_for = if labelled {
+            match lane::issue_state::body(&slug, n) {
+                Some(body) => lane::targets::first_code_target(&body),
+                None => Some("(body unreadable)".to_string()),
+            }
+        } else {
+            None
+        };
+        tickets.push(Ticket { n: n.clone(), ready, chris_merges, documentation: labelled && stripped_for.is_none(), stripped_for });
     }
     // The clump lands as one diff. Light is the docs-only tier, so one
     // ticket that is not docs-only makes the whole diff code — the same
@@ -946,6 +963,9 @@ fn run() -> Result<(), ExitCode> {
         if !t.chris_merges {
             claim_args.extend(["--remove-label", t.ready]);
         }
+        if t.stripped_for.is_some() {
+            claim_args.extend(["--remove-label", "documentation"]);
+        }
         claim_args.extend(["--add-label", "in-progress", "--add-assignee", "@me"]);
         match runner::run("gh", &claim_args) {
             Ok(c) if c.success => claimed.push(t),
@@ -1015,7 +1035,10 @@ fn run() -> Result<(), ExitCode> {
             // Only a clump carries the note: a lone ticket has no internal
             // blockers, no sibling shas and one report already (#901).
             let note = if ns.len() > 1 { CLUMP_NOTE } else { "" };
-            (format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}{note}", ns.join(" ")), format!("{tier} tier{merger}"))
+            let stripped: Vec<String> =
+                tickets.iter().filter_map(|t| t.stripped_for.as_ref().map(|p| format!("#{} names {p}", t.n))).collect();
+            let strip_note = if stripped.is_empty() { String::new() } else { format!(", documentation label stripped: {}", stripped.join("; ")) };
+            (format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}{note}", ns.join(" ")), format!("{tier} tier{strip_note}{merger}"))
         }
         Mode::Spec { slots } => (format!("/implement-spec {n} --slots {slots} --controller \"{controller}\""), format!("spec, {slots} slots")),
     };

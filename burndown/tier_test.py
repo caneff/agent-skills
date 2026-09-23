@@ -81,6 +81,36 @@ def test_a_candidate_naming_no_files_is_never_labelled():
     assert T.labels_to_write(candidate(1, [])) == []
 
 
+def test_a_documentation_label_on_a_ticket_targeting_code_would_be_stripped():
+    """#1045: #969 targeted a `SKILL.md` and carried `documentation` from its
+    filer. The label is a claim; the targets are the evidence, and a code
+    target makes the claim wrong."""
+    c = candidate(969, ["multi-axis-code-review/SKILL.md"], ["documentation"])
+    assert T.labels_to_strip(c) == ["documentation"]
+    mixed = candidate(970, ["docs/research/n.md", "burndown/tier.py"], ["documentation"])
+    assert T.labels_to_strip(mixed) == ["documentation"]
+
+
+def test_nothing_is_stripped_from_prose_unlabelled_or_unknown_candidates():
+    assert T.labels_to_strip(candidate(1, ["docs/research/n.md"], ["documentation"])) == []
+    assert T.labels_to_strip(candidate(2, ["burndown/tier.py"])) == []
+    # No resolved files: unknown is not evidence the label is wrong.
+    assert T.labels_to_strip(candidate(3, [], ["documentation"])) == []
+
+
+def test_strip_reports_and_never_writes():
+    """`--strip` only reports what dispatch will remove: this reader keeps
+    its only-ever-adds rule, and the removal is `implement-dispatch`'s."""
+    gh = FakeGh()
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        T.strip_report([candidate(969, ["a/SKILL.md"], ["documentation"]),
+                        candidate(970, ["docs/n.md"], ["documentation"])])
+    assert "would strip" in out.getvalue() and "#969" in out.getvalue()
+    assert "#970" not in out.getvalue()
+    assert all(call[1] != "edit" for call in gh.calls), gh.calls
+
+
 class FakeGh:
     """Every `gh` argv the pass ran, and nothing else. A writer is tested by
     what it invokes: there is no tracker here to read a label back off."""
@@ -155,6 +185,20 @@ def test_the_report_says_so_when_it_wrote_nothing():
     line about labels reads the same as a report from a pass that never
     ran."""
     assert T.render([]) == "labels written: none"
+
+
+def test_the_command_line_strip_reads_labels_from_the_tracker_and_writes_nothing():
+    calls = []
+
+    def gh(args):
+        calls.append(list(args))
+        return json.dumps({"labels": [{"name": "documentation"}]})
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = T.main(["tier.py", "caneff/agent-skills", "969=x/SKILL.md", "--strip"], run=gh)
+    assert code == 0 and "#969" in out.getvalue(), out.getvalue()
+    assert all(c[1] == "view" for c in calls), calls
 
 
 class FakeView:

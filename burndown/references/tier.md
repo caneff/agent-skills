@@ -45,6 +45,16 @@ anywhere in this reader for `--remove-label`, so a label a human put on a
 ticket is never taken off by a run. A worker keeps its right to raise light to heavy;
 nothing raises heavy to light, and nothing here lowers it either.
 
+## `--strip`: a label the targets contradict
+
+`tier.py <owner/repo> <n>=<path>... --strip` reports `would strip:` for each
+ticket that carries `documentation` while a target is not prose (#1045: #969
+targeted a `SKILL.md`, carried the filer's label, went out light and landed on
+main unreviewed). It writes nothing. `implement-dispatch` does the removal: it
+reads the body's paths, and on a code path (`flow/claude/WORKFLOW.md` § Gate 2: `.py/.ts/.js/.sh/.rs`,
+a `SKILL.md`, `settings.json`) dispatches heavy, drops `documentation` in the
+claim edit, and says so in its report. An unreadable body strips too.
+
 ## What counts as prose
 
 A whitelist: `.md`, `.markdown`, `.txt`, `.rst`. Everything else is treated

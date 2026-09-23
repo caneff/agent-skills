@@ -13,7 +13,7 @@ So this reader writes the missing label onto the ticket, not a flag into the
 run: `--tier` is invisible the moment dispatch returns, while `merge-cleanup`,
 `/landed` and a resumed controller all read the ticket.
 
-It only ever adds. A label is never removed here, and a worker keeps its right
+It only ever adds. A label is never removed here (`--strip` reports what dispatch will remove, and writes nothing), and a worker keeps its right
 to raise light to heavy — the reverse of both is how a code change ships
 unreviewed.
 
@@ -64,6 +64,32 @@ def labels_to_write(candidate):
     if files and all(is_prose(f) for f in files):
         return [DOCUMENTATION_LABEL]
     return []
+
+
+def labels_to_strip(candidate):
+    """`(candidate) -> labels dispatch will remove`: `documentation` on a
+    candidate whose targets include a file that is not prose. The label is a
+    filer's claim and the targets are the evidence (#1045: #969 targeted a
+    `SKILL.md`, carried the label, and went out light). Unknown targets are
+    not evidence, so an empty file list strips nothing."""
+    files = candidate["files"]
+    if DOCUMENTATION_LABEL in candidate["labels"] and any(not is_prose(f) for f in files):
+        return [DOCUMENTATION_LABEL]
+    return []
+
+
+def strip_report(candidates):
+    """Print what `implement-dispatch` would strip. Report only: this reader
+    still never removes a label, and the removal is dispatch's, at claim."""
+    found = [(c["number"], labels_to_strip(c)) for c in candidates]
+    found = [(n, labels) for n, labels in found if labels]
+    if not found:
+        print("would strip: none")
+        return found
+    print("would strip:")
+    for n, labels in found:
+        print(f"    #{n}  {', '.join(labels)}")
+    return found
 
 
 class TierError(Exception):
@@ -165,14 +191,18 @@ def main(argv, run=None):
     know is usage rather than a candidate: `tier.py <repo> --help` used to
     reach the candidate parser and die with "not a candidate: --help"."""
     dry_run = "--dry-run" in argv[1:]
-    args = [a for a in argv[1:] if a != "--dry-run"]
+    strip = "--strip" in argv[1:]
+    args = [a for a in argv[1:] if a not in ("--dry-run", "--strip")]
     if len(args) < 2 or any(a.startswith("-") for a in args):
-        print("usage: tier.py <owner/repo> <n>=<path>[,<path>]... [--dry-run]",
+        print("usage: tier.py <owner/repo> <n>=<path>[,<path>]... [--dry-run] [--strip]",
               file=sys.stderr)
         return 2
     written = []
     try:
         candidates = candidates_from(args[0], args[1:], run)
+        if strip:
+            strip_report(candidates)
+            return 0
         tag(args[0], candidates, run, write=not dry_run, written=written)
     except (TierError, ClosureError) as exc:
         # The partial report first: whatever is already on the tracker is

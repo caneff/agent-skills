@@ -185,6 +185,12 @@ fn run_gh(args: &[String]) -> ExitCode {
         // GH_STATE/GH_LABELS/GH_ASSIGNEES trio still answers every ticket
         // with no row of its own.
         let n = args.get(2).map(String::as_str).unwrap_or("");
+        // `--json body` is the body read: GH_BODY_<n>, else GH_BODY.
+        if args.iter().any(|a| a == "body") {
+            let body = env::var(format!("GH_BODY_{n}")).or_else(|_| env::var("GH_BODY")).unwrap_or_default();
+            println!("{body}");
+            return ExitCode::SUCCESS;
+        }
         let row = match env::var(format!("GH_ISSUE_{n}")) {
             Ok(row) => row,
             Err(_) => {
