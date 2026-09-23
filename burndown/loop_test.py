@@ -140,6 +140,19 @@ def test_picks_names_a_same_tick_collision_and_its_picked_blocker():
     assert "workspace" not in by_ticket[(457,)]
 
 
+def test_picks_names_a_same_tick_collision_past_the_free_slot_cut():
+    # #1049: at --free 1 the walk stopped at #452 and never examined #457 or
+    # #458, so a controller saw one pick and no held line. Both collide with
+    # the pick and must be named; #501 collides with nothing, so it is
+    # simply out of slots, not held.
+    picked, held = loop.picks(loop.frontier(candidates_781(), []), 1)
+    assert [c["tickets"] for c in picked] == [[452]]
+    by_ticket = {tuple(h["clump"]["tickets"]): h for h in held}
+    assert sorted(by_ticket) == [(457,), (458,)]
+    assert by_ticket[(458,)]["holder"] == 452
+    assert by_ticket[(458,)]["same_tick"] is True
+
+
 def test_picks_takes_the_widest_closure_first():
     # #1026: two free slots, three independent candidates (no collisions)
     # with closure sizes 1, 4 and 2 in ticket order — the widest goes out

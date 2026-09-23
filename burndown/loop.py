@@ -153,8 +153,6 @@ def picks(state, free):
     widest_first = sorted(state["dispatchable"],
                           key=lambda c: (-len(paths(c)), key_of(c)))
     for clump in widest_first:
-        if len(picked) == free:
-            break
         # A clump picked a moment ago is in flight by the time the next one
         # starts, so the same exclusion applies inside one tick. Candidates
         # that collide with each other are normally one clump already — this
@@ -170,7 +168,11 @@ def picks(state, free):
                         "over": sorted(paths(clump) & paths(blocker)),
                         "same_tick": True})
             continue
-        picked.append(clump)
+        # Past the free-slot cut the walk goes on so a collision with a pick
+        # is still named (#1049); a clump that collides with nothing is only
+        # out of slots, not held.
+        if len(picked) < free:
+            picked.append(clump)
     return picked, held
 
 
