@@ -28,6 +28,7 @@ run_fixture code-span-name-valid
 run_fixture step-prefix-exact-valid
 run_fixture double-backtick-name-valid
 run_fixture step-locator-inline-code-valid
+run_fixture multiline-code-span-valid
 
 for fixture in pointer-suffix-invalid bare-cross-file-collision step-heading-name-invalid \
   step-number-invalid step-range-invalid \
@@ -35,7 +36,7 @@ for fixture in pointer-suffix-invalid bare-cross-file-collision step-heading-nam
   step-fence-nested-invalid step-fence-char-invalid step-fence-length-invalid \
   step-fence-info-invalid step-colon-name-invalid mention-unescaped-invalid long-name-step-invalid inline-code-name-invalid \
   step-prefix-collision-invalid possessive-inline-code-invalid conjunction-inline-code-invalid \
-  step-duplicate-exact-invalid step-prefix-ambiguous-invalid; do
+  step-duplicate-exact-invalid step-prefix-ambiguous-invalid multiline-code-span-unterminated-invalid; do
   if run_fixture "$fixture"; then
     echo "FAIL: checker accepted fixture $fixture"
     exit 1
