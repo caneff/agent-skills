@@ -814,7 +814,7 @@ fn a_worktree_listed_through_a_symlink_still_clears_its_canonically_spelled_reco
     std::fs::write(
         &shim,
         format!(
-            "#!/bin/bash\nfrom={from}\nto={to}\nif [[ \"$*\" == *\"worktree list\"* ]]; then\n  {real} \"$@\" | while IFS= read -r l; do echo \"${{l//\"$from\"/\"$to\"}}\"; done\nelse\n  exec {real} \"$@\"\nfi\n",
+            "#!/bin/bash\nfrom='{from}'\nto='{to}'\nif [[ \"$*\" == *\"worktree list\"* ]]; then\n  \"{real}\" \"$@\" | while IFS= read -r l; do echo \"${{l//\"$from\"/\"$to\"}}\"; done\nelse\n  exec \"{real}\" \"$@\"\nfi\n",
             real = which("git").display(),
             from = wt.display(),
             to = link.display(),
