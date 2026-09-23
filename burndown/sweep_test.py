@@ -82,6 +82,15 @@ def test_render_defuses_mentions_and_raw_html_in_finding_text():
     assert "`x < y`" in body, body
 
 
+def test_render_treats_unmatched_and_escaped_backticks_as_plain_text():
+    # CommonMark: a backtick run closes only on a run of the same length, and
+    # a backslash-escaped backtick opens nothing (#1097 C1).
+    for text in ("``<img src=x>`", "\\`<img src=x>`", "``@caneff`"):
+        body = sweep.render_body([leftover(
+            901, [901], 950, "S1", "a.py", "T", "hard", text)])
+        assert "<img" not in body and "@caneff" not in body, (text, body)
+
+
 def test_title_names_the_run_id():
     assert sweep.title("burn-2026-09-20-0905") == \
         "Sweep: leftovers from burn burn-2026-09-20-0905"

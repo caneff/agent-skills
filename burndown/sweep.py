@@ -49,6 +49,11 @@ def grouped_by_file(leftovers):
     return [(file, groups[file]) for file in order]
 
 
+# A CommonMark code span: a backtick run closes only on a run of the same
+# length, and a backslash-escaped backtick opens nothing.
+_CODE_SPAN = re.compile(r"(?<![`\\])(`+)(?!`)(?:(?!\1).)+?(?<!`)\1(?!`)")
+
+
 def inline_safe(text):
     """A finding's title or text made safe to sit in a ticket body: an
     `@mention` is broken with a zero-width space so it notifies nobody, and
@@ -59,7 +64,7 @@ def inline_safe(text):
         chunk = re.sub(r"(?<!\w)@(?=\w)", "@\u200b", chunk)
         return chunk.replace("<", "&lt;")
     out, pos = [], 0
-    for m in re.finditer(r"(`+)(?:(?!\1).)+?\1", text):
+    for m in _CODE_SPAN.finditer(text):
         out.append(fix(text[pos:m.start()]))
         out.append(m.group(0))
         pos = m.end()
