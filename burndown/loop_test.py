@@ -861,9 +861,10 @@ _EMPTY.close()
 EMPTY_LIVE = _EMPTY.name
 
 
-def loop_py(*args, cwd=None):
+def loop_py(*args, cwd=None, env=None):
     return subprocess.run([sys.executable, LOOP, *args],
-                          capture_output=True, text=True, timeout=60, cwd=cwd)
+                          capture_output=True, text=True, timeout=60, cwd=cwd,
+                          env=None if env is None else {**os.environ, **env})
 
 
 def test_the_cli_box_check_exits_nonzero_on_a_refusal():
@@ -1791,6 +1792,51 @@ def main():
     print(f"{len(tests)} passed")
 
 
+def run_file_dispatch(tmp, recorded):
+    """`closure.py --json` plus workspace as the controller builds it — no
+    `job` field — and a run file in a private cache dir. `recorded` is the
+    `runfile.py job` call for clump 351, or None to record nothing."""
+    import runfile
+    cache = os.path.join(tmp, "cache")
+    os.makedirs(cache)
+    runfile.start("burn-t", 5, None, root=cache)
+    runfile.clump("burn-t", [351], "/w/351", "sm-351", root=cache)
+    runfile.clump("burn-t", [412], "/w/412", "sm-412", root=cache)
+    runfile.job("burn-t", 412, "none", root=cache)
+    if recorded:
+        runfile.job("burn-t", 351, *recorded, root=cache)
+    cand = os.path.join(tmp, "candidates.json")
+    live = os.path.join(tmp, "live.json")
+    with open(cand, "w") as fh:
+        json.dump([{"tickets": [500], "closure": ["fresh.py"]}], fh)
+    clumps = in_flight_clumps()
+    for clump in clumps:
+        del clump["job"]
+    with open(live, "w") as fh:
+        json.dump(clumps, fh)
+    return cand, live, {"BURNDOWN_CACHE_DIR": cache}
+
+
+def test_dispatch_reads_the_job_record_from_the_run_file_1107():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live, env = run_file_dispatch(tmp, ("running", 8))
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "1", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 0, got
+        assert "#351 declared 8 cores" in got.stdout, got.stdout
+        assert "dispatch  #500" not in got.stdout, got.stdout
+
+
+def test_dispatch_refuses_a_clump_the_run_file_has_no_job_for_1107():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live, env = run_file_dispatch(tmp, None)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "1", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 1, got
+        assert "#351 is live with no job record" in got.stderr, got.stderr
+
+
 if __name__ == "__main__":
     main()
-

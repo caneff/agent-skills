@@ -54,7 +54,8 @@ At each dispatch the closures are re-resolved against current `main` —
 **one hop**, `closure.py`'s declared ceiling — the candidate's own and every
 in-flight clump's, since the run file stores a clump's tickets and workspace
 but no closure, and a closure stored at claim time is exactly what goes
-stale. The two are what `loop.py dispatch` reads as `--in-flight`. That is cheap and it is enough for the one
+stale. The two are what `loop.py dispatch` reads as `--in-flight`; the job
+record comes from the run file through `--run <run-id>`. That is cheap and it is enough for the one
 question a dispatch asks: does *this* clump collide with anyone live?
 
 A **full** re-exploration is a different question, and it fires on one
