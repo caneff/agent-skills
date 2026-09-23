@@ -32,5 +32,11 @@ esac
 case "$(flatten < "$skill")" in
   *'That is every `--body-file` for `gh pr create`'*) echo "FAIL: the .scratch/ rule still claims every --body-file for gh pr create" >&2; fail=1 ;;
 esac
+# The hygiene bullet every worker reads must list the PR body as an exception;
+# without it the bullet names the Codex files as the only thing kept out of .scratch/.
+case "$(sed -n '/^- \*\*A file whose contents become public/,/^## Control$/p' "$skill" 2>/dev/null | flatten)" in
+  *'the PR body, `pr-body-<n>.md`'*) ;;
+  *) echo "FAIL: the hygiene bullet does not list the PR body as a review-cache exception" >&2; fail=1 ;;
+esac
 [ "$fail" -eq 0 ] || exit 1
 echo "ok: PR body lives in the review cache"
