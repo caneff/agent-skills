@@ -64,5 +64,11 @@ check_in "§ The PR" "$the_pr" 'folds it into its own'
 check_in "§ The PR" "$the_pr" 'check first, the same idempotent search'
 check_in "§ The PR" "$the_pr" 'Sweep: leftovers from PR #<n> in:title'
 
+# #1095: the edit targets the number the search returned, never the PR's own
+# `<n>`, and a zero or multiple match refuses instead of falling back.
+check_in "§ The PR" "$the_pr" '--json number,title'
+check_in "§ The PR" "$the_pr" 'gh issue edit "$sweep"'
+check_in "§ The PR" "$the_pr" 'zero or more than one'
+
 [ "$fail" -eq 0 ] && echo "PASS $0"
 exit "$fail"

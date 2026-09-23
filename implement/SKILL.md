@@ -393,15 +393,20 @@ sweep uses** (`burndown/SKILL.md` § The sweep) — a crash after
 
 ```
 gh issue list --repo <owner/name> --state all \
-  --search "Sweep: leftovers from PR #<n> in:title"
+  --search "Sweep: leftovers from PR #<n> in:title" \
+  --json number,title --jq '[.[] | select(.title == "Sweep: leftovers from PR #<n>") | .number]'
 ```
 
-found: update its body instead of filing another,
-`gh issue edit <n> --repo <owner/name> --body-file <path>`. Nothing
-found: file `Sweep: leftovers from PR #<n>` through `/file-ticket`,
+The search is fuzzy, so the `--jq` keeps only an exact title match. Its
+output is the sweep's own number, never this PR's `<n>`, which is your own
+implementation ticket. Exactly one number (zero or more than one is not this case): put it in `sweep` and update that
+body instead of filing another,
+`gh issue edit "$sweep" --repo <owner/name> --body-file <path>`. Zero: file
+`Sweep: leftovers from PR #<n>` through `/file-ticket`,
 labelled `ready-for-agent`, in #1030's body shape
 (`burndown/SKILL.md` § The sweep: grouped by file, one bullet per
-item). A burn controller that later finds this ticket open on the
+item). More than one number is two sweeps for one PR: stop and tell the
+controller, and never edit `<n>` as a fallback. A burn controller that later finds this ticket open on the
 frontier folds it into its own run's sweep
 (`burndown/SKILL.md` § The sweep) rather than leaving it standing
 beside one.

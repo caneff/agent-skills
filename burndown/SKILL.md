@@ -172,15 +172,20 @@ moment,
 
 ```
 gh issue list --repo <owner/name> --state all \
-  --search "Sweep: leftovers from burn <run-id> in:title"
+  --search "Sweep: leftovers from burn <run-id> in:title" \
+  --json number,title --jq '[.[] | select(.title == "Sweep: leftovers from burn <run-id>") | .number]'
 ```
 
-An issue there already **is** this run's sweep: update its body instead
+The search is fuzzy, so the `--jq` keeps only an exact title match, and its
+output is the sweep's own number — never a run or ticket number. Exactly
+one number is this run's sweep, held in `sweep`; zero or more than one
+number is not that case, and more than one stops the run rather than
+editing a guess. Update its body instead
 of filing another — a fresh render of the run's own leftovers, with any
 `## <file>` section already in the current body that a fold (below) put
 there kept as it stands, since a fold's own items never reappear in
 `sweep.py render`'s output and a bare overwrite would drop them —
-`gh issue edit <n> --repo <owner/name> --body-file <path>`. Nothing found:
+`gh issue edit "$sweep" --repo <owner/name> --body-file <path>`. Zero numbers:
 render the run's leftovers —
 
 ```
