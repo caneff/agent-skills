@@ -125,7 +125,8 @@ def with_blocked_by(body):
     with open(FILE_TICKET_SKILL) as fh:
         skill = fh.read()
     tail = "## Blocked by\n\n- None — can start immediately."
-    assert tail in skill, "file-ticket's template no longer ends in the tail this test appends"
+    assert tail + "\nEOF" in skill, \
+        "file-ticket's template body no longer closes on the tail this test appends"
     return body.rstrip("\n") + "\n\n" + tail + "\n"
 
 
