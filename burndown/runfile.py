@@ -457,9 +457,9 @@ def leftover(run_id, lowest, pr, sidecar_path, root=None,
     commit's date: a sidecar written before it is refused. `None` skips the
     check; the CLI never passes it without `--allow-stale`."""
     pr = pr_number(pr)
+    found = read_leftover_lines(sidecar_path)
     if head_committed is not None:
         refuse_stale_sidecar(sidecar_path, head_committed)
-    found = read_leftover_lines(sidecar_path)
     with locked(run_id, root):
         run = load(run_id, root)
         entry = clump_entry(run, lowest)

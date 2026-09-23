@@ -1172,6 +1172,17 @@ def test_cli_leftover_needs_head_committed_or_allow_stale():
     assert ok.returncode == 0, ok.stderr
 
 
+def test_a_missing_sidecar_is_refused_by_name_under_head_committed():
+    root = landed_root()
+    try:
+        runfile.leftover("burn-1", 901, 950, "/nonexistent/sidecar.jsonl",
+                         root=root, head_committed="2026-09-22T10:00:00Z")
+    except runfile.RunFileError as err:
+        assert "/nonexistent/sidecar.jsonl" in str(err), err
+    else:
+        raise AssertionError("a missing sidecar was accepted")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     try:
