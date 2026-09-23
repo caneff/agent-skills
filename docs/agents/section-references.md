@@ -95,3 +95,7 @@ punctuation right after it.
 Known limits: a spelled-out number above ten is not recognised; a second
 locator in one pointer (`step 3 and step 9`) is not read; and a lazily numbered
 list (`1.` on every item) does not satisfy the check.
+A multi-line code span is tracked to the next blank line only: a heading, list
+item or fence line does not yet end it, so a backtick before one can pair with
+a backtick after it and hide a cut name from the inline-code guard (#1115 owns
+the fix).
