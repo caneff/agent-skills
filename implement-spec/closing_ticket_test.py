@@ -9,7 +9,6 @@ had already diverged from the live editor inside that same spec, so naming
 it is necessary and not sufficient.
 """
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -222,7 +221,8 @@ def test_neither_reader_defines_a_key_regex_of_its_own():
     for path in (GENERATOR, os.path.join(burndown, "closure.py")):
         with open(path) as fh:
             source = fh.read()
-        assert not re.search(r"^_KEY\b", source, re.MULTILINE), path
+        # The key grammar's own key group, under whatever name it is bound.
+        assert "[A-Za-z][A-Za-z -]*?" not in source, path
 
 
 def test_a_root_that_is_not_a_directory_is_not_a_missing_declaration():
