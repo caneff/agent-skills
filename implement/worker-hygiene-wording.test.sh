@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Guards #909: a worker's commit identity comes from the repo's config, and a
-# file whose contents become public (a --body-file) lives in the worker's own
-# workspace. Both rules sit in implement/SKILL.md § The brief. A prose
+# file whose contents become public lives in the worker's own workspace (the
+# PR body is the one exception, guarded in pr-body-location.test.sh). Both rules sit in implement/SKILL.md § The brief. A prose
 # assertion, not a behavioral test — there is no harness that runs the skill's
 # own prose. (The #963 trailer is guarded in pr-up-report-shape.test.sh, the
 # #951 --background wording in codex-pass-schedule.test.sh.)
@@ -30,11 +30,10 @@ check 'Commit identity comes from the repo'"'"'s config.'
 check 'Never pass `-c user.email` or `-c user.name` to `git commit`'
 check 'GitHub'"'"'s email-privacy rule rejected every push'
 check 'A file whose contents become public lives under your own workspace'"'"'s `.scratch/`'
-check 'every `--body-file` for `gh pr create` and `gh pr edit`'
 check 'never `/tmp`, never a shared scratchpad path'
 check 'any file you author and then hand to a command'
-check 'The one exception is the controller'"'"'s Codex pass files'
-check '`~/.cache/agent-reviews/<repo>/`, under a ticket-and-phase name'
+check 'The controller'"'"'s Codex pass files'
+check '`~/.cache/agent-reviews/<repo>/`, under a ticket-named file'
 check 'PR 908 went up carrying #886'"'"'s body'
 check 'Your "PR up" message ends with the controller trailer'
 

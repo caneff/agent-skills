@@ -1483,6 +1483,22 @@ fn a_worktree_holding_scratch_is_refused_naming_it() {
 }
 
 #[test]
+fn a_worktree_holding_only_a_scratch_pr_body_is_still_refused() {
+    // #1052 moved the worker's PR body to the review cache so a landing never
+    // hits this; the refusal itself stays, since a note in `.scratch/` is
+    // still worth one.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r26b", "implement-26");
+    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
+    std::fs::create_dir_all(wt.join(".scratch")).unwrap();
+    std::fs::write(wt.join(".scratch/pr-body-26.md"), "Closes #26\n").unwrap();
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: .scratch/pr-body-26.md (--discard overrides)", wt.display());
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+    assert!(wt.join(".scratch/pr-body-26.md").is_file() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
 fn a_worktree_holding_only_caches_is_removed_and_they_are_listed() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r27", "implement-27");
