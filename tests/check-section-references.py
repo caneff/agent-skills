@@ -56,13 +56,14 @@ HEADING_STEP = re.compile(r"^(step\s+\d+)\b", re.IGNORECASE)
 BACKTICK_RUN = re.compile(r"`+")
 
 
-def code_spans(line: str) -> list[tuple[int, int]]:
-    """(content_start, content_end) for each inline code span on the line,
+def code_spans(text: str) -> list[tuple[int, int]]:
+    """(content_start, content_end) for each inline code span in the text (one
+    line, or several joined by newlines),
     per the CommonMark rule: a span opens on a backtick run and closes on
     the next run of exactly the same length, not on any lone backtick — so
     `` `§ Build` `` is one span (an outer double-backtick run around a
     single one would leave the single run as plain text)."""
-    runs = [(m.start(), m.end()) for m in BACKTICK_RUN.finditer(line)]
+    runs = [(m.start(), m.end()) for m in BACKTICK_RUN.finditer(text)]
     spans = []
     index = 0
     while index < len(runs):
