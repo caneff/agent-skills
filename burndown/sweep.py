@@ -23,19 +23,12 @@ step, not this module's: a renderer prints a body, it does not call `gh`.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runfile  # noqa: E402
-
-# The five outcomes a dispositions sidecar line can carry
-# (`implement/SKILL.md` § Review). A line whose `outcome` is missing or none
-# of these is not a disposition to count — skipped the same way
-# `runfile.read_leftover_lines` skips a line outside its own five.
-_DISPOSITION_OUTCOMES = ("fixed", "disputed", "filed", "handed-back",
-                         "leftover")
-
 
 def title(run_id):
     return f"Sweep: leftovers from burn {run_id}"
@@ -54,6 +47,24 @@ def grouped_by_file(leftovers):
             order.append(file)
         groups[file].append(item)
     return [(file, groups[file]) for file in order]
+
+
+def inline_safe(text):
+    """A finding's title or text made safe to sit in a ticket body: an
+    `@mention` is broken with a zero-width space so it notifies nobody, and
+    `<` becomes `&lt;` so raw HTML is not parsed. Backticked code spans are
+    left as written. `runfile.leftover_field` already keeps the text to one
+    line, so no heading or fence can start a line."""
+    def fix(chunk):
+        chunk = re.sub(r"(?<!\w)@(?=\w)", "@\u200b", chunk)
+        return chunk.replace("<", "&lt;")
+    out, pos = [], 0
+    for m in re.finditer(r"(`+)(?:(?!\1).)+?\1", text):
+        out.append(fix(text[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(fix(text[pos:]))
+    return "".join(out)
 
 
 def render_body(leftovers):
@@ -75,9 +86,9 @@ def render_body(leftovers):
         for item in items:
             tickets = ", ".join(f"#{n}" for n in item["tickets"])
             lines.append(
-                f"- **{item['id']}** ({item['severity']}) {item['title']} "
+                f"- **{item['id']}** ({item['severity']}) {inline_safe(item['title'])} "
                 f"— clump #{item['clump']}, {tickets}, PR #{item['pr']}: "
-                f"{item['text']}")
+                f"{inline_safe(item['text'])}")
         lines.append("")
     return "\n".join(lines).rstrip("\n") + "\n"
 
@@ -99,26 +110,6 @@ def default_reviews_dir(repo_root=None):
 
 def dispositions_path(reviews_dir, lowest):
     return os.path.join(reviews_dir, f"dispositions-{lowest}.jsonl")
-
-
-def read_dispositions(path):
-    """Every recognised-outcome line of a dispositions sidecar
-    (`implement/SKILL.md` § Review). A malformed or unrelated line costs
-    itself, not the read — the same tolerance `runfile.read_leftover_lines`
-    holds its own sidecar reader to."""
-    out = []
-    with open(path) as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(obj, dict) and obj.get("outcome") in _DISPOSITION_OUTCOMES:
-                out.append(obj)
-    return out
 
 
 def counts(run, reviews_dir):
@@ -148,7 +139,7 @@ def counts(run, reviews_dir):
         if not os.path.exists(path):
             missing.append(lowest)
             continue
-        for obj in read_dispositions(path):
+        for _, obj in runfile.read_dispositions(path):
             outcome = obj["outcome"]
             if outcome == "fixed":
                 fixed += 1

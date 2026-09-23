@@ -71,10 +71,8 @@ _JOB_STATES = ("running", "none", "done")
 _LEFTOVER_KEYS = ("clump", "tickets", "pr", "id", "file", "title",
                   "severity", "text")
 # The five outcomes `implement/SKILL.md` § Review's dispositions sidecar can
-# carry. A line whose outcome is missing or is none of these is not a known
-# non-leftover disposition to skip — it is a wholly different file, and
-# skipping it the same way `fixed`/`disputed`/`filed`/`handed-back` are
-# skipped is how a wrong `--from` reads as a PR that genuinely left nothing.
+# carry; why any other is refused, not skipped: `references/run-file.md`
+# § Leftovers.
 _SIDECAR_OUTCOMES = ("fixed", "disputed", "filed", "handed-back", "leftover")
 
 
@@ -287,6 +285,21 @@ def start(run_id, slots=DEFAULT_SLOTS, controller=None, root=None):
     return run
 
 
+def positive_int(value, what):
+    """A whole number of at least one, never a bool (`True` is an `int`)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise RunFileError(f"not a {what}: {value!r}")
+    return value
+
+
+def clump_entry(run, lowest):
+    """The run's clump keyed by its lowest ticket, or a refusal naming it."""
+    for entry in run["clumps"]:
+        if entry["tickets"][0] == lowest:
+            return entry
+    raise RunFileError(f"run {run['run_id']} has no clump #{lowest}")
+
+
 def ticket_numbers(tickets):
     """A clump's ticket list: at least one positive integer, sorted. The
     lowest is the clump's key — the same one its branch is named for."""
@@ -294,9 +307,7 @@ def ticket_numbers(tickets):
         raise RunFileError("a clump names at least one ticket")
     out = []
     for ticket in tickets:
-        if isinstance(ticket, bool) or not isinstance(ticket, int) or ticket < 1:
-            raise RunFileError(f"not a ticket number: {ticket!r}")
-        out.append(ticket)
+        out.append(positive_int(ticket, "ticket number"))
     return sorted(set(out))
 
 
@@ -323,9 +334,7 @@ def job_record(value):
 
 
 def pr_number(value):
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise RunFileError(f"not a PR number: {value!r}")
-    return value
+    return positive_int(value, "PR number")
 
 
 def leftover_field(value, what):
@@ -347,11 +356,8 @@ def leftover_record(value):
     missing = [key for key in _LEFTOVER_KEYS if key not in value]
     if missing:
         raise RunFileError(f"a leftover is missing {', '.join(missing)}")
-    clump = value["clump"]
-    if isinstance(clump, bool) or not isinstance(clump, int) or clump < 1:
-        raise RunFileError(f"not a clump ticket: {clump!r}")
     return {
-        "clump": clump,
+        "clump": positive_int(value["clump"], "clump ticket"),
         "tickets": ticket_numbers(value["tickets"]),
         "pr": pr_number(value["pr"]),
         "id": leftover_field(value["id"], "finding id"),
@@ -362,12 +368,12 @@ def leftover_record(value):
     }
 
 
-def read_leftover_lines(sidecar_path):
-    """Every `leftover` line of a dispositions sidecar
-    (`implement/SKILL.md` § Review), in the order the sidecar holds them.
-    Every other outcome — `fixed`, `disputed`, `filed`, `handed-back` — is
-    not this command's to read, and is skipped rather than refused: this
-    reader meets the whole sidecar, not a file trimmed for it."""
+def read_dispositions(sidecar_path):
+    """Every line of a dispositions sidecar (`implement/SKILL.md` § Review),
+    in order, each a JSON object with one of the five sidecar outcomes. A
+    line that is not is refused by file and line, never skipped: a skipped
+    line reads as a PR that genuinely left nothing, and `sweep.py counts`
+    would report the same low count with a clean exit."""
     try:
         with open(sidecar_path) as fh:
             raw_lines = fh.readlines()
@@ -390,7 +396,16 @@ def read_leftover_lines(sidecar_path):
                 f"{sidecar_path}:{n} is not a dispositions sidecar line — "
                 f"its outcome is {outcome!r}, not one of "
                 f"{', '.join(_SIDECAR_OUTCOMES)}")
-        if outcome != "leftover":
+        out.append((n, obj))
+    return out
+
+
+def read_leftover_lines(sidecar_path):
+    """Every `leftover` line of a dispositions sidecar, in order. The other
+    four outcomes are not this command's to transcribe, and are skipped."""
+    out = []
+    for n, obj in read_dispositions(sidecar_path):
+        if obj["outcome"] != "leftover":
             continue
         missing = [key for key in ("id", "file", "title", "severity", "text")
                    if key not in obj]
@@ -404,16 +419,9 @@ def read_leftover_lines(sidecar_path):
 
 def leftover(run_id, lowest, pr, sidecar_path, root=None):
     """Copy every `leftover` line of a landed PR's dispositions sidecar into
-    the run file, so nothing is transcribed by hand and a restart does not
-    lose them. Idempotent per PR and finding id: the sidecar does not change
-    once a PR has landed, and a second run of this command — after a
-    restart, or a controller that ran the landing step twice — must not
-    double an entry the sweep would then count twice. A finding already
-    recorded for this clump under a *different* PR is refused, the same as a
-    second, different landing sha: two PR numbers for one finding id is a
-    typo'd `--pr`, not a second landing. Refuses a clump with no recorded
-    landing: a PR that may never land must not persist leftovers nothing can
-    later remove.
+    the run file. Idempotent per PR and finding id; a finding already
+    recorded under a different PR, or a clump with no recorded landing, is
+    refused — the reasons are in `references/run-file.md` § Leftovers.
 
     Returns `(run, added)`, `added` being the finding ids this call
     actually appended, for a caller to report a copy count."""
@@ -421,10 +429,7 @@ def leftover(run_id, lowest, pr, sidecar_path, root=None):
     found = read_leftover_lines(sidecar_path)
     with locked(run_id, root):
         run = load(run_id, root)
-        entry = next(
-            (c for c in run["clumps"] if c["tickets"][0] == lowest), None)
-        if entry is None:
-            raise RunFileError(f"run {run_id} has no clump #{lowest}")
+        entry = clump_entry(run, lowest)
         if entry["landed"] is None:
             raise RunFileError(
                 f"clump #{lowest} has not landed — `land` comes first")
@@ -462,13 +467,9 @@ def job(run_id, lowest, state, cores=0, root=None):
     record = job_record({"state": state, "cores": cores})
     with locked(run_id, root):
         run = load(run_id, root)
-        for entry in run["clumps"]:
-            if entry["tickets"][0] != lowest:
-                continue
-            entry["job"] = record
-            save(run, root)
-            return run
-    raise RunFileError(f"run {run_id} has no clump #{lowest}")
+        clump_entry(run, lowest)["job"] = record
+        save(run, root)
+        return run
 
 
 def named(value, what):
@@ -531,16 +532,13 @@ def land(run_id, lowest, sha, root=None):
     checked_sha(sha)
     with locked(run_id, root):
         run = load(run_id, root)
-        for entry in run["clumps"]:
-            if entry["tickets"][0] != lowest:
-                continue
-            if entry["landed"] not in (None, sha):
-                raise RunFileError(
-                    f"clump #{lowest} already landed at {entry['landed']}")
-            entry["landed"] = sha
-            save(run, root)
-            return run
-    raise RunFileError(f"run {run_id} has no clump #{lowest}")
+        entry = clump_entry(run, lowest)
+        if entry["landed"] not in (None, sha):
+            raise RunFileError(
+                f"clump #{lowest} already landed at {entry['landed']}")
+        entry["landed"] = sha
+        save(run, root)
+        return run
 
 
 def reconcile(run, live_agents):
