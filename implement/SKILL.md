@@ -224,6 +224,18 @@ No PR and no reviewer; Chris reads the log after.
    Codex medium and low, correctness `PLAUSIBLE`, and standards `hard` and
    `judgement` are not high.
 
+   **The reachability bar.** Stated here once, applied before severity: a
+   finding is filed, or kept as a leftover, only when the controller can
+   name how its failure occurs in our environment — this box (WSL, one
+   user, shared 32 cores), our repos (all SHA-1, all `caneff/*`), and
+   bodies people here actually write. A finding that fails that bar is
+   `disputed: unreachable — <why>` in the PR body, whatever Codex's
+   severity word, and it is not a sidecar line. It leaves the fix-in-round
+   rules alone: a reachable small finding is still fixed, an unreachable
+   one is not worth a round either. (#1086: `burn-2026-09-22-0636` filed
+   seven tickets from second and third passes; four described failures
+   that cannot occur here.)
+
    **The adjacent-fix rule.** A round-1 finding is fixed in the round, not
    filed, when all five parts hold: it sits in a file already in the diff;
    the fix is confined to one function; it changes under 20 lines, its test
@@ -728,7 +740,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    the merge. A commit the controller has not read never merges. The
    controller disposes of every other second-pass finding in the PR body itself:
    `disputed: <why>`, filed if it is high, or `leftover`, under § Review's
-   severity mapping. A fix outside the rule is a change, not a round.
+   reachability bar first and its severity mapping second. A fix outside the rule is a change, not a round.
 
    A third Codex run happens only when a second-pass finding fixed in the
    round was high. The third run is final: its findings are `disputed` or

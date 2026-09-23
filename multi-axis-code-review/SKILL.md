@@ -156,7 +156,8 @@ Belt and braces: append to **every** prompt — "Also write your full report to 
 
 Which rating counts as high is `implement/SKILL.md` § Review's severity mapping,
 stated there once; no brief here restates it, and a reviewer rates in its
-own axis's words.
+own axis's words. A finding whose failure cannot occur here is disputed
+under `implement/SKILL.md` § Review's reachability bar, whatever its rating.
 
 **Alongside the prose, each reviewer also writes a sidecar** so counting a
 finding stops needing an LLM pass over prose (#855, #854): "Also write
