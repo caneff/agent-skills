@@ -418,8 +418,9 @@ fn write_executable(path: &Path, text: &str) -> Result<(), String> {
 /// install covers them all, and the call site holds the claim lock so two
 /// dispatches of the same repo can't race each other's takeover (#1009 C2).
 /// Ownership is taken once: a slot that is already byte-identical to the
-/// current wrapper is left alone, so a repeat dispatch does not re-displace
-/// an already-displaced hook.
+/// current wrapper is not displaced again, so a repeat dispatch does not
+/// re-displace an already-displaced hook — but it is still rewritten through
+/// `write_executable`, so a lost executable bit is repaired (#1054).
 fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str, guard_content: &str, buffer_stdin: bool) -> Result<(), String> {
     let path = Path::new(dir).join(slot);
     let foreign_path = Path::new(dir).join(foreign_name);
@@ -458,9 +459,10 @@ fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str
         );
     }
     write_executable(&Path::new(dir).join(guard_name), guard_content)?;
-    if !is_ours {
-        write_executable(&path, &wrapper)?;
-    }
+    // Even a byte-identical wrapper is rewritten: the rename is idempotent and
+    // restores the executable bit, which git needs and a chmod after install
+    // (same bytes, mode 0644) would otherwise leave inert (#1054).
+    write_executable(&path, &wrapper)?;
     Ok(())
 }
 

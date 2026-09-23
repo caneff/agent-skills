@@ -1218,6 +1218,32 @@ fn a_repo_already_carrying_this_builds_own_pre_commit_wrapper_is_left_alone_on_r
     refuses_a_foreign_email_commit(&repo, "395");
 }
 
+/// A wrapper whose bytes still match but whose executable bit was cleared
+/// after install (#1054): git silently ignores a non-executable hook, so a
+/// byte-identical wrapper must still be repaired on the next dispatch, not
+/// taken as "already ours" and left inert.
+#[test]
+fn a_byte_identical_wrapper_that_lost_its_executable_bit_is_repaired_on_redispatch() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    for slot in ["pre-commit", "pre-push"] {
+        let hook = hooks_dir(&repo).join(slot);
+        std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
+    }
+
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "396"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+
+    for slot in ["pre-commit", "pre-push"] {
+        let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(hooks_dir(&repo).join(slot)).unwrap().permissions());
+        assert!(mode & 0o111 != 0, "{slot} left non-executable (mode {mode:o}) by a redispatch");
+    }
+    refuses_a_foreign_email_commit(&repo, "396");
+}
+
 /// The pre-commit guard (#934) never fires on a replayed commit — a cherry-
 /// pick or rebase, exactly the gap #1006 files (its own probe: `-c
 /// user.email=... rebase` rewrote a replayed commit's email with exit 0).
