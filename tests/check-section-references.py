@@ -85,8 +85,36 @@ def code_spans(line: str) -> list[tuple[int, int]]:
     return spans
 
 
-def inside_code_span(line: str, position: int) -> bool:
-    return any(start <= position < end for start, end in code_spans(line))
+def line_code_spans(lines: list[str]) -> list[list[tuple[int, int]]]:
+    """Per line, the code-span content ranges in that line's own offsets. A
+    span may cross a line break but not a blank line, so spans are found over
+    each paragraph's joined text and cut back to the lines they cover."""
+    result: list[list[tuple[int, int]]] = [[] for _ in lines]
+    index = 0
+    while index < len(lines):
+        if not lines[index].strip():
+            index += 1
+            continue
+        end = index
+        while end < len(lines) and lines[end].strip():
+            end += 1
+        starts = []
+        offset = 0
+        for line in lines[index:end]:
+            starts.append(offset)
+            offset += len(line) + 1
+        for span_start, span_end in code_spans("\n".join(lines[index:end])):
+            for row, line_start in enumerate(starts, index):
+                start = max(span_start, line_start) - line_start
+                stop = min(span_end, line_start + len(lines[row])) - line_start
+                if start < stop:
+                    result[row].append((start, stop))
+        index = end
+    return result
+
+
+def inside_code_span(spans: list[tuple[int, int]], position: int) -> bool:
+    return any(start <= position < end for start, end in spans)
 
 
 def tracked_markdown() -> list[Path]:
@@ -258,6 +286,7 @@ def main() -> int:
         latest_named_file: Path | None = None
         previous_line_named_file: Path | None = None
         lines = source.read_text().splitlines()
+        spans_by_line = line_code_spans(lines)
         for number, line in enumerate(lines, 1):
             for pointer in SECTION.finditer(line):
                 # Bound once: every reading pointer offers, step-locator ones
@@ -303,7 +332,7 @@ def main() -> int:
                 # (#1005).
                 raw_name = pointer.group(1).strip()
                 cut_at_backtick = line[pointer.end() : pointer.end() + 1] == "`"
-                inside_span = inside_code_span(line, pointer.start())
+                inside_span = inside_code_span(spans_by_line[number - 1], pointer.start())
                 has_step_locator = len(readings) > 1
                 if (
                     cut_at_backtick
