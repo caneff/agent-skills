@@ -152,7 +152,9 @@ check_absent_in "$merge_section" 'Otherwise, from this PR' 'implement/SKILL.md �
 # disputed or leftover, never a fourth run. The old "second run is final, no
 # worker fix left" wording is retired whole-file, since a copy of it anywhere
 # would contradict the fix round.
-check_in "$merge_section" 'the controller evaluates every one before any reaches the worker' 'implement/SKILL.md § The merge'
+# The evaluation covers Codex's recommendation as well as the finding: a
+# controller can agree a finding exists and still forward its remedy unread (#1082).
+check_in "$merge_section" 'the controller evaluates every finding and its recommendation before any reaches the worker' 'implement/SKILL.md § The merge'
 check_in "$merge_section" "A second-pass finding that passes § Review's adjacent-fix rule goes to the worker, who fixes it in one round" 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'the controller reads that fix diff itself' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'A third Codex run happens only when a second-pass finding fixed in the round was high.' 'implement/SKILL.md § The merge'

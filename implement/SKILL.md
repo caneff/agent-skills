@@ -735,8 +735,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    When either moved, run this pass once more on the fixes, with
    `phase=second`, and post its output as a PR comment the same way, from
    its own `phase`-named `out_file`. No material findings → go to step 4.
-   Findings → the controller evaluates every one before any reaches the
-   worker, as it did the first pass's. **A second-pass finding that passes
+   Findings → the controller evaluates every finding and its recommendation
+   before any reaches the worker, as it did the first pass's. **A second-pass finding that passes
    § Review's adjacent-fix rule goes to the worker, who fixes it in one
    round.** The worker makes each fix in a commit of its own. It records
    each with § Review's adjacent-fix disposition and that sha in the PR
