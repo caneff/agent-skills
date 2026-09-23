@@ -231,6 +231,15 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     assert failed.returncode == 1, (failed.stdout, failed.stderr)
     assert ("BREACH C2: 20 changed lines in burndown/loop.py; the budget is under 20"
             in failed.stdout), failed.stdout
+    # And small, one file, but a file no commit on the branch had touched.
+    elsewhere = commit(repo, {"burndown/phases.py": "unrelated tidy\n"},
+                       "C2 again, in a file outside the diff")
+    outside = os.path.join(work, "dispositions-901-outside.jsonl")
+    write_jsonl(outside, bound(dict(shas, C2=elsewhere)))
+    failed = cli(CHECK_ADJACENT, "--repo", repo, "--base", base, outside)
+    assert failed.returncode == 1, (failed.stdout, failed.stderr)
+    assert ("BREACH C2: burndown/phases.py was not in the diff before this fix"
+            in failed.stdout), failed.stdout
 
     # Clump #910's verification pass: two leftovers — one in a file #901's
     # also named, so the sweep groups across clumps — and one fixed finding.
