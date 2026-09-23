@@ -568,7 +568,7 @@ It writes `dispositions-<n>.jsonl` in the grammar of `implement/SKILL.md` § Rev
 and its report to `<dir>/review-verify-<n>.md`.
 
 The brief: "Check each round-1 finding id against its fix or its claimed
-disposition. Fail the pass, naming the finding id, on any of three things:
+disposition. Fail the pass, naming the finding id, on any of four things:
 (a) a round-1 finding with no disposition — `leftover` counts as one, as
 do the other four outcomes; (b) a `leftover` whose finding
 is high under implement's severity mapping, since a high finding is filed —
@@ -581,7 +581,12 @@ it measures every sidecar line with `"scope": "adjacent"` for one file, a
 file already in the diff and under 20 changed lines, and prints `BREACH <id>`
 for each that breaks them, or for any line it cannot read. Judge the other
 two parts — one function and no public seam — by reading the fix commit, and
-fail by id on those the same way. Report every breach beside the finding it
+fail by id on those the same way. (d) a `disputed: unreachable — <why>`
+disposition whose why does not name how the environment in
+`implement/SKILL.md` § Review's reachability bar (this box, our repos,
+bodies people here write) rules the failure out; a bare "unlikely" or
+"cannot happen" fails by id, since the bar would otherwise suppress a
+reachable finding unchecked. Report every breach beside the finding it
 belongs to. Under 400 words."
 
 ## Why separate axes

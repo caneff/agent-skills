@@ -38,6 +38,12 @@ check_in "§ Review" "$review" 'never becomes a `leftover` sidecar line'
 check_in "§ The merge" "$merge" "§ Review's reachability bar"
 check_in "multi-axis-code-review § 4" "$maxis_text" "§ Review's reachability bar"
 
+# The verification brief fails an unreachable dispute whose why names no
+# environment fact (Codex gate H1 on PR #1135).
+check_in "multi-axis-code-review § 6" "$maxis_text" 'on any of four things:'
+check_in "multi-axis-code-review § 6" "$maxis_text" 'a `disputed: unreachable — <why>` disposition whose why does not name how the environment'
+check_in "multi-axis-code-review § 6" "$maxis_text" 'rules the failure out'
+
 n="$(grep -o -F -- '**The reachability bar.**' <<<"$whole" | wc -l || true)"
 [ "$n" -eq 1 ] || { echo "FAIL: expected the bar's heading exactly once, found $n" >&2; fail=1; }
 [ "$fail" -eq 0 ] && echo "PASS $0"
