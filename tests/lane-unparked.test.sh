@@ -83,10 +83,9 @@ stale_pointers=(
 patterns=("${marks[@]}" "${stale_pointers[@]}")
 
 # --- The swept set -----------------------------------------------------------
-# Read from HEAD's tree, not the index (#1092): three workers saw this
-# check fail once under `tests/all.sh` with a tracked file missing from
-# `git ls-files`; the cause was never found. A commit does not change while
-# it is read, so this listing cannot vary that way. The
+# Read from HEAD's tree, not the index (#1092): the ticket asked for it so a
+# mid-write index cannot give a partial set. (The flake that prompted it was
+# in fact the SIGPIPE below; no index race was ever observed.) The
 # readability check below still holds the working tree to that listing.
 mapfile -t skill_dirs < <(git ls-tree -r --name-only HEAD | grep -E '^[^/]+/SKILL\.md$' | cut -d/ -f1 | sort -u)
 if [ "${#skill_dirs[@]}" -eq 0 ]; then
@@ -102,7 +101,10 @@ if [ "${#swept[@]}" -lt "$FLOOR" ]; then
   exit 1
 fi
 for m in "${must_sweep[@]}"; do
-  printf '%s\n' "${swept[@]}" | grep -qxF -- "$m" ||
+  # A here-string, not `printf | grep -q`: under `pipefail` grep -q exits on
+  # its first match, printf takes SIGPIPE, and the pipeline reads as a miss —
+  # the intermittent "does not contain <file>" failure of #1092 (5 in 300).
+  grep -qxF -- "$m" <<<"$(printf '%s\n' "${swept[@]}")" ||
     { echo "FAIL: the swept set does not contain $m — it is not sweeping the tree under test" >&2; exit 1; }
 done
 # HEAD says these files exist; the working tree is what grep reads. A
