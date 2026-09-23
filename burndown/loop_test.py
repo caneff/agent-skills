@@ -1838,5 +1838,22 @@ def test_dispatch_refuses_a_clump_the_run_file_has_no_job_for_1107():
         assert "#351 is live with no job record" in got.stderr, got.stderr
 
 
+def test_dispatch_refuses_when_only_the_in_flight_file_carries_the_job_1107():
+    # The refusal must come from the run file's silence: an in-flight `job`
+    # that would charge cleanly is ignored once --run is given (review C1).
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live, env = run_file_dispatch(tmp, None)
+        with open(live) as fh:
+            clumps = json.load(fh)
+        clumps[0]["job"] = NO_JOB
+        with open(live, "w") as fh:
+            json.dump(clumps, fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "1", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 1, got
+        assert "#351 is live with no job record" in got.stderr, got.stderr
+
+
 if __name__ == "__main__":
     main()
