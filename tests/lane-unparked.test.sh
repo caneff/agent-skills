@@ -28,8 +28,10 @@
 #   - the negative control is a real module that no lane doc names, not a
 #     path nobody ever wrote.
 #
-# Scope: the skills tree only — every git-tracked file under a directory that
-# has a SKILL.md. `docs/research/` is the project's record of what was true on
+# Scope: the skills tree only — every file committed at HEAD under a directory
+# that has a SKILL.md. Staged-but-uncommitted additions and deletions are
+# outside it (#1092: the sweep reads the commit, not the index); the merge
+# gate runs on committed trees. `docs/research/` is the project's record of what was true on
 # a date, including the parked-state disputes that are this trial's evidence,
 # and is deliberately not swept; the ticket's own wording is "a grep over the
 # skills tree".
@@ -81,10 +83,10 @@ stale_pointers=(
 patterns=("${marks[@]}" "${stale_pointers[@]}")
 
 # --- The swept set -----------------------------------------------------------
-# Read from HEAD's tree, not the index (#1092): under `tests/all.sh` a
-# `git ls-files` returned a partial listing once, for the instant the index
-# was being rewritten, and failed the must-sweep check on a file that was
-# tracked and present. A commit does not change while it is read. The
+# Read from HEAD's tree, not the index (#1092): three workers saw this
+# check fail once under `tests/all.sh` with a tracked file missing from
+# `git ls-files`; the cause was never found. A commit does not change while
+# it is read, so this listing cannot vary that way. The
 # readability check below still holds the working tree to that listing.
 mapfile -t skill_dirs < <(git ls-tree -r --name-only HEAD | grep -E '^[^/]+/SKILL\.md$' | cut -d/ -f1 | sort -u)
 if [ "${#skill_dirs[@]}" -eq 0 ]; then
