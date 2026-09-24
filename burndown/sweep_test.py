@@ -99,20 +99,26 @@ def test_render_treats_unmatched_and_escaped_backticks_as_plain_text():
 
 def test_render_reads_an_escaped_backslash_before_a_real_code_span():
     # `\\` is an escaped backslash, so the backtick after it opens a real
-    # span `a`; the `<i>` after that span is live HTML to CommonMark (#1109).
+    # span `a<b`; the `<i>` after that span is live HTML to CommonMark (#1109).
+    # The `<` inside the span shows it was kept, not defused.
     body = sweep.render_body([leftover(
-        901, [901], 950, "S1", "a.py", "T", "hard", "\\\\`a`<i>\\`")])
+        901, [901], 950, "S1", "a.py", "T", "hard", "\\\\`a<b`<i>\\`")])
     assert "<i>" not in body, body
-    assert "`a`" in body, body
+    assert "`a<b`" in body, body
 
 
 def test_render_reads_an_escaped_first_backtick_as_shortening_its_run():
-    # In \``a`<i>` the escape takes the first of two backticks, so the second
-    # opens a one-backtick span `a`; the `<i>` after it is live HTML (#1109).
+    # In \``a<b`<i>` the escape takes the first of two backticks, so the
+    # second opens a one-backtick span `a<b`; the `<i>` after it is live HTML
+    # (#1109). The ticket wrote this shape with one more trailing backtick,
+    # a\``a`a<i>``, which never leaked; it stays pinned as a regression case.
     body = sweep.render_body([leftover(
-        901, [901], 950, "S1", "a.py", "T", "hard", "\\``a`<i>`")])
+        901, [901], 950, "S1", "a.py", "T", "hard", "\\``a<b`<i>`")])
     assert "<i>" not in body, body
-    assert "`a`&lt;i>\\`" in body, body
+    assert "`a<b`&lt;i>\\`" in body, body
+    body = sweep.render_body([leftover(
+        901, [901], 950, "S1", "a.py", "T", "hard", "a\\``a`a<i>``")])
+    assert "<i>" not in body, body
 
 
 def test_render_escapes_a_backtick_left_outside_a_span():
