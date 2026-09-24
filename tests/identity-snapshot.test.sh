@@ -47,4 +47,11 @@ check "a suite that unsets user.email fails the gate" 1 $rc
 run_case 'git config user.email ""' unset-first
 check "a suite that sets an unset user.email to empty fails the gate" 1 $rc
 
+# A suite that leaks and then fails is the likely shape of the real leak (a
+# failed `cd`, then a bare `git config`): the identity must still be named.
+run_case 'git config user.email t@example.com; exit 1'
+check "a suite that rewrites user.email and then fails fails the gate" 1 $rc
+printf '%s\n' "$out" | grep -q 'changed the checkout.s git identity'
+check "the identity change is named although the suite also failed" 0 $?
+
 exit $fail

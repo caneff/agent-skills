@@ -124,19 +124,22 @@ identity_before=$(identity_snapshot)
 
 count=0
 while IFS=$'\t' read -r label cmd; do
-  if out=$($cmd 2>&1 </dev/null); then
+  out=$($cmd 2>&1 </dev/null); suite_status=$?
+  # Before either failure branch: a suite that leaks and then fails is the
+  # likely shape of the real leak, and would otherwise never be named.
+  identity_after=$(identity_snapshot)
+  if [ "$identity_after" != "$identity_before" ]; then
+    report_failure "$label" "$out" \
+      "tests/all.sh: this suite changed the checkout's git identity (a fixture identity written without naming its repo, #1144):" \
+      "  before: $(printf '%s' "$identity_before" | tr '\n' ' ')" \
+      "  after:  $(printf '%s' "$identity_after" | tr '\n' ' ')"
+  fi
+  if [ "$suite_status" -eq 0 ]; then
     if hit=$(printf '%s\n' "$out" | grep -m1 -E "$failure_signature"); then
       report_failure "$label" "$out" \
         "tests/all.sh: exited 0, but its output carries a failure line:" \
         "  $hit" \
         "$(logging_remedy "$hit")"
-    fi
-    identity_after=$(identity_snapshot)
-    if [ "$identity_after" != "$identity_before" ]; then
-      report_failure "$label" "$out" \
-        "tests/all.sh: this suite changed the checkout's git identity (a fixture identity written without naming its repo, #1144):" \
-        "  before: $(printf '%s' "$identity_before" | tr '\n' ' ')" \
-        "  after:  $(printf '%s' "$identity_after" | tr '\n' ' ')"
     fi
     echo "PASS $label"
     count=$((count + 1))
