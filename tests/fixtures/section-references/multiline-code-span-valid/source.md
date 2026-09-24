@@ -6,4 +6,7 @@ See the `recipe
 See the ``recipe
 § Build`` for more words after it.
 
+- See the `recipe
+  § Build` for more words after it.
+
 ## Build

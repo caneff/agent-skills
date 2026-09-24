@@ -55,6 +55,11 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 LOOSE_STEP_LOCATOR = re.compile(STEP_LOCATOR.pattern.replace("[^.,;:!?)}\\]]+?", ".+?"), re.IGNORECASE)
 HEADING_STEP = re.compile(r"^(step\s+\d+)\b", re.IGNORECASE)
 BACKTICK_RUN = re.compile(r"`+")
+# Lines that end a paragraph, so a code span cannot cross them (CommonMark,
+# GFM tables): an ATX heading or a table row stands alone, as a FENCE line
+# does, and a list item starts a paragraph its continuation lines join.
+LINE_BLOCK = re.compile(r"^ {0,3}#{1,6}(\s|$)|^\s*\|")
+LIST_ITEM = re.compile(r"^\s*([-*+]|\d{1,9}[.)])(\s|$)")
 
 
 def code_spans(text: str) -> list[tuple[int, int]]:
@@ -87,19 +92,39 @@ def code_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def stands_alone(line: str) -> bool:
+    return bool(LINE_BLOCK.match(line) or FENCE.match(line))
+
+
+def paragraph_end(lines: list[str], index: int) -> int:
+    """The index after the last line of the paragraph starting at index. A
+    blank line ends it, and so does the start of a list item; a heading,
+    fence line or table row is a paragraph of its own line."""
+    if stands_alone(lines[index]):
+        return index + 1
+    end = index + 1
+    while (
+        end < len(lines)
+        and lines[end].strip()
+        and not stands_alone(lines[end])
+        and not LIST_ITEM.match(lines[end])
+    ):
+        end += 1
+    return end
+
+
 def line_code_spans(lines: list[str]) -> list[list[tuple[int, int]]]:
     """Per line, the code-span content ranges in that line's own offsets. A
-    span may cross a line break but not a blank line, so spans are found over
-    each paragraph's joined text and cut back to the lines they cover."""
+    span may cross a line break but not a paragraph boundary
+    (paragraph_end), so spans are found over each paragraph's joined text
+    and cut back to the lines they cover."""
     result: list[list[tuple[int, int]]] = [[] for _ in lines]
     index = 0
     while index < len(lines):
         if not lines[index].strip():
             index += 1
             continue
-        end = index
-        while end < len(lines) and lines[end].strip():
-            end += 1
+        end = paragraph_end(lines, index)
         starts = [0, *accumulate(len(line) + 1 for line in lines[index:end - 1])]
         for span_start, span_end in code_spans("\n".join(lines[index:end])):
             for row, line_start in enumerate(starts, index):
