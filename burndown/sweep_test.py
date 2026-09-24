@@ -20,10 +20,15 @@ SWEEP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sweep.py")
 FIXTURES = []
 
 
-def cache():
-    root = tempfile.mkdtemp(prefix="sweep-fixture-")
+def tracked_tempdir(prefix):
+    """A temp dir `clean_fixtures` removes at the end of the run."""
+    root = tempfile.mkdtemp(prefix=prefix)
     FIXTURES.append(root)
     return root
+
+
+def cache():
+    return tracked_tempdir("sweep-fixture-")
 
 
 def clean_fixtures():
@@ -142,17 +147,13 @@ def test_cli_on_an_unknown_run_is_refused():
 
 
 def reviews_dir_fixture():
-    root = tempfile.mkdtemp(prefix="sweep-sidecars-")
-    FIXTURES.append(root)
-    return root
+    return tracked_tempdir("sweep-sidecars-")
 
 
 def home_fixture():
     """A directory standing in for `$HOME`, and the parent the fixture repos
     are made under."""
-    root = tempfile.mkdtemp(prefix="sweep-home-")
-    FIXTURES.append(root)
-    return root
+    return tracked_tempdir("sweep-home-")
 
 
 def write_sidecar(reviews_dir, lowest, lines):
