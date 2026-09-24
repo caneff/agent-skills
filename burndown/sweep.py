@@ -10,6 +10,11 @@ that the run has no leftovers and prints nothing to file on stdout. This is
 the renderer #1029 left for #1030: the run file was already the store,
 nothing here writes to it.
 
+    python3 burndown/sweep.py blocked-by < <body>
+
+prints the body ending in exactly one `## Blocked by` section (#1130): the
+form both filing and updating a sweep pipe the finished body through.
+
     python3 burndown/sweep.py counts <run-id> --repo <checkout> | --reviews-dir <dir>
 
 prints the closing report's three counts — fixed in-round, leftover,
@@ -132,6 +137,33 @@ def render_body(leftovers):
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+BLOCKED_BY_TEXT = "None — can start immediately."
+_BLOCKED_BY_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+blocked by[ \t]*:?[ \t]*$",
+                                 re.IGNORECASE)
+_ANY_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+\S")
+
+
+def with_blocked_by(body):
+    """`body` ending in exactly one `## Blocked by` section. `render_body`
+    emits file sections only and the update path adds a fold's kept sections
+    to them, so neither carries the declaration `/file-ticket` wrote on first
+    filing (#1130); `frontier.blocked_by_section` reads a body with none as
+    unresolved and one with two as ambiguous. Any declaration already in
+    `body` is dropped first, so the call is idempotent."""
+    kept = []
+    skipping = False
+    for line in body.splitlines():
+        if _BLOCKED_BY_HEADING.match(line):
+            skipping = True
+        elif skipping and _ANY_HEADING.match(line):
+            skipping = False
+        if not skipping:
+            kept.append(line)
+    text = "\n".join(kept).rstrip("\n")
+    return (text + "\n\n" if text else "") + \
+        f"## Blocked by\n\n{BLOCKED_BY_TEXT}\n"
+
+
 def default_reviews_dir(repo_root):
     """`~/.cache/agent-reviews/<repo>`, keyed the same way
     `multi-axis-code-review/SKILL.md`'s own dir expansion is: the primary
@@ -236,7 +268,16 @@ def main(argv):
     where.add_argument("--reviews-dir",
                    help="the sidecar directory itself, instead of --repo")
 
+    subs.add_parser(
+        "blocked-by",
+        help="read a sweep body on stdin, print it ending in exactly one "
+             "`## Blocked by` section")
+
     args = parser.parse_args(argv[1:])
+
+    if args.command == "blocked-by":
+        print(with_blocked_by(sys.stdin.read()), end="")
+        return 0
 
     override = os.environ.get("BURNDOWN_CACHE_DIR")
     root = os.path.expanduser(override) if override else None
