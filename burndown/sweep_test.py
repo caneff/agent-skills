@@ -112,7 +112,17 @@ def test_render_reads_an_escaped_first_backtick_as_shortening_its_run():
     body = sweep.render_body([leftover(
         901, [901], 950, "S1", "a.py", "T", "hard", "\\``a`<i>`")])
     assert "<i>" not in body, body
-    assert "`a`&lt;i>`" in body, body
+    assert "`a`&lt;i>\\`" in body, body
+
+
+def test_render_escapes_a_backtick_left_outside_a_span():
+    # Title and text share one line, so an unmatched backtick in the title
+    # would close on the text's first one and push the text's `<i>` out of
+    # its span (#1109 C1). Escaped, it pairs with nothing.
+    body = sweep.render_body([leftover(
+        901, [901], 950, "S1", "a.py", "a`", "hard", "b`<i>`")])
+    assert "a\\` — clump" in body, body
+    assert "b`<i>`" in body, body
 
 
 def test_title_names_the_run_id():

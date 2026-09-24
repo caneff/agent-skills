@@ -90,6 +90,10 @@ def inline_safe(text):
     anyone or injecting markup. `runfile.leftover_field` already keeps the text to one
     line, so no heading or fence can start a line."""
     def defuse(chunk):
+        # A backtick outside every span is escaped, so it cannot pair with
+        # one in the next field on the same line; an escape pair stays whole.
+        chunk = re.sub(rf"(\\[{re.escape(string.punctuation)}])|`",
+                       lambda m: m.group(1) or "\\`", chunk)
         chunk = re.sub(r"(?<!\w)@(?=\w)", "@\u200b", chunk)
         return chunk.replace("<", "&lt;")
     out, pos = [], 0
