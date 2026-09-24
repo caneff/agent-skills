@@ -58,17 +58,20 @@ list strips nothing: unknown targets are not evidence the label is wrong.
 
 The pass does the removal because it is the only reader holding the
 clumper's file list (#1118). `implement-dispatch` strips too, but from the
-ticket body's tokens alone, and it cannot use prose as a whitelist: `i.e`,
-`v1.2` and `Node.js` would all read as code. It matches a fixed list of code
-extensions (`flow/claude/WORKFLOW.md` § Gate 2's, plus `.go`, `.zsh`, `.ps1`,
-`.lua`, `.ini`, `.cfg` and similar), a `SKILL.md`, a few extensionless
-filenames (`Makefile`, `Dockerfile`), and an extensionless path under a
-script directory (`bin/`, `hooks/`, `.githooks/`) — on those it dispatches
-heavy, drops `documentation` in the claim edit, and says so in its report; an
-unreadable body dispatches heavy and keeps the label. A body naming only
-prose, or a script outside those shapes, on a ticket whose candidate line
-names it, gets past dispatch's reading — so the label has to be gone before
-dispatch reads it, and this pass runs before the first dispatch. The old
+ticket body's tokens alone, and it cannot use prose as a whitelist for a
+bare token: `i.e`, `v1.2` and `Node.js` would all read as code. A token with a
+`/` is a path and is code unless its extension is prose (`.md`, `.markdown`,
+`.txt`, `.rst`), a `SKILL.md` excepted; a bare token is code by a fixed list
+of extensions (`flow/lane/src/targets.rs` has it). Extensionless, it is code
+by filename (`Makefile`, `Gemfile`, `Dockerfile`) or under a script directory
+(`bin/`, `hooks/`, `.githooks/`). On those it dispatches heavy, drops
+`documentation` in the claim edit, and says so in its report; an unreadable
+body dispatches heavy and keeps the label. What it still cannot read: an
+extensionless name outside the script directories and the filename list
+(`scripts/deploy`, `tools/foo`), or a bare extensioned token outside the fixed
+list. A candidate whose line names one of those gets past dispatch's reading,
+so the label has to be gone before dispatch reads it, and this pass runs
+before the first dispatch. The old
 report-only `--strip` flag is retired; `--dry-run`
 previews the strip under `would strip:`.
 

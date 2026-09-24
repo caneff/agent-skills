@@ -8,10 +8,12 @@
 //! toward code — a wrong heavy tier costs one review, a wrong light tier
 //! lands code unreviewed. It reads a body's tokens, not a file list, so it
 //! cannot treat everything outside prose as code the way `burndown/tier.py`
-//! does (`i.e`, `v1.2` would all go heavy): it names a fixed list of code
-//! extensions, a few extensionless filenames, and extensionless entries under
-//! a script directory (`bin/`, `hooks/`). A path outside all three is still
-//! invisible here; `tier.py` strips the label for it before dispatch.
+//! does (`i.e`, `v1.2` would all go heavy). A token with a `/` is a path, and
+//! is code unless its extension is prose (`.md .markdown .txt .rst`); a bare
+//! token is code only by a fixed list of extensions. Extensionless, it is code
+//! by filename (`Makefile`, `Gemfile`) or under a script directory (`bin/`,
+//! `hooks/`). An extensionless name outside those is still invisible here;
+//! `tier.py` strips the label for it before dispatch.
 
 /// Extensions read as code: § Gate 2's, the ones that wire the harness or CI
 /// (its "hooks, CI config"), and other scripting and config languages.
@@ -21,9 +23,12 @@ const CODE_EXTENSIONS: &[&str] = &[
     "c", "h", "cpp", "hpp", "mk",
 ];
 /// Extensionless files that are code wherever they sit.
-const CODE_FILENAMES: &[&str] = &["makefile", "dockerfile", "justfile", "rakefile", "procfile"];
+const CODE_FILENAMES: &[&str] = &["makefile", "dockerfile", "justfile", "rakefile", "gemfile", "procfile"];
 /// A directory whose extensionless entries are scripts: `bin/implement-dispatch`, a git hook.
 const CODE_DIRS: &[&str] = &["bin", "sbin", "hooks", ".githooks", ".husky"];
+/// Extensions `burndown/tier.py` reads as prose; on a path (a token with a `/`),
+/// any other extension is code.
+const PROSE_EXTENSIONS: &[&str] = &["md", "markdown", "txt", "rst"];
 /// Product names that end in a code extension but are prose.
 const PROSE_TOKENS: &[&str] = &["node.js", "next.js", "vue.js", "three.js", "d3.js", "express.js"];
 /// Basenames that are code whatever their extension: a skill's body changes
@@ -50,7 +55,11 @@ fn is_code_path(token: &str) -> bool {
         return false;
     }
     match name.rsplit_once('.') {
-        Some((stem, ext)) => !stem.is_empty() && CODE_EXTENSIONS.contains(&ext),
+        Some((stem, ext)) => {
+            !stem.is_empty()
+                && (CODE_EXTENSIONS.contains(&ext)
+                    || (token.contains('/') && ext.chars().any(|c| c.is_alphabetic()) && !PROSE_EXTENSIONS.contains(&ext)))
+        }
         None => token.contains('/') && token.split('/').rev().skip(1).any(|d| CODE_DIRS.contains(&d.to_ascii_lowercase().as_str())),
     }
 }
@@ -82,6 +91,16 @@ mod tests {
             "a.go", "a.zsh", "a.ps1", "a.lua", "a.ini", "a.cfg", "x/y.rb",
         ] {
             assert_eq!(first_code_target(&format!("see {p}, then")), Some(p.into()), "{p}");
+        }
+    }
+
+    #[test]
+    fn a_slash_path_is_code_unless_its_extension_is_prose() {
+        for p in ["src/main.dart", "tools/Gemfile", "a/b.sql", "x/y.lua", "infra/main.tf", "Gemfile", "lib/Rakefile"] {
+            assert_eq!(first_code_target(&format!("see {p}, then")), Some(p.into()), "{p}");
+        }
+        for body in ["read/write and and/or", "docs/notes.md", "a/b.txt", "a/b.rst", "a/b.markdown", "ratio 3/4.5 here"] {
+            assert_eq!(first_code_target(body), None, "{body}");
         }
     }
 
