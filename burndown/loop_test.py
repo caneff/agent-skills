@@ -1463,6 +1463,17 @@ def test_a_done_pane_with_no_pr_up_is_stalled_not_idle():
     assert "done      #2" in rendered, rendered
 
 
+def test_a_pr_up_that_is_not_a_pr_number_does_not_quiet_a_done_pane():
+    """The sweep's `--workers` file is often hand-built, so a `pr_up` of 0,
+    "x" or false reaches it unvalidated; only a real PR number is on record."""
+    for bad in (0, "x", False, -3, True):
+        clumps = live_clumps()[:1]
+        clumps[0]["pr_up"] = bad
+        state = loop.sweep(clumps, agent_stub(
+            {"skills-1": herdr_agent("done")}, []))
+        assert state["workers"][0]["verdict"] == "stalled", (bad, state)
+
+
 def in_flight_clumps(job=None, other=None):
     """Two live clumps as `loop.py dispatch --in-flight` reads them: the run
     file's entries, each carrying its worker's job state, plus the closure

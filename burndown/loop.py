@@ -838,7 +838,12 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
             verdict, detail = _verdict(answer)
             # A turn that ended with no "PR up" on record ended mid-lane:
             # nothing reached the controller, and nothing will (#1148).
-            if verdict == "done" and clump.get("pr_up") is None:
+            # Only a PR number is on record: a hand-built workers file can
+            # carry 0 or "x", and either must not quiet the pane.
+            pr = clump.get("pr_up")
+            on_record = (isinstance(pr, int) and not isinstance(pr, bool)
+                         and pr > 0)
+            if verdict == "done" and not on_record:
                 verdict, detail = "stalled", ("done with no PR up on record "
                                               "— read this pane")
         read.append({"agent": agent, "tickets": clump["tickets"],
