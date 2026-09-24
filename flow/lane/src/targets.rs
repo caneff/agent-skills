@@ -6,16 +6,26 @@
 //! So the body's own targets are read too. `flow/claude/WORKFLOW.md` § Gate 2
 //! names what is code; this is the dispatcher's reading of it, and it errs
 //! toward code — a wrong heavy tier costs one review, a wrong light tier
-//! lands code unreviewed. It reads a body's tokens, so it can only see a path
-//! with an extension: an extensionless script is invisible here, where
-//! `burndown/tier.py` (which reads a candidate's file list) calls it code and
-//! strips the label before dispatch.
+//! lands code unreviewed. It reads a body's tokens, not a file list, so it
+//! cannot treat everything outside prose as code the way `burndown/tier.py`
+//! does (`i.e`, `v1.2` would all go heavy): it names a fixed list of code
+//! extensions, a few extensionless filenames, and extensionless entries under
+//! a script directory (`bin/`, `hooks/`). A path outside all three is still
+//! invisible here; `tier.py` strips the label for it before dispatch.
 
 /// Extensions § Gate 2 names as code, plus the ones that wire the harness or
 /// CI (its "hooks, CI config").
 const CODE_EXTENSIONS: &[&str] = &[
-    "py", "ts", "tsx", "js", "jsx", "mjs", "cjs", "sh", "bash", "rs", "yml", "yaml", "toml", "json",
+    "py", "ts", "tsx", "js", "jsx", "mjs", "cjs", "sh", "bash", "rs", "yml", "yaml", "toml", "json", "go", "zsh",
+    "fish", "ps1", "psm1", "bat", "cmd", "lua", "ini", "cfg", "conf", "rb", "pl", "php", "java", "kt", "swift",
+    "c", "h", "cpp", "hpp", "mk",
 ];
+/// Extensionless files that are code wherever they sit.
+const CODE_FILENAMES: &[&str] = &["makefile", "dockerfile", "justfile", "rakefile", "procfile"];
+/// A directory whose extensionless entries are scripts: `bin/implement-dispatch`, a git hook.
+const CODE_DIRS: &[&str] = &["bin", "sbin", "hooks", ".githooks", ".husky"];
+/// Product names that end in a code extension but are prose.
+const PROSE_TOKENS: &[&str] = &["node.js", "next.js", "vue.js", "three.js", "d3.js", "express.js"];
 /// Basenames that are code whatever their extension: a skill's body changes
 /// what every later session does, and `settings.json` wires the harness.
 const CODE_BASENAMES: &[&str] = &["skill.md"];
@@ -32,12 +42,15 @@ pub fn first_code_target(body: &str) -> Option<String> {
 
 fn is_code_path(token: &str) -> bool {
     let name = token.rsplit('/').next().unwrap_or(token).to_ascii_lowercase();
-    if CODE_BASENAMES.contains(&name.as_str()) {
+    if CODE_BASENAMES.contains(&name.as_str()) || CODE_FILENAMES.contains(&name.as_str()) {
         return true;
+    }
+    if PROSE_TOKENS.contains(&name.as_str()) {
+        return false;
     }
     match name.rsplit_once('.') {
         Some((stem, ext)) => !stem.is_empty() && CODE_EXTENSIONS.contains(&ext),
-        None => false,
+        None => token.contains('/') && token.split('/').rev().skip(1).any(|d| CODE_DIRS.contains(&d.to_ascii_lowercase().as_str())),
     }
 }
 
@@ -58,6 +71,23 @@ mod tests {
             "hooks/x.bash", "a.tsx", "a.mjs", "settings.local.json",
         ] {
             assert_eq!(first_code_target(&format!("see {p}, then")), Some(p.into()), "{p}");
+        }
+    }
+
+    #[test]
+    fn names_extensionless_scripts_and_unlisted_extensions() {
+        for p in [
+            "bin/implement-dispatch", "Makefile", "build/Dockerfile", ".githooks/pre-push", "hooks/commit-msg",
+            "a.go", "a.zsh", "a.ps1", "a.lua", "a.ini", "a.cfg", "x/y.rb",
+        ] {
+            assert_eq!(first_code_target(&format!("see {p}, then")), Some(p.into()), "{p}");
+        }
+    }
+
+    #[test]
+    fn ordinary_prose_tokens_are_not_code() {
+        for body in ["i.e. this", "e.g. that", "bump to v1.2 now", "runs on Node.js", "read/write and/or edit", "version 3.10.2"] {
+            assert_eq!(first_code_target(body), None, "{body}");
         }
     }
 
