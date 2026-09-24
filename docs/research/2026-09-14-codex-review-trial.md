@@ -234,3 +234,5 @@ Filed from conversation — controller, map #776 merge tail.
 | agent-skills#1095 | #1150 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#1113 | #1153 | 0 | 1 | 0 | One run, one [medium] also found by Claude (C1/P1): `check_adjacent.py` still breaches a fix plus its own test file; filed as #1152 by the worker, not folded in by the controller since #1152 carries an open design decision. Sha unmoved, no second pass. |
 | agent-skills#1114 | #1155 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
+| agent-skills#1151 | #1156 | 0 | 0 | 0 | One run, approve, no material findings (sweep PR fenced by the controller to files no live clump held). No second pass. |
+| agent-skills#1118 | #1157 | 0 | 0 | 1 | One run, one codex-only [high], disputed by the controller as unreachable within the lane: a `documentation` label re-added between the tier pass and dispatch would still dispatch light, but nothing in the lane adds it after the pass and a human relabel is a ruling; the ticket offered (a) label-strip or (b) targets-into-dispatch and the PR took (a). Sha unmoved, no second pass. |
