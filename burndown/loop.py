@@ -960,14 +960,17 @@ def with_run_jobs(in_flight, run_id, root=None):
     except runfile.RunFileError as exc:
         raise LoopError(str(exc)) from exc
     jobs = {min(entry["tickets"]): entry["job"] for entry in run["clumps"]}
+    with_jobs = []
     for clump in in_flight:
-        if key_of(clump) not in jobs:
+        key = key_of(clump)
+        if key not in jobs:
             raise LoopError(
-                f"#{key_of(clump)} is live but not registered in run "
+                f"#{key} is live but not registered in run "
                 f"{run_id} — register it with `runfile.py clump` (then "
                 "`runfile.py job`) before dispatching; `runfile.py job` "
                 "alone fails on an unregistered clump")
-    return [{**clump, "job": jobs[key_of(clump)]} for clump in in_flight]
+        with_jobs.append({**clump, "job": jobs[key]})
+    return with_jobs
 
 
 def herdr_get(agent, timeout):
