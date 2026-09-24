@@ -142,21 +142,36 @@ and exits clean.
 `--pr-body <path>` is the PR's body, as
 `gh pr view <pr> --repo <owner/name> --json body --jq .body` prints it; a
 process substitution, `--pr-body <(gh pr view ...)`, passes it without a
-file. Each sidecar line is compared with the PR body's Decisions made. A
-body line cites a finding when it opens with the finding's id, after any
-list marker and bold or code marks. Its outcome is the first disposition
-word after the id: `fixed`, `disputed`, `filed`, `handed back` or
-`leftover`. The command refuses in three cases:
+file. Only the body's Decisions made section is read. Its lines cite a
+finding in the shapes PR bodies here are written in: ids leading a list
+item, alone or grouped by commas or "and" (`- S3, S5, P2: leftover`),
+bolded or not, or one named as `sidecar <id>` at the end of the line. A line
+naming an id with no outcome word records nothing, and when several lines
+cite one id the last is its record, since a ruling may be appended below the
+first. A line states its outcome when the word right after its first colon
+outside parentheses is one of `fixed`, `disputed`, `filed`, `handed back` or
+`leftover`, and the sidecar must hold exactly that. A line that only mentions
+outcome words, as in `S1 (hard): overflows. Claimed fixed; contested.
+leftover.`, disagrees when the sidecar's outcome is not among them. The
+command refuses:
 
-- a body line records an outcome the sidecar line for that id does not
-  hold. A disposition changed after the verification pass rewrites its
-  sidecar line in the same step that records it in the PR body
-  (`implement/SKILL.md` § The merge), so a disagreement is a step that
-  reached one record and not the other (#1085).
-- a `leftover` line whose id no body line cites. Absent is not agreement:
-  the leftover is either missing from the body or cited in a shape this
-  reader cannot see.
-- an empty body, which is what a failed `gh pr view` leaves behind.
+- a sidecar line the body contradicts. A disposition changed after the
+  verification pass rewrites its sidecar line in the same step that records
+  it in the PR body (`implement/SKILL.md` § The merge), so a disagreement is
+  a step that reached one record and not the other (#1085).
+- a leftover the body states and the sidecar has no line for:
+  `implement/SKILL.md` § The merge's
+  case of a leftover kept only in the PR body, which never reaches a sweep.
+- a body whose Decisions made cites none of the sidecar's ids, which is
+  another PR's body or one this reader cannot parse at all.
+- a body with no Decisions made section, which covers the empty file a
+  failed `gh pr view` leaves behind.
+
+A sidecar id the body does not cite is not refused: absent is not
+disagreement, and refusing it would refuse every line shape the reader
+misses. Run over the 40 most recent merged PRs with a sidecar on disk, the
+check passed 38 and refused two, each a body and sidecar that really
+disagree (`docs/research/2026-09-24-pr-body-check-probe.md`).
 
 The check compares content, not times. A commit that changed no
 disposition, such as a doc fix, a test-only witness or a re-wrap, refuses

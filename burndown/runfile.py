@@ -33,6 +33,8 @@ import sys
 import time
 
 CACHE_DIR = "~/.cache/burndown"
+# The one form of the PR-body fetch `leftover --pr-body` reads.
+_FETCH_BODY = "gh pr view <pr> --repo <owner/name> --json body --jq .body"
 # How long a writer waits for the run file's lock before refusing, matching the
 # `flock -w 30` the dispatch lane already waits with.
 LOCK_TIMEOUT = 30.0
@@ -407,12 +409,15 @@ def read_dispositions(sidecar_path):
                 f"its outcome is {outcome!r}, not one of "
                 f"{', '.join(_SIDECAR_OUTCOMES)}")
         fid = obj.get("id")
-        if isinstance(fid, str):
-            if fid in seen:
-                raise RunFileError(
-                    f"{sidecar_path}:{n} repeats finding id {fid!r} from "
-                    f"line {seen[fid]} — one line per finding")
-            seen[fid] = n
+        if not isinstance(fid, str) or not fid.strip():
+            raise RunFileError(
+                f"{sidecar_path}:{n} carries no finding id, or one that is "
+                f"not a string: {fid!r}")
+        if fid in seen:
+            raise RunFileError(
+                f"{sidecar_path}:{n} repeats finding id {fid!r} from "
+                f"line {seen[fid]} — one line per finding")
+        seen[fid] = n
         out.append((n, obj))
     return out
 
@@ -433,35 +438,102 @@ def read_leftover_lines(sidecar_path):
     return out
 
 
-# A PR body's disposition word for a finding: the first of these after the
-# id on the line that cites it (`implement/SKILL.md` § The PR, Decisions made).
-_BODY_OUTCOME = re.compile(
-    r"\b(fixed|disputed|filed|handed[- ]back|leftover)\b", re.IGNORECASE)
+# How a PR body's Decisions made cites a finding (`implement/SKILL.md`
+# § The PR): ids leading a list item, grouped by commas or "and", or one
+# named as `sidecar <id>` anywhere on the line.
+_OUTCOME_WORD = r"(fixed|disputed|filed|handed[- ]back|leftover)"
+_ID = r"[A-Za-z][A-Za-z0-9-]*[0-9][A-Za-z0-9]*"
+_LIST_MARKER = re.compile(r"\s*(?:(?:[-*+]|\d+[.)])\s+)?")
+_LEAD_ID = re.compile(r"[*_`]*(" + _ID + r")[*_`]*(?![\w-])")
+_ID_SEPARATOR = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+|\s*/\s*")
+_TAIL_ID = re.compile(r"\bsidecar(?:\s+id)?:?\s+[*_`]*(" + _ID + r")",
+                      re.IGNORECASE)
+_HEADING = re.compile(r"(#{1,6})\s")
+_DECISIONS = re.compile(r"(#{1,6})\s+Decisions made\b", re.IGNORECASE)
 
 
-def body_outcomes(body_lines, fid):
-    """Every `(line number, outcome)` the PR body records for finding `fid`:
-    a line citing it opens with the id — after any list marker and bold or
-    code marks — and its outcome is the first disposition word after it. A
-    line that names the id with no disposition word records nothing."""
-    cite = re.compile(r"\s*(?:[-*+]|\d+[.)])?\s*[*_`]*" + re.escape(fid) +
-                      r"[*_`]*(?![\w-])(.*)")
-    out = []
+def decisions_made(body_lines):
+    """The `(line number, text)` lines of the body's Decisions made section,
+    or `None` when it has none."""
+    out = None
     for n, line in enumerate(body_lines, start=1):
-        match = cite.match(line)
-        word = match and _BODY_OUTCOME.search(match.group(1))
-        if word:
-            out.append((n, word.group(1).lower().replace(" ", "-")))
+        heading = _HEADING.match(line)
+        if out is not None and heading and len(heading.group(1)) <= level:
+            break
+        if out is not None:
+            out.append((n, line))
+        elif _DECISIONS.match(line):
+            out, level = [], len(heading.group(1))
     return out
+
+
+def cited_ids(line):
+    """The ids a Decisions made line cites, and the text after the leading
+    ones: `- S1, P2 and C1: fixed` cites all three."""
+    pos = _LIST_MARKER.match(line).end()
+    ids = []
+    while True:
+        token = _LEAD_ID.match(line, pos)
+        if token is None:
+            break
+        ids.append(token.group(1))
+        pos = token.end()
+        sep = _ID_SEPARATOR.match(line, pos)
+        if sep is None or _LEAD_ID.match(line, sep.end()) is None:
+            break
+        pos = sep.end()
+    ids += [m.group(1) for m in _TAIL_ID.finditer(line)]
+    return ids, line[pos:]
+
+
+def stated_outcome(rest):
+    """The outcome a line states outright: the disposition word opening the
+    text after its first colon outside parentheses, as in `S1 (hard):
+    fixed`. `None` when that word is something else."""
+    depth = 0
+    for i, ch in enumerate(rest):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch == ":" and depth == 0:
+            word = re.match(r"\s*[*_`]*" + _OUTCOME_WORD + r"\b", rest[i + 1:],
+                            re.IGNORECASE)
+            return word and normal_outcome(word.group(1))
+    return None
+
+
+def normal_outcome(word):
+    return word.lower().replace(" ", "-")
+
+
+def body_records(body_lines):
+    """Every finding id Decisions made records, mapped to its last record:
+    `(line number, stated outcome or None, every outcome word on the line)`.
+    The last line wins because a ruling may be appended below the first
+    record rather than edited into it. A line naming an id with no outcome
+    word at all records nothing."""
+    records = {}
+    for n, line in decisions_made(body_lines) or []:
+        ids, rest = cited_ids(line)
+        words = {normal_outcome(w) for w in
+                 re.findall(r"\b" + _OUTCOME_WORD + r"\b", rest, re.IGNORECASE)}
+        if ids and words:
+            for fid in ids:
+                records[fid] = (n, stated_outcome(rest), words)
+    return records
 
 
 def refuse_disagreeing_pr_body(sidecar_path, body_path):
     """A sidecar the PR body disagrees with predates a disposition change:
     the controller's fix read or ruling reaches the PR body and the sidecar
-    in one step (`implement/SKILL.md` § The merge), so a line whose outcome
-    the body contradicts is one that step never touched (#1085). The
-    comparison is by content, so a commit that changed no disposition —
-    a doc fix, a test, a re-wrap — refuses nothing (#1147)."""
+    in one step (`implement/SKILL.md` § The merge), so a line the body
+    contradicts is one that step never touched (#1085). The comparison is
+    by content, so a commit that changed no disposition refuses nothing
+    (#1147). A line that states its outcome must match the sidecar's; one
+    that only mentions outcome words disagrees when the sidecar's is not
+    among them. The refusals and their reasons: `references/run-file.md`
+    § Leftovers."""
     try:
         with open(body_path) as fh:
             body_lines = fh.read().splitlines()
@@ -469,26 +541,38 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
         raise RunFileError(
             f"could not read the PR body {body_path}: {exc.strerror}"
         ) from exc
-    if not any(line.strip() for line in body_lines):
+    if decisions_made(body_lines) is None:
         raise RunFileError(
-            f"the PR body {body_path} is empty — fetch it with "
-            "`gh pr view <pr> --json body --jq .body`")
-    for n, obj in read_dispositions(sidecar_path):
-        fid = obj.get("id")
-        if not isinstance(fid, str):
+            f"the PR body {body_path} has no Decisions made section — fetch "
+            f"it with `{_FETCH_BODY}`")
+    records = body_records(body_lines)
+    lines = read_dispositions(sidecar_path)
+    if lines and not any(obj["id"] in records for _, obj in lines):
+        raise RunFileError(
+            f"the PR body {body_path} cites none of {sidecar_path}'s finding "
+            "ids — is it this PR's body?")
+    held = {obj["id"] for _, obj in lines}
+    for n, obj in lines:
+        if obj["id"] not in records:
             continue
-        cited = body_outcomes(body_lines, fid)
-        if not cited and obj["outcome"] == "leftover":
+        body_n, stated, words = records[obj["id"]]
+        if stated is not None:
+            agrees = stated == obj["outcome"]
+            said = stated
+        else:
+            agrees = obj["outcome"] in words
+            said = " or ".join(sorted(words))
+        if not agrees:
             raise RunFileError(
-                f"the PR body {body_path} cites no disposition for {fid}, "
-                f"a leftover at {sidecar_path}:{n} — cite it by id in "
-                "Decisions made, or pass --allow-stale")
-        for body_n, outcome in cited:
-            if outcome != obj["outcome"]:
-                raise RunFileError(
-                    f"{body_path}:{body_n} records {fid} as {outcome!r}, "
-                    f"but {sidecar_path}:{n} says {obj['outcome']!r} — "
-                    "rewrite the sidecar line, or pass --allow-stale")
+                f"{body_path}:{body_n} records {obj['id']} as {said!r}, "
+                f"but {sidecar_path}:{n} says {obj['outcome']!r} — rewrite "
+                "the sidecar line, or pass --allow-stale")
+    for fid, (body_n, stated, _) in records.items():
+        if stated == "leftover" and fid not in held:
+            raise RunFileError(
+                f"{body_path}:{body_n} records {fid} as a leftover, but "
+                f"{sidecar_path} has no line for it — append it in § "
+                "Review's leftover grammar, or pass --allow-stale")
 
 
 _SIDECAR_NAME = re.compile(r"dispositions-([0-9]+)\.jsonl")
@@ -522,9 +606,11 @@ def leftover(run_id, lowest, pr, sidecar_path, root=None, pr_body=None):
     Returns `(run, added)`, `added` being the finding ids this call
     actually appended, for a caller to report a copy count.
 
-    `pr_body` is a file holding the PR's body: a sidecar line whose outcome
-    it contradicts is refused. `None` skips the check; the CLI never passes
-    it without `--allow-stale`."""
+    `pr_body` is a file holding the PR's body, checked against the sidecar
+    by `refuse_disagreeing_pr_body`: a contradicted outcome, a leftover the
+    body records and the sidecar lacks, a body citing none of the sidecar's
+    ids, and a body with no Decisions made section are refused. `None` skips
+    the check; the CLI never passes it without `--allow-stale`."""
     pr = pr_number(pr)
     found = read_leftover_lines(sidecar_path)
     if pr_body is not None:
@@ -809,9 +895,9 @@ def main(argv):
                     metavar="PATH", help="the dispositions sidecar to copy from")
     fresh = lo.add_mutually_exclusive_group(required=True)
     fresh.add_argument("--pr-body", metavar="PATH",
-                       help="the PR's body, as `gh pr view <pr> --json body "
-                            "--jq .body` prints it; a sidecar line whose "
-                            "outcome it contradicts is refused as stale")
+                       help=f"the PR's body, as `{_FETCH_BODY}` prints "
+                            "it; a sidecar its Decisions made contradicts, "
+                            "or does not cite at all, is refused as stale")
     fresh.add_argument("--allow-stale", action="store_true",
                        help="skip the PR-body check")
 

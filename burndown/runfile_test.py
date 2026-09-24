@@ -339,10 +339,11 @@ def sidecar_of(*lines, number=901):
     return path_
 
 
-def refusal_of(sidecar, root):
+def refusal_of(sidecar, root, pr_body=None):
     """The refusal `runfile.leftover` raises for `sidecar`, its message."""
     try:
-        runfile.leftover("burn-1", 901, 950, sidecar, root=root)
+        runfile.leftover("burn-1", 901, 950, sidecar, root=root,
+                         pr_body=pr_body)
     except runfile.RunFileError as exc:
         assert runfile.load("burn-1", root=root)["leftovers"] == []
         return str(exc)
@@ -1336,39 +1337,59 @@ def pr_body(text):
     return path_
 
 
-# The Decisions made shapes PR bodies here actually carry (PRs 1166, 1167):
-# a bare id, a bolded id with its severity, an adjacent fix, a line that
-# names an id with no disposition, a leftover mentioned only in passing, and
-# an id another id is a prefix of.
-BODY = """## Decisions made
+# Decisions made lines copied from PR bodies here (PRs 1150, 1153, 1160,
+# 1166, 1167): grouped ids, bolded ids with a description before the
+# disposition, a disposition word inside the description, a line naming an id
+# with no disposition, an id named only as `sidecar <id>` at the end, an id
+# another id is a prefix of, and a section that is not Decisions made.
+BODY = """## What changed
 
-- S1: fixed (adjacent), 2c2eb6c.
-- **C1** (CONFIRMED): fixed, b0f0f22. A `|` line is a table row.
-- P2: disputed. The verdict is broader than the ticket, deliberately.
+- S1: this line is outside Decisions made and says leftover.
+
+## Decisions made
+
+- S1, P2, C1: fixed, 283d5ef — jq printed an array, so `$sweep` was not executable.
+- C4, S4 (a path ending in a product name, `scripts/node.js`, read as prose): fixed (adjacent) e5418a1.
+- P3 and the Codex `[high]` (`src/main.dart` still read as light): the controller overruled my dispute; fixed 80b3140.
+- **S2** (standards, judgement): paragraph overflows 80 columns. Claimed fixed in 2abe0b9; the verification pass contested it. leftover.
+- **C2** (correctness, CONFIRMED, hard): `check_adjacent.py` still breaches. filed: #1152 (outside this diff).
 - P2's broader verdict: the controller accepted the dispute.
 - C3: fixed, 5b6b0f1. This was a leftover at the verification pass.
-- S3: leftover.
-- S30: fixed, 9abcdef. A different finding whose id starts with S3.
-- codex-gate-1: leftover (controller). Table column counts.
+- S3, S5, S6: leftover (all judgement, none high).
+- S30: fixed, 9abcdef.
+- Codex gate [medium] (table column counts): leftover (controller); sidecar codex-gate-1.
 
 ## Last reviewed sha
+
+- S3: fixed. Outside Decisions made again.
 """
+
+
+def body_sidecar():
+    """The sidecar BODY agrees with, line for line."""
+    def left(fid):
+        return dict(LEFTOVER_S3, id=fid)
+    return sidecar_of(
+        {"id": "S1", "outcome": "fixed", "sha": "283d5ef"},
+        {"id": "P2", "outcome": "fixed", "sha": "283d5ef"},
+        {"id": "C1", "outcome": "fixed", "sha": "283d5ef"},
+        {"id": "C4", "outcome": "fixed", "sha": "e5418a1", "scope": "adjacent"},
+        {"id": "S4", "outcome": "fixed", "sha": "e5418a1", "scope": "adjacent"},
+        {"id": "P3", "outcome": "fixed", "sha": "80b3140"},
+        left("S2"),
+        {"id": "C2", "outcome": "filed", "ticket": 1152},
+        {"id": "C3", "outcome": "fixed", "sha": "5b6b0f1"},
+        left("S3"), left("S5"), left("S6"),
+        left("codex-gate-1"))
 
 
 def test_a_sidecar_the_pr_body_agrees_with_is_harvested_whatever_came_after():
     # #1147: a doc-only, test-only or re-wrap commit after the verification
     # pass changes no disposition, so nothing about it can refuse the harvest.
-    sidecar = sidecar_of(
-        {"id": "S1", "outcome": "fixed", "sha": "2c2eb6c", "scope": "adjacent"},
-        {"id": "C1", "outcome": "fixed", "sha": "b0f0f22"},
-        {"id": "P2", "outcome": "disputed", "reason": "deliberate"},
-        {"id": "C3", "outcome": "fixed", "sha": "5b6b0f1"},
-        LEFTOVER_S3,
-        dict(LEFTOVER_S3, id="codex-gate-1", severity="medium"))
     root = landed_root()
-    _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root,
+    _, added = runfile.leftover("burn-1", 901, 950, body_sidecar(), root=root,
                                 pr_body=pr_body(BODY))
-    assert added == ["S3", "codex-gate-1"], added
+    assert added == ["S2", "S3", "S5", "S6", "codex-gate-1"], added
 
 
 def test_a_leftover_line_the_pr_body_records_as_fixed_is_refused_until_rewritten():
@@ -1376,7 +1397,7 @@ def test_a_leftover_line_the_pr_body_records_as_fixed_is_refused_until_rewritten
     # sidecar line still reads leftover.
     sidecar = sidecar_of(LEFTOVER_S3)
     body = pr_body("## Decisions made\n\n- S3: fixed, abc1234.\n")
-    got = refusal_of_body(sidecar, body)
+    got = refusal_of(sidecar, landed_root(), body)
     assert ("S3" in got and "'fixed'" in got and "'leftover'" in got
             and f"{body}:3" in got and f"{sidecar}:1" in got), got
     # The controller's rewrite: same finding, new outcome.
@@ -1389,37 +1410,95 @@ def test_a_leftover_line_the_pr_body_records_as_fixed_is_refused_until_rewritten
     assert added == [], added
 
 
-def test_a_line_rewritten_to_fixed_while_the_pr_body_still_says_leftover_is_refused():
-    sidecar = sidecar_of({"id": "S3", "outcome": "fixed", "sha": "abc1234"})
-    got = refusal_of_body(sidecar, pr_body("- **S3** (hard): leftover.\n"))
-    assert "'leftover'" in got and "'fixed'" in got, got
+def test_a_stale_leftover_is_refused_in_each_real_line_shape():
+    # Each real shape in BODY, with the sidecar still reading leftover where
+    # the body says otherwise: the grouped line, the description-first line,
+    # and a fixed line that mentions the word leftover.
+    for fid in ("P2", "S4", "P3", "C3", "C2"):
+        stale = body_sidecar()
+        with open(stale) as fh:
+            lines = [json.loads(line) for line in fh]
+        with open(stale, "w") as fh:
+            for line in lines:
+                if line["id"] == fid:
+                    line = dict(LEFTOVER_S3, id=fid)
+                fh.write(json.dumps(line) + "\n")
+        got = refusal_of(stale, landed_root(), pr_body(BODY))
+        assert f"records {fid} as" in got, (fid, got)
+    # And the reverse, on the line citing its id only as `sidecar <id>`.
+    stale = body_sidecar()
+    with open(stale) as fh:
+        lines = [json.loads(line) for line in fh]
+    with open(stale, "w") as fh:
+        for line in lines:
+            if line["id"] == "codex-gate-1":
+                line = {"id": "codex-gate-1", "outcome": "fixed",
+                        "sha": "abc1234"}
+            fh.write(json.dumps(line) + "\n")
+    got = refusal_of(stale, landed_root(), pr_body(BODY))
+    assert "records codex-gate-1 as 'leftover'" in got, got
 
 
-def test_a_leftover_the_pr_body_never_cites_is_refused():
-    # Absent is not agreement: a leftover the PR body does not name could be
-    # one a ruling changed in the body under a different wording.
-    got = refusal_of_body(sidecar_of(LEFTOVER_S3),
-                          pr_body("## Decisions made\n\n- S1: fixed.\n"))
-    assert "cites no disposition for S3" in got, got
-
-
-def test_an_empty_pr_body_is_refused():
-    # An empty file is what a failed `gh pr view` leaves behind; read as
-    # a body it would agree with every sidecar holding no leftover.
-    got = refusal_of_body(sidecar_of({"id": "S1", "outcome": "fixed",
-                                      "sha": "0123abc"}), pr_body(" \n"))
-    assert "is empty" in got, got
-
-
-def refusal_of_body(sidecar, body):
+def test_a_ruling_appended_below_the_first_record_is_the_one_read():
+    # A changed disposition may be recorded as a new line rather than by
+    # editing the old one: the last line citing an id is its record, both
+    # ways round.
+    body = pr_body("## Decisions made\n\n- S3: leftover.\n"
+                   "- S3: fixed, abc1234 (controller ruling).\n")
+    rewritten = sidecar_of({"id": "S3", "outcome": "fixed", "sha": "abc1234"})
     root = landed_root()
-    try:
-        runfile.leftover("burn-1", 901, 950, sidecar, root=root,
-                         pr_body=body)
-    except runfile.RunFileError as exc:
-        assert runfile.load("burn-1", root=root)["leftovers"] == []
-        return str(exc)
-    raise AssertionError("the sidecar was accepted against the PR body")
+    _, added = runfile.leftover("burn-1", 901, 950, rewritten, root=root,
+                                pr_body=body)
+    assert added == [], added
+    got = refusal_of(sidecar_of(LEFTOVER_S3), landed_root(), body)
+    assert "records S3 as 'fixed'" in got and f"{body}:4" in got, got
+
+
+def test_a_leftover_the_body_records_but_the_sidecar_lacks_is_refused():
+    # § The merge: a leftover kept only in the PR body never reaches a sweep.
+    body = pr_body("## Decisions made\n\n- S1: fixed, 0123abc.\n"
+                   "- S2: leftover (controller).\n")
+    got = refusal_of(sidecar_of({"id": "S1", "outcome": "fixed",
+                                 "sha": "0123abc"}), landed_root(), body)
+    assert "records S2 as a leftover" in got and "no line" in got, got
+
+
+def test_a_leftover_the_body_does_not_cite_is_harvested():
+    # Absent is not disagreement, and a body line in a shape the reader
+    # cannot see must not retrain the override (#1147).
+    body = pr_body("## Decisions made\n\n- S1: fixed, 0123abc.\n"
+                   "- The third Codex pass left one item.\n")
+    root = landed_root()
+    _, added = runfile.leftover(
+        "burn-1", 901, 950,
+        sidecar_of({"id": "S1", "outcome": "fixed", "sha": "0123abc"},
+                   LEFTOVER_S3),
+        root=root, pr_body=body)
+    assert added == ["S3"], added
+
+
+def test_a_body_citing_none_of_the_sidecars_ids_is_refused():
+    # Another PR's body, or one whose Decisions made the reader cannot parse
+    # at all, would otherwise agree with every sidecar.
+    got = refusal_of(sidecar_of(LEFTOVER_S3), landed_root(),
+                     pr_body("## Decisions made\n\n- C9: fixed.\n"))
+    assert "cites none of" in got, got
+
+
+def test_a_body_with_no_decisions_made_section_is_refused():
+    # An empty file is what a failed `gh pr view` leaves behind; and a line
+    # outside the section is no record at all.
+    for text in (" \n", "## What changed\n\n- S3: leftover.\n"):
+        got = refusal_of(sidecar_of(LEFTOVER_S3), landed_root(),
+                         pr_body(text))
+        assert "no Decisions made section" in got, (text, got)
+
+
+def test_a_sidecar_line_whose_id_is_missing_or_not_a_string_is_refused():
+    for line in ({"outcome": "fixed", "sha": "0123abc"},
+                 {"id": 1, "outcome": "fixed", "sha": "0123abc"}):
+        got = refusal_of(sidecar_of(line), landed_root())
+        assert ":1" in got and "finding id" in got, (line, got)
 
 
 def test_cli_leftover_needs_pr_body_or_allow_stale():
@@ -1429,11 +1508,11 @@ def test_cli_leftover_needs_pr_body_or_allow_stale():
     assert bare.returncode != 0, bare.stdout
     stale = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
                 "--from", SIDECAR, "--pr-body",
-                pr_body("- S3: fixed, 0123abc.\n"))
+                pr_body("## Decisions made\n\n- S3: fixed, 0123abc.\n"))
     assert (stale.returncode == 1 and "'fixed'" in stale.stderr
             and len(stale.stderr.splitlines()) == 1), stale.stderr
     agreed = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
-                 "--from", SIDECAR, "--pr-body", pr_body("- S3: leftover\n"))
+                 "--from", SIDECAR, "--pr-body", pr_body("## Decisions made\n\n- S3: leftover\n"))
     assert agreed.returncode == 0, agreed.stderr
     assert "copied 1 leftover" in agreed.stdout, agreed.stdout
     gone = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",

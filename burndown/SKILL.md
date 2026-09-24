@@ -144,7 +144,7 @@ too.
    <n> --pr <n>` as it arrives, for § Liveness, and each landing's leftover
    findings with `runfile.py
    leftover <run-id> --clump <n> --pr <n> --from <dispositions sidecar> --pr-body <the PR's body,
-   from `gh pr view <pr> --json body --jq .body`>`, so a restart can pick the run back up with nothing transcribed by hand
+   from `gh pr view <pr> --repo <owner/name> --json body --jq .body`>`, so a restart can pick the run back up with nothing transcribed by hand
    (`references/run-file.md` § Leftovers). The controller clears the PR-up
    record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever it
    hands findings back to the worker (Codex findings, or any ruling that
