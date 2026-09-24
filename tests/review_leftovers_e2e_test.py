@@ -355,8 +355,11 @@ def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     # A GIT_DIR exported by the caller would point every `git -C` here, and
     # the scripts under test, at the caller's repo instead of the fixtures.
-    for name in [k for k in os.environ if k.startswith("GIT_")]:
-        del os.environ[name]
+    # Only the variables that pick the repository go: GIT_CONFIG_* isolates
+    # git from the user's config and stays.
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                 "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+        os.environ.pop(name, None)
     failed = True
     try:
         for test in tests:
