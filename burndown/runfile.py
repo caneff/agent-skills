@@ -66,14 +66,12 @@ _CLUMP_KEYS = ("tickets", "workspace", "agent", "landed")
 # as zero is the #351 dispatch into a box already at 25.8 load. Absent from
 # a #892-era file, so it is filled in on load rather than demanded.
 _JOB_STATES = ("running", "none", "done")
+# The keys a `leftover` sidecar line carries.
+_SIDECAR_LEFTOVER_KEYS = ("id", "file", "title", "severity", "text")
 # What one leftover entry holds: the clump that carried the finding, the
 # full ticket list that clump closes, the PR it landed on, and the sidecar
 # line's own fields untouched.
-_LEFTOVER_KEYS = ("clump", "tickets", "pr", "id", "file", "title",
-                  "severity", "text")
-# The keys a `leftover` sidecar line carries: the entry's own fields, after
-# the three the run adds.
-_SIDECAR_LEFTOVER_KEYS = _LEFTOVER_KEYS[3:]
+_LEFTOVER_KEYS = ("clump", "tickets", "pr", *_SIDECAR_LEFTOVER_KEYS)
 # The five outcomes `implement/SKILL.md` § Review's dispositions sidecar can
 # carry; why any other is refused, not skipped: `references/run-file.md`
 # § Leftovers.
