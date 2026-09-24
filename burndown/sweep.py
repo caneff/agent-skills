@@ -61,24 +61,25 @@ def _code_spans(text):
         if text[i] == "\\" and i + 1 < n and text[i + 1] in string.punctuation:
             i += 2
         elif text[i] == "`":
-            run_end = i
-            while run_end < n and text[run_end] == "`":
-                run_end += 1
-            close = _closing_run(text, run_end, run_end - i)
-            if close is not None:
+            run = _BACKTICK_RUN.match(text, i)
+            close = _closing_run(text, run.end(), len(run.group()))
+            if close is None:
+                i = run.end()
+            else:
                 yield i, close
-            i = close if close is not None else run_end
+                i = close
         else:
             i += 1
+
+
+_BACKTICK_RUN = re.compile(r"`+")
 
 
 def _closing_run(text, pos, length):
     """The end of the first backtick run of exactly `length` at or after
     `pos`, or None."""
-    for m in re.finditer(r"`+", text[pos:]):
-        if len(m.group(0)) == length:
-            return pos + m.end()
-    return None
+    return next((m.end() for m in _BACKTICK_RUN.finditer(text, pos)
+                 if len(m.group()) == length), None)
 
 
 def inline_safe(text):
