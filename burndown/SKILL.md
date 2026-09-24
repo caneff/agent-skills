@@ -132,8 +132,7 @@ too.
 8. Dispatch and merge through
    [`implement`](~/.agents/skills/implement/SKILL.md) § Dispatch, which
    claims the clump and starts the worker, passing `--run <run-id>` on
-   every plain `implement-dispatch` so the brief tells the worker a run
-   file is under it and it files no per-PR sweep (#1146); `implement/SKILL.md` § The merge,
+   every plain `implement-dispatch`; `implement/SKILL.md` § The merge,
    which merges and cleans up, is the controller's own step there. The loop
    restates neither grammar. When two in-flight branches turn out to touch
    the same files, the collision procedure, the closure defect it implies,
