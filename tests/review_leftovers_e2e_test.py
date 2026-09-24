@@ -3,8 +3,9 @@
 in-round, one sweep ticket per burn), closing ticket #1096.
 
 One burn, driven through every command the spec's slices built, in the order
-a controller and its workers run them, each command's output handed to the
-next reader rather than a fixture standing in for it:
+a controller and its workers run them. Each command's output goes to the next
+reader, except step 2, which registers the clumps step 1 named by hand, and
+the per-PR sweep of step 7, a fixture standing in for a worker's filing:
 
   1. `loop.py dispatch` over three candidates of closure sizes 1, 4 and 2
      with two free slots names the size-4 clump first (#1026).
@@ -321,6 +322,7 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     # 7. A per-PR sweep a worker outside the burn filed (#1033), in the same
     # shape, folds in by its file sections alone.
     per_pr = with_blocked_by(
+        "Filed from: a worker's per-PR sweep.\n\n"
         "## burndown/cost.py\n\n"
         "- **S2** (judgement) Magic 28 — PR #960: name the process cap.\n")
     folded = with_blocked_by(body.rstrip("\n") + "\n\n" + fold(per_pr))
