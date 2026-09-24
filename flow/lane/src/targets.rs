@@ -56,9 +56,9 @@ fn is_code_path(token: &str) -> bool {
     }
     match name.rsplit_once('.') {
         Some((stem, ext)) => {
-            !stem.is_empty()
-                && (CODE_EXTENSIONS.contains(&ext)
-                    || (token.contains('/') && ext.chars().any(|c| c.is_alphabetic()) && !PROSE_EXTENSIONS.contains(&ext)))
+            // On a path, a dotfile's name is its extension (`config/.env`), as in `tier.py`.
+            (!stem.is_empty() && CODE_EXTENSIONS.contains(&ext))
+                || (token.contains('/') && ext.chars().any(|c| c.is_alphabetic()) && !PROSE_EXTENSIONS.contains(&ext))
         }
         None => token.contains('/') && token.split('/').rev().skip(1).any(|d| CODE_DIRS.contains(&d.to_ascii_lowercase().as_str())),
     }
@@ -96,10 +96,10 @@ mod tests {
 
     #[test]
     fn a_slash_path_is_code_unless_its_extension_is_prose() {
-        for p in ["src/main.dart", "tools/Gemfile", "a/b.sql", "x/y.lua", "infra/main.tf", "Gemfile", "lib/Rakefile"] {
+        for p in ["src/main.dart", "tools/Gemfile", "a/b.sql", "x/y.lua", "infra/main.tf", "Gemfile", "lib/Rakefile", "config/.env", "x/.eslintrc"] {
             assert_eq!(first_code_target(&format!("see {p}, then")), Some(p.into()), "{p}");
         }
-        for body in ["read/write and and/or", "docs/notes.md", "a/b.txt", "a/b.rst", "a/b.markdown", "ratio 3/4.5 here"] {
+        for body in ["read/write and and/or", "docs/notes.md", "a/b.txt", "a/b.rst", "a/b.markdown", "ratio 3/4.5 here", "docs/.notes.md"] {
             assert_eq!(first_code_target(body), None, "{body}");
         }
     }
