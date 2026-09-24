@@ -2002,7 +2002,7 @@ fn a_run_id_outside_the_run_file_grammar_is_refused_before_the_claim() {
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
     // runfile.py's own run-id grammar: a space or quote would split the
     // one-line brief, a `/` or `..` names no run file, empty names none.
-    for bad in ["burn x", "burn\"x", "../burn", "-burn", ".burn", "", "burn\n"] {
+    for bad in ["burn x", "burn\"x", "../burn", "burn..x", "-burn", ".burn", "", "burn\n"] {
         let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", bad, "413"], &default_scenario());
         assert!(refused(&out, &f.calls(), &repo, "413", "run id"), "--run {bad:?}: {}", out_text(&out));
     }
