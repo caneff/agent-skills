@@ -2038,7 +2038,7 @@ fn help_documents_the_run_flag() {
     let out = f.dispatch(&["--help"], &default_scenario());
     assert!(out.status.success(), "{}", out_text(&out));
     let text = out_text(&out);
-    for want in ["[--run <run-id>]", "--run <run-id>", "no run file"] {
+    for want in ["[--run <run-id>]", "no run file"] {
         assert!(text.contains(want), "help lacks {want:?}:\n{text}");
     }
 }
