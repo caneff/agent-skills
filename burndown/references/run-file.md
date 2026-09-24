@@ -146,8 +146,8 @@ refused, the same as `land` and `job` refuse one.
 A file written before leftovers existed still loads — the field is filled
 in as `[]`, the honest reading of a run that never recorded one.
 
-Nothing here builds the sweep ticket itself; that renderer and the
-`/file-ticket` call at run close are a later ticket (#1030, #1033). This
+Nothing here builds the sweep ticket itself; `sweep.py render` renders it
+and `burndown/SKILL.md` § The sweep files it. This
 list is only the store, so a restart does not lose what a landed PR already
 carried.
 

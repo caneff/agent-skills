@@ -24,6 +24,8 @@ import subprocess
 import sys
 import time
 
+import runfile
+
 
 class LoopError(Exception):
     """The loop cannot proceed as asked. One stderr line, never a traceback:
@@ -932,14 +934,11 @@ def read_clumps(path, live=False, closure=True):
     return clumps
 
 
-def with_run_jobs(in_flight, run_id):
+def with_run_jobs(in_flight, run_id, root=None):
     """The in-flight clumps with each `job` read from the run file, matched by
     the clump's lowest ticket. `closure.py --json` carries no `job`, so the
     record `runfile.py job` wrote is the only source; a clump the run file
     holds no record for gets `None`, which `job_cores` refuses by name."""
-    import runfile
-    override = os.environ.get("BURNDOWN_CACHE_DIR")
-    root = os.path.expanduser(override) if override else None
     try:
         run = runfile.load(run_id, root)
     except runfile.RunFileError as exc:
@@ -1064,7 +1063,9 @@ def run(argv):
         elif args.command == "dispatch":
             candidates = read_clumps(args.candidates)
             in_flight = read_clumps(args.in_flight, live=True)
-            in_flight = with_run_jobs(in_flight, args.run)
+            override = os.environ.get("BURNDOWN_CACHE_DIR")
+            root = os.path.expanduser(override) if override else None
+            in_flight = with_run_jobs(in_flight, args.run, root)
             free = max(args.free, 0)
             # Measured before any early return: a broken herdr or `ps` must
             # refuse here too, not hide behind "nothing to dispatch".

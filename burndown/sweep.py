@@ -80,7 +80,7 @@ def render_body(leftovers):
     landed on, and its one line of finding text.
 
     Empty input renders to the empty string, not a placeholder body: zero
-    leftovers files nothing (`references/run-file.md` § Leftovers), and an
+    leftovers files nothing (`SKILL.md` § The sweep), and an
     empty string is what tells the caller that apart from a body worth
     filing."""
     if not leftovers:
