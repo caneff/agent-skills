@@ -178,6 +178,9 @@ def parse_disposition_line(raw: str) -> Disposition | None:
     fid, outcome = obj.get("id"), obj.get("outcome")
     if not (isinstance(fid, str) and fid) or outcome not in _OUTCOME_DETAIL_FIELD:
         return None
+    # Severity is checked for presence only, not against _VALID_SEVERITIES: a
+    # leftover's severity is the reviewer's own word, and Codex and correctness
+    # findings carry `PLAUSIBLE`, `medium` and `low` (#1151).
     if outcome == "leftover" and not all(
             isinstance(obj.get(key), str) and obj[key]
             for key in ("file", "title", "severity")):
