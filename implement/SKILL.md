@@ -141,6 +141,15 @@ never to Chris. An ordinary
 call you make yourself, under an assumption you state, and list under
 Decisions made.
 
+**Your turn ends mid-lane only on a message to the controller**: a question,
+a job declaration, or "PR up". A summary in your own pane reaches no one.
+#1095's worker committed its fix, ran the gate and ended its turn with review,
+verification and the PR undone; herdr showed its pane `done`, and the
+controller found it ten minutes later only because Chris asked (#1148). The
+stop hook alerts the controller on such a stop, and a burn's sweep reads the
+pane as `stalled`, but both are backstops that fire after the time is lost;
+the send is the report.
+
 ## Light tier
 
 1. Make the change on this branch. Commit with `Closes #<n>` in the body,

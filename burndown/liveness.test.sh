@@ -67,6 +67,14 @@ check_in "$liveness_text" 'burndown/loop.py sweep' 'burndown/SKILL.md § Livenes
 check_in "$liveness_text" 'vanished' 'burndown/SKILL.md § Liveness'
 check_in "$liveness_text" '#925' 'burndown/SKILL.md § Liveness'
 
+# Rule 4b: a `done` pane with no landing and no "PR up" on record is
+# `stalled`, not `idle` — #1095's worker ended its turn mid-lane and the
+# sweep had no word for it (#1148). The record is the run file's, written
+# when "PR up" arrives, so a resumed controller's sweep still has it.
+check_in "$liveness_text" '`stalled`' 'burndown/SKILL.md § Liveness'
+check_in "$liveness_text" '#1095' 'burndown/SKILL.md § Liveness'
+check_in "$(tr '\n' ' ' <"$skill" | tr -s ' ')" 'runfile.py pr-up' 'burndown/SKILL.md'
+
 # Rule 5: a worker declares its parallel job's core count, and the controller
 # holds the free slots against it and says so.
 check_in "$liveness_text" 'core count' 'burndown/SKILL.md § Liveness'

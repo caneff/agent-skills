@@ -140,7 +140,8 @@ too.
    each dispatched clump with
    `runfile.py clump` — its workspace and its worker's herdr agent name, or
    step 1's resume has nothing to re-announce to — each landing with
-   `runfile.py land`, and each landing's leftover findings with `runfile.py
+   `runfile.py land`, each "PR up" with `runfile.py pr-up <run-id> --clump
+   <n> --pr <n>` as it arrives (§ Liveness reads it), and each landing's leftover findings with `runfile.py
    leftover <run-id> --clump <n> --pr <n> --from <dispositions sidecar> --head-committed <PR head
    commit's committer date>`, so a restart can pick the run back up with nothing transcribed by hand
    (`references/run-file.md` § Leftovers).
@@ -369,6 +370,16 @@ behind the ranking, and what each source costs when it is read the other way:
    it is busy with, so a worker spinning on no-op calls passes every signal
    the sweep has (#925). The sweep answers whether there is still a pane and
    what herdr says it is doing — never whether the work is progressing.
+
+   A `done` pane on an unlanded clump with no "PR up" on record is
+   **`stalled`**, distinct from `idle`: its turn ended mid-lane and nothing
+   reached the controller. #1095's worker committed, ran the gate and ended
+   its turn with a summary to no one; herdr said `done`, and the controller
+   found it ten minutes later only because Chris asked (#1148). The record is
+   the run file's `pr_up` (`references/run-file.md` § The PR-up record), so
+   a `done` pane whose "PR up" arrived reads `done` — waiting on the
+   controller's merge. A `stalled` verdict means read that pane and answer
+   what it left.
 
 **A worker declares its job size.** A worker that launches a parallel job
 names that job and its **core count** in its report, and a worker that
