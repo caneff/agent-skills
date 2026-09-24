@@ -761,6 +761,15 @@ fn without_herdr_the_linked_worktree_is_removed_and_the_skip_reported() {
 
 // --- #964: the controller/worker record is cleared with the workspace ------
 
+/// Swap the fixture's `<tools_dir>/git` stub for a wrapper script, so a test
+/// can make one git subcommand answer differently and pass the rest through.
+fn replace_git_with(c: &Cleanup, tools_dir: &str, script: String) {
+    let git = c.root().join(tools_dir).join("git");
+    std::fs::remove_file(&git).unwrap();
+    std::fs::write(&git, script).unwrap();
+    std::fs::set_permissions(&git, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+}
+
 fn worker_record(workspace: &std::path::Path, branch: &str) -> lane::workers::WorkerRecord {
     lane::workers::WorkerRecord {
         agent: "a".into(),
@@ -809,19 +818,16 @@ fn a_worktree_listed_through_a_symlink_still_clears_its_canonically_spelled_reco
     std::os::unix::fs::symlink(&wt, &link).unwrap();
     lane::workers::append(&c.home(), "111", &worker_record(&wt, "caneff/merged-one")).unwrap();
 
-    let shim = c.root().join("noherdr/git");
-    std::fs::remove_file(&shim).unwrap();
-    std::fs::write(
-        &shim,
+    replace_git_with(
+        &c,
+        "noherdr",
         format!(
             "#!/bin/bash\nfrom='{from}'\nto='{to}'\nif [[ \"$*\" == *\"worktree list\"* ]]; then\n  \"{real}\" \"$@\" | while IFS= read -r l; do echo \"${{l//\"$from\"/\"$to\"}}\"; done\nelse\n  exec \"{real}\" \"$@\"\nfi\n",
             real = which("git").display(),
             from = wt.display(),
             to = link.display(),
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    );
 
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !wt.exists(), "{}", run.text());
@@ -2225,18 +2231,15 @@ fn a_worktree_listing_that_git_cannot_read_refuses_the_recheck_rather_than_reapi
     let c = Cleanup::new();
     let real_git = support::cleanup::which("git");
     let marker = c.root().join("worktree-list-broken");
-    let git_stub = c.root().join("full/git");
-    std::fs::remove_file(&git_stub).unwrap();
-    std::fs::write(
-        &git_stub,
+    replace_git_with(
+        &c,
+        "full",
         format!(
             "#!/bin/sh\ncase \" $* \" in\n  *' worktree list --porcelain '*)\n    [ -e \"{marker}\" ] && exit 1\n    ;;\nesac\nexec \"{real_git}\" \"$@\"\n",
             marker = marker.display(),
             real_git = real_git.display()
         ),
-    )
-    .unwrap();
-    std::fs::set_permissions(&git_stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    );
 
     let r = reap_repo(&c, "r45", &["118", "119"]);
     let planned = r.join(".claude/worktrees/implement-119");

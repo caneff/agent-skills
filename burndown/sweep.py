@@ -57,7 +57,9 @@ def inline_safe(text):
     """A finding's title or text made safe to sit in a ticket body: an
     `@mention` is broken with a zero-width space so it notifies nobody, and
     `<` becomes `&lt;` so raw HTML is not parsed. Backticked code spans are
-    left as written. `runfile.leftover_field` already keeps the text to one
+    left as written. Emphasis and link markup in the text is not escaped: the
+    residual mangling is accepted, since it garbles a line without notifying
+    anyone or injecting markup. `runfile.leftover_field` already keeps the text to one
     line, so no heading or fence can start a line."""
     def defuse(chunk):
         chunk = re.sub(r"(?<!\w)@(?=\w)", "@\u200b", chunk)
@@ -78,7 +80,7 @@ def render_body(leftovers):
     landed on, and its one line of finding text.
 
     Empty input renders to the empty string, not a placeholder body: zero
-    leftovers files nothing (`references/run-file.md` § Leftovers), and an
+    leftovers files nothing (`SKILL.md` § The sweep), and an
     empty string is what tells the caller that apart from a body worth
     filing."""
     if not leftovers:

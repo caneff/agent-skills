@@ -66,11 +66,12 @@ _CLUMP_KEYS = ("tickets", "workspace", "agent", "landed")
 # as zero is the #351 dispatch into a box already at 25.8 load. Absent from
 # a #892-era file, so it is filled in on load rather than demanded.
 _JOB_STATES = ("running", "none", "done")
+# The keys a `leftover` sidecar line carries.
+_SIDECAR_LEFTOVER_KEYS = ("id", "file", "title", "severity", "text")
 # What one leftover entry holds: the clump that carried the finding, the
 # full ticket list that clump closes, the PR it landed on, and the sidecar
 # line's own fields untouched.
-_LEFTOVER_KEYS = ("clump", "tickets", "pr", "id", "file", "title",
-                  "severity", "text")
+_LEFTOVER_KEYS = ("clump", "tickets", "pr", *_SIDECAR_LEFTOVER_KEYS)
 # The five outcomes `implement/SKILL.md` § Review's dispositions sidecar can
 # carry; why any other is refused, not skipped: `references/run-file.md`
 # § Leftovers.
@@ -403,14 +404,13 @@ def read_dispositions(sidecar_path):
 
 
 def read_leftover_lines(sidecar_path):
-    """Every `leftover` line of a dispositions sidecar, in order. The other
-    four outcomes are not this command's to transcribe, and are skipped."""
+    """Every `leftover` line of a dispositions sidecar, in order; the other
+    outcomes are skipped (`references/run-file.md` § Leftovers)."""
     out = []
     for n, obj in read_dispositions(sidecar_path):
         if obj["outcome"] != "leftover":
             continue
-        missing = [key for key in ("id", "file", "title", "severity", "text")
-                   if key not in obj]
+        missing = [key for key in _SIDECAR_LEFTOVER_KEYS if key not in obj]
         if missing:
             raise RunFileError(
                 f"{sidecar_path}:{n} is a leftover missing "

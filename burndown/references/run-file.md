@@ -146,9 +146,9 @@ refused, the same as `land` and `job` refuse one.
 A file written before leftovers existed still loads — the field is filled
 in as `[]`, the honest reading of a run that never recorded one.
 
-Nothing here builds the sweep ticket itself; that renderer and the
-`/file-ticket` call at run close are a later ticket (#1030, #1033). This
-list is only the store, so a restart does not lose what a landed PR already
+Nothing here builds the sweep ticket itself: `sweep.py render` renders it,
+and filing it is described in `burndown/SKILL.md` § The sweep.
+This list is only the store, so a restart does not lose what a landed PR already
 carried.
 
 ## Why `~/.cache/burndown/<run-id>.json`

@@ -17,6 +17,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tally_review_axes as t
 
+SHARED_SIDECAR_FIXTURE = Path(__file__).resolve().parents[2] / "implement" / "fixtures" / "dispositions-sidecar.jsonl"
+
 
 def test_parses_plain_round1_report():
     r = t.parse_report_filename("review-standards-790.md")
@@ -267,7 +269,7 @@ def test_parses_a_valid_handed_back_disposition_line():
 def test_every_line_of_the_shared_sidecar_fixture_parses():
     # The fixture is the one example of all five outcomes (#1027); a line the
     # tally cannot parse would be counted undisposed (#1076).
-    fixture = Path(__file__).resolve().parents[2] / "implement" / "fixtures" / "dispositions-sidecar.jsonl"
+    fixture = SHARED_SIDECAR_FIXTURE
     lines = [ln for ln in fixture.read_text().splitlines() if ln.strip()]
     parsed = [t.parse_disposition_line(ln) for ln in lines]
     assert None not in parsed, [ln for ln, d in zip(lines, parsed) if d is None]
@@ -287,8 +289,18 @@ def test_disposition_line_rejects_a_leftover_without_text():
     assert t.parse_disposition_line(bad) is None
 
 
+def test_disposition_line_rejects_a_leftover_missing_file_title_or_severity():
+    full = {"id": "S3", "outcome": "leftover", "file": "a.py", "title": "x",
+            "severity": "hard", "text": "rename it"}
+    for key in ("file", "title", "severity"):
+        bad = {k: v for k, v in full.items() if k != key}
+        assert t.parse_disposition_line(json.dumps(bad)) is None, key
+        for wrong in ("", 7, None):
+            assert t.parse_disposition_line(json.dumps({**full, key: wrong})) is None, (key, wrong)
+
+
 def test_tally_sidecars_counts_the_shared_fixture_with_no_undisposed():
-    fixture = Path(__file__).resolve().parents[2] / "implement" / "fixtures" / "dispositions-sidecar.jsonl"
+    fixture = SHARED_SIDECAR_FIXTURE
     ids = [json.loads(ln)["id"] for ln in fixture.read_text().splitlines() if ln.strip()]
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
