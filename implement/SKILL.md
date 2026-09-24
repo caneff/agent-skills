@@ -21,8 +21,9 @@ implement-dispatch --spec <n> [--slots <k>] [--model sonnet|opus]
 `--slots` defaults to 5 and goes into the nested brief either way.
 A burn's controller always passes `--run <run-id>` on a plain dispatch, and
 it goes into the brief: that is how the worker knows a run file is under it
-(§ The PR). Nobody else passes it; `--spec` refuses it, a spec run keeping
-its own run file.
+(§ The PR). A spec run is a burn to its own slices, so it passes its own run
+id to them; a dispatch outside any run passes none. `--spec` refuses the flag,
+since the spec run keeps its own run file.
 
 `sonnet` for an ordinary ticket, `opus` for a subtle seam — `--spec` mode
 defaults to `opus` instead. Plain mode refuses an issue labelled `spec`,
