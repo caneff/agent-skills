@@ -81,7 +81,7 @@ def test_a_candidate_naming_no_files_is_never_labelled():
     assert T.labels_to_write(candidate(1, [])) == []
 
 
-def test_a_documentation_label_on_a_ticket_targeting_code_would_be_stripped():
+def test_a_documentation_label_on_a_ticket_targeting_code_is_stripped():
     """#1045: #969 targeted a `SKILL.md` and carried `documentation` from its
     filer. The label is a claim; the targets are the evidence, and a code
     target makes the claim wrong."""
@@ -96,17 +96,6 @@ def test_nothing_is_stripped_from_prose_unlabelled_or_unknown_candidates():
     assert T.labels_to_strip(candidate(2, ["burndown/tier.py"])) == []
     # No resolved files: unknown is not evidence the label is wrong.
     assert T.labels_to_strip(candidate(3, [], ["documentation"])) == []
-
-
-def test_strip_reports_and_never_writes():
-    """`--strip` only reports what dispatch will remove: this reader keeps
-    its only-ever-adds rule, and the removal is `implement-dispatch`'s."""
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        T.strip_report([candidate(969, ["a/SKILL.md"], ["documentation"]),
-                        candidate(970, ["docs/n.md"], ["documentation"])])
-    assert "would strip" in out.getvalue() and "#969" in out.getvalue()
-    assert "#970" not in out.getvalue()
 
 
 class FakeGh:
@@ -133,16 +122,23 @@ def test_the_pass_writes_the_missing_label_and_only_that():
                          "--add-label", "documentation"]], gh.calls
 
 
-def test_the_pass_never_removes_a_label():
-    """The rule stated as a test rather than as a comment: no argv this pass
-    builds may carry `--remove-label`, whatever the candidate looks like."""
+def test_the_pass_removes_only_documentation_and_only_from_code():
+    """The rule stated as a test rather than as a comment: the one removal
+    this pass makes is `documentation`, from a candidate targeting code. A
+    prose candidate, an unknown one, and every other label stay as they are,
+    so nothing here sends a ticket from heavy to light."""
     gh = FakeGh()
+    stripped = []
     T.tag("caneff/agent-skills", [
         candidate(371, ["docs/research/note.md"]),
-        candidate(372, ["docs/research/other.md"], ["documentation"]),
-        candidate(373, ["burndown/tier.py"], ["documentation"]),
-    ], run=gh)
-    assert all("--remove-label" not in call for call in gh.calls), gh.calls
+        candidate(372, ["docs/research/other.md"], ["documentation", "enhancement"]),
+        candidate(373, ["burndown/tier.py"], ["documentation", "enhancement"]),
+        candidate(374, [], ["documentation"]),
+    ], run=gh, stripped=stripped)
+    removals = [c for c in gh.calls if "--remove-label" in c]
+    assert removals == [["issue", "edit", "373", "--repo", "caneff/agent-skills",
+                         "--remove-label", "documentation"]], gh.calls
+    assert stripped == [{"number": 373, "labels": ["documentation"]}], stripped
 
 
 def test_dry_run_decides_the_same_and_writes_nothing():
@@ -156,7 +152,7 @@ def test_dry_run_decides_the_same_and_writes_nothing():
 
 def test_the_report_names_every_label_written():
     report = T.render([{"number": 371, "labels": ["documentation"]},
-                       {"number": 372, "labels": ["documentation"]}])
+                       {"number": 372, "labels": ["documentation"]}], [])
     assert "#371" in report and "#372" in report
     assert report.count("documentation") == 2, report
 
@@ -173,7 +169,9 @@ def test_a_dry_run_says_would_write_rather_than_written():
                       run=gh)
     assert code == 0, code
     assert "would write:" in out.getvalue(), out.getvalue()
+    assert "would strip: none" in out.getvalue(), out.getvalue()
     assert "labels written" not in out.getvalue(), out.getvalue()
+    assert "labels stripped" not in out.getvalue(), out.getvalue()
     assert gh.calls == [["issue", "view", "371", "--repo", "caneff/agent-skills",
                          "--json", "labels"]], gh.calls
 
@@ -182,23 +180,21 @@ def test_the_report_says_so_when_it_wrote_nothing():
     """A run that wrote no label has to say that in words: a report with no
     line about labels reads the same as a report from a pass that never
     ran."""
-    assert T.render([]) == "labels written: none"
+    assert T.render([], []) == "labels written: none\nlabels stripped: none"
 
 
-def test_the_command_line_strip_reads_labels_from_the_tracker_and_writes_nothing():
-    calls = []
-
-    def gh(args):
-        calls.append(list(args))
-        # Neither candidate carries the label, so a fall-through into the
-        # tagging pass would write it onto the prose one (#372).
-        return json.dumps({"labels": [{"name": "documentation"}] if args[2] == "969" else []})
-
+def test_a_dry_run_previews_the_strip_and_writes_nothing():
+    """The strip is previewed the way the add is: `would strip:` names the
+    ticket, and no `issue edit` runs."""
+    tracker = Tracker({969: ["documentation"]})
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        code = T.main(["tier.py", "caneff/agent-skills", "969=x/SKILL.md", "372=docs/n.md", "--strip"], run=gh)
-    assert code == 0 and "#969" in out.getvalue(), out.getvalue()
-    assert all(c[1] == "view" for c in calls), calls
+        code = T.main(["tier.py", "caneff/agent-skills", "969=x/SKILL.md", "--dry-run"],
+                      run=tracker)
+    assert code == 0, code
+    assert "would strip:" in out.getvalue() and "#969" in out.getvalue(), out.getvalue()
+    assert all(c[1] == "view" for c in tracker.calls), tracker.calls
+    assert tracker.labels[969] == ["documentation"], tracker.labels
 
 
 class FakeView:
@@ -213,6 +209,49 @@ class FakeView:
         number = int(args[2])
         names = [{"name": n} for n in self.labels[number]]
         return json.dumps({"labels": names})
+
+
+class Tracker:
+    """A tracker that keeps state: `issue view` reads the labels an earlier
+    `issue edit` left, so a test can ask what dispatch will read next."""
+
+    def __init__(self, labels_by_number):
+        self.labels = {n: list(ls) for n, ls in labels_by_number.items()}
+        self.calls = []
+
+    def __call__(self, args):
+        self.calls.append(list(args))
+        number = int(args[2])
+        if args[1] == "view":
+            return json.dumps({"labels": [{"name": n} for n in self.labels[number]]})
+        for flag, value in zip(args, args[1:]):
+            for name in value.split(","):
+                if flag == "--add-label" and name not in self.labels[number]:
+                    self.labels[number].append(name)
+                if flag == "--remove-label" and name in self.labels[number]:
+                    self.labels[number].remove(name)
+        return ""
+
+
+def test_a_code_candidate_with_a_prose_body_leaves_the_pass_dispatchable_heavy():
+    """#1118: dispatch reads only the ticket body's paths, so a body naming
+    only prose keeps a filer's `documentation` label through the claim even
+    when the clumper's candidate line names a `SKILL.md`. The tagging pass is
+    the one reader holding that candidate line, so it removes the label, and
+    dispatch — light only on a `documentation` label — sends the ticket heavy.
+    The tracker is what dispatch reads, so the tracker is what is asserted."""
+    tracker = Tracker({1118: ["documentation", "ready-for-agent"],
+                       372: ["documentation", "ready-for-agent"]})
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = T.main(["tier.py", "caneff/agent-skills",
+                       "1118=docs/n.md,x/SKILL.md", "372=docs/n.md"], run=tracker)
+    assert code == 0, code
+    assert "documentation" not in tracker.labels[1118], tracker.labels
+    assert tracker.labels[1118] == ["ready-for-agent"], tracker.labels
+    # A prose candidate keeps its label: light stays light.
+    assert "documentation" in tracker.labels[372], tracker.labels
+    assert "labels stripped:" in out.getvalue() and "#1118" in out.getvalue(), out.getvalue()
 
 
 def test_a_candidates_labels_come_from_the_tracker_not_the_command_line():
@@ -306,7 +345,7 @@ def test_a_failure_midway_still_names_the_labels_already_written():
         raised = exc
     assert raised is not None, "the failure was swallowed"
     assert [w["number"] for w in written] == [371, 372], written
-    report = T.render(written)
+    report = T.render(written, [])
     assert "#371" in report and "#372" in report, report
 
 
@@ -365,11 +404,21 @@ def test_unreadable_json_from_the_tracker_is_refused():
 
 def test_an_unknown_flag_is_usage_not_a_candidate():
     """`tier.py <repo> --help` reached the candidate parser and exited 1 with
-    "not a candidate: --help"."""
-    out = subprocess.run([sys.executable, TIER, "caneff/agent-skills", "--help"],
-                         capture_output=True, text=True)
-    assert out.returncode == 2, out
-    assert "usage: tier.py" in out.stderr, out.stderr
+    "not a candidate: --help". `--strip` is retired (#1118): the pass strips
+    itself, and an old report-only call must not run the writing pass.
+
+    The `gh` on `PATH` is a stub that records any call and fails: a flag
+    that slipped through would otherwise write a label onto the real
+    tracker before this test could fail."""
+    with tempfile.TemporaryDirectory(prefix="tier-usage-") as scratch:
+        called = os.path.join(scratch, "gh-called")
+        with only_gh_on_path(f': >"{called}"; exit 99'):
+            for flag in ("--help", "--strip"):
+                out = subprocess.run([sys.executable, TIER, "example/none", "1=a.md", flag],
+                                     capture_output=True, text=True)
+                assert out.returncode == 2, (flag, out)
+                assert "usage: tier.py" in out.stderr, out.stderr
+        assert not os.path.exists(called), "a rejected flag still reached gh"
 
 
 def main():

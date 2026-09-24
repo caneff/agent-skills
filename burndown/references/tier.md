@@ -1,11 +1,12 @@
-# Tier tagging: the label a docs-only ticket is missing
+# Tier tagging: the label a ticket's targets call for
 
 A ticket's **tier** is read off its `documentation` label at dispatch —
 present is light, absent is heavy (the **Tier** entry in
 [`../../CONTEXT.md`](../../CONTEXT.md)). A docs-only ticket whose author forgot the
 label therefore gets the full heavy process for a page of prose. The exploration pass already knows each
 candidate's files before dispatch, so it **writes the missing label onto the
-ticket**. Reading it is `burndown/tier.py` — `python3 burndown/tier.py
+ticket**, and takes a `documentation` label its code targets contradict back
+off (§ Stripping). Reading it is `burndown/tier.py` — `python3 burndown/tier.py
 <owner/repo> <n>=<path>[,<path>]... [--dry-run]`, or `tag(repo, candidates)`
 in process.
 
@@ -28,34 +29,44 @@ knew the answer before dispatch and the lane ignored it.
 `{"number": <n>, "files": [...], "labels": [...]}` — the ticket's number, the
 files it targets, and the labels it carries **right now**, read from the
 tracker at pass time rather than assumed. Four answers, and only the first
-writes anything:
+adds anything (a removal is `labels_to_strip`'s, § Stripping):
 
 - Every target file is prose, and the ticket has no `documentation` label →
   `["documentation"]`.
 - Every target file is prose, and the label is already there → nothing. This
   pass is idempotent; a tick that runs twice writes once.
-- Any target file is not prose → nothing. A mixed diff is code
-  (`flow/claude/WORKFLOW.md` § Gate 2).
+- Any target file is not prose → nothing to add. A mixed diff is code
+  (`flow/claude/WORKFLOW.md` § Gate 2), and a `documentation` label already
+  there is stripped.
 - The candidate names no files → nothing. `all()` over an empty list is
   `True`, and that is the one reading of "every file is prose" that sends an
   unknown candidate down the light tier.
 
-**It only ever adds.** `tag` builds `--add-label` and there is no spelling
-anywhere in this reader for `--remove-label`, so a label a human put on a
-ticket is never taken off by a run. A worker keeps its right to raise light to heavy;
-nothing raises heavy to light, and nothing here lowers it either.
+**It touches one label, `documentation`.** `tag` builds `--add-label` from
+`labels_to_write` and `--remove-label` from `labels_to_strip` alone, so the
+one label a run ever takes off a ticket is `documentation`, and only from a
+candidate targeting code. A worker keeps its right to raise light to heavy,
+and nothing here sends a candidate with a code target light.
 
-## `--strip`: a label the targets contradict
+## Stripping: a label the targets contradict
 
-`tier.py <owner/repo> <n>=<path>... --strip` reports `would strip:` for each
-ticket that carries `documentation` while a target is not prose (#1045: #969
-targeted a `SKILL.md`, carried the filer's label, went out light and landed on
-main unreviewed). It writes nothing. `implement-dispatch` does the removal, reading the
-body's paths by extension (so an extensionless script named in a body is
-invisible to it, where this reader, given the file list, calls it code): on a code path (`flow/claude/WORKFLOW.md` § Gate 2: `.py/.ts/.js/.sh/.rs`,
-a `SKILL.md`, `settings.json`) dispatches heavy, drops `documentation` in the
-claim edit, and says so in its report. An unreadable body dispatches heavy and
-keeps the label.
+`labels_to_strip(candidate)` returns `["documentation"]` for a candidate that
+carries the label while a target is not prose, and the pass removes it with
+`--remove-label documentation` (#1045: #969 targeted a `SKILL.md`, carried the
+filer's label, went out light and landed on main unreviewed). An empty file
+list strips nothing: unknown targets are not evidence the label is wrong.
+
+The pass does the removal because it is the only reader holding the
+clumper's file list (#1118). `implement-dispatch` strips too, but from the
+ticket body's paths alone, read by extension: on a code path
+(`flow/claude/WORKFLOW.md` § Gate 2: `.py/.ts/.js/.sh/.rs`, a `SKILL.md`,
+`settings.json`) it dispatches heavy, drops `documentation` in the claim edit,
+and says so in its report; an unreadable body dispatches heavy and keeps the
+label. A body naming only prose, on a ticket whose candidate line names a
+`SKILL.md` or an extensionless script, gets past dispatch's reading — so the
+label has to be gone before dispatch reads it, and this pass runs before the
+first dispatch. The old report-only `--strip` flag is retired; `--dry-run`
+previews the strip under `would strip:`.
 
 ## What counts as prose
 
@@ -98,11 +109,12 @@ session does.
 
 ## The run's opening report names every label written
 
-`tag` accumulates into the caller's own list, and `render(written)` is the
-line the run's opening report carries — one line per
-ticket, with the labels that went onto it — and a pass that wrote none says
-`labels written: none` in words. A `--dry-run` reports the same decisions
-under `would write:`, because a preview that claims a write is worse than no
+`tag` accumulates into the caller's own lists, and `render(written,
+stripped)` is what the run's opening report carries — one line per
+ticket, with the labels that went onto it or came off it — and a pass that
+wrote none says `labels written: none` and `labels stripped: none` in words.
+A `--dry-run` reports the same decisions under `would write:` and `would
+strip:`, because a preview that claims a write is worse than no
 preview: the line is the run's record of what the tracker now carries. A report silent about labels reads the same
 as a report from a pass that never ran, and the difference between those two
 is a ticket dispatched at the wrong tier.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The `documentation` label a docs-only candidate is missing.
+"""The `documentation` label a candidate's targets call for.
 
 A ticket's tier is read off its `documentation` label at dispatch: present is
 light — the worker lands on the default branch, no PR, no reviewer — and
@@ -13,9 +13,14 @@ So this reader writes the missing label onto the ticket, not a flag into the
 run: `--tier` is invisible the moment dispatch returns, while `merge-cleanup`,
 `/landed` and a resumed controller all read the ticket.
 
-It only ever adds. A label is never removed here (`--strip` reports what dispatch will remove, and writes nothing), and a worker keeps its right
-to raise light to heavy — the reverse of both is how a code change ships
-unreviewed.
+It touches one label, `documentation`, in the direction its targets
+prove. It adds the label to a candidate every target of which is prose, and
+removes it from a candidate whose targets include code (#1118:
+`implement-dispatch` reads only the ticket body's paths, so a body naming
+only prose kept the filer's label and dispatched light while the clumper's
+candidate line named a `SKILL.md`). A worker keeps its right to raise light
+to heavy, and nothing here sends a candidate with a code target light: that
+is how a code change ships unreviewed.
 
 The grammar and the evidence: `references/tier.md`.
 """
@@ -67,7 +72,7 @@ def labels_to_write(candidate):
 
 
 def labels_to_strip(candidate):
-    """`(candidate) -> labels dispatch will remove`: `documentation` on a
+    """`(candidate) -> labels to remove`: `documentation` on a
     candidate whose targets include a file that is not prose. The label is a
     filer's claim and the targets are the evidence (#1045: #969 targeted a
     `SKILL.md`, carried the label, and went out light). Unknown targets are
@@ -76,20 +81,6 @@ def labels_to_strip(candidate):
     if DOCUMENTATION_LABEL in candidate["labels"] and any(not is_prose(f) for f in files):
         return [DOCUMENTATION_LABEL]
     return []
-
-
-def strip_report(candidates):
-    """Print what `implement-dispatch` would strip. Report only: this reader
-    still never removes a label, and the removal is dispatch's, at claim."""
-    found = [(c["number"], labels_to_strip(c)) for c in candidates]
-    found = [(n, labels) for n, labels in found if labels]
-    if not found:
-        print("would strip: none")
-        return found
-    print("would strip:")
-    for n, labels in found:
-        print(f"    #{n}  {', '.join(labels)}")
-    return found
 
 
 class TierError(Exception):
@@ -112,13 +103,15 @@ def gh(args):
     return out.stdout
 
 
-def tag(repo, candidates, run=None, write=True, written=None):
+def tag(repo, candidates, run=None, write=True, written=None, stripped=None):
     """`(candidates) -> what was written`: one record per candidate that
     earned a label, `{"number": <n>, "labels": [...]}`, in candidate order.
+    Removals go into `stripped` in the same shape.
 
-    `--add-label` and nothing else — this pass has no spelling for removing a
-    label, which is what keeps a worker's right to raise light to heavy from
-    being undone from here.
+    `--remove-label` is built from `labels_to_strip` alone, so the one label
+    this pass can take off is `documentation`, and only where a target is
+    code: a removal only ever raises the tier, and a worker's right to raise
+    light to heavy is never undone from here.
 
     `write=False` decides identically and invokes nothing, so a dry run is a
     readable preview of the real one rather than a second code path.
@@ -130,33 +123,49 @@ def tag(repo, candidates, run=None, write=True, written=None):
     not.
     """
     written = [] if written is None else written
+    stripped = [] if stripped is None else stripped
     run = run or gh
     for candidate in candidates:
-        labels = labels_to_write(candidate)
-        if not labels:
-            continue
-        if write:
-            run(["issue", "edit", str(candidate["number"]), "--repo", repo,
-                 "--add-label", ",".join(labels)])
-        written.append({"number": candidate["number"], "labels": labels})
+        number = candidate["number"]
+        add, strip = labels_to_write(candidate), labels_to_strip(candidate)
+        if add:
+            if write:
+                run(["issue", "edit", str(number), "--repo", repo,
+                     "--add-label", ",".join(add)])
+            written.append({"number": number, "labels": add})
+        if strip:
+            if write:
+                run(["issue", "edit", str(number), "--repo", repo,
+                     "--remove-label", ",".join(strip)])
+            stripped.append({"number": number, "labels": strip})
     return written
 
 
-def render(written, write=True):
+def render(written, stripped, write=True):
     """The lines the run's opening report carries: every label this pass
-    wrote, against the ticket it went on. A pass that wrote none says so in
-    words — a report silent about labels reads the same as one from a pass
-    that never ran.
+    wrote and every label it stripped, against the ticket each belongs to. A
+    pass that did neither says so in words — a report silent about labels
+    reads the same as one from a pass that never ran.
 
-    A dry run reports the same decisions under `would write:`. A preview that
-    claims a write is worse than no preview at all: this line is the run's
-    record of what the tracker now carries, and a controller reading `labels
-    written:` after a dry run would take the tier as already fixed."""
-    heading = "labels written" if write else "would write"
-    if not written:
+    A dry run reports the same decisions under `would write:` and `would
+    strip:`. A preview that claims a write is worse than no preview at all:
+    these lines are the run's record of what the tracker now carries, and a
+    controller reading `labels written:` after a dry run would take the tier
+    as already fixed.
+
+    `stripped` has no default: an in-process caller that forgot it would
+    print `labels stripped: none` over strips that happened."""
+    return "\n".join([
+        _block("labels written" if write else "would write", written),
+        _block("labels stripped" if write else "would strip", stripped),
+    ])
+
+
+def _block(heading, records):
+    if not records:
         return f"{heading}: none"
     lines = [f"{heading}:"]
-    lines.extend(f"    #{w['number']}  {', '.join(w['labels'])}" for w in written)
+    lines.extend(f"    #{r['number']}  {', '.join(r['labels'])}" for r in records)
     return "\n".join(lines)
 
 
@@ -191,26 +200,23 @@ def main(argv, run=None):
     know is usage rather than a candidate: `tier.py <repo> --help` used to
     reach the candidate parser and die with "not a candidate: --help"."""
     dry_run = "--dry-run" in argv[1:]
-    strip = "--strip" in argv[1:]
-    args = [a for a in argv[1:] if a not in ("--dry-run", "--strip")]
+    args = [a for a in argv[1:] if a != "--dry-run"]
     if len(args) < 2 or any(a.startswith("-") for a in args):
-        print("usage: tier.py <owner/repo> <n>=<path>[,<path>]... [--dry-run] [--strip]",
+        print("usage: tier.py <owner/repo> <n>=<path>[,<path>]... [--dry-run]",
               file=sys.stderr)
         return 2
-    written = []
+    written, stripped = [], []
     try:
         candidates = candidates_from(args[0], args[1:], run)
-        if strip:
-            strip_report(candidates)
-            return 0
-        tag(args[0], candidates, run, write=not dry_run, written=written)
+        tag(args[0], candidates, run, write=not dry_run, written=written,
+            stripped=stripped)
     except (TierError, ClosureError) as exc:
         # The partial report first: whatever is already on the tracker is
         # what the next dispatch will read, failure or not.
-        print(render(written, write=not dry_run))
+        print(render(written, stripped, write=not dry_run))
         print(f"tier.py: {exc}", file=sys.stderr)
         return 1
-    print(render(written, write=not dry_run))
+    print(render(written, stripped, write=not dry_run))
     return 0
 
 

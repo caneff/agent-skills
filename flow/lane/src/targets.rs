@@ -8,8 +8,8 @@
 //! toward code — a wrong heavy tier costs one review, a wrong light tier
 //! lands code unreviewed. It reads a body's tokens, so it can only see a path
 //! with an extension: an extensionless script is invisible here, where
-//! `burndown/tier.py --strip` (which reads a candidate's file list) would call
-//! it code.
+//! `burndown/tier.py` (which reads a candidate's file list) calls it code and
+//! strips the label before dispatch.
 
 /// Extensions § Gate 2 names as code, plus the ones that wire the harness or
 /// CI (its "hooks, CI config").
