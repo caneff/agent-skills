@@ -1442,6 +1442,27 @@ def test_the_sweep_names_the_vanished_worker_distinctly_when_rendered():
     assert "idle      #2" in rendered, rendered
 
 
+def test_a_done_pane_with_no_pr_up_is_stalled_not_idle():
+    """#1095: the worker ended its turn mid-lane with a summary to no one,
+    herdr showed `done`, and the sweep had no verdict for it. A `done` pane
+    on an unlanded clump whose "PR up" is not on record is `stalled`; one
+    whose "PR up" is on record is waiting on the controller, and says `done`.
+    An `idle` pane stays `idle`."""
+    calls = []
+    clumps = live_clumps()
+    clumps[1]["pr_up"] = 1160
+    get = agent_stub({"skills-1": herdr_agent("done"),
+                      "skills-2": herdr_agent("done"),
+                      "skills-3": herdr_agent("idle")}, calls)
+    state = loop.sweep(clumps, get)
+    verdicts = {w["agent"]: w["verdict"] for w in state["workers"]}
+    assert verdicts == {"skills-1": "stalled", "skills-2": "done",
+                        "skills-3": "idle"}, verdicts
+    rendered = loop.render_sweep(state)
+    assert "stalled   #1" in rendered, rendered
+    assert "done      #2" in rendered, rendered
+
+
 def in_flight_clumps(job=None, other=None):
     """Two live clumps as `loop.py dispatch --in-flight` reads them: the run
     file's entries, each carrying its worker's job state, plus the closure

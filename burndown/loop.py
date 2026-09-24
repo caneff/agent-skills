@@ -772,7 +772,7 @@ def cleanup_ready(clump, outstanding=()):
 # its verdict. A state herdr grows later reads as `unknown` and is reported
 # with the word herdr used, rather than being silently folded into `working` —
 # which is the reading that would let a stuck worker pass as healthy.
-_AGENT_STATES = frozenset({"working", "idle", "blocked"})
+_AGENT_STATES = frozenset({"working", "idle", "blocked", "done"})
 # One deadline for the **whole** sweep, not one per probe. A per-probe bound
 # composes: N hung panes would hold the controller inside one tool call for N
 # timeouts, and a controller in a tool call hears no worker at all (#778). So
@@ -801,7 +801,9 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
     only this sweep can find, and it is reported as its own verdict rather
     than as an idle worker. What the sweep cannot see is the other shape: a
     pane that is present and busy looks `working` whatever it is busy with
-    (#925). Nothing about one clump ends the sweep: a probe that fails, and a
+    (#925). A `done` pane on a clump whose "PR up" is not on record
+    (`pr_up`, the run file's) is `stalled`: its turn ended mid-lane with
+    nothing sent (#1148). Nothing about one clump ends the sweep: a probe that fails, and a
     clump the run file left with no agent name, are each that one worker's
     verdict, so a herdr that answers for two workers and not the third still
     tells the controller about two.
@@ -834,6 +836,11 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
             verdict, detail = "unreachable", str(exc)
         else:
             verdict, detail = _verdict(answer)
+            # A turn that ended with no "PR up" on record ended mid-lane:
+            # nothing reached the controller, and nothing will (#1148).
+            if verdict == "done" and clump.get("pr_up") is None:
+                verdict, detail = "stalled", ("done with no PR up on record "
+                                              "— read this pane")
         read.append({"agent": agent, "tickets": clump["tickets"],
                      "workspace": clump.get("workspace", ""),
                      "verdict": verdict, "detail": detail})
