@@ -51,7 +51,7 @@ check_in() {
 # know before relaxing the classifier.
 check_in "$tagging_text" 'references/tier.md' 'burndown/SKILL.md § Tier tagging'
 check_in "$tagging_text" 'tier.py' 'burndown/SKILL.md § Tier tagging'
-check_in "$tagging_text" 'only ever raises the tier' 'burndown/SKILL.md § Tier tagging'
+check_in "$tagging_text" 'touches one label, `documentation`' 'burndown/SKILL.md § Tier tagging'
 # And the numbered loop actually runs it: a section nothing invokes is a
 # reader a controller never reaches (#898 round-1 finding P1).
 check_in "$loop_text" 'burndown/tier.py <owner/repo>' 'burndown/SKILL.md § The loop'

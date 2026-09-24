@@ -41,11 +41,11 @@ writes anything:
   `True`, and that is the one reading of "every file is prose" that sends an
   unknown candidate down the light tier.
 
-**It only ever raises the tier.** `tag` builds `--add-label` from
+**It touches one label, `documentation`.** `tag` builds `--add-label` from
 `labels_to_write` and `--remove-label` from `labels_to_strip` alone, so the
 one label a run ever takes off a ticket is `documentation`, and only from a
-candidate targeting code. A worker keeps its right to raise light to heavy;
-nothing raises heavy to light, and nothing here lowers it either.
+candidate targeting code. A worker keeps its right to raise light to heavy,
+and nothing here sends a candidate with a code target light.
 
 ## Stripping: a label the targets contradict
 

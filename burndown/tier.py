@@ -13,14 +13,14 @@ So this reader writes the missing label onto the ticket, not a flag into the
 run: `--tier` is invisible the moment dispatch returns, while `merge-cleanup`,
 `/landed` and a resumed controller all read the ticket.
 
-It only ever raises the tier. It adds `documentation` to a docs-only
-candidate that lacks it, and it removes `documentation` — the one label it
-ever removes — from a candidate whose targets include code (#1118:
+It touches one label, `documentation`, in the direction its targets
+prove. It adds the label to a candidate every target of which is prose, and
+removes it from a candidate whose targets include code (#1118:
 `implement-dispatch` reads only the ticket body's paths, so a body naming
 only prose kept the filer's label and dispatched light while the clumper's
 candidate line named a `SKILL.md`). A worker keeps its right to raise light
-to heavy, and nothing here lowers heavy to light: that is how a code change
-ships unreviewed.
+to heavy, and nothing here sends a candidate with a code target light: that
+is how a code change ships unreviewed.
 
 The grammar and the evidence: `references/tier.md`.
 """
@@ -110,7 +110,7 @@ def tag(repo, candidates, run=None, write=True, written=None, stripped=None):
 
     `--remove-label` is built from `labels_to_strip` alone, so the one label
     this pass can take off is `documentation`, and only where a target is
-    code: every write here raises the tier, and a worker's right to raise
+    code: a removal only ever raises the tier, and a worker's right to raise
     light to heavy is never undone from here.
 
     `write=False` decides identically and invokes nothing, so a dry run is a

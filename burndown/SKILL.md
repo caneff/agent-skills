@@ -298,8 +298,8 @@ the one that sees the clumper's) — `python3 burndown/tier.py <owner/repo>
 label, not a flag: `merge-cleanup`, `/landed` and a resumed controller all
 read the ticket, and a flag is gone the moment dispatch returns.
 
-It **only ever raises the tier**: `documentation` is the one label it
-removes. A candidate is docs-only when every file it targets is
+It **touches one label, `documentation`**: it adds it when every target
+is prose and removes it when any target is code. A candidate is docs-only when every file it targets is
 prose — `.md`, `.markdown`, `.txt`, `.rst`, and never a `SKILL.md` — and
 anything else it cannot read as prose counts as code, which is deliberately
 stricter than `flow/claude/WORKFLOW.md` § Gate 2: light tier lands with no PR

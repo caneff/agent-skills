@@ -122,7 +122,7 @@ def test_the_pass_writes_the_missing_label_and_only_that():
                          "--add-label", "documentation"]], gh.calls
 
 
-def test_the_pass_only_ever_raises_the_tier():
+def test_the_pass_removes_only_documentation_and_only_from_code():
     """The rule stated as a test rather than as a comment: the one removal
     this pass makes is `documentation`, from a candidate targeting code. A
     prose candidate, an unknown one, and every other label stay as they are,
