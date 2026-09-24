@@ -1978,3 +1978,67 @@ fn an_unreadable_body_dispatches_heavy_and_keeps_the_documentation_label() {
     assert!(!calls.contains("--remove-label documentation"), "{calls}");
     assert!(out_text(&out).contains("body unreadable, dispatched heavy: #403"), "{}", out_text(&out));
 }
+
+// --- #1146: a burn's run id reaches the brief ---------------------------------
+
+#[test]
+fn a_run_id_is_carried_in_the_brief_so_the_worker_knows_a_run_file_is_under_it() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "burn-2026-09-23-0700", "412"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    assert_eq!(
+        prompt_line(&f),
+        "herdr agent prompt sudokumaker-custom-constrain-412 /implement 412 --tier heavy --controller \"skills-ctl\" --run burn-2026-09-23-0700 --wait --until working --timeout 120000"
+    );
+    assert!(out_text(&out).contains("dispatched #412 (sonnet, heavy tier, run burn-2026-09-23-0700, controller skills-ctl)"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_run_id_outside_the_run_file_grammar_is_refused_before_the_claim() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    // runfile.py's own run-id grammar: a space or quote would split the
+    // one-line brief, a `/` or `..` names no run file, empty names none.
+    for bad in ["burn x", "burn\"x", "../burn", "-burn", ".burn", "", "burn\n"] {
+        let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", bad, "413"], &default_scenario());
+        assert!(refused(&out, &f.calls(), &repo, "413", "run id"), "--run {bad:?}: {}", out_text(&out));
+    }
+}
+
+#[test]
+fn a_run_id_on_a_spec_dispatch_is_refused() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let scenario = with(&default_scenario(), &[("GH_LABELS", "spec,ready-for-agent")]);
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "burn-2026-09-23-0700", "--spec", "395"], &scenario);
+    assert!(refused(&out, &f.calls(), &repo, "395", "--run"), "{}", out_text(&out));
+}
+
+#[test]
+fn a_clumps_run_id_sits_before_the_clump_note() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--run", "burn-2026-09-23-0700", "424", "423"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let line = prompt_line(&f);
+    assert!(
+        line.starts_with("herdr agent prompt sudokumaker-custom-constrain-423 /implement 423 424 --tier heavy --controller \"skills-ctl\" --run burn-2026-09-23-0700 -- Clump:"),
+        "{line}"
+    );
+}
+
+#[test]
+fn help_documents_the_run_flag() {
+    let f = Fixture::new();
+    let out = f.dispatch(&["--help"], &default_scenario());
+    assert!(out.status.success(), "{}", out_text(&out));
+    let text = out_text(&out);
+    for want in ["[--run <run-id>]", "--run <run-id>", "no run file"] {
+        assert!(text.contains(want), "help lacks {want:?}:\n{text}");
+    }
+}

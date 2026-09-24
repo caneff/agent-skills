@@ -41,7 +41,7 @@ worker running in its own workspace inside herdr, report, and stop. It never
 waits on the worker.
 
   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
-                     <issue number> [<issue number>...]
+                     [--run <run-id>] <issue number> [<issue number>...]
   implement-dispatch [--repo <path>] [--model sonnet|opus] [--controller <name>]
                      --spec <n> [--slots <k>]
 
@@ -54,6 +54,13 @@ without a PR and a merged PR's closingIssuesReferences is the only record
 merge-cleanup can clear a clump's claims from. A ready-for-human issue among
 them ends the brief with --chris-merges: the worker builds the clump and
 Chris merges its PR. --model defaults to sonnet.
+
+--run <run-id> puts `--run <run-id>` in the brief, after --chris-merges: a
+burn's controller always passes its run id, so the worker knows a run file is
+under it and leaves the leftover sweep to the burn. A brief with no --run is
+a worker with no run file under it, which files its own per-PR sweep. The id
+follows burndown/runfile.py's grammar and is refused otherwise; spec mode
+refuses --run, since a spec run keeps its own run file.
 
 Several issue numbers are one clump: one worker, one workspace, one branch
 and one PR that closes all of them. Branch and workspace are implement-<n>
@@ -95,7 +102,8 @@ Refuses, with nothing claimed or created, when any named issue is not open and
 labelled exactly one of ready-for-agent and ready-for-human, it carries a held
 label (in-progress, needs-info), the same number is named twice, spec mode
 names an issue without the spec label or with ready-for-human or names more
-than one, plain mode names one with the spec label, no controller is named or
+than one, or carries --run, plain mode names one with the spec label, --run
+names no run id, no controller is named or
 found, the herdr server is not running, claude onboarding is incomplete, the
 herdr agent name is taken, or the workspace path or branch already exists.
 After the workspace exists, any herdr failure exits non-zero with herdr's own
@@ -119,6 +127,9 @@ struct Args {
     repo: Option<String>,
     model: Option<String>,
     controller: Option<String>,
+    /// The burn run this dispatch belongs to, put in the brief as `--run
+    /// <id>` so the worker knows a run file is under it (#1146).
+    run: Option<String>,
     /// The clump: every ticket named on the command line, in the order
     /// typed. Spec mode's one ticket arrives here too.
     ns: Vec<String>,
@@ -160,6 +171,7 @@ fn parse_args(argv: Vec<String>) -> Parsed {
     let mut repo = None;
     let mut model = None;
     let mut controller = None;
+    let mut run = None;
     let mut ns: Vec<String> = Vec::new();
     let mut spec = false;
     let mut slots = None;
@@ -177,6 +189,10 @@ fn parse_args(argv: Vec<String>) -> Parsed {
             "--controller" => match it.next() {
                 Some(v) => controller = Some(v),
                 None => return Parsed::Err("--controller needs a value".into()),
+            },
+            "--run" => match it.next() {
+                Some(v) => run = Some(v),
+                None => return Parsed::Err("--run needs a value".into()),
             },
             "--spec" => match it.next() {
                 Some(_) if !ns.is_empty() => return Parsed::Err("one ticket at a time".into()),
@@ -202,7 +218,7 @@ fn parse_args(argv: Vec<String>) -> Parsed {
             }
         }
     }
-    Parsed::Args(Args { repo, model, controller, ns, spec, slots })
+    Parsed::Args(Args { repo, model, controller, run, ns, spec, slots })
 }
 
 /// Handles the hidden `--seed-trust <claude.json path> <workspace path>`
@@ -494,6 +510,16 @@ fn primary_worktree(repo: &str) -> Option<String> {
     first.strip_prefix("worktree ").map(str::to_string)
 }
 
+/// `burndown/runfile.py`'s run-id grammar, `[A-Za-z0-9][A-Za-z0-9._-]*`
+/// with no `..`: the id names the run file, and it rides in a one-line brief
+/// where a space or quote would split it.
+fn valid_run_id(s: &str) -> bool {
+    let mut chars = s.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && !s.contains("..")
+}
+
 fn valid_slug(s: &str) -> bool {
     let mut parts = s.splitn(2, '/');
     let (Some(a), Some(b)) = (parts.next(), parts.next()) else { return false };
@@ -726,6 +752,16 @@ fn run() -> Result<(), ExitCode> {
             _ => return Err(die(format!("--slots must be a positive integer, not '{k}'"))),
         },
     };
+    if let Some(id) = &args.run {
+        // A spec run keeps its own run file and passes its own id to the
+        // slices it dispatches; the burn's id would reach no one there.
+        if let Mode::Spec { .. } = mode {
+            return Err(die("--run only goes with a plain dispatch; a spec run keeps its own run file"));
+        }
+        if !valid_run_id(id) {
+            return Err(die(format!("not a run id: {id:?} (letters, digits, dash, dot, underscore, starting with a letter or digit)")));
+        }
+    }
     let model = args.model.clone().unwrap_or_else(|| mode.default_model().to_string());
     if model != "sonnet" && model != "opus" {
         return Err(die(format!("--model must be sonnet or opus, not '{model}'")));
@@ -1046,7 +1082,14 @@ fn run() -> Result<(), ExitCode> {
             if !unread.is_empty() {
                 strip_note.push_str(&format!(", body unreadable, dispatched heavy: {}", unread.join(" ")));
             }
-            (format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}{note}", ns.join(" ")), format!("{tier} tier{strip_note}{merger}"))
+            let (run_flag, run_note) = match &args.run {
+                Some(id) => (format!(" --run {id}"), format!(", run {id}")),
+                None => (String::new(), String::new()),
+            };
+            (
+                format!("/implement {} --tier {tier} --controller \"{controller}\"{marker}{run_flag}{note}", ns.join(" ")),
+                format!("{tier} tier{strip_note}{merger}{run_note}"),
+            )
         }
         Mode::Spec { slots } => (format!("/implement-spec {n} --slots {slots} --controller \"{controller}\""), format!("spec, {slots} slots")),
     };
