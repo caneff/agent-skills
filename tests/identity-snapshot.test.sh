@@ -15,13 +15,16 @@ check() { # name expected-exit actual-exit
 }
 
 # The fake suite's body is the argument; the shadow is reset per case.
-run_case() { # <suite body>; leaves the run's output in $out, status in $rc
+run_case() { # <suite body> [unset-first]; leaves the run's output in $out, status in $rc
   rm -rf "$shadow/repo"; mkdir -p "$shadow/repo/tests"
   cp "$root/tests/all.sh" "$shadow/repo/tests/all.sh"
   printf '#!/usr/bin/env bash\n%s\n' "$1" >"$shadow/repo/fake.test.sh"
   git -C "$shadow/repo" init -q
   git -C "$shadow/repo" config user.email owner@example.org
   git -C "$shadow/repo" config user.name owner
+  # A second argument starts the case with user.email unset, so a suite that
+  # sets it to empty is a change only the `<unset>` marker can see.
+  [ -n "${2-}" ] && git -C "$shadow/repo" config --unset user.email
   git -C "$shadow/repo" add -A
   git -C "$shadow/repo" -c user.email=t@example.com -c user.name=t commit -qm shadow
   out=$(cd "$shadow/repo" && bash tests/all.sh 2>&1); rc=$?
@@ -40,5 +43,8 @@ check "a suite that rewrites user.name fails the gate" 1 $rc
 
 run_case 'git config --unset user.email'
 check "a suite that unsets user.email fails the gate" 1 $rc
+
+run_case 'git config user.email ""' unset-first
+check "a suite that sets an unset user.email to empty fails the gate" 1 $rc
 
 exit $fail
