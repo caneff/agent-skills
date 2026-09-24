@@ -31,7 +31,11 @@
 
 set -u
 
-hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Through the symlink: install.sh links this hook into ~/.claude/hooks/, and a
+# lib looked for beside the link goes missing whenever install.sh has not
+# been re-run since the lib was added (#1148: every stop from 2026-09-22 to
+# 2026-09-24 logged lib-missing).
+hook_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 log="$HOME/.claude/worker-stop-alerts.log"
 lib_missing() { # <what's wrong> -> logs and exits 0, no lib functions required
   mkdir -p "$(dirname "$log")"
