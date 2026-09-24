@@ -53,16 +53,18 @@ too.
    with the clump it unblocks named. Then **tag the tier before any
    dispatch** (§ Tier tagging): `python3 burndown/tier.py <owner/repo>
    <n>=<path>[,<path>]...` writes the missing `documentation` label onto
-   every docs-only candidate, because the tier is read off the ticket at
-   dispatch and a label written after that is a label that came too late.
+   every docs-only candidate and strips it from every candidate targeting
+   code, because the tier is read off the ticket at dispatch and a label
+   changed after that is a label that came too late.
 3. The **opening report** carries `closure.py`'s announcement line verbatim,
    so the reader can tell all three declaration states apart: a declared
    directive, a **declared None** — the repo has no include graph — and
    **silence**, which clumps conservatively by directory subtree. A
    controller reading "conservative" has to know which of the last two it
-   got. It also carries `tier.py`'s line (§ Tier tagging), which **names
-   every label the exploration pass wrote** and says `labels written: none`
-   when it wrote none — a report silent about labels reads the same from a
+   got. It also carries `tier.py`'s lines (§ Tier tagging), which **name
+   every label the exploration pass wrote** and every label it stripped, and
+   say `labels written: none` and `labels stripped: none` when it did
+   neither — a report silent about labels reads the same from a
    pass that wrote nothing and a pass that never ran, and the difference
    between those two is a ticket dispatched at the wrong tier.
 
@@ -286,14 +288,18 @@ which of the three modes it got. The grammar and the evidence:
 
 A candidate's **tier** is read off its `documentation` label at dispatch, so
 a docs-only ticket whose author forgot the label takes TDD, a three-axis
-review and a PR for a page of prose (#781's `#371`). After clumping and
+review and a PR for a page of prose (#781's `#371`), and a labelled ticket
+whose candidate targets a `SKILL.md` goes out light (#969). After clumping and
 **before the first dispatch**, `burndown/tier.py` writes that missing label
-onto the ticket — `python3 burndown/tier.py <owner/repo>
+onto the ticket, and removes `documentation` from a candidate whose targets
+include code (#1118: dispatch reads only the body's paths, so this pass is
+the one that sees the clumper's) — `python3 burndown/tier.py <owner/repo>
 <n>=<path>[,<path>]... [--dry-run]`, the clumper's own candidate grammar. The
 label, not a flag: `merge-cleanup`, `/landed` and a resumed controller all
 read the ticket, and a flag is gone the moment dispatch returns.
 
-It **only ever adds**. A candidate is docs-only when every file it targets is
+It **only ever raises the tier**: `documentation` is the one label it
+removes. A candidate is docs-only when every file it targets is
 prose — `.md`, `.markdown`, `.txt`, `.rst`, and never a `SKILL.md` — and
 anything else it cannot read as prose counts as code, which is deliberately
 stricter than `flow/claude/WORKFLOW.md` § Gate 2: light tier lands with no PR
