@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+from itertools import accumulate
 from pathlib import Path
 
 
@@ -99,11 +100,7 @@ def line_code_spans(lines: list[str]) -> list[list[tuple[int, int]]]:
         end = index
         while end < len(lines) and lines[end].strip():
             end += 1
-        starts = []
-        offset = 0
-        for line in lines[index:end]:
-            starts.append(offset)
-            offset += len(line) + 1
+        starts = [0, *accumulate(len(line) + 1 for line in lines[index:end - 1])]
         for span_start, span_end in code_spans("\n".join(lines[index:end])):
             for row, line_start in enumerate(starts, index):
                 start = max(span_start, line_start) - line_start

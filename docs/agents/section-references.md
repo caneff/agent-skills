@@ -32,8 +32,9 @@ does not resolve.
   backtick outside a wrapping code span fails, saying inline code in a
   heading name is unsupported. Write the plain heading. A code span is
   recognised by CommonMark's own rule — a backtick run opens it and only a
-  later run of the same length closes it, in the same paragraph (a span may
-  cross a line break, never a blank line), so a name wrapped in a single
+  later run of the same length closes it, within one run of non-blank lines (a
+  span may cross a line break, never a blank line; a heading, list item or
+  fence line beside prose joins the run), so a name wrapped in a single
   backtick pair or a double one is read as inside the span either way (write
   `<sign> Build` inside one backtick, or inside two). The guard against
   inline code runs on the name before the possessive or conjunction trimmer
