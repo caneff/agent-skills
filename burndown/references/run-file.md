@@ -147,7 +147,7 @@ A file written before leftovers existed still loads — the field is filled
 in as `[]`, the honest reading of a run that never recorded one.
 
 Nothing here builds the sweep ticket itself; `sweep.py render` renders it
-and `burndown/SKILL.md` § The sweep files it. This
+and `burndown/SKILL.md` § The sweep, which files it. This
 list is only the store, so a restart does not lose what a landed PR already
 carried.
 
