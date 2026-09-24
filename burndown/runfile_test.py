@@ -1188,7 +1188,7 @@ def test_a_pr_up_that_is_not_a_pr_number_or_names_no_clump_is_refused():
     root = cache()
     runfile.start("r-pr3", 3, "dc", root)
     runfile.clump("r-pr3", [1095], "/w/1095", "skills-1095", root)
-    for bad in (0, -1, "1160", True, None):
+    for bad in (0, -1, "1160", True):
         try:
             runfile.pr_up("r-pr3", 1095, bad, root)
         except runfile.RunFileError:
@@ -1244,6 +1244,40 @@ def test_the_cli_records_pr_up_and_shows_it():
     got = cli(root, "pr-up", "r-pr5", "--clump", "1095", "--pr", "1160")
     assert got.returncode == 0, got
     assert "PR #1160 up" in cli(root, "show", "r-pr5").stdout
+
+
+def test_a_cleared_pr_up_makes_a_done_pane_stalled_again():
+    """The controller clears the record when it hands findings back, since
+    the PR stays open through a fix round: a worker that then stops mid-fix
+    must read `stalled`, not `done` (Codex gate on PR #1166)."""
+    import loop
+    root = cache()
+    assert cli(root, "start", "r-pr7", "--slots", "2").returncode == 0
+    assert cli(root, "clump", "r-pr7", "--tickets", "1095", "--workspace",
+               "/w/1095", "--agent", "skills-1095").returncode == 0
+    assert cli(root, "pr-up", "r-pr7", "--clump", "1095", "--pr",
+               "1160").returncode == 0
+    cleared = cli(root, "pr-up", "r-pr7", "--clump", "1095", "--clear")
+    assert cleared.returncode == 0, cleared
+    assert "no PR up" in cleared.stdout, cleared.stdout
+    clumps = runfile.load("r-pr7", root)["clumps"]
+    assert clumps[0]["pr_up"] is None, clumps
+    state = loop.sweep(clumps, lambda agent, timeout: {
+        "result": {"agent": {"agent_status": "done"}}})
+    assert state["workers"][0]["verdict"] == "stalled", state
+
+
+def test_pr_up_takes_a_pr_or_clear_but_not_both_and_not_neither():
+    root = cache()
+    assert cli(root, "start", "r-pr8", "--slots", "2").returncode == 0
+    assert cli(root, "clump", "r-pr8", "--tickets", "1095", "--workspace",
+               "/w/1095", "--agent", "skills-1095").returncode == 0
+    both = cli(root, "pr-up", "r-pr8", "--clump", "1095", "--pr", "1160",
+               "--clear")
+    assert both.returncode != 0 and "not allowed with" in both.stderr, both
+    neither = cli(root, "pr-up", "r-pr8", "--clump", "1095")
+    assert neither.returncode != 0 and "required" in neither.stderr, neither
+    assert runfile.load("r-pr8", root)["clumps"][0]["pr_up"] is None
 
 
 # --- A sidecar older than the PR's head commit is stale (#1085) ------------

@@ -74,6 +74,10 @@ check_in "$liveness_text" '#925' 'burndown/SKILL.md § Liveness'
 check_in "$liveness_text" '`stalled`' 'burndown/SKILL.md § Liveness'
 check_in "$liveness_text" '#1095' 'burndown/SKILL.md § Liveness'
 check_in "$(tr '\n' ' ' <"$skill" | tr -s ' ')" 'runfile.py pr-up' 'burndown/SKILL.md'
+# The PR stays open through a fix round, so the record is cleared whenever
+# the controller hands findings back, or a worker that stops mid-fix reads
+# as waiting on the merge (Codex gate on PR #1166).
+check_in "$(tr '\n' ' ' <"$skill" | tr -s ' ')" 'clears the PR-up record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever it hands findings back' 'burndown/SKILL.md'
 
 # Rule 5: a worker declares its parallel job's core count, and the controller
 # holds the free slots against it and says so.

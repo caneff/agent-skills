@@ -145,7 +145,11 @@ too.
    findings with `runfile.py
    leftover <run-id> --clump <n> --pr <n> --from <dispositions sidecar> --head-committed <PR head
    commit's committer date>`, so a restart can pick the run back up with nothing transcribed by hand
-   (`references/run-file.md` § Leftovers).
+   (`references/run-file.md` § Leftovers). The controller clears the PR-up
+   record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever it
+   hands findings back to the worker (Codex findings, or any ruling that
+   sends it back to work), since the PR stays open through the fix round,
+   and records it again on the next "PR up".
 9. **Wait on the wake, and sweep on an idle one.** The loop waits by being
    idle, never inside a tool call: a controller in one hears no worker until
    it returns. What it trusts while it waits, in rank order, and the bounded

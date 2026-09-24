@@ -4,7 +4,7 @@
     python3 burndown/runfile.py start    <run-id> [--slots <k>] [--controller <agent>]
     python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
     python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
-    python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950
+    python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
     python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --head-committed <ISO>
     python3 burndown/runfile.py show     <run-id>
     python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
@@ -538,8 +538,11 @@ def pr_up(run_id, lowest, pr, root=None):
     reads (`burndown/SKILL.md` § Liveness). It lives here and not in the
     controller's context, because a resumed controller's sweep has only this
     file. A later "PR up" naming another PR replaces it: unlike a squash sha,
-    a PR number is not final — a worker can close one and open another."""
-    pr = pr_number(pr)
+    a PR number is not final — a worker can close one and open another.
+    `pr=None` clears it, when the controller hands findings back: the PR
+    stays open through a fix round, so only the clear makes a worker that
+    stops mid-fix read `stalled` again."""
+    pr = None if pr is None else pr_number(pr)
     with locked(run_id, root):
         run = load(run_id, root)
         clump_entry(run, lowest)["pr_up"] = pr
@@ -785,7 +788,11 @@ def main(argv):
     up.add_argument("run_id")
     up.add_argument("--clump", type=int, required=True,
                     help="the clump's lowest ticket")
-    up.add_argument("--pr", type=int, required=True)
+    which = up.add_mutually_exclusive_group(required=True)
+    which.add_argument("--pr", type=int)
+    which.add_argument("--clear", action="store_true",
+                       help="the controller handed findings back; the next "
+                            "\"PR up\" records it again")
 
     out = subs.add_parser("show", help="print the run file")
     out.add_argument("run_id")
