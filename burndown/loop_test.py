@@ -1918,6 +1918,39 @@ def test_dispatch_refuses_a_clump_the_run_file_has_no_job_for_1107():
         assert "#351 is live with no job record" in got.stderr, got.stderr
 
 
+def test_dispatch_names_runfile_clump_for_an_unregistered_clump_1126():
+    # `runfile.py job` fails with "has no clump" on a clump the run file never
+    # registered, so the refusal must name `runfile.py clump`, not `job`.
+    import runfile
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live, env = run_file_dispatch(tmp, ("none",))
+        cache = env["BURNDOWN_CACHE_DIR"]
+        with open(live) as fh:
+            clumps = json.load(fh)
+        clumps.append({"tickets": [777], "workspace": "/w/777",
+                       "agent": "sm-777", "closure": ["x.py"]})
+        with open(live, "w") as fh:
+            json.dump(clumps, fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "1", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 1, got
+        assert "#777" in got.stderr and "runfile.py clump" in got.stderr, \
+            got.stderr
+        assert "no job record" not in got.stderr, got.stderr
+        # A registered clump with no job still names `job`.
+        runfile.clump("burn-t", [888], "/w/888", "sm-888", root=cache)
+        clumps[-1]["tickets"] = [888]
+        with open(live, "w") as fh:
+            json.dump(clumps, fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "1", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 1, got
+        assert "#888 is live with no job record" in got.stderr, got.stderr
+        assert "not registered" not in got.stderr, got.stderr
+
+
 def test_dispatch_refuses_when_only_the_in_flight_file_carries_the_job_1107():
     # The refusal must come from the run file's silence: an in-flight `job`
     # that would charge cleanly is ignored once --run is given (review C1).
