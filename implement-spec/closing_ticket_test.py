@@ -124,6 +124,36 @@ def test_a_seam_with_no_blind_spot_is_refused():
         raise AssertionError("a seam with no blind spot was accepted")
 
 
+def _refusal(agents, **kw):
+    try:
+        T.seam_of(repo(agents=agents), **kw)
+    except T.SeamError as exc:
+        return str(exc)
+    raise AssertionError(f"an emphasis-only value was accepted: {agents!r}")
+
+
+def test_an_emphasis_only_seam_is_refused_naming_the_seam_and_the_value():
+    got = _refusal("# R\n\n## End-to-end seam\n\n- **Seam**:**\n"
+                   "- **Blind to**: x\n")
+    assert "Seam" in got and "'**'" in got, got
+
+
+def test_an_emphasis_only_blind_spot_is_refused_naming_the_blind_spot():
+    got = _refusal("# R\n\n## End-to-end seam\n\n- **Seam**: `make e2e`\n"
+                   "- **Blind to**:__\n")
+    assert "Blind to" in got and "'__'" in got, got
+
+
+def test_an_emphasis_only_exploration_value_is_refused_too():
+    got = _refusal("# R\n", seam=" * _ ", blind_to="x")
+    assert "Seam" in got and "'*" in got, got
+
+
+def test_any_whitespace_between_emphasis_markers_still_counts_as_only_markers():
+    got = _refusal("# R\n", seam="*\n*", blind_to="x")
+    assert "Seam" in got and "'*\\n*'" in got, got
+
+
 def test_the_cli_prints_the_body():
     import subprocess
     out = subprocess.run(
