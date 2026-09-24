@@ -249,8 +249,8 @@ No PR and no reviewer; Chris reads the log after.
    `runfile_test.py` is one fix, and the controller ruled it so). The
    20-line budget cannot be split across files: a fix touching any other
    second file is a change, not an adjacent fix, and § Build's
-   pre-existing-bug rule governs it. Make each adjacent fix in a commit of its own, so its sha measures it
-   alone. Its disposition is `fixed (adjacent)`, with that sha; its sidecar
+   pre-existing-bug rule governs it. Make each adjacent fix in a commit of
+   its own, so its sha measures it alone. Its disposition is `fixed (adjacent)`, with that sha; its sidecar
    line is step 2's adjacent form. § The merge step 3 applies the same rule
    to a Codex second-pass finding.
 2. One verification pass, scoped to the round-1 findings and the fix commits.
