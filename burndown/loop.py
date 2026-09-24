@@ -801,9 +801,9 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
     only this sweep can find, and it is reported as its own verdict rather
     than as an idle worker. What the sweep cannot see is the other shape: a
     pane that is present and busy looks `working` whatever it is busy with
-    (#925). A `done` pane on a clump whose "PR up" is not on record
-    (`pr_up`, the run file's) is `stalled`: its turn ended mid-lane with
-    nothing sent (#1148). Nothing about one clump ends the sweep: a probe that fails, and a
+    (#925). A finished pane on a clump with no "PR up" on record (`pr_up`,
+    the run file's) is `stalled`, a line that says read the pane (#1148).
+    Nothing about one clump ends the sweep: a probe that fails, and a
     clump the run file left with no agent name, are each that one worker's
     verdict, so a herdr that answers for two workers and not the third still
     tells the controller about two.

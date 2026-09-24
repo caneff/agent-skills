@@ -534,11 +534,11 @@ def job(run_id, lowest, state, cores=0, root=None):
 
 
 def pr_up(run_id, lowest, pr, root=None):
-    """Record the PR a clump's worker reported "PR up" on. The sweep reads a
-    `done` pane on an unlanded clump with no such record as `stalled`: a
-    worker whose turn ended mid-lane with nothing sent (#1148). It lives here
-    and not in the controller's context, because a resumed controller's
-    sweep has only this file."""
+    """Record the PR a clump's worker reported "PR up" on, which the sweep
+    reads (`burndown/SKILL.md` § Liveness). It lives here and not in the
+    controller's context, because a resumed controller's sweep has only this
+    file. A later "PR up" naming another PR replaces it: unlike a squash sha,
+    a PR number is not final — a worker can close one and open another."""
     pr = pr_number(pr)
     with locked(run_id, root):
         run = load(run_id, root)

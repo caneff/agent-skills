@@ -86,11 +86,10 @@ the honest reading of a run that never recorded one.
 Each clump carries `pr_up`: the PR number its worker's "PR up" named, or
 `null` until one reaches the controller. `runfile.py pr-up <run-id> --clump
 <n> --pr <n>` writes it, when the controller reads that message. The sweep
-reads it (`burndown/SKILL.md` § Liveness): a herdr `done` pane on an unlanded
-clump with no `pr_up` is `stalled`, a worker whose turn ended mid-lane with
-nothing sent (#1148). A file written before this field existed loads with it
-as `null`, which reads a `done` pane as `stalled`: the loud reading, and the
-controller's read of the pane settles it.
+reads it, and what it reads it for is `burndown/SKILL.md` § Liveness. A file
+written before this field existed loads with it as `null`, which reads a
+finished pane as `stalled`: the loud reading, and the controller's read of
+the pane settles it.
 
 ## Leftovers
 
