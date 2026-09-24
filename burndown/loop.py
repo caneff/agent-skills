@@ -952,13 +952,22 @@ def with_run_jobs(in_flight, run_id, root=None):
     """The in-flight clumps with each `job` read from the run file, matched by
     the clump's lowest ticket. `closure.py --json` carries no `job`, so the
     record `runfile.py job` wrote is the only source; a clump the run file
-    holds no record for gets `None`, which `job_cores` refuses by name."""
+    holds no record for is refused here by name, `runfile.py clump` being the
+    fix; a registered clump with no `job` gets `None`, which `job_cores`
+    refuses naming `runfile.py job`."""
     try:
         run = runfile.load(run_id, root)
     except runfile.RunFileError as exc:
         raise LoopError(str(exc)) from exc
     jobs = {min(entry["tickets"]): entry["job"] for entry in run["clumps"]}
-    return [{**clump, "job": jobs.get(key_of(clump))} for clump in in_flight]
+    for clump in in_flight:
+        if key_of(clump) not in jobs:
+            raise LoopError(
+                f"#{key_of(clump)} is live but not registered in run "
+                f"{run_id} — register it with `runfile.py clump` (then "
+                "`runfile.py job`) before dispatching; `runfile.py job` "
+                "alone fails on an unregistered clump")
+    return [{**clump, "job": jobs[key_of(clump)]} for clump in in_flight]
 
 
 def herdr_get(agent, timeout):
