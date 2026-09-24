@@ -1180,8 +1180,21 @@ def test_a_recorded_pr_up_survives_a_restart_and_a_re_register():
     runfile.clump("r-pr2", [1095], "/w/1095", "skills-1095", root)
     runfile.pr_up("r-pr2", 1095, 1160, root)
     assert runfile.load("r-pr2", root)["clumps"][0]["pr_up"] == 1160
-    runfile.clump("r-pr2", [1095], "/w/1095b", "skills-1095b", root)
+    # The same worker's clump growing after a closure re-resolve keeps it.
+    runfile.clump("r-pr2", [1095, 1096], "/w/1095", "skills-1095", root)
     assert runfile.load("r-pr2", root)["clumps"][0]["pr_up"] == 1160
+
+
+def test_a_redispatch_to_a_new_agent_clears_pr_up_so_a_done_pane_is_stalled():
+    import loop
+    root = cache()
+    runfile.start("r-pr9", 3, "dc", root)
+    runfile.clump("r-pr9", [1095], "/w/1095", "skills-1095", root)
+    runfile.pr_up("r-pr9", 1095, 1160, root)
+    run = runfile.clump("r-pr9", [1095], "/w/1095", "skills-1095-b", root)
+    state = loop.sweep(run["clumps"], lambda agent, timeout: {
+        "result": {"agent": {"agent_status": "done"}}})
+    assert state["workers"][0]["verdict"] == "stalled", state
 
 
 def test_a_pr_up_that_is_not_a_pr_number_or_names_no_clump_is_refused():

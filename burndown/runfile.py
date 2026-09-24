@@ -591,7 +591,9 @@ def clump(run_id, tickets, workspace, agent, root=None):
         entry = {"tickets": tickets, "workspace": workspace, "agent": agent,
                  "landed": same["landed"] if same else None,
                  "job": same["job"] if same else None,
-                 "pr_up": same["pr_up"] if same else None}
+                 # A new agent has sent no "PR up" of its own.
+                 "pr_up": same["pr_up"] if same and same["agent"] == agent
+                 else None}
         run["clumps"] = sorted(
             [c for c in run["clumps"] if c is not same] + [entry],
             key=lambda c: c["tickets"][0])
