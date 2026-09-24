@@ -126,18 +126,22 @@ def tag(repo, candidates, run=None, write=True, written=None, stripped=None):
     stripped = [] if stripped is None else stripped
     run = run or gh
     for candidate in candidates:
-        for flag, labels, record in (("--add-label", labels_to_write(candidate), written),
-                                     ("--remove-label", labels_to_strip(candidate), stripped)):
-            if not labels:
-                continue
+        number = candidate["number"]
+        add, strip = labels_to_write(candidate), labels_to_strip(candidate)
+        if add:
             if write:
-                run(["issue", "edit", str(candidate["number"]), "--repo", repo,
-                     flag, ",".join(labels)])
-            record.append({"number": candidate["number"], "labels": labels})
+                run(["issue", "edit", str(number), "--repo", repo,
+                     "--add-label", ",".join(add)])
+            written.append({"number": number, "labels": add})
+        if strip:
+            if write:
+                run(["issue", "edit", str(number), "--repo", repo,
+                     "--remove-label", ",".join(strip)])
+            stripped.append({"number": number, "labels": strip})
     return written
 
 
-def render(written, write=True, stripped=()):
+def render(written, stripped, write=True):
     """The lines the run's opening report carries: every label this pass
     wrote and every label it stripped, against the ticket each belongs to. A
     pass that did neither says so in words — a report silent about labels
@@ -147,16 +151,22 @@ def render(written, write=True, stripped=()):
     strip:`. A preview that claims a write is worse than no preview at all:
     these lines are the run's record of what the tracker now carries, and a
     controller reading `labels written:` after a dry run would take the tier
-    as already fixed."""
-    blocks = []
-    for heading, records in (("labels written" if write else "would write", written),
-                             ("labels stripped" if write else "would strip", stripped)):
-        if not records:
-            blocks.append(f"{heading}: none")
-            continue
-        blocks.append(f"{heading}:")
-        blocks.extend(f"    #{r['number']}  {', '.join(r['labels'])}" for r in records)
-    return "\n".join(blocks)
+    as already fixed.
+
+    `stripped` has no default: an in-process caller that forgot it would
+    print `labels stripped: none` over strips that happened."""
+    return "\n".join([
+        _block("labels written" if write else "would write", written),
+        _block("labels stripped" if write else "would strip", stripped),
+    ])
+
+
+def _block(heading, records):
+    if not records:
+        return f"{heading}: none"
+    lines = [f"{heading}:"]
+    lines.extend(f"    #{r['number']}  {', '.join(r['labels'])}" for r in records)
+    return "\n".join(lines)
 
 
 def fetch_labels(repo, number, run=None):
@@ -203,10 +213,10 @@ def main(argv, run=None):
     except (TierError, ClosureError) as exc:
         # The partial report first: whatever is already on the tracker is
         # what the next dispatch will read, failure or not.
-        print(render(written, write=not dry_run, stripped=stripped))
+        print(render(written, stripped, write=not dry_run))
         print(f"tier.py: {exc}", file=sys.stderr)
         return 1
-    print(render(written, write=not dry_run, stripped=stripped))
+    print(render(written, stripped, write=not dry_run))
     return 0
 
 

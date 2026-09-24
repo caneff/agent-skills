@@ -152,7 +152,7 @@ def test_dry_run_decides_the_same_and_writes_nothing():
 
 def test_the_report_names_every_label_written():
     report = T.render([{"number": 371, "labels": ["documentation"]},
-                       {"number": 372, "labels": ["documentation"]}])
+                       {"number": 372, "labels": ["documentation"]}], [])
     assert "#371" in report and "#372" in report
     assert report.count("documentation") == 2, report
 
@@ -180,7 +180,7 @@ def test_the_report_says_so_when_it_wrote_nothing():
     """A run that wrote no label has to say that in words: a report with no
     line about labels reads the same as a report from a pass that never
     ran."""
-    assert T.render([]) == "labels written: none\nlabels stripped: none"
+    assert T.render([], []) == "labels written: none\nlabels stripped: none"
 
 
 def test_a_dry_run_previews_the_strip_and_writes_nothing():
@@ -345,7 +345,7 @@ def test_a_failure_midway_still_names_the_labels_already_written():
         raised = exc
     assert raised is not None, "the failure was swallowed"
     assert [w["number"] for w in written] == [371, 372], written
-    report = T.render(written)
+    report = T.render(written, [])
     assert "#371" in report and "#372" in report, report
 
 

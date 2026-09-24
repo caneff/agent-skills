@@ -109,7 +109,7 @@ session does.
 ## The run's opening report names every label written
 
 `tag` accumulates into the caller's own lists, and `render(written,
-stripped=stripped)` is what the run's opening report carries — one line per
+stripped)` is what the run's opening report carries — one line per
 ticket, with the labels that went onto it or came off it — and a pass that
 wrote none says `labels written: none` and `labels stripped: none` in words.
 A `--dry-run` reports the same decisions under `would write:` and `would
