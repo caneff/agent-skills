@@ -22,9 +22,11 @@ standalone — read from each landed clump's dispositions sidecar
 (`implement/SKILL.md` § Review's `dispositions-<lowest ticket>.jsonl`, the
 same file the verification pass writes). Nothing here writes one either.
 
-Filing the ticket through `/file-ticket` — the label, the `## Blocked by`
-section, and when the controller calls this — is `burndown/SKILL.md`'s own
-step, not this module's: a renderer prints a body, it does not call `gh`.
+Filing the ticket through `/file-ticket` — the label, the first filing's
+`## Blocked by` section, and when the controller calls this — is
+`burndown/SKILL.md`'s own step, not this module's: a renderer prints a body,
+it does not call `gh`. Only an update rewrites the section, through
+`blocked-by`.
 """
 import os
 import re
@@ -33,6 +35,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frontier  # noqa: E402
 import runfile  # noqa: E402
 
 def title(run_id):
@@ -138,9 +141,6 @@ def render_body(leftovers):
 
 
 BLOCKED_BY_TEXT = "None — can start immediately."
-_BLOCKED_BY_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+blocked by[ \t]*:?[ \t]*$",
-                                 re.IGNORECASE)
-_ANY_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+\S")
 
 
 def with_blocked_by(body):
@@ -150,15 +150,24 @@ def with_blocked_by(body):
     filing (#1130); `frontier.blocked_by_section` reads a body with none as
     unresolved and one with two as ambiguous. Any declaration already in
     `body` is dropped first, so the call is idempotent."""
+    if not body.strip():
+        return ""  # nothing to file stays nothing (`SKILL.md` § The sweep)
+    lines = body.splitlines()
+    # The reader's own grammar (`frontier.visible`, `_HEADING`, `_INLINE`):
+    # a fenced or quoted `Blocked by` is not a declaration and is kept.
+    seen = {i for i, _ in frontier.visible(lines)}
     kept = []
-    skipping = False
-    for line in body.splitlines():
-        if _BLOCKED_BY_HEADING.match(line):
-            skipping = True
-        elif skipping and _ANY_HEADING.match(line):
-            skipping = False
-        if not skipping:
-            kept.append(line)
+    skipping, preamble = False, True
+    for i, line in enumerate(lines):
+        heading = i in seen and frontier._ANY_HEADING.match(line)
+        if heading:
+            preamble = False
+            skipping = bool(frontier._HEADING.match(line))
+        if skipping:
+            continue
+        if preamble and i in seen and frontier._INLINE.match(line):
+            continue
+        kept.append(line)
     text = "\n".join(kept).rstrip("\n")
     return (text + "\n\n" if text else "") + \
         f"## Blocked by\n\n{BLOCKED_BY_TEXT}\n"

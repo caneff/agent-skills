@@ -405,11 +405,33 @@ def test_with_blocked_by_replaces_a_declaration_already_in_the_body():
     assert sweep.with_blocked_by(body) == body
 
 
+def test_with_blocked_by_keeps_sections_after_the_old_declaration():
+    old = ("## a.py\n\n- one\n\n## Blocked by\n\n- #7\n\n"
+           "## b.py\n\n- two\n")
+    body = sweep.with_blocked_by(old)
+    assert "## b.py" in body and "- two" in body, body
+    assert "#7" not in body, body
+
+
+def test_with_blocked_by_reads_fences_and_inline_forms_like_the_frontier():
+    fenced = "## a.py\n\n```\n## Blocked by\n- x\n```\n\n- tail\n"
+    body = sweep.with_blocked_by(fenced)
+    assert "```\n## Blocked by\n- x\n```" in body and "- tail" in body, body
+    assert frontier.blocked_by_section(body) == sweep.BLOCKED_BY_TEXT, body
+    inline = "Blocked by: #7\n\n## a.py\n\n- item\n"
+    body = sweep.with_blocked_by(inline)
+    assert frontier.blocked_by_section(body) == sweep.BLOCKED_BY_TEXT, body
+
+
+def test_with_blocked_by_on_an_empty_body_stays_empty():
+    assert sweep.with_blocked_by("") == ""
+    assert sweep.with_blocked_by("\n \n") == ""
+
+
 def test_cli_blocked_by_appends_the_section_to_stdin():
-    root = cache()
     got = subprocess.run([sys.executable, SWEEP, "blocked-by"],
                          input="## a.py\n\n- item\n", capture_output=True,
-                         text=True, env=dict(os.environ, BURNDOWN_CACHE_DIR=root))
+                         text=True)
     assert got.returncode == 0, got
     assert frontier.blocked_by_section(got.stdout) == sweep.BLOCKED_BY_TEXT, got
 
