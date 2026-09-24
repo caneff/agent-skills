@@ -108,6 +108,20 @@ logging_remedy() { # <matched line>
     "  or give the logger a format that does not start the line at column 0."
 }
 
+# A suite that writes a fixture identity into the real checkout's config
+# leaves every later commit authored by it (#1144: `t@example.com` sat in the
+# primary checkout's config for two weeks). Snapshot the two keys before any
+# suite runs and fail the suite after which they differ. `--local` reads the
+# repo's own config, which is where the leak lands; an unset key reads as a
+# distinct marker so an unset counts as a change.
+identity_snapshot() {
+  local key
+  for key in user.email user.name; do
+    printf '%s=%s\n' "$key" "$(git config --local --get "$key" 2>/dev/null || echo '<unset>')"
+  done
+}
+identity_before=$(identity_snapshot)
+
 count=0
 while IFS=$'\t' read -r label cmd; do
   if out=$($cmd 2>&1 </dev/null); then
@@ -116,6 +130,13 @@ while IFS=$'\t' read -r label cmd; do
         "tests/all.sh: exited 0, but its output carries a failure line:" \
         "  $hit" \
         "$(logging_remedy "$hit")"
+    fi
+    identity_after=$(identity_snapshot)
+    if [ "$identity_after" != "$identity_before" ]; then
+      report_failure "$label" "$out" \
+        "tests/all.sh: this suite changed the checkout's git identity (a fixture identity written without naming its repo, #1144):" \
+        "  before: $(printf '%s' "$identity_before" | tr '\n' ' ')" \
+        "  after:  $(printf '%s' "$identity_after" | tr '\n' ' ')"
     fi
     echo "PASS $label"
     count=$((count + 1))

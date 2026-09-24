@@ -17,9 +17,15 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 unset GIT_AUTHOR_EMAIL GIT_COMMITTER_EMAIL COMMIT_IDENTITY_OVERRIDE
 repo="$tmp/repo"
 git init -q "$repo"
+# Name the repo and refuse a target outside our own mktemp dir: a bare
+# `git config` after a failed `cd` wrote the real checkout's config (#1144).
+case "$(git -C "$repo" rev-parse --show-toplevel)" in
+  "$(cd "$tmp" && pwd -P)"/*) ;;
+  *) echo "FAIL: fixture repo is not under $tmp" >&2; exit 2 ;;
+esac
+git -C "$repo" config user.email t@example.com
+git -C "$repo" config user.name t
 cd "$repo" || exit 2
-git config user.email t@example.com
-git config user.name t
 cp "$hook" .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 
@@ -43,7 +49,7 @@ try env COMMIT_IDENTITY_OVERRIDE= git -c user.email=bot@x.org commit -qm empty
 check "empty override is not an override" 1 $?
 
 # no configured email: the guard must refuse, not read absence as a match
-git config --unset user.email
+git -C "$repo" config --unset user.email
 try env GIT_AUTHOR_EMAIL=a@b.c GIT_COMMITTER_EMAIL=a@b.c git commit -qm none
 check "no configured user.email is refused" 1 $?
 

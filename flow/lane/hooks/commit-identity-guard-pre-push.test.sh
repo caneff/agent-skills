@@ -24,9 +24,15 @@ git init -q --bare "$remote"
 
 repo="$tmp/repo"
 git init -q "$repo"
+# Name the repo and refuse a target outside our own mktemp dir: a bare
+# `git config` after a failed `cd` wrote the real checkout's config (#1144).
+case "$(git -C "$repo" rev-parse --show-toplevel)" in
+  "$(cd "$tmp" && pwd -P)"/*) ;;
+  *) echo "FAIL: fixture repo is not under $tmp" >&2; exit 2 ;;
+esac
+git -C "$repo" config user.email t@example.com
+git -C "$repo" config user.name t
 cd "$repo" || exit 2
-git config user.email t@example.com
-git config user.name t
 git remote add origin "$remote"
 mkdir -p .git/hooks
 cp "$hook" .git/hooks/pre-push
@@ -70,11 +76,11 @@ git reset -q --hard HEAD~1
 # no configured email: the guard must refuse on that ground specifically —
 # not merely because the mismatch check also fires on an empty $configured,
 # which would survive deleting the no-configured-email refusal outright.
-git config --unset user.email
+git -C "$repo" config --unset user.email
 git -c user.email=a@b.c commit -q --allow-empty -m none
 push main; check "no configured user.email is refused" 1 $?
 grep -q "no user.email is configured" "$tmp/out"; check "the no-configured-email refusal names itself" 0 $?
-git config user.email t@example.com
+git -C "$repo" config user.email t@example.com
 
 # zero ref updates on stdin: git's own protocol always sends at least one
 # when the hook runs at all, so this is either a starved stdin (#1006 S1) or
