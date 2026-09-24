@@ -29,14 +29,15 @@ knew the answer before dispatch and the lane ignored it.
 `{"number": <n>, "files": [...], "labels": [...]}` — the ticket's number, the
 files it targets, and the labels it carries **right now**, read from the
 tracker at pass time rather than assumed. Four answers, and only the first
-writes anything:
+adds anything (a removal is `labels_to_strip`'s, § Stripping):
 
 - Every target file is prose, and the ticket has no `documentation` label →
   `["documentation"]`.
 - Every target file is prose, and the label is already there → nothing. This
   pass is idempotent; a tick that runs twice writes once.
-- Any target file is not prose → nothing. A mixed diff is code
-  (`flow/claude/WORKFLOW.md` § Gate 2).
+- Any target file is not prose → nothing to add. A mixed diff is code
+  (`flow/claude/WORKFLOW.md` § Gate 2), and a `documentation` label already
+  there is stripped.
 - The candidate names no files → nothing. `all()` over an empty list is
   `True`, and that is the one reading of "every file is prose" that sends an
   unknown candidate down the light tier.
