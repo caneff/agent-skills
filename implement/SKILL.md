@@ -243,10 +243,13 @@ No PR and no reviewer; Chris reads the log after.
    **The adjacent-fix rule.** A round-1 finding is fixed in the round, not
    filed, when all five parts hold: it sits in a file already in the diff;
    the fix is confined to one function; it changes under 20 lines, its test
-   included; it adds no public seam; and it touches no second file. The
-   20-line budget cannot be split across files: a fix touching two files is
-   a change, not an adjacent fix, and § Build's pre-existing-bug rule governs
-   it. Make each adjacent fix in a commit of its own, so its sha measures it
+   included; it adds no public seam; and it touches no second file. The fix's
+   own test file is part of the fix, not a second file — that is what "its
+   test included" means (#1097: 8 lines in `runfile.py` plus 2 in
+   `runfile_test.py` is one fix, and the controller ruled it so). The
+   20-line budget cannot be split across files: a fix touching any other
+   second file is a change, not an adjacent fix, and § Build's
+   pre-existing-bug rule governs it. Make each adjacent fix in a commit of its own, so its sha measures it
    alone. Its disposition is `fixed (adjacent)`, with that sha; its sidecar
    line is step 2's adjacent form. § The merge step 3 applies the same rule
    to a Codex second-pass finding.
