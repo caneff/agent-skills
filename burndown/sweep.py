@@ -57,7 +57,9 @@ def inline_safe(text):
     """A finding's title or text made safe to sit in a ticket body: an
     `@mention` is broken with a zero-width space so it notifies nobody, and
     `<` becomes `&lt;` so raw HTML is not parsed. Backticked code spans are
-    left as written. `runfile.leftover_field` already keeps the text to one
+    left as written. Emphasis and link markup in the text is not escaped: the
+    residual mangling is accepted, since it garbles a line without notifying
+    anyone or injecting markup. `runfile.leftover_field` already keeps the text to one
     line, so no heading or fence can start a line."""
     def defuse(chunk):
         chunk = re.sub(r"(?<!\w)@(?=\w)", "@\u200b", chunk)

@@ -71,6 +71,9 @@ _JOB_STATES = ("running", "none", "done")
 # line's own fields untouched.
 _LEFTOVER_KEYS = ("clump", "tickets", "pr", "id", "file", "title",
                   "severity", "text")
+# The keys a `leftover` sidecar line carries: the entry's own fields, after
+# the three the run adds.
+_SIDECAR_LEFTOVER_KEYS = _LEFTOVER_KEYS[3:]
 # The five outcomes `implement/SKILL.md` § Review's dispositions sidecar can
 # carry; why any other is refused, not skipped: `references/run-file.md`
 # § Leftovers.
@@ -403,14 +406,13 @@ def read_dispositions(sidecar_path):
 
 
 def read_leftover_lines(sidecar_path):
-    """Every `leftover` line of a dispositions sidecar, in order. The other
-    four outcomes are not this command's to transcribe, and are skipped."""
+    """Every `leftover` line of a dispositions sidecar, in order; the other
+    outcomes are skipped (`references/run-file.md` § Leftovers)."""
     out = []
     for n, obj in read_dispositions(sidecar_path):
         if obj["outcome"] != "leftover":
             continue
-        missing = [key for key in ("id", "file", "title", "severity", "text")
-                   if key not in obj]
+        missing = [key for key in _SIDECAR_LEFTOVER_KEYS if key not in obj]
         if missing:
             raise RunFileError(
                 f"{sidecar_path}:{n} is a leftover missing "
