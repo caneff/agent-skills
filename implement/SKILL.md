@@ -390,7 +390,10 @@ The body has these sections and nothing else:
   step 3's Codex classification reads this list. Cite each finding by the
   id its sidecar gave it (`S1`/`P2`/`C3`) rather than restating it in
   prose (#855) — that's what makes this list joinable against
-  `dispositions-<n>.jsonl` without a reading pass. On any other build, every
+  `dispositions-<n>.jsonl` without a reading pass. Open each line with the
+  id and put its disposition word first after it (`- S1: fixed, <sha>.`):
+  `runfile.py leftover` reads the outcome off that line at harvest and
+  refuses a sidecar it contradicts (#1147). On any other build, every
   round-1 finding that was disputed (with the why), filed (with its
   ticket number), handed back (with the command) or left over.
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
@@ -806,10 +809,11 @@ The controller merges on a repo Chris owns; Chris reads it after via
    `dispositions-<n>.jsonl` to its new outcome in the same step that records
    it in the PR body. A `leftover` line left standing after its finding was
    fixed is a sweep item that no longer exists (#1028: P2 ruled fixed in
-   `bda6750`, sidecar still `leftover`). `runfile.py leftover` catches part
-   of the miss at harvest: it refuses a sidecar written before the PR's head
-   commit (`--head-committed`), which is a fix pushed after the sidecar. A
-   ruling that adds no commit is not seen by it; the rewrite is the rule.
+   `bda6750`, sidecar still `leftover`). `runfile.py leftover` catches the
+   half-done step at harvest: it refuses a sidecar line whose outcome the PR
+   body's Decisions made contradicts, and a leftover the body does not cite
+   by id (`--pr-body`). A change recorded in neither place is not seen by
+   it; the rewrite is the rule.
 
    Classify each finding by comparing it with the PR body's round-1
    findings — `codex-only, confirmed` (fixed or filed, and no Claude axis

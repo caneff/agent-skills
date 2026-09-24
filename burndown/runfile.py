@@ -5,7 +5,7 @@
     python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
     python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
     python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
-    python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --head-committed <ISO>
+    python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --pr-body <path>
     python3 burndown/runfile.py show     <run-id>
     python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 
@@ -24,7 +24,6 @@ write replaces the file in one step: `references/run-file.md`, which is where
 those reasons live rather than being restated here.
 """
 import contextlib
-import datetime
 import fcntl
 import json
 import math
@@ -434,28 +433,62 @@ def read_leftover_lines(sidecar_path):
     return out
 
 
-def refuse_stale_sidecar(sidecar_path, head_committed):
-    """A sidecar last written before the PR's head commit predates a
-    disposition change: the controller's fix read or ruling reaches the PR
-    body and the sidecar in one step (`implement/SKILL.md` § The merge), so
-    an older file is one that step never touched (#1085)."""
+# A PR body's disposition word for a finding: the first of these after the
+# id on the line that cites it (`implement/SKILL.md` § The PR, Decisions made).
+_BODY_OUTCOME = re.compile(
+    r"\b(fixed|disputed|filed|handed[- ]back|leftover)\b", re.IGNORECASE)
+
+
+def body_outcomes(body_lines, fid):
+    """Every `(line number, outcome)` the PR body records for finding `fid`:
+    a line citing it opens with the id — after any list marker and bold or
+    code marks — and its outcome is the first disposition word after it. A
+    line that names the id with no disposition word records nothing."""
+    cite = re.compile(r"\s*(?:[-*+]|\d+[.)])?\s*[*_`]*" + re.escape(fid) +
+                      r"[*_`]*(?![\w-])(.*)")
+    out = []
+    for n, line in enumerate(body_lines, start=1):
+        match = cite.match(line)
+        word = match and _BODY_OUTCOME.search(match.group(1))
+        if word:
+            out.append((n, word.group(1).lower().replace(" ", "-")))
+    return out
+
+
+def refuse_disagreeing_pr_body(sidecar_path, body_path):
+    """A sidecar the PR body disagrees with predates a disposition change:
+    the controller's fix read or ruling reaches the PR body and the sidecar
+    in one step (`implement/SKILL.md` § The merge), so a line whose outcome
+    the body contradicts is one that step never touched (#1085). The
+    comparison is by content, so a commit that changed no disposition —
+    a doc fix, a test, a re-wrap — refuses nothing (#1147)."""
     try:
-        head = datetime.datetime.fromisoformat(head_committed)
-    except (TypeError, ValueError):
+        with open(body_path) as fh:
+            body_lines = fh.read().splitlines()
+    except OSError as exc:
         raise RunFileError(
-            f"--head-committed {head_committed!r} is not an ISO-8601 "
-            "timestamp") from None
-    if head.tzinfo is None:
+            f"could not read the PR body {body_path}: {exc.strerror}"
+        ) from exc
+    if not any(line.strip() for line in body_lines):
         raise RunFileError(
-            f"--head-committed {head_committed!r} carries no UTC offset")
-    written = datetime.datetime.fromtimestamp(
-        os.path.getmtime(sidecar_path), datetime.timezone.utc)
-    if written < head:
-        raise RunFileError(
-            f"{sidecar_path} was last written {written.isoformat()}, older "
-            f"than the PR's head commit at {head.isoformat()} — a "
-            "disposition may have changed since; rewrite the sidecar line, "
-            "or pass --allow-stale")
+            f"the PR body {body_path} is empty — fetch it with "
+            "`gh pr view <pr> --json body --jq .body`")
+    for n, obj in read_dispositions(sidecar_path):
+        fid = obj.get("id")
+        if not isinstance(fid, str):
+            continue
+        cited = body_outcomes(body_lines, fid)
+        if not cited and obj["outcome"] == "leftover":
+            raise RunFileError(
+                f"the PR body {body_path} cites no disposition for {fid}, "
+                f"a leftover at {sidecar_path}:{n} — cite it by id in "
+                "Decisions made, or pass --allow-stale")
+        for body_n, outcome in cited:
+            if outcome != obj["outcome"]:
+                raise RunFileError(
+                    f"{body_path}:{body_n} records {fid} as {outcome!r}, "
+                    f"but {sidecar_path}:{n} says {obj['outcome']!r} — "
+                    "rewrite the sidecar line, or pass --allow-stale")
 
 
 _SIDECAR_NAME = re.compile(r"dispositions-([0-9]+)\.jsonl")
@@ -479,8 +512,7 @@ def refuse_foreign_sidecar(sidecar_path, tickets):
             f"clump's tickets ({', '.join(f'#{t}' for t in tickets)})")
 
 
-def leftover(run_id, lowest, pr, sidecar_path, root=None,
-             head_committed=None):
+def leftover(run_id, lowest, pr, sidecar_path, root=None, pr_body=None):
     """Copy every `leftover` line of a landed PR's dispositions sidecar into
     the run file. The sidecar's `dispositions-<n>` must name one of the
     clump's tickets. Idempotent per PR and finding id; a finding already
@@ -490,13 +522,13 @@ def leftover(run_id, lowest, pr, sidecar_path, root=None,
     Returns `(run, added)`, `added` being the finding ids this call
     actually appended, for a caller to report a copy count.
 
-    `head_committed`, an ISO-8601 timestamp with offset, is the PR head
-    commit's date: a sidecar written before it is refused. `None` skips the
-    check; the CLI never passes it without `--allow-stale`."""
+    `pr_body` is a file holding the PR's body: a sidecar line whose outcome
+    it contradicts is refused. `None` skips the check; the CLI never passes
+    it without `--allow-stale`."""
     pr = pr_number(pr)
     found = read_leftover_lines(sidecar_path)
-    if head_committed is not None:
-        refuse_stale_sidecar(sidecar_path, head_committed)
+    if pr_body is not None:
+        refuse_disagreeing_pr_body(sidecar_path, pr_body)
     with locked(run_id, root):
         run = load(run_id, root)
         entry = clump_entry(run, lowest)
@@ -776,12 +808,12 @@ def main(argv):
     lo.add_argument("--from", dest="from_path", required=True,
                     metavar="PATH", help="the dispositions sidecar to copy from")
     fresh = lo.add_mutually_exclusive_group(required=True)
-    fresh.add_argument("--head-committed", metavar="ISO",
-                       help="the PR head commit's committer date, e.g. "
-                            "2026-09-22T10:00:00Z; a sidecar written before "
-                            "it is refused as stale")
+    fresh.add_argument("--pr-body", metavar="PATH",
+                       help="the PR's body, as `gh pr view <pr> --json body "
+                            "--jq .body` prints it; a sidecar line whose "
+                            "outcome it contradicts is refused as stale")
     fresh.add_argument("--allow-stale", action="store_true",
-                       help="skip the staleness check")
+                       help="skip the PR-body check")
 
     work = subs.add_parser("job", help="record a clump's parallel-job state")
     work.add_argument("run_id")
@@ -830,8 +862,7 @@ def main(argv):
             print(render(land(args.run_id, args.clump, args.sha, root)))
         elif args.command == "leftover":
             run, added = leftover(args.run_id, args.clump, args.pr,
-                                  args.from_path, root,
-                                  args.head_committed)
+                                  args.from_path, root, args.pr_body)
             print(render(run))
             print(f"copied {len(added)} leftover(s) from {args.from_path}")
         elif args.command == "job":

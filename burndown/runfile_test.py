@@ -1314,7 +1314,7 @@ def test_pr_up_takes_a_pr_or_clear_but_not_both_and_not_neither():
     assert runfile.load("r-pr8", root)["clumps"][0]["pr_up"] is None
 
 
-# --- A sidecar older than the PR's head commit is stale (#1085) ------------
+# --- A sidecar the PR body disagrees with is stale (#1085, #1147) ---------
 
 def landed_root():
     root = cache()
@@ -1324,83 +1324,132 @@ def landed_root():
     return root
 
 
-def test_a_sidecar_line_rewritten_from_leftover_to_fixed_yields_no_leftover():
-    leftover_line = {"id": "S3", "outcome": "leftover", "file": "a.py",
-                     "title": "t", "severity": "hard", "text": "x"}
-    sidecar = sidecar_of(leftover_line)
-    os.utime(sidecar, (1_000_000_000, 1_000_000_000))  # 2001, before the head
+LEFTOVER_S3 = {"id": "S3", "outcome": "leftover", "file": "a.py",
+               "title": "t", "severity": "hard", "text": "x"}
+
+
+def pr_body(text):
+    """A PR body as `gh pr view --json body --jq .body` prints it."""
+    path_ = os.path.join(cache(), "pr-body.md")
+    with open(path_, "w") as fh:
+        fh.write(text)
+    return path_
+
+
+# The Decisions made shapes PR bodies here actually carry (PRs 1166, 1167):
+# a bare id, a bolded id with its severity, an adjacent fix, a line that
+# names an id with no disposition, a leftover mentioned only in passing, and
+# an id another id is a prefix of.
+BODY = """## Decisions made
+
+- S1: fixed (adjacent), 2c2eb6c.
+- **C1** (CONFIRMED): fixed, b0f0f22. A `|` line is a table row.
+- P2: disputed. The verdict is broader than the ticket, deliberately.
+- P2's broader verdict: the controller accepted the dispute.
+- C3: fixed, 5b6b0f1. This was a leftover at the verification pass.
+- S3: leftover.
+- S30: fixed, 9abcdef. A different finding whose id starts with S3.
+- codex-gate-1: leftover (controller). Table column counts.
+
+## Last reviewed sha
+"""
+
+
+def test_a_sidecar_the_pr_body_agrees_with_is_harvested_whatever_came_after():
+    # #1147: a doc-only, test-only or re-wrap commit after the verification
+    # pass changes no disposition, so nothing about it can refuse the harvest.
+    sidecar = sidecar_of(
+        {"id": "S1", "outcome": "fixed", "sha": "2c2eb6c", "scope": "adjacent"},
+        {"id": "C1", "outcome": "fixed", "sha": "b0f0f22"},
+        {"id": "P2", "outcome": "disputed", "reason": "deliberate"},
+        {"id": "C3", "outcome": "fixed", "sha": "5b6b0f1"},
+        LEFTOVER_S3,
+        dict(LEFTOVER_S3, id="codex-gate-1", severity="medium"))
     root = landed_root()
-    head = "2026-09-22T10:00:00Z"
-    try:
-        runfile.leftover("burn-1", 901, 950, sidecar, root=root,
-                         head_committed=head)
-    except runfile.RunFileError:
-        pass
-    else:
-        raise AssertionError("the stale sidecar was accepted")
-    # The controller's rewrite: same finding, new outcome, fresh mtime.
+    _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root,
+                                pr_body=pr_body(BODY))
+    assert added == ["S3", "codex-gate-1"], added
+
+
+def test_a_leftover_line_the_pr_body_records_as_fixed_is_refused_until_rewritten():
+    # #1085's own case: the fix landed and the PR body says so, but the
+    # sidecar line still reads leftover.
+    sidecar = sidecar_of(LEFTOVER_S3)
+    body = pr_body("## Decisions made\n\n- S3: fixed, abc1234.\n")
+    got = refusal_of_body(sidecar, body)
+    assert ("S3" in got and "'fixed'" in got and "'leftover'" in got
+            and f"{body}:3" in got and f"{sidecar}:1" in got), got
+    # The controller's rewrite: same finding, new outcome.
     with open(sidecar, "w") as fh:
         fh.write(json.dumps({"id": "S3", "outcome": "fixed",
                              "sha": "abc1234"}) + "\n")
-    _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root,
-                                head_committed=head)
-    assert added == [], added
-    assert runfile.load("burn-1", root=root)["leftovers"] == []
-
-
-def test_a_head_committed_without_a_utc_offset_is_refused():
     root = landed_root()
-    try:
-        runfile.leftover("burn-1", 901, 950, SIDECAR, root=root,
-                         head_committed="2026-09-22T10:00:00")
-    except runfile.RunFileError as err:
-        assert "no UTC offset" in str(err), err
-    else:
-        raise AssertionError("a naive timestamp was accepted")
+    _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root,
+                                pr_body=body)
+    assert added == [], added
 
 
-def test_a_sidecar_older_than_the_pr_head_commit_is_refused():
-    sidecar = sidecar_of({"id": "S3", "outcome": "leftover", "file": "a.py",
-                          "title": "t", "severity": "hard", "text": "x"})
-    os.utime(sidecar, (1_000_000_000, 1_000_000_000))  # 2001
+def test_a_line_rewritten_to_fixed_while_the_pr_body_still_says_leftover_is_refused():
+    sidecar = sidecar_of({"id": "S3", "outcome": "fixed", "sha": "abc1234"})
+    got = refusal_of_body(sidecar, pr_body("- **S3** (hard): leftover.\n"))
+    assert "'leftover'" in got and "'fixed'" in got, got
+
+
+def test_a_leftover_the_pr_body_never_cites_is_refused():
+    # Absent is not agreement: a leftover the PR body does not name could be
+    # one a ruling changed in the body under a different wording.
+    got = refusal_of_body(sidecar_of(LEFTOVER_S3),
+                          pr_body("## Decisions made\n\n- S1: fixed.\n"))
+    assert "cites no disposition for S3" in got, got
+
+
+def test_an_empty_pr_body_is_refused():
+    # An empty file is what a failed `gh pr view` leaves behind; read as
+    # a body it would agree with every sidecar holding no leftover.
+    got = refusal_of_body(sidecar_of({"id": "S1", "outcome": "fixed",
+                                      "sha": "0123abc"}), pr_body(" \n"))
+    assert "is empty" in got, got
+
+
+def refusal_of_body(sidecar, body):
     root = landed_root()
     try:
         runfile.leftover("burn-1", 901, 950, sidecar, root=root,
-                         head_committed="2026-09-22T10:00:00Z")
-    except runfile.RunFileError as err:
-        assert "older than" in str(err), err
-    else:
-        raise AssertionError("a stale sidecar was accepted")
-    assert runfile.load("burn-1", root=root)["leftovers"] == []
-    # A sidecar written after the head commit is not stale.
-    os.utime(sidecar, (1_900_000_000, 1_900_000_000))  # 2030
-    _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root,
-                                head_committed="2026-09-22T10:00:00Z")
-    assert added == ["S3"], added
+                         pr_body=body)
+    except runfile.RunFileError as exc:
+        assert runfile.load("burn-1", root=root)["leftovers"] == []
+        return str(exc)
+    raise AssertionError("the sidecar was accepted against the PR body")
 
 
-def test_cli_leftover_needs_head_committed_or_allow_stale():
+def test_cli_leftover_needs_pr_body_or_allow_stale():
     root = landed_root()
     bare = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
                "--from", SIDECAR)
     assert bare.returncode != 0, bare.stdout
     stale = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
-                "--from", SIDECAR, "--head-committed", "2999-01-01T00:00:00Z")
-    assert stale.returncode != 0 and "older than" in stale.stderr, stale.stderr
-    ok = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
-             "--from", SIDECAR, "--allow-stale")
-    assert ok.returncode == 0, ok.stderr
+                "--from", SIDECAR, "--pr-body",
+                pr_body("- S3: fixed, 0123abc.\n"))
+    assert (stale.returncode == 1 and "'fixed'" in stale.stderr
+            and len(stale.stderr.splitlines()) == 1), stale.stderr
+    agreed = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
+                 "--from", SIDECAR, "--pr-body", pr_body("- S3: leftover\n"))
+    assert agreed.returncode == 0, agreed.stderr
+    assert "copied 1 leftover" in agreed.stdout, agreed.stdout
+    gone = cli(root, "leftover", "burn-1", "--clump", "901", "--pr", "950",
+               "--from", SIDECAR, "--head-committed", "2026-09-22T10:00:00Z")
+    assert gone.returncode != 0, gone.stdout
 
 
-def test_a_missing_sidecar_is_refused_by_name_under_head_committed():
+def test_a_missing_pr_body_is_refused_by_name():
     root = landed_root()
     try:
-        runfile.leftover("burn-1", 901, 950, "/nonexistent/sidecar.jsonl",
-                         root=root, head_committed="2026-09-22T10:00:00Z")
+        runfile.leftover("burn-1", 901, 950, SIDECAR, root=root,
+                         pr_body="/nonexistent/pr-body.md")
     except runfile.RunFileError as err:
-        assert "/nonexistent/sidecar.jsonl" in str(err), err
+        assert "/nonexistent/pr-body.md" in str(err), err
     else:
-        raise AssertionError("a missing sidecar was accepted")
+        raise AssertionError("a missing PR body was accepted")
 
 
 def main():

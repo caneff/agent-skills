@@ -11,7 +11,7 @@ python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <pat
 python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
 python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
 python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
-python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --head-committed <ISO>
+python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --pr-body <path>
 python3 burndown/runfile.py show     <run-id>
 python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 ```
@@ -105,7 +105,7 @@ closes, the PR it landed on, and the finding's own `id`, `file`, `title`,
 not retyped.
 
 ```
-python3 burndown/runfile.py leftover <run-id> --clump 905 --pr 950 --from <dispositions sidecar> --head-committed <ISO>
+python3 burndown/runfile.py leftover <run-id> --clump 905 --pr 950 --from <dispositions sidecar> --pr-body <path>
 ```
 
 reads every `outcome: leftover` line of `<dispositions sidecar>` — the
@@ -139,18 +139,32 @@ provenance there is: without the check, another PR's sidecar attributes its
 leftovers to this clump for good, and one holding no leftover records zero
 and exits clean.
 
-`--head-committed <ISO>` is the PR head commit's committer date
-(`gh pr view <pr> --json commits --jq '.commits[-1].committedDate'`). A
-sidecar whose mtime is older is refused: a disposition changed after the
-verification pass rewrites its sidecar line
-(`implement/SKILL.md` § The merge), so a file older than the head commit
-was not rewritten after the fix that commit holds (#1085). It cannot see a
-ruling that adds no commit, or a file whose mtime moved with no line
-changing. A head commit that moved with no disposition changing (a rebase,
-a fix that touched no finding) also trips it: read the sidecar against the
-PR body, then pass `--allow-stale`. `--allow-stale` skips
-the check; one of the two flags is required, so omitting the check is
-a choice and never a default.
+`--pr-body <path>` is the PR's body, as
+`gh pr view <pr> --repo <owner/name> --json body --jq .body` prints it; a
+process substitution, `--pr-body <(gh pr view ...)`, passes it without a
+file. Each sidecar line is compared with the PR body's Decisions made. A
+body line cites a finding when it opens with the finding's id, after any
+list marker and bold or code marks. Its outcome is the first disposition
+word after the id: `fixed`, `disputed`, `filed`, `handed back` or
+`leftover`. The command refuses in three cases:
+
+- a body line records an outcome the sidecar line for that id does not
+  hold. A disposition changed after the verification pass rewrites its
+  sidecar line in the same step that records it in the PR body
+  (`implement/SKILL.md` § The merge), so a disagreement is a step that
+  reached one record and not the other (#1085).
+- a `leftover` line whose id no body line cites. Absent is not agreement:
+  the leftover is either missing from the body or cited in a shape this
+  reader cannot see.
+- an empty body, which is what a failed `gh pr view` leaves behind.
+
+The check compares content, not times. A commit that changed no
+disposition, such as a doc fix, a test-only witness or a re-wrap, refuses
+nothing. The mtime guard it replaced refused every one of those, and in
+burn-2026-09-23 the controller overrode it on four PRs out of four (#1147).
+It cannot see a disposition changed in neither record. `--allow-stale`
+skips the check; one of the two flags is required, so omitting the check
+is a choice and never a default.
 
 `land` comes first: a clump with no recorded landing is refused, so a PR
 that may never land cannot persist leftovers nothing can later remove.
