@@ -36,9 +36,10 @@ does not resolve.
   wrapped in a single backtick pair or a double one is read as inside the
   span either way (write `<sign> Build` inside one backtick, or inside two).
   A span may cross a line break, but a paragraph ends at a blank line and at
-  the start of a list item. Inside a list any marker starts the next item;
-  in other prose only a bullet with text after it, or an item numbered 1,
-  does, so a wrapped line reading `2. ...` continues the paragraph. A
+  the start of a list item. Inside a list (a paragraph that starts on a
+  marker or indented) any marker starts the next item; in other prose only
+  a bullet with text after it, or an item numbered 1, does, so a wrapped
+  line reading `2. ...` continues the paragraph. A
   heading, and each row of a table (a header row with a `| --- |` delimiter
   row under it, down to the next blank line, heading or fence), is a
   paragraph of its own line; a `|` line with no delimiter row is ordinary

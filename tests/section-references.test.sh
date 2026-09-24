@@ -49,7 +49,8 @@ done
 # guard. Each must fail on that guard, not another.
 for fixture in code-span-list-boundary-invalid code-span-heading-boundary-invalid \
   code-span-fence-boundary-invalid code-span-table-boundary-invalid \
-  code-span-ordered-list-boundary-invalid code-span-pipe-continuation-invalid; do
+  code-span-ordered-list-boundary-invalid code-span-pipe-continuation-invalid \
+  code-span-list-paragraph-boundary-invalid; do
   if output=$(run_fixture "$fixture" 2>&1); then
     echo "FAIL: checker accepted fixture $fixture"
     exit 1

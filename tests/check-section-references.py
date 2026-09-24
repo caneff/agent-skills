@@ -59,6 +59,7 @@ BACKTICK_RUN = re.compile(r"`+")
 # A list item starts a paragraph its continuation lines join; inside a list
 # any marker starts the next item, but in other prose only a non-empty bullet
 # or an item numbered 1 interrupts, so a wrapped "2. ..." line continues it.
+# A paragraph that starts on a marker or indented is read as inside a list.
 # Indentation is not measured against a container, so a nested item counts.
 LIST_ITEM = re.compile(r"^\s*([-*+]|\d{1,9}[.)])(\s|$)")
 LIST_INTERRUPT = re.compile(r"^\s*([-*+]|1[.)])\s+\S")
@@ -143,7 +144,8 @@ def paragraph_end(lines: list[str], index: int, boundary: set[int]) -> int:
     (LIST_ITEM, LIST_INTERRUPT), and a boundary row is a paragraph alone."""
     if index in boundary:
         return index + 1
-    starts_item = LIST_ITEM if LIST_ITEM.match(lines[index]) else LIST_INTERRUPT
+    in_list = LIST_ITEM.match(lines[index]) or lines[index][:1].isspace()
+    starts_item = LIST_ITEM if in_list else LIST_INTERRUPT
     end = index + 1
     while (
         end < len(lines)
