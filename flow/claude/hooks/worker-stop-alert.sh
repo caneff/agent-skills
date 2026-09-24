@@ -90,11 +90,24 @@ herdr_sid="$(timeout 2 herdr agent list 2>/dev/null \
   | head -n1)"
 resolved=""
 [ -n "$herdr_sid" ] && resolved="$(worker_alert_resolve_session sid "$herdr_sid")"
-[ -n "$resolved" ] || resolved="$(worker_alert_resolve_session name "$controller")"
-ctl_session="" ctl_socket="" resolved_name=""
-if [ -n "$resolved" ]; then
-  IFS=$'\x1f' read -r ctl_session resolved_name ctl_socket <<<"$resolved"
+if [ -z "$resolved" ]; then
+  resolved="$(worker_alert_resolve_session name "$controller")"
+  # A name resolves one record; widen to every live record sharing its
+  # session id, so a nameless twin's socket counts here too (#1114).
+  by_name_sid="${resolved%%$'\x1f'*}"
+  [ -n "$by_name_sid" ] && widened="$(worker_alert_resolve_session sid "$by_name_sid")" \
+    && resolved="$widened"
 fi
+# `sid` mode can return several lines — every live record sharing the
+# controller's session id (#1114). A report to any of them reached the
+# controller, so every name and socket joins the match set; the session id,
+# the same on every line, is what the pane lookup uses.
+ctl_session="" names=() sockets=()
+while IFS=$'\x1f' read -r r_sid r_name r_sock; do
+  [ -n "$ctl_session" ] || ctl_session="$r_sid"
+  [ -n "$r_name" ] && names+=("$r_name")
+  [ -n "$r_sock" ] && sockets+=("uds:$r_sock")
+done <<<"$resolved"
 # Belt and braces: worker_alert_resolve_session above already returns a
 # nameless record's session id, so this rarely fires, but it keeps the pane
 # lookup working even if it found nothing (a record removed between the
@@ -104,10 +117,12 @@ fi
 # The verdict for this stop: `reported`, `waiting` on a subagent, or `silent`,
 # plus the transcript's last entry as the stop's key. `$c` is the brief's
 # literal controller value (a herdr agent name or an already-live session
-# name) and `$rn` its resolved session name when resolution found one — a
-# report is counted against either, since nothing here requires a worker to
-# have resolved before sending (#1014).
-IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg rn "$resolved_name" --arg sock "$ctl_socket" '
+# name), `$names` every resolved session name and `$socks` every resolved
+# `uds:` address — a report is counted against any of them, since nothing
+# here requires a worker to have resolved before sending (#1014).
+IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" \
+  --argjson names "$(jq -nc '$ARGS.positional' --args -- ${names[@]+"${names[@]}"})" \
+  --argjson socks "$(jq -nc '$ARGS.positional' --args -- ${sockets[@]+"${sockets[@]}"})" '
   to_entries as $all
   | ($all | map(select(.value.type == "user"
       and (.value.origin.kind == "human" or (.value.origin.kind == "peer" and .value.origin.handback != true))))
@@ -115,10 +130,9 @@ IFS=$'\t' read -r verdict stop < <(entries | jq -r --arg c "$controller" --arg r
   | .[($start + 1):] as $after
   | [$all[] | select(.value.type == "assistant") | .value.message.content[]?
       | select(.type == "tool_use" and .name == "SendMessage")
-      | select(.input.to | strings
-          | (. == $c or startswith($c + " [")
-             or ($rn != "" and (. == $rn or startswith($rn + " ["))))
-             or ($sock != "" and . == "uds:" + $sock))
+      | select(.input.to | strings | . as $to
+          | any(($c, $names[]); . as $nm | $to == $nm or ($to | startswith($nm + " [")))
+            or IN($socks[]))
       | .id] as $sends
   # Every delivered report, by its position in the transcript.
   | [$all[] | select(.value.type == "user" and (.value.toolUseResult | type) == "object"
