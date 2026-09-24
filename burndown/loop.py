@@ -836,16 +836,18 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
             verdict, detail = "unreachable", str(exc)
         else:
             verdict, detail = _verdict(answer)
-            # A turn that ended with no "PR up" on record ended mid-lane:
-            # nothing reached the controller, and nothing will (#1148).
-            # Only a PR number is on record: a hand-built workers file can
-            # carry 0 or "x", and either must not quiet the pane.
+            # A finished turn with no "PR up" on record ended mid-lane, or on
+            # a question the controller still owes: either way, read the pane
+            # (#1148). `idle` counts as well as `done`, since focusing a pane
+            # turns one into the other. Only a PR number is on record: a
+            # hand-built workers file can carry 0 or "x".
             pr = clump.get("pr_up")
             on_record = (isinstance(pr, int) and not isinstance(pr, bool)
                          and pr > 0)
-            if verdict == "done" and not on_record:
-                verdict, detail = "stalled", ("done with no PR up on record "
-                                              "— read this pane")
+            if verdict in ("done", "idle") and not on_record:
+                verdict, detail = "stalled", (
+                    f"{verdict} with no PR up; read the pane (a worker "
+                    "waiting on your answer reads the same)")
         read.append({"agent": agent, "tickets": clump["tickets"],
                      "workspace": clump.get("workspace", ""),
                      "verdict": verdict, "detail": detail})

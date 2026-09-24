@@ -1359,9 +1359,12 @@ HERDR_GONE = {"id": "cli:agent:get",
 
 
 def live_clumps():
+    # skills-2 has sent "PR up", so an `idle` answer for it passes through as
+    # herdr's word rather than reading `stalled` (#1148).
     return [
         {"tickets": [1], "workspace": "/w/1", "agent": "skills-1"},
-        {"tickets": [2], "workspace": "/w/2", "agent": "skills-2"},
+        {"tickets": [2], "workspace": "/w/2", "agent": "skills-2",
+         "pr_up": 1160},
         {"tickets": [3], "workspace": "/w/3", "agent": "skills-3"},
     ]
 
@@ -1442,25 +1445,34 @@ def test_the_sweep_names_the_vanished_worker_distinctly_when_rendered():
     assert "idle      #2" in rendered, rendered
 
 
-def test_a_done_pane_with_no_pr_up_is_stalled_not_idle():
+def test_a_finished_pane_with_no_pr_up_is_stalled_and_says_read_the_pane():
     """#1095: the worker ended its turn mid-lane with a summary to no one,
-    herdr showed `done`, and the sweep had no verdict for it. A `done` pane
-    on an unlanded clump whose "PR up" is not on record is `stalled`; one
-    whose "PR up" is on record is waiting on the controller, and says `done`.
-    An `idle` pane stays `idle`."""
+    herdr showed `done`, and the sweep had no verdict for it. A finished pane
+    (`done`, or `idle` once someone focused it) on an unlanded clump whose "PR
+    up" is not on record is `stalled`, and its line says to read the pane,
+    since a worker waiting on the controller's answer reads the same. With
+    "PR up" on record the sweep prints herdr's own word."""
     calls = []
-    clumps = live_clumps()
-    clumps[1]["pr_up"] = 1160
+    clumps = live_clumps() + [
+        {"tickets": [4], "workspace": "/w/4", "agent": "skills-4",
+         "pr_up": 1161}]
     get = agent_stub({"skills-1": herdr_agent("done"),
                       "skills-2": herdr_agent("done"),
-                      "skills-3": herdr_agent("idle")}, calls)
+                      "skills-3": herdr_agent("idle"),
+                      "skills-4": herdr_agent("idle")}, calls)
     state = loop.sweep(clumps, get)
     verdicts = {w["agent"]: w["verdict"] for w in state["workers"]}
     assert verdicts == {"skills-1": "stalled", "skills-2": "done",
-                        "skills-3": "idle"}, verdicts
+                        "skills-3": "stalled", "skills-4": "idle"}, verdicts
     rendered = loop.render_sweep(state)
-    assert "stalled   #1" in rendered, rendered
+    assert ("stalled   #1  skills-1  /w/1  done with no PR up; read the pane "
+            "(a worker waiting on your answer reads the same)") in rendered, \
+        rendered
+    assert ("stalled   #3  skills-3  /w/3  idle with no PR up; read the pane "
+            "(a worker waiting on your answer reads the same)") in rendered, \
+        rendered
     assert "done      #2" in rendered, rendered
+    assert "idle      #4" in rendered, rendered
 
 
 def test_a_pr_up_that_is_not_a_pr_number_does_not_quiet_a_done_pane():
@@ -1642,7 +1654,7 @@ def test_the_cli_sweep_probes_each_live_slot_once_through_herdr():
             json.dump([{"tickets": [1], "workspace": "/w/1",
                         "agent": "skills-1"},
                        {"tickets": [2], "workspace": "/w/2",
-                        "agent": "skills-2"},
+                        "agent": "skills-2", "pr_up": 1160},
                        {"tickets": [3], "workspace": "/w/3",
                         "agent": "skills-3"},
                        {"tickets": [4], "workspace": "/w/4",
