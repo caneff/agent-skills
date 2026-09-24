@@ -4,6 +4,7 @@
     python3 burndown/runfile.py start    <run-id> [--slots <k>] [--controller <agent>]
     python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
     python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
+    python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
     python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --head-committed <ISO>
     python3 burndown/runfile.py show     <run-id>
     python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
@@ -257,6 +258,10 @@ def load(run_id, root=None):
             # Filled in rather than demanded: a run file written before jobs
             # were recorded is still that controller's run.
             entry["job"] = job_record(entry.get("job"))
+            # Filled in the same way: the PR a worker's "PR up" named, or
+            # `None` when none reached the controller (#1148).
+            pr = entry.get("pr_up")
+            entry["pr_up"] = None if pr is None else pr_number(pr)
             if entry["landed"] is not None:
                 checked_sha(entry["landed"])
         # Filled in rather than demanded, the same as `job` above: a run file
@@ -528,6 +533,23 @@ def job(run_id, lowest, state, cores=0, root=None):
         return run
 
 
+def pr_up(run_id, lowest, pr, root=None):
+    """Record the PR a clump's worker reported "PR up" on, which the sweep
+    reads (`burndown/SKILL.md` § Liveness). It lives here and not in the
+    controller's context, because a resumed controller's sweep has only this
+    file. A later "PR up" naming another PR replaces it: unlike a squash sha,
+    a PR number is not final — a worker can close one and open another.
+    `pr=None` clears it, when the controller hands findings back: the PR
+    stays open through a fix round, so only the clear makes a worker that
+    stops mid-fix read `stalled` again."""
+    pr = None if pr is None else pr_number(pr)
+    with locked(run_id, root):
+        run = load(run_id, root)
+        clump_entry(run, lowest)["pr_up"] = pr
+        save(run, root)
+        return run
+
+
 def named(value, what):
     """A workspace path or a herdr agent name. Blank is not an answer: the
     agent name is the only way to reach that worker after a restart, and the
@@ -568,7 +590,10 @@ def clump(run_id, tickets, workspace, agent, root=None):
                     "may grow a clump, never drop a ticket out of the run")
         entry = {"tickets": tickets, "workspace": workspace, "agent": agent,
                  "landed": same["landed"] if same else None,
-                 "job": same["job"] if same else None}
+                 "job": same["job"] if same else None,
+                 # A new agent has sent no "PR up" of its own.
+                 "pr_up": same["pr_up"] if same and same["agent"] == agent
+                 else None}
         run["clumps"] = sorted(
             [c for c in run["clumps"] if c is not same] + [entry],
             key=lambda c: c["tickets"][0])
@@ -646,7 +671,8 @@ def render(run):
         state = f"landed {entry['landed']}" if entry["landed"] else "in flight"
         lines.append(f"clump #{entry['tickets'][0]}  {tickets_of(entry)}  "
                      f"{entry['agent']}  {entry['workspace']}  {state}  "
-                     f"{render_job(entry.get('job'))}")
+                     f"{render_job(entry.get('job'))}  "
+                     f"{render_pr_up(entry.get('pr_up'))}")
     for item in run.get("leftovers", []):
         lines.append(
             f"leftover  clump #{item['clump']}  {tickets_of(item)}  "
@@ -664,6 +690,10 @@ def render_job(record):
         return f"job: {record['cores']} cores"
     return ("job: no parallel job" if record["state"] == "none"
             else "job: done")
+
+
+def render_pr_up(pr):
+    return f"PR #{pr} up" if pr is not None else "no PR up"
 
 
 def tickets_of(entry):
@@ -755,6 +785,17 @@ def main(argv):
     size.add_argument("--done", action="store_true",
                       help="the worker reports its job finished")
 
+    up = subs.add_parser("pr-up",
+                         help="record the PR a worker reported \"PR up\" on")
+    up.add_argument("run_id")
+    up.add_argument("--clump", type=int, required=True,
+                    help="the clump's lowest ticket")
+    which = up.add_mutually_exclusive_group(required=True)
+    which.add_argument("--pr", type=int)
+    which.add_argument("--clear", action="store_true",
+                       help="the controller handed findings back; the next "
+                            "\"PR up\" records it again")
+
     out = subs.add_parser("show", help="print the run file")
     out.add_argument("run_id")
 
@@ -788,6 +829,8 @@ def main(argv):
                      else "none" if args.none else "done")
             print(render(job(args.run_id, args.clump, state,
                              args.cores or 0, root)))
+        elif args.command == "pr-up":
+            print(render(pr_up(args.run_id, args.clump, args.pr, root)))
         elif args.command == "show":
             print(render(load(args.run_id, root)))
         elif args.command == "resume":

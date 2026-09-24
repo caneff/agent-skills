@@ -772,7 +772,7 @@ def cleanup_ready(clump, outstanding=()):
 # its verdict. A state herdr grows later reads as `unknown` and is reported
 # with the word herdr used, rather than being silently folded into `working` —
 # which is the reading that would let a stuck worker pass as healthy.
-_AGENT_STATES = frozenset({"working", "idle", "blocked"})
+_AGENT_STATES = frozenset({"working", "idle", "blocked", "done"})
 # One deadline for the **whole** sweep, not one per probe. A per-probe bound
 # composes: N hung panes would hold the controller inside one tool call for N
 # timeouts, and a controller in a tool call hears no worker at all (#778). So
@@ -801,7 +801,9 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
     only this sweep can find, and it is reported as its own verdict rather
     than as an idle worker. What the sweep cannot see is the other shape: a
     pane that is present and busy looks `working` whatever it is busy with
-    (#925). Nothing about one clump ends the sweep: a probe that fails, and a
+    (#925). A finished pane on a clump with no "PR up" on record (`pr_up`,
+    the run file's) is `stalled`, a line that says read the pane (#1148).
+    Nothing about one clump ends the sweep: a probe that fails, and a
     clump the run file left with no agent name, are each that one worker's
     verdict, so a herdr that answers for two workers and not the third still
     tells the controller about two.
@@ -834,6 +836,18 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
             verdict, detail = "unreachable", str(exc)
         else:
             verdict, detail = _verdict(answer)
+            # A finished turn with no "PR up" on record ended mid-lane, or on
+            # a question the controller still owes: either way, read the pane
+            # (#1148). `idle` counts as well as `done`, since focusing a pane
+            # turns one into the other. Only a PR number is on record: a
+            # hand-built workers file can carry 0 or "x".
+            pr = clump.get("pr_up")
+            on_record = (isinstance(pr, int) and not isinstance(pr, bool)
+                         and pr > 0)
+            if verdict in ("done", "idle") and not on_record:
+                verdict, detail = "stalled", (
+                    f"{verdict} with no PR up; read the pane (a worker "
+                    "waiting on your answer reads the same)")
         read.append({"agent": agent, "tickets": clump["tickets"],
                      "workspace": clump.get("workspace", ""),
                      "verdict": verdict, "detail": detail})

@@ -140,10 +140,16 @@ too.
    each dispatched clump with
    `runfile.py clump` — its workspace and its worker's herdr agent name, or
    step 1's resume has nothing to re-announce to — each landing with
-   `runfile.py land`, and each landing's leftover findings with `runfile.py
+   `runfile.py land`, each "PR up" with `runfile.py pr-up <run-id> --clump
+   <n> --pr <n>` as it arrives, for § Liveness, and each landing's leftover
+   findings with `runfile.py
    leftover <run-id> --clump <n> --pr <n> --from <dispositions sidecar> --head-committed <PR head
    commit's committer date>`, so a restart can pick the run back up with nothing transcribed by hand
-   (`references/run-file.md` § Leftovers).
+   (`references/run-file.md` § Leftovers). The controller clears the PR-up
+   record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever it
+   hands findings back to the worker (Codex findings, or any ruling that
+   sends it back to work), since the PR stays open through the fix round,
+   and records it again on the next "PR up".
 9. **Wait on the wake, and sweep on an idle one.** The loop waits by being
    idle, never inside a tool call: a controller in one hears no worker until
    it returns. What it trusts while it waits, in rank order, and the bounded
@@ -369,6 +375,16 @@ behind the ranking, and what each source costs when it is read the other way:
    it is busy with, so a worker spinning on no-op calls passes every signal
    the sweep has (#925). The sweep answers whether there is still a pane and
    what herdr says it is doing — never whether the work is progressing.
+
+   A finished pane — `done`, or `idle` once someone has focused it — on an
+   unlanded clump with no "PR up" on record is **`stalled`**, distinct from
+   `idle`. Its turn ended with no "PR up", so it either stopped mid-lane or
+   is waiting on your answer to a question; the line says to read the pane,
+   and the pane says which. #1095's worker committed, ran the gate and ended
+   its turn with a summary to no one; herdr said `done`, and the controller
+   found it ten minutes later only because Chris asked (#1148). The record is
+   the run file's `pr_up` (`references/run-file.md` § The PR-up record); with
+   it, the sweep prints herdr's own word.
 
 **A worker declares its job size.** A worker that launches a parallel job
 names that job and its **core count** in its report, and a worker that

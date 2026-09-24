@@ -709,4 +709,18 @@ else
   echo "FAIL: incomplete lib — rc $rc, log: $(cat "$log" 2>/dev/null), out: $out"; fails=1
 fi
 
+# The installed layout is a symlink in ~/.claude/hooks/ pointing at this
+# directory. The lib is found beside the symlink's target, not beside the
+# symlink: from #1066's landing until someone re-ran install.sh, every stop on
+# the box logged lib-missing, #1095's silent stop among them (#1148).
+reset_log
+printf '{"result":{"agents":[{"pane_id":"w9:p1","agent_session":{"value":"ctl-session"}}]}}\n' > "$tmp/agent-list.json"
+linked="$tmp/linked"; mkdir -p "$linked"; ln -s "$hook" "$linked/$(basename "$hook")"
+rm -f "$tmp/prompt.pane" "$tmp/prompt.text"
+out=$(jq -n --arg t "$t" '{hook_event_name:"Stop",session_id:"w",transcript_path:$t,stop_hook_active:false}' \
+      | HOME="$home" HERDR_PANE_ID="w2W:p1" PATH="$stubdir:$PATH" bash "$linked/$(basename "$hook")" 2>&1)
+pane=$(cat "$tmp/prompt.pane" 2>/dev/null || true)
+text=$(cat "$tmp/prompt.text" 2>/dev/null || true)
+expect_alert "a hook symlinked alone into another directory finds its lib beside the target and alerts"
+
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

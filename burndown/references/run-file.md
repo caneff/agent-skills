@@ -10,6 +10,7 @@ python3 burndown/runfile.py start    <run-id> [--slots <k>] [--controller <agent
 python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
 python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
 python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
+python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
 python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --head-committed <ISO>
 python3 burndown/runfile.py show     <run-id>
 python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
@@ -25,9 +26,10 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
   "clumps": [
     {"tickets": [901, 902], "workspace": "/home/c/src/x/.claude/worktrees/implement-901",
      "agent": "implement-901-42", "job": {"state": "running", "cores": 8},
-     "landed": null},
+     "pr_up": null, "landed": null},
     {"tickets": [905], "workspace": "/home/c/src/x/.claude/worktrees/implement-905",
      "agent": "implement-905-7", "job": {"state": "none", "cores": 0},
+     "pr_up": 950,
      "landed": "0123456789abcdef0123456789abcdef01234567"}
   ],
   "leftovers": [
@@ -78,6 +80,19 @@ dispatch into a loaded box that #894 exists to stop. A file written before
 this field existed still loads — the field is filled in as `null`, which is
 the honest reading of a run that never recorded one.
 
+
+## The PR-up record
+
+Each clump carries `pr_up`: the PR number its worker's "PR up" named, or
+`null` until one reaches the controller. `runfile.py pr-up <run-id> --clump
+<n> --pr <n>` writes it, when the controller reads that message, and `--clear`
+resets it to `null` when the controller hands findings back: the PR stays
+open through a fix round, and only the clear lets a worker that stops
+mid-fix read `stalled` again. The sweep
+reads it, and what it reads it for is `burndown/SKILL.md` § Liveness. A file
+written before this field existed loads with it as `null`, which reads a
+finished pane as `stalled`: the loud reading, and the controller's read of
+the pane settles it.
 
 ## Leftovers
 
