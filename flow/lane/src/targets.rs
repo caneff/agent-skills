@@ -31,8 +31,9 @@ const PROSE_TOKENS: &[&str] = &["node.js", "next.js", "vue.js", "three.js", "d3.
 const CODE_BASENAMES: &[&str] = &["skill.md"];
 
 /// The first path-shaped token in `body` that is code, if any. A token is
-/// path-shaped when it has an extension after its last `.` and no other
-/// punctuation than `/ - _ .`; trailing sentence punctuation is dropped.
+/// path-shaped when it holds only `/ - _ .` besides letters and digits;
+/// trailing sentence punctuation is dropped. It is code by extension, by
+/// filename, or as an extensionless entry under a script directory.
 pub fn first_code_target(body: &str) -> Option<String> {
     body.split(|c: char| !(c.is_alphanumeric() || "/-_.".contains(c)))
         .map(|t| t.trim_end_matches('.'))
