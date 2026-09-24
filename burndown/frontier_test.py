@@ -764,7 +764,8 @@ def test_a_folded_per_pr_body_keeps_one_blocked_by_declaration():
                     "## Blocked by\n\nNone — can start immediately.\n")
     per_pr_files_only = per_pr_body.split("\n## Blocked by")[0]
     folded = run_sweep_body + per_pr_files_only
-    assert F.blocked_by_section(folded) is not F.AMBIGUOUS, folded
+    assert F.blocked_by_section(folded) == F.blocked_by_section(run_sweep_body), folded
+    assert F.blocked_by_section(folded) is not None, folded
 
 
 def main():

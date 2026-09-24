@@ -148,7 +148,7 @@ def fold(per_pr_body):
     return taken[:-1] if taken.endswith("\n") else taken  # `-r` adds one newline
 
 
-def on_the_frontier(number, body):
+def frontier_buckets(number, body):
     issue = {"number": number, "title": f"Sweep: leftovers from burn {RUN}",
              "body": body, "labels": [{"name": "ready-for-agent"}]}
     buckets = frontier.classify([issue], lambda n: "closed")
@@ -163,7 +163,7 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
 
     # 1. Widest clump first (#1026): two free slots, closures of 1, 4 and 2.
     candidates = os.path.join(work, "candidates.json")
-    live = os.path.join(work, "live.json")
+    in_flight_file = os.path.join(work, "live.json")
     with open(candidates, "w") as fh:
         json.dump([
             {"tickets": [905], "closure": ["burndown/cost.py"]},
@@ -171,13 +171,13 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
                                                 "burndown/runfile.py", "burndown/sweep.py"]},
             {"tickets": [910], "closure": ["burndown/references/loop.md", "implement/SKILL.md"]},
         ], fh)
-    with open(live, "w") as fh:
+    with open(in_flight_file, "w") as fh:
         json.dump([], fh)
     # `dispatch` reads the run file (#1107), so the run starts first; nothing
     # is in flight yet, so it holds no clumps.
     ok(cli(RUNFILE, "start", RUN, "--slots", "2", "--controller", "burn-e2e", env=env))
     dispatched = [line for line in ok(cli(
-        LOOP, "dispatch", "--candidates", candidates, "--in-flight", live,
+        LOOP, "dispatch", "--candidates", candidates, "--in-flight", in_flight_file,
         "--run", RUN, "--free", "2", "--processes", "4", "--committed-gb", "4",
         env=env)).splitlines()
         if line.startswith("dispatch")]
@@ -316,7 +316,7 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     # One declaration, and it names no blockers: the reader's own answer, so
     # the tail's wording lives only where `with_blocked_by` reads it.
     assert frontier.section_blockers(frontier.blocked_by_section(run_sweep)) == ([], None)
-    assert on_the_frontier(1200, run_sweep)["unblocked"] == [1200]
+    assert frontier_buckets(1200, run_sweep)["unblocked"] == [1200]
 
     # 7. A per-PR sweep a worker outside the burn filed (#1033), in the same
     # shape, folds in by its file sections alone.
@@ -326,10 +326,10 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     folded = with_blocked_by(body.rstrip("\n") + "\n\n" + fold(per_pr))
     assert folded.count("## Blocked by") == 1, folded
     assert "- **S2** (judgement) Magic 28 — PR #960" in folded, folded
-    assert on_the_frontier(1200, folded)["unblocked"] == [1200]
+    assert frontier_buckets(1200, folded)["unblocked"] == [1200]
     whole = with_blocked_by(body.rstrip("\n") + "\n\n" + per_pr)
     assert frontier.blocked_by_section(whole) is frontier.AMBIGUOUS
-    assert on_the_frontier(1200, whole)["unresolved"] == [1200]
+    assert frontier_buckets(1200, whole)["unresolved"] == [1200]
 
     # 8. A run whose landings left nothing files nothing (#1030).
     quiet = "burn-e2e-1024-quiet"
@@ -351,16 +351,23 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
 
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    # A GIT_DIR exported by the caller would point every `git -C` here, and
+    # the scripts under test, at the caller's repo instead of the fixtures.
+    for name in [k for k in os.environ if k.startswith("GIT_")]:
+        del os.environ[name]
+    failed = True
     try:
         for test in tests:
             test()
             print(f"ok  {test.__name__}")
         print(f"{len(tests)} passed")
+        failed = False
     finally:
         left = clean_fixtures()
         if left:
             print(f"fixtures left behind: {', '.join(left)}", file=sys.stderr)
-            raise SystemExit(1)
+            if not failed:  # a raising SystemExit would replace the traceback
+                raise SystemExit(1)
 
 
 if __name__ == "__main__":
