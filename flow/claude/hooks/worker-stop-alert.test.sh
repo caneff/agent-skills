@@ -575,8 +575,7 @@ printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 # Two live records share the controller's sessionId (the race flow/lane's
 # sessions reader documents): the lexically first is nameless, the later one
 # named, and the worker reported to the named one's session name. `sid` mode
-# must scan every live match and prefer the named record, not stop at the
-# nameless one (#1059).
+# must scan every live match, not stop at the nameless one (#1059).
 reset_log
 sleep 60 & race_pid=$!
 race_stat=$(cat /proc/$race_pid/stat); race_start=$(set -- ${race_stat##*) }; echo "${20}")
@@ -588,14 +587,14 @@ t="$tmp/race-reported.jsonl"
 { human "$race_brief"; send s1 "skills-race"; ok s1; assistant_text "PR up sent"; } > "$t"
 run "two live records share the controller sessionId, first nameless" "$t"
 expect_reported "a report to the later named record's session name counts even though a nameless record sorts first"
-# The mirror (#1114): preferring the named record must not drop its nameless
+# The mirror (#1114): matching the named record must not drop its nameless
 # twin's socket, so a report the worker delivered to `uds:<nameless socket>`
 # — the address a reply from that record copies — counts too.
 reset_log
 t="$tmp/race-nameless-socket.jsonl"
 { human "$race_brief"; send s1 "uds:/run/race-nameless.sock"; ok s1; assistant_text "PR up sent"; } > "$t"
 run "two live records share the controller sessionId, report to the nameless socket" "$t"
-expect_reported "a report to the nameless twin's socket counts even though the named record is preferred"
+expect_reported "a report to the nameless twin's socket counts as well as the named record's session name"
 # The same twins reached without herdr: the brief carries the named record's
 # session name, `name` mode resolves it to the shared sessionId, and the
 # nameless twin's socket still counts.
