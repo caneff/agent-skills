@@ -55,6 +55,17 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 LOOSE_STEP_LOCATOR = re.compile(STEP_LOCATOR.pattern.replace("[^.,;:!?)}\\]]+?", ".+?"), re.IGNORECASE)
 HEADING_STEP = re.compile(r"^(step\s+\d+)\b", re.IGNORECASE)
 BACKTICK_RUN = re.compile(r"`+")
+# Paragraph boundaries a code span cannot cross (CommonMark, GFM tables).
+# A list item starts a paragraph its continuation lines join; inside a list
+# any marker starts the next item, but in other prose only a non-empty bullet
+# or an item numbered 1 interrupts, so a wrapped "2. ..." line continues it.
+# A paragraph that starts on a marker or indented is read as inside a list.
+# Indentation is not measured against a container, so a nested item counts.
+LIST_ITEM = re.compile(r"^\s*([-*+]|\d{1,9}[.)])(\s|$)")
+LIST_INTERRUPT = re.compile(r"^\s*([-*+]|1[.)])\s+\S")
+# A table is a header row followed by this delimiter row; a "|" line with no
+# delimiter row under it is ordinary paragraph text.
+TABLE_DELIMITER = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
 
 
 def code_spans(text: str) -> list[tuple[int, int]]:
@@ -87,19 +98,83 @@ def code_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def prose_lines(lines: list[str]) -> list[bool]:
+    """Per line, False for a fence marker or a line inside a fence."""
+    fence = None  # (character, length) of the fence that is open
+    prose = []
+    for line in lines:
+        marker = FENCE.match(line)
+        if marker and (
+            fence is None
+            or (
+                marker.group(1)[0] == fence[0]
+                and len(marker.group(1)) >= fence[1]
+                and not marker.group(2).strip()
+            )
+        ):
+            fence = None if fence else (marker.group(1)[0], len(marker.group(1)))
+            prose.append(False)
+            continue
+        prose.append(fence is None)
+    return prose
+
+
+def standalone_rows(lines: list[str], prose: list[bool]) -> set[int]:
+    """Lines no paragraph runs through: fenced lines, and prose lines that
+    are a paragraph of their own — a heading, and each row of a table from
+    its header down to a blank line, a heading or a fence."""
+    rows = {
+        index
+        for index, line in enumerate(lines)
+        if not prose[index] or heading_text(line)
+    }
+    for index in range(len(lines) - 1):
+        below = lines[index + 1]
+        if lines[index].strip() and "|" in below and TABLE_DELIMITER.match(below):
+            row = index
+            while row < len(lines) and lines[row].strip() and row not in rows:
+                rows.add(row)
+                row += 1
+    return rows
+
+
+def paragraph_end(lines: list[str], index: int, boundary: set[int]) -> int:
+    """The index after the last line of the paragraph starting at index: it
+    ends at a blank line, a boundary row and the start of a list item
+    (LIST_ITEM, LIST_INTERRUPT), and a boundary row is a paragraph alone."""
+    if index in boundary:
+        return index + 1
+    in_list = LIST_ITEM.match(lines[index]) or lines[index][:1].isspace()
+    starts_item = LIST_ITEM if in_list else LIST_INTERRUPT
+    end = index + 1
+    while (
+        end < len(lines)
+        and lines[end].strip()
+        and end not in boundary
+        and not starts_item.match(lines[end])
+    ):
+        end += 1
+    return end
+
+
 def line_code_spans(lines: list[str]) -> list[list[tuple[int, int]]]:
     """Per line, the code-span content ranges in that line's own offsets. A
-    span may cross a line break but not a blank line, so spans are found over
-    each paragraph's joined text and cut back to the lines they cover."""
+    span may cross a line break but not a paragraph boundary
+    (paragraph_end), so spans are found over each paragraph's joined text
+    and cut back to the lines they cover. A fenced line is code throughout."""
     result: list[list[tuple[int, int]]] = [[] for _ in lines]
+    prose = prose_lines(lines)
+    boundary = standalone_rows(lines, prose)
     index = 0
     while index < len(lines):
+        if not prose[index]:
+            result[index].append((0, len(lines[index])))
+            index += 1
+            continue
         if not lines[index].strip():
             index += 1
             continue
-        end = index
-        while end < len(lines) and lines[end].strip():
-            end += 1
+        end = paragraph_end(lines, index, boundary)
         starts = [0, *accumulate(len(line) + 1 for line in lines[index:end - 1])]
         for span_start, span_end in code_spans("\n".join(lines[index:end])):
             for row, line_start in enumerate(starts, index):
@@ -135,24 +210,10 @@ def sections(path: Path) -> list[tuple[str, str]]:
     """Each heading with its text, down to the next heading of its level or
     higher. Fenced code is not a heading and not part of the text."""
     lines = path.read_text().splitlines()
-    fence = None  # (character, length) of the fence that is open
-    prose = []  # per line: a fence marker or a line inside one is not
+    prose = prose_lines(lines)
     starts = []  # (line index, level, heading text)
     for index, line in enumerate(lines):
-        marker = FENCE.match(line)
-        if marker and (
-            fence is None
-            or (
-                marker.group(1)[0] == fence[0]
-                and len(marker.group(1)) >= fence[1]
-                and not marker.group(2).strip()
-            )
-        ):
-            fence = None if fence else (marker.group(1)[0], len(marker.group(1)))
-            prose.append(False)
-            continue
-        prose.append(fence is None)
-        if fence is None and (heading := heading_text(line)):
+        if prose[index] and (heading := heading_text(line)):
             starts.append((index, len(line) - len(line.lstrip("#")), heading))
     found = []
     for position, (index, level, heading) in enumerate(starts):

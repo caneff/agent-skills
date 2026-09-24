@@ -43,6 +43,24 @@ for fixture in pointer-suffix-invalid bare-cross-file-collision step-heading-nam
   fi
 done
 
+# A backtick before a list item, heading, fence or table row must not pair
+# with one after it, and one before a "|" line that is not a table row must;
+# otherwise the pointer reads as inside a code span and skips the inline-code
+# guard. Each must fail on that guard, not another.
+for fixture in code-span-list-boundary-invalid code-span-heading-boundary-invalid \
+  code-span-fence-boundary-invalid code-span-table-boundary-invalid \
+  code-span-ordered-list-boundary-invalid code-span-pipe-continuation-invalid \
+  code-span-list-paragraph-boundary-invalid; do
+  if output=$(run_fixture "$fixture" 2>&1); then
+    echo "FAIL: checker accepted fixture $fixture"
+    exit 1
+  fi
+  if ! grep -q "is cut at inline code" <<<"$output"; then
+    echo "FAIL: fixture $fixture failed for another reason: $output"
+    exit 1
+  fi
+done
+
 target=implement/SKILL.md
 backup=$(mktemp)
 cp "$target" "$backup"

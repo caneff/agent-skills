@@ -32,12 +32,19 @@ does not resolve.
   backtick outside a wrapping code span fails, saying inline code in a
   heading name is unsupported. Write the plain heading. A code span is
   recognised by CommonMark's own rule — a backtick run opens it and only a
-  later run of the same length closes it, within one run of non-blank lines (a
-  span may cross a line break, never a blank line; a heading, list item or
-  fence line beside prose joins the run), so a name wrapped in a single
-  backtick pair or a double one is read as inside the span either way (write
-  `<sign> Build` inside one backtick, or inside two). The guard against
-  inline code runs on the name before the possessive or conjunction trimmer
+  later run of the same length closes it, in the same paragraph — so a name
+  wrapped in a single backtick pair or a double one is read as inside the
+  span either way (write `<sign> Build` inside one backtick, or inside two).
+  A span may cross a line break, but a paragraph ends at a blank line and at
+  the start of a list item. Inside a list (a paragraph that starts on a
+  marker or indented) any marker starts the next item; in other prose only
+  a bullet with text after it, or an item numbered 1, does, so a wrapped
+  line reading `2. ...` continues the paragraph. A
+  heading, and each row of a table (a header row with a `| --- |` delimiter
+  row under it, down to the next blank line, heading or fence), is a
+  paragraph of its own line; a `|` line with no delimiter row is ordinary
+  text. A line inside a fence, markers included, is code throughout. The
+  guard against inline code runs on the name before the possessive or conjunction trimmer
   touches it, not after: `<sign> Build's` immediately followed by a code
   span, or `<sign> Build and` immediately followed by one, both fail rather
   than silently downgrading to a reference to an unrelated `Build` heading.
@@ -96,7 +103,3 @@ punctuation right after it.
 Known limits: a spelled-out number above ten is not recognised; a second
 locator in one pointer (`step 3 and step 9`) is not read; and a lazily numbered
 list (`1.` on every item) does not satisfy the check.
-A multi-line code span is tracked to the next blank line only: a heading, list
-item or fence line does not yet end it, so a backtick before one can pair with
-a backtick after it and hide a cut name from the inline-code guard (#1115 owns
-the fix).
