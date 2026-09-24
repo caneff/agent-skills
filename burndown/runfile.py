@@ -260,9 +260,8 @@ def load(run_id, root=None):
             entry["job"] = job_record(entry.get("job"))
             # Filled in the same way: the PR a worker's "PR up" named, or
             # `None` when none reached the controller (#1148).
-            if entry.get("pr_up") is not None:
-                pr_number(entry["pr_up"])
-            entry["pr_up"] = entry.get("pr_up")
+            pr = entry.get("pr_up")
+            entry["pr_up"] = None if pr is None else pr_number(pr)
             if entry["landed"] is not None:
                 checked_sha(entry["landed"])
         # Filled in rather than demanded, the same as `job` above: a run file
