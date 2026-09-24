@@ -149,6 +149,11 @@ def test_an_emphasis_only_exploration_value_is_refused_too():
     assert "Seam" in got and "'*" in got, got
 
 
+def test_any_whitespace_between_emphasis_markers_still_counts_as_only_markers():
+    got = _refusal("# R\n", seam="*\n*", blind_to="x")
+    assert "Seam" in got and "'*\\n*'" in got, got
+
+
 def test_the_cli_prints_the_body():
     import subprocess
     out = subprocess.run(

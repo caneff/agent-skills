@@ -89,7 +89,7 @@ def seam_of(root, seam=None, blind_to=None):
     for key, value in (("**Seam**", seam), ("**Blind to**", blind_to)):
         # `key_line` reads `- **Seam**:**` as the value `**`; a value of
         # nothing but emphasis markers names nothing (#1104).
-        if value and not value.strip("*_ \t"):
+        if value and not re.sub(r"[\s*_]", "", value):
             raise SeamError(f"{root}: {key} reads {value!r}, which is only "
                             "emphasis markers and names nothing")
     if not seam:
