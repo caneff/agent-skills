@@ -18,8 +18,10 @@ worker_alert_read_brief() { # <transcript> -> "n\tcontroller" on stdout, or empt
     | first // empty | "\(.n)\t\(.c)"'
 }
 
-# A live registry record naming `sid` (mode "sid") or `nm` (mode "name") —
-# its session id, current name (possibly empty) and socket. `sid` mode
+# Live registry records naming `sid` (mode "sid") or `nm` (mode "name") —
+# one line per record: its session id, current name (possibly empty) and
+# socket. `sid` mode prints every live match (#1114); `name` mode only the
+# first. `sid` mode
 # matches on `.sessionId` alone, with no requirement that `.name` be
 # non-empty: a Claude session with no name yet is still live, still sends
 # and receives cross-session messages (every one carries `from="uds:<its
@@ -38,8 +40,8 @@ worker_alert_read_brief() { # <transcript> -> "n\tcontroller" on stdout, or empt
 # position it's in. Live means the pid's /proc starttime (field 22, after
 # the `(comm)` field) equals the record's procStart — a stale record whose
 # pid was reused has another, as in flow/lane's sessions reader.
-worker_alert_resolve_session() { # <mode: sid|name> <val> -> "sid\x1fname\x1fsock" on stdout, 0; else 1
-  local mode="$1" val="$2" f pid start sid nm sock stat fields fallback=""
+worker_alert_resolve_session() { # <mode: sid|name> <val> -> "sid\x1fname\x1fsock" per line on stdout (sid mode: every live match), 0; else 1
+  local mode="$1" val="$2" f pid start sid nm sock stat fields found=1
   for f in "$HOME"/.claude/sessions/*.json; do
     [ -e "$f" ] || continue
     IFS=$'\x1f' read -r pid start sid nm sock < <(jq -r --arg mode "$mode" --arg v "$val" \
@@ -50,19 +52,16 @@ worker_alert_resolve_session() { # <mode: sid|name> <val> -> "sid\x1fname\x1fsoc
     stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || continue
     read -ra fields <<<"${stat##*) }"
     [ -n "$start" ] && [ "${fields[19]:-}" = "$start" ] || continue
-    # Two live records can share one sessionId (flow/lane's sessions reader
-    # scans for the later named one on purpose), so `sid` mode keeps looking
-    # past a nameless record and returns it only when no named one follows
-    # (#1059). `name` mode matches ON a non-empty name: first hit stands.
-    if [ "$mode" = sid ] && [ -z "$nm" ]; then
-      [ -n "$fallback" ] || fallback="$(printf '%s\x1f%s\x1f%s' "$sid" "$nm" "$sock")"
-      continue
-    fi
     printf '%s\x1f%s\x1f%s\n' "$sid" "$nm" "$sock"
-    return 0
+    found=0
+    # `name` mode matches ON a non-empty name: first hit stands. Two live
+    # records can share one sessionId (flow/lane's sessions reader scans for
+    # the later named one on purpose), and a report to either one's name or
+    # socket reached the controller, so `sid` mode prints every live match —
+    # neither the named one (#1059) nor its nameless twin (#1114) dropped.
+    [ "$mode" = name ] && return 0
   done
-  [ -n "$fallback" ] && { printf '%s\n' "$fallback"; return 0; }
-  return 1
+  return "$found"
 }
 
 # One alert-log line, in every hook's shared format: date, the caller's key
