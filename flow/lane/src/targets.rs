@@ -13,8 +13,8 @@
 //! a script directory (`bin/`, `hooks/`). A path outside all three is still
 //! invisible here; `tier.py` strips the label for it before dispatch.
 
-/// Extensions § Gate 2 names as code, plus the ones that wire the harness or
-/// CI (its "hooks, CI config").
+/// Extensions read as code: § Gate 2's, the ones that wire the harness or CI
+/// (its "hooks, CI config"), and other scripting and config languages.
 const CODE_EXTENSIONS: &[&str] = &[
     "py", "ts", "tsx", "js", "jsx", "mjs", "cjs", "sh", "bash", "rs", "yml", "yaml", "toml", "json", "go", "zsh",
     "fish", "ps1", "psm1", "bat", "cmd", "lua", "ini", "cfg", "conf", "rb", "pl", "php", "java", "kt", "swift",
