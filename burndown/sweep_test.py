@@ -90,10 +90,29 @@ def test_render_defuses_mentions_and_raw_html_in_finding_text():
 def test_render_treats_unmatched_and_escaped_backticks_as_plain_text():
     # CommonMark: a backtick run closes only on a run of the same length, and
     # a backslash-escaped backtick opens nothing (#1097 C1).
-    for text in ("``<img src=x>`", "\\`<img src=x>`", "``@caneff`"):
+    for text in ("``<img src=x>`", "`<img src=x>``", "\\`<img src=x>`",
+                 "``@caneff`"):
         body = sweep.render_body([leftover(
             901, [901], 950, "S1", "a.py", "T", "hard", text)])
         assert "<img" not in body and "@caneff" not in body, (text, body)
+
+
+def test_render_reads_an_escaped_backslash_before_a_real_code_span():
+    # `\\` is an escaped backslash, so the backtick after it opens a real
+    # span `a`; the `<i>` after that span is live HTML to CommonMark (#1109).
+    body = sweep.render_body([leftover(
+        901, [901], 950, "S1", "a.py", "T", "hard", "\\\\`a`<i>\\`")])
+    assert "<i>" not in body, body
+    assert "`a`" in body, body
+
+
+def test_render_reads_an_escaped_first_backtick_as_shortening_its_run():
+    # In \``a`<i>` the escape takes the first of two backticks, so the second
+    # opens a one-backtick span `a`; the `<i>` after it is live HTML (#1109).
+    body = sweep.render_body([leftover(
+        901, [901], 950, "S1", "a.py", "T", "hard", "\\``a`<i>`")])
+    assert "<i>" not in body, body
+    assert "`a`&lt;i>`" in body, body
 
 
 def test_title_names_the_run_id():

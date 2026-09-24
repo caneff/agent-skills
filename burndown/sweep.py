@@ -23,6 +23,7 @@ step, not this module's: a renderer prints a body, it does not call `gh`.
 """
 import os
 import re
+import string
 import subprocess
 import sys
 
@@ -48,9 +49,36 @@ def grouped_by_file(leftovers):
     return [(file, groups[file]) for file in order]
 
 
-# A CommonMark code span: a backtick run closes only on a run of the same
-# length, and a backslash-escaped backtick opens nothing.
-_CODE_SPAN = re.compile(r"(?<![`\\])(`+)(?!`)(?:(?!\1).)+?(?<!`)\1(?!`)")
+def _code_spans(text):
+    """The `(start, end)` of each CommonMark code span in `text`, left to
+    right. Outside a span a backslash before ASCII punctuation escapes that
+    one character, so `\\\\` is a literal backslash and `` \\` `` a literal
+    backtick that opens nothing. An unescaped backtick run opens a span that
+    closes on the next run of exactly its length; with no such run, the
+    opener is literal text. Inside a span a backslash is literal."""
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] == "\\" and i + 1 < n and text[i + 1] in string.punctuation:
+            i += 2
+        elif text[i] == "`":
+            run_end = i
+            while run_end < n and text[run_end] == "`":
+                run_end += 1
+            close = _closing_run(text, run_end, run_end - i)
+            if close is not None:
+                yield i, close
+            i = close if close is not None else run_end
+        else:
+            i += 1
+
+
+def _closing_run(text, pos, length):
+    """The end of the first backtick run of exactly `length` at or after
+    `pos`, or None."""
+    for m in re.finditer(r"`+", text[pos:]):
+        if len(m.group(0)) == length:
+            return pos + m.end()
+    return None
 
 
 def inline_safe(text):
@@ -65,10 +93,10 @@ def inline_safe(text):
         chunk = re.sub(r"(?<!\w)@(?=\w)", "@\u200b", chunk)
         return chunk.replace("<", "&lt;")
     out, pos = [], 0
-    for m in _CODE_SPAN.finditer(text):
-        out.append(defuse(text[pos:m.start()]))
-        out.append(m.group(0))
-        pos = m.end()
+    for start, end in _code_spans(text):
+        out.append(defuse(text[pos:start]))
+        out.append(text[start:end])
+        pos = end
     out.append(defuse(text[pos:]))
     return "".join(out)
 
