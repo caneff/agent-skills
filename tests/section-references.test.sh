@@ -44,10 +44,12 @@ for fixture in pointer-suffix-invalid bare-cross-file-collision step-heading-nam
 done
 
 # A backtick before a list item, heading, fence or table row must not pair
-# with one after it; if it did, the pointer would read as inside a code span
-# and skip the inline-code guard. Each must fail on that guard, not another.
+# with one after it, and one before a "|" line that is not a table row must;
+# otherwise the pointer reads as inside a code span and skips the inline-code
+# guard. Each must fail on that guard, not another.
 for fixture in code-span-list-boundary-invalid code-span-heading-boundary-invalid \
-  code-span-fence-boundary-invalid code-span-table-boundary-invalid; do
+  code-span-fence-boundary-invalid code-span-table-boundary-invalid \
+  code-span-ordered-list-boundary-invalid code-span-pipe-continuation-invalid; do
   if output=$(run_fixture "$fixture" 2>&1); then
     echo "FAIL: checker accepted fixture $fixture"
     exit 1
