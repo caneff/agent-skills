@@ -104,7 +104,7 @@ def cli(root, *args, cwd=None, home=None, extra_env=None):
                           capture_output=True, text=True)
 
 
-SIDECAR = os.path.join(cache(), "dispositions-901.jsonl")
+SIDECAR = sweep.dispositions_path(cache(), 901)
 shutil.copyfile(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "implement", "fixtures",
     "dispositions-sidecar.jsonl"), SIDECAR)
@@ -141,14 +141,22 @@ def test_cli_on_an_unknown_run_is_refused():
     assert "sweep.py:" in got.stderr, got.stderr
 
 
-def sidecar_dir():
+def reviews_dir_fixture():
     root = tempfile.mkdtemp(prefix="sweep-sidecars-")
     FIXTURES.append(root)
     return root
 
 
+def home_fixture():
+    """A directory standing in for `$HOME`, and the parent the fixture repos
+    are made under."""
+    root = tempfile.mkdtemp(prefix="sweep-home-")
+    FIXTURES.append(root)
+    return root
+
+
 def write_sidecar(reviews_dir, lowest, lines):
-    path = os.path.join(reviews_dir, f"dispositions-{lowest}.jsonl")
+    path = sweep.dispositions_path(reviews_dir, lowest)
     with open(path, "w") as fh:
         for obj in lines:
             fh.write(json.dumps(obj) + "\n")
@@ -157,7 +165,7 @@ def write_sidecar(reviews_dir, lowest, lines):
 
 def test_counts_sums_fixed_adjacent_leftover_and_standalone_across_landed_clumps():
     root = cache()
-    reviews = sidecar_dir()
+    reviews = reviews_dir_fixture()
     runfile.start("burn-c", slots=2, root=root)
     runfile.clump("burn-c", [901], "/w/a", "agent-a", root=root)
     runfile.clump("burn-c", [905], "/w/b", "agent-b", root=root)
@@ -181,7 +189,7 @@ def test_counts_sums_fixed_adjacent_leftover_and_standalone_across_landed_clumps
 
 def test_counts_ignores_an_unlanded_clumps_sidecar():
     root = cache()
-    reviews = sidecar_dir()
+    reviews = reviews_dir_fixture()
     runfile.start("burn-d", slots=2, root=root)
     runfile.clump("burn-d", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-d", 901, "abc1234", root=root)
@@ -198,7 +206,7 @@ def test_counts_ignores_an_unlanded_clumps_sidecar():
 
 def test_counts_refuses_a_landed_clump_with_no_sidecar_rather_than_read_zero():
     root = cache()
-    reviews = sidecar_dir()
+    reviews = reviews_dir_fixture()
     runfile.start("burn-e", slots=1, root=root)
     runfile.clump("burn-e", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-e", 901, "abc1234", root=root)
@@ -213,7 +221,7 @@ def test_counts_refuses_a_landed_clump_with_no_sidecar_rather_than_read_zero():
 
 def test_cli_counts_prints_the_three_counts():
     root = cache()
-    reviews = sidecar_dir()
+    reviews = reviews_dir_fixture()
     runfile.start("burn-f", slots=1, root=root)
     runfile.clump("burn-f", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-f", 901, "abc1234", root=root)
@@ -235,12 +243,12 @@ def test_counts_refuses_a_malformed_sidecar_line_rather_than_count_low():
                  '{"id": "S1", "outcome": "mystery"}']
     for n, bad in enumerate(bad_lines):
         root = cache()
-        reviews = sidecar_dir()
+        reviews = reviews_dir_fixture()
         run_id = f"burn-m{n}"
         runfile.start(run_id, slots=1, root=root)
         runfile.clump(run_id, [901], "/w/a", "agent-a", root=root)
         runfile.land(run_id, 901, "abc1234", root=root)
-        path = os.path.join(reviews, "dispositions-901.jsonl")
+        path = sweep.dispositions_path(reviews, 901)
         with open(path, "w") as fh:
             fh.write('{"id": "S0", "outcome": "fixed", "sha": "aaa"}\n')
             fh.write(bad + "\n")
@@ -261,7 +269,7 @@ def test_cli_counts_reads_the_target_repos_sidecars_from_another_cwd():
     # with `--repo` (#1093): the sidecar directory is the target's, not the
     # cwd's — and a same-named sidecar under the cwd repo must not be read.
     root = cache()
-    home = sidecar_dir()
+    home = home_fixture()
     target = git_repo(home, "target-repo")
     other = git_repo(home, "other-repo")
     runfile.start("burn-x", slots=1, root=root)
@@ -283,7 +291,7 @@ def test_cli_counts_refuses_with_neither_repo_nor_reviews_dir():
     # or reports every landed clump missing.
     root = cache()
     runfile.start("burn-y", slots=1, root=root)
-    got = cli(root, "counts", "burn-y", cwd=git_repo(cache(), "any"))
+    got = cli(root, "counts", "burn-y", cwd=git_repo(home_fixture(), "any"))
     assert got.returncode == 1, got
     assert "--repo" in got.stderr, got.stderr
 
@@ -292,7 +300,7 @@ def test_cli_counts_refuses_a_repo_that_is_not_a_checkout_root():
     # A subdirectory of a repo, or a GIT_DIR in the environment, must not
     # resolve to some other repo's cache directory (#1093 C1, C2).
     root = cache()
-    home = sidecar_dir()
+    home = home_fixture()
     outer = git_repo(home, "outer")
     sub = os.path.join(outer, "deep")
     os.makedirs(sub)
@@ -311,7 +319,7 @@ def test_cli_counts_ignores_a_git_dir_in_the_environment():
     # repointed git at the other repo would read a directory with none and
     # refuse the landed clump as missing.
     root = cache()
-    home = sidecar_dir()
+    home = home_fixture()
     target = git_repo(home, "target-repo")
     other = git_repo(home, "other-repo")
     runfile.start("burn-g", slots=1, root=root)
