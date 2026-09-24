@@ -18,8 +18,10 @@ worker_alert_read_brief() { # <transcript> -> "n\tcontroller" on stdout, or empt
     | first // empty | "\(.n)\t\(.c)"'
 }
 
-# A live registry record naming `sid` (mode "sid") or `nm` (mode "name") —
-# its session id, current name (possibly empty) and socket. `sid` mode
+# Live registry records naming `sid` (mode "sid") or `nm` (mode "name") —
+# one line per record: its session id, current name (possibly empty) and
+# socket. `sid` mode prints every live match (#1114); `name` mode only the
+# first. `sid` mode
 # matches on `.sessionId` alone, with no requirement that `.name` be
 # non-empty: a Claude session with no name yet is still live, still sends
 # and receives cross-session messages (every one carries `from="uds:<its
