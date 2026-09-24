@@ -46,7 +46,11 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       continue
     }
   else
-    range=$(git rev-list "$remote_sha..$local_sha") || {
+    # Skip what any remote ref already holds, not just $remote_sha: a rebase
+    # onto the default branch pulls in GitHub's own squash-merge commits
+    # (committer noreply@github.com), already on origin and not ours to
+    # re-check (#1149). Do not simplify this back to $remote_sha..$local_sha.
+    range=$(git rev-list "$local_sha" --not "$remote_sha" --remotes="$remote_name") || {
       echo "commit-identity guard (pre-push): refused — could not enumerate the commits $local_ref is pushing between $remote_sha and $local_sha (git rev-list failed); refusing rather than reading that as nothing to check." >&2
       bad=1
       continue

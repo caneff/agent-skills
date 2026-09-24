@@ -114,4 +114,34 @@ check "a commit already on origin's tracking ref is still checked when pushed ne
 git checkout -q main
 git branch -qD other-feature
 
+# an existing branch rebased onto a remote trunk that holds a foreign-identity
+# commit (GitHub's own squash-merge: author the owner's noreply, committer
+# noreply@github.com, #1149). `remote_sha..local_sha` then lists the trunk's
+# commit, already on origin, and the guard refused the --force-with-lease push
+# of a correctly rebased worker branch. Only commits new to the remote count.
+base=$(git rev-parse HEAD)
+git checkout -qb work "$base"
+git commit -q --allow-empty -m workcommit
+push work; check "fixture: the work branch reaches the remote" 0 $?
+git checkout -qb trunk "$base"
+GIT_AUTHOR_EMAIL=5097759+someone@users.noreply.github.com GIT_COMMITTER_EMAIL=noreply@github.com \
+  COMMIT_IDENTITY_OVERRIDE="fixture: github squash-merge" git commit -q --allow-empty -m squashed
+COMMIT_IDENTITY_OVERRIDE="fixture: github squash-merge" push trunk
+check "fixture: the trunk commit reaches the remote" 0 $?
+git fetch -q origin >/dev/null 2>&1
+check "fixture: origin/trunk is fetched" 0 $?
+git checkout -q work
+git rebase -q origin/trunk >/dev/null 2>&1
+check "fixture: the work branch rebases onto origin/trunk" 0 $?
+git push --force-with-lease origin "HEAD:refs/heads/work" >"$tmp/out" 2>&1
+check "a branch rebased onto a remote commit with a foreign committer pushes with lease" 0 $?
+
+# the same push must still refuse a foreign commit replayed locally on top
+git -c user.email=real@gmail.com commit -q --allow-empty -m replayedagain
+git push --force-with-lease origin "HEAD:refs/heads/work" >"$tmp/out" 2>&1
+check "a locally replayed foreign commit on an existing branch is still refused" 1 $?
+grep -q "real@gmail.com" "$tmp/out"; check "that refusal names the replayed email" 0 $?
+git reset -q --hard HEAD~1
+git checkout -q main
+
 exit $fail
