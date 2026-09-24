@@ -790,7 +790,12 @@ The controller merges on a repo Chris owns; Chris reads it after via
    it, is recorded twice. Its PR-body disposition is the first record.
    Beside it, the controller appends one line for it to
    `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl`, in § Review's
-   `leftover` grammar, under the Codex finding's own id. That sidecar is
+   `leftover` grammar, under the id `codex-<phase>-<label>`: the pass's
+   `phase` (`gate`, `second` or `third`) and the label Codex gave the
+   finding, as in `codex-second-1`. The PR-body disposition cites the same
+   id. Codex numbers each pass's findings from 1, so a bare label repeats
+   across passes, and `runfile.py leftover` refuses a sidecar that carries
+   one id twice (#1124). That sidecar is
    what the sweep harvests at landing, and the verification pass wrote it
    before any Codex pass ran, so a leftover kept only in the PR body never
    reaches a sweep.

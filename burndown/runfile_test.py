@@ -346,7 +346,7 @@ def refusal_of(sidecar, root):
     except runfile.RunFileError as exc:
         assert runfile.load("burn-1", root=root)["leftovers"] == []
         return str(exc)
-    raise AssertionError("a foreign sidecar was accepted")
+    raise AssertionError("the sidecar was accepted")
 
 
 def test_a_valid_sidecar_from_another_pr_is_refused():
@@ -475,6 +475,27 @@ def test_a_line_with_no_outcome_or_an_unknown_outcome_is_refused():
     _, added = runfile.leftover("burn-1", 901, 950, recognised,
                                 root=root)
     assert added == [], added
+
+
+def test_a_sidecar_carrying_one_id_twice_is_refused_by_both_lines():
+    # #1124: two Codex passes each number their findings from 1, so a gate
+    # and a second-pass leftover both filed under "1" once copied one and
+    # dropped the other without a word, while `sweep.py counts` over the
+    # same file counted both.
+    def item(file):
+        return {"id": "1", "outcome": "leftover", "file": file,
+                "title": "t", "severity": "medium", "text": "x"}
+    sidecar = sidecar_of(item("a.py"), {"id": "S1", "outcome": "fixed",
+                                        "sha": "0123abc"}, item("b.py"))
+    got = refusal_of(sidecar, landed_root())
+    assert f"{sidecar}:3" in got and "line 1" in got and "'1'" in got, got
+    run = {"clumps": [{"tickets": [901], "landed": "abc1234"}]}
+    try:
+        sweep.counts(run, os.path.dirname(sidecar))
+    except runfile.RunFileError as exc:
+        assert f"{sidecar}:3" in str(exc), exc
+    else:
+        raise AssertionError("sweep counts read a duplicated id")
 
 
 def test_a_second_pr_for_the_same_clump_and_finding_id_is_refused():

@@ -123,6 +123,13 @@ PR that genuinely left nothing. It also prints `copied N leftover(s) from
 through the same reader (`runfile.read_dispositions`), so it refuses the same
 lines rather than counting low.
 
+A line whose `id` an earlier line of the same sidecar already carries is
+refused by both line numbers (#1124). Every reader joins on the id, so
+before this refusal `leftover` copied the first of two `leftover` lines and
+skipped the second without a word, while `counts` counted both. Codex numbers
+each pass's findings from 1, which is why a Codex-pass leftover's id carries
+its pass (`implement/SKILL.md` § The merge).
+
 `<dispositions sidecar>` must be named `dispositions-<n>.jsonl` with `<n>` one
 of the clump's tickets, else it is refused (#1084). The name is checked
 after the lines are read and the clump is found to have landed, so a

@@ -381,7 +381,9 @@ def read_dispositions(sidecar_path):
     """Every line of a dispositions sidecar (`implement/SKILL.md` § Review),
     in order, as `(line number, object)`. A line that is not a JSON object
     with one of the five sidecar outcomes is refused by file and line — why
-    it is not skipped: `references/run-file.md` § Leftovers."""
+    it is not skipped: `references/run-file.md` § Leftovers. So is a second
+    line carrying an id an earlier line already used (#1124): every reader
+    joins on the id, and one of the two would be dropped or counted twice."""
     try:
         with open(sidecar_path) as fh:
             raw_lines = fh.readlines()
@@ -389,6 +391,7 @@ def read_dispositions(sidecar_path):
         raise RunFileError(
             f"could not read {sidecar_path}: {exc.strerror}") from exc
     out = []
+    seen = {}
     for n, raw in enumerate(raw_lines, start=1):
         raw = raw.strip()
         if not raw:
@@ -404,6 +407,13 @@ def read_dispositions(sidecar_path):
                 f"{sidecar_path}:{n} is not a dispositions sidecar line — "
                 f"its outcome is {outcome!r}, not one of "
                 f"{', '.join(_SIDECAR_OUTCOMES)}")
+        fid = obj.get("id")
+        if isinstance(fid, str):
+            if fid in seen:
+                raise RunFileError(
+                    f"{sidecar_path}:{n} repeats finding id {fid!r} from "
+                    f"line {seen[fid]} — one line per finding")
+            seen[fid] = n
         out.append((n, obj))
     return out
 
