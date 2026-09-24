@@ -141,7 +141,7 @@ too.
    `runfile.py clump` — its workspace and its worker's herdr agent name, or
    step 1's resume has nothing to re-announce to — each landing with
    `runfile.py land`, each "PR up" with `runfile.py pr-up <run-id> --clump
-   <n> --pr <n>` as it arrives (§ Liveness reads it), and each landing's leftover findings with `runfile.py
+   <n> --pr <n>` as it arrives, for § Liveness, and each landing's leftover findings with `runfile.py
    leftover <run-id> --clump <n> --pr <n> --from <dispositions sidecar> --head-committed <PR head
    commit's committer date>`, so a restart can pick the run back up with nothing transcribed by hand
    (`references/run-file.md` § Leftovers).
