@@ -405,12 +405,20 @@ def test_unreadable_json_from_the_tracker_is_refused():
 def test_an_unknown_flag_is_usage_not_a_candidate():
     """`tier.py <repo> --help` reached the candidate parser and exited 1 with
     "not a candidate: --help". `--strip` is retired (#1118): the pass strips
-    itself, and an old report-only call must not run the writing pass."""
-    for flag in ("--help", "--strip"):
-        out = subprocess.run([sys.executable, TIER, "caneff/agent-skills", "1=a.md", flag],
-                             capture_output=True, text=True)
-        assert out.returncode == 2, (flag, out)
-        assert "usage: tier.py" in out.stderr, out.stderr
+    itself, and an old report-only call must not run the writing pass.
+
+    The `gh` on `PATH` is a stub that records any call and fails: a flag
+    that slipped through would otherwise write a label onto the real
+    tracker before this test could fail."""
+    with tempfile.TemporaryDirectory(prefix="tier-usage-") as scratch:
+        called = os.path.join(scratch, "gh-called")
+        with only_gh_on_path(f': >"{called}"; exit 99'):
+            for flag in ("--help", "--strip"):
+                out = subprocess.run([sys.executable, TIER, "example/none", "1=a.md", flag],
+                                     capture_output=True, text=True)
+                assert out.returncode == 2, (flag, out)
+                assert "usage: tier.py" in out.stderr, out.stderr
+        assert not os.path.exists(called), "a rejected flag still reached gh"
 
 
 def main():
