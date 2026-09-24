@@ -122,14 +122,17 @@ git branch -qD other-feature
 base=$(git rev-parse HEAD)
 git checkout -qb work "$base"
 git commit -q --allow-empty -m workcommit
-push work
+push work; check "fixture: the work branch reaches the remote" 0 $?
 git checkout -qb trunk "$base"
 GIT_AUTHOR_EMAIL=5097759+someone@users.noreply.github.com GIT_COMMITTER_EMAIL=noreply@github.com \
   COMMIT_IDENTITY_OVERRIDE="fixture: github squash-merge" git commit -q --allow-empty -m squashed
 COMMIT_IDENTITY_OVERRIDE="fixture: github squash-merge" push trunk
+check "fixture: the trunk commit reaches the remote" 0 $?
 git fetch -q origin >/dev/null 2>&1
+check "fixture: origin/trunk is fetched" 0 $?
 git checkout -q work
 git rebase -q origin/trunk >/dev/null 2>&1
+check "fixture: the work branch rebases onto origin/trunk" 0 $?
 git push --force-with-lease origin "HEAD:refs/heads/work" >"$tmp/out" 2>&1
 check "a branch rebased onto a remote commit with a foreign committer pushes with lease" 0 $?
 
