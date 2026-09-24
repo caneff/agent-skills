@@ -46,7 +46,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       continue
     }
   else
-    range=$(git rev-list "$remote_sha..$local_sha") || {
+    range=$(git rev-list "$local_sha" --not "$remote_sha" --remotes="$remote_name") || {
       echo "commit-identity guard (pre-push): refused — could not enumerate the commits $local_ref is pushing between $remote_sha and $local_sha (git rev-list failed); refusing rather than reading that as nothing to check." >&2
       bad=1
       continue
