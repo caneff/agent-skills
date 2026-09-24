@@ -52,12 +52,12 @@ by extension — otherwise the label is stripped at claim and the report says
 so; an unreadable body goes heavy and keeps the label), heavy otherwise — a clump is always heavy, because light tier lands
 without a PR and a merged PR's closingIssuesReferences is the only record
 merge-cleanup can clear a clump's claims from. A ready-for-human issue among
-them ends the brief with --chris-merges: the worker builds the clump and
+them puts --chris-merges in the brief: the worker builds the clump and
 Chris merges its PR. --model defaults to sonnet.
 
---run <run-id> puts `--run <run-id>` in the brief, after --chris-merges: a
-burn's controller always passes its run id, so the worker knows a run file is
-under it and leaves the leftover sweep to the burn. A brief with no --run is
+--run <run-id> puts `--run <run-id>` in the brief. A burn's controller, a
+spec run's included, always passes its run id, so the worker knows a run file
+is under it and leaves the leftover sweep to the run. A brief with no --run is
 a worker with no run file under it, which files its own per-PR sweep. The id
 follows burndown/runfile.py's grammar and is refused otherwise; spec mode
 refuses --run, since a spec run keeps its own run file.
