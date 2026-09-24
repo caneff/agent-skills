@@ -295,6 +295,8 @@ def test_disposition_line_rejects_a_leftover_missing_file_title_or_severity():
     for key in ("file", "title", "severity"):
         bad = {k: v for k, v in full.items() if k != key}
         assert t.parse_disposition_line(json.dumps(bad)) is None, key
+        for wrong in ("", 7, None):
+            assert t.parse_disposition_line(json.dumps({**full, key: wrong})) is None, (key, wrong)
 
 
 def test_tally_sidecars_counts_the_shared_fixture_with_no_undisposed():
