@@ -195,7 +195,17 @@ of filing another — a fresh render of the run's own leftovers, with any
 `## <file>` section already in the current body that a fold (below) put
 there kept as it stands, since a fold's own items never reappear in
 `sweep.py render`'s output and a bare overwrite would drop them —
-`gh issue edit "$sweep" --repo <owner/name> --body-file <path>`. Exit 0 and no output:
+`gh issue edit "$sweep" --repo <owner/name> --body-file <path>`. The finished body (render, then the
+kept sections) goes through the one filter before the edit —
+
+```
+{ python3 burndown/sweep.py render <run-id>; <kept sections>; } \
+  | python3 burndown/sweep.py blocked-by > <path>
+```
+
+— which drops any `## Blocked by` already in it and appends the one
+`None — can start immediately.` A body with none reads **unresolved** to
+`burndown/frontier.py` and is never dispatched. Exit 0 and no output:
 render the run's leftovers —
 
 ```
@@ -205,7 +215,9 @@ python3 burndown/sweep.py render <run-id>
 groups them by file, one bullet per item naming its ticket(s), clump,
 PR, finding id, severity and text — and file **its stdout** through
 `/file-ticket`, titled `Sweep: leftovers from burn <run-id>`, labelled
-`ready-for-agent`, with `## Blocked by` `None — can start immediately.` A
+`ready-for-agent`, with `## Blocked by` `None — can start immediately.` (`/file-ticket`
+writes it on first filing; only the update path below uses `sweep.py
+blocked-by`, so a body never carries two). A
 run with **zero leftovers files nothing**: stdout is empty and the
 "nothing to file" notice goes to stderr, so a caller piping stdout
 straight into `/file-ticket` files nothing rather than a ticket whose body

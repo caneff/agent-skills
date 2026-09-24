@@ -10,6 +10,11 @@ that the run has no leftovers and prints nothing to file on stdout. This is
 the renderer #1029 left for #1030: the run file was already the store,
 nothing here writes to it.
 
+    python3 burndown/sweep.py blocked-by < <body>
+
+prints the body ending in exactly one `## Blocked by` section (#1130): the
+form both filing and updating a sweep pipe the finished body through.
+
     python3 burndown/sweep.py counts <run-id> --repo <checkout> | --reviews-dir <dir>
 
 prints the closing report's three counts — fixed in-round, leftover,
@@ -17,9 +22,11 @@ standalone — read from each landed clump's dispositions sidecar
 (`implement/SKILL.md` § Review's `dispositions-<lowest ticket>.jsonl`, the
 same file the verification pass writes). Nothing here writes one either.
 
-Filing the ticket through `/file-ticket` — the label, the `## Blocked by`
-section, and when the controller calls this — is `burndown/SKILL.md`'s own
-step, not this module's: a renderer prints a body, it does not call `gh`.
+Filing the ticket through `/file-ticket` — the label, the first filing's
+`## Blocked by` section, and when the controller calls this — is
+`burndown/SKILL.md`'s own step, not this module's: a renderer prints a body,
+it does not call `gh`. Only an update rewrites the section, through
+`blocked-by`.
 """
 import os
 import re
@@ -28,6 +35,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frontier  # noqa: E402
 import runfile  # noqa: E402
 
 def title(run_id):
@@ -130,6 +138,39 @@ def render_body(leftovers):
                 f"{inline_safe(item['text'])}")
         lines.append("")
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+BLOCKED_BY_TEXT = "None — can start immediately."
+
+
+def with_blocked_by(body):
+    """`body` ending in exactly one `## Blocked by` section. `render_body`
+    emits file sections only and the update path adds a fold's kept sections
+    to them, so neither carries the declaration `/file-ticket` wrote on first
+    filing (#1130); `frontier.blocked_by_section` reads a body with none as
+    unresolved and one with two as ambiguous. Any declaration already in
+    `body` is dropped first, so the call is idempotent."""
+    if not body.strip():
+        return ""  # nothing to file stays nothing (`SKILL.md` § The sweep)
+    lines = body.splitlines()
+    # The reader's own grammar (`frontier.visible`, `_HEADING`, `_INLINE`):
+    # a fenced or quoted `Blocked by` is not a declaration and is kept.
+    seen = {i for i, _ in frontier.visible(lines)}
+    kept = []
+    skipping, preamble = False, True
+    for i, line in enumerate(lines):
+        heading = i in seen and frontier._ANY_HEADING.match(line)
+        if heading:
+            preamble = False
+            skipping = bool(frontier._HEADING.match(line))
+        if skipping:
+            continue
+        if preamble and i in seen and frontier._INLINE.match(line):
+            continue
+        kept.append(line)
+    text = "\n".join(kept).rstrip("\n")
+    return (text + "\n\n" if text else "") + \
+        f"## Blocked by\n\n{BLOCKED_BY_TEXT}\n"
 
 
 def default_reviews_dir(repo_root):
@@ -236,7 +277,16 @@ def main(argv):
     where.add_argument("--reviews-dir",
                    help="the sidecar directory itself, instead of --repo")
 
+    subs.add_parser(
+        "blocked-by",
+        help="read a sweep body on stdin, print it ending in exactly one "
+             "`## Blocked by` section")
+
     args = parser.parse_args(argv[1:])
+
+    if args.command == "blocked-by":
+        print(with_blocked_by(sys.stdin.read()), end="")
+        return 0
 
     override = os.environ.get("BURNDOWN_CACHE_DIR")
     root = os.path.expanduser(override) if override else None

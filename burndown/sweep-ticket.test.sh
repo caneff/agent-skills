@@ -91,6 +91,10 @@ check_in "$sweep_text" 'a fold (below) put there kept as it stands' 'burndown/SK
 check_in "$sweep_text" 'its file sections only' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'split("\n## Blocked by")[0]' 'burndown/SKILL.md § The sweep'
 
+# #1130: the update path must end in exactly one `## Blocked by`, or the
+# frontier reads the sweep as unresolved and never dispatches it.
+check_in "$sweep_text" 'burndown/sweep.py blocked-by' 'burndown/SKILL.md § The sweep'
+
 # The run report's three counts. Each needle carries the bold emphasis
 # markers around its own word: a bare 'leftover' matches "leftovers" six
 # times over in surrounding prose, and a bare 'standalone' matches "stay

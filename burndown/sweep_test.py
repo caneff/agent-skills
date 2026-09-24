@@ -12,6 +12,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frontier  # noqa: E402
 import runfile  # noqa: E402
 import sweep  # noqa: E402
 
@@ -376,6 +377,63 @@ def test_cli_counts_refuses_both_repo_and_reviews_dir():
     got = cli(root, "counts", "burn-w", "--repo", "/x", "--reviews-dir", "/y")
     assert got.returncode == 2, got
     assert "not allowed with" in got.stderr, got.stderr
+
+
+def test_an_updated_sweep_body_after_render_and_fold_declares_one_blocked_by():
+    # #1130: the update path rewrites the body from a fresh render plus a
+    # fold's kept sections, neither of which carries `## Blocked by`; the
+    # frontier reads a body with none as unresolved and never dispatches it.
+    fresh = sweep.render_body([leftover(
+        1, [901], 950, "S1", "a.py", "t", "hard", "x")])
+    fold = "## b.py\n\n- **P1** (medium) t2 — clump #2, #902, PR #951: y\n"
+    body = sweep.with_blocked_by(fresh + "\n" + fold)
+    assert frontier.blocked_by_section(fresh + "\n" + fold) is None
+    assert frontier.blocked_by_section(body) == sweep.BLOCKED_BY_TEXT, body
+    assert frontier.section_blockers(
+        frontier.blocked_by_section(body)) == ([], None), body
+    assert body.count("## Blocked by") == 1, body
+    assert body.index("## b.py") < body.index("## Blocked by"), body
+
+
+def test_with_blocked_by_replaces_a_declaration_already_in_the_body():
+    # A kept section copied from the current body may carry the old
+    # declaration; two would read AMBIGUOUS.
+    old = "## a.py\n\n- item\n\n## Blocked by\n\n- None — can start immediately.\n"
+    body = sweep.with_blocked_by(old)
+    assert body.count("## Blocked by") == 1, body
+    assert frontier.blocked_by_section(body) == sweep.BLOCKED_BY_TEXT, body
+    assert sweep.with_blocked_by(body) == body
+
+
+def test_with_blocked_by_keeps_sections_after_the_old_declaration():
+    old = ("## a.py\n\n- one\n\n## Blocked by\n\n- #7\n\n"
+           "## b.py\n\n- two\n")
+    body = sweep.with_blocked_by(old)
+    assert "## b.py" in body and "- two" in body, body
+    assert "#7" not in body, body
+
+
+def test_with_blocked_by_reads_fences_and_inline_forms_like_the_frontier():
+    fenced = "## a.py\n\n```\n## Blocked by\n- x\n```\n\n- tail\n"
+    body = sweep.with_blocked_by(fenced)
+    assert "```\n## Blocked by\n- x\n```" in body and "- tail" in body, body
+    assert frontier.blocked_by_section(body) == sweep.BLOCKED_BY_TEXT, body
+    inline = "Blocked by: #7\n\n## a.py\n\n- item\n"
+    body = sweep.with_blocked_by(inline)
+    assert frontier.blocked_by_section(body) == sweep.BLOCKED_BY_TEXT, body
+
+
+def test_with_blocked_by_on_an_empty_body_stays_empty():
+    assert sweep.with_blocked_by("") == ""
+    assert sweep.with_blocked_by("\n \n") == ""
+
+
+def test_cli_blocked_by_appends_the_section_to_stdin():
+    got = subprocess.run([sys.executable, SWEEP, "blocked-by"],
+                         input="## a.py\n\n- item\n", capture_output=True,
+                         text=True)
+    assert got.returncode == 0, got
+    assert frontier.blocked_by_section(got.stdout) == sweep.BLOCKED_BY_TEXT, got
 
 
 def main():
