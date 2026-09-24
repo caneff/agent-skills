@@ -45,7 +45,7 @@ fn is_code_path(token: &str) -> bool {
     if CODE_BASENAMES.contains(&name.as_str()) || CODE_FILENAMES.contains(&name.as_str()) {
         return true;
     }
-    if PROSE_TOKENS.contains(&name.as_str()) {
+    if !token.contains('/') && PROSE_TOKENS.contains(&name.as_str()) {
         return false;
     }
     match name.rsplit_once('.') {
@@ -89,6 +89,8 @@ mod tests {
         for body in ["i.e. this", "e.g. that", "bump to v1.2 now", "runs on Node.js", "read/write and/or edit", "version 3.10.2"] {
             assert_eq!(first_code_target(body), None, "{body}");
         }
+        // A product name is prose; a path ending in one is a file.
+        assert_eq!(first_code_target("edit scripts/node.js"), Some("scripts/node.js".into()));
     }
 
     #[test]
