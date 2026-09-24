@@ -1216,6 +1216,25 @@ def test_a_run_file_written_before_pr_up_existed_still_reads():
     assert runfile.load("r-pr4", root)["clumps"][0]["pr_up"] is None
 
 
+def test_a_run_file_holding_a_pr_up_that_is_not_a_pr_number_is_refused():
+    root = cache()
+    runfile.start("r-pr6", 2, "dc", root)
+    runfile.clump("r-pr6", [401], "/w/401", "sm-401", root)
+    target = runfile.path("r-pr6", root)
+    for bad in ("7", 0, True):
+        with open(target) as fh:
+            raw = json.load(fh)
+        raw["clumps"][0]["pr_up"] = bad
+        with open(target, "w") as fh:
+            json.dump(raw, fh)
+        try:
+            runfile.load("r-pr6", root)
+        except runfile.RunFileError as exc:
+            assert "PR number" in str(exc), exc
+        else:
+            raise AssertionError(f"a pr_up of {bad!r} loaded")
+
+
 def test_the_cli_records_pr_up_and_shows_it():
     root = cache()
     assert cli(root, "start", "r-pr5", "--slots", "2").returncode == 0
