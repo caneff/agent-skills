@@ -140,7 +140,7 @@ def test_a_clump_records_its_tickets_workspace_and_herdr_agent_name():
     got = runfile.load("burn-1", root=root)["clumps"]
     assert got == [{"tickets": [901, 902], "workspace": "/w/implement-901",
                     "agent": "implement-901-42", "landed": None,
-                    "job": None}], got
+                    "job": None, "pr_up": None}], got
 
 
 def test_a_clump_is_keyed_by_its_lowest_ticket_and_re_registers_in_place():
@@ -1161,6 +1161,70 @@ def test_the_cli_records_a_job_and_shows_it():
     none = cli(root, "job", "r-job5", "--clump", "351", "--none")
     assert none.returncode == 0, none
     assert "no parallel job" in cli(root, "show", "r-job5").stdout
+
+
+# --- "PR up" is on record, so the sweep can tell stalled from waiting (#1148)
+
+def test_a_clump_starts_with_no_pr_up_on_record():
+    root = cache()
+    runfile.start("r-pr", 3, "dc", root)
+    run = runfile.clump("r-pr", [1095], "/w/1095", "skills-1095", root)
+    assert run["clumps"][0]["pr_up"] is None, run
+
+
+def test_a_recorded_pr_up_survives_a_restart_and_a_re_register():
+    """A resumed controller's sweep reads this record, not its context: a
+    `done` pane whose "PR up" was never recorded reads `stalled`."""
+    root = cache()
+    runfile.start("r-pr2", 3, "dc", root)
+    runfile.clump("r-pr2", [1095], "/w/1095", "skills-1095", root)
+    runfile.pr_up("r-pr2", 1095, 1160, root)
+    assert runfile.load("r-pr2", root)["clumps"][0]["pr_up"] == 1160
+    runfile.clump("r-pr2", [1095], "/w/1095b", "skills-1095b", root)
+    assert runfile.load("r-pr2", root)["clumps"][0]["pr_up"] == 1160
+
+
+def test_a_pr_up_that_is_not_a_pr_number_or_names_no_clump_is_refused():
+    root = cache()
+    runfile.start("r-pr3", 3, "dc", root)
+    runfile.clump("r-pr3", [1095], "/w/1095", "skills-1095", root)
+    for bad in (0, -1, "1160", True, None):
+        try:
+            runfile.pr_up("r-pr3", 1095, bad, root)
+        except runfile.RunFileError:
+            pass
+        else:
+            raise AssertionError(f"{bad!r} is not a PR number")
+    try:
+        runfile.pr_up("r-pr3", 999, 1160, root)
+    except runfile.RunFileError as exc:
+        assert "#999" in str(exc), exc
+    else:
+        raise AssertionError("a PR-up record must name a clump of this run")
+
+
+def test_a_run_file_written_before_pr_up_existed_still_reads():
+    root = cache()
+    runfile.start("r-pr4", 2, "dc", root)
+    runfile.clump("r-pr4", [401], "/w/401", "sm-401", root)
+    target = runfile.path("r-pr4", root)
+    with open(target) as fh:
+        raw = json.load(fh)
+    del raw["clumps"][0]["pr_up"]
+    with open(target, "w") as fh:
+        json.dump(raw, fh)
+    assert runfile.load("r-pr4", root)["clumps"][0]["pr_up"] is None
+
+
+def test_the_cli_records_pr_up_and_shows_it():
+    root = cache()
+    assert cli(root, "start", "r-pr5", "--slots", "2").returncode == 0
+    assert cli(root, "clump", "r-pr5", "--tickets", "1095", "--workspace",
+               "/w/1095", "--agent", "skills-1095").returncode == 0
+    assert "no PR up" in cli(root, "show", "r-pr5").stdout
+    got = cli(root, "pr-up", "r-pr5", "--clump", "1095", "--pr", "1160")
+    assert got.returncode == 0, got
+    assert "PR #1160 up" in cli(root, "show", "r-pr5").stdout
 
 
 # --- A sidecar older than the PR's head commit is stale (#1085) ------------
