@@ -11,7 +11,7 @@ python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <pat
 python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
 python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
 python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
-python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --head-committed <ISO>
+python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --pr-body <path>
 python3 burndown/runfile.py show     <run-id>
 python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 ```
@@ -105,7 +105,7 @@ closes, the PR it landed on, and the finding's own `id`, `file`, `title`,
 not retyped.
 
 ```
-python3 burndown/runfile.py leftover <run-id> --clump 905 --pr 950 --from <dispositions sidecar> --head-committed <ISO>
+python3 burndown/runfile.py leftover <run-id> --clump 905 --pr 950 --from <dispositions sidecar> --pr-body <path>
 ```
 
 reads every `outcome: leftover` line of `<dispositions sidecar>` — the
@@ -123,6 +123,13 @@ PR that genuinely left nothing. It also prints `copied N leftover(s) from
 through the same reader (`runfile.read_dispositions`), so it refuses the same
 lines rather than counting low.
 
+A line whose `id` an earlier line of the same sidecar already carries is
+refused by both line numbers (#1124). Every reader joins on the id, so
+before this refusal `leftover` copied the first of two `leftover` lines and
+skipped the second without a word, while `counts` counted both. Codex numbers
+each pass's findings from 1, which is why a Codex-pass leftover's id carries
+its pass (`implement/SKILL.md` § The merge).
+
 `<dispositions sidecar>` must be named `dispositions-<n>.jsonl` with `<n>` one
 of the clump's tickets, else it is refused (#1084). The name is checked
 after the lines are read and the clump is found to have landed, so a
@@ -132,18 +139,47 @@ provenance there is: without the check, another PR's sidecar attributes its
 leftovers to this clump for good, and one holding no leftover records zero
 and exits clean.
 
-`--head-committed <ISO>` is the PR head commit's committer date
-(`gh pr view <pr> --json commits --jq '.commits[-1].committedDate'`). A
-sidecar whose mtime is older is refused: a disposition changed after the
-verification pass rewrites its sidecar line
-(`implement/SKILL.md` § The merge), so a file older than the head commit
-was not rewritten after the fix that commit holds (#1085). It cannot see a
-ruling that adds no commit, or a file whose mtime moved with no line
-changing. A head commit that moved with no disposition changing (a rebase,
-a fix that touched no finding) also trips it: read the sidecar against the
-PR body, then pass `--allow-stale`. `--allow-stale` skips
-the check; one of the two flags is required, so omitting the check is
-a choice and never a default.
+`--pr-body <path>` is the PR's body, as
+`gh pr view <pr> --repo <owner/name> --json body --jq .body` prints it; a
+process substitution, `--pr-body <(gh pr view ...)`, passes it without a
+file. Only the body's Decisions made section is read. Its lines cite a
+finding in the shapes PR bodies here are written in: ids leading a list
+item, alone or grouped by commas or "and" (`- S3, S5, P2: leftover`),
+bolded or not, or one named as `sidecar <id>` at the end of the line. A line
+naming an id with no outcome word records nothing, and when several lines
+cite one id the last is its record, since a ruling may be appended below the
+first. A line states its outcome when the word right after its first colon
+outside parentheses is one of `fixed`, `disputed`, `filed`, `handed back` or
+`leftover`, and the sidecar must hold exactly that. A line that only mentions
+outcome words, as in `S1 (hard): overflows. Claimed fixed; contested.
+leftover.`, disagrees when the sidecar's outcome is not among them. The
+command refuses:
+
+- a sidecar line the body contradicts. A disposition changed after the
+  verification pass rewrites its sidecar line in the same step that records
+  it in the PR body (`implement/SKILL.md` § The merge), so a disagreement is
+  a step that reached one record and not the other (#1085).
+- a leftover the body states and the sidecar has no line for:
+  `implement/SKILL.md` § The merge's
+  case of a leftover kept only in the PR body, which never reaches a sweep.
+- a body whose Decisions made cites none of the sidecar's ids, which is
+  another PR's body or one this reader cannot parse at all.
+- a body with no Decisions made section, which covers the empty file a
+  failed `gh pr view` leaves behind.
+
+A sidecar id the body does not cite is not refused: absent is not
+disagreement, and refusing it would refuse every line shape the reader
+misses. Run over the 40 most recent merged PRs with a sidecar on disk, the
+check passed 38 and refused two, each a body and sidecar that really
+disagree (`docs/research/2026-09-24-pr-body-check-probe.md`).
+
+The check compares content, not times. A commit that changed no
+disposition, such as a doc fix, a test-only witness or a re-wrap, refuses
+nothing. The mtime guard it replaced refused every one of those, and in
+burn-2026-09-23 the controller overrode it on four PRs out of four (#1147).
+It cannot see a disposition changed in neither record. `--allow-stale`
+skips the check; one of the two flags is required, so omitting the check
+is a choice and never a default.
 
 `land` comes first: a clump with no recorded landing is refused, so a PR
 that may never land cannot persist leftovers nothing can later remove.

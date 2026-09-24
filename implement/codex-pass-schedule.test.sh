@@ -188,7 +188,11 @@ check_in "$merge_section" 'no worker fix round follows it' 'implement/SKILL.md �
 # verification pass wrote, in § Review's leftover grammar (P2, ruled by the
 # controller on PR 1080).
 check_in "$merge_section" 'the controller appends one line for it to `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl`' 'implement/SKILL.md § The merge'
-check_in "$merge_section" "in § Review's \`leftover\` grammar, under the Codex finding's own id" 'implement/SKILL.md § The merge'
+check_in "$merge_section" "in § Review's \`leftover\` grammar, under the id \`codex-<phase>-<label>\`" 'implement/SKILL.md § The merge'
+# Codex numbers each pass's findings from 1, so a bare Codex id repeats
+# across passes; the phase prefix is what keeps two leftovers apart (#1124).
+check_in "$merge_section" 'as in `codex-second-1`' 'implement/SKILL.md § The merge'
+check_absent_in "$merge_section" "under the Codex finding's own id" 'implement/SKILL.md § The merge'
 check_absent_in "$whole_file" 'there is no third Codex run' 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'there is no worker fix-and-re-run cycle left' 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'the no-third-run ceiling' 'implement/SKILL.md (whole file)'
