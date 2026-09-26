@@ -14,11 +14,16 @@ neither door: say so and stop.
 ## Dispatch
 
 ```
-implement-dispatch <n> [<n>...] [--model sonnet|opus]
+implement-dispatch <n> [<n>...] [--model sonnet|opus] [--run <run-id>]
 implement-dispatch --spec <n> [--slots <k>] [--model sonnet|opus]
 ```
 
 `--slots` defaults to 5 and goes into the nested brief either way.
+A burn's controller always passes `--run <run-id>` on a plain dispatch, and
+it goes into the brief: that is how the worker knows a run file is under it
+(§ The PR). A spec run is a burn to its own slices, so it passes its own run
+id to them; a dispatch outside any run passes none. `--spec` refuses the flag,
+since the spec run keeps its own run file.
 
 `sonnet` for an ordinary ticket, `opus` for a subtle seam — `--spec` mode
 defaults to `opus` instead. Plain mode refuses an issue labelled `spec`,
@@ -45,7 +50,9 @@ ticket lands, and on a repo Chris owns you merge its PR (§ The merge).
 ## The brief
 
 The worker starts with `/implement <n> [<n>...] --tier light|heavy
---controller "<name>"`, plus `--chris-merges` on a `ready-for-human` ticket.
+--controller "<name>" [--run <run-id>]`, plus `--chris-merges` on a
+`ready-for-human` ticket. `--run <run-id>` means a burn dispatched you and its
+run file is under you; its absence means none is (§ The PR).
 Every ticket named is `in-progress` and assigned to you already (a
 `ready-for-human` ticket keeps its `ready-for-human` label too); build them
 all. Several numbers are one clump: one workspace, one branch named for the
@@ -206,9 +213,8 @@ No PR and no reviewer; Chris reads the log after.
    finding, under the severity mapping below. A finding that is not high and
    not fixed in the round takes `leftover`: no ticket of its own, only a
    sidecar line (step 2) and `leftover` in prose. A burn's own sweep, one
-   ticket per run, is `burndown/SKILL.md` § The sweep; a worker with **no
-   run file** under it — dispatched directly through `/implement`, never
-   through `burndown`'s loop (`burndown/SKILL.md` § The loop step 8) —
+   ticket per run, is `burndown/SKILL.md` § The sweep; a worker whose
+   brief carries **no `--run <run-id>`** has no run file under it and
    files its own per-PR sweep instead, at report time: this file's § The PR
    below.
    On a repo whose `origin` owner isn't
@@ -402,8 +408,12 @@ The body has these sections and nothing else:
   ticket number), handed back (with the command) or left over.
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
 
-**A worker with no run file under it** (§ Review) files one more ticket
-now, before sending "PR up": read this PR's own dispositions sidecar,
+**A worker whose brief carries no `--run <run-id>`** (§ Review) has no run
+file under it, and files one more ticket now, before sending "PR up". A
+brief carrying `--run <run-id>` files nothing here: the burn's own sweep
+harvests that run's leftovers. The flag is the only signal — nine workers in
+`burn-2026-09-23` filed a per-PR sweep under a run file they could not see
+(#1146). Without the flag: read this PR's own dispositions sidecar,
 `dispositions-<n>.jsonl` (§ Review step 2 already wrote it), for its
 `leftover` lines. None: file nothing, the same zero-leftovers rule the
 burn sweep uses. Any: **check first, the same idempotent search the burn

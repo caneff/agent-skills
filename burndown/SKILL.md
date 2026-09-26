@@ -131,7 +131,8 @@ too.
    `--live <n>`, the workers already running; omitting it is refused.
 8. Dispatch and merge through
    [`implement`](~/.agents/skills/implement/SKILL.md) § Dispatch, which
-   claims the clump and starts the worker; `implement/SKILL.md` § The merge,
+   claims the clump and starts the worker, passing `--run <run-id>` on
+   every plain `implement-dispatch`; `implement/SKILL.md` § The merge,
    which merges and cleans up, is the controller's own step there. The loop
    restates neither grammar. When two in-flight branches turn out to touch
    the same files, the collision procedure, the closure defect it implies,
@@ -238,7 +239,7 @@ folded into the sweep and never in any sidecar — the controller adds its own
 filed-observation count to `counts`' standalone number by hand.
 
 **A per-PR sweep found on the frontier** (`implement/SKILL.md` § The PR: a
-worker with no run file under it files one of these, titled
+worker whose brief carries no `--run <run-id>` files one of these, titled
 `Sweep: leftovers from PR #<n>`) is not a second sweep ticket for this
 run. `runfile.py leftover` cannot pull its items into the run file — it
 refuses any PR that is not one of this run's own landed clumps — so fold
