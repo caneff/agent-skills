@@ -818,6 +818,16 @@ The controller merges on a repo Chris owns; Chris reads it after via
    before any Codex pass ran, so a leftover kept only in the PR body never
    reaches a sweep.
 
+   On a PR whose worker brief carried no `--run <run-id>`, appending a Codex
+   `leftover` is not the end: the worker filed its per-PR sweep at "PR up",
+   before any Codex pass, so nothing reads the sidecar again. The controller
+   then updates or files the per-PR sweep through § The PR's idempotent title
+   search (same `--jq` exact-title filter; one hit → `gh issue edit "$sweep"`,
+   no hit → file `Sweep: leftovers from PR #<n>` through `/file-ticket`, more
+   than one → stop and tell Chris), adding the Codex leftovers to its body
+   (#1125). A burn PR files nothing here: the burn's own sweep harvests the
+   sidecar (`burndown/SKILL.md` § The sweep).
+
    **A disposition that changes after the verification pass rewrites its
    sidecar line** (#1085). Whoever changes it — the controller's read of an
    in-round fix, or a ruling — rewrites that finding's line in
@@ -846,7 +856,25 @@ The controller merges on a repo Chris owns; Chris reads it after via
    Chris the table and a keep/drop recommendation: keep if at least one
    codex-only confirmed finding would have shipped a real bug, drop if the
    pass only repeated the Claude axes or raised noise.
-4. Merge:
+4. Merge. Before the merge, re-run the seam on the PR as it will land
+   (#1145): GitHub's CLEAN is a textual-merge verdict, not a test verdict, and
+   two PRs sharing no file each pass their own gate and break `<default>`
+   together (burn-2026-09-23: #1107 and #1096). Skip only when
+   `origin/<default>` has not moved past the PR's merge base
+   (`git merge-base --is-ancestor origin/<default> origin/implement-<n>`
+   exits 0). Otherwise, from the primary checkout, after `git fetch origin`:
+
+   ```
+   git worktree add --detach <absolute path under .scratch/> origin/<default>
+   cd <that path> && git merge --no-edit origin/implement-<n> && bash tests/all.sh
+   ```
+
+   State the worker and core budget in the run (the repo's gate is serial;
+   a repo whose gate fans out says its count). The controller merges only on
+   green. A merge conflict or a red gate blocks the merge: send the worker
+   the failure to fix. Remove that worktree with `git worktree remove` when
+   done. A repo with no `tests/all.sh` runs the suites the PR touches plus
+   any test that imports a file `<default>` changed since the base.
 
    ```
    gh pr merge <pr> --repo <owner/name> --squash
