@@ -821,12 +821,15 @@ The controller merges on a repo Chris owns; Chris reads it after via
    On a PR whose worker brief carried no `--run <run-id>`, appending a Codex
    `leftover` is not the end: the worker filed its per-PR sweep at "PR up",
    before any Codex pass, so nothing reads the sidecar again. The controller
-   then updates or files the per-PR sweep through § The PR's idempotent title
-   search (same `--jq` exact-title filter; one hit → `gh issue edit "$sweep"`,
-   no hit → file `Sweep: leftovers from PR #<n>` through `/file-ticket`, more
-   than one → stop and tell Chris), adding the Codex leftovers to its body
-   (#1125). A burn PR files nothing here: the burn's own sweep harvests the
-   sidecar (`burndown/SKILL.md` § The sweep).
+   then updates or files the per-PR sweep by § The PR's idempotent title
+   search, rules and all: a non-zero exit from the search stops you and is
+   never read as no hit; no hit files through `/file-ticket` in #1030's body
+   shape, labelled `ready-for-agent`; one hit is edited with the worker's
+   existing items kept and the Codex leftovers added, since `--body-file`
+   replaces the whole body (#1125). A brief that carried `--run <run-id>`
+   files nothing here: the burn's own sweep harvests the sidecar
+   (`burndown/SKILL.md` § The sweep). A sweep the worker never filed (no
+   leftovers at "PR up") is filed here the same way.
 
    **A disposition that changes after the verification pass rewrites its
    sidecar line** (#1085). Whoever changes it — the controller's read of an
@@ -859,22 +862,24 @@ The controller merges on a repo Chris owns; Chris reads it after via
 4. Merge. Before the merge, re-run the seam on the PR as it will land
    (#1145): GitHub's CLEAN is a textual-merge verdict, not a test verdict, and
    two PRs sharing no file each pass their own gate and break `<default>`
-   together (burn-2026-09-23: #1107 and #1096). Skip only when
-   `origin/<default>` has not moved past the PR's merge base
-   (`git merge-base --is-ancestor origin/<default> origin/implement-<n>`
-   exits 0). Otherwise, from the primary checkout, after `git fetch origin`:
+   together (burn-2026-09-23: #1107 and #1096). Run `git fetch origin` first,
+   then skip only when `origin/<default>` has not moved past the PR's merge
+   base (`git merge-base --is-ancestor origin/<default> <headRefOid>` exits
+   0, `headRefOid` being step 2's). Otherwise, from the primary checkout:
 
    ```
    git worktree add --detach <absolute path under .scratch/> origin/<default>
-   cd <that path> && git merge --no-edit origin/implement-<n> && bash tests/all.sh
+   cd <that path> && git merge --no-edit <headRefOid> && <the repo's seam>
    ```
 
-   State the worker and core budget in the run (the repo's gate is serial;
-   a repo whose gate fans out says its count). The controller merges only on
-   green. A merge conflict or a red gate blocks the merge: send the worker
-   the failure to fix. Remove that worktree with `git worktree remove` when
-   done. A repo with no `tests/all.sh` runs the suites the PR touches plus
-   any test that imports a file `<default>` changed since the base.
+   `<the repo's seam>` is the command `AGENTS.md` § End-to-end seam declares
+   (`bash tests/all.sh` here); a repo declaring none: tell Chris and merge
+   nothing on this step's say-so. State the run's worker and core count in
+   your status line before you launch it. The controller merges only on
+   green. A merge conflict or a red seam blocks the merge: send the worker
+   the failure to fix, and its next "PR up" restarts at step 2, so the fix is
+   read and re-run like any other commit. Remove the worktree afterwards with
+   `git worktree remove --force`, since a conflicted merge leaves it dirty.
 
    ```
    gh pr merge <pr> --repo <owner/name> --squash
@@ -909,7 +914,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
 **The one exception: a `ready-for-human` ticket** ("Chris merges"). Nothing
 merges automatically. After step 3 (the Codex pass, if this PR is heavy
-Claude-lane), hand Chris the merge line and the cleanup line, each with the
+Claude-lane) and step 4's re-run of the seam (skipped only as step 4 says;
+a red one goes to the worker, not to Chris), hand Chris the merge line and the cleanup line, each with the
 `! ` prefix and paths expanded, and stop merging and cleaning up yourself;
 Chris merges, cleans up, and the `Closes` check is his. Why: Chris marked
 that work for his own hands, so he sees it before it lands. If step 3 ran,
