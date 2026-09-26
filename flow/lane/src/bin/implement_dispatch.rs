@@ -59,7 +59,9 @@ Chris merges its PR. --model defaults to sonnet.
 spec run's included, always passes its run id, so the worker knows a run file
 is under it and leaves the leftover sweep to the run. A brief with no --run is
 a worker with no run file under it, which files its own per-PR sweep. The id
-follows burndown/runfile.py's grammar and is refused otherwise; spec mode
+follows burndown/runfile.py's grammar and must name a run file that exists,
+<id>.json under $BURNDOWN_CACHE_DIR or else ~/.cache/burndown, as runfile.py
+reads it; either failing is refused before the claim. Spec mode
 refuses --run, since a spec run keeps its own run file.
 
 Several issue numbers are one clump: one worker, one workspace, one branch
@@ -520,6 +522,19 @@ fn valid_run_id(s: &str) -> bool {
         && !s.contains("..")
 }
 
+/// Where `burndown/runfile.py` keeps run `id`: `$BURNDOWN_CACHE_DIR` when
+/// set and non-empty, with a leading `~` expanded, else `~/.cache/burndown`.
+fn run_file_path(id: &str) -> PathBuf {
+    let home = env::var("HOME").unwrap_or_default();
+    let dir = match env::var("BURNDOWN_CACHE_DIR") {
+        Ok(d) if d == "~" => home,
+        Ok(d) if d.starts_with("~/") => format!("{home}{}", &d[1..]),
+        Ok(d) if !d.is_empty() => d,
+        _ => format!("{home}/.cache/burndown"),
+    };
+    Path::new(&dir).join(format!("{id}.json"))
+}
+
 fn valid_slug(s: &str) -> bool {
     let mut parts = s.splitn(2, '/');
     let (Some(a), Some(b)) = (parts.next(), parts.next()) else { return false };
@@ -760,6 +775,12 @@ fn run() -> Result<(), ExitCode> {
         }
         if !valid_run_id(id) {
             return Err(die(format!("not a run id: {id:?} (letters, digits, dash, dot, underscore, starting with a letter or digit)")));
+        }
+        // A well-formed id naming no run would tell the worker a run file
+        // holds its leftovers when none does, and they would be lost.
+        let file = run_file_path(id);
+        if !file.is_file() {
+            return Err(die(format!("no run file for --run {id}: {} is not a file", file.display())));
         }
     }
     let model = args.model.clone().unwrap_or_else(|| mode.default_model().to_string());
