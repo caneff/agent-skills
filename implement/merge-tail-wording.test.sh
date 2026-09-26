@@ -29,7 +29,7 @@ check_in 'Run `git fetch origin` first, then skip only when `origin/<default>` h
 check_in 'git merge-base --is-ancestor origin/<default> <headRefOid>'
 check_in 'git worktree add --detach'
 check_in 'git merge --no-edit <headRefOid> && <the repo'"'"'s seam>'
-check_in 'declares (`bash tests/all.sh` here)'
+check_in '§ End-to-end seam, which is `bash tests/all.sh` here'
 check_in 'The controller merges only on green'
 check_in 'its next "PR up" restarts at step 2'
 check_in 'git worktree remove --force'
