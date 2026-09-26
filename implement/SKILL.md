@@ -468,7 +468,7 @@ instead, the merge line being a claim for the controller to hand over:
 Controller: Chris merges this PR; you dispatched me, so after the Codex pass
   (if heavy) hand him the merge line and the cleanup line per implement/SKILL.md
   § The merge, each with the `! ` prefix:
-  ! gh pr merge <pr> --repo <owner/name> --squash
+  ! gh pr merge <pr> --repo <owner/name> --squash --match-head-commit <headRefOid>
   ! cd <primary checkout> && merge-cleanup --repo <primary checkout> implement-<n>
 ```
 
@@ -881,9 +881,19 @@ The controller merges on a repo Chris owns; Chris reads it after via
    read and re-run like any other commit. Remove the worktree afterwards with
    `git worktree remove --force`, since a conflicted merge leaves it dirty.
 
+   Immediately before the merge, `git fetch origin` again: when
+   `origin/<default>` is no longer the sha the seam's worktree was created
+   from, re-run this step (or, if it is now an ancestor of the head, apply
+   the skip rule).
+
    ```
-   gh pr merge <pr> --repo <owner/name> --squash
+   gh pr merge <pr> --repo <owner/name> --squash --match-head-commit <headRefOid>
    ```
+
+   `--match-head-commit` binds the merge to the head the seam ran on (step
+   2's `headRefOid` on the skip path): GitHub refuses it atomically if the
+   head moved since. The `ready-for-human` merge line below carries the same
+   flag.
 
    No `--delete-branch`: git refuses to delete a branch a worktree has
    checked out, and the merge fails on it; `merge-cleanup` removes the

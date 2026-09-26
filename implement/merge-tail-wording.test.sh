@@ -37,5 +37,16 @@ check_in 'State the run'"'"'s worker and core count'
 check_in "GitHub's CLEAN is a textual-merge verdict, not a test verdict"
 check_in "and step 4's re-run of the seam"
 
+# Codex gate on #1172: the merge is bound to the head the seam ran on, and
+# the base is re-fetched right before it; both merge lines carry the flag.
+check_in 'gh pr merge <pr> --repo <owner/name> --squash --match-head-commit <headRefOid>'
+check_in '`git fetch origin` again: when `origin/<default>` is no longer the sha the seam'"'"'s worktree was created from, re-run this step'
+brief="$(sed -n '/^## Heavy tier$/,/^### The merge$/p' "$skill" | flatten)"
+case "$brief" in *'! gh pr merge <pr> --repo <owner/name> --squash --match-head-commit <headRefOid>'*) ;;
+  *) echo "FAIL: the --chris-merges PR-up merge line lacks --match-head-commit" >&2; fail=1 ;; esac
+n="$(grep -c 'gh pr merge <pr> --repo <owner/name> --squash' "$skill")"
+m="$(grep -c 'gh pr merge <pr> --repo <owner/name> --squash --match-head-commit <headRefOid>' "$skill")"
+[ "$n" -eq "$m" ] || { echo "FAIL: a gh pr merge line in SKILL.md lacks --match-head-commit ($m of $n)" >&2; fail=1; }
+
 [ "$fail" -eq 0 ] && echo "PASS $0"
 exit "$fail"
