@@ -468,7 +468,7 @@ instead, the merge line being a claim for the controller to hand over:
 Controller: Chris merges this PR; you dispatched me, so after the Codex pass
   (if heavy) hand him the merge line and the cleanup line per implement/SKILL.md
   § The merge, each with the `! ` prefix:
-  ! gh pr merge <pr> --repo <owner/name> --squash
+  ! gh pr merge <pr> --repo <owner/name> --squash --match-head-commit <headRefOid>
   ! cd <primary checkout> && merge-cleanup --repo <primary checkout> implement-<n>
 ```
 
@@ -818,6 +818,19 @@ The controller merges on a repo Chris owns; Chris reads it after via
    before any Codex pass ran, so a leftover kept only in the PR body never
    reaches a sweep.
 
+   On a PR whose worker brief carried no `--run <run-id>`, appending a Codex
+   `leftover` is not the end: the worker filed its per-PR sweep at "PR up",
+   before any Codex pass, so nothing reads the sidecar again. The controller
+   then updates or files the per-PR sweep by § The PR's idempotent title
+   search, rules and all: a non-zero exit from the search stops you and is
+   never read as no hit; no hit files through `/file-ticket` in #1030's body
+   shape, labelled `ready-for-agent`; one hit is edited with the worker's
+   existing items kept and the Codex leftovers added, since `--body-file`
+   replaces the whole body (#1125). A brief that carried `--run <run-id>`
+   files nothing here: the burn's own sweep harvests the sidecar
+   (`burndown/SKILL.md` § The sweep). A sweep the worker never filed (no
+   leftovers at "PR up") is filed here the same way.
+
    **A disposition that changes after the verification pass rewrites its
    sidecar line** (#1085). Whoever changes it — the controller's read of an
    in-round fix, or a ruling — rewrites that finding's line in
@@ -846,11 +859,41 @@ The controller merges on a repo Chris owns; Chris reads it after via
    Chris the table and a keep/drop recommendation: keep if at least one
    codex-only confirmed finding would have shipped a real bug, drop if the
    pass only repeated the Claude axes or raised noise.
-4. Merge:
+4. Merge. Before the merge, re-run the seam on the PR as it will land
+   (#1145): GitHub's CLEAN is a textual-merge verdict, not a test verdict, and
+   two PRs sharing no file each pass their own gate and break `<default>`
+   together (burn-2026-09-23: #1107 and #1096). Run `git fetch origin` first,
+   then skip only when `origin/<default>` has not moved past the PR's merge
+   base (`git merge-base --is-ancestor origin/<default> <headRefOid>` exits
+   0, `headRefOid` being step 2's). Otherwise, from the primary checkout:
 
    ```
-   gh pr merge <pr> --repo <owner/name> --squash
+   git worktree add --detach <absolute path under .scratch/> origin/<default>
+   cd <that path> && git merge --no-edit <headRefOid> && <the repo's seam>
    ```
+
+   `<the repo's seam>` is the command declared in `AGENTS.md` § End-to-end seam,
+   which is `bash tests/all.sh` here; a repo declaring none: tell Chris and merge
+   nothing on this step's say-so. State the run's worker and core count in
+   your status line before you launch it. The controller merges only on
+   green. A merge conflict or a red seam blocks the merge: send the worker
+   the failure to fix, and its next "PR up" restarts at step 2, so the fix is
+   read and re-run like any other commit. Remove the worktree afterwards with
+   `git worktree remove --force`, since a conflicted merge leaves it dirty.
+
+   Immediately before the merge, `git fetch origin` again: when
+   `origin/<default>` is no longer the sha the seam's worktree was created
+   from, re-run this step (or, if it is now an ancestor of the head, apply
+   the skip rule).
+
+   ```
+   gh pr merge <pr> --repo <owner/name> --squash --match-head-commit <headRefOid>
+   ```
+
+   `--match-head-commit` binds the merge to the head the seam ran on (step
+   2's `headRefOid` on the skip path): GitHub refuses it atomically if the
+   head moved since. The `ready-for-human` merge line below carries the same
+   flag.
 
    No `--delete-branch`: git refuses to delete a branch a worktree has
    checked out, and the merge fails on it; `merge-cleanup` removes the
@@ -881,7 +924,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
 **The one exception: a `ready-for-human` ticket** ("Chris merges"). Nothing
 merges automatically. After step 3 (the Codex pass, if this PR is heavy
-Claude-lane), hand Chris the merge line and the cleanup line, each with the
+Claude-lane) and step 4's re-run of the seam (skipped only as step 4 says;
+a red one goes to the worker, not to Chris), hand Chris the merge line and the cleanup line, each with the
 `! ` prefix and paths expanded, and stop merging and cleaning up yourself;
 Chris merges, cleans up, and the `Closes` check is his. Why: Chris marked
 that work for his own hands, so he sees it before it lands. If step 3 ran,
