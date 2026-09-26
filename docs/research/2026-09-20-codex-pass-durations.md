@@ -197,3 +197,5 @@ rename landed sooner.
 | 1125 | #1172 | second | 2026-09-26T09:53:25-04:00 | 2026-09-26T09:53:52-04:00 | 0.5 | collected |
 | sudokupad-art#175 | sudokupad-art#178 | gate | 2026-09-26T10:29:47-04:00 | 2026-09-26T10:31:18-04:00 | 1.5 | collected |
 | sudokupad-art#177 | sudokupad-art#180 | gate | 2026-09-26T10:46:41-04:00 | 2026-09-26T10:47:33-04:00 | 0.9 | collected |
+| sudokupad-art#179 | sudokupad-art#182 | gate | 2026-09-26T10:58:34-04:00 | 2026-09-26T10:59:20-04:00 | 0.8 | collected |
+| sudokupad-art#179 | sudokupad-art#182 | second | 2026-09-26T17:53:06-04:00 | 2026-09-26T17:54:02-04:00 | 0.9 | collected |
