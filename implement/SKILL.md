@@ -258,8 +258,10 @@ No PR and no reviewer; Chris reads the log after.
    test included" means: 8 lines in an implementation file plus 2 in its
    own test file is one fix. "Own" means same directory (#1152): a test
    file elsewhere in the tree, such as `tests/test_runfile.py` beside a
-   root `runfile.py`, is a second file, not this fix's test file. The
-   20-line budget cannot be split across
+   root `runfile.py`, is a second file, not this fix's test file. Which
+   file names count as "own" is `check_adjacent.py`'s `own_test_pair` to
+   define, not restated here — a second copy of that list would drift from
+   the checker that actually enforces it. The 20-line budget cannot be split across
    files: a fix touching any other second file is a change, not an
    adjacent fix, and § Build's
    pre-existing-bug rule governs it. Make each adjacent fix in a commit of

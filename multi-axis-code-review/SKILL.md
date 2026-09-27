@@ -577,8 +577,9 @@ report, since its sidecar line carries only `hard` or `judgement`;
 rule. For (c), write the sidecar
 first, then run `python3 ~/.agents/skills/multi-axis-code-review/check_adjacent.py --repo <worktree> --base <fixed point> <dir>/dispositions-<n>.jsonl`:
 it measures every sidecar line with `"scope": "adjacent"` for one file — or
-that file plus its own test file in the same directory (#1152) — a source
-file already in the diff and under 20 changed lines total, and prints
+that file plus its own test file in the same directory, one of the three
+naming patterns `own_test_pair` in `check_adjacent.py` defines (#1152) — a
+source file already in the diff and under 20 changed lines total, and prints
 `BREACH <id>` for each that breaks them, or for any line it cannot read. Judge the other
 two parts — one function and no public seam — by reading the fix commit, and
 fail by id on those the same way. (d) a `disputed: unreachable — <why>`
