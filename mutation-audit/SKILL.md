@@ -63,7 +63,7 @@ covered without re-running mutmut.
    it itself (`auditlib.walk_source`, which prunes `EXCLUDED_DIRS` and
    dot-dirs):
    ```sh
-   python3 ~/.agents/skills/mutation-audit/audit.py --suggest <scope>
+   python3 ~/.agents/skills/mutation-audit/audit.py --suggest <root>
    ```
    This calls `suggest_candidates` — the tested pure seam: a module is a
    candidate when it's a plain module (not `__init__.py`, not a test file,
