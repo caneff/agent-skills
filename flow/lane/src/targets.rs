@@ -27,8 +27,9 @@ const CODE_DIRS: &[&str] = &["bin", "sbin", "hooks", ".githooks", ".husky"];
 /// Extensions `burndown/tier.py` reads as prose; on a path (a token with a `/`),
 /// any other extension is code.
 const PROSE_EXTENSIONS: &[&str] = &["md", "markdown", "txt", "rst"];
-/// Product names that end in a code extension but are prose.
-const PROSE_TOKENS: &[&str] = &["node.js", "next.js", "vue.js", "three.js", "d3.js", "express.js"];
+/// Product names that end in a code extension but are prose. Only the one
+/// the tests exercise; an unlisted one reads as code, the cheap error.
+const PROSE_TOKENS: &[&str] = &["node.js"];
 /// Basenames that are code wherever they sit, whatever their extension: a
 /// skill's body changes what every later session does, and the rest are
 /// extensionless build and run files.
