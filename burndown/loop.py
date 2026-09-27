@@ -1012,19 +1012,18 @@ def herdr_get(agent, timeout):
         ) from None
 
 
-def render_dispatch(picked, held, run_id=None):
-    """One `dispatch` line per pick and, given the run, the
-    `implement-dispatch` command under it — carrying `--run <run-id>`, so
+def render_dispatch(picked, held, run_id):
+    """One `dispatch` line per pick and the `implement-dispatch` command
+    under it — carrying `--run <run-id>`, so
     the flag a burn owes every plain dispatch (`burndown/SKILL.md` § The
     loop step 8) is in the line the controller runs rather than in prose."""
     lines = []
     for c in picked:
         lines.append(f"dispatch  #{key_of(c)}  "
                      + ",".join(f"#{n}" for n in c["tickets"]))
-        if run_id:
-            lines.append("command   implement-dispatch "
-                         + " ".join(str(n) for n in c["tickets"])
-                         + f" --run {run_id}")
+        lines.append("command   implement-dispatch "
+                     + " ".join(str(n) for n in c["tickets"])
+                     + f" --run {run_id}")
     for entry in held:
         # `same_tick` names the other candidate this tick picked ahead of it;
         # otherwise the holder is a live workspace (#971).
@@ -1144,7 +1143,8 @@ def run(argv):
                 # dispatch.
                 print("nothing to dispatch: every free slot is held by a "
                       "declared job")
-                print(render_dispatch([], frontier(candidates, unlanded)["held"]))
+                print(render_dispatch([], frontier(candidates, unlanded)["held"],
+                                      args.run))
                 return 0
             live = len(unlanded)
             room, refusals = box_room(count, args.committed_gb,
