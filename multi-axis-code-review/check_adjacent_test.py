@@ -117,11 +117,20 @@ def test_a_small_one_file_fix_in_a_file_already_in_the_diff_passes():
     assert f"{adjacent_id()}: ok" in result.stdout, result.stdout
 
 
-def test_a_fix_touching_a_second_file_breaches():
+def test_a_fix_touching_an_unrelated_second_file_breaches():
+    root = repo()
+    sha = commit(root, {"a.py": lines(40) + "ticket work\nfix\n",
+                        "b.py": lines(40) + "unrelated\n"}, "fix plus unrelated file")
+    assert_breached(run(root, sidecar(root, sha)), "not one file and its own test file")
+
+
+def test_a_fix_plus_its_own_test_file_passes():
     root = repo()
     sha = commit(root, {"a.py": lines(40) + "ticket work\nfix\n",
                         "a_test.py": "assert fix\n"}, "fix plus test file")
-    assert_breached(run(root, sidecar(root, sha)), "touches 2 files")
+    result = run(root, sidecar(root, sha))
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert f"{adjacent_id()}: ok" in result.stdout, result.stdout
 
 
 def test_twenty_changed_lines_breach_and_nineteen_do_not():

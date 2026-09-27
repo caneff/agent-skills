@@ -5,9 +5,11 @@ parts of implement's adjacent-fix rule (#1025; SKILL.md § 6 runs it).
     check_adjacent.py --repo <worktree> --base <fixed point> <dispositions-<n>.jsonl>
 
 For each line with `"scope": "adjacent"`, its `sha` must name one commit on
-the branch that touches exactly one file, a file the diff from `--base` had
-already changed before that commit, with under 20 changed lines (insertions
-plus deletions, as `git show --numstat` counts them). One line per adjacent
+the branch that touches one file — or that file plus its own test file
+(#1097, #1175) — a source file the diff from `--base` had already changed
+before that commit, with under 20 changed lines total (insertions plus
+deletions, as `git show --numstat` counts them, the test file's included).
+One line per adjacent
 fix: `<id>: ok ...` or `BREACH <id>: <why>`. Exit 0 with no breach, 1 with
 any, 2 on a usage error, an empty sidecar or a repo git cannot read. The
 other two parts of the rule — one function, no public seam — take a
@@ -18,6 +20,7 @@ an absent answer read as a clean one is the shape this check exists to stop.
 """
 import argparse
 import json
+import os
 import subprocess
 import sys
 
@@ -26,6 +29,43 @@ BUDGET = 20  # changed lines, the fix's test included; the fix must be under it
 
 def git(repo, *args):
     return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+
+
+def _test_source_stem(path):
+    """If `path`'s basename looks like a test file, (dirname, source stem,
+    source ext) of the file it would test; else None. Covers this repo's own
+    `<stem>_test.py` convention, pytest's `test_<stem>.py`, and the
+    `<stem>.test.<ext>` convention (e.g. `obs-session.test.mjs`)."""
+    d, base = os.path.split(path)
+    stem, ext = os.path.splitext(base)
+    if not ext:
+        return None
+    if stem.endswith("_test") and len(stem) > len("_test"):
+        return d, stem[: -len("_test")], ext
+    if stem.startswith("test_") and len(stem) > len("test_"):
+        return d, stem[len("test_"):], ext
+    stem2, ext2 = os.path.splitext(stem)
+    if ext2 == ".test" and stem2:
+        return d, stem2, ext
+    return None
+
+
+def own_test_pair(path_a, path_b):
+    """(source, test) if one of `path_a`, `path_b` is the other's own test
+    file, else None. Same directory only (#1152): a same-stem file in a
+    different directory, such as `tests/test_runfile.py` beside a root
+    `runfile.py`, does not count."""
+    for test_path, src_path in ((path_a, path_b), (path_b, path_a)):
+        info = _test_source_stem(test_path)
+        if info is None:
+            continue
+        test_dir, src_stem, src_ext = info
+        src_dir, src_base = os.path.split(src_path)
+        if src_dir != test_dir:
+            continue
+        if os.path.splitext(src_base) == (src_stem, src_ext):
+            return src_path, test_path
+    return None
 
 
 def measure(repo, base, sha):
@@ -43,20 +83,27 @@ def measure(repo, base, sha):
     if stat.returncode != 0:
         return False, f"could not read {sha}: {stat.stderr.strip()}"
     rows = [r.split("\t", 2) for r in stat.stdout.splitlines() if r]
-    if len(rows) != 1:
-        return False, f"touches {len(rows)} files; the rule allows one"
-    added, deleted, path = rows[0]
-    if not (added.isdigit() and deleted.isdigit()):
-        return False, f"{path} is binary; its changed lines cannot be counted"
-    changed = int(added) + int(deleted)
+    if len(rows) not in (1, 2):
+        return False, f"touches {len(rows)} files; the rule allows one file plus its own test file"
+    pair = None
+    if len(rows) == 2:
+        pair = own_test_pair(rows[0][2], rows[1][2])
+        if pair is None:
+            return False, f"touches {rows[0][2]} and {rows[1][2]}, which are not one file and its own test file"
+    for added, deleted, path in rows:
+        if not (added.isdigit() and deleted.isdigit()):
+            return False, f"{path} is binary; its changed lines cannot be counted"
+    changed = sum(int(added) + int(deleted) for added, deleted, _ in rows)
+    paths = " and ".join(path for _, _, path in rows)
     if changed >= BUDGET:
-        return False, f"{changed} changed lines in {path}; the budget is under {BUDGET}"
+        return False, f"{changed} changed lines in {paths}; the budget is under {BUDGET}"
+    source_path = pair[0] if pair else rows[0][2]
     before = git(repo, "diff", "--name-only", f"{base}...{full}^")
     if before.returncode != 0:
         return False, f"could not read the diff before {sha}: {before.stderr.strip()}"
-    if path not in before.stdout.splitlines():
-        return False, f"{path} was not in the diff before this fix"
-    return True, f"{changed} changed lines in {path}"
+    if source_path not in before.stdout.splitlines():
+        return False, f"{source_path} was not in the diff before this fix"
+    return True, f"{changed} changed lines in {paths}"
 
 
 def main(argv=None):
