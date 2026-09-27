@@ -172,6 +172,10 @@ check_in "$merge_section" 'the one place a high finding is not filed' 'implement
 # unbound, a commit pushed after the read passes step 2's CLEAN re-run and
 # merges unreviewed (Codex gate [high] on PR 1080).
 check_in "$merge_section" 'records the head sha it read the fix diff at, beside the finding it answers' 'implement/SKILL.md § The merge'
+# #1173 spec-S4: the recorded sha has a named place, the PR body.
+check_in "$merge_section" '`read at <sha>` appended to that finding'"'"'s line' 'implement/SKILL.md § The merge'
+# #1173 spec-P2: the gate pass's dispositions offer `leftover` and file only a high.
+check_in "$merge_section" 'The worker disposes of each one — fixed in a commit, `disputed: <why>`, filed if it is high, or `leftover`' 'implement/SKILL.md § The merge'
 check_in "$merge_section" "Immediately before step 4, the PR's \`headRefOid\` must still equal that sha" 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'A commit the controller has not read never merges' 'implement/SKILL.md § The merge'
 # § Review's rule text names the second pass too, so a reader starting there

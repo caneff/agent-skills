@@ -730,8 +730,9 @@ The controller merges on a repo Chris owns; Chris reads it after via
    second pass is judged against below: the diff is only half this pass's
    input, and a requirement commented onto the ticket between the two
    passes moves the other half while the sha sits still.
-   The worker disposes of each one
-   (fixed in a commit / `disputed: <why>` / filed), adds each disposition to
+   The worker disposes of each one — fixed in a commit, `disputed: <why>`,
+   filed if it is high, or `leftover`, under § Review's reachability bar
+   first and its severity mapping second — adds each disposition to
    the PR body's Decisions made section (`gh pr edit <pr> --repo
    <owner/name> --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md`), and sends "PR up" again.
    Re-run step 2 (not-draft, CLEAN — commits landed since the first check).
@@ -786,7 +787,9 @@ The controller merges on a repo Chris owns; Chris reads it after via
    over an in-round fix: the controller's read of the fix diff is the
    review of every commit past the second pass's sha, up to the head it
    read. So the controller records the head sha it read the fix diff at,
-   beside the finding it answers. Immediately before step 4, the PR's
+   beside the finding it answers: `read at <sha>` appended to that
+   finding's line in the PR body's Decisions made (`gh pr edit`, the same
+   body file). Immediately before step 4, the PR's
    `headRefOid` must still equal that sha. If it moved, the controller
    reads the new commits the same way and records the new sha, or refuses
    the merge. A commit the controller has not read never merges. The
@@ -893,8 +896,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
    `--match-head-commit` binds the merge to the head the seam ran on (step
    2's `headRefOid` on the skip path): GitHub refuses it atomically if the
-   head moved since. The `ready-for-human` merge line below carries the same
-   flag.
+   head moved since. The `ready-for-human` merge line, in § The PR's
+   `--chris-merges` report block above, carries the same flag.
 
    No `--delete-branch`: git refuses to delete a branch a worktree has
    checked out, and the merge fails on it; `merge-cleanup` removes the
