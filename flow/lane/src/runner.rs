@@ -61,7 +61,17 @@ const READ_GRACE: Duration = Duration::from_secs(2);
 /// just the direct child) gets killed. Returns whether it timed out
 /// alongside the exit status, since a killed child's status alone doesn't
 /// say why it failed — a caller reporting to a person needs the "why."
-fn run_bounded(mut cmd: Command, timeout: Duration) -> std::io::Result<(ExitStatus, Vec<u8>, Vec<u8>, bool)> {
+/// (#849 Codex gate on PR #1195): the read side was bounded only past a
+/// timeout of the *direct* child — a child that exits on its own but backgrounds
+/// a descendant still holding stdout/stderr open (a hook that forks a daemon,
+/// e.g.) left `recv_drained`'s bare `rx.recv()` blocking forever, with no
+/// timeout ever having fired to explain it. The drain deadline now applies
+/// unconditionally, whether or not the direct child itself timed out — but
+/// the process-group kill stays timeout-only: a child that exited on its own
+/// may have legitimately started a long-lived process (`herdr` launched by a
+/// hook) that is not this call's to kill just because its own pipe is still
+/// open.
+fn run_bounded(mut cmd: Command, timeout: Duration) -> std::io::Result<(ExitStatus, Vec<u8>, Vec<u8>, bool, bool)> {
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     // A new process group headed by the child's own pid: on timeout we can
     // signal the whole group, not just the one pid `Child::kill` reaches.
@@ -74,44 +84,64 @@ fn run_bounded(mut cmd: Command, timeout: Duration) -> std::io::Result<(ExitStat
 
     let (status, timed_out) = wait_bounded(&mut child, timeout)?;
 
-    // Only past a timeout is there anything left in the group to still be
-    // holding a pipe open; a child that exited on its own gets read with no
-    // extra bound, however long that legitimately takes. One shared deadline
-    // (not READ_GRACE applied to each of the two reads in turn) caps the
-    // total added wait at READ_GRACE, not 2x it.
-    let deadline = timed_out.then(|| Instant::now() + READ_GRACE);
-    let stdout = recv_drained(stdout_rx, deadline);
-    let stderr = recv_drained(stderr_rx, deadline);
-    Ok((status, stdout, stderr, timed_out))
+    // One shared deadline (not READ_GRACE applied to each of the two reads in
+    // turn) caps the total added wait at READ_GRACE, not 2x it — for either
+    // path, timed out or not.
+    let deadline = Instant::now() + READ_GRACE;
+    let (stdout, stdout_eof) = recv_drained(stdout_rx, deadline);
+    let (stderr, stderr_eof) = recv_drained(stderr_rx, deadline);
+    Ok((status, stdout, stderr, timed_out, !(stdout_eof && stderr_eof)))
 }
 
-/// Spawns a thread draining `pipe` to EOF, handing the bytes back over a
-/// channel rather than a `JoinHandle` so the receiver can bound how long it
-/// waits without blocking on the thread's own lifetime. A pipe left stuck
-/// open past that bound leaks this one thread — accepted, since the
-/// alternative is the caller blocking on it instead.
-fn drain(mut pipe: impl Read + Send + 'static) -> mpsc::Receiver<Vec<u8>> {
+/// Spawns a thread draining `pipe`, sending an incremental snapshot of what
+/// it has read so far after every chunk (not only once, at EOF): the
+/// receiver can then read the best-so-far bytes even when the pipe never
+/// reaches EOF within its deadline, rather than getting nothing because the
+/// one send it used to wait for never happened. The bool is whether this
+/// snapshot is the final one (the pipe reached EOF or errored). A pipe left
+/// stuck open past the receiver's deadline leaks this one thread — accepted,
+/// since the alternative is the caller blocking on it instead.
+fn drain(mut pipe: impl Read + Send + 'static) -> mpsc::Receiver<(Vec<u8>, bool)> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let mut buf = Vec::new();
-        let _ = pipe.read_to_end(&mut buf);
-        let _ = tx.send(buf);
+        let mut chunk = [0u8; 8192];
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) => {
+                    let _ = tx.send((buf, true));
+                    return;
+                }
+                Ok(n) => {
+                    buf.extend_from_slice(&chunk[..n]);
+                    if tx.send((buf.clone(), false)).is_err() {
+                        return; // receiver gave up past its deadline
+                    }
+                }
+                Err(_) => {
+                    let _ = tx.send((buf, true));
+                    return;
+                }
+            }
+        }
     });
     rx
 }
 
-/// Reads the drained bytes, waiting at most until `deadline` —  `None` means
-/// the child exited on its own, so there's no bound beyond the reader
-/// thread's own EOF. A `Receiver` that never sends (a grandchild still
-/// holding the pipe past `deadline`) yields empty rather than blocking the
-/// caller forever. Called for stdout then stderr against the *same*
-/// `deadline` (not a fresh `READ_GRACE` each time), so stdout using up the
-/// whole grace leaves stderr's wait at zero rather than granting it another
-/// full `READ_GRACE`.
-fn recv_drained(rx: mpsc::Receiver<Vec<u8>>, deadline: Option<Instant>) -> Vec<u8> {
-    match deadline {
-        Some(d) => rx.recv_timeout(d.saturating_duration_since(Instant::now())).unwrap_or_default(),
-        None => rx.recv().unwrap_or_default(),
+/// Reads from `rx` until it reports EOF or `deadline` passes, returning the
+/// best snapshot read so far either way, plus whether that snapshot is the
+/// final one (EOF reached) — `false` means a descendant is still holding the
+/// pipe open past `deadline`, and the caller must say so rather than
+/// silently returning a possibly-partial read as if it were complete.
+fn recv_drained(rx: mpsc::Receiver<(Vec<u8>, bool)>, deadline: Instant) -> (Vec<u8>, bool) {
+    let mut last = Vec::new();
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(remaining) {
+            Ok((buf, true)) => return (buf, true),
+            Ok((buf, false)) => last = buf,
+            Err(_) => return (last, false), // deadline elapsed, or the sender is gone
+        }
     }
 }
 
@@ -153,12 +183,18 @@ pub fn run_in_timeout(dir: Option<&Path>, program: &str, args: &[&str], timeout:
     if let Some(d) = dir {
         cmd.current_dir(d);
     }
-    let (status, stdout, stderr, timed_out) = run_bounded(cmd, timeout)?;
+    let (status, stdout, stderr, timed_out, truncated) = run_bounded(cmd, timeout)?;
     let mut combined = String::from_utf8_lossy(&stdout).into_owned();
     combined.push_str(&String::from_utf8_lossy(&stderr));
     trim_trailing_newlines(&mut combined);
     if timed_out && combined.is_empty() {
         combined = format!("(no output; timed out after {timeout:?})");
+    } else if truncated {
+        // The direct child exited (or was killed on timeout) but a
+        // descendant is still holding a pipe open past READ_GRACE — the
+        // bytes above are whatever was read before that, not necessarily
+        // everything the command would eventually have written.
+        combined.push_str(&format!(" (output truncated: a descendant is still holding a pipe open past {READ_GRACE:?})"));
     }
     Ok(CommandOutput { success: status.success(), combined })
 }
@@ -167,7 +203,7 @@ pub fn run_in_timeout(dir: Option<&Path>, program: &str, args: &[&str], timeout:
 pub fn quiet_stdout_timeout(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
     let mut cmd = Command::new(program);
     cmd.args(args).stdin(Stdio::null());
-    let (status, stdout, _stderr, _timed_out) = run_bounded(cmd, timeout).ok()?;
+    let (status, stdout, _stderr, _timed_out, _truncated) = run_bounded(cmd, timeout).ok()?;
     if !status.success() {
         return None;
     }
@@ -193,10 +229,20 @@ pub fn quiet_ok_timeout(program: &str, args: &[&str], timeout: Duration) -> bool
 pub fn quiet_stdout_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<Option<String>, String> {
     let mut cmd = Command::new(program);
     cmd.args(args).stdin(Stdio::null());
-    let (status, stdout, _stderr, timed_out) =
+    let (status, stdout, _stderr, timed_out, truncated) =
         run_bounded(cmd, timeout).map_err(|e| format!("{program} {}: {e}", args.join(" ")))?;
     if timed_out {
         return Err(format!("{program} {} timed out after {timeout:?}", args.join(" ")));
+    }
+    if truncated {
+        // The child itself exited, but a descendant still held a pipe open
+        // past READ_GRACE (a hook backgrounding a daemon, e.g.): the read is
+        // possibly partial, so it must not be handed back as a complete
+        // Some(...) a caller could mistake for the command's real answer.
+        return Err(format!(
+            "{program} {}: a descendant is still holding a pipe open past {READ_GRACE:?}; the read may be incomplete",
+            args.join(" ")
+        ));
     }
     if !status.success() {
         return Ok(None);
@@ -211,10 +257,21 @@ pub fn quiet_stdout_bounded(program: &str, args: &[&str], timeout: Duration) -> 
 pub fn quiet_ok_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<bool, String> {
     let mut cmd = Command::new(program);
     cmd.args(args).stdin(Stdio::null());
-    let (status, _stdout, _stderr, timed_out) =
+    let (status, _stdout, _stderr, timed_out, truncated) =
         run_bounded(cmd, timeout).map_err(|e| format!("{program} {}: {e}", args.join(" ")))?;
     if timed_out {
         return Err(format!("{program} {} timed out after {timeout:?}", args.join(" ")));
+    }
+    if truncated {
+        // stdout/stderr aren't this function's answer (only the exit
+        // status is), but a pipe still open past READ_GRACE means a
+        // descendant of this command is still running — the same
+        // uncertainty `quiet_stdout_bounded` refuses to fold into a plain
+        // answer applies here too.
+        return Err(format!(
+            "{program} {}: a descendant is still holding a pipe open past {READ_GRACE:?}",
+            args.join(" ")
+        ));
     }
     Ok(status.success())
 }
@@ -361,6 +418,22 @@ mod tests {
         let out = run_timeout("sleep", &["5"], Duration::from_millis(200)).unwrap();
         assert!(!out.success);
         assert!(out.combined.to_lowercase().contains("timed out"), "combined was {:?}", out.combined);
+    }
+
+    // Codex gate on PR #1195 (#849): the direct child here exits almost
+    // immediately with status 0, but backgrounds a descendant that holds
+    // stderr open for far longer than this call's own `timeout` — before
+    // the fix, `recv_drained`'s unconditional `rx.recv()` on the
+    // non-timed-out path blocked on that descendant forever. Bounded by
+    // READ_GRACE now, whether or not the direct child itself timed out.
+    #[test]
+    fn run_timeout_does_not_hang_forever_when_a_normally_exiting_child_backgrounds_a_pipe_holding_descendant() {
+        use std::time::{Duration, Instant};
+        let start = Instant::now();
+        let out = run_timeout("sh", &["-c", "sleep 60 >&2 & exit 0"], Duration::from_secs(5)).unwrap();
+        assert!(start.elapsed() < Duration::from_secs(4), "waited {:?} for a child that exited on its own", start.elapsed());
+        assert!(out.success, "the direct child's own successful exit must still be reported: {:?}", out.combined);
+        assert!(out.combined.to_lowercase().contains("truncated"), "combined was {:?}", out.combined);
     }
 
     // #849: a bounded query must fail loud when the bound fires, never
