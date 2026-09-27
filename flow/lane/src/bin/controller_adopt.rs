@@ -13,10 +13,10 @@
 //! Refuses a worker whose controller is still alive, one whose workspace was
 //! torn down, and any cwd other than the primary checkout.
 
-use lane::herdr::{self, HERDR_QUERY_TIMEOUT};
-use lane::runner::{quiet_stdout, quiet_stdout_timeout};
+use lane::herdr::{self, AgentNameError};
+use lane::runner::quiet_stdout;
 use lane::workers::{self, AdoptRefusal, Adopter};
-use lane::{proc_info, safe_println, sessions};
+use lane::{proc_info, safe_println, sessions, worktree};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -29,9 +29,8 @@ fn fail(msg: &str) -> ExitCode {
 /// top level; `Err` names why not.
 fn primary_checkout(cwd: &str) -> Result<String, String> {
     let top = quiet_stdout("git", &["-C", cwd, "rev-parse", "--show-toplevel"]).ok_or_else(|| format!("{cwd} is not in a git repo"))?;
-    let list = quiet_stdout("git", &["-C", cwd, "worktree", "list", "--porcelain"]).ok_or_else(|| format!("git worktree list failed in {cwd}"))?;
-    let primary = list.lines().next().and_then(|l| l.strip_prefix("worktree ")).ok_or_else(|| format!("git worktree list named no worktree in {cwd}"))?;
-    let (top, primary) = (workers::canonical_workspace_path(top.trim()), workers::canonical_workspace_path(primary));
+    let primary = worktree::primary(cwd).ok_or_else(|| format!("git worktree list named no worktree in {cwd}"))?;
+    let (top, primary) = (workers::canonical_workspace_path(top.trim()), workers::canonical_workspace_path(&primary));
     if top != primary {
         return Err(format!("{top} is not the primary checkout ({primary}); adopt from there"));
     }
@@ -45,11 +44,11 @@ fn primary_checkout(cwd: &str) -> Result<String, String> {
 /// session name then would hand the worker an address a restart ages.
 fn own_name(home: &Path, own_pid: &str) -> Result<String, String> {
     let me = sessions::live_all(home).into_iter().find(|s| s.pid == own_pid).ok_or("this session's own registry record is gone")?;
-    let listing = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT)
-        .ok_or("herdr agent list failed or timed out, so this session's herdr agent name is unknown")?;
-    let agents = herdr::parse_agents(&listing).ok_or("herdr agent list gave output of an unexpected shape")?;
-    let agent = agents.iter().find(|a| !me.session_id.is_empty() && a.session() == me.session_id).and_then(|a| a.given_name());
-    agent.map(str::to_string).or(Some(me.name).filter(|n| !n.is_empty())).ok_or_else(|| "this session has no herdr agent name and no session name to re-point the worker at".to_string())
+    let agent = herdr::agent_name_of_session(&me.session_id).map_err(|e| match e {
+        AgentNameError::ListFailed => "herdr agent list failed or timed out, so this session's herdr agent name is unknown",
+        AgentNameError::Unparseable => "herdr agent list gave output of an unexpected shape",
+    })?;
+    agent.or(Some(me.name).filter(|n| !n.is_empty())).ok_or_else(|| "this session has no herdr agent name and no session name to re-point the worker at".to_string())
 }
 
 fn main() -> ExitCode {
