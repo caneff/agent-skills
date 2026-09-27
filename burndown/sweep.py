@@ -168,6 +168,8 @@ def with_blocked_by(body):
             continue
         kept.append(line)
     text = "\n".join(kept).rstrip("\n")
+    if not text.strip():
+        text = ""  # whitespace left by a dropped declaration is no content
     return (text + "\n\n" if text else "") + \
         f"## Blocked by\n\n{BLOCKED_BY_TEXT}\n"
 
