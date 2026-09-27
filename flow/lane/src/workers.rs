@@ -842,6 +842,25 @@ mod tests {
         assert_eq!(read(&home, "4242").len(), 2);
     }
 
+    /// #1101 review C3: a move within one sidecar (a reused pid) still holds its lock.
+    #[test]
+    fn a_move_within_one_sidecar_waits_for_its_lock() {
+        let tmp = TempDir::new().unwrap();
+        let (home, dead) = (tmp.path().to_path_buf(), i32::MAX.to_string());
+        append(&home, &dead, &record(&home.display().to_string())).unwrap();
+        let held = hold_lock(&home, &dead);
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let (h, d) = (home.clone(), dead.clone());
+        let mover = std::thread::spawn(move || {
+            let got = move_record(&h, &d, &path_for(&h, &d), &|_: &WorkerRecord| true, Adopter { pid: &d, start: "1" }).map(|a| a.is_some());
+            let _ = done_tx.send(());
+            got
+        });
+        assert!(done_rx.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "the move ran without the lock");
+        drop(held);
+        assert_eq!(mover.join().unwrap(), Ok(true));
+    }
+
     /// #1098 Codex [high]: every adoption runs under one lock, so the scan
     /// for a live holder and the landing are one step across all sidecars —
     /// two adopters taking the two stale copies a crash can leave would
