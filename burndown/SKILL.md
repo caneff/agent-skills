@@ -199,19 +199,19 @@ of filing another — a fresh render of the run's own leftovers, with any
 `## <file>` section already in the current body that a fold (below) put
 there kept as it stands, since a fold's own items never reappear in
 `sweep.py render`'s output and a bare overwrite would drop them —
-`gh issue edit "$sweep" --repo <owner/name> --body-file <path>`. The finished body (render, then the
-kept sections) goes through the one filter before the edit —
+`gh issue edit`. The finished body (render, then the kept sections) goes
+through the one filter, and the edit runs only on its success —
 
 ```
 { python3 burndown/sweep.py render <run-id>; <kept sections>; } \
-  | python3 burndown/sweep.py blocked-by > <path>
+  | python3 burndown/sweep.py blocked-by > <path> \
+  && gh issue edit "$sweep" --repo <owner/name> --body-file <path>
 ```
 
 — which drops any `## Blocked by` already in it and appends the one
 `None — can start immediately.` A body with none reads **unresolved** to
-`burndown/frontier.py` and is never dispatched. An empty body exits 1 and
-the edit does not run, since `--body-file` on an empty file blanks the
-sweep. Exit 0 and no output:
+`burndown/frontier.py` and is never dispatched. An empty body exits 1, so
+the `&&` skips the edit: `--body-file` on an empty file blanks the sweep. Exit 0 and no output:
 render the run's leftovers —
 
 ```
