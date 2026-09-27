@@ -21,16 +21,16 @@ before spending attention on the literal lines.
 
 ## Publish As An Agent-Native Plan — Never Inline
 
-The deliverable is ALWAYS a published Agent-Native Plan, created with
-`create-visual-recap` on the Plan MCP connector — NEVER inline chat content (not
+The deliverable is a published Agent-Native Plan, created with
+`create-visual-recap` on the Plan MCP connector — not inline chat content (not
 Markdown prose, an ASCII sketch, a table, a fenced "wireframe", or a "here's the
 recap" summary). A recap's entire value is the hosted, interactive, annotatable
 plan; an inline summary is not a degraded recap, it is the thing a recap
 replaces. If the `plan` (or legacy `agent-native-plans`) tools are not visible,
 discover them through the host's `tool_search` first; if they are still missing,
-STOP and give the user the client-specific reconnect step rather than improvising
+stop and give the user the client-specific reconnect step rather than improvising
 an inline recap. Before publishing, or whenever a connector or auth error
-appears, READ `references/connection.md` in this skill directory — it is the
+appears, read `references/connection.md` in this skill directory — it is the
 single source of truth for the never-inline rule, connector discovery, and the
 per-client reconnect steps. Local-files privacy mode (below) is the one
 exception.
@@ -44,7 +44,7 @@ catalog lookup. Read the diff with the local `recap collect-diff` / `scan` /
 `build-prompt --local-files` helpers, author a local MDX folder (set
 `kind: "recap"` and `localOnly: true`), and preview it with `plan local check`,
 `plan local serve --kind recap`, and `plan local verify --kind recap`. Before
-using local-files mode, READ `references/local-files.md` in this skill directory
+using local-files mode, read `references/local-files.md` in this skill directory
 — it is the single source of truth for the full contract.
 
 ## When To Use
@@ -125,17 +125,13 @@ A strong recap follows one skeleton, top to bottom:
 4. `file-tree` of the changed files with `change` flags.
 5. `## Key changes` — one horizontal `tabs` block of `diff` / `annotated-code`.
 
-Budgets that keep the recap reviewable:
+Keep the recap reviewable:
 
-- 3-8 key-change tabs. Fewer than 3 on a large change under-serves the
-  reviewer; more than 8 stops being a summary.
-- Keep each diff/annotated-code excerpt focused — prefer under ~150 lines per
-  tab; summarize or link the rest of a long file instead of dumping it.
+- One key-change tab per load-bearing file: enough that a large change is not
+  under-served, few enough that the section still reads as a summary.
+- Keep each diff/annotated-code excerpt focused; summarize or link the rest of
+  a long file instead of dumping it.
 - Title at most ~70 characters; brief 1-3 sentences.
-
-These budgets are also the cost ceiling: do not exceed them in the name of
-thoroughness, and do not re-read the full diff after the initial sequential
-pass — work from the notes taken during that pass.
 
 **GOOD.** A 25-file auth change: Before/After wireframes of the login surface,
 a two-paragraph narrative, a diff-aware `data-model` of the sessions table, an
@@ -201,10 +197,10 @@ so the rendered recap opens with the UI visual available.
 UI recap/plan wireframes must meet a strict quality bar — full-width chrome,
 pinned bottom bars, real product content, before/after comparability, the right
 `surface` preset, `--wf-*` tokens instead of hex, and no `<html>`/`<style>`/font
-tags. Before authoring ANY wireframe / `<Screen>` / `WireframeBlock`, READ
+tags. Before authoring any wireframe / `<Screen>` / `WireframeBlock`, read
 `references/wireframe.md` in this skill directory — it is the single source of
 truth for HTML wireframe quality, shared word for word with `/visual-plan`
-and `/visual-recap`. Do not author wireframes from memory.
+and `/visual-recap`.
 
 Use the standard `WireframeBlock` / `<Screen>` format so the Plan viewer owns the
 surface frame, theme, and sketchy/clean toggle. HTML wireframes are appropriate
@@ -225,7 +221,7 @@ a headless CI agent), state that in the recap handoff instead.
 
 ## Top Canvas Recaps — read `../visual-plan/references/canvas.md`
 
-When a recap includes a top canvas, storyboard, or flow view, READ
+When a recap includes a top canvas, storyboard, or flow view, read
 `../visual-plan/references/canvas.md` before authoring `canvas.mdx`. Recap
 canvas artboards must use the same HTML wireframe path as good document-body
 wireframes: `<Screen surface="..." html={...} />` with a semantic HTML fragment.
@@ -533,10 +529,9 @@ then either update the recap with `create-visual-recap` (passing the existing
 `update-visual-plan`. The loop is live and wired. In local-files privacy mode,
 do not call those hosted tools; read review notes from chat or local files, edit
 `<plan-dir>/*.mdx` directly, and rerun `plan local check`, `serve`, or `verify`
-for `<plan-dir>`. The one thing not yet automatic is PR-comment-triggered
-re-runs: the GitHub Action creates an initial recap per PR, but it does not yet
-re-run automatically when new review feedback is posted in GitHub — that
-auto-re-run is the remaining fast-follow.
+for `<plan-dir>`. The GitHub Action creates one recap per PR and does not
+re-run when review feedback is posted in GitHub; re-run the recap by hand
+after addressing that feedback.
 
 ## Related Skills
 
@@ -547,6 +542,3 @@ auto-re-run is the remaining fast-follow.
   plans; see "Interpreting comment anchors" in the visual-plan skill for
   coordinate frames, wireframe node ids, text-quote resolution, detached
   threads, routing via `resolutionTarget`, and two-axis consumed/resolved state.
-- **security** — data scoping, secret handling, and the hardcoded-secret rule the
-  recap's redaction and visibility gating mirror.
-- **sharing** — org/login-gated visibility for the plan that holds the recap.

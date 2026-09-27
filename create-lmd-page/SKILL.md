@@ -64,7 +64,6 @@ The template is styled to blend into the Logic Masters Deutschland site (logic-m
 
 - No `font-family` — the site sets `sans-serif` at 90% on the page; inheriting matches the surrounding text.
 - Background `#eef` and border `#ddf` match LMD's sidebar boxes and image borders; `border-radius: 5px` matches LMD's `.box`.
-- Headings at `font-size: 120%` match LMD's in-box `H2` sizing; the caption's `#888` matches LMD metadata lines (e.g. "eingestellt von...").
 - Use `%`/`px` units like the site does, not `rem` (site font-size is 90%, so rem values don't line up).
 - `.rp_html IMG` already gets `max-width: 100%` from site CSS.
 - The whole post sits in a thin frame: `background: #fafaff; border: 1px solid #ddf; border-radius: 8px; padding: 26px 30px` on the `<section>` (both layouts). Same `#ddf`/`5px`-family hairline as the Rules card; the `#fafaff` fill is a barely-there lavender tint, deliberately lighter than the `#eef` card so the card still reads as the darker inner panel. Frame widths: 820px two-column, 840px one-column (a wide single column filled by a large centered image up top and a wide rules card below — see the gutter gotcha above for why the card can be wide).

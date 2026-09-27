@@ -2,8 +2,7 @@
 
 `visual-teach` ships as a **base + standalone components**. Each component is
 self-contained: its CSS file, optional JS, and a co-located `demo.html` that is
-both the usage doc and the rendering proof. See `demo/showcase.html` for all
-components on one page.
+both the usage doc and the rendering proof.
 
 **These blocks are a floor, not a ceiling.** `vt-*` covers the commodity parts.
 Before reaching for the nearest block, ask what interaction actually practices

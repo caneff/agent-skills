@@ -73,9 +73,6 @@ DIGEST_KEPT=<space-separated skills kept whole-file, not merged>
 A conflicted run stops before the merge commit, so `git status` in
 `DIGEST_SKILLS_DIR` is dirty by design until the conflicts are resolved.
 
-```
-```
-
 Then:
 
 1. For each changed skill, read its content diff — prose files only, skip pure boilerplate:
