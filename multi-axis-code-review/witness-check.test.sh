@@ -176,6 +176,17 @@ check_in "$spec" 'a test that passes for a reason other than the one it claims' 
 check_in "$spec" 'when absent' 'the spec axis brief'
 check_in "$correctness" 'when absent' 'the correctness axis brief'
 check_in "$correctness" 'class 2 (a stated fallback with no mechanism behind it)' 'the correctness axis brief'
+check_in "$correctness" 'an absent or malformed answer read as a benign one' 'the correctness axis brief'
+check_in "$correctness" 'a test that passes for a reason other than the one it claims' 'the correctness axis brief'
+# A second, bare mention of the file elsewhere in a brief would satisfy 'when
+# present' above without itself being conditioned. Counting every mention
+# closes that gap: the sole mention checked above is also the only one.
+for axis in standards spec correctness; do
+  eval "brief=\$$axis"
+  count=$(printf '%s' "$brief" | grep -o 'docs/agents/defect-classes\.md' | wc -l)
+  [ "$count" -eq 1 ] ||
+    { echo "FAIL: the $axis axis brief mentions docs/agents/defect-classes.md $count times, not exactly 1" >&2; fail=1; }
+done
 # The standing brief says the same, since an axis reads it whether or not the
 # caller's paste survived. A bare 'worktree' needle would pass on `git -C
 # <worktree>`, which that file already carried before this change.
