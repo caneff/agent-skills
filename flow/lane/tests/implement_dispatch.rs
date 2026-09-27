@@ -1949,6 +1949,35 @@ fn a_documentation_label_on_a_ticket_targeting_a_skill_body_dispatches_heavy_and
 }
 
 #[test]
+fn a_documentation_ticket_naming_a_script_build_file_or_unlisted_path_dispatches_heavy_and_strips_it() {
+    // #1106 widened what a body's tokens call code past extensions; these are
+    // those shapes at the dispatch seam, not only at `first_code_target`.
+    for (body, target) in [
+        ("Tidy the usage text in `bin/implement-dispatch`.", "bin/implement-dispatch"),
+        ("Add a `lint` target to the Makefile.", "Makefile"),
+        ("Note in .githooks/pre-push why it buffers stdin.", ".githooks/pre-push"),
+        (r"Reword the comment in bin\implement-dispatch.", "bin/implement-dispatch"),
+        ("Fix the doc comment in src/main.dart.", "src/main.dart"),
+    ] {
+        let f = Fixture::new();
+        f.reset_home(true);
+        let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+        let scenario = with(&default_scenario(), &[("GH_LABELS", "documentation,ready-for-agent"), ("GH_BODY", body)]);
+        let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "403"], &scenario);
+        assert!(out.status.success(), "{body}: {}", out_text(&out));
+        let calls = f.calls();
+        assert!(calls.contains("/implement 403 --tier heavy"), "{body}: {calls}");
+        assert!(
+            calls.lines().any(|l| l
+                == format!("gh issue edit 403 --repo {SLUG} --remove-label ready-for-agent --remove-label documentation --add-label in-progress --add-assignee @me")),
+            "{body}: {calls}"
+        );
+        let text = out_text(&out);
+        assert!(text.contains("documentation label stripped") && text.contains(target), "{body}: {text}");
+    }
+}
+
+#[test]
 fn a_documentation_ticket_naming_only_prose_stays_light_and_keeps_its_label() {
     let f = Fixture::new();
     f.reset_home(true);
