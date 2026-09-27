@@ -250,3 +250,4 @@ Filed from conversation — controller, map #776 merge tail.
 | agent-skills#1125 + #1145 | #1172 | 1 | 0 | 1 | Two runs. Gate: one codex-only [high], the merged-tree test is not bound to what `gh pr merge` lands. Split ruling: head binding (`--match-head-commit`) and a pre-merge base re-fetch fixed at 0e5e796, a real gap the Claude axes missed; the residual base race is left over (needs a merge queue or merge lock). Second pass, sha moved: the same residual race re-raised as [high], disputed as a duplicate of that leftover. The sidecar holds one outcome per id, so the split forced `leftover --allow-stale`. |
 | second-brain-v2#145 | second-brain-v2#146 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#1182 | #1186 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
+| agent-skills#1184 | #1187 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
