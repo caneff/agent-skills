@@ -117,11 +117,29 @@ def test_a_small_one_file_fix_in_a_file_already_in_the_diff_passes():
     assert f"{adjacent_id()}: ok" in result.stdout, result.stdout
 
 
-def test_a_fix_touching_a_second_file_breaches():
+def test_a_fix_touching_an_unrelated_second_file_breaches():
+    root = repo()
+    sha = commit(root, {"a.py": lines(40) + "ticket work\nfix\n",
+                        "b.py": lines(40) + "unrelated\n"}, "fix plus unrelated file")
+    assert_breached(run(root, sidecar(root, sha)), "not one file and its own test file")
+
+
+def test_a_fix_plus_its_own_test_file_passes():
     root = repo()
     sha = commit(root, {"a.py": lines(40) + "ticket work\nfix\n",
                         "a_test.py": "assert fix\n"}, "fix plus test file")
-    assert_breached(run(root, sidecar(root, sha)), "touches 2 files")
+    result = run(root, sidecar(root, sha))
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert f"{adjacent_id()}: ok" in result.stdout, result.stdout
+
+
+def test_a_same_stem_test_file_in_a_different_directory_still_breaches():
+    # #1152: a same-stem test file counts only from the source file's own
+    # directory — `tests/test_a.py` beside a root `a.py` does not count.
+    root = repo()
+    sha = commit(root, {"a.py": lines(40) + "ticket work\nfix\n",
+                        "tests/test_a.py": "assert fix\n"}, "fix plus out-of-directory test")
+    assert_breached(run(root, sidecar(root, sha)), "not one file and its own test file")
 
 
 def test_twenty_changed_lines_breach_and_nineteen_do_not():
@@ -136,6 +154,81 @@ def test_twenty_changed_lines_breach_and_nineteen_do_not():
     sha = commit(root, {"a.py": base_text + lines(19, "added")}, "nineteen")
     result = run(root, sidecar(root, sha))
     assert result.returncode == 0, (result.stdout, result.stderr)
+
+
+def test_the_pairs_two_files_are_summed_toward_the_budget():
+    # Neither file alone reaches 20, but the pair's total does: this must
+    # breach, or the checker is only counting the source file (#1175, C1/P1).
+    root = repo()
+    sha = commit(root, {"a.py": lines(40) + "ticket work\n" + lines(11, "src"),
+                        "a_test.py": "assert fix\n" + lines(8, "spec")}, "wide pair")
+    assert_breached(run(root, sidecar(root, sha)), "20 changed lines")
+
+
+def test_a_pytest_style_test_prefix_pairs_with_its_source():
+    # `test_<stem>` (#1175's third convention), and the source sorts after
+    # its test file in `git show --numstat`'s output — proving the source is
+    # found by name, not by numstat row order (C2).
+    root = tempfile.mkdtemp(prefix="check-adjacent-fixture-")
+    FIXTURES.append(root)
+    git(root, "init", "-q", "-b", "main")
+    git(root, "config", "user.email", "fixture@example.invalid")
+    git(root, "config", "user.name", "fixture")
+    commit(root, {"util.py": lines(40)}, "base")
+    git(root, "branch", "base")
+    commit(root, {"util.py": lines(40) + "ticket work\n"}, "ticket work")
+    sha = commit(root, {"util.py": lines(40) + "ticket work\nfix\n",
+                        "test_util.py": "assert fix\n"}, "fix plus pytest-style test")
+    result = run(root, sidecar(root, sha))
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert f"{adjacent_id()}: ok" in result.stdout, result.stdout
+
+
+def test_a_dotted_test_extension_pairs_with_its_source():
+    # `<stem>.test.<ext>` (evidence: caneff/twitch-rules-scroller's
+    # obs-session.mjs / obs-session.test.mjs, #1175).
+    root = tempfile.mkdtemp(prefix="check-adjacent-fixture-")
+    FIXTURES.append(root)
+    git(root, "init", "-q", "-b", "main")
+    git(root, "config", "user.email", "fixture@example.invalid")
+    git(root, "config", "user.name", "fixture")
+    commit(root, {"mod.mjs": lines(40)}, "base")
+    git(root, "branch", "base")
+    commit(root, {"mod.mjs": lines(40) + "ticket work\n"}, "ticket work")
+    sha = commit(root, {"mod.mjs": lines(40) + "ticket work\nfix\n",
+                        "mod.test.mjs": "assert(fix)\n"}, "fix plus dotted test")
+    result = run(root, sidecar(root, sha))
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert f"{adjacent_id()}: ok" in result.stdout, result.stdout
+
+
+def test_a_pair_whose_source_is_also_new_still_breaches():
+    # Both files new to this commit: the source itself was never in the diff
+    # before it, so the "already in the diff" rule must still bite (#1175, C2/P2).
+    root = repo()
+    sha = commit(root, {"c.py": "new source\n", "c_test.py": "assert new\n"},
+                 "brand new pair")
+    assert_breached(run(root, sidecar(root, sha)), "was not in the diff before this fix")
+
+
+def test_three_files_breaches_by_count():
+    root = repo()
+    sha = commit(root, {"a.py": lines(40) + "ticket work\nfix\n",
+                        "a_test.py": "assert fix\n",
+                        "b.py": lines(40) + "also touched\n"}, "three files")
+    assert_breached(run(root, sidecar(root, sha)), "touches 3 files")
+
+
+def test_a_binary_test_file_in_a_pair_breaches_as_binary():
+    root = repo()
+    commit(root, {"a_test.py": "x\0y\n"}, "binary test file in the diff")
+    with open(os.path.join(root, "a.py"), "a") as fh:
+        fh.write("fix\n")
+    with open(os.path.join(root, "a_test.py"), "wb") as fh:
+        fh.write(b"x\0z\n")
+    git(root, "commit", "-q", "-am", "fix plus binary test file")
+    sha = git(root, "rev-parse", "HEAD")
+    assert_breached(run(root, sidecar(root, sha)), "is binary")
 
 
 def test_a_fix_in_a_file_the_diff_had_not_touched_breaches():

@@ -231,7 +231,8 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     write_jsonl(breach, bound(dict(shas, C2=two_files)))
     failed = cli(CHECK_ADJACENT, "--repo", repo, "--base", base, breach)
     assert failed.returncode == 1, (failed.stdout, failed.stderr)
-    assert "BREACH C2: touches 2 files; the rule allows one" in failed.stdout, failed.stdout
+    assert ("BREACH C2: touches burndown/cost.py and burndown/loop.py, "
+            "which are not one file and its own test file") in failed.stdout, failed.stdout
     # And one file, but over the line budget: 20 changed lines is not under 20.
     too_long = commit(repo, {"burndown/loop.py": numbered(37) + "tick2 renamed again\n"
                              + "ticket work, fixed\n"
