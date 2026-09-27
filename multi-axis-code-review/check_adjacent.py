@@ -52,9 +52,10 @@ def _test_source_stem(path):
 
 def own_test_pair(path_a, path_b):
     """(source, test) if one of `path_a`, `path_b` is the other's own test
-    file, else None. Same directory only (#1152): a same-stem file in a
-    different directory, such as `tests/test_runfile.py` beside a root
-    `runfile.py`, does not count."""
+    file, else None. Same directory only (#1152, deciding the question
+    #1097 and #1175 left open): a same-stem file in a different directory,
+    such as `tests/test_runfile.py` beside a root `runfile.py`, does not
+    count — it is a second file the fix reached into, not its own test."""
     for test_path, src_path in ((path_a, path_b), (path_b, path_a)):
         info = _test_source_stem(test_path)
         if info is None:

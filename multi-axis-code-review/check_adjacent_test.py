@@ -133,6 +133,15 @@ def test_a_fix_plus_its_own_test_file_passes():
     assert f"{adjacent_id()}: ok" in result.stdout, result.stdout
 
 
+def test_a_same_stem_test_file_in_a_different_directory_still_breaches():
+    # #1152: a same-stem test file counts only from the source file's own
+    # directory — `tests/test_a.py` beside a root `a.py` does not count.
+    root = repo()
+    sha = commit(root, {"a.py": lines(40) + "ticket work\nfix\n",
+                        "tests/test_a.py": "assert fix\n"}, "fix plus out-of-directory test")
+    assert_breached(run(root, sidecar(root, sha)), "not one file and its own test file")
+
+
 def test_twenty_changed_lines_breach_and_nineteen_do_not():
     root = repo()
     # 10 lines rewritten: 10 insertions plus 10 deletions is 20 changed lines.
