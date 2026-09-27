@@ -14,11 +14,9 @@ set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # repo-relative path  ->  live path (first glob match wins). Add a line per file.
-# Whole-file copies — keep secrets out of every listed file. claude/settings.json
-# is NOT here: install.sh symlinks it (#1031) — the premise for copy-only never
-# held (a probed harness write through the link left it a link); machine-local
-# secrets belong in settings.local.json, which is also symlinked and never
-# copied here.
+# Whole-file copies — keep secrets out of every listed file. Machine-local
+# secrets belong in settings.local.json, which is symlinked (by install.sh)
+# and never copied here.
 declare -A COPIES=(
   ["vscode/settings.json"]="/mnt/c/Users/*/AppData/Roaming/Code/User/settings.json"
   ["claude/output-styles/quill.md"]="$HOME/.claude/output-styles/quill.md"
@@ -39,7 +37,13 @@ for rel in "${!COPIES[@]}"; do
 done
 
 if [ "$mode" = --commit ]; then
-  rels=("${!COPIES[@]}")
+  # claude/settings.json is symlinked (#1031), not copied: install.sh points
+  # ~/.claude/settings.json straight at this file, so a harness write (a
+  # plugin toggle, /config, "always allow") lands in it directly. Nothing
+  # copies it, but it still has to reach main automatically, so --commit
+  # stages it alongside the COPIES manifest even though only the manifest
+  # entries were just synced above.
+  rels=("${!COPIES[@]}" claude/settings.json)
   git -C "$here" add -- "${rels[@]}" 2>/dev/null || true
   if ! git -C "$here" diff --cached --quiet -- "${rels[@]}" 2>/dev/null; then
     git -C "$here" commit -q -m "chore(flow): auto-backup copy-only settings" -- "${rels[@]}"

@@ -25,10 +25,9 @@ link() { # link <repo-relative-src> <live-dest>
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link bin/job-run                "$HOME/.local/bin/job-run"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
-# claude/settings.json is symlinked (#1031): a probed harness write
-# (`claude plugin disable --scope user`) rewrote the live file through the
-# link without breaking it, so the premise for copy-only (backup-sync.sh)
-# no longer holds for this file.
+# Symlinked, not copy-only (#1031): a probed harness write rewrote the live
+# file through the link without breaking it (`claude plugin disable --scope
+# user`); backup-sync.sh --commit still backs it up, straight off this link.
 link claude/settings.json       "$HOME/.claude/settings.json"
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
 for h in block-dangerous-git.sh refresh-landed.sh require-agent-model.sh \
