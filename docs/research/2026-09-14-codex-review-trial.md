@@ -262,3 +262,4 @@ Filed from conversation — controller, map #776 merge tail.
 | agent-skills#1031 | #1198 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#1021 | #1199 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#867 | #1200 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
+| agent-skills#1101 | #1201 | 0 | 0 | 1 | One run, one codex-only [high], disputed by the controller: a new-binary writer (locks `.lock`) and an old-binary appender (locks the sidecar inode) do not exclude each other while `lane-install.sh` swaps binaries under a running dispatch. A one-time rollout window no compatible lock closes; closed operationally by installing with no lane process running. |
