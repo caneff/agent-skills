@@ -158,7 +158,11 @@ command refuses:
 - a sidecar line the body contradicts. A disposition changed after the
   verification pass rewrites its sidecar line in the same step that records
   it in the PR body (`implement/SKILL.md` § The merge), so a disagreement is
-  a step that reached one record and not the other (#1085).
+  a step that reached one record and not the other (#1085). A ruling that
+  genuinely splits a finding is refused the same way — it is still one id
+  holding two outcome words — until it is written as two ids per
+  `implement/SKILL.md` § Review's split grammar; the refusal itself names
+  that way past it, by this finding's own id.
 - a leftover the body states and the sidecar has no line for:
   `implement/SKILL.md` § The merge's
   case of a leftover kept only in the PR body, which never reaches a sweep.
