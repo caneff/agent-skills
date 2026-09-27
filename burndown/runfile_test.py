@@ -1556,6 +1556,13 @@ def test_leftover_help_names_every_pr_body_refusal():
         assert refusal in text, (refusal, text)
 
 
+def test_stated_outcome_reads_no_outcome_from_a_line_with_no_colon():
+    # The fall-through path: a Decisions made line with no colon states no
+    # outcome, and reads as None rather than raising.
+    assert runfile.stated_outcome("S1 fixed in the round") is None
+    assert runfile.stated_outcome("S1: fixed") == "fixed"
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     try:

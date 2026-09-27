@@ -508,7 +508,7 @@ def stated_outcome(rest):
             word = re.match(r"\s*[*_`]*" + _OUTCOME_WORD + r"\b", rest[i + 1:],
                             re.IGNORECASE)
             return word and normal_outcome(word.group(1))
-    return os.path.expanduser(override) if override else None
+    return None
 
 
 def normal_outcome(word):
