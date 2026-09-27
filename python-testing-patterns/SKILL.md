@@ -46,7 +46,7 @@ Load detailed references for specific topics:
 | Fixtures, scopes, setup/teardown, conftest.py | `~/.agents/skills/python-testing-patterns/references/fixtures.md` |
 | Parametrization, multiple test cases | `~/.agents/skills/python-testing-patterns/references/parametrized-tests.md` |
 | Mocking, patching, unittest.mock, pytest-mock | `~/.agents/skills/python-testing-patterns/references/mocking.md` |
-| Async tests, pytest-asyncio, event loops | `~/.agents/skills/python-testing-patterns/references/async-testing.md` |
+| Async tests, pytest-asyncio | `~/.agents/skills/python-testing-patterns/references/async-testing.md` |
 | Property-based testing, Hypothesis, strategies | `~/.agents/skills/python-testing-patterns/references/property-based-testing.md` |
 | Monkeypatch, environment variables, attributes | `~/.agents/skills/python-testing-patterns/references/monkeypatch.md` |
 | Test structure, markers, conftest.py patterns | `~/.agents/skills/python-testing-patterns/references/test-organization.md` |

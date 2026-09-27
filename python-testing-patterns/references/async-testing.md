@@ -140,4 +140,3 @@ async def test_async_context_manager():
 4. **Test concurrency**: Verify parallel behavior explicitly
 5. **Timeout protection**: Add timeouts to prevent hanging tests
 6. **AsyncMock**: Use for mocking async functions
-7. **Clean event loops**: Ensure proper cleanup

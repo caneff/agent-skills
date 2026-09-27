@@ -260,7 +260,7 @@ def test_user_creation_sends_welcome_email():
 
     user = create_user("test@example.com", email_service=mock_email)
 
-    assert user.email == "test@example.com"
+    assert user.welcome_email_sent is True
     mock_email.send_welcome.assert_called_once_with(email="test@example.com")
 ```
 
@@ -395,7 +395,7 @@ def test_divide_negative_dividend_returns_negative_quotient():
     assert divide(-10, 2) == -5
 
 def test_divide_returns_float_result_within_tolerance():
-    assert abs(divide(1, 3) - 0.333333) < 0.00001
+    assert divide(1, 3) == pytest.approx(1 / 3)
 ```
 
 ### 25. Continuous Monitoring
