@@ -202,7 +202,19 @@ No PR and no reviewer; Chris reads the log after.
    owner asks).
 
    Every finding gets exactly one disposition, one of five outcomes:
-   `fixed`, `disputed`, `filed`, `handed-back` and `leftover`. It is fixed
+   `fixed`, `disputed`, `filed`, `handed-back` and `leftover`. **A ruling
+   that genuinely divides a finding** — fix one part now, leave the
+   rest — is never written as one id carrying two outcome words (`fixed …
+   leftover`, as PR #1172's did): write it as two ids sharing the base,
+   suffixed `a`, `b`, … in the order the halves are named (`codex-gate-1a`
+   fixed, `codex-gate-1b` leftover), each with its own sidecar line, its own
+   Decisions made line, and its own outcome. A round prefix (when one
+   applies) sits in front of the whole thing, the split suffix stays last
+   (`r2-S1a`), so the two grammars never collide. `runfile.py leftover
+   --pr-body` matches an id exactly, so this is the whole fix — nothing
+   about a split needs `--allow-stale`; that flag is for a sidecar that is
+   genuinely stale, not a finding that was never one thing to begin with.
+   It is fixed
    in a commit, `disputed: <why>`, or filed as a follow-up ticket through
    `/file-ticket` so it leaves with a routing role, never `needs-triage` —
    ad hoc `gh issue create` skips that role. `filed` is reserved for a high
@@ -846,7 +858,12 @@ The controller merges on a repo Chris owns; Chris reads it after via
    the half-done step at harvest: it refuses a sidecar line whose outcome the PR
    body's Decisions made contradicts, and a leftover the body does not cite
    by id (`--pr-body`). A change recorded in neither place is not seen by
-   it; the rewrite is the rule.
+   it; the rewrite is the rule. **A ruling that splits the finding rather
+   than changing it outright** (§ Review, PR #1172's case: fix the head
+   binding, leave the residual race) is not a rewrite of the one line — it
+   is two lines, one per suffixed id (`codex-gate-1a`, `codex-gate-1b`), the
+   base id itself dropped from both files. Passing `--allow-stale` over a
+   split is the override this rule exists to stop training (#1147/#1170).
 
    Classify each finding by comparing it with the PR body's round-1
    findings — `codex-only, confirmed` (fixed or filed, and no Claude axis

@@ -1442,6 +1442,37 @@ def test_a_leftover_line_the_pr_body_records_as_fixed_is_refused_until_rewritten
     assert added == [], added
 
 
+def test_a_contradiction_refusal_names_the_split_id_way_out():
+    # #1174: PR #1172's ruling genuinely split S3 — fix the head binding,
+    # leave the residual race — and the only path past the contradiction
+    # was `--allow-stale`, the override #1147/#1170 exist to stop training.
+    # The refusal now names the id-a/id-b way out, by this finding's own id.
+    sidecar = sidecar_of(LEFTOVER_S3)
+    body = pr_body("## Decisions made\n\n- S3: fixed, abc1234.\n")
+    got = refusal_of(sidecar, landed_root(), body)
+    assert "S3a" in got and "S3b" in got and "split" in got, got
+
+
+def test_a_genuine_split_is_written_as_two_ids_not_one():
+    # #1174: what PR #1172's ruling actually wanted — fix the head binding
+    # now, leave the residual race — expressed as two ids sharing a base,
+    # each with its own outcome, rather than one id carrying both.
+    root = landed_root()
+    sidecar = sidecar_of(
+        {"id": "codex-gate-1a", "outcome": "fixed", "sha": "0e5e796"},
+        {"id": "codex-gate-1b", "outcome": "leftover",
+         "file": "burndown/runfile.py", "title": "residual head-binding race",
+         "severity": "medium",
+         "text": "a second writer between load and replace still wins"})
+    body = pr_body(
+        "## Decisions made\n\n"
+        "- codex-gate-1a: fixed at 0e5e796 — head binding closed.\n"
+        "- codex-gate-1b: leftover — residual race; sidecar codex-gate-1b.\n")
+    _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root,
+                                pr_body=body)
+    assert added == ["codex-gate-1b"], added
+
+
 def test_a_stale_leftover_is_refused_in_each_real_line_shape():
     # Each real shape in BODY, with the sidecar still reading leftover where
     # the body says otherwise: the grouped line, the description-first line,

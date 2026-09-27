@@ -221,6 +221,27 @@ def test_counts_sums_fixed_adjacent_leftover_and_standalone_across_landed_clumps
     assert got == {"fixed": 2, "adjacent": 1, "leftover": 1, "standalone": 1}, got
 
 
+def test_counts_treats_split_ids_as_independent_findings():
+    # #1174: a ruling that splits one finding into a fixed half and a
+    # leftover half is written as two ids sharing a base (`codex-gate-1a`,
+    # `codex-gate-1b`), never one id with two outcomes. `counts` joins on id
+    # alone, so a split needs no code here — this locks that.
+    root = cache()
+    reviews = reviews_dir_fixture()
+    runfile.start("burn-f", slots=1, root=root)
+    runfile.clump("burn-f", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-f", 901, "abc1234", root=root)
+    write_sidecar(reviews, 901, [
+        {"id": "codex-gate-1a", "outcome": "fixed", "sha": "0e5e796"},
+        {"id": "codex-gate-1b", "outcome": "leftover", "file": "f",
+         "title": "residual race", "severity": "medium", "text": "x"},
+    ])
+    run = runfile.load("burn-f", root=root)
+    got = sweep.counts(run, reviews)
+    assert got == {"fixed": 1, "adjacent": 0, "leftover": 1,
+                   "standalone": 0}, got
+
+
 def test_counts_ignores_an_unlanded_clumps_sidecar():
     root = cache()
     reviews = reviews_dir_fixture()
