@@ -12,6 +12,11 @@
 //! HERDR_WORKSPACES, HERDR_LIST_FAIL (only `agent list` fails), HERDR_FAIL, HERDR_PANE_CLOSE_FAIL, GH_ASSIGNEES,
 //! GH_ISSUE_EDIT_FAIL, GH_PR_CLOSES, GH_PR_CLOSES_FAIL for merge-cleanup;
 //! GH_PR_STATUS for controller-restore's `--json number,state` PR lookup.
+//! A third role, `git`, is a passthrough proxy to the real binary (`REAL_GIT`,
+//! an absolute path) rather than a scenario stub, since replicating real git
+//! is not this fake's job; `GIT_HANG`/`GH_HANG` (#849) make it or `gh` hang
+//! forever on a call whose args contain the given substring, standing in for
+//! a hung subprocess so a test can prove an OS-level bound actually fires.
 //! Never installed — see install.sh.
 
 use std::env;
@@ -175,7 +180,54 @@ fn view_barrier(n: &str) {
     }
 }
 
+/// `GIT_HANG`/`GH_HANG`: when set to a non-empty substring found in this
+/// call's joined args, sleeps forever instead of answering — standing in
+/// for a hung `git`/`gh` subprocess (#849). The caller's own OS-level
+/// timeout is what ends the wait by killing this process's group; nothing
+/// here ever returns on its own once triggered, so a test that fails to
+/// wire an actual bound would simply hang instead of getting a false pass.
+fn hangs_on(var: &str, args: &[String]) -> bool {
+    match env::var(var) {
+        Ok(pat) if !pat.is_empty() => args.join(" ").contains(&pat),
+        _ => false,
+    }
+}
+
+fn hang_forever() -> ! {
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
+    }
+}
+
+/// Runs as `git`: a thin proxy over the real binary (`REAL_GIT`, an
+/// absolute path — resolving `"git"` again here would just re-enter this
+/// same proxy, since the fake dir sits ahead of the real PATH), unless
+/// `GIT_HANG` names a substring of this call's args, in which case it hangs
+/// instead of ever reaching the real git. Stdio is inherited, so a caller
+/// piping this process's stdout/stderr (as `implement-dispatch`'s bounded
+/// runner does) sees exactly what the real git would have written.
+fn run_git(args: &[String]) -> ExitCode {
+    if hangs_on("GIT_HANG", args) {
+        hang_forever();
+    }
+    let real = env::var("REAL_GIT").unwrap_or_else(|_| "git".to_string());
+    match std::process::Command::new(&real).args(args).status() {
+        Ok(status) => match status.code() {
+            Some(0) => ExitCode::SUCCESS,
+            Some(c) => ExitCode::from((c & 0xff) as u8),
+            None => ExitCode::FAILURE,
+        },
+        Err(e) => {
+            eprintln!("lane-fake: could not exec real git ({real}): {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn run_gh(args: &[String]) -> ExitCode {
+    if hangs_on("GH_HANG", args) {
+        hang_forever();
+    }
     let a0 = args.first().map(String::as_str).unwrap_or("");
     let a1 = args.get(1).map(String::as_str).unwrap_or("");
     if (a0, a1) == ("issue", "view") {
@@ -500,8 +552,11 @@ fn main() -> ExitCode {
     let allowed = match role.as_str() {
         "gh" => gh_allowed(&args),
         "herdr" => herdr_allowed(&args),
+        // A passthrough proxy to the real git (#849's hang tests): its
+        // subcommand surface is git's own, not ours to allowlist.
+        "git" => true,
         _ => {
-            eprintln!("lane-fake: invoked as unknown role '{role}' (expected gh or herdr)");
+            eprintln!("lane-fake: invoked as unknown role '{role}' (expected gh, herdr or git)");
             return ExitCode::FAILURE;
         }
     };
@@ -513,6 +568,7 @@ fn main() -> ExitCode {
     match role.as_str() {
         "gh" => run_gh(&args),
         "herdr" => run_herdr(&args),
+        "git" => run_git(&args),
         _ => unreachable!(),
     }
 }

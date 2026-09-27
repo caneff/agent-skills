@@ -4,7 +4,9 @@
 //! The contract is `--help` below.
 
 use lane::herdr::{AgentNameError, HERDR_QUERY_TIMEOUT};
-use lane::runner::{self, quiet_ok, quiet_ok_timeout, quiet_stdout, quiet_stdout_timeout, run_timeout, CommandOutput};
+use lane::runner::{
+    self, quiet_ok_bounded, quiet_ok_timeout, quiet_stdout_bounded, quiet_stdout_timeout, run_in_timeout, run_timeout, CommandOutput,
+};
 use lane::{git_origin, herdr, proc_info, safe_print, safe_println, sessions, worktree};
 use serde_json::Value;
 use std::env;
@@ -292,6 +294,46 @@ fn fetch_timeout() -> std::time::Duration {
     std::time::Duration::from_millis(ms)
 }
 
+/// Env-overridden bound, shared by the `git`/`gh` timeout functions below —
+/// same pattern as `fetch_timeout`/`claim_lock_wait`, so a test can shorten
+/// any of them without waiting out a real-world default.
+fn env_ms_or(var: &str, default_ms: u64) -> std::time::Duration {
+    let ms = env::var(var).ok().and_then(|v| v.parse().ok()).unwrap_or(default_ms);
+    std::time::Duration::from_millis(ms)
+}
+
+/// OS-level bound for a local, read-only `git` call (`show-ref`,
+/// `symbolic-ref`, `worktree list`, `remote get-url`, `rev-parse
+/// --git-path`) — all fast against a healthy repo, so this is generous
+/// headroom against a loaded box, not a query's expected latency.
+/// `LANE_GIT_QUERY_TIMEOUT_MS` shortens it for tests.
+fn git_query_timeout() -> std::time::Duration {
+    env_ms_or("LANE_GIT_QUERY_TIMEOUT_MS", 10_000)
+}
+
+/// OS-level bound for a `git` call that mutates the repo (`worktree add`) —
+/// looser than `git_query_timeout`, on the same reasoning as
+/// `HERDR_MUTATION_TIMEOUT` above: killing one mid-mutation risks a
+/// half-registered worktree the next retry then trips over.
+/// `LANE_GIT_MUTATION_TIMEOUT_MS` shortens it for tests.
+fn git_mutation_timeout() -> std::time::Duration {
+    env_ms_or("LANE_GIT_MUTATION_TIMEOUT_MS", 30_000)
+}
+
+/// OS-level bound for a `gh` read (`issue view`) — a GitHub API round trip,
+/// so looser than a local git query. `LANE_GH_QUERY_TIMEOUT_MS` shortens it
+/// for tests.
+fn gh_query_timeout() -> std::time::Duration {
+    env_ms_or("LANE_GH_QUERY_TIMEOUT_MS", 15_000)
+}
+
+/// OS-level bound for a `gh` mutation (`issue edit`, the claim and its
+/// release) — same reasoning as `gh_query_timeout`.
+/// `LANE_GH_MUTATION_TIMEOUT_MS` shortens it for tests.
+fn gh_mutation_timeout() -> std::time::Duration {
+    env_ms_or("LANE_GH_MUTATION_TIMEOUT_MS", 15_000)
+}
+
 /// The per-repository claim lock: held from the first read of a clump's
 /// tickets to the last claim edit, so two dispatches naming one ticket
 /// serialize and the second reads the first's claim. An OS `flock` on the
@@ -488,7 +530,7 @@ fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str
 /// half is what actually stops a replayed foreign-email commit from ever
 /// reaching `git push`, where #909's failure mode began.
 fn install_identity_guard(primary: &str) -> Result<(), String> {
-    let dir = quiet_stdout("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"])
+    let dir = quiet_stdout_timeout("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"], git_query_timeout())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| format!("cannot resolve the hooks dir of {primary}"))?;
@@ -571,7 +613,7 @@ fn release_args<'a>(t: &'a Ticket, slug: &'a str) -> Vec<&'a str> {
 fn release_claimed(claimed: &[&Ticket], slug: &str) {
     for done in claimed {
         let release = release_args(done, slug);
-        if !matches!(runner::run("gh", &release), Ok(o) if o.success) {
+        if !matches!(run_timeout("gh", &release, gh_mutation_timeout()), Ok(o) if o.success) {
             eprintln!("implement-dispatch: could not release #{}; re-run: gh {}", done.n, release.join(" "));
         }
     }
@@ -789,7 +831,7 @@ fn run() -> Result<(), ExitCode> {
     let Some(primary) = worktree::primary(&repo) else {
         return Err(die(format!("not a git repo: {repo}")));
     };
-    let slug = git_origin::origin_slug(Path::new(&primary)).unwrap_or_default();
+    let slug = git_origin::origin_slug_timeout(Path::new(&primary), git_query_timeout()).map_err(die)?.unwrap_or_default();
     if !valid_slug(&slug) {
         return Err(die(format!("origin in {primary} names no GitHub owner/name")));
     }
@@ -829,8 +871,10 @@ fn run() -> Result<(), ExitCode> {
     // which is what makes the claim all-or-nothing.
     let mut tickets: Vec<Ticket> = Vec::new();
     for n in &ns {
-        let Some(issue) = lane::issue_state::read(&slug, n) else {
-            return Err(die(format!("#{n} is not an open issue")));
+        let issue = match lane::issue_state::read_timeout(&slug, n, gh_query_timeout()) {
+            Ok(Some(issue)) => issue,
+            Ok(None) => return Err(die(format!("#{n} is not an open issue"))),
+            Err(e) => return Err(die(e)),
         };
         if issue.state != "OPEN" {
             return Err(die(format!("#{n} is not an open issue")));
@@ -860,7 +904,14 @@ fn run() -> Result<(), ExitCode> {
         // the evidence. An unreadable body cannot show the ticket is prose, so
         // it goes heavy — but nothing shows the label wrong, so it is kept.
         let labelled = issue.has_label("documentation");
-        let body = if labelled { lane::issue_state::body(&slug, n) } else { None };
+        let body = if labelled {
+            match lane::issue_state::body_timeout(&slug, n, gh_query_timeout()) {
+                Ok(b) => b,
+                Err(e) => return Err(die(e)),
+            }
+        } else {
+            None
+        };
         let body_unreadable = labelled && body.is_none();
         let stripped_for = body.as_deref().and_then(lane::targets::first_code_target);
         tickets.push(Ticket {
@@ -974,17 +1025,26 @@ fn run() -> Result<(), ExitCode> {
     if !quiet_ok_timeout("git", &["-C", &primary, "fetch", "-q", "origin"], fetch_timeout) {
         return Err(die(format!("git fetch failed or exceeded its {fetch_timeout:?} bound in {primary}")));
     }
-    let registered_worktree = quiet_stdout("git", &["-C", &primary, "worktree", "list", "--porcelain"])
+    let registered_worktree = quiet_stdout_bounded("git", &["-C", &primary, "worktree", "list", "--porcelain"], git_query_timeout())
+        .map_err(die)?
         .map(|out| out.lines().any(|l| l == format!("worktree {}", wt.display())))
         .unwrap_or(false);
     if wt.exists() || registered_worktree {
         return Err(die(format!("{} already exists", wt.display())));
     }
-    if quiet_ok("git", &["-C", &primary, "show-ref", "-q", "--verify", &format!("refs/heads/{branch}")]) {
+    if quiet_ok_bounded("git", &["-C", &primary, "show-ref", "-q", "--verify", &format!("refs/heads/{branch}")], git_query_timeout())
+        .map_err(die)?
+    {
         return Err(die(format!("branch {branch} already exists")));
     }
-    let default = git_origin::default_branch(Path::new(&primary));
-    if !quiet_ok("git", &["-C", &primary, "show-ref", "-q", "--verify", &format!("refs/remotes/origin/{default}")]) {
+    let default = git_origin::default_branch_timeout(Path::new(&primary), git_query_timeout()).map_err(die)?;
+    if !quiet_ok_bounded(
+        "git",
+        &["-C", &primary, "show-ref", "-q", "--verify", &format!("refs/remotes/origin/{default}")],
+        git_query_timeout(),
+    )
+    .map_err(die)?
+    {
         return Err(die(format!("no origin/{default} to branch from")));
     }
 
@@ -1003,7 +1063,14 @@ fn run() -> Result<(), ExitCode> {
         // ticket taken since the refusal pass must not be claimed over —
         // or released by our rollback, which removes labels and an
         // assignee this run would then never have set.
-        let refusal = match lane::issue_state::read(&slug, &t.n) {
+        let reread = match lane::issue_state::read_timeout(&slug, &t.n, gh_query_timeout()) {
+            Ok(v) => v,
+            Err(e) => {
+                release_claimed(&claimed, &slug);
+                return Err(die(e));
+            }
+        };
+        let refusal = match reread {
             Some(i) if i.state != "OPEN" || i.has_label("in-progress") => {
                 Some(format!("#{} is labelled in-progress or no longer open; another dispatch took it", t.n))
             }
@@ -1022,7 +1089,7 @@ fn run() -> Result<(), ExitCode> {
             claim_args.extend(["--remove-label", "documentation"]);
         }
         claim_args.extend(["--add-label", "in-progress", "--add-assignee", "@me"]);
-        match runner::run("gh", &claim_args) {
+        match run_timeout("gh", &claim_args, gh_mutation_timeout()) {
             Ok(c) if c.success => claimed.push(t),
             _ => {
                 release_claimed(&claimed, &slug);
@@ -1033,10 +1100,11 @@ fn run() -> Result<(), ExitCode> {
     drop(claim_lock);
     let claim = Claim { tickets: &tickets, slug: &slug, wt: &wt };
 
-    let wa = runner::run_in(
+    let wa = run_in_timeout(
         None,
         "git",
         &["-C", &primary, "worktree", "add", "-q", "--no-track", "-b", &branch, wt.to_str().unwrap_or(""), &format!("origin/{default}")],
+        git_mutation_timeout(),
     );
     claim.step("git worktree add", wa, None)?;
 

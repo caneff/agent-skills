@@ -2120,3 +2120,93 @@ fn the_run_file_is_found_under_a_tilde_burndown_cache_dir() {
     assert!(out.status.success(), "{}", out_text(&out));
     assert!(prompt_line(&f).contains("--run burn-2026-09-23-0700"), "{}", prompt_line(&f));
 }
+
+// #849: implement-dispatch's git and gh subprocess calls previously had no
+// OS-level timeout, unlike its herdr calls (#844). These three tests are
+// the ticket's own acceptance criteria.
+
+#[test]
+fn no_unbounded_git_or_gh_call_remains_in_implement_dispatchs_reach() {
+    // implement-dispatch's own source, plus the two shared modules it calls
+    // into for every git/gh subprocess it runs one hop removed
+    // (git_origin.rs, issue_state.rs) — widened past implement_dispatch.rs
+    // alone (controller ruling on #849) so this witnesses "no unbounded
+    // git/gh call in implement-dispatch" rather than passing because the
+    // calls live one file over. Those two modules still expose their
+    // plain, unbounded functions for merge-cleanup, which is untouched and
+    // out of scope here (a sibling clump owns merge_cleanup.rs) — this test
+    // checks only what implement-dispatch's own source calls, never what
+    // those modules also expose for another caller.
+    let manifest = env!("CARGO_MANIFEST_DIR");
+    let dispatch_src = std::fs::read_to_string(format!("{manifest}/src/bin/implement_dispatch.rs")).unwrap();
+
+    let unbounded_direct = [
+        "quiet_stdout(\"git\"",
+        "quiet_stdout(\"gh\"",
+        "quiet_ok(\"git\"",
+        "quiet_ok(\"gh\"",
+        "run(\"git\"",
+        "run(\"gh\"",
+        "run_in(None, \"git\"",
+        "run_in(None, \"gh\"",
+        "status(\"git\"",
+        "status(\"gh\"",
+        "quiet_stderr_ok(\"git\"",
+        "quiet_stderr_ok(\"gh\"",
+    ];
+    for pat in unbounded_direct {
+        assert!(!dispatch_src.contains(pat), "implement_dispatch.rs still calls the unbounded helper {pat:?}");
+    }
+
+    // The shared modules' plain functions are still there, for
+    // merge-cleanup; implement-dispatch must call only their `_timeout`
+    // siblings. Each pattern's trailing "(" is what keeps it from matching
+    // its own `_timeout(`/`_bounded(` sibling as a false positive.
+    let unbounded_shared =
+        ["git_origin::default_branch(", "git_origin::origin_slug(", "issue_state::read(", "issue_state::body("];
+    for pat in unbounded_shared {
+        assert!(!dispatch_src.contains(pat), "implement_dispatch.rs still calls the unbounded shared function {pat:?}");
+    }
+}
+
+#[test]
+fn a_gh_call_that_hangs_fails_within_its_bound_naming_the_command_instead_of_hanging_forever() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    // Matches the refusal pass's `gh issue view 395 --repo ... --json
+    // state,labels,assignees ...` — the earliest gh call implement-dispatch
+    // makes, so nothing past it (the claim, the workspace) can have run.
+    let scenario = with(&default_scenario(), &[("GH_HANG", "issue view"), ("LANE_GH_QUERY_TIMEOUT_MS", "200")]);
+    let start = std::time::Instant::now();
+    let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &scenario);
+    let elapsed = start.elapsed();
+    assert!(!out.status.success(), "{}", out_text(&out));
+    assert!(elapsed < std::time::Duration::from_secs(3), "waited {elapsed:?} past a 200ms bound");
+    let text = out_text(&out).to_lowercase();
+    assert!(text.contains("gh") && text.contains("timed out"), "{}", out_text(&out));
+    assert!(!f.calls().contains("issue edit"), "{}", f.calls());
+}
+
+#[test]
+fn a_show_ref_that_hangs_fails_instead_of_being_read_as_branch_absent() {
+    let f = Fixture::new();
+    f.reset_home(true);
+    let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
+    // Matches both show-ref call sites (#849's evidence list); the branch-
+    // existence check runs first, so that is the one this test actually
+    // exercises.
+    let scenario = with(&default_scenario(), &[("LANE_GIT_QUERY_TIMEOUT_MS", "200")]);
+    let start = std::time::Instant::now();
+    let out = f.dispatch_with_git_hang(&["--repo", repo.to_str().unwrap(), "395"], &scenario, "show-ref");
+    let elapsed = start.elapsed();
+    assert!(!out.status.success(), "{}", out_text(&out));
+    assert!(elapsed < std::time::Duration::from_secs(3), "waited {elapsed:?} past a 200ms bound");
+    let text = out_text(&out).to_lowercase();
+    assert!(text.contains("show-ref") && text.contains("timed out"), "{}", out_text(&out));
+    // The failure must be reported as a timeout, never silently read as
+    // "the branch doesn't exist" (which would let dispatch carry on).
+    assert!(!text.contains("already exists"), "{}", out_text(&out));
+    assert!(!f.calls().contains("worktree open"), "{}", f.calls());
+    assert!(!f.calls().contains("issue edit"), "{}", f.calls());
+}

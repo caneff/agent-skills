@@ -4,7 +4,8 @@
 //! Standards review of #821 (over-engineering lens, yagni) — a change to
 //! the gh contract or the parse now lands once.
 
-use crate::runner::quiet_stdout;
+use crate::runner::{quiet_stdout, quiet_stdout_bounded};
+use std::time::Duration;
 
 /// One issue's state, labels and assignees, as `gh issue view` answers it.
 pub struct IssueState {
@@ -62,6 +63,37 @@ pub fn read(slug: &str, n: &str) -> Option<IssueState> {
 /// code".
 pub fn body(slug: &str, n: &str) -> Option<String> {
     quiet_stdout("gh", &["issue", "view", n, "--repo", slug, "--json", "body", "-q", ".body"])
+}
+
+/// `read`, bounded (#849): `implement-dispatch` is the only caller of this
+/// variant. `Ok(None)` is `gh`'s own real "no such issue"/call-failed
+/// answer, which a caller may still read as "not an open issue"; `Err`
+/// names the command and must never be read as "no labels" or any other
+/// fact about the issue — the bound firing says nothing about the issue at
+/// all.
+pub fn read_timeout(slug: &str, n: &str, timeout: Duration) -> Result<Option<IssueState>, String> {
+    let out = quiet_stdout_bounded(
+        "gh",
+        &[
+            "issue",
+            "view",
+            n,
+            "--repo",
+            slug,
+            "--json",
+            "state,labels,assignees",
+            "-q",
+            ".state + \"\\t\" + ([.labels[].name] | join(\",\")) + \"\\t\" + ([.assignees[].login] | join(\",\"))",
+        ],
+        timeout,
+    )?;
+    Ok(out.map(|s| parse(&s)))
+}
+
+/// `body`, bounded (#849) — see [`read_timeout`]. A timed-out read must
+/// never be read as "empty body" the way a real call failure already is.
+pub fn body_timeout(slug: &str, n: &str, timeout: Duration) -> Result<Option<String>, String> {
+    quiet_stdout_bounded("gh", &["issue", "view", n, "--repo", slug, "--json", "body", "-q", ".body"], timeout)
 }
 
 #[cfg(test)]

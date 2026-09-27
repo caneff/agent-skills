@@ -183,6 +183,42 @@ pub fn quiet_ok_timeout(program: &str, args: &[&str], timeout: Duration) -> bool
     run_bounded(cmd, timeout).map(|(status, ..)| status.success()).unwrap_or(false)
 }
 
+/// Bounded read whose caller must be able to tell a genuine "no" — the
+/// command ran, exited non-zero or produced nothing — from the bound
+/// firing: unlike [`quiet_stdout_timeout`], which folds both into `None`,
+/// indistinguishable from a completed command's own negative answer.
+/// `Ok(None)` is the real negative a caller may read as a fact (no such
+/// ref, no origin remote); `Err` names the program and its arguments and
+/// must never be read that way (#849).
+pub fn quiet_stdout_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<Option<String>, String> {
+    let mut cmd = Command::new(program);
+    cmd.args(args).stdin(Stdio::null());
+    let (status, stdout, _stderr, timed_out) =
+        run_bounded(cmd, timeout).map_err(|e| format!("{program} {}: {e}", args.join(" ")))?;
+    if timed_out {
+        return Err(format!("{program} {} timed out after {timeout:?}", args.join(" ")));
+    }
+    if !status.success() {
+        return Ok(None);
+    }
+    let mut s = String::from_utf8_lossy(&stdout).into_owned();
+    trim_trailing_newlines(&mut s);
+    Ok(Some(s))
+}
+
+/// Bounded existence-style check whose caller must be able to tell a
+/// genuine "no" from the bound firing — see [`quiet_stdout_bounded`].
+pub fn quiet_ok_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<bool, String> {
+    let mut cmd = Command::new(program);
+    cmd.args(args).stdin(Stdio::null());
+    let (status, _stdout, _stderr, timed_out) =
+        run_bounded(cmd, timeout).map_err(|e| format!("{program} {}: {e}", args.join(" ")))?;
+    if timed_out {
+        return Err(format!("{program} {} timed out after {timeout:?}", args.join(" ")));
+    }
+    Ok(status.success())
+}
+
 fn trim_trailing_newlines(s: &mut String) {
     // Bash's `$(...)` strips trailing newlines; match that so callers that
     // parse or compare the captured text see what the bash port saw.
@@ -327,4 +363,48 @@ mod tests {
         assert!(out.combined.to_lowercase().contains("timed out"), "combined was {:?}", out.combined);
     }
 
+    // #849: a bounded query must fail loud when the bound fires, never
+    // fold that into the same `None`/`false` a completed command's own
+    // negative answer produces.
+    #[test]
+    fn quiet_stdout_bounded_errs_on_a_hang_instead_of_returning_none() {
+        use std::time::Duration;
+        let got = quiet_stdout_bounded("sleep", &["5"], Duration::from_millis(200));
+        assert!(got.is_err(), "expected Err on a hang, got {got:?}");
+        assert!(got.unwrap_err().to_lowercase().contains("timed out"));
+    }
+
+    #[test]
+    fn quiet_stdout_bounded_returns_none_on_a_real_failure() {
+        use std::time::Duration;
+        let got = quiet_stdout_bounded("sh", &["-c", "exit 1"], Duration::from_secs(5));
+        assert_eq!(got, Ok(None));
+    }
+
+    #[test]
+    fn quiet_stdout_bounded_returns_the_output_on_success() {
+        use std::time::Duration;
+        let got = quiet_stdout_bounded("printf", &["%s", "hello"], Duration::from_secs(5));
+        assert_eq!(got, Ok(Some("hello".to_string())));
+    }
+
+    #[test]
+    fn quiet_ok_bounded_errs_on_a_hang_instead_of_returning_false() {
+        use std::time::Duration;
+        let got = quiet_ok_bounded("sleep", &["5"], Duration::from_millis(200));
+        assert!(got.is_err(), "expected Err on a hang, got {got:?}");
+        assert!(got.unwrap_err().to_lowercase().contains("timed out"));
+    }
+
+    #[test]
+    fn quiet_ok_bounded_returns_false_on_a_real_failure() {
+        use std::time::Duration;
+        assert_eq!(quiet_ok_bounded("sh", &["-c", "exit 1"], Duration::from_secs(5)), Ok(false));
+    }
+
+    #[test]
+    fn quiet_ok_bounded_returns_true_on_success() {
+        use std::time::Duration;
+        assert_eq!(quiet_ok_bounded("true", &[], Duration::from_secs(5)), Ok(true));
+    }
 }
