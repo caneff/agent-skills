@@ -15,7 +15,8 @@ nothing here writes to it.
     python3 burndown/sweep.py blocked-by < <body>
 
 prints the body ending in exactly one `## Blocked by` section (#1130): the
-form both filing and updating a sweep pipe the finished body through.
+form updating a sweep pipes the finished body through. An empty body is
+refused, exit 1, since the update it feeds would blank the ticket.
 
     python3 burndown/sweep.py counts <run-id> --repo <checkout> | --reviews-dir <dir>
 
@@ -279,7 +280,15 @@ def main(argv):
     args = parser.parse_args(argv[1:])
 
     if args.command == "blocked-by":
-        print(with_blocked_by(sys.stdin.read()), end="")
+        body = with_blocked_by(sys.stdin.read())
+        if not body:
+            # Only the update path pipes through here, and `gh issue edit
+            # --body-file` with an empty file blanks the sweep ticket.
+            print("sweep.py: the body on stdin is empty — refusing, since "
+                  "an empty update would blank the sweep ticket",
+                  file=sys.stderr)
+            return 1
+        print(body, end="")
         return 0
 
     root = runfile.env_root()

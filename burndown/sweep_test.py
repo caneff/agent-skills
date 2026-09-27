@@ -433,6 +433,34 @@ def test_cli_blocked_by_appends_the_section_to_stdin():
     assert frontier.blocked_by_section(got.stdout) == sweep.BLOCKED_BY_TEXT, got
 
 
+def test_with_blocked_by_keeps_a_fenced_inline_line_in_the_preamble():
+    # The preamble strip reads only lines the frontier sees: a fenced
+    # `Blocked by:` is quoted text, not a declaration (#1169 verification).
+    body = sweep.with_blocked_by("```\nBlocked by: #7\n```\n\n## a.py\n\n- x\n")
+    assert "```\nBlocked by: #7\n```" in body, body
+    assert frontier.blocked_by_section(body) == sweep.BLOCKED_BY_TEXT, body
+
+
+def test_with_blocked_by_keeps_an_inline_line_past_the_first_heading():
+    # The preamble ends at the first heading; an inline form inside a file
+    # section is finding text, and the frontier never reads it there.
+    item = "Blocked by: a stale lock, per the finding"
+    body = sweep.with_blocked_by(f"## a.py\n\n- x\n{item}\n")
+    assert item in body, body
+    assert frontier.blocked_by_section(body) == sweep.BLOCKED_BY_TEXT, body
+
+
+def test_cli_blocked_by_refuses_an_empty_body():
+    # Only the update path pipes through `blocked-by`, and `gh issue edit
+    # --body-file` with an empty file blanks the sweep ticket (#1169
+    # verification): an empty body exits non-zero instead of printing "".
+    got = subprocess.run([sys.executable, SWEEP, "blocked-by"],
+                         input="\n \n", capture_output=True, text=True)
+    assert got.returncode == 1, got
+    assert got.stdout == "", got
+    assert "empty" in got.stderr, got
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     try:

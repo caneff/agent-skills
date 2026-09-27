@@ -206,7 +206,9 @@ kept sections) goes through the one filter before the edit —
 
 — which drops any `## Blocked by` already in it and appends the one
 `None — can start immediately.` A body with none reads **unresolved** to
-`burndown/frontier.py` and is never dispatched. Exit 0 and no output:
+`burndown/frontier.py` and is never dispatched. An empty body exits 1 and
+the edit does not run, since `--body-file` on an empty file blanks the
+sweep. Exit 0 and no output:
 render the run's leftovers —
 
 ```
@@ -217,7 +219,7 @@ groups them by file, one bullet per item naming its ticket(s), clump,
 PR, finding id, severity and text — and file **its stdout** through
 `/file-ticket`, titled `Sweep: leftovers from burn <run-id>`, labelled
 `ready-for-agent`, with `## Blocked by` `None — can start immediately.` (`/file-ticket`
-writes it on first filing; only the update path below uses `sweep.py
+writes it on first filing; only the update path above uses `sweep.py
 blocked-by`, so a body never carries two). A
 run with **zero leftovers files nothing**: stdout is empty and the
 "nothing to file" notice goes to stderr, so a caller piping stdout
