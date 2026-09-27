@@ -58,7 +58,7 @@ spotted seam would be; no separate report.
 
 ### 2. Present candidates as an HTML report
 
-Write a self-contained HTML file to the OS temp directory so nothing lands in the repo. Resolve the temp dir from `$TMPDIR`, falling back to `/tmp` (or `%TEMP%` on Windows), and write to `<tmpdir>/architecture-review-<timestamp>.html` so each run gets a fresh file. Open it for the user — `xdg-open <path>` on Linux, `open <path>` on macOS, `start <path>` on Windows — and tell them the absolute path.
+Write a self-contained HTML file to `<tmpdir>/improve-codebase-architecture-<timestamp>/report.html` so nothing lands in the repo and each run gets a fresh folder for the page and its copied assets. Tmpdir resolution, opening the report and handing off its path follow the harness HTML-REPORT.md.
 
 The report is styled with the **visual-teach** design system — the same vendored `vt-*` components and `--vt-*` theme tokens the teaching lessons use — so it opens offline, carries a working light/dark mode, and loads no external host. At render time, copy the assets the report uses next to it with `pagelib.copy_assets` (see the harness HTML-REPORT.md) and link them relatively. Use **Mermaid** (vendored, via the `mermaid.js` bridge) for graph-shaped structure — call graphs, dependencies, sequences — and hand-built `vt-diagram` divs/SVG for the editorial visuals (mass diagrams, cross-sections). Each candidate gets a **before/after visualisation**. Be visual — the diagrams carry the weight.
 

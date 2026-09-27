@@ -18,4 +18,4 @@ must match, and every `Keep` must be left alone.
 | 9 | `test_user_model_default_role_is_member` | `test_user_service.py` | **Cut** | library-default test | Proves the dataclass's own default argument works — a guarantee the standard library already gives, not app logic. Cannot fail from anything this codebase does; deleting it loses no coverage of behavior this app owns. |
 | 10 | `test_retry_eventually_succeeds` | `test_user_service.py` | **Rewrite** | flakiness-by-construction | Real `time.sleep` and unseeded `random.random()` decide the outcome run to run — it can fail when retry logic is correct (bad luck) and pass when retry logic is broken (good luck). The behavior (retry until success) is real; rewrite with a mocked clock and seeded/injected randomness. |
 
-Tally: 2 Keep, 2 Cut, 6 Rewrite.
+Tally: 2 Keep, 3 Cut, 5 Rewrite.

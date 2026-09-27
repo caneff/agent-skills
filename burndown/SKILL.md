@@ -354,8 +354,7 @@ the machine, never off the file.
 
 A worker is addressed by its **herdr agent name** throughout, because a WSL
 restart renames every Claude session and every brief hard-codes
-`--controller "<name>"`. The retired per-repo `~/.cache/burndown/<repo>.progress`
-file is gone; nothing reads or writes one. The contract, the JSON shape and the
+`--controller "<name>"`. The contract, the JSON shape and the
 resume procedure: [`references/run-file.md`](references/run-file.md).
 
 A single spec's slices in one workspace are
@@ -404,9 +403,7 @@ behind the ranking, and what each source costs when it is read the other way:
    unlanded clump with no "PR up" on record is **`stalled`**, distinct from
    `idle`. Its turn ended with no "PR up", so it either stopped mid-lane or
    is waiting on your answer to a question; the line says to read the pane,
-   and the pane says which. #1095's worker committed, ran the gate and ended
-   its turn with a summary to no one; herdr said `done`, and the controller
-   found it ten minutes later only because Chris asked (#1148). The record is
+   and the pane says which. The record is
    the run file's `pr_up` (`references/run-file.md` § The PR-up record); with
    it, the sweep prints herdr's own word.
 
@@ -467,9 +464,8 @@ act.
 **A bounded probe before escalating.** A controller **may commission a bounded
 probe** from a worker before it escalates — a named, small, time-boxed
 measurement whose shape it states, so an abstract question reaches Chris as a
-table instead of three options in the dark. On #781 that was three clue
-counts, one browser, no givens; it came back in minutes and turned a spec
-question into a one-message ruling.
+table instead of three options in the dark
+([`references/parking.md`](references/parking.md) § The bounded probe).
 
 ## Before a controller rules
 

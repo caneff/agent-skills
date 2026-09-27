@@ -48,7 +48,7 @@ Three exit statuses: **0** clean, **1** hollow tests found, **2** unable to
 check. Only gate mode ever returns 1 — a report never fails a build — but 0 and
 2 mean the same thing in both modes. A path that does not exist gets 2, never 0
 — a gate that reports success while it scanned nothing is a lie, and a typo in
-a repo's wiring would otherwise make that repo's gate permanently green (#685).
+a repo's wiring would otherwise make that repo's gate permanently green.
 `audit.mjs` also exits 2 when `@babel/parser` is missing.
 
 The `fixtures/` exemption matches a directory of that name at any depth, so the
@@ -62,7 +62,7 @@ picked up automatically by `tests/all.sh`'s `*.test.sh` discovery.
 
 **The JS gate's remaining blind spot.** A file whose every test is
 assertion-free has no assertion to be recognized by, so the runner *import* is
-what identifies it (#685) — which leaves one case uncovered: a vitest file run
+what identifies it — which leaves one case uncovered: a vitest file run
 in globals mode, importing nothing, whose every test is assertion-free. It is
 invisible to both signals. `audit.py` has no equivalent limit; it audits any
 `test_*.py` outright.
@@ -255,11 +255,12 @@ just no longer this test's problem.
 
 ## Verify against the fixture
 
-`~/.agents/skills/test-audit/fixtures/` carries five files spanning the Cut/
-Rewrite/Keep buckets and the mechanical smells above (pytest and vitest).
-`~/.agents/skills/test-audit/fixtures/answer-key.md` has the expected pass-one
-candidate list and the pass-two bucket for each test. Running this skill over
-`~/.agents/skills/test-audit/fixtures/` should reproduce that table.
+`~/.agents/skills/test-audit/fixtures/` carries five files.
+`test_pricing.py`, `test_checkout_e2e.py` and `test_user_service.py` span the
+Cut/Rewrite/Keep buckets; `~/.agents/skills/test-audit/fixtures/answer-key.md`
+has the pass-two bucket for each of their tests, and a run over them should
+reproduce that table. `test_pytest_smells.py` and `vitest_smells.test.js`
+exist for pass one's scanners to flag; the answer key does not cover them.
 
 ## Run
 

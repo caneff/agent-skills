@@ -37,7 +37,7 @@ Every finding carries exactly one, built from `vt-pill`:
 - **Worth it** — `vt-pill` (accent). A clear improvement, lower stakes.
 - **Nit** — `vt-pill neutral` (grey). Cosmetic; listed only if it rides along cheaply.
 
-A second **category tag** — `vt-pill neutral outline sm` (`duplication`, `spaghetti`, `boundary`, `file-size`, `dead-abstraction`, `reliability`, `simplification`) — sits next to the badge so the reader can scan by kind. Put the file list after the badges in a monospaced span.
+A second **category tag** — `vt-pill neutral outline sm` (`duplication`, `branching`, `boundary`, `file-size`, `dead-abstraction`, `reliability`, `simplification`) — sits next to the badge so the reader can scan by kind. Put the file list after the badges in a monospaced span.
 
 ## Headline card
 
@@ -104,7 +104,7 @@ Close with a short section — a `vt-callout` holding a plain list — of the th
 
 ## Tone
 
-Direct, serious, and demanding about quality — the same standard as the terminal review, not softened because it is now in a browser. Name the problem plainly. Do not hedge it into a mild suggestion. Rank without mercy: the headline and the Blockers come first; the Nits ride along at the bottom or not at all.
+Direct, serious, and demanding about quality. Name the problem plainly. Do not hedge it into a mild suggestion. Rank without mercy: the headline and the Blockers come first; the Nits ride along at the bottom or not at all.
 
 **Write the prose in Simplified Technical English** (see the SKILL.md "Write the review in plain language" section). Short sentences. One idea per sentence. Active voice, present tense. Use the **target repo's own domain terms** — its `CONTEXT.md` names them if it has one — instead of inventing new ones. Keep real technical terms (module, regex, atomic write). **Do not put this skill's metaphors — "code judo", "spaghetti", "seam leak" — into the card text.** A card that needs the dialect to be understood has failed; rewrite it.
 

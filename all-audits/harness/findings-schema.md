@@ -85,7 +85,7 @@ Do not list every finding here. The log is the list; the summary is the map.
 Each process writes the same manifest shape to the path the prompt names,
 regardless of which audit ran — this is what `driver.py` reads to find the
 report; it never scans the process's stdout (see
-[`AUDIT-RUN.md`](AUDIT-RUN.md#the-manifest-559)):
+[`AUDIT-RUN.md`](AUDIT-RUN.md#the-manifest)):
 
 - `report_path` — absolute path to the report's `.html` file. For an audit
   that writes `findings.jsonl`, this is the grouped summary page above, not a

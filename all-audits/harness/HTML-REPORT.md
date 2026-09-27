@@ -31,8 +31,9 @@ bridge last.
 > under CORS rules, which `file://` blocks — the toggle, copy buttons, and
 > Prism then silently die.
 
-The report is a single self-contained HTML file in the OS temp directory. It
-opens offline, carries a working light/dark mode, and loads no external host.
+The report is an HTML page plus the `assets/` folder `copy_assets` writes
+beside it, in the OS temp directory. It opens offline, carries a working
+light/dark mode, and loads no external host.
 The tmp dir resolves `${TMPDIR:-/tmp}` — a skill names its own folder
 (`<tmpdir>/<skill>-<timestamp>/report.html`) and needs no separate fallback
 note. Once the report is written, **open it and hand off the path**:
@@ -42,7 +43,7 @@ Windows, then tell the user the absolute path.
 **Inside a sweep, write the manifest.** When the prompt names a manifest
 path, `driver.py` finds your report there — a JSON object naming
 `report_path`, not a stdout scan. See
-[`AUDIT-RUN.md`](AUDIT-RUN.md#the-manifest-559)'s "The manifest" section for
+[`AUDIT-RUN.md`](AUDIT-RUN.md#the-manifest)'s "The manifest" section for
 the exact shape.
 
 ## Beyond this doc

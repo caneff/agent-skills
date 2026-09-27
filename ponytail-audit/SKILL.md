@@ -75,7 +75,7 @@ and win bullets), and closes with a **Deliberately leaving alone** list so the
 reader sees what was considered and consciously kept — the real abstractions and
 the deliberate redundancy.
 
-Ranking is unchanged: **biggest cut first.** The header carries the only metric
+Rank **biggest cut first.** The header carries the only metric
 that matters — `net: -<N> lines, -<M> deps possible` — and each card its own
 line count. Nothing to cut: a one-card report whose verdict is `Lean already.
 Ship.`

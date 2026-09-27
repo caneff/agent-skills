@@ -59,10 +59,9 @@ covered without re-running mutmut.
 1. **Resolve the target.** `$ARGUMENTS` is the target module. If it's
    given, skip to step 2.
 
-   **No target — suggest, don't sweep.** Walk the current directory
-   (`os.walk`, skipping `.git`, `node_modules`, `dist`, `build`, `.venv`,
-   `venv`, `vendor`, `worktrees`, `mutants`, and any dotdir) collecting
-   `.py` paths, then:
+   **No target — suggest, don't sweep.** Pass the repo root; the script walks
+   it itself (`auditlib.walk_source`, which prunes `EXCLUDED_DIRS` and
+   dot-dirs):
    ```sh
    python3 ~/.agents/skills/mutation-audit/audit.py --suggest <scope>
    ```
