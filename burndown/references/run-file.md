@@ -159,13 +159,10 @@ command refuses:
   verification pass rewrites its sidecar line in the same step that records
   it in the PR body (`implement/SKILL.md` § The merge), so a disagreement is
   a step that reached one record and not the other (#1085). A ruling that
-  genuinely splits a finding — fix one part, leave the rest, PR #1172's
-  case — is not this: it is refused the same way, because it is still one
-  id holding two outcome words, and the refusal itself names the way past
-  it that is not `--allow-stale` — two ids sharing the base, suffixed `a`,
-  `b`, … (`implement/SKILL.md` § Review's split grammar), each with its own
-  sidecar line and its own Decisions made line. A round-prefixed id splits
-  the same way, the suffix trailing the prefix (`r2-S1a`).
+  genuinely splits a finding is refused the same way — it is still one id
+  holding two outcome words — until it is written as two ids per
+  `implement/SKILL.md` § Review's split grammar; the refusal itself names
+  that way past it, by this finding's own id.
 - a leftover the body states and the sidecar has no line for:
   `implement/SKILL.md` § The merge's
   case of a leftover kept only in the PR body, which never reaches a sweep.

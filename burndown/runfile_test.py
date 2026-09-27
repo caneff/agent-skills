@@ -1471,6 +1471,15 @@ def test_a_genuine_split_is_written_as_two_ids_not_one():
     _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root,
                                 pr_body=body)
     assert added == ["codex-gate-1b"], added
+    # Witness that the --pr-body check is genuinely live for split ids, not
+    # merely silent about them (correctness C3): a body that disagrees with
+    # one split half is still refused, by that half's own id.
+    disagreeing = pr_body(
+        "## Decisions made\n\n"
+        "- codex-gate-1a: leftover — head binding still open.\n"
+        "- codex-gate-1b: leftover — residual race; sidecar codex-gate-1b.\n")
+    got = refusal_of(sidecar, landed_root(), disagreeing)
+    assert "codex-gate-1a" in got and "'leftover'" in got and "'fixed'" in got, got
 
 
 def test_a_stale_leftover_is_refused_in_each_real_line_shape():

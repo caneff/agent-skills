@@ -575,7 +575,7 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
                 f"{body_path}:{body_n} records {obj['id']} as {said!r}, "
                 f"but {sidecar_path}:{n} says {obj['outcome']!r} — rewrite "
                 "the sidecar line; if the ruling genuinely splits this "
-                f"finding into two outcomes, write it as two ids, one per "
+                "finding into two outcomes, write it as two ids, one per "
                 f"half ({obj['id']}a, {obj['id']}b — implement/SKILL.md § "
                 "Review's split grammar), each with its own sidecar line; "
                 "otherwise pass --allow-stale")

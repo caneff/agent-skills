@@ -202,25 +202,36 @@ No PR and no reviewer; Chris reads the log after.
    owner asks).
 
    Every finding gets exactly one disposition, one of five outcomes:
-   `fixed`, `disputed`, `filed`, `handed-back` and `leftover`. **A ruling
-   that genuinely divides a finding** — fix one part now, leave the
-   rest — is never written as one id carrying two outcome words (`fixed …
-   leftover`, as PR #1172's did): write it as two ids sharing the base,
-   suffixed `a`, `b`, … in the order the halves are named (`codex-gate-1a`
-   fixed, `codex-gate-1b` leftover), each with its own sidecar line, its own
-   Decisions made line, and its own outcome. A round prefix (when one
-   applies) sits in front of the whole thing, the split suffix stays last
-   (`r2-S1a`), so the two grammars never collide. `runfile.py leftover
-   --pr-body` matches an id exactly, so this is the whole fix — nothing
-   about a split needs `--allow-stale`; that flag is for a sidecar that is
-   genuinely stale, not a finding that was never one thing to begin with.
-   It is fixed
+   `fixed`, `disputed`, `filed`, `handed-back` and `leftover`. It is fixed
    in a commit, `disputed: <why>`, or filed as a follow-up ticket through
    `/file-ticket` so it leaves with a routing role, never `needs-triage` —
    ad hoc `gh issue create` skips that role. `filed` is reserved for a high
    finding, under the severity mapping below. A finding that is not high and
    not fixed in the round takes `leftover`: no ticket of its own, only a
-   sidecar line (step 2) and `leftover` in prose. A burn's own sweep, one
+   sidecar line (step 2) and `leftover` in prose.
+
+   **The split grammar.** A ruling that genuinely divides a controller-only
+   finding — one with no line of its own in a `findings-<axis>-<n>.jsonl`
+   sidecar, which today means a Codex-pass finding (§ The merge step 3) —
+   fix one part now, leave the rest — is never written as one id carrying
+   two outcome words (`fixed … leftover`, as PR #1172's did): write it as
+   two ids
+   sharing the base, suffixed `a`, `b`, … in the order the halves are named
+   (`codex-gate-1a` fixed, `codex-gate-1b` leftover), each with its own
+   sidecar line, its own Decisions made line, and its own outcome. A round
+   prefix (when one applies) sits in front of the whole thing, the split
+   suffix stays last (`r2-S1a`), so the two grammars never collide.
+   `runfile.py leftover --pr-body` matches an id exactly, so nothing about a
+   genuine split needs `--allow-stale`; that flag is for a sidecar that is
+   stale, not a finding that was never one thing to begin with. **A round-1
+   finding's own id (`S3`, `P2`, `C1`, `OE1`) is never split**:
+   `docs/research/tally_review_axes.py` and the verification pass
+   (`multi-axis-code-review/SKILL.md` § 6) both join a disposition to its
+   finding by exact id, so a split `S3` would read as `S3` itself
+   undisposed and `S3a`/`S3b` as orphans neither tool recognises. A ruling
+   that divides a round-1 finding takes one disposition for the whole
+   finding, same as any other, until those two readers learn the grammar
+   too. A burn's own sweep, one
    ticket per run, is `burndown/SKILL.md` § The sweep; a worker whose
    brief carries **no `--run <run-id>`** has no run file under it and
    files its own per-PR sweep instead, at report time: this file's § The PR
@@ -858,12 +869,10 @@ The controller merges on a repo Chris owns; Chris reads it after via
    the half-done step at harvest: it refuses a sidecar line whose outcome the PR
    body's Decisions made contradicts, and a leftover the body does not cite
    by id (`--pr-body`). A change recorded in neither place is not seen by
-   it; the rewrite is the rule. **A ruling that splits the finding rather
-   than changing it outright** (§ Review, PR #1172's case: fix the head
-   binding, leave the residual race) is not a rewrite of the one line — it
-   is two lines, one per suffixed id (`codex-gate-1a`, `codex-gate-1b`), the
-   base id itself dropped from both files. Passing `--allow-stale` over a
-   split is the override this rule exists to stop training (#1147/#1170).
+   it; the rewrite is the rule. A ruling that splits the finding rather
+   than changing it outright is not a rewrite of the one line — it is § Review's
+   split grammar (`codex-gate-1a`, `codex-gate-1b`), not `--allow-stale`
+   (#1147/#1170).
 
    Classify each finding by comparing it with the PR body's round-1
    findings — `codex-only, confirmed` (fixed or filed, and no Claude axis
