@@ -145,14 +145,8 @@ trap 'rm -rf "$scratch"' EXIT
   cd "$scratch"
   git init -q -b main repo
   cd repo
-  # Name the repo and refuse a target outside our own mktemp dir: a bare
-  # `git config` after a failed `cd` wrote the real checkout's config (#1144).
-  case "$(git -C "$scratch/repo" rev-parse --show-toplevel)" in
-    "$(cd "$scratch" && pwd -P)"/*) ;;
-    *) echo "FAIL: fixture repo is not under $scratch" >&2; exit 1 ;;
-  esac
-  git -C "$scratch/repo" config user.email t@example.com
-  git -C "$scratch/repo" config user.name t
+  . "$here/../tests/fixture-identity.sh"
+  fixture_identity "$scratch/repo" "$scratch" || exit 1
   echo base >f.txt; git add f.txt; git commit -qm base
   git checkout -qb work
   echo first >f.txt; git commit -qam first
