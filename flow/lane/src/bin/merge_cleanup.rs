@@ -611,7 +611,16 @@ impl Cleanup {
     /// a clean one.
     fn report_blockers(&self, path: &str, b: &str) {
         let mut lines = Vec::new();
-        if let Some(wt) = linked_worktree_holding(path, b) {
+        // A listing git could not produce is a blocker, not "no workspace".
+        let held = match worktree_holding(path, b) {
+            Err(()) => {
+                lines.push("unreadable git worktree list failed".to_string());
+                None
+            }
+            Ok(wt) => wt.filter(|wt| *wt != primary_of(path)),
+        };
+        let unheld = if held.is_none() { format!(" (no linked worktree holds {b})") } else { String::new() };
+        if let Some(wt) = held {
             match WorktreeFiles::read(&wt) {
                 None => lines.push("unreadable git status failed".to_string()),
                 Some(files) => {
@@ -635,7 +644,7 @@ impl Cleanup {
             }
         }
         if lines.is_empty() {
-            safe_println!("blockers: none");
+            safe_println!("blockers: none{unheld}");
         }
         for l in lines {
             safe_println!("blocker: {l}");

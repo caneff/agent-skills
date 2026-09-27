@@ -1093,6 +1093,17 @@ fn a_dry_run_on_a_branch_not_yet_merged_still_names_its_blockers() {
 }
 
 #[test]
+fn a_dry_run_that_cannot_list_worktrees_names_that_as_a_blocker() {
+    // Review S1/P1/C2: a failed listing is not "no workspace, so none".
+    let c = Cleanup::new();
+    let (r, _wt) = lane_workspace(&c, "r46", "implement-1032g");
+    let fail_list = "for a in \"$@\"; do [ \"$a\" = list ] && exit 128; done\n";
+    replace_git_with(&c, "noherdr", format!("#!/bin/bash\n{fail_list}exec \"{}\" \"$@\"\n", which("git").display()));
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert_eq!(blocker_lines(&run), vec!["blocker: unreadable git worktree list failed".to_string()], "{}", run.text());
+}
+
+#[test]
 fn a_dry_run_with_nothing_blocking_says_so() {
     let c = Cleanup::new();
     let (r, _wt) = lane_workspace(&c, "r43", "implement-1032d");
