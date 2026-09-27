@@ -1181,7 +1181,18 @@ mod tests {
             "burn-2026-09-27", "a", "1", "A.b_c-9", "burn.x", "a.", "-a", ".a", "_a", "a..b", "..", "a/b", "a b", "a\"b", "a\n", "",
             "\u{e9}t\u{e9}", "a\u{e9}",
         ];
-        let script = "import json, sys\nsys.path.insert(0, sys.argv[1])\nimport runfile\nout = []\nfor i in json.load(sys.stdin):\n    try:\n        runfile.checked_run_id(i); out.append(True)\n    except runfile.RunFileError:\n        out.append(False)\nprint(json.dumps(out))";
+        let script = r#"
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import runfile
+out = []
+for i in json.load(sys.stdin):
+    try:
+        runfile.checked_run_id(i); out.append(True)
+    except runfile.RunFileError:
+        out.append(False)
+print(json.dumps(out))
+"#;
         let burndown = concat!(env!("CARGO_MANIFEST_DIR"), "/../../burndown");
         let mut child = std::process::Command::new("python3")
             .args(["-c", script, burndown])
