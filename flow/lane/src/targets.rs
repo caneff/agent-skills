@@ -4,16 +4,18 @@
 //! and a label a filer put on by hand is not evidence about the diff (#969:
 //! a `SKILL.md` change went out light and landed on main with no reviewer).
 //! So the body's own targets are read too. `flow/claude/WORKFLOW.md` § Gate 2
-//! names what is code; this is the dispatcher's reading of it, and it errs
-//! toward code — a wrong heavy tier costs one review, a wrong light tier
-//! lands code unreviewed. It reads a body's tokens, not a file list, so it
-//! cannot treat everything outside prose as code the way `burndown/tier.py`
-//! does (`i.e`, `v1.2` would all go heavy). A token with a `/` is a path, and
-//! is code unless its extension is prose (`.md .markdown .txt .rst`); a bare
-//! token is code only by a fixed list of extensions. Extensionless, it is code
-//! by filename (`Makefile`, `Gemfile`) or under a script directory (`bin/`,
-//! `hooks/`). An extensionless name outside those is still invisible here;
-//! `tier.py` strips the label for it before dispatch.
+//! names what is code; this is the dispatcher's reading of it. A wrong heavy
+//! tier costs one review and a wrong light tier lands code unreviewed, so it
+//! errs toward code wherever a body's tokens let it. A token with a `/` is a
+//! path, and is code unless its extension is prose (`.md .markdown .txt
+//! .rst`): a whitelist, as in `burndown/tier.py`. A bare token is the
+//! exception. It is code only by a fixed list of extensions, a blacklist,
+//! because prose is full of dotted words that are not files (`i.e`, `v1.2`,
+//! `user.email`), so a bare token with an unlisted extension (`build.gradle`)
+//! reads as prose here. Extensionless, a token is code by basename
+//! (`Makefile`, `Gemfile`) or under a script directory (`bin/`, `hooks/`); any
+//! other extensionless name reads as prose too. `tier.py` strips the label
+//! for both gaps before dispatch, from the clumper's file list.
 
 /// Extensions read as code: § Gate 2's, the ones that wire the harness or CI
 /// (its "hooks, CI config"), and other scripting and config languages.
