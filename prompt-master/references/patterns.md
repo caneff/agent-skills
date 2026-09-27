@@ -35,7 +35,7 @@
 
 | # | Pattern | Bad Example | Fixed |
 |---|---------|------------|-------|
-| 14 | **Missing output format** | "explain this concept" | "3 bullet points, each under 20 words, with a one-sentence summary at top" |
+| 14 | **Missing output format** | "explain this concept" | "3 bullet points a newcomer can act on, with a one-sentence summary at top" |
 | 15 | **Implicit length** | "write a summary" | "Write a summary a busy executive can act on without reading the source" |
 | 16 | **No role assignment** | (blank) | "You are a senior backend engineer specializing in Node.js and PostgreSQL" |
 | 17 | **Vague aesthetic adjectives** | "make it look professional" | "Monochrome palette, 16px base font, 24px line height, no decorative elements" |
