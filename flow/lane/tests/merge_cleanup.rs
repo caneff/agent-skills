@@ -1318,6 +1318,24 @@ fn discard_does_not_cover_a_file_that_appears_inside_a_reported_untracked_direct
 }
 
 #[test]
+fn a_session_whose_idle_pane_the_guard_closed_does_not_refuse_the_recheck() {
+    // Review C4: once its pane is closed herdr stops listing the agent, but
+    // the session's pid can outlive that; the guard already cleared it.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r34", "implement-879e");
+    c.session("r34", &format!(r#"{{"pid":{},"cwd":"{}","sessionId":"sess-34","procStart":"{}"}}"#, me(), wt.display(), me_start()));
+    c.set_agents(&format!(
+        r#"[{{"name":"skills-34","pane_id":"w34:p1","cwd":"{}","agent_status":"idle","agent_session":{{"value":"sess-34"}}}}]"#,
+        wt.display()
+    ));
+    let agents = c.root().join("agents.json");
+    let late = format!(r#"echo '{{"result":{{"agents":[]}}}}' > '{}'"#, agents.display());
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[("MERGE_CLEANUP_AFTER_GUARDS", &late)]);
+    assert!(std::fs::read_to_string(&agents).unwrap().contains(r#""agents":[]"#), "the failpoint did not run");
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+}
+
+#[test]
 fn a_live_session_that_appears_after_the_guards_refuses_the_removal() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r32", "implement-879c");
