@@ -651,6 +651,25 @@ mod tests {
         assert_eq!(workspaces, vec!["/a", "/b"], "read must observe the completed rewrite, not the torn truncate");
     }
 
+    /// #1101 review C1: the lock survives a publish's rename; one on the sidecar's own inode would not.
+    #[test]
+    fn the_lock_still_excludes_a_writer_after_a_publish_renames_the_sidecar() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        append(&home, "111", &record("/a")).unwrap();
+        let held = hold_lock(&home, "111");
+        publish(&path_for(&home, "111"), &[]).unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let h = home.clone();
+        let appender = std::thread::spawn(move || {
+            append(&h, "111", &record("/b")).unwrap();
+            let _ = done_tx.send(());
+        });
+        assert!(done_rx.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "append ran without the lock after the rename");
+        drop(held);
+        appender.join().unwrap();
+    }
+
     /// #964 fix round 1 (Codex high): `remove_workspace`'s read/filter/write
     /// and `append`'s write must serialize on the same file lock, or an
     /// append landing between the read and the write is silently lost. Holds
