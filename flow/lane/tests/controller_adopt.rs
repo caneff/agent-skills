@@ -324,3 +324,59 @@ fn an_adopt_killed_after_landing_leaves_the_worker_with_its_adopter_and_offered_
     // worker's re-point message can come from (#1098 second Codex pass).
     assert!(stdout(&again).contains("Your controller is now controller-50"), "{}", out_text(&again));
 }
+
+#[test]
+fn an_adopt_killed_mid_rewrite_of_the_dead_sidecar_loses_none_of_its_other_records() {
+    // #1101: removing the adopted copy rewrites the dead controller's
+    // sidecar. A process death partway through that rewrite must leave the
+    // sidecar whole in its old or its new version: the dead controller's
+    // other worker is still there to restore or adopt. The kill is a real
+    // SIGABRT from the debug-build failpoint, after half the new bytes.
+    let f = Fixture::new();
+    let (own_pid, own_start) = adopter(&f);
+    let (primary, ws) = f.repo_with_workspace("scroller", BRANCH);
+    let (_, other_ws) = f.repo_with_workspace("other", "implement-346");
+    let dead = dead_pid().to_string();
+    let record = worker_record(AGENT, BRANCH, &ws, "12345");
+    let other = worker_record("other-346", "implement-346", &other_ws, "12345");
+    workers::append(&f.home(), &dead, &record).unwrap();
+    workers::append(&f.home(), &dead, &other).unwrap();
+
+    let out = cmd(&f, env!("CARGO_BIN_EXE_controller-adopt"), &primary)
+        .arg(AGENT)
+        .env("LANE_SIDECAR_ABORT_MID_WRITE", format!("{dead}.workers.jsonl"))
+        .output()
+        .unwrap();
+    use std::os::unix::process::ExitStatusExt;
+    assert_eq!(out.status.signal(), Some(6), "the adopt must die at the failpoint: {}", out_text(&out));
+    let left = workers::read(&f.home(), &dead);
+    assert!(left == vec![record.clone(), other.clone()] || left == vec![other.clone()], "the dead sidecar is its old or its new version: {left:?}");
+    assert_eq!(workers::read(&f.home(), &own_pid), vec![worker_record(AGENT, BRANCH, &ws, &own_start)], "the landing came first");
+}
+
+#[test]
+fn an_adopt_killed_mid_landing_is_retried_and_restore_finds_the_worker() {
+    // #1101 (PR #1099 third Codex pass, CX3-1): a landing cut off after a
+    // prefix of the record must not leave an unterminated line the retry's
+    // record merges into, or the retry removes the only readable copy from
+    // the dead sidecar and the worker is in neither file.
+    let f = Fixture::new();
+    let (own_pid, own_start) = adopter(&f);
+    let (primary, ws) = f.repo_with_workspace("scroller", BRANCH);
+    let dead = dead_pid().to_string();
+    workers::append(&f.home(), &dead, &worker_record(AGENT, BRANCH, &ws, "12345")).unwrap();
+
+    let out = cmd(&f, env!("CARGO_BIN_EXE_controller-adopt"), &primary)
+        .arg(AGENT)
+        .env("LANE_SIDECAR_ABORT_MID_WRITE", format!("{own_pid}.workers.jsonl"))
+        .output()
+        .unwrap();
+    use std::os::unix::process::ExitStatusExt;
+    assert_eq!(out.status.signal(), Some(6), "the adopt must die at the failpoint: {}", out_text(&out));
+
+    let again = adopt(&f, &primary, AGENT);
+    assert!(again.status.success(), "{}", out_text(&again));
+    assert_eq!(holders(&f), vec![(own_pid, worker_record(AGENT, BRANCH, &ws, &own_start))]);
+    let text = stdout(&restore(&f, &primary));
+    assert!(text.contains("You control implement-345 (scroller-345"), "restore finds the worker: {text}");
+}
