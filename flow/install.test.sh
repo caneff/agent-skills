@@ -99,6 +99,14 @@ if [ -L "$tmp/home/.claude/hooks/refresh-landed.sh" ]; then
 else
   echo "FAIL refresh-landed.sh not linked under the scratch HOME"; fails=1
 fi
+# claude/settings.json is symlinked, not copy-only (#1031): a PR that edits
+# the repo file must take effect live without a backup-sync round trip.
+if [ -L "$tmp/home/.claude/settings.json" ] \
+   && [ "$(readlink "$tmp/home/.claude/settings.json")" = "$repo/flow/claude/settings.json" ]; then
+  echo "PASS claude/settings.json symlinked under the scratch HOME"
+else
+  echo "FAIL claude/settings.json not symlinked under the scratch HOME: $(ls -la "$tmp/home/.claude/settings.json" 2>&1)"; fails=1
+fi
 # implement-dispatch (#748) is `cargo install`ed, not linked: a real
 # executable, never a symlink into the repo, and the fake is never installed.
 dispatch_out=$(HOME="$tmp/home" "$tmp/home/.local/bin/implement-dispatch" --repo "$tmp/nowhere" 1 2>&1)
