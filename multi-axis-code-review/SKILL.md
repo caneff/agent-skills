@@ -91,9 +91,8 @@ review with a message saying which. None of them may reach the axes as "no
 changes found": a review that silently found nothing is indistinguishable from
 a clean one.
 
-The capture block is in § 4; the rest of this skill is unchanged — step 2 reads
-the spec off the named commits' messages, and steps 3 to 5 do not know which
-mode produced the patch.
+The capture block is in § 4. Step 2 reads the spec off the named commits'
+messages, and steps 3 to 5 do not know which mode produced the patch.
 
 ### 2. Identify the spec source
 
@@ -165,9 +164,7 @@ finding stops needing an LLM pass over prose (#855, #854): "Also write
 finding: `{"id": "<letter+ordinal>", "axis": "<axis>", "severity": "hard"
 or "judgement", "file": "<path>", "title": "<short title>"}`. Assign each
 finding a stable id — the axis's first letter (`S` standards, `P` spec, `C`
-correctness) plus a per-report ordinal, e.g. `S1`, `P2`, `C3` — the
-convention `~/.cache/agent-reviews/skills/verify-790-dispositions.md`
-already reaches for by hand; formalize it, don't invent a new one. Cite the
+correctness) plus a per-report ordinal, e.g. `S1`, `P2`, `C3`. Cite the
 same id in the prose report next to each finding, so a reader can join the
 two. A partial write costs one line, not the file — readers of this
 sidecar must tolerate and skip a malformed line rather than fail the whole
@@ -298,50 +295,39 @@ If the completion notification comes back missing or empty, read that file befor
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The list of standards-source files you found in step 3, and the settled decisions. The smell baseline and the over-engineering lens are the agent definition's to read from § 3; paste them only in the no-definition fallback above.
-- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Check `docs/agents/defect-classes.md` by name — the three shapes this repo keeps shipping, with every instance. Skip anything tooling enforces, and skip the hollow-witness check — the correctness axis owns it (#938), and two opus agents mutating the same tests over the same diff cost two dispositions for one finding. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the over-engineering lens over the diff and list what to cut, one line each in `location: <tag> <what>. <replacement>.` form using the five tags. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Under 550 words."
+- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Check `docs/agents/defect-classes.md` by name when present in the reviewed repo — the three shapes this repo keeps shipping, with every instance; when absent, check the three shapes inline instead: (1) an absent or malformed answer read as a benign one; (2) a stated fallback with no mechanism behind it; (3) a test that passes for a reason other than the one it claims. Skip anything tooling enforces, and skip the hollow-witness check — the correctness axis owns it (#938), and two opus agents mutating the same tests over the same diff cost two dispositions for one finding. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the over-engineering lens over the diff and list what to cut, one line each in `location: <tag> <what>. <replacement>.` form using the five tags. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Findings and their evidence only, no preamble."
 
 **Spec sub-agent prompt** — include:
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec, and the settled decisions.
-- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep), except a change an adjacent disposition names (`fixed (adjacent)`), which implement's adjacent-fix rule sanctions; (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Check `docs/agents/defect-classes.md` by name. Under 400 words."
+- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep), except a change an adjacent disposition names (`fixed (adjacent)`), which implement's adjacent-fix rule sanctions; (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Check `docs/agents/defect-classes.md` by name when present in the reviewed repo; when absent, check the three shapes inline instead: (1) an absent or malformed answer read as a benign one; (2) a stated fallback with no mechanism behind it; (3) a test that passes for a reason other than the one it claims. Findings and their evidence only, no preamble."
 
 **Correctness sub-agent prompt** — include:
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec if there is one (so "behaviour the ticket did not ask for" has a referent), the test command the repo uses, and the settled decisions.
-- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) `docs/agents/defect-classes.md` checked by name, class 1 (an absent or malformed answer read as a benign one) and class 3 (a test that passes for a reason other than the one it claims) especially, since you own the witness check; (d) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it — and when a mutation goes red, read the message and confirm the failure is your assertion and not a missing file or a denied path, which is class 3 again. (e) every safety guard the diff adds — a check that refuses, validates or fails closed — gets a second, separate mutation: mutate its call site. For every entry point the guard exists to protect, delete or neutralize the call to the guard there, run the suite that covers that entry point, and confirm it goes red at that entry point — not only in the unit test that calls the guard directly; mutating the guard's own body (d) reddens that unit test and says nothing about whether anything still calls the guard. A call-site mutation that stays green is an unprotected entry point: report it as a finding naming the entry point, since the guard can be bypassed at the only place it matters. Read the failure message as in (d), so a red from a missing file is not taken for a red from the assertion. Isolate each mutation in a throwaway worktree — `git worktree add --detach <a path outside the checkout> HEAD`, removed afterwards with `git worktree remove --force` — and never in a copy of the tree, which on a linked worktree shares the checkout's own index. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. Prepare every mutation and launch them at once rather than walking them in turn — at most four running together — a third of the headroom under the box's 28-process cap, counted `ps -eo comm= | grep -cx claude` and never `ps aux | grep`, since your axis is one of three — and fewer, down to one at a time again, when the box is already busy or its process table cannot be read: slower, never refused. Each mutation keeps its own worktree and its own captured output, and you collect them by id when they finish; a call-site mutation gets its own id, distinct from the constraint mutation it accompanies, never shared with it, so a failure message is still read against the mutation that produced it. A mutation whose worktree, suite run or output never arrived is `unknown`, reported by that name — never counted as an assertion that held, which is class 1. Nothing is restored between mutations: each worktree is discarded whole, and the checkout is left exactly as found. A file outside the repository (`~/.local/bin`, a dotfile, a registry) is read with one plain command — `cat <path>` or `diff <a> <b>` — never inside a `cd ... && for` compound, which the permission classifier cannot read as the read it is and blocks; and a mutation never reaches a step that writes outside the worktree (an installer, a registry edit, a symlink into `~`): stub that seam or skip the mutation and report it `unknown` (2026-09-21: a mutation ran a toast installer for real and left a registry key pointing at a deleted `/tmp` worktree). Rate each bug PLAUSIBLE or CONFIRMED and say which. Under 450 words."
+- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) when present in the reviewed repo, `docs/agents/defect-classes.md` checked by name, class 1 (an absent or malformed answer read as a benign one) and class 3 (a test that passes for a reason other than the one it claims) especially, since you own the witness check; when absent, check those same two shapes inline plus class 2 (a stated fallback with no mechanism behind it); (d) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it — and when a mutation goes red, read the message and confirm the failure is your assertion and not a missing file or a denied path, which is class 3 again. (e) every safety guard the diff adds — a check that refuses, validates or fails closed — gets a second, separate mutation: mutate its call site. For every entry point the guard exists to protect, delete or neutralize the call to the guard there, run the suite that covers that entry point, and confirm it goes red at that entry point — not only in the unit test that calls the guard directly; mutating the guard's own body (d) reddens that unit test and says nothing about whether anything still calls the guard. A call-site mutation that stays green is an unprotected entry point: report it as a finding naming the entry point, since the guard can be bypassed at the only place it matters. Read the failure message as in (d), so a red from a missing file is not taken for a red from the assertion. Isolate each mutation in a throwaway worktree — `git worktree add --detach <a path outside the checkout> HEAD`, removed afterwards with `git worktree remove --force` — and never in a copy of the tree, which on a linked worktree shares the checkout's own index. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. Prepare every mutation and launch them at once rather than walking them in turn — at most four running together — a third of the headroom under the box's 28-process cap, counted `ps -eo comm= | grep -cx claude` and never `ps aux | grep`, since your axis is one of three — and fewer, down to one at a time again, when the box is already busy or its process table cannot be read: slower, never refused. Each mutation keeps its own worktree and its own captured output, and you collect them by id when they finish; a call-site mutation gets its own id, distinct from the constraint mutation it accompanies, never shared with it, so a failure message is still read against the mutation that produced it. A mutation whose worktree, suite run or output never arrived is `unknown`, reported by that name — never counted as an assertion that held, which is class 1. Nothing is restored between mutations: each worktree is discarded whole, and the checkout is left exactly as found. A file outside the repository (`~/.local/bin`, a dotfile, a registry) is read with one plain command — `cat <path>` or `diff <a> <b>` — never inside a `cd ... && for` compound, which the permission classifier cannot read as the read it is and blocks; and a mutation never reaches a step that writes outside the worktree (an installer, a registry edit, a symlink into `~`): stub that seam or skip the mutation and report it `unknown`. Rate each bug PLAUSIBLE or CONFIRMED and say which. Findings and their evidence only, no preamble."
 
 **What the witness check costs, and what actually isolates it** (#939). The
-check itself is the most valuable thing a review does — the `paths()` fail-open
-in #893, the zero-cores default in #894 and the suppressed contradictions in
-#897 all came out of it in one day. Neither line below runs it less.
+check itself is the most valuable thing a review does. Neither line below runs it less.
 
 *Isolation.* `git worktree add` a throwaway worktree per mutation. **Never
 `cp -a`**, or any other byte copy of the reviewed tree: a linked worktree's
 `.git` is a *file holding a gitdir pointer*, not a directory, so a copy of one
 still points at the original's gitdir and shares its index, HEAD and refs.
 Reviews in this lane always run on a linked worktree, so the copy is not weaker
-isolation — it is none. On 2026-09-20 a worker followed the wording this
-replaces, copied its tree with `cp -a`, and two `git rm --cached` runs inside
-the "isolated" copy staged deletions in the real checkout's index; it noticed
-only because those two mutations happened to be staged ones. A worktree has its
+isolation — it is none: a `git rm --cached` inside the copy stages a deletion
+in the real checkout's index. A worktree has its
 own index and HEAD, so the same command cannot reach the checkout, and `git
 clone --no-hardlinks` is the other safe answer. Sharing the object store also
-costs no copy of the 419 MB / 529 tracked files this repo carries. `HEAD` is
+costs no copy of the tracked tree. `HEAD` is
 the revision the captured diff ends at, so the mutation lands on exactly the
 code under review.
 
 *Concurrency* (#957). The mutations share nothing — each has its own worktree,
 its own index and its own output file — so they run together, and the check
 costs one covering-suite run of wall clock instead of one per mutated test.
-The serial reading was an artefact of the brief being written as a list of
-steps; nobody established it as a constraint. Measured on
-`caneff/sudokupad-art` on 2026-09-20: `test_retro_waves.py` is 31.96s of a
-33.9s suite (378 of 602 tests, everything else 0.91s), and the recent work is
-in that file, so the covering suite is the slow one. A diff adding ten tests
-paid five minutes before the reviewer read anything, and that correctness pass
-took 22 minutes.
 
 A call-site mutation (correctness brief, (e)) is one more kind of mutation for
 this machinery to run, one per protected entry point, enumerated beside the
@@ -360,9 +346,8 @@ output file that is empty. Reported by name, never folded in with the
 assertions that genuinely held — that is defect class 1, and it is the failure
 this whole block is most exposed to.
 
-There is **nothing to restore**. The serial loop restored implicitly, by moving
-on to the next test; with the mutations concurrent nothing is shared to restore
-and each worktree is discarded whole. No step here reaches back into the
+There is **nothing to restore**: with the mutations concurrent, nothing is
+shared to restore, and each worktree is discarded whole. No step here reaches back into the
 checkout to undo anything, and reintroducing one would be the `cp -a` defect by
 another route.
 
@@ -536,8 +521,8 @@ any later `merge-cleanup` on this repo.
 
 *Scope.* Re-run the suite that covers the mutated test — the file it lives in,
 run the way `tests/all.sh` would run it (`bash <name>.test.sh`, `python3
-<name>_test.py`) — not the whole gate. `bash tests/all.sh` is 2m51s wall over
-62 suites here, so a diff adding five tests would pay it five times inside one
+<name>_test.py`) — not the whole gate. `bash tests/all.sh` runs every suite in
+the repo, so a diff adding five tests would pay it five times inside one
 axis, while the covering suite finishes in seconds. The whole gate belongs to
 the worker's own pre-report gate, where it already runs once.
 
@@ -587,7 +572,7 @@ disposition whose why does not name how the environment in
 bodies people here write) rules the failure out; a bare "unlikely" or
 "cannot happen" fails by id, since the bar would otherwise suppress a
 reachable finding unchecked. Report every breach beside the finding it
-belongs to. Under 400 words."
+belongs to."
 
 ## Why separate axes
 
