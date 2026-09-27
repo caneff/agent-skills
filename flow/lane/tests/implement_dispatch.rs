@@ -2202,12 +2202,18 @@ fn a_show_ref_that_hangs_fails_instead_of_being_read_as_branch_absent() {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    // Matches both show-ref call sites (#849's evidence list); the branch-
-    // existence check runs first, so that is the one this test actually
-    // exercises.
+    // Targets exactly the branch-existence check's own ref
+    // (`refs/heads/implement-395`), not the bare substring "show-ref"
+    // (#849 correctness gate, C1): this fixture's clone has no
+    // `origin/HEAD`, so `default_branch_timeout` makes its own show-ref
+    // call to probe for "main" — a broader pattern hangs that call too,
+    // and the "timed out" text this test asserts on can come from there
+    // instead of from the branch-existence check it means to witness.
+    // Confirmed by mutation: with the broader pattern, neutralising only
+    // the branch-existence check's own `.map_err(die)?` left this test green.
     let scenario = with(&default_scenario(), &[("LANE_GIT_QUERY_TIMEOUT_MS", "200")]);
     let start = std::time::Instant::now();
-    let out = f.dispatch_with_git_hang(&["--repo", repo.to_str().unwrap(), "395"], &scenario, "show-ref");
+    let out = f.dispatch_with_git_hang(&["--repo", repo.to_str().unwrap(), "395"], &scenario, "refs/heads/implement-395");
     let elapsed = start.elapsed();
     assert!(!out.status.success(), "{}", out_text(&out));
     assert!(elapsed < std::time::Duration::from_secs(3), "waited {elapsed:?} past a 200ms bound");
