@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Guards #1148: a worker's turn ends mid-lane only on a message to its
-# controller — a question, a job declaration, or "PR up". #1095's worker
-# committed, ran the gate and ended its turn with a summary to no one; the
-# controller found it ten minutes later only because Chris asked. The rule
-# sits in implement/SKILL.md § Control. A prose assertion, not a behavioral
+# controller — a question, a job declaration, or "PR up". A worker that
+# commits, runs the gate, and ends its turn with a summary in its own pane
+# reaches no one; the stop hook and the sweep's `stalled` verdict are
+# backstops, not the report. The rule sits in implement/SKILL.md § Control.
+# A prose assertion, not a behavioral
 # test — the hook that backs it is tested in
 # flow/claude/hooks/worker-stop-alert.test.sh, the sweep's `stalled` verdict
 # in burndown/loop_test.py.
@@ -31,7 +32,6 @@ check() {
 check 'Your turn ends mid-lane only on a message to the controller'
 check 'a question, a job declaration, or "PR up"'
 check 'A summary in your own pane reaches no one'
-check '#1095'
 check '`stalled`'
 
 if [ "$fail" -eq 0 ]; then echo "PASS implement/turn-end-wording.test.sh"; else exit 1; fi

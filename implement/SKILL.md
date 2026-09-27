@@ -70,10 +70,9 @@ is what tells it what it owes.
 
 **Read the ticket before you build it — its comments as well as its body.**
 A requirement added in a comment after filing is still a requirement, and the
-body alone is not the ticket (`caneff/sudokumaker-custom-constraints#522`:
-two required items sat in a two-day-old comment, and the build missed both).
-One fetch gets both; render them as one document, body first, each comment
-marked as a later addition with its author and timestamp:
+body alone is not the ticket. One fetch gets both; render them as one
+document, body first, each comment marked as a later addition with its
+author and timestamp:
 
 ```
 gh issue view <n> --repo <owner/name> --json body,comments --jq '
@@ -111,21 +110,20 @@ owner's word turns it on.
 - **Commit identity comes from the repo's config.** Never pass
   `-c user.email` or `-c user.name` to `git commit`. The session context line
   giving the owner's address is there to identify whose tickets and PRs are
-  whose, not to sign commits: three workers signed with it, GitHub's
-  email-privacy rule rejected every push, and the only fix was a gated
-  history rewrite (#909).
+  whose, not to sign commits: GitHub's email-privacy rule rejects a push
+  signed with it, and the only fix is a gated history rewrite.
 - **A file whose contents become public lives under your own workspace's
   `.scratch/`.** That is any file you author and then hand to a command —
   never `/tmp`, never a shared scratchpad path. Two exceptions live in the
   review cache, `~/.cache/agent-reviews/<repo>/`, under a ticket-named file.
   The controller's Codex pass files (§ The merge step 3), because your own
   clearing of `.scratch/` would take an in-flight pass's output with it. And
-  the PR body, `pr-body-<n>.md` (§ The PR): a body left in `.scratch/` made
-  `merge-cleanup` refuse the removal on every heavy landing, and the
-  controller re-ran it with `--discard` by hand (#1052). Another session
-  overwrote a shared `pr-body.md` between its write and `gh pr create`, and
-  PR 908 went up carrying #886's body and a `Closes #886`; only luck left #886
-  open to nobody's harm (#909).
+  the PR body, `pr-body-<n>.md` (§ The PR): a body left in `.scratch/` makes
+  `merge-cleanup` refuse the removal on every heavy landing, forcing the
+  controller to re-run it with `--discard` by hand. The name is
+  ticket-specific because a shared `pr-body.md` can be overwritten by
+  another session between the write and `gh pr create`, and the PR then
+  goes up with another ticket's body and closes that ticket instead.
 
 ## Control
 
@@ -150,12 +148,10 @@ Decisions made.
 
 **Your turn ends mid-lane only on a message to the controller**: a question,
 a job declaration, or "PR up". A summary in your own pane reaches no one.
-#1095's worker committed its fix, ran the gate and ended its turn with review,
-verification and the PR undone; herdr showed its pane `done`, and the
-controller found it ten minutes later only because Chris asked (#1148). The
-stop hook alerts the controller on such a stop, and a burn's sweep reads the
-pane as `stalled`, but both are backstops that fire after the time is lost;
-the send is the report.
+herdr shows such a pane `done` while review, verification and the PR sit
+undone. The stop hook alerts the controller on such a stop, and a burn's
+sweep reads the pane as `stalled`, but both are backstops that fire after
+the time is lost; the send is the report.
 
 ## Light tier
 
@@ -252,18 +248,17 @@ No PR and no reviewer; Chris reads the log after.
    line from the verification pass, as every round-1 finding does). The
    fix-in-round rules stand for a reachable finding; an unreachable one is
    disputed rather than fixed, even when it would pass the adjacent-fix
-   rule. (#1086: `burn-2026-09-22-0636` filed seven tickets from second
-   and third passes; four described failures that cannot occur here.)
+   rule.
 
    **The adjacent-fix rule.** A round-1 finding is fixed in the round, not
    filed, when all five parts hold: it sits in a file already in the diff;
    the fix is confined to one function; it changes under 20 lines, its test
    included; it adds no public seam; and it touches no second file. The fix's
    own test file is part of the fix, not a second file — that is what "its
-   test included" means (#1097: 8 lines in `runfile.py` plus 2 in
-   `runfile_test.py` is one fix, and the controller ruled it so). The
-   20-line budget cannot be split across files: a fix touching any other
-   second file is a change, not an adjacent fix, and § Build's
+   test included" means: 8 lines in an implementation file plus 2 in its
+   own test file is one fix. The 20-line budget cannot be split across
+   files: a fix touching any other second file is a change, not an
+   adjacent fix, and § Build's
    pre-existing-bug rule governs it. Make each adjacent fix in a commit of
    its own, so its sha measures it alone. Its disposition is
    `fixed (adjacent)`, with that sha; its sidecar line is step 2's adjacent
@@ -363,10 +358,10 @@ time, not from the worker: § The merge.
 
 The final commit body carries `Closes #<n>` — one line per ticket the brief
 named — and so does the PR body (see below). A "done" report where only the
-commit carries it is not enough:
-PRs #827, #829 and #830 all shipped with `closingIssuesReferences: []`
-because only the commit body had it. Stack fix commits; never amend a sha
-already reported — an amend erases the sha the controller was handed.
+commit carries it is not enough: a PR whose body lacks the line ships with
+`closingIssuesReferences: []` even though the commit closes the ticket.
+Stack fix commits; never amend a sha already reported — an amend erases the
+sha the controller was handed.
 
 ### The PR
 
@@ -412,9 +407,9 @@ The body has these sections and nothing else:
 **A worker whose brief carries no `--run <run-id>`** (§ Review) has no run
 file under it, and files one more ticket now, before sending "PR up". A
 brief carrying `--run <run-id>` files nothing here: the burn's own sweep
-harvests that run's leftovers. The flag is the only signal — nine workers in
-`burn-2026-09-23` filed a per-PR sweep under a run file they could not see
-(#1146). Without the flag: read this PR's own dispositions sidecar,
+harvests that run's leftovers. The flag is the only signal a worker can
+see, and a worker without it cannot tell whether a run file exists.
+Without the flag: read this PR's own dispositions sidecar,
 `dispositions-<n>.jsonl` (§ Review step 2 already wrote it), for its
 `leftover` lines. None: file nothing, the same zero-leftovers rule the
 burn sweep uses. Any: **check first, the same idempotent search the burn
@@ -487,9 +482,7 @@ Controller: Chris merges this PR; you dispatched me, so after the Codex pass
   time you send the report: your own last push restarts the checks, so a
   bare "CLEAN" is a claim the controller cannot date. § The merge: step 2
   re-checks and is the only authority; naming the sha makes the staleness
-  explicit instead of a race this report silently loses. (#456 reported
-  CLEAN at a sha two pushes stale; the PR read UNSTABLE seconds later — one
-  controller wake.)
+  explicit instead of a race this report silently loses.
 - **The tip, accounted for** — the same `headRefOid`, read after your final
   push, never your local `git rev-parse HEAD`: an unpushed commit or a
   branch that moved since your last remote read gives a tip that is not the
@@ -498,29 +491,23 @@ Controller: Chris merges this PR; you dispatched me, so after the Codex pass
   **its own sha beside its diff class**: what kind of change it is (wording
   only, test-only, the fix for finding `S1`). A list of shas the controller can
   check against the PR; a bare list of classes it cannot. That is what lets
-  it rule on another review round without diffing it blind. 4 of 7 reports
-  in the #781 burn carried a tip past the reviewed sha, and the controller
-  diffed each one by hand.
+  it rule on another review round without diffing it blind.
 - **Every parallel job you launched, with its core count** — and when you
   launched none, say "none" rather than leaving the field out. The
   controller's budget is counted in slots and the real contention is in
   cores and processes, and nothing bridges the two but this line: a worker
   that launched nothing and a worker that forgot to say produce the same
-  silence, and the controller charges zero for both. #351's worker ran a
-  `verify.py` that hard-codes an 8-worker CP-SAT portfolio, at ~793% CPU;
-  box load hit 25.8 with **no dispatch pending**, so no box check could
-  have caught it. Declare the job's own core count, not the load you
-  observed.
+  silence, and the controller charges zero for both. A script that
+  hard-codes its own worker pool loads the box with no dispatch pending,
+  so no box check catches it. Declare the job's own core count, not the
+  load you observed.
 
   **A parallel job is any process you caused to exist beyond yourself** —
   a background command, a test run still going, and **every subagent**: a
   review axis, a verification pass, an explore agent. A subagent is a
   process on the same shared box, counting against the same 28-process cap
   as any other. So `none` means none, not "none of the kind I had in
-  mind": on 2026-09-20 three workers each running three review axes plus a
-  verification pass took the box from 12 claude processes to 35, and the
-  first report to carry this field declared `none` while four of its own
-  subagents were the overrun.
+  mind": three review axes plus a verification pass are four processes.
 - **A mutation check**, when the ticket's deliverable is a test or a gate:
   name one change that makes the new test or gate fail, and that you saw it
   fail. Nothing else in the report tells a gate from a test that always
@@ -584,11 +571,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    marked as controller context rather than ticket text. Codex reads this
    one branch against `origin/<default>` and nothing else, so anything the
    controller knows that the tree does not say is invisible to it — and
-   what it cannot see, it reports as a missing requirement. Three of map
-   #776's disputes were exactly that: PR #930's merge-tail pointer was in
-   PR #929, PR #940's four-bucket sentence was on `implement-898`, and
-   PR #945's `[high]` "tier tagger is unreachable from the active lane"
-   was the parked skill every ticket in that map lands into. Write both
+   what it cannot see — a split onto a sibling branch, a parked skill a
+   map lands into — it reports as a missing requirement. Write both
    lines with your file-write tool, into the same file, never interpolated
    into a shell string — a branch name or a ticket title reaching the shell
    is the same injection the ticket render above is already protected from:
@@ -664,10 +648,9 @@ The controller merges on a repo Chris owns; Chris reads it after via
    launch wrote.
 
    **The pass launches once, here, at PR-up** — not earlier, at the
-   worker's round-1 report. #1015 retired that early launch: measured on
-   `burn-2026-09-21-0930`, 4 early launches raced against the worker's own
-   round-1 fix commits and 0 were banked, so every one was refused and
-   rerun here anyway, each costing its wall clock twice. Run the whole
+   worker's round-1 report: an earlier launch races the worker's own
+   round-1 fix commits, is refused as stale, and is rerun here anyway,
+   costing its wall clock twice. Run the whole
    block inline, in the foreground, as part of this step; each launch is
    still a node process against the box cap.
 
@@ -687,7 +670,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    silence. A refused verdict's findings are never reported as current —
    they describe a diff this PR no longer has, or a run that never produced
    a review, and either one collected looks exactly like a pass that found
-   nothing, which is the shape this lane closed seven times on 2026-09-20.
+   nothing — the absent-answer-read-as-benign shape this lane exists to close.
    The skip clause at the top of this step governs the preflight only — not
    logged in, no plugin entry — checked before any run exists; every
    started run answers to this gate, and there is no retry: a refused run
@@ -702,10 +685,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    directory:
    `gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`, before
    acting on it. If `gh pr comment` fails, stop before merging — the
-   comment is what makes the verdict readable by anyone but you. Everything
-   after that — the dispositions, #888's conditional second pass (which
-   runs the same block with `phase=second`), the third-run ceiling, the
-   trial row — is #888's, #812's and #1028's, unchanged by #1015.
+   comment is what makes the verdict readable by anyone but you.
 
    **Every run records its duration**, collected or refused, as one row
    appended to `docs/research/2026-09-20-codex-pass-durations.md`: ticket,
@@ -718,8 +698,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
    No material findings → go to step 4. Findings → hold the merge: send the
    worker the findings and the comment URL. Note the head sha this pass ran
-   against — step 2's `headRefOid` — and beside it `sha256sum "$body_file"`,
-   taken before the `rm` above removes that file. That sum covers the
+   against — step 2's `headRefOid` — and beside it the record's
+   `body_sha256`. That sum covers the
    appendix as well as the rendered ticket, both being in the one file, so
    a fresh render for that comparison is ticket and appendix — rebuilding
    the ticket alone reads as a change that never happened and burns the
@@ -741,8 +721,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    changed.** Step 2's fresh `headRefOid` differing from the sha noted above
    means a `fixed` disposition pushed a commit, so there is a new diff to
    read; a fresh render of the ticket hashing differently from the
-   `sha256sum` noted beside it means a comment added a requirement the first
-   pass never read. Either is a new input, and the pass runs.
+   `body_sha256` noted beside it means a comment added a requirement the
+   first pass never read. Either is a new input, and the pass runs.
 
    If every disposition was `disputed` or `filed`, the sha is unmoved and
    the ticket hash matches, both halves of the input are byte-identical and
@@ -762,14 +742,6 @@ The controller merges on a repo Chris owns; Chris reads it after via
    the sha unmoved is neither case: the commit it names is not on the PR, so
    nothing merges until the worker pushes it — a push that moves the sha and
    runs the second pass after all.
-
-   (#888: twice in the #781 burn — `sudokumaker-custom-constraints#559` at
-   `203ac7a`, `agent-skills#877` at `b96aa32` — the sha was unmoved and the
-   mandated run would have re-read an unchanged file. The ticket half has
-   its own incident: on 2026-09-20 every controller invocation of this pass
-   built its body file from the ticket body alone, no comments, against a
-   step that names both — a lane that treats a comment as a requirement,
-   #882, cannot skip on an input that ignores one.)
 
    When either moved, run this pass once more on the fixes, with
    `phase=second`, and post its output as a PR comment the same way, from
@@ -840,9 +812,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    in-round fix, or a ruling — rewrites that finding's line in
    `dispositions-<n>.jsonl` to its new outcome in the same step that records
    it in the PR body. A `leftover` line left standing after its finding was
-   fixed is a sweep item that no longer exists (#1028: P2 ruled fixed in
-   `bda6750`, sidecar still `leftover`). `runfile.py leftover` catches the
-   half-done step at harvest: it refuses a sidecar line whose outcome the PR
+   fixed is a sweep item that no longer exists. `runfile.py leftover` catches
+   the half-done step at harvest: it refuses a sidecar line whose outcome the PR
    body's Decisions made contradicts, and a leftover the body does not cite
    by id (`--pr-body`). A change recorded in neither place is not seen by
    it; the rewrite is the rule.
@@ -865,10 +836,11 @@ The controller merges on a repo Chris owns; Chris reads it after via
    pass only repeated the Claude axes or raised noise.
 4. Merge. Before the merge, re-run the seam on the PR as it will land
    (#1145): GitHub's CLEAN is a textual-merge verdict, not a test verdict, and
-   two PRs sharing no file each pass their own gate and break `<default>`
-   together (burn-2026-09-23: #1107 and #1096). Run `git fetch origin` first,
-   then skip only when `origin/<default>` has not moved past the PR's merge
-   base (`git merge-base --is-ancestor origin/<default> <headRefOid>` exits
+   two PRs sharing no file each pass their own gate and can break `<default>`
+   together even though neither PR's own gate saw the other's change. Run
+   `git fetch origin` first, then skip only when `origin/<default>` has not
+   moved past the PR's merge base
+   (`git merge-base --is-ancestor origin/<default> <headRefOid>` exits
    0, `headRefOid` being step 2's). Otherwise, from the primary checkout:
 
    ```

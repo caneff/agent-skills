@@ -71,8 +71,8 @@ check_in "$before_pr_section" 'a PR that closes nothing must not reach the merge
 check_in "$before_pr_section" "GitHub not having indexed the reference yet"
 
 # Rule 4 (controller ruling on PR #468's root cause): the PR body needs its
-# own bare `Closes #<n>` line — the commit-body trailer alone left
-# closingIssuesReferences empty on #827, #829 and #830.
+# own bare `Closes #<n>` line — the commit-body trailer alone leaves
+# closingIssuesReferences empty.
 check_in "$before_pr_section" 'and so does the PR body'
 check_in "$pr_section" 'a bare line, not inside backticks or a code fence'
 

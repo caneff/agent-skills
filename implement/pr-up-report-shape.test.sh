@@ -2,11 +2,10 @@
 # Guards #887: the worker's "PR up" report must state the sha its CLEAN
 # reading came from, account for every commit past the last reviewed sha,
 # and — when the ticket's deliverable is a test or a gate — name a mutation
-# that makes it fail. From the #781 burn: 4 of 7 reports carried a tip past
-# the reviewed sha and the controller diffed each by hand, and #456's CLEAN
-# was already stale (true at `880aebb`, reported at `ab1100e`) by the time
-# the controller read it. This is a prose assertion over implement/SKILL.md,
-# not a behavioral test — there is no harness that runs the skill's own prose.
+# that makes it fail. A stale CLEAN or an unaccounted tip is a report the
+# controller cannot trust without diffing it by hand. This is a prose
+# assertion over implement/SKILL.md, not a behavioral test — there is no
+# harness that runs the skill's own prose.
 # A caller's leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR/
 # GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES would point
 # show-toplevel at that caller's repo instead of this one (#620); resolving
@@ -68,9 +67,9 @@ check_in "$pr_flat" 'a test that always passes'
 # every parallel job the worker launched is declared with its core count, and
 # a worker that launched none says so — silence from a worker that forgot and
 # silence from a worker with nothing to declare are the same bytes, and the
-# controller charges zero cores against its free slots for both. #351's
-# `verify.py` ran an 8-worker CP-SAT portfolio at ~793% CPU and took box load
-# to 25.8 with no dispatch pending, so no box check could have caught it.
+# controller charges zero cores against its free slots for both. A script
+# that hard-codes its own worker pool loads the box with no dispatch
+# pending, so no box check catches it.
 check_in "$pr_flat" 'core count'
 check_in "$pr_flat" 'say "none"'
 check_in "$pr_flat" 'counted in slots'
