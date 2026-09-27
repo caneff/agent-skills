@@ -586,6 +586,11 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
 _SIDECAR_NAME = re.compile(r"dispositions-([0-9]+)\.jsonl")
 
 
+def dispositions_path(reviews_dir, lowest):
+    """The sidecar `_SIDECAR_NAME` parses, for clump `<lowest>`."""
+    return os.path.join(reviews_dir, f"dispositions-{lowest}.jsonl")
+
+
 def refuse_foreign_sidecar(sidecar_path, tickets):
     """A sidecar is `dispositions-<n>.jsonl` for the ticket `<n>` its PR was
     dispatched for (`implement/SKILL.md` § Review). One whose `<n>` is not a

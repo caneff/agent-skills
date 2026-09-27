@@ -197,10 +197,6 @@ def default_reviews_dir(repo_root):
     return os.path.join(os.path.expanduser("~/.cache/agent-reviews"), repo)
 
 
-def dispositions_path(reviews_dir, lowest):
-    return os.path.join(reviews_dir, f"dispositions-{lowest}.jsonl")
-
-
 def counts(run, reviews_dir):
     """The closing report's three counts, read from each **landed** clump's
     dispositions sidecar: **fixed in-round** is every `fixed` line
@@ -224,7 +220,7 @@ def counts(run, reviews_dir):
         if not entry["landed"]:
             continue
         lowest = entry["tickets"][0]
-        path = dispositions_path(reviews_dir, lowest)
+        path = runfile.dispositions_path(reviews_dir, lowest)
         if not os.path.exists(path):
             missing.append(lowest)
             continue

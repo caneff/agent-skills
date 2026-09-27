@@ -145,7 +145,7 @@ def cli(root, *args, cwd=None, home=None, extra_env=None):
                           capture_output=True, text=True)
 
 
-SIDECAR = sweep.dispositions_path(cache(), 901)
+SIDECAR = runfile.dispositions_path(cache(), 901)
 shutil.copyfile(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "implement", "fixtures",
     "dispositions-sidecar.jsonl"), SIDECAR)
@@ -193,7 +193,7 @@ def home_fixture():
 
 
 def write_sidecar(reviews_dir, lowest, lines):
-    path = sweep.dispositions_path(reviews_dir, lowest)
+    path = runfile.dispositions_path(reviews_dir, lowest)
     with open(path, "w") as fh:
         for obj in lines:
             fh.write(json.dumps(obj) + "\n")
@@ -285,7 +285,7 @@ def test_counts_refuses_a_malformed_sidecar_line_rather_than_count_low():
         runfile.start(run_id, slots=1, root=root)
         runfile.clump(run_id, [901], "/w/a", "agent-a", root=root)
         runfile.land(run_id, 901, "abc1234", root=root)
-        path = sweep.dispositions_path(reviews, 901)
+        path = runfile.dispositions_path(reviews, 901)
         with open(path, "w") as fh:
             fh.write('{"id": "S0", "outcome": "fixed", "sha": "aaa"}\n')
             fh.write(bad + "\n")
