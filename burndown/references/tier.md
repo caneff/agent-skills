@@ -60,16 +60,15 @@ The pass does the removal because it is the only reader holding the
 clumper's file list (#1118). `implement-dispatch` strips too, but from the
 ticket body's tokens alone, and it cannot use prose as a whitelist for a
 bare token: `i.e`, `v1.2` and `Node.js` would all read as code. A token with a
-`/` is a path and is code unless its extension is prose (`.md`, `.markdown`,
-`.txt`, `.rst`), a `SKILL.md` excepted; a bare token is code by a fixed list
-of extensions (`flow/lane/src/targets.rs` has it). Extensionless, it is code
-by filename (`Makefile`, `Gemfile`, `Dockerfile`) or under a script directory
-(`bin/`, `hooks/`, `.githooks/`). On those it dispatches heavy, drops
-`documentation` in the claim edit, and says so in its report; an unreadable
-body dispatches heavy and keeps the label. What it still cannot read: an
-extensionless name outside the script directories and the filename list
-(`scripts/deploy`, `tools/foo`), or a bare extensioned token outside the fixed
-list. A candidate whose line names one of those gets past dispatch's reading,
+`/` is a path and is code unless its extension is prose (§ What counts as
+prose), a `SKILL.md` excepted. A bare token is code only by a fixed list of
+extensions, and an extensionless one only by basename or under a script
+directory; the lists are `flow/lane/src/targets.rs`'s and are read there, not
+copied here. On a code target it dispatches heavy, drops `documentation` in
+the claim edit, and says so in its report; an unreadable body dispatches
+heavy and keeps the label. What it still cannot read: an extensionless name
+outside those lists (`scripts/deploy`, `tools/foo`), or a bare extensioned
+token outside the fixed list (`build.gradle`). A candidate whose line names one of those gets past dispatch's reading,
 so the label has to be gone before dispatch reads it, and this pass runs
 before the first dispatch. The old
 report-only `--strip` flag is retired; `--dry-run`
