@@ -558,6 +558,37 @@ def test_tally_sidecars_warns_on_an_orphan_disposition():
         assert "orphan" in err
 
 
+def test_parses_an_over_engineering_cut_with_an_oe_id():
+    # #1021: an over-engineering cut is a standards finding like any
+    # other, in its own OE1/OE2/... series rather than S1/S2/...
+    f = t.parse_finding_line(json.dumps({
+        "id": "OE1", "axis": "standards", "severity": "hard",
+        "file": "foo.py", "title": "yagni: single-caller abstraction",
+    }))
+    assert f == t.Finding(id="OE1", axis="standards", severity="hard",
+                          file="foo.py", title="yagni: single-caller abstraction")
+
+
+def test_tally_sidecars_counts_an_over_engineering_cut_as_a_standards_finding():
+    # #1021: an OE-id finding and its leftover disposition tally exactly
+    # like an S-id one — nothing about the join keys on the id's prefix.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-1021.jsonl").write_text(
+            json.dumps({"id": "OE1", "axis": "standards", "severity": "judgement",
+                        "file": "a.py", "title": "yagni: one-caller layer"})
+        )
+        (root / "skills" / "dispositions-1021.jsonl").write_text(
+            json.dumps({"id": "OE1", "outcome": "leftover", "file": "a.py",
+                        "title": "yagni: one-caller layer", "severity": "judgement",
+                        "text": "inline it until a second caller exists"})
+        )
+        row = t.tally_sidecars(root)["skills/standards"]
+        assert row == {"raised": 1, "undisposed": 0, "fixed": 0, "disputed": 0,
+                       "filed": 0, "handed-back": 0, "leftover": 1}
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
