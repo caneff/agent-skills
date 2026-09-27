@@ -199,3 +199,4 @@ rename landed sooner.
 | sudokupad-art#177 | sudokupad-art#180 | gate | 2026-09-26T10:46:41-04:00 | 2026-09-26T10:47:33-04:00 | 0.9 | collected |
 | sudokupad-art#179 | sudokupad-art#182 | gate | 2026-09-26T10:58:34-04:00 | 2026-09-26T10:59:20-04:00 | 0.8 | collected |
 | sudokupad-art#179 | sudokupad-art#182 | second | 2026-09-26T17:53:06-04:00 | 2026-09-26T17:54:02-04:00 | 0.9 | collected |
+| second-brain-v2#145 | second-brain-v2#146 | gate | 2026-09-27T10:15:54-04:00 | 2026-09-27T10:17:26-04:00 | 1.5 | collected |
