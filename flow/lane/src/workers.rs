@@ -412,13 +412,10 @@ fn move_record(
 ) -> Result<Option<Adopted>, AdoptRefusal> {
     let io = |e: std::io::Error| AdoptRefusal::Io(e.to_string());
     let own = path_for(home, me.pid);
-    let _guards = if own == from {
-        vec![lock(from).map_err(io)?]
-    } else if own.as_path() < from {
-        vec![lock(&own).map_err(io)?, lock(from).map_err(io)?]
-    } else {
-        vec![lock(from).map_err(io)?, lock(&own).map_err(io)?]
-    };
+    let mut paths = vec![own.as_path(), from];
+    paths.sort();
+    paths.dedup();
+    let _guards = paths.into_iter().map(lock).collect::<std::io::Result<Vec<_>>>().map_err(io)?;
 
     let raw = std::fs::read_to_string(from).map_err(io)?;
     let lines = non_empty_lines(&raw);
