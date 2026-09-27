@@ -15,12 +15,12 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # repo-relative path  ->  live path (first glob match wins). Add a line per file.
 # Whole-file copies — keep secrets out of every listed file. claude/settings.json
-# is here (not symlinked by install.sh) because the harness rewrites it in place,
-# which breaks a symlink; machine-local secrets belong in settings.local.json,
-# which stays symlinked and is not copied here.
+# is NOT here: install.sh symlinks it (#1031) — the premise for copy-only never
+# held (a probed harness write through the link left it a link); machine-local
+# secrets belong in settings.local.json, which is also symlinked and never
+# copied here.
 declare -A COPIES=(
   ["vscode/settings.json"]="/mnt/c/Users/*/AppData/Roaming/Code/User/settings.json"
-  ["claude/settings.json"]="$HOME/.claude/settings.json"
   ["claude/output-styles/quill.md"]="$HOME/.claude/output-styles/quill.md"
 )
 
