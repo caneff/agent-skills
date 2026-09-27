@@ -65,7 +65,9 @@
       "Bash(ls /home/caneff/.local/bin*)",
       "Bash(job-run:*)",
       "Bash(uv run finders/*)",
-      "Bash(uv run --with google-auth --with requests .scratch/sheet/write_rules.py:*)"
+      "Bash(uv run --with google-auth --with requests tools/upton_links/sheet/write_rules.py:*)",
+      "Bash(uv run tools/upton_links/make_links.py:*)",
+      "Bash(uv run tools/upton_links/make_big.py:*)"
     ],
     "deny": [
       "AskUserQuestion",
