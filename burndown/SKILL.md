@@ -199,19 +199,25 @@ of filing another — a fresh render of the run's own leftovers, with any
 `## <file>` section already in the current body that a fold (below) put
 there kept as it stands, since a fold's own items never reappear in
 `sweep.py render`'s output and a bare overwrite would drop them —
-`gh issue edit`. The finished body (render, then the kept sections) goes
-through the one filter, and the edit runs only on its success —
+`gh issue edit`. Each producer writes its own file, the finished body
+(render, then the kept sections) goes through the one filter, and every
+step's exit gates the next —
 
 ```
-{ python3 burndown/sweep.py render <run-id>; <kept sections>; } \
-  | python3 burndown/sweep.py blocked-by > <path> \
+python3 burndown/sweep.py render <run-id> > <render path> \
+  && <kept sections> > <kept path> \
+  && cat <render path> <kept path> \
+     | python3 burndown/sweep.py blocked-by > <path> \
   && gh issue edit "$sweep" --repo <owner/name> --body-file <path>
 ```
 
-— which drops any `## Blocked by` already in it and appends the one
-`None — can start immediately.` A body with none reads **unresolved** to
-`burndown/frontier.py` and is never dispatched. An empty body exits 1, so
-the `&&` skips the edit: `--body-file` on an empty file blanks the sweep. Exit 0 and no output:
+— so a failed render or a failed fetch of the kept sections never reaches
+the edit, which would replace the sweep with only the half that
+succeeded. The filter drops any `## Blocked by` already in the body and
+appends the one `None — can start immediately.` A body with none reads
+**unresolved** to `burndown/frontier.py` and is never dispatched. An empty
+body exits 1 too, since `--body-file` on an empty file blanks the sweep.
+Exit 0 and no output:
 render the run's leftovers —
 
 ```
