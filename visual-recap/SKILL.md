@@ -44,7 +44,7 @@ catalog lookup. Read the diff with the local `recap collect-diff` / `scan` /
 `build-prompt --local-files` helpers, author a local MDX folder (set
 `kind: "recap"` and `localOnly: true`), and preview it with `plan local check`,
 `plan local serve --kind recap`, and `plan local verify --kind recap`. Before
-using local-files mode, READ `references/local-files.md` in this skill directory
+using local-files mode, read `references/local-files.md` in this skill directory
 — it is the single source of truth for the full contract.
 
 ## When To Use
