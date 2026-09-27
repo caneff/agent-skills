@@ -1147,6 +1147,62 @@ fn a_herdr_agent_with_no_name_refuses_whatever_its_status() {
     }
 }
 
+// --- #879: the state is re-read immediately before the forced removal -------
+
+/// Runs merge-cleanup on the merged branch with the debug-build failpoint
+/// `MERGE_CLEANUP_AFTER_GUARDS` set to `sh -c` text run once both guards
+/// have passed and before the removal.
+fn mc_with_late(c: &Cleanup, r: &std::path::Path, extra: &[&str], late: &str) -> support::cleanup::Run {
+    let mut args = vec!["--repo", s(r), "caneff/merged-one"];
+    args.extend_from_slice(extra);
+    c.mc(Tools::NoHerdr, &args, &[("MERGE_CLEANUP_AFTER_GUARDS", late)])
+}
+
+#[test]
+fn a_file_that_appears_after_the_guards_refuses_the_removal() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r30", "implement-879a");
+    let late = wt.join("late-note");
+    let run = mc_with_late(&c, &r, &[], &format!("echo unsaved > '{}'", late.display()));
+    assert!(!run.ok, "{}", run.text());
+    assert!(late.is_file() && wt.is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — 1 untracked file(s) would be lost: late-note (appeared after the guards passed)",
+        wt.display()
+    );
+    assert!(run.stderr.contains(&want), "{}", run.text());
+}
+
+#[test]
+fn discard_covers_only_what_the_guards_reported_not_a_file_that_appears_after() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r31", "implement-879b");
+    std::fs::write(wt.join("reported"), "seen by the guard\n").unwrap();
+    let late = wt.join("late-note");
+    let run = mc_with_late(&c, &r, &["--discard"], &format!("echo unsaved > '{}'", late.display()));
+    assert!(!run.ok, "{}", run.text());
+    assert!(late.is_file() && wt.join("reported").is_file(), "{}", run.text());
+    assert!(run.stderr.contains("1 untracked file(s) would be lost: late-note (appeared after the guards passed)"), "{}", run.text());
+}
+
+#[test]
+fn a_live_session_that_appears_after_the_guards_refuses_the_removal() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r32", "implement-879c");
+    let staged = c.root().join("staged-session.json");
+    std::fs::write(&staged, format!(r#"{{"pid":{},"cwd":"{}","procStart":"{}"}}"#, me(), wt.display(), me_start())).unwrap();
+    let dest = c.home().join(".claude/sessions/late.json");
+    let run = mc_with_late(&c, &r, &[], &format!("cat '{}' > '{}'", staged.display(), dest.display()));
+    assert!(!run.ok, "{}", run.text());
+    assert!(dest.is_file() && wt.is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — a live session is in it: pid {} (appeared after the guards passed)",
+        wt.display(),
+        me()
+    );
+    assert!(run.stderr.contains(&want), "{}", run.text());
+}
+
 // --- 12. a herdr worker's own registry session is decided by its status ------
 
 #[test]

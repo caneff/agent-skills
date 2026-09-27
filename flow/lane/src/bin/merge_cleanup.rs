@@ -80,7 +80,9 @@ registry session refuses unless its sessionId equals a herdr agent's
 agent_session.value for that worktree, in which case the herdr agent's own
 status decides it instead — working or blocked (or herdr cannot classify it)
 refuses, idle (or done) this run closes its pane and the removal proceeds. A
-registry session with no matching herdr agent always refuses. Other idle
+registry session with no matching herdr agent always refuses. Both guards
+read again immediately before the removal: a file or a live session that
+appeared after they passed refuses, and --discard never covers it. Other idle
 entries under .claude/worktrees are listed as "stale, not removed". The
 herdr workspaces of removed worktrees close at exit, after everything else.
 "#;
@@ -481,6 +483,18 @@ impl WorktreeFiles {
         !self.modified.is_empty() || !self.untracked.is_empty() || !self.ignored.is_empty()
     }
 
+    /// The modified, untracked and non-cache ignored entries of `self` that
+    /// `earlier` did not have: what appeared between two reads.
+    fn since(&self, earlier: &WorktreeFiles) -> WorktreeFiles {
+        let new = |now: &[String], then: &[String]| now.iter().filter(|e| !then.contains(e)).cloned().collect();
+        WorktreeFiles {
+            modified: new(&self.modified, &earlier.modified),
+            untracked: new(&self.untracked, &earlier.untracked),
+            ignored: new(&self.ignored, &earlier.ignored),
+            ..WorktreeFiles::default()
+        }
+    }
+
     /// "1 modified, 2 untracked, 3 ignored, 4 cache".
     fn counts(&self) -> String {
         format!(
@@ -540,9 +554,8 @@ fn first_names(names: &[String]) -> String {
     }
 }
 
-fn refuse_live(wt: &str, items: &[String]) -> bool {
-    eprintln!("merge-cleanup: refusing to remove {wt} — a live session is in it: {}", items.join(", "));
-    false
+fn refuse_live(wt: &str, items: &[String], suffix: &str) {
+    eprintln!("merge-cleanup: refusing to remove {wt} — a live session is in it: {}{suffix}", items.join(", "));
 }
 
 impl Cleanup {
@@ -565,6 +578,14 @@ impl Cleanup {
     /// worktree, in which case that session is the worker's own pane and the
     /// herdr agent's status decides it instead.
     fn occupancy(&self, wt: &str) -> Occupancy {
+        self.occupancy_excusing(wt, &[])
+    }
+
+    /// `occupancy`, with the registry sessions in `excused` explained away
+    /// too: the ones `guard_live` already cleared by closing their idle
+    /// herdr pane, which herdr stops listing once the pane is gone while the
+    /// session's pid may take a moment longer to exit (#879's recheck).
+    fn occupancy_excusing(&self, wt: &str, excused: &[String]) -> Occupancy {
         let herdr = match on_path("herdr").then(|| herdr_agents_in(wt)) {
             None => HerdrAnswer::Absent,
             Some(Err(())) => HerdrAnswer::Failed,
@@ -578,7 +599,7 @@ impl Cleanup {
         };
         let unresolved = sessions::live_in(Path::new(&self.home), wt)
             .into_iter()
-            .filter(|s| s.session_id.is_empty() || !herdr_sessions.contains(&s.session_id.as_str()))
+            .filter(|s| s.session_id.is_empty() || !(herdr_sessions.contains(&s.session_id.as_str()) || excused.contains(&s.session_id)))
             .map(|s| format!("pid {}", s.pid))
             .collect();
         Occupancy { unresolved, herdr }
@@ -588,20 +609,23 @@ impl Cleanup {
     /// herdr agent whose cwd is in the workspace refuses only while its
     /// agent_status is working or blocked (or herdr cannot classify it); an
     /// idle one (idle or done) has its pane closed by this run, then proceeds.
-    fn guard_live(&self, wt: &str) -> bool {
+    /// `None` refuses; otherwise the sessionIds of the agents whose panes it
+    /// closed, for `recheck` to excuse.
+    fn guard_live(&self, wt: &str) -> Option<Vec<String>> {
         let occupancy = self.occupancy(wt);
         if !occupancy.unresolved.is_empty() {
-            return refuse_live(wt, &occupancy.unresolved);
+            refuse_live(wt, &occupancy.unresolved, "");
+            return None;
         }
         let agents = match occupancy.herdr {
             HerdrAnswer::Absent => {
                 skip("the herdr agent check", "herdr is not on PATH");
-                return true;
+                return Some(Vec::new());
             }
             // A herdr that cannot answer cannot clear the workspace either.
             HerdrAnswer::Failed => {
                 eprintln!("merge-cleanup: refusing to remove {wt} — herdr agent list failed");
-                return false;
+                return None;
             }
             HerdrAnswer::Agents(agents) => agents,
         };
@@ -610,14 +634,43 @@ impl Cleanup {
         // touched, so the outcome never depends on herdr agent list's order.
         let blockers = blockers(&agents);
         if !blockers.is_empty() {
-            return refuse_live(wt, &blockers);
+            refuse_live(wt, &blockers, "");
+            return None;
         }
-        for a in agents {
+        for a in &agents {
             let (name, pane) = (a.name(), a.pane());
             if !self.step(&format!("closing idle herdr agent {name}'s pane ({pane})"), "herdr", &["pane", "close", pane]) {
                 eprintln!("merge-cleanup: refusing to remove {wt} — failed to close herdr agent {name}'s pane ({pane})");
-                return false;
+                return None;
             }
+        }
+        Some(agents.iter().map(Agent::session).filter(|s| !s.is_empty()).map(str::to_string).collect())
+    }
+
+    /// #879: the guards' read, taken again with no step between it and the
+    /// forced removal, since `--force` also turns off git's own last
+    /// dirty-worktree check. Anything that appeared after the guards passed
+    /// refuses the way the guards do, named — a modified, untracked or
+    /// non-cache ignored file (`--discard` covered only what `guard_files`
+    /// reported), or a live session. An ignored directory whose walk now
+    /// fails reads as a new ignored entry, so it refuses here as it does
+    /// there. The window between this read and git's removal is not zero;
+    /// only dropping `--force` would close it, and that was ruled out.
+    fn recheck(&self, wt: &str, approved: &WorktreeFiles, excused: &[String]) -> bool {
+        const LATE: &str = " (appeared after the guards passed)";
+        let Some(now) = WorktreeFiles::read(wt) else {
+            eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there{LATE}");
+            return false;
+        };
+        let late = now.since(approved);
+        if late.is_dirty() {
+            eprintln!("merge-cleanup: refusing to remove {wt} — {}{LATE}", late.dirty_text());
+            return false;
+        }
+        let live = self.occupancy_excusing(wt, excused).live_items();
+        if !live.is_empty() {
+            refuse_live(wt, &live, LATE);
+            return false;
         }
         true
     }
@@ -647,12 +700,13 @@ impl Cleanup {
     /// is exempt, an unreadable one still refuses, and everything #823
     /// worried about for a directory with contents still holds.
     ///
-    /// `None` refuses. Otherwise the empty ignored directories, for the
-    /// caller to name once the removal has actually happened: the ruling
+    /// `None` refuses. Otherwise what it read, which is what it approved:
+    /// `recheck` compares against it, and its empty ignored directories are
+    /// for the caller to name once the removal has actually happened: the ruling
     /// asks that the output stay a full account of what cleanup touched, and
     /// this guard runs before `guard_live`, so a line printed here would
     /// announce a removal that a live session then goes on to refuse.
-    fn guard_files(&self, wt: &str) -> Option<Vec<String>> {
+    fn guard_files(&self, wt: &str) -> Option<WorktreeFiles> {
         let Some(files) = WorktreeFiles::read(wt) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there");
             return None;
@@ -668,7 +722,7 @@ impl Cleanup {
             let would = if self.dry { "would discard" } else { "discarding" };
             safe_println!("{would} {} cache file(s) in {wt}: {}", files.caches.len(), first_names(&files.caches));
         }
-        Some(files.empty_dirs)
+        Some(files)
     }
 
     /// Other workspaces under <repo>/.claude/worktrees the guard would clear,
@@ -1154,18 +1208,27 @@ impl Cleanup {
             let wt_canonical = lane::workers::canonical_workspace_path(&wt);
             // Before the live-session guard, which closes idle panes: a
             // removal refused for its files must not have touched herdr.
-            let Some(empty_dirs) = self.guard_files(&wt) else {
+            let Some(approved) = self.guard_files(&wt) else {
                 return false;
             };
-            if !self.guard_live(&wt) {
+            let Some(excused) = self.guard_live(&wt) else {
+                return false;
+            };
+            self.removal_targets.push(wt.clone());
+            #[cfg(debug_assertions)]
+            if let Some(cmd) = env::var_os("MERGE_CLEANUP_AFTER_GUARDS") {
+                // Test-only failpoint, absent from a release build: state
+                // that appears after the guards passed (#879).
+                let _ = std::process::Command::new("sh").arg("-c").arg(cmd).status();
+            }
+            if !self.recheck(&wt, &approved, &excused) {
                 return false;
             }
-            self.removal_targets.push(wt.clone());
             if self.step(&format!("removing the linked worktree at {wt}"), "git", &["-C", path, "worktree", "remove", "--force", &wt]) {
                 // After the removal, never before it: these went with the
                 // worktree, so the line accounts for what was actually taken.
                 let verb = if self.dry { "would remove" } else { "removing" };
-                for dir in &empty_dirs {
+                for dir in &approved.empty_dirs {
                     safe_println!("{verb} the empty ignored directory at {wt}/{}", dir);
                 }
                 // #964: a dispatch's controller/worker record is bookkeeping
