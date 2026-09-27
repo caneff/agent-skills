@@ -1012,9 +1012,19 @@ def herdr_get(agent, timeout):
         ) from None
 
 
-def render_dispatch(picked, held):
-    lines = [f"dispatch  #{key_of(c)}  "
-             + ",".join(f"#{n}" for n in c["tickets"]) for c in picked]
+def render_dispatch(picked, held, run_id=None):
+    """One `dispatch` line per pick and, given the run, the
+    `implement-dispatch` command under it — carrying `--run <run-id>`, so
+    the flag a burn owes every plain dispatch (`burndown/SKILL.md` § The
+    loop step 8) is in the line the controller runs rather than in prose."""
+    lines = []
+    for c in picked:
+        lines.append(f"dispatch  #{key_of(c)}  "
+                     + ",".join(f"#{n}" for n in c["tickets"]))
+        if run_id:
+            lines.append("command   implement-dispatch "
+                         + " ".join(str(n) for n in c["tickets"])
+                         + f" --run {run_id}")
     for entry in held:
         # `same_tick` names the other candidate this tick picked ahead of it;
         # otherwise the holder is a live workspace (#971).
@@ -1147,7 +1157,8 @@ def run(argv):
             print(render_peak(count, live, room, working, unlisted))
             state = frontier(candidates, unlanded)
             picked, same_tick_held = picks(state, room)
-            lines = render_dispatch(picked, state["held"] + same_tick_held)
+            lines = render_dispatch(picked, state["held"] + same_tick_held,
+                                    args.run)
             if room < cores["room"]:
                 lines = f"box: room for {room} of {cores['room']}\n{lines}"
             print(lines)

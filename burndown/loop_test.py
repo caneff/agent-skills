@@ -202,6 +202,24 @@ def test_the_cli_dispatch_names_the_widest_clump_first():
         assert lines == ["dispatch  #20  #20", "dispatch  #30  #30"], got.stdout
 
 
+def test_each_pick_prints_its_implement_dispatch_command_carrying_the_run():
+    # The burn's --run on every plain dispatch was prose only (#1173 S1, P2,
+    # C2, codex-second-1): the command the controller runs is printed here,
+    # with the run id dispatch was itself given.
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live, env = run_file_dispatch(tmp, ("none",))
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [500, 502], "closure": ["fresh.py"]}], fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "2", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 0, got
+        commands = [line for line in got.stdout.splitlines()
+                    if line.startswith("command")]
+        assert commands == [
+            "command   implement-dispatch 500 502 --run burn-t"], got.stdout
+
+
 def test_the_cli_names_a_same_tick_collision_as_a_held_line():
     with tempfile.TemporaryDirectory() as tmp:
         cand = os.path.join(tmp, "candidates.json")
