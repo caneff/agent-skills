@@ -1280,6 +1280,21 @@ fn discard_covers_only_what_the_guards_reported_not_a_file_that_appears_after() 
 }
 
 #[test]
+fn discard_does_not_cover_a_file_that_appears_inside_a_reported_untracked_directory() {
+    // Review C1: git collapses an untracked directory to one `dir/` entry, so
+    // a file added inside it after the guards read the same as before.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r33", "implement-879d");
+    std::fs::create_dir_all(wt.join("evidence")).unwrap();
+    std::fs::write(wt.join("evidence/a.log"), "seen by the guard\n").unwrap();
+    let late = wt.join("evidence/b.log");
+    let run = mc_with_late(&c, &r, &["--discard"], &format!("echo unsaved > '{}'", late.display()));
+    assert!(!run.ok, "{}", run.text());
+    assert!(late.is_file(), "{}", run.text());
+    assert!(run.stderr.contains("1 untracked file(s) would be lost: evidence/b.log (appeared after the guards passed)"), "{}", run.text());
+}
+
+#[test]
 fn a_live_session_that_appears_after_the_guards_refuses_the_removal() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r32", "implement-879c");

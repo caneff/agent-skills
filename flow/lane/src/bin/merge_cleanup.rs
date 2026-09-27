@@ -439,11 +439,12 @@ impl WorktreeFiles {
     /// A worktree whose directory is already gone holds nothing to lose. The
     /// untracked and ignored modes are spelled out, so a
     /// `status.showUntrackedFiles=no` config cannot hide files from the guard.
+    /// Untracked files one by one, so `recheck` sees a file new inside `dir/`.
     /// `matching`, not `traditional`: a directory holding only an ignored
     /// cache is not collapsed to its parent (`sub/`), which `is_cache` could
     /// not tell from work.
     fn read(wt: &str) -> Option<Self> {
-        let Some(out) = quiet_stdout("git", &["-C", wt, "status", "--porcelain", "--untracked-files=normal", "--ignored=matching"]) else {
+        let Some(out) = quiet_stdout("git", &["-C", wt, "status", "--porcelain", "--untracked-files=all", "--ignored=matching"]) else {
             return (!Path::new(wt).exists()).then(Self::default);
         };
         let mut files = Self::default();
