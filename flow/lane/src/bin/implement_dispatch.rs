@@ -1110,7 +1110,10 @@ fn run() -> Result<(), ExitCode> {
                     Ok(c) => c.combined,
                     Err(e) => e.to_string(),
                 };
-                return Err(die(format!("could not claim #{} (gh issue edit): {why}", t.n)));
+                return Err(die(format!(
+                    "could not claim #{} (gh issue edit): {why} — check GitHub before retrying: the edit may have applied after this timed out",
+                    t.n
+                )));
             }
         }
     }
