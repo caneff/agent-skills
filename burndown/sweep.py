@@ -5,8 +5,10 @@ file:
 
     python3 burndown/sweep.py render <run-id>
 
-reads the run file and prints the ticket title and body, or says on stderr
-that the run has no leftovers and prints nothing to file on stdout. This is
+reads the run file and prints the ticket body, or says on stderr that the
+run has no leftovers and prints nothing to file on stdout. The title is
+`burndown/SKILL.md` § The sweep's to supply: stdout is filed as the body
+whole, so a title line here would land in it. This is
 the renderer #1029 left for #1030: the run file was already the store,
 nothing here writes to it.
 
@@ -37,10 +39,6 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import frontier  # noqa: E402
 import runfile  # noqa: E402
-
-def title(run_id):
-    return f"Sweep: leftovers from burn {run_id}"
-
 
 def grouped_by_file(leftovers):
     """Leftovers grouped by `file`, each group in the order its first item
@@ -303,8 +301,6 @@ def main(argv):
             print(f"run {args.run_id} has no leftovers — nothing to file",
                   file=sys.stderr)
             return 0
-        print(title(args.run_id))
-        print()
         print(body, end="")
         return 0
 

@@ -20,7 +20,7 @@ the per-PR sweep of step 7, a fixture standing in for a worker's filing:
   4. `runfile.py land` / `leftover` copy each PR's `leftover` lines into the
      run file; `show` prints them and they survive `resume` (#1029).
   5. `sweep.py counts` prints the report's three counts (#1030).
-  6. `sweep.py render` prints the sweep ticket, grouped by file, every field
+  6. `sweep.py render` prints the sweep ticket's body, grouped by file, every field
      present; given `/file-ticket`'s `## Blocked by` tail it carries exactly
      one declaration, and `frontier.py` reads it as unblocked (#1030).
   7. A per-PR sweep filed outside a burn folds into the run sweep by its file
@@ -305,12 +305,10 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     counts = ok(cli(SWEEP, "counts", RUN, "--reviews-dir", reviews, env=env))
     assert counts == "fixed in-round: 3 (1 adjacent)  leftover: 3  standalone: 1\n", counts
 
-    # 6. The sweep ticket (#1030): its title, then its body grouped by file in
-    # first-seen order, every field a sweep worker needs, mentions and HTML
-    # defused.
-    rendered = cli(SWEEP, "render", RUN, env=env)
-    title, blank, body = ok(rendered).split("\n", 2)
-    assert (title, blank) == (f"Sweep: leftovers from burn {RUN}", ""), rendered.stdout
+    # 6. The sweep ticket's body (#1030): grouped by file in first-seen order,
+    # every field a sweep worker needs, mentions and HTML defused. No title
+    # line: `/file-ticket` takes the title separately (#1173 P3).
+    body = ok(cli(SWEEP, "render", RUN, env=env))
     assert body == (
         "## burndown/loop.py\n"
         "\n"

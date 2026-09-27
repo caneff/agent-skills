@@ -132,11 +132,6 @@ def test_render_escapes_a_backtick_left_outside_a_span():
     assert "b`<i>`" in body, body
 
 
-def test_title_names_the_run_id():
-    assert sweep.title("burn-2026-09-20-0905") == \
-        "Sweep: leftovers from burn burn-2026-09-20-0905"
-
-
 def cli(root, *args, cwd=None, home=None, extra_env=None):
     env = dict(os.environ, BURNDOWN_CACHE_DIR=root, **(extra_env or {}))
     if home:
@@ -151,7 +146,7 @@ shutil.copyfile(os.path.join(
     "dispositions-sidecar.jsonl"), SIDECAR)
 
 
-def test_cli_prints_the_title_and_grouped_body_for_a_run_with_leftovers():
+def test_cli_prints_the_grouped_body_and_no_title_line():
     root = cache()
     runfile.start("burn-1", slots=2, root=root)
     runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
@@ -159,8 +154,10 @@ def test_cli_prints_the_title_and_grouped_body_for_a_run_with_leftovers():
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
     got = cli(root, "render", "burn-1")
     assert got.returncode == 0, got
-    assert "Sweep: leftovers from burn burn-1" in got.stdout, got.stdout
-    assert "## burndown/loop.py" in got.stdout, got.stdout
+    # stdout is the body `/file-ticket` files; the title is `SKILL.md` § The
+    # sweep's to supply, so a title line here lands in the body (#1173 P3).
+    assert got.stdout.startswith("## burndown/loop.py\n"), got.stdout
+    assert "Sweep: leftovers" not in got.stdout, got.stdout
 
 
 def test_cli_on_a_run_with_no_leftovers_prints_nothing_to_file():
