@@ -5,10 +5,11 @@
 ### 1. One Concept Per Test
 **Each test should verify a single behavior:**
 ```python
-# Good: Tests one concept
-def test_user_creation_sets_default_role():
+# Good: Tests one concept, and the assertion is your code's behavior, not
+# the framework's default
+def test_new_user_starts_pending_until_verified():
     user = User(name="Test")
-    assert user.role == "user"
+    assert user.status == "pending"
 
 def test_user_creation_generates_unique_id():
     user = User(name="Test")
@@ -101,12 +102,13 @@ def test_random_generation():
     value = random.randint(1, 10)
     assert value > 0  # Could fail randomly
 
-# Fix: Control randomness
-def test_random_generation_fixed():
-    import random
-    random.seed(42)  # Fixed seed
-    value = random.randint(1, 10)
-    assert value == 2  # Deterministic
+# Fix: inject the randomness and assert on your code's behavior
+class LowestRoll:
+    def randint(self, a, b):
+        return a
+
+def test_roll_die_returns_lowest_face_for_lowest_roll():
+    assert roll_die(rng=LowestRoll()) == 1
 ```
 
 ## Fixture Design
@@ -249,18 +251,17 @@ def test_calculate_total_with_mocks():
 ```
 
 ### 13. Verify Interactions
-**Assert mocks were called correctly:**
+**Assert a call only when the call is the outcome — a message sent across a
+system boundary — and assert the returned result beside it. A test that checks
+only mock calls breaks on refactors that keep behavior:**
 ```python
-def test_user_creation_sends_email():
+def test_user_creation_sends_welcome_email():
     mock_email = Mock()
 
-    create_user("test@example.com", email_service=mock_email)
+    user = create_user("test@example.com", email_service=mock_email)
 
-    # Verify
-    mock_email.send_welcome.assert_called_once()
-    mock_email.send_welcome.assert_called_with(
-        email="test@example.com"
-    )
+    assert user.welcome_email_sent is True
+    mock_email.send_welcome.assert_called_once_with(email="test@example.com")
 ```
 
 ### 14. Reset Mocks
@@ -330,6 +331,8 @@ addopts = -v --strict-markers
 markers =
     unit: Unit tests
     integration: Integration tests
+    database: Tests touching a database
+    e2e: End-to-end tests
     slow: Slow tests
 ```
 
@@ -379,21 +382,20 @@ Focus on:
 - Security checks
 
 ### 24. Test Edge Cases
-**Boundary conditions and errors:**
+**One behavior per test, boundary conditions included:**
 ```python
-def test_divide_edge_cases():
-    # Normal case
+def test_divide_returns_quotient():
     assert divide(10, 2) == 5
 
-    # Edge: zero
+def test_divide_by_zero_raises_value_error():
     with pytest.raises(ValueError):
         divide(10, 0)
 
-    # Edge: negative
+def test_divide_negative_dividend_returns_negative_quotient():
     assert divide(-10, 2) == -5
 
-    # Edge: float precision
-    assert abs(divide(1, 3) - 0.333333) < 0.00001
+def test_divide_returns_float_result_within_tolerance():
+    assert divide(1, 3) == pytest.approx(1 / 3)
 ```
 
 ### 25. Continuous Monitoring
