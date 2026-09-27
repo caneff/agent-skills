@@ -45,6 +45,7 @@ what the next one reads. The wording of those rules is held by the
 the rest is the closing ticket's two opens of the real thing.
 """
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -138,8 +139,14 @@ def fold(per_pr_body):
     over the issue JSON `gh issue view --json body` would print."""
     with open(BURNDOWN_SKILL) as fh:
         skill = fh.read()
-    jq_filter = '.body | split("\\n## Blocked by")[0]'
-    assert jq_filter in skill, \
+    # The filter is read off the fold command's own `--jq` argument, not
+    # matched anywhere in the file: a quoted anti-example would pass a bare
+    # substring check (#1173 C4).
+    command = re.search(r"^gh issue view <n> --repo <owner/name> --json body "
+                        r"\\\n\s+--jq '([^']*)'$", skill, re.MULTILINE)
+    assert command, "burndown's fold command is gone from § The sweep"
+    jq_filter = command.group(1)
+    assert "## Blocked by" in jq_filter, \
         "burndown's fold no longer stops the per-PR body before its Blocked by"
     taken = subprocess.run(["jq", "-r", jq_filter], input=json.dumps({"body": per_pr_body}),
                            capture_output=True, text=True, check=True).stdout
