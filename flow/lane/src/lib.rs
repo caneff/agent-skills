@@ -12,3 +12,4 @@ pub mod runner;
 pub mod sessions;
 pub mod targets;
 pub mod workers;
+pub mod worktree;

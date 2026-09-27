@@ -126,6 +126,14 @@ def cache_root(root=None):
     return root or os.path.expanduser(CACHE_DIR)
 
 
+def env_root():
+    """The root a CLI passes down: `BURNDOWN_CACHE_DIR`, `~` expanded, or
+    None for the default. Every burndown CLI resolves the environment here
+    once and hands the result to in-process calls as `root`."""
+    override = os.environ.get("BURNDOWN_CACHE_DIR")
+    return os.path.expanduser(override) if override else None
+
+
 def path(run_id, root=None):
     return os.path.join(cache_root(root), f"{checked_run_id(run_id)}.json")
 
@@ -578,6 +586,11 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
 _SIDECAR_NAME = re.compile(r"dispositions-([0-9]+)\.jsonl")
 
 
+def dispositions_path(reviews_dir, lowest):
+    """The sidecar `_SIDECAR_NAME` parses, for clump `<lowest>`."""
+    return os.path.join(reviews_dir, f"dispositions-{lowest}.jsonl")
+
+
 def refuse_foreign_sidecar(sidecar_path, tickets):
     """A sidecar is `dispositions-<n>.jsonl` for the ticket `<n>` its PR was
     dispatched for (`implement/SKILL.md` § Review). One whose `<n>` is not a
@@ -896,8 +909,12 @@ def main(argv):
     fresh = lo.add_mutually_exclusive_group(required=True)
     fresh.add_argument("--pr-body", metavar="PATH",
                        help=f"the PR's body, as `{_FETCH_BODY}` prints "
-                            "it; a sidecar its Decisions made contradicts, "
-                            "or does not cite at all, is refused as stale")
+                            "it. Refused as stale: a sidecar line its "
+                            "Decisions made contradicts, a leftover the body "
+                            "records that the sidecar lacks, a body that "
+                            "cites none of the sidecar's ids, and a body "
+                            "with no Decisions made section "
+                            "(references/run-file.md § Leftovers)")
     fresh.add_argument("--allow-stale", action="store_true",
                        help="skip the PR-body check")
 
@@ -935,9 +952,8 @@ def main(argv):
 
     args = parser.parse_args(argv[1:])
     # One seam per caller: in-process callers pass `root`, the CLI resolves the
-    # environment once here and passes it down (`cost.py` does the same).
-    override = os.environ.get("BURNDOWN_CACHE_DIR")
-    root = os.path.expanduser(override) if override else None
+    # environment once here and passes it down.
+    root = env_root()
     try:
         if args.command == "start":
             print(render(start(args.run_id, args.slots, args.controller, root)))

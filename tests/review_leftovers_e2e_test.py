@@ -20,7 +20,7 @@ the per-PR sweep of step 7, a fixture standing in for a worker's filing:
   4. `runfile.py land` / `leftover` copy each PR's `leftover` lines into the
      run file; `show` prints them and they survive `resume` (#1029).
   5. `sweep.py counts` prints the report's three counts (#1030).
-  6. `sweep.py render` prints the sweep ticket, grouped by file, every field
+  6. `sweep.py render` prints the sweep ticket's body, grouped by file, every field
      present; given `/file-ticket`'s `## Blocked by` tail it carries exactly
      one declaration, and `frontier.py` reads it as unblocked (#1030).
   7. A per-PR sweep filed outside a burn folds into the run sweep by its file
@@ -45,6 +45,7 @@ what the next one reads. The wording of those rules is held by the
 the rest is the closing ticket's two opens of the real thing.
 """
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -138,8 +139,14 @@ def fold(per_pr_body):
     over the issue JSON `gh issue view --json body` would print."""
     with open(BURNDOWN_SKILL) as fh:
         skill = fh.read()
-    jq_filter = '.body | split("\\n## Blocked by")[0]'
-    assert jq_filter in skill, \
+    # The filter is read off the fold command's own `--jq` argument, not
+    # matched anywhere in the file: a quoted anti-example would pass a bare
+    # substring check (#1173 C4).
+    command = re.search(r"^gh issue view <n> --repo <owner/name> --json body "
+                        r"\\\n\s+--jq '([^']*)'$", skill, re.MULTILINE)
+    assert command, "burndown's fold command is gone from § The sweep"
+    jq_filter = command.group(1)
+    assert "## Blocked by" in jq_filter, \
         "burndown's fold no longer stops the per-PR body before its Blocked by"
     taken = subprocess.run(["jq", "-r", jq_filter], input=json.dumps({"body": per_pr_body}),
                            capture_output=True, text=True, check=True).stdout
@@ -305,12 +312,10 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     counts = ok(cli(SWEEP, "counts", RUN, "--reviews-dir", reviews, env=env))
     assert counts == "fixed in-round: 3 (1 adjacent)  leftover: 3  standalone: 1\n", counts
 
-    # 6. The sweep ticket (#1030): its title, then its body grouped by file in
-    # first-seen order, every field a sweep worker needs, mentions and HTML
-    # defused.
-    rendered = cli(SWEEP, "render", RUN, env=env)
-    title, blank, body = ok(rendered).split("\n", 2)
-    assert (title, blank) == (f"Sweep: leftovers from burn {RUN}", ""), rendered.stdout
+    # 6. The sweep ticket's body (#1030): grouped by file in first-seen order,
+    # every field a sweep worker needs, mentions and HTML defused. No title
+    # line: `/file-ticket` takes the title separately (#1173 P3).
+    body = ok(cli(SWEEP, "render", RUN, env=env))
     assert body == (
         "## burndown/loop.py\n"
         "\n"

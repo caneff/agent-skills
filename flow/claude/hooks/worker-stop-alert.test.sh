@@ -38,7 +38,10 @@ home="$tmp/home"
 mkdir -p "$home/.claude/sessions"
 # The controller session is this test's own shell: a live pid whose
 # procStart is its /proc starttime (field 22).
-stat=$(cat /proc/$$/stat); ctl_start=$(set -- ${stat##*) }; echo "${20}")
+proc_start() { # <pid> -> its /proc starttime, field 22 (the 20th after `(comm) `)
+  local stat; stat=$(cat "/proc/$1/stat") && (set -- ${stat##*) }; echo "${20}")
+}
+ctl_start=$(proc_start $$)
 printf '{"pid":%s,"procStart":"%s","sessionId":"ctl-session","name":"skills-b6"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 agents_ok='{"result":{"agents":[{"pane_id":"w9:p1","agent_session":{"value":"ctl-session"}},{"pane_id":"w0:p1","agent_session":{"value":"dead-session"}}]}}'
 printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
@@ -578,7 +581,7 @@ printf '%s\n' "$agents_ok" > "$tmp/agent-list.json"
 # must scan every live match, not stop at the nameless one (#1059).
 reset_log
 sleep 60 & race_pid=$!
-race_stat=$(cat /proc/$race_pid/stat); race_start=$(set -- ${race_stat##*) }; echo "${20}")
+race_start=$(proc_start "$race_pid")
 printf '{"pid":%s,"procStart":"%s","sessionId":"sess-race","messagingSocketPath":"/run/race-nameless.sock"}\n' "$$" "$ctl_start" > "$home/.claude/sessions/$$.json"
 printf '{"pid":%s,"procStart":"%s","sessionId":"sess-race","name":"skills-race","messagingSocketPath":"/run/race-named.sock"}\n' "$race_pid" "$race_start" > "$home/.claude/sessions/zz-race.json"
 printf '%s\n' '{"result":{"agents":[{"name":"hctl-race","pane_id":"w9:p1","agent_session":{"value":"sess-race"}}]}}' > "$tmp/agent-list.json"

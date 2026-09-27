@@ -75,6 +75,34 @@ pub fn parse_agents(json: &str) -> Option<Vec<Agent>> {
     serde_json::from_str::<AgentList>(json).ok().map(|l| l.result.agents)
 }
 
+/// Why a session's herdr agent name could not be read. Neither is "no
+/// agent": a caller that fell back to the session name on either would hand
+/// out the address a restart ages.
+#[derive(Debug, PartialEq)]
+pub enum AgentNameError {
+    /// `herdr agent list` failed or ran past `HERDR_QUERY_TIMEOUT`.
+    ListFailed,
+    /// It answered in a shape `parse_agents` does not read.
+    Unparseable,
+}
+
+/// The name given to the herdr agent running Claude session `session_id`,
+/// from a fresh `herdr agent list`. `Ok(None)` means the listing was read and
+/// no named agent runs that session; an empty id matches none. The one
+/// lookup `implement-dispatch` briefs a controller by and `controller-adopt`
+/// re-points a worker by, so the two cannot drift.
+pub fn agent_name_of_session(session_id: &str) -> Result<Option<String>, AgentNameError> {
+    let listing = crate::runner::quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT).ok_or(AgentNameError::ListFailed)?;
+    let agents = parse_agents(&listing).ok_or(AgentNameError::Unparseable)?;
+    Ok(given_name_of_session(&agents, session_id))
+}
+
+/// An empty id matches nothing: an agent with no session reads as "".
+fn given_name_of_session(agents: &[Agent], session_id: &str) -> Option<String> {
+    let agent = agents.iter().find(|a| !session_id.is_empty() && a.session() == session_id);
+    agent.and_then(|a| a.given_name()).map(str::to_string)
+}
+
 #[derive(Deserialize)]
 struct WorkspaceList {
     result: WorkspaceResult,
@@ -113,6 +141,12 @@ mod tests {
     fn an_agent_with_no_name_falls_back_to_its_agent_field() {
         let agents = parse_agents(r#"{"result":{"agents":[{"agent":"claude","cwd":"/w"}]}}"#).unwrap();
         assert_eq!(agents[0].name(), "claude");
+    }
+
+    #[test]
+    fn an_empty_session_id_names_no_agent_even_one_with_no_session() {
+        let agents = parse_agents(r#"{"result":{"agents":[{"agent":"claude","name":"skills-ctl","cwd":"/w"}]}}"#).unwrap();
+        assert_eq!(given_name_of_session(&agents, ""), None);
     }
 
     #[test]

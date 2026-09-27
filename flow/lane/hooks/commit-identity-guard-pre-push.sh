@@ -39,23 +39,19 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   saw_a_ref=1
   [ -z "${local_sha:-}" ] && continue
   [ "$local_sha" = "$zero" ] && continue  # deleting a ref: nothing is being pushed
-  if [ -z "${remote_sha:-}" ] || [ "$remote_sha" = "$zero" ]; then
-    range=$(git rev-list "$local_sha" --not --remotes="$remote_name") || {
-      echo "commit-identity guard (pre-push): refused — could not enumerate the commits $local_ref is pushing (git rev-list failed); refusing rather than reading that as nothing to check." >&2
-      bad=1
-      continue
-    }
-  else
-    # Skip what any remote ref already holds, not just $remote_sha: a rebase
-    # onto the default branch pulls in GitHub's own squash-merge commits
-    # (committer noreply@github.com), already on origin and not ours to
-    # re-check (#1149). Do not simplify this back to $remote_sha..$local_sha.
-    range=$(git rev-list "$local_sha" --not "$remote_sha" --remotes="$remote_name") || {
-      echo "commit-identity guard (pre-push): refused — could not enumerate the commits $local_ref is pushing between $remote_sha and $local_sha (git rev-list failed); refusing rather than reading that as nothing to check." >&2
-      bad=1
-      continue
-    }
-  fi
+  # A new branch has no remote sha to exclude; an existing one excludes it.
+  # Either way skip what any remote ref already holds, not just $remote_sha:
+  # a rebase onto the default branch pulls in GitHub's own squash-merge
+  # commits (committer noreply@github.com), already on origin and not ours to
+  # re-check (#1149). Do not simplify this back to $remote_sha..$local_sha.
+  exclude=
+  [ -n "${remote_sha:-}" ] && [ "$remote_sha" != "$zero" ] && exclude=$remote_sha
+  # $exclude unquoted: empty must vanish, not become an empty revision.
+  range=$(git rev-list "$local_sha" --not $exclude --remotes="$remote_name") || {
+    echo "commit-identity guard (pre-push): refused — could not enumerate the commits $local_ref is pushing (git rev-list $local_sha --not $exclude --remotes=$remote_name failed); refusing rather than reading that as nothing to check." >&2
+    bad=1
+    continue
+  }
   for sha in $range; do
     author_email=$(git log -1 --format=%ae "$sha") || {
       echo "commit-identity guard (pre-push): refused — could not read $sha's author email; refusing rather than reading that as a match." >&2

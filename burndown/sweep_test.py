@@ -132,11 +132,6 @@ def test_render_escapes_a_backtick_left_outside_a_span():
     assert "b`<i>`" in body, body
 
 
-def test_title_names_the_run_id():
-    assert sweep.title("burn-2026-09-20-0905") == \
-        "Sweep: leftovers from burn burn-2026-09-20-0905"
-
-
 def cli(root, *args, cwd=None, home=None, extra_env=None):
     env = dict(os.environ, BURNDOWN_CACHE_DIR=root, **(extra_env or {}))
     if home:
@@ -145,13 +140,13 @@ def cli(root, *args, cwd=None, home=None, extra_env=None):
                           capture_output=True, text=True)
 
 
-SIDECAR = sweep.dispositions_path(cache(), 901)
+SIDECAR = runfile.dispositions_path(cache(), 901)
 shutil.copyfile(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "implement", "fixtures",
     "dispositions-sidecar.jsonl"), SIDECAR)
 
 
-def test_cli_prints_the_title_and_grouped_body_for_a_run_with_leftovers():
+def test_cli_prints_the_grouped_body_and_no_title_line():
     root = cache()
     runfile.start("burn-1", slots=2, root=root)
     runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
@@ -159,8 +154,10 @@ def test_cli_prints_the_title_and_grouped_body_for_a_run_with_leftovers():
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
     got = cli(root, "render", "burn-1")
     assert got.returncode == 0, got
-    assert "Sweep: leftovers from burn burn-1" in got.stdout, got.stdout
-    assert "## burndown/loop.py" in got.stdout, got.stdout
+    # stdout is the body `/file-ticket` files; the title is `SKILL.md` § The
+    # sweep's to supply, so a title line here lands in the body (#1173 P3).
+    assert got.stdout.startswith("## burndown/loop.py\n"), got.stdout
+    assert "Sweep: leftovers" not in got.stdout, got.stdout
 
 
 def test_cli_on_a_run_with_no_leftovers_prints_nothing_to_file():
@@ -193,7 +190,7 @@ def home_fixture():
 
 
 def write_sidecar(reviews_dir, lowest, lines):
-    path = sweep.dispositions_path(reviews_dir, lowest)
+    path = runfile.dispositions_path(reviews_dir, lowest)
     with open(path, "w") as fh:
         for obj in lines:
             fh.write(json.dumps(obj) + "\n")
@@ -285,7 +282,7 @@ def test_counts_refuses_a_malformed_sidecar_line_rather_than_count_low():
         runfile.start(run_id, slots=1, root=root)
         runfile.clump(run_id, [901], "/w/a", "agent-a", root=root)
         runfile.land(run_id, 901, "abc1234", root=root)
-        path = sweep.dispositions_path(reviews, 901)
+        path = runfile.dispositions_path(reviews, 901)
         with open(path, "w") as fh:
             fh.write('{"id": "S0", "outcome": "fixed", "sha": "aaa"}\n')
             fh.write(bad + "\n")
@@ -434,6 +431,43 @@ def test_cli_blocked_by_appends_the_section_to_stdin():
                          text=True)
     assert got.returncode == 0, got
     assert frontier.blocked_by_section(got.stdout) == sweep.BLOCKED_BY_TEXT, got
+
+
+def test_with_blocked_by_keeps_a_fenced_inline_line_in_the_preamble():
+    # The preamble strip reads only lines the frontier sees: a fenced
+    # `Blocked by:` is quoted text, not a declaration (#1169 verification).
+    body = sweep.with_blocked_by("```\nBlocked by: #7\n```\n\n## a.py\n\n- x\n")
+    assert "```\nBlocked by: #7\n```" in body, body
+    assert frontier.blocked_by_section(body) == sweep.BLOCKED_BY_TEXT, body
+
+
+def test_with_blocked_by_keeps_an_inline_line_past_the_first_heading():
+    # The preamble ends at the first heading; an inline form inside a file
+    # section is finding text, and the frontier never reads it there.
+    item = "Blocked by: a stale lock, per the finding"
+    body = sweep.with_blocked_by(f"## a.py\n\n- x\n{item}\n")
+    assert item in body, body
+    assert frontier.blocked_by_section(body) == sweep.BLOCKED_BY_TEXT, body
+
+
+def test_cli_blocked_by_refuses_an_empty_body():
+    # Only the update path pipes through `blocked-by`, and `gh issue edit
+    # --body-file` with an empty file blanks the sweep ticket (#1169
+    # verification): an empty body exits non-zero instead of printing "".
+    got = subprocess.run([sys.executable, SWEEP, "blocked-by"],
+                         input="\n \n", capture_output=True, text=True)
+    assert got.returncode == 1, got
+    assert got.stdout == "", got
+    assert "empty" in got.stderr, got
+    # A body that is only a declaration strips to nothing too, and the
+    # update would replace the leftovers with a lone section (review C3).
+    # Whitespace before it is no content either (Codex gate, codex-gate-4).
+    for only in ("## Blocked by\n\n- #3\n", "Blocked by: #3\n",
+                 "  \n## Blocked by\n\n- #3\n", "\t\n \t\nBlocked by: #3\n"):
+        got = subprocess.run([sys.executable, SWEEP, "blocked-by"],
+                             input=only, capture_output=True, text=True)
+        assert got.returncode == 1, (only, got)
+        assert got.stdout == "", (only, got)
 
 
 def main():

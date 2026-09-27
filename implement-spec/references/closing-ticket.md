@@ -16,8 +16,9 @@ declaration:
 - **Blind to**: the live editor — grid rendering at 4x4 and 6x6
 ```
 
-Both keys are required. A repo that declares nothing is not a repo with no
-seam: the exploration pass supplies both halves instead (`--seam`,
+Both keys are required, and a value of nothing but emphasis markers is
+refused as naming nothing: `- **Seam**:**` reads as the value `**` (#1104).
+A repo that declares nothing is not a repo with no seam: the exploration pass supplies both halves instead (`--seam`,
 `--blind-to`), and a spec run that can supply neither has found something
 worth telling the controller before it writes a closing ticket at all.
 

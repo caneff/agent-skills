@@ -255,7 +255,7 @@ FIXTURE = os.path.join(
 def named_sidecar(number=901, source=FIXTURE):
     """A copy of `source` named `dispositions-<number>.jsonl`, the name
     `runfile.leftover` binds to a clump's tickets (#1084)."""
-    path_ = sweep.dispositions_path(cache(), number)
+    path_ = runfile.dispositions_path(cache(), number)
     shutil.copyfile(source, path_)
     return path_
 
@@ -332,7 +332,7 @@ def test_leftover_against_a_sidecar_with_no_leftover_line_copies_none():
 
 
 def sidecar_of(*lines, number=901):
-    path_ = sweep.dispositions_path(cache(), number)
+    path_ = runfile.dispositions_path(cache(), number)
     with open(path_, "w") as fh:
         for line in lines:
             fh.write(json.dumps(line) + "\n")
@@ -1529,6 +1529,38 @@ def test_a_missing_pr_body_is_refused_by_name():
         assert "/nonexistent/pr-body.md" in str(err), err
     else:
         raise AssertionError("a missing PR body was accepted")
+
+
+def test_the_sidecar_name_runfile_builds_is_the_one_it_parses():
+    # One module owns both directions of `dispositions-<n>.jsonl` (#1173 S5):
+    # the built name names its own ticket and no other.
+    built = runfile.dispositions_path("/reviews", 901)
+    assert built == "/reviews/dispositions-901.jsonl", built
+    runfile.refuse_foreign_sidecar(built, [901])
+    try:
+        runfile.refuse_foreign_sidecar(built, [902])
+    except runfile.RunFileError as err:
+        assert "901" in str(err), err
+    else:
+        raise AssertionError("a sidecar for #901 was accepted for clump #902")
+
+
+def test_leftover_help_names_every_pr_body_refusal():
+    # The docstring lists four refusals; the --pr-body help named two
+    # (#1173 S3). argparse re-wraps help text, so compare with spaces folded.
+    got = subprocess.run([sys.executable, RUNFILE, "leftover", "--help"],
+                         capture_output=True, text=True)
+    text = " ".join(got.stdout.split())
+    for refusal in ("contradicts", "the sidecar lacks", "cites none",
+                    "no Decisions made section", "§ Leftovers"):
+        assert refusal in text, (refusal, text)
+
+
+def test_stated_outcome_reads_no_outcome_from_a_line_with_no_colon():
+    # The fall-through path: a Decisions made line with no colon states no
+    # outcome, and reads as None rather than raising.
+    assert runfile.stated_outcome("S1 fixed in the round") is None
+    assert runfile.stated_outcome("S1: fixed") == "fixed"
 
 
 def main():

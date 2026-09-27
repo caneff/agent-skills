@@ -3,9 +3,9 @@
 //! workspace inside herdr, report, and stop. It never waits on the worker.
 //! The contract is `--help` below.
 
-use lane::herdr::HERDR_QUERY_TIMEOUT;
+use lane::herdr::{AgentNameError, HERDR_QUERY_TIMEOUT};
 use lane::runner::{self, quiet_ok, quiet_ok_timeout, quiet_stdout, quiet_stdout_timeout, run_timeout, CommandOutput};
-use lane::{git_origin, herdr, proc_info, safe_print, safe_println, sessions};
+use lane::{git_origin, herdr, proc_info, safe_print, safe_println, sessions, worktree};
 use serde_json::Value;
 use std::env;
 use std::os::unix::fs::PermissionsExt;
@@ -506,12 +506,6 @@ fn install_identity_guard(primary: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn primary_worktree(repo: &str) -> Option<String> {
-    let out = quiet_stdout("git", &["-C", repo, "worktree", "list", "--porcelain"])?;
-    let first = out.lines().next()?;
-    first.strip_prefix("worktree ").map(str::to_string)
-}
-
 /// `burndown/runfile.py`'s run-id grammar, `[A-Za-z0-9][A-Za-z0-9._-]*`
 /// with no `..`: the id names the run file, and it rides in a one-line brief
 /// where a space or quote would split it.
@@ -792,7 +786,7 @@ fn run() -> Result<(), ExitCode> {
     }
 
     let repo = args.repo.clone().unwrap_or_else(|| env::current_dir().map(|p| p.display().to_string()).unwrap_or_default());
-    let Some(primary) = primary_worktree(&repo) else {
+    let Some(primary) = worktree::primary(&repo) else {
         return Err(die(format!("not a git repo: {repo}")));
     };
     let slug = git_origin::origin_slug(Path::new(&primary)).unwrap_or_default();
@@ -946,18 +940,18 @@ fn run() -> Result<(), ExitCode> {
     let controller = if controller_flag.is_none() {
         // A listing that failed is not "no agents": briefing the session name
         // then would write the address a restart ages, silently.
-        let Some(listing) = quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT) else {
-            return Err(die("herdr agent list failed or timed out, so the controller's herdr agent name is unknown; pass --controller"));
-        };
-        let Some(agents) = herdr::parse_agents(&listing) else {
-            return Err(die("herdr agent list gave output of an unexpected shape; pass --controller"));
-        };
-        match agents.iter().find(|a| a.session() == controller_session).and_then(|a| a.given_name()) {
-            Some(n) if n.contains('"') || n.contains('\n') => {
+        match herdr::agent_name_of_session(&controller_session) {
+            Err(AgentNameError::ListFailed) => {
+                return Err(die("herdr agent list failed or timed out, so the controller's herdr agent name is unknown; pass --controller"));
+            }
+            Err(AgentNameError::Unparseable) => {
+                return Err(die("herdr agent list gave output of an unexpected shape; pass --controller"));
+            }
+            Ok(Some(n)) if n.contains('"') || n.contains('\n') => {
                 return Err(die(format!("controller herdr agent name cannot hold a double quote or newline: {n}")));
             }
-            Some(n) => n.to_string(),
-            None => controller,
+            Ok(Some(n)) => n,
+            Ok(None) => controller,
         }
     } else {
         controller
@@ -1177,6 +1171,45 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
     use tempfile::TempDir;
+
+    /// `valid_run_id` copies `burndown/runfile.py`'s grammar, and an id one
+    /// accepts and the other refuses is a brief naming a run file the burn
+    /// cannot open, or a burn id dispatch will not carry. Ask runfile.py.
+    #[test]
+    fn run_id_grammar_matches_runfile_py() {
+        let ids = [
+            "burn-2026-09-27", "a", "1", "A.b_c-9", "burn.x", "a.", "-a", ".a", "_a", "a..b", "..", "a/b", "a b", "a\"b", "a\n", "",
+            "\u{e9}t\u{e9}", "a\u{e9}",
+        ];
+        let script = r#"
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import runfile
+out = []
+for i in json.load(sys.stdin):
+    try:
+        runfile.checked_run_id(i); out.append(True)
+    except runfile.RunFileError:
+        out.append(False)
+print(json.dumps(out))
+"#;
+        let burndown = concat!(env!("CARGO_MANIFEST_DIR"), "/../../burndown");
+        let mut child = std::process::Command::new("python3")
+            .args(["-c", script, burndown])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("python3 runs");
+        std::io::Write::write_all(child.stdin.as_mut().unwrap(), serde_json::to_string(&ids).unwrap().as_bytes()).unwrap();
+        drop(child.stdin.take());
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "runfile.py check failed: {}", String::from_utf8_lossy(&out.stderr));
+        let theirs: Vec<bool> = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(theirs.len(), ids.len());
+        for (id, py) in ids.iter().zip(theirs) {
+            assert_eq!(valid_run_id(id), py, "{id:?}: implement-dispatch says {}, runfile.py says {py}", valid_run_id(id));
+        }
+    }
 
     #[test]
     fn polls_past_herdrs_read_after_write_lag_past_100ms() {

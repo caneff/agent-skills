@@ -4,16 +4,18 @@
 //! and a label a filer put on by hand is not evidence about the diff (#969:
 //! a `SKILL.md` change went out light and landed on main with no reviewer).
 //! So the body's own targets are read too. `flow/claude/WORKFLOW.md` § Gate 2
-//! names what is code; this is the dispatcher's reading of it, and it errs
-//! toward code — a wrong heavy tier costs one review, a wrong light tier
-//! lands code unreviewed. It reads a body's tokens, not a file list, so it
-//! cannot treat everything outside prose as code the way `burndown/tier.py`
-//! does (`i.e`, `v1.2` would all go heavy). A token with a `/` is a path, and
-//! is code unless its extension is prose (`.md .markdown .txt .rst`); a bare
-//! token is code only by a fixed list of extensions. Extensionless, it is code
-//! by filename (`Makefile`, `Gemfile`) or under a script directory (`bin/`,
-//! `hooks/`). An extensionless name outside those is still invisible here;
-//! `tier.py` strips the label for it before dispatch.
+//! names what is code; this is the dispatcher's reading of it. A wrong heavy
+//! tier costs one review and a wrong light tier lands code unreviewed, so it
+//! errs toward code wherever a body's tokens let it. A token with a `/` is a
+//! path, and is code unless its extension is prose (`.md .markdown .txt
+//! .rst`): a whitelist, as in `burndown/tier.py`. A bare token is the
+//! exception. It is code only by a fixed list of extensions, a blacklist,
+//! because prose is full of dotted words that are not files (`i.e`, `v1.2`,
+//! `user.email`), so a bare token with an unlisted extension (`build.gradle`)
+//! reads as prose here. Extensionless, a token is code by basename
+//! (`Makefile`, `Gemfile`) or under a script directory (`bin/`, `hooks/`); any
+//! other extensionless name reads as prose too. `tier.py` strips the label
+//! for both gaps before dispatch, from the clumper's file list.
 
 /// Extensions read as code: § Gate 2's, the ones that wire the harness or CI
 /// (its "hooks, CI config"), and other scripting and config languages.
@@ -22,25 +24,27 @@ const CODE_EXTENSIONS: &[&str] = &[
     "fish", "ps1", "psm1", "bat", "cmd", "lua", "ini", "cfg", "conf", "rb", "pl", "php", "java", "kt", "swift",
     "c", "h", "cpp", "hpp", "mk",
 ];
-/// Extensionless files that are code wherever they sit.
-const CODE_FILENAMES: &[&str] = &["makefile", "dockerfile", "justfile", "rakefile", "gemfile", "procfile"];
 /// A directory whose extensionless entries are scripts: `bin/implement-dispatch`, a git hook.
 const CODE_DIRS: &[&str] = &["bin", "sbin", "hooks", ".githooks", ".husky"];
 /// Extensions `burndown/tier.py` reads as prose; on a path (a token with a `/`),
 /// any other extension is code.
 const PROSE_EXTENSIONS: &[&str] = &["md", "markdown", "txt", "rst"];
-/// Product names that end in a code extension but are prose.
-const PROSE_TOKENS: &[&str] = &["node.js", "next.js", "vue.js", "three.js", "d3.js", "express.js"];
-/// Basenames that are code whatever their extension: a skill's body changes
-/// what every later session does, and `settings.json` wires the harness.
-const CODE_BASENAMES: &[&str] = &["skill.md"];
+/// Product names that end in a code extension but are prose. Only the one
+/// the tests exercise; an unlisted one reads as code, the cheap error.
+const PROSE_TOKENS: &[&str] = &["node.js"];
+/// Basenames that are code wherever they sit, whatever their extension: a
+/// skill's body changes what every later session does, and the rest are
+/// extensionless build and run files.
+const CODE_BASENAMES: &[&str] = &["skill.md", "makefile", "dockerfile", "justfile", "rakefile", "gemfile", "procfile"];
 
 /// The first path-shaped token in `body` that is code, if any. A token is
 /// path-shaped when it holds only `/ - _ .` besides letters and digits;
 /// trailing sentence punctuation is dropped. It is code by extension, by
 /// filename, or as an extensionless entry under a script directory.
 pub fn first_code_target(body: &str) -> Option<String> {
-    body.split(|c: char| !(c.is_alphanumeric() || "/-_.".contains(c)))
+    // A Windows path separator is a path separator, as `tier.py` reads it.
+    body.replace('\\', "/")
+        .split(|c: char| !(c.is_alphanumeric() || "/-_.".contains(c)))
         .map(|t| t.trim_end_matches('.'))
         .find(|t| is_code_path(t))
         .map(str::to_string)
@@ -48,7 +52,7 @@ pub fn first_code_target(body: &str) -> Option<String> {
 
 fn is_code_path(token: &str) -> bool {
     let name = token.rsplit('/').next().unwrap_or(token).to_ascii_lowercase();
-    if CODE_BASENAMES.contains(&name.as_str()) || CODE_FILENAMES.contains(&name.as_str()) {
+    if CODE_BASENAMES.contains(&name.as_str()) {
         return true;
     }
     if !token.contains('/') && PROSE_TOKENS.contains(&name.as_str()) {
@@ -102,6 +106,30 @@ mod tests {
         for body in ["read/write and and/or", "docs/notes.md", "a/b.txt", "a/b.rst", "a/b.markdown", "ratio 3/4.5 here", "docs/.notes.md"] {
             assert_eq!(first_code_target(body), None, "{body}");
         }
+    }
+
+    /// The prose whitelist is written twice, here and in `burndown/tier.py`,
+    /// and a file one reader calls prose and the other calls code dispatches
+    /// at a tier the other never agreed to. Read tier.py's literal and compare.
+    #[test]
+    fn the_prose_whitelist_matches_tier_py() {
+        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../burndown/tier.py")).unwrap();
+        let line = src.lines().find(|l| l.starts_with("PROSE_EXTENSIONS = {")).expect("tier.py defines PROSE_EXTENSIONS on one line");
+        let mut theirs: Vec<&str> = line.split('"').skip(1).step_by(2).collect();
+        let mut ours = PROSE_EXTENSIONS.to_vec();
+        theirs.sort_unstable();
+        ours.sort_unstable();
+        assert!(!theirs.is_empty(), "no extensions parsed from: {line}");
+        assert_eq!(ours, theirs, "targets.rs PROSE_EXTENSIONS and burndown/tier.py's disagree");
+    }
+
+    #[test]
+    fn a_backslash_path_reads_like_a_slash_path() {
+        // `tier.py` normalises `\` to `/` before it classifies; so does this.
+        assert_eq!(first_code_target(r"see bin\implement-dispatch, then").as_deref(), Some("bin/implement-dispatch"));
+        assert_eq!(first_code_target(r"edit .githooks\pre-push").as_deref(), Some(".githooks/pre-push"));
+        assert_eq!(first_code_target(r"src\main.dart"), Some("src/main.dart".into()));
+        assert_eq!(first_code_target(r"docs\notes.md"), None);
     }
 
     #[test]

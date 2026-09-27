@@ -24,14 +24,8 @@ git init -q --bare "$remote"
 
 repo="$tmp/repo"
 git init -q "$repo"
-# Name the repo and refuse a target outside our own mktemp dir: a bare
-# `git config` after a failed `cd` wrote the real checkout's config (#1144).
-case "$(git -C "$repo" rev-parse --show-toplevel)" in
-  "$(cd "$tmp" && pwd -P)"/*) ;;
-  *) echo "FAIL: fixture repo is not under $tmp" >&2; exit 2 ;;
-esac
-git -C "$repo" config user.email t@example.com
-git -C "$repo" config user.name t
+. "$here/../../../tests/fixture-identity.sh"
+fixture_identity "$repo" "$tmp" || exit 2
 cd "$repo" || exit 2
 git remote add origin "$remote"
 mkdir -p .git/hooks

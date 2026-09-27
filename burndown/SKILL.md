@@ -132,7 +132,9 @@ too.
 8. Dispatch and merge through
    [`implement`](~/.agents/skills/implement/SKILL.md) § Dispatch, which
    claims the clump and starts the worker, passing `--run <run-id>` on
-   every plain `implement-dispatch`; `implement/SKILL.md` § The merge,
+   every plain `implement-dispatch`: run the `command` line `loop.py
+   dispatch` prints under each pick, which carries it;
+   `implement/SKILL.md` § The merge,
    which merges and cleans up, is the controller's own step there. The loop
    restates neither grammar. When two in-flight branches turn out to touch
    the same files, the collision procedure, the closure defect it implies,
@@ -143,9 +145,10 @@ too.
    step 1's resume has nothing to re-announce to — each landing with
    `runfile.py land`, each "PR up" with `runfile.py pr-up <run-id> --clump
    <n> --pr <n>` as it arrives, for § Liveness, and each landing's leftover
-   findings with `runfile.py
-   leftover <run-id> --clump <n> --pr <n> --from <dispositions sidecar> --pr-body <the PR's body,
-   from `gh pr view <pr> --repo <owner/name> --json body --jq .body`>`, so a restart can pick the run back up with nothing transcribed by hand
+   findings with `runfile.py leftover <run-id> --clump <n> --pr <n> --from
+   <dispositions sidecar> --pr-body <the PR's body, from `gh pr view <pr>
+   --repo <owner/name> --json body --jq .body`>`, so a restart can pick the
+   run back up with nothing transcribed by hand
    (`references/run-file.md` § Leftovers). The controller clears the PR-up
    record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever it
    hands findings back to the worker (Codex findings, or any ruling that
@@ -196,17 +199,25 @@ of filing another — a fresh render of the run's own leftovers, with any
 `## <file>` section already in the current body that a fold (below) put
 there kept as it stands, since a fold's own items never reappear in
 `sweep.py render`'s output and a bare overwrite would drop them —
-`gh issue edit "$sweep" --repo <owner/name> --body-file <path>`. The finished body (render, then the
-kept sections) goes through the one filter before the edit —
+`gh issue edit`. Each producer writes its own file, the finished body
+(render, then the kept sections) goes through the one filter, and every
+step's exit gates the next —
 
 ```
-{ python3 burndown/sweep.py render <run-id>; <kept sections>; } \
-  | python3 burndown/sweep.py blocked-by > <path>
+python3 burndown/sweep.py render <run-id> > <render path> \
+  && <kept sections> > <kept path> \
+  && cat <render path> <kept path> \
+     | python3 burndown/sweep.py blocked-by > <path> \
+  && gh issue edit "$sweep" --repo <owner/name> --body-file <path>
 ```
 
-— which drops any `## Blocked by` already in it and appends the one
-`None — can start immediately.` A body with none reads **unresolved** to
-`burndown/frontier.py` and is never dispatched. Exit 0 and no output:
+— so a failed render or a failed fetch of the kept sections never reaches
+the edit, which would replace the sweep with only the half that
+succeeded. The filter drops any `## Blocked by` already in the body and
+appends the one `None — can start immediately.` A body with none reads
+**unresolved** to `burndown/frontier.py` and is never dispatched. An empty
+body exits 1 too, since `--body-file` on an empty file blanks the sweep.
+Exit 0 and no output:
 render the run's leftovers —
 
 ```
@@ -217,7 +228,7 @@ groups them by file, one bullet per item naming its ticket(s), clump,
 PR, finding id, severity and text — and file **its stdout** through
 `/file-ticket`, titled `Sweep: leftovers from burn <run-id>`, labelled
 `ready-for-agent`, with `## Blocked by` `None — can start immediately.` (`/file-ticket`
-writes it on first filing; only the update path below uses `sweep.py
+writes it on first filing; only the update path above uses `sweep.py
 blocked-by`, so a body never carries two). A
 run with **zero leftovers files nothing**: stdout is empty and the
 "nothing to file" notice goes to stderr, so a caller piping stdout
@@ -367,7 +378,7 @@ behind the ranking, and what each source costs when it is read the other way:
    says; it never parks a clump, holds a slot or calls a worker stalled on
    the alert alone.
 3. **The backstop is a bounded sweep.** `python3 burndown/loop.py sweep
-   --workers <run file's clumps>` probes each live slot once through `herdr
+   --run <run-id>` probes each live slot once through `herdr
    agent get` — no retry, no wait, one call per slot and none for a landed
    clump. Run it when the controller wakes for any reason and has **nothing
    else to do**. It is **never a timer** and never a blocking call: the wake

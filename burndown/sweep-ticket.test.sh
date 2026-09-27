@@ -49,6 +49,10 @@ check_in "$sweep_text" 'files nothing' 'burndown/SKILL.md § The sweep'
 # The renderer and the counter this section invokes, so a controller reaches
 # the commands and not just a description of them.
 check_in "$sweep_text" 'burndown/sweep.py render <run-id>' 'burndown/SKILL.md § The sweep'
+# #1173: every producer's exit gates the update's edit, so a failed render,
+# a failed kept-sections fetch or an empty body stops it (codex-gate-2).
+check_in "$sweep_text" 'render <run-id> > <render path> \ && <kept sections> > <kept path> \ && cat <render path> <kept path>' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'blocked-by > <path> \ && gh issue edit "$sweep"' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'burndown/sweep.py counts <run-id>' 'burndown/SKILL.md § The sweep'
 
 # Idempotency: the deterministic title is the recovery, so a re-run of

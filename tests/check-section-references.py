@@ -63,9 +63,22 @@ BACKTICK_RUN = re.compile(r"`+")
 # Indentation is not measured against a container, so a nested item counts.
 LIST_ITEM = re.compile(r"^\s*([-*+]|\d{1,9}[.)])(\s|$)")
 LIST_INTERRUPT = re.compile(r"^\s*([-*+]|1[.)])\s+\S")
-# A table is a header row followed by this delimiter row; a "|" line with no
-# delimiter row under it is ordinary paragraph text.
+# A table is a header row followed by this delimiter row, with the same
+# number of cells (GFM); a "|" line with no such row under it is ordinary
+# paragraph text.
 TABLE_DELIMITER = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
+UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
+
+
+def cell_count(row: str) -> int:
+    """GFM cells in a table row: split on unescaped pipes, one leading and
+    one trailing pipe being the row's edges rather than separators."""
+    row = row.strip()
+    if row.startswith("|"):
+        row = row[1:]
+    if row.endswith("|") and not row.endswith("\\|"):
+        row = row[:-1]
+    return len(UNESCAPED_PIPE.split(row))
 
 
 def code_spans(text: str) -> list[tuple[int, int]]:
@@ -130,7 +143,12 @@ def standalone_rows(lines: list[str], prose: list[bool]) -> set[int]:
     }
     for index in range(len(lines) - 1):
         below = lines[index + 1]
-        if lines[index].strip() and "|" in below and TABLE_DELIMITER.match(below):
+        if (
+            lines[index].strip()
+            and "|" in below
+            and TABLE_DELIMITER.match(below)
+            and cell_count(lines[index]) == cell_count(below)
+        ):
             row = index
             while row < len(lines) and lines[row].strip() and row not in rows:
                 rows.add(row)

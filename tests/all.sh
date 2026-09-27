@@ -113,7 +113,9 @@ logging_remedy() { # <matched line>
 # primary checkout's config for two weeks). Snapshot the two keys before any
 # suite runs and fail the suite after which they differ. `--local` reads the
 # repo's own config, which is where the leak lands; an unset key reads as a
-# distinct marker so an unset counts as a change.
+# distinct marker so an unset counts as a change. That config is shared by
+# every worktree, and a concurrent legitimate change is indistinguishable from
+# a leak here, so the check stays and the message names both causes (#1173).
 identity_snapshot() {
   local key
   for key in user.email user.name; do
@@ -130,9 +132,12 @@ while IFS=$'\t' read -r label cmd; do
   identity_after=$(identity_snapshot)
   if [ "$identity_after" != "$identity_before" ]; then
     report_failure "$label" "$out" \
-      "tests/all.sh: this suite changed the checkout's git identity (a fixture identity written without naming its repo, #1144):" \
+      "tests/all.sh: the checkout's git identity changed while this suite ran (a fixture identity written without naming its repo, #1144):" \
       "  before: $(printf '%s' "$identity_before" | tr '\n' ' ')" \
-      "  after:  $(printf '%s' "$identity_after" | tr '\n' ' ')"
+      "  after:  $(printf '%s' "$identity_after" | tr '\n' ' ')" \
+      "  This config is shared by every worktree of the repo, so a session in another" \
+      "  worktree that changed the identity during this run reads the same way (#1173)." \
+      "  If one did, re-run; if none did, this suite wrote it."
   fi
   if [ "$suite_status" -eq 0 ]; then
     if hit=$(printf '%s\n' "$out" | grep -m1 -E "$failure_signature"); then

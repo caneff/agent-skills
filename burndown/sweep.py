@@ -5,15 +5,18 @@ file:
 
     python3 burndown/sweep.py render <run-id>
 
-reads the run file and prints the ticket title and body, or says on stderr
-that the run has no leftovers and prints nothing to file on stdout. This is
+reads the run file and prints the ticket body, or says on stderr that the
+run has no leftovers and prints nothing to file on stdout. The title is
+`burndown/SKILL.md` § The sweep's to supply: stdout is filed as the body
+whole, so a title line here would land in it. This is
 the renderer #1029 left for #1030: the run file was already the store,
 nothing here writes to it.
 
     python3 burndown/sweep.py blocked-by < <body>
 
 prints the body ending in exactly one `## Blocked by` section (#1130): the
-form both filing and updating a sweep pipe the finished body through.
+form updating a sweep pipes the finished body through. An empty body is
+refused, exit 1, since the update it feeds would blank the ticket.
 
     python3 burndown/sweep.py counts <run-id> --repo <checkout> | --reviews-dir <dir>
 
@@ -37,10 +40,6 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import frontier  # noqa: E402
 import runfile  # noqa: E402
-
-def title(run_id):
-    return f"Sweep: leftovers from burn {run_id}"
-
 
 def grouped_by_file(leftovers):
     """Leftovers grouped by `file`, each group in the order its first item
@@ -169,6 +168,8 @@ def with_blocked_by(body):
             continue
         kept.append(line)
     text = "\n".join(kept).rstrip("\n")
+    if not text.strip():
+        text = ""  # whitespace left by a dropped declaration is no content
     return (text + "\n\n" if text else "") + \
         f"## Blocked by\n\n{BLOCKED_BY_TEXT}\n"
 
@@ -197,10 +198,6 @@ def default_reviews_dir(repo_root):
     return os.path.join(os.path.expanduser("~/.cache/agent-reviews"), repo)
 
 
-def dispositions_path(reviews_dir, lowest):
-    return os.path.join(reviews_dir, f"dispositions-{lowest}.jsonl")
-
-
 def counts(run, reviews_dir):
     """The closing report's three counts, read from each **landed** clump's
     dispositions sidecar: **fixed in-round** is every `fixed` line
@@ -224,7 +221,7 @@ def counts(run, reviews_dir):
         if not entry["landed"]:
             continue
         lowest = entry["tickets"][0]
-        path = dispositions_path(reviews_dir, lowest)
+        path = runfile.dispositions_path(reviews_dir, lowest)
         if not os.path.exists(path):
             missing.append(lowest)
             continue
@@ -285,11 +282,21 @@ def main(argv):
     args = parser.parse_args(argv[1:])
 
     if args.command == "blocked-by":
-        print(with_blocked_by(sys.stdin.read()), end="")
+        body = with_blocked_by(sys.stdin.read())
+        # Nothing but the appended declaration means the input held no
+        # content either: empty, or only a Blocked-by the filter drops.
+        if not body or body.startswith("## Blocked by\n"):
+            # Only the update path pipes through here, and `gh issue edit
+            # --body-file` with an empty file blanks the sweep ticket.
+            print("sweep.py: the body on stdin is empty, or only a Blocked "
+                  "by declaration — refusing, since "
+                  "an empty update would blank the sweep ticket",
+                  file=sys.stderr)
+            return 1
+        print(body, end="")
         return 0
 
-    override = os.environ.get("BURNDOWN_CACHE_DIR")
-    root = os.path.expanduser(override) if override else None
+    root = runfile.env_root()
     try:
         run = runfile.load(args.run_id, root)
     except runfile.RunFileError as exc:
@@ -308,8 +315,6 @@ def main(argv):
             print(f"run {args.run_id} has no leftovers — nothing to file",
                   file=sys.stderr)
             return 0
-        print(title(args.run_id))
-        print()
         print(body, end="")
         return 0
 

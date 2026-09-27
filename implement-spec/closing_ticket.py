@@ -53,9 +53,10 @@ def declaration(text):
         for _, rest in lines[pos + 1:]:
             if _ANY_HEADING.match(rest):
                 break
-            key = key_line(rest)
-            if key:
-                found[key[0]] = key[1]
+            pair = key_line(rest)
+            if pair:
+                key, value = pair
+                found[key] = value
         return found
     return None
 
@@ -69,7 +70,9 @@ def seam_of(root, seam=None, blind_to=None):
     refuses and names them both. A declaration an inferred value may silently
     override is not a declaration, and a stale exploration result would
     replace the repo's canonical answer with nothing said. Refuses when
-    either half is missing from both sources.
+    either half is missing from both sources, and when either settled value
+    is only emphasis markers (`- **Seam**:**` reads as the value `**`),
+    which names nothing (#1104).
     """
     if not os.path.isdir(root):
         # Distinct from a repo that declares nothing: a typo'd root reported
@@ -86,12 +89,6 @@ def seam_of(root, seam=None, blind_to=None):
         found = {}
     seam = _settled("**Seam**", root, found.get("seam"), seam)
     blind_to = _settled("**Blind to**", root, found.get("blind to"), blind_to)
-    for key, value in (("**Seam**", seam), ("**Blind to**", blind_to)):
-        # `key_line` reads `- **Seam**:**` as the value `**`; a value of
-        # nothing but emphasis markers names nothing (#1104).
-        if value and not re.sub(r"[\s*_]", "", value):
-            raise SeamError(f"{root}: {key} reads {value!r}, which is only "
-                            "emphasis markers and names nothing")
     if not seam:
         raise SeamError(
             f"{root} declares no `## End-to-end seam` section and the "
@@ -161,7 +158,8 @@ def _review_procedure(spec, shas):
 
 def _settled(key, root, declared, explored):
     """One half of the seam: the declaration where there is one, and the
-    exploration pass's answer only where there is not."""
+    exploration pass's answer only where there is not. An emphasis-only
+    value is refused."""
     declared = (declared or "").strip()
     explored = (explored or "").strip()
     if declared and explored and declared != explored:
@@ -171,7 +169,13 @@ def _settled(key, root, declared, explored):
             "The declaration is authoritative, so this is not a value to "
             "pick between: either the pass is stale, or the declaration is "
             "wrong and the repo's own file is where that gets fixed")
-    return declared or explored
+    value = declared or explored
+    # `key_line` reads `- **Seam**:**` as the value `**`; a value of
+    # nothing but emphasis markers names nothing (#1104).
+    if value and not re.sub(r"[\s*_]", "", value):
+        raise SeamError(f"{root}: {key} reads {value!r}, which is only "
+                        "emphasis markers and names nothing")
+    return value
 
 
 def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):

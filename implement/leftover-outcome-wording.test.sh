@@ -80,6 +80,7 @@ check_in "§ Dispatch" "$dispatch" 'implement-dispatch <n> [<n>...] [--model son
 check_in "§ Dispatch" "$dispatch" "A burn's controller always passes \`--run <run-id>\`"
 check_in "§ The brief" "$brief" '[--run <run-id>]'
 check_in "burndown § The loop step 8" "$loop_step8" 'passing `--run <run-id>` on every plain `implement-dispatch`'
+check_in "burndown § The loop step 8" "$loop_step8" 'run the `command` line `loop.py dispatch` prints under each pick'
 
 # Codex gate finding 2 on PR #1094: a crash after /file-ticket here is the
 # same recovery hazard #1030 already solved for the burn sweep — search by

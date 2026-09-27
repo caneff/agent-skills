@@ -37,6 +37,11 @@ run_case 'git config user.email t@example.com'
 check "a suite that rewrites user.email fails the gate" 1 $rc
 printf '%s\n' "$out" | grep -q 'fake.test.sh' && printf '%s\n' "$out" | grep -q 'user.email'
 check "the failure names the suite and the key" 0 $?
+# The config is shared by every worktree of the repo, so a legitimate identity
+# change in another session lands mid-run and is read as this suite's (#1173
+# C4). The check stays; the message must not assert the suite did it.
+printf '%s\n' "$out" | grep -q 'shared by every worktree'
+check "the failure says another worktree's session could have made the change" 0 $?
 
 run_case 'git config user.name t'
 check "a suite that rewrites user.name fails the gate" 1 $rc
@@ -51,7 +56,7 @@ check "a suite that sets an unset user.email to empty fails the gate" 1 $rc
 # failed `cd`, then a bare `git config`): the identity must still be named.
 run_case 'git config user.email t@example.com; exit 1'
 check "a suite that rewrites user.email and then fails fails the gate" 1 $rc
-printf '%s\n' "$out" | grep -q 'changed the checkout.s git identity'
+printf '%s\n' "$out" | grep -q 'git identity changed while this suite ran'
 check "the identity change is named although the suite also failed" 0 $?
 
 exit $fail

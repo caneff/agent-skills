@@ -15,6 +15,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import loop  # noqa: E402
+import runfile  # noqa: E402
 
 
 def git_stub(branch="main", git_dir="/repo/.git", common_dir="/repo/.git",
@@ -199,6 +200,24 @@ def test_the_cli_dispatch_names_the_widest_clump_first():
         lines = [line for line in got.stdout.splitlines()
                 if line.startswith("dispatch")]
         assert lines == ["dispatch  #20  #20", "dispatch  #30  #30"], got.stdout
+
+
+def test_each_pick_prints_its_implement_dispatch_command_carrying_the_run():
+    # The burn's --run on every plain dispatch was prose only (#1173 S1, P2,
+    # C2, codex-second-1): the command the controller runs is printed here,
+    # with the run id dispatch was itself given.
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live, env = run_file_dispatch(tmp, ("none",))
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [500, 502], "closure": ["fresh.py"]}], fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "2", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 0, got
+        commands = [line for line in got.stdout.splitlines()
+                    if line.startswith("command")]
+        assert commands == [
+            "command   implement-dispatch 500 502 --run burn-t"], got.stdout
 
 
 def test_the_cli_names_a_same_tick_collision_as_a_held_line():
@@ -1674,6 +1693,42 @@ def test_the_cli_sweep_probes_each_live_slot_once_through_herdr():
                 "the sweep probes each live slot exactly once"
 
 
+def test_the_cli_sweep_reads_the_run_file_itself_given_a_run_id():
+    # `--run` loads the run file through runfile.load(), so the controller
+    # no longer extracts `.clumps` by hand (#1173 codex-third-1).
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = os.path.join(tmp, "bin")
+        os.mkdir(bindir)
+        stub = os.path.join(bindir, "herdr")
+        with open(stub, "w") as fh:
+            fh.write(HERDR_STUB)
+        os.chmod(stub, 0o755)
+        cache = os.path.join(tmp, "cache")
+        runfile.start("burn-sweep-run-fixture", slots=2, root=cache)
+        runfile.clump("burn-sweep-run-fixture", [1], "/w/1", "skills-1", root=cache)
+        runfile.clump("burn-sweep-run-fixture", [3], "/w/3", "skills-3", root=cache)
+        runfile.clump("burn-sweep-run-fixture", [4], "/w/4", "skills-4", root=cache)
+        runfile.land("burn-sweep-run-fixture", 4, "a1b2c3d", root=cache)
+        calls = os.path.join(tmp, "calls")
+        env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"],
+                   CALLS=calls, BURNDOWN_CACHE_DIR=cache)
+        got = subprocess.run([sys.executable, LOOP, "sweep", "--run",
+                              "burn-sweep-run-fixture"], capture_output=True, text=True,
+                             timeout=60, env=env)
+        assert got.returncode == 0, got
+        assert "working   #1" in got.stdout, got.stdout
+        assert "vanished  #3" in got.stdout, got.stdout
+        with open(calls) as fh:
+            assert fh.read().split() == ["skills-1", "skills-3"], \
+                "a landed clump is not probed"
+        missing = subprocess.run([sys.executable, LOOP, "sweep", "--run",
+                                  "burn-none"], capture_output=True,
+                                 text=True, timeout=60, env=env)
+        assert missing.returncode == 1, missing
+        assert "burn-none" in missing.stderr, missing.stderr
+        assert "Traceback" not in missing.stderr, missing.stderr
+
+
 def test_a_clump_with_no_agent_name_is_one_verdict_not_a_dead_sweep():
     calls = []
     clumps = live_clumps()
@@ -1949,6 +2004,26 @@ def test_dispatch_names_runfile_clump_for_an_unregistered_clump_1126():
         assert got.returncode == 1, got
         assert "#888 is live with no job record" in got.stderr, got.stderr
         assert "not registered" not in got.stderr, got.stderr
+
+
+def test_dispatch_names_the_overlap_when_an_unregistered_key_shares_tickets():
+    # In-flight [300, 351] against a registered [351]: `runfile.py clump
+    # --tickets 300,351` refuses on "already in clump #351", so the refusal
+    # names the overlap instead of prescribing it (#1173 C1).
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live, env = run_file_dispatch(tmp, ("none",))
+        with open(live) as fh:
+            clumps = json.load(fh)
+        clumps[0]["tickets"] = [300, 351]
+        with open(live, "w") as fh:
+            json.dump(clumps, fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "1", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 1, got
+        assert "#300" in got.stderr and "#351" in got.stderr, got.stderr
+        assert "overlaps" in got.stderr, got.stderr
+        assert "runfile.py clump" not in got.stderr, got.stderr
 
 
 def test_dispatch_refuses_when_only_the_in_flight_file_carries_the_job_1107():

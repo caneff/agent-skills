@@ -5,7 +5,7 @@ memory:
 
     python3 burndown/loop.py seat
     python3 burndown/loop.py box [--processes <n>] --committed-gb <g> [--add-gb <g>]
-    python3 burndown/loop.py sweep --workers <clumps.json>
+    python3 burndown/loop.py sweep --run <run-id> | --workers <clumps.json>
 
 The judgment steps stay in the skill. What lives here is what a run got wrong
 by hand: which clumps are dispatchable once the live workspaces are excluded,
@@ -953,17 +953,30 @@ def with_run_jobs(in_flight, run_id, root=None):
     the clump's lowest ticket. `closure.py --json` carries no `job`, so the
     record `runfile.py job` wrote is the only source; a clump the run file
     holds no record for is refused here by name, `runfile.py clump` being the
-    fix; a registered clump with no `job` gets `None`, which `job_cores`
+    fix — unless its tickets overlap a clump registered under another key,
+    which `runfile.py clump` would refuse, so that refusal names the overlap
+    instead; a registered clump with no `job` gets `None`, which `job_cores`
     refuses naming `runfile.py job`."""
     try:
         run = runfile.load(run_id, root)
     except runfile.RunFileError as exc:
         raise LoopError(str(exc)) from exc
     jobs = {min(entry["tickets"]): entry["job"] for entry in run["clumps"]}
+    owner = {n: min(entry["tickets"]) for entry in run["clumps"]
+             for n in entry["tickets"]}
     with_jobs = []
     for clump in in_flight:
         key = key_of(clump)
         if key not in jobs:
+            shared = sorted({owner[n] for n in clump["tickets"] if n in owner})
+            if shared:
+                # `runfile.py clump` would refuse these tickets as held.
+                raise LoopError(
+                    f"#{key} is live but overlaps registered clump(s) "
+                    + ", ".join(f"#{k}" for k in shared) +
+                    f" in run {run_id} under another key — the in-flight "
+                    "list and the run file disagree on this clump's "
+                    "tickets; fix the stale one before dispatching")
             raise LoopError(
                 f"#{key} is live but not registered in run "
                 f"{run_id} — register it with `runfile.py clump` (then "
@@ -999,9 +1012,18 @@ def herdr_get(agent, timeout):
         ) from None
 
 
-def render_dispatch(picked, held):
-    lines = [f"dispatch  #{key_of(c)}  "
-             + ",".join(f"#{n}" for n in c["tickets"]) for c in picked]
+def render_dispatch(picked, held, run_id):
+    """One `dispatch` line per pick and the `implement-dispatch` command
+    under it — carrying `--run <run-id>`, so
+    the flag a burn owes every plain dispatch (`burndown/SKILL.md` § The
+    loop step 8) is in the line the controller runs rather than in prose."""
+    lines = []
+    for c in picked:
+        lines.append(f"dispatch  #{key_of(c)}  "
+                     + ",".join(f"#{n}" for n in c["tickets"]))
+        lines.append("command   implement-dispatch "
+                     + " ".join(str(n) for n in c["tickets"])
+                     + f" --run {run_id}")
     for entry in held:
         # `same_tick` names the other candidate this tick picked ahead of it;
         # otherwise the holder is a live workspace (#971).
@@ -1058,8 +1080,12 @@ def run(argv):
     sweep_cmd = subs.add_parser(
         "sweep", help="one herdr probe per live slot, the backstop under the "
                       "wake")
-    sweep_cmd.add_argument("--workers", required=True,
-                           help="the run's clumps, as the run file holds them")
+    roster = sweep_cmd.add_mutually_exclusive_group(required=True)
+    roster.add_argument("--run",
+                        help="the run id; its clumps are read from the run "
+                             "file")
+    roster.add_argument("--workers",
+                        help="the run's clumps, as the run file holds them")
     hub = subs.add_parser(
         "hub", help="whether a landing asks for full re-exploration")
     hub.add_argument("--candidates", required=True)
@@ -1089,8 +1115,7 @@ def run(argv):
         elif args.command == "dispatch":
             candidates = read_clumps(args.candidates)
             in_flight = read_clumps(args.in_flight, live=True)
-            override = os.environ.get("BURNDOWN_CACHE_DIR")
-            root = os.path.expanduser(override) if override else None
+            root = runfile.env_root()
             in_flight = with_run_jobs(in_flight, args.run, root)
             free = max(args.free, 0)
             # Measured before any early return: a broken herdr or `ps` must
@@ -1118,7 +1143,8 @@ def run(argv):
                 # dispatch.
                 print("nothing to dispatch: every free slot is held by a "
                       "declared job")
-                print(render_dispatch([], frontier(candidates, unlanded)["held"]))
+                print(render_dispatch([], frontier(candidates, unlanded)["held"],
+                                      args.run))
                 return 0
             live = len(unlanded)
             room, refusals = box_room(count, args.committed_gb,
@@ -1131,7 +1157,8 @@ def run(argv):
             print(render_peak(count, live, room, working, unlisted))
             state = frontier(candidates, unlanded)
             picked, same_tick_held = picks(state, room)
-            lines = render_dispatch(picked, state["held"] + same_tick_held)
+            lines = render_dispatch(picked, state["held"] + same_tick_held,
+                                    args.run)
             if room < cores["room"]:
                 lines = f"box: room for {room} of {cores['room']}\n{lines}"
             print(lines)
@@ -1170,9 +1197,15 @@ def run(argv):
                     "workers")
             budget = float(os.environ.get("BURNDOWN_SWEEP_BUDGET")
                            or SWEEP_BUDGET)
-            print(render_sweep(
-                sweep(read_clumps(args.workers, closure=False), herdr_get,
-                      budget=budget)))
+            if args.run:
+                try:
+                    workers = runfile.load(args.run, runfile.env_root())[
+                        "clumps"]
+                except runfile.RunFileError as exc:
+                    raise LoopError(str(exc)) from exc
+            else:
+                workers = read_clumps(args.workers, closure=False)
+            print(render_sweep(sweep(workers, herdr_get, budget=budget)))
         elif args.command == "hub":
             landed = [p for p in args.landed.replace(",", " ").split() if p]
             hub_files = hubs(read_clumps(args.candidates))
