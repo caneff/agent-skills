@@ -208,19 +208,22 @@ No PR and no reviewer; Chris reads the log after.
    ad hoc `gh issue create` skips that role. `filed` is reserved for a high
    finding, under the severity mapping below. A finding that is not high and
    not fixed in the round takes `leftover`: no ticket of its own, only a
-   sidecar line (step 2) and `leftover` in prose.
+   sidecar line (step 2) and `leftover` in prose. A burn's own sweep, one
+   ticket per run, is `burndown/SKILL.md` § The sweep; a worker whose
+   brief carries **no `--run <run-id>`** has no run file under it and
+   files its own per-PR sweep instead, at report time: this file's § The PR
+   below.
 
    **The split grammar.** A ruling that genuinely divides a controller-only
    finding — one with no line of its own in a `findings-<axis>-<n>.jsonl`
    sidecar, which today means a Codex-pass finding (§ The merge step 3) —
    fix one part now, leave the rest — is never written as one id carrying
    two outcome words (`fixed … leftover`, as PR #1172's did): write it as
-   two ids
-   sharing the base, suffixed `a`, `b`, … in the order the halves are named
-   (`codex-gate-1a` fixed, `codex-gate-1b` leftover), each with its own
-   sidecar line, its own Decisions made line, and its own outcome. A round
-   prefix (when one applies) sits in front of the whole thing, the split
-   suffix stays last (`r2-S1a`), so the two grammars never collide.
+   two ids sharing the base, suffixed `a`, `b`, … in the order the halves
+   are named (`codex-gate-1a` fixed, `codex-gate-1b` leftover), each with
+   its own sidecar line, its own Decisions made line, and its own outcome.
+   A round prefix (when one applies) sits in front of the whole thing, the
+   split suffix stays last (`r2-S1a`), so the two grammars never collide.
    `runfile.py leftover --pr-body` matches an id exactly, so nothing about a
    genuine split needs `--allow-stale`; that flag is for a sidecar that is
    stale, not a finding that was never one thing to begin with. **A round-1
@@ -231,11 +234,8 @@ No PR and no reviewer; Chris reads the log after.
    undisposed and `S3a`/`S3b` as orphans neither tool recognises. A ruling
    that divides a round-1 finding takes one disposition for the whole
    finding, same as any other, until those two readers learn the grammar
-   too. A burn's own sweep, one
-   ticket per run, is `burndown/SKILL.md` § The sweep; a worker whose
-   brief carries **no `--run <run-id>`** has no run file under it and
-   files its own per-PR sweep instead, at report time: this file's § The PR
-   below.
+   too.
+
    On a repo whose `origin` owner isn't
    your `gh` login, `/file-ticket` hands the command back instead of filing,
    so there is no ticket number: the disposition is `handed back: <the

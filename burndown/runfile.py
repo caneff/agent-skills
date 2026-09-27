@@ -574,11 +574,12 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
             raise RunFileError(
                 f"{body_path}:{body_n} records {obj['id']} as {said!r}, "
                 f"but {sidecar_path}:{n} says {obj['outcome']!r} — rewrite "
-                "the sidecar line; if the ruling genuinely splits this "
-                "finding into two outcomes, write it as two ids, one per "
-                f"half ({obj['id']}a, {obj['id']}b — implement/SKILL.md § "
-                "Review's split grammar), each with its own sidecar line; "
-                "otherwise pass --allow-stale")
+                "the sidecar line; if the ruling genuinely divides a "
+                "controller-only finding (never a round-1 finding's own "
+                f"id), write it as two ids, one per half ({obj['id']}a, "
+                f"{obj['id']}b — implement/SKILL.md § Review's split "
+                "grammar), each with its own sidecar line; otherwise pass "
+                "--allow-stale")
     for fid, (body_n, stated, _) in records.items():
         if stated == "leftover" and fid not in held:
             raise RunFileError(

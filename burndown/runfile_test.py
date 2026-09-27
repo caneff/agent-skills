@@ -1443,14 +1443,21 @@ def test_a_leftover_line_the_pr_body_records_as_fixed_is_refused_until_rewritten
 
 
 def test_a_contradiction_refusal_names_the_split_id_way_out():
-    # #1174: PR #1172's ruling genuinely split S3 — fix the head binding,
-    # leave the residual race — and the only path past the contradiction
-    # was `--allow-stale`, the override #1147/#1170 exist to stop training.
-    # The refusal now names the id-a/id-b way out, by this finding's own id.
-    sidecar = sidecar_of(LEFTOVER_S3)
-    body = pr_body("## Decisions made\n\n- S3: fixed, abc1234.\n")
+    # #1174: PR #1172's ruling genuinely split codex-gate-1 — fix the head
+    # binding, leave the residual race — and the only path past the
+    # contradiction was `--allow-stale`, the override #1147/#1170 exist to
+    # stop training. The refusal now names the id-a/id-b way out, by this
+    # finding's own id. A controller-only id, not a round-1 one (S3, P2,
+    # C1): § Review's split grammar is never a round-1 finding's own id,
+    # and the message must not recommend that on the one shape of id it
+    # forbids it for.
+    sidecar = sidecar_of({"id": "codex-gate-1", "outcome": "leftover",
+                          "file": "a.py", "title": "t", "severity": "hard",
+                          "text": "x"})
+    body = pr_body("## Decisions made\n\n- codex-gate-1: fixed, abc1234.\n")
     got = refusal_of(sidecar, landed_root(), body)
-    assert "S3a" in got and "S3b" in got and "split" in got, got
+    assert ("codex-gate-1a" in got and "codex-gate-1b" in got
+            and "split" in got), got
 
 
 def test_a_genuine_split_is_written_as_two_ids_not_one():
