@@ -15,7 +15,7 @@
 
 use lane::herdr::{self, HERDR_QUERY_TIMEOUT};
 use lane::runner::{quiet_stdout, quiet_stdout_timeout};
-use lane::workers::{self, AdoptRefusal};
+use lane::workers::{self, AdoptRefusal, Adopter};
 use lane::{proc_info, safe_println, sessions};
 use std::path::Path;
 use std::process::ExitCode;
@@ -86,7 +86,7 @@ fn main() -> ExitCode {
         Err(e) => return fail(&format!("{e}; nothing moved")),
     };
 
-    let adopted = match workers::adopt(home, agent, &primary, &own_pid, &own_start) {
+    let adopted = match workers::adopt(home, agent, &primary, Adopter { pid: &own_pid, start: &own_start }) {
         Ok(a) => a,
         Err(AdoptRefusal::NotFound) => return fail(&format!("no worker record names {agent} under {primary} (another session may have just adopted it)")),
         Err(AdoptRefusal::ControllerAlive(pid)) if pid == own_pid => {

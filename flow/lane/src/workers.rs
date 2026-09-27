@@ -283,10 +283,18 @@ pub struct Adopted {
     pub stale_copy_left: bool,
 }
 
-/// Makes the session at `own_pid` (starttime `own_start`) the controller of
-/// the worker `agent` whose workspace sits under `within` (#1098): moves its
-/// record out of its dead controller's sidecar into `own_pid`'s, restamped
-/// with `own_start` so `controller-restore` restores it here after a
+/// The session taking a worker over: its pid, which names its sidecar, and
+/// its `/proc/<pid>/stat` starttime, which the moved record is restamped
+/// with. The two identify one process only together.
+#[derive(Debug, Clone, Copy)]
+pub struct Adopter<'a> {
+    pub pid: &'a str,
+    pub start: &'a str,
+}
+
+/// Makes the session `me` the controller of the worker `agent` whose
+/// workspace sits under `within` (#1098): moves its record out of its dead
+/// controller's sidecar into `me.pid`'s, restamped with `me.start` so `controller-restore` restores it here after a
 /// `/clear`. Refuses while the record's controller is alive — two
 /// controllers for one worker is the failure this exists to prevent — and
 /// when the workspace is gone.
@@ -300,7 +308,7 @@ pub struct Adopted {
 /// Codex [high]): a process death between the two leaves a duplicate the
 /// live copy outranks — `orphans` never offers it, and this refuses it —
 /// never a worker in neither file.
-pub fn adopt(home: &Path, agent: &str, within: &str, own_pid: &str, own_start: &str) -> Result<Adopted, AdoptRefusal> {
+pub fn adopt(home: &Path, agent: &str, within: &str, me: Adopter) -> Result<Adopted, AdoptRefusal> {
     let io = |e: std::io::Error| AdoptRefusal::Io(e.to_string());
     std::fs::create_dir_all(home.join(".claude/sessions")).map_err(io)?;
     let guard = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(adopt_lock_path(home)).map_err(io)?;
@@ -322,7 +330,7 @@ pub fn adopt(home: &Path, agent: &str, within: &str, own_pid: &str, own_start: &
         }
     }
     for (pid, path, _) in &candidates {
-        if let Some(adopted) = move_record(home, pid, path, &names, own_pid, own_start)? {
+        if let Some(adopted) = move_record(home, pid, path, &names, me)? {
             return Ok(adopted);
         }
     }
@@ -337,11 +345,10 @@ fn move_record(
     from_pid: &str,
     from: &Path,
     names: &dyn Fn(&WorkerRecord) -> bool,
-    own_pid: &str,
-    own_start: &str,
+    me: Adopter,
 ) -> Result<Option<Adopted>, AdoptRefusal> {
     let io = |e: std::io::Error| AdoptRefusal::Io(e.to_string());
-    let own = path_for(home, own_pid);
+    let own = path_for(home, me.pid);
     let mut src = std::fs::OpenOptions::new().read(true).write(true).open(from).map_err(io)?;
     let mut dst = if own == from {
         None
@@ -375,7 +382,7 @@ fn move_record(
         return Err(AdoptRefusal::TornDown(record.workspace));
     }
 
-    let adopted = WorkerRecord { proc_start: own_start.to_string(), ..record };
+    let adopted = WorkerRecord { proc_start: me.start.to_string(), ..record };
     let line = serde_json::to_string(&adopted).map_err(|e| AdoptRefusal::Io(e.to_string()))?;
     let mut kept: Vec<&str> = lines.iter().enumerate().filter(|(i, _)| *i != at).map(|(_, l)| *l).collect();
     let stale_copy_left = match dst.as_mut() {
@@ -680,7 +687,7 @@ mod tests {
         let (h, root, me2, start2) = (home.clone(), tmp.path().display().to_string(), me.clone(), my_start.clone());
         let adopter = std::thread::spawn(move || {
             let names = |r: &WorkerRecord| r.agent == "sudokupad-art-143" && crate::sessions::in_tree(&r.workspace, &root);
-            let got = move_record(&h, &i32::MAX.to_string(), &path_for(&h, &i32::MAX.to_string()), &names, &me2, &start2);
+            let got = move_record(&h, &i32::MAX.to_string(), &path_for(&h, &i32::MAX.to_string()), &names, Adopter { pid: &me2, start: &start2 });
             let _ = done_tx.send(());
             got
         });
@@ -692,7 +699,7 @@ mod tests {
         assert_eq!(read(&home, &me), vec![WorkerRecord { proc_start: my_start.clone(), ..record(&ws) }]);
 
         let root = tmp.path().display().to_string();
-        assert_eq!(adopt(&home, "sudokupad-art-143", &root, "1", "1").unwrap_err(), AdoptRefusal::ControllerAlive(me));
+        assert_eq!(adopt(&home, "sudokupad-art-143", &root, Adopter { pid: "1", start: "1" }).unwrap_err(), AdoptRefusal::ControllerAlive(me));
     }
 
     /// #1098 review S2: only a pid that verifiably does not exist is a dead
@@ -726,7 +733,7 @@ mod tests {
 
         let root = tmp.path().display().to_string();
         let names = |r: &WorkerRecord| r.agent == "sudokupad-art-143" && crate::sessions::in_tree(&r.workspace, &root);
-        let got = move_record(home, &dead, &path_for(home, &dead), &names, "4242", "1");
+        let got = move_record(home, &dead, &path_for(home, &dead), &names, Adopter { pid: "4242", start: "1" });
         assert!(matches!(got, Err(AdoptRefusal::Io(_))), "{got:?}");
         assert_eq!(read(home, &dead), vec![record(&ws)], "the record is back where it was");
     }
@@ -748,7 +755,7 @@ mod tests {
         append(home, &me, &live).unwrap();
 
         let names = |r: &WorkerRecord| r.agent == "sudokupad-art-143";
-        let got = move_record(home, &me, &path_for(home, &me), &names, "4242", "1");
+        let got = move_record(home, &me, &path_for(home, &me), &names, Adopter { pid: "4242", start: "1" });
         assert_eq!(got.unwrap_err(), AdoptRefusal::ControllerAlive(me.clone()));
         assert_eq!(read(home, &me), vec![live]);
         assert!(read(home, "4242").is_empty());
@@ -775,7 +782,7 @@ mod tests {
         let h = home.clone();
         let mover = std::thread::spawn(move || {
             let names = |r: &WorkerRecord| r.agent == "sudokupad-art-143" && r.workspace != "/other";
-            let got = move_record(&h, &i32::MAX.to_string(), &path_for(&h, &i32::MAX.to_string()), &names, "4242", "1");
+            let got = move_record(&h, &i32::MAX.to_string(), &path_for(&h, &i32::MAX.to_string()), &names, Adopter { pid: "4242", start: "1" });
             let _ = done_tx.send(());
             got
         });
@@ -804,7 +811,7 @@ mod tests {
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let (h, root) = (home.clone(), tmp.path().display().to_string());
         let adopter = std::thread::spawn(move || {
-            let got = adopt(&h, "sudokupad-art-143", &root, "4242", "1");
+            let got = adopt(&h, "sudokupad-art-143", &root, Adopter { pid: "4242", start: "1" });
             let _ = done_tx.send(());
             got
         });
