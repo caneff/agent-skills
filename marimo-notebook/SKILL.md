@@ -241,14 +241,14 @@ uvx marimo check <notebook.py>
 
 Make sure these are checked before handing a notebook back to the user. 
 
-**Important**: you have a tendency to over-do variables with an underscore prefix. You should only apply this to one or two variables at most. Consider creating a new variable instead of prefixing entire cells in marimo. 
+Use an underscore prefix only for the one or two variables that must stay cell-local; otherwise give the variable a new, unique name rather than prefixing a whole cell's variables.
 
 ## api docs
 
 If the user specifically wants you to use a marimo function, you can locally check the docs via: 
 
 ```
-uv --with marimo run python -c "import marimo as mo; help(mo.ui.form)"
+uv run --with marimo python -c "import marimo as mo; help(mo.ui.form)"
 ```
 
 ## tests 
@@ -269,7 +269,7 @@ pytest <notebook.py>
 
 ## Additional resources
 
-- For marimo notebooks that run in width=columns [SQL.md](references/COLUMNS.md)
+- For marimo notebooks that run in width=columns [COLUMNS.md](references/COLUMNS.md)
 - For SQL use in marimo see [SQL.md](references/SQL.md)
 - For UI elements in marimo [UI.md](references/UI.md)
 - For exposing functions/classes as top level imports [TOP-LEVEL-IMPORTS.md](references/TOP-LEVEL-IMPORTS.md)
