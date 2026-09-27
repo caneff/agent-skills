@@ -1545,6 +1545,17 @@ def test_the_sidecar_name_runfile_builds_is_the_one_it_parses():
         raise AssertionError("a sidecar for #901 was accepted for clump #902")
 
 
+def test_leftover_help_names_every_pr_body_refusal():
+    # The docstring lists four refusals; the --pr-body help named two
+    # (#1173 S3). argparse re-wraps help text, so compare with spaces folded.
+    got = subprocess.run([sys.executable, RUNFILE, "leftover", "--help"],
+                         capture_output=True, text=True)
+    text = " ".join(got.stdout.split())
+    for refusal in ("contradicts", "the sidecar lacks", "cites none",
+                    "no Decisions made section", "§ Leftovers"):
+        assert refusal in text, (refusal, text)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     try:

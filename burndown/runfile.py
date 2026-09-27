@@ -909,8 +909,12 @@ def main(argv):
     fresh = lo.add_mutually_exclusive_group(required=True)
     fresh.add_argument("--pr-body", metavar="PATH",
                        help=f"the PR's body, as `{_FETCH_BODY}` prints "
-                            "it; a sidecar its Decisions made contradicts, "
-                            "or does not cite at all, is refused as stale")
+                            "it. Refused as stale: a sidecar line its "
+                            "Decisions made contradicts, a leftover the body "
+                            "records that the sidecar lacks, a body that "
+                            "cites none of the sidecar's ids, and a body "
+                            "with no Decisions made section "
+                            "(references/run-file.md § Leftovers)")
     fresh.add_argument("--allow-stale", action="store_true",
                        help="skip the PR-body check")
 
