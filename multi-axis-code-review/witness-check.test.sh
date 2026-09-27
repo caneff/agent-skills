@@ -168,10 +168,14 @@ for axis in standards spec correctness; do
 done
 check_in "$standards" 'an absent or malformed answer read as a benign one' 'the standards axis brief'
 check_in "$standards" 'a stated fallback with no mechanism behind it' 'the standards axis brief'
+check_in "$standards" 'a test that passes for a reason other than the one it claims' 'the standards axis brief'
+check_in "$standards" 'when absent' 'the standards axis brief'
 check_in "$spec" 'an absent or malformed answer read as a benign one' 'the spec axis brief'
 check_in "$spec" 'a stated fallback with no mechanism behind it' 'the spec axis brief'
+check_in "$spec" 'a test that passes for a reason other than the one it claims' 'the spec axis brief'
+check_in "$spec" 'when absent' 'the spec axis brief'
 check_in "$correctness" 'when absent' 'the correctness axis brief'
-check_in "$correctness" 'class 2' 'the correctness axis brief'
+check_in "$correctness" 'class 2 (a stated fallback with no mechanism behind it)' 'the correctness axis brief'
 # The standing brief says the same, since an axis reads it whether or not the
 # caller's paste survived. A bare 'worktree' needle would pass on `git -C
 # <worktree>`, which that file already carried before this change.
