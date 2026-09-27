@@ -1089,8 +1089,7 @@ def run(argv):
         elif args.command == "dispatch":
             candidates = read_clumps(args.candidates)
             in_flight = read_clumps(args.in_flight, live=True)
-            override = os.environ.get("BURNDOWN_CACHE_DIR")
-            root = os.path.expanduser(override) if override else None
+            root = runfile.env_root()
             in_flight = with_run_jobs(in_flight, args.run, root)
             free = max(args.free, 0)
             # Measured before any early return: a broken herdr or `ps` must

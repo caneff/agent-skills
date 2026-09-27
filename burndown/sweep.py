@@ -288,8 +288,7 @@ def main(argv):
         print(with_blocked_by(sys.stdin.read()), end="")
         return 0
 
-    override = os.environ.get("BURNDOWN_CACHE_DIR")
-    root = os.path.expanduser(override) if override else None
+    root = runfile.env_root()
     try:
         run = runfile.load(args.run_id, root)
     except runfile.RunFileError as exc:

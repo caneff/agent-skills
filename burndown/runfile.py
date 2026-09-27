@@ -126,6 +126,14 @@ def cache_root(root=None):
     return root or os.path.expanduser(CACHE_DIR)
 
 
+def env_root():
+    """The root a CLI passes down: `BURNDOWN_CACHE_DIR`, `~` expanded, or
+    None for the default. Every burndown CLI resolves the environment here
+    once and hands the result to in-process calls as `root`."""
+    override = os.environ.get("BURNDOWN_CACHE_DIR")
+    return os.path.expanduser(override) if override else None
+
+
 def path(run_id, root=None):
     return os.path.join(cache_root(root), f"{checked_run_id(run_id)}.json")
 
@@ -500,7 +508,7 @@ def stated_outcome(rest):
             word = re.match(r"\s*[*_`]*" + _OUTCOME_WORD + r"\b", rest[i + 1:],
                             re.IGNORECASE)
             return word and normal_outcome(word.group(1))
-    return None
+    return os.path.expanduser(override) if override else None
 
 
 def normal_outcome(word):
@@ -935,9 +943,8 @@ def main(argv):
 
     args = parser.parse_args(argv[1:])
     # One seam per caller: in-process callers pass `root`, the CLI resolves the
-    # environment once here and passes it down (`cost.py` does the same).
-    override = os.environ.get("BURNDOWN_CACHE_DIR")
-    root = os.path.expanduser(override) if override else None
+    # environment once here and passes it down.
+    root = env_root()
     try:
         if args.command == "start":
             print(render(start(args.run_id, args.slots, args.controller, root)))
