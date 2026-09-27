@@ -56,19 +56,19 @@ Pick the idea that is easiest to explain with a minimum code example. For a mini
 
 It will be typical that you'll want to compare two approaches. But take a moment to think about the example, because that matters most to the story. Most of the time you don't want to use a toy example. They're not informative and they are overdone. It may be better to generate a creative example that shows where one approach can really shine. We don't want to cherry pick, but we also don't want to do examples that have been overdone either. 
 
-I cannot stress enough how important it is to actually think about the story and the example before you write any code whatsoever. You should really ultra think this. Give the user some interaction but really try to prevent scrolling. A good example tells a story, it doesn't just state some facts. 
+Settle the story and the example before you write any code: they matter more than the implementation. Give the user some interaction but keep scrolling to a minimum. A good example tells a story, it doesn't just state some facts. 
 
-Feel free to think about this decision, but once you've got it clear what idea is best to showcase, immediately proceed to build the marimo notebook. 
+Once it is clear which idea is best to showcase, build the marimo notebook. 
 
-Use the marimo-notebook skill for this, and possibly the anywidget skill, but only if a custom widget makes for a better story. If you strongly feel that it makes sense to use a custom anywidget, refer to [references/ANYWIDGET.md](references/ANYWIDGET.md).
+Use the marimo-notebook skill for this, and the anywidget-generator skill only if a custom widget makes for a better story; its essentials are in [references/ANYWIDGET.md](references/ANYWIDGET.md).
 
 When you are ready, make sure that you hide all the code and that you move the cells with inputs/outputs to the top of the file. 
 
 Example: 
 
 ```
-@app.cell
-def _(hide_code=True):
+@app.cell(hide_code=True)
+def _():
     import marimo as mo
     return mo
 ```

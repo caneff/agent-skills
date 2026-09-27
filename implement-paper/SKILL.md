@@ -22,15 +22,13 @@ Only move on once you have a clear picture of what to build.
 
 ## Step 2: Fetch the paper
 
-If the user gives you an Arxiv/AlphaXiv link, you will an efficient way to read the paper. 
-
 See [references/fetching-papers.md](references/fetching-papers.md) for how to retrieve paper content via alphaxiv.org. This avoids reading raw PDFs and gives you structured markdown.
 
 ## Step 3: Plan the notebook
 
 After reading the paper, outline the notebook structure for the user before writing code.
 
-**Keep the notebook as small as possible.** Sometimes the idea is best conveyed with just a single interactive widget — if you need a custom one, consider the `anywidget` skill. Other times you need a full training loop — if so, consider using the `marimo-batch` skill for heavy computation. The goal is the minimum amount of code needed to get the idea across.
+**Keep the notebook as small as possible.** Sometimes the idea is best conveyed with just a single interactive widget — if you need a custom one, consider the `anywidget-generator` skill. Other times you need a full training loop — if so, consider using the `marimo-batch` skill for heavy computation. The goal is the minimum amount of code needed to get the idea across.
 
 A typical arc:
 

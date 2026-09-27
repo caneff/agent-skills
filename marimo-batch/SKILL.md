@@ -33,8 +33,8 @@ But you can also use the CLI from marimo.
 
 ```python
 if mo.app_meta().mode == "script":
-    if "help" in mo.cli_args() or len(cli_args) == 0:
-        print("Usage: uv run git_archaeology.py --repo <url> [--samples <n>]")
+    if "help" in mo.cli_args() or len(mo.cli_args()) == 0:
+        print("Usage: uv run notebook.py [--sample-size <n>] [--learning-rate <x>]")
         print()
         for name, field in ModelParams.model_fields.items():
             default = f" (default: {field.default})" if field.default is not None else " (required)"
@@ -61,7 +61,7 @@ The user wants to be able to run a notebook using this pattern, so make sure you
 
 It is possible that the user is interested in adding support for weights and biases. Make sure you confirm if this is the case yes/no. If that is the case, make sure these ModelParams are logged. You also want to make sure that the `wandb_project` and `wandb_run_name` are part of the ModelParams is the user wants to go down this route. 
 
-If the user is keen to start a training job for ML, make sure you use [this starting point](references/starting-point.py). Make sure you keep the columns intact in this notebook! 
+If the user is keen to start a training job for ML, use [this starting point](references/starting-point.py); it uses columns (see Columns below).
 
 ## Environment Variables
 
@@ -88,7 +88,7 @@ Make sure you add this `EnvConfig` at the top of the notebook.
 
 ## Columns 
 
-It can be common for larger marimo notebooks to use the columns feature to make it easy to navigate. If that is the case, you must keep these columns intact! 
+Larger marimo notebooks often use columns so the user can navigate them. When a notebook does, keep each cell's `column=` argument as it is: the layout is the user's navigation.
 
 ```python
 @app.cell(column=0, hide_code=True)

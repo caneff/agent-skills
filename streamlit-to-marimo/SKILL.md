@@ -52,7 +52,7 @@ For general marimo notebook conventions (cell structure, PEP 723 metadata, outpu
 |-----------|--------|-------|
 | `st.write()` | `mo.md()` or last expression | |
 | `st.markdown()` | `mo.md()` | Supports f-strings: `mo.md(f"Value: {x.value}")` |
-| `st.latex()` | `mo.md(r"$...$")` | marimo uses KaTeX; see `references/latex.md` |
+| `st.latex()` | `mo.md(r"$...$")` | marimo uses KaTeX; see `../jupyter-to-marimo/references/latex.md` |
 | `st.code()` | `mo.md("```python\n...\n```")` | |
 | `st.dataframe()` | `df` (last expression) | DataFrames render as interactive marimo widgets natively; use `mo.ui.dataframe(df)` only for no-code transformations |
 | `st.table()` | `df` (last expression) | Use `mo.ui.table(df)` if you need row selection |
