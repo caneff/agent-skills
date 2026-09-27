@@ -15,11 +15,11 @@ The issue tracker and triage label vocabulary should have been provided to you �
 
 Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments.
 
-Check whether the source issue already has sub-issues before slicing it: `gh issue view <n> --repo <owner>/<repo> --json subIssues`. Its exit status and its output split into three outcomes, never two:
+Check whether the source issue already has sub-issues before slicing it: run `gh issue view <n> --repo <owner>/<repo> --json subIssues` bare — piping it through another command (`| jq`, `| grep`) substitutes that command's exit status for `gh`'s own, which reopens the failure this guard exists to close. Its exit status and its output split into three outcomes, never two:
 
-- **Exit 0, `subIssues.nodes` non-empty**: already sliced — stop and list the children instead of slicing again.
-- **Exit 0, `subIssues.nodes` empty**: confirmed no children — proceed to slice.
-- **Non-zero exit** (missing `gh`, no network, an auth failure, any other lookup error): the lookup failed, not "no children" — stop, report the error, and publish nothing. Never fall through to slicing on a failed lookup; a failure read as an empty answer is how a duplicate ticket set gets published under the same parent with nothing erroring to flag it.
+- **Exit 0, `subIssues.nodes` a non-empty array**: already sliced — stop and list the children instead of slicing again.
+- **Exit 0, `subIssues.nodes` present and an empty array**: confirmed no children — proceed to slice.
+- **Non-zero exit, or exit 0 with `subIssues.nodes` missing or not an array** (missing `gh`, no network, an auth failure, an unexpected output shape, any other lookup error): the lookup failed, not "no children" — stop, report the error, and publish nothing. Never fall through to slicing on a failed lookup; a failure read as an empty answer is how a duplicate ticket set gets published under the same parent with nothing erroring to flag it.
 
 ### 2. Explore the codebase (optional)
 
