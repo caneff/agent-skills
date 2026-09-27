@@ -108,6 +108,21 @@ mod tests {
         }
     }
 
+    /// The prose whitelist is written twice, here and in `burndown/tier.py`,
+    /// and a file one reader calls prose and the other calls code dispatches
+    /// at a tier the other never agreed to. Read tier.py's literal and compare.
+    #[test]
+    fn the_prose_whitelist_matches_tier_py() {
+        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../burndown/tier.py")).unwrap();
+        let line = src.lines().find(|l| l.starts_with("PROSE_EXTENSIONS = {")).expect("tier.py defines PROSE_EXTENSIONS on one line");
+        let mut theirs: Vec<&str> = line.split('"').skip(1).step_by(2).collect();
+        let mut ours = PROSE_EXTENSIONS.to_vec();
+        theirs.sort_unstable();
+        ours.sort_unstable();
+        assert!(!theirs.is_empty(), "no extensions parsed from: {line}");
+        assert_eq!(ours, theirs, "targets.rs PROSE_EXTENSIONS and burndown/tier.py's disagree");
+    }
+
     #[test]
     fn a_backslash_path_reads_like_a_slash_path() {
         // `tier.py` normalises `\` to `/` before it classifies; so does this.
