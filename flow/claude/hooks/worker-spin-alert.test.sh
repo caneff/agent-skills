@@ -201,4 +201,23 @@ else
   echo "FAIL: incomplete lib — rc $rc, log: $(cat "$tmp/home/.claude/worker-spin-alerts.log" 2>/dev/null)"; fails=1
 fi
 
+# The installed layout is a symlink in ~/.claude/hooks/ pointing at this
+# directory. The lib is found beside the symlink's target, not beside the
+# symlink: worker-stop-alert.sh got this fix under #1148; this hook shares
+# the same lib-resolution bug and needs the same one-line change (#1031).
+rm -f "$tmp/prompts" "$tmp/home/.claude/worker-spin-alerts.log"
+printf '{"result":{"agents":[{"pane_id":"w9:p1","agent_session":{"value":"ctl-session"}}]}}\n' > "$tmp/agents.linked"
+mv "$tmp/bin/herdr" "$tmp/bin/herdr.orig"
+sed "s|echo '{\"result\":{\"agents\":\[.*\]}}'|cat $tmp/agents.linked|" "$tmp/bin/herdr.orig" > "$tmp/bin/herdr"
+chmod +x "$tmp/bin/herdr"
+linked="$tmp/linked"; mkdir -p "$linked"; ln -s "$hook" "$linked/$(basename "$hook")"
+rc=$(printf '{"session_id":"s13","transcript_path":"%s"}' "$fx/real-spin.jsonl" \
+     | HOME="$tmp/home" PATH="$tmp/bin:$PATH" bash "$linked/$(basename "$hook")" >/dev/null 2>&1; echo $?)
+mv "$tmp/bin/herdr.orig" "$tmp/bin/herdr"
+if [ "$rc" = 0 ] && [ "$(grep -c 'worker-spin-alert' "$tmp/prompts" 2>/dev/null)" = 1 ]; then
+  echo "PASS: a hook symlinked alone into another directory finds its lib beside the target and alerts"
+else
+  echo "FAIL: symlinked hook — rc $rc, prompts: $(cat "$tmp/prompts" 2>/dev/null), log: $(cat "$tmp/home/.claude/worker-spin-alerts.log" 2>/dev/null)"; fails=1
+fi
+
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

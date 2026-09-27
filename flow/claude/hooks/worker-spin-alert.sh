@@ -79,7 +79,11 @@ if [ "${1:-}" = "--classify" ]; then
   classify "$2"; exit 0
 fi
 
-hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Through the symlink: install.sh links this hook into ~/.claude/hooks/, and a
+# lib looked for beside the link goes missing whenever install.sh has not
+# been re-run since the lib was added (#1148: worker-stop-alert.sh got this
+# fix; this hook shares the bug).
+hook_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 log="$HOME/.claude/worker-spin-alerts.log"
 lib_missing() { # <what's wrong> -> logs and exits 0, no lib functions required
   mkdir -p "$(dirname "$log")"
