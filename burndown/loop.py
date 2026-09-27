@@ -953,16 +953,29 @@ def with_run_jobs(in_flight, run_id, root=None):
     the clump's lowest ticket. `closure.py --json` carries no `job`, so the
     record `runfile.py job` wrote is the only source; a clump the run file
     holds no record for is refused here by name, `runfile.py clump` being the
-    fix; a registered clump with no `job` gets `None`, which `job_cores`
+    fix — unless its tickets overlap a clump registered under another key,
+    which `runfile.py clump` would refuse, so that refusal names the overlap
+    instead; a registered clump with no `job` gets `None`, which `job_cores`
     refuses naming `runfile.py job`."""
     try:
         run = runfile.load(run_id, root)
     except runfile.RunFileError as exc:
         raise LoopError(str(exc)) from exc
     jobs = {min(entry["tickets"]): entry["job"] for entry in run["clumps"]}
+    owner = {n: min(entry["tickets"]) for entry in run["clumps"]
+             for n in entry["tickets"]}
     with_jobs = []
     for clump in in_flight:
         key = key_of(clump)
+        shared = sorted({owner[n] for n in clump["tickets"] if n in owner})
+        if key not in jobs and shared:
+            # `runfile.py clump` would refuse these tickets as already held.
+            raise LoopError(
+                f"#{key} is live but overlaps registered clump(s) "
+                + ", ".join(f"#{k}" for k in shared) +
+                f" in run {run_id} under another key — the in-flight list "
+                "and the run file disagree on this clump's tickets; fix the "
+                "stale one before dispatching")
         if key not in jobs:
             raise LoopError(
                 f"#{key} is live but not registered in run "

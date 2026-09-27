@@ -1988,6 +1988,26 @@ def test_dispatch_names_runfile_clump_for_an_unregistered_clump_1126():
         assert "not registered" not in got.stderr, got.stderr
 
 
+def test_dispatch_names_the_overlap_when_an_unregistered_key_shares_tickets():
+    # In-flight [300, 351] against a registered [351]: `runfile.py clump
+    # --tickets 300,351` refuses on "already in clump #351", so the refusal
+    # names the overlap instead of prescribing it (#1173 C1).
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live, env = run_file_dispatch(tmp, ("none",))
+        with open(live) as fh:
+            clumps = json.load(fh)
+        clumps[0]["tickets"] = [300, 351]
+        with open(live, "w") as fh:
+            json.dump(clumps, fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "1", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 1, got
+        assert "#300" in got.stderr and "#351" in got.stderr, got.stderr
+        assert "overlaps" in got.stderr, got.stderr
+        assert "runfile.py clump" not in got.stderr, got.stderr
+
+
 def test_dispatch_refuses_when_only_the_in_flight_file_carries_the_job_1107():
     # The refusal must come from the run file's silence: an in-flight `job`
     # that would charge cleanly is ignored once --run is given (review C1).
