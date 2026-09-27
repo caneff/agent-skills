@@ -1209,13 +1209,21 @@ impl Cleanup {
         // A denied or failed delete (branch protection, a race) used to be
         // discarded here (#842 Codex pass), so it neither failed the run
         // nor said the remote branch was still there.
-        if quiet_ok("git", &["-C", path, "ls-remote", "--exit-code", "--heads", "origin", b]) {
-            if !self.step(&format!("deleting remote branch {b}"), "git", &["-C", path, "push", "origin", "--delete", b]) {
-                self.remote_delete_failed = true;
-                eprintln!("merge-cleanup: could not delete remote branch {b}; re-run: git -C {path} push origin --delete {b}");
+        match remote_branch(path, b) {
+            RemoteBranch::Present => {
+                if !self.step(&format!("deleting remote branch {b}"), "git", &["-C", path, "push", "origin", "--delete", b]) {
+                    self.remote_delete_failed = true;
+                    eprintln!("merge-cleanup: could not delete remote branch {b}; re-run: git -C {path} push origin --delete {b}");
+                }
             }
-        } else {
-            skip("the remote branch delete", &format!("origin has no {b}"));
+            RemoteBranch::Absent => skip("the remote branch delete", &format!("origin has no {b}")),
+            // #845: a lookup that never answered is not "origin has no
+            // branch" — read as one, the run exited 0 with the branch still
+            // on origin. Same partial failure as a denied delete.
+            RemoteBranch::Unknown => {
+                self.remote_delete_failed = true;
+                eprintln!("merge-cleanup: could not look up remote branch {b} on origin; re-run: git -C {path} push origin --delete {b}");
+            }
         }
 
         // Step 6 — fast-forward the primary checkout, so the next branch
@@ -1517,6 +1525,32 @@ fn partly_done(verb: &str, remote_failed: bool, claim_failed: bool) -> String {
         (true, false) => format!("{verb}, remote branch not deleted"),
         (false, true) => format!("{verb}, claim not cleared"),
         (false, false) => unreachable!(),
+    }
+}
+
+/// What `git ls-remote --exit-code --heads origin <b>` said.
+enum RemoteBranch {
+    Present,
+    /// Exit 2: the lookup answered, and origin has no such ref.
+    Absent,
+    /// Any other failure — auth, an unreachable origin, a git that did not
+    /// run: the lookup never answered.
+    Unknown,
+}
+
+fn remote_branch(path: &str, b: &str) -> RemoteBranch {
+    let code = std::process::Command::new("git")
+        .args(["-C", path, "ls-remote", "--exit-code", "--heads", "origin", b])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()
+        .and_then(|s| s.code());
+    match code {
+        Some(0) => RemoteBranch::Present,
+        Some(2) => RemoteBranch::Absent,
+        _ => RemoteBranch::Unknown,
     }
 }
 

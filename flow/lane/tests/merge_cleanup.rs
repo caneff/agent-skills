@@ -382,6 +382,47 @@ fn a_denied_remote_delete_changes_the_claim_clear_failure_wording() {
     assert!(!run.stderr.contains("git cleanup completed, but could not clear #53"), "{}", run.text());
 }
 
+/// A `git` whose `ls-remote` exits `code` and prints nothing; every other
+/// subcommand is the real git.
+fn git_with_ls_remote_exit(code: u8) -> String {
+    format!(
+        "#!/bin/bash\nfor a in \"$@\"; do [ \"$a\" = ls-remote ] && exit {code}; done\nexec \"{real}\" \"$@\"\n",
+        real = which("git").display()
+    )
+}
+
+#[test]
+fn a_failed_remote_branch_lookup_is_a_partial_failure_not_branch_absent() {
+    // #845: `ls-remote --exit-code` exits 2 for "no such ref" and 128 for a
+    // lookup that never answered (auth, unreachable origin). Read as a bool,
+    // both said "origin has no branch", and the run exited 0 with the branch
+    // still on origin.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r16");
+    let origin = c.root().join("r16.origin.git");
+    replace_git_with(&c, "noherdr", git_with_ls_remote_exit(128));
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok, "a failed lookup must fail the run: {}", run.text());
+    assert!(c.has_branch(&origin, "caneff/merged-one"), "nothing should have deleted the remote branch");
+    assert!(
+        run.stderr.contains("could not look up remote branch caneff/merged-one on origin; re-run: git")
+            && run.stderr.contains("push origin --delete caneff/merged-one"),
+        "{}",
+        run.text()
+    );
+    assert!(!run.has("origin has no caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn a_remote_branch_lookup_answering_no_such_ref_still_exits_zero() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r17");
+    replace_git_with(&c, "noherdr", git_with_ls_remote_exit(2));
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has("skipped the remote branch delete (origin has no caneff/merged-one)"), "{}", run.text());
+}
+
 #[test]
 fn a_sweep_row_for_a_denied_remote_delete_says_so_distinctly_and_still_fails_the_run() {
     let c = Cleanup::new();
