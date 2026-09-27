@@ -17,8 +17,7 @@
   `implement-*` branch — `--lease` refuses if anyone else pushed, and the
   branch is disposable by design. Any force-push to `main`, any `--force`
   without a lease, and any rebase or reset I did not already sanction: still
-  ask. (2026-09-19: a worker sat parked for hours mid-rebase because the lane
-  mandated the rebase and every way to finish it was gated.)
+  ask.
 - **Gate 1 — whose repo?** Mine (origin owner = my gh login) → agents land
   directly. Anyone else's → push the branch, stop before the PR, hand me the
   PR command.
@@ -41,9 +40,8 @@
   Never pass `-c user.email` / `-c user.name`, and never set them to my real
   address: the repo is already configured. The harness states my email so you
   can tell which issues, PRs and commits are mine — that is identification,
-  not a git identity. (2026-09-20: three workers in one day committed as
-  `caneff@gmail.com` inferred from that line; GitHub's email-privacy block
-  rejected all three pushes and each needed a gated history rewrite to undo.)
+  not a git identity. GitHub's email-privacy block rejects a push committed as
+  that address, and undoing it takes a gated history rewrite.
   Enforced at `git commit` and again at `git push` — the second catch is what
   covers a rebase or cherry-pick, which replays a commit without ever calling
   `git commit` — in any repo `implement-dispatch` has run in; mechanism and
@@ -90,9 +88,7 @@ Before reporting a commit sha, `git status --porcelain` is empty.
 A command handed over that deletes, sweeps, or rewrites has had its scope
 read (`--help`, or `--dry-run` when one exists) in this session, and the
 reply names exactly what it will remove. Never infer a flag's blast radius
-from a one-line mention in a doc. (`merge-cleanup --sweep`, 2026-09-13:
-described as two worktrees, walked every repo and deleted 87 unlanded
-commits.)
+from a one-line mention in a doc.
 
 # Communication
 
