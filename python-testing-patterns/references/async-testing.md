@@ -112,18 +112,6 @@ async def test_with_async_mock(mocker):
     mock_fetch.assert_awaited_once_with("url")
 ```
 
-## Event Loop Management
-
-**Custom event loop:**
-```python
-@pytest.fixture
-def event_loop():
-    """Create custom event loop."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-```
-
 ## Testing Async Context Managers
 
 ```python

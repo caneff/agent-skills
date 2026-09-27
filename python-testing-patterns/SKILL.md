@@ -28,6 +28,7 @@ Prefer:
 - small local builders for domain objects
 - parametrization for the same behavior matrix
 - exact text checks only where the formatter or composer owns wording
+- expected-value-driving data local to the test; shared fixtures for mechanics, builders, and cleanup, not hidden business examples
 
 Delete or rewrite:
 
@@ -36,27 +37,12 @@ Delete or rewrite:
 - tests whose name says one behavior but assertions check unrelated fields
 - tests that inspect private implementation unless no public behavior exposes the contract
 
-## Core Concepts
-
-**Test Discovery**: Files matching `test_*.py` or `*_test.py`, functions starting with `test_`
-
-**Fixtures**: Reusable test resources with setup and teardown
-- Scopes: `function` (default), `class`, `module`, `session`
-- Composition: Build complex fixtures from simple ones
-- Share via `conftest.py` for project-wide availability
-- Keep expected-value-driving data local to the test; use shared fixtures for mechanics, builders, and cleanup, not hidden business examples.
-
-**Assertions**: Use `assert` statements, `pytest.raises()` for exceptions
-
-**Organization**: Separate `unit/`, `integration/`, `e2e/` directories
-
 ## Quick Reference
 
 Load detailed references for specific topics:
 
 | Task | Reference File |
 |------|----------------|
-| Pytest basics, test structure, AAA pattern | `~/.agents/skills/python-testing-patterns/references/pytest-fundamentals.md` |
 | Fixtures, scopes, setup/teardown, conftest.py | `~/.agents/skills/python-testing-patterns/references/fixtures.md` |
 | Parametrization, multiple test cases | `~/.agents/skills/python-testing-patterns/references/parametrized-tests.md` |
 | Mocking, patching, unittest.mock, pytest-mock | `~/.agents/skills/python-testing-patterns/references/mocking.md` |
@@ -67,14 +53,3 @@ Load detailed references for specific topics:
 | Coverage measurement, reports, thresholds | `~/.agents/skills/python-testing-patterns/references/coverage.md` |
 | Database, API, Redis, message queue testing | `~/.agents/skills/python-testing-patterns/references/integration-testing.md` |
 | Best practices, test quality, fixture design | `~/.agents/skills/python-testing-patterns/references/best-practices.md` |
-
-## Resources
-
-- **pytest**: https://docs.pytest.org/
-- **unittest.mock**: https://docs.python.org/3/library/unittest.mock.html
-- **pytest-asyncio**: Testing async code
-- **pytest-cov**: Coverage reporting
-- **pytest-mock**: pytest wrapper for mock
-- **Hypothesis**: https://hypothesis.readthedocs.io/
-- **pytest-xdist**: Parallel test execution
-- **testcontainers**: Docker containers for testing
