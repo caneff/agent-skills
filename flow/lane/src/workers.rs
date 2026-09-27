@@ -103,8 +103,13 @@ pub fn append(home: &Path, pid: &str, record: &WorkerRecord) -> std::io::Result<
 /// a sidecar that does not exist.
 pub fn read(home: &Path, pid: &str) -> Vec<WorkerRecord> {
     let path = path_for(home, pid);
-    if std::fs::symlink_metadata(&path).is_err() {
-        return Vec::new();
+    match std::fs::symlink_metadata(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(e) => {
+            eprintln!("workers::read: could not stat {}, reading no workers: {e}", path.display());
+            return Vec::new();
+        }
+        Ok(_) => {}
     }
     let _guard = match open_lock(&path).and_then(|l| l.lock_shared().map(|()| l)) {
         Ok(l) => Some(l),
@@ -113,7 +118,13 @@ pub fn read(home: &Path, pid: &str) -> Vec<WorkerRecord> {
             None
         }
     };
-    let Ok(raw) = std::fs::read_to_string(&path) else { return Vec::new() };
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) => {
+            eprintln!("workers::read: could not read {}, reading no workers: {e}", path.display());
+            return Vec::new();
+        }
+    };
     non_empty_lines(&raw).into_iter().filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
 
