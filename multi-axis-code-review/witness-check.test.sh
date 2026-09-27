@@ -158,6 +158,20 @@ check_in "$correctness" 'class 1' 'the correctness axis brief'
 check_in "$correctness" 'class 3' 'the correctness axis brief'
 [ -f "$here/../docs/agents/defect-classes.md" ] ||
   { echo "FAIL: the axis briefs point at a docs/agents/defect-classes.md that does not exist" >&2; fail=1; }
+# #1023: the file exists only in agent-skills. A reviewer in a repo without it
+# must not hunt for it or report its absence as a finding — each brief names
+# it conditionally ('when present') and states the three shapes inline as the
+# fallback for a repo that lacks the file.
+for axis in standards spec correctness; do
+  eval "brief=\$$axis"
+  check_in "$brief" 'when present' "the $axis axis brief"
+done
+check_in "$standards" 'an absent or malformed answer read as a benign one' 'the standards axis brief'
+check_in "$standards" 'a stated fallback with no mechanism behind it' 'the standards axis brief'
+check_in "$spec" 'an absent or malformed answer read as a benign one' 'the spec axis brief'
+check_in "$spec" 'a stated fallback with no mechanism behind it' 'the spec axis brief'
+check_in "$correctness" 'when absent' 'the correctness axis brief'
+check_in "$correctness" 'class 2' 'the correctness axis brief'
 # The standing brief says the same, since an axis reads it whether or not the
 # caller's paste survived. A bare 'worktree' needle would pass on `git -C
 # <worktree>`, which that file already carried before this change.
