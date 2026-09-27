@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
-# backup-sync — copy-only backups that a repo symlink can't hold, because the
-# live file lives on the Windows side of WSL. Walks a manifest of repo<->live
+# backup-sync — copy-only backups for files a repo symlink can't hold (the
+# live file lives on the Windows side of WSL). Walks a manifest of repo<->live
 # pairs; one line per file.
 #
 #   backup-sync.sh            repo <- live   (refresh the snapshots)
 #   backup-sync.sh --commit   repo <- live, then commit any that changed (hook use)
 #   backup-sync.sh --restore  live <- repo   (write the snapshots onto this machine)
 #
-# --commit is scoped to the manifest paths, so it never sweeps an unrelated
-# working-tree edit into its commit. Never exits nonzero on a missing live file
-# (a SessionStart hook must not break the session).
+# --commit stages the manifest paths plus claude/settings.json (symlinked by
+# install.sh, #1031 — a harness write lands straight in it, so it still needs
+# committing even though nothing here copies it), and nothing else — it never
+# sweeps an unrelated working-tree edit into its commit. Never exits nonzero
+# on a missing live file (a SessionStart hook must not break the session).
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # repo-relative path  ->  live path (first glob match wins). Add a line per file.
-# Whole-file copies — keep secrets out of every listed file. claude/settings.json
-# is here (not symlinked by install.sh) because the harness rewrites it in place,
-# which breaks a symlink; machine-local secrets belong in settings.local.json,
-# which stays symlinked and is not copied here.
+# Whole-file copies — keep secrets out of every listed file. Machine-local
+# secrets belong in settings.local.json, which is symlinked (by install.sh)
+# and never copied here.
 declare -A COPIES=(
   ["vscode/settings.json"]="/mnt/c/Users/*/AppData/Roaming/Code/User/settings.json"
-  ["claude/settings.json"]="$HOME/.claude/settings.json"
   ["claude/output-styles/quill.md"]="$HOME/.claude/output-styles/quill.md"
 )
 
@@ -39,10 +39,16 @@ for rel in "${!COPIES[@]}"; do
 done
 
 if [ "$mode" = --commit ]; then
-  rels=("${!COPIES[@]}")
+  # claude/settings.json is symlinked (#1031), not copied: install.sh points
+  # ~/.claude/settings.json straight at this file, so a harness write (a
+  # plugin toggle, /config, "always allow") lands in it directly. Nothing
+  # copies it, but it still has to reach main automatically, so --commit
+  # stages it alongside the COPIES manifest even though only the manifest
+  # entries were just synced above.
+  rels=("${!COPIES[@]}" claude/settings.json)
   git -C "$here" add -- "${rels[@]}" 2>/dev/null || true
   if ! git -C "$here" diff --cached --quiet -- "${rels[@]}" 2>/dev/null; then
-    git -C "$here" commit -q -m "chore(flow): auto-backup copy-only settings" -- "${rels[@]}"
+    git -C "$here" commit -q -m "chore(flow): auto-backup live settings" -- "${rels[@]}"
     echo "committed backup snapshot"
     # A commit that never leaves the machine is not a backup, and it leaves main
     # ahead of origin, which is what makes the next push refuse to

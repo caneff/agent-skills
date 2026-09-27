@@ -25,9 +25,10 @@ link() { # link <repo-relative-src> <live-dest>
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link bin/job-run                "$HOME/.local/bin/job-run"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
-# claude/settings.json is NOT symlinked — the harness rewrites it in place and
-# would break the link. It is a copy-only backup (see backup-sync.sh), written
-# by the --restore call below.
+# Symlinked, not copy-only (#1031): a probed harness write rewrote the live
+# file through the link without breaking it (`claude plugin disable --scope
+# user`); backup-sync.sh --commit still backs it up, straight off this link.
+link claude/settings.json       "$HOME/.claude/settings.json"
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
 for h in block-dangerous-git.sh refresh-landed.sh require-agent-model.sh \
          wrap-background-jobs.sh worker-stop-alert.sh worker-spin-alert.sh \
@@ -57,7 +58,7 @@ if [ -L "$git_common_dir/hooks/pre-push" ]; then
 fi
 
 # Lay down the copy-only backups (files a symlink can't hold): the Windows VS
-# Code settings and claude/settings.json.
+# Code settings and the quill output-style copy.
 bash "$here/backup-sync.sh" --restore
 
 # herdr-toast-install links the toast scripts and registers the herdrfocus:
