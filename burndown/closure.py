@@ -100,9 +100,10 @@ def parse_declaration(text):
         return None
     fields = {}
     for line in section.splitlines():
-        key = key_line(line)
-        if key:
-            fields[key[0]] = key[1].strip("`")
+        pair = key_line(line)
+        if pair:
+            key, value = pair
+            fields[key] = value.strip("`")
     directive = fields.get("directive")
     if not directive:
         # A stated `None` is an answer: this repo generates nothing, so a
