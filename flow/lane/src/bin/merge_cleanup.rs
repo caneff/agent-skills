@@ -18,9 +18,19 @@ workspace down, delete the branch local and remote, fast-forward the primary
 checkout. This runs after the merge has already happened, and it refuses any
 branch the tracker does not report as merged unless --force.
 
-  merge-cleanup [--repo <path>] <branch|PR number|PR URL> [--force] [--discard] [--dry-run]
+  merge-cleanup [--repo <path>] <branch|PR number|PR URL> [--force] [--discard] [--dry-run] [--quiet]
   merge-cleanup --sweep [--root <dir>] [--yes] [--dry-run]
   merge-cleanup --reap [--repo <path>] [--yes] [--dry-run]
+
+--dry-run on this form first names what would block the workspace's
+removal, one "blocker: <category> <detail>" line per category — live-session,
+modified, untracked, ignored, scratch (ignored files under .scratch/) or
+unreadable — or "blockers: none". It prints them before the merged check, so
+a worker can run it at PR-up, while the branch is still unmerged.
+
+--quiet prints only the actions taken, refusals and errors: no skipped-step
+lines, no pruning or fast-forward lines, no git output on stdout, and no
+stale report.
 
 --sweep walks every git repo one level under <dir> (default ~/src), prints
 the merged local branches it would clean — each with what proved it merged,
@@ -83,7 +93,8 @@ refuses, idle (or done) this run closes its pane and the removal proceeds. A
 registry session with no matching herdr agent always refuses. Both guards
 read again immediately before the removal: a file or a live session that
 appeared after they passed refuses, and --discard never covers it. Other idle
-entries under .claude/worktrees are listed as "stale, not removed". The
+entries under .claude/worktrees are listed as "stale, not removed", bar a
+directory that is not a worktree but holds one. The
 herdr workspaces of removed worktrees close at exit, after everything else.
 "#;
 
@@ -92,8 +103,18 @@ fn die(msg: impl AsRef<str>) -> ExitCode {
     ExitCode::FAILURE
 }
 
+/// `--quiet` (#1032): set once in `main`, read by `skip`, which the
+/// free functions call as well as `Cleanup`.
+static QUIET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn quiet() -> bool {
+    QUIET.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn skip(what: &str, why: &str) {
-    safe_println!("skipped {what} ({why})");
+    if !quiet() {
+        safe_println!("skipped {what} ({why})");
+    }
 }
 
 #[derive(Default)]
@@ -108,6 +129,7 @@ struct Args {
     force: bool,
     discard: bool,
     yes: bool,
+    quiet: bool,
 }
 
 enum Parsed {
@@ -136,6 +158,7 @@ fn parse_args(argv: impl IntoIterator<Item = String>) -> Parsed {
             "--discard" => a.discard = true,
             "--yes" => a.yes = true,
             "--dry-run" => a.dry = true,
+            "--quiet" => a.quiet = true,
             "-h" | "--help" => return Parsed::Help,
             f if f.starts_with('-') => return Parsed::Err(format!("unknown flag: {f}")),
             _ => {
@@ -567,7 +590,55 @@ impl Cleanup {
             return true;
         }
         safe_println!("{what}");
-        status(program, args)
+        run_status(program, args)
+    }
+
+    /// `step` for bookkeeping nobody acts on — pruning, the fast-forward:
+    /// under `--quiet` it runs without a word.
+    fn chatter_step(&self, what: &str, program: &str, args: &[&str]) -> bool {
+        if quiet() && !self.dry {
+            return run_status(program, args);
+        }
+        self.step(what, program, args)
+    }
+
+    /// `--dry-run`'s blocker lines (#1032): everything that would stop
+    /// `b`'s workspace being removed, by category, through the same reads
+    /// the guards make. Printed ahead of the merged check, so a worker can
+    /// name them at PR-up while the branch is unmerged; `blockers: none`
+    /// when there are none, so a run that printed nothing is never read as
+    /// a clean one.
+    fn report_blockers(&self, path: &str, b: &str) {
+        let mut lines = Vec::new();
+        if let Some(wt) = linked_worktree_holding(path, b) {
+            match WorktreeFiles::read(&wt) {
+                None => lines.push("unreadable git status failed".to_string()),
+                Some(files) => {
+                    let (scratch, ignored): (Vec<String>, Vec<String>) =
+                        files.ignored.iter().cloned().partition(|f| f == ".scratch/" || f.starts_with(".scratch/"));
+                    // Modified and untracked are capped, as in the refusal;
+                    // ignored and scratch names never are (#838).
+                    for (kind, names, capped) in
+                        [("modified", files.modified, true), ("untracked", files.untracked, true), ("ignored", ignored, false), ("scratch", scratch, false)]
+                    {
+                        if !names.is_empty() {
+                            let shown = if capped { first_names(&names) } else { names.join(", ") };
+                            lines.push(format!("{kind} {} file(s): {shown}", names.len()));
+                        }
+                    }
+                }
+            }
+            let live = self.occupancy(&wt).live_items();
+            if !live.is_empty() {
+                lines.push(format!("live-session {}", live.join(", ")));
+            }
+        }
+        if lines.is_empty() {
+            safe_println!("blockers: none");
+        }
+        for l in lines {
+            safe_println!("blocker: {l}");
+        }
     }
 
     /// What is alive in `wt`, classified once for both the guard and the
@@ -745,7 +816,12 @@ impl Cleanup {
             if self.removal_targets.contains(&e) {
                 continue;
             }
-            let mark = if quiet_stdout("git", &["-C", &e, "rev-parse", "--show-toplevel"]).as_deref() != Some(e.as_str()) {
+            let mark = if !is_worktree_root(&e) {
+                // A directory that holds worktrees of its own is their
+                // parent, not a leftover (#1032).
+                if subdirs(&e).iter().any(|d| is_worktree_root(d)) {
+                    continue;
+                }
                 " (not a git worktree)"
             } else {
                 if quiet_stdout("git", &["-C", &e, "rev-list", "--count", &format!("{base}..HEAD")]).as_deref() != Some("0") {
@@ -764,6 +840,9 @@ impl Cleanup {
     }
 
     fn report_stale(&self, repos: &[String]) {
+        if quiet() {
+            return;
+        }
         let list: Vec<String> = repos.iter().flat_map(|r| self.stale_worktrees(r)).collect();
         if list.is_empty() {
             return;
@@ -806,7 +885,7 @@ impl Cleanup {
     /// anything, the same failure shape the old old_head/new_head check
     /// missed.
     fn fast_forward_and_rebuild(&self, primary: &str, default: &str) {
-        self.step(&format!("fast-forwarding {default} in {primary}"), "git", &["-C", primary, "pull", "--ff-only", "--quiet"]);
+        self.chatter_step(&format!("fast-forwarding {default} in {primary}"), "git", &["-C", primary, "pull", "--ff-only", "--quiet"]);
         // A dry run never pulls, so HEAD does not move; nothing past here can
         // fire without a real pull having happened first.
         if self.dry {
@@ -1158,12 +1237,13 @@ impl Cleanup {
             return false;
         }
         safe_println!("recorded the tip of {b} at {record} (git branch {b} {record} restores it)");
-        if quiet_stderr_ok("git", &["-C", path, "branch", "-d", b]) {
+        let deleted = if quiet() { quiet_ok("git", &["-C", path, "branch", "-d", b]) } else { quiet_stderr_ok("git", &["-C", path, "branch", "-d", b]) };
+        if deleted {
             safe_println!("deleted local branch {b}");
             return true;
         }
         safe_println!("deleting local branch {b} with -D (the squash merge left it unmerged)");
-        status("git", &["-C", path, "branch", "-D", b])
+        run_status("git", &["-C", path, "branch", "-D", b])
     }
 
     /// Steps 3-6 for one branch.
@@ -1242,7 +1322,7 @@ impl Cleanup {
                 self.removed_worktrees.push(wt);
             }
         }
-        self.step("pruning stale worktree entries", "git", &["-C", path, "worktree", "prune"]);
+        self.chatter_step("pruning stale worktree entries", "git", &["-C", path, "worktree", "prune"]);
 
         // Step 4 — the local branch. Git refuses to delete a branch a
         // checkout holds, so move the primary off it first.
@@ -1722,6 +1802,20 @@ fn worktree_holding(path: &str, b: &str) -> Result<Option<String>, ()> {
     Ok(None)
 }
 
+/// `dir` is the top of a git worktree.
+fn is_worktree_root(dir: &str) -> bool {
+    quiet_stdout("git", &["-C", dir, "rev-parse", "--show-toplevel"]).as_deref() == Some(dir)
+}
+
+/// `status`, but under `--quiet` the command's stdout is dropped: its
+/// stderr, where a failure is reported, still passes through.
+fn run_status(program: &str, args: &[&str]) -> bool {
+    if !quiet() {
+        return status(program, args);
+    }
+    std::process::Command::new(program).args(args).stdout(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
+}
+
 /// `"$dir"/*/`: the non-hidden directories in `dir`, sorted, as paths. A
 /// listing, not a glob, so a missing `dir` yields nothing rather than the
 /// unexpanded pattern (#735).
@@ -1746,6 +1840,7 @@ fn main() -> ExitCode {
         Parsed::Err(e) => return die(e),
         Parsed::Args(a) => a,
     };
+    QUIET.store(a.quiet, std::sync::atomic::Ordering::Relaxed);
     let mut c = Cleanup {
         dry: a.dry,
         force: a.force,
@@ -1820,10 +1915,15 @@ fn main() -> ExitCode {
         if branch.is_empty() {
             return die(format!("PR #{pr} has no head branch"));
         }
-        safe_println!("PR #{pr} is {branch}");
+        if !quiet() {
+            safe_println!("PR #{pr} is {branch}");
+        }
     }
     if branch.is_empty() {
         return die("name a branch, a PR number or URL, or pass --sweep");
+    }
+    if a.dry {
+        c.report_blockers(&repo, &branch);
     }
     let ok = c.cleanup_branch(&repo, &branch);
     if ok {

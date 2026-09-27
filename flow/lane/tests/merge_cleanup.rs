@@ -728,7 +728,7 @@ fn help_prints_the_header_and_exits_zero() {
     assert!(run.stdout.starts_with("The tail the controller runs after squash-merging a worker's PR"), "{}", run.stdout);
     assert!(run.stdout.contains("  merge-cleanup --sweep [--root <dir>] [--yes] [--dry-run]\n"), "{}", run.stdout);
     assert!(run.stdout.contains("`git branch <branch> refs/deleted/<branch>@<short sha>` restores."), "{}", run.stdout);
-    assert!(run.stdout.contains("  merge-cleanup [--repo <path>] <branch|PR number|PR URL> [--force] [--discard] [--dry-run]\n"), "{}", run.stdout);
+    assert!(run.stdout.contains("  merge-cleanup [--repo <path>] <branch|PR number|PR URL> [--force] [--discard] [--dry-run] [--quiet]\n"), "{}", run.stdout);
     assert!(run.stdout.contains("--discard removes it anyway"), "{}", run.stdout);
     assert!(run.stdout.contains("Ignored files include .scratch/"), "{}", run.stdout);
     assert!(run.stdout.contains("printed as cache file(s), distinct\nfrom the ignored file(s) count above"), "{}", run.stdout);
@@ -1038,6 +1038,100 @@ fn the_worktree_under_cleanup_is_not_a_stale_sibling() {
     let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/ff-merged", "--dry-run"], &[]);
     assert!(run.ok, "{}", run.text());
     assert_eq!(run.stale(), vec![wts.join("agent-old").display().to_string()], "{}", run.text());
+}
+
+// --- #1032: the dry run names its blockers; --quiet; nested-worktree parents -
+
+/// The `blocker:` and `blockers:` lines of a run's stdout.
+fn blocker_lines(run: &support::cleanup::Run) -> Vec<String> {
+    run.stdout.lines().filter(|l| l.starts_with("blocker: ") || l.starts_with("blockers: ")).map(str::to_string).collect()
+}
+
+#[test]
+fn a_dry_run_names_an_ignored_non_cache_file_as_a_blocker_and_changes_nothing() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r40", "implement-1032a");
+    std::fs::write(r.join(".git/info/exclude"), "build/\n.scratch/\n").unwrap();
+    std::fs::create_dir_all(wt.join("build")).unwrap();
+    std::fs::write(wt.join("build/fast.so"), "artifact\n").unwrap();
+    std::fs::create_dir_all(wt.join(".scratch")).unwrap();
+    std::fs::write(wt.join(".scratch/evidence.log"), "kept\n").unwrap();
+    let origin = c.root().join("r40.origin.git");
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert_eq!(
+        blocker_lines(&run),
+        vec!["blocker: ignored 1 file(s): build/fast.so".to_string(), "blocker: scratch 1 file(s): .scratch/evidence.log".to_string()],
+        "{}",
+        run.text()
+    );
+    assert!(wt.join("build/fast.so").is_file() && wt.join(".scratch/evidence.log").is_file(), "{}", run.text());
+    assert!(c.has_branch(&r, "caneff/merged-one") && c.has_branch(&origin, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn a_dry_run_names_a_live_session_as_a_blocker_and_changes_nothing() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r41", "implement-1032b");
+    c.session("live", &format!(r#"{{"pid":{},"cwd":"{}","procStart":"{}"}}"#, me(), wt.display(), me_start()));
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert_eq!(blocker_lines(&run), vec![format!("blocker: live-session pid {}", me())], "{}", run.text());
+    assert!(wt.is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn a_dry_run_on_a_branch_not_yet_merged_still_names_its_blockers() {
+    // The PR-up case: the worker runs the dry run before the merge, so the
+    // blockers print ahead of the merged check that refuses the rest.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r42");
+    let wt = r.join(".claude/worktrees/implement-1032c");
+    c.worktree_add(&r, &[s(&wt), "caneff/open-one"]);
+    std::fs::write(wt.join("notes"), "unsaved\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/open-one", "--dry-run"], &[]);
+    assert_eq!(blocker_lines(&run), vec!["blocker: untracked 1 file(s): notes".to_string()], "{}", run.text());
+    assert!(run.has("caneff/open-one is not merged"), "{}", run.text());
+}
+
+#[test]
+fn a_dry_run_with_nothing_blocking_says_so() {
+    let c = Cleanup::new();
+    let (r, _wt) = lane_workspace(&c, "r43", "implement-1032d");
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert_eq!(blocker_lines(&run), vec!["blockers: none".to_string()], "{}", run.text());
+}
+
+#[test]
+fn quiet_prints_only_the_action_lines() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r44", "implement-1032e");
+    let wts = r.join(".claude/worktrees");
+    c.worktree_add(&r, &["--detach", s(&wts.join("agent-old")), "origin/main"]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--quiet"], &[]);
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    let lines: Vec<&str> = run.stdout.lines().collect();
+    let actions = [
+        "removing the linked worktree at ",
+        "recorded the tip of caneff/merged-one at ",
+        "deleted local branch caneff/merged-one",
+        "deleting remote branch caneff/merged-one",
+    ];
+    assert_eq!(lines.len(), actions.len(), "{}", run.text());
+    for (line, action) in lines.iter().zip(actions) {
+        assert!(line.starts_with(action), "{line:?} is not {action:?}: {}", run.text());
+    }
+}
+
+#[test]
+fn a_directory_holding_only_nested_worktrees_is_not_stale() {
+    let c = Cleanup::new();
+    let (r, _wt) = lane_workspace(&c, "r45", "implement-1032f");
+    let parent = r.join(".claude/worktrees/other-repo");
+    c.worktree_add(&r, &["--detach", s(&parent.join("implement-9")), "origin/main"]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!run.stale().iter().any(|l| l.contains("other-repo")), "{}", run.text());
+    assert!(parent.join("implement-9").is_dir(), "{}", run.text());
 }
 
 // --- 11. an idle herdr agent's pane is closed; working or blocked refuses ----
