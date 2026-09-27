@@ -24,6 +24,7 @@ import json
 import os
 import posixpath
 import re
+import subprocess
 import sys
 
 # The fence rule is #890's, bug-for-bug: a declaration inside ``` or ~~~ is
@@ -163,9 +164,9 @@ def canonical(root, path):
 
 
 def repo_files(root):
-    """Every file under `root` as a repo-relative posix path, minus the
-    directories in `SKIP_DIRS`. Text is not filtered here — `read_text` drops
-    what does not read as text, since that needs the bytes.
+    """Tracked and untracked non-ignored files under `root`, minus
+    `SKIP_DIRS`, as repo-relative posix paths. Text is not filtered here —
+    `read_text` drops what does not read as text, since that needs the bytes.
 
     A directory that cannot be read raises rather than vanishing: a dropped
     directory is a dropped includer, and a closure short of one file clumps
@@ -173,13 +174,41 @@ def repo_files(root):
     def refuse(error):
         raise ClosureError(f"cannot read {getattr(error, 'filename', root)}: {error}")
 
+    # A caller's Git environment must not redirect this scan to its repo.
+    env = {k: v for k, v in os.environ.items() if k not in {
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"}}
+    try:
+        listed = subprocess.run(
+            ["git", "-C", root, "ls-files", "--cached", "--others",
+             "--exclude-standard", "-z",
+             *(f"--exclude={d}/" for d in sorted(SKIP_DIRS))],
+            capture_output=True, env=env)
+    except OSError as exc:
+        refuse(exc)
+    # Git can exit zero after warning that it could not open a directory.
+    if listed.returncode or listed.stderr:
+        raise ClosureError(f"cannot read {root}: git ls-files: "
+                           f"{os.fsdecode(listed.stderr).strip()}")
+    files = {os.fsdecode(p) for p in listed.stdout.split(b"\0") if p}
+    directories = set()
+    for path in files:
+        parent = posixpath.dirname(path)
+        while parent:
+            directories.add(parent)
+            parent = posixpath.dirname(parent)
+
     out = []
     for dirpath, dirnames, filenames in os.walk(root, onerror=refuse):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        dirnames[:] = sorted(
+            d for d in dirnames if d not in SKIP_DIRS
+            and os.path.relpath(os.path.join(dirpath, d), root).replace(
+                os.sep, "/") in directories)
         for name in sorted(filenames):
             full = os.path.join(dirpath, name)
             rel = os.path.relpath(full, root).replace(os.sep, "/")
-            out.append(rel)
+            if rel in files:
+                out.append(rel)
     return out
 
 
