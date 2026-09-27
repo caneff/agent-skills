@@ -281,10 +281,13 @@ def main(argv):
 
     if args.command == "blocked-by":
         body = with_blocked_by(sys.stdin.read())
-        if not body:
+        # Nothing but the appended declaration means the input held no
+        # content either: empty, or only a Blocked-by the filter drops.
+        if not body or body.startswith("## Blocked by\n"):
             # Only the update path pipes through here, and `gh issue edit
             # --body-file` with an empty file blanks the sweep ticket.
-            print("sweep.py: the body on stdin is empty — refusing, since "
+            print("sweep.py: the body on stdin is empty, or only a Blocked "
+                  "by declaration — refusing, since "
                   "an empty update would blank the sweep ticket",
                   file=sys.stderr)
             return 1

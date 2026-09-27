@@ -459,6 +459,13 @@ def test_cli_blocked_by_refuses_an_empty_body():
     assert got.returncode == 1, got
     assert got.stdout == "", got
     assert "empty" in got.stderr, got
+    # A body that is only a declaration strips to nothing too, and the
+    # update would replace the leftovers with a lone section (review C3).
+    for only in ("## Blocked by\n\n- #3\n", "Blocked by: #3\n"):
+        got = subprocess.run([sys.executable, SWEEP, "blocked-by"],
+                             input=only, capture_output=True, text=True)
+        assert got.returncode == 1, (only, got)
+        assert got.stdout == "", (only, got)
 
 
 def main():
