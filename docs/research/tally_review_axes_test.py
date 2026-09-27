@@ -558,20 +558,11 @@ def test_tally_sidecars_warns_on_an_orphan_disposition():
         assert "orphan" in err
 
 
-def test_parses_an_over_engineering_cut_with_an_oe_id():
-    # #1021: an over-engineering cut is a standards finding like any
-    # other, in its own OE1/OE2/... series rather than S1/S2/...
-    f = t.parse_finding_line(json.dumps({
-        "id": "OE1", "axis": "standards", "severity": "hard",
-        "file": "foo.py", "title": "yagni: single-caller abstraction",
-    }))
-    assert f == t.Finding(id="OE1", axis="standards", severity="hard",
-                          file="foo.py", title="yagni: single-caller abstraction")
-
-
 def test_tally_sidecars_counts_an_over_engineering_cut_as_a_standards_finding():
     # #1021: an OE-id finding and its leftover disposition tally exactly
     # like an S-id one — nothing about the join keys on the id's prefix.
+    # (This is also the parse_finding_line witness for an OE id: the tally
+    # only reaches "raised": 1 if the line parses.)
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "skills").mkdir()
