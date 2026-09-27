@@ -5,7 +5,7 @@ memory:
 
     python3 burndown/loop.py seat
     python3 burndown/loop.py box [--processes <n>] --committed-gb <g> [--add-gb <g>]
-    python3 burndown/loop.py sweep --workers <clumps.json>
+    python3 burndown/loop.py sweep --run <run-id> | --workers <clumps.json>
 
 The judgment steps stay in the skill. What lives here is what a run got wrong
 by hand: which clumps are dispatchable once the live workspaces are excluded,
