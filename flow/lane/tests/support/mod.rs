@@ -17,6 +17,19 @@ fn fake_path() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_lane-fake"))
 }
 
+/// The real `git` binary's absolute path, resolved from the test harness's
+/// own (unmodified) `PATH` once per fixture (#849): `Fixture::path_env`
+/// prepends the fake dir ahead of it, so the `git` role in `lane-fake`
+/// cannot resolve "git" by name again without re-entering itself — it needs
+/// this absolute path to reach the real thing.
+fn real_git_path() -> PathBuf {
+    let path = std::env::var("PATH").unwrap_or_default();
+    std::env::split_paths(&path)
+        .map(|dir| dir.join("git"))
+        .find(|p| p.is_file())
+        .expect("git not found on PATH")
+}
+
 pub struct Fixture {
     pub tmp: tempfile::TempDir,
 }
@@ -29,6 +42,13 @@ impl Fixture {
         let fake = fake_path();
         std::os::unix::fs::symlink(&fake, tmp.path().join("bin/gh")).unwrap();
         std::os::unix::fs::symlink(&fake, tmp.path().join("bin/herdr")).unwrap();
+        // `git` itself is NOT faked here: every other test file that builds
+        // its own Command from `path_env()` (controller_adopt.rs,
+        // merge-cleanup's fixture) never sets REAL_GIT, and a shadowed
+        // "git" with nothing to delegate to recurses into itself. Only
+        // `dispatch_with_git_hang` below adds it, on a PATH of its own —
+        // `real_git_path` is resolved there too (#849 standards gate, S6),
+        // not here, since no other method needs it.
         let f = Fixture { tmp };
         f.set_agents("[]");
         f
@@ -137,6 +157,33 @@ impl Fixture {
         cmd.env("HOME", self.home());
         cmd.env("CALL_LOG", self.call_log());
         cmd.env("HERDR_AGENTS", self.agents_file());
+        for (k, v) in scenario {
+            cmd.env(k, v);
+        }
+        cmd.output().unwrap()
+    }
+
+    /// `dispatch`, with `git` itself faked (#849): a passthrough proxy to
+    /// the real binary (`real_git_path`) placed on its own PATH entry ahead
+    /// of `path_env()`'s, except that a call whose args contain `hang`
+    /// never returns — standing in for a hung `git` subprocess so a test
+    /// can prove an OS-level bound actually fires rather than assuming it.
+    /// Kept off the plain `dispatch`'s PATH entirely: every other test's
+    /// `git` calls hit the real binary directly, exactly as before this
+    /// method existed.
+    pub fn dispatch_with_git_hang(&self, args: &[&str], scenario: &[(&str, &str)], hang: &str) -> Output {
+        let git_bin = self.tmp.path().join("git-bin");
+        std::fs::create_dir_all(&git_bin).unwrap();
+        std::os::unix::fs::symlink(fake_path(), git_bin.join("git")).unwrap();
+        let mut cmd = Command::new(bin_path());
+        cmd.args(args);
+        cmd.env_clear();
+        cmd.env("PATH", format!("{}:{}", git_bin.display(), self.path_env()));
+        cmd.env("HOME", self.home());
+        cmd.env("CALL_LOG", self.call_log());
+        cmd.env("HERDR_AGENTS", self.agents_file());
+        cmd.env("REAL_GIT", real_git_path());
+        cmd.env("GIT_HANG", hang);
         for (k, v) in scenario {
             cmd.env(k, v);
         }
