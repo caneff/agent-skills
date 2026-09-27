@@ -827,9 +827,9 @@ impl Cleanup {
                 continue;
             }
             let mark = if !is_worktree_root(&e) {
-                // A directory that holds worktrees of its own is their
+                // A directory holding nothing but worktrees is their
                 // parent, not a leftover (#1032).
-                if subdirs(&e).iter().any(|d| is_worktree_root(d)) {
+                if holds_only_worktrees(&e) {
                     continue;
                 }
                 " (not a git worktree)"
@@ -1815,6 +1815,20 @@ fn worktree_holding(path: &str, b: &str) -> Result<Option<String>, ()> {
 /// `dir` is the top of a git worktree.
 fn is_worktree_root(dir: &str) -> bool {
     quiet_stdout("git", &["-C", dir, "rev-parse", "--show-toplevel"]).as_deref() == Some(dir)
+}
+
+/// `dir` holds at least one entry, and every entry is a worktree's top.
+fn holds_only_worktrees(dir: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    let mut any = false;
+    for e in entries {
+        let Ok(e) = e else { return false };
+        if !is_worktree_root(&e.path().display().to_string()) {
+            return false;
+        }
+        any = true;
+    }
+    any
 }
 
 /// `status`, but under `--quiet` the command's stdout is dropped: its

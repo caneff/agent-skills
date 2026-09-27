@@ -1145,6 +1145,18 @@ fn a_directory_holding_only_nested_worktrees_is_not_stale() {
     assert!(parent.join("implement-9").is_dir(), "{}", run.text());
 }
 
+#[test]
+fn a_directory_holding_a_nested_worktree_and_a_leftover_is_still_stale() {
+    // Review P3/C3: only a directory holding nothing but worktrees is exempt.
+    let c = Cleanup::new();
+    let (r, _wt) = lane_workspace(&c, "r47", "implement-1032h");
+    let parent = r.join(".claude/worktrees/other-repo");
+    c.worktree_add(&r, &["--detach", s(&parent.join("implement-9")), "origin/main"]);
+    std::fs::write(parent.join("leftover"), "junk\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.stale().contains(&format!("{} (not a git worktree)", parent.display())), "{}", run.text());
+}
+
 // --- 11. an idle herdr agent's pane is closed; working or blocked refuses ----
 
 #[test]
