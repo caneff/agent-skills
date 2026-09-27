@@ -94,7 +94,7 @@ case "$(printf '%s\n' "$template" | tail -n 1)" in
   *) echo "FAIL: implement/SKILL.md's 'PR up:' template has no closing fence" >&2; exit 1 ;;
 esac
 for field in 'Last reviewed sha:' 'CLEAN observed at:' 'Tip:' 'Mutation check:' \
-             'Parallel jobs:'; do
+             'Parallel jobs:' 'Cleanup blockers:'; do
   check_in "$template" "$field"
 done
 
@@ -113,6 +113,24 @@ check_in "$template" 'merge-cleanup --repo <primary checkout> implement-<n>'
 check_in "$pr_flat" 'Chris merges this PR; you dispatched me'
 check_in "$pr_flat" '! gh pr merge <pr> --repo <owner/name> --squash'
 check_in "$pr_flat" 'the first entry of `git worktree list`'
+
+# Rule 7 (#1032, folding in #831): the report names what merge-cleanup
+# would refuse the workspace's removal over, from a dry run taken at PR-up,
+# with a kept .scratch/'s reason beside it — and the controller reads it
+# before merging, not from the refusal after. twitch-rules-scroller #345's
+# cleanup refused over 59 ignored files only once PR #375 had landed.
+check_in "$template" 'PRE_REPORT_KEEP_SCRATCH'
+before_flat="$(sed -n '/^### Before the PR$/,/^### The PR$/p' "$skill" | flatten)"
+merge_flat="$(sed -n '/^### The merge$/,/^## Someone else'"'"'s repo$/p' "$skill" | flatten)"
+[ -n "$before_flat" ] && [ -n "$merge_flat" ] || { echo "FAIL: could not extract § Before the PR or § The merge" >&2; exit 1; }
+case "$before_flat" in
+  *'implement-<n> --dry-run'*'blocker: '*) ;;
+  *) echo "FAIL: implement/SKILL.md § Before the PR does not run merge-cleanup --dry-run for its blocker lines" >&2; fail=1 ;;
+esac
+case "$merge_flat" in
+  *'read the report'"'"'s `Cleanup blockers` field'*) ;;
+  *) echo "FAIL: implement/SKILL.md § The merge does not read the Cleanup blockers field" >&2; fail=1 ;;
+esac
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS implement/pr-up-report-shape.test.sh"

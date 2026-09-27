@@ -355,6 +355,18 @@ time, not from the worker: § The merge.
    controller what you tried and what `gh pr view` still returns; the
    controller rules on it (disputed, or a manual `gh issue close` planned
    for after merge), same as any other blocker.
+7. **Name what will block the cleanup** (#1032): from this workspace, run
+   `merge-cleanup --repo <primary checkout> implement-<n> --dry-run` and
+   keep every line it prints starting `blocker: ` or `blockers: `. They
+   print before its merged check, so the run exits non-zero here with
+   `is not merged`; that is expected, the lines are the answer. No such
+   line at all means the dry run never reached them, not that nothing
+   blocks: say so in the report rather than writing `none`. Your own
+   session shows as a `live-session` blocker and clears when you go idle;
+   keep the line anyway. Anything else — an ignored build artifact, e2e
+   evidence, a kept `.scratch/` — is what `merge-cleanup` would refuse
+   after the merge, when you are gone and only Chris's `--discard` can
+   clear it.
 
 The final commit body carries `Closes #<n>` — one line per ticket the brief
 named — and so does the PR body (see below). A "done" report where only the
@@ -451,6 +463,9 @@ Mutation check: <the change that made it fail, and that you saw it fail
   — or "n/a, deliverable is not a test or a gate">
 Parallel jobs: <one "<what it was> — <n> cores" line per parallel job you
   launched — or "none">
+Cleanup blockers: <every "blocker: " line of § Before the PR step 7's dry
+  run, verbatim, a "scratch" line followed by its PRE_REPORT_KEEP_SCRATCH
+  reason — or "none", only when the dry run printed "blockers: none">
 Controller: you dispatched me; merge this PR per implement/SKILL.md § The merge
   (Codex pass if heavy, squash, answer my outstanding questions, wait for my
   idle notice), then run:
@@ -508,6 +523,12 @@ Controller: Chris merges this PR; you dispatched me, so after the Codex pass
   process on the same shared box, counting against the same 28-process cap
   as any other. So `none` means none, not "none of the kind I had in
   mind": three review axes plus a verification pass are four processes.
+- **The cleanup blockers** (#1032, folding in #831) — what `merge-cleanup`
+  would refuse the workspace's removal over, named while you can still act
+  on it rather than found in the refusal after the merge. A kept `.scratch/`
+  carries the same `<why>` you gave `PRE_REPORT_KEEP_SCRATCH`
+  (§ Before the PR step 3), since the dry run can name the files but not
+  the reason.
 - **A mutation check**, when the ticket's deliverable is a test or a gate:
   name one change that makes the new test or gate fail, and that you saw it
   fail. Nothing else in the report tells a gate from a test that always
@@ -538,7 +559,11 @@ The controller merges on a repo Chris owns; Chris reads it after via
    same check as § Before the PR: step 6, rerun because `main` may have
    moved since "PR up". `closingIssuesReferences` empty or missing the
    ticket blocks the merge same as a draft or a conflict does — a PR that
-   closes nothing does not merge.
+   closes nothing does not merge. Then read the report's `Cleanup blockers`
+   field: every line but the worker's own `live-session` is ruled on now,
+   while the worker is alive to commit or move it — kept evidence moved
+   out, or Chris asked whether `--discard` may take it — never discovered
+   from `merge-cleanup`'s refusal after the merge.
 3. **Codex adversarial-review pass (#812 trial) — heavy Claude-lane PRs
    only.** Not heavy, not Claude-lane (a Codex-lane build's own review step
    is `codex-lane.md`'s, unchanged), skip to step 4.

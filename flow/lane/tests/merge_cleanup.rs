@@ -382,6 +382,47 @@ fn a_denied_remote_delete_changes_the_claim_clear_failure_wording() {
     assert!(!run.stderr.contains("git cleanup completed, but could not clear #53"), "{}", run.text());
 }
 
+/// A `git` whose `ls-remote` exits `code` and prints nothing; every other
+/// subcommand is the real git.
+fn git_with_ls_remote_exit(code: u8) -> String {
+    format!(
+        "#!/bin/bash\nfor a in \"$@\"; do [ \"$a\" = ls-remote ] && exit {code}; done\nexec \"{real}\" \"$@\"\n",
+        real = which("git").display()
+    )
+}
+
+#[test]
+fn a_failed_remote_branch_lookup_is_a_partial_failure_not_branch_absent() {
+    // #845: `ls-remote --exit-code` exits 2 for "no such ref" and 128 for a
+    // lookup that never answered (auth, unreachable origin). Read as a bool,
+    // both said "origin has no branch", and the run exited 0 with the branch
+    // still on origin.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r16");
+    let origin = c.root().join("r16.origin.git");
+    replace_git_with(&c, "noherdr", git_with_ls_remote_exit(128));
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok, "a failed lookup must fail the run: {}", run.text());
+    assert!(c.has_branch(&origin, "caneff/merged-one"), "nothing should have deleted the remote branch");
+    assert!(
+        run.stderr.contains("could not look up remote branch caneff/merged-one on origin; re-run: git")
+            && run.stderr.contains("push origin --delete caneff/merged-one"),
+        "{}",
+        run.text()
+    );
+    assert!(!run.has("origin has no caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn a_remote_branch_lookup_answering_no_such_ref_still_exits_zero() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r17");
+    replace_git_with(&c, "noherdr", git_with_ls_remote_exit(2));
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(run.has("skipped the remote branch delete (origin has no caneff/merged-one)"), "{}", run.text());
+}
+
 #[test]
 fn a_sweep_row_for_a_denied_remote_delete_says_so_distinctly_and_still_fails_the_run() {
     let c = Cleanup::new();
@@ -687,7 +728,7 @@ fn help_prints_the_header_and_exits_zero() {
     assert!(run.stdout.starts_with("The tail the controller runs after squash-merging a worker's PR"), "{}", run.stdout);
     assert!(run.stdout.contains("  merge-cleanup --sweep [--root <dir>] [--yes] [--dry-run]\n"), "{}", run.stdout);
     assert!(run.stdout.contains("`git branch <branch> refs/deleted/<branch>@<short sha>` restores."), "{}", run.stdout);
-    assert!(run.stdout.contains("  merge-cleanup [--repo <path>] <branch|PR number|PR URL> [--force] [--discard] [--dry-run]\n"), "{}", run.stdout);
+    assert!(run.stdout.contains("  merge-cleanup [--repo <path>] <branch|PR number|PR URL> [--force] [--discard] [--dry-run] [--quiet]\n"), "{}", run.stdout);
     assert!(run.stdout.contains("--discard removes it anyway"), "{}", run.stdout);
     assert!(run.stdout.contains("Ignored files include .scratch/"), "{}", run.stdout);
     assert!(run.stdout.contains("printed as cache file(s), distinct\nfrom the ignored file(s) count above"), "{}", run.stdout);
@@ -999,6 +1040,123 @@ fn the_worktree_under_cleanup_is_not_a_stale_sibling() {
     assert_eq!(run.stale(), vec![wts.join("agent-old").display().to_string()], "{}", run.text());
 }
 
+// --- #1032: the dry run names its blockers; --quiet; nested-worktree parents -
+
+/// The `blocker:` and `blockers:` lines of a run's stdout.
+fn blocker_lines(run: &support::cleanup::Run) -> Vec<String> {
+    run.stdout.lines().filter(|l| l.starts_with("blocker: ") || l.starts_with("blockers: ")).map(str::to_string).collect()
+}
+
+#[test]
+fn a_dry_run_names_an_ignored_non_cache_file_as_a_blocker_and_changes_nothing() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r40", "implement-1032a");
+    std::fs::write(r.join(".git/info/exclude"), "build/\n.scratch/\n").unwrap();
+    std::fs::create_dir_all(wt.join("build")).unwrap();
+    std::fs::write(wt.join("build/fast.so"), "artifact\n").unwrap();
+    std::fs::create_dir_all(wt.join(".scratch")).unwrap();
+    std::fs::write(wt.join(".scratch/evidence.log"), "kept\n").unwrap();
+    let origin = c.root().join("r40.origin.git");
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert_eq!(
+        blocker_lines(&run),
+        vec!["blocker: ignored 1 file(s): build/fast.so".to_string(), "blocker: scratch 1 file(s): .scratch/evidence.log".to_string()],
+        "{}",
+        run.text()
+    );
+    assert!(wt.join("build/fast.so").is_file() && wt.join(".scratch/evidence.log").is_file(), "{}", run.text());
+    assert!(c.has_branch(&r, "caneff/merged-one") && c.has_branch(&origin, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn a_dry_run_names_a_live_session_as_a_blocker_and_changes_nothing() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r41", "implement-1032b");
+    c.session("live", &format!(r#"{{"pid":{},"cwd":"{}","procStart":"{}"}}"#, me(), wt.display(), me_start()));
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert_eq!(blocker_lines(&run), vec![format!("blocker: live-session pid {}", me())], "{}", run.text());
+    assert!(wt.is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+}
+
+#[test]
+fn a_dry_run_on_a_branch_not_yet_merged_still_names_its_blockers() {
+    // The PR-up case: the worker runs the dry run before the merge, so the
+    // blockers print ahead of the merged check that refuses the rest.
+    let c = Cleanup::new();
+    let r = c.mkfixture("r42");
+    let wt = r.join(".claude/worktrees/implement-1032c");
+    c.worktree_add(&r, &[s(&wt), "caneff/open-one"]);
+    std::fs::write(wt.join("notes"), "unsaved\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/open-one", "--dry-run"], &[]);
+    assert_eq!(blocker_lines(&run), vec!["blocker: untracked 1 file(s): notes".to_string()], "{}", run.text());
+    assert!(run.has("caneff/open-one is not merged"), "{}", run.text());
+}
+
+#[test]
+fn a_dry_run_that_cannot_list_worktrees_names_that_as_a_blocker() {
+    // Review S1/P1/C2: a failed listing is not "no workspace, so none".
+    let c = Cleanup::new();
+    let (r, _wt) = lane_workspace(&c, "r46", "implement-1032g");
+    let fail_list = "for a in \"$@\"; do [ \"$a\" = list ] && exit 128; done\n";
+    replace_git_with(&c, "noherdr", format!("#!/bin/bash\n{fail_list}exec \"{}\" \"$@\"\n", which("git").display()));
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert_eq!(blocker_lines(&run), vec!["blocker: unreadable git worktree list failed".to_string()], "{}", run.text());
+}
+
+#[test]
+fn a_dry_run_with_nothing_blocking_says_so() {
+    let c = Cleanup::new();
+    let (r, _wt) = lane_workspace(&c, "r43", "implement-1032d");
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert_eq!(blocker_lines(&run), vec!["blockers: none".to_string()], "{}", run.text());
+}
+
+#[test]
+fn quiet_prints_only_the_action_lines() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r44", "implement-1032e");
+    let wts = r.join(".claude/worktrees");
+    c.worktree_add(&r, &["--detach", s(&wts.join("agent-old")), "origin/main"]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--quiet"], &[]);
+    assert!(run.ok && !wt.exists() && !c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    let lines: Vec<&str> = run.stdout.lines().collect();
+    let actions = [
+        "removing the linked worktree at ",
+        "recorded the tip of caneff/merged-one at ",
+        "deleted local branch caneff/merged-one",
+        "deleting remote branch caneff/merged-one",
+    ];
+    assert_eq!(lines.len(), actions.len(), "{}", run.text());
+    for (line, action) in lines.iter().zip(actions) {
+        assert!(line.starts_with(action), "{line:?} is not {action:?}: {}", run.text());
+    }
+}
+
+#[test]
+fn a_directory_holding_only_nested_worktrees_is_not_stale() {
+    let c = Cleanup::new();
+    let (r, _wt) = lane_workspace(&c, "r45", "implement-1032f");
+    let parent = r.join(".claude/worktrees/other-repo");
+    c.worktree_add(&r, &["--detach", s(&parent.join("implement-9")), "origin/main"]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok, "{}", run.text());
+    assert!(!run.stale().iter().any(|l| l.contains("other-repo")), "{}", run.text());
+    assert!(parent.join("implement-9").is_dir(), "{}", run.text());
+}
+
+#[test]
+fn a_directory_holding_a_nested_worktree_and_a_leftover_is_still_stale() {
+    // Review P3/C3: only a directory holding nothing but worktrees is exempt.
+    let c = Cleanup::new();
+    let (r, _wt) = lane_workspace(&c, "r47", "implement-1032h");
+    let parent = r.join(".claude/worktrees/other-repo");
+    c.worktree_add(&r, &["--detach", s(&parent.join("implement-9")), "origin/main"]);
+    std::fs::write(parent.join("leftover"), "junk\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.stale().contains(&format!("{} (not a git worktree)", parent.display())), "{}", run.text());
+}
+
 // --- 11. an idle herdr agent's pane is closed; working or blocked refuses ----
 
 #[test]
@@ -1104,6 +1262,131 @@ fn a_herdr_agent_with_no_name_refuses_whatever_its_status() {
         assert!(wt.is_dir() && c.has_branch(&r, "caneff/merged-one"), "{status}");
         assert!(!c.calls().contains("pane close"), "{}", c.calls());
     }
+}
+
+// --- #879: the state is re-read immediately before the forced removal -------
+
+/// Runs merge-cleanup on the merged branch with the debug-build failpoint
+/// `MERGE_CLEANUP_AFTER_GUARDS` set to `sh -c` text run once both guards
+/// have passed and before the removal.
+fn mc_with_late(c: &Cleanup, r: &std::path::Path, extra: &[&str], late: &str) -> support::cleanup::Run {
+    let mut args = vec!["--repo", s(r), "caneff/merged-one"];
+    args.extend_from_slice(extra);
+    c.mc(Tools::NoHerdr, &args, &[("MERGE_CLEANUP_AFTER_GUARDS", late)])
+}
+
+#[test]
+fn a_file_that_appears_after_the_guards_refuses_the_removal() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r30", "implement-879a");
+    let late = wt.join("late-note");
+    let run = mc_with_late(&c, &r, &[], &format!("echo unsaved > '{}'", late.display()));
+    assert!(!run.ok, "{}", run.text());
+    assert!(late.is_file() && wt.is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — 1 untracked file(s) would be lost: late-note (appeared after the guards passed)",
+        wt.display()
+    );
+    assert!(run.stderr.contains(&want), "{}", run.text());
+}
+
+#[test]
+fn discard_covers_only_what_the_guards_reported_not_a_file_that_appears_after() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r31", "implement-879b");
+    std::fs::write(wt.join("reported"), "seen by the guard\n").unwrap();
+    let late = wt.join("late-note");
+    let run = mc_with_late(&c, &r, &["--discard"], &format!("echo unsaved > '{}'", late.display()));
+    assert!(!run.ok, "{}", run.text());
+    assert!(late.is_file() && wt.join("reported").is_file(), "{}", run.text());
+    assert!(run.stderr.contains("1 untracked file(s) would be lost: late-note (appeared after the guards passed)"), "{}", run.text());
+}
+
+#[test]
+fn discard_does_not_cover_a_file_that_appears_inside_a_reported_untracked_directory() {
+    // Review C1: git collapses an untracked directory to one `dir/` entry, so
+    // a file added inside it after the guards read the same as before.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r33", "implement-879d");
+    std::fs::create_dir_all(wt.join("evidence")).unwrap();
+    std::fs::write(wt.join("evidence/a.log"), "seen by the guard\n").unwrap();
+    let late = wt.join("evidence/b.log");
+    let run = mc_with_late(&c, &r, &["--discard"], &format!("echo unsaved > '{}'", late.display()));
+    assert!(!run.ok, "{}", run.text());
+    assert!(late.is_file(), "{}", run.text());
+    assert!(run.stderr.contains("1 untracked file(s) would be lost: evidence/b.log (appeared after the guards passed)"), "{}", run.text());
+}
+
+#[test]
+fn a_session_whose_idle_pane_the_guard_closed_does_not_refuse_the_recheck() {
+    // Review C4: once its pane is closed herdr stops listing the agent, but
+    // the session's pid can outlive that; the guard already cleared it.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r34", "implement-879e");
+    c.session("r34", &format!(r#"{{"pid":{},"cwd":"{}","sessionId":"sess-34","procStart":"{}"}}"#, me(), wt.display(), me_start()));
+    c.set_agents(&format!(
+        r#"[{{"name":"skills-34","pane_id":"w34:p1","cwd":"{}","agent_status":"idle","agent_session":{{"value":"sess-34"}}}}]"#,
+        wt.display()
+    ));
+    let agents = c.root().join("agents.json");
+    let late = format!(r#"echo '{{"result":{{"agents":[]}}}}' > '{}'"#, agents.display());
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[("MERGE_CLEANUP_AFTER_GUARDS", &late)]);
+    assert!(std::fs::read_to_string(&agents).unwrap().contains(r#""agents":[]"#), "the failpoint did not run");
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+}
+
+#[test]
+fn an_idle_herdr_agent_that_appears_after_the_guards_refuses_the_removal() {
+    // Codex gate on PR #1197 (codex-gate-1): an idle agent explains its own
+    // registry session and is no blocker to `live_items`, so one that
+    // arrived after `guard_live` passed the recheck with a pane nobody closed.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r35", "implement-879f");
+    let staged_agents = c.root().join("staged-agents.json");
+    std::fs::write(
+        &staged_agents,
+        format!(
+            r#"{{"result":{{"agents":[{{"name":"skills-late","pane_id":"w35:p1","cwd":"{}","agent_status":"idle","agent_session":{{"value":"sess-35"}}}}]}}}}"#,
+            wt.display()
+        ),
+    )
+    .unwrap();
+    let staged_session = c.root().join("staged-session.json");
+    std::fs::write(&staged_session, format!(r#"{{"pid":{},"cwd":"{}","sessionId":"sess-35","procStart":"{}"}}"#, me(), wt.display(), me_start())).unwrap();
+    let session = c.home().join(".claude/sessions/late.json");
+    let late = format!(
+        "cat '{}' > '{}' && cat '{}' > '{}'",
+        staged_agents.display(),
+        c.root().join("agents.json").display(),
+        staged_session.display(),
+        session.display()
+    );
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[("MERGE_CLEANUP_AFTER_GUARDS", &late)]);
+    assert!(session.is_file(), "the failpoint did not run: {}", run.text());
+    assert!(!run.ok && wt.is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — a live session is in it: herdr agent skills-late (w35:p1) (appeared after the guards passed)",
+        wt.display()
+    );
+    assert!(run.stderr.contains(&want), "{}", run.text());
+}
+
+#[test]
+fn a_live_session_that_appears_after_the_guards_refuses_the_removal() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r32", "implement-879c");
+    let staged = c.root().join("staged-session.json");
+    std::fs::write(&staged, format!(r#"{{"pid":{},"cwd":"{}","procStart":"{}"}}"#, me(), wt.display(), me_start())).unwrap();
+    let dest = c.home().join(".claude/sessions/late.json");
+    let run = mc_with_late(&c, &r, &[], &format!("cat '{}' > '{}'", staged.display(), dest.display()));
+    assert!(!run.ok, "{}", run.text());
+    assert!(dest.is_file() && wt.is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — a live session is in it: pid {} (appeared after the guards passed)",
+        wt.display(),
+        me()
+    );
+    assert!(run.stderr.contains(&want), "{}", run.text());
 }
 
 // --- 12. a herdr worker's own registry session is decided by its status ------
