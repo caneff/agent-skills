@@ -16,20 +16,17 @@ None — no file in this repo is generated from another. Add a `**Directive**:` 
 
 `disable-model-invocation: true` means **not auto-invocable**: the skill runs
 when someone types its command, never off model inference. It is the norm
-here, not an exception — 53 of 79 `SKILL.md` files carry it, `implement`
-among them — so it says nothing about whether a skill is live.
+here, not an exception — most `SKILL.md` files carry it — so it says nothing
+about whether a skill is live.
 
 A **parked** skill is marked two ways and only these two: a `Parked: ` prefix
 on its `description:`, and a `> **Parked**` banner under the frontmatter
 saying what is retired and what will revive it. Both are prose. Unparking
 removes both and touches no frontmatter key.
 
-(2026-09-20, #899: a controller brief called the frontmatter key a parked
-marker and told a worker to cut it from two skills. The worker checked before
-cutting — the key predates the parking commit `207fee4`, which touched only
-`description:` — and a grep treating it as a marker would have flagged 53
-live skills. Anything claiming to detect parked state matches exactly the
-parked files and no live skill; that property is the test.)
+Anything claiming to detect parked state matches exactly the parked files and
+no live skill; that property is the test. Treating the frontmatter key as a
+marker would flag most live skills.
 
 ### Recurring defect classes
 
