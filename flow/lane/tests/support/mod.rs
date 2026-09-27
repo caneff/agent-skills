@@ -32,7 +32,6 @@ fn real_git_path() -> PathBuf {
 
 pub struct Fixture {
     pub tmp: tempfile::TempDir,
-    real_git: PathBuf,
 }
 
 impl Fixture {
@@ -47,9 +46,10 @@ impl Fixture {
         // its own Command from `path_env()` (controller_adopt.rs,
         // merge-cleanup's fixture) never sets REAL_GIT, and a shadowed
         // "git" with nothing to delegate to recurses into itself. Only
-        // `dispatch_with_git_hang` below adds it, on a PATH of its own.
-        let real_git = real_git_path();
-        let f = Fixture { tmp, real_git };
+        // `dispatch_with_git_hang` below adds it, on a PATH of its own —
+        // `real_git_path` is resolved there too (#849 standards gate, S6),
+        // not here, since no other method needs it.
+        let f = Fixture { tmp };
         f.set_agents("[]");
         f
     }
@@ -182,7 +182,7 @@ impl Fixture {
         cmd.env("HOME", self.home());
         cmd.env("CALL_LOG", self.call_log());
         cmd.env("HERDR_AGENTS", self.agents_file());
-        cmd.env("REAL_GIT", &self.real_git);
+        cmd.env("REAL_GIT", real_git_path());
         cmd.env("GIT_HANG", hang);
         for (k, v) in scenario {
             cmd.env(k, v);
