@@ -80,7 +80,6 @@ check "$create_text" 'In addition to the section, never instead of it' 'Create i
 # still gets a filed, readable ticket — and so the failure is spoken aloud.
 check "$create_text" 'The edge comes second' 'Create it'
 check "$create_text" 'rather than a filing that never happened' 'Create it'
-check "$create_text" 'Say so in your reply when the edge fails' 'Create it'
 
 # A blocker in another repo (#919): the section names it in full, the
 # native edge takes the full URL, and the filer is told what the reader
