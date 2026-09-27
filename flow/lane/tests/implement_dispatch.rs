@@ -2139,6 +2139,15 @@ fn no_unbounded_git_or_gh_call_remains_in_implement_dispatchs_reach() {
     // those modules also expose for another caller.
     let manifest = env!("CARGO_MANIFEST_DIR");
     let dispatch_src = std::fs::read_to_string(format!("{manifest}/src/bin/implement_dispatch.rs")).unwrap();
+    // Whitespace-insensitive (#849 correctness gate, C2/S5): rustfmt already
+    // wraps a call like `run_in(\n None,\n "git",` onto several lines in
+    // this very diff, and a patterns-on-one-line match would pass a
+    // reverted-to-unbounded call unseen the moment it got reformatted —
+    // confirmed by mutation: restoring the pre-diff multi-line
+    // `runner::run_in(\n None,\n "git",` left the single-line version of
+    // this test green. Every pattern below is written with no whitespace of
+    // its own to match a source stripped the same way.
+    let stripped: String = dispatch_src.chars().filter(|c| !c.is_whitespace()).collect();
 
     let unbounded_direct = [
         "quiet_stdout(\"git\"",
@@ -2147,15 +2156,15 @@ fn no_unbounded_git_or_gh_call_remains_in_implement_dispatchs_reach() {
         "quiet_ok(\"gh\"",
         "run(\"git\"",
         "run(\"gh\"",
-        "run_in(None, \"git\"",
-        "run_in(None, \"gh\"",
+        "run_in(None,\"git\"",
+        "run_in(None,\"gh\"",
         "status(\"git\"",
         "status(\"gh\"",
         "quiet_stderr_ok(\"git\"",
         "quiet_stderr_ok(\"gh\"",
     ];
     for pat in unbounded_direct {
-        assert!(!dispatch_src.contains(pat), "implement_dispatch.rs still calls the unbounded helper {pat:?}");
+        assert!(!stripped.contains(pat), "implement_dispatch.rs still calls the unbounded helper {pat:?} (whitespace-insensitive)");
     }
 
     // The shared modules' plain functions are still there, for
@@ -2165,7 +2174,7 @@ fn no_unbounded_git_or_gh_call_remains_in_implement_dispatchs_reach() {
     let unbounded_shared =
         ["git_origin::default_branch(", "git_origin::origin_slug(", "issue_state::read(", "issue_state::body("];
     for pat in unbounded_shared {
-        assert!(!dispatch_src.contains(pat), "implement_dispatch.rs still calls the unbounded shared function {pat:?}");
+        assert!(!stripped.contains(pat), "implement_dispatch.rs still calls the unbounded shared function {pat:?}");
     }
 }
 
