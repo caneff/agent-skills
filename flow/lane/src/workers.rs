@@ -137,10 +137,11 @@ fn lock_path(sidecar: &Path) -> PathBuf {
     sibling(sidecar, "lock")
 }
 
-fn sibling(sidecar: &Path, ext: &str) -> PathBuf {
+/// `sidecar`'s file name with `.<suffix>` added after the whole of it.
+fn sibling(sidecar: &Path, suffix: &str) -> PathBuf {
     let mut name = sidecar.file_name().unwrap_or_default().to_os_string();
     name.push(".");
-    name.push(ext);
+    name.push(suffix);
     sidecar.with_file_name(name)
 }
 
