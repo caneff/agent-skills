@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Guards #1086: the severity mapping carries a reachability bar, applied
 # before severity — a finding whose failure cannot occur here is
-# `disputed: unreachable — <why>`, never filed and never a sidecar line
-# (burn-2026-09-22-0636 filed seven tickets from second and third passes;
-# four were closed on sight as unreachable). The bar is stated once in
-# implement/SKILL.md § Review; § The merge and multi-axis-code-review point
-# at it. Prose assertion — no harness runs the skill's own prose.
+# `disputed: unreachable — <why>`, never filed and never a sidecar line.
+# The bar is stated once in implement/SKILL.md § Review; § The merge and
+# multi-axis-code-review point at it. Prose assertion — no harness runs
+# the skill's own prose.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"

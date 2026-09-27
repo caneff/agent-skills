@@ -78,8 +78,7 @@ quota. In this lane they swap for:
    Both carry `disable-model-invocation: true` (#814): the SlashCommand tool
    never reaches either for a dispatched worker. Invoke the plugin's own
    script instead of the slash command, for each — same commands, and the
-   same injection-safety and `--wait` rationale, as `implement/SKILL.md`'s
-   Review step:
+   same injection-safety and `--wait` rationale, as `implement/SKILL.md` § The merge step 3:
 
    ```
    body_file=<absolute path you wrote the ticket body, comments and appendix to>

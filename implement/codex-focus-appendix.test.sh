@@ -4,10 +4,7 @@
 # half of a deliberately split change, and not the fact that the code under
 # review is parked or otherwise landing ahead of its own activation. Both
 # gaps it reports as a missing requirement: right about `main`, wrong about
-# the work, once per split (map #776: PR #930's merge-tail pointer was in
-# PR #929, PR #940's four-bucket sentence was on `implement-898`, and
-# PR #945's `[high]` "tier tagger is unreachable" was the parked skill the
-# ticket lands into). The remedy is context the controller already holds at
+# the work. The remedy is context the controller already holds at
 # dispatch time, appended to the focus text, so both required lines must be
 # named in both invocation sites and both must be written out even when
 # there is nothing to report — an omitted line and a "nothing is split"

@@ -28,13 +28,13 @@ check() {
 
 check 'Commit identity comes from the repo'"'"'s config.'
 check 'Never pass `-c user.email` or `-c user.name` to `git commit`'
-check 'GitHub'"'"'s email-privacy rule rejected every push'
+check 'GitHub'"'"'s email-privacy rule rejects a push signed with it'
 check 'A file whose contents become public lives under your own workspace'"'"'s `.scratch/`'
 check 'never `/tmp`, never a shared scratchpad path'
 check 'any file you author and then hand to a command'
 check 'The controller'"'"'s Codex pass files'
 check '`~/.cache/agent-reviews/<repo>/`, under a ticket-named file'
-check 'PR 908 went up carrying #886'"'"'s body'
+check 'can be overwritten by another session between the write and `gh pr create`'
 check 'Your "PR up" message ends with the controller trailer'
 
 if [ "$fail" -eq 0 ]; then echo "PASS implement/worker-hygiene-wording.test.sh"; else exit 1; fi
