@@ -22,8 +22,6 @@ const CODE_EXTENSIONS: &[&str] = &[
     "fish", "ps1", "psm1", "bat", "cmd", "lua", "ini", "cfg", "conf", "rb", "pl", "php", "java", "kt", "swift",
     "c", "h", "cpp", "hpp", "mk",
 ];
-/// Extensionless files that are code wherever they sit.
-const CODE_FILENAMES: &[&str] = &["makefile", "dockerfile", "justfile", "rakefile", "gemfile", "procfile"];
 /// A directory whose extensionless entries are scripts: `bin/implement-dispatch`, a git hook.
 const CODE_DIRS: &[&str] = &["bin", "sbin", "hooks", ".githooks", ".husky"];
 /// Extensions `burndown/tier.py` reads as prose; on a path (a token with a `/`),
@@ -31,9 +29,10 @@ const CODE_DIRS: &[&str] = &["bin", "sbin", "hooks", ".githooks", ".husky"];
 const PROSE_EXTENSIONS: &[&str] = &["md", "markdown", "txt", "rst"];
 /// Product names that end in a code extension but are prose.
 const PROSE_TOKENS: &[&str] = &["node.js", "next.js", "vue.js", "three.js", "d3.js", "express.js"];
-/// Basenames that are code whatever their extension: a skill's body changes
-/// what every later session does, and `settings.json` wires the harness.
-const CODE_BASENAMES: &[&str] = &["skill.md"];
+/// Basenames that are code wherever they sit, whatever their extension: a
+/// skill's body changes what every later session does, and the rest are
+/// extensionless build and run files.
+const CODE_BASENAMES: &[&str] = &["skill.md", "makefile", "dockerfile", "justfile", "rakefile", "gemfile", "procfile"];
 
 /// The first path-shaped token in `body` that is code, if any. A token is
 /// path-shaped when it holds only `/ - _ .` besides letters and digits;
@@ -48,7 +47,7 @@ pub fn first_code_target(body: &str) -> Option<String> {
 
 fn is_code_path(token: &str) -> bool {
     let name = token.rsplit('/').next().unwrap_or(token).to_ascii_lowercase();
-    if CODE_BASENAMES.contains(&name.as_str()) || CODE_FILENAMES.contains(&name.as_str()) {
+    if CODE_BASENAMES.contains(&name.as_str()) {
         return true;
     }
     if !token.contains('/') && PROSE_TOKENS.contains(&name.as_str()) {
