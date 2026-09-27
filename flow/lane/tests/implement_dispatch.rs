@@ -2129,7 +2129,8 @@ fn the_run_file_is_found_under_a_tilde_burndown_cache_dir() {
 fn no_unbounded_git_or_gh_call_remains_in_implement_dispatchs_reach() {
     // implement-dispatch's own source, plus the two shared modules it calls
     // into for every git/gh subprocess it runs one hop removed
-    // (git_origin.rs, issue_state.rs) — widened past implement_dispatch.rs
+    // (git_origin.rs, issue_state.rs, worktree.rs) — widened past
+    // implement_dispatch.rs
     // alone (controller ruling on #849) so this witnesses "no unbounded
     // git/gh call in implement-dispatch" rather than passing because the
     // calls live one file over. Those two modules still expose their
