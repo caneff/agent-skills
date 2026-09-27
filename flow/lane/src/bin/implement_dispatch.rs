@@ -1178,6 +1178,34 @@ mod tests {
     use std::time::{Duration, Instant};
     use tempfile::TempDir;
 
+    /// `valid_run_id` copies `burndown/runfile.py`'s grammar, and an id one
+    /// accepts and the other refuses is a brief naming a run file the burn
+    /// cannot open, or a burn id dispatch will not carry. Ask runfile.py.
+    #[test]
+    fn run_id_grammar_matches_runfile_py() {
+        let ids = [
+            "burn-2026-09-27", "a", "1", "A.b_c-9", "burn.x", "a.", "-a", ".a", "_a", "a..b", "..", "a/b", "a b", "a\"b", "a\n", "",
+            "\u{e9}t\u{e9}", "a\u{e9}",
+        ];
+        let script = "import json, sys\nsys.path.insert(0, sys.argv[1])\nimport runfile\nout = []\nfor i in json.load(sys.stdin):\n    try:\n        runfile.checked_run_id(i); out.append(True)\n    except runfile.RunFileError:\n        out.append(False)\nprint(json.dumps(out))";
+        let burndown = concat!(env!("CARGO_MANIFEST_DIR"), "/../../burndown");
+        let mut child = std::process::Command::new("python3")
+            .args(["-c", script, burndown])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("python3 runs");
+        std::io::Write::write_all(child.stdin.as_mut().unwrap(), serde_json::to_string(&ids).unwrap().as_bytes()).unwrap();
+        drop(child.stdin.take());
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "runfile.py check failed: {}", String::from_utf8_lossy(&out.stderr));
+        let theirs: Vec<bool> = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(theirs.len(), ids.len());
+        for (id, py) in ids.iter().zip(theirs) {
+            assert_eq!(valid_run_id(id), py, "{id:?}: implement-dispatch says {}, runfile.py says {py}", valid_run_id(id));
+        }
+    }
+
     #[test]
     fn polls_past_herdrs_read_after_write_lag_past_100ms() {
         let tmp = TempDir::new().unwrap();
