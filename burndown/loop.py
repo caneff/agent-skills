@@ -967,16 +967,16 @@ def with_run_jobs(in_flight, run_id, root=None):
     with_jobs = []
     for clump in in_flight:
         key = key_of(clump)
-        shared = sorted({owner[n] for n in clump["tickets"] if n in owner})
-        if key not in jobs and shared:
-            # `runfile.py clump` would refuse these tickets as already held.
-            raise LoopError(
-                f"#{key} is live but overlaps registered clump(s) "
-                + ", ".join(f"#{k}" for k in shared) +
-                f" in run {run_id} under another key — the in-flight list "
-                "and the run file disagree on this clump's tickets; fix the "
-                "stale one before dispatching")
         if key not in jobs:
+            shared = sorted({owner[n] for n in clump["tickets"] if n in owner})
+            if shared:
+                # `runfile.py clump` would refuse these tickets as held.
+                raise LoopError(
+                    f"#{key} is live but overlaps registered clump(s) "
+                    + ", ".join(f"#{k}" for k in shared) +
+                    f" in run {run_id} under another key — the in-flight "
+                    "list and the run file disagree on this clump's "
+                    "tickets; fix the stale one before dispatching")
             raise LoopError(
                 f"#{key} is live but not registered in run "
                 f"{run_id} — register it with `runfile.py clump` (then "
