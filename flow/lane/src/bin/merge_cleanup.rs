@@ -690,9 +690,9 @@ impl Cleanup {
     /// herdr agent whose cwd is in the workspace refuses only while its
     /// agent_status is working or blocked (or herdr cannot classify it); an
     /// idle one (idle or done) has its pane closed by this run, then proceeds.
-    /// `None` refuses; otherwise the sessionIds of the agents whose panes it
-    /// closed, for `recheck` to excuse.
-    fn guard_live(&self, wt: &str) -> Option<Vec<String>> {
+    /// `None` refuses; otherwise the (pane, sessionId) of each agent whose
+    /// pane it closed, for `recheck` to excuse.
+    fn guard_live(&self, wt: &str) -> Option<Vec<(String, String)>> {
         let occupancy = self.occupancy(wt);
         if !occupancy.unresolved.is_empty() {
             refuse_live(wt, &occupancy.unresolved, "");
@@ -725,7 +725,7 @@ impl Cleanup {
                 return None;
             }
         }
-        Some(agents.iter().map(Agent::session).filter(|s| !s.is_empty()).map(str::to_string).collect())
+        Some(agents.iter().map(|a| (a.pane().to_string(), a.session().to_string())).collect())
     }
 
     /// #879: the guards' read, taken again with no step between it and the
@@ -737,7 +737,7 @@ impl Cleanup {
     /// fails reads as a new ignored entry, so it refuses here as it does
     /// there. The window between this read and git's removal is not zero;
     /// only dropping `--force` would close it, and that was ruled out.
-    fn recheck(&self, wt: &str, approved: &WorktreeFiles, excused: &[String]) -> bool {
+    fn recheck(&self, wt: &str, approved: &WorktreeFiles, closed: &[(String, String)]) -> bool {
         const LATE: &str = " (appeared after the guards passed)";
         let Some(now) = WorktreeFiles::read(wt) else {
             eprintln!("merge-cleanup: refusing to remove {wt} — git status failed there{LATE}");
@@ -748,7 +748,16 @@ impl Cleanup {
             eprintln!("merge-cleanup: refusing to remove {wt} — {}{LATE}", late.dirty_text());
             return false;
         }
-        let live = self.occupancy_excusing(wt, excused).live_items();
+        let excused: Vec<String> = closed.iter().map(|(_, s)| s.clone()).filter(|s| !s.is_empty()).collect();
+        let occupancy = self.occupancy_excusing(wt, &excused);
+        let mut live = occupancy.live_items();
+        // Any agent whose pane `guard_live` did not close refuses, idle
+        // included: idle is what clears a pane the guard closes, not one
+        // that arrived after it (Codex gate on PR #1197).
+        if let HerdrAnswer::Agents(agents) = &occupancy.herdr {
+            let late = agents.iter().filter(|a| a.is_idle() && !a.name().is_empty() && !closed.iter().any(|(p, _)| p == a.pane()));
+            live.extend(late.map(|a| format!("herdr agent {} ({})", a.name(), a.pane())));
+        }
         if !live.is_empty() {
             refuse_live(wt, &live, LATE);
             return false;
@@ -1301,7 +1310,7 @@ impl Cleanup {
             let Some(approved) = self.guard_files(&wt) else {
                 return false;
             };
-            let Some(excused) = self.guard_live(&wt) else {
+            let Some(closed) = self.guard_live(&wt) else {
                 return false;
             };
             self.removal_targets.push(wt.clone());
@@ -1311,7 +1320,7 @@ impl Cleanup {
                 // that appears after the guards passed (#879).
                 let _ = std::process::Command::new("sh").arg("-c").arg(cmd).status();
             }
-            if !self.recheck(&wt, &approved, &excused) {
+            if !self.recheck(&wt, &approved, &closed) {
                 return false;
             }
             if self.step(&format!("removing the linked worktree at {wt}"), "git", &["-C", path, "worktree", "remove", "--force", &wt]) {

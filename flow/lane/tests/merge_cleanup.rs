@@ -1336,6 +1336,42 @@ fn a_session_whose_idle_pane_the_guard_closed_does_not_refuse_the_recheck() {
 }
 
 #[test]
+fn an_idle_herdr_agent_that_appears_after_the_guards_refuses_the_removal() {
+    // Codex gate on PR #1197 (codex-gate-1): an idle agent explains its own
+    // registry session and is no blocker to `live_items`, so one that
+    // arrived after `guard_live` passed the recheck with a pane nobody closed.
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r35", "implement-879f");
+    let staged_agents = c.root().join("staged-agents.json");
+    std::fs::write(
+        &staged_agents,
+        format!(
+            r#"{{"result":{{"agents":[{{"name":"skills-late","pane_id":"w35:p1","cwd":"{}","agent_status":"idle","agent_session":{{"value":"sess-35"}}}}]}}}}"#,
+            wt.display()
+        ),
+    )
+    .unwrap();
+    let staged_session = c.root().join("staged-session.json");
+    std::fs::write(&staged_session, format!(r#"{{"pid":{},"cwd":"{}","sessionId":"sess-35","procStart":"{}"}}"#, me(), wt.display(), me_start())).unwrap();
+    let session = c.home().join(".claude/sessions/late.json");
+    let late = format!(
+        "cat '{}' > '{}' && cat '{}' > '{}'",
+        staged_agents.display(),
+        c.root().join("agents.json").display(),
+        staged_session.display(),
+        session.display()
+    );
+    let run = c.mc(Tools::Full, &["--repo", s(&r), "caneff/merged-one"], &[("MERGE_CLEANUP_AFTER_GUARDS", &late)]);
+    assert!(session.is_file(), "the failpoint did not run: {}", run.text());
+    assert!(!run.ok && wt.is_dir() && c.has_branch(&r, "caneff/merged-one"), "{}", run.text());
+    let want = format!(
+        "merge-cleanup: refusing to remove {} — a live session is in it: herdr agent skills-late (w35:p1) (appeared after the guards passed)",
+        wt.display()
+    );
+    assert!(run.stderr.contains(&want), "{}", run.text());
+}
+
+#[test]
 fn a_live_session_that_appears_after_the_guards_refuses_the_removal() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r32", "implement-879c");
