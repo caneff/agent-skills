@@ -58,7 +58,7 @@ It will be typical that you'll want to compare two approaches. But take a moment
 
 Settle the story and the example before writing any code; the example carries the story. Give the user some interaction but keep scrolling to a minimum. A good example tells a story, it doesn't just state some facts.
 
-Feel free to think about this decision, but once you've got it clear what idea is best to showcase, immediately proceed to build the marimo notebook. 
+Once it is clear which idea is best to showcase, build the marimo notebook. 
 
 Use the marimo-notebook skill for this, and possibly the `anywidget-generator` skill, but only if a custom widget makes for a better story. If you strongly feel that it makes sense to use a custom anywidget, refer to [references/ANYWIDGET.md](references/ANYWIDGET.md).
 
