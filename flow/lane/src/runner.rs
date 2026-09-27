@@ -93,33 +93,33 @@ fn run_bounded(mut cmd: Command, timeout: Duration) -> std::io::Result<(ExitStat
     Ok((status, stdout, stderr, timed_out, !(stdout_eof && stderr_eof)))
 }
 
-/// Spawns a thread draining `pipe`, sending an incremental snapshot of what
-/// it has read so far after every chunk (not only once, at EOF): the
-/// receiver can then read the best-so-far bytes even when the pipe never
-/// reaches EOF within its deadline, rather than getting nothing because the
-/// one send it used to wait for never happened. The bool is whether this
-/// snapshot is the final one (the pipe reached EOF or errored). A pipe left
-/// stuck open past the receiver's deadline leaks this one thread — accepted,
-/// since the alternative is the caller blocking on it instead.
+/// Spawns a thread draining `pipe`, sending each new chunk once — never the
+/// whole buffer read so far — so the channel's queue stays linear in the
+/// bytes read rather than quadratic (#849 Codex second pass on PR #1195:
+/// sending `buf.clone()` per chunk, with nothing consuming the channel until
+/// the child exits, queued O(n) snapshots of up to O(n) bytes each — roughly
+/// 4 GiB queued for 8 MiB of real output). The receiver accumulates the
+/// chunks itself. The bool is whether this is the final message (the pipe
+/// reached EOF or errored); a pipe left stuck open past the receiver's
+/// deadline leaks this one thread — accepted, since the alternative is the
+/// caller blocking on it instead.
 fn drain(mut pipe: impl Read + Send + 'static) -> mpsc::Receiver<(Vec<u8>, bool)> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let mut buf = Vec::new();
         let mut chunk = [0u8; 8192];
         loop {
             match pipe.read(&mut chunk) {
                 Ok(0) => {
-                    let _ = tx.send((buf, true));
+                    let _ = tx.send((Vec::new(), true));
                     return;
                 }
                 Ok(n) => {
-                    buf.extend_from_slice(&chunk[..n]);
-                    if tx.send((buf.clone(), false)).is_err() {
+                    if tx.send((chunk[..n].to_vec(), false)).is_err() {
                         return; // receiver gave up past its deadline
                     }
                 }
                 Err(_) => {
-                    let _ = tx.send((buf, true));
+                    let _ = tx.send((Vec::new(), true));
                     return;
                 }
             }
@@ -128,19 +128,23 @@ fn drain(mut pipe: impl Read + Send + 'static) -> mpsc::Receiver<(Vec<u8>, bool)
     rx
 }
 
-/// Reads from `rx` until it reports EOF or `deadline` passes, returning the
-/// best snapshot read so far either way, plus whether that snapshot is the
-/// final one (EOF reached) — `false` means a descendant is still holding the
-/// pipe open past `deadline`, and the caller must say so rather than
-/// silently returning a possibly-partial read as if it were complete.
+/// Reads from `rx` until it reports EOF or `deadline` passes, accumulating
+/// every chunk it sends, and returning what was read so far either way, plus
+/// whether that read is complete (EOF reached) — `false` means a descendant
+/// is still holding the pipe open past `deadline`, and the caller must say
+/// so rather than silently returning a possibly-partial read as if it were
+/// complete.
 fn recv_drained(rx: mpsc::Receiver<(Vec<u8>, bool)>, deadline: Instant) -> (Vec<u8>, bool) {
-    let mut last = Vec::new();
+    let mut buf = Vec::new();
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         match rx.recv_timeout(remaining) {
-            Ok((buf, true)) => return (buf, true),
-            Ok((buf, false)) => last = buf,
-            Err(_) => return (last, false), // deadline elapsed, or the sender is gone
+            Ok((chunk, true)) => {
+                buf.extend_from_slice(&chunk);
+                return (buf, true);
+            }
+            Ok((chunk, false)) => buf.extend_from_slice(&chunk),
+            Err(_) => return (buf, false), // deadline elapsed, or the sender is gone
         }
     }
 }
@@ -434,6 +438,23 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(4), "waited {:?} for a child that exited on its own", start.elapsed());
         assert!(out.success, "the direct child's own successful exit must still be reported: {:?}", out.combined);
         assert!(out.combined.to_lowercase().contains("truncated"), "combined was {:?}", out.combined);
+    }
+
+    // Codex second pass on PR #1195 (#849): `drain` used to send a clone of
+    // the whole buffer-so-far on every 8 KiB chunk, and nothing consumed the
+    // channel until the child exited — several MiB of real output queued
+    // roughly its square in bytes. This drains within the timeout and gets
+    // every byte back; the mutation check (revert `drain` to send
+    // `buf.clone()`) is what actually proves the growth was quadratic, since
+    // a small size alone wouldn't show it.
+    #[test]
+    fn run_timeout_drains_several_megabytes_without_quadratic_blowup() {
+        use std::time::{Duration, Instant};
+        let start = Instant::now();
+        let out = run_timeout("sh", &["-c", "head -c 16777216 /dev/zero"], Duration::from_secs(10)).unwrap();
+        assert!(out.success, "combined length was {}", out.combined.len());
+        assert_eq!(out.combined.len(), 16_777_216, "expected exactly 16 MiB back");
+        assert!(start.elapsed() < Duration::from_secs(5), "waited {:?} to drain 16 MiB", start.elapsed());
     }
 
     // #849: a bounded query must fail loud when the bound fires, never
