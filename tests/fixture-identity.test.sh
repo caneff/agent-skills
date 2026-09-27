@@ -35,4 +35,13 @@ fixture_identity "$tmp/missing" "$tmp" 2>"$tmp/err"
 check "missing repo is refused" 1 $?
 check "cwd checkout's email is untouched" "$before" "$(git -C "$here" config --local user.email)"
 
+# An empty or missing root resolves to "", and "/*" would admit any repo
+# (#1173 review C2): both are refused, and the repo is left unwritten.
+git init -q "$outside/other"
+fixture_identity "$outside/other" "" 2>"$tmp/err"
+check "empty root is refused" 1 $?
+fixture_identity "$outside/other" "$tmp/no-such-dir" 2>"$tmp/err"
+check "missing root is refused" 1 $?
+check "repo under a bad root is left without an email" "" "$(git -C "$outside/other" config --local user.email)"
+
 exit $fail
