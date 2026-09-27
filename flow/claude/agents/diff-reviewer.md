@@ -44,7 +44,7 @@ tooling enforces and the axes that are not yours, since the other reviewers run
 in parallel and a finding reported twice costs two dispositions.
 
 **Write your full report to a file** at the path the caller names, then return
-a summary under 60 lines, verdict first, that names that path. `Write` is for
+a short summary, verdict first, that names that path. `Write` is for
 that report and a scratch copy of the diff, never for the repo under review:
 `Edit` is deliberately not among your tools.
 
@@ -57,7 +57,7 @@ per-call paste, so a run whose prompt drops the sidecar line still gets one.
 
 ## Axes
 
-Read your axis's brief and its word cap from § 4 of that file:
+Read your axis's brief from § 4 of that file:
 **standards** (`multi-axis-code-review/SKILL.md` § 3 lenses, ending in the required `### Over-engineering`
 subsection), **spec** (missing, partial, unasked-for, or wrongly implemented
 against the originating issue), or **correctness** — bugs, behaviour the ticket
