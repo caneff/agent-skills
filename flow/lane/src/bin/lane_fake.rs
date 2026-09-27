@@ -210,7 +210,16 @@ fn run_git(args: &[String]) -> ExitCode {
     if hangs_on("GIT_HANG", args) {
         hang_forever();
     }
-    let real = env::var("REAL_GIT").unwrap_or_else(|_| "git".to_string());
+    // No silent "git" fallback (#849 standards/correctness gate, S1/C5):
+    // this proxy sits ahead of the real git on PATH, so resolving "git" by
+    // name here would just re-invoke this same binary, forever, rather
+    // than reaching the real thing. A caller that shadows "git" with this
+    // proxy owes it REAL_GIT; refuse loudly instead of hanging on the
+    // caller's behalf.
+    let Ok(real) = env::var("REAL_GIT") else {
+        eprintln!("lane-fake: invoked as git with no REAL_GIT set; refusing rather than re-entering this proxy");
+        return ExitCode::FAILURE;
+    };
     match std::process::Command::new(&real).args(args).status() {
         Ok(status) => match status.code() {
             Some(0) => ExitCode::SUCCESS,
