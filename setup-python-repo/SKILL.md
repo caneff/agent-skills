@@ -26,7 +26,7 @@ Run `git remote -v`, `ls`, and read any `pyproject.toml`.
 ## 1. Init + structure
 
 ```bash
-uv init --lib --name <pkg>      # src layout + hatchling + py.typed
+uv init --lib --name <pkg>      # src layout + uv_build + py.typed
 ```
 
 Target layout (interleaved tests — test sits next to the code it tests):
@@ -155,8 +155,9 @@ Invoke `setup-matt-pocock-skills` (issue tracker / triage labels / domain docs).
 It runs **after** AGENTS.md exists (it writes its `## Agent skills` block there)
 and after the remote exists (it inspects `git remote` for the issue tracker).
 
-**Don't ask its three questions — my answers are always the same: this
-repo's own `AGENTS.md` (root) states them. Pass those and proceed
+**Don't ask its three questions — my answers are always the same, and the
+skills repo's root `AGENTS.md` (`~/.agents/skills/AGENTS.md`: Issue tracker,
+Triage labels, Domain docs) states them. Pass those and proceed
 non-interactively.**
 
 Only stop to ask if the repo state contradicts them (e.g. no GitHub remote).

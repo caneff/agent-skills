@@ -99,8 +99,8 @@ generic swap command.
 
 ## Comparing a link against its example
 
-Do not hand-roll this (it was written three times: #287, #289, #290 in
-**sudokumaker-custom-constraints**). Two checks already exist there:
+Do not hand-roll this. Two checks already exist in
+**sudokumaker-custom-constraints**:
 
 - `framebuild.check` runs at build time and asserts the link decodes back to
   the built document and ships exactly the components its embedded backend
