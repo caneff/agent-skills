@@ -253,3 +253,5 @@ Filed from conversation — controller, map #776 merge tail.
 | agent-skills#1184 | #1187 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#1173 | #1189 | 2 | 0 | 2 | Two runs. Gate: [high] `loop.py`'s printed dispatch command carries no `--repo` — **codex-only, confirmed**, filed #1190 (needs the run file to record its repo, P17's design call); [high] the sweep-update block masks a failing `sweep.py render` — **codex-only, confirmed and fixed** (7ef6520); [high] merge-base race — disputed, duplicate of P9 (leftover, same residual as #1172); [medium] whitespace before a declaration-only body bypasses `blocked-by`'s refusal — **codex-only, confirmed and fixed** (0dc161c). Second pass, sha moved: the `--repo` finding re-raised, disputed as a duplicate of the filed gate finding. |
 | agent-skills#1185 | #1191 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
+| agent-skills#1183 | #1192 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
+| agent-skills#1181 | #1193 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
