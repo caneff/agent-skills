@@ -122,7 +122,7 @@ suite isn't watching it at all.
    invoked with verbatim. Run both from the same directory and pass the same
    relative path to both; an absolute `<scope>` here (e.g. from
    `$ARGUMENTS`) makes every radon key miss every coverage key, and
-   `normalize` now raises loudly on that rather than silently scoring
+   `normalize` raises loudly on that rather than silently scoring
    everything 0%/0%. That guard catches a *total* mismatch only — if some
    keys join and some don't (radon's scope is wider than coverage.py's
    `source`/`omit`, say), the unmatched files score 0%/0% silently and read
@@ -233,7 +233,7 @@ suite isn't watching it at all.
    Then open the report (`xdg-open`/`open`/`start`) and print its absolute
    path — unless invoked from inside an `all-audits` sweep, which instead
    names a manifest path in its prompt to write to (see
-   `~/.agents/skills/all-audits/harness/AUDIT-RUN.md#the-manifest-559`)
+   `~/.agents/skills/all-audits/harness/AUDIT-RUN.md#the-manifest`)
    and says not to open anything.
 
 ## TypeScript path
@@ -248,8 +248,8 @@ matches — no fallback needed for the arithmetic.** The one real gap is
 shape, not math: the CLI's `--format json` report exposes only the
 already-combined `cov`/`covKind` per method (which axis was lower), never
 both raw percentages — `normalize_ts` (`~/.agents/skills/crap-audit/audit.py`) fills the
-non-dominant axis with `100.0` (can't be the minimum), so `score()` —
-ticket 1's, unmodified — still reproduces the package's own `crap` value
+non-dominant axis with `100.0` (can't be the minimum), so the unmodified `score()`
+still reproduces the package's own `crap` value
 exactly. See `~/.agents/skills/crap-audit/fixtures/ts_sample_project/answer-key.md` for the
 full worked verification, including both `covKind: "N/A"` cases (missing
 coverage data vs. structural_na).

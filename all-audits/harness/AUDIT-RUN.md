@@ -40,7 +40,7 @@ open the summary and hand off its path per
 `pagelib.copy_assets()` render the page and deliver its assets. Print the
 one-line verdict and the summary's absolute path, nothing else.
 
-## The manifest (#559)
+## The manifest
 
 When `driver.py` runs an audit as part of a sweep, its prompt names an
 absolute manifest path and asks for one more file after the report:

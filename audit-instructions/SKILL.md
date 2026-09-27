@@ -52,8 +52,8 @@ Fetched guidance outranks any flag here. When it does, say so in the report.
 
 ## 4. What is missing
 
-Current models often want steering older files lack — keep answers short, cap document
-length, say how to update me while you work, hold the task scope, limit the helpers you
+Current models often want steering older files lack — keep answers short, say what
+length the reader needs, say how to update me while you work, hold the task scope, limit the helpers you
 spawn. Treat these as candidates, not a checklist to fill.
 
 Before surfacing any addition, classify it:

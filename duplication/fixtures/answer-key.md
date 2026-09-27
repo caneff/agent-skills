@@ -34,7 +34,7 @@ Running `python3 duplication/audit.py` over the full captured JSON
 | # | Source | Kind | Bucket | Reason |
 |---|--------|------|--------|--------|
 | 1 | `sample_a.py:4` `validate_order` / `sample_b.py:6` `validate_shipment` | token-clone (jscpd) | **consolidate** | Byte-for-byte identical validation logic pasted into a second function name. A fix to one (e.g. tightening the price check) silently skips the other. Pass-two judgment should keep this `consolidate` — nothing about it looks intentional. |
-| 2 | `sample_a.py:13` `user_age_years` / `sample_b.py:19` `user_age_in_years` | semantic-duplicate (pass two, not jscpd) | **consolidate** | Same fact (a user's age in years) decoded from the same stored data (`user["birth_date"]`) two different ways — one via plain year subtraction, one via `dateutil.relativedelta` on a parsed date. Token-different, so jscpd's clone matcher does not flag this pair; it's the semantic pass's job in `duplication/SKILL.md` to surface it as `category: semantic-duplicate`. |
+| 2 | `sample_a.py:19` `user_age_years` / `sample_b.py:21` `user_age_in_years` | semantic-duplicate (pass two, not jscpd) | **consolidate** | Same fact (a user's age in years) decoded from the same stored data (`user["birth_date"]`) two different ways — one via plain year subtraction, one via `dateutil.relativedelta` on a parsed date. Token-different, so jscpd's clone matcher does not flag this pair; it's the semantic pass's job in `duplication/SKILL.md` to surface it as `category: semantic-duplicate`. |
 
 Tally: 1 token-clone (jscpd, pass one), 1 semantic-duplicate (pass two, not
 mechanically detectable — confirmed jscpd's JSON above contains only the

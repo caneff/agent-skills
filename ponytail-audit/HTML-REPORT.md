@@ -26,6 +26,8 @@ line-count `vt-chip` (`−45 lines`) so the reader scans the ranking by size:
 - `yagni:` — `vt-pill warn` (amber). One-implementation abstraction, config
   nobody sets, layer with one caller.
 - `shrink:` — `vt-pill neutral` (slate). Same logic, fewer lines.
+- `bloat:` — `vt-pill warn` (amber). A function or class ruff's `PLR` rules
+  flag as oversized; name the rule code. Split it along its actual seams.
 
 Put the monospaced file list after the badges (e.g. `verdict.py:51`).
 
@@ -56,6 +58,6 @@ For a display-only snippet that should not be copied (`— gone —`, sample
 output), add `vt-static` to the `vt-code` and drop the copy button.
 
 Token roles for this card: `--vt-bad` for the before / the deleted, `--vt-good`
-for the after / the replacement, `--vt-warn` for `yagni`, `--vt-accent` for
+for the after / the replacement, `--vt-warn` for `yagni` and `bloat`, `--vt-accent` for
 `stdlib`/`native`. Widen the content column for the side-by-side before/after —
 set `main { --vt-measure: 1080px; }`, never `max-width`, in a local `<style>`.
