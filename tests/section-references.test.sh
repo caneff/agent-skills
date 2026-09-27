@@ -29,6 +29,7 @@ run_fixture step-prefix-exact-valid
 run_fixture double-backtick-name-valid
 run_fixture step-locator-inline-code-valid
 run_fixture multiline-code-span-valid
+run_fixture code-span-table-mismatch-valid
 
 for fixture in pointer-suffix-invalid bare-cross-file-collision step-heading-name-invalid \
   step-number-invalid step-range-invalid \
