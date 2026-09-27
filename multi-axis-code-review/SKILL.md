@@ -143,8 +143,9 @@ it lives in prose only. Assign each cut a stable id in its own series —
 `OE1`, `OE2`, … — cite that id beside the cut in the prose subsection, and
 give it a line in the same `findings-standards-<n>.jsonl` sidecar as the rest
 of the Standards axis's findings (§ 4 below), `axis` still `"standards"` and
-`severity` the tag's own weight (`hard` for `delete`/`stdlib`/`native`,
-`judgement` for `yagni`/`shrink`). The verification pass, the dispositions
+`severity` always `"judgement"` — an over-engineering cut is not a
+documented repo standard, and § 3's own **Always a judgement call** rule
+already says nothing here can be `hard`. The verification pass, the dispositions
 sidecar, and the leftover sweep join an `OE` id exactly as they join an `S`,
 `P`, or `C` one — nothing about the id format is axis-specific.
 
