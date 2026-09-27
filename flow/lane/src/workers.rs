@@ -235,7 +235,13 @@ fn publish(path: &Path, lines: &[&str]) -> std::io::Result<()> {
         let _ = std::fs::remove_file(&tmp);
     }
     written?;
-    std::fs::File::open(path.parent().unwrap_or(Path::new(".")))?.sync_all()
+    // The rename has landed, so a failed directory fsync is noted rather than
+    // returned: a caller told a landed write failed acts on a false answer
+    // (#1101 review C2) — adoption would refuse a worker it had just taken.
+    if let Err(e) = std::fs::File::open(path.parent().unwrap_or(Path::new("."))).and_then(|d| d.sync_all()) {
+        eprintln!("workers: published {}, but could not fsync its directory: {e}", path.display());
+    }
+    Ok(())
 }
 
 /// Test-only failpoint, absent from a release build: a process death partway
