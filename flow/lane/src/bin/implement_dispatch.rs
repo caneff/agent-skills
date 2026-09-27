@@ -530,7 +530,10 @@ fn install_hook_slot(dir: &str, slot: &str, foreign_name: &str, guard_name: &str
 /// half is what actually stops a replayed foreign-email commit from ever
 /// reaching `git push`, where #909's failure mode began.
 fn install_identity_guard(primary: &str) -> Result<(), String> {
-    let dir = quiet_stdout_timeout("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"], git_query_timeout())
+    // Bounded so a timeout reports itself as one (#849 standards/correctness
+    // gate, S4/C6) rather than folding into the same "cannot resolve"
+    // message a real git failure already gets from `quiet_stdout_timeout`.
+    let dir = quiet_stdout_bounded("git", &["-C", primary, "rev-parse", "--path-format=absolute", "--git-path", "hooks"], git_query_timeout())?
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| format!("cannot resolve the hooks dir of {primary}"))?;
