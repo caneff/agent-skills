@@ -94,8 +94,13 @@ pub enum AgentNameError {
 pub fn agent_name_of_session(session_id: &str) -> Result<Option<String>, AgentNameError> {
     let listing = crate::runner::quiet_stdout_timeout("herdr", &["agent", "list"], HERDR_QUERY_TIMEOUT).ok_or(AgentNameError::ListFailed)?;
     let agents = parse_agents(&listing).ok_or(AgentNameError::Unparseable)?;
+    Ok(given_name_of_session(&agents, session_id))
+}
+
+/// An empty id matches nothing: an agent with no session reads as "".
+fn given_name_of_session(agents: &[Agent], session_id: &str) -> Option<String> {
     let agent = agents.iter().find(|a| !session_id.is_empty() && a.session() == session_id);
-    Ok(agent.and_then(|a| a.given_name()).map(str::to_string))
+    agent.and_then(|a| a.given_name()).map(str::to_string)
 }
 
 #[derive(Deserialize)]
@@ -136,6 +141,12 @@ mod tests {
     fn an_agent_with_no_name_falls_back_to_its_agent_field() {
         let agents = parse_agents(r#"{"result":{"agents":[{"agent":"claude","cwd":"/w"}]}}"#).unwrap();
         assert_eq!(agents[0].name(), "claude");
+    }
+
+    #[test]
+    fn an_empty_session_id_names_no_agent_even_one_with_no_session() {
+        let agents = parse_agents(r#"{"result":{"agents":[{"agent":"claude","name":"skills-ctl","cwd":"/w"}]}}"#).unwrap();
+        assert_eq!(given_name_of_session(&agents, ""), None);
     }
 
     #[test]
