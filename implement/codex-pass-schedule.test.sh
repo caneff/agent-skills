@@ -6,8 +6,8 @@
 # `docs/research/2026-09-20-codex-pass-durations.md`.
 # The fail-closed collection gate is unchanged: a verdict nobody could
 # collect must never read as a pass that found nothing (the
-# absent-answer-read-as-benign shape this repo closed seven times on
-# 2026-09-20), so the gate still refuses — not merges — on absent,
+# absent-answer-read-as-benign shape this lane exists to close), so the
+# gate still refuses — not merges — on absent,
 # unreadable, errored, raced or stale, and a refusal ends the step visibly
 # rather than being posted as if it described this PR. Every run still
 # records its own duration, collected or refused.
@@ -114,8 +114,8 @@ check_in "$merge_section" 'nothing already earned is discarded' 'implement/SKILL
 check_in "$merge_section" 'there is no retry: a refused run ends the step for its own phase' 'implement/SKILL.md § The merge'
 check_absent_in "$whole_file" 'The retry is validated by the same gate' 'implement/SKILL.md (whole file)'
 
-# Rule 6: a collected verdict changes nothing downstream — the two-pass
-# ceiling, the dispositions and the trial row are #888's and #812's still.
+# Rule 6: one recorded run per phase, through this one block, whichever
+# phase writes it — never restated as depending on where it was launched.
 check_in "$merge_section" 'A collected verdict is this step' 'implement/SKILL.md § The merge'
 check_absent_in "$whole_file" 'unchanged by where the collected pass was launched' 'implement/SKILL.md (whole file)'
 check_in "$merge_section" 'One recorded run, whichever phase writes it' 'implement/SKILL.md § The merge'

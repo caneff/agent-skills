@@ -118,9 +118,9 @@ owner's word turns it on.
   review cache, `~/.cache/agent-reviews/<repo>/`, under a ticket-named file.
   The controller's Codex pass files (§ The merge step 3), because your own
   clearing of `.scratch/` would take an in-flight pass's output with it. And
-  the PR body, `pr-body-<n>.md` (§ The PR): a body left in `.scratch/` made
-  `merge-cleanup` refuse the removal on every heavy landing, and the
-  controller re-ran it with `--discard` by hand (#1052). The name is
+  the PR body, `pr-body-<n>.md` (§ The PR): a body left in `.scratch/` makes
+  `merge-cleanup` refuse the removal on every heavy landing, forcing the
+  controller to re-run it with `--discard` by hand. The name is
   ticket-specific because a shared `pr-body.md` can be overwritten by
   another session between the write and `gh pr create`, and the PR then
   goes up with another ticket's body and closes that ticket instead.
@@ -670,7 +670,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    silence. A refused verdict's findings are never reported as current —
    they describe a diff this PR no longer has, or a run that never produced
    a review, and either one collected looks exactly like a pass that found
-   nothing, which is the shape this lane closed seven times on 2026-09-20.
+   nothing — the absent-answer-read-as-benign shape this lane exists to close.
    The skip clause at the top of this step governs the preflight only — not
    logged in, no plugin entry — checked before any run exists; every
    started run answers to this gate, and there is no retry: a refused run
@@ -721,8 +721,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    changed.** Step 2's fresh `headRefOid` differing from the sha noted above
    means a `fixed` disposition pushed a commit, so there is a new diff to
    read; a fresh render of the ticket hashing differently from the
-   `sha256sum` noted beside it means a comment added a requirement the first
-   pass never read. Either is a new input, and the pass runs.
+   `body_sha256` noted beside it means a comment added a requirement the
+   first pass never read. Either is a new input, and the pass runs.
 
    If every disposition was `disputed` or `filed`, the sha is unmoved and
    the ticket hash matches, both halves of the input are byte-identical and
@@ -812,9 +812,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    in-round fix, or a ruling — rewrites that finding's line in
    `dispositions-<n>.jsonl` to its new outcome in the same step that records
    it in the PR body. A `leftover` line left standing after its finding was
-   fixed is a sweep item that no longer exists (#1028: P2 ruled fixed in
-   `bda6750`, sidecar still `leftover`). `runfile.py leftover` catches the
-   half-done step at harvest: it refuses a sidecar line whose outcome the PR
+   fixed is a sweep item that no longer exists. `runfile.py leftover` catches
+   the half-done step at harvest: it refuses a sidecar line whose outcome the PR
    body's Decisions made contradicts, and a leftover the body does not cite
    by id (`--pr-body`). A change recorded in neither place is not seen by
    it; the rewrite is the rule.
@@ -837,10 +836,11 @@ The controller merges on a repo Chris owns; Chris reads it after via
    pass only repeated the Claude axes or raised noise.
 4. Merge. Before the merge, re-run the seam on the PR as it will land
    (#1145): GitHub's CLEAN is a textual-merge verdict, not a test verdict, and
-   two PRs sharing no file each pass their own gate and break `<default>`
-   together (burn-2026-09-23: #1107 and #1096). Run `git fetch origin` first,
-   then skip only when `origin/<default>` has not moved past the PR's merge
-   base (`git merge-base --is-ancestor origin/<default> <headRefOid>` exits
+   two PRs sharing no file each pass their own gate and can break `<default>`
+   together even though neither PR's own gate saw the other's change. Run
+   `git fetch origin` first, then skip only when `origin/<default>` has not
+   moved past the PR's merge base
+   (`git merge-base --is-ancestor origin/<default> <headRefOid>` exits
    0, `headRefOid` being step 2's). Otherwise, from the primary checkout:
 
    ```
