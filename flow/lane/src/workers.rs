@@ -6,7 +6,7 @@
 //! `merge-cleanup` removes the record for a workspace once it tears it down.
 
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// One dispatched worker, as the controller needs it back after a `/clear`:
@@ -61,35 +61,27 @@ pub fn now_iso8601() -> String {
         .unwrap_or_default()
 }
 
-/// Appends one record for the controller session at `pid`. The file is
-/// append-only JSONL, one record per dispatch — never rewritten here, so two
-/// dispatches racing on the same controller each add their own line rather
-/// than clobbering the other's.
-/// One `write_all` call, not `writeln!`'s separate write of the line and
-/// its `"\n"` (#964 correctness C4): a regular file opened with `O_APPEND`
-/// gives each single `write(2)` call its own atomic offset bump on Linux, so
-/// two dispatches racing on one controller each land their whole line
-/// whole — two writes per append could interleave a line from each process
-/// between the two, corrupting both, which `read`'s per-line parse would
-/// then have silently dropped.
+/// Appends one record for the controller session at `pid`, one record per
+/// dispatch, so two dispatches racing on the same controller each add their
+/// own line rather than clobbering the other's.
 ///
-/// Takes the same exclusive `File::lock()` as `remove_workspace`'s rewrite
-/// (#964 fix round 1, Codex high): `O_APPEND` alone only protects one
-/// `write(2)` from another; it does nothing against `remove_workspace`'s
-/// read-filter-`fs::write` on the same file, which can land between this
-/// call's open and its write and then get overwritten whole by the rewrite,
-/// silently losing this record. The lock releases when `f` drops at the end
-/// of this function.
+/// Under the sidecar's exclusive lock (`lock`), the whole file is read, the
+/// line added, and the result published as a complete replacement
+/// (`publish`) rather than appended in place (#1101, PR #1099 Codex CX3-1):
+/// an in-place `write_all` cut off after a prefix leaves an unterminated line
+/// that the next append's record merges into, and `read` then skips both. A
+/// replacement cut off anywhere leaves the old file whole.
 pub fn append(home: &Path, pid: &str, record: &WorkerRecord) -> std::io::Result<()> {
     let path = path_for(home, pid);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let mut line = serde_json::to_string(record).map_err(std::io::Error::other)?;
-    line.push('\n');
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
-    f.lock()?;
-    f.write_all(line.as_bytes())
+    let line = serde_json::to_string(record).map_err(std::io::Error::other)?;
+    let _guard = lock(&path)?;
+    let raw = read_if_present(&path)?;
+    let mut lines = non_empty_lines(&raw);
+    lines.push(&line);
+    publish(&path, &lines)
 }
 
 /// Every well-formed record for the controller session at `pid`, in the
@@ -98,36 +90,73 @@ pub fn append(home: &Path, pid: &str, record: &WorkerRecord) -> std::io::Result<
 /// No file at all reads as no workers, the ordinary case for a session that
 /// has never dispatched one.
 ///
-/// Takes a shared `File::lock_shared()` before reading (#1044): without it,
-/// a read landing between `remove_workspace`'s `set_len(0)` truncate and its
-/// rewrite of the kept lines observes an empty file and returns no workers,
-/// silently — exactly the window `controller-restore`'s `SessionStart` read
-/// exists to survive a `/clear` through. `remove_workspace`'s rewrite holds
-/// its own exclusive lock across that whole window, so a shared lock here is
-/// enough to block until the rewrite completes and be read whole. No file at
-/// all still reads as no workers; a file that can be opened but not locked
-/// falls back to reading it unlocked rather than losing every worker over a
-/// lock that failed for an unrelated reason — noted on stderr rather than
-/// swallowed outright, since a silent fallback here is the same class of
-/// failure (#1044 review, S1/P1/C2) the lock exists to remove: nothing would
-/// otherwise distinguish "read while the lock could not be taken" from "no
-/// workers were ever dispatched."
+/// Takes the sidecar's lock shared before reading (#1044), so a read waits
+/// out any writer holding it exclusively. Every write now replaces the file
+/// by rename, so no reader can see a torn one either way; the lock is what
+/// orders a read against a read-modify-publish in progress. A lock that
+/// cannot be taken falls back to reading unlocked rather than losing every
+/// worker over a lock that failed for an unrelated reason — noted on stderr
+/// rather than swallowed outright, since a silent fallback here is the same
+/// class of failure (#1044 review, S1/P1/C2) the lock exists to remove:
+/// nothing would otherwise distinguish "read while the lock could not be
+/// taken" from "no workers were ever dispatched." No lock file is created for
+/// a sidecar that does not exist.
 pub fn read(home: &Path, pid: &str) -> Vec<WorkerRecord> {
     let path = path_for(home, pid);
-    let raw = match std::fs::OpenOptions::new().read(true).open(&path) {
-        Ok(mut f) => {
-            if let Err(e) = f.lock_shared() {
-                eprintln!("workers::read: could not lock {}, reading unlocked: {e}", path.display());
-            }
-            let mut raw = String::new();
-            if f.read_to_string(&mut raw).is_err() {
-                return Vec::new();
-            }
-            raw
+    if std::fs::symlink_metadata(&path).is_err() {
+        return Vec::new();
+    }
+    let _guard = match open_lock(&path).and_then(|l| l.lock_shared().map(|()| l)) {
+        Ok(l) => Some(l),
+        Err(e) => {
+            eprintln!("workers::read: could not lock {}, reading unlocked: {e}", path.display());
+            None
         }
-        Err(_) => return Vec::new(),
     };
-    raw.lines().filter(|l| !l.trim().is_empty()).filter_map(|l| serde_json::from_str(l).ok()).collect()
+    let Ok(raw) = std::fs::read_to_string(&path) else { return Vec::new() };
+    non_empty_lines(&raw).into_iter().filter_map(|l| serde_json::from_str(l).ok()).collect()
+}
+
+/// The lock file beside a sidecar, `<pid>.workers.jsonl.lock`. The lock
+/// lives here rather than on the sidecar's own handle because `publish`
+/// swaps the sidecar's inode by rename: a lock on the old inode would not
+/// exclude a writer that opens the new one (#1101). This file is never
+/// replaced or removed, so every holder locks the same inode.
+fn lock_path(sidecar: &Path) -> PathBuf {
+    sibling(sidecar, "lock")
+}
+
+fn sibling(sidecar: &Path, ext: &str) -> PathBuf {
+    let mut name = sidecar.file_name().unwrap_or_default().to_os_string();
+    name.push(".");
+    name.push(ext);
+    sidecar.with_file_name(name)
+}
+
+fn open_lock(sidecar: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(lock_path(sidecar))
+}
+
+/// The sidecar's exclusive lock, held until the returned handle drops. Every
+/// writer — `append`, `remove_workspace` and adoption's move — holds it
+/// across its whole read-modify-publish, so no write lands between another's
+/// read and its publish and is lost to it (#964 fix round 1, Codex high).
+fn lock(sidecar: &Path) -> std::io::Result<std::fs::File> {
+    let f = open_lock(sidecar)?;
+    f.lock()?;
+    Ok(f)
+}
+
+/// The sidecar's contents, or empty when there is no file yet.
+fn read_if_present(path: &Path) -> std::io::Result<String> {
+    match std::fs::read_to_string(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        other => other,
+    }
+}
+
+fn non_empty_lines(raw: &str) -> Vec<&str> {
+    raw.lines().filter(|l| !l.trim().is_empty()).collect()
 }
 
 /// Normalizes a workspace path for storage in, or a query against, a
@@ -156,56 +185,70 @@ pub fn canonical_workspace_path(path: &str) -> String {
 /// this is best-effort bookkeeping alongside the workspace's own removal, not
 /// a step `merge-cleanup` can fail over.
 ///
-/// Reads through the same exclusive `File::lock()` `append` takes, held for
-/// the whole read-filter-rewrite (#964 fix round 1, Codex high): reading with
-/// `fs::read_to_string` and writing with a separate `fs::write`, as an
-/// earlier version of this did, opens a window between the two where a
-/// concurrent `append` can land and then be silently discarded by this call's
-/// rewrite. One `File` handle, locked before the read, holds that window
-/// shut; the lock releases when the handle drops at the end of each loop
-/// iteration. A file this run cannot open, lock or read is skipped rather
-/// than erroring, matching every other best-effort failure mode here.
+/// Holds the sidecar's exclusive lock (`lock`) across the whole
+/// read-filter-publish (#964 fix round 1, Codex high), so an `append` cannot
+/// land between the read and the publish and be discarded by it; the lock
+/// releases at the end of each loop iteration. A file this run cannot lock,
+/// read or publish is skipped rather than erroring, matching every other
+/// best-effort failure mode here — and a failed publish leaves it whole.
 pub fn remove_workspace(home: &Path, workspace: &str) -> bool {
     let mut removed_any = false;
     for (_, path) in sidecars(home) {
-        let Ok(mut f) = std::fs::OpenOptions::new().read(true).write(true).open(&path) else { continue };
-        if f.lock().is_err() {
-            continue;
-        }
-        let mut raw = String::new();
-        if f.read_to_string(&mut raw).is_err() {
-            continue;
-        }
+        let Ok(_guard) = lock(&path) else { continue };
+        let Ok(raw) = std::fs::read_to_string(&path) else { continue };
         let mut kept: Vec<&str> = Vec::new();
         let mut changed = false;
-        for line in raw.lines() {
-            if line.trim().is_empty() {
-                continue;
-            }
+        for line in non_empty_lines(&raw) {
             match serde_json::from_str::<WorkerRecord>(line) {
                 Ok(r) if r.workspace == workspace => changed = true,
                 _ => kept.push(line),
             }
         }
-        if !changed {
-            continue;
-        }
-        if rewrite(&mut f, &kept).is_ok() {
+        if changed && publish(&path, &kept).is_ok() {
             removed_any = true;
         }
     }
     removed_any
 }
 
-/// Replaces the whole of a locked sidecar with `lines`, one record each.
-fn rewrite(f: &mut std::fs::File, lines: &[&str]) -> std::io::Result<()> {
+/// Replaces the whole of a locked sidecar with `lines`, one record each, so
+/// that a death, kill or full disk at any point leaves either the old file or
+/// the new one, never a truncated one (#1101): the new contents go to
+/// `<sidecar>.tmp`, are fsynced, and are renamed over the sidecar, and the
+/// directory is fsynced so the rename itself survives a crash. The caller
+/// holds `lock`, which is what makes one fixed temp name safe; a temp file a
+/// crash left behind is truncated by the next publish.
+fn publish(path: &Path, lines: &[&str]) -> std::io::Result<()> {
     let mut out = lines.join("\n");
     if !out.is_empty() {
         out.push('\n');
     }
-    f.set_len(0)?;
-    f.seek(SeekFrom::Start(0))?;
-    f.write_all(out.as_bytes())
+    let tmp = sibling(path, "tmp");
+    let written = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        abort_mid_write(path, &mut f, out.as_bytes());
+        f.write_all(out.as_bytes())?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written?;
+    std::fs::File::open(path.parent().unwrap_or(Path::new(".")))?.sync_all()
+}
+
+/// Test-only failpoint, absent from a release build: a process death partway
+/// through publishing the sidecar `LANE_SIDECAR_ABORT_MID_WRITE` names, after
+/// the first half of its new contents reached `f`.
+fn abort_mid_write(path: &Path, f: &mut std::fs::File, bytes: &[u8]) {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("LANE_SIDECAR_ABORT_MID_WRITE").is_some_and(|name| path.file_name() == Some(name.as_os_str())) {
+        let _ = f.write_all(&bytes[..bytes.len() / 2]);
+        std::process::abort();
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = (path, f, bytes);
 }
 
 /// Every `<pid>.workers.jsonl` under `<home>/.claude/sessions`, as
@@ -303,7 +346,9 @@ pub struct Adopter<'a> {
 /// its scan for a live holder to its landing, so two sessions adopting one
 /// worker serialize: the second finds the first's copy alive and is
 /// refused. The move itself also takes the exclusive lock `append` and
-/// `remove_workspace` take, on both sidecars, in path order. The record
+/// `remove_workspace` take, on both sidecars, in path order, and publishes
+/// each sidecar whole (`publish`), so a death mid-write never leaves either
+/// one short of a record it held (#1101). The record
 /// lands in the adopter's sidecar before it leaves the dead one (#1098
 /// Codex [high]): a process death between the two leaves a duplicate the
 /// live copy outranks — `orphans` never offers it, and this refuses it —
@@ -349,27 +394,16 @@ fn move_record(
 ) -> Result<Option<Adopted>, AdoptRefusal> {
     let io = |e: std::io::Error| AdoptRefusal::Io(e.to_string());
     let own = path_for(home, me.pid);
-    let mut src = std::fs::OpenOptions::new().read(true).write(true).open(from).map_err(io)?;
-    let mut dst = if own == from {
-        None
+    let _guards = if own == from {
+        vec![lock(from).map_err(io)?]
+    } else if own.as_path() < from {
+        vec![lock(&own).map_err(io)?, lock(from).map_err(io)?]
     } else {
-        Some(std::fs::OpenOptions::new().create(true).append(true).open(&own).map_err(io)?)
+        vec![lock(from).map_err(io)?, lock(&own).map_err(io)?]
     };
-    match &dst {
-        Some(d) if own.as_path() < from => {
-            d.lock().map_err(io)?;
-            src.lock().map_err(io)?;
-        }
-        Some(d) => {
-            src.lock().map_err(io)?;
-            d.lock().map_err(io)?;
-        }
-        None => src.lock().map_err(io)?,
-    }
 
-    let mut raw = String::new();
-    src.read_to_string(&mut raw).map_err(io)?;
-    let lines: Vec<&str> = raw.lines().filter(|l| !l.trim().is_empty()).collect();
+    let raw = std::fs::read_to_string(from).map_err(io)?;
+    let lines = non_empty_lines(&raw);
     let Some((at, record)) =
         lines.iter().enumerate().find_map(|(i, l)| serde_json::from_str::<WorkerRecord>(l).ok().filter(|r| names(r)).map(|r| (i, r)))
     else {
@@ -385,25 +419,25 @@ fn move_record(
     let adopted = WorkerRecord { proc_start: me.start.to_string(), ..record };
     let line = serde_json::to_string(&adopted).map_err(|e| AdoptRefusal::Io(e.to_string()))?;
     let mut kept: Vec<&str> = lines.iter().enumerate().filter(|(i, _)| *i != at).map(|(_, l)| *l).collect();
-    let stale_copy_left = match dst.as_mut() {
-        None => {
-            kept.push(&line);
-            rewrite(&mut src, &kept).map_err(io)?;
-            false
+    let stale_copy_left = if own == from {
+        kept.push(&line);
+        publish(from, &kept).map_err(io)?;
+        false
+    } else {
+        // Landing first: a failed publish leaves the source untouched
+        // (#1098 review C3), and a death after it leaves a duplicate the
+        // live copy outranks rather than a worker in neither file.
+        let dst_raw = read_if_present(&own).map_err(io)?;
+        let mut landed = non_empty_lines(&dst_raw);
+        landed.push(&line);
+        publish(&own, &landed).map_err(io)?;
+        #[cfg(debug_assertions)]
+        if std::env::var_os("LANE_ADOPT_ABORT_AFTER_LANDING").is_some() {
+            // Test-only failpoint, absent from a release build: a real
+            // process death in exactly that window.
+            std::process::abort();
         }
-        Some(d) => {
-            // Landing first: a failed write leaves the source untouched
-            // (#1098 review C3), and a death after it leaves a duplicate the
-            // live copy outranks rather than a worker in neither file.
-            d.write_all(format!("{line}\n").as_bytes()).map_err(io)?;
-            #[cfg(debug_assertions)]
-            if std::env::var_os("LANE_ADOPT_ABORT_AFTER_LANDING").is_some() {
-                // Test-only failpoint, absent from a release build: a real
-                // process death in exactly that window.
-                std::process::abort();
-            }
-            rewrite(&mut src, &kept).is_err()
-        }
+        publish(from, &kept).is_err()
     };
     Ok(Some(Adopted { from_pid: from_pid.to_string(), record: adopted, stale_copy_left }))
 }
@@ -411,7 +445,13 @@ fn move_record(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Seek, SeekFrom};
     use tempfile::TempDir;
+
+    /// Holds the lock every sidecar writer takes, as a racing writer would.
+    fn hold_lock(home: &Path, pid: &str) -> std::fs::File {
+        lock(&path_for(home, pid)).unwrap()
+    }
 
     fn record(workspace: &str) -> WorkerRecord {
         WorkerRecord {
@@ -563,16 +603,14 @@ mod tests {
         assert!(!remove_workspace(tmp.path(), "/anything"));
     }
 
-    /// #1044: `remove_workspace`'s rewrite truncates the file (`set_len(0)`)
-    /// before writing the kept records back, all under its exclusive lock.
-    /// `read` must take that same lock (shared is enough) so a read landing
-    /// in that window blocks until the rewrite finishes, rather than
-    /// observing the truncated-but-not-yet-rewritten file and returning no
-    /// records — the torn read `controller-restore` would otherwise hit.
-    /// Simulates the pause by holding the lock across a truncate, spawning
-    /// `read` on another thread, proving it cannot return while the lock is
-    /// held, then completing the rewrite and checking `read` observes the
-    /// full post-rewrite content rather than the empty truncated file.
+    /// #1044: `read` takes the lock every writer holds (shared is enough), so
+    /// a read landing while a writer holds it blocks until the write is done
+    /// rather than observing the file mid-write and returning no records —
+    /// the torn read `controller-restore` would otherwise hit. Holds the lock
+    /// across an in-place truncate, as a writer that did not publish by
+    /// rename would, spawns `read` on another thread, proves it cannot return
+    /// while the lock is held, then completes the write and checks `read`
+    /// observes the full content rather than the empty truncated file.
     #[test]
     fn read_waits_for_the_lock_so_it_never_observes_a_torn_truncate() {
         let tmp = TempDir::new().unwrap();
@@ -581,8 +619,8 @@ mod tests {
         append(&home, "111", &record("/b")).unwrap();
 
         let path = path_for(&home, "111");
+        let lock = hold_lock(&home, "111");
         let mut held = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
-        held.lock().unwrap();
         held.set_len(0).unwrap();
         held.seek(SeekFrom::Start(0)).unwrap();
 
@@ -606,7 +644,7 @@ mod tests {
         held.seek(SeekFrom::Start(0)).unwrap();
         held.write_all(line_a.as_bytes()).unwrap();
         held.write_all(line_b.as_bytes()).unwrap();
-        drop(held);
+        drop(lock);
 
         let got = reader.join().unwrap();
         let workspaces: Vec<&str> = got.iter().map(|r| r.workspace.as_str()).collect();
@@ -626,9 +664,7 @@ mod tests {
         append(&home, "111", &record("/a")).unwrap();
         append(&home, "111", &record("/b")).unwrap();
 
-        let path = path_for(&home, "111");
-        let held = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
-        held.lock().unwrap();
+        let held = hold_lock(&home, "111");
 
         let (remove_done_tx, remove_done_rx) = std::sync::mpsc::channel();
         let h1 = home.clone();
@@ -681,8 +717,7 @@ mod tests {
         let me = std::process::id().to_string();
         let my_start = crate::proc_info::read_stat(std::process::id() as i32).unwrap().start;
 
-        let held = std::fs::OpenOptions::new().read(true).write(true).open(path_for(&home, &dead)).unwrap();
-        held.lock().unwrap();
+        let held = hold_lock(&home, &dead);
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let (h, root, me2, start2) = (home.clone(), tmp.path().display().to_string(), me.clone(), my_start.clone());
         let adopter = std::thread::spawn(move || {
@@ -715,11 +750,8 @@ mod tests {
 
     /// #1098 review C3: a failed landing must leave the record where it was —
     /// a worker in neither file is one nothing will ever offer or restore
-    /// again. The
-    /// adopter's sidecar is `/dev/full` here, which opens and locks but
-    /// refuses every write — and reads zeros forever, so this calls
-    /// `move_record`, which never reads the adopter's sidecar, rather than
-    /// `adopt`, whose scan reads every sidecar.
+    /// again. A directory squats on the adopter's `<sidecar>.tmp` here, so the
+    /// landing's publish cannot create its temp file and fails.
     #[test]
     fn a_failed_write_into_the_adopters_sidecar_leaves_the_record_where_it_was() {
         let tmp = TempDir::new().unwrap();
@@ -729,7 +761,7 @@ mod tests {
         let ws = ws.display().to_string();
         let dead = i32::MAX.to_string();
         append(home, &dead, &record(&ws)).unwrap();
-        std::os::unix::fs::symlink("/dev/full", path_for(home, "4242")).unwrap();
+        std::fs::create_dir(sibling(&path_for(home, "4242"), "tmp")).unwrap();
 
         let root = tmp.path().display().to_string();
         let names = |r: &WorkerRecord| r.agent == "sudokupad-art-143" && crate::sessions::in_tree(&r.workspace, &root);
@@ -776,8 +808,7 @@ mod tests {
         append(&home, &dead, &record(&ws)).unwrap();
         append(&home, "4242", &record("/other")).unwrap();
 
-        let held = std::fs::OpenOptions::new().read(true).write(true).open(path_for(&home, "4242")).unwrap();
-        held.lock().unwrap();
+        let held = hold_lock(&home, "4242");
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let h = home.clone();
         let mover = std::thread::spawn(move || {
