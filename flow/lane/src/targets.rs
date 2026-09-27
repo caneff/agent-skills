@@ -40,7 +40,9 @@ const CODE_BASENAMES: &[&str] = &["skill.md", "makefile", "dockerfile", "justfil
 /// trailing sentence punctuation is dropped. It is code by extension, by
 /// filename, or as an extensionless entry under a script directory.
 pub fn first_code_target(body: &str) -> Option<String> {
-    body.split(|c: char| !(c.is_alphanumeric() || "/-_.".contains(c)))
+    // A Windows path separator is a path separator, as `tier.py` reads it.
+    body.replace('\\', "/")
+        .split(|c: char| !(c.is_alphanumeric() || "/-_.".contains(c)))
         .map(|t| t.trim_end_matches('.'))
         .find(|t| is_code_path(t))
         .map(str::to_string)
@@ -102,6 +104,15 @@ mod tests {
         for body in ["read/write and and/or", "docs/notes.md", "a/b.txt", "a/b.rst", "a/b.markdown", "ratio 3/4.5 here", "docs/.notes.md"] {
             assert_eq!(first_code_target(body), None, "{body}");
         }
+    }
+
+    #[test]
+    fn a_backslash_path_reads_like_a_slash_path() {
+        // `tier.py` normalises `\` to `/` before it classifies; so does this.
+        assert_eq!(first_code_target(r"see bin\implement-dispatch, then").as_deref(), Some("bin/implement-dispatch"));
+        assert_eq!(first_code_target(r"edit .githooks\pre-push").as_deref(), Some(".githooks/pre-push"));
+        assert_eq!(first_code_target(r"src\main.dart"), Some("src/main.dart".into()));
+        assert_eq!(first_code_target(r"docs\notes.md"), None);
     }
 
     #[test]
