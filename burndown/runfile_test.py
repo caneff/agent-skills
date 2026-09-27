@@ -1392,6 +1392,38 @@ def test_a_sidecar_the_pr_body_agrees_with_is_harvested_whatever_came_after():
     assert added == ["S2", "S3", "S5", "S6", "codex-gate-1"], added
 
 
+def test_an_over_engineering_leftover_is_harvested_like_any_other_id():
+    # #1021: an OE-id finding (an over-engineering cut) joins the PR body
+    # and the leftover harvest exactly like an S/P/C one — the id format
+    # carries no axis-specific meaning to this reader.
+    root = landed_root()
+    sidecar = sidecar_of(
+        {"id": "S1", "outcome": "fixed", "sha": "283d5ef"},
+        {"id": "OE1", "outcome": "leftover", "file": "a.py",
+         "title": "yagni: one-caller layer", "severity": "judgement",
+         "text": "inline it until a second caller exists"})
+    body = pr_body("## Decisions made\n\n- S1: fixed, 283d5ef.\n"
+                    "- OE1: leftover (one-caller layer, judgement).\n")
+    _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root,
+                                pr_body=body)
+    assert added == ["OE1"], added
+    entry = runfile.load("burn-1", root=root)["leftovers"][0]
+    assert entry["id"] == "OE1" and entry["severity"] == "judgement", entry
+
+
+def test_an_over_engineering_id_is_recognized_when_the_pr_body_disagrees():
+    # #1021 correctness C1: the prior test's PR-body half was a hollow
+    # witness — a body that never cites OE1 at all also harvests clean,
+    # since an uncited id is "not disputed", not "disputed". Prove the
+    # citation grammar itself reads an OE id, by putting it in genuine
+    # disagreement with the sidecar and reading the refusal message.
+    sidecar = sidecar_of({"id": "OE1", "outcome": "leftover", "file": "a.py",
+                          "title": "t", "severity": "judgement", "text": "x"})
+    body = pr_body("## Decisions made\n\n- OE1: fixed, 283d5ef.\n")
+    got = refusal_of(sidecar, landed_root(), body)
+    assert "records OE1 as 'fixed'" in got, got
+
+
 def test_a_leftover_line_the_pr_body_records_as_fixed_is_refused_until_rewritten():
     # #1085's own case: the fix landed and the PR body says so, but the
     # sidecar line still reads leftover.

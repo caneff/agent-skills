@@ -137,6 +137,18 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 
 This lens **owns** the three smells above that are really over-engineering — Speculative Generality, Middle Man, Refused Bequest. Report each such cut **once**, under the over-engineering subsection (step 4), never twice. A single smoke test or `assert`-based self-check is the minimum, not bloat — never flag it as a cut.
 
+**Every cut gets a sidecar line too** (#1021). An over-engineering cut is a
+finding like any other — it escapes disposition and the leftover sweep when
+it lives in prose only. Assign each cut a stable id in its own series —
+`OE1`, `OE2`, … — cite that id beside the cut in the prose subsection, and
+give it a line in the same `findings-standards-<n>.jsonl` sidecar as the rest
+of the Standards axis's findings (§ 4 below), `axis` still `"standards"` and
+`severity` always `"judgement"` — an over-engineering cut is not a
+documented repo standard, and § 3's own **Always a judgement call** rule
+already says nothing here can be `hard`. The verification pass, the dispositions
+sidecar, and the leftover sweep join an `OE` id exactly as they join an `S`,
+`P`, or `C` one — nothing about the id format is axis-specific.
+
 ### 4. Spawn the three sub-agents in parallel
 
 Spawn all three with the plain `Agent` tool, `subagent_type: diff-reviewer`, fire-and-return: no `name`, not background, no teammate messaging. This is what makes the result reach *you* as the agent's completion notification — even when you yourself are a subagent of some other caller. A named background teammate parks its report for `SendMessage`/`ListAgents` instead, and when you're a subagent nothing is polling for that: the report idles or lands nowhere.
@@ -164,7 +176,9 @@ finding stops needing an LLM pass over prose (#855, #854): "Also write
 finding: `{"id": "<letter+ordinal>", "axis": "<axis>", "severity": "hard"
 or "judgement", "file": "<path>", "title": "<short title>"}`. Assign each
 finding a stable id — the axis's first letter (`S` standards, `P` spec, `C`
-correctness) plus a per-report ordinal, e.g. `S1`, `P2`, `C3`. Cite the
+correctness) plus a per-report ordinal, e.g. `S1`, `P2`, `C3`; an
+over-engineering cut instead takes its own `OE1`, `OE2`, … series, still
+under `axis: "standards"`. Cite the
 same id in the prose report next to each finding, so a reader can join the
 two. A partial write costs one line, not the file — readers of this
 sidecar must tolerate and skip a malformed line rather than fail the whole
@@ -295,7 +309,7 @@ If the completion notification comes back missing or empty, read that file befor
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The list of standards-source files you found in step 3, and the settled decisions. The smell baseline and the over-engineering lens are the agent definition's to read from § 3; paste them only in the no-definition fallback above.
-- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Check `docs/agents/defect-classes.md` by name when present in the reviewed repo — the three shapes this repo keeps shipping, with every instance; when absent, check the three shapes inline instead: (1) an absent or malformed answer read as a benign one; (2) a stated fallback with no mechanism behind it; (3) a test that passes for a reason other than the one it claims. Skip anything tooling enforces, and skip the hollow-witness check — the correctness axis owns it (#938), and two opus agents mutating the same tests over the same diff cost two dispositions for one finding. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the over-engineering lens over the diff and list what to cut, one line each in `location: <tag> <what>. <replacement>.` form using the five tags. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Findings and their evidence only, no preamble."
+- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Check `docs/agents/defect-classes.md` by name when present in the reviewed repo — the three shapes this repo keeps shipping, with every instance; when absent, check the three shapes inline instead: (1) an absent or malformed answer read as a benign one; (2) a stated fallback with no mechanism behind it; (3) a test that passes for a reason other than the one it claims. Skip anything tooling enforces, and skip the hollow-witness check — the correctness axis owns it (#938), and two opus agents mutating the same tests over the same diff cost two dispositions for one finding. Then end with a required **### Over-engineering** subsection (a `###` so it nests under the Standards heading): run the over-engineering lens over the diff and list what to cut, one line each in `OE<n>: location: <tag> <what>. <replacement>.` form using the five tags, `<n>` a per-report ordinal starting at 1 for this subsection's own series. This subsection owns Speculative Generality / Middle Man / Refused Bequest — report those cuts here, not above. Write `Lean already.` if there is nothing to cut — the subsection is required even when empty. Also give each cut a line in the same findings sidecar as your other findings, with that `OE<n>` id and `axis: "standards"`. Findings and their evidence only, no preamble."
 
 **Spec sub-agent prompt** — include:
 
