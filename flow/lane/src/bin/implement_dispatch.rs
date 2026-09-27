@@ -1096,9 +1096,21 @@ fn run() -> Result<(), ExitCode> {
         claim_args.extend(["--add-label", "in-progress", "--add-assignee", "@me"]);
         match run_timeout("gh", &claim_args, gh_mutation_timeout()) {
             Ok(c) if c.success => claimed.push(t),
-            _ => {
+            other => {
                 release_claimed(&claimed, &slug);
-                return Err(die(format!("could not claim #{}", t.n)));
+                // Names the underlying gh output (#849 correctness gate,
+                // C4/P3a) so a timeout here — where GitHub may still have
+                // applied the edit after this process's own child was
+                // killed — reads as a timeout an operator should check
+                // GitHub over, not a bare "could not claim" that looks
+                // like an ordinary gh failure. This ticket itself is never
+                // auto-released past a timeout: doing so on a claim that
+                // actually landed server-side would incorrectly revert it.
+                let why = match other {
+                    Ok(c) => c.combined,
+                    Err(e) => e.to_string(),
+                };
+                return Err(die(format!("could not claim #{} (gh issue edit): {why}", t.n)));
             }
         }
     }
