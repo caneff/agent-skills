@@ -1058,8 +1058,12 @@ def run(argv):
     sweep_cmd = subs.add_parser(
         "sweep", help="one herdr probe per live slot, the backstop under the "
                       "wake")
-    sweep_cmd.add_argument("--workers", required=True,
-                           help="the run's clumps, as the run file holds them")
+    roster = sweep_cmd.add_mutually_exclusive_group(required=True)
+    roster.add_argument("--run",
+                        help="the run id; its clumps are read from the run "
+                             "file")
+    roster.add_argument("--workers",
+                        help="the run's clumps, as the run file holds them")
     hub = subs.add_parser(
         "hub", help="whether a landing asks for full re-exploration")
     hub.add_argument("--candidates", required=True)
@@ -1169,9 +1173,15 @@ def run(argv):
                     "workers")
             budget = float(os.environ.get("BURNDOWN_SWEEP_BUDGET")
                            or SWEEP_BUDGET)
-            print(render_sweep(
-                sweep(read_clumps(args.workers, closure=False), herdr_get,
-                      budget=budget)))
+            if args.run:
+                try:
+                    workers = runfile.load(args.run, runfile.env_root())[
+                        "clumps"]
+                except runfile.RunFileError as exc:
+                    raise LoopError(str(exc)) from exc
+            else:
+                workers = read_clumps(args.workers, closure=False)
+            print(render_sweep(sweep(workers, herdr_get, budget=budget)))
         elif args.command == "hub":
             landed = [p for p in args.landed.replace(",", " ").split() if p]
             hub_files = hubs(read_clumps(args.candidates))

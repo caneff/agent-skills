@@ -15,6 +15,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import loop  # noqa: E402
+import runfile  # noqa: E402
 
 
 def git_stub(branch="main", git_dir="/repo/.git", common_dir="/repo/.git",
@@ -1672,6 +1673,42 @@ def test_the_cli_sweep_probes_each_live_slot_once_through_herdr():
         with open(calls) as fh:
             assert fh.read().split() == ["skills-1", "skills-2", "skills-3"], \
                 "the sweep probes each live slot exactly once"
+
+
+def test_the_cli_sweep_reads_the_run_file_itself_given_a_run_id():
+    # `--run` loads the run file through runfile.load(), so the controller
+    # no longer extracts `.clumps` by hand (#1173 codex-third-1).
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = os.path.join(tmp, "bin")
+        os.mkdir(bindir)
+        stub = os.path.join(bindir, "herdr")
+        with open(stub, "w") as fh:
+            fh.write(HERDR_STUB)
+        os.chmod(stub, 0o755)
+        cache = os.path.join(tmp, "cache")
+        runfile.start("burn-sweep-run-fixture", slots=2, root=cache)
+        runfile.clump("burn-sweep-run-fixture", [1], "/w/1", "skills-1", root=cache)
+        runfile.clump("burn-sweep-run-fixture", [3], "/w/3", "skills-3", root=cache)
+        runfile.clump("burn-sweep-run-fixture", [4], "/w/4", "skills-4", root=cache)
+        runfile.land("burn-sweep-run-fixture", 4, "a1b2c3d", root=cache)
+        calls = os.path.join(tmp, "calls")
+        env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"],
+                   CALLS=calls, BURNDOWN_CACHE_DIR=cache)
+        got = subprocess.run([sys.executable, LOOP, "sweep", "--run",
+                              "burn-sweep-run-fixture"], capture_output=True, text=True,
+                             timeout=60, env=env)
+        assert got.returncode == 0, got
+        assert "working   #1" in got.stdout, got.stdout
+        assert "vanished  #3" in got.stdout, got.stdout
+        with open(calls) as fh:
+            assert fh.read().split() == ["skills-1", "skills-3"], \
+                "a landed clump is not probed"
+        missing = subprocess.run([sys.executable, LOOP, "sweep", "--run",
+                                  "burn-none"], capture_output=True,
+                                 text=True, timeout=60, env=env)
+        assert missing.returncode == 1, missing
+        assert "burn-none" in missing.stderr, missing.stderr
+        assert "Traceback" not in missing.stderr, missing.stderr
 
 
 def test_a_clump_with_no_agent_name_is_one_verdict_not_a_dead_sweep():

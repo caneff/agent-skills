@@ -369,7 +369,7 @@ behind the ranking, and what each source costs when it is read the other way:
    says; it never parks a clump, holds a slot or calls a worker stalled on
    the alert alone.
 3. **The backstop is a bounded sweep.** `python3 burndown/loop.py sweep
-   --workers <run file's clumps>` probes each live slot once through `herdr
+   --run <run-id>` probes each live slot once through `herdr
    agent get` — no retry, no wait, one call per slot and none for a landed
    clump. Run it when the controller wakes for any reason and has **nothing
    else to do**. It is **never a timer** and never a blocking call: the wake
