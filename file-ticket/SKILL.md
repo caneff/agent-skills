@@ -115,9 +115,11 @@ whatever the edge does: an old `gh` without the flag, or a tracker with no
 dependency support, is a reported failure over a filed, readable ticket
 rather than a filing that never happened. (`gh` 2.95.0 has both
 `--add-blocked-by` here and `--blocked-by` on the create; the second
-command is for the machines that do not.) Say so in your reply when the
-edge fails — the section still states the relationship, and nobody has to
-find out from the tracker later.
+command is for the machines that do not.) A same-repo edge that fails
+is not covered by the unresolved status above — that only fires for a
+cross-repo edge — so report the failed edge in your reply too, since
+the section's `- #<n>` line is the only record left of a blocker the
+tracker itself no longer gates on.
 
 Filing more than one target prints one URL per line, in the order the
 targets were given.

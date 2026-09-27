@@ -244,7 +244,7 @@ Pause and ask for human review when:
 - The task requires changes outside the stated scope
 
 Checkpoints:
-After each major step, output: ✅ [what was completed]
+Report progress when it changes or a checkpoint is reached; ground each completion claim in a tool result.
 At the end, output a full summary of every file changed.
 ```
 
