@@ -1096,6 +1096,45 @@ fn a_dry_run_names_an_ignored_non_cache_file_as_a_blocker_and_changes_nothing() 
 }
 
 #[test]
+fn a_dry_run_caps_the_scratch_blocker_at_the_first_names() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r42", "implement-1210a");
+    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
+    std::fs::create_dir_all(wt.join(".scratch")).unwrap();
+    for i in 1..=8 {
+        std::fs::write(wt.join(format!(".scratch/f{i}.log")), "kept\n").unwrap();
+    }
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert_eq!(
+        blocker_lines(&run),
+        vec!["blocker: scratch 8 file(s): .scratch/f1.log, .scratch/f2.log, .scratch/f3.log, .scratch/f4.log, .scratch/f5.log and 3 more".to_string()],
+        "{}",
+        run.text()
+    );
+}
+
+#[test]
+fn a_dry_run_names_a_nested_git_worktree_in_scratch_as_one_entry() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r43", "implement-1210b");
+    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
+    let nested = wt.join(".scratch/verify-mut");
+    std::fs::create_dir_all(nested.join("src/deep")).unwrap();
+    std::fs::write(nested.join(".git"), "gitdir: /elsewhere\n").unwrap();
+    for i in 1..=8 {
+        std::fs::write(nested.join(format!("src/deep/f{i}.rs")), "x\n").unwrap();
+    }
+    std::fs::write(wt.join(".scratch/evidence.log"), "kept\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert_eq!(
+        blocker_lines(&run),
+        vec!["blocker: scratch 2 file(s): .scratch/evidence.log, .scratch/verify-mut/".to_string()],
+        "{}",
+        run.text()
+    );
+}
+
+#[test]
 fn a_dry_run_names_a_live_session_as_a_blocker_and_changes_nothing() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r41", "implement-1032b");

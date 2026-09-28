@@ -569,6 +569,22 @@ fn files_under(dir: &Path) -> Option<Vec<String>> {
     Some(out)
 }
 
+/// `names`, relative to `wt`, with every file under a nested git worktree
+/// (a directory holding a `.git` entry) replaced by that directory once, as
+/// `dir/`: a verification subagent's checkout is one fact, not thousands.
+fn collapse_nested_worktrees(wt: &str, names: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for name in names {
+        let parts: Vec<&str> = name.split('/').collect();
+        let nested = (1..parts.len()).map(|n| parts[..n].join("/")).find(|dir| Path::new(wt).join(dir).join(".git").exists());
+        let shown = nested.map_or(name, |dir| format!("{dir}/"));
+        if !out.contains(&shown) {
+            out.push(shown);
+        }
+    }
+    out
+}
+
 /// The first `NAMES_SHOWN` names, comma-separated, then "and <n> more".
 fn first_names(names: &[String]) -> String {
     let shown = names[..names.len().min(NAMES_SHOWN)].join(", ");
@@ -626,10 +642,13 @@ impl Cleanup {
                 Some(files) => {
                     let (scratch, ignored): (Vec<String>, Vec<String>) =
                         files.ignored.iter().cloned().partition(|f| f == ".scratch/" || f.starts_with(".scratch/"));
-                    // Modified and untracked are capped, as in the refusal;
-                    // ignored and scratch names never are (#838).
+                    // Modified, untracked and scratch names are capped, as in
+                    // the refusal; ignored names never are (#838). A scratch
+                    // tree can hold thousands of files, and the count says
+                    // how many.
+                    let scratch = collapse_nested_worktrees(&wt, scratch);
                     for (kind, names, capped) in
-                        [("modified", files.modified, true), ("untracked", files.untracked, true), ("ignored", ignored, false), ("scratch", scratch, false)]
+                        [("modified", files.modified, true), ("untracked", files.untracked, true), ("ignored", ignored, false), ("scratch", scratch, true)]
                     {
                         if !names.is_empty() {
                             let shown = if capped { first_names(&names) } else { names.join(", ") };
