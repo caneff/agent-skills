@@ -246,7 +246,7 @@ def test_dispatch_refuses_a_run_file_that_names_no_target_repo_1190():
     # A run file from before the field loads, but a command printed without
     # `--repo` would claim against the cwd's origin: refuse, never omit.
     with tempfile.TemporaryDirectory() as tmp:
-        cand, live, env = run_file_dispatch(tmp, ("none",), repo=None)
+        cand, live, env = run_file_dispatch(tmp, ("none",), legacy=True)
         got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
                       "--run", "burn-t", "--free", "2", "--processes", "4",
                       "--committed-gb", "4", env=env)
@@ -1974,16 +1974,17 @@ def drop_repo_field(run_id, cache):
         json.dump(run, fh)
 
 
-def run_file_dispatch(tmp, recorded, repo=REPO):
+def run_file_dispatch(tmp, recorded, repo=REPO, legacy=False):
     """`closure.py --json` plus workspace as the controller builds it — no
     `job` field — and a run file in a private cache dir. `recorded` is the
     `runfile.py job` call for clump 351, or None to record nothing. `repo` is
-    the run's target checkout; None writes a run file from before the field."""
+    the run's target checkout; `legacy` strips the field, as a run file
+    written before it existed."""
     import runfile
     cache = os.path.join(tmp, "cache")
     os.makedirs(cache)
-    runfile.start("burn-t", 5, None, root=cache, repo=repo or REPO)
-    if repo is None:
+    runfile.start("burn-t", 5, None, root=cache, repo=repo)
+    if legacy:
         drop_repo_field("burn-t", cache)
     runfile.clump("burn-t", [351], "/w/351", "sm-351", root=cache)
     runfile.clump("burn-t", [412], "/w/412", "sm-412", root=cache)
