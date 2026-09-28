@@ -973,6 +973,13 @@ def workspace_diff(workspace):
             raise LoopError(f"could not read {workspace}'s diff: git "
                             f"{' '.join(args)} failed: {done.stderr.strip()}")
         return done.stdout
+    # A workspace path whose `.git` is gone resolves to the checkout around it
+    # (workspaces sit under the primary's `.claude/worktrees/`), whose diff is
+    # empty on the default branch — an absent workspace read as no change.
+    top = in_workspace(["rev-parse", "--show-toplevel"]).strip()
+    if os.path.realpath(top) != os.path.realpath(workspace):
+        raise LoopError(f"{workspace} is not a checkout root (git resolves it "
+                        f"to {top}), so its diff is not its own")
     default = in_workspace(
         ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).strip()
     # NUL-separated, as `closure.py` reads `git ls-files`: the default output

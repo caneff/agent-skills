@@ -2229,6 +2229,21 @@ def test_workspace_diff_returns_a_non_ascii_path_unquoted():
         assert loop.workspace_diff(work) == ["caf\u00e9.md"]
 
 
+def test_workspace_diff_refuses_a_directory_that_is_not_its_own_checkout():
+    # #1212 C3: a workspace path with its `.git` gone resolves to the checkout
+    # around it and would read as a branch that changed nothing.
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_workspace(tmp, ["b.txt"])
+        inner = os.path.join(work, "gone")
+        os.mkdir(inner)
+        try:
+            loop.workspace_diff(inner)
+        except loop.LoopError as exc:
+            assert "not a checkout root" in str(exc), exc
+        else:
+            raise AssertionError("an enclosing checkout's diff was returned")
+
+
 def test_the_cli_dispatch_holds_a_candidate_on_a_file_only_the_diff_reaches():
     with tempfile.TemporaryDirectory() as tmp:
         work = make_workspace(tmp, ["b.txt"])
