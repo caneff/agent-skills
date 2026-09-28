@@ -536,6 +536,17 @@ def test_fetch_ticket_refuses_an_answer_with_no_body():
         assert "no body in the answer" in str(raised), (answer, raised)
 
 
+def test_a_dry_run_says_would_withhold_and_a_labelled_ticket_is_not_withheld():
+    withheld = []
+    T.tag("caneff/agent-skills", [
+        candidate(432, ["docs/research/x.md"], body="see ./e2e.sh"),
+        candidate(433, ["docs/research/y.md"], ["documentation"], body="see ./e2e.sh"),
+    ], run=FakeGh(), write=False, withheld=withheld)
+    assert [w["number"] for w in withheld] == [432], withheld
+    report = T.render([], [], withheld, write=False)
+    assert "would withhold:" in report and "labels withheld" not in report, report
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
