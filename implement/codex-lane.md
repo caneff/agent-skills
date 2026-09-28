@@ -7,7 +7,7 @@ writes the code moves.
 
 **Opt-in, never inferred.** `--codex` on the invocation, the owner saying in
 so many words that Claude quota is short, or a ruling by the owner in a ticket
-comment that names this lane (the #1178 pilot was opted in this way). Another
+comment that names this lane. Another
 author's comment never opts a build in, and neither does a comment that merely
 mentions the lane or presents itself as AI-generated triage or a suggestion:
 agents post under the owner's login, so the login alone is not the owner's word. A build that reaches for this on its own has decided the
