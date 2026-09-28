@@ -2222,6 +2222,13 @@ def test_workspace_diff_names_both_sides_of_a_rename():
         assert sorted(loop.workspace_diff(work)) == ["a.txt", "renamed.txt"]
 
 
+def test_workspace_diff_returns_a_non_ascii_path_unquoted():
+    # #1212 C2: git's default output quotes it, so it never matches a raw path.
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_workspace(tmp, ["caf\u00e9.md"])
+        assert loop.workspace_diff(work) == ["caf\u00e9.md"]
+
+
 def test_the_cli_dispatch_holds_a_candidate_on_a_file_only_the_diff_reaches():
     with tempfile.TemporaryDirectory() as tmp:
         work = make_workspace(tmp, ["b.txt"])

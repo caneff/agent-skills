@@ -975,8 +975,11 @@ def workspace_diff(workspace):
         return done.stdout
     default = in_workspace(
         ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).strip()
-    return [line for line in in_workspace(
-        ["diff", "--name-only", "--no-renames", f"{default}...HEAD"]).splitlines() if line]
+    # NUL-separated, as `closure.py` reads `git ls-files`: the default output
+    # C-quotes a non-ASCII name, which then matches no raw path.
+    return [name for name in in_workspace(
+        ["diff", "--name-only", "-z", "--no-renames",
+         f"{default}...HEAD"]).split("\0") if name]
 
 
 def with_workspace_diffs(in_flight, diff=workspace_diff):
