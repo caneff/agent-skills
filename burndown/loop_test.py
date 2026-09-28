@@ -229,6 +229,19 @@ def test_each_pick_prints_its_implement_dispatch_command_carrying_the_run():
         ], got.stdout
 
 
+def test_the_printed_command_shell_quotes_a_target_path_with_a_space_1190():
+    with tempfile.TemporaryDirectory() as tmp:
+        target = os.path.realpath(os.path.join(tmp, "a repo"))
+        os.makedirs(target)
+        subprocess.run(["git", "init", "-q", target], check=True)
+        cand, live, env = run_file_dispatch(tmp, ("none",), repo=target)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "2", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 0, got
+        assert f"--run burn-t --repo '{target}'" in got.stdout, got.stdout
+
+
 def test_dispatch_refuses_a_run_file_that_names_no_target_repo_1190():
     # A run file from before the field loads, but a command printed without
     # `--repo` would claim against the cwd's origin: refuse, never omit.
