@@ -145,16 +145,23 @@ process substitution, `--pr-body <(gh pr view ...)`, passes it without a
 file. Only the body's Decisions made section is read. Its lines cite a
 finding in the shapes PR bodies here are written in: ids leading a list
 item, alone or grouped by commas or "and" (`- S3, S5, P2: leftover`),
-bolded or not, or one named as `sidecar <id>` at the end of the line. A line
-naming an id with no outcome word records nothing, and when several lines
-cite one id the last is its record, since a ruling may be appended below the
-first. A line states its outcome when the word right after its first colon
+bolded or not, file-qualified or not (`**e2e/scenarios.mjs S8**` cites `S8`,
+#1213), or one named as `sidecar <id>` at the end of the line. A line
+naming an id with no outcome word records nothing. A line states its outcome when the word right after its first colon
 outside parentheses is one of `fixed`, `disputed`, `filed`, `handed back` or
 `leftover`, and the sidecar must hold exactly that. A line that only mentions
 outcome words, as in `S1 (hard): overflows. Claimed fixed; contested.
 leftover.`, disagrees when the sidecar's outcome is not among them. The
 command refuses:
 
+- an id the sidecar holds that the body records twice with two different
+  stated outcomes (#1177): the id was reused across review rounds, and the
+  refusal says so and names the prefix rule (a round after the first cites
+  `r2-S1`; `multi-axis-code-review/SKILL.md` § 4). A changed
+  disposition is edited into its one line, never appended below the first.
+  Only ids the sidecar holds are compared: a sweep PR's body cites sweep items
+  whose ids repeat across their source PRs, and its own findings carry the
+  `r1-` prefix so they never collide with those.
 - a sidecar line the body contradicts. A disposition changed after the
   verification pass rewrites its sidecar line in the same step that records
   it in the PR body (`implement/SKILL.md` § The merge), so a disagreement is

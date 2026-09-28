@@ -1518,19 +1518,73 @@ def test_a_stale_leftover_is_refused_in_each_real_line_shape():
     assert "records codex-gate-1 as 'leftover'" in got, got
 
 
-def test_a_ruling_appended_below_the_first_record_is_the_one_read():
-    # A changed disposition may be recorded as a new line rather than by
-    # editing the old one: the last line citing an id is its record, both
-    # ways round.
-    body = pr_body("## Decisions made\n\n- S3: leftover.\n"
-                   "- S3: fixed, abc1234 (controller ruling).\n")
-    rewritten = sidecar_of({"id": "S3", "outcome": "fixed", "sha": "abc1234"})
-    root = landed_root()
-    _, added = runfile.leftover("burn-1", 901, 950, rewritten, root=root,
+def test_a_round_prefixed_id_does_not_collide_with_the_same_bare_id():
+    # #1177: round 2 of a PR's review is `r2-S1`, so round 1's `S1: fixed` and
+    # round 2's `r2-S1: disputed` are two findings, and the sidecar of the
+    # later round is harvested without --allow-stale.
+    sidecar = sidecar_of(
+        {"id": "r2-S1", "outcome": "disputed", "reason": "unreachable here"},
+        dict(LEFTOVER_S3, id="r2-S3"))
+    body = pr_body("## Decisions made\n\n- S1: fixed, abc1234.\n"
+                   "- r2-S1: disputed: unreachable here.\n"
+                   "- r2-S3: leftover.\n")
+    _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=landed_root(),
+                                pr_body=body)
+    assert added == ["r2-S3"], added
+
+
+def test_a_bare_id_recorded_twice_with_different_outcomes_is_refused_as_reuse():
+    # #1177: two rounds that both used `S1` leave one id with two outcomes.
+    # That is an id reused across rounds, not a stale sidecar: the refusal
+    # says so and names the prefix rule.
+    sidecar = sidecar_of({"id": "S1", "outcome": "disputed", "reason": "x"})
+    body = pr_body("## Decisions made\n\n- S1: disputed: x.\n"
+                   "- S1: fixed, abc1234.\n")
+    got = refusal_of(sidecar, landed_root(), body)
+    assert "S1" in got and "more than once" in got and "r2-" in got, got
+    assert "reused across review rounds" in got and "records S1 as" not in got, got
+    assert f"{body}:3 and :4" in got, got
+
+
+def test_a_bare_id_recorded_twice_with_one_outcome_is_not_reuse():
+    # The same disposition stated twice is a restatement, not two findings.
+    sidecar = sidecar_of({"id": "S1", "outcome": "fixed", "sha": "abc1234"})
+    body = pr_body("## Decisions made\n\n- S1: fixed, abc1234.\n"
+                   "- S1: fixed, abc1234 (re-read by the controller).\n")
+    _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=landed_root(),
                                 pr_body=body)
     assert added == [], added
-    got = refusal_of(sidecar_of(LEFTOVER_S3), landed_root(), body)
-    assert "records S3 as 'fixed'" in got and f"{body}:4" in got, got
+
+
+def test_an_id_the_sidecar_does_not_hold_may_repeat_in_the_body():
+    # #1213: a sweep PR's body cites its sweep items, which reuse ids across
+    # source PRs. Only an id the sidecar holds is compared, so those repeats
+    # are not reuse.
+    sidecar = sidecar_of(dict(LEFTOVER_S3, id="r1-S3"))
+    body = pr_body("## Decisions made\n\n- r1-S3: leftover.\n"
+                   "- S3: fixed, abc1234 (from PR #10).\n"
+                   "- S3: disputed: unreachable (from PR #11).\n")
+    _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=landed_root(),
+                                pr_body=body)
+    assert added == ["r1-S3"], added
+
+
+def test_a_file_qualified_id_is_read_as_that_id():
+    # #1213: `**e2e/scenarios.mjs S8**` cites S8.
+    assert runfile.cited_ids("- **e2e/scenarios.mjs S8**: fixed, abc1234")[0] \
+        == ["S8"]
+    assert runfile.cited_ids("- `burndown/run.py` r2-S1, P2: leftover")[0] \
+        == ["r2-S1", "P2"]
+    sidecar = sidecar_of(dict(LEFTOVER_S3, id="S8"))
+    body = pr_body("## Decisions made\n\n- **e2e/scenarios.mjs S8**: fixed, "
+                   "abc1234.\n")
+    got = refusal_of(sidecar, landed_root(), body)
+    assert "records S8 as 'fixed'" in got, got
+
+
+def test_a_word_before_an_id_is_not_read_as_a_file():
+    # A path token carries a `.` or `/`; plain prose before an id does not.
+    assert runfile.cited_ids("- Codex S8: leftover")[0] == []
 
 
 def test_a_leftover_the_body_records_but_the_sidecar_lacks_is_refused():

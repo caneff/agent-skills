@@ -436,7 +436,8 @@ The body has these sections and nothing else:
   id its sidecar gave it (`S1`/`P2`/`C3`) rather than restating it in
   prose (#855) — that's what makes this list joinable against
   `dispositions-<n>.jsonl` without a reading pass. Open each line with its
-  id, or ids (`- S1, P2: fixed, <sha>.`), and put the disposition word
+  id, or ids (`- S1, P2: fixed, <sha>.`; a round after the first cites
+  `r2-S1`, per `multi-axis-code-review/SKILL.md` § 4's Round ids), and put the disposition word
   right after the first colon. `runfile.py leftover` reads the outcome off
   that line at harvest, the last line for an id winning, and refuses a
   sidecar it contradicts (#1147). On any other build, every

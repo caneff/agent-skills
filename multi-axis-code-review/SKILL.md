@@ -178,7 +178,15 @@ or "judgement", "file": "<path>", "title": "<short title>"}`. Assign each
 finding a stable id — the axis's first letter (`S` standards, `P` spec, `C`
 correctness) plus a per-report ordinal, e.g. `S1`, `P2`, `C3`; an
 over-engineering cut instead takes its own `OE1`, `OE2`, … series, still
-under `axis: "standards"`. Cite the
+under `axis: "standards"`. **Round ids** (#1177, #1213; this is the one home
+for the rule): a PR's first review round keeps the bare ids above; every
+later round in the same PR prefixes each id with its round, `r2-S1`,
+`r2-C3`, `r3-P1`, so a PR reviewed twice never has two findings named `S1`.
+The caller's prompt names the round (`round: 2, prefix ids with r2-`); a
+prompt that names none is round 1. A sweep ticket's PR prefixes every round,
+its first included (`r1-S3`), so its own findings stay apart from the sweep
+items it disposes, which carry their source PR's ids. A split suffix
+(`implement/SKILL.md` § Review) stays last: `r2-S1a`. Cite the
 same id in the prose report next to each finding, so a reader can join the
 two. A partial write costs one line, not the file — readers of this
 sidecar must tolerate and skip a malformed line rather than fail the whole
@@ -561,7 +569,9 @@ End with a one-line summary: total findings per axis, and the worst issue _withi
 A caller that follows round 1 with one verification pass (implement's review
 step 2) spawns one `diff-reviewer`, `model: opus`, fire-and-return as in § 4.
 Its prompt carries the round-1 findings sidecars, a fresh capture of the fix
-commits, the worker's claimed dispositions — each a claim to check, never
+commits, the round's id prefix (§ 4's Round ids: none for round 1, `r2-` for
+a second round, and it writes its dispositions under those ids), the worker's
+claimed dispositions — each a claim to check, never
 settled, and never with an outcome pre-assigned — and the settled decisions.
 It writes `dispositions-<n>.jsonl` in the grammar of `implement/SKILL.md` § Review,
 and its report to `<dir>/review-verify-<n>.md`.
