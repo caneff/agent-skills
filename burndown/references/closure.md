@@ -135,8 +135,12 @@ line — this one does — registers no edge, fenced or indented. Everywhere
 else every line counts:
 a ``` line in source code means nothing in particular, and reading it as a
 fence would hide the real directives after it, which is the under-clumping
-direction. A file that does not read as text, and the directories in `SKIP_DIRS`
-(`.git`, `node_modules`, `__pycache__`, `.claude`), hold no directives.
+direction. A file that does not read as text, the directories in `SKIP_DIRS`
+(`.git`, `node_modules`, `__pycache__`, `.claude`) and every gitignored file
+hold no directives. The file list comes from `git ls-files` (tracked plus
+untracked-not-ignored, #1178), so `repo_files` needs a git repository and a
+`git` on `PATH`: without either, the resolve fails rather than reading an empty
+list as an empty closure.
 
 Everything else about the scan **fails closed**, because the direction it
 would fail in is under-clumping — a missing edge, and two workers in the same

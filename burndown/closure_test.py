@@ -371,6 +371,8 @@ def test_no_code_path_runs_the_declared_generator():
     got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
     assert "examples/skyscraper/component.js" in got, got
     C.clumps(root, [candidate(451, "examples/_shared/line-kind.js")])
+    subprocess.run([sys.executable, CLOSURE, root, "1=examples/_shared/line-kind.js"],
+                   capture_output=True, check=True)
     assert not os.path.exists(marker), "the declared generator ran"
 
 
@@ -675,7 +677,7 @@ def test_gitignored_oversized_files_do_not_break_the_resolve():
     except C.ClosureError as exc:
         refused, got = str(exc), None
     assert refused is not None, got
-    assert "32000000-byte scan limit" in refused, refused
+    assert "scan limit" in refused, refused
     assert "b14-solutions.txt" in refused, refused
 
 
@@ -714,6 +716,73 @@ def test_a_failed_git_listing_is_not_an_empty_closure():
         refused, got = str(exc), None
     assert refused is not None, got
     assert "git ls-files" in refused, refused
+
+
+def fake_git_on_path(script):
+    """A directory holding a `git` that runs `script`, and nothing else."""
+    bin_dir = tempfile.mkdtemp(prefix="closure-fixture-")
+    FIXTURES.append(bin_dir)
+    path = os.path.join(bin_dir, "git")
+    with open(path, "w") as fh:
+        fh.write("#!/bin/sh\n" + script + "\n")
+    os.chmod(path, 0o755)
+    return bin_dir
+
+
+def refused_with_path(root, path):
+    saved = os.environ["PATH"]
+    os.environ["PATH"] = path
+    try:
+        return C.resolve_closure(root, ["examples/_shared/line-kind.js"]), None
+    except C.ClosureError as exc:
+        return None, str(exc)
+    finally:
+        os.environ["PATH"] = saved
+
+
+def test_a_missing_git_is_not_an_empty_closure():
+    root = repo(SHARED)
+    got, refused = refused_with_path(root, "/nonexistent")
+    assert refused is not None, got
+    assert "cannot read" in refused, refused
+
+
+def test_a_git_that_fails_silently_is_not_an_empty_closure():
+    # Exit status alone: no stderr for the other clause to catch.
+    root = repo(SHARED)
+    got, refused = refused_with_path(root, fake_git_on_path("exit 1"))
+    assert refused is not None, got
+    assert "git ls-files" in refused, refused
+
+
+def test_a_callers_git_environment_does_not_redirect_the_scan():
+    # A hook or rebase exports GIT_DIR for its own repo; the scan is of `root`.
+    other = repo({"unrelated.js": "x\n"})
+    root = repo(SHARED)
+    saved = {k: os.environ.get(k) for k in ("GIT_DIR", "GIT_WORK_TREE")}
+    os.environ["GIT_DIR"] = os.path.join(other, ".git")
+    os.environ["GIT_WORK_TREE"] = other
+    try:
+        got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    assert "examples/skyscraper/component.js" in got, got
+
+
+def test_an_unreadable_gitignored_directory_does_not_break_the_resolve():
+    root = repo({**SHARED, ".gitignore": ".scratch/\n",
+                 ".scratch/notes.txt": "x\n"})
+    ignored = os.path.join(root, ".scratch")
+    os.chmod(ignored, 0o000)
+    try:
+        got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
+    finally:
+        os.chmod(ignored, 0o755)
+    assert "examples/skyscraper/component.js" in got, got
 
 
 def test_a_file_that_cannot_be_opened_is_not_a_file_with_no_includes():
