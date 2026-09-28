@@ -161,10 +161,10 @@ fi
 
 rm "$body"
 out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
-if [ "$rc" = 1 ] && [[ "$out" == *"pr-body-7.md"* ]]; then
+if [ "$rc" = 1 ] && [[ "$out" == *"write the body there first"* ]]; then
   echo "PASS: a sidecar with no PR body file fails closed"
 else
-  echo "FAIL: sidecar without body — want exit 1 naming pr-body-7.md, got $rc: $out"; fails=1
+  echo "FAIL: sidecar without body — want exit 1 + the gate's own 'write the body there first', got $rc: $out"; fails=1
 fi
 
 rm "$sidecar"
@@ -174,6 +174,20 @@ if [ "$rc" = 0 ] && [[ "$out" == *"no dispositions sidecar"* ]]; then
 else
   echo "FAIL: no sidecar — want exit 0 + 'no dispositions sidecar', got $rc: $out"; fails=1
 fi
+# Real workers run from a linked worktree, whose own directory name is not
+# the repo's: the cache folder must key on the shared .git (#1214), or the
+# check finds no sidecar and switches itself off with a pass.
+git -C "$repo" worktree add -q -b implement-8 "$tmp/implement-8" main
+printf '%s\n' '{"id": "S1", "outcome": "disputed", "reason": "no"}' >"$reviews/dispositions-8.jsonl"
+printf '## Decisions made\n\n- S1: fixed, abc1234.\n' >"$reviews/pr-body-8.md"
+wt_tip=$(git -C "$tmp/implement-8" rev-parse HEAD)
+out=$(cd "$tmp/implement-8" && HOME="$cache_home" bash "$gate" "$wt_tip" 2>&1); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *"S1"* ]]; then
+  echo "PASS: a linked worktree finds the repo's sidecar and refuses a stale one"
+else
+  echo "FAIL: linked worktree — want exit 1 naming S1, got $rc: $out"; fails=1
+fi
+git -C "$repo" worktree remove --force "$tmp/implement-8"
 git -C "$repo" checkout -q main
 
 # Wrong usage is a usage error, not a pass.
