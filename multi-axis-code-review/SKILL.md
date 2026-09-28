@@ -161,7 +161,7 @@ The `diff-reviewer` agent definition (`flow/claude/agents/diff-reviewer.md`, ins
 
 **A finding names the file and the intent, not the edit.** This is the one home for the rule; callers point here rather than reword it. Say where the problem is and what outcome is wrong; the fixer owns the file and picks the change. The observable: a finding never contains a command to run. A finding written as a patch to apply verbatim ("exactly these, nothing else", or a `git checkout <sha> -- <path>` the fixer is told to paste) turns one round into four — the fixer stops reading for the problem and starts applying the script, so a wrong script lands four times instead of being caught once.
 
-Every prompt carries only the **diff, the commit list, the spec/standards sources, and the settled decisions** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
+Every prompt carries only the **diff, the commit list, the spec/standards sources, the settled decisions and the id prefix** — never this session's plan, reasoning, or messages. When this session authored the change, leaked rationale makes the reviewer read your *intent* instead of the code, recreating the same-context blindness the parallel sub-agents exist to remove. Feed the artifacts, not the thinking behind them.
 
 Belt and braces: append to **every** prompt — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). `/tmp` is wiped at every boot here and herdr workers never set `$CLAUDE_JOB_DIR`, so these reports — the only record of what each reviewer said — need a home that survives: `~/.cache/agent-reviews/<repo>/`. Never point the report at `./.scratch/` or anywhere under the repo — an untracked file there blocks `git worktree remove` (and so `ship`).
 
@@ -178,7 +178,16 @@ or "judgement", "file": "<path>", "title": "<short title>"}`. Assign each
 finding a stable id — the axis's first letter (`S` standards, `P` spec, `C`
 correctness) plus a per-report ordinal, e.g. `S1`, `P2`, `C3`; an
 over-engineering cut instead takes its own `OE1`, `OE2`, … series, still
-under `axis: "standards"`. Cite the
+under `axis: "standards"`. **Round ids** (#1177, #1213; this is the one home
+for the rule): a PR's first review round keeps the bare ids above; every
+later round in the same PR prefixes each id with its round, `r2-S1`,
+`r2-C3`, `r3-P1`, so a PR reviewed twice never has two findings named `S1`.
+The caller names the prefix in every reviewer prompt (`id prefix: r2-`, or
+`id prefix: none`), and a reviewer whose prompt names none writes bare ids. A
+sweep ticket's PR (title `Sweep: leftovers from ...`) carries a prefix on
+every round, its first included (`id prefix: r1-`), so its own findings stay
+apart from the sweep items it disposes, which keep their source PR's ids. A split suffix
+(`implement/SKILL.md` § Review) stays last: `r2-S1a`. Cite the
 same id in the prose report next to each finding, so a reader can join the
 two. A partial write costs one line, not the file — readers of this
 sidecar must tolerate and skip a malformed line rather than fail the whole
@@ -561,7 +570,10 @@ End with a one-line summary: total findings per axis, and the worst issue _withi
 A caller that follows round 1 with one verification pass (implement's review
 step 2) spawns one `diff-reviewer`, `model: opus`, fire-and-return as in § 4.
 Its prompt carries the round-1 findings sidecars, a fresh capture of the fix
-commits, the worker's claimed dispositions — each a claim to check, never
+commits, the round's id prefix, named as § 4's Round ids say (`id prefix: none`,
+`r1-` on a sweep ticket, `r2-` for a second round: it writes its dispositions
+under those ids), the worker's
+claimed dispositions — each a claim to check, never
 settled, and never with an outcome pre-assigned — and the settled decisions.
 It writes `dispositions-<n>.jsonl` in the grammar of `implement/SKILL.md` § Review,
 and its report to `<dir>/review-verify-<n>.md`.

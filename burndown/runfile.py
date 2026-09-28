@@ -452,7 +452,15 @@ def read_leftover_lines(sidecar_path):
 _OUTCOME_WORD = r"(fixed|disputed|filed|handed[- ]back|leftover)"
 _ID = r"[A-Za-z][A-Za-z0-9-]*[0-9][A-Za-z0-9]*"
 _LIST_MARKER = re.compile(r"\s*(?:(?:[-*+]|\d+[.)])\s+)?")
-_LEAD_ID = re.compile(r"[*_`]*(" + _ID + r")[*_`]*(?![\w-])")
+# A sweep PR's controller cites an id file-qualified (`**e2e/scenarios.mjs
+# S8**`, #1213): a path token before the id, optionally `:<line>` or `#L<line>`.
+# The token carries a `/`, or is a bare file name in backticks: a dotted word
+# (`Node.js`, `v1.2`) is prose.
+_FILE_QUALIFIER = (r"(?:[\w.\-/]*/[\w.\-/]*|[\w.\-/]+(?=`))"
+                   r"(?::\d+|#L\d+)?[*_`]*\s+[*_`]*")
+_FILE_QUALIFIER = r"(?:" + _FILE_QUALIFIER + r")?"
+_LEAD_ID = re.compile(r"[*_`]*" + _FILE_QUALIFIER + r"(" + _ID
+                      + r")[*_`]*(?![\w-])")
 _ID_SEPARATOR = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+|\s*/\s*")
 _TAIL_ID = re.compile(r"\bsidecar(?:\s+id)?:?\s+[*_`]*(" + _ID + r")",
                       re.IGNORECASE)
@@ -477,7 +485,8 @@ def decisions_made(body_lines):
 
 def cited_ids(line):
     """The ids a Decisions made line cites, and the text after the leading
-    ones: `- S1, P2 and C1: fixed` cites all three."""
+    ones: `- S1, P2 and C1: fixed` cites all three. A file-qualified id
+    (`**e2e/scenarios.mjs S8**`) cites the id alone."""
     pos = _LIST_MARKER.match(line).end()
     ids = []
     while True:
@@ -516,11 +525,10 @@ def normal_outcome(word):
 
 
 def body_records(body_lines):
-    """Every finding id Decisions made records, mapped to its last record:
-    `(line number, stated outcome or None, every outcome word on the line)`.
-    The last line wins because a ruling may be appended below the first
-    record rather than edited into it. A line naming an id with no outcome
-    word at all records nothing."""
+    """Every finding id Decisions made records, mapped to its records in
+    order: `(line number, stated outcome or None, every outcome word on the
+    line)`. A line naming an id with no outcome word at all records
+    nothing."""
     records = {}
     for n, line in decisions_made(body_lines) or []:
         ids, rest = cited_ids(line)
@@ -528,8 +536,36 @@ def body_records(body_lines):
                  re.findall(r"\b" + _OUTCOME_WORD + r"\b", rest, re.IGNORECASE)}
         if ids and words:
             for fid in ids:
-                records[fid] = (n, stated_outcome(rest), words)
+                records.setdefault(fid, []).append(
+                    (n, stated_outcome(rest), words))
     return records
+
+
+def refuse_reused_ids(body_path, records, held):
+    """A finding id the sidecar holds that the body records twice with two
+    different stated outcomes is an id two review rounds both used (#1177):
+    a round after the first prefixes its ids (`r2-S1`; the rule is in
+    `multi-axis-code-review/SKILL.md` § 4), so a bare id names one finding. Only ids the sidecar holds
+    are compared: a sweep PR's body cites sweep items whose ids repeat across
+    their source PRs (#1213), and those are nobody's finding here."""
+    for fid, found in records.items():
+        if fid not in held:
+            continue
+        stated = {}
+        for line_n, outcome, _ in found:
+            if outcome is not None:
+                stated.setdefault(outcome, line_n)
+        if len(stated) > 1:
+            (one, one_n), (two, two_n) = list(stated.items())[:2]
+            raise RunFileError(
+                f"{body_path}:{one_n} and :{two_n} record {fid} "
+                f"more than once, as {one!r} and {two!r} — the "
+                "id was reused across review rounds, which is not a "
+                "stale sidecar. A review round after the first prefixes "
+                "its ids with the round (r2-S1, r2-C3), and a sweep PR's "
+                "own findings take r1-: rename the later round's ids in "
+                "the sidecar and the body. A changed disposition is edited "
+                "into its one line, not appended below the first")
 
 
 def refuse_disagreeing_pr_body(sidecar_path, body_path):
@@ -560,10 +596,11 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
             f"the PR body {body_path} cites none of {sidecar_path}'s finding "
             "ids — is it this PR's body?")
     held = {obj["id"] for _, obj in lines}
+    refuse_reused_ids(body_path, records, held)
     for n, obj in lines:
         if obj["id"] not in records:
             continue
-        body_n, stated, words = records[obj["id"]]
+        body_n, stated, words = records[obj["id"]][-1]
         if stated is not None:
             agrees = stated == obj["outcome"]
             said = stated
@@ -580,7 +617,8 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
                 f"{obj['id']}b — implement/SKILL.md § Review's split "
                 "grammar), each with its own sidecar line; otherwise pass "
                 "--allow-stale")
-    for fid, (body_n, stated, _) in records.items():
+    for fid, found in records.items():
+        body_n, stated, _ = found[-1]
         if stated == "leftover" and fid not in held:
             raise RunFileError(
                 f"{body_path}:{body_n} records {fid} as a leftover, but "
