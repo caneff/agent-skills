@@ -137,8 +137,14 @@ fn drain(mut pipe: impl Read + Send + 'static) -> mpsc::Receiver<(Vec<u8>, bool)
 fn recv_drained(rx: mpsc::Receiver<(Vec<u8>, bool)>, deadline: Instant) -> (Vec<u8>, bool) {
     let mut buf = Vec::new();
     loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        match rx.recv_timeout(remaining) {
+        // `recv_timeout(0)` still returns queued chunks, so a descendant that
+        // keeps writing would hold this loop past the deadline: stop on the
+        // clock, not on an empty queue.
+        let now = Instant::now();
+        if now >= deadline {
+            return (buf, false);
+        }
+        match rx.recv_timeout(deadline - now) {
             Ok((chunk, true)) => {
                 buf.extend_from_slice(&chunk);
                 return (buf, true);
@@ -178,9 +184,9 @@ pub fn run_timeout(program: &str, args: &[&str], timeout: Duration) -> std::io::
     run_in_timeout(None, program, args, timeout)
 }
 
-/// `run_in`, bounded — see [`run_timeout`]. A timed-out call with nothing on
-/// either stream says so in `combined`, rather than reporting "(no output)"
-/// with no clue a bound ever fired.
+/// `run_in`, bounded — see [`run_timeout`]. A timed-out call says so in
+/// `combined`, with or without output, rather than reporting an ordinary
+/// failure with no clue a bound ever fired.
 pub fn run_in_timeout(dir: Option<&Path>, program: &str, args: &[&str], timeout: Duration) -> std::io::Result<CommandOutput> {
     let mut cmd = Command::new(program);
     cmd.args(args).stdin(Stdio::null());
@@ -191,9 +197,14 @@ pub fn run_in_timeout(dir: Option<&Path>, program: &str, args: &[&str], timeout:
     let mut combined = String::from_utf8_lossy(&stdout).into_owned();
     combined.push_str(&String::from_utf8_lossy(&stderr));
     trim_trailing_newlines(&mut combined);
-    if timed_out && combined.is_empty() {
-        combined = format!("(no output; timed out after {timeout:?})");
-    } else if truncated {
+    if timed_out {
+        if combined.is_empty() {
+            combined = format!("(no output; timed out after {timeout:?})");
+        } else {
+            combined.push_str(&format!(" (timed out after {timeout:?})"));
+        }
+    }
+    if truncated {
         // The direct child exited (or was killed on timeout) but a
         // descendant is still holding a pipe open past READ_GRACE — the
         // bytes above are whatever was read before that, not necessarily
@@ -438,6 +449,37 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(4), "waited {:?} for a child that exited on its own", start.elapsed());
         assert!(out.success, "the direct child's own successful exit must still be reported: {:?}", out.combined);
         assert!(out.combined.to_lowercase().contains("truncated"), "combined was {:?}", out.combined);
+    }
+
+    // #1209 codex-third-2: a child that printed something and then hung was
+    // reported as an ordinary failure carrying only its output; the timeout
+    // was named only when there was no output at all.
+    #[test]
+    fn run_timeout_names_the_timeout_even_when_the_child_printed_first() {
+        use std::time::Duration;
+        let out = run_timeout("sh", &["-c", "echo partial; sleep 5"], Duration::from_millis(200)).unwrap();
+        assert!(!out.success);
+        assert!(out.combined.contains("partial"), "captured output was dropped: {:?}", out.combined);
+        assert!(out.combined.to_lowercase().contains("timed out"), "combined was {:?}", out.combined);
+    }
+
+    // #1209 codex-third-1: after the drain deadline `recv_timeout(0)` still
+    // hands back every queued chunk, so a descendant that keeps writing kept
+    // the loop running past READ_GRACE. Driven at the function, with the
+    // deadline already past and chunks queued: an end-to-end writer fast
+    // enough to show it would hold gigabytes in memory for the whole grace.
+    #[test]
+    fn recv_drained_stops_at_the_deadline_however_much_is_queued() {
+        use std::time::{Duration, Instant};
+        let (tx, rx) = mpsc::channel();
+        for _ in 0..3 {
+            tx.send((vec![b'x'; 8], false)).unwrap();
+        }
+        let past = Instant::now() - Duration::from_millis(1);
+        let (buf, eof) = recv_drained(rx, past);
+        assert!(!eof, "a read cut by the deadline must not claim EOF");
+        assert!(buf.is_empty(), "read {} bytes past the deadline", buf.len());
+        drop(tx);
     }
 
     // Codex second pass on PR #1195 (#849): `drain` used to send a clone of
