@@ -437,7 +437,7 @@ The body has these sections and nothing else:
   prose (#855) — that's what makes this list joinable against
   `dispositions-<n>.jsonl` without a reading pass. Open each line with its
   id, or ids (`- S1, P2: fixed, <sha>.`; a round after the first cites
-  `r2-S1`, per `multi-axis-code-review/SKILL.md` § 4's Round ids), and put the disposition word
+  `r2-S1`, per `multi-axis-code-review/SKILL.md` § 4's Round ids; a sweep ticket's PR prefixes its own round 1 too, `r1-S3`, so its ids stay apart from the sweep items it disposes, and cites a sweep item file-qualified, `<file> <id>`), and put the disposition word
   right after the first colon. `runfile.py leftover` reads the outcome off
   that line at harvest, the last line for an id winning, and refuses a
   sidecar it contradicts (#1147). On any other build, every
