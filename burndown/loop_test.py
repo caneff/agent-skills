@@ -879,13 +879,15 @@ _EMPTY.close()
 EMPTY_LIVE = _EMPTY.name
 
 
-def loop_py(*args, cwd=None, env=None):
+def loop_py(*args, cwd=None, env=None, real_workspaces=False):
     """Runs loop.py. `dispatch` requires --run, so a call that gives none gets
     a run file built from the `job` fields of its --in-flight file — the
     fixture's own record of each worker's job, moved to where dispatch reads
     it."""
     args = list(args)
     tmp = None
+    if args[:1] == ["dispatch"] and not real_workspaces:
+        args.append("--no-workspace-diff")
     if args[:1] == ["dispatch"] and "--run" not in args and "--in-flight" in args:
         tmp = tempfile.TemporaryDirectory()
         env = {**(env or {}), "BURNDOWN_CACHE_DIR": tmp.name}
@@ -2115,6 +2117,172 @@ def test_load_run_reads_a_run_file_and_wraps_its_refusal_as_a_loop_error():
             assert "burn-none" in str(exc), exc
         else:
             raise AssertionError("a missing run file was not refused")
+
+
+def test_a_workspaces_real_diff_joins_its_in_flight_closure():
+    # #1212: the closure resolved from the ticket's named files misses what the
+    # worker's diff really reaches; the diff is unioned in at every dispatch.
+    live = [{"tickets": [431], "workspace": "/w/431", "closure": ["rig.mjs"]}]
+    got = loop.with_workspace_diffs(
+        live, lambda ws: ["server.collection.test.mjs", "rig.mjs"])
+    assert loop.paths(got[0]) == {"rig.mjs", "server.collection.test.mjs"}, got
+    assert loop.paths(live[0]) == {"rig.mjs"}, "the input was mutated"
+
+
+def test_an_undeclared_file_in_the_diff_holds_a_candidate_off_the_frontier():
+    live = loop.with_workspace_diffs(
+        [{"tickets": [431], "workspace": "/w/431", "closure": ["rig.mjs"]}],
+        lambda ws: ["docs/obs-layout.md"])
+    cand = [{"tickets": [442], "closure": ["docs/obs-layout.md"]}]
+    state = loop.frontier(cand, live)
+    assert state["dispatchable"] == [], state
+    assert state["held"][0]["over"] == ["docs/obs-layout.md"], state
+
+
+def test_a_subtree_clump_without_a_closure_gets_the_diff_in_its_files():
+    got = loop.with_workspace_diffs(
+        [{"tickets": [5], "workspace": "/w/5", "files": ["a/x.js"]}],
+        lambda ws: ["b/y.js"])
+    assert loop.paths(got[0]) == {"a/x.js", "b/y.js"}, got
+    assert "closure" not in got[0], got
+
+
+def test_a_landed_clump_is_not_diffed():
+    asked = []
+    live = [{"tickets": [9], "workspace": "/w/9", "closure": ["a"],
+             "landed": True}]
+    got = loop.with_workspace_diffs(live, lambda ws: asked.append(ws) or ["z"])
+    assert asked == [] and loop.paths(got[0]) == {"a"}, (asked, got)
+
+
+def test_a_diff_that_cannot_be_read_refuses_rather_than_reading_empty():
+    def broken(ws):
+        raise loop.LoopError(f"no diff for {ws}")
+    try:
+        loop.with_workspace_diffs(
+            [{"tickets": [3], "workspace": "/w/3", "closure": ["a"]}], broken)
+    except loop.LoopError as exc:
+        assert "clump #3" in str(exc) and "/w/3" in str(exc), exc
+    else:
+        raise AssertionError("an unreadable diff was read as an empty one")
+
+
+def run_in(cwd, *cmd):
+    return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True,
+                          text=True).stdout
+
+
+def make_workspace(tmp, changed, default="main"):
+    """A real clone whose branch adds each of `changed`, one commit apiece,
+    past its origin's `default` branch."""
+    origin = os.path.join(tmp, "origin.git")
+    work = os.path.join(tmp, "work")
+    run_in(tmp, "git", "init", "-q", "--bare", "-b", default, origin)
+    run_in(tmp, "git", "clone", "-q", origin, work)
+    for k, v in (("user.email", "t@example.com"), ("user.name", "t")):
+        run_in(work, "git", "config", k, v)
+    with open(os.path.join(work, "a.txt"), "w") as fh:
+        fh.write("a")
+    run_in(work, "git", "add", "a.txt")
+    run_in(work, "git", "commit", "-qm", "a")
+    run_in(work, "git", "push", "-q", "origin", f"HEAD:{default}")
+    run_in(work, "git", "remote", "set-head", "origin", default)
+    run_in(work, "git", "checkout", "-q", "-b", "implement-1")
+    for name in changed:
+        with open(os.path.join(work, name), "w") as fh:
+            fh.write("b")
+        run_in(work, "git", "add", name)
+        run_in(work, "git", "commit", "-qm", f"add {name}")
+    return work
+
+
+def test_workspace_diff_lists_files_changed_against_the_origin_default():
+    # A default that is not `main` and two commits on the branch: a diff
+    # against a hard-coded `origin/main`, or against `HEAD~1`, reads wrong
+    # (#1212 C6).
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_workspace(tmp, ["b.txt", "c.txt"], default="trunk")
+        assert sorted(loop.workspace_diff(work)) == ["b.txt", "c.txt"]
+        try:
+            loop.workspace_diff(os.path.join(tmp, "missing"))
+        except loop.LoopError:
+            pass
+        else:
+            raise AssertionError("a missing workspace was read as no diff")
+
+
+def test_workspace_diff_names_both_sides_of_a_rename():
+    # #1212 C1: a candidate naming the old path collides with the rename.
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_workspace(tmp, [])
+        run_in(work, "git", "mv", "a.txt", "renamed.txt")
+        run_in(work, "git", "commit", "-qm", "rename")
+        assert sorted(loop.workspace_diff(work)) == ["a.txt", "renamed.txt"]
+
+
+def test_workspace_diff_returns_a_non_ascii_path_unquoted():
+    # #1212 C2: git's default output quotes it, so it never matches a raw path.
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_workspace(tmp, ["caf\u00e9.md"])
+        assert loop.workspace_diff(work) == ["caf\u00e9.md"]
+
+
+def test_workspace_diff_refuses_a_directory_that_is_not_its_own_checkout():
+    # #1212 C3: a workspace path with its `.git` gone resolves to the checkout
+    # around it and would read as a branch that changed nothing.
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_workspace(tmp, ["b.txt"])
+        inner = os.path.join(work, "gone")
+        os.mkdir(inner)
+        try:
+            loop.workspace_diff(inner)
+        except loop.LoopError as exc:
+            assert "not a checkout root" in str(exc), exc
+        else:
+            raise AssertionError("an enclosing checkout's diff was returned")
+
+
+def test_the_cli_dispatch_says_when_it_skipped_the_workspace_diff():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [10], "closure": ["a.js"]}], fh)
+        with open(live, "w") as fh:
+            json.dump([], fh)
+        args = ("dispatch", "--candidates", cand, "--in-flight", live,
+                "--free", "1", "--processes", "4", "--committed-gb", "4")
+        skipped = loop_py(*args)
+        assert "workspace diff: SKIPPED" in skipped.stdout, skipped.stdout
+        read = loop_py(*args, real_workspaces=True)
+        assert read.returncode == 0, read.stderr
+        assert "SKIPPED" not in read.stdout, read.stdout
+
+
+def test_the_cli_dispatch_holds_a_candidate_on_a_file_only_the_diff_reaches():
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_workspace(tmp, ["b.txt"])
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [442], "closure": ["b.txt"]}], fh)
+        with open(live, "w") as fh:
+            json.dump([{"tickets": [431], "workspace": work,
+                        "closure": ["a.txt"],
+                        "job": {"state": "running", "cores": 1}}], fh)
+        args = ("dispatch", "--candidates", cand, "--in-flight", live,
+                "--free", "1", "--processes", "4", "--committed-gb", "4")
+        got = loop_py(*args, real_workspaces=True)
+        assert got.returncode == 0, got.stderr
+        assert "dispatch  #442" not in got.stdout, got.stdout
+        assert "b.txt" in got.stdout, got.stdout
+        with open(live, "w") as fh:
+            json.dump([{"tickets": [431], "workspace": work + "-gone",
+                        "closure": ["a.txt"],
+                        "job": {"state": "running", "cores": 1}}], fh)
+        refused = loop_py(*args, real_workspaces=True)
+        assert refused.returncode == 1, refused.stdout
+        assert "431" in refused.stderr, refused.stderr
 
 
 if __name__ == "__main__":

@@ -55,7 +55,13 @@ At each dispatch the closures are re-resolved against current `main` —
 in-flight clump's, since the run file stores a clump's tickets and workspace
 but no closure, and a closure stored at claim time is exactly what goes
 stale. The two are what `loop.py dispatch` reads as `--in-flight`; the job
-record comes from the run file through the required `--run <run-id>`. That is cheap and it is enough for the one
+record comes from the run file through the required `--run <run-id>`. The
+closure is only what the ticket's named files reach, so dispatch also unions
+each unlanded in-flight workspace's `git diff --name-only
+origin/<default>...HEAD` into it (#1212): on burn-trs-2026-09-27 two workers
+ran concurrently in files no candidate list named. An unreadable diff refuses
+the tick rather than reading as no change; `--no-workspace-diff` exists for
+fixtures without real checkouts and a controller never passes it. That is cheap and it is enough for the one
 question a dispatch asks: does *this* clump collide with anyone live?
 
 A **full** re-exploration is a different question, and it fires on one

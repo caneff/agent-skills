@@ -956,6 +956,64 @@ def load_run(run_id, root=None):
         raise LoopError(str(exc)) from exc
 
 
+def workspace_diff(workspace):
+    """The files a workspace's branch really changes against its origin's
+    default branch: `git diff --name-only origin/<default>...HEAD` run inside
+    it (#1212). Refuses when git cannot answer — a workspace whose diff could
+    not be read is not one that changed nothing.
+    """
+    def in_workspace(args):
+        try:
+            done = subprocess.run(["git", "-C", workspace, *args],
+                                  capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise LoopError(
+                f"could not read {workspace}'s diff: {exc}") from exc
+        if done.returncode != 0:
+            raise LoopError(f"could not read {workspace}'s diff: git "
+                            f"{' '.join(args)} failed: {done.stderr.strip()}")
+        return done.stdout
+    # A workspace path whose `.git` is gone resolves to the checkout around it
+    # (workspaces sit under the primary's `.claude/worktrees/`), whose diff is
+    # empty on the default branch — an absent workspace read as no change.
+    top = in_workspace(["rev-parse", "--show-toplevel"]).strip()
+    if os.path.realpath(top) != os.path.realpath(workspace):
+        raise LoopError(f"{workspace} is not a checkout root (git resolves it "
+                        f"to {top}), so its diff is not its own")
+    default = in_workspace(
+        ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).strip()
+    # NUL-separated, as `closure.py` reads `git ls-files`: the default output
+    # C-quotes a non-ASCII name, which then matches no raw path.
+    return [name for name in in_workspace(
+        ["diff", "--name-only", "-z", "--no-renames",
+         f"{default}...HEAD"]).split("\0") if name]
+
+
+def with_workspace_diffs(in_flight, diff=workspace_diff):
+    """The in-flight clumps with each live workspace's real diff unioned into
+    the files it owns (#1212). A closure resolved from the ticket's named
+    files is frozen at what the controller wrote by hand; the worker's diff
+    is what it actually reached, so the exclusion reads both. A landed clump
+    is skipped: its change is on the default branch and its workspace holds
+    nothing.
+
+    `diff(workspace) -> [path]`; its `LoopError` is re-raised naming the
+    workspace. The clumps passed in are not mutated.
+    """
+    out = []
+    for clump in in_flight:
+        if clump.get("landed"):
+            out.append(clump)
+            continue
+        try:
+            changed = diff(clump["workspace"])
+        except LoopError as exc:
+            raise LoopError(f"clump #{key_of(clump)}: {exc}") from exc
+        key = "closure" if clump.get("closure") is not None else "files"
+        out.append({**clump, key: sorted(paths(clump) | set(changed))})
+    return out
+
+
 def with_run_jobs(in_flight, run_id, root=None):
     """The in-flight clumps with each `job` read from the run file, matched by
     the clump's lowest ticket. `closure.py --json` carries no `job`, so the
@@ -1076,6 +1134,11 @@ def run(argv):
                                "optional run id is the one a controller "
                                "forgets")
     dispatch.add_argument("--free", type=int, required=True)
+    dispatch.add_argument("--no-workspace-diff", action="store_true",
+                          help="skip reading each in-flight workspace's git "
+                               "diff into its closure (#1212). For fixtures "
+                               "whose workspaces are not real checkouts; a "
+                               "controller never passes it")
     # Measured when omitted, so the box check cannot be skipped by a
     # controller who does not know what number to pass.
     dispatch.add_argument("--processes", type=process_count,
@@ -1122,6 +1185,14 @@ def run(argv):
             in_flight = read_clumps(args.in_flight, live=True)
             root = runfile.env_root()
             in_flight = with_run_jobs(in_flight, args.run, root)
+            if args.no_workspace_diff:
+                # Said, not silent: this run's exclusion reads only the named
+                # closures, and its output must not read like one that also
+                # read each workspace's diff (#1212 S1).
+                print("workspace diff: SKIPPED (--no-workspace-diff) — "
+                      "in-flight closures are the named files only")
+            else:
+                in_flight = with_workspace_diffs(in_flight)
             free = max(args.free, 0)
             # Measured before any early return: a broken herdr or `ps` must
             # refuse here too, not hide behind "nothing to dispatch".
