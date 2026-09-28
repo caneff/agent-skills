@@ -111,8 +111,8 @@ quota. In this lane they swap for:
    sibling branch or a deliberate parking, which is why Codex reading it
    alone reports both as defects.
 
-A Codex-lane PR gets no merge-time Codex pass. `implement/SKILL.md § The merge
-step 3` applies to heavy Claude-lane PRs only, and says so; the lane's own
+A Codex-lane PR gets no merge-time Codex pass. `implement/SKILL.md`
+§ The merge step 3 applies to heavy Claude-lane PRs only, and says so; the lane's own
 `/codex:adversarial-review` is its adversarial pass, and running the controller's
 on top would spend the same Codex quota on the same diff. The controller merges
 on the lane's reviews and adds no trial row to
@@ -143,5 +143,5 @@ says the owner decides where the billing goes. Send the controller the error
 and hand the owner the choice: wait for the reset, park the ticket, or a
 Claude review the owner rules as a one-off substitute. On a substitution the
 PR body names the substitution, names the ruling, and lists the reviews that
-actually ran, as the disclosure rule in the last paragraph of "The reviews" requires. A preflight that catches the cap before
-the build starts is #1204's, not this section's.
+actually ran (§ The reviews). A preflight that catches the cap before the
+build starts is #1204's, not this section's.
