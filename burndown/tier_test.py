@@ -515,6 +515,16 @@ def test_the_body_reader_agrees_with_targets_rs_on_its_own_test_cases():
         assert T.body_code_target(body) is None, body
 
 
+def test_the_body_reader_trims_a_sentence_dot_and_reads_backslashes():
+    """targets.rs trims trailing dots and folds `\\`; without the trim,
+    `Research why ./e2e.sh.` reads as prose and #1211 reopens."""
+    assert T.body_code_target("Research why ./e2e.sh.") == "./e2e.sh"
+    assert T.body_code_target("edit SKILL.md.") == "SKILL.md"
+    assert T.body_code_target(r"see bin\implement-dispatch, then") == "bin/implement-dispatch"
+    assert T.body_code_target(r"src\main.dart") == "src/main.dart"
+    assert T.body_code_target(r"docs\notes.md") is None
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
