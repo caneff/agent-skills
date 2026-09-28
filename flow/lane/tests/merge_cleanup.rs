@@ -843,6 +843,28 @@ fn a_removed_worktree_clears_its_worker_record_and_leaves_an_unrelated_one() {
     assert_eq!(lane::workers::read(&c.home(), "222").len(), 1, "an unrelated controller's record must survive");
 }
 
+/// #1209 (PR #1201 P1): the kill-mid-rewrite witness covered controller-adopt's
+/// removal only. `remove_workspace` publishes the same sidecar, so a death
+/// halfway through its rewrite must leave that sidecar in its old or its new
+/// version, the controller's other worker still readable.
+#[test]
+fn a_merge_cleanup_killed_mid_rewrite_of_the_sidecar_loses_none_of_its_other_records() {
+    let c = Cleanup::new();
+    let r = c.mkfixture("r5b");
+    let wt = c.root().join("r5b-wt");
+    c.worktree_add(&r, &[s(&wt), "caneff/merged-one"]);
+    let ours = worker_record(&wt, "caneff/merged-one");
+    let other = worker_record(&c.root().join("elsewhere-wt"), "caneff/other");
+    lane::workers::append(&c.home(), "111", &ours).unwrap();
+    lane::workers::append(&c.home(), "111", &other).unwrap();
+
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[("LANE_SIDECAR_ABORT_MID_WRITE", "111.workers.jsonl")]);
+    assert!(!run.ok, "merge-cleanup must die at the failpoint: {}", run.text());
+    assert!(!run.has("cleared the controller's worker record"), "it died after the rewrite, not in it: {}", run.text());
+    let left = lane::workers::read(&c.home(), "111");
+    assert!(left == vec![ours, other.clone()] || left == vec![other], "the sidecar is its old or its new version: {left:?}");
+}
+
 /// #1087: `implement-dispatch` records the canonical spelling of a workspace,
 /// so `merge-cleanup` must canonicalize the spelling `git worktree list`
 /// gives it before matching. Current git already prints the resolved path,
