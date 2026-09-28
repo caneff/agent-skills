@@ -1,6 +1,6 @@
 # HTML Report Format
 
-The architectural review is rendered as a single self-contained HTML file in the OS temp directory. It is styled with the **visual-teach** design system — the same vendored, semantic `vt-*` components and `--vt-*` theme tokens the teaching lessons use — so the report opens offline, carries a working light/dark mode, and shares one visual identity with the rest of the skills. No web-framework, no remote diagram library, nothing that phones home.
+The architectural review is rendered as one HTML file in the OS temp directory, with the vendored visual-teach assets copied beside it. It is styled with the **visual-teach** design system — the same vendored, semantic `vt-*` components and `--vt-*` theme tokens the teaching lessons use — so the report opens offline, carries a working light/dark mode, and shares one visual identity with the rest of the skills. No web-framework, no remote diagram library, nothing that phones home.
 
 **The diagrams carry the weight.** A deepening reads best as a picture: four shallow modules collapsing into one, an interface as wide as its implementation, a call leaking across a seam. Mermaid handles graph-shaped structure (call graphs, dependencies, sequences); hand-built `vt-diagram` divs and inline SVG handle the more editorial visuals (mass diagrams, cross-sections). Mix the two — don't lean on Mermaid for everything, it starts to look generic. A before/after code block is the exception here, not the rule; reach for it when the change is a few lines of source, not a change of shape.
 
