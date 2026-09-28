@@ -75,6 +75,8 @@ if [[ "$branch" =~ ^implement-([0-9]+)$ ]]; then
       { echo "pre-report gate: runfile.py check refused — fix the sidecar line or the body's line (the gate has no --allow-stale; that flag is harvest's): $check" >&2; exit 1; }
     dispositions_status="dispositions agree with the PR body"
   fi
+else
+  dispositions_status="branch '$branch' is not implement-<n>, dispositions not looked for"
 fi
 
 echo "pre-report gate: clean tree, ${scratch_status}, ${dispositions_status}, ${sha:0:12} is an ancestor of ${tip} (${tip_sha:0:12})"
