@@ -2244,6 +2244,23 @@ def test_workspace_diff_refuses_a_directory_that_is_not_its_own_checkout():
             raise AssertionError("an enclosing checkout's diff was returned")
 
 
+def test_the_cli_dispatch_says_when_it_skipped_the_workspace_diff():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [10], "closure": ["a.js"]}], fh)
+        with open(live, "w") as fh:
+            json.dump([], fh)
+        args = ("dispatch", "--candidates", cand, "--in-flight", live,
+                "--free", "1", "--processes", "4", "--committed-gb", "4")
+        skipped = loop_py(*args)
+        assert "workspace diff: SKIPPED" in skipped.stdout, skipped.stdout
+        read = loop_py(*args, "--real-workspaces")
+        assert read.returncode == 0, read.stderr
+        assert "SKIPPED" not in read.stdout, read.stdout
+
+
 def test_the_cli_dispatch_holds_a_candidate_on_a_file_only_the_diff_reaches():
     with tempfile.TemporaryDirectory() as tmp:
         work = make_workspace(tmp, ["b.txt"])

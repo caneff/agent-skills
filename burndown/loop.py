@@ -1185,7 +1185,13 @@ def run(argv):
             in_flight = read_clumps(args.in_flight, live=True)
             root = runfile.env_root()
             in_flight = with_run_jobs(in_flight, args.run, root)
-            if not args.no_workspace_diff:
+            if args.no_workspace_diff:
+                # Said, not silent: this run's exclusion reads only the named
+                # closures, and its output must not read like one that also
+                # read each workspace's diff (#1212 S1).
+                print("workspace diff: SKIPPED (--no-workspace-diff) — "
+                      "in-flight closures are the named files only")
+            else:
                 in_flight = with_workspace_diffs(in_flight)
             free = max(args.free, 0)
             # Measured before any early return: a broken herdr or `ps` must
