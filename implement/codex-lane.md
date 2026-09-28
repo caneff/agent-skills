@@ -134,13 +134,14 @@ survive it.
 
 ## When Codex's own quota runs out
 
-Codex has its own plan usage cap, separate from Claude's. A `/codex:review` or
-`/codex:adversarial-review` that fails on it returns a hard "usage limit"
-error with a retry date and no partial output (#1178). Stop. Do not retry, and
+Codex has its own plan usage cap, separate from Claude's. Any Codex call in the
+lane can hit it: the `/codex:rescue` build, `/codex:review` or
+`/codex:adversarial-review`. On the pilot the review returned a hard "usage
+limit" error with a retry date and no partial output (#1178). Stop. Do not retry, and
 do not substitute a review on your own initiative: which review stands in is
 the owner's tradeoff, not the worker's, and the lane's opt-in rule already
 says the owner decides where the billing goes. Send the controller the error
-and hand the owner the choice: wait for the reset, park the ticket, or a
+(with no controller, tell the owner directly) and hand the owner the choice: wait for the reset, park the ticket, or a
 Claude review the owner rules as a one-off substitute. On a substitution the
 PR body names the substitution, names the ruling, and lists the reviews that
 actually ran (§ The reviews). A preflight that catches the cap before the
