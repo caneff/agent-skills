@@ -756,17 +756,11 @@ def test_a_git_that_fails_silently_is_not_an_empty_closure():
 
 
 def test_a_git_that_warns_on_stderr_but_exits_zero_still_lists_its_files():
-    # A config warning is stderr on a good run; the
-    # exit status decides. The fake prints the real listing after the warning.
+    # A config warning is stderr on a good run; the exit status decides. The
+    # fake warns, then runs the real git with the flags it was given.
     root = repo(SHARED)
-    real = subprocess.run(
-        ["git", "-C", root, "ls-files", "--cached", "--others",
-         "--exclude-standard", "-z"], capture_output=True, check=True).stdout
-    listing = os.path.join(tempfile.mkdtemp(prefix="closure-fixture-"), "list")
-    FIXTURES.append(os.path.dirname(listing))
-    with open(listing, "wb") as fh:
-        fh.write(real)
-    path = fake_git_on_path(f"echo 'warning: noisy config' >&2\n/bin/cat '{listing}'")
+    real = shutil.which("git")
+    path = fake_git_on_path(f"echo 'warning: noisy config' >&2\nexec {real} \"$@\"")
     got, refused = refused_with_path(root, path)
     assert refused is None, refused
     assert "examples/skyscraper/component.js" in got, got
