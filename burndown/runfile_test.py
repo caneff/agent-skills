@@ -126,7 +126,7 @@ def test_start_refuses_a_repo_that_is_not_a_git_checkout():
         assert "not a git checkout" in str(exc), exc
     else:
         raise AssertionError("a plain directory was accepted as the target")
-    got = cli(root, "start", "burn-2", "--repo", os.path.join(plain, "nope"))
+    got = cli(root, "start", "--repo", REPO, "burn-2", "--repo", os.path.join(plain, "nope"))
     assert got.returncode == 1 and "not a git checkout" in got.stderr, got
     assert "Traceback" not in got.stderr, got.stderr
     assert not os.path.exists(runfile.path("burn-2", root))
