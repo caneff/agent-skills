@@ -149,6 +149,19 @@ def test_start_refuses_a_blank_repo_instead_of_recording_the_cwds_repo():
     assert not os.path.exists(runfile.path("burn-2", root))
 
 
+def test_show_prints_the_recorded_target_repo_and_says_when_there_is_none():
+    root = cache()
+    runfile.start("burn-1", slots=1, root=root, repo=REPO)
+    assert f"repo {REPO}" in cli(root, "show", "burn-1").stdout
+    target = runfile.path("burn-1", root)
+    with open(target) as fh:
+        old = json.load(fh)
+    del old["repo"]
+    with open(target, "w") as fh:
+        json.dump(old, fh)
+    assert "repo none recorded" in cli(root, "show", "burn-1").stdout
+
+
 def test_a_run_file_written_before_the_repo_field_loads_and_names_no_target():
     root = cache()
     runfile.start("burn-1", slots=1, root=root, repo=REPO)

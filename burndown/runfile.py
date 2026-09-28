@@ -907,7 +907,8 @@ def render(run):
     """The run as the controller reads it back: one header line, one line per
     clump, landings marked with their sha."""
     lines = [f"run {run['run_id']}  slots {run['slots']}  "
-             f"controller {run['controller'] or '-'}"]
+             f"controller {run['controller'] or '-'}  "
+             f"repo {run.get('repo') or 'none recorded'}"]
     for entry in run["clumps"]:
         state = f"landed {entry['landed']}" if entry["landed"] else "in flight"
         lines.append(f"clump #{entry['tickets'][0]}  {tickets_of(entry)}  "
