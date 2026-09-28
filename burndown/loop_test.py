@@ -879,17 +879,15 @@ _EMPTY.close()
 EMPTY_LIVE = _EMPTY.name
 
 
-def loop_py(*args, cwd=None, env=None):
+def loop_py(*args, cwd=None, env=None, real_workspaces=False):
     """Runs loop.py. `dispatch` requires --run, so a call that gives none gets
     a run file built from the `job` fields of its --in-flight file — the
     fixture's own record of each worker's job, moved to where dispatch reads
     it."""
     args = list(args)
     tmp = None
-    if args[:1] == ["dispatch"] and "--real-workspaces" not in args:
+    if args[:1] == ["dispatch"] and not real_workspaces:
         args.append("--no-workspace-diff")
-    if "--real-workspaces" in args:
-        args.remove("--real-workspaces")
     if args[:1] == ["dispatch"] and "--run" not in args and "--in-flight" in args:
         tmp = tempfile.TemporaryDirectory()
         env = {**(env or {}), "BURNDOWN_CACHE_DIR": tmp.name}
@@ -2256,7 +2254,7 @@ def test_the_cli_dispatch_says_when_it_skipped_the_workspace_diff():
                 "--free", "1", "--processes", "4", "--committed-gb", "4")
         skipped = loop_py(*args)
         assert "workspace diff: SKIPPED" in skipped.stdout, skipped.stdout
-        read = loop_py(*args, "--real-workspaces")
+        read = loop_py(*args, real_workspaces=True)
         assert read.returncode == 0, read.stderr
         assert "SKIPPED" not in read.stdout, read.stdout
 
@@ -2273,9 +2271,8 @@ def test_the_cli_dispatch_holds_a_candidate_on_a_file_only_the_diff_reaches():
                         "closure": ["a.txt"],
                         "job": {"state": "running", "cores": 1}}], fh)
         args = ("dispatch", "--candidates", cand, "--in-flight", live,
-                "--free", "1", "--processes", "4", "--committed-gb", "4",
-                "--real-workspaces")
-        got = loop_py(*args)
+                "--free", "1", "--processes", "4", "--committed-gb", "4")
+        got = loop_py(*args, real_workspaces=True)
         assert got.returncode == 0, got.stderr
         assert "dispatch  #442" not in got.stdout, got.stdout
         assert "b.txt" in got.stdout, got.stdout
@@ -2283,7 +2280,7 @@ def test_the_cli_dispatch_holds_a_candidate_on_a_file_only_the_diff_reaches():
             json.dump([{"tickets": [431], "workspace": work + "-gone",
                         "closure": ["a.txt"],
                         "job": {"state": "running", "cores": 1}}], fh)
-        refused = loop_py(*args)
+        refused = loop_py(*args, real_workspaces=True)
         assert refused.returncode == 1, refused.stdout
         assert "431" in refused.stderr, refused.stderr
 
