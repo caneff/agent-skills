@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # The pre-report gate: run from the worktree before reporting a sha.
-# Fails unless the tree is clean, <sha> is an ancestor of <tip>, and the
-# workspace's .scratch/ is empty — the three ways a "done" report has
-# described work that was not on the branch or left cleanup for later.
+# Fails unless the tree is clean, <sha> is an ancestor of <tip>, the
+# workspace's .scratch/ is empty, and — on an implement-<n> branch whose
+# review cache holds dispositions-<n>.jsonl — the PR body pr-body-<n>.md
+# exists and its Decisions made agrees with that sidecar (#1214): the four
+# ways a "done" report has described work that was not on the branch, left
+# cleanup for later, or shipped a stale disposition.
 # A non-empty .scratch/ the worker cannot commit and must keep is named in
 # the PR-up report by setting PRE_REPORT_KEEP_SCRATCH="<why>", which passes
 # the check and folds the reason into the pass line itself.
