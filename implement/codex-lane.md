@@ -111,9 +111,9 @@ quota. In this lane they swap for:
    sibling branch or a deliberate parking, which is why Codex reading it
    alone reports both as defects.
 
-A Codex-lane PR gets no merge-time Codex pass. `implement/SKILL.md`
-§ The merge step 3 applies to heavy Claude-lane PRs only, and says so; the lane's own
-`/codex:adversarial-review` is its adversarial pass, and running the controller's
+A Codex-lane PR gets no merge-time Codex pass.
+`implement/SKILL.md` § The merge step 3 applies to heavy Claude-lane PRs only,
+and says so; the lane's own `/codex:adversarial-review` is its adversarial pass, and running the controller's
 on top would spend the same Codex quota on the same diff. The controller merges
 on the lane's reviews and adds no trial row to
 `docs/research/2026-09-14-codex-review-trial.md`, which compares Codex against
