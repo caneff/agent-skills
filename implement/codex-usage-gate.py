@@ -20,11 +20,15 @@ A missing, stale or malformed reading is 30, never 0: it is not headroom.
 from __future__ import annotations
 
 import importlib.util
+import math
 import sys
 import time
 from pathlib import Path
 
 WARN_PERCENT = 80
+# The helper's 1.3s RPC_TIMEOUT is tuned to a statusline tick; a loaded box
+# answers in 0.6-1.2s, and a spurious timeout here skips a pass (exit 30).
+REFRESH_TIMEOUT = 5.0
 HELPER = Path(__file__).resolve().parent.parent / "flow/ccstatusline-table/helpers/codex-usage.py"
 
 PROCEED, WARN, CAPPED, UNKNOWN = 0, 10, 20, 30
@@ -54,7 +58,10 @@ def reading(limits: object, now: float) -> tuple[float, float] | None:
         if not isinstance(win, dict):
             return None
         pct, resets = win.get("usedPercent"), win.get("resetsAt")
-        if any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in (pct, resets)):
+        if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+               for v in (pct, resets)):
+            return None  # json.loads accepts NaN and Infinity; neither is a reading
+        if pct < 0:
             return None
         if resets <= now:
             return None
@@ -63,28 +70,36 @@ def reading(limits: object, now: float) -> tuple[float, float] | None:
     return worst
 
 
-def main() -> int:
+def check() -> tuple[int, str]:
     helper = load_helper()
+    helper.RPC_TIMEOUT = REFRESH_TIMEOUT
     now = time.time()
-    found = reading(helper.read_cache(now), now)
-    if found is None:
+    worst = reading(helper.read_cache(now), now)
+    if worst is None:
         live = helper.fetch_live()
         if live is not None:
             helper.write_cache(live, now)
-            found = reading(live, now)
-    if found is None:
-        print("codex usage unknown: no fresh, readable usage cache and the live fetch failed")
-        return UNKNOWN
-    pct, resets = found
+            worst = reading(live, now)
+    if worst is None:
+        return UNKNOWN, "codex usage unknown: no fresh, readable usage cache and the live fetch failed"
+    pct, resets = worst
     when = time.strftime("%Y-%m-%d %H:%M", time.localtime(resets))
     if pct >= 100:
-        print(f"codex usage {pct:g}% — capped, resets {when}")
-        return CAPPED
+        return CAPPED, f"codex usage {pct:g}% — capped, resets {when}"
     if pct >= WARN_PERCENT:
-        print(f"codex usage {pct:g}% — at or above {WARN_PERCENT}%, resets {when}")
-        return WARN
-    print(f"codex usage {pct:g}% — ok, resets {when}")
-    return PROCEED
+        return WARN, f"codex usage {pct:g}% — at or above {WARN_PERCENT}%, resets {when}"
+    return PROCEED, f"codex usage {pct:g}% — ok, resets {when}"
+
+
+def main() -> int:
+    # Any failure is exit 30: a crash's own exit 1 is a status neither caller
+    # has a rule for, and an unread reading is not headroom.
+    try:
+        status, line = check()
+    except Exception as exc:
+        status, line = UNKNOWN, f"codex usage unknown: {type(exc).__name__}: {exc}"
+    print(line)
+    return status
 
 
 if __name__ == "__main__":
