@@ -168,7 +168,8 @@ def canonical(root, path):
 
 def git_listing(root):
     """The paths git lists under `root`: tracked, plus untracked and not
-    ignored, minus `SKIP_DIRS`. A non-zero exit, or git skipping an unreadable directory, raises `ClosureError`."""
+    ignored, minus `SKIP_DIRS`. A non-zero exit, or git skipping an unreadable
+    directory, raises `ClosureError`."""
     # A caller's Git environment must not redirect this scan to its repo.
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["LC_ALL"] = "C"  # the unreadable-directory warning below is matched by text
