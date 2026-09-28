@@ -191,7 +191,7 @@ running the declared generator would answer exactly, and it would cost one
 regeneration per candidate per wave — the whole queue, re-explored on every
 refill. The declaration exists so that one scan of the repo answers for every
 candidate at once. `closure.py` does run one subprocess, `git ls-files`, to
-list the tracked and non-ignored files it scans (`repo_files`); it never runs
+list the tracked plus untracked-not-ignored files it scans (`repo_files`); it never runs
 the generator. `test_no_code_path_runs_the_declared_generator` in
 `closure_test.py` witnesses that: it declares a generator that touches a marker
 file, runs `resolve_closure`, `clumps` and the CLI, and asserts the marker is
