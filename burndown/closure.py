@@ -168,9 +168,11 @@ def canonical(root, path):
 
 def git_listing(root):
     """The paths git lists under `root`: tracked, plus untracked and not
-    ignored, minus `SKIP_DIRS`. Anything short of a clean listing raises `ClosureError`."""
+    ignored, minus `SKIP_DIRS`. A non-zero exit, or git skipping an unreadable
+    directory, raises `ClosureError`."""
     # A caller's Git environment must not redirect this scan to its repo.
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env["LC_ALL"] = "C"  # the unreadable-directory warning below is matched by text
     # The --exclude arguments are not redundant with the walk's SKIP_DIRS
     # filter: for --others they keep git from opening an unreadable
     # node_modules/, which it warns about and the check below refuses.
@@ -182,8 +184,11 @@ def git_listing(root):
             capture_output=True, env=env)
     except OSError as exc:
         raise ClosureError(f"cannot read {root}: {exc}") from exc
-    # Git can exit zero after warning that it could not open a directory.
-    if listed.returncode or listed.stderr:
+    # Exit status decides; stderr is only the message. Git writes to stderr on
+    # good runs too (a config warning). The one warning that is a failure
+    # is an unreadable directory: git skips it and exits zero, and its files
+    # would silently drop out of the closure.
+    if listed.returncode or b"could not open directory" in listed.stderr:
         raise ClosureError(f"cannot read {root}: git ls-files: "
                            f"{os.fsdecode(listed.stderr).strip()}")
     return {os.fsdecode(p) for p in listed.stdout.split(b"\0") if p}

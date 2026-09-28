@@ -755,6 +755,25 @@ def test_a_git_that_fails_silently_is_not_an_empty_closure():
     assert "git ls-files" in refused, refused
 
 
+def test_a_git_that_warns_on_stderr_but_exits_zero_still_lists_its_files():
+    # A config warning is stderr on a good run; the exit status decides. The
+    # fake warns, then runs the real git with the flags it was given.
+    root = repo(SHARED)
+    real = shutil.which("git")
+    path = fake_git_on_path(f"echo 'warning: noisy config' >&2\nexec {real} \"$@\"")
+    got, refused = refused_with_path(root, path)
+    assert refused is None, refused
+    assert "examples/skyscraper/component.js" in got, got
+
+
+def test_the_scan_pins_git_to_the_c_locale():
+    # The unreadable-directory guard matches git's English warning text.
+    root = repo(SHARED)
+    got, refused = refused_with_path(
+        root, fake_git_on_path('[ "$LC_ALL" = C ] || exit 1\nexec ' + shutil.which("git") + ' "$@"'))
+    assert refused is None, refused
+
+
 def test_a_callers_git_environment_does_not_redirect_the_scan():
     # A hook or rebase exports GIT_DIR for its own repo; the scan is of `root`.
     other = repo({"unrelated.js": "x\n"})
