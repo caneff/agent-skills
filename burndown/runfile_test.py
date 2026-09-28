@@ -1596,6 +1596,21 @@ def test_a_file_qualified_id_is_read_as_that_id():
     assert "records S8 as 'fixed'" in got, got
 
 
+def test_a_file_qualifier_may_carry_a_line_and_a_bare_file_needs_backticks():
+    # C1: a line number or #L anchor on the path is part of the qualifier.
+    for line in ("- **e2e/scenarios.mjs:42 S8**: fixed",
+                 "- **e2e/scenarios.mjs#L42 S8**: fixed",
+                 "- `runfile.py` S8: fixed"):
+        assert runfile.cited_ids(line)[0] == ["S8"], line
+
+
+def test_a_dotted_word_before_an_id_is_not_read_as_a_file():
+    # C3: a product or a version is prose. Only a path with a `/`, or a bare
+    # file name in backticks, qualifies an id.
+    assert runfile.cited_ids("- Node.js v18: leftover as a follow-up")[0] == []
+    assert "S3" not in runfile.cited_ids("- v1.2 S3: fixed")[0]
+
+
 def test_a_word_before_an_id_is_not_read_as_a_file():
     # A path token carries a `.` or `/`; plain prose before an id does not.
     assert runfile.cited_ids("- Codex S8: leftover")[0] == []

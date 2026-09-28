@@ -453,8 +453,12 @@ _OUTCOME_WORD = r"(fixed|disputed|filed|handed[- ]back|leftover)"
 _ID = r"[A-Za-z][A-Za-z0-9-]*[0-9][A-Za-z0-9]*"
 _LIST_MARKER = re.compile(r"\s*(?:(?:[-*+]|\d+[.)])\s+)?")
 # A sweep PR's controller cites an id file-qualified (`**e2e/scenarios.mjs
-# S8**`, #1213): a path token, one carrying a `.` or `/`, before the id.
-_FILE_QUALIFIER = r"(?:[\w.\-/]*[./][\w.\-/]*[*_`]*\s+[*_`]*)?"
+# S8**`, #1213): a path token before the id, optionally `:<line>` or `#L<line>`.
+# The token carries a `/`, or is a bare file name in backticks: a dotted word
+# (`Node.js`, `v1.2`) is prose.
+_FILE_QUALIFIER = (r"(?:[\w.\-/]*/[\w.\-/]*|[\w.\-/]+(?=`))"
+                   r"(?::\d+|#L\d+)?[*_`]*\s+[*_`]*")
+_FILE_QUALIFIER = r"(?:" + _FILE_QUALIFIER + r")?"
 _LEAD_ID = re.compile(r"[*_`]*" + _FILE_QUALIFIER + r"(" + _ID
                       + r")[*_`]*(?![\w-])")
 _ID_SEPARATOR = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+|\s*/\s*")
