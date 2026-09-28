@@ -1837,6 +1837,20 @@ def test_cli_check_runs_the_harvest_comparison_without_a_run_file():
     assert agreed.returncode == 0 and "agree" in agreed.stdout, agreed.stderr
 
 
+def test_cli_check_refuses_an_empty_sidecar_and_a_malformed_leftover():
+    # Harvest refuses a leftover line missing its fields (P2), and an empty
+    # sidecar has nothing to compare, which is not agreement (C1).
+    root = cache()
+    body = pr_body("## Decisions made\n\n- S3: leftover\n")
+    for text, want in (("", "no lines"),
+                       ('{"id": "S3", "outcome": "leftover"}\n', "missing")):
+        side = os.path.join(cache(), "dispositions-901.jsonl")
+        with open(side, "w") as fh:
+            fh.write(text)
+        got = cli(root, "check", "--from", side, "--pr-body", body)
+        assert got.returncode == 1 and want in got.stderr, (text, got.stderr)
+
+
 def test_the_sidecar_name_runfile_builds_is_the_one_it_parses():
     # One module owns both directions of `dispositions-<n>.jsonl` (#1173 S5):
     # the built name names its own ticket and no other.

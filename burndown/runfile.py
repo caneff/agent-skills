@@ -1083,6 +1083,10 @@ def main(argv):
             print(render(run))
             print(f"copied {len(added)} leftover(s) from {args.from_path}")
         elif args.command == "check":
+            if not read_dispositions(args.from_path):
+                raise RunFileError(f"{args.from_path} has no lines — nothing "
+                                   "to compare the PR body against")
+            read_leftover_lines(args.from_path)
             refuse_disagreeing_pr_body(args.from_path, args.pr_body)
             print(f"{args.from_path} and {args.pr_body} agree")
         elif args.command == "job":
