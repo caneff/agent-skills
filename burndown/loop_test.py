@@ -2174,11 +2174,12 @@ def run_in(cwd, *cmd):
                           text=True).stdout
 
 
-def make_workspace(tmp, changed):
-    """A real clone whose branch adds `changed` past its origin's default."""
+def make_workspace(tmp, changed, default="main"):
+    """A real clone whose branch adds each of `changed`, one commit apiece,
+    past its origin's `default` branch."""
     origin = os.path.join(tmp, "origin.git")
     work = os.path.join(tmp, "work")
-    run_in(tmp, "git", "init", "-q", "--bare", "-b", "main", origin)
+    run_in(tmp, "git", "init", "-q", "--bare", "-b", default, origin)
     run_in(tmp, "git", "clone", "-q", origin, work)
     for k, v in (("user.email", "t@example.com"), ("user.name", "t")):
         run_in(work, "git", "config", k, v)
@@ -2186,20 +2187,24 @@ def make_workspace(tmp, changed):
         fh.write("a")
     run_in(work, "git", "add", "a.txt")
     run_in(work, "git", "commit", "-qm", "a")
-    run_in(work, "git", "push", "-q", "origin", "HEAD:main")
-    run_in(work, "git", "remote", "set-head", "origin", "main")
+    run_in(work, "git", "push", "-q", "origin", f"HEAD:{default}")
+    run_in(work, "git", "remote", "set-head", "origin", default)
     run_in(work, "git", "checkout", "-q", "-b", "implement-1")
-    with open(os.path.join(work, changed), "w") as fh:
-        fh.write("b")
-    run_in(work, "git", "add", changed)
-    run_in(work, "git", "commit", "-qm", "b")
+    for name in changed:
+        with open(os.path.join(work, name), "w") as fh:
+            fh.write("b")
+        run_in(work, "git", "add", name)
+        run_in(work, "git", "commit", "-qm", f"add {name}")
     return work
 
 
 def test_workspace_diff_lists_files_changed_against_the_origin_default():
+    # A default that is not `main` and two commits on the branch: a diff
+    # against a hard-coded `origin/main`, or against `HEAD~1`, reads wrong
+    # (#1212 C6).
     with tempfile.TemporaryDirectory() as tmp:
-        work = make_workspace(tmp, "b.txt")
-        assert loop.workspace_diff(work) == ["b.txt"]
+        work = make_workspace(tmp, ["b.txt", "c.txt"], default="trunk")
+        assert sorted(loop.workspace_diff(work)) == ["b.txt", "c.txt"]
         try:
             loop.workspace_diff(os.path.join(tmp, "missing"))
         except loop.LoopError:
@@ -2210,7 +2215,7 @@ def test_workspace_diff_lists_files_changed_against_the_origin_default():
 
 def test_the_cli_dispatch_holds_a_candidate_on_a_file_only_the_diff_reaches():
     with tempfile.TemporaryDirectory() as tmp:
-        work = make_workspace(tmp, "b.txt")
+        work = make_workspace(tmp, ["b.txt"])
         cand = os.path.join(tmp, "candidates.json")
         live = os.path.join(tmp, "live.json")
         with open(cand, "w") as fh:
