@@ -605,14 +605,16 @@ The controller merges on a repo Chris owns; Chris reads it after via
    comment `Codex pass skipped: <why>` on the PR and go to step 4 — a skip
    adds no trial row.
 
-   Then check the plan's usage, before any run starts (#1204):
+   Then check the plan's usage before every launch of this block (#1204) —
+   the gate, and the second and third passes, each a launch:
    `python3 ~/.agents/skills/implement/codex-usage-gate.py`. It reads the
    usage cache, refreshing a missing or stale one itself, and prints one
-   line. Exit 0: launch. Exit 10 (at or above 80%): put its line in your
-   next message to Chris, then launch. Exit 20 (capped) or exit 30 (no fresh,
+   line. Exit 0: launch. Exit 10 (at or above 80%): tell Chris its line in a
+   message of its own, then launch. Exit 20 (capped) or exit 30 (no fresh,
    readable reading): comment `Codex pass skipped: <printed line>` on the PR,
    launch nothing, write no refused duration row — no run existed to refuse —
-   and go to step 4. An unreadable cache is exit 30, never headroom.
+   and go to step 4; on the second or third pass, the pass already collected
+   stands and its dispositions carry on to step 4. An unreadable cache is exit 30, never headroom.
 
    From the worker's workspace, fetch the ticket yourself — you did
    not build this ticket, so you don't already hold it — body and comments
@@ -738,7 +740,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    a review, and either one collected looks exactly like a pass that found
    nothing — the absent-answer-read-as-benign shape this lane exists to close.
    The skip clause at the top of this step governs the preflight only — not
-   logged in, no plugin entry — checked before any run exists; every
+   logged in, no plugin entry, the usage gate — checked before any run exists; every
    started run answers to this gate, and there is no retry: a refused run
    ends the step for its own phase, the same as a refused preflight. A
    refusal with no pass yet collected for this PR leaves no trial row to

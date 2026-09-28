@@ -24,11 +24,13 @@ runs through the `codex@openai-codex` plugin, which drives the local Codex CLI
 under the owner's own auth; there is no second runtime to configure.
 
 Then check the plan's usage (#1204):
+before the build and again before each review call (§ The reviews), since a
+build can run for hours and the cap can land between them:
 `python3 ~/.agents/skills/implement/codex-usage-gate.py`, which prints one
 line. Exit 0: go on. Exit 10 (at or above 80%): tell the owner the line before
 starting. Exit 20 (capped) or exit 30 (no fresh, readable reading): stop,
-start no Codex run, and hand the owner the line — the lane cannot build past
-the cap, and an unreadable cache is never headroom.
+start no Codex run, and hand the owner the line — an unreadable cache is
+never headroom.
 
 Load the plugin's `gpt-5-4-prompting` skill before writing the brief. A prompt
 shaped for Claude is not shaped for Codex, and the handoff is one shot.
@@ -152,5 +154,5 @@ says the owner decides where the billing goes. Send the controller the error
 (with no controller, tell the owner directly) and hand the owner the choice: wait for the reset, park the ticket, or a
 Claude review the owner rules as a one-off substitute. On a substitution the
 PR body names the substitution, names the ruling, and lists the reviews that
-actually ran (§ The reviews). A preflight that catches the cap before the
-build starts is #1204's, not this section's.
+actually ran (§ The reviews). A preflight that catches the cap before a
+Codex call starts is #1204's, not this section's.
