@@ -547,6 +547,17 @@ def test_a_dry_run_says_would_withhold_and_a_labelled_ticket_is_not_withheld():
     assert "would withhold:" in report and "labels withheld" not in report, report
 
 
+def test_fetch_ticket_refuses_an_answer_whose_labels_are_missing_or_malformed():
+    """Missing labels read as "no labels" re-write the label every tick (S7)."""
+    for answer in ('{"body": "x"}', '{"labels": null, "body": "x"}', '{"labels": "x", "body": "x"}'):
+        raised = None
+        try:
+            T.fetch_ticket("caneff/agent-skills", 1, run=lambda args, a=answer: a)
+        except T.TierError as exc:
+            raised = exc
+        assert "no labels in the answer" in str(raised), (answer, raised)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:

@@ -247,7 +247,11 @@ def fetch_ticket(repo, number, run=None):
     if not isinstance(answer, dict) or not isinstance(answer.get("body"), str):
         # A body that did not come back is not a body that names no code.
         raise TierError(f"gh issue view {number}: no body in the answer")
-    return [label.get("name") for label in answer.get("labels") or []], answer["body"]
+    if not isinstance(answer.get("labels"), list):
+        # Nor are missing labels no labels: read so, the pass writes the label
+        # again on every tick.
+        raise TierError(f"gh issue view {number}: no labels in the answer")
+    return [label.get("name") for label in answer["labels"]], answer["body"]
 
 
 def candidates_from(repo, specs, run=None):
