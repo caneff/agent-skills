@@ -25,7 +25,7 @@ section() { # section <heading regex>: from that heading to the next `## `
   ' "$lane" | flatten
 }
 
-optin="$(sed -n '1,/^## Preflight$/p' "$lane" | flatten)"
+optin="$(awk '/^## / { exit } { print }' "$lane" | flatten)"
 build="$(section '^## The build$')"
 reviews="$(section '^## The reviews$')"
 cap="$(section "^## When Codex's own quota runs out$")"
