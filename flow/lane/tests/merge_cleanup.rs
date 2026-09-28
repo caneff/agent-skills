@@ -861,6 +861,11 @@ fn a_merge_cleanup_killed_mid_rewrite_of_the_sidecar_loses_none_of_its_other_rec
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[("LANE_SIDECAR_ABORT_MID_WRITE", "111.workers.jsonl")]);
     assert!(!run.ok, "merge-cleanup must die at the failpoint: {}", run.text());
     assert!(!run.has("cleared the controller's worker record"), "it died after the rewrite, not in it: {}", run.text());
+    // The half-written temp file is what only a death inside publish leaves; an
+    // exit before the rewrite, or after it, leaves none (#1209 C4, P11).
+    let sessions = c.home().join(".claude/sessions");
+    let temps: Vec<_> = std::fs::read_dir(&sessions).unwrap().filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).collect();
+    assert_eq!(temps.len(), 1, "expected the failpoint's half-written temp file in {sessions:?}");
     let left = lane::workers::read(&c.home(), "111");
     assert!(left == vec![ours, other.clone()] || left == vec![other], "the sidecar is its old or its new version: {left:?}");
 }

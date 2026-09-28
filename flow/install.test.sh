@@ -322,11 +322,12 @@ else
 fi
 rm "$lh/.claude/settings.json"
 printf 'newer\n' > "$lh/.claude/settings.json"
-link_out=$(HOME="$lh" here="$repo/flow" bash -c 'set -euo pipefail; eval "$(sed -n "/^link()/,/^}/p" "$here/install.sh")"; link claude/settings.json "$HOME/.claude/settings.json"' 2>&1); rc=$?
-if [ "$rc" -ne 0 ] && [ "$(cat "$lh/.claude/settings.json.pre-flow")" = "legacy" ] && [ "$(cat "$lh/.claude/settings.json")" = "newer" ]; then
-  echo "PASS a second real file is refused, not moved over the first backup"
+link_out=$(HOME="$lh" here="$repo/flow" bash -c 'set -euo pipefail; link_refused=""; eval "$(sed -n "/^link()/,/^}/p" "$here/install.sh")"; link claude/settings.json "$HOME/.claude/settings.json"; echo "link_refused=$link_refused"' 2>&1); rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$link_out" | grep -q '^refusing: ' && printf '%s' "$link_out" | grep -q '^link_refused=1$' \
+   && [ "$(cat "$lh/.claude/settings.json.pre-flow")" = "legacy" ] && [ "$(cat "$lh/.claude/settings.json")" = "newer" ]; then
+  echo "PASS a second real file is refused, not moved over the first backup, and the install carries on"
 else
-  echo "FAIL the existing .pre-flow backup was clobbered or the second file lost (rc=$rc): $link_out"; fails=1
+  echo "FAIL the existing .pre-flow backup was clobbered, the second file lost, or the refusal was fatal (rc=$rc): $link_out"; fails=1
 fi
 
 [ "$fails" = 0 ] && echo "ALL PASS"

@@ -166,10 +166,9 @@ def canonical(root, path):
     return rel
 
 
-def git_listing(root, refuse):
+def git_listing(root):
     """The paths git lists under `root`: tracked, plus untracked and not
-    ignored, minus `SKIP_DIRS`. Anything short of a clean listing goes to
-    `refuse`, which raises."""
+    ignored, minus `SKIP_DIRS`. Anything short of a clean listing raises `ClosureError`."""
     # A caller's Git environment must not redirect this scan to its repo.
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     # The --exclude arguments are not redundant with the walk's SKIP_DIRS
@@ -182,7 +181,7 @@ def git_listing(root, refuse):
              *(f"--exclude={d}/" for d in sorted(SKIP_DIRS))],
             capture_output=True, env=env)
     except OSError as exc:
-        refuse(exc)
+        raise ClosureError(f"cannot read {root}: {exc}") from exc
     # Git can exit zero after warning that it could not open a directory.
     if listed.returncode or listed.stderr:
         raise ClosureError(f"cannot read {root}: git ls-files: "
@@ -201,7 +200,7 @@ def repo_files(root):
     def refuse(error):
         raise ClosureError(f"cannot read {getattr(error, 'filename', root)}: {error}")
 
-    files = git_listing(root, refuse)
+    files = git_listing(root)
     # The walk descends only into directories git listed a file under, so an
     # unreadable gitignored directory never fails the resolve.
     directories = set()
