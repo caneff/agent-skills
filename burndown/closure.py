@@ -185,9 +185,9 @@ def git_listing(root):
     except OSError as exc:
         raise ClosureError(f"cannot read {root}: {exc}") from exc
     # Exit status decides; stderr is only the message. Git writes to stderr on
-    # good runs too (config warnings, safe.directory). The one warning that
-    # is a failure is an unreadable directory: git skips it and exits zero,
-    # and its files would silently drop out of the closure.
+    # good runs too (a config warning). The one warning that is a failure
+    # is an unreadable directory: git skips it and exits zero, and its files
+    # would silently drop out of the closure.
     if listed.returncode or b"could not open directory" in listed.stderr:
         raise ClosureError(f"cannot read {root}: git ls-files: "
                            f"{os.fsdecode(listed.stderr).strip()}")

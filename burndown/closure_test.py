@@ -756,7 +756,7 @@ def test_a_git_that_fails_silently_is_not_an_empty_closure():
 
 
 def test_a_git_that_warns_on_stderr_but_exits_zero_still_lists_its_files():
-    # A config warning or safe.directory notice is stderr on a good run; the
+    # A config warning is stderr on a good run; the
     # exit status decides. The fake prints the real listing after the warning.
     root = repo(SHARED)
     real = subprocess.run(
