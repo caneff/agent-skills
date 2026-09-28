@@ -142,7 +142,7 @@ fn recv_drained(rx: mpsc::Receiver<(Vec<u8>, bool)>, deadline: Instant) -> (Vec<
         // clock, not on an empty queue.
         let now = Instant::now();
         if now >= deadline {
-            return (buf, false);
+            return take_queued(rx, buf);
         }
         match rx.recv_timeout(deadline - now) {
             Ok((chunk, true)) => {
@@ -153,6 +153,28 @@ fn recv_drained(rx: mpsc::Receiver<(Vec<u8>, bool)>, deadline: Instant) -> (Vec<
             Err(_) => return (buf, false), // deadline elapsed, or the sender is gone
         }
     }
+}
+
+/// At most this many chunks already queued are still taken once the deadline
+/// has passed (`drain` sends 8 KiB at most, so 2 MiB): the two pipes share one
+/// deadline and stdout is read first, so without it a slow stdout would cost
+/// the direct child's stderr, its error message included. The cap is what
+/// keeps a descendant that never stops writing from extending the read.
+const POST_DEADLINE_CHUNKS: usize = 256;
+
+fn take_queued(rx: mpsc::Receiver<(Vec<u8>, bool)>, mut buf: Vec<u8>) -> (Vec<u8>, bool) {
+    for _ in 0..POST_DEADLINE_CHUNKS {
+        match rx.try_recv() {
+            Ok((chunk, eof)) => {
+                buf.extend_from_slice(&chunk);
+                if eof {
+                    return (buf, true);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    (buf, false)
 }
 
 /// Polls `try_wait` until the child exits or `timeout` elapses, killing its
@@ -466,19 +488,33 @@ mod tests {
     // #1209 codex-third-1: after the drain deadline `recv_timeout(0)` still
     // hands back every queued chunk, so a descendant that keeps writing kept
     // the loop running past READ_GRACE. Driven at the function, with the
-    // deadline already past and chunks queued: an end-to-end writer fast
-    // enough to show it would hold gigabytes in memory for the whole grace.
+    // deadline already past: an end-to-end writer fast enough to show it would
+    // hold gigabytes in memory for the whole grace.
     #[test]
-    fn recv_drained_stops_at_the_deadline_however_much_is_queued() {
+    fn recv_drained_reads_a_bounded_amount_past_the_deadline_however_much_is_queued() {
         use std::time::{Duration, Instant};
         let (tx, rx) = mpsc::channel();
-        for _ in 0..3 {
+        for _ in 0..(POST_DEADLINE_CHUNKS * 4) {
             tx.send((vec![b'x'; 8], false)).unwrap();
         }
         let past = Instant::now() - Duration::from_millis(1);
         let (buf, eof) = recv_drained(rx, past);
         assert!(!eof, "a read cut by the deadline must not claim EOF");
-        assert!(buf.is_empty(), "read {} bytes past the deadline", buf.len());
+        assert_eq!(buf.len(), POST_DEADLINE_CHUNKS * 8, "the post-deadline read must stop at its cap");
+        drop(tx);
+    }
+
+    // #1209 spec P1: stdout is read first and can spend the shared deadline;
+    // what the direct child already wrote to stderr is still queued and kept.
+    #[test]
+    fn recv_drained_keeps_what_was_already_queued_when_the_deadline_has_passed() {
+        use std::time::{Duration, Instant};
+        let (tx, rx) = mpsc::channel();
+        tx.send((b"boom: the error".to_vec(), false)).unwrap();
+        let past = Instant::now() - Duration::from_millis(1);
+        let (buf, eof) = recv_drained(rx, past);
+        assert_eq!(buf, b"boom: the error");
+        assert!(!eof);
         drop(tx);
     }
 
