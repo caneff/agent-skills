@@ -80,7 +80,11 @@ too.
    file, its closure from that re-resolution, and the two together are
    `loop.py dispatch`'s `--in-flight`; its job record is in neither, and
    `--run <run-id>` is required, and dispatch reads it from the run file by
-   the clump's lowest ticket, ignoring any `job` in the in-flight file. A clump whose closure intersects a
+   the clump's lowest ticket, ignoring any `job` in the in-flight file.
+   `loop.py dispatch` then unions each unlanded in-flight workspace's real
+   `git diff --name-only origin/<default>...HEAD` into that closure (#1212),
+   so a file the worker reached that no candidate list named still holds
+   the clumps that share it; a diff it cannot read refuses the tick. A clump whose closure intersects a
    live workspace's is **off the frontier**: `loop.py dispatch` picks from
    what is left, **widest closure first** so a wide clump does not sit
    behind narrow ones and block them later (#1026), and names what holds
