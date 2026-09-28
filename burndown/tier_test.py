@@ -525,6 +525,17 @@ def test_the_body_reader_trims_a_sentence_dot_and_reads_backslashes():
     assert T.body_code_target(r"docs\notes.md") is None
 
 
+def test_fetch_ticket_refuses_an_answer_with_no_body():
+    """A body that did not come back is not a body that names no code."""
+    for answer in ('{"labels": []}', '{"labels": [], "body": null}', "null", "[]"):
+        raised = None
+        try:
+            T.fetch_ticket("caneff/agent-skills", 1, run=lambda args, a=answer: a)
+        except T.TierError as exc:
+            raised = exc
+        assert "no body in the answer" in str(raised), (answer, raised)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
