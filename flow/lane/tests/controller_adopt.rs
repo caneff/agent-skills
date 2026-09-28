@@ -123,6 +123,34 @@ fn adopt_takes_a_worker_whose_pid_now_belongs_to_an_unrelated_session() {
     assert_eq!(held, vec![own_pid]);
 }
 
+// #1209 S4: `worktree::primary` folded "git failed" and "git named no
+// worktree" into one `None`, so a failing `git worktree list` was reported as
+// naming no worktree. A `git` that answers `rev-parse` and fails `worktree
+// list` is the shape.
+#[test]
+fn adopt_names_a_failing_git_worktree_list_as_a_failure() {
+    let f = Fixture::new();
+    adopter(&f);
+    let (primary, _) = f.repo_with_workspace("scroller", BRANCH);
+    let real = String::from_utf8(Command::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    let bin = f.home().join("failing-git-bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let shim = bin.join("git");
+    std::fs::write(&shim, format!("#!/bin/sh\ncase \"$*\" in *\"worktree list\"*) echo 'fatal: boom' >&2; exit 128;; esac\nexec {} \"$@\"\n", real.trim())).unwrap();
+    std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+
+    let out = cmd(&f, env!("CARGO_BIN_EXE_controller-adopt"), &primary)
+        .env("PATH", format!("{}:{}", bin.display(), f.path_env()))
+        .arg(AGENT)
+        .output()
+        .unwrap();
+    let text = out_text(&out);
+    assert!(!out.status.success(), "{text}");
+    assert!(text.contains("git worktree list failed"), "{text}");
+    assert!(text.contains("boom"), "git's own message was dropped: {text}");
+    assert!(!text.contains("named no worktree"), "a failure was reported as an empty answer: {text}");
+}
+
 #[test]
 fn adopt_refuses_off_the_primary_checkout() {
     let f = Fixture::new();
