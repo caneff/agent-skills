@@ -65,6 +65,7 @@ BURNDOWN_SKILL = os.path.join(ROOT, "burndown", "SKILL.md")
 FILE_TICKET_SKILL = os.path.join(ROOT, "file-ticket", "SKILL.md")
 
 RUN = "burn-e2e-1024"
+REPO = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 FIXTURES = []
 
 
@@ -180,7 +181,7 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
         json.dump([], fh)
     # `dispatch` reads the run file (#1107), so the run starts first; nothing
     # is in flight yet, so it holds no clumps.
-    ok(cli(RUNFILE, "start", RUN, "--slots", "2", "--controller", "burn-e2e", env=env))
+    ok(cli(RUNFILE, "start", RUN, "--repo", REPO, "--slots", "2", "--controller", "burn-e2e", env=env))
     dispatched = [line for line in ok(cli(
         LOOP, "dispatch", "--candidates", candidates, "--in-flight", in_flight_file,
         "--run", RUN, "--free", "2", "--processes", "4", "--committed-gb", "4",
@@ -352,7 +353,7 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
 
     # 8. A run whose landings left nothing files nothing (#1030).
     quiet = "burn-e2e-1024-quiet"
-    ok(cli(RUNFILE, "start", quiet, env=env))
+    ok(cli(RUNFILE, "start", quiet, "--repo", REPO, env=env))
     ok(cli(RUNFILE, "clump", quiet, "--tickets", "920", "--workspace", "/w/implement-920",
            "--agent", "w920", env=env))
     ok(cli(RUNFILE, "land", quiet, "--clump", "920", "--sha", "0a1b2c3", env=env))

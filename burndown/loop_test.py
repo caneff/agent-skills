@@ -17,6 +17,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import loop  # noqa: E402
 import runfile  # noqa: E402
 
+# A real git checkout to record as a run's target when the case is not about it.
+REPO = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
 
 def git_stub(branch="main", git_dir="/repo/.git", common_dir="/repo/.git",
              head="origin/main"):
@@ -205,9 +208,14 @@ def test_the_cli_dispatch_names_the_widest_clump_first():
 def test_each_pick_prints_its_implement_dispatch_command_carrying_the_run():
     # The burn's --run on every plain dispatch was prose only (#1173 S1, P2,
     # C2, codex-second-1): the command the controller runs is printed here,
-    # with the run id dispatch was itself given.
+    # with the run id dispatch was itself given. It also carries the run's
+    # recorded target checkout, not the cwd's (#1190): `implement-dispatch`
+    # resolves issue numbers against a checkout, and the cwd may be another repo.
     with tempfile.TemporaryDirectory() as tmp:
-        cand, live, env = run_file_dispatch(tmp, ("none",))
+        target = os.path.realpath(os.path.join(tmp, "target"))
+        os.makedirs(target)
+        subprocess.run(["git", "init", "-q", target], check=True)
+        cand, live, env = run_file_dispatch(tmp, ("none",), repo=target)
         with open(cand, "w") as fh:
             json.dump([{"tickets": [500, 502], "closure": ["fresh.py"]}], fh)
         got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
@@ -217,7 +225,34 @@ def test_each_pick_prints_its_implement_dispatch_command_carrying_the_run():
         commands = [line for line in got.stdout.splitlines()
                     if line.startswith("command")]
         assert commands == [
-            "command   implement-dispatch 500 502 --run burn-t"], got.stdout
+            f"command   implement-dispatch 500 502 --run burn-t --repo {target}"
+        ], got.stdout
+
+
+def test_the_printed_command_shell_quotes_a_target_path_with_a_space_1190():
+    with tempfile.TemporaryDirectory() as tmp:
+        target = os.path.realpath(os.path.join(tmp, "a repo"))
+        os.makedirs(target)
+        subprocess.run(["git", "init", "-q", target], check=True)
+        cand, live, env = run_file_dispatch(tmp, ("none",), repo=target)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "2", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 0, got
+        assert f"--run burn-t --repo '{target}'" in got.stdout, got.stdout
+
+
+def test_dispatch_refuses_a_run_file_that_names_no_target_repo_1190():
+    # A run file from before the field loads, but a command printed without
+    # `--repo` would claim against the cwd's origin: refuse, never omit.
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live, env = run_file_dispatch(tmp, ("none",), repo=None)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "2", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 1, got
+        assert "names no target repo" in got.stderr, got.stderr
+        assert "implement-dispatch" not in got.stdout, got.stdout
 
 
 def test_the_cli_names_a_same_tick_collision_as_a_held_line():
@@ -906,7 +941,7 @@ def fixture_run(cache, in_flight_path):
     """A run file in `cache` holding each in-flight fixture entry as a clump,
     with its `job` recorded when the fixture carries one."""
     import runfile
-    runfile.start("fixture", 5, None, root=cache)
+    runfile.start("fixture", 5, None, root=cache, repo=REPO)
     with open(in_flight_path) as fh:
         clumps = json.load(fh)
     for entry in clumps:
@@ -1706,7 +1741,7 @@ def test_the_cli_sweep_reads_the_run_file_itself_given_a_run_id():
             fh.write(HERDR_STUB)
         os.chmod(stub, 0o755)
         cache = os.path.join(tmp, "cache")
-        runfile.start("burn-sweep-run-fixture", slots=2, root=cache)
+        runfile.start("burn-sweep-run-fixture", slots=2, root=cache, repo=REPO)
         runfile.clump("burn-sweep-run-fixture", [1], "/w/1", "skills-1", root=cache)
         runfile.clump("burn-sweep-run-fixture", [3], "/w/3", "skills-3", root=cache)
         runfile.clump("burn-sweep-run-fixture", [4], "/w/4", "skills-4", root=cache)
@@ -1929,14 +1964,27 @@ def main():
     print(f"{len(tests)} passed")
 
 
-def run_file_dispatch(tmp, recorded):
+def drop_repo_field(run_id, cache):
+    """Rewrite a run file as one written before the `repo` field existed."""
+    target = runfile.path(run_id, cache)
+    with open(target) as fh:
+        run = json.load(fh)
+    del run["repo"]
+    with open(target, "w") as fh:
+        json.dump(run, fh)
+
+
+def run_file_dispatch(tmp, recorded, repo=REPO):
     """`closure.py --json` plus workspace as the controller builds it — no
     `job` field — and a run file in a private cache dir. `recorded` is the
-    `runfile.py job` call for clump 351, or None to record nothing."""
+    `runfile.py job` call for clump 351, or None to record nothing. `repo` is
+    the run's target checkout; None writes a run file from before the field."""
     import runfile
     cache = os.path.join(tmp, "cache")
     os.makedirs(cache)
-    runfile.start("burn-t", 5, None, root=cache)
+    runfile.start("burn-t", 5, None, root=cache, repo=repo or REPO)
+    if repo is None:
+        drop_repo_field("burn-t", cache)
     runfile.clump("burn-t", [351], "/w/351", "sm-351", root=cache)
     runfile.clump("burn-t", [412], "/w/412", "sm-412", root=cache)
     runfile.job("burn-t", 412, "none", root=cache)
@@ -2052,7 +2100,7 @@ def test_dispatch_matches_a_multi_ticket_clump_by_its_lowest_ticket_1107():
     with tempfile.TemporaryDirectory() as tmp:
         cache = os.path.join(tmp, "cache")
         os.makedirs(cache)
-        runfile.start("burn-t", 5, None, root=cache)
+        runfile.start("burn-t", 5, None, root=cache, repo=REPO)
         runfile.clump("burn-t", [351, 360], "/w/351", "sm-351", root=cache)
         runfile.job("burn-t", 351, "running", 8, root=cache)
         cand = os.path.join(tmp, "candidates.json")
@@ -2107,7 +2155,7 @@ def test_a_job_field_in_the_in_flight_file_is_never_charged_1107():
 def test_load_run_reads_a_run_file_and_wraps_its_refusal_as_a_loop_error():
     # One loader behind `with_run_jobs` and `sweep --run` (#1209 S2).
     with tempfile.TemporaryDirectory() as tmp:
-        runfile.start("burn-loader", slots=2, root=tmp)
+        runfile.start("burn-loader", slots=2, root=tmp, repo=REPO)
         runfile.clump("burn-loader", [7], "/w/7", "skills-7", root=tmp)
         run = loop.load_run("burn-loader", tmp)
         assert [c["tickets"] for c in run["clumps"]] == [[7]], run

@@ -34,8 +34,10 @@ too.
 **Open the run.**
 
 1. Take the seat (above), then `runfile.py start` the run with its slot
-   budget (5 when `--slots` is omitted) and the controller's own herdr
-   agent name (§ Run state). Resuming an existing run instead:
+   budget (5 when `--slots` is omitted), the controller's own herdr
+   agent name, and `--repo <target checkout>`, required: the run's target,
+   which every printed `implement-dispatch` command carries and
+   `sweep.py counts --repo` is checked against (§ Run state). Resuming an existing run instead:
    `runfile.py resume`, and then **one message per live, unlanded worker**
    — its `announce` bucket and only that one, via `loop.announce`. A
    landed clump's worker gets none however its agent looks; a vanished one
@@ -248,7 +250,7 @@ infer it from an absent link.
 python3 burndown/sweep.py counts <run-id> --repo <primary checkout>
 ```
 
-reads them from each landed clump's dispositions sidecar (`implement/SKILL.md` § Review) under the `--repo` checkout's cache directory — never the cwd's, which is not always the target — so Chris can see whether the adjacent-fix rule is doing its job
+reads them from each landed clump's dispositions sidecar (`implement/SKILL.md` § Review) under the `--repo` checkout's cache directory — never the cwd's, which is not always the target, and refused unless `--repo` is the run's recorded target — so Chris can see whether the adjacent-fix rule is doing its job
 without re-deriving it from the PRs by hand. Controller observations about
 the loop itself stay standalone tickets (§ Before a controller rules), never
 folded into the sweep and never in any sidecar — the controller adds its own
@@ -350,7 +352,10 @@ light. The grammar, the divergence and the evidence:
 A run's state is **one JSON file per run** at `~/.cache/burndown/<run-id>.json`,
 read and written by `burndown/runfile.py` — not the controller's context, and
 not a per-repo log. It holds the run id, the slot budget (default 5, set by
-`runfile.py start --slots <k>`), the controller's herdr agent name, and
+`runfile.py start --slots <k>`), the controller's herdr agent name, the target repo
+(`runfile.py start --repo <checkout>`, recorded as its absolute top-level; a
+run file from before the field makes `loop.py dispatch` and `sweep.py counts
+--repo` refuse, since a missing target must not read as no check), and
 per clump its ticket list, workspace, worker's herdr agent name, the
 parallel job its worker has out (§ Liveness) and squash sha once it
 lands. `runfile.py resume <run-id> --live
