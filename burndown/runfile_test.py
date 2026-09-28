@@ -132,6 +132,22 @@ def test_start_refuses_a_repo_that_is_not_a_git_checkout():
     assert not os.path.exists(runfile.path("burn-2", root))
 
 
+def test_checkout_top_ignores_git_environment_that_repoints_git():
+    # A GIT_WORK_TREE inherited from a hook or a parent shell makes raw
+    # `git -C <target> rev-parse --show-toplevel` answer with the other repo.
+    target = git_checkout(cache(), "target")
+    other = git_checkout(cache(), "other")
+    saved = os.environ.get("GIT_WORK_TREE")
+    os.environ["GIT_WORK_TREE"] = other
+    try:
+        assert runfile.checkout_top(target) == target
+    finally:
+        if saved is None:
+            del os.environ["GIT_WORK_TREE"]
+        else:
+            os.environ["GIT_WORK_TREE"] = saved
+
+
 def test_start_refuses_a_blank_repo_instead_of_recording_the_cwds_repo():
     # `git -C ""` stays in the cwd: an unset `--repo "$TARGET"` would record
     # the controller's own checkout, the #1093 hazard this field closes.
