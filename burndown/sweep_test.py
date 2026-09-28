@@ -16,6 +16,9 @@ import frontier  # noqa: E402
 import runfile  # noqa: E402
 import sweep  # noqa: E402
 
+# A real git checkout to record as a run's target when the case is not about it.
+REPO = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
 SWEEP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sweep.py")
 
 FIXTURES = []
@@ -148,7 +151,7 @@ shutil.copyfile(os.path.join(
 
 def test_cli_prints_the_grouped_body_and_no_title_line():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
@@ -165,7 +168,7 @@ def test_cli_on_a_run_with_no_leftovers_prints_nothing_to_file():
     # — not a sentence that reads as a fileable body. The "nothing to file"
     # notice goes to stderr instead (#1030 round-1 findings S4, C3).
     root = cache()
-    runfile.start("burn-2", slots=1, root=root)
+    runfile.start("burn-2", slots=1, root=root, repo=REPO)
     got = cli(root, "render", "burn-2")
     assert got.returncode == 0, got
     assert got.stdout == "", got.stdout
@@ -200,7 +203,7 @@ def write_sidecar(reviews_dir, lowest, lines):
 def test_counts_sums_fixed_adjacent_leftover_and_standalone_across_landed_clumps():
     root = cache()
     reviews = reviews_dir_fixture()
-    runfile.start("burn-c", slots=2, root=root)
+    runfile.start("burn-c", slots=2, root=root, repo=REPO)
     runfile.clump("burn-c", [901], "/w/a", "agent-a", root=root)
     runfile.clump("burn-c", [905], "/w/b", "agent-b", root=root)
     runfile.land("burn-c", 901, "abc1234", root=root)
@@ -228,7 +231,7 @@ def test_counts_treats_split_ids_as_independent_findings():
     # alone, so a split needs no code here — this locks that.
     root = cache()
     reviews = reviews_dir_fixture()
-    runfile.start("burn-f", slots=1, root=root)
+    runfile.start("burn-f", slots=1, root=root, repo=REPO)
     runfile.clump("burn-f", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-f", 901, "abc1234", root=root)
     write_sidecar(reviews, 901, [
@@ -245,7 +248,7 @@ def test_counts_treats_split_ids_as_independent_findings():
 def test_counts_ignores_an_unlanded_clumps_sidecar():
     root = cache()
     reviews = reviews_dir_fixture()
-    runfile.start("burn-d", slots=2, root=root)
+    runfile.start("burn-d", slots=2, root=root, repo=REPO)
     runfile.clump("burn-d", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-d", 901, "abc1234", root=root)
     runfile.clump("burn-d", [905], "/w/b", "agent-b", root=root)
@@ -262,7 +265,7 @@ def test_counts_ignores_an_unlanded_clumps_sidecar():
 def test_counts_refuses_a_landed_clump_with_no_sidecar_rather_than_read_zero():
     root = cache()
     reviews = reviews_dir_fixture()
-    runfile.start("burn-e", slots=1, root=root)
+    runfile.start("burn-e", slots=1, root=root, repo=REPO)
     runfile.clump("burn-e", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-e", 901, "abc1234", root=root)
     run = runfile.load("burn-e", root=root)
@@ -277,7 +280,7 @@ def test_counts_refuses_a_landed_clump_with_no_sidecar_rather_than_read_zero():
 def test_cli_counts_prints_the_three_counts():
     root = cache()
     reviews = reviews_dir_fixture()
-    runfile.start("burn-f", slots=1, root=root)
+    runfile.start("burn-f", slots=1, root=root, repo=REPO)
     runfile.clump("burn-f", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-f", 901, "abc1234", root=root)
     write_sidecar(reviews, 901, [
@@ -300,7 +303,7 @@ def test_counts_refuses_a_malformed_sidecar_line_rather_than_count_low():
         root = cache()
         reviews = reviews_dir_fixture()
         run_id = f"burn-m{n}"
-        runfile.start(run_id, slots=1, root=root)
+        runfile.start(run_id, slots=1, root=root, repo=REPO)
         runfile.clump(run_id, [901], "/w/a", "agent-a", root=root)
         runfile.land(run_id, 901, "abc1234", root=root)
         path = runfile.dispositions_path(reviews, 901)
@@ -327,7 +330,7 @@ def test_cli_counts_reads_the_target_repos_sidecars_from_another_cwd():
     home = home_fixture()
     target = git_repo(home, "target-repo")
     other = git_repo(home, "other-repo")
-    runfile.start("burn-x", slots=1, root=root)
+    runfile.start("burn-x", slots=1, root=root, repo=target)
     runfile.clump("burn-x", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-x", 901, "abc1234", root=root)
     for name, outcome in (("target-repo", "filed"), ("other-repo", "fixed")):
@@ -345,28 +348,84 @@ def test_cli_counts_refuses_with_neither_repo_nor_reviews_dir():
     # No cwd default: from the wrong repo it reads another repo's sidecars
     # or reports every landed clump missing.
     root = cache()
-    runfile.start("burn-y", slots=1, root=root)
+    runfile.start("burn-y", slots=1, root=root, repo=REPO)
     got = cli(root, "counts", "burn-y", cwd=git_repo(home_fixture(), "any"))
     assert got.returncode == 1, got
     assert "--repo" in got.stderr, got.stderr
 
 
-def test_cli_counts_refuses_a_repo_that_is_not_a_checkout_root():
-    # A subdirectory of a repo, or a GIT_DIR in the environment, must not
-    # resolve to some other repo's cache directory (#1093 C1, C2).
+def test_cli_counts_refuses_a_repo_that_is_not_a_git_checkout():
+    # A path git cannot resolve must not read as some other repo's cache
+    # directory (#1093 C1, C2).
     root = cache()
     home = home_fixture()
-    outer = git_repo(home, "outer")
-    sub = os.path.join(outer, "deep")
-    os.makedirs(sub)
-    runfile.start("burn-z", slots=1, root=root)
-    got = cli(root, "counts", "burn-z", "--repo", sub, home=home)
-    assert got.returncode == 1, got
-    assert "not a git checkout" in got.stderr, got.stderr
-    assert "Traceback" not in got.stderr, got.stderr
+    runfile.start("burn-z", slots=1, root=root, repo=REPO)
     got = cli(root, "counts", "burn-z", "--repo", os.path.join(home, "nope"),
               home=home)
     assert got.returncode == 1 and "not a git checkout" in got.stderr, got
+    assert "Traceback" not in got.stderr, got.stderr
+
+
+def landed_run(root, run_id, repo):
+    runfile.start(run_id, slots=1, root=root, repo=repo)
+    runfile.clump(run_id, [901], "/w/a", "agent-a", root=root)
+    runfile.land(run_id, 901, "abc1234", root=root)
+
+
+def test_cli_counts_refuses_a_repo_other_than_the_runs_target_1190():
+    # The other checkout has a sidecar of its own waiting to be misread; the
+    # run's recorded target decides, so it is refused before any is read.
+    root = cache()
+    home = home_fixture()
+    target = git_repo(home, "target-repo")
+    other = git_repo(home, "other-repo")
+    landed_run(root, "burn-o", target)
+    d = os.path.join(home, ".cache", "agent-reviews", "other-repo")
+    os.makedirs(d)
+    write_sidecar(d, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
+    got = cli(root, "counts", "burn-o", "--repo", other, home=home)
+    assert got.returncode == 1, got
+    assert os.path.realpath(target) in got.stderr, got.stderr
+    assert os.path.realpath(other) in got.stderr, got.stderr
+    assert "fixed in-round" not in got.stdout, got.stdout
+
+
+def test_cli_counts_accepts_the_recorded_checkout_from_a_subdirectory_1190():
+    root = cache()
+    home = home_fixture()
+    target = git_repo(home, "target-repo")
+    sub = os.path.join(target, "deep")
+    os.makedirs(sub)
+    landed_run(root, "burn-s", target)
+    d = os.path.join(home, ".cache", "agent-reviews", "target-repo")
+    os.makedirs(d)
+    write_sidecar(d, 901, [{"id": "S1", "outcome": "filed", "ticket": 5}])
+    for spelled in (target, sub, target + "/"):
+        got = cli(root, "counts", "burn-s", "--repo", spelled, home=home)
+        assert got.returncode == 0, (spelled, got)
+        assert "standalone: 1" in got.stdout, got.stdout
+
+
+def test_cli_counts_refuses_a_run_file_that_names_no_target_repo_1190():
+    root = cache()
+    home = home_fixture()
+    target = git_repo(home, "target-repo")
+    landed_run(root, "burn-l", target)
+    target_file = runfile.path("burn-l", root)
+    with open(target_file) as fh:
+        run = json.load(fh)
+    del run["repo"]
+    with open(target_file, "w") as fh:
+        json.dump(run, fh)
+    got = cli(root, "counts", "burn-l", "--repo", target, home=home)
+    assert got.returncode == 1, got
+    assert "names no target repo" in got.stderr, got.stderr
+    # `--reviews-dir` is the explicit escape and is not checked.
+    d = os.path.join(home, "sidecars")
+    os.makedirs(d)
+    write_sidecar(d, 901, [{"id": "S1", "outcome": "filed", "ticket": 5}])
+    got = cli(root, "counts", "burn-l", "--reviews-dir", d, home=home)
+    assert got.returncode == 0, got
 
 
 def test_cli_counts_ignores_a_git_dir_in_the_environment():
@@ -377,7 +436,7 @@ def test_cli_counts_ignores_a_git_dir_in_the_environment():
     home = home_fixture()
     target = git_repo(home, "target-repo")
     other = git_repo(home, "other-repo")
-    runfile.start("burn-g", slots=1, root=root)
+    runfile.start("burn-g", slots=1, root=root, repo=target)
     runfile.clump("burn-g", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-g", 901, "abc1234", root=root)
     d = os.path.join(home, ".cache", "agent-reviews", "target-repo")
@@ -391,7 +450,7 @@ def test_cli_counts_ignores_a_git_dir_in_the_environment():
 
 def test_cli_counts_refuses_both_repo_and_reviews_dir():
     root = cache()
-    runfile.start("burn-w", slots=1, root=root)
+    runfile.start("burn-w", slots=1, root=root, repo=REPO)
     got = cli(root, "counts", "burn-w", "--repo", "/x", "--reviews-dir", "/y")
     assert got.returncode == 2, got
     assert "not allowed with" in got.stderr, got.stderr

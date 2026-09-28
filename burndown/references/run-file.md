@@ -6,7 +6,7 @@ It is the only place a run's state lives: the controller's context is not
 state, and a per-repo log is not this run.
 
 ```
-python3 burndown/runfile.py start    <run-id> [--slots <k>] [--controller <agent>]
+python3 burndown/runfile.py start    <run-id> --repo <checkout> [--slots <k>] [--controller <agent>]
 python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
 python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
 python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
@@ -23,6 +23,7 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
   "run_id": "burn-2026-09-20-0905",
   "slots": 3,
   "controller": "burn-ctl-1a",
+  "repo": "/home/c/src/x",
   "clumps": [
     {"tickets": [901, 902], "workspace": "/home/c/src/x/.claude/worktrees/implement-901",
      "agent": "implement-901-42", "job": {"state": "running", "cores": 8},

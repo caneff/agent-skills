@@ -324,8 +324,21 @@ def main(argv):
     if args.reviews_dir:
         reviews_dir = os.path.expanduser(args.reviews_dir)
     elif args.repo:
+        # The run's recorded target is what `--repo` must name (#1190): a
+        # wrong checkout reads another repo's sidecars. Tops are compared, so
+        # a subdirectory or a trailing slash is the same target.
         try:
-            reviews_dir = default_reviews_dir(os.path.expanduser(args.repo))
+            top = runfile.checkout_top(args.repo)
+            recorded = runfile.target_repo(run)
+        except runfile.RunFileError as exc:
+            print(f"sweep.py: --repo {args.repo}: {exc}", file=sys.stderr)
+            return 1
+        if top != recorded:
+            print(f"sweep.py: --repo {args.repo} is {top}, but run "
+                  f"{args.run_id} targets {recorded}", file=sys.stderr)
+            return 1
+        try:
+            reviews_dir = default_reviews_dir(top)
         except (subprocess.CalledProcessError, OSError, ValueError) as exc:
             print(f"sweep.py: --repo {args.repo} is not a git checkout: {exc}",
                   file=sys.stderr)

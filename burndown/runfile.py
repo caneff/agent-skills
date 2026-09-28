@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One run's state, machine-readable, at `~/.cache/burndown/<run-id>.json`:
 
-    python3 burndown/runfile.py start    <run-id> [--slots <k>] [--controller <agent>]
+    python3 burndown/runfile.py start    <run-id> --repo <checkout> [--slots <k>] [--controller <agent>]
     python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
     python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
     python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
@@ -9,8 +9,10 @@
     python3 burndown/runfile.py show     <run-id>
     python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 
-It holds the run id, the slot budget, the controller's herdr agent name, and
-one entry per clump — its ticket list, its workspace, its worker's **herdr
+It holds the run id, the slot budget, the controller's herdr agent name, the
+**target repo** (the absolute top-level of the checkout the run works on,
+which `loop.py dispatch` prints into every `implement-dispatch` command and
+`sweep.py counts --repo` is checked against), and one entry per clump — its ticket list, its workspace, its worker's **herdr
 agent name**, and its squash sha once it lands. It also holds the run's
 **leftovers**, copied at landing from each PR's dispositions sidecar
 (`implement/SKILL.md` § Review) rather than transcribed by hand. `resume`
@@ -29,6 +31,7 @@ import json
 import math
 import os
 import re
+import subprocess
 import sys
 import time
 
@@ -78,6 +81,44 @@ _LEFTOVER_KEYS = ("clump", "tickets", "pr", *_SIDECAR_LEFTOVER_KEYS)
 # carry; why any other is refused, not skipped: `references/run-file.md`
 # § Leftovers.
 _SIDECAR_OUTCOMES = ("fixed", "disputed", "filed", "handed-back", "leftover")
+
+
+def _clean_git_env():
+    # GIT_DIR and friends would repoint git at another repo whatever the path
+    # says.
+    return {k: v for k, v in os.environ.items()
+            if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")}
+
+
+def checkout_top(where):
+    """The absolute git top-level of `where` — a checkout root or any
+    directory inside one, a trailing slash included — or a `RunFileError`
+    when `where` is not in a git checkout. Comparing tops, not spellings, is
+    what makes a subdirectory or `path/` the same target."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", os.path.expanduser(where), "rev-parse",
+             "--show-toplevel"], capture_output=True, text=True, timeout=30,
+            env=_clean_git_env())
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RunFileError(f"{where} is not a git checkout: {exc}") from exc
+    if done.returncode != 0 or not done.stdout.strip():
+        raise RunFileError(
+            f"{where} is not a git checkout: {done.stderr.strip()}")
+    return os.path.realpath(done.stdout.strip())
+
+
+def target_repo(run):
+    """The checkout a run targets, or a `RunFileError` when its run file names
+    none. A run file from before the field loads (as `job` and `leftovers`
+    do), so the refusal is here, at each reader that needs the answer: a
+    missing target read as "no check needed" is a `--repo`-less command
+    aimed at whatever repo the cwd happens to be."""
+    if run.get("repo") is None:
+        raise RunFileError(
+            f"run {run['run_id']} names no target repo — it was started "
+            "before `runfile.py start --repo`; start a new run")
+    return run["repo"]
 
 
 class RunFileError(Exception):
@@ -280,13 +321,25 @@ def load(run_id, root=None):
             raise RunFileError(
                 f"holds leftovers as {type(leftovers).__name__}, not a list")
         run["leftovers"] = [leftover_record(item) for item in leftovers]
+        # Filled in with `None` the same way; `target_repo` refuses it.
+        repo = run.get("repo")
+        if repo is not None and (not isinstance(repo, str)
+                                 or not os.path.isabs(repo)):
+            raise RunFileError(
+                f"holds a target repo that is not an absolute path: {repo!r}")
+        run["repo"] = repo
     except RunFileError as exc:
         raise RunFileError(f"{target}: {exc}") from None
     return run
 
 
-def start(run_id, slots=DEFAULT_SLOTS, controller=None, root=None):
+def start(run_id, slots=DEFAULT_SLOTS, controller=None, root=None, repo=None):
     slots = slot_budget(slots)
+    if repo is None:
+        raise RunFileError(
+            "start needs --repo <checkout>: the run's target repo, which "
+            "dispatch and the sweep's counts are checked against")
+    repo = checkout_top(repo)
     if controller is not None:
         controller = named(controller, "herdr agent name")
     target = path(run_id, root)
@@ -296,7 +349,7 @@ def start(run_id, slots=DEFAULT_SLOTS, controller=None, root=None):
                 f"run {run_id} already has a file at {target} — resume reads "
                 "it, and a second start would wipe it")
         run = {"run_id": run_id, "slots": slots, "controller": controller,
-               "clumps": [], "leftovers": []}
+               "repo": repo, "clumps": [], "leftovers": []}
         save(run, root)
     return run
 
@@ -925,6 +978,9 @@ def main(argv):
     new.add_argument("--slots", type=int, default=DEFAULT_SLOTS,
                      help=f"slot budget, a positive integer (default {DEFAULT_SLOTS})")
     new.add_argument("--controller", help="the controller's herdr agent name")
+    new.add_argument("--repo", required=True,
+                     help="the target repo's checkout; its absolute top-level "
+                          "path is recorded")
 
     reg = subs.add_parser("clump", help="register or re-register a clump")
     reg.add_argument("run_id")
@@ -999,7 +1055,8 @@ def main(argv):
     root = env_root()
     try:
         if args.command == "start":
-            print(render(start(args.run_id, args.slots, args.controller, root)))
+            print(render(start(args.run_id, args.slots, args.controller, root,
+                               args.repo)))
         elif args.command == "clump":
             print(render(clump(args.run_id, parse_tickets(args.tickets),
                                args.workspace, args.agent, root)))

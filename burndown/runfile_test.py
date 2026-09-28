@@ -18,6 +18,9 @@ import runfile  # noqa: E402
 import sweep  # noqa: E402
 
 RUNFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runfile.py")
+# A real git checkout for every `start` that is not about the target repo: this
+# repo's own top-level, which `runfile.start` resolves the same way.
+REPO = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 
 # Every fixture cache dir this run makes, removed at the end whatever the run
@@ -61,7 +64,7 @@ def clean_fixtures():
 
 def test_start_writes_the_run_id_and_slot_budget_and_load_reads_them_back():
     root = cache()
-    runfile.start("burn-2026-09-20-0905", slots=3, root=root)
+    runfile.start("burn-2026-09-20-0905", slots=3, root=root, repo=REPO)
     run = runfile.load("burn-2026-09-20-0905", root=root)
     assert run["run_id"] == "burn-2026-09-20-0905", run
     assert run["slots"] == 3, run
@@ -70,22 +73,105 @@ def test_start_writes_the_run_id_and_slot_budget_and_load_reads_them_back():
 
 def test_start_without_slots_records_the_default_of_five():
     root = cache()
-    runfile.start("burn-1", root=root)
+    runfile.start("burn-1", root=root, repo=REPO)
     assert runfile.load("burn-1", root=root)["slots"] == 5
 
 
 def test_cli_start_without_slots_records_five_and_a_named_value_wins():
     root = cache()
-    assert cli(root, "start", "burn-1").returncode == 0
+    assert cli(root, "start", "--repo", REPO, "burn-1").returncode == 0
     assert runfile.load("burn-1", root=root)["slots"] == 5
-    assert cli(root, "start", "burn-2", "--slots", "2").returncode == 0
+    assert cli(root, "start", "--repo", REPO, "burn-2", "--slots", "2").returncode == 0
     assert runfile.load("burn-2", root=root)["slots"] == 2
-    assert cli(root, "start", "burn-3", "--slots", "0").returncode != 0
+    assert cli(root, "start", "--repo", REPO, "burn-3", "--slots", "0").returncode != 0
+
+
+def git_checkout(parent, name):
+    path = os.path.join(parent, name)
+    os.makedirs(path)
+    subprocess.run(["git", "init", "-q", path], check=True)
+    return os.path.realpath(path)
+
+
+def test_start_records_the_absolute_top_level_of_the_target_checkout():
+    root = cache()
+    target = git_checkout(cache(), "target")
+    sub = os.path.join(target, "deep")
+    os.makedirs(sub)
+    runfile.start("burn-1", slots=1, root=root, repo=sub + "/")
+    assert runfile.load("burn-1", root=root)["repo"] == target
+
+
+def test_start_without_a_repo_is_refused_naming_the_flag():
+    root = cache()
+    try:
+        runfile.start("burn-1", slots=1, root=root)
+    except Exception as exc:
+        assert isinstance(exc, runfile.RunFileError), repr(exc)
+        assert "--repo" in str(exc), exc
+    else:
+        raise AssertionError("start without a target repo was accepted")
+    assert not os.path.exists(runfile.path("burn-1", root))
+    got = cli(root, "start", "burn-1")
+    assert got.returncode == 2 and "--repo" in got.stderr, got
+    assert not os.path.exists(runfile.path("burn-1", root))
+
+
+def test_start_refuses_a_repo_that_is_not_a_git_checkout():
+    root = cache()
+    plain = cache()
+    try:
+        runfile.start("burn-1", slots=1, root=root, repo=plain)
+    except runfile.RunFileError as exc:
+        assert "not a git checkout" in str(exc), exc
+    else:
+        raise AssertionError("a plain directory was accepted as the target")
+    got = cli(root, "start", "--repo", REPO, "burn-2", "--repo", os.path.join(plain, "nope"))
+    assert got.returncode == 1 and "not a git checkout" in got.stderr, got
+    assert "Traceback" not in got.stderr, got.stderr
+    assert not os.path.exists(runfile.path("burn-2", root))
+
+
+def test_a_run_file_written_before_the_repo_field_loads_and_names_no_target():
+    root = cache()
+    runfile.start("burn-1", slots=1, root=root, repo=REPO)
+    target = runfile.path("burn-1", root)
+    with open(target) as fh:
+        old = json.load(fh)
+    del old["repo"]
+    with open(target, "w") as fh:
+        json.dump(old, fh)
+    run = runfile.load("burn-1", root=root)
+    assert run["repo"] is None, run
+    try:
+        runfile.target_repo(run)
+    except runfile.RunFileError as exc:
+        assert "names no target repo" in str(exc), exc
+    else:
+        raise AssertionError("a run with no target repo returned one")
+
+
+def test_load_refuses_a_repo_field_that_is_not_a_path():
+    root = cache()
+    runfile.start("burn-1", slots=1, root=root, repo=REPO)
+    target = runfile.path("burn-1", root)
+    with open(target) as fh:
+        run = json.load(fh)
+    for bad in (7, "", "relative/path"):
+        run["repo"] = bad
+        with open(target, "w") as fh:
+            json.dump(run, fh)
+        try:
+            runfile.load("burn-1", root=root)
+        except runfile.RunFileError as exc:
+            assert "target repo" in str(exc), (bad, exc)
+        else:
+            raise AssertionError(f"repo {bad!r} was accepted")
 
 
 def test_the_file_lands_at_run_id_dot_json_under_the_cache_dir():
     root = cache()
-    runfile.start("burn-1", slots=1, root=root)
+    runfile.start("burn-1", slots=1, root=root, repo=REPO)
     assert os.path.isfile(os.path.join(root, "burn-1.json")), os.listdir(root)
 
 
@@ -93,9 +179,9 @@ def test_start_refuses_a_run_id_that_already_has_a_file():
     # A resumed controller that re-runs `start` would otherwise wipe the very
     # state it restarted to read.
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     try:
-        runfile.start("burn-1", slots=9, root=root)
+        runfile.start("burn-1", slots=9, root=root, repo=REPO)
     except runfile.RunFileError as exc:
         assert "burn-1" in str(exc), exc
     else:
@@ -107,7 +193,7 @@ def test_a_run_id_that_would_leave_the_cache_dir_is_refused():
     root = cache()
     for bad in ("../escape", "a/b", "", ".", "..", ".hidden"):
         try:
-            runfile.start(bad, slots=1, root=root)
+            runfile.start(bad, slots=1, root=root, repo=REPO)
         except runfile.RunFileError:
             continue
         raise AssertionError(f"accepted run id {bad!r}")
@@ -134,7 +220,7 @@ def test_loading_a_run_that_was_never_started_names_the_path():
 
 def test_a_clump_records_its_tickets_workspace_and_herdr_agent_name():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [902, 901], "/w/implement-901", "implement-901-42",
                   root=root)
     got = runfile.load("burn-1", root=root)["clumps"]
@@ -147,7 +233,7 @@ def test_a_clump_is_keyed_by_its_lowest_ticket_and_re_registers_in_place():
     # A clump redispatched after a park keeps its identity; the workspace and
     # the herdr agent name are the parts that move.
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
     runfile.clump("burn-1", [901, 902], "/w/b", "agent-b", root=root)
     got = runfile.load("burn-1", root=root)["clumps"]
@@ -157,7 +243,7 @@ def test_a_clump_is_keyed_by_its_lowest_ticket_and_re_registers_in_place():
 
 def test_a_ticket_already_in_another_clump_is_refused():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
     try:
         runfile.clump("burn-1", [902, 903], "/w/b", "agent-b", root=root)
@@ -170,7 +256,7 @@ def test_a_ticket_already_in_another_clump_is_refused():
 
 def test_a_clump_needs_at_least_one_ticket_number():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     for bad in ([], ["901"], [0], [-1]):
         try:
             runfile.clump("burn-1", bad, "/w/a", "agent-a", root=root)
@@ -184,7 +270,7 @@ def test_a_clump_needs_at_least_one_ticket_number():
 
 def test_a_landing_records_the_clumps_squash_sha():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "0123456789abcdef0123456789abcdef01234567",
                  root=root)
@@ -194,7 +280,7 @@ def test_a_landing_records_the_clumps_squash_sha():
 
 def test_a_landing_on_a_clump_the_run_never_dispatched_is_refused():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     try:
         runfile.land("burn-1", 901, "abc1234", root=root)
     except runfile.RunFileError as exc:
@@ -206,7 +292,7 @@ def test_a_landing_on_a_clump_the_run_never_dispatched_is_refused():
 def test_a_second_different_sha_for_a_landed_clump_is_refused():
     # The squash sha is final. A second, different one is a stale writer.
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)  # idempotent
@@ -221,7 +307,7 @@ def test_a_second_different_sha_for_a_landed_clump_is_refused():
 
 def test_a_landing_sha_is_hex():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     for bad in ("", "HEAD", "abc123", "zzzzzzz", "abc1234 "):
         try:
@@ -235,7 +321,7 @@ def test_a_landing_sha_is_hex():
 
 def test_re_registering_a_landed_clump_keeps_its_sha():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     runfile.clump("burn-1", [901], "/w/a", "agent-a2", root=root)
@@ -265,7 +351,7 @@ SIDECAR = named_sidecar()
 
 def test_leftover_copies_only_the_leftover_lines_with_every_field_filled():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
@@ -284,7 +370,7 @@ def test_leftover_copies_only_the_leftover_lines_with_every_field_filled():
 
 def test_leftover_run_twice_for_the_same_pr_does_not_duplicate():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
@@ -295,7 +381,7 @@ def test_leftover_run_twice_for_the_same_pr_does_not_duplicate():
 
 def test_leftover_on_a_clump_the_run_never_dispatched_is_refused():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     try:
         runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
     except runfile.RunFileError as exc:
@@ -310,7 +396,7 @@ def test_leftover_reports_how_many_it_copied():
     # nothing today; the count is what tells a mistyped `--from` apart from
     # a PR that genuinely left nothing (defect class 1).
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     _, added = runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
@@ -321,7 +407,7 @@ def test_leftover_reports_how_many_it_copied():
 
 def test_leftover_against_a_sidecar_with_no_leftover_line_copies_none():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     no_leftovers = sidecar_of({"id": "S1", "outcome": "fixed",
@@ -384,7 +470,7 @@ def test_a_sidecar_not_named_for_a_ticket_is_refused():
 
 def test_a_sidecar_for_any_ticket_of_the_clump_is_accepted():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     _, added = runfile.leftover("burn-1", 901, 950,
@@ -394,7 +480,7 @@ def test_a_sidecar_for_any_ticket_of_the_clump_is_accepted():
 
 def test_a_leftover_line_missing_a_required_field_is_refused():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     sidecar = sidecar_of({"id": "S3", "outcome": "leftover",
@@ -411,7 +497,7 @@ def test_a_leftover_line_missing_a_required_field_is_refused():
 
 def test_a_leftover_line_with_a_blank_or_multiline_field_is_refused():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     for bad in (
@@ -435,7 +521,7 @@ def test_leftover_on_an_unlanded_clump_is_refused():
     # A retry or an out-of-order call must not persist leftovers for a PR
     # that may never land, with nothing able to remove them afterward.
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     try:
         runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
@@ -453,7 +539,7 @@ def test_a_line_with_no_outcome_or_an_unknown_outcome_is_refused():
     # copies zero either way (defect class 1). The four recognised
     # non-leftover outcomes must still be skipped, not refused.
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     for bad in (
@@ -504,7 +590,7 @@ def test_a_second_pr_for_the_same_clump_and_finding_id_is_refused():
     # numbers — a typo'd `--pr` would double-count it for the sweep, with
     # no undo but hand-editing the run file.
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
@@ -520,7 +606,7 @@ def test_a_second_pr_for_the_same_clump_and_finding_id_is_refused():
 
 def test_cli_leftover_appends_and_show_prints_the_leftovers():
     root = cache()
-    cli(root, "start", "burn-1", "--slots", "2")
+    cli(root, "start", "--repo", REPO, "burn-1", "--slots", "2")
     cli(root, "clump", "burn-1", "--tickets", "901", "--workspace", "/w/a",
         "--agent", "agent-a")
     cli(root, "land", "burn-1", "--clump", "901", "--sha", "abc1234")
@@ -543,7 +629,7 @@ def test_cli_leftover_appends_and_show_prints_the_leftovers():
 
 def test_leftovers_survive_resume():
     root = cache()
-    runfile.start("burn-1", slots=2, controller="ctl", root=root)
+    runfile.start("burn-1", slots=2, controller="ctl", root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     runfile.leftover("burn-1", 901, 950, SIDECAR, root=root)
@@ -555,7 +641,7 @@ def test_leftovers_survive_resume():
 # --- Resume: reconcile against the live agents, re-announce the controller -
 
 def three_clumps(root):
-    runfile.start("burn-1", slots=3, controller="burn-ctl-1a", root=root)
+    runfile.start("burn-1", slots=3, controller="burn-ctl-1a", root=root, repo=REPO)
     runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
     runfile.clump("burn-1", [903], "/w/b", "agent-b", root=root)
     runfile.clump("burn-1", [905], "/w/c", "agent-c", root=root)
@@ -628,7 +714,7 @@ def test_a_write_that_dies_before_it_finishes_leaves_the_old_run_intact():
     # half-written run file is worse than a stale one — it reads as a run
     # with no clumps.
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     before = open(runfile.path("burn-1", root=root)).read()
 
@@ -661,7 +747,7 @@ def test_a_run_killed_mid_flight_is_recovered_by_a_second_process():
     # The round trip the ticket asks for, across process boundaries: nothing
     # of the run survives in memory, only the file.
     root = cache()
-    assert cli(root, "start", "burn-1", "--slots", "3",
+    assert cli(root, "start", "--repo", REPO, "burn-1", "--slots", "3",
                "--controller", "burn-ctl-1a").returncode == 0
     assert cli(root, "clump", "burn-1", "--tickets", "901,902",
                "--workspace", "/w/a", "--agent", "agent-a").returncode == 0
@@ -683,7 +769,7 @@ def test_a_run_killed_mid_flight_is_recovered_by_a_second_process():
 
 def test_the_cli_reports_a_vanished_worker_by_its_herdr_agent_name():
     root = cache()
-    cli(root, "start", "burn-1", "--slots", "2")
+    cli(root, "start", "--repo", REPO, "burn-1", "--slots", "2")
     cli(root, "clump", "burn-1", "--tickets", "903", "--workspace", "/w/b",
         "--agent", "agent-b")
     got = cli(root, "resume", "burn-1", "--live", "agent-a")
@@ -693,7 +779,7 @@ def test_the_cli_reports_a_vanished_worker_by_its_herdr_agent_name():
 
 def test_show_prints_the_run_without_touching_it():
     root = cache()
-    cli(root, "start", "burn-1", "--slots", "2", "--controller", "ctl")
+    cli(root, "start", "--repo", REPO, "burn-1", "--slots", "2", "--controller", "ctl")
     cli(root, "clump", "burn-1", "--tickets", "901", "--workspace", "/w/a",
         "--agent", "agent-a")
     before = open(os.path.join(root, "burn-1.json")).read()
@@ -744,12 +830,12 @@ def test_a_trailing_newline_does_not_sneak_through_a_run_id_or_a_sha():
     # newline in it is a filename with a newline in it.
     root = cache()
     try:
-        runfile.start("burn-1\n", slots=1, root=root)
+        runfile.start("burn-1\n", slots=1, root=root, repo=REPO)
     except runfile.RunFileError:
         pass
     else:
         raise AssertionError("a run id with a newline was accepted")
-    runfile.start("burn-1", slots=1, root=root)
+    runfile.start("burn-1", slots=1, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     try:
         runfile.land("burn-1", 901, "abc1234\n", root=root)
@@ -764,7 +850,7 @@ def test_a_slot_budget_that_is_not_a_positive_count_is_refused():
     root = cache()
     for bad in (0, -1, "3", 1.5, None, True):
         try:
-            runfile.start("burn-1", slots=bad, root=root)
+            runfile.start("burn-1", slots=bad, root=root, repo=REPO)
         except runfile.RunFileError:
             continue
         raise AssertionError(f"accepted slots {bad!r}")
@@ -800,7 +886,7 @@ def test_a_clump_with_no_workspace_or_no_agent_name_is_refused():
     # a workspace path is the only way to read what it did. Blank is not an
     # answer to either.
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     for workspace, agent in (("", "agent-a"), ("/w/a", ""), ("/w/a", None),
                              (None, "agent-a"), ("/w/a", "  ")):
         try:
@@ -818,7 +904,7 @@ def test_a_cache_dir_that_cannot_be_written_is_a_refusal_not_a_traceback():
     with open(os.path.join(root, "afile"), "w") as fh:
         fh.write("not a directory")
     try:
-        runfile.start("burn-1", slots=1, root=os.path.join(root, "afile", "sub"))
+        runfile.start("burn-1", slots=1, root=os.path.join(root, "afile", "sub"), repo=REPO)
     except runfile.RunFileError as exc:
         assert "burn-1.json" in str(exc), exc
     else:
@@ -827,7 +913,7 @@ def test_a_cache_dir_that_cannot_be_written_is_a_refusal_not_a_traceback():
     closed = os.path.join(root, "closed")
     os.mkdir(closed, 0o500)
     try:
-        runfile.start("burn-1", slots=1, root=os.path.join(closed, "sub"))
+        runfile.start("burn-1", slots=1, root=os.path.join(closed, "sub"), repo=REPO)
     except runfile.RunFileError:
         pass
     else:
@@ -843,7 +929,7 @@ def test_a_cache_dir_that_cannot_be_read_still_records_the_write():
     root = cache()
     os.chmod(root, 0o300)
     try:
-        runfile.start("burn-1", slots=2, root=root)
+        runfile.start("burn-1", slots=2, root=root, repo=REPO)
     finally:
         os.chmod(root, 0o700)
     assert runfile.load("burn-1", root=root)["slots"] == 2
@@ -879,7 +965,7 @@ def test_re_registering_a_clump_may_not_drop_a_ticket_from_it():
     # The file answers "which tickets are out". A clump re-registered under
     # its lowest ticket alone would drop the rest silently.
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901, 902], "/w/a", "agent-a", root=root)
     try:
         runfile.clump("burn-1", [901], "/w/b", "agent-b", root=root)
@@ -897,7 +983,7 @@ def test_the_cli_refuses_a_ticket_list_python_would_read_creatively():
     # `int()` accepts `9_01` and `+901`. A run file that says #901 when the
     # brief said `9_01` is a wrong answer, not a lenient one.
     root = cache()
-    cli(root, "start", "burn-1", "--slots", "2")
+    cli(root, "start", "--repo", REPO, "burn-1", "--slots", "2")
     # A doubled separator is not in this list: `901,,902` names exactly two
     # tickets and no other reading of it exists.
     # `str.isdigit()` is true for `²` (which `int()` then rejects) and for
@@ -919,7 +1005,7 @@ def test_the_cli_expands_a_tilde_in_the_cache_dir_override():
     home = os.path.join(root, "home")
     os.makedirs(home)
     got = subprocess.run(
-        [sys.executable, RUNFILE, "start", "burn-1", "--slots", "1"],
+        [sys.executable, RUNFILE, "start", "--repo", REPO, "burn-1", "--slots", "1"],
         capture_output=True, text=True,
         env={**os.environ, "HOME": home, "BURNDOWN_CACHE_DIR": "~/cachedir"},
         cwd=root)
@@ -1018,7 +1104,7 @@ def test_two_concurrent_writers_do_not_lose_an_update():
     # rather than pass on how two processes happen to interleave (the same
     # device flow/lane's two_concurrent_dispatches test uses).
     root = cache()
-    cli(root, "start", "burn-1", "--slots", "4")
+    cli(root, "start", "--repo", REPO, "burn-1", "--slots", "4")
     env = {**os.environ, "BURNDOWN_CACHE_DIR": root,
            "BURNDOWN_RUNFILE_DELAY_MS": "400"}
     procs = [subprocess.Popen(
@@ -1036,7 +1122,7 @@ def test_two_concurrent_writers_do_not_lose_an_update():
 
 def test_a_lock_someone_else_holds_times_out_as_a_refusal():
     root = cache()
-    cli(root, "start", "burn-1", "--slots", "2")
+    cli(root, "start", "--repo", REPO, "burn-1", "--slots", "2")
     lock = runfile.path("burn-1", root=root) + ".lock"
     fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
     fcntl.flock(fd, fcntl.LOCK_EX)
@@ -1068,7 +1154,7 @@ def test_a_malformed_environment_value_is_a_refusal_not_a_traceback():
     # contract with a new surface. A bad value inherited from a parent shell
     # must not turn a restart recovery into a stack trace.
     root = cache()
-    cli(root, "start", "burn-1", "--slots", "2")
+    cli(root, "start", "--repo", REPO, "burn-1", "--slots", "2")
     for name, value in (("BURNDOWN_RUNFILE_LOCK_TIMEOUT", "30s"),
                         ("BURNDOWN_RUNFILE_LOCK_TIMEOUT", "inf"),
                         ("BURNDOWN_RUNFILE_LOCK_TIMEOUT", "nan"),
@@ -1093,7 +1179,7 @@ def test_an_empty_environment_value_reads_as_unset():
     # these has a documented default to fall back to.
     root = cache()
     got = subprocess.run(
-        [sys.executable, RUNFILE, "start", "burn-1", "--slots", "1"],
+        [sys.executable, RUNFILE, "start", "--repo", REPO, "burn-1", "--slots", "1"],
         capture_output=True, text=True, timeout=30,
         env={**os.environ, "BURNDOWN_CACHE_DIR": root,
              "BURNDOWN_RUNFILE_LOCK_TIMEOUT": "",
@@ -1104,7 +1190,7 @@ def test_an_empty_environment_value_reads_as_unset():
 
 def test_a_clump_starts_with_no_job_on_record():
     root = cache()
-    runfile.start("r-job", 3, "dc", root)
+    runfile.start("r-job", 3, "dc", root, repo=REPO)
     run = runfile.clump("r-job", [351], "/w/351", "sm-351", root)
     assert run["clumps"][0]["job"] is None, run
 
@@ -1114,7 +1200,7 @@ def test_a_declared_job_survives_a_restart():
     The declaration lived in one argv before, so a resume dispatched into the
     contention #351 produced."""
     root = cache()
-    runfile.start("r-job2", 3, "dc", root)
+    runfile.start("r-job2", 3, "dc", root, repo=REPO)
     runfile.clump("r-job2", [351], "/w/351", "sm-351", root)
     runfile.job("r-job2", 351, "running", 8, root)
     # A fresh read stands in for the restart.
@@ -1127,7 +1213,7 @@ def test_a_declared_job_survives_a_restart():
 
 def test_a_worker_that_launched_no_job_is_recorded_as_having_said_so():
     root = cache()
-    runfile.start("r-job3", 3, "dc", root)
+    runfile.start("r-job3", 3, "dc", root, repo=REPO)
     runfile.clump("r-job3", [351], "/w/351", "sm-351", root)
     runfile.job("r-job3", 351, "none", root=root)
     assert runfile.load("r-job3", root)["clumps"][0]["job"] == {
@@ -1136,7 +1222,7 @@ def test_a_worker_that_launched_no_job_is_recorded_as_having_said_so():
 
 def test_a_job_record_that_is_not_one_is_refused():
     root = cache()
-    runfile.start("r-job4", 3, "dc", root)
+    runfile.start("r-job4", 3, "dc", root, repo=REPO)
     runfile.clump("r-job4", [351], "/w/351", "sm-351", root)
     for state, cores in (("running", 0), ("running", "8"), ("spinning", 1),
                          ("running", True), ("none", 4)):
@@ -1158,7 +1244,7 @@ def test_a_run_file_written_before_jobs_existed_still_reads():
     """#892's files have no `job` key. A controller resuming one of those
     must get its run back, not a refusal about a field that did not exist."""
     root = cache()
-    runfile.start("r-old", 2, "dc", root)
+    runfile.start("r-old", 2, "dc", root, repo=REPO)
     runfile.clump("r-old", [401], "/w/401", "sm-401", root)
     target = runfile.path("r-old", root)
     with open(target) as fh:
@@ -1172,7 +1258,7 @@ def test_a_run_file_written_before_jobs_existed_still_reads():
 
 def test_the_cli_records_a_job_and_shows_it():
     root = cache()
-    assert cli(root, "start", "r-job5", "--slots", "2").returncode == 0
+    assert cli(root, "start", "--repo", REPO, "r-job5", "--slots", "2").returncode == 0
     assert cli(root, "clump", "r-job5", "--tickets", "351", "--workspace",
                "/w/351", "--agent", "sm-351").returncode == 0
     got = cli(root, "job", "r-job5", "--clump", "351", "--cores", "8")
@@ -1189,7 +1275,7 @@ def test_the_cli_records_a_job_and_shows_it():
 
 def test_a_clump_starts_with_no_pr_up_on_record():
     root = cache()
-    runfile.start("r-pr", 3, "dc", root)
+    runfile.start("r-pr", 3, "dc", root, repo=REPO)
     run = runfile.clump("r-pr", [1095], "/w/1095", "skills-1095", root)
     assert run["clumps"][0]["pr_up"] is None, run
 
@@ -1198,7 +1284,7 @@ def test_a_recorded_pr_up_survives_a_restart_and_a_re_register():
     """A resumed controller's sweep reads this record, not its context: a
     `done` pane whose "PR up" was never recorded reads `stalled`."""
     root = cache()
-    runfile.start("r-pr2", 3, "dc", root)
+    runfile.start("r-pr2", 3, "dc", root, repo=REPO)
     runfile.clump("r-pr2", [1095], "/w/1095", "skills-1095", root)
     runfile.pr_up("r-pr2", 1095, 1160, root)
     assert runfile.load("r-pr2", root)["clumps"][0]["pr_up"] == 1160
@@ -1210,7 +1296,7 @@ def test_a_recorded_pr_up_survives_a_restart_and_a_re_register():
 def test_a_redispatch_to_a_new_agent_clears_pr_up_so_a_done_pane_is_stalled():
     import loop
     root = cache()
-    runfile.start("r-pr9", 3, "dc", root)
+    runfile.start("r-pr9", 3, "dc", root, repo=REPO)
     runfile.clump("r-pr9", [1095], "/w/1095", "skills-1095", root)
     runfile.pr_up("r-pr9", 1095, 1160, root)
     run = runfile.clump("r-pr9", [1095], "/w/1095", "skills-1095-b", root)
@@ -1221,7 +1307,7 @@ def test_a_redispatch_to_a_new_agent_clears_pr_up_so_a_done_pane_is_stalled():
 
 def test_a_pr_up_that_is_not_a_pr_number_or_names_no_clump_is_refused():
     root = cache()
-    runfile.start("r-pr3", 3, "dc", root)
+    runfile.start("r-pr3", 3, "dc", root, repo=REPO)
     runfile.clump("r-pr3", [1095], "/w/1095", "skills-1095", root)
     for bad in (0, -1, "1160", True):
         try:
@@ -1240,7 +1326,7 @@ def test_a_pr_up_that_is_not_a_pr_number_or_names_no_clump_is_refused():
 
 def test_a_run_file_written_before_pr_up_existed_still_reads():
     root = cache()
-    runfile.start("r-pr4", 2, "dc", root)
+    runfile.start("r-pr4", 2, "dc", root, repo=REPO)
     runfile.clump("r-pr4", [401], "/w/401", "sm-401", root)
     target = runfile.path("r-pr4", root)
     with open(target) as fh:
@@ -1253,7 +1339,7 @@ def test_a_run_file_written_before_pr_up_existed_still_reads():
 
 def test_a_run_file_holding_a_pr_up_that_is_not_a_pr_number_is_refused():
     root = cache()
-    runfile.start("r-pr6", 2, "dc", root)
+    runfile.start("r-pr6", 2, "dc", root, repo=REPO)
     runfile.clump("r-pr6", [401], "/w/401", "sm-401", root)
     target = runfile.path("r-pr6", root)
     for bad in ("7", 0, True):
@@ -1272,7 +1358,7 @@ def test_a_run_file_holding_a_pr_up_that_is_not_a_pr_number_is_refused():
 
 def test_the_cli_records_pr_up_and_shows_it():
     root = cache()
-    assert cli(root, "start", "r-pr5", "--slots", "2").returncode == 0
+    assert cli(root, "start", "--repo", REPO, "r-pr5", "--slots", "2").returncode == 0
     assert cli(root, "clump", "r-pr5", "--tickets", "1095", "--workspace",
                "/w/1095", "--agent", "skills-1095").returncode == 0
     assert "no PR up" in cli(root, "show", "r-pr5").stdout
@@ -1287,7 +1373,7 @@ def test_a_cleared_pr_up_makes_a_done_pane_stalled_again():
     must read `stalled`, not `done` (Codex gate on PR #1166)."""
     import loop
     root = cache()
-    assert cli(root, "start", "r-pr7", "--slots", "2").returncode == 0
+    assert cli(root, "start", "--repo", REPO, "r-pr7", "--slots", "2").returncode == 0
     assert cli(root, "clump", "r-pr7", "--tickets", "1095", "--workspace",
                "/w/1095", "--agent", "skills-1095").returncode == 0
     assert cli(root, "pr-up", "r-pr7", "--clump", "1095", "--pr",
@@ -1304,7 +1390,7 @@ def test_a_cleared_pr_up_makes_a_done_pane_stalled_again():
 
 def test_pr_up_takes_a_pr_or_clear_but_not_both_and_not_neither():
     root = cache()
-    assert cli(root, "start", "r-pr8", "--slots", "2").returncode == 0
+    assert cli(root, "start", "--repo", REPO, "r-pr8", "--slots", "2").returncode == 0
     assert cli(root, "clump", "r-pr8", "--tickets", "1095", "--workspace",
                "/w/1095", "--agent", "skills-1095").returncode == 0
     both = cli(root, "pr-up", "r-pr8", "--clump", "1095", "--pr", "1160",
@@ -1319,7 +1405,7 @@ def test_pr_up_takes_a_pr_or_clear_but_not_both_and_not_neither():
 
 def landed_root():
     root = cache()
-    runfile.start("burn-1", slots=2, root=root)
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
     runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-1", 901, "abc1234", root=root)
     return root

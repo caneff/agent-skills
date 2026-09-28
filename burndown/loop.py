@@ -19,6 +19,7 @@ Why each rule reads the way it does: `references/loop.md`.
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1075,18 +1076,21 @@ def herdr_get(agent, timeout):
         ) from None
 
 
-def render_dispatch(picked, held, run_id):
+def render_dispatch(picked, held, run_id, repo):
     """One `dispatch` line per pick and the `implement-dispatch` command
     under it — carrying `--run <run-id>`, so
     the flag a burn owes every plain dispatch (`burndown/SKILL.md` § The
-    loop step 8) is in the line the controller runs rather than in prose."""
+    loop step 8) is in the line the controller runs rather than in prose, and
+    `--repo <checkout>`, the run's recorded target: `implement-dispatch`
+    resolves issue numbers against a checkout, and the controller's cwd may be
+    another repo's (#1190)."""
     lines = []
     for c in picked:
         lines.append(f"dispatch  #{key_of(c)}  "
                      + ",".join(f"#{n}" for n in c["tickets"]))
         lines.append("command   implement-dispatch "
                      + " ".join(str(n) for n in c["tickets"])
-                     + f" --run {run_id}")
+                     + f" --run {run_id} --repo {shlex.quote(repo)}")
     for entry in held:
         # `same_tick` names the other candidate this tick picked ahead of it;
         # otherwise the holder is a live workspace (#971).
@@ -1184,6 +1188,10 @@ def run(argv):
             candidates = read_clumps(args.candidates)
             in_flight = read_clumps(args.in_flight, live=True)
             root = runfile.env_root()
+            try:
+                repo = runfile.target_repo(load_run(args.run, root))
+            except runfile.RunFileError as exc:
+                raise LoopError(str(exc)) from exc
             in_flight = with_run_jobs(in_flight, args.run, root)
             if args.no_workspace_diff:
                 # Said, not silent: this run's exclusion reads only the named
@@ -1220,7 +1228,7 @@ def run(argv):
                 print("nothing to dispatch: every free slot is held by a "
                       "declared job")
                 print(render_dispatch([], frontier(candidates, unlanded)["held"],
-                                      args.run))
+                                      args.run, repo))
                 return 0
             live = len(unlanded)
             room, refusals = box_room(count, args.committed_gb,
@@ -1234,7 +1242,7 @@ def run(argv):
             state = frontier(candidates, unlanded)
             picked, same_tick_held = picks(state, room)
             lines = render_dispatch(picked, state["held"] + same_tick_held,
-                                    args.run)
+                                    args.run, repo)
             if room < cores["room"]:
                 lines = f"box: room for {room} of {cores['room']}\n{lines}"
             print(lines)
