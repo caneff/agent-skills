@@ -1546,6 +1546,17 @@ def test_a_bare_id_recorded_twice_with_different_outcomes_is_refused_as_reuse():
     assert f"{body}:3 and :4" in got, got
 
 
+def test_reuse_is_found_past_a_first_line_that_states_no_outcome():
+    # C2: a first record that only mentions outcome words states nothing, and
+    # two later lines still disagree with each other.
+    sidecar = sidecar_of({"id": "S1", "outcome": "disputed", "reason": "x"})
+    body = pr_body("## Decisions made\n\n- S1 (hard): overflows. Claimed fixed; "
+                   "contested. leftover.\n- S1: fixed, abc1234.\n"
+                   "- S1: disputed: x.\n")
+    got = refusal_of(sidecar, landed_root(), body)
+    assert "reused across review rounds" in got, got
+
+
 def test_a_bare_id_recorded_twice_with_one_outcome_is_not_reuse():
     # The same disposition stated twice is a restatement, not two findings.
     sidecar = sidecar_of({"id": "S1", "outcome": "fixed", "sha": "abc1234"})

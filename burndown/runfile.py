@@ -547,17 +547,19 @@ def refuse_reused_ids(body_path, records, held):
     for fid, found in records.items():
         if fid not in held:
             continue
-        first = found[0]
-        for later in found[1:]:
-            if (first[1] is not None and later[1] is not None
-                    and first[1] != later[1]):
-                raise RunFileError(
-                    f"{body_path}:{first[0]} and :{later[0]} record {fid} "
-                    f"more than once, as {first[1]!r} and {later[1]!r} — the "
-                    "id was reused across review rounds, which is not a "
-                    "stale sidecar. A review round after the first prefixes "
-                    "its ids with the round (r2-S1, r2-C3): rename the "
-                    "later round's ids in the sidecar and the body")
+        stated = {}
+        for line_n, outcome, _ in found:
+            if outcome is not None:
+                stated.setdefault(outcome, line_n)
+        if len(stated) > 1:
+            (one, one_n), (two, two_n) = list(stated.items())[:2]
+            raise RunFileError(
+                f"{body_path}:{one_n} and :{two_n} record {fid} "
+                f"more than once, as {one!r} and {two!r} — the "
+                "id was reused across review rounds, which is not a "
+                "stale sidecar. A review round after the first prefixes "
+                "its ids with the round (r2-S1, r2-C3): rename the "
+                "later round's ids in the sidecar and the body")
 
 
 def refuse_disagreeing_pr_body(sidecar_path, body_path):
