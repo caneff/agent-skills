@@ -129,8 +129,14 @@ on the lane's reviews and adds no trial row to
 `docs/research/2026-09-14-codex-review-trial.md`, which compares Codex against
 Claude axes and has none here.
 
+The Codex lane writes no `findings-<axis>-<n>.jsonl` and no
+`dispositions-<n>.jsonl`, so its worker runs the pre-report gate with
+`PRE_REPORT_NO_VERIFICATION="codex lane: no Claude axes"` (#1188) and the
+controller's merge step 2 does not require the sidecar.
+
 The one-round-plus-verification cap and the pre-report gate in
-`implement/SKILL.md` § Review and § Before the PR: both bind unchanged. So does the
+`implement/SKILL.md` § Review and § Before the PR: both bind, the gate with the
+waiver above. So does the
 disclosure: the PR body names the reviews that actually ran and says the diff
 was written by Codex, not Claude. A reader who assumes a Claude review
 happened is reading a claim nobody made.
