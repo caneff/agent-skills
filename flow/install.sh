@@ -106,12 +106,14 @@ bash "$here/lane-install.sh"
 echo
 echo "Done. The live flow tooling now points at this repo; commit to back it up."
 
+status=0
 if [ -n "$link_refused" ]; then
   echo "one or more files were left as they were (see \"refusing:\" above); the rest of the install ran" >&2
-  exit 1
+  status=1
 fi
 
 if [ -n "$toast_failed" ]; then
   echo "herdr-toast-install failed for a non-refusal reason; the rest of the install ran anyway — see above" >&2
-  exit 1
+  status=1
 fi
+exit "$status"
