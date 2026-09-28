@@ -436,11 +436,14 @@ The body has these sections and nothing else:
   id its sidecar gave it (`S1`/`P2`/`C3`) rather than restating it in
   prose (#855) — that's what makes this list joinable against
   `dispositions-<n>.jsonl` without a reading pass. Open each line with its
-  id, or ids (`- S1, P2: fixed, <sha>.`; a round after the first cites
-  `r2-S1`, per `multi-axis-code-review/SKILL.md` § 4's Round ids; a sweep ticket's PR prefixes its own round 1 too, `r1-S3`, so its ids stay apart from the sweep items it disposes, and cites a sweep item file-qualified, `<file> <id>`), and put the disposition word
-  right after the first colon. `runfile.py leftover` reads the outcome off
-  that line at harvest, the last line for an id winning, and refuses a
-  sidecar it contradicts (#1147). On any other build, every
+  id, or ids (`- S1, P2: fixed, <sha>.`; a prefixed round cites `r2-S1`,
+  and a sweep item is cited file-qualified, `<file> <id>`), and put the
+  disposition word right after the first colon. Which id prefix a round
+  carries, and that its reviewer prompts name it, is
+  `multi-axis-code-review/SKILL.md` § 4's Round ids. `runfile.py leftover`
+  reads the outcome off that line at harvest and refuses a sidecar it
+  contradicts (#1147), and an id the body records twice with two outcomes
+  (#1177): a changed disposition is edited into its one line. On any other build, every
   round-1 finding that was disputed (with the why), filed (with its
   ticket number), handed back (with the command) or left over.
 - **Last reviewed sha** — and that commits after it were not re-reviewed.
