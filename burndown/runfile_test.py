@@ -132,6 +132,23 @@ def test_start_refuses_a_repo_that_is_not_a_git_checkout():
     assert not os.path.exists(runfile.path("burn-2", root))
 
 
+def test_start_refuses_a_blank_repo_instead_of_recording_the_cwds_repo():
+    # `git -C ""` stays in the cwd: an unset `--repo "$TARGET"` would record
+    # the controller's own checkout, the #1093 hazard this field closes.
+    root = cache()
+    for blank in ("", "  "):
+        try:
+            runfile.start("burn-1", slots=1, root=root, repo=blank)
+        except Exception as exc:
+            assert isinstance(exc, runfile.RunFileError), repr(exc)
+            assert "blank" in str(exc), exc
+        else:
+            raise AssertionError(f"repo {blank!r} was accepted")
+    got = cli(root, "start", "burn-2", "--repo", "")
+    assert got.returncode == 1 and "blank" in got.stderr, got
+    assert not os.path.exists(runfile.path("burn-2", root))
+
+
 def test_a_run_file_written_before_the_repo_field_loads_and_names_no_target():
     root = cache()
     runfile.start("burn-1", slots=1, root=root, repo=REPO)

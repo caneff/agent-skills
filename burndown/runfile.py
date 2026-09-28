@@ -94,7 +94,11 @@ def checkout_top(where):
     """The absolute git top-level of `where` — a checkout root or any
     directory inside one, a trailing slash included — or a `RunFileError`
     when `where` is not in a git checkout. Comparing tops, not spellings, is
-    what makes a subdirectory or `path/` the same target."""
+    what makes a subdirectory or `path/` the same target. A blank `where` is
+    refused: `git -C ""` stays in the cwd, so an unset shell variable would
+    record whatever repo the controller stands in."""
+    if not isinstance(where, str) or not where.strip():
+        raise RunFileError("no checkout named: the path is blank")
     try:
         done = subprocess.run(
             ["git", "-C", os.path.expanduser(where), "rev-parse",
