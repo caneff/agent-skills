@@ -26,16 +26,18 @@ knew the answer before dispatch and the lane ignored it.
 ## The seam
 
 `labels_to_write(candidate) -> labels`, where a candidate is
-`{"number": <n>, "files": [...], "labels": [...]}` — the ticket's number, the
-files it targets, and the labels it carries **right now**, read from the
-tracker at pass time rather than assumed. Five answers, and only the first
+`{"number": <n>, "files": [...], "labels": [...], "body": "..."}` — the
+ticket's number, the files it targets, and the labels and body it carries
+**right now**, read from the tracker at pass time rather than assumed (a
+candidate with no `body` key raises). Five answers, and only the first
 adds anything (a removal is `labels_to_strip`'s, § Stripping):
 
-- Every target file is prose, and the ticket has no `documentation` label →
+- Every target file is prose, the body names no code, and the ticket has no
+  `documentation` label →
   `["documentation"]`.
 - Every target file is prose, and the label is already there → nothing. This
   pass is idempotent; a tick that runs twice writes once.
-- Every target file is prose, but the ticket **body** names a code path the
+- Every target file is prose and the label is absent, but the ticket **body** names a code path the
   way `implement-dispatch` reads it → nothing to add, and the ticket is
   reported under `labels withheld:` (§ One reader decides).
 - Any target file is not prose → nothing to add. A mixed diff is code

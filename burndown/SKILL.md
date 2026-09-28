@@ -64,8 +64,8 @@ too.
    got. It also carries `tier.py`'s lines (§ Tier tagging), which **name
    every label the exploration pass wrote**, every label it stripped and
    every ticket it withheld the label from because its body names code, and
-   say `labels written: none` and `labels stripped: none` when it did
-   neither — a report silent about labels reads the same from a
+   say `labels written: none`, `labels stripped: none` and
+   `labels withheld: none` when it did none of them — a report silent about labels reads the same from a
    pass that wrote nothing and a pass that never ran, and the difference
    between those two is a ticket dispatched at the wrong tier.
 
@@ -330,7 +330,9 @@ label, not a flag: `merge-cleanup`, `/landed` and a resumed controller all
 read the ticket, and a flag is gone the moment dispatch returns.
 
 It **touches one label, `documentation`**: it adds it when every target
-is prose and removes it when any target is code. A candidate is docs-only when every file it targets is
+is prose and the body names no code the way dispatch reads it (a body that
+does is reported under `labels withheld:`, #1211), and removes it when any
+target is code. A candidate is docs-only when every file it targets is
 prose — `.md`, `.markdown`, `.txt`, `.rst`, and never a `SKILL.md` — and
 anything else it cannot read as prose counts as code, which is deliberately
 stricter than `flow/claude/WORKFLOW.md` § Gate 2: light tier lands with no PR
