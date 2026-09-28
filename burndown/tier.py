@@ -14,7 +14,10 @@ run: `--tier` is invisible the moment dispatch returns, while `merge-cleanup`,
 `/landed` and a resumed controller all read the ticket.
 
 It touches one label, `documentation`, in the direction its targets
-prove. It adds the label to a candidate every target of which is prose, and
+prove. It adds the label to a candidate every target of which is prose, unless
+the ticket body names code the way `implement-dispatch` reads it (#1211:
+dispatch would strip the label again, so the pass withholds it and says so
+under `labels withheld:`), and
 removes it from a candidate whose targets include code (#1118:
 `implement-dispatch` reads only the ticket body's paths, so a body naming
 only prose kept the filer's label and dispatched light while the clumper's
@@ -204,33 +207,34 @@ def tag(repo, candidates, run=None, write=True, written=None, stripped=None,
 
 def render(written, stripped, withheld, write=True):
     """The lines the run's opening report carries: every label this pass
-    wrote and every label it stripped, against the ticket each belongs to. A
-    pass that did neither says so in words — a report silent about labels
+    wrote, every label it stripped and every ticket it withheld the label
+    from, against the ticket each belongs to. A pass that did none says so
+    in words — a report silent about labels
     reads the same as one from a pass that never ran.
 
-    A dry run reports the same decisions under `would write:` and `would
-    strip:`. A preview that claims a write is worse than no preview at all:
-    these lines are the run's record of what the tracker now carries, and a
+    A dry run reports the same decisions under `would write:`, `would
+    strip:` and `would withhold:`. A preview that claims a write is worse than no
+    preview at all: these lines are the run's record of what the tracker now carries, and a
     controller reading `labels written:` after a dry run would take the tier
     as already fixed.
 
     `stripped` and `withheld` have no default: an in-process caller that
     forgot one would print `none` over changes that happened. `withheld` names
     the tickets whose body names code, so they go out heavy with no label."""
-    held = [{"number": w["number"], "labels": [f"body names {w['target']}"]} for w in withheld]
     return "\n".join([
-        _block("labels written" if write else "would write", written),
-        _block("labels stripped" if write else "would strip", stripped),
-        _block("labels withheld" if write else "would withhold", held),
+        _block("labels written" if write else "would write",
+               [(r["number"], ", ".join(r["labels"])) for r in written]),
+        _block("labels stripped" if write else "would strip",
+               [(r["number"], ", ".join(r["labels"])) for r in stripped]),
+        _block("labels withheld" if write else "would withhold",
+               [(w["number"], f"body names {w['target']}") for w in withheld]),
     ])
 
 
-def _block(heading, records):
-    if not records:
+def _block(heading, rows):
+    if not rows:
         return f"{heading}: none"
-    lines = [f"{heading}:"]
-    lines.extend(f"    #{r['number']}  {', '.join(r['labels'])}" for r in records)
-    return "\n".join(lines)
+    return "\n".join([f"{heading}:", *(f"    #{n}  {text}" for n, text in rows)])
 
 
 def fetch_ticket(repo, number, run=None):
