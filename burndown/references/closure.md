@@ -140,7 +140,9 @@ direction. A file that does not read as text, the directories in `SKIP_DIRS`
 hold no directives. The file list comes from `git ls-files` (tracked plus
 untracked-not-ignored, #1178), so `repo_files` needs a git repository and a
 `git` on `PATH`: without either, the resolve fails rather than reading an empty
-list as an empty closure.
+list as an empty closure. Git's exit status decides that, not its stderr (a config
+warning is stderr on a good run); the one stderr line that refuses is git skipping
+an unreadable directory.
 
 Everything else about the scan **fails closed**, because the direction it
 would fail in is under-clumping — a missing edge, and two workers in the same
