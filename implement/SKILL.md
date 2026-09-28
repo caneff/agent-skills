@@ -605,6 +605,15 @@ The controller merges on a repo Chris owns; Chris reads it after via
    comment `Codex pass skipped: <why>` on the PR and go to step 4 — a skip
    adds no trial row.
 
+   Then check the plan's usage, before any run starts (#1204):
+   `python3 ~/.agents/skills/implement/codex-usage-gate.py`. It reads the
+   usage cache, refreshing a missing or stale one itself, and prints one
+   line. Exit 0: launch. Exit 10 (at or above 80%): put its line in your
+   next message to Chris, then launch. Exit 20 (capped) or exit 30 (no fresh,
+   readable reading): comment `Codex pass skipped: <printed line>` on the PR,
+   launch nothing, write no refused duration row — no run existed to refuse —
+   and go to step 4. An unreadable cache is exit 30, never headroom.
+
    From the worker's workspace, fetch the ticket yourself — you did
    not build this ticket, so you don't already hold it — body and comments
    both, rendered as in § The brief, since a requirement added in a comment
