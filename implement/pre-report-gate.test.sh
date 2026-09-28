@@ -167,6 +167,19 @@ else
   echo "FAIL: sidecar without body — want exit 1 + the gate's own 'write the body there first', got $rc: $out"; fails=1
 fi
 
+# A check that could not run (no runfile.py beside the gate) is an environment
+# error, exit 2, never a disagreement the worker is told to fix (#1214 C3).
+printf '%s\n' '{"id": "S1", "outcome": "fixed", "sha": "abc1234"}' >"$sidecar"
+printf '## Decisions made\n\n- S1: fixed, abc1234.\n' >"$body"
+mkdir -p "$tmp/lonely/implement"
+cp "$gate" "$tmp/lonely/implement/pre-report-gate.sh"
+out=$(cd "$repo" && HOME="$cache_home" bash "$tmp/lonely/implement/pre-report-gate.sh" "$tip" 2>&1); rc=$?
+if [ "$rc" = 2 ] && [[ "$out" == *"could not run"* ]]; then
+  echo "PASS: a check that cannot run is exit 2, not a disagreement"
+else
+  echo "FAIL: check cannot run — want exit 2 + 'could not run', got $rc: $out"; fails=1
+fi
+
 rm "$sidecar"
 out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
 if [ "$rc" = 0 ] && [[ "$out" == *"no dispositions sidecar"* ]]; then

@@ -74,7 +74,11 @@ if [[ "$branch" =~ ^implement-([0-9]+)$ ]]; then
   if [ -f "$sidecar" ]; then
     [ -f "$body" ] || { echo "pre-report gate: $sidecar exists but the PR body $body does not — write the body there first (implement/SKILL.md § The PR)" >&2; exit 1; }
     runfile="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../burndown/runfile.py"
-    check=$(python3 "$runfile" check --from "$sidecar" --pr-body "$body" 2>&1) ||
+    check=$(python3 "$runfile" check --from "$sidecar" --pr-body "$body" 2>&1)
+    check_rc=$?
+    [ "$check_rc" -le 1 ] ||
+      { echo "pre-report gate: runfile.py check could not run (exit $check_rc): $check" >&2; exit 2; }
+    [ "$check_rc" -eq 0 ] ||
       { echo "pre-report gate: runfile.py check refused — fix the sidecar line or the body's line (the gate has no --allow-stale; that flag is harvest's): $check" >&2; exit 1; }
     dispositions_status="dispositions agree with the PR body"
   fi
