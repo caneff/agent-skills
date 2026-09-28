@@ -2213,6 +2213,15 @@ def test_workspace_diff_lists_files_changed_against_the_origin_default():
             raise AssertionError("a missing workspace was read as no diff")
 
 
+def test_workspace_diff_names_both_sides_of_a_rename():
+    # #1212 C1: a candidate naming the old path collides with the rename.
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_workspace(tmp, [])
+        run_in(work, "git", "mv", "a.txt", "renamed.txt")
+        run_in(work, "git", "commit", "-qm", "rename")
+        assert sorted(loop.workspace_diff(work)) == ["a.txt", "renamed.txt"]
+
+
 def test_the_cli_dispatch_holds_a_candidate_on_a_file_only_the_diff_reaches():
     with tempfile.TemporaryDirectory() as tmp:
         work = make_workspace(tmp, ["b.txt"])

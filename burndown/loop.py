@@ -976,7 +976,7 @@ def workspace_diff(workspace):
     default = in_workspace(
         ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).strip()
     return [line for line in in_workspace(
-        ["diff", "--name-only", f"{default}...HEAD"]).splitlines() if line]
+        ["diff", "--name-only", "--no-renames", f"{default}...HEAD"]).splitlines() if line]
 
 
 def with_workspace_diffs(in_flight, diff=workspace_diff):
