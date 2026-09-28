@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # The pre-report gate: run from the worktree before reporting a sha.
 # Fails unless the tree is clean, <sha> is an ancestor of <tip>, the
-# workspace's .scratch/ is empty, and — on an implement-<n> branch whose
-# review cache holds dispositions-<n>.jsonl — the PR body pr-body-<n>.md
-# exists and its Decisions made agrees with that sidecar (#1214): the four
-# ways a "done" report has described work that was not on the branch, left
-# cleanup for later, or shipped a stale disposition.
+# workspace's .scratch/ is empty, and — on an implement-<n> branch — the review
+# cache holds a non-empty dispositions-<n>.jsonl (#1188) and the PR body
+# pr-body-<n>.md exists and its Decisions made agrees with that sidecar
+# (#1214): the ways a "done" report has described work that was not on the
+# branch, left cleanup for later, skipped the verification pass, or shipped a
+# stale disposition.
 # A non-empty .scratch/ the worker cannot commit and must keep is named in
 # the PR-up report by setting PRE_REPORT_KEEP_SCRATCH="<why>", which passes
 # the check and folds the reason into the pass line itself.
@@ -56,13 +57,11 @@ if ! git merge-base --is-ancestor "$sha" "$tip_sha"; then
   exit 1
 fi
 
-# The dispositions check (#1214): on an implement-<n> branch whose review
-# cache holds dispositions-<n>.jsonl, the PR body's Decisions made must agree
-# with it — the comparison `runfile.py leftover` makes at harvest, made here
-# so the worker rewrites a stale line instead of the controller. No sidecar
-# is a light-tier or no-review branch; the pass line says the check did not
-# run rather than claiming agreement.
-dispositions_status="no dispositions sidecar, check not run"
+# The dispositions check (#1214, #1188): on an implement-<n> branch the review
+# cache must hold dispositions-<n>.jsonl, and the PR body's Decisions made must
+# agree with it — the comparison `runfile.py leftover` makes at harvest, made here
+# so the worker rewrites a stale line instead of the controller. Off an
+# implement-<n> branch there is no ticket to look up, and the pass line says so.
 branch=$(git rev-parse --abbrev-ref HEAD)
 if [[ "$branch" =~ ^implement-([0-9]+)$ ]]; then
   n=${BASH_REMATCH[1]}
@@ -71,17 +70,22 @@ if [[ "$branch" =~ ^implement-([0-9]+)$ ]]; then
   reviews="$HOME/.cache/agent-reviews/$(basename "$(dirname "$common")")"
   sidecar="$reviews/dispositions-$n.jsonl"
   body="$reviews/pr-body-$n.md"
-  if [ -f "$sidecar" ]; then
-    [ -f "$body" ] || { echo "pre-report gate: $sidecar exists but the PR body $body does not — write the body there first (implement/SKILL.md § The PR)" >&2; exit 1; }
-    runfile="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../burndown/runfile.py"
-    check=$(python3 "$runfile" check --from "$sidecar" --pr-body "$body" 2>&1)
-    check_rc=$?
-    [ "$check_rc" -le 1 ] ||
-      { echo "pre-report gate: runfile.py check could not run (exit $check_rc): $check" >&2; exit 2; }
-    [ "$check_rc" -eq 0 ] ||
-      { echo "pre-report gate: runfile.py check refused — fix the sidecar line or the body's line (the gate has no --allow-stale; that flag is harvest's): $check" >&2; exit 1; }
-    dispositions_status="dispositions agree with the PR body"
-  fi
+  # A heavy build's verification pass writes this sidecar (#1188); none means
+  # the pass never ran, so "PR up" is refused rather than passed unchecked.
+  # Light tier has no PR and never runs this gate.
+  [ -f "$sidecar" ] ||
+    { echo "pre-report gate: no dispositions sidecar at $sidecar — the verification pass (implement/SKILL.md § Review step 2) has not run; run it before reporting" >&2; exit 1; }
+  [ -s "$sidecar" ] ||
+    { echo "pre-report gate: the dispositions sidecar $sidecar is empty — the verification pass recorded no dispositions (implement/SKILL.md § Review step 2)" >&2; exit 1; }
+  [ -f "$body" ] || { echo "pre-report gate: $sidecar exists but the PR body $body does not — write the body there first (implement/SKILL.md § The PR)" >&2; exit 1; }
+  runfile="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../burndown/runfile.py"
+  check=$(python3 "$runfile" check --from "$sidecar" --pr-body "$body" 2>&1)
+  check_rc=$?
+  [ "$check_rc" -le 1 ] ||
+    { echo "pre-report gate: runfile.py check could not run (exit $check_rc): $check" >&2; exit 2; }
+  [ "$check_rc" -eq 0 ] ||
+    { echo "pre-report gate: runfile.py check refused — fix the sidecar line or the body's line (the gate has no --allow-stale; that flag is harvest's): $check" >&2; exit 1; }
+  dispositions_status="dispositions agree with the PR body"
 else
   dispositions_status="branch '$branch' is not implement-<n>, dispositions not looked for"
 fi

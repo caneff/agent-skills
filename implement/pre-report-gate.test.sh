@@ -180,13 +180,36 @@ else
   echo "FAIL: check cannot run — want exit 2 + 'could not run', got $rc: $out"; fails=1
 fi
 
+# A heavy PR with no verification pass has no sidecar (#1188): on an
+# implement-<n> branch that is a refusal, not a pass that skips the check.
 rm "$sidecar"
 out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
-if [ "$rc" = 0 ] && [[ "$out" == *"no dispositions sidecar"* ]]; then
-  echo "PASS: no sidecar passes, and the pass line says the check did not run"
+if [ "$rc" = 1 ] && [[ "$out" == *"no dispositions sidecar"* ]] && [[ "$out" == *"verification pass"* ]]; then
+  echo "PASS: no sidecar on an implement-<n> branch fails the gate, naming the verification pass"
 else
-  echo "FAIL: no sidecar — want exit 0 + 'no dispositions sidecar', got $rc: $out"; fails=1
+  echo "FAIL: no sidecar — want exit 1 + 'no dispositions sidecar' + 'verification pass', got $rc: $out"; fails=1
 fi
+
+# An empty sidecar is a verification pass that recorded nothing: same refusal.
+: >"$sidecar"
+out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *"empty"* ]]; then
+  echo "PASS: an empty sidecar fails the gate"
+else
+  echo "FAIL: empty sidecar — want exit 1 + 'empty', got $rc: $out"; fails=1
+fi
+rm "$sidecar"
+
+# Off an implement-<n> branch there is no ticket to look a sidecar up by: the
+# gate still passes and says the sidecar was not looked for.
+git -C "$repo" checkout -q main
+out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$(git -C "$repo" rev-parse HEAD)" 2>&1); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"not implement-<n>"* ]]; then
+  echo "PASS: a non-implement branch passes and says dispositions were not looked for"
+else
+  echo "FAIL: non-implement branch — want exit 0 + 'not implement-<n>', got $rc: $out"; fails=1
+fi
+git -C "$repo" checkout -q implement-7
 # Real workers run from a linked worktree, whose own directory name is not
 # the repo's: the cache folder must key on the shared .git (#1214), or the
 # check finds no sidecar and switches itself off with a pass.

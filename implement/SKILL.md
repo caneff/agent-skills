@@ -361,8 +361,9 @@ time, not from the worker: § The merge.
    `dispositions-<n>.jsonl` against the PR body's Decisions made (#1214) —
    the comparison `runfile.py leftover` makes at harvest — so a disposition
    changed after the verification pass is rewritten in its sidecar line
-   now; write `pr-body-<n>.md` before running it. A pass line reading
-   `no dispositions sidecar, check not run` means nothing was compared.
+   now; write `pr-body-<n>.md` before running it. It refuses, exit 1, when
+   `dispositions-<n>.jsonl` is missing or empty (#1188): the verification pass
+   (§ Review step 2) never ran, and "PR up" waits until it has.
 6. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
    prints `false` and `CLEAN` before "PR up" goes out — a PR reported on a
    draft or a conflict fails the controller's merge. `headRefOid` is the sha
@@ -596,7 +597,10 @@ The controller merges on a repo Chris owns; Chris reads it after via
    same check as § Before the PR: step 6, rerun because `main` may have
    moved since "PR up". `closingIssuesReferences` empty or missing the
    ticket blocks the merge same as a draft or a conflict does — a PR that
-   closes nothing does not merge. Then read the report's `Cleanup blockers`
+   closes nothing does not merge. So does a heavy PR with no verification
+   pass (#1188): `test -s ~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl`
+   (`<n>` the clump's lowest ticket) must succeed, or the merge waits and the
+   worker is sent back to § Review step 2. Then read the report's `Cleanup blockers`
    field: every line but the worker's own `live-session` is ruled on now,
    while the worker is alive to commit or move it — kept evidence moved
    out, or Chris asked whether `--discard` may take it — never discovered
