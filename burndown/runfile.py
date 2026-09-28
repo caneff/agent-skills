@@ -540,8 +540,8 @@ def body_records(body_lines):
 def refuse_reused_ids(body_path, records, held):
     """A finding id the sidecar holds that the body records twice with two
     different stated outcomes is an id two review rounds both used (#1177):
-    a round after the first prefixes its ids (`r2-S1`, `multi-axis-code-review`
-    § Round ids), so a bare id names one finding. Only ids the sidecar holds
+    a round after the first prefixes its ids (`r2-S1`; the rule is in
+    `multi-axis-code-review/SKILL.md` § 4), so a bare id names one finding. Only ids the sidecar holds
     are compared: a sweep PR's body cites sweep items whose ids repeat across
     their source PRs (#1213), and those are nobody's finding here."""
     for fid, found in records.items():
@@ -558,8 +558,10 @@ def refuse_reused_ids(body_path, records, held):
                 f"more than once, as {one!r} and {two!r} — the "
                 "id was reused across review rounds, which is not a "
                 "stale sidecar. A review round after the first prefixes "
-                "its ids with the round (r2-S1, r2-C3): rename the "
-                "later round's ids in the sidecar and the body")
+                "its ids with the round (r2-S1, r2-C3), and a sweep PR's "
+                "own findings take r1-: rename the later round's ids in "
+                "the sidecar and the body. A changed disposition is edited "
+                "into its one line, not appended below the first")
 
 
 def refuse_disagreeing_pr_body(sidecar_path, body_path):

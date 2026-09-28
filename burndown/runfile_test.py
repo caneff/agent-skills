@@ -1543,6 +1543,9 @@ def test_a_bare_id_recorded_twice_with_different_outcomes_is_refused_as_reuse():
     got = refusal_of(sidecar, landed_root(), body)
     assert "S1" in got and "more than once" in got and "r2-" in got, got
     assert "reused across review rounds" in got and "records S1 as" not in got, got
+    # Two other causes read the same: a ruling appended below the first
+    # record, and a sweep PR's items colliding with its own findings.
+    assert "appended" in got and "r1-" in got, got
     assert f"{body}:3 and :4" in got, got
 
 
