@@ -36,6 +36,12 @@ DECLARED = """# Fixture repo
 FIXTURES = []
 
 
+def git(root, *args):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return subprocess.run(["git", "-C", root, *args], check=True,
+                          capture_output=True, env=env)
+
+
 def clean_fixtures():
     """Remove every fixture repo this run made, and return the ones that
     survived. Some tests take a directory's or a file's read permission away,
@@ -62,6 +68,7 @@ def repo(files, agents=DECLARED):
     the end of the run, pass or fail."""
     root = tempfile.mkdtemp(prefix="closure-fixture-")
     FIXTURES.append(root)
+    git(root, "init", "-q")
     if agents is not None:
         files = {**files, "AGENTS.md": agents}
     for path, text in files.items():
@@ -357,12 +364,14 @@ def test_the_whole_queue_is_resolved_against_one_repo_scan():
 
 
 def test_no_code_path_runs_the_declared_generator():
-    # The resolver reports the generator command and never runs it: one
-    # regeneration per candidate per wave is correct and far too expensive.
-    with open(C.__file__) as fh:
-        source = fh.read()
-    for forbidden in ("subprocess", "os.system", "os.popen", "os.exec", "popen"):
-        assert forbidden not in source, forbidden
+    root = repo(SHARED)
+    marker = os.path.join(root, "generator-ran")
+    with open(os.path.join(root, "AGENTS.md"), "w") as fh:
+        fh.write(DECLARED.replace("make examples", f"touch {marker}"))
+    got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
+    assert "examples/skyscraper/component.js" in got, got
+    C.clumps(root, [candidate(451, "examples/_shared/line-kind.js")])
+    assert not os.path.exists(marker), "the declared generator ran"
 
 
 # --- A quoted declaration is not a declaration -----------------------------
@@ -532,8 +541,13 @@ def test_a_binary_file_is_not_scanned_for_directives():
 def test_a_skipped_directory_holds_no_edges():
     root = repo({"_shared/line-kind.js": "x\n",
                  "node_modules/dep/comp.js": "#include ../../_shared/line-kind.js\n"})
-    got = C.resolve_closure(root, ["_shared/line-kind.js"])
-    assert got == {"_shared/line-kind.js"}, got
+    skipped = os.path.join(root, "node_modules")
+    os.chmod(skipped, 0o000)
+    try:
+        got = C.resolve_closure(root, ["_shared/line-kind.js"])
+        assert got == {"_shared/line-kind.js"}, got
+    finally:
+        os.chmod(skipped, 0o755)
 
 
 # --- The declaration's edges (round 1: C4, C7, C8, S4) --------------------
@@ -641,6 +655,65 @@ def test_a_file_past_the_scan_limit_fails_the_resolve():
         refused, got = str(exc), None
     assert refused is not None, got
     assert "scan limit" in refused and "huge.js" in refused, refused
+
+
+def test_gitignored_oversized_files_do_not_break_the_resolve():
+    root = repo({**SHARED, ".gitignore": ".scratch/\n",
+                 ".scratch/copycat-rsl/b14-solutions.txt": ""})
+    huge = os.path.join(root, ".scratch/copycat-rsl/b14-solutions.txt")
+    with open(huge, "wb") as fh:
+        fh.truncate(C.SCAN_LIMIT + 1)
+    got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
+    assert got == {"examples/_shared/line-kind.js",
+                   "examples/skyscraper/component.js",
+                   "examples/thermo/component.js"}, got
+
+    os.unlink(os.path.join(root, ".gitignore"))
+    refused = None
+    try:
+        got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
+    except C.ClosureError as exc:
+        refused, got = str(exc), None
+    assert refused is not None, got
+    assert "32000000-byte scan limit" in refused, refused
+    assert "b14-solutions.txt" in refused, refused
+
+
+def test_tracked_and_untracked_includers_survive_ignore_rules():
+    root = repo({"shared.js": "x\n", ".gitignore": ".scratch/\n",
+                 ".scratch/tracked\ncomponent.js": "#include ../shared.js\n",
+                 ".scratch/ignored.js": "#include ../shared.js\n",
+                 "untracked café.js": "#include shared.js\n"})
+    git(root, "add", "-f", "shared.js", ".scratch/tracked\ncomponent.js")
+    got = C.resolve_closure(root, ["shared.js"])
+    assert got == {"shared.js", ".scratch/tracked\ncomponent.js",
+                   "untracked café.js"}, got
+
+
+def test_a_tracked_file_matching_ignore_rules_still_has_a_scan_limit():
+    root = repo({"shared.js": "x\n", ".gitignore": "huge.js\n",
+                 "huge.js": "y" * 5000})
+    git(root, "add", "-f", "huge.js")
+    refused = None
+    try:
+        got = C.include_edges(root, C.declaration(root), limit=1000)
+    except C.ClosureError as exc:
+        refused, got = str(exc), None
+    assert refused is not None, got
+    assert "scan limit" in refused and "huge.js" in refused, refused
+
+
+def test_a_failed_git_listing_is_not_an_empty_closure():
+    root = repo(SHARED)
+    with open(os.path.join(root, ".git/index"), "w") as fh:
+        fh.write("broken index\n")
+    refused = None
+    try:
+        got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
+    except C.ClosureError as exc:
+        refused, got = str(exc), None
+    assert refused is not None, got
+    assert "git ls-files" in refused, refused
 
 
 def test_a_file_that_cannot_be_opened_is_not_a_file_with_no_includes():
