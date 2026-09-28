@@ -15,7 +15,9 @@
 //! reads as prose here. Extensionless, a token is code by basename
 //! (`Makefile`, `Gemfile`) or under a script directory (`bin/`, `hooks/`); any
 //! other extensionless name reads as prose too. `tier.py` strips the label
-//! for both gaps before dispatch, from the clumper's file list.
+//! for both gaps before dispatch, from the clumper's file list. `tier.py` also
+//! copies the lists below to read a body as this does (#1211), and
+//! `burndown/tier_test.py` fails when a list here changes and its copy doesn't.
 
 /// Extensions read as code: § Gate 2's, the ones that wire the harness or CI
 /// (its "hooks, CI config"), and other scripting and config languages.

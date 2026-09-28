@@ -14,6 +14,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -27,8 +28,8 @@ import tier as T  # noqa: E402
 TIER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tier.py")
 
 
-def candidate(number, files, labels=()):
-    return {"number": number, "files": list(files), "labels": list(labels)}
+def candidate(number, files, labels=(), body="prose only"):
+    return {"number": number, "files": list(files), "labels": list(labels), "body": body}
 
 
 def test_docs_only_candidate_with_no_label_gets_documentation():
@@ -107,7 +108,7 @@ class FakeGh:
 
     def __call__(self, args):
         self.calls.append(list(args))
-        return json.dumps({"labels": []}) if args[1] == "view" else ""
+        return json.dumps({"labels": [], "body": "prose only"}) if args[1] == "view" else ""
 
 
 def test_the_pass_writes_the_missing_label_and_only_that():
@@ -152,7 +153,7 @@ def test_dry_run_decides_the_same_and_writes_nothing():
 
 def test_the_report_names_every_label_written():
     report = T.render([{"number": 371, "labels": ["documentation"]},
-                       {"number": 372, "labels": ["documentation"]}], [])
+                       {"number": 372, "labels": ["documentation"]}], [], [])
     assert "#371" in report and "#372" in report
     assert report.count("documentation") == 2, report
 
@@ -173,14 +174,15 @@ def test_a_dry_run_says_would_write_rather_than_written():
     assert "labels written" not in out.getvalue(), out.getvalue()
     assert "labels stripped" not in out.getvalue(), out.getvalue()
     assert gh.calls == [["issue", "view", "371", "--repo", "caneff/agent-skills",
-                         "--json", "labels"]], gh.calls
+                         "--json", "labels,body"]], gh.calls
 
 
 def test_the_report_says_so_when_it_wrote_nothing():
     """A run that wrote no label has to say that in words: a report with no
     line about labels reads the same as a report from a pass that never
     ran."""
-    assert T.render([], []) == "labels written: none\nlabels stripped: none"
+    assert T.render([], [], []) == ("labels written: none\nlabels stripped: none\n"
+                                    "labels withheld: none")
 
 
 def test_a_dry_run_previews_the_strip_and_writes_nothing():
@@ -208,22 +210,24 @@ class FakeView:
         self.calls.append(list(args))
         number = int(args[2])
         names = [{"name": n} for n in self.labels[number]]
-        return json.dumps({"labels": names})
+        return json.dumps({"labels": names, "body": "prose only"})
 
 
 class Tracker:
     """A tracker that keeps state: `issue view` reads the labels an earlier
     `issue edit` left, so a test can ask what dispatch will read next."""
 
-    def __init__(self, labels_by_number):
+    def __init__(self, labels_by_number, bodies=None):
         self.labels = {n: list(ls) for n, ls in labels_by_number.items()}
+        self.bodies = bodies or {}
         self.calls = []
 
     def __call__(self, args):
         self.calls.append(list(args))
         number = int(args[2])
         if args[1] == "view":
-            return json.dumps({"labels": [{"name": n} for n in self.labels[number]]})
+            return json.dumps({"labels": [{"name": n} for n in self.labels[number]],
+                               "body": self.bodies.get(number, "prose only")})
         for flag, value in zip(args, args[1:]):
             for name in value.split(","):
                 if flag == "--add-label" and name not in self.labels[number]:
@@ -263,9 +267,10 @@ def test_a_candidates_labels_come_from_the_tracker_not_the_command_line():
         "caneff/agent-skills",
         ["371=docs/research/note.md", "372=docs/a.md,docs/b.md"], run=view)
     assert candidates == [
-        {"number": 371, "files": ["docs/research/note.md"], "labels": []},
+        {"number": 371, "files": ["docs/research/note.md"], "labels": [],
+         "body": "prose only"},
         {"number": 372, "files": ["docs/a.md", "docs/b.md"],
-         "labels": ["documentation", "enhancement"]},
+         "labels": ["documentation", "enhancement"], "body": "prose only"},
     ], candidates
 
 
@@ -303,7 +308,7 @@ class ExplodingGh:
     def __call__(self, args):
         self.calls.append(list(args))
         if args[1] == "view":
-            return json.dumps({"labels": []})
+            return json.dumps({"labels": [], "body": ""})
         if args[2] == self.fails_on:
             raise T.TierError("'documentation' not found")
         return ""
@@ -345,7 +350,7 @@ def test_a_failure_midway_still_names_the_labels_already_written():
         raised = exc
     assert raised is not None, "the failure was swallowed"
     assert [w["number"] for w in written] == [371, 372], written
-    report = T.render(written, [])
+    report = T.render(written, [], [])
     assert "#371" in report and "#372" in report, report
 
 
@@ -395,7 +400,7 @@ def test_unreadable_json_from_the_tracker_is_refused():
     writes the label onto a ticket that may already carry it, every tick."""
     raised = None
     try:
-        T.fetch_labels("caneff/agent-skills", 1, run=lambda args: "{not json")
+        T.fetch_ticket("caneff/agent-skills", 1, run=lambda args: "{not json")
     except T.TierError as exc:
         raised = exc
     assert raised is not None, "unreadable JSON passed for an unlabelled ticket"
@@ -419,6 +424,138 @@ def test_an_unknown_flag_is_usage_not_a_candidate():
                 assert out.returncode == 2, (flag, out)
                 assert "usage: tier.py" in out.stderr, out.stderr
         assert not os.path.exists(called), "a rejected flag still reached gh"
+
+
+# --- #1211: one reader decides -------------------------------------------
+# tier.py wrote `documentation` onto #432 (target `docs/research/...md`), then
+# implement-dispatch stripped it because the body named `./e2e.sh`. The two
+# read different inputs; tier.py now reads the body the way dispatch does and
+# withholds a label dispatch would strip, saying so in the report.
+
+def test_a_body_naming_a_script_withholds_the_label():
+    """The #432 shape: every target is prose, the body merely names a script."""
+    c = candidate(432, ["docs/research/2026-09-27-x.md"],
+                  body="Research why ./e2e.sh is slow. Write it up.")
+    assert T.labels_to_write(c) == []
+    assert T.body_code_target(c["body"]) == "./e2e.sh"
+
+
+def test_ordinary_prose_in_a_body_does_not_withhold_the_label():
+    c = candidate(1, ["docs/research/n.md"],
+                  body="i.e. read/write and/or v1.2 on Node.js; see docs/notes.md")
+    assert T.labels_to_write(c) == ["documentation"]
+
+
+def test_a_candidate_with_no_body_key_is_refused_not_read_as_clean():
+    """An absent body is not an empty body (defect class 1)."""
+    raised = None
+    try:
+        T.labels_to_write({"number": 1, "files": ["a.md"], "labels": []})
+    except KeyError as exc:
+        raised = exc
+    assert isinstance(raised, KeyError), "a candidate with no body passed as prose-only"
+    assert raised.args == ("body",), raised
+
+
+def test_the_pass_reports_the_label_it_withheld_and_why():
+    gh = FakeGh()
+    withheld = []
+    written = T.tag("caneff/agent-skills", [
+        candidate(432, ["docs/research/x.md"], body="see ./e2e.sh"),
+        candidate(433, ["docs/research/y.md"]),
+    ], run=gh, withheld=withheld)
+    assert [w["number"] for w in written] == [433], written
+    assert [(w["number"], w["target"]) for w in withheld] == [(432, "./e2e.sh")], withheld
+    assert gh.calls == [["issue", "edit", "433", "--repo", "caneff/agent-skills",
+                         "--add-label", "documentation"]], gh.calls
+    report = T.render(written, [], withheld)
+    assert "labels withheld:" in report and "#432" in report and "./e2e.sh" in report, report
+
+
+def test_end_to_end_the_report_never_claims_a_label_dispatch_will_strip():
+    tracker = Tracker({432: ["ready-for-agent"]}, bodies={432: "Look at ./e2e.sh timings"})
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = T.main(["tier.py", "caneff/agent-skills", "432=docs/research/x.md"],
+                      run=tracker)
+    assert code == 0, code
+    assert tracker.labels[432] == ["ready-for-agent"], tracker.labels
+    written_block = out.getvalue().split("labels stripped")[0]
+    assert "#432" not in written_block, out.getvalue()
+    assert "#432" in out.getvalue().split("labels withheld")[1], out.getvalue()
+
+
+def _rust_list(src, name):
+    body = re.search(r"const %s: &\[&str\] = &\[(.*?)\];" % name, src, re.S).group(1)
+    return sorted(re.findall(r'"([^"]+)"', body))
+
+
+def test_the_body_reader_lists_match_targets_rs():
+    """Two copies of dispatch's lists are two places to drift, and a drift
+    reopens #1211: tier.py would write a label dispatch strips (or the
+    reverse). Read targets.rs's literals and compare."""
+    src = open(os.path.join(os.path.dirname(TIER), "..", "flow", "lane", "src",
+                            "targets.rs")).read()
+    assert sorted(T.BODY_CODE_EXTENSIONS) == _rust_list(src, "CODE_EXTENSIONS")
+    assert sorted(T.BODY_CODE_DIRS) == _rust_list(src, "CODE_DIRS")
+    assert sorted(T.BODY_PROSE_TOKENS) == _rust_list(src, "PROSE_TOKENS")
+    assert sorted(T.BODY_CODE_BASENAMES) == _rust_list(src, "CODE_BASENAMES")
+    assert sorted(T.PROSE_EXTENSIONS) == _rust_list(src, "PROSE_EXTENSIONS")
+
+
+def test_the_body_reader_agrees_with_targets_rs_on_its_own_test_cases():
+    """The cases targets.rs's tests assert, replayed here."""
+    for p in ["a/b.py", "hooks/g.sh", "settings.json", "bin/implement-dispatch", "Makefile",
+              "src/main.dart", "tools/Gemfile", "config/.env", "x/.eslintrc", "a.go",
+              "scripts/node.js", "multi-axis-code-review/SKILL.md", ".githooks/pre-push"]:
+        assert T.body_code_target(f"see {p}, then") == p, p
+    assert T.body_code_target(r"edit .githooks\pre-push") == ".githooks/pre-push"
+    for body in ["read/write and and/or", "docs/notes.md", "a/b.rst", "ratio 3/4.5 here",
+                 "docs/.notes.md", "i.e. this", "runs on Node.js", "version 3.10.2", ""]:
+        assert T.body_code_target(body) is None, body
+
+
+def test_the_body_reader_trims_a_sentence_dot_and_reads_backslashes():
+    """targets.rs trims trailing dots and folds `\\`; without the trim,
+    `Research why ./e2e.sh.` reads as prose and #1211 reopens."""
+    assert T.body_code_target("Research why ./e2e.sh.") == "./e2e.sh"
+    assert T.body_code_target("edit SKILL.md.") == "SKILL.md"
+    assert T.body_code_target(r"see bin\implement-dispatch, then") == "bin/implement-dispatch"
+    assert T.body_code_target(r"src\main.dart") == "src/main.dart"
+    assert T.body_code_target(r"docs\notes.md") is None
+
+
+def test_fetch_ticket_refuses_an_answer_with_no_body():
+    """A body that did not come back is not a body that names no code."""
+    for answer in ('{"labels": []}', '{"labels": [], "body": null}', "null", "[]"):
+        raised = None
+        try:
+            T.fetch_ticket("caneff/agent-skills", 1, run=lambda args, a=answer: a)
+        except T.TierError as exc:
+            raised = exc
+        assert "no body in the answer" in str(raised), (answer, raised)
+
+
+def test_a_dry_run_says_would_withhold_and_a_labelled_ticket_is_not_withheld():
+    withheld = []
+    T.tag("caneff/agent-skills", [
+        candidate(432, ["docs/research/x.md"], body="see ./e2e.sh"),
+        candidate(433, ["docs/research/y.md"], ["documentation"], body="see ./e2e.sh"),
+    ], run=FakeGh(), write=False, withheld=withheld)
+    assert [w["number"] for w in withheld] == [432], withheld
+    report = T.render([], [], withheld, write=False)
+    assert "would withhold:" in report and "labels withheld" not in report, report
+
+
+def test_fetch_ticket_refuses_an_answer_whose_labels_are_missing_or_malformed():
+    """Missing labels read as "no labels" re-write the label every tick (S7)."""
+    for answer in ('{"body": "x"}', '{"labels": null, "body": "x"}', '{"labels": "x", "body": "x"}'):
+        raised = None
+        try:
+            T.fetch_ticket("caneff/agent-skills", 1, run=lambda args, a=answer: a)
+        except T.TierError as exc:
+            raised = exc
+        assert "no labels in the answer" in str(raised), (answer, raised)
 
 
 def main():

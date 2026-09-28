@@ -26,15 +26,20 @@ knew the answer before dispatch and the lane ignored it.
 ## The seam
 
 `labels_to_write(candidate) -> labels`, where a candidate is
-`{"number": <n>, "files": [...], "labels": [...]}` — the ticket's number, the
-files it targets, and the labels it carries **right now**, read from the
-tracker at pass time rather than assumed. Four answers, and only the first
+`{"number": <n>, "files": [...], "labels": [...], "body": "..."}` — the
+ticket's number, the files it targets, and the labels and body it carries
+**right now**, read from the tracker at pass time rather than assumed (a
+candidate with no `body` key raises). Five answers, and only the first
 adds anything (a removal is `labels_to_strip`'s, § Stripping):
 
-- Every target file is prose, and the ticket has no `documentation` label →
+- Every target file is prose, the body names no code, and the ticket has no
+  `documentation` label →
   `["documentation"]`.
 - Every target file is prose, and the label is already there → nothing. This
   pass is idempotent; a tick that runs twice writes once.
+- Every target file is prose and the label is absent, but the ticket **body** names a code path the
+  way `implement-dispatch` reads it → nothing to add, and the ticket is
+  reported under `labels withheld:` (§ One reader decides).
 - Any target file is not prose → nothing to add. A mixed diff is code
   (`flow/claude/WORKFLOW.md` § Gate 2), and a `documentation` label already
   there is stripped.
@@ -73,6 +78,24 @@ so the label has to be gone before dispatch reads it, and this pass runs
 before the first dispatch. The old
 report-only `--strip` flag is retired; `--dry-run`
 previews the strip under `would strip:`.
+
+## One reader decides: a label dispatch would strip (#1211)
+
+The pass reads the clumper's file list; `implement-dispatch` reads every
+path the ticket body mentions. A research ticket targeting only
+`docs/research/x.md` whose body merely *names* `./e2e.sh` therefore got the
+label from this pass and lost it at claim (#432 in burn-trs-2026-09-27), and
+the opening report's `labels written` line was false by dispatch time.
+
+The pass now applies dispatch's body reading before it writes: it fetches
+the ticket's body with its labels (`fetch_ticket`; a body that does not come
+back is an error, not an empty body) and `body_code_target` reads it with
+the lists in `flow/lane/src/targets.rs`, copied into `tier.py` and compared
+literal for literal by `tier_test.py`. A body naming code withholds the
+label, and the report says so under `labels withheld:` (`would withhold:` on
+a dry run) with the token, so heavy is the stated outcome rather than a
+surprise. Dispatch keeps its own check as the net for a label a filer put on
+by hand.
 
 ## What counts as prose
 
