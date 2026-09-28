@@ -15,6 +15,11 @@ link() { # link <repo-relative-src> <live-dest>
   if [ -L "$dest" ]; then
     rm "$dest"
   elif [ -e "$dest" ]; then
+    # A second real file must not overwrite the first backup (#1209).
+    if [ -e "$dest.pre-flow" ] || [ -L "$dest.pre-flow" ]; then
+      echo "refusing: $dest is a real file and $dest.pre-flow already exists; move one aside" >&2
+      return 1
+    fi
     mv "$dest" "$dest.pre-flow"
     echo "backed up existing $dest -> $dest.pre-flow"
   fi
