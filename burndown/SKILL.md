@@ -62,7 +62,8 @@ too.
    **silence**, which clumps conservatively by directory subtree. A
    controller reading "conservative" has to know which of the last two it
    got. It also carries `tier.py`'s lines (§ Tier tagging), which **name
-   every label the exploration pass wrote** and every label it stripped, and
+   every label the exploration pass wrote**, every label it stripped and
+   every ticket it withheld the label from because its body names code, and
    say `labels written: none` and `labels stripped: none` when it did
    neither — a report silent about labels reads the same from a
    pass that wrote nothing and a pass that never ran, and the difference

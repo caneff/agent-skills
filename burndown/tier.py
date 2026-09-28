@@ -49,6 +49,47 @@ PROSE_EXTENSIONS = {"md", "markdown", "txt", "rst"}
 SKILL_BODY = "skill.md"
 
 
+# The ticket body's own reading, the one `implement-dispatch` applies at claim
+# time (`flow/lane/src/targets.rs`, which owns these lists; `tier_test.py`
+# compares them literal for literal). A label written for a ticket whose body
+# names code is a label dispatch strips again, so the run's report would say
+# it wrote a label the ticket no longer carries (#1211).
+BODY_CODE_EXTENSIONS = {
+    "py", "ts", "tsx", "js", "jsx", "mjs", "cjs", "sh", "bash", "rs", "yml", "yaml", "toml", "json", "go", "zsh",
+    "fish", "ps1", "psm1", "bat", "cmd", "lua", "ini", "cfg", "conf", "rb", "pl", "php", "java", "kt", "swift",
+    "c", "h", "cpp", "hpp", "mk",
+}
+BODY_CODE_DIRS = {"bin", "sbin", "hooks", ".githooks", ".husky"}
+BODY_PROSE_TOKENS = {"node.js"}
+BODY_CODE_BASENAMES = {"skill.md", "makefile", "dockerfile", "justfile", "rakefile", "gemfile", "procfile"}
+_PATH_CHARS = "/-_."
+
+
+def _body_token_is_code(token):
+    name = token.rsplit("/", 1)[-1].lower()
+    if name in BODY_CODE_BASENAMES:
+        return True
+    if "/" not in token and name in BODY_PROSE_TOKENS:
+        return False
+    stem, dot, ext = name.rpartition(".")
+    if dot:
+        return (bool(stem) and ext in BODY_CODE_EXTENSIONS) or (
+            "/" in token and any(c.isalpha() for c in ext) and ext not in PROSE_EXTENSIONS)
+    return "/" in token and any(d.lower() in BODY_CODE_DIRS for d in token.split("/")[:-1])
+
+
+def body_code_target(body):
+    """The first path-shaped token in a ticket body that is code, as
+    `implement-dispatch` reads it, or None."""
+    text = "".join(c if (c.isalnum() or c in _PATH_CHARS) else " "
+                   for c in body.replace("\\", "/"))
+    for token in text.split():
+        token = token.rstrip(".")
+        if token and _body_token_is_code(token):
+            return token
+    return None
+
+
 def is_prose(path):
     """Whether one file is prose, and so cannot make a candidate code."""
     name = posixpath.basename(path.replace("\\", "/")).lower()
@@ -62,13 +103,27 @@ def labels_to_write(candidate):
     to one ticket, in the order it adds them. Only ever additions."""
     if DOCUMENTATION_LABEL in candidate["labels"]:
         return []
+    if _targets_are_prose(candidate) and not label_withheld_for(candidate):
+        return [DOCUMENTATION_LABEL]
+    return []
+
+
+def _targets_are_prose(candidate):
     files = candidate["files"]
     # `all()` over an empty list is True, and a candidate whose files nobody
     # resolved is the one case where that reading is a code change landing
     # unreviewed. Unknown goes heavy.
-    if files and all(is_prose(f) for f in files):
-        return [DOCUMENTATION_LABEL]
-    return []
+    return bool(files) and all(is_prose(f) for f in files)
+
+
+def label_withheld_for(candidate):
+    """The code path in the ticket body that stops the label being written
+    on an otherwise all-prose, unlabelled candidate, or None. Dispatch would
+    strip that label at claim, so writing it makes the report false (#1211).
+    A missing "body" raises: an absent body is not a prose-only one."""
+    if DOCUMENTATION_LABEL in candidate["labels"] or not _targets_are_prose(candidate):
+        return None
+    return body_code_target(candidate["body"])
 
 
 def labels_to_strip(candidate):
@@ -103,10 +158,12 @@ def gh(args):
     return out.stdout
 
 
-def tag(repo, candidates, run=None, write=True, written=None, stripped=None):
+def tag(repo, candidates, run=None, write=True, written=None, stripped=None,
+        withheld=None):
     """`(candidates) -> what was written`: one record per candidate that
     earned a label, `{"number": <n>, "labels": [...]}`, in candidate order.
-    Removals go into `stripped` in the same shape.
+    Removals go into `stripped` in the same shape; a label held back because
+    the body names code goes into `withheld` as `{"number", "target"}`.
 
     `--remove-label` is built from `labels_to_strip` alone, so the one label
     this pass can take off is `documentation`, and only where a target is
@@ -124,10 +181,14 @@ def tag(repo, candidates, run=None, write=True, written=None, stripped=None):
     """
     written = [] if written is None else written
     stripped = [] if stripped is None else stripped
+    withheld = [] if withheld is None else withheld
     run = run or gh
     for candidate in candidates:
         number = candidate["number"]
         add, strip = labels_to_write(candidate), labels_to_strip(candidate)
+        blocked = label_withheld_for(candidate)
+        if blocked:
+            withheld.append({"number": number, "target": blocked})
         if add:
             if write:
                 run(["issue", "edit", str(number), "--repo", repo,
@@ -141,7 +202,7 @@ def tag(repo, candidates, run=None, write=True, written=None, stripped=None):
     return written
 
 
-def render(written, stripped, write=True):
+def render(written, stripped, withheld, write=True):
     """The lines the run's opening report carries: every label this pass
     wrote and every label it stripped, against the ticket each belongs to. A
     pass that did neither says so in words — a report silent about labels
@@ -153,11 +214,14 @@ def render(written, stripped, write=True):
     controller reading `labels written:` after a dry run would take the tier
     as already fixed.
 
-    `stripped` has no default: an in-process caller that forgot it would
-    print `labels stripped: none` over strips that happened."""
+    `stripped` and `withheld` have no default: an in-process caller that
+    forgot one would print `none` over changes that happened. `withheld` names
+    the tickets whose body names code, so they go out heavy with no label."""
+    held = [{"number": w["number"], "labels": [f"body names {w['target']}"]} for w in withheld]
     return "\n".join([
         _block("labels written" if write else "would write", written),
         _block("labels stripped" if write else "would strip", stripped),
+        _block("labels withheld" if write else "would withhold", held),
     ])
 
 
@@ -169,18 +233,21 @@ def _block(heading, records):
     return "\n".join(lines)
 
 
-def fetch_labels(repo, number, run=None):
-    """The labels one ticket carries right now. Read at pass time, never
+def fetch_ticket(repo, number, run=None):
+    """The labels and body one ticket carries right now. Read at pass time, never
     assumed: a run that assumed the label absent would write it again on
     every tick, and one that assumed it present would leave a docs ticket
     heavy forever."""
     run = run or gh
     try:
         answer = json.loads(run(["issue", "view", str(number), "--repo", repo,
-                                 "--json", "labels"]) or "null")
+                                 "--json", "labels,body"]) or "null")
     except ValueError as exc:
         raise TierError(f"gh issue view {number}: unreadable JSON") from exc
-    return [label.get("name") for label in (answer or {}).get("labels") or []]
+    if not isinstance(answer, dict) or not isinstance(answer.get("body"), str):
+        # A body that did not come back is not a body that names no code.
+        raise TierError(f"gh issue view {number}: no body in the answer")
+    return [label.get("name") for label in answer.get("labels") or []], answer["body"]
 
 
 def candidates_from(repo, specs, run=None):
@@ -190,7 +257,7 @@ def candidates_from(repo, specs, run=None):
     out = []
     for spec in specs:
         candidate = parse_candidate(spec)
-        candidate["labels"] = fetch_labels(repo, candidate["number"], run)
+        candidate["labels"], candidate["body"] = fetch_ticket(repo, candidate["number"], run)
         out.append(candidate)
     return out
 
@@ -205,18 +272,18 @@ def main(argv, run=None):
         print("usage: tier.py <owner/repo> <n>=<path>[,<path>]... [--dry-run]",
               file=sys.stderr)
         return 2
-    written, stripped = [], []
+    written, stripped, withheld = [], [], []
     try:
         candidates = candidates_from(args[0], args[1:], run)
         tag(args[0], candidates, run, write=not dry_run, written=written,
-            stripped=stripped)
+            stripped=stripped, withheld=withheld)
     except (TierError, ClosureError) as exc:
         # The partial report first: whatever is already on the tracker is
         # what the next dispatch will read, failure or not.
-        print(render(written, stripped, write=not dry_run))
+        print(render(written, stripped, withheld, write=not dry_run))
         print(f"tier.py: {exc}", file=sys.stderr)
         return 1
-    print(render(written, stripped, write=not dry_run))
+    print(render(written, stripped, withheld, write=not dry_run))
     return 0
 
 
