@@ -62,5 +62,21 @@ if grep -q "sub_issues" to-tickets/SKILL.md; then
   fail=1
 fi
 
+# Step 1's re-slice guard has three outcomes, not two (#867): a failed lookup
+# is neither "already sliced" nor "no children". Folding it back into two
+# reopens the duplicate-set failure.
+guard=$(sed -n '/^### 1\. Gather context$/,/^### 2\./p' to-tickets/SKILL.md | tr '\n' ' ' | tr -s ' ')
+for needle in \
+  'already sliced' \
+  'confirmed no children' \
+  'the lookup failed, not "no children"' \
+  'publish nothing'; do
+  case "$guard" in
+    *"$needle"*) ;;
+    *) echo "FAIL: to-tickets/SKILL.md step 1 re-slice guard is missing: $needle"
+       fail=1 ;;
+  esac
+done
+
 [ "$fail" -eq 0 ] && echo "ok - templates match the live adapter doc"
 exit "$fail"

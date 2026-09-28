@@ -2102,5 +2102,20 @@ def test_a_job_field_in_the_in_flight_file_is_never_charged_1107():
         assert "dispatch  #500" in got.stdout, got.stdout
 
 
+def test_load_run_reads_a_run_file_and_wraps_its_refusal_as_a_loop_error():
+    # One loader behind `with_run_jobs` and `sweep --run` (#1209 S2).
+    with tempfile.TemporaryDirectory() as tmp:
+        runfile.start("burn-loader", slots=2, root=tmp)
+        runfile.clump("burn-loader", [7], "/w/7", "skills-7", root=tmp)
+        run = loop.load_run("burn-loader", tmp)
+        assert [c["tickets"] for c in run["clumps"]] == [[7]], run
+        try:
+            loop.load_run("burn-none", tmp)
+        except loop.LoopError as exc:
+            assert "burn-none" in str(exc), exc
+        else:
+            raise AssertionError("a missing run file was not refused")
+
+
 if __name__ == "__main__":
     main()

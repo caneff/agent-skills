@@ -2174,14 +2174,14 @@ fn no_unbounded_git_or_gh_call_remains_in_implement_dispatchs_reach() {
     // its own `_timeout(`/`_bounded(` sibling as a false positive.
     // `worktree::primary(` (#849 correctness gate, C3/spec P1): dispatch's
     // own first git call, missed in the initial pass — bounded via
-    // `worktree::primary_timeout`, `worktree::primary` kept for
-    // controller-adopt, out of scope.
+    // `worktree::primary_timeout`; `worktree::primary_checked` is
+    // controller-adopt's, out of scope.
     let unbounded_shared = [
         "git_origin::default_branch(",
         "git_origin::origin_slug(",
         "issue_state::read(",
         "issue_state::body(",
-        "worktree::primary(",
+        "worktree::primary_checked(",
     ];
     for pat in unbounded_shared {
         assert!(!stripped.contains(pat), "implement_dispatch.rs still calls the unbounded shared function {pat:?}");

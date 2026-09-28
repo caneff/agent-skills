@@ -948,6 +948,14 @@ def read_clumps(path, live=False, closure=True):
     return clumps
 
 
+def load_run(run_id, root=None):
+    """The run file for `run_id`, its refusal as a `LoopError`."""
+    try:
+        return runfile.load(run_id, root)
+    except runfile.RunFileError as exc:
+        raise LoopError(str(exc)) from exc
+
+
 def with_run_jobs(in_flight, run_id, root=None):
     """The in-flight clumps with each `job` read from the run file, matched by
     the clump's lowest ticket. `closure.py --json` carries no `job`, so the
@@ -957,10 +965,7 @@ def with_run_jobs(in_flight, run_id, root=None):
     which `runfile.py clump` would refuse, so that refusal names the overlap
     instead; a registered clump with no `job` gets `None`, which `job_cores`
     refuses naming `runfile.py job`."""
-    try:
-        run = runfile.load(run_id, root)
-    except runfile.RunFileError as exc:
-        raise LoopError(str(exc)) from exc
+    run = load_run(run_id, root)
     jobs = {min(entry["tickets"]): entry["job"] for entry in run["clumps"]}
     owner = {n: min(entry["tickets"]) for entry in run["clumps"]
              for n in entry["tickets"]}
@@ -1198,11 +1203,7 @@ def run(argv):
             budget = float(os.environ.get("BURNDOWN_SWEEP_BUDGET")
                            or SWEEP_BUDGET)
             if args.run:
-                try:
-                    workers = runfile.load(args.run, runfile.env_root())[
-                        "clumps"]
-                except runfile.RunFileError as exc:
-                    raise LoopError(str(exc)) from exc
+                workers = load_run(args.run, runfile.env_root())["clumps"]
             else:
                 workers = read_clumps(args.workers, closure=False)
             print(render_sweep(sweep(workers, herdr_get, budget=budget)))

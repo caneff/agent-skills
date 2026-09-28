@@ -17,6 +17,9 @@ include directive and its generator command in `AGENTS.md` and this resolver
 follows that declaration one hop. It never runs the generator — resolving the
 closure empirically would cost one regeneration per candidate per wave.
 
+The files scanned are the ones `git ls-files` lists — tracked, plus untracked
+and not ignored — so the repo must be a git repository.
+
 The grammar, the two modes and what each answers: `references/closure.md`.
 """
 import collections
@@ -163,6 +166,29 @@ def canonical(root, path):
     return rel
 
 
+def git_listing(root):
+    """The paths git lists under `root`: tracked, plus untracked and not
+    ignored, minus `SKIP_DIRS`. Anything short of a clean listing raises `ClosureError`."""
+    # A caller's Git environment must not redirect this scan to its repo.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    # The --exclude arguments are not redundant with the walk's SKIP_DIRS
+    # filter: for --others they keep git from opening an unreadable
+    # node_modules/, which it warns about and the check below refuses.
+    try:
+        listed = subprocess.run(
+            ["git", "-C", root, "ls-files", "--cached", "--others",
+             "--exclude-standard", "-z",
+             *(f"--exclude={d}/" for d in sorted(SKIP_DIRS))],
+            capture_output=True, env=env)
+    except OSError as exc:
+        raise ClosureError(f"cannot read {root}: {exc}") from exc
+    # Git can exit zero after warning that it could not open a directory.
+    if listed.returncode or listed.stderr:
+        raise ClosureError(f"cannot read {root}: git ls-files: "
+                           f"{os.fsdecode(listed.stderr).strip()}")
+    return {os.fsdecode(p) for p in listed.stdout.split(b"\0") if p}
+
+
 def repo_files(root):
     """Tracked and untracked non-ignored files under `root`, minus
     `SKIP_DIRS`, as repo-relative posix paths. Text is not filtered here —
@@ -174,23 +200,9 @@ def repo_files(root):
     def refuse(error):
         raise ClosureError(f"cannot read {getattr(error, 'filename', root)}: {error}")
 
-    # A caller's Git environment must not redirect this scan to its repo.
-    env = {k: v for k, v in os.environ.items() if k not in {
-        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"}}
-    try:
-        listed = subprocess.run(
-            ["git", "-C", root, "ls-files", "--cached", "--others",
-             "--exclude-standard", "-z",
-             *(f"--exclude={d}/" for d in sorted(SKIP_DIRS))],
-            capture_output=True, env=env)
-    except OSError as exc:
-        refuse(exc)
-    # Git can exit zero after warning that it could not open a directory.
-    if listed.returncode or listed.stderr:
-        raise ClosureError(f"cannot read {root}: git ls-files: "
-                           f"{os.fsdecode(listed.stderr).strip()}")
-    files = {os.fsdecode(p) for p in listed.stdout.split(b"\0") if p}
+    files = git_listing(root)
+    # The walk descends only into directories git listed a file under, so an
+    # unreadable gitignored directory never fails the resolve.
     directories = set()
     for path in files:
         parent = posixpath.dirname(path)

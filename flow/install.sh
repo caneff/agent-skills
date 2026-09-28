@@ -7,6 +7,7 @@
 # aside to <file>.pre-flow once, then replaced by the symlink — nothing is lost.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+link_refused=""
 
 link() { # link <repo-relative-src> <live-dest>
   local src="$here/$1" dest="$2"
@@ -15,6 +16,14 @@ link() { # link <repo-relative-src> <live-dest>
   if [ -L "$dest" ]; then
     rm "$dest"
   elif [ -e "$dest" ]; then
+    # A second real file must not overwrite the first backup (#1209).
+    if [ -e "$dest.pre-flow" ] || [ -L "$dest.pre-flow" ]; then
+      # Not fatal: under `set -e` a return 1 would end the install here, and
+      # everything after this file would never be linked (#1209 C1).
+      echo "refusing: $dest is a real file and $dest.pre-flow already exists; move one aside" >&2
+      link_refused=1
+      return 0
+    fi
     mv "$dest" "$dest.pre-flow"
     echo "backed up existing $dest -> $dest.pre-flow"
   fi
@@ -97,7 +106,14 @@ bash "$here/lane-install.sh"
 echo
 echo "Done. The live flow tooling now points at this repo; commit to back it up."
 
+status=0
+if [ -n "$link_refused" ]; then
+  echo "one or more files were left as they were (see \"refusing:\" above); the rest of the install ran" >&2
+  status=1
+fi
+
 if [ -n "$toast_failed" ]; then
   echo "herdr-toast-install failed for a non-refusal reason; the rest of the install ran anyway — see above" >&2
-  exit 1
+  status=1
 fi
+exit "$status"

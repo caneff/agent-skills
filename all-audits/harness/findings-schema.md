@@ -57,7 +57,7 @@ for the facts: the summary is drawn from this file, never the reverse. Fields:
 
 ## The summary — `report.html`
 
-A single self-contained visual-teach page. Use `HTML-REPORT.md` (in this
+One visual-teach page, with its assets copied beside it. Use `HTML-REPORT.md` (in this
 repo's `all-audits/harness/`) for the scaffold and asset delivery — same
 `vt-*` spine, same copy-assets-alongside step. The body differs: grouped
 overview, not cards.

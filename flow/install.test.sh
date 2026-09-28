@@ -305,5 +305,30 @@ else
   echo "FAIL a failing lane-install.sh broke or silenced the rest of the install (rc=$rc): $out"; fails=1
 fi
 
+# link()'s move-aside (#1209 C3): a real file already at the destination —
+# ~/.claude/settings.json on a machine that predates the symlink — is kept as
+# <file>.pre-flow and replaced by the link; a second real file, with a
+# .pre-flow already there, is refused rather than moved over the first backup.
+# link() is read out of install.sh and run alone, so this case does not pay for
+# the cargo installs a whole run makes.
+lh="$tmp/linkhome"
+mkdir -p "$lh/.claude"
+printf 'legacy\n' > "$lh/.claude/settings.json"
+link_out=$(HOME="$lh" here="$repo/flow" bash -c 'set -euo pipefail; eval "$(sed -n "/^link()/,/^}/p" "$here/install.sh")"; link claude/settings.json "$HOME/.claude/settings.json"' 2>&1) || { echo "FAIL link() failed on a real settings.json: $link_out"; fails=1; }
+if [ -L "$lh/.claude/settings.json" ] && [ "$(cat "$lh/.claude/settings.json.pre-flow" 2>/dev/null)" = "legacy" ]; then
+  echo "PASS a real settings.json is moved to .pre-flow and replaced by the link"
+else
+  echo "FAIL a real settings.json was not backed up to .pre-flow: $link_out"; fails=1
+fi
+rm "$lh/.claude/settings.json"
+printf 'newer\n' > "$lh/.claude/settings.json"
+link_out=$(HOME="$lh" here="$repo/flow" bash -c 'set -euo pipefail; link_refused=""; eval "$(sed -n "/^link()/,/^}/p" "$here/install.sh")"; link claude/settings.json "$HOME/.claude/settings.json"; echo "link_refused=$link_refused"' 2>&1); rc=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$link_out" | grep -q '^refusing: ' && printf '%s' "$link_out" | grep -q '^link_refused=1$' \
+   && [ "$(cat "$lh/.claude/settings.json.pre-flow")" = "legacy" ] && [ "$(cat "$lh/.claude/settings.json")" = "newer" ]; then
+  echo "PASS a second real file is refused, not moved over the first backup, and the install carries on"
+else
+  echo "FAIL the existing .pre-flow backup was clobbered, the second file lost, or the refusal was fatal (rc=$rc): $link_out"; fails=1
+fi
+
 [ "$fails" = 0 ] && echo "ALL PASS"
 exit "$fails"
