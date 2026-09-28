@@ -91,6 +91,9 @@ check "$write_text" 'leaves the ticket **unresolved** until the native edge' 'Wr
 check "$create_text" '--add-blocked-by https://github.com/<blocker-owner>/<blocker-repo>/issues/<blocker-n>' 'Create it'
 
 check "$create_text" 'the ticket stays **unresolved**' 'Create it'
+# ...and the filer must say so: a failed edge nobody mentions is the same as
+# no edge, which is the silence the section exists to end (#1209 P2).
+check "$create_text" 'name it as such in your reply' 'Create it'
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS file-ticket/blocked-by-wording.test.sh"
