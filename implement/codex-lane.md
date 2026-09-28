@@ -68,8 +68,8 @@ The brief carries what neither engine can infer:
 **Codex may not be able to commit.** Codex's sandbox holds `.git` read-only, so
 `git add` can fail creating `index.lock` (#1178). Do not work around the
 sandbox and do not rewrite the diff. When Codex returns the change uncommitted,
-the worker commits Codex's diff as plumbing: it stages and commits exactly what
-Codex wrote, with `Closes #<n>` in the final commit body, and authors none of
+the worker commits Codex's diff as plumbing: it stages and commits exactly the
+paths Codex changed (never `git add -A`, which would take the brief file), with `Closes #<n>` in the final commit body, and authors none of
 it. This does not break "Codex writes the code", because committing is not
 authorship. The PR body says the commit was made by the worker and the diff was
 written by Codex, in the same passage as the disclosure below.
