@@ -363,7 +363,10 @@ time, not from the worker: § The merge.
    changed after the verification pass is rewritten in its sidecar line
    now; write `pr-body-<n>.md` before running it. It refuses, exit 1, when
    `dispositions-<n>.jsonl` is missing or empty (#1188): the verification pass
-   (§ Review step 2) never ran, and "PR up" waits until it has.
+   (§ Review step 2) never ran, and "PR up" waits until it has. A round 1 that
+   found nothing (all three `findings-<axis>-<n>.jsonl` empty) leaves nothing to
+   verify and passes. The Codex lane writes neither sidecar and runs it with
+   `PRE_REPORT_NO_VERIFICATION="<why>"`, named in the PR-up report.
 6. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
    prints `false` and `CLEAN` before "PR up" goes out — a PR reported on a
    draft or a conflict fails the controller's merge. `headRefOid` is the sha
@@ -593,14 +596,16 @@ The controller merges on a repo Chris owns; Chris reads it after via
    dispatch report — do not decide alone either way: hand Chris the merge
    line and the cleanup line as in the exception below, and name the
    disagreement.
-2. **The PR is still not-draft, CLEAN, and closes what it should** — the
+2. **The PR is still not-draft, CLEAN, closes what it should, and carries its verification pass** — the
    same check as § Before the PR: step 6, rerun because `main` may have
    moved since "PR up". `closingIssuesReferences` empty or missing the
    ticket blocks the merge same as a draft or a conflict does — a PR that
-   closes nothing does not merge. So does a heavy PR with no verification
-   pass (#1188): `test -s ~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl`
-   (`<n>` the clump's lowest ticket) must succeed, or the merge waits and the
-   worker is sent back to § Review step 2. Then read the report's `Cleanup blockers`
+   closes nothing does not merge. So does a heavy Claude-lane PR with no verification pass (#1188):
+   `bash ~/.agents/skills/implement/verification-check.sh <n>` (`<n>` the
+   clump's lowest ticket, run from the primary checkout) must exit 0, or the
+   merge waits and the worker is sent back to § Review step 2. It reads the
+   review cache by the checkout's own key, so no repo name is filled in. A
+   Codex-lane PR is exempt: its worker's waiver is in the "PR up" report. Then read the report's `Cleanup blockers`
    field: every line but the worker's own `live-session` is ruled on now,
    while the worker is alive to commit or move it — kept evidence moved
    out, or Chris asked whether `--discard` may take it — never discovered

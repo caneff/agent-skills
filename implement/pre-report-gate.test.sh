@@ -190,15 +190,42 @@ else
   echo "FAIL: no sidecar — want exit 1 + 'no dispositions sidecar' + 'verification pass', got $rc: $out"; fails=1
 fi
 
-# An empty sidecar is a verification pass that recorded nothing: same refusal.
+# An empty sidecar beside real round-1 findings is a pass that recorded nothing.
+printf '%s\n' '{"id": "S1"}' >"$reviews/findings-standards-7.jsonl"
 : >"$sidecar"
 out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
 if [ "$rc" = 1 ] && [[ "$out" == *"empty"* ]]; then
-  echo "PASS: an empty sidecar fails the gate"
+  echo "PASS: an empty sidecar beside real findings fails the gate"
 else
   echo "FAIL: empty sidecar — want exit 1 + 'empty', got $rc: $out"; fails=1
 fi
-rm "$sidecar"
+rm "$sidecar" "$reviews/findings-standards-7.jsonl"
+
+# A clean round 1 (all three findings sidecars empty) leaves nothing to verify:
+# it passes, and there is no disposition to compare the PR body against.
+for a in standards spec correctness; do : >"$reviews/findings-$a-7.jsonl"; done
+out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"round 1 found nothing"* ]]; then
+  echo "PASS: a clean round 1 passes without a sidecar and the pass line says so"
+else
+  echo "FAIL: clean round 1 — want exit 0 + 'round 1 found nothing', got $rc: $out"; fails=1
+fi
+rm "$reviews"/findings-*-7.jsonl
+
+# The Codex lane writes no findings sidecars: it waives the check by naming why,
+# and the reason lands in the pass line.
+out=$(cd "$repo" && HOME="$cache_home" PRE_REPORT_NO_VERIFICATION="codex lane, no Claude axes" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"waived"* ]] && [[ "$out" == *"codex lane, no Claude axes"* ]]; then
+  echo "PASS: PRE_REPORT_NO_VERIFICATION waives the check and quotes the reason"
+else
+  echo "FAIL: waiver — want exit 0 + 'waived' + reason, got $rc: $out"; fails=1
+fi
+out=$(cd "$repo" && HOME="$cache_home" PRE_REPORT_NO_VERIFICATION="" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 1 ]; then
+  echo "PASS: an empty PRE_REPORT_NO_VERIFICATION is not a waiver"
+else
+  echo "FAIL: empty waiver — want exit 1, got $rc: $out"; fails=1
+fi
 
 # Off an implement-<n> branch there is no ticket to look a sidecar up by: the
 # gate still passes and says the sidecar was not looked for.
@@ -212,7 +239,7 @@ fi
 git -C "$repo" checkout -q implement-7
 # Real workers run from a linked worktree, whose own directory name is not
 # the repo's: the cache folder must key on the shared .git (#1214), or the
-# check finds no sidecar and switches itself off with a pass.
+# check finds no sidecar and refuses a worker whose pass did run (#1188).
 git -C "$repo" worktree add -q -b implement-8 "$tmp/implement-8" main
 printf '%s\n' '{"id": "S1", "outcome": "disputed", "reason": "no"}' >"$reviews/dispositions-8.jsonl"
 printf '## Decisions made\n\n- S1: fixed, abc1234.\n' >"$reviews/pr-body-8.md"
