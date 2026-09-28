@@ -2164,7 +2164,7 @@ def test_a_diff_that_cannot_be_read_refuses_rather_than_reading_empty():
         loop.with_workspace_diffs(
             [{"tickets": [3], "workspace": "/w/3", "closure": ["a"]}], broken)
     except loop.LoopError as exc:
-        assert "/w/3" in str(exc), exc
+        assert "clump #3" in str(exc) and "/w/3" in str(exc), exc
     else:
         raise AssertionError("an unreadable diff was read as an empty one")
 
