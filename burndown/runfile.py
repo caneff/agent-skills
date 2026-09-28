@@ -6,6 +6,7 @@
     python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
     python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
     python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --pr-body <path>
+    python3 burndown/runfile.py check    --from <dispositions sidecar> --pr-body <path>
     python3 burndown/runfile.py show     <run-id>
     python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 
@@ -1045,6 +1046,15 @@ def main(argv):
                        help="the controller handed findings back; the next "
                             "\"PR up\" records it again")
 
+    chk = subs.add_parser(
+        "check",
+        help="the PR-body comparison `leftover` runs at harvest, with no run "
+             "file: the worker's pre-\"PR up\" gate (#1214)")
+    chk.add_argument("--from", dest="from_path", required=True,
+                     metavar="PATH", help="the dispositions sidecar")
+    chk.add_argument("--pr-body", required=True, metavar="PATH",
+                     help="the PR's body")
+
     out = subs.add_parser("show", help="print the run file")
     out.add_argument("run_id")
 
@@ -1072,6 +1082,9 @@ def main(argv):
                                   args.from_path, root, args.pr_body)
             print(render(run))
             print(f"copied {len(added)} leftover(s) from {args.from_path}")
+        elif args.command == "check":
+            refuse_disagreeing_pr_body(args.from_path, args.pr_body)
+            print(f"{args.from_path} and {args.pr_body} agree")
         elif args.command == "job":
             state = ("running" if args.cores is not None
                      else "none" if args.none else "done")

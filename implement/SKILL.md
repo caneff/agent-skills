@@ -357,7 +357,12 @@ time, not from the worker: § The merge.
 5. **`bash ~/.agents/skills/implement/pre-report-gate.sh <sha>`** passes on
    the sha you report — a "done" report has described work that was dirty in
    the tree, not on the branch, or left content behind in `.scratch/` with
-   no `PRE_REPORT_KEEP_SCRATCH` naming why.
+   no `PRE_REPORT_KEEP_SCRATCH` naming why. It also checks
+   `dispositions-<n>.jsonl` against the PR body's Decisions made (#1214) —
+   the comparison `runfile.py leftover` makes at harvest — so a disposition
+   changed after the verification pass is rewritten in its sidecar line
+   now; write `pr-body-<n>.md` before running it. A pass line reading
+   `no dispositions sidecar, check not run` means nothing was compared.
 6. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
    prints `false` and `CLEAN` before "PR up" goes out — a PR reported on a
    draft or a conflict fails the controller's merge. `headRefOid` is the sha

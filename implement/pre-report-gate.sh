@@ -53,4 +53,28 @@ if ! git merge-base --is-ancestor "$sha" "$tip_sha"; then
   exit 1
 fi
 
-echo "pre-report gate: clean tree, ${scratch_status}, ${sha:0:12} is an ancestor of ${tip} (${tip_sha:0:12})"
+# The dispositions check (#1214): on an implement-<n> branch whose review
+# cache holds dispositions-<n>.jsonl, the PR body's Decisions made must agree
+# with it — the comparison `runfile.py leftover` makes at harvest, made here
+# so the worker rewrites a stale line instead of the controller. No sidecar
+# is a light-tier or no-review branch; the pass line says the check did not
+# run rather than claiming agreement.
+dispositions_status="no dispositions sidecar, check not run"
+branch=$(git rev-parse --abbrev-ref HEAD)
+if [[ "$branch" =~ ^implement-([0-9]+)$ ]]; then
+  n=${BASH_REMATCH[1]}
+  common=$(git rev-parse --path-format=absolute --git-common-dir) ||
+    { echo "pre-report gate: cannot resolve the common .git" >&2; exit 2; }
+  reviews="$HOME/.cache/agent-reviews/$(basename "$(dirname "$common")")"
+  sidecar="$reviews/dispositions-$n.jsonl"
+  body="$reviews/pr-body-$n.md"
+  if [ -f "$sidecar" ]; then
+    [ -f "$body" ] || { echo "pre-report gate: $sidecar exists but the PR body $body does not — write the body there first (implement/SKILL.md § The PR)" >&2; exit 1; }
+    runfile="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../burndown/runfile.py"
+    check=$(python3 "$runfile" check --from "$sidecar" --pr-body "$body" 2>&1) ||
+      { echo "pre-report gate: the sidecar and the PR body disagree — rewrite the sidecar line or edit the body's line: $check" >&2; exit 1; }
+    dispositions_status="dispositions agree with the PR body"
+  fi
+fi
+
+echo "pre-report gate: clean tree, ${scratch_status}, ${dispositions_status}, ${sha:0:12} is an ancestor of ${tip} (${tip_sha:0:12})"

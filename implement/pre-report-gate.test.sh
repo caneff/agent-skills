@@ -131,6 +131,51 @@ else
   echo "SKIP: unreadable .scratch/ case (running as root)"
 fi
 
+# The dispositions check (#1214): on an implement-<n> branch whose review
+# cache holds dispositions-<n>.jsonl, the PR body's Decisions made must agree
+# with the sidecar — the same comparison `runfile.py leftover` makes at
+# harvest, run here so the worker fixes a stale line, not the controller.
+git -C "$repo" checkout -q -b implement-7
+cache_home="$tmp/home"
+reviews="$cache_home/.cache/agent-reviews/$(basename "$repo")"
+mkdir -p "$reviews"
+sidecar="$reviews/dispositions-7.jsonl"
+body="$reviews/pr-body-7.md"
+tip=$(git -C "$repo" rev-parse HEAD)
+printf '%s\n' '{"id": "S1", "outcome": "disputed", "reason": "no"}' >"$sidecar"
+printf '## Decisions made\n\n- S1: fixed, abc1234.\n' >"$body"
+out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *"S1"* ]] && [[ "$out" == *"fixed"* ]]; then
+  echo "PASS: a sidecar line the PR body contradicts fails the gate, naming the id"
+else
+  echo "FAIL: stale sidecar — want exit 1 naming S1, got $rc: $out"; fails=1
+fi
+
+printf '%s\n' '{"id": "S1", "outcome": "fixed", "sha": "abc1234"}' >"$sidecar"
+out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"dispositions agree"* ]]; then
+  echo "PASS: an agreeing sidecar passes and the pass line says it was checked"
+else
+  echo "FAIL: agreeing sidecar — want exit 0 + 'dispositions agree', got $rc: $out"; fails=1
+fi
+
+rm "$body"
+out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *"pr-body-7.md"* ]]; then
+  echo "PASS: a sidecar with no PR body file fails closed"
+else
+  echo "FAIL: sidecar without body — want exit 1 naming pr-body-7.md, got $rc: $out"; fails=1
+fi
+
+rm "$sidecar"
+out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"no dispositions sidecar"* ]]; then
+  echo "PASS: no sidecar passes, and the pass line says the check did not run"
+else
+  echo "FAIL: no sidecar — want exit 0 + 'no dispositions sidecar', got $rc: $out"; fails=1
+fi
+git -C "$repo" checkout -q main
+
 # Wrong usage is a usage error, not a pass.
 out=$(cd "$repo" && bash "$gate" 2>&1); rc=$?
 if [ "$rc" = 2 ] && [[ "$out" == *"usage"* ]]; then

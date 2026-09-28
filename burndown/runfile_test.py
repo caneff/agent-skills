@@ -1825,6 +1825,18 @@ def test_a_missing_pr_body_is_refused_by_name():
         raise AssertionError("a missing PR body was accepted")
 
 
+def test_cli_check_runs_the_harvest_comparison_without_a_run_file():
+    # The worker's pre-"PR up" gate (#1214): no run id, no landing, only the
+    # sidecar against the body.
+    root = cache()
+    stale = cli(root, "check", "--from", SIDECAR, "--pr-body",
+                pr_body("## Decisions made\n\n- S3: fixed, 0123abc.\n"))
+    assert stale.returncode == 1 and "S3" in stale.stderr, stale.stderr
+    agreed = cli(root, "check", "--from", SIDECAR, "--pr-body",
+                 pr_body("## Decisions made\n\n- S3: leftover\n"))
+    assert agreed.returncode == 0 and "agree" in agreed.stdout, agreed.stderr
+
+
 def test_the_sidecar_name_runfile_builds_is_the_one_it_parses():
     # One module owns both directions of `dispositions-<n>.jsonl` (#1173 S5):
     # the built name names its own ticket and no other.
