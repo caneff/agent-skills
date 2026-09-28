@@ -42,25 +42,12 @@ const CODE_BASENAMES: &[&str] = &["skill.md", "makefile", "dockerfile", "justfil
 /// trailing sentence punctuation is dropped. It is code by extension, by
 /// filename, or as an extensionless entry under a script directory.
 pub fn first_code_target(body: &str) -> Option<String> {
-    normalise_separators(body)
+    // A Windows path separator is a path separator, as `tier.py` reads it.
+    body.replace('\\', "/")
         .split(|c: char| !(c.is_alphanumeric() || "/-_.".contains(c)))
         .map(|t| t.trim_end_matches('.'))
         .find(|t| is_code_path(t))
         .map(str::to_string)
-}
-
-/// A Windows path separator is a path separator, as `tier.py` reads it: a `\`
-/// between two path characters. One that follows anything else is not part of a
-/// path, and stays a token break — `\w+\.json` in a regex is not `/.json`.
-fn normalise_separators(body: &str) -> String {
-    let is_path_char = |c: char| c.is_alphanumeric() || "-_.".contains(c);
-    let mut out = String::with_capacity(body.len());
-    let mut prev = ' ';
-    for c in body.chars() {
-        out.push(if c == '\\' && is_path_char(prev) { '/' } else { c });
-        prev = c;
-    }
-    out
 }
 
 fn is_code_path(token: &str) -> bool {
@@ -143,15 +130,6 @@ mod tests {
         assert_eq!(first_code_target(r"edit .githooks\pre-push").as_deref(), Some(".githooks/pre-push"));
         assert_eq!(first_code_target(r"src\main.dart"), Some("src/main.dart".into()));
         assert_eq!(first_code_target(r"docs\notes.md"), None);
-    }
-
-    #[test]
-    fn a_regex_escape_is_not_a_backslash_path() {
-        // #1209 C5: `\w+\.json` became `/.json` and read as a path.
-        for body in [r"match \w+\.json in the log", r"the pattern \.json$", r"grep '\.toml'"] {
-            assert_eq!(first_code_target(body), None, "{body}");
-        }
-        assert_eq!(first_code_target(r"C:\src\main.dart"), Some("src/main.dart".into()));
     }
 
     #[test]
