@@ -570,15 +570,19 @@ fn files_under(dir: &Path) -> Option<Vec<String>> {
 }
 
 /// `names`, relative to `wt`, with every file under a nested git worktree
-/// (a directory holding a `.git` entry) replaced by that directory once, as
-/// `dir/`: a verification subagent's checkout is one fact, not thousands.
-fn collapse_nested_worktrees(wt: &str, names: Vec<String>) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
+/// replaced by that directory once, as `dir/`: a verification subagent's
+/// checkout is one fact, not thousands. The outermost `.git` wins. A bare
+/// `.git` stat, not `is_worktree_root`'s `git rev-parse` per directory: this
+/// runs on every prefix of every scratch file, and a wrong guess only
+/// changes how a name is shown, never whether it blocks.
+fn collapse_nested_worktrees(wt: &str, names: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
     for name in names {
         let parts: Vec<&str> = name.split('/').collect();
         let nested = (1..parts.len()).map(|n| parts[..n].join("/")).find(|dir| Path::new(wt).join(dir).join(".git").exists());
-        let shown = nested.map_or(name, |dir| format!("{dir}/"));
-        if !out.contains(&shown) {
+        let shown = nested.map_or_else(|| name.clone(), |dir| format!("{dir}/"));
+        if seen.insert(shown.clone()) {
             out.push(shown);
         }
     }
@@ -644,15 +648,19 @@ impl Cleanup {
                         files.ignored.iter().cloned().partition(|f| f == ".scratch/" || f.starts_with(".scratch/"));
                     // Modified, untracked and scratch names are capped, as in
                     // the refusal; ignored names never are (#838). A scratch
-                    // tree can hold thousands of files, and the count says
-                    // how many.
-                    let scratch = collapse_nested_worktrees(&wt, scratch);
-                    for (kind, names, capped) in
-                        [("modified", files.modified, true), ("untracked", files.untracked, true), ("ignored", ignored, false), ("scratch", scratch, true)]
-                    {
+                    // tree can hold thousands of files: the count stays the
+                    // file count, the names collapse nested worktrees.
+                    let scratch_count = scratch.len();
+                    let scratch = collapse_nested_worktrees(&wt, &scratch);
+                    for (kind, names, count, capped) in [
+                        ("modified", files.modified.clone(), files.modified.len(), true),
+                        ("untracked", files.untracked.clone(), files.untracked.len(), true),
+                        ("ignored", ignored.clone(), ignored.len(), false),
+                        ("scratch", scratch, scratch_count, true),
+                    ] {
                         if !names.is_empty() {
                             let shown = if capped { first_names(&names) } else { names.join(", ") };
-                            lines.push(format!("{kind} {} file(s): {shown}", names.len()));
+                            lines.push(format!("{kind} {count} file(s): {shown}"));
                         }
                     }
                 }

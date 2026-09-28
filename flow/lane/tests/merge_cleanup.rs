@@ -1128,10 +1128,24 @@ fn a_dry_run_names_a_nested_git_worktree_in_scratch_as_one_entry() {
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
     assert_eq!(
         blocker_lines(&run),
-        vec!["blocker: scratch 2 file(s): .scratch/evidence.log, .scratch/verify-mut/".to_string()],
+        vec!["blocker: scratch 10 file(s): .scratch/evidence.log, .scratch/verify-mut/".to_string()],
         "{}",
         run.text()
     );
+}
+
+#[test]
+fn a_dry_run_names_the_outermost_of_two_nested_git_worktrees() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r44", "implement-1210c");
+    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
+    let inner = wt.join(".scratch/outer/inner");
+    std::fs::create_dir_all(&inner).unwrap();
+    std::fs::write(wt.join(".scratch/outer/.git"), "gitdir: /elsewhere\n").unwrap();
+    std::fs::write(inner.join(".git"), "gitdir: /elsewhere\n").unwrap();
+    std::fs::write(inner.join("f.rs"), "x\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert_eq!(blocker_lines(&run), vec!["blocker: scratch 3 file(s): .scratch/outer/".to_string()], "{}", run.text());
 }
 
 #[test]
