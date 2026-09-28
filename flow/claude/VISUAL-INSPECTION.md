@@ -40,6 +40,16 @@ a step your own hands can do.
   my Windows browser. That is my opener, not your reader — you read the page
   through `shot-scraper` below.
 
+- An image or sheet I should look at: write it under a temporary name and
+  rename it into place only once it is complete, give each round a **fresh
+  filename** (never overwrite the one I already opened), decode it before
+  opening (`python3 -c "from PIL import Image; Image.open('<f>').verify()"`,
+  or `file <f>` naming the image type), and open it **once**, with one named
+  opener: `wslview <f>`, after `ls <f>` confirms it exists. Why: in the week
+  of 2026-09-21 I saw sheets opened mid-write (truncated), a reused filename
+  serving the previous round from cache, and `wslview` on a missing path
+  opening Explorer instead (#1231).
+
 ## Reading a rendered page yourself
 
 A **rendered** artifact — an HTML page, a report, a lineup — and any page you
