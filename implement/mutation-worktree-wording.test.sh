@@ -28,6 +28,13 @@ has "§ Build" "$build" 'git worktree remove --force'
 has "§ Build" "$build" 'Nothing is restored in the live checkout'
 has "§ Build" "$build" "the *Isolation* paragraph of \`multi-axis-code-review/SKILL.md\`'s witness-check block"
 lacks "§ Build" "$build" 'then restore it'
-has "§ The PR" "$pr" 'the throwaway worktree the mutation ran in'
+# Each copy on its own: the template line and the report bullet both carry the
+# phrase, so a whole-section search passes with either one reverted.
+line="${pr#*Mutation check: <}"; line="${line%%Parallel jobs:*}"
+[ "$line" != "$pr" ] || { echo "FAIL: Mutation check template line not found in § The PR" >&2; exit 1; }
+has "Mutation check line" "$line" 'the throwaway worktree the mutation ran in'
+bullet="${pr#*A mutation check\*\*, when}"; bullet="${bullet%%Add \"Chris merges\"*}"
+[ "$bullet" != "$pr" ] || { echo "FAIL: mutation-check bullet not found in § The PR" >&2; exit 1; }
+has "mutation-check bullet" "$bullet" 'the throwaway worktree the mutation ran in'
 [ "$fail" -eq 0 ] && echo "PASS $0"
 exit "$fail"
