@@ -48,3 +48,29 @@ correctness, OE over-engineering.
 - `2026-09-20-codex-pass-durations.md` (#942): Codex wall clock.
 - sudokupad-art `docs/research/2026-09-28-leftover-causes.md`: what share of
   leftovers a PR created itself.
+
+## Vocabulary on disk (tallied 2026-09-29 across all repos)
+
+- **Findings `severity`:** only two values, `hard` (265) and `judgement`
+  (3522). Codex findings use high / medium / low in their `.out` text, and
+  a few of those reach dispositions as `leftover` rows.
+- **Dispositions `severity`:** absent on almost every `fixed` (2392 of
+  2393), `disputed` (808) and `filed` row. It has to be joined back to the
+  findings sidecar by id.
+- **Dispositions `outcome`:** the four canonical values dominate (fixed
+  2393, disputed 808, leftover 474, filed 155). There is also drift:
+  `not-fixed` / `not_fixed`, `partial` / `fixed-partial`,
+  `fixed-with-regression`, `regression`, `contested`, `open`, `new`, and
+  free-text severities such as `judgement, PLAUSIBLE`.
+- The verification axis is written as both `verification` and `verify`.
+
+## Rulings (Chris, 2026-09-29)
+
+1. **Scope:** every review type. That is the three axes, the
+   over-engineering section, the reviewers' constraint and call-site
+   mutations, the verification pass, each Codex phase (gate, second, third)
+   and the worker's own mutation check.
+2. **Value:** fixed findings weighted by severity, plus cost accounting for
+   each review type.
+3. **Data:** both a backfill harvest over the existing cache and
+   transcripts, and a ledger row written by every review from now on.
