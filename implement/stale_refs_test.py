@@ -15,12 +15,29 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECK = os.path.join(HERE, "stale_refs.py")
 
+# A caller's leaked GIT_DIR and kin would point every fixture git call, and the
+# check itself, at the caller's repo instead of the fixture (#620).
+for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+            "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+    os.environ.pop(var, None)
+
 FIXTURES = []
 
 
 def git(root, *args):
     return subprocess.run(["git", "-C", root, *args], check=True,
                           capture_output=True, text=True).stdout.strip()
+
+
+def clean_fixtures():
+    """Remove every fixture and return the ones that would not go."""
+    left = []
+    while FIXTURES:
+        root = FIXTURES.pop()
+        shutil.rmtree(root, ignore_errors=True)
+        if os.path.exists(root):
+            left.append(root)
+    return left
 
 
 def write(root, files):
@@ -50,9 +67,22 @@ def commit(root, message="work"):
     git(root, "commit", "-q", "-m", message)
 
 
-def run(root, base="main"):
-    return subprocess.run([sys.executable, CHECK, "--repo", root, "--base", base],
-                          capture_output=True, text=True)
+def run(root, base="main", env=None):
+    command = [sys.executable, CHECK, "--repo", root]
+    if base is not None:
+        command += ["--base", base]
+    return subprocess.run(command, capture_output=True, text=True, env=env)
+
+
+def failing_git(subcommand):
+    """An environment whose `git` fails `subcommand` and runs every other."""
+    shim = tempfile.mkdtemp(prefix="stale-refs-shim-")
+    FIXTURES.append(shim)
+    with open(os.path.join(shim, "git"), "w") as fh:
+        fh.write(f'#!/bin/sh\nfor a; do [ "$a" = {subcommand} ] && {{ echo "shim: {subcommand} fails" >&2; exit 128; }}; done\n'
+                 f'exec {shutil.which("git")} "$@"\n')
+    os.chmod(os.path.join(shim, "git"), 0o755)
+    return {**os.environ, "PATH": f"{shim}:{os.environ['PATH']}"}
 
 
 def assert_result(label, result, status, present=(), absent=()):
@@ -185,35 +215,127 @@ def test_helper_of_a_deleted_test_file_is_not_reported():
     return assert_result("helper of a deleted test file", run(root), 0, absent=["mkfixture"])
 
 
-CASES = [
-    test_renamed_path_old_spelling_remains,
-    test_rename_with_every_reference_updated_is_clean,
-    test_unreadable_base_is_not_clean,
-    test_deleted_file_named_by_bare_basename,
-    test_basename_still_tracked_elsewhere_is_not_reported,
-    test_renamed_python_function_still_called,
-    test_function_moved_to_another_file_is_not_reported,
-    test_removed_constant_and_shell_function_still_named,
-    test_signature_change_is_not_a_removal,
-    test_name_another_file_still_defines_is_not_reported,
-    test_removed_line_that_looks_like_a_header,
-    test_extensionless_command_name_is_not_searched_bare,
-    test_helper_of_a_deleted_test_file_is_not_reported,
-]
+def test_run_from_a_subdirectory_searches_the_whole_tree():
+    root = repo({"src/old.sh": "echo\n", "src/lib.py": "def load_cells():\n    pass\n",
+                 "docs/a.md": "See src/old.sh and load_cells.\n"})
+    git(root, "rm", "-q", "src/old.sh")
+    write(root, {"src/lib.py": "\n"})
+    commit(root)
+    return assert_result("run from a subdirectory", run(os.path.join(root, "src")), 1,
+                         present=["docs/a.md:1: src/old.sh (deleted)",
+                                  "docs/a.md:1: load_cells (removed from src/lib.py)"])
+
+
+def test_file_moved_into_a_directory_with_references_updated_is_clean():
+    root = repo({"gate.sh": "echo\n", "README.md": "Run gate.sh.\n"})
+    git(root, "mv", "gate.sh", "tools-gate.sh")
+    os.makedirs(os.path.join(root, "tools"))
+    git(root, "mv", "tools-gate.sh", "tools/gate.sh")
+    write(root, {"README.md": "Run tools/gate.sh.\n"})
+    commit(root)
+    return assert_result("file moved into a directory, references updated", run(root), 0,
+                         absent=["README.md"])
+
+
+def test_removal_from_a_test_file_does_not_hide_the_same_removal_from_a_module():
+    root = repo({"a_test.py": "def load_cells():\n    pass\n",
+                 "lib.py": "def load_cells():\n    pass\n", "tool.py": "load_cells()\n"})
+    write(root, {"a_test.py": "\n", "lib.py": "\n"})
+    commit(root)
+    return assert_result("same name removed from a test file and a module", run(root), 1,
+                         present=["tool.py:1: load_cells (removed from lib.py)"])
+
+
+def test_deleted_non_ascii_path_still_named():
+    root = repo({"docs/résumé.md": "x\n", "index.md": "Read docs/résumé.md.\n"})
+    git(root, "rm", "-q", "docs/résumé.md")
+    commit(root)
+    return assert_result("deleted non-ASCII path", run(root), 1,
+                         present=["index.md:1: docs/résumé.md (deleted)"])
+
+
+def test_diff_noprefix_config_still_reads_removed_names():
+    root = repo({"lib.py": "def load_cells():\n    pass\n", "tool.py": "load_cells()\n"})
+    git(root, "config", "diff.noprefix", "true")
+    write(root, {"lib.py": "\n"})
+    commit(root)
+    return assert_result("diff.noprefix set", run(root), 1,
+                         present=["tool.py:1: load_cells (removed from lib.py)"])
+
+
+def test_removed_hyphenated_name_does_not_flag_a_longer_one():
+    root = repo({"lib.sh": "old-helper() {\n  :\n}\nold-helper-two() {\n  :\n}\n",
+                 "use.sh": "old-helper-two\n"})
+    write(root, {"lib.sh": "old-helper-two() {\n  :\n}\n"})
+    commit(root)
+    return assert_result("hyphenated name inside a longer one", run(root), 0,
+                         absent=["use.sh"])
+
+
+def test_uncommitted_change_is_not_a_clean_tree():
+    root = repo({"tools/old-gate.sh": "echo\n", "README.md": "Run tools/old-gate.sh.\n"})
+    git(root, "mv", "tools/old-gate.sh", "tools/new-gate.sh")
+    return assert_result("uncommitted rename", run(root), 2)
+
+
+def test_default_base_is_origin_head():
+    root = repo({"tools/old-gate.sh": "echo\n", "README.md": "Run tools/old-gate.sh.\n"})
+    git(root, "update-ref", "refs/remotes/origin/main", "main")
+    git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    git(root, "mv", "tools/old-gate.sh", "tools/new-gate.sh")
+    commit(root)
+    return assert_result("no --base reads origin/HEAD", run(root, base=None), 1,
+                         present=["README.md:1: tools/old-gate.sh (renamed to tools/new-gate.sh)"])
+
+
+def test_no_origin_head_is_not_clean():
+    root = repo({"a.txt": "a\n"})
+    return assert_result("no --base and no origin/HEAD", run(root, base=None), 2)
+
+
+def test_a_failing_grep_is_not_clean():
+    root = repo({"tools/old-gate.sh": "echo\n", "README.md": "Run tools/old-gate.sh.\n"})
+    git(root, "mv", "tools/old-gate.sh", "tools/new-gate.sh")
+    commit(root)
+    return assert_result("git grep fails", run(root, env=failing_git("grep")), 2)
+
+
+def test_a_failing_ls_files_is_not_clean():
+    root = repo({"a.txt": "a\n"})
+    return assert_result("git ls-files fails", run(root, env=failing_git("ls-files")), 2)
+
+
+def test_short_removed_name_is_not_searched():
+    root = repo({"lib.py": "def run():\n    pass\n", "doc.md": "Then run it.\n"})
+    write(root, {"lib.py": "\n"})
+    commit(root)
+    return assert_result("removed name under four characters", run(root), 0, absent=["doc.md"])
+
+
+def test_deleted_basename_inside_a_longer_file_name_is_not_reported():
+    root = repo({"tools/gate.sh": "echo\n", "tools/pre-gate.sh": "echo\n",
+                 "doc.md": "Run pre-gate.sh.\n"})
+    git(root, "rm", "-q", "tools/gate.sh")
+    commit(root)
+    return assert_result("basename inside a longer file name", run(root), 0, absent=["doc.md"])
 
 
 def main():
+    # Every `test_` function runs: a hand-kept list lets a new case sit unrun
+    # while the suite still prints PASS.
+    cases = [f for name, f in globals().items() if name.startswith("test_") and callable(f)]
     failed = 0
     try:
-        for case in CASES:
+        for case in cases:
             failed += case()
     finally:
-        for root in FIXTURES:
-            shutil.rmtree(root, ignore_errors=True)
-    if failed:
-        print(f"FAIL {failed} of {len(CASES)} cases")
+        left = clean_fixtures()
+    for root in left:
+        print(f"FAIL fixture not removed: {root}")
+    if failed or left:
+        print(f"FAIL {failed} of {len(cases)} cases")
         return 1
-    print(f"PASS {len(CASES)} cases")
+    print(f"PASS {len(cases)} cases")
     return 0
 
 
