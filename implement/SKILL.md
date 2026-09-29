@@ -188,8 +188,18 @@ No PR and no reviewer; Chris reads the log after.
   references behind (#1252).
 - For each acceptance criterion, write the failing test and see it red before
   the code that makes it pass. Once green, strip the constraint it verifies
-  and see it fail, then restore it — a test that passed with the fix reverted
-  has shipped as proof of a fix it never checked.
+  and see it fail — a test that passed with the fix reverted has shipped as
+  proof of a fix it never checked. Commit the work first, then mutate in a
+  throwaway worktree: `git worktree add --detach .scratch/mutation-<id> HEAD`,
+  strip the constraint there, run only the covering suite there, and
+  `git worktree remove --force .scratch/mutation-<id>`. Nothing is restored in
+  the live checkout: `git checkout -- <file>`, `git restore` and `git stash`
+  all return a file to its last commit, so any uncommitted edit in it goes with
+  the mutation (#1261). The isolation recipe is
+  the *Isolation* paragraph of `multi-axis-code-review/SKILL.md`'s witness-check
+  block (not a heading, so no section sign) — a fenced recipe, not a script you
+  can call, so follow its rules (never a byte copy of the tree) rather than
+  copy its code.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
   report it as a follow-up. Why: an unasked fix widens the diff past what the
@@ -539,8 +549,9 @@ Last reviewed sha: <sha>
 CLEAN observed at: <sha>
 Tip: <headRefOid> — <"no commits past the reviewed sha", or one
   "<sha> — <diff class>" line per commit past it>
-Mutation check: <the change that made it fail, and that you saw it fail
-  — or "n/a, deliverable is not a test or a gate">
+Mutation check: <the change that made it fail, that you saw it fail, and
+  the throwaway worktree the mutation ran in — or "n/a, deliverable is not a
+  test or a gate">
 Parallel jobs: <one "<what it was> — <n> cores" line per parallel job you
   launched — or "none">
 Cleanup blockers: <every "blocker: " line of § Before the PR step 7's dry
@@ -610,8 +621,8 @@ Controller: Chris merges this PR; you dispatched me, so after the Codex pass
   (§ Before the PR step 3), since the dry run can name the files but not
   the reason.
 - **A mutation check**, when the ticket's deliverable is a test or a gate:
-  name one change that makes the new test or gate fail, and that you saw it
-  fail. Nothing else in the report tells a gate from a test that always
+  name one change that makes the new test or gate fail, that you saw it
+  fail, and the throwaway worktree the mutation ran in. Nothing else in the report tells a gate from a test that always
   passes.
 
 Add "Chris merges" when — and only when — this run's own brief line carried the
