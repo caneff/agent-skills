@@ -292,9 +292,10 @@ No PR and no reviewer; Chris reads the log after.
 
    **The blocking kinds.** Stated here once, applied after the reachability
    bar; the reviewer briefs in `multi-axis-code-review` point here. A
-   round-1 finding that the PR (a) added a second copy of existing code or
-   data, or (b) left a doc, docstring, comment or alias claiming a state the
-   PR changed, is fixed in this PR before merge. The adjacent-fix rule's
+   finding of round 1, or of any Codex pass at merge (§ The merge step 3),
+   that the PR (a) added a second copy of existing code or data, or (b)
+   left a doc, docstring, comment or alias claiming a state the PR changed,
+   is fixed in this PR before merge. The adjacent-fix rule's
    size limit does not apply: the fix may cross files and run past 20
    lines. It is never `leftover`, and never `filed` unless the fix needs its
    own design, which the disposition names. Its sidecar line is the plain
@@ -842,8 +843,9 @@ The controller merges on a repo Chris owns; Chris reads it after via
    second pass is judged against below: the diff is only half this pass's
    input, and a requirement commented onto the ticket between the two
    passes moves the other half while the sha sits still.
-   The worker disposes of each one — fixed in a commit, `disputed: <why>`,
-   filed if it is high, or `leftover`, under § Review's reachability bar
+   The worker disposes of each one — fixed in a commit (always, for one of
+   § Review's blocking kinds), `disputed: <why>`, filed if it is high, or
+   `leftover`, under § Review's reachability bar
    first and its severity mapping second — adds each disposition to
    the PR body's Decisions made section (`gh pr edit <pr> --repo
    <owner/name> --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md`), and sends "PR up" again.
@@ -880,13 +882,14 @@ The controller merges on a repo Chris owns; Chris reads it after via
    its own `phase`-named `out_file`. No material findings → go to step 4.
    Findings → the controller evaluates every finding and its recommendation
    before any reaches the worker, as it did the first pass's. **A
-   second-pass finding that passes § Review's adjacent-fix rule goes to
+   second-pass finding that passes § Review's adjacent-fix rule, or is one of § Review's blocking kinds, goes to
    the worker, who fixes it in one round.** The worker makes each fix in
    a commit of its own. It records each with § Review's adjacent-fix
-   disposition and that sha in the PR body's Decisions made section, and
-   sends "PR up" again. Then the controller reads that fix diff itself,
-   against the finding it answers and the adjacent-fix rule, rather than
-   sending it back to Codex. It re-runs
+   disposition, or a blocking kind's plain `fixed`, and that sha in the PR
+   body's Decisions made section, and sends "PR up" again. Then the
+   controller reads that fix diff itself, against the finding it answers
+   and the adjacent-fix rule (a blocking kind's fix has no size limit),
+   rather than sending it back to Codex. It re-runs
    step 2. The fail-closed gate does not refuse the second pass as stale
    over an in-round fix: the controller's read of the fix diff is the
    review of every commit past the second pass's sha, up to the head it
@@ -903,10 +906,12 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
    A third Codex run happens only when a second-pass finding fixed in the
    round was high. The third run is final: its findings are `disputed` or
-   `leftover`, never a fourth run. That makes a third-run high the one
+   `leftover`, except one of § Review's blocking kinds, which goes to the
+   worker for one fix round that the controller reads as it reads a
+   second-pass fix; never a fourth run. That makes a third-run high the one
    place a high finding is not filed. The third run uses the same block
    with `phase=third` and posts the same way. The controller disposes of
-   each of its findings in the PR body; no worker fix round follows it.
+   each of its other findings in the PR body.
    With no high among the second-pass fixes, the controller's own read of
    the fix diff is the last review, and step 4 follows once every
    disposition is recorded.

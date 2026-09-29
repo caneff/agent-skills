@@ -152,10 +152,10 @@ check_absent_in "$merge_section" 'Otherwise, from this PR' 'implement/SKILL.md �
 # The evaluation covers Codex's recommendation as well as the finding: a
 # controller can agree a finding exists and still forward its remedy unread (#1082).
 check_in "$merge_section" 'the controller evaluates every finding and its recommendation before any reaches the worker' 'implement/SKILL.md § The merge'
-check_in "$merge_section" "A second-pass finding that passes § Review's adjacent-fix rule goes to the worker, who fixes it in one round" 'implement/SKILL.md § The merge'
+check_in "$merge_section" "A second-pass finding that passes § Review's adjacent-fix rule, or is one of § Review's blocking kinds, goes to the worker, who fixes it in one round" 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'the controller reads that fix diff itself' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'A third Codex run happens only when a second-pass finding fixed in the round was high.' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'The third run is final: its findings are `disputed` or `leftover`, never a fourth run.' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'The third run is final: its findings are `disputed` or `leftover`, except one of § Review'"'"'s blocking kinds, which goes to the worker for one fix round that the controller reads as it reads a second-pass fix; never a fourth run.' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'phase=third' 'implement/SKILL.md § The merge'
 [ "$(grep -oF 'The third run is final' <<<"$whole_file" | wc -l)" -eq 1 ] ||
   { echo "FAIL: 'The third run is final' does not appear exactly once in implement/SKILL.md" >&2; fail=1; }
@@ -172,7 +172,7 @@ check_in "$merge_section" 'records the head sha it read the fix diff at, beside 
 # #1173 spec-S4: the recorded sha has a named place, the PR body.
 check_in "$merge_section" '`read at <sha>` appended to that finding'"'"'s line' 'implement/SKILL.md § The merge'
 # #1173 spec-P2: the gate pass's dispositions offer `leftover` and file only a high.
-check_in "$merge_section" 'The worker disposes of each one — fixed in a commit, `disputed: <why>`, filed if it is high, or `leftover`' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'The worker disposes of each one — fixed in a commit (always, for one of § Review'"'"'s blocking kinds), `disputed: <why>`, filed if it is high, or `leftover`' 'implement/SKILL.md § The merge'
 check_in "$merge_section" "Immediately before step 4, the PR's \`headRefOid\` must still equal that sha" 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'A commit the controller has not read never merges' 'implement/SKILL.md § The merge'
 # § Review's rule text names the second pass too, so a reader starting there
@@ -180,10 +180,11 @@ check_in "$merge_section" 'A commit the controller has not read never merges' 'i
 check_in "$whole_file" "§ The merge step 3 applies the same rule to a Codex second-pass finding" 'implement/SKILL.md (whole file)'
 # The rest of the fix round's contract: the CLEAN check reruns after the
 # worker's fix, a non-adjacent high is still filed, and the third run is
-# followed by no worker fix round (C3).
-check_in "$merge_section" 'adjacent-fix rule, rather than sending it back to Codex. It re-runs step 2.' 'implement/SKILL.md § The merge'
+# followed by no worker fix round (C3) but a blocking kind's, which the
+# controller reads itself (Chris's ruling on PR #1263, P1).
+check_in "$merge_section" 'adjacent-fix rule (a blocking kind'"'"'s fix has no size limit), rather than sending it back to Codex. It re-runs step 2.' 'implement/SKILL.md § The merge'
 check_in "$merge_section" '`disputed: <why>`, filed if it is high, or `leftover`' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'no worker fix round follows it' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'The controller disposes of each of its other findings in the PR body.' 'implement/SKILL.md § The merge'
 # A Codex-pass leftover lives only in the PR body unless the controller
 # also writes it where the sweep harvests: the dispositions sidecar the
 # verification pass wrote, in § Review's leftover grammar (P2, ruled by the

@@ -75,6 +75,18 @@ order="$(grep -n -F -e '**The severity mapping.**' -e '**The reachability bar.**
 [ "$order" = '**The severity mapping.*|**The reachability bar.*|**The blocking kinds.** |**The adjacent-fix rule.|' ] ||
   { echo "FAIL: § Review's four rules are out of order: $order" >&2; fail=1; }
 
+# Chris's ruling on PR #1263 (P1): the blocking kinds cover a Codex-pass
+# finding at merge as well as a round-1 one, and each Codex disposition site
+# points back at § Review instead of offering `leftover` unqualified.
+merge="$(sed -n '/^### The merge$/,/^## Someone else/p' "$skill" | flatten)"
+grep -q '^## Someone else' "$skill" || { echo "FAIL: heading '## Someone else' missing" >&2; exit 1; }
+check_in "§ Review" "$review" 'or of any Codex pass at merge'
+check_in "§ The merge first pass" "$merge" "fixed in a commit (always, for one of § Review's blocking kinds)"
+check_in "§ The merge second pass" "$merge" "or is one of § Review's blocking kinds, goes to the worker"
+check_in "§ The merge third pass" "$merge" "except one of § Review's blocking kinds"
+n="$(grep -o -F -- "§ Review's blocking kinds" <<<"$merge" | wc -l || true)"
+[ "$n" -ge 3 ] || { echo "FAIL: § The merge points at the blocking kinds $n times, wanted all three passes" >&2; fail=1; }
+
 # multi-axis-code-review points at the rule, and states neither kind itself.
 check_in "multi-axis-code-review § 4" "$spawn" "\`implement/SKILL.md\` § Review's blocking kinds"
 check_in "multi-axis-code-review § 4" "$spawn" '`blocking:`'
