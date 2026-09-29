@@ -39,7 +39,7 @@ check_in "multi-axis-code-review § 4" "$maxis_text" "§ Review's reachability b
 
 # The verification brief fails an unreachable dispute whose why names no
 # environment fact (Codex gate H1 on PR #1135).
-check_in "multi-axis-code-review § 6" "$maxis_text" 'on any of four things:'
+check_in "multi-axis-code-review § 6" "$maxis_text" 'on any of five things:'
 check_in "multi-axis-code-review § 6" "$maxis_text" 'a `disputed: unreachable — <why>` disposition whose why does not name how the environment'
 check_in "multi-axis-code-review § 6" "$maxis_text" 'rules the failure out'
 

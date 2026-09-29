@@ -181,6 +181,11 @@ No PR and no reviewer; Chris reads the log after.
 ### Build
 
 - Invoke the `tdd` skill before any implementation code.
+- **Reuse before writing.** Before you write a helper, constant, loader or
+  data file, search the repo for an existing one and reuse it. Why: a second
+  copy is the costliest drift a PR creates. Review flags it, and unwinding it
+  after merge has taken several sweep tickets, each leaving new stale
+  references behind (#1252).
 - For each acceptance criterion, write the failing test and see it red before
   the code that makes it pass. Once green, strip the constraint it verifies
   and see it fail, then restore it — a test that passed with the fix reverted
@@ -188,8 +193,9 @@ No PR and no reviewer; Chris reads the log after.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
   report it as a follow-up. Why: an unasked fix widens the diff past what the
-  reviewers check against the ticket. A round-1 finding that passes
-  § Review's adjacent-fix rule is the one narrowing: it is fixed in the round.
+  reviewers check against the ticket. Two narrowings: a round-1 finding that
+  passes § Review's adjacent-fix rule is fixed in the round, and so is one of
+  § Review's blocking kinds, whatever its size.
 - Typecheck and single test files as you go, the full suite once at the end.
   Why: a failure caught at the file it came from is cheaper to place than one
   found in the full run.
@@ -207,8 +213,9 @@ No PR and no reviewer; Chris reads the log after.
    `/file-ticket` so it leaves with a routing role, never `needs-triage` —
    ad hoc `gh issue create` skips that role. `filed` is reserved for a high
    finding, under the severity mapping below. A finding that is not high and
-   not fixed in the round takes `leftover`: no ticket of its own, only a
-   sidecar line (step 2) and `leftover` in prose. A burn's own sweep, one
+   not fixed in the round takes `leftover` (never one of the blocking
+   kinds below): no ticket of its own, only a sidecar line (step 2) and
+   `leftover` in prose. A burn's own sweep, one
    ticket per run, is `burndown/SKILL.md` § The sweep; a worker whose
    brief carries **no `--run <run-id>`** has no run file under it and
    files its own per-PR sweep instead, at report time: this file's § The PR
@@ -272,6 +279,25 @@ No PR and no reviewer; Chris reads the log after.
    fix-in-round rules stand for a reachable finding; an unreachable one is
    disputed rather than fixed, even when it would pass the adjacent-fix
    rule.
+
+   **The blocking kinds.** Stated here once, applied after the reachability
+   bar; the reviewer briefs in `multi-axis-code-review` point here. A
+   round-1 finding that the PR (a) added a second copy of existing code or
+   data, or (b) left a doc, docstring, comment or alias claiming a state the
+   PR changed, is fixed in this PR before merge. The adjacent-fix rule's
+   size limit does not apply: the fix may cross files and run past 20
+   lines. It is never `leftover`, and never `filed` unless the fix needs its
+   own design, which the disposition names. Its sidecar line is the plain
+   `fixed` line, with no `scope`, so `check_adjacent.py` does not measure
+   it; the verification pass checks the fix like any other. A reviewer
+   marks one by opening its sidecar `title` with `blocking:`, but the kind
+   is the finding's, not the tag's: an untagged copy is still kind (a). Kind (a)
+   is a copy of something the base branch already holds, not a shape
+   repeated inside the diff, which is the standards axis's Duplicated Code.
+   Kind (b) includes the claim this PR's own rename or removal left behind.
+   Why: in `caneff/sudokupad-art`, 63 of 85 leftover findings sat in lines
+   the PR itself wrote, and copies deferred as `leftover` took four sweep
+   tickets to unwind (#1252).
 
    **The adjacent-fix rule.** A round-1 finding is fixed in the round, not
    filed, when all five parts hold: it sits in a file already in the diff;
@@ -354,6 +380,19 @@ time, not from the worker: § The merge.
    in `AGENTS.md` § Recurring defect classes;
    `docs/agents/defect-classes.md` carries the checks and every instance.
    This step is the pointer, not a third copy.
+
+   **Then find the stale references** (#1252): from this workspace, run
+   `python3 ~/.agents/skills/implement/stale_refs.py`. It reads
+   `git diff origin/<default>...HEAD`, takes every path the diff renamed or
+   deleted and every top-level name it removed or renamed, and prints each
+   tracked line still carrying the old spelling as `file:line`. Which names
+   it skips as noise — short words, a test file's own helpers, languages it
+   does not parse — is its docstring's to state. Commit first: it reads the
+   committed diff. Fix each hit before "PR up", or name it under Decisions
+   made with why it stays — a dated record such as `docs/research/`
+   describes history, and a port's "ported from" comment names its source
+   on purpose. Exit 2 is not a clean tree: git could not answer, or tracked
+   files are uncommitted, so fix the cause and rerun.
 5. **`bash ~/.agents/skills/implement/pre-report-gate.sh <sha>`** passes on
    the sha you report — a "done" report has described work that was dirty in
    the tree, not on the branch, or left content behind in `.scratch/` with

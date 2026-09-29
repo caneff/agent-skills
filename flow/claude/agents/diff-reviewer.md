@@ -54,6 +54,9 @@ with a stable `id` (your axis's letter plus an ordinal: `S1`, `P2`, `C3`),
 `axis`, `severity` (`hard` or `judgement`), `file`, and `title` (#855). This
 is the standing brief's own copy of that requirement, not just the caller's
 per-call paste, so a run whose prompt drops the sidecar line still gets one.
+A finding of one of `implement/SKILL.md` § Review's blocking kinds opens its
+`title` with `blocking:` and names the kind, so the worker cannot read it as
+a `leftover` (#1252).
 When the prompt names an id prefix (`id prefix: r2-`), prefix every id with it
 (`r2-S1`); one that names none gets bare ids. The rule is `multi-axis-code-review/SKILL.md` § 4's Round ids.
 On the standards axis, a cut the over-engineering lens reports also gets a
