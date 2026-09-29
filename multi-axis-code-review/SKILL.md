@@ -603,9 +603,9 @@ disposition whose why does not name how the environment in
 bodies people here write) rules the failure out; a bare "unlikely" or
 "cannot happen" fails by id, since the bar would otherwise suppress a
 reachable finding unchecked; (e) a finding of one of
-`implement/SKILL.md` § Review's blocking kinds, whatever its reviewer's title said, disposed as
-`leftover`, or as `filed` with no design named for why the fix needs its
-own ticket. Report every breach beside the finding it belongs to."
+`implement/SKILL.md` § Review's blocking kinds, whatever its reviewer's
+title said, disposed as `leftover`, or as `filed` with no design named for
+why the fix needs its own ticket. Report every breach beside the finding it belongs to."
 
 ## Why separate axes
 

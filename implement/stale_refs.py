@@ -146,7 +146,8 @@ def main(argv=None):
         # From the top: `git grep` searches only below its cwd, while the
         # diff names paths from the root.
         root = checked(args.repo, "rev-parse", "--show-toplevel").strip()
-        base = args.base or checked(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
+        base = args.base or checked(
+            root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
         dirty = checked(root, "status", "--porcelain", "--untracked-files=no")
         if dirty:
             raise GitError("tracked files have uncommitted changes; the diff reads HEAD, "

@@ -78,6 +78,13 @@ order="$(grep -n -F -e '**The severity mapping.**' -e '**The reachability bar.**
 # multi-axis-code-review points at the rule, and states neither kind itself.
 check_in "multi-axis-code-review § 4" "$spawn" "\`implement/SKILL.md\` § Review's blocking kinds"
 check_in "multi-axis-code-review § 4" "$spawn" '`blocking:`'
+# The standing brief every reviewer reads carries the tag, not only the
+# caller's prose (S1 on PR #1252's round 1).
+reviewer="$(flatten <"$here/../flow/claude/agents/diff-reviewer.md")"
+check_in "diff-reviewer.md" "$reviewer" "\`implement/SKILL.md\` § Review's blocking kinds"
+check_in "diff-reviewer.md" "$reviewer" '`blocking:`'
+check_in "§ Review" "$review" 'opening its sidecar `title` with `blocking:`'
+check_in "§ Before the PR" "$before" 'Commit first'
 check_in "multi-axis-code-review § 6" "$verify" 'on any of five things:'
 check_in "multi-axis-code-review § 6" "$verify" "a finding of one of \`implement/SKILL.md\` § Review's blocking kinds"
 for phrase in 'second copy of existing code or data' 'claiming a state the PR changed'; do
