@@ -291,6 +291,7 @@
       "Driving the OBS e2e rig from this repo: closing OBS's window via PowerShell `Get-Process obs64` + `CloseMainWindow()`, and any obs-websocket request sent through `layout/obs-request.mjs` (including SetSourceFilterEnabled).",
       "Editing, commenting on, closing, and labelling GitHub issues in the user's own repos with `gh issue edit|comment|close|create`, including inside a compound command that first prepares the body in the scratchpad.",
       "Publishing, republishing, or updating an Artifact with the Artifact tool (the default publish action, with or without a url), whenever the user has asked for a page, report, or reference to be built or updated, or has already been shown one earlier in the session. The user has given blanket permission for artifact publishes.",
+      "Reading run output, globally: reading any file under any repo's `.scratch/` directory (logs, e2e artifacts, progress files, sidecars) with cat, tail, head, grep, wc, diff, ls, du or the Read tool is inspection of the session's own work, not Interfere With Workloads. Covers reads only; launching or killing rig processes stays under the OBS e2e rig entry.",
       "Shared-box compute runs: launching CP-SAT solver runs, grid hunts, soundness fuzzes and test gates on this machine (uv run <script>, just <recipe>, node <script>, usually under job-run), with any worker count the repo docs allow, is intended work, not Interfere With Workloads. Covers launching and reading progress files; it does not cover killing jobs the session did not create."
     ],
     "environment": [
