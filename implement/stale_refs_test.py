@@ -55,7 +55,7 @@ def run(root, base="main"):
                           capture_output=True, text=True)
 
 
-def expect(label, result, status, present=(), absent=()):
+def assert_result(label, result, status, present=(), absent=()):
     problems = []
     if result.returncode != status:
         problems.append(f"exit {result.returncode}, wanted {status}")
@@ -77,7 +77,7 @@ def test_renamed_path_old_spelling_remains():
                  "README.md": "Run tools/old-gate.sh before the PR.\n"})
     git(root, "mv", "tools/old-gate.sh", "tools/new-gate.sh")
     commit(root)
-    return expect("renamed path, old spelling remains", run(root), 1,
+    return assert_result("renamed path, old spelling remains", run(root), 1,
                   present=["README.md:1:", "tools/old-gate.sh", "tools/new-gate.sh"])
 
 
@@ -88,12 +88,12 @@ def test_rename_with_every_reference_updated_is_clean():
     write(root, {"README.md": "Run tools/new-gate.sh before the PR.\n"})
     commit(root)
     result = run(root)
-    return expect("rename with every reference updated", result, 0, absent=["old-gate"])
+    return assert_result("rename with every reference updated", result, 0, absent=["old-gate"])
 
 
 def test_unreadable_base_is_not_clean():
     root = repo({"a.txt": "a\n"})
-    return expect("a base git cannot resolve", run(root, base="no-such-ref"), 2)
+    return assert_result("a base git cannot resolve", run(root, base="no-such-ref"), 2)
 
 
 def test_deleted_file_named_by_bare_basename():
@@ -101,7 +101,7 @@ def test_deleted_file_named_by_bare_basename():
                  "docs/how.md": "Then run `pre-gate.sh <sha>`.\n"})
     git(root, "rm", "-q", "implement/pre-gate.sh")
     commit(root)
-    return expect("deleted file named by its bare basename", run(root), 1,
+    return assert_result("deleted file named by its bare basename", run(root), 1,
                   present=["docs/how.md:1: pre-gate.sh (deleted)"])
 
 
@@ -110,7 +110,7 @@ def test_basename_still_tracked_elsewhere_is_not_reported():
                  "docs/how.md": "Each directory has its own run.sh.\n"})
     git(root, "rm", "-q", "a/run.sh")
     commit(root)
-    return expect("basename another tracked file still carries", run(root), 0,
+    return assert_result("basename another tracked file still carries", run(root), 0,
                   absent=["docs/how.md"])
 
 
@@ -119,7 +119,7 @@ def test_renamed_python_function_still_called():
                  "tool.py": "from lib import load_cells\n\nprint(load_cells('x'))\n"})
     write(root, {"lib.py": "def read_cells(path):\n    return path\n"})
     commit(root)
-    return expect("renamed Python function still called", run(root), 1,
+    return assert_result("renamed Python function still called", run(root), 1,
                   present=["tool.py:1: load_cells", "tool.py:3: load_cells"])
 
 
@@ -129,7 +129,7 @@ def test_function_moved_to_another_file_is_not_reported():
     write(root, {"lib.py": "", "cells.py": "def load_cells(path):\n    return path\n",
                  "tool.py": "from cells import load_cells\n"})
     commit(root)
-    return expect("function moved to another file", run(root), 0, absent=["load_cells"])
+    return assert_result("function moved to another file", run(root), 0, absent=["load_cells"])
 
 
 def test_removed_constant_and_shell_function_still_named():
@@ -139,7 +139,7 @@ def test_removed_constant_and_shell_function_still_named():
                  "doc.md": "Cells are CELL_SIZE wide.\n"})
     write(root, {"lib.py": "\n", "lib.sh": "\n"})
     commit(root)
-    return expect("removed constant and shell function", run(root), 1,
+    return assert_result("removed constant and shell function", run(root), 1,
                   present=["use.sh:2: old_helper", "doc.md:1: CELL_SIZE"])
 
 
@@ -148,7 +148,7 @@ def test_signature_change_is_not_a_removal():
                  "tool.py": "from lib import load_cells\n"})
     write(root, {"lib.py": "def load_cells(path, strict=False):\n    return path\n"})
     commit(root)
-    return expect("signature change keeps the name", run(root), 0, absent=["load_cells"])
+    return assert_result("signature change keeps the name", run(root), 0, absent=["load_cells"])
 
 
 def test_name_another_file_still_defines_is_not_reported():
@@ -157,7 +157,7 @@ def test_name_another_file_still_defines_is_not_reported():
                  "use.py": "from b import shared_helper\n"})
     write(root, {"a.py": "\n"})
     commit(root)
-    return expect("name another file still defines", run(root), 0, absent=["shared_helper"])
+    return assert_result("name another file still defines", run(root), 0, absent=["shared_helper"])
 
 
 def test_removed_line_that_looks_like_a_header():
@@ -165,7 +165,7 @@ def test_removed_line_that_looks_like_a_header():
                  "tool.py": "load_cells()\n"})
     write(root, {"lib.py": "\n"})
     commit(root)
-    return expect("removed line starting '-- '", run(root), 1,
+    return assert_result("removed line starting '-- '", run(root), 1,
                   present=["tool.py:1: load_cells (removed from lib.py)"])
 
 
@@ -174,7 +174,7 @@ def test_extensionless_command_name_is_not_searched_bare():
                  "docs/how.md": "Run merge-cleanup after the merge.\n"})
     git(root, "rm", "-q", "bin/merge-cleanup")
     commit(root)
-    return expect("extensionless command name", run(root), 0, absent=["docs/how.md"])
+    return assert_result("extensionless command name", run(root), 0, absent=["docs/how.md"])
 
 
 def test_helper_of_a_deleted_test_file_is_not_reported():
@@ -182,7 +182,7 @@ def test_helper_of_a_deleted_test_file_is_not_reported():
                  "other.test.sh": "  mkfixture\n"})
     git(root, "rm", "-q", "gate.test.sh")
     commit(root)
-    return expect("helper of a deleted test file", run(root), 0, absent=["mkfixture"])
+    return assert_result("helper of a deleted test file", run(root), 0, absent=["mkfixture"])
 
 
 CASES = [
