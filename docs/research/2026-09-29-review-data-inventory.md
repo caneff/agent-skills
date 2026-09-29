@@ -74,3 +74,13 @@ correctness, OE over-engineering.
    each review type.
 3. **Data:** both a backfill harvest over the existing cache and
    transcripts, and a ledger row written by every review from now on.
+4. **Severity weights:** the ledger records severity as written, and the
+   analysis applies the weights: `hard` 3, `judgement` 1; Codex high 3,
+   medium 2, low 1.
+5. **Cost:** Claude reviewers are costed in tokens by kind (input, output,
+   cache write, cache read) plus wall clock, and turned into dollars at
+   analysis time from a price table. Codex is costed in wall clock plus the
+   change in its weekly usage percentage.
+6. **Outcomes:** `fixed` and `filed` count as value. `leftover` gets its
+   own column with no value. `disputed` gets zero value and its own column
+   as the reviewer's noise rate.
