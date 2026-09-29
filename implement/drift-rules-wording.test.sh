@@ -84,6 +84,10 @@ check_in "§ Review" "$review" 'or of any Codex pass at merge'
 check_in "§ The merge first pass" "$merge" "fixed in a commit (always, for one of § Review's blocking kinds)"
 check_in "§ The merge second pass" "$merge" "or is one of § Review's blocking kinds, goes to the worker"
 check_in "§ The merge third pass" "$merge" "except one of § Review's blocking kinds"
+# The verification pass and the sidecar belong to round 1; a Codex-pass
+# blocking fix is checked where § The merge checks every Codex fix.
+check_in "§ Review" "$review" 'A round-1 blocking finding'"'"'s sidecar line is the plain `fixed` line'
+check_in "§ Review" "$review" "A Codex-pass one is checked by the next Codex pass or the controller's own read of the fix diff"
 n="$(grep -o -F -- "§ Review's blocking kinds" <<<"$merge" | wc -l || true)"
 [ "$n" -ge 3 ] || { echo "FAIL: § The merge points at the blocking kinds $n times, wanted all three passes" >&2; fail=1; }
 

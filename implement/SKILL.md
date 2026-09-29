@@ -295,16 +295,19 @@ No PR and no reviewer; Chris reads the log after.
    finding of round 1, or of any Codex pass at merge (§ The merge step 3),
    that the PR (a) added a second copy of existing code or data, or (b)
    left a doc, docstring, comment or alias claiming a state the PR changed,
-   is fixed in this PR before merge. The adjacent-fix rule's
-   size limit does not apply: the fix may cross files and run past 20
-   lines. It is never `leftover`, and never `filed` unless the fix needs its
-   own design, which the disposition names. Its sidecar line is the plain
-   `fixed` line, with no `scope`, so `check_adjacent.py` does not measure
-   it; the verification pass checks the fix like any other. A reviewer
-   marks one by opening its sidecar `title` with `blocking:`, but the kind
-   is the finding's, not the tag's: an untagged copy is still kind (a). Kind (a)
-   is a copy of something the base branch already holds, not a shape
-   repeated inside the diff, which is the standards axis's Duplicated Code.
+   is fixed in this PR before merge. The adjacent-fix rule's size limit
+   does not apply: the fix may cross files and run past 20 lines. It is
+   never `leftover`, and never `filed` unless the fix needs its own design,
+   which the disposition names. A round-1 blocking finding's sidecar line is
+   the plain `fixed` line, with no `scope`, so `check_adjacent.py` does not
+   measure it; the verification pass checks the fix like any other. A
+   Codex-pass one is checked by the next Codex pass or the controller's own
+   read of the fix diff, as § The merge step 3 says for each pass. A
+   reviewer marks one by opening its sidecar `title` with `blocking:`, but
+   the kind is the finding's, not the tag's: an untagged copy is still kind
+   (a). Kind (a) is a copy of something the base branch already holds, not
+   a shape repeated inside the diff, which is the standards axis's
+   Duplicated Code.
    Kind (b) includes the claim this PR's own rename or removal left behind.
    Why: in `caneff/sudokupad-art`, 63 of 85 leftover findings sat in lines
    the PR itself wrote, and copies deferred as `leftover` took four sweep
@@ -845,8 +848,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    passes moves the other half while the sha sits still.
    The worker disposes of each one — fixed in a commit (always, for one of
    § Review's blocking kinds), `disputed: <why>`, filed if it is high, or
-   `leftover`, under § Review's reachability bar
-   first and its severity mapping second — adds each disposition to
+   `leftover`, under § Review's reachability bar first and its severity
+   mapping second — adds each disposition to
    the PR body's Decisions made section (`gh pr edit <pr> --repo
    <owner/name> --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md`), and sends "PR up" again.
    Re-run step 2 (not-draft, CLEAN — commits landed since the first check).
@@ -882,8 +885,9 @@ The controller merges on a repo Chris owns; Chris reads it after via
    its own `phase`-named `out_file`. No material findings → go to step 4.
    Findings → the controller evaluates every finding and its recommendation
    before any reaches the worker, as it did the first pass's. **A
-   second-pass finding that passes § Review's adjacent-fix rule, or is one of § Review's blocking kinds, goes to
-   the worker, who fixes it in one round.** The worker makes each fix in
+   second-pass finding that passes § Review's adjacent-fix rule, or is one
+   of § Review's blocking kinds, goes to the worker, who fixes it in one
+   round.** The worker makes each fix in
    a commit of its own. It records each with § Review's adjacent-fix
    disposition, or a blocking kind's plain `fixed`, and that sha in the PR
    body's Decisions made section, and sends "PR up" again. Then the
