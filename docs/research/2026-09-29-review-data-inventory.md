@@ -84,3 +84,9 @@ correctness, OE over-engineering.
 6. **Outcomes:** `fixed` and `filed` count as value. `leftover` gets its
    own column with no value. `disputed` gets zero value and its own column
    as the reviewer's noise rate.
+7. **Overlap:** counts. A unique finding (no other reviewer raised it on
+   that PR) is worth more than a shared one. Controller's default, not
+   Chris's, flag if you disagree: a finding raised by k reviewers gives
+   each 1/k of its weighted value, and the split is an analysis parameter.
+   Escapes (defects a review missed that a later ticket fixed) are a
+   follow-up, not part of this work.
