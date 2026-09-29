@@ -26,7 +26,7 @@ has "§ Build" "$build" 'Commit the work first'
 has "§ Build" "$build" 'git worktree add --detach .scratch/'
 has "§ Build" "$build" 'git worktree remove --force'
 has "§ Build" "$build" 'Nothing is restored in the live checkout'
-has "§ Build" "$build" 'multi-axis-code-review/SKILL.md` § What the witness check costs'
+has "§ Build" "$build" "the *Isolation* paragraph of \`multi-axis-code-review/SKILL.md\`'s witness-check block"
 lacks "§ Build" "$build" 'then restore it'
 has "§ The PR" "$pr" 'the throwaway worktree the mutation ran in'
 [ "$fail" -eq 0 ] && echo "PASS $0"

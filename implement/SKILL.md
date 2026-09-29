@@ -196,9 +196,10 @@ No PR and no reviewer; Chris reads the log after.
   the live checkout: `git checkout -- <file>`, `git restore` and `git stash`
   all return a file to its last commit, so any uncommitted edit in it goes with
   the mutation (#1261). The isolation recipe is
-  `multi-axis-code-review/SKILL.md` § What the witness check costs — a fenced
-  recipe, not a script you can call, so follow its rules (never a byte copy of
-  the tree) rather than copy its code.
+  the *Isolation* paragraph of `multi-axis-code-review/SKILL.md`'s witness-check
+  block (not a heading, so no section sign) — a fenced recipe, not a script you
+  can call, so follow its rules (never a byte copy of the tree) rather than
+  copy its code.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
   report it as a follow-up. Why: an unasked fix widens the diff past what the
