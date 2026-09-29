@@ -6,9 +6,11 @@ renamed or deleted (#1252; implement/SKILL.md § Before the PR runs it).
 
 Reads `git diff <base>...HEAD`. For each path it renamed or deleted, the old
 path is searched for in the tracked tree, and so is its bare basename when no
-tracked file still carries that basename (a doc names `pre-report-gate.sh`,
-not its directory). For each top-level name the diff's removed lines define
-(a def, class, constant or function at column 0 of a code file) that no
+tracked file still carries that basename and it has an extension (a doc
+names `pre-report-gate.sh`, not its directory; an extensionless name is a
+command, which may live on under another implementation). For each top-level name the diff's removed lines define
+(a def, class, constant or function at column 0 of a code file that is not
+a test file) that no
 added line defines again and no tracked code file still defines, the name is
 searched for as a whole word. One line per hit,
 `<file>:<line>: <old spelling> (<what happened to it>)`. Exit 0 with no hit,
@@ -65,6 +67,14 @@ DEFINITIONS = {ext: [re.compile(p) for p in pats] for exts, pats in (
 MIN_NAME = 4
 
 
+def is_test(path):
+    """A test file's top-level names are its own helpers: nothing imports
+    them, so another file using the same word is not a stale reference."""
+    base = os.path.basename(path)
+    return (base.startswith("test_") or "_test." in base or ".test." in base
+            or path.startswith("tests/") or "/tests/" in path)
+
+
 def defined(path, text):
     """Names `text`, one line of `path`, defines at top level."""
     names = set()
@@ -99,7 +109,7 @@ def removed_names(repo, base):
         elif line.startswith("+"):
             plus |= defined(new, line[1:])
     return {name: path for name, path in minus.items()
-            if name not in plus and len(name) >= MIN_NAME}
+            if name not in plus and len(name) >= MIN_NAME and not is_test(path)}
 
 
 def basename_pattern(name):
@@ -138,7 +148,9 @@ def main(argv=None):
             reported = set()
             searches = [(old, ("-F", "-e", old))]
             name = os.path.basename(old)
-            if name != old and name not in tracked:
+            # An extensionless file is a command, and a command outlives its
+            # script: a port to another language keeps the name on PATH.
+            if name != old and os.path.splitext(name)[1] and name not in tracked:
                 searches.append((name, ("-E", "-e", basename_pattern(name))))
             for spelling, pattern in searches:
                 for path, line, _ in hits(args.repo, *pattern):

@@ -169,6 +169,22 @@ def test_removed_line_that_looks_like_a_header():
                   present=["tool.py:1: load_cells (removed from lib.py)"])
 
 
+def test_extensionless_command_name_is_not_searched_bare():
+    root = repo({"bin/merge-cleanup": "#!/bin/sh\n",
+                 "docs/how.md": "Run merge-cleanup after the merge.\n"})
+    git(root, "rm", "-q", "bin/merge-cleanup")
+    commit(root)
+    return expect("extensionless command name", run(root), 0, absent=["docs/how.md"])
+
+
+def test_helper_of_a_deleted_test_file_is_not_reported():
+    root = repo({"gate.test.sh": "mkfixture() {\n  :\n}\n",
+                 "other.test.sh": "  mkfixture\n"})
+    git(root, "rm", "-q", "gate.test.sh")
+    commit(root)
+    return expect("helper of a deleted test file", run(root), 0, absent=["mkfixture"])
+
+
 CASES = [
     test_renamed_path_old_spelling_remains,
     test_rename_with_every_reference_updated_is_clean,
@@ -181,6 +197,8 @@ CASES = [
     test_signature_change_is_not_a_removal,
     test_name_another_file_still_defines_is_not_reported,
     test_removed_line_that_looks_like_a_header,
+    test_extensionless_command_name_is_not_searched_bare,
+    test_helper_of_a_deleted_test_file_is_not_reported,
 ]
 
 
