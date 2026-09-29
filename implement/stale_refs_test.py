@@ -320,6 +320,30 @@ def test_deleted_basename_inside_a_longer_file_name_is_not_reported():
     return assert_result("basename inside a longer file name", run(root), 0, absent=["doc.md"])
 
 
+def test_rename_to_a_path_of_another_length_reports_the_old_path():
+    root = repo({"a.sh": "echo\n", "doc.md": "Run a.sh first.\n"})
+    git(root, "mv", "a.sh", "much-longer-name.sh")
+    commit(root)
+    return assert_result("rename to a path of another length", run(root), 1,
+                         present=["doc.md:1: a.sh (renamed to much-longer-name.sh)"])
+
+
+def test_deleted_root_file_named_with_dot_slash():
+    root = repo({"gate.sh": "echo\n", "doc.md": "Run ./gate.sh first.\n"})
+    git(root, "rm", "-q", "gate.sh")
+    commit(root)
+    return assert_result("deleted root file named ./gate.sh", run(root), 1,
+                         present=["doc.md:1: gate.sh (deleted)"])
+
+
+def test_name_removed_from_a_path_with_a_space():
+    root = repo({"my lib.py": "def load_cells():\n    pass\n", "tool.py": "load_cells()\n"})
+    write(root, {"my lib.py": "\n"})
+    commit(root)
+    return assert_result("name removed from a path with a space", run(root), 1,
+                         present=["tool.py:1: load_cells (removed from my lib.py)"])
+
+
 def main():
     # Every `test_` function runs: a hand-kept list lets a new case sit unrun
     # while the suite still prints PASS.

@@ -111,15 +111,16 @@ def read_diff(repo, base):
         elif line.startswith("deleted file mode"):
             gone[old] = "deleted"
         elif line.startswith("--- a/"):
-            old = line[len("--- a/"):]
+            # Git ends a header path holding a space with a tab.
+            old = line[len("--- a/"):].rstrip("\t")
     return gone, {n: p for n, p in removed.items() if len(n) >= MIN_NAME}
 
 
-def whole(spelling, before):
+def whole(spelling, before, lead=""):
     """An extended regex for `spelling` not embedded in a longer name: no name
-    character after it, and none of `before` ahead of it."""
+    character after it, and none of `before` ahead of it, `lead` aside."""
     escaped = re.sub(r"([.\[\]()*+?{}|^$\\])", r"\\\1", spelling)  # POSIX ERE's own set
-    return f"(^|[^{before}]){escaped}($|[^A-Za-z0-9_-])"
+    return f"(^|[^{before}]){lead}{escaped}($|[^A-Za-z0-9_-])"
 
 
 # A path stands alone when no name character or `/` precedes it (`gate.sh`
@@ -157,7 +158,7 @@ def main(argv=None):
         found = 0
         for old, why in sorted(gone.items()):
             reported = set()
-            searches = [(old, whole(old, PATH_BEFORE))]
+            searches = [(old, whole(old, PATH_BEFORE, lead=r"(\./)?"))]
             name = os.path.basename(old)
             if name != old and os.path.splitext(name)[1] and name not in tracked:
                 searches.append((name, whole(name, BASENAME_BEFORE)))
