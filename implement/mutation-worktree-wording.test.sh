@@ -28,6 +28,14 @@ has "§ Build" "$build" 'git worktree remove --force'
 has "§ Build" "$build" 'Nothing is restored in the live checkout'
 has "§ Build" "$build" "the *Isolation* paragraph of \`multi-axis-code-review/SKILL.md\`'s witness-check block"
 lacks "§ Build" "$build" 'then restore it'
+# The only place Build may name a restore command is the sentence that forbids
+# it; a reworded instruction elsewhere ("put the file back with git checkout")
+# is the regression.
+rest="${build/Nothing is restored in the live checkout:*(#1261)/}"
+[ "$rest" != "$build" ] || { echo "FAIL: the prohibition sentence was not found in § Build" >&2; exit 1; }
+for cmd in 'git checkout --' 'git restore' 'git stash' 'restore it' 'put the file back'; do
+  lacks "§ Build outside its prohibition" "$rest" "$cmd"
+done
 # Each copy on its own: the template line and the report bullet both carry the
 # phrase, so a whole-section search passes with either one reverted.
 line="${pr#*Mutation check: <}"; line="${line%%Parallel jobs:*}"
