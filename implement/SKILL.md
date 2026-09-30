@@ -199,8 +199,8 @@ No PR and no reviewer; Chris reads the log after.
 
   The first line clears a worktree an earlier run left registered at that
   path, which would make `worktree add` refuse. If the add still refuses,
-  stop and pick another `<id>`: the path holds something git does not
-  know, and a mutation there would read a stale tree. Strip the constraint
+  stop and pick another `<id>`: the path holds a directory git does not
+  know or a locked worktree, and a mutation there would read a stale tree. Strip the constraint
   there, run only the covering suite there, and
   `git worktree remove --force .scratch/mutation-<id>` whether it went red
   or not. The worktree holds only tracked files, so set up there whatever
@@ -934,9 +934,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    is not filed. The third run uses the same block with `phase=third` and
    posts the same way. The controller disposes of each of its other
    findings in the PR body. With no high among the second-pass fixes, the
-   controller's own read of
-   the fix diff is the last review, and step 4 follows once every
-   disposition is recorded.
+   controller's own read of the fix diff is the last review, and step 4
+   follows once every disposition is recorded.
 
    A Codex-pass finding disposed of as `leftover`, whichever pass raised
    it, is recorded twice. Its PR-body disposition is the first record.
