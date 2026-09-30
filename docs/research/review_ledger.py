@@ -40,7 +40,7 @@ import json
 import re
 import sys
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from tally_review_axes import (
@@ -97,7 +97,7 @@ def unknown_cost(reason: str) -> dict:
 # A subagent transcript lives at <projects>/<project>/<session>/subagents/agent-<id>.{jsonl,meta.json}, and
 # <project> is the working directory with "/" and "/." both written "-" and "--".
 _PROJECT_RE = re.compile(
-    r"^-home-[^-]+(?:-src-(?P<src>.+?)|--agents-(?P<agents>.+?))(?:--claude-worktrees-implement-(?P<n>\d+))?$")
+    r"^-home-[^-]+(?:-src-(?P<src>.+?)|--agents-(?P<agents>.+?))(?:--claude-worktrees-(?:implement-(?P<n>\d+)|.+))?$")
 
 
 def _axis_of(text: str) -> str | None:
@@ -122,12 +122,13 @@ def read_transcript(path: Path) -> dict:
     """The first user message, model, token totals and wall clock of one transcript.
     A streamed message is written as several lines sharing an id, each with the usage so
     far, so each token kind takes its maximum per id. A cache kind a usage block leaves
-    out counts as none (the API omits it when nothing was cached); a missing block, or an
-    unreadable line that could have held one, leaves the tokens unknown."""
+    out counts as none (the API omits it when nothing was cached). Anything that could
+    hide tokens or time leaves that field unknown, with the reason: an unreadable line, an
+    assistant message with no readable usage, a timestamp that does not parse."""
     per_id: dict[str, dict] = {}
     stamps: list[tuple[datetime, str]] = []
     models: Counter = Counter()
-    first, lost = None, 0
+    first, lost, no_usage, bad_stamps = None, 0, 0, 0
     for n, raw in enumerate(path.read_text(errors="replace").splitlines()):
         if not raw.strip():
             continue
@@ -138,9 +139,10 @@ def read_transcript(path: Path) -> dict:
         ts = obj.get("timestamp")
         if isinstance(ts, str):
             try:
-                stamps.append((datetime.fromisoformat(ts.replace("Z", "+00:00")), ts))
+                when = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                stamps.append((when if when.tzinfo else when.replace(tzinfo=timezone.utc), ts))
             except ValueError:
-                pass
+                bad_stamps += 1
         if first is None and obj.get("type") == "user":
             first = _first_text(obj)
         msg = obj.get("message")
@@ -154,14 +156,18 @@ def read_transcript(path: Path) -> dict:
             mine = per_id.setdefault(str(msg.get("id") or f"line{n}"), dict.fromkeys(TOKEN_KINDS, 0))
             for k in TOKEN_KINDS:
                 mine[k] = max(mine[k], u.get(_USAGE_FIELDS[k], 0))
-    if lost:
-        tokens = {"status": "unknown", "reason": f"{lost} unreadable line(s) in the transcript"}
-    elif not per_id:
-        tokens = {"status": "unknown", "reason": "transcript has no usage block"}
-    else:
-        tokens = {"status": "known", **{k: sum(m[k] for m in per_id.values()) for k in TOKEN_KINDS}}
-    if len(stamps) < 1:
-        wall = {"status": "unknown", "reason": "transcript has no readable timestamp"}
+        else:
+            no_usage += 1
+    why = ([f"{lost} unreadable line(s) in the transcript"] if lost else []) + (
+        [f"{no_usage} assistant message(s) with no readable usage"] if no_usage and per_id else [])
+    if not per_id and not lost:
+        why = ["transcript has no usage block"]
+    tokens = {"status": "unknown", "reason": "; ".join(why)} if why else \
+        {"status": "known", **{k: sum(m[k] for m in per_id.values()) for k in TOKEN_KINDS}}
+    if lost or bad_stamps or not stamps:
+        wall = {"status": "unknown", "reason": (
+            f"{lost} unreadable line(s) in the transcript" if lost else
+            f"{bad_stamps} timestamp(s) do not parse" if bad_stamps else "transcript has no readable timestamp")}
     else:
         lo, hi = min(stamps), max(stamps)
         wall = {"status": "known", "start": lo[1], "end": hi[1], "seconds": round((hi[0] - lo[0]).total_seconds(), 3)}
@@ -191,7 +197,10 @@ def attribute(meta: dict, project: str, first: str | None) -> tuple[dict | None,
     axis = by_desc or by_head
     if axis is None:
         return None, "no review axis in the description or the first message"
-    rm = re.search(r"round[ -]?(\d+)", desc.lower()) or re.search(r"round[ -]?(\d+)", head[:120].lower())
+    if axis != "verification" and "worktrees/review-" in head[:800]:
+        return None, "spec-level review of a review worktree, not of this ticket's PR"
+    rm = re.search(r"round[ -]?(\d+)", desc.lower()) or re.search(r"id prefix:\s*r(\d+)-", head.lower()) \
+        or re.search(r"round[ -]?(\d+)", head[:120].lower())
     return {"repo": repo, "ticket": ticket, "type": axis, "round": int(rm.group(1)) if rm else 1}, ""
 
 
@@ -217,7 +226,11 @@ def read_transcripts(root: Path) -> tuple[list[dict], list[str], int]:
         if not path.exists():
             unattributed.append(f"{label}: meta.json has no transcript beside it")
             continue
-        read = read_transcript(path)
+        try:
+            read = read_transcript(path)
+        except (OSError, UnicodeError) as e:
+            unattributed.append(f"{label}: unreadable transcript ({e.strerror or e})")
+            continue
         key, why = attribute(meta, project, read["first"])
         if key is None:
             unattributed.append(f"{label}: {why}")
@@ -245,52 +258,82 @@ def _merge_cost(runs: list[dict]) -> tuple[dict, str | None]:
     return cost, (models[0] if len(models) == 1 else None)
 
 
-def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> list[dict]:
-    """Fill each row's cost from its transcripts; returns rows for runs no sidecar row holds.
-    A verification run whose round differs from its sidecar's joins that row when the ticket
-    has exactly one verification row. Over-engineering cost stays inside standards."""
+def _norm_repo(name: str) -> str:
+    """Claude Code writes `_` and `.` in a path as `-`, so a project directory cannot tell them apart."""
+    return re.sub(r"[_.]", "-", name)
+
+
+def new_row(row_id, repo, tickets, row_type, rnd, run_id, findings, findings_status, sources, *,
+            model=None, cost=None, mappings=()) -> dict:
+    """A harvested ledger row: the one place its shape is written."""
+    return {
+        "row_id": row_id, "origin": "harvest", "repo": repo, "pr": None, "ticket": tickets[0],
+        "tickets": tickets, "type": row_type, "round": rnd, "run_id": run_id, "model": model,
+        "findings": findings, "cost": cost,
+        "status": {
+            "fields": {"pr": {"status": "unknown", "reason": "not in the sidecars or the transcripts"},
+                       "model": {"status": "known"} if model else
+                       {"status": "unknown", "reason": "not in the sidecars or the transcripts"},
+                       "findings": findings_status},
+            "sources": sources, "mappings": list(mappings)}}
+
+
+def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> tuple[list[dict], list[str]]:
+    """Fill each row's cost from its transcripts; returns (rows for runs no sidecar row holds,
+    the rows that sum more than one transcript). A verification run whose round differs from
+    its sidecar's joins that row when the ticket has exactly one verification row. Two sidecar
+    rows on one key cannot split a transcript between them, so both stay unknown. Over-engineering
+    cost stays inside standards."""
+    canon = {_norm_repo(r["repo"]): r["repo"] for r in rows}
     by_key: dict[tuple, list[dict]] = {}
+    by_type: dict[tuple, list[dict]] = {}
     for r in rows:
         for t in r["tickets"]:
             by_key.setdefault((r["repo"], t, r["type"], r["round"]), []).append(r)
-    by_type: dict[tuple, list[dict]] = {}
-    for r in rows:
         by_type.setdefault((r["repo"], r["ticket"], r["type"]), []).append(r)
     joined: dict[str, list[dict]] = {}
+    shared: dict[str, str] = {}
     extra: list[dict] = []
     for run in runs:
+        run["repo"] = canon.get(_norm_repo(run["repo"]), run["repo"])
         hits = by_key.get((run["repo"], run["ticket"], run["type"], run["round"]), [])
         if not hits and run["type"] == "verification":
             hits = by_type.get((run["repo"], run["ticket"], "verification"), [])
             hits = hits if len(hits) == 1 else []
-        if hits:
+        if len(hits) > 1:
+            for h in hits:
+                shared[h["row_id"]] = (f"{len(hits)} sidecar rows share ({run['repo']}, #{run['ticket']}, "
+                                       f"{run['type']}, round {run['round']}); a transcript cannot be split between them")
+        elif hits:
             joined.setdefault(hits[0]["row_id"], []).append(run)
-            continue
-        extra.append(run)
+        else:
+            extra.append(run)
+    multi = []
     for r in rows:
+        runs_here = joined.get(r["row_id"], [])
         if r["type"] == "over-engineering":
             r["cost"] = {"tokens": dict(_INSIDE_STANDARDS), "wall_clock": dict(_INSIDE_STANDARDS),
                          "usage_delta": dict(_NOT_APPLICABLE)}
-        elif r["row_id"] in joined:
-            r["cost"], r["model"] = _merge_cost(joined[r["row_id"]])
+        elif r["row_id"] in shared:
+            r["cost"] = unknown_cost(shared[r["row_id"]])
+        elif runs_here:
+            r["cost"], r["model"] = _merge_cost(runs_here)
             if r["model"]:
                 r["status"]["fields"]["model"] = {"status": "known"}
-            r["status"]["sources"] += [run["source"] for run in joined[r["row_id"]]]
+            r["status"]["sources"] += [run["source"] for run in runs_here]
+            if len(runs_here) > 1:
+                multi.append(f"{r['row_id']}: {len(runs_here)} transcripts summed")
         else:
             r["cost"] = unknown_cost(missing or "no transcript attributed to this row")
     new_rows = []
     for run in extra:
         cost, model = _merge_cost([run])
-        new_rows.append({
-            "row_id": f"{run['repo']}/{run['ticket']}/{run['type']}/{run['round']}/{run['agent']}",
-            "origin": "harvest", "repo": run["repo"], "pr": None, "ticket": run["ticket"],
-            "tickets": [run["ticket"]], "type": run["type"], "round": run["round"], "run_id": run["agent"],
-            "model": model, "findings": [], "cost": cost,
-            "status": {"fields": {"pr": {"status": "unknown", "reason": "not in the transcript"},
-                                  "model": {"status": "known"} if model else {"status": "unknown", "reason": "no model in the transcript"},
-                                  "findings": {"status": "unknown", "reason": "no findings sidecar for this run: nothing found, or nothing written"}},
-                       "sources": [run["source"]], "mappings": []}})
-    return new_rows
+        new_rows.append(new_row(
+            f"{run['repo']}/{run['ticket']}/{run['type']}/{run['round']}/{run['agent']}", run["repo"],
+            [run["ticket"]], run["type"], run["round"], run["agent"], [],
+            {"status": "unknown", "reason": "no findings sidecar for this run: nothing found, or nothing written"},
+            [run["source"]], model=model, cost=cost))
+    return new_rows, multi
 
 
 def _dict_line(raw: str):
@@ -521,26 +564,21 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
                 sources = [f"{repo_dir}/{name}"]
                 if file_dispositions is not None:
                     sources.append(f"{repo_dir}/dispositions-{group}.jsonl")
-                rows.append({
-                    "row_id": row_id, "origin": "harvest", "repo": repo, "pr": None, "ticket": tickets[0],
-                    "tickets": tickets, "type": row_type, "round": rnd, "run_id": run_id, "model": None,
-                    "findings": findings, "cost": None,
-                    "status": {
-                        "fields": {"pr": {"status": "unknown", "reason": "not in the sidecars"},
-                                   "model": {"status": "unknown", "reason": "not in the sidecars"},
-                                   "findings": findings_status},
-                        "sources": sources, "mappings": row_mappings.get((row_type, rnd), [])}})
+                rows.append(new_row(
+                    row_id, repo, tickets, row_type, rnd, run_id, findings, findings_status, sources,
+                    mappings=row_mappings.get((row_type, rnd), [])))
         for group, table in sorted(dispositions.items()):
             for fid in sorted(table):
                 if (group, fid) not in joined:
                     orphans.append(f"{repo_dir} #{group} `{fid}` ({table[fid].get('outcome')})")
     runs, unattributed, ignored = read_transcripts(transcripts) if transcripts else ([], [], 0)
-    rows += attach_costs(rows, runs, missing)
+    new_rows, multi = attach_costs(rows, runs, missing)
+    rows += new_rows
     rows.sort(key=lambda r: r["row_id"])
     matches: list[dict] = []
     restatements: list[dict] = []
     mark_overlap(rows, matches, restatements)
-    return rows, {"restatements": restatements, "unattributed": sorted(unattributed), "ignored": ignored,
+    return rows, {"multi": multi, "restatements": restatements, "unattributed": sorted(unattributed), "ignored": ignored,
                   "mappings": mappings, "unmapped": unmapped, "matches": matches,
                   "orphans": sorted(set(orphans)), "skipped": sorted(set(skipped)),
                   "unharvested": sorted(unharvested)}
@@ -576,6 +614,9 @@ def review_file_text(facts: dict) -> str:
         "## Dispositions with no finding", bullets(facts["orphans"]), "",
         "## Sidecars not harvested (file name off the harvested patterns)", bullets(facts["unharvested"]), "",
         "## Skipped lines and duplicates", bullets(facts["skipped"]), "",
+        "## Rows with more than one transcript",
+        "Summed. Two or more can be a retried reviewer, or a transcript joined to the wrong row.",
+        bullets(facts["multi"]), "",
         "## Transcripts not attributed",
         f"{facts['ignored']} transcript(s) of other agent types were out of scope and are not listed.",
         bullets(facts["unattributed"]), ""])
@@ -720,6 +761,8 @@ def cmd_report(args) -> int:
     try:
         rows = read_ledger(args.ledger)
         prices = json.loads(args.prices.read_text()) if args.prices else None
+        if prices is not None and not isinstance(prices, dict):
+            raise ValueError(f"{args.prices}: a price table is a JSON object of model -> prices")
     except (FileNotFoundError, ValueError) as e:
         print(f"review_ledger: {e}", file=sys.stderr)
         return 2

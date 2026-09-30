@@ -455,7 +455,63 @@ def build_cost_fixture(root: Path) -> tuple[Path, Path]:
     transcript(tr, p400, "gp", "Standards review #400", "Repo: x", [
         ("2026-09-20T16:00:00.000Z", "m1", usage(500, 500, 500, 500))], agent_type="general-purpose")
     (tr / p400 / "s1" / "subagents" / "agent-bad.meta.json").write_text("")
+    add_edge_cases(cache, tr)
     return cache, tr
+
+
+def add_edge_cases(cache: Path, tr: Path) -> None:
+    """Transcripts the real tree holds that a plain fixture would not: a stated round, a torn or
+    malformed transcript, a spec-level review run from a ticket worktree, two sidecar rows for one
+    key, a repo spelled differently in the cache and the project directory, a worktree that is not
+    `implement-N`, a verification pass whose round differs from its sidecar's, a conflicting axis."""
+    skills = cache / "skills"
+
+    def sidecar(repo_dir: Path, axis: str, n: int, name=None, fid="S1", prefix=""):
+        write_jsonl(repo_dir / (name or f"findings-{axis}-{n}.jsonl"),
+                    [finding(f"{prefix}{fid}", "hard", "a.py", f"Thing {n}", axis=axis)])
+        write_jsonl(repo_dir / f"dispositions-{n}.jsonl", [{"id": f"{prefix}{fid}", "outcome": "fixed", "sha": "e"}])
+
+    def one(project, agent, desc, first, ts, u):
+        transcript(tr, project, agent, desc, first, [(t, f"m{i}", u) for i, (t, u) in enumerate(zip(ts, u))])
+
+    ok = usage(4, 4, 4, 4)
+    sidecar(skills, "standards", 407, "findings-standards-407-r2.jsonl", prefix="r2-")
+    one(wt(SKILLS_PROJ, 407), "prf", "Standards review #407", "Axis: standards. id prefix: r2-",
+        ["2026-09-20T10:00:00Z"], [ok])
+    sidecar(skills, "standards", 408)
+    one(wt(SKILLS_PROJ, 408), "bad", "Standards review #408", "Repo: x",
+        ["2026-09-20T10:00:00Z", "2026-09-20T10:01:00Z"], [ok, {"input_tokens": 1, "output_tokens": None}])
+    sidecar(skills, "standards", 409)
+    one(wt(SKILLS_PROJ, 409), "torn", "Standards review #409", "Repo: x", ["2026-09-20T10:00:00Z"], [ok])
+    with open(tr / wt(SKILLS_PROJ, 409) / "s1" / "subagents" / "agent-torn.jsonl", "a") as f:
+        f.write('{"type": "assistant", "timest')
+    sidecar(skills, "standards", 410)
+    one(wt(SKILLS_PROJ, 410), "tz", "Standards review #410", "Repo: x",
+        ["2026-09-20T10:00:00", "2026-09-20T10:01:00Z"], [ok, ok])
+    sidecar(skills, "spec", 411, fid="P1")
+    one(wt(SKILLS_PROJ, 411), "lvl", "Spec axis spec-9 review",
+        "Axis: **Spec**. Worktree under review: /x/.claude/worktrees/review-spec-9 (detached)",
+        ["2026-09-20T10:00:00Z"], [usage(77, 77, 77, 77)])
+    sidecar(skills, "correctness", 412, fid="C1")
+    write_jsonl(skills / "findings-correctness-412-round1.jsonl", [finding("C1", "hard", "a.py", "Thing 412", axis="correctness")])
+    one(wt(SKILLS_PROJ, 412), "twin", "Correctness review #412", "Repo: x", ["2026-09-20T10:00:00Z"], [ok])
+    write_jsonl(cache / "foo_bar" / "findings-standards-413.jsonl", [finding("S1", "hard", "a.py", "Thing 413")])
+    write_jsonl(cache / "foo_bar" / "dispositions-413.jsonl", [{"id": "S1", "outcome": "fixed", "sha": "e"}])
+    one(wt("-home-u-src-foo-bar", 413), "und", "Standards review #413", "Repo: x", ["2026-09-20T10:00:00Z"], [ok])
+    write_jsonl(cache / "otherrepo" / "findings-standards-414.jsonl", [finding("S1", "hard", "a.py", "Thing 414")])
+    write_jsonl(cache / "otherrepo" / "dispositions-414.jsonl", [{"id": "S1", "outcome": "fixed", "sha": "e"}])
+    one(OTHER_PROJ + "--claude-worktrees-drills-qqrr", "drl", "Standards review #414", "Repo: x",
+        ["2026-09-20T10:00:00Z"], [ok])
+    sidecar(skills, "verify", 415, "findings-verify-415.jsonl", fid="V1")
+    one(wt(SKILLS_PROJ, 415), "vr2", "Verification pass round-2 #415", "Repo: x", ["2026-09-20T10:00:00Z"], [ok])
+    sidecar(skills, "standards", 416)
+    one(wt(SKILLS_PROJ, 416), "cfl", "Standards review #416", "Axis: spec. Repo: x", ["2026-09-20T10:00:00Z"],
+        [usage(66, 66, 66, 66)])
+    sidecar(skills, "standards", 417)
+    d = tr / wt(SKILLS_PROJ, 417) / "s1" / "subagents"
+    d.mkdir(parents=True)
+    (d / "agent-dir.meta.json").write_text(json.dumps({"agentType": "diff-reviewer", "description": "Standards review #417"}))
+    (d / "agent-dir.jsonl").mkdir()
 
 
 class CostHarvestTest(Case):
@@ -541,10 +597,67 @@ class CostHarvestTest(Case):
         self.assertNotIn("agent-gp", section)  # a non diff-reviewer is out of scope, not a failure
 
     def test_unattributed_spend_is_in_no_row(self):
-        total = sum(r["cost"]["tokens"].get("input", 0) for r in self.rows().values())
-        self.assertNotIn(99, [r["cost"]["tokens"].get("input") for r in self.rows().values()])
-        self.assertNotIn(500, [r["cost"]["tokens"].get("input") for r in self.rows().values()])
-        self.assertEqual(total, 5 + 10 + 1 + 7 + 5 + 6 + 3 + 9)
+        seen = [r["cost"]["tokens"].get("input") for r in self.rows().values()]
+        for unattributed in (99, 500, 77, 66):
+            self.assertNotIn(unattributed, seen)
+
+    def tokens_of(self, row_id):
+        return self.cost(row_id)["tokens"]
+
+    def unattributed_section(self):
+        return self.review.read_text().split("## Transcripts not attributed")[1].split("\n## ")[0]
+
+    def test_round_is_read_from_the_id_prefix_the_brief_names(self):
+        self.assertEqual(self.tokens_of("skills/407/standards/2/findings-standards-407-r2")["input"], 4)
+
+    def test_a_message_with_a_malformed_usage_block_makes_tokens_unknown(self):
+        t = self.tokens_of("skills/408/standards/1/findings-standards-408")
+        self.assertEqual(t["status"], "unknown")
+        self.assertIn("usage", t["reason"])
+
+    def test_a_torn_transcript_makes_tokens_unknown(self):
+        t = self.tokens_of("skills/409/standards/1/findings-standards-409")
+        self.assertEqual(t["status"], "unknown")
+        self.assertIn("unreadable", t["reason"])
+
+    def test_naive_and_aware_timestamps_do_not_crash_the_harvest(self):
+        self.assertEqual(self.cost("skills/410/standards/1/findings-standards-410")["wall_clock"]["seconds"], 60)
+
+    def test_a_review_of_a_review_worktree_is_not_charged_to_the_ticket_worktree_it_ran_in(self):
+        row = self.cost("skills/411/spec/1/findings-spec-411")
+        self.assertEqual(row["tokens"]["status"], "unknown")
+        self.assertIn("agent-lvl", self.unattributed_section())
+        self.assertIn("spec-level", self.unattributed_section())
+
+    def test_two_sidecar_rows_for_one_key_both_say_so_rather_than_one_taking_the_cost(self):
+        for rid in ("skills/412/correctness/1/findings-correctness-412",
+                    "skills/412/correctness/1/findings-correctness-412-round1"):
+            t = self.tokens_of(rid)
+            self.assertEqual(t["status"], "unknown", rid)
+            self.assertIn("share", t["reason"])
+        self.assertFalse([r for r in self.rows() if r.startswith("skills/412/") and r.endswith("/agent-twin")])
+
+    def test_a_repo_spelled_with_an_underscore_matches_its_project_directory(self):
+        self.assertEqual(self.tokens_of("foo_bar/413/standards/1/findings-standards-413")["input"], 4)
+        self.assertFalse([r for r in self.rows() if r.startswith("foo-bar/")])
+
+    def test_a_worktree_not_named_implement_n_does_not_make_a_repo_name(self):
+        self.assertEqual(self.tokens_of("otherrepo/414/standards/1/findings-standards-414")["input"], 4)
+        self.assertFalse([r for r in self.rows() if "--claude" in r])
+
+    def test_a_verification_run_joins_the_only_verify_row_when_its_round_differs(self):
+        self.assertEqual(self.tokens_of("skills/415/verification/1/findings-verify-415")["input"], 4)
+
+    def test_description_and_first_message_naming_different_axes_is_listed_not_guessed(self):
+        self.assertEqual(self.tokens_of("skills/416/standards/1/findings-standards-416")["status"], "unknown")
+        self.assertIn("agent-cfl", self.unattributed_section())
+
+    def test_an_unreadable_transcript_is_listed_and_does_not_stop_the_harvest(self):
+        self.assertIn("agent-dir", self.unattributed_section())
+
+    def test_rows_that_sum_several_transcripts_are_listed(self):
+        section = self.review.read_text().split("## Rows with more than one transcript")[1].split("\n## ")[0]
+        self.assertIn("findings-spec-405", section)
 
     def test_reharvest_gives_the_same_ledger(self):
         first = self.ledger.read_text()
@@ -841,6 +954,13 @@ class ReportTest(Case):
         write_jsonl(ledger, [mut])
         result = run("report", "--ledger", ledger, home=self.home)
         self.assertNotIn("No mutation rows", result.stdout)
+
+    def test_a_prices_file_that_is_not_an_object_fails_loud(self):
+        ledger, prices = self.tmp / "in.jsonl", self.tmp / "p.json"
+        write_jsonl(ledger, report_rows())
+        prices.write_text("[1, 2]")
+        result = run("report", "--ledger", ledger, "--prices", prices, home=self.home)
+        self.assertEqual(result.returncode, 2)
 
     def test_missing_ledger_fails_loud(self):
         result = run("report", "--ledger", self.tmp / "absent.jsonl", home=self.home)
