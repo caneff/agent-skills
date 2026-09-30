@@ -110,7 +110,7 @@ def _axis_of(text: str) -> str | None:
 
 
 def _first_text(obj: dict) -> str | None:
-    content = (obj.get("message") or {}).get("content") if isinstance(obj.get("message"), dict) else None
+    content = obj["message"].get("content") if isinstance(obj.get("message"), dict) else None
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -698,20 +698,18 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
     for t in [*(t for t in REVIEW_TYPES if t in present), *sorted(present - set(REVIEW_TYPES))]:
         mine = [r for r in rows if r["type"] == t]
         findings = [f for r in mine for f in r["findings"]]
-        value, unweighted = 0.0, 0
-        for r in mine:
-            v, u = _row_value(r, weights, split)
-            value, unweighted = value + v, unweighted + u
+        per_row = [(r, *_row_value(r, weights, split), _row_dollars(r, prices)) for r in mine]
+        value, unweighted = sum(v for _, v, _, _ in per_row), sum(u for _, _, u, _ in per_row)
         known = [f for f in findings if f["outcome"] != "unknown"]
         rate = lambda outcome: (sum(f["outcome"] == outcome for f in known) / len(known)) if known else None
         inside = t == "over-engineering"
         costs = [r["cost"] for r in mine]
         token_rows = [c["tokens"] for c in costs if c.get("tokens", {}).get("status") == "known"]
         wall_rows = [c["wall_clock"] for c in costs if c.get("wall_clock", {}).get("status") == "known"]
-        priced = [(r, d) for r in mine if (d := _row_dollars(r, prices)) is not None]
+        priced = [(r, v, d) for r, v, _, d in per_row if d is not None]
         # Value per dollar divides only the value of rows whose cost and findings are both
         # known by those rows' dollars: an unknown row is left out, never counted as free.
-        rated = [(r, d) for r, d in priced if r["status"]["fields"]["findings"]["status"] == "known"]
+        rated = [(v, d) for r, v, d in priced if r["status"]["fields"]["findings"]["status"] == "known"]
         rated_dollars = sum(d for _, d in rated)
         types.append({
             "type": t, "rows": len(mine), "findings": len(findings), "value": round(value, 4),
@@ -724,11 +722,10 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
             "cost_note": "inside standards" if inside else None,
             "tokens": None if inside or not token_rows else {k: sum(c[k] for c in token_rows) for k in TOKEN_KINDS},
             "wall_clock_seconds": None if inside or not wall_rows else sum(c["seconds"] for c in wall_rows),
-            "dollars": None if inside or not priced else round(sum(d for _, d in priced), 4),
+            "dollars": None if inside or not priced else round(sum(d for _, _, d in priced), 4),
             "unpriced_rows": 0 if inside else sum(
-                1 for c, r in zip(costs, mine) if c.get("tokens", {}).get("status") == "known"
-                and _row_dollars(r, prices) is None),
-            "value_per_dollar": round(sum(_row_value(r, weights, split)[0] for r, _ in rated) / rated_dollars, 4)
+                1 for r, _, _, d in per_row if r["cost"].get("tokens", {}).get("status") == "known" and d is None),
+            "value_per_dollar": round(sum(v for v, _ in rated) / rated_dollars, 4)
             if not inside and rated_dollars else None})
     notes = []
     if not present & set(MUTATION_TYPES):

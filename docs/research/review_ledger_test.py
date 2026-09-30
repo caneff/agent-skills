@@ -304,12 +304,13 @@ class HarvestTest(Case):
         self.assertNotIn("Long function", section)
         self.assertIn("Jaccard", section)
 
-    def test_cost_fields_are_unknown_never_zero(self):
+    def test_without_transcripts_cost_is_unknown_never_zero_and_oe_is_inside_standards(self):
         for row in self.rows().values():
             for field in ("tokens", "wall_clock"):
                 want = "inside-standards" if row["type"] == "over-engineering" else "unknown"
                 self.assertEqual(row["cost"][field]["status"], want)
                 self.assertNotIn("value", row["cost"][field])
+            self.assertEqual(row["cost"]["usage_delta"]["status"], "not-applicable")
 
     def test_dispositions_with_no_finding_are_listed_not_dropped(self):
         section = self.review.read_text().split("## Dispositions with no finding")[1].split("\n## ")[0]
@@ -401,15 +402,13 @@ OTHER_PROJ = "-home-u-src-otherrepo"
 def build_cost_fixture(root: Path) -> tuple[Path, Path]:
     cache, tr = root / "cache", root / "projects"
     skills, other = cache / "skills", cache / "otherrepo"
-    for n in (400, 401, 402, 405):
-        write_jsonl(skills / f"findings-standards-{n}.jsonl" if n != 405 else skills / "findings-spec-405.jsonl",
-                    [finding("S1" if n != 405 else "P1", "hard", "a.py", f"Thing {n}")])
-        write_jsonl(skills / f"dispositions-{n}.jsonl",
-                    [{"id": "S1" if n != 405 else "P1", "outcome": "fixed", "sha": "e"}])
+    for n in (401, 402):
+        write_jsonl(skills / f"findings-standards-{n}.jsonl", [finding("S1", "hard", "a.py", f"Thing {n}")])
+        write_jsonl(skills / f"dispositions-{n}.jsonl", [{"id": "S1", "outcome": "fixed", "sha": "e"}])
+    write_jsonl(skills / "findings-spec-405.jsonl", [finding("P1", "hard", "a.py", "Thing 405", axis="spec")])
+    write_jsonl(skills / "dispositions-405.jsonl", [{"id": "P1", "outcome": "fixed", "sha": "e"}])
     write_jsonl(skills / "findings-standards-400.jsonl", [
         finding("S1", "hard", "a.py", "Thing 400"), finding("OE1", "judgement", "c.py", "Wrapper")])
-    write_jsonl(skills / "dispositions-400.jsonl", [
-        {"id": "S1", "outcome": "fixed", "sha": "e"}, {"id": "OE1", "outcome": "fixed", "sha": "e"}])
     write_jsonl(skills / "findings-spec-400.jsonl", [finding("P1", "judgement", "d.py", "Spec thing", axis="spec")])
     write_jsonl(skills / "findings-correctness-400.jsonl", [
         finding("C1", "judgement", "e.py", "Corr thing", axis="correctness")])
@@ -807,7 +806,11 @@ class CostReportTest(Case):
             args += ["--prices", pf]
         result = run(*args, home=self.home)
         self.assertEqual(result.returncode, 0, result.stderr)
-        return {t["type"]: t for t in json.loads(result.stdout)["types"]} if fmt == "json" else result.stdout
+        if fmt != "json":
+            return result.stdout
+        out = json.loads(result.stdout)
+        self.notes = out["notes"]
+        return {t["type"]: t for t in out["types"]}
 
     def test_dollars_match_the_hand_computed_fixture(self):
         # A: 15 + 7.5 + 3.75 + 4.5 = 30.75.  B: 2 x 15 = 30.  D has no price, C no tokens.
@@ -835,23 +838,12 @@ class CostReportTest(Case):
         self.assertEqual((std["unknown_cost_rows"], std["unpriced_rows"]), (1, 1))
         spec = self.report()["spec"]
         self.assertEqual(spec["unknown_cost_rows"], 1)
-        # Averaging C in as zero would lower the per-row means; the report carries sums and counts only.
-        self.assertNotIn("mean", " ".join(std))
+        # C is in neither the dollars nor the value-per-dollar divisor (see the tests above).
+        self.assertEqual(std["dollars"], 60.75)
 
     def test_rows_on_an_unpriced_model_are_named_in_a_note(self):
-        notes = json.loads(run("report", "--ledger", self.ledger_with_cost(), "--prices", self.prices_file(),
-                               "--format", "json", home=self.home).stdout)["notes"]
-        self.assertTrue(any(n.startswith("standards: 1 row(s)") for n in notes), notes)
-
-    def ledger_with_cost(self):
-        ledger = self.tmp / "in.jsonl"
-        write_jsonl(ledger, cost_rows())
-        return ledger
-
-    def prices_file(self):
-        pf = self.tmp / "prices.json"
-        pf.write_text(json.dumps(PRICES))
-        return pf
+        self.report()
+        self.assertTrue(any(n.startswith("standards: 1 row(s)") for n in self.notes), self.notes)
 
     def test_no_price_table_means_no_dollars_not_zero_dollars(self):
         std = self.report(None)["standards"]
@@ -885,20 +877,20 @@ class ReportTest(Case):
         self.assertEqual(result.returncode, 0, result.stderr)
         return {t["type"]: t for t in json.loads(result.stdout)["types"]}
 
-    OLD = ("type", "rows", "findings", "value", "unique_share", "leftover_rate", "dispute_rate",
-           "unknown_outcomes", "unweighted", "unknown_finding_rows", "unknown_cost_rows")
+    COUNT_COLUMNS = ("type", "rows", "findings", "value", "unique_share", "leftover_rate", "dispute_rate",
+                     "unknown_outcomes", "unweighted", "unknown_finding_rows", "unknown_cost_rows")
 
-    def old_columns(self, t):
-        return {k: t[k] for k in self.OLD}
+    def count_columns(self, t):
+        return {k: t[k] for k in self.COUNT_COLUMNS}
 
     def test_table_matches_hand_computed_values(self):
         types = self.report()
-        self.assertEqual(self.old_columns(types["standards"]), {
+        self.assertEqual(self.count_columns(types["standards"]), {
             "type": "standards", "rows": 1, "findings": 5, "value": 3.5,
             "unique_share": 0.8, "leftover_rate": 0.25, "dispute_rate": 0.25,
             "unknown_outcomes": 1, "unweighted": 0, "unknown_finding_rows": 1,
             "unknown_cost_rows": 1})
-        self.assertEqual(self.old_columns(types["spec"]), {
+        self.assertEqual(self.count_columns(types["spec"]), {
             "type": "spec", "rows": 1, "findings": 2, "value": 1.5,
             "unique_share": 0.5, "leftover_rate": 0.0, "dispute_rate": 0.0,
             "unknown_outcomes": 0, "unweighted": 1, "unknown_finding_rows": 0,
