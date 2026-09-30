@@ -98,7 +98,6 @@ def unknown_cost(reason: str) -> dict:
 # <project> is the working directory with "/" and "/." both written "-" and "--".
 _PROJECT_RE = re.compile(
     r"^-home-[^-]+(?:-src-(?P<src>.+?)|--agents-(?P<agents>.+?))(?:--claude-worktrees-implement-(?P<n>\d+))?$")
-_REVIEW_AXES = ("standards", "spec", "correctness")
 
 
 def _axis_of(text: str) -> str | None:
@@ -106,7 +105,7 @@ def _axis_of(text: str) -> str | None:
     low = text.lower()
     if "verif" in low:
         return "verification"
-    found = [a for a in _REVIEW_AXES if a in low]
+    found = [a for a in ALL_AXES if a in low]
     return found[0] if len(found) == 1 else None
 
 
@@ -354,17 +353,16 @@ def _reviewer(row_type: str) -> str:
     return "standards" if row_type == "over-engineering" else row_type
 
 
-def mark_overlap(rows: list[dict], matches: list[dict]) -> None:
+def mark_overlap(rows: list[dict], matches: list[dict], restatements: list[dict]) -> None:
     """Set overlap/k on every finding; append each cross-reviewer match to `matches`.
     Findings group by (repo, ticket), because harvested rows carry no PR number.
-    The verification pass is not a reviewer here (ruling 8, #1266): restating a
-    round-1 finding leaves both unique, and a finding it raises new is unique."""
+    The verification pass is not a reviewer here (ruling 8, #1266): it never shares a
+    round-1 finding's credit. A verification finding that matches a finding of another
+    reviewer is a restatement (`overlap: restated`, no credit, listed in `restatements`)
+    and leaves the round-1 finding unique; one it raises new is unique."""
     by_ticket: dict[tuple, list[tuple[dict, dict]]] = {}
     for row in rows:
         for f in row["findings"]:
-            if row["type"] == "verification":
-                f["overlap"], f["k"] = "unique", 1
-                continue
             by_ticket.setdefault((row["repo"], row["ticket"]), []).append((row, f))
     for (repo, ticket), items in sorted(by_ticket.items()):
         parent = list(range(len(items)))
@@ -375,20 +373,30 @@ def mark_overlap(rows: list[dict], matches: list[dict]) -> None:
                 i = parent[i]
             return i
 
+        restated = set()
         for i in range(len(items)):
             for j in range(i + 1, len(items)):
                 (ri, fi), (rj, fj) = items[i], items[j]
-                if _reviewer(ri["type"]) != _reviewer(rj["type"]) and titles_match(fi, fj):
+                if _reviewer(ri["type"]) == _reviewer(rj["type"]) or not titles_match(fi, fj):
+                    continue
+                pair = {"repo": repo, "ticket": ticket, "file": fi["file"],
+                        "a": (ri["type"], fi["id"], fi["title"]), "b": (rj["type"], fj["id"], fj["title"])}
+                if "verification" in (ri["type"], rj["type"]):
+                    restated.add(i if ri["type"] == "verification" else j)
+                    restatements.append(pair)
+                else:
                     parent[find(i)] = find(j)
-                    matches.append({"repo": repo, "ticket": ticket, "file": fi["file"],
-                                    "a": (ri["type"], fi["id"], fi["title"]),
-                                    "b": (rj["type"], fj["id"], fj["title"])})
+                    matches.append(pair)
         clusters: dict[int, set] = {}
         for i, (row, _) in enumerate(items):
-            clusters.setdefault(find(i), set()).add(_reviewer(row["type"]))
-        for i, (_, f) in enumerate(items):
-            k = len(clusters[find(i)])
-            f["overlap"], f["k"] = ("shared" if k > 1 else "unique"), k
+            if row["type"] != "verification":
+                clusters.setdefault(find(i), set()).add(_reviewer(row["type"]))
+        for i, (row, f) in enumerate(items):
+            if row["type"] == "verification":
+                f["overlap"], f["k"] = ("restated" if i in restated else "unique"), 1
+            else:
+                k = len(clusters[find(i)])
+                f["overlap"], f["k"] = ("shared" if k > 1 else "unique"), k
 
 
 def _findings_name(name: str):
@@ -530,8 +538,9 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     rows += attach_costs(rows, runs, missing)
     rows.sort(key=lambda r: r["row_id"])
     matches: list[dict] = []
-    mark_overlap(rows, matches)
-    return rows, {"unattributed": sorted(unattributed), "ignored": ignored,
+    restatements: list[dict] = []
+    mark_overlap(rows, matches, restatements)
+    return rows, {"restatements": restatements, "unattributed": sorted(unattributed), "ignored": ignored,
                   "mappings": mappings, "unmapped": unmapped, "matches": matches,
                   "orphans": sorted(set(orphans)), "skipped": sorted(set(skipped)),
                   "unharvested": sorted(unharvested)}
@@ -545,10 +554,13 @@ def review_file_text(facts: dict) -> str:
     def bullets(items):
         return "\n".join(f"- {i}" for i in items) or "- none"
 
-    matches = "\n".join(
-        f"- {m['repo']} #{m['ticket']} `{m['file']}`: {m['a'][0]} {m['a'][1]} \"{m['a'][2]}\""
-        f" = {m['b'][0]} {m['b'][1]} \"{m['b'][2]}\""
-        for m in sorted(facts["matches"], key=lambda m: (m["repo"], m["ticket"], m["a"], m["b"]))) or "- none"
+    def match_lines(found):
+        return "\n".join(
+            f"- {m['repo']} #{m['ticket']} `{m['file']}`: {m['a'][0]} {m['a'][1]} \"{m['a'][2]}\""
+            f" = {m['b'][0]} {m['b'][1]} \"{m['b'][2]}\""
+            for m in sorted(found, key=lambda m: (m["repo"], m["ticket"], m["a"], m["b"]))) or "- none"
+
+    matches = match_lines(facts["matches"])
     return "\n".join([
         "# Review ledger harvest: review file", "",
         "## Label mappings applied", table(facts["mappings"]), "",
@@ -557,6 +569,10 @@ def review_file_text(facts: dict) -> str:
         f"Rule: same file, and the word sets of the two normalised titles overlap by at least "
         f"{TITLE_MATCH_JACCARD} (Jaccard); matches chain transitively; findings group by ticket.",
         matches, "",
+        f"## Verification restatements ({len(facts['restatements'])})",
+        "A verification finding matching another reviewer's finding (same rule) is a restatement: it earns no "
+        "credit and leaves that finding unique (ruling 8).",
+        match_lines(facts["restatements"]), "",
         "## Dispositions with no finding", bullets(facts["orphans"]), "",
         "## Sidecars not harvested (file name off the harvested patterns)", bullets(facts["unharvested"]), "",
         "## Skipped lines and duplicates", bullets(facts["skipped"]), "",
@@ -614,7 +630,7 @@ def _row_value(row: dict, weights: dict, split: str) -> tuple[float, int]:
     """(weighted value, findings whose severity has no weight) of one row."""
     value, unweighted = 0.0, 0
     for f in row["findings"]:
-        if f["outcome"] not in VALUE_OUTCOMES:
+        if f["outcome"] not in VALUE_OUTCOMES or f["overlap"] == "restated":
             continue
         weight = weights.get(f["severity"])
         if weight is None:

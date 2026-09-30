@@ -342,18 +342,29 @@ class VerificationOverlapTest(Case):
         row = next(r for r in self.rows().values() if r["type"] == kind)
         return next(f for f in row["findings"] if f["id"] == fid)
 
-    def test_restated_round_one_finding_stays_unique_on_both_sides(self):
-        for kind, fid in (("standards", "S1"), ("verification", "V1")):
-            f = self.find(kind, fid)
-            self.assertEqual((f["overlap"], f["k"]), ("unique", 1), fid)
+    def test_restated_round_one_finding_stays_unique(self):
+        f = self.find("standards", "S1")
+        self.assertEqual((f["overlap"], f["k"]), ("unique", 1))
+
+    def test_the_restating_verification_finding_earns_no_credit(self):
+        f = self.find("verification", "V1")
+        self.assertEqual((f["overlap"], f["k"]), ("restated", 1))
+        ledger = self.tmp / "ledger.jsonl"
+        out = json.loads(run("report", "--ledger", ledger, "--format", "json", home=self.home).stdout)
+        verification = next(t for t in out["types"] if t["type"] == "verification")
+        # V1 restates S1 (fixed, judgement 1, would be worth 1); only V2 counts.
+        self.assertEqual(verification["value"], 1.0)
+        standards = next(t for t in out["types"] if t["type"] == "standards")
+        self.assertEqual(standards["value"], 3.0)  # S1 hard, unique, undivided
 
     def test_finding_the_verification_pass_raises_new_keeps_its_credit(self):
         f = self.find("verification", "V2")
         self.assertEqual((f["overlap"], f["k"]), ("unique", 1))
 
-    def test_restatement_is_not_written_as_an_overlap_match(self):
-        section = self.review.read_text().split("## Overlap matches")[1].split("\n## ")[0]
-        self.assertNotIn("Widget leak", section)
+    def test_restatement_is_listed_apart_from_overlap_matches(self):
+        text = self.review.read_text()
+        self.assertNotIn("Widget leak", text.split("## Overlap matches")[1].split("\n## ")[0])
+        self.assertIn("Widget leak", text.split("## Verification restatements")[1].split("\n## ")[0])
 
 
 def usage(inp, out, cw, cr):
