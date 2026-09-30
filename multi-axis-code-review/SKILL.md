@@ -586,7 +586,7 @@ under those ids), the worker's
 claimed dispositions — each a claim to check, never
 settled, and never with an outcome pre-assigned — and the settled decisions.
 It writes `dispositions-<n>.jsonl` in the grammar of `implement/SKILL.md` § Review,
-and its report to `<dir>/review-verify-<n>.md`.
+It also writes its report to `<dir>/review-verify-<n>.md`.
 
 The brief: "Check each round-1 finding id against its fix or its claimed
 disposition. Fail the pass, naming the finding id, on any of five things:
@@ -613,7 +613,9 @@ reachable finding unchecked; (e) a finding of one of
 `implement/SKILL.md` § Review's blocking kinds, whatever its reviewer's
 title said, disposed as `leftover`, or as `filed` with no design named for
 why the fix needs its own ticket. Report every breach beside the finding it
-belongs to."
+belongs to. Keep every line already in the file whose id holds a space — on a
+sweep ticket's PR those are the worker's `<file> <id>` leftovers (#1259) — and
+write your own lines beside them."
 
 ## Why separate axes
 

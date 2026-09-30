@@ -29,6 +29,24 @@ echo side > "$repo/b.txt"; git -C "$repo" add -A; git -C "$repo" commit -qm side
 offbranch=$(git -C "$repo" rev-parse HEAD)
 git -C "$repo" checkout -q main
 
+# The gate asks gh whether the ticket is a sweep (#1259); no network here. The
+# stub answers from $tmp/ticket-title and $tmp/ticket-body, and fails when
+# $tmp/gh-down exists.
+mkdir -p "$tmp/bin"
+cat >"$tmp/bin/gh" <<STUB
+#!/usr/bin/env bash
+[ -e "$tmp/gh-down" ] && { echo "gh: no network" >&2; exit 1; }
+case "\$*" in
+  *--json\ title*) cat "$tmp/ticket-title" ;;
+  *--json\ body*) cat "$tmp/ticket-body" ;;
+  *) exit 1 ;;
+esac
+STUB
+chmod +x "$tmp/bin/gh"
+echo "Ordinary ticket" >"$tmp/ticket-title"
+: >"$tmp/ticket-body"
+export PATH="$tmp/bin:$PATH"
+
 fails=0
 # run <name> <expected-exit> <sha> [<substring the output must contain>]
 run() {
@@ -226,6 +244,38 @@ if [ "$rc" = 1 ]; then
 else
   echo "FAIL: empty waiver — want exit 1, got $rc: $out"; fails=1
 fi
+
+# A sweep ticket's PR (#1259): every item of the ticket is a sidecar leftover or
+# done in the body. One item in neither is refused, by name.
+printf '%s\n' 'Sweep: leftovers from burn r1' >"$tmp/ticket-title"
+printf '## a/one.md\n\n- **P9** (hard) t — clump #1, #1, PR #2: x\n- **P14** (low) t — clump #1, #1, PR #2: y\n' >"$tmp/ticket-body"
+printf '%s\n' '{"id": "a/one.md P9", "outcome": "leftover", "file": "a/one.md", "title": "t", "severity": "hard", "text": "x"}' '{"id": "r1-S1", "outcome": "fixed", "sha": "abc1234"}' >"$sidecar"
+printf '## Decisions made\n\n- **a/one.md P9**: leftover.\n- r1-S1: fixed, abc1234.\n' >"$body"
+out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *"a/one.md P14"* ]] && [[ "$out" != *"a/one.md P9,"* ]]; then
+  echo "PASS: a sweep PR missing one item from sidecar and body fails the gate, naming it"
+else
+  echo "FAIL: sweep item missing — want exit 1 naming 'a/one.md P14', got $rc: $out"; fails=1
+fi
+printf '## Decisions made\n\n- **a/one.md P9**: leftover.\n- **a/one.md P14**: fixed, abc1234.\n- r1-S1: fixed, abc1234.\n' >"$body"
+out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"sweep item"* ]]; then
+  echo "PASS: a sweep PR accounting for every item passes and says so"
+else
+  echo "FAIL: sweep accounted — want exit 0 + 'sweep item', got $rc: $out"; fails=1
+fi
+# An unreadable ticket is not "not a sweep": the gate cannot tell, exit 2.
+touch "$tmp/gh-down"
+out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
+rm "$tmp/gh-down"
+if [ "$rc" = 2 ] && [[ "$out" == *"cannot read ticket"* ]]; then
+  echo "PASS: a ticket gh cannot read fails the gate closed, exit 2"
+else
+  echo "FAIL: gh down — want exit 2 + 'cannot read ticket', got $rc: $out"; fails=1
+fi
+echo "Ordinary ticket" >"$tmp/ticket-title"
+printf '%s\n' '{"id": "S1", "outcome": "fixed", "sha": "abc1234"}' >"$sidecar"
+printf '## Decisions made\n\n- S1: fixed, abc1234.\n' >"$body"
 
 # Off an implement-<n> branch there is no ticket to look a sidecar up by: the
 # gate still passes and says the sidecar was not looked for.

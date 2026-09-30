@@ -10,6 +10,9 @@
 # A non-empty .scratch/ the worker cannot commit and must keep is named in
 # the PR-up report by setting PRE_REPORT_KEEP_SCRATCH="<why>", which passes
 # the check and folds the reason into the pass line itself.
+# On a sweep ticket's PR (title "Sweep: leftovers from ...", read with gh) it
+# also refuses a sweep item that is neither a sidecar leftover nor stated `fixed` in the
+# body (#1259).
 # Usage: bash pre-report-gate.sh <sha> [<tip, default HEAD>]
 # Exit 0 + a pass line to quote in the report; 1 + a one-line reason; 2 on
 # usage or a sha git cannot resolve.
@@ -82,10 +85,10 @@ if [[ "$branch" =~ ^implement-([0-9]+)$ ]]; then
     [ "$vrc" -eq 0 ] || { echo "pre-report gate: verification-check.sh could not run (exit $vrc): $verification" >&2; exit 2; }
   fi
   dispositions_status="$verification"
+  runfile="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../burndown/runfile.py"
   # Nothing to compare the PR body against when no sidecar was written.
   if [ -s "$sidecar" ]; then
     [ -f "$body" ] || { echo "pre-report gate: $sidecar exists but the PR body $body does not — write the body there first (implement/SKILL.md § The PR)" >&2; exit 1; }
-    runfile="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../burndown/runfile.py"
     check=$(python3 "$runfile" check --from "$sidecar" --pr-body "$body" 2>&1)
     check_rc=$?
     [ "$check_rc" -le 1 ] ||
@@ -93,6 +96,25 @@ if [[ "$branch" =~ ^implement-([0-9]+)$ ]]; then
     [ "$check_rc" -eq 0 ] ||
       { echo "pre-report gate: runfile.py check refused — fix the sidecar line or the body's line (the gate has no --allow-stale; that flag is harvest's): $check" >&2; exit 1; }
     dispositions_status="$verification; dispositions agree with the PR body"
+  fi
+  # A sweep ticket's undone items reach the next sweep only as sidecar
+  # leftover lines (#1259): `runfile.py leftover` harvests nothing else. So on
+  # a sweep PR every item of the ticket is a sidecar line or stated `fixed` in the body.
+  # A ticket that cannot be read is not "not a sweep" (exit 2).
+  title=$(gh issue view "$n" --json title --jq .title 2>&1) ||
+    { echo "pre-report gate: cannot read ticket #$n to tell whether it is a sweep (gh: $title)" >&2; exit 2; }
+  if [[ "$title" == "Sweep: leftovers from "* ]]; then
+    [ -f "$body" ] || { echo "pre-report gate: #$n is a sweep ticket, so the PR body $body is needed to check its items — write it there first (implement/SKILL.md § The PR)" >&2; exit 1; }
+    ticket="$reviews/sweep-ticket-$n.md"
+    gh issue view "$n" --json body --jq .body >"$ticket" ||
+      { echo "pre-report gate: cannot read the body of sweep ticket #$n" >&2; exit 2; }
+    sweep_check=$(python3 "$runfile" sweep-check --ticket "$ticket" --pr-body "$body" --from "$sidecar" 2>&1)
+    sweep_rc=$?
+    [ "$sweep_rc" -le 1 ] ||
+      { echo "pre-report gate: runfile.py sweep-check could not run (exit $sweep_rc): $sweep_check" >&2; exit 2; }
+    [ "$sweep_rc" -eq 0 ] ||
+      { echo "pre-report gate: $sweep_check" >&2; exit 1; }
+    dispositions_status="$dispositions_status; every sweep item accounted for"
   fi
 else
   dispositions_status="branch '$branch' is not implement-<n>, dispositions not looked for"

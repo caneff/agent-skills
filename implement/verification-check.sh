@@ -2,7 +2,8 @@
 # Did the verification pass (implement/SKILL.md § Review step 2) happen for
 # ticket <n>? Run from any checkout of the repo: the review cache is keyed on
 # the shared .git's parent name, not the worktree's or the GitHub repo's.
-# Exit 0: dispositions-<n>.jsonl is non-empty, or round 1 provably found
+# Exit 0: dispositions-<n>.jsonl holds a line with a bare id (a sweep PR's
+# own `<file> <id>` lines do not count), or round 1 provably found
 # nothing (all three findings-<axis>-<n>.jsonl exist with no non-blank line,
 # so there was nothing to verify). Exit 1 + one line: the pass is missing.
 # Exit 2: usage or environment. Used by pre-report-gate.sh (worker) and by
@@ -16,7 +17,9 @@ common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
 reviews="$HOME/.cache/agent-reviews/$(basename "$(dirname "$common")")"
 sidecar="$reviews/dispositions-$n.jsonl"
 
-if [ -s "$sidecar" ]; then
+# A sweep PR's worker writes its own `<file> <id>` leftover lines into this
+# file (#1259); an id with a space is that, never the verification pass's.
+if [ -s "$sidecar" ] && grep -Eq '"id": ?"[^" ]+"' "$sidecar"; then
   echo "dispositions-$n.jsonl present"
   exit 0
 fi
@@ -33,7 +36,7 @@ if [ "$empty_round" = 1 ]; then
   exit 0
 fi
 if [ -e "$sidecar" ]; then
-  echo "the dispositions sidecar $sidecar is empty although round 1 has findings — the verification pass recorded no dispositions (implement/SKILL.md § Review step 2)"
+  echo "the dispositions sidecar $sidecar is empty, or holds only a sweep worker's <file> <id> lines, although round 1 has findings — the verification pass recorded no dispositions (implement/SKILL.md § Review step 2)"
 else
   echo "no dispositions sidecar at $sidecar — the verification pass (implement/SKILL.md § Review step 2) has not run; run it before reporting"
 fi

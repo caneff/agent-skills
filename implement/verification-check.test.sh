@@ -35,6 +35,13 @@ printf '{"id": "S1", "outcome": "fixed", "sha": "abc"}\n' >"$rev/dispositions-5.
 t "a non-empty dispositions sidecar passes" 0 "dispositions-5.jsonl present"
 : >"$rev/dispositions-5.jsonl"
 t "empty dispositions beside real findings is refused" 1 "empty"
+# A sweep PR's worker writes `<file> <id>` leftover lines itself (#1259); those
+# are not the verification pass having run.
+printf '{"id": "a/one.md P9", "outcome": "leftover", "file": "a/one.md", "title": "t", "severity": "hard", "text": "x"}\n' >"$rev/dispositions-5.jsonl"
+t "a sidecar holding only worker-written sweep lines is not a verification pass" 1 "verification pass"
+printf '{"id": "S1", "outcome": "fixed", "sha": "abc"}\n' >>"$rev/dispositions-5.jsonl"
+t "a verification line beside the sweep lines passes" 0 "present"
+: >"$rev/dispositions-5.jsonl"
 clear_rev; axes ''
 t "all three findings sidecars empty: round 1 found nothing, passes" 0 "round 1 found nothing"
 : >"$rev/dispositions-5.jsonl"

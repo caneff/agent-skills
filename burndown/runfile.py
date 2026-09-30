@@ -37,6 +37,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frontier  # noqa: E402
+
 CACHE_DIR = "~/.cache/burndown"
 # The one form of the PR-body fetch `leftover --pr-body` reads.
 _FETCH_BODY = "gh pr view <pr> --repo <owner/name> --json body --jq .body"
@@ -518,10 +521,10 @@ _LIST_MARKER = re.compile(r"\s*(?:(?:[-*+]|\d+[.)])\s+)?")
 # S8**`, #1213): a path token before the id, optionally `:<line>` or `#L<line>`.
 # The token carries a `/`, or is a bare file name in backticks: a dotted word
 # (`Node.js`, `v1.2`) is prose.
-_FILE_QUALIFIER = (r"(?:[\w.\-/]*/[\w.\-/]*|[\w.\-/]+(?=`))"
+_FILE_QUALIFIER = (r"(?P<file>[\w.\-/]*/[\w.\-/]*|[\w.\-/]+(?=`))"
                    r"(?::\d+|#L\d+)?[*_`]*\s+[*_`]*")
 _FILE_QUALIFIER = r"(?:" + _FILE_QUALIFIER + r")?"
-_LEAD_ID = re.compile(r"[*_`]*" + _FILE_QUALIFIER + r"(" + _ID
+_LEAD_ID = re.compile(r"[*_`]*" + _FILE_QUALIFIER + r"(?P<id>" + _ID
                       + r")[*_`]*(?![\w-])")
 _ID_SEPARATOR = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+|\s*/\s*")
 _TAIL_ID = re.compile(r"\bsidecar(?:\s+id)?:?\s+[*_`]*(" + _ID + r")",
@@ -545,24 +548,47 @@ def decisions_made(body_lines):
     return out
 
 
-def cited_ids(line):
-    """The ids a Decisions made line cites, and the text after the leading
-    ones: `- S1, P2 and C1: fixed` cites all three. A file-qualified id
-    (`**e2e/scenarios.mjs S8**`) cites the id alone."""
+def _cites(line):
+    """The `(file or None, id)` pairs the leading ids of a Decisions made
+    line cite, and the position where the text after them starts."""
     pos = _LIST_MARKER.match(line).end()
-    ids = []
+    cites = []
     while True:
         token = _LEAD_ID.match(line, pos)
         if token is None:
             break
-        ids.append(token.group(1))
+        cites.append((token.group("file"), token.group("id")))
         pos = token.end()
         sep = _ID_SEPARATOR.match(line, pos)
         if sep is None or _LEAD_ID.match(line, sep.end()) is None:
             break
         pos = sep.end()
+    return cites, pos
+
+
+def cited_ids(line):
+    """`(ids, rest, cites)` of a Decisions made line: the ids it cites, the
+    text after the leading ones, and the `(file or None, id)` pairs of the
+    leading ones. `- S1, P2 and C1: fixed` cites all three. A file-qualified
+    id (`**e2e/scenarios.mjs S8**`) cites the id alone; `cites` keeps its
+    file."""
+    cites, pos = _cites(line)
+    ids = [fid for _, fid in cites]
     ids += [m.group(1) for m in _TAIL_ID.finditer(line)]
-    return ids, line[pos:]
+    return ids, line[pos:], cites
+
+
+def qualified_id(file, fid):
+    """The id a sweep item is recorded under, sidecar and body both:
+    `<file> <id>`. `fid` alone repeats across a sweep's source PRs."""
+    return f"{file} {fid}"
+
+
+def split_qualified(key):
+    """`(file or None, id)` of a finding id: the inverse of `qualified_id`.
+    An id never holds a space, so the last one splits a `<file> <id>`."""
+    file, _, fid = key.rpartition(" ")
+    return (file or None), fid
 
 
 def stated_outcome(rest):
@@ -593,12 +619,17 @@ def body_records(body_lines):
     nothing."""
     records = {}
     for n, line in decisions_made(body_lines) or []:
-        ids, rest = cited_ids(line)
+        ids, rest, cites = cited_ids(line)
         words = {normal_outcome(w) for w in
                  re.findall(r"\b" + _OUTCOME_WORD + r"\b", rest, re.IGNORECASE)}
         if ids and words:
-            for fid in ids:
-                records.setdefault(fid, []).append(
+            # A file-qualified citation is recorded under its `<file> <id>`
+            # as well as the bare id: a sweep item's sidecar line is keyed
+            # by the qualified form, since a bare id repeats across files.
+            keys = ids + [qualified_id(file, fid) for file, fid in cites
+                          if file]
+            for key in keys:
+                records.setdefault(key, []).append(
                     (n, stated_outcome(rest), words))
     return records
 
@@ -680,13 +711,80 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
                 f"{obj['id']}b — implement/SKILL.md § Review's split "
                 "grammar), each with its own sidecar line; otherwise pass "
                 "--allow-stale")
+    # A sweep item's sidecar line is keyed `<file> <id>`; the bare id a
+    # qualified citation is also recorded under is not a second finding.
+    qualified = {split_qualified(h)[1] for h in held}
     for fid, found in records.items():
         body_n, stated, _ = found[-1]
-        if stated == "leftover" and fid not in held:
+        if stated == "leftover" and fid not in held | qualified:
             raise RunFileError(
                 f"{body_path}:{body_n} records {fid} as a leftover, but "
                 f"{sidecar_path} has no line for it — append it in § "
                 "Review's leftover grammar, or pass --allow-stale")
+
+
+_SWEEP_FILE = re.compile(r"##\s+(.+?)\s*$")
+_SWEEP_ITEM = re.compile(r"\s*[-*+]\s+\*\*(.+?)\*\*")
+
+
+def sweep_items(ticket_text):
+    """A sweep ticket's items as `<file> <id>`, in order: the grammar
+    `sweep.py render_body` emits — one `## <file>` section per file, one
+    `- **<id>**` bullet per item. A fenced block is skipped (`frontier.unfenced`), and the
+    `## Blocked by` declaration is not a file. A bullet that kept its own
+    file's prefix reads bare."""
+    items, file = [], None
+    for _, line in frontier.unfenced(ticket_text.splitlines()):
+        heading = _SWEEP_FILE.match(line)
+        if heading:
+            file = heading.group(1).strip("`")
+            if file.lower() == "blocked by":
+                file = None
+            continue
+        item = _SWEEP_ITEM.match(line)
+        if item and file:
+            bare = item.group(1).removeprefix(f"{file} ")
+            items.append(qualified_id(file, bare))
+    return items
+
+
+def refuse_unaccounted_sweep_items(ticket_path, body_path, sidecar_path):
+    """A sweep PR's worker accounts for every item of the sweep ticket: a
+    `leftover` line in the sidecar under its `<file> <id>`, or a
+    Decisions made line in the PR body stating it `fixed` (#1259).
+    An item in neither is one the next sweep never sees, since
+    `leftover` harvests the sidecar and nothing else. Refused by item name."""
+    try:
+        with open(ticket_path) as fh:
+            items = sweep_items(fh.read())
+        with open(body_path) as fh:
+            records = body_records(fh.read().splitlines())
+    except OSError as exc:
+        raise RunFileError(f"could not read {exc.filename}: {exc.strerror}"
+                           ) from exc
+    if not items:
+        raise RunFileError(
+            f"{ticket_path} holds no `## <file>` / `- **<id>**` sweep items "
+            "— it is not a sweep ticket, or its body was not fetched whole")
+    held = set()
+    if os.path.exists(sidecar_path):
+        held = {obj["id"] for _, obj in read_dispositions(sidecar_path)}
+    missing = []
+    for item in items:
+        if item in held:
+            continue
+        found = records.get(item)
+        if found:
+            if found[-1][1] == "fixed":
+                continue
+        missing.append(item)
+    if missing:
+        raise RunFileError(
+            "sweep item(s) in neither the sidecar nor the PR body as done: "
+            + ", ".join(missing) + f" — write each undone one as a "
+            f"`leftover` line in {sidecar_path} under its `<file> <id>`, "
+            "and cite it the same way in Decisions made "
+            "(implement/SKILL.md § Review)")
 
 
 _SIDECAR_NAME = re.compile(r"dispositions-([0-9]+)\.jsonl")
@@ -1060,6 +1158,18 @@ def main(argv):
     chk.add_argument("--pr-body", required=True, metavar="PATH",
                      help="the PR's body")
 
+    swp = subs.add_parser(
+        "sweep-check",
+        help="a sweep PR's pre-\"PR up\" gate (#1259): every item of the "
+             "sweep ticket is a sidecar line or done in the PR body")
+    swp.add_argument("--ticket", required=True, metavar="PATH",
+                     help="the sweep ticket's body")
+    swp.add_argument("--pr-body", required=True, metavar="PATH",
+                     help="the PR's body")
+    swp.add_argument("--from", dest="from_path", required=True,
+                     metavar="PATH",
+                     help="the dispositions sidecar; may be absent or empty")
+
     out = subs.add_parser("show", help="print the run file")
     out.add_argument("run_id")
 
@@ -1094,6 +1204,10 @@ def main(argv):
             read_leftover_lines(args.from_path)
             refuse_disagreeing_pr_body(args.from_path, args.pr_body)
             print(f"{args.from_path} and {args.pr_body} agree")
+        elif args.command == "sweep-check":
+            refuse_unaccounted_sweep_items(args.ticket, args.pr_body,
+                                           args.from_path)
+            print(f"every sweep item in {args.ticket} is accounted for")
         elif args.command == "job":
             state = ("running" if args.cores is not None
                      else "none" if args.none else "done")

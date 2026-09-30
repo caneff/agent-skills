@@ -1888,6 +1888,135 @@ def test_stated_outcome_reads_no_outcome_from_a_line_with_no_colon():
     assert runfile.stated_outcome("S1: fixed") == "fixed"
 
 
+SWEEP_TICKET = """Some preamble.
+
+## implement/SKILL.md
+
+- **P9** (hard) title nine — clump #10, #10, PR #11: text nine
+- **P14** (low) title fourteen — clump #10, #10, PR #11: text fourteen
+
+## burndown/runfile.py
+
+- **P9** (low) same id, other file — clump #12, #12, PR #13: text
+"""
+
+
+def sweep_leftover(file, id_):
+    return {"id": f"{file} {id_}", "outcome": "leftover", "file": file,
+            "title": "t", "severity": "hard", "text": "x"}
+
+
+def sweep_refusal(sidecar_lines, body_text):
+    sidecar = sidecar_of(*sidecar_lines)
+    ticket = os.path.join(cache(), "sweep-ticket.md")
+    with open(ticket, "w") as fh:
+        fh.write(SWEEP_TICKET)
+    try:
+        runfile.refuse_unaccounted_sweep_items(ticket, pr_body(body_text),
+                                               sidecar)
+    except runfile.RunFileError as exc:
+        return str(exc)
+    return None
+
+
+def test_sweep_items_are_read_file_qualified_from_the_sweep_grammar():
+    assert runfile.sweep_items(SWEEP_TICKET) == [
+        "implement/SKILL.md P9", "implement/SKILL.md P14",
+        "burndown/runfile.py P9"]
+
+
+def test_a_sweep_pr_leaving_an_item_out_of_sidecar_and_body_is_refused_by_name():
+    got = sweep_refusal(
+        [sweep_leftover("implement/SKILL.md", "P9")],
+        "## Decisions made\n\n- **implement/SKILL.md P9**: leftover.\n"
+        "- **burndown/runfile.py P9**: fixed, abc1234.\n")
+    assert got is not None and "implement/SKILL.md P14" in got, got
+    assert "burndown/runfile.py P9" not in got, got
+
+
+def test_a_sweep_pr_accounting_for_every_item_is_accepted():
+    got = sweep_refusal(
+        [sweep_leftover("implement/SKILL.md", "P9"),
+         sweep_leftover("implement/SKILL.md", "P14")],
+        "## Decisions made\n\n- **implement/SKILL.md P9**: leftover.\n"
+        "- **implement/SKILL.md P14**: leftover.\n"
+        "- **burndown/runfile.py P9**: fixed, abc1234.\n")
+    assert got is None, got
+
+
+def test_an_item_body_line_that_says_not_fixed_is_not_done():
+    # C1: only a stated `fixed` outcome accounts for an item without a sidecar
+    # line; an outcome word elsewhere on the line does not.
+    for said in ("not fixed, deferred", "disputed: unreachable",
+                 "left undone; will be filed later"):
+        got = sweep_refusal(
+            [sweep_leftover("implement/SKILL.md", "P9")],
+            "## Decisions made\n\n- **implement/SKILL.md P9**: leftover.\n"
+            f"- **implement/SKILL.md P14**: {said}\n"
+            "- **burndown/runfile.py P9**: fixed, abc1234.\n")
+        assert got is not None and "implement/SKILL.md P14" in got, (said, got)
+
+
+def test_a_ticket_with_no_parsable_item_is_refused_not_passed():
+    ticket = os.path.join(cache(), "empty-ticket.md")
+    with open(ticket, "w") as fh:
+        fh.write("Just prose, no sweep sections.\n")
+    try:
+        runfile.refuse_unaccounted_sweep_items(
+            ticket, pr_body("## Decisions made\n\n- S1: fixed.\n"),
+            sidecar_of({"id": "S1", "outcome": "fixed", "sha": "abc1234"}))
+    except runfile.RunFileError as exc:
+        assert "holds no" in str(exc), exc
+    else:
+        raise AssertionError("an item-less ticket was accepted")
+
+
+def test_sweep_items_read_spaced_headings_star_bullets_and_skip_fences():
+    text = ("## my notes.md\n\n* **P1** (low) t\n  - **P2** (low) t\n\n"
+            "```\n## fenced.md\n- **P3** (low) t\n```\n\n"
+            "## Blocked by\n\nNone — can start immediately.\n")
+    assert runfile.sweep_items(text) == ["my notes.md P1", "my notes.md P2"]
+
+
+def test_a_tilde_fence_holding_a_backtick_line_does_not_end_the_ticket():
+    # S4: frontier's fence reader, not a second copy of it.
+    text = ("## a.md\n\n~~~\n```\n~~~\n\n- **P1** (low) t\n")
+    assert runfile.sweep_items(text) == ["a.md P1"]
+
+
+def test_a_bullet_keeping_its_own_files_prefix_is_read_bare():
+    assert runfile.sweep_items(
+        "## a/one.md\n\n- **a/one.md P9** (low) t\n") == ["a/one.md P9"]
+
+
+def test_a_same_id_fixed_under_another_file_does_not_account_for_an_item():
+    got = sweep_refusal(
+        [sweep_leftover("implement/SKILL.md", "P14")],
+        "## Decisions made\n\n- **burndown/runfile.py P9**: fixed, abc1234.\n"
+        "- **implement/SKILL.md P14**: leftover.\n")
+    assert got is not None and "implement/SKILL.md P9" in got, got
+
+
+def test_two_sweep_leftovers_are_harvested_under_their_own_files():
+    sidecar = sidecar_of(sweep_leftover("implement/SKILL.md", "P9"),
+                         sweep_leftover("burndown/runfile.py", "P9"))
+    body = pr_body("## Decisions made\n\n- **implement/SKILL.md P9**: "
+                   "leftover.\n- **burndown/runfile.py P9**: leftover.\n")
+    run, added = runfile.leftover("burn-1", 901, 950, sidecar,
+                                  root=landed_root(), pr_body=body)
+    assert added == ["implement/SKILL.md P9", "burndown/runfile.py P9"], added
+    assert [i["file"] for i in run["leftovers"]] == [
+        "implement/SKILL.md", "burndown/runfile.py"]
+
+
+def test_a_qualified_sidecar_id_the_body_records_fixed_is_refused_until_rewritten():
+    sidecar = sidecar_of(sweep_leftover("implement/SKILL.md", "P9"))
+    body = pr_body("## Decisions made\n\n- **implement/SKILL.md P9**: "
+                   "fixed, abc1234.\n")
+    got = refusal_of(sidecar, landed_root(), body)
+    assert "implement/SKILL.md P9" in got and "'fixed'" in got, got
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     try:
