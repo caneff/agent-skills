@@ -900,7 +900,10 @@ def test_fetch_parent_with_no_parent_anywhere_is_none():
 
 
 def test_fetch_parent_does_not_read_a_failed_call_as_no_parent():
-    run = gh_answers({"repos/owner/repo/issues/491/parent": F.FrontierError("gh: HTTP 502")})
+    # The fallback's target is answerable, so a 502 read as a 404 returns a
+    # parent and trips the assertion below instead of a missing-key error.
+    run = gh_answers({"repos/owner/repo/issues/491/parent": F.FrontierError("gh: HTTP 502"),
+                      "repos/owner/repo/issues/483": spec_parent(483)})
     try:
         F.fetch_parent("owner/repo", issue(491, body="Part of #483"), run=run)
     except F.FrontierError as exc:
