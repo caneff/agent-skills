@@ -171,7 +171,10 @@ def git_listing(root):
     ignored, minus `SKIP_DIRS`. A non-zero exit, or git skipping an unreadable
     directory, raises `ClosureError`."""
     # A caller's Git environment must not redirect this scan to its repo.
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    # GIT_CONFIG_* redirects nothing and is kept: a `safe.directory` passed
+    # that way is what lets the scan read a checkout owned by another user.
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("GIT_") or k.startswith("GIT_CONFIG")}
     env["LC_ALL"] = "C"  # the unreadable-directory warning below is matched by text
     # The --exclude arguments are not redundant with the walk's SKIP_DIRS
     # filter: for --others they keep git from opening an unreadable

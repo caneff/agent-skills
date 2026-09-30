@@ -18,6 +18,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import closure as C  # noqa: E402
+from unittest import mock  # noqa: E402
 
 CLOSURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "closure.py")
 
@@ -729,20 +730,19 @@ def fake_git_on_path(script):
     return bin_dir
 
 
-def refused_with_path(root, path):
-    saved = os.environ["PATH"]
-    os.environ["PATH"] = path
+def resolve_with_path(root, path):
+    """`(closure, refusal)` of resolving the shared file with `PATH` set to
+    `path`: exactly one of the two is None."""
     try:
-        return C.resolve_closure(root, ["examples/_shared/line-kind.js"]), None
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            return C.resolve_closure(root, ["examples/_shared/line-kind.js"]), None
     except C.ClosureError as exc:
         return None, str(exc)
-    finally:
-        os.environ["PATH"] = saved
 
 
 def test_a_missing_git_is_not_an_empty_closure():
     root = repo(SHARED)
-    got, refused = refused_with_path(root, "/nonexistent")
+    got, refused = resolve_with_path(root, "/nonexistent")
     assert refused is not None, got
     assert "cannot read" in refused, refused
 
@@ -750,7 +750,7 @@ def test_a_missing_git_is_not_an_empty_closure():
 def test_a_git_that_fails_silently_is_not_an_empty_closure():
     # Exit status alone: no stderr for the other clause to catch.
     root = repo(SHARED)
-    got, refused = refused_with_path(root, fake_git_on_path("exit 1"))
+    got, refused = resolve_with_path(root, fake_git_on_path("exit 1"))
     assert refused is not None, got
     assert "git ls-files" in refused, refused
 
@@ -761,7 +761,7 @@ def test_a_git_that_warns_on_stderr_but_exits_zero_still_lists_its_files():
     root = repo(SHARED)
     real = shutil.which("git")
     path = fake_git_on_path(f"echo 'warning: noisy config' >&2\nexec {real} \"$@\"")
-    got, refused = refused_with_path(root, path)
+    got, refused = resolve_with_path(root, path)
     assert refused is None, refused
     assert "examples/skyscraper/component.js" in got, got
 
@@ -769,7 +769,7 @@ def test_a_git_that_warns_on_stderr_but_exits_zero_still_lists_its_files():
 def test_the_scan_pins_git_to_the_c_locale():
     # The unreadable-directory guard matches git's English warning text.
     root = repo(SHARED)
-    got, refused = refused_with_path(
+    got, refused = resolve_with_path(
         root, fake_git_on_path('[ "$LC_ALL" = C ] || exit 1\nexec ' + shutil.which("git") + ' "$@"'))
     assert refused is None, refused
 
@@ -778,18 +778,25 @@ def test_a_callers_git_environment_does_not_redirect_the_scan():
     # A hook or rebase exports GIT_DIR for its own repo; the scan is of `root`.
     other = repo({"unrelated.js": "x\n"})
     root = repo(SHARED)
-    saved = {k: os.environ.get(k) for k in ("GIT_DIR", "GIT_WORK_TREE")}
-    os.environ["GIT_DIR"] = os.path.join(other, ".git")
-    os.environ["GIT_WORK_TREE"] = other
-    try:
+    redirect = {"GIT_DIR": os.path.join(other, ".git"), "GIT_WORK_TREE": other}
+    with mock.patch.dict(os.environ, redirect):
         got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
     assert "examples/skyscraper/component.js" in got, got
+
+
+def test_a_callers_git_config_environment_still_reaches_the_scan_1254():
+    # #1209 C7: GIT_CONFIG_* repoints nothing, and stripping it drops settings
+    # the scan needs (a `safe.directory` passed this way). An excludesFile
+    # passed the same way shows it arrived.
+    root = repo(SHARED)
+    ignores = os.path.join(root, "..ignores")
+    with open(ignores, "w") as fh:
+        fh.write("component.js\n")
+    config = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.excludesFile",
+              "GIT_CONFIG_VALUE_0": ignores}
+    with mock.patch.dict(os.environ, config):
+        got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
+    assert "examples/skyscraper/component.js" not in got, got
 
 
 def test_an_unreadable_gitignored_directory_does_not_break_the_resolve():
@@ -801,6 +808,21 @@ def test_an_unreadable_gitignored_directory_does_not_break_the_resolve():
         got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
     finally:
         os.chmod(ignored, 0o755)
+    assert "examples/skyscraper/component.js" in got, got
+
+
+def test_an_unreadable_skipped_directory_does_not_break_the_resolve_1254():
+    # #1209 P6: the .gitignore case above also passes a design that filters
+    # git's list afterwards with no --exclude, because git never opens an
+    # ignored directory. A SKIP_DIRS directory no .gitignore names is opened
+    # unless the --exclude arguments keep git out of it.
+    root = repo({**SHARED, "node_modules/pkg/index.js": "x\n"})
+    skipped = os.path.join(root, "node_modules")
+    os.chmod(skipped, 0o000)
+    try:
+        got = C.resolve_closure(root, ["examples/_shared/line-kind.js"])
+    finally:
+        os.chmod(skipped, 0o755)
     assert "examples/skyscraper/component.js" in got, got
 
 
