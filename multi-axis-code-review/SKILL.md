@@ -204,6 +204,25 @@ when all three sidecars exist and are empty, so a clean round that left no
 file would be refused at "PR up". The safe direction stays: an absent sidecar
 is refused, because it cannot be told from a reviewer that never ran.
 
+**Every review ends with `append`** (#1268; this is the one home for the rule,
+and the `diff-reviewer` definition and § 6 point here). Once its sidecar is
+written, each axis reviewer runs, from any directory:
+
+```
+python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type <axis> --round <k>
+```
+
+`<repo>` is the review cache's directory name (the `<repo>` of `<dir>`), `<n>`
+the ticket, `<axis>` `standards`, `spec` or `correctness` (a `standards` append
+also writes the `OE` findings' row), `<k>` the round, 1 unless the prompt's id
+prefix says `r2-` or later. It writes the ledger row for that run, cost read
+from the reviewer's subagent transcript up to that call. It exits non-zero,
+naming what is missing, when that transcript has no usage or the findings
+sidecar is absent, and then writes nothing. A refusal is reported, never
+skipped: the reviewer puts the command's stderr on the first line of its
+summary, and the caller repeats it in its own report. A caller whose summary
+shows neither a refusal nor the `appended` line sends the reviewer back.
+
 **Expand `<dir>` yourself before writing the prompt**, and prune anything
 untouched for 14 days, the same folder style and retention `job-run` gives
 `~/.cache/agent-jobs` — this sidecar lives in the same directory as the
@@ -587,6 +606,8 @@ claimed dispositions — each a claim to check, never
 settled, and never with an outcome pre-assigned — and the settled decisions.
 It writes `dispositions-<n>.jsonl` in the grammar of `implement/SKILL.md` § Review,
 It also writes its report to `<dir>/review-verify-<n>.md`.
+It ends with `append --type verification`, as § 4's *Every review ends with
+`append`* says, once its sidecar and dispositions are written.
 
 The brief: "Check each round-1 finding id against its fix or its claimed
 disposition. Fail the pass, naming the finding id, on any of five things:
