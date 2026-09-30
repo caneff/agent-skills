@@ -287,10 +287,11 @@ def _norm_repo(name: str) -> str:
 
 
 def new_row(row_id, repo, tickets, row_type, rnd, run_id, findings, findings_status, sources, *,
-            model=None, cost=None, mappings=()) -> dict:
-    """A harvested ledger row: the one place its shape is written."""
+            model=None, cost=None, mappings=(), origin="harvest", extra=None) -> dict:
+    """A ledger row: the one place its shape is written. `extra` holds the keys only one kind
+    of row carries (a mutation row's `mutation_id` and `outcome`)."""
     return {
-        "row_id": row_id, "origin": "harvest", "repo": repo, "pr": None, "ticket": tickets[0],
+        "row_id": row_id, "origin": origin, "repo": repo, "pr": None, "ticket": tickets[0],
         "tickets": tickets, "type": row_type, "round": rnd, "run_id": run_id, "model": model,
         "findings": findings, "cost": cost,
         "status": {
@@ -298,7 +299,8 @@ def new_row(row_id, repo, tickets, row_type, rnd, run_id, findings, findings_sta
                        "model": {"status": "known"} if model else
                        {"status": "unknown", "reason": "not in the sidecars or the transcripts"},
                        "findings": findings_status},
-            "sources": sources, "mappings": list(mappings)}}
+            "sources": sources, "mappings": list(mappings)},
+        **(extra or {})}
 
 
 def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> tuple[list[dict], dict]:
@@ -777,8 +779,8 @@ def cmd_append_mutation(args) -> int:
                   args.mutation_id, [], {"status": "not-applicable", "reason": "a mutation row holds no findings"},
                   [], cost={"tokens": {"status": "not-applicable",
                                        "reason": "a mutation's tokens stay with the correctness reviewer, or with the worker for worker-mutation"},
-                            "wall_clock": {"status": "known", "seconds": seconds}})
-    row.update(origin="append", mutation_id=args.mutation_id, outcome=outcome)
+                            "wall_clock": {"status": "known", "seconds": seconds}},
+                  origin="append", extra={"mutation_id": args.mutation_id, "outcome": outcome})
     try:
         update_ledger(args.ledger, lambda ledger: ledger.update({row_id: row}))
     except ValueError as e:
