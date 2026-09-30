@@ -84,11 +84,17 @@ mod tests {
         let cases: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         // A fixture that parsed to nothing would pass the loop below for no reason.
         assert!(cases.len() >= 20, "fixture holds only {} cases", cases.len());
-        assert!(cases.iter().any(|c| c["target"].is_null()), "fixture has no prose case");
-        assert!(cases.iter().any(|c| c["target"].is_string()), "fixture has no code case");
+        assert!(cases.iter().any(|c| c.get("target").is_some_and(|t| t.is_null())), "fixture has no prose case");
+        assert!(cases.iter().any(|c| c.get("target").is_some_and(|t| t.is_string())), "fixture has no code case");
         for c in &cases {
             let body = c["body"].as_str().expect("case body is a string");
-            assert_eq!(first_code_target(body).as_deref(), c["target"].as_str(), "{body:?}");
+            // `target` is required and is a string or null: a missing or mistyped one is not "expects prose".
+            let want = match c.get("target") {
+                Some(serde_json::Value::Null) => None,
+                Some(serde_json::Value::String(t)) => Some(t.as_str()),
+                other => panic!("case {body:?} has a bad target: {other:?}"),
+            };
+            assert_eq!(first_code_target(body).as_deref(), want, "{body:?}");
         }
     }
 
