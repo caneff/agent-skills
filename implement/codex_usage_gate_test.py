@@ -42,7 +42,7 @@ for line in sys.stdin:
 """
 
 
-def run_live(stale_cache, limits):
+def run_live(stale_cache, limits, *args):
     """A stale cache with a fake `codex app-server` answering `limits` (or nothing).
 
     Returns (exit status, stdout, the cache file's content after the run)."""
@@ -59,7 +59,7 @@ def run_live(stale_cache, limits):
         env = {"CODEX_HOME": d, "PATH": bindir}
         if limits is not None:
             env["FAKE_LIMITS"] = json.dumps(limits)
-        p = subprocess.run([sys.executable, GATE], env=env, capture_output=True, text=True)
+        p = subprocess.run([sys.executable, GATE, *args], env=env, capture_output=True, text=True)
         return p.returncode, p.stdout, json.load(open(path))
 
 
@@ -91,15 +91,6 @@ check("over 100", run(cache(103)), 20)
 # The worst window governs.
 check("secondary governs",
       run(cache(10, secondary={"usedPercent": 100, "resetsAt": time.time() + DAY})), 20)
-# `--percent` prints the reading alone, for the review ledger's before/after rows (#1269),
-# and `unknown` (exit 30) where the gate itself would be 30 — never a number it did not read.
-check("percent", run(cache(44), "--percent"), 0, "44")
-assert run(cache(44), "--percent")[1] == "44\n", run(cache(44), "--percent")
-assert run(cache(103), "--percent")[1] == "103\n"
-assert run(cache(44.5), "--percent")[1] == "44.5\n"
-check("percent, capped still reads", run(cache(100), "--percent"), 0, "100")
-assert run(None, "--percent") == (30, "unknown\n"), run(None, "--percent")
-assert run(cache(100, resets=time.time() - 60), "--percent") == (30, "unknown\n")
 # Absent or malformed is never headroom.
 check("no cache", run(None), 30)
 check("stale cache", run(cache(5, fetched=time.time() - 3600)), 30)
@@ -129,3 +120,21 @@ status, out, after = run_live(stale, None)
 check("refresh returns nothing", (status, out), 30)
 assert after == stale, f"a failed refresh must leave the cache alone: {after}"
 print("ok")
+
+# `--percent` (#1269) prints the worst window's percentage and reset time from a live read,
+# never the cache: a cached 10% must not stand in for the 12% the pass just spent.
+fresh = cache(10)
+reset = int(time.time() + 4 * DAY)
+live = {"primary": {"usedPercent": 12.5, "resetsAt": reset}, "secondary": None}
+status, out, _ = run_live(fresh, live, "--percent")
+assert (status, out) == (0, f"12.5 {reset}\n"), (status, out)
+# The worst window governs, and its reset time names it.
+live2 = {"primary": {"usedPercent": 5, "resetsAt": reset}, "secondary": {"usedPercent": 30, "resetsAt": reset + DAY}}
+assert run_live(fresh, live2, "--percent")[:2] == (0, f"30 {reset + DAY}\n")
+# A fresh-looking cache with no live answer is unknown, never the cached number.
+status, out, _ = run_live(fresh, None, "--percent")
+assert (status, out) == (30, "unknown\n"), (status, out)
+assert run_live(fresh, {"primary": {"usedPercent": 5, "resetsAt": time.time() - 60}, "secondary": None},
+                "--percent")[:2] == (30, "unknown\n")
+assert run(None, "--percent") == (30, "unknown\n")
+print("ok percent")

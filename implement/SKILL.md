@@ -716,8 +716,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
    Run `codex login status` first. Not logged in, no `codex@openai-codex`
    entry in `~/.claude/plugins/installed_plugins.json`, or the pass errors:
-   comment `Codex pass skipped: <why>` on the PR and go to step 4 — a skip
-   adds no trial row.
+   comment `Codex pass skipped: <why>` on the PR, append its ledger skip row
+   (below), and go to step 4 — a skip adds no trial row.
 
    Then check the plan's usage before every launch of this block (#1204) —
    the gate, and the second and third passes, each a launch:
@@ -727,7 +727,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    message of its own, then launch. Exit 20 (capped) or exit 30 (no fresh,
    readable reading): comment `Codex pass skipped: <printed line>` on the PR,
    launch nothing, write no refused duration row — no run existed to refuse —
-   and go to step 4; on the second or third pass, the pass already collected
+   append its ledger skip row (below), and go to step 4; on the second or third pass, the pass already collected
    stands and its dispositions carry on to step 4. An unreadable cache is exit 30, never headroom.
 
    From the worker's workspace, fetch the ticket yourself — you did
@@ -807,11 +807,13 @@ The controller merges on a repo Chris owns; Chris reads it after via
    record="$dir/codex-adversarial-<n>-$phase.json"
    plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
    cd <the PR's workspace> && git fetch origin
+   usage_before=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)
    launch_sha=$(git rev-parse HEAD); started=$(date -Is)
    node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1
    status=$?
-   printf '{"ticket": <n>, "phase": "%s", "status": %d, "launch_sha": "%s", "completion_sha": "%s", "body_sha256": "%s", "started": "%s", "completed": "%s"}\n' \
-     "$phase" "$status" "$launch_sha" "$(git rev-parse HEAD)" "$(sha256sum "$body_file" | cut -d" " -f1)" "$started" "$(date -Is)" >"$record"
+   usage_after=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)
+   printf '{"ticket": <n>, "phase": "%s", "status": %d, "launch_sha": "%s", "completion_sha": "%s", "body_sha256": "%s", "started": "%s", "completed": "%s", "usage_before": "%s", "usage_after": "%s"}\n' \
+     "$phase" "$status" "$launch_sha" "$(git rev-parse HEAD)" "$(sha256sum "$body_file" | cut -d" " -f1)" "$started" "$(date -Is)" "$usage_before" "$usage_after" >"$record"
    ```
 
    The record carries the node call's exit status, the workspace HEAD at
@@ -829,33 +831,29 @@ The controller merges on a repo Chris owns; Chris reads it after via
    each name keeps the second pass from overwriting the record the gate
    launch wrote.
 
-   **Every pass is one ledger row** (#1269), written with the review ledger's
-   `append`: the pass's time and its share of the weekly allowance, read with
-   the gate's own reader before the launch and again after the run. The
-   `--percent` read goes on the line just before `launch_sha=`; the `append`
-   goes on the line after the record is written:
+   **Every pass is one ledger row** (#1269): its time and its share of the
+   weekly allowance. The block takes the usage reading with the gate's own
+   `--percent` flag, live and not from the cache, just before the launch and
+   just after the run, and puts both in the record (`usage_before`,
+   `usage_after`, each `<percent> <resetsAt>` or `unknown`). Once the
+   fail-closed gate below has ruled on the run, write its row from the
+   record, with `<repo>` the review cache's directory name:
 
    ```
-   before=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)
-   python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type codex-$phase --usage-before "$before"
+   python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type codex-<phase>
    ```
 
-   `append` reads the pass's record and `.out` from the cache, reads usage
-   itself, and records the change in percentage points. A usage reading that
-   fails, on either side, is `unknown`, never zero, and so is a percentage
-   that fell (the window reset under the pass). A pass not launched — exit 20
-   or 30 of the usage gate, a failed preflight, or the per-burn budget if
-   #1217 has landed — has no record and reads no usage: append it with its
-   reason, which gets a row of zero cost that `report` counts as skipped and
-   never as a clean pass:
-
-   ```
-   python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type codex-<phase> --skip-reason "<the printed line>"
-   ```
-
-   A run the gate refuses as raced or stale is not appended: its record reads
-   as a collected pass. A refusal from `append` itself goes to the
-   controller, never skipped.
+   A usage reading that fails, on either side, is `unknown`, never zero, and
+   so are two readings of different windows and a percentage that fell: the
+   row is never given a change nobody read. A run the gate refuses takes the
+   same line with `--refusal "<why>"` added: it cost usage, and its findings
+   describe a diff this PR no longer has, so its row holds none. A pass not
+   launched has no record: append it with `--skip-reason "<the printed
+   line>"` and no other flag, and it gets a row of zero cost that `report`
+   counts as skipped and never as a clean pass. That is an exit 20 or 30 of
+   the usage gate, a failed preflight, or the per-burn budget if #1217 has
+   landed. A refusal from `append` itself goes to the controller, never
+   skipped.
 
    **The pass launches once, here, at PR-up** — not earlier, at the
    worker's round-1 report: an earlier launch races the worker's own
@@ -873,8 +871,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    two shas differ, so the branch moved while Codex was reading) or stale
    (they agree with each other but not with `headRefOid`, so a fix landed
    after the launch) is a refusal, not a pass: do not post that verdict,
-   append its duration row with the refusal as the outcome, and this step
-   ends as `Codex pass skipped: <why>` — comment it on the PR, naming the
+   append its duration row with the refusal as the outcome, append its ledger
+   row with `--refusal` (below), and this step ends as `Codex pass skipped: <why>` — comment it on the PR, naming the
    refusal, and go to step 4. Nothing is claimed about a diff nobody
    reviewed, and the skip is visible on the PR rather than inferred from a
    silence. A refused verdict's findings are never reported as current —

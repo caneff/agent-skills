@@ -1,35 +1,18 @@
 #!/usr/bin/env python3
-"""Tests for `review_ledger.py append --type codex-<phase>` (#1269): one row per Codex pass the
-controller runs at merge, carrying the usage change read with the gate's own reader. Every test
-runs the command line. HOME and CODEX_HOME are temp dirs and PATH holds no `codex`, so the usage
-reader answers from a fixture cache or not at all, and never reaches a real Codex."""
+"""Tests for the Codex rows the controller writes at merge (#1269): `append --type codex-<phase>`
+and `harvest`, both reading the usage change from the two live readings the pass's record carries
+(`usage_before`, `usage_after`, as `codex-usage-gate.py --percent` prints them). Every test runs the
+command line; HOME is a temp dir, so no default path reaches the real ~/.cache."""
 import json
-import os
 import subprocess
 import sys
-import time
 import unittest
 
 from review_ledger_codex_test import OUT_CLEAN, OUT_REFUSED, OUT_TWO, put
-from review_ledger_test import SCRIPT, Case
+from review_ledger_test import SCRIPT, Case, run
 
-DAY = 86400
 STARTED, COMPLETED = "2026-09-30T09:00:00-04:00", "2026-09-30T09:02:30-04:00"
-
-
-def run_append(*args, home, usage=None):
-    """The command line with `usage` (a percent, or None for no readable usage) as the weekly window."""
-    codex_home = home / "codex"
-    codex_home.mkdir(exist_ok=True)
-    cache = codex_home / "usage-cache.json"
-    cache.unlink(missing_ok=True)
-    if usage is not None:
-        now = time.time()
-        cache.write_text(json.dumps({"fetchedAt": now, "primary": None,
-                                     "secondary": {"usedPercent": usage, "resetsAt": now + DAY}}))
-    env = {"HOME": str(home), "CODEX_HOME": str(codex_home), "PATH": "/nonexistent"}
-    return subprocess.run([sys.executable, str(SCRIPT), "append", *map(str, args)],
-                          capture_output=True, text=True, env=env)
+W1, W2 = 1790000000, 1790600000  # two windows' reset times
 
 
 class CodexAppendCase(Case):
@@ -39,15 +22,23 @@ class CodexAppendCase(Case):
         self.ledger = self.tmp / "ledger.jsonl"
         self.skills = self.cache / "skills"
 
-    def append(self, ticket, phase, *extra, usage=None, before="10"):
-        args = ["--repo", "skills", "--ticket", ticket, "--type", f"codex-{phase}", "--cache", self.cache,
-                "--ledger", self.ledger, *extra]
-        if before is not None:
-            args += ["--usage-before", before]
-        return run_append(*args, home=self.home, usage=usage)
+    def record(self, ticket, phase="gate", before=None, after=None, out=OUT_CLEAN, status=0):
+        """A pass's record and `.out`; `before` and `after` are the readings the controller took
+        (a string, or None for a record that carries none)."""
+        put(self.skills, ticket, phase, STARTED, COMPLETED, out, status)
+        path = self.skills / f"codex-adversarial-{ticket}-{phase}.json"
+        rec = json.loads(path.read_text())
+        for key, value in (("usage_before", before), ("usage_after", after)):
+            if value is not None:
+                rec[key] = value
+        path.write_text(json.dumps(rec) + "\n")
 
-    def ok(self, *a, **k):
-        r = self.append(*a, **k)
+    def append(self, ticket, phase, *extra):
+        return run("append", "--repo", "skills", "--ticket", ticket, "--type", f"codex-{phase}", "--cache", self.cache,
+                   "--ledger", self.ledger, *extra, home=self.home)
+
+    def ok(self, *a):
+        r = self.append(*a)
         self.assertEqual(r.returncode, 0, r.stderr)
         return r
 
@@ -57,9 +48,9 @@ class CodexAppendCase(Case):
 
 
 class UsageChangeTest(CodexAppendCase):
-    def test_a_pass_records_the_usage_change_before_to_after(self):
-        put(self.skills, 500, "gate", STARTED, COMPLETED, OUT_TWO)
-        self.ok(500, "gate", before="10", usage=12.5)
+    def test_a_pass_records_the_usage_change_between_its_two_readings(self):
+        self.record(500, before=f"10 {W1}", after=f"12.5 {W1}", out=OUT_TWO)
+        self.ok(500, "gate")
         row = self.only_row()
         self.assertEqual(row["type"], "codex-gate")
         self.assertEqual(row["cost"]["usage_delta"], {"status": "known", "before": 10.0, "after": 12.5, "delta": 2.5})
@@ -67,122 +58,173 @@ class UsageChangeTest(CodexAppendCase):
         self.assertEqual([f["severity"] for f in row["findings"]], ["high", "medium"])
 
     def test_a_pass_that_used_nothing_is_a_known_zero(self):
-        put(self.skills, 500, "gate", STARTED, COMPLETED, OUT_CLEAN)
-        self.ok(500, "gate", before="10", usage=10)
+        self.record(500, before=f"10 {W1}", after=f"10 {W1}")
+        self.ok(500, "gate")
         self.assertEqual(self.only_row()["cost"]["usage_delta"]["delta"], 0)
 
     def test_each_phase_writes_its_own_row(self):
         for phase in ("gate", "second", "third"):
-            put(self.skills, 500, phase, STARTED, COMPLETED, OUT_CLEAN)
-            self.ok(500, phase, usage=11)
+            self.record(500, phase, f"1 {W1}", f"2 {W1}")
+            self.ok(500, phase)
         self.assertEqual(sorted(r["type"] for r in self.rows().values()), ["codex-gate", "codex-second", "codex-third"])
 
-    def test_a_failed_read_after_the_pass_is_unknown_never_zero(self):
-        put(self.skills, 500, "gate", STARTED, COMPLETED, OUT_CLEAN)
-        self.ok(500, "gate", before="10", usage=None)
-        delta = self.only_row()["cost"]["usage_delta"]
-        self.assertEqual(delta["status"], "unknown")
-        self.assertNotIn("delta", delta)
-
-    def test_a_missing_or_unreadable_before_is_unknown_never_zero(self):
-        for n, before in enumerate([None, "unknown", "", "abc", "nan", "-3"]):
-            put(self.skills, 510 + n, "gate", STARTED, COMPLETED, OUT_CLEAN)
-            self.ok(510 + n, "gate", before=before, usage=12)
+    def test_a_missing_or_unreadable_reading_is_unknown_never_zero(self):
+        good = f"10 {W1}"
+        cases = [(None, good), (good, None), (None, None), ("unknown", good), (good, "unknown"), ("", good),
+                 ("abc", good), ("nan 5", good), (f"-3 {W1}", good), ("10", good), (f"10 {W1} x", good),
+                 (good, f"inf {W1}"), (f"10 nan", good)]
+        for n, (before, after) in enumerate(cases):
+            self.record(510 + n, before=before, after=after)
+            self.ok(510 + n, "gate")
         for row in self.rows().values():
-            self.assertEqual(row["cost"]["usage_delta"]["status"], "unknown", row["row_id"])
-            self.assertNotIn("delta", row["cost"]["usage_delta"])
+            delta = row["cost"]["usage_delta"]
+            self.assertEqual(delta["status"], "unknown", row["row_id"])
+            self.assertNotIn("delta", delta)
 
-    def test_a_percent_that_fell_is_a_window_reset_not_a_negative_cost(self):
-        put(self.skills, 500, "gate", STARTED, COMPLETED, OUT_CLEAN)
-        self.ok(500, "gate", before="90", usage=3)
+    def test_readings_of_different_windows_are_never_subtracted(self):
+        # The primary window was the worst before the pass and the secondary after: 22 -> 23 is not a 1-point cost,
+        # and neither is 20 -> 25 across two windows.
+        self.record(500, before=f"20 {W1}", after=f"25 {W2}")
+        self.ok(500, "gate")
         delta = self.only_row()["cost"]["usage_delta"]
         self.assertEqual(delta["status"], "unknown")
-        self.assertIn("reset", delta["reason"])
+        self.assertIn("different windows", delta["reason"])
+
+    def test_a_percent_that_fell_within_one_window_is_unknown(self):
+        self.record(500, before=f"90 {W1}", after=f"3 {W1}")
+        self.ok(500, "gate")
+        delta = self.only_row()["cost"]["usage_delta"]
+        self.assertEqual(delta["status"], "unknown")
+        self.assertIn("fell", delta["reason"])
+
+    def test_a_record_with_no_readings_is_unknown(self):
+        self.record(500)
+        self.ok(500, "gate")
+        self.assertEqual(self.only_row()["cost"]["usage_delta"]["status"], "unknown")
 
     def test_a_refused_run_keeps_its_usage_change_and_is_not_a_clean_pass(self):
-        put(self.skills, 500, "gate", STARTED, COMPLETED, OUT_REFUSED, status=1)
-        self.ok(500, "gate", before="99", usage=100)
+        self.record(500, before=f"99 {W1}", after=f"100 {W1}", out=OUT_REFUSED, status=1)
+        self.ok(500, "gate")
         row = self.only_row()
         self.assertEqual(row["status"]["fields"]["findings"]["status"], "refused")
         self.assertEqual(row["cost"]["usage_delta"]["delta"], 1.0)
 
     def test_no_record_for_the_phase_is_refused_and_writes_nothing(self):
-        put(self.skills, 500, "gate", STARTED, COMPLETED, OUT_CLEAN)
-        r = self.append(500, "second", usage=12)
+        self.record(500)
+        r = self.append(500, "second")
         self.assertEqual(r.returncode, 2)
-        self.assertIn("no Codex record", r.stderr)
+        self.assertIn("expected exactly one", r.stderr)
         self.assertFalse(self.ledger.exists())
 
     def test_appending_the_same_pass_twice_leaves_one_row(self):
-        put(self.skills, 500, "gate", STARTED, COMPLETED, OUT_CLEAN)
-        self.ok(500, "gate", usage=12)
-        self.ok(500, "gate", usage=13)
+        self.record(500, before=f"1 {W1}", after=f"2 {W1}")
+        self.ok(500, "gate")
+        self.ok(500, "gate")
         self.assertEqual(len(self.rows()), 1)
 
-    def test_a_later_harvest_keeps_the_appended_usage_change(self):
-        put(self.skills, 500, "gate", STARTED, COMPLETED, OUT_TWO)
-        self.ok(500, "gate", before="10", usage=12)
+    def test_a_later_harvest_writes_the_same_row(self):
+        self.record(500, before=f"10 {W1}", after=f"12 {W1}", out=OUT_TWO)
+        self.ok(500, "gate")
+        appended = self.only_row()
         r = subprocess.run([sys.executable, str(SCRIPT), "harvest", "--cache", str(self.cache), "--transcripts",
                             str(self.tmp), "--ledger", str(self.ledger), "--review-file", str(self.tmp / "h.md")],
                            capture_output=True, text=True, env={"HOME": str(self.home)})
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.only_row()["cost"]["usage_delta"]["delta"], 2.0)
-        self.assertEqual(len(self.only_row()["findings"]), 2)
+        self.assertEqual({**self.only_row(), "origin": "append"}, appended)
 
-    def test_other_rows_of_the_ticket_are_not_written_or_lost(self):
-        put(self.skills, 500, "gate", STARTED, COMPLETED, OUT_CLEAN)
-        put(self.skills, 500, "second", STARTED, COMPLETED, OUT_CLEAN)
-        self.ok(500, "gate", usage=12)
+    def test_other_rows_of_the_ticket_are_not_written(self):
+        self.record(500, "gate")
+        self.record(500, "second")
+        self.ok(500, "gate")
         self.assertEqual([r["type"] for r in self.rows().values()], ["codex-gate"])
 
 
 class SkippedPassTest(CodexAppendCase):
-    def skip(self, ticket, phase, reason, **k):
-        return self.append(ticket, phase, "--skip-reason", reason, **k)
+    def skip(self, ticket, phase, reason, *extra):
+        return self.append(ticket, phase, "--skip-reason", reason, *extra)
 
     def test_a_skipped_pass_writes_a_row_with_its_reason_and_zero_cost(self):
-        r = self.skip(500, "gate", "codex usage 100% - capped, resets 2026-10-03 09:00", before=None)
+        reason = "codex usage 100% - capped, resets 2026-10-03 09:00"
+        r = run("append", "--repo", "skills", "--ticket", 500, "--type", "codex-gate", "--skip-reason", reason,
+                "--ledger", self.ledger, home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
         row = self.only_row()
         self.assertEqual(row["type"], "codex-gate")
-        self.assertEqual(row["skip_reason"], "codex usage 100% - capped, resets 2026-10-03 09:00")
+        self.assertEqual(row["skip_reason"], reason)
         self.assertEqual(row["cost"]["wall_clock"], {"status": "known", "seconds": 0})
         self.assertEqual(row["cost"]["usage_delta"]["delta"], 0)
         self.assertEqual(row["findings"], [])
-        self.assertEqual(row["status"]["fields"]["findings"]["status"], "skipped")
-
-    def test_a_skipped_pass_needs_no_record_and_reads_no_usage(self):
-        self.ok(500, "gate", "--skip-reason", "budget spent", before=None, usage=None)
-        self.assertEqual(self.only_row()["cost"]["usage_delta"]["delta"], 0)
+        self.assertEqual(row["status"]["fields"]["findings"], {"status": "skipped", "reason": reason})
 
     def test_a_skipped_pass_is_not_a_clean_pass_in_the_report(self):
-        self.ok(500, "gate", "--skip-reason", "capped", before=None)
-        put(self.skills, 501, "gate", STARTED, COMPLETED, OUT_CLEAN)
-        self.ok(501, "gate", usage=12)
-        r = subprocess.run([sys.executable, str(SCRIPT), "report", "--ledger", str(self.ledger), "--format", "json"],
-                           capture_output=True, text=True, env={"HOME": str(self.home)})
+        run("append", "--repo", "skills", "--ticket", 500, "--type", "codex-gate", "--skip-reason", "capped",
+            "--ledger", self.ledger, home=self.home)
+        self.record(501, before=f"1 {W1}", after=f"2 {W1}")
+        self.ok(501, "gate")
+        r = run("report", "--ledger", self.ledger, "--format", "json", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
         (t,) = [t for t in json.loads(r.stdout)["types"] if t["type"] == "codex-gate"]
         self.assertEqual((t["rows"], t["clean_rows"], t["skipped_rows"], t["unknown_finding_rows"]), (2, 1, 1, 0))
+        self.assertEqual((t["usage_percent"], t["unknown_usage_rows"]), (1.0, 0))
 
-    def test_an_empty_reason_is_refused(self):
-        r = self.skip(500, "gate", "  ", before=None)
-        self.assertEqual(r.returncode, 2)
+    def test_an_empty_reason_or_a_cache_beside_it_is_refused(self):
+        for extra in (["--skip-reason", "  "], ["--skip-reason", "x", "--cache", str(self.cache)],
+                      ["--skip-reason", "x", "--refusal", "y"], ["--skip-reason", "x", "--round", "2"]):
+            r = run("append", "--repo", "skills", "--ticket", 500, "--type", "codex-gate", *extra,
+                    "--ledger", self.ledger, home=self.home)
+            self.assertEqual(r.returncode, 2, extra)
         self.assertFalse(self.ledger.exists())
 
 
 class RefusalTest(CodexAppendCase):
-    def test_usage_and_skip_flags_are_for_codex_types(self):
-        for flags in (["--usage-before", "1"], ["--skip-reason", "x"]):
-            r = run_append("--repo", "skills", "--ticket", 500, "--type", "spec", "--cache", self.cache,
-                           "--ledger", self.ledger, *flags, home=self.home)
-            self.assertEqual(r.returncode, 2)
-            self.assertIn("codex", r.stderr)
+    def test_a_refused_run_keeps_its_usage_and_holds_no_findings(self):
+        self.record(500, before=f"10 {W1}", after=f"12 {W1}", out=OUT_TWO)
+        self.ok(500, "gate", "--refusal", "stale: the head moved after the launch")
+        row = self.only_row()
+        self.assertEqual(row["findings"], [])
+        self.assertEqual(row["status"]["fields"]["findings"]["status"], "refused")
+        self.assertEqual(row["refusal"], "stale: the head moved after the launch")
+        self.assertEqual(row["cost"]["usage_delta"]["delta"], 2.0)
 
-    def test_mutation_flags_are_refused_on_a_codex_type(self):
+    def test_a_later_harvest_keeps_the_refusal(self):
+        self.record(500, before=f"10 {W1}", after=f"12 {W1}", out=OUT_TWO)
+        self.ok(500, "gate", "--refusal", "raced")
+        r = subprocess.run([sys.executable, str(SCRIPT), "harvest", "--cache", str(self.cache), "--transcripts",
+                            str(self.tmp), "--ledger", str(self.ledger), "--review-file", str(self.tmp / "h.md")],
+                           capture_output=True, text=True, env={"HOME": str(self.home)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.only_row()["findings"], [])
+        self.assertEqual(self.only_row()["status"]["fields"]["findings"]["status"], "refused")
+
+    def test_an_empty_refusal_reason_is_refused(self):
+        self.record(500)
+        self.assertEqual(self.append(500, "gate", "--refusal", " ").returncode, 2)
+        self.assertFalse(self.ledger.exists())
+
+
+class FlagTest(CodexAppendCase):
+    def test_skip_and_refusal_flags_are_for_codex_types(self):
+        for flags in (["--skip-reason", "x"], ["--refusal", "x"]):
+            for rtype, extra in (("spec", []), ("witness-mutation", ["--mutation-id", "m1", "--outcome", "red",
+                                                                     "--seconds", "1"])):
+                r = run("append", "--repo", "skills", "--ticket", 500, "--type", rtype, "--cache", self.cache,
+                        "--ledger", self.ledger, *flags, *extra, home=self.home)
+                self.assertEqual(r.returncode, 2, (rtype, flags))
+                self.assertIn("for codex types", r.stderr)
+        self.assertFalse(self.ledger.exists())
+
+    def test_mutation_flags_are_refused_on_a_codex_type_by_the_guard_not_a_missing_cache(self):
+        self.record(500, before=f"1 {W1}", after=f"2 {W1}")
         r = self.append(500, "gate", "--mutation-id", "m1", "--outcome", "red", "--seconds", 3)
         self.assertEqual(r.returncode, 2)
+        self.assertIn("are not for codex-gate", r.stderr)
         self.assertFalse(self.ledger.exists())
+
+    def test_a_codex_row_is_round_one(self):
+        self.record(500)
+        r = self.append(500, "gate", "--round", "2")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("round 1", r.stderr)
 
 
 if __name__ == "__main__":

@@ -16,10 +16,13 @@ One line on stdout, and an exit status the caller branches on:
 
 A missing, stale or malformed reading is 30, never 0: it is not headroom.
 
-`--percent` prints the worst window's percentage alone (`12.5`), or `unknown`
-with exit 30, and is always 0 or 30. `review_ledger.py append` reads usage
-through `read_percent` below, and the controller passes `--percent`'s output
-as its `--usage-before` (#1269): one reader before and after a Codex pass.
+`--percent` prints the worst window's percentage and its reset time
+(`12.5 1790000000`), or `unknown` with exit 30, and is always 0 or 30. It
+ignores the cache and reads live, since a cached reading can be 30 minutes
+old and a pass is shorter than that. The controller takes it just before a
+Codex launch and just after the run, and both go into the pass's record for
+`review_ledger.py` (#1269). The reset time names the window, so two readings
+of different windows are never subtracted.
 """
 
 from __future__ import annotations
@@ -70,25 +73,21 @@ def worst_window(helper, limits: object, now: float) -> tuple[float, float] | No
     return worst
 
 
-def reading() -> tuple[float, float] | None:
+def reading(live_only: bool = False) -> tuple[float, float] | None:
     """(worst usedPercent, its resetsAt) from the cache, refreshed live when it
-    is missing or stale, or None when no fresh, well-formed reading exists."""
+    is missing or stale, or None when no fresh, well-formed reading exists.
+    `live_only` skips the cache: a reading taken around an event must not be
+    older than the event."""
     helper = load_helper()
     helper.RPC_TIMEOUT = REFRESH_TIMEOUT
     now = time.time()
-    worst = worst_window(helper, helper.read_cache(now), now)
+    worst = None if live_only else worst_window(helper, helper.read_cache(now), now)
     if worst is None:
         live = helper.fetch_live()
         if live is not None:
             helper.write_cache(live, now)
             worst = worst_window(helper, live, now)
     return worst
-
-
-def read_percent() -> float | None:
-    """The worst window's percentage, or None: the reading `--percent` prints."""
-    worst = reading()
-    return None if worst is None else worst[0]
 
 
 def check() -> tuple[int, str]:
@@ -107,11 +106,11 @@ def check() -> tuple[int, str]:
 def main() -> int:
     if sys.argv[1:] == ["--percent"]:
         try:
-            pct = read_percent()
+            worst = reading(live_only=True)
         except Exception:
-            pct = None
-        print("unknown" if pct is None else f"{pct:g}")
-        return UNKNOWN if pct is None else PROCEED
+            worst = None
+        print("unknown" if worst is None else f"{worst[0]:g} {int(worst[1])}")
+        return UNKNOWN if worst is None else PROCEED
     # Any failure is exit 30: a crash's own exit 1 is a status neither caller
     # has a rule for, and an unread reading is not headroom.
     try:

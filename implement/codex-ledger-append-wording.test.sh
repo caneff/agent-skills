@@ -20,9 +20,14 @@ check_in() {
   case "$1" in *"$2"*) ;; *) echo "FAIL: implement/SKILL.md § The merge is missing: $2" >&2; fail=1 ;; esac
 }
 check_in "$merge" '**Every pass is one ledger row** (#1269)'
-check_in "$merge" 'before=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)'
-check_in "$merge" 'review_ledger.py append --repo <repo> --ticket <n> --type codex-$phase --usage-before "$before"'
-check_in "$merge" 'review_ledger.py append --repo <repo> --ticket <n> --type codex-<phase> --skip-reason "<the printed line>"'
+check_in "$merge" 'usage_before=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)'
+check_in "$merge" 'usage_after=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)'
+check_in "$merge" '"usage_before": "%s", "usage_after": "%s"}'
+check_in "$merge" 'review_ledger.py append --repo <repo> --ticket <n> --type codex-<phase>'
+check_in "$merge" 'with `--refusal "<why>"` added'
+check_in "$merge" 'append it with `--skip-reason "<the printed line>"` and no other flag'
+check_in "$merge" 'append its ledger skip row (below), and go to step 4;'
+check_in "$merge" 'append its ledger row with `--refusal` (below)'
 check_in "$merge" 'A usage reading that fails, on either side, is `unknown`, never zero'
 check_in "$merge" 'A refusal from `append` itself goes to the controller, never skipped'
 [ "$fail" -eq 0 ] && echo "PASS $0"
