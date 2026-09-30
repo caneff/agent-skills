@@ -123,12 +123,17 @@ GIT_REDIRECT_VARS = (
 
 
 def scrubbed_env():
-    """The current environment minus the git-redirecting variables (#625).
+    """The current environment minus the git-redirecting variables (#625),
+    plus an unlimited `claude -p` background-task wait (#1278).
 
     Every child the driver spawns gets this — `claude` and `uv` run git of
     their own inside a worktree, so they must not inherit the leak either.
+    An audit fans out shards that outlive `claude -p`'s 600 s default wait
+    ceiling, which terminates the process with no report; `0` waits forever.
     """
-    return {k: v for k, v in os.environ.items() if k not in GIT_REDIRECT_VARS}
+    env = {k: v for k, v in os.environ.items() if k not in GIT_REDIRECT_VARS}
+    env["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] = "0"
+    return env
 
 
 def _run(cmd, cwd=None):
@@ -307,13 +312,21 @@ def collect_from_manifest(manifests_dir, name, collection_dir, dest_name):
 
 
 def run_one(name, repo, outlogs, manifests_dir):
+    """Run one audit. Returns None on success, else the failure reason —
+    a nonzero `claude` exit or no manifest (#1278); `done` prints only on
+    success."""
     print(f"[{name}] starting")
     log_path = os.path.join(outlogs, f"{name}.log")
     manifest = manifest_path_for(manifests_dir, name)
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
     with open(log_path, "w", encoding="utf-8") as log:
-        subprocess.run(["claude", *CLAUDE_FLAGS, audit_prompt(name, repo, manifest)], stdout=log, stderr=subprocess.STDOUT, check=False, env=scrubbed_env())
+        r = subprocess.run(["claude", *CLAUDE_FLAGS, audit_prompt(name, repo, manifest)], stdout=log, stderr=subprocess.STDOUT, check=False, env=scrubbed_env())
+    reason = f"exit {r.returncode}" if r.returncode != 0 else ("no manifest" if read_manifest(manifests_dir, name) is None else None)
+    if reason:
+        print(f"[{name}] FAILED: {reason} — see {log_path}")
+        return reason
     print(f"[{name}] done")
+    return None
 
 
 # --- HTML index rendering -----------------------------------------------------
@@ -518,12 +531,13 @@ def execute(repo, plan, run):
     The first audit runs alone as a smoke test: if the `-p` slash invocation
     is rejected by the model-invocation guard, every audit would fail the
     same way, so the sweep aborts instead of fanning thirteen failures out.
+    Returns the names of the audits that failed (#1278).
     """
     if not plan.to_run:
-        return
+        return []
     smoke = plan.to_run[0]
     print(f"== smoke test: {smoke} ==")
-    run_one(smoke, repo, run.logs, run.manifests)
+    failed = [smoke] if run_one(smoke, repo, run.logs, run.manifests) else []
     log_text = open(os.path.join(run.logs, f"{smoke}.log"), encoding="utf-8", errors="replace").read()
     if re.search(r"cannot be used with Skill tool|disable-model-invocation", log_text, re.IGNORECASE):
         print(f"ABORT: -p slash invocation was rejected by the guard. See {run.logs}/{smoke}.log", file=sys.stderr)
@@ -532,7 +546,9 @@ def execute(repo, plan, run):
     rest = plan.to_run[1:]
     if rest:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(rest)) as ex:
-            list(ex.map(lambda n: run_one(n, repo, run.logs, run.manifests), rest))
+            results = list(ex.map(lambda n: run_one(n, repo, run.logs, run.manifests), rest))
+        failed += [n for n, reason in zip(rest, results) if reason]
+    return failed
 
 
 def collect(run, repo, plan, base=None):
@@ -657,8 +673,11 @@ def sweep(repo, out, only, short, force):
     run = RunDir.create(out)
     _announce(run, repo)
     plan = plan_sweep(repo, selected, force)
-    execute(repo, plan, run)
+    failed = execute(repo, plan, run)
     open_index(collect(run, repo, plan))
+    if failed:
+        print(f"FAILED audits: {', '.join(failed)}", file=sys.stderr)
+        sys.exit(1)
 
 
 def rebuild_index(repo, out):

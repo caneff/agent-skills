@@ -8,6 +8,10 @@
 set -euo pipefail
 prompt="${*: -1}"
 
+# Record the wait-ceiling variable in this process's log, so a test can see
+# what env the driver handed it (#1278).
+echo "ceiling=${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-unset}"
+
 manifest="$(printf '%s' "$prompt" | grep -oP 'write a manifest to \K\S+' || true)"
 [ -n "$manifest" ] || exit 0
 
@@ -18,6 +22,8 @@ case "$prompt" in
     echo '<html><body>dead-code report</body></html>' >"$dir/report.html"
     mkdir -p "$(dirname "$manifest")"
     printf '{"report_path": "%s/report.html", "count": 1, "headline": "one finding"}\n' "$dir" >"$manifest"
+    # A nonzero exit even with a manifest on disk (#1278), when a test asks.
+    exit "${FAKE_CLAUDE_EXIT_DEAD_CODE:-0}"
     ;;
   *)
     # Every other audit: no manifest — the crashed/silent-process case. Print

@@ -253,7 +253,10 @@ def test_index_from_manifests_missing_manifest_is_a_failure_row():
             [sys.executable, os.path.join(fake_claude_dir, "driver.py"), tmp, "--only", "dead-code,duplication", "--out", os.path.join(tmp, "out")],
             capture_output=True, text=True, env=env,
         )
-        assert r.returncode == 0, r.stdout + r.stderr
+        assert r.returncode != 0, "an audit that wrote no manifest must fail the sweep (#1278)"
+        assert "[dead-code] done" in r.stdout, r.stdout
+        assert "[duplication] done" not in r.stdout, "no manifest must never print done (#1278)"
+        assert "[duplication] FAILED: no manifest" in r.stdout, r.stdout
 
         # duplication's fake process printed a stray .html path to its own
         # log (see fake_claude_fixture.sh) and wrote no manifest — a
@@ -265,6 +268,40 @@ def test_index_from_manifests_missing_manifest_is_a_failure_row():
         assert "dead-code/report.html" in index_text, "the manifest-backed report must be linked"
         assert "unrelated-1234" not in index_text, "the driver must never pick up a stray path from a log"
         assert "no manifest" in index_text, "duplication (no manifest written) must render as a named failure"
+
+
+def _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, **extra_env):
+    here = os.path.dirname(os.path.abspath(__file__))
+    os.symlink(os.path.join(here, "fake_claude_fixture.sh"), os.path.join(bin_dir, "claude"))
+    env = {
+        **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_CACHE_HOME": cache_dir,
+        "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", **extra_env,
+    }
+    return subprocess.run(
+        [sys.executable, os.path.join(here, "driver.py"), tmp, "--only", only, "--out", os.path.join(tmp, "out")],
+        capture_output=True, text=True, env=env,
+    )
+
+
+def test_audit_claude_gets_the_unlimited_bg_wait_ceiling():
+    """#1278: `claude -p` kills itself after 600 s of background tasks unless
+    the ceiling variable is 0; the audit's own log records what it received."""
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as cache_dir, tempfile.TemporaryDirectory() as bin_dir:
+        r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code")
+        assert r.returncode == 0, r.stdout + r.stderr
+        log = open(os.path.join(tmp, "out", "logs", "dead-code.log")).read()
+        assert "ceiling=0" in log, log
+
+
+def test_audit_exiting_nonzero_fails_the_sweep_even_with_a_manifest():
+    """#1278: a nonzero `claude` exit is a failure line and a nonzero sweep
+    exit, never `done`, whatever is on disk."""
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as cache_dir, tempfile.TemporaryDirectory() as bin_dir:
+        r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code", FAKE_CLAUDE_EXIT_DEAD_CODE="3")
+        assert r.returncode != 0, r.stdout + r.stderr
+        assert "[dead-code] FAILED: exit 3" in r.stdout, r.stdout
+        assert "[dead-code] done" not in r.stdout, r.stdout
+        assert os.path.isfile(os.path.join(tmp, "out", "collection", "index.html")), "the index is still built"
 
 
 @contextlib.contextmanager
