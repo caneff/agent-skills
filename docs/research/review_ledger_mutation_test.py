@@ -19,7 +19,7 @@ class MutationCase(Case):
         (self.status / mutation_id).write_text(text)
         return self.status / mutation_id
 
-    def append(self, mutation_id, rtype="witness-mutation", status="red\n", seconds=12, ticket=500, **extra):
+    def append(self, mutation_id, rtype="witness-mutation", status="red\n", seconds=12, ticket=500):
         path = self.status_file(mutation_id, status) if status is not None else self.status / mutation_id
         return run("append", "--repo", "skills", "--ticket", ticket, "--type", rtype, "--mutation-id",
                    mutation_id, "--status-file", path, "--seconds", seconds, "--ledger", self.ledger,
@@ -148,7 +148,12 @@ class ReportMutationTest(MutationCase):
         self.assertNotIn("standards", self.types())
         table = self.report("md")
         self.assertIn("red rate", table)
-        self.assertIn("| witness-mutation | 1 | 0 | 0.00 |", table)
+        self.assertIn("| witness-mutation | 1 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | 0 | 0 |", table)
+
+    def test_a_mutation_type_shows_no_finding_counts_rather_than_zero(self):
+        self.ok("m1")
+        t = self.types()["witness-mutation"]
+        self.assertEqual([t[k] for k in ("findings", "value", "unknown_outcomes", "unweighted")], [None] * 4)
 
     def test_the_report_says_outright_that_past_reviews_carry_no_mutation_data(self):
         self.ok("m1")

@@ -776,7 +776,7 @@ def cmd_append_mutation(args) -> int:
     row = new_row(row_id, repo, [args.ticket], args.type, args.round,
                   args.mutation_id, [], {"status": "not-applicable", "reason": "a mutation row holds no findings"},
                   [], cost={"tokens": {"status": "not-applicable",
-                                       "reason": "a reviewer's tokens stay with its correctness row"},
+                                       "reason": "a mutation's tokens stay with the correctness reviewer, or with the worker for worker-mutation"},
                             "wall_clock": {"status": "known", "seconds": seconds}})
     row.update(origin="append", mutation_id=args.mutation_id, outcome=outcome)
     try:
@@ -881,7 +881,7 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
         inside = t == "over-engineering"
         mutation = t in MUTATION_TYPES
         outcomes = Counter(r.get("outcome") for r in mine) if mutation else Counter()
-        red_known = outcomes["red"] + outcomes["green"]
+        known_outcomes = outcomes["red"] + outcomes["green"]
         costs = [r["cost"] for r in mine]
         token_rows = [c["tokens"] for c in costs if c.get("tokens", {}).get("status") == "known"]
         wall_rows = [c["wall_clock"] for c in costs if c.get("wall_clock", {}).get("status") == "known"]
@@ -896,19 +896,20 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
                 rated.append((v + extra, d))
         rated_dollars = sum(d for _, d in rated)
         types.append({
-            "type": t, "rows": len(mine), "findings": len(findings), "value": round(value, 4),
+            "type": t, "rows": len(mine), "findings": None if mutation else len(findings), "value": None if mutation else round(value, 4),
             "unique_share": (sum(f["overlap"] == "unique" for f in findings) / len(findings)) if findings else None,
             "leftover_rate": rate("leftover"), "dispute_rate": rate("disputed"),
-            "unknown_outcomes": len(findings) - len(known), "unweighted": unweighted,
-            "unknown_finding_rows": 0 if mutation else sum(
-                r["status"]["fields"]["findings"]["status"] != "known" for r in mine),
+            "unknown_outcomes": None if mutation else len(findings) - len(known),
+            "unweighted": None if mutation else unweighted,
+            "unknown_finding_rows": sum(
+                r["status"]["fields"]["findings"]["status"] not in ("known", "not-applicable") for r in mine),
             "unknown_cost_rows": 0 if inside else sum(
                 any(c.get(f, {}).get("status") not in ("known", "not-applicable") for f in ("tokens", "wall_clock"))
                 for c in costs),
             # A mutation type's red rate leaves the `unknown` ones out, like the outcome rates above;
             # they are counted beside it. Only mutation rows carry either.
-            "red_rate": outcomes["red"] / red_known if red_known else None,
-            "unknown_mutations": len(mine) - red_known if mutation else None,
+            "red_rate": outcomes["red"] / known_outcomes if known_outcomes else None,
+            "unknown_mutations": len(mine) - known_outcomes if mutation else None,
             "cost_note": "inside standards" if inside else None,
             "tokens": None if inside or not token_rows else {k: sum(c[k] for c in token_rows) for k in TOKEN_KINDS},
             "wall_clock_seconds": None if inside or not wall_rows else sum(c["seconds"] for c in wall_rows),
@@ -919,7 +920,7 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
             if not inside and rated_dollars else None})
     notes = []
     notes.append("Reviews before #1270 carry no mutation data: a review run earlier has no mutation rows, "
-                 "so a mutation type's counts start at that change and a missing type is n/a, not zero."
+                 "so a mutation type's counts start at that change and a type with no rows is left out, not shown as zero."
                  + ("" if present & set(MUTATION_TYPES) else " No mutation rows are in this ledger yet."))
     for t in types:
         if prices is not None and t["unpriced_rows"]:
@@ -928,6 +929,11 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
     if prices is None:
         notes.append("No price table: dollars and value per dollar are n/a, not zero (pass --prices).")
     return {"types": types, "notes": notes}
+
+
+def _n(x, spec=""):
+    """A count or value cell; n/a when the type has none (a mutation type holds no findings)."""
+    return "n/a" if x is None else format(x, spec)
 
 
 def _pct(x):
@@ -963,11 +969,10 @@ def cmd_report(args) -> int:
           "| tokens | wall clock | dollars | value per dollar | red rate | unknown mutations |")
     print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for t in result["types"]:
-        print(f"| {t['type']} | {t['rows']} | {t['findings']} | {t['value']:.2f} | {_pct(t['unique_share'])} "
-              f"| {_pct(t['leftover_rate'])} | {_pct(t['dispute_rate'])} | {t['unknown_outcomes']} "
-              f"| {t['unweighted']} | {t['unknown_finding_rows']} | {t['unknown_cost_rows']} "
-              f"| {' | '.join(_cost_cells(t))} | {_pct(t['red_rate'])} "
-              f"| {'n/a' if t['unknown_mutations'] is None else t['unknown_mutations']} |")
+        print(f"| {t['type']} | {t['rows']} | {_n(t['findings'])} | {_n(t['value'], '.2f')} | {_pct(t['unique_share'])} "
+              f"| {_pct(t['leftover_rate'])} | {_pct(t['dispute_rate'])} | {_n(t['unknown_outcomes'])} "
+              f"| {_n(t['unweighted'])} | {t['unknown_finding_rows']} | {t['unknown_cost_rows']} "
+              f"| {' | '.join(_cost_cells(t))} | {_pct(t['red_rate'])} | {_n(t['unknown_mutations'])} |")
     print()
     for note in result["notes"]:
         print(note)
