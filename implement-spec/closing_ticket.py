@@ -41,22 +41,49 @@ class SeamError(Exception):
     this check exists to stop being written again."""
 
 
+def _indent(line):
+    return len(line) - len(line.lstrip(" \t"))
+
+
+def _continuation(raw, start, parent):
+    """The lines that wrap the list item at `raw[start]`, joined with
+    single spaces: each adjacent line up to a blank line, a heading, a fence
+    or a key line no deeper than the item. Read from the raw lines, not from
+    `visible()`, because a four-space continuation is what `visible()` drops
+    as quoted material — and dropping it is the truncation (#1243)."""
+    words = []
+    for line in raw[start + 1:]:
+        if (not line.strip() or _ANY_HEADING.match(line)
+                or line.lstrip().startswith(("```", "~~~"))
+                or (key_line(line) and _indent(line) <= _indent(parent))):
+            break
+        words.append(line.strip())
+    return words
+
+
 def declaration(text):
     """`{seam, blind to}` from a document's `## End-to-end seam` section, or
     `None` when it has no such section — silence, which is not a
-    declaration."""
-    lines = visible((text or "").splitlines())
+    declaration. A value wrapped onto continuation lines is read whole
+    (#1243): a partial blind spot stated as the whole one is worse than none."""
+    raw = (text or "").splitlines()
+    lines = visible(raw)
     for pos, (_, line) in enumerate(lines):
         if not _SEAM_HEADING.match(line):
             continue
         found = {}
-        for _, rest in lines[pos + 1:]:
+        skip_to = 0
+        for index, rest in lines[pos + 1:]:
             if _ANY_HEADING.match(rest):
                 break
+            if index < skip_to:
+                continue
             pair = key_line(rest)
             if pair:
                 key, value = pair
-                found[key] = value
+                wrapped = _continuation(raw, index, rest)
+                skip_to = index + 1 + len(wrapped)
+                found[key] = " ".join([value] + wrapped).strip()
         return found
     return None
 

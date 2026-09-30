@@ -16,6 +16,11 @@ declaration:
 - **Blind to**: the live editor — grid rendering at 4x4 and 6x6
 ```
 
+A value may wrap onto indented continuation lines, as a Markdown list item
+does; they are joined onto it with single spaces, up to a blank line, a
+heading or the next key (#1243). Reading only the first line would state a
+partial blind spot as the whole one.
+
 Both keys are required, and a value of nothing but emphasis markers is
 refused as naming nothing: `- **Seam**:**` reads as the value `**` (#1104).
 A repo that declares nothing is not a repo with no seam: the exploration pass supplies both halves instead (`--seam`,

@@ -406,6 +406,69 @@ def test_this_repos_own_agents_md_declares_a_seam_and_a_blind_spot():
     assert "a test asserts" in blind_to, blind_to
 
 
+WRAPPED = """# Fixture repo
+
+## End-to-end seam
+
+- **Seam**: `just test`
+- **Blind to**: the live app — solve time (`just time`),
+  how a link renders, and
+  what the share sheet shows
+- Notes: not a key of this section
+"""
+
+
+def test_a_wrapped_blind_spot_is_read_whole():
+    # #1243: a list item wrapped onto indented continuation lines was cut at
+    # its first line break, and the closing ticket stated a partial blind
+    # spot as the whole one.
+    seam, blind_to = T.seam_of(repo(agents=WRAPPED))
+    assert blind_to == ("the live app — solve time (`just time`), "
+                        "how a link renders, and what the share sheet shows"), \
+        blind_to
+
+
+def test_a_wrapped_value_reaches_the_ticket_body():
+    got = T.body(repo(agents=WRAPPED), spec=366, shas=SHAS, surfaces=[])
+    assert "what the share sheet shows" in got, got
+
+
+def test_a_continuation_indented_four_spaces_is_still_the_value():
+    # `visible()` drops a four-space line as quoted material; adjacent to a
+    # key line it is that item's continuation, not a quotation.
+    text = ("## End-to-end seam\n\n- **Seam**: `just test`\n"
+            "- **Blind to**: the live app\n"
+            "    and how a link renders\n")
+    assert T.declaration(text)["blind to"] == \
+        "the live app and how a link renders", T.declaration(text)
+
+
+def test_a_blank_line_ends_the_item():
+    text = ("## End-to-end seam\n\n- **Blind to**: the live app\n\n"
+            "  a later paragraph\n")
+    assert T.declaration(text)["blind to"] == "the live app", \
+        T.declaration(text)
+
+
+def test_a_nested_key_line_is_part_of_the_wrapped_value():
+    # A sub-bullet shaped like a key is indented deeper than its parent, so
+    # it continues the parent instead of ending it (and being read as a key
+    # of the section).
+    text = ("## End-to-end seam\n\n- **Blind to**: the live app:\n"
+            "  - render: how a link looks\n- **Seam**: `just test`\n")
+    got = T.declaration(text)
+    assert got["blind to"] == "the live app: - render: how a link looks", got
+    assert got["seam"] == "`just test`", got
+    assert "render" not in got, got
+
+
+def test_a_wrapped_value_stops_at_the_next_heading():
+    text = ("## End-to-end seam\n\n- **Blind to**: the live app\n"
+            "## Next\n- **Seam**: elsewhere\n")
+    assert T.declaration(text) == {"blind to": "the live app"}, \
+        T.declaration(text)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     try:
