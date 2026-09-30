@@ -57,10 +57,10 @@ def record(ticket, phase, started, completed, status=0):
             "body_sha256": "b", "started": started, "completed": completed}
 
 
-def put(repo_dir, ticket, phase, rec_fields, out):
+def put(repo_dir, ticket, phase, started, completed, out, status=0):
     stem = repo_dir / f"codex-adversarial-{ticket}-{phase}"
     repo_dir.mkdir(parents=True, exist_ok=True)
-    stem.with_suffix(".json").write_text(json.dumps(record(ticket, phase, *rec_fields[:2], **rec_fields[2])) + "\n")
+    stem.with_suffix(".json").write_text(json.dumps(record(ticket, phase, started, completed, status)) + "\n")
     if out is not None:
         stem.with_suffix(".out").write_text(out)
 
@@ -68,9 +68,9 @@ def put(repo_dir, ticket, phase, rec_fields, out):
 def build_codex_cache(root):
     skills = root / "skills"
     # 200: all three phases. Gate: two findings, joined to dispositions by number.
-    put(skills, 200, "gate", ("2026-09-22T09:00:00-04:00", "2026-09-22T09:02:30-04:00", {}), OUT_TWO)
-    put(skills, 200, "second", ("2026-09-22T09:10:00-04:00", "2026-09-22T09:11:00-04:00", {}), OUT_TWO)
-    put(skills, 200, "third", ("2026-09-22T09:20:00-04:00", "2026-09-22T09:20:45-04:00", {}), OUT_CLEAN)
+    put(skills, 200, "gate", "2026-09-22T09:00:00-04:00", "2026-09-22T09:02:30-04:00", OUT_TWO)
+    put(skills, 200, "second", "2026-09-22T09:10:00-04:00", "2026-09-22T09:11:00-04:00", OUT_TWO)
+    put(skills, 200, "third", "2026-09-22T09:20:00-04:00", "2026-09-22T09:20:45-04:00", OUT_CLEAN)
     write_jsonl(skills / "dispositions-200.jsonl", [
         {"id": "codex-gate-1", "outcome": "fixed", "sha": "abc"},
         {"id": "codex-gate-2", "outcome": "leftover", "file": "flow/install.sh", "title": "t",
@@ -80,25 +80,28 @@ def build_codex_cache(root):
         {"id": "codex-third-9", "outcome": "fixed", "sha": "z"},
     ])
     # 201: refused at the usage limit.
-    put(skills, 201, "gate", ("2026-09-27T14:10:35-04:00", "2026-09-27T14:10:38-04:00", {"status": 1}), OUT_REFUSED)
+    put(skills, 201, "gate", "2026-09-27T14:10:35-04:00", "2026-09-27T14:10:38-04:00", OUT_REFUSED, status=1)
     # 202: findings the parser cannot read; 203: a record with no .out at all.
-    put(skills, 202, "gate", ("2026-09-22T10:00:00-04:00", "2026-09-22T10:01:00-04:00", {}), OUT_UNPARSED)
-    put(skills, 203, "gate", ("2026-09-22T11:00:00-04:00", "2026-09-22T11:01:00-04:00", {}), None)
+    put(skills, 202, "gate", "2026-09-22T10:00:00-04:00", "2026-09-22T10:01:00-04:00", OUT_UNPARSED)
+    put(skills, 203, "gate", "2026-09-22T11:00:00-04:00", "2026-09-22T11:01:00-04:00", None)
     # 204: a retried gate, an early launch (not one of the three types), and a record
     # whose timestamps do not parse.
-    put(skills, 204, "gate-retry", ("2026-09-22T12:00:00-04:00", "2026-09-22T12:00:10-04:00", {}), OUT_CLEAN)
-    put(skills, 204, "early", ("2026-09-22T12:10:00-04:00", "2026-09-22T12:10:10-04:00", {}), OUT_CLEAN)
-    put(skills, 205, "gate", ("not a time", "2026-09-22T12:10:10-04:00", {}), OUT_CLEAN)
+    put(skills, 204, "gate-retry", "2026-09-22T12:00:00-04:00", "2026-09-22T12:00:10-04:00", OUT_CLEAN)
+    put(skills, 204, "early", "2026-09-22T12:10:00-04:00", "2026-09-22T12:10:10-04:00", OUT_CLEAN)
+    put(skills, 205, "gate", "not a time", "2026-09-22T12:10:10-04:00", OUT_CLEAN)
     # 206: a Claude finding matching Codex's first finding: shared credit.
     write_jsonl(skills / "findings-spec-206.jsonl",
                 [finding("P1", "hard", "flow/guard.sh", "guard breaks first pushes", axis="spec")])
     write_jsonl(skills / "dispositions-206.jsonl", [{"id": "P1", "outcome": "fixed", "sha": "e"},
                                                    {"id": "codex-gate-1", "outcome": "fixed", "sha": "f"}])
-    put(skills, 206, "gate", ("2026-09-22T13:00:00-04:00", "2026-09-22T13:01:00-04:00", {}), OUT_TWO)
+    put(skills, 206, "gate", "2026-09-22T13:00:00-04:00", "2026-09-22T13:01:00-04:00", OUT_TWO)
+    # 207: a dispositions line for a Codex pass that has no record in this ticket: stays an orphan
+    # although other tickets join the same `codex-gate-1` id.
+    write_jsonl(skills / "dispositions-207.jsonl", [{"id": "codex-gate-1", "outcome": "fixed", "sha": "q"}])
     # A scratch directory is not a review directory.
-    put(root / "scratch-9", 999, "gate", ("2026-09-22T09:00:00-04:00", "2026-09-22T09:01:00-04:00", {}), OUT_TWO)
+    put(root / "scratch-9", 999, "gate", "2026-09-22T09:00:00-04:00", "2026-09-22T09:01:00-04:00", OUT_TWO)
     # A repo whose cache holds only Codex records.
-    put(root / "other", 300, "gate", ("2026-09-22T09:00:00-04:00", "2026-09-22T09:01:00-04:00", {}), OUT_CLEAN)
+    put(root / "other", 300, "gate", "2026-09-22T09:00:00-04:00", "2026-09-22T09:01:00-04:00", OUT_CLEAN)
 
 
 class CodexHarvestTest(Case):
@@ -195,6 +198,10 @@ class CodexHarvestTest(Case):
             for f in self.row(200, phase)["findings"]:
                 self.assertEqual((f["overlap"], f["k"]), ("unique", 1))
 
+    def test_another_tickets_line_with_a_joined_id_stays_an_orphan(self):
+        section = self.review.read_text().split("## Dispositions with no finding")[1].split("\n## ")[0]
+        self.assertIn("#207 `codex-gate-1`", section)
+
     def test_the_codex_dispositions_are_no_longer_orphans(self):
         section = self.review.read_text().split("## Dispositions with no finding")[1].split("\n## ")[0]
         self.assertNotIn("#200 `codex-gate-1`", section)
@@ -205,6 +212,75 @@ class CodexHarvestTest(Case):
         before = self.ledger.read_text()
         self.harvest(self.cache)
         self.assertEqual(self.ledger.read_text(), before)
+
+
+ONE_HIGH = """Verdict: needs-attention
+
+Findings:
+- [high] One real finding (flow/a.sh:1)
+  Body.
+
+Next steps:
+- Fix.
+"""
+
+
+class CodexGuardTest(Case):
+    """Small caches, one per guard: each ticket here exists to trip exactly one."""
+
+    def cache_rows(self, build):
+        cache = self.tmp / "cache"
+        build(cache)
+        self.harvest(cache)
+        return self.rows()
+
+    def test_two_labels_naming_one_finding_leave_it_unknown(self):
+        def build(root):
+            put(root / "skills", 207, "gate", "2026-09-22T09:00:00-04:00", "2026-09-22T09:01:00-04:00", ONE_HIGH)
+            write_jsonl(root / "skills" / "dispositions-207.jsonl", [
+                {"id": "codex-gate-1", "outcome": "fixed", "sha": "a"},
+                {"id": "codex-gate-H1", "outcome": "disputed", "reason": "no"}])
+        f = self.cache_rows(build)["skills/207/codex-gate/1/codex-adversarial-207-gate"]["findings"][0]
+        self.assertEqual(f["outcome"], "unknown")
+        self.assertIn("both name this finding", f["outcome_status"]["reason"])
+
+    def test_a_record_that_disagrees_with_its_file_name_is_skipped_and_listed(self):
+        def build(root):
+            skills = root / "skills"
+            put(skills, 208, "gate", "2026-09-22T09:00:00-04:00", "2026-09-22T09:01:00-04:00", OUT_CLEAN)
+            (skills / "codex-adversarial-208-gate.json").write_text(
+                json.dumps(record(999, "gate", "2026-09-22T09:00:00-04:00", "2026-09-22T09:01:00-04:00")))
+            put(skills, 209, "gate", "2026-09-22T09:00:00-04:00", "2026-09-22T09:01:00-04:00", OUT_CLEAN)
+        rows = self.cache_rows(build)
+        self.assertFalse(any("/208/" in rid or "/999/" in rid for rid in rows))
+        self.assertIn("codex-adversarial-208-gate.json: record is unreadable or disagrees",
+                      self.review.read_text())
+
+    def test_a_record_completed_before_it_started_has_unknown_wall_clock(self):
+        def build(root):
+            put(root / "skills", 209, "gate", "2026-09-22T09:05:00-04:00", "2026-09-22T09:00:00-04:00", OUT_CLEAN)
+        wall = self.cache_rows(build)["skills/209/codex-gate/1/codex-adversarial-209-gate"]["cost"]["wall_clock"]
+        self.assertEqual(wall["status"], "unknown")
+        self.assertNotIn("seconds", wall)
+
+    def test_a_gate_and_its_retry_do_not_both_take_one_disposition(self):
+        def build(root):
+            for phase in ("gate", "gate-retry"):
+                put(root / "skills", 210, phase, "2026-09-22T09:00:00-04:00", "2026-09-22T09:01:00-04:00", ONE_HIGH)
+            write_jsonl(root / "skills" / "dispositions-210.jsonl", [{"id": "codex-gate-1", "outcome": "fixed", "sha": "a"}])
+        rows = self.cache_rows(build)
+        gate = rows["skills/210/codex-gate/1/codex-adversarial-210-gate"]["findings"][0]
+        retry = rows["skills/210/codex-gate/1/codex-adversarial-210-gate-retry"]["findings"][0]
+        self.assertEqual(gate["outcome"], "fixed")
+        self.assertEqual(retry["outcome"], "unknown")
+        self.assertIn("already credits", retry["outcome_status"]["reason"])
+
+    def test_the_same_record_under_the_alias_directories_gives_two_rows(self):
+        def build(root):
+            for d in ("skills", "agent-skills"):
+                put(root / d, 211, "gate", "2026-09-22T09:00:00-04:00", "2026-09-22T09:01:00-04:00", OUT_CLEAN)
+        rows = [rid for rid in self.cache_rows(build) if "/211/codex-gate/" in rid]
+        self.assertEqual(len(rows), 2)
 
 
 class CodexReportTest(Case):
@@ -240,6 +316,12 @@ class CodexReportTest(Case):
         # The clean ones are 204's retry, 205 and 300.
         self.assertEqual(gate["clean_rows"], 3)
         self.assertEqual(self.report()["codex-third"]["refused_rows"], 0)
+
+    def test_a_refused_row_is_not_an_unknown_findings_row_and_a_claude_type_has_no_clean_column(self):
+        types = self.report()
+        # 202 (unparsed) and 203 (no .out) only: the refused 201 is counted in `refused_rows`, once.
+        self.assertEqual(types["codex-gate"]["unknown_finding_rows"], 2)
+        self.assertIsNone(types["spec"]["clean_rows"])
 
     def test_codex_cost_is_wall_clock_with_no_tokens_or_dollars(self):
         gate = self.report()["codex-gate"]
