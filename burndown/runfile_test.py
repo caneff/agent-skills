@@ -15,12 +15,14 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runfile  # noqa: E402
+from run_fixtures import drop_repo_field, linked_worktree  # noqa: E402
 import sweep  # noqa: E402
 
 RUNFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runfile.py")
 # A real git checkout for every `start` that is not about the target repo: this
-# repo's own top-level, which `runfile.start` resolves the same way.
-REPO = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+# repo's own primary checkout, which `runfile.start` resolves the same way
+# (this suite may run from a linked worktree).
+REPO = runfile.checkout_top(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 
 # Every fixture cache dir this run makes, removed at the end whatever the run
@@ -91,6 +93,19 @@ def git_checkout(parent, name):
     os.makedirs(path)
     subprocess.run(["git", "init", "-q", path], check=True)
     return os.path.realpath(path)
+
+
+def test_checkout_top_of_a_linked_worktree_is_the_primary_checkout_1254():
+    # A run started with `--repo <worktree>` must still match
+    # `sweep.py counts --repo <primary checkout>` (#1190 C2): both name the
+    # one checkout the sidecars are keyed on.
+    primary = git_checkout(cache(), "target")
+    linked = linked_worktree(primary, "linked")
+    assert runfile.checkout_top(linked) == primary
+    assert runfile.checkout_top(primary) == primary
+    root = cache()
+    runfile.start("burn-1", slots=1, root=root, repo=linked)
+    assert runfile.load("burn-1", root=root)["repo"] == primary
 
 
 def test_start_records_the_absolute_top_level_of_the_target_checkout():
@@ -169,24 +184,14 @@ def test_show_prints_the_recorded_target_repo_and_says_when_there_is_none():
     root = cache()
     runfile.start("burn-1", slots=1, root=root, repo=REPO)
     assert f"repo {REPO}" in cli(root, "show", "burn-1").stdout
-    target = runfile.path("burn-1", root)
-    with open(target) as fh:
-        old = json.load(fh)
-    del old["repo"]
-    with open(target, "w") as fh:
-        json.dump(old, fh)
+    drop_repo_field("burn-1", root)
     assert "repo none recorded" in cli(root, "show", "burn-1").stdout
 
 
 def test_a_run_file_written_before_the_repo_field_loads_and_names_no_target():
     root = cache()
     runfile.start("burn-1", slots=1, root=root, repo=REPO)
-    target = runfile.path("burn-1", root)
-    with open(target) as fh:
-        old = json.load(fh)
-    del old["repo"]
-    with open(target, "w") as fh:
-        json.dump(old, fh)
+    drop_repo_field("burn-1", root)
     run = runfile.load("burn-1", root=root)
     assert run["repo"] is None, run
     try:

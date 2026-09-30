@@ -70,6 +70,21 @@ fn refuses_an_origin_that_names_no_github_owner_name() {
 }
 
 #[test]
+fn a_git_failure_on_the_repo_is_reported_with_gits_own_words_1254() {
+    // #1209 P4: any non-zero `git worktree list` used to print "not a git
+    // repo", hiding a dubious-ownership or corrupt-repo failure behind it.
+    let f = Fixture::new();
+    f.reset_home(true);
+    let not_repo = f.mkfixture("plain", "main").parent().unwrap().join("outside-any-repo");
+    std::fs::create_dir_all(&not_repo).unwrap();
+    let out = f.dispatch(&["--repo", not_repo.to_str().unwrap(), "395"], &default_scenario());
+    let text = out_text(&out);
+    assert!(!out.status.success(), "{text}");
+    assert!(text.contains("worktree list --porcelain failed"), "{text}");
+    assert!(text.to_lowercase().contains("not a git repository"), "git's own words are missing: {text}");
+}
+
+#[test]
 fn refuses_when_flock_is_not_on_path() {
     let f = Fixture::new();
     f.reset_home(true);

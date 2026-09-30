@@ -20,7 +20,6 @@ A missing, stale or malformed reading is 30, never 0: it is not headroom.
 from __future__ import annotations
 
 import importlib.util
-import math
 import sys
 import time
 from pathlib import Path
@@ -41,7 +40,7 @@ def load_helper():
     return mod
 
 
-def reading(limits: object, now: float) -> tuple[float, float] | None:
+def worst_window(helper, limits: object, now: float) -> tuple[float, float] | None:
     """(worst usedPercent, its resetsAt) across the windows, or None.
 
     A window that is present but malformed, or whose reset has passed (its
@@ -55,14 +54,10 @@ def reading(limits: object, now: float) -> tuple[float, float] | None:
         win = limits.get(key)
         if win is None:
             continue
-        if not isinstance(win, dict):
+        parsed = helper.valid_window(win)
+        if parsed is None:
             return None
-        pct, resets = win.get("usedPercent"), win.get("resetsAt")
-        if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
-               for v in (pct, resets)):
-            return None  # json.loads accepts NaN and Infinity; neither is a reading
-        if pct < 0:
-            return None
+        pct, resets = parsed
         if resets <= now:
             return None
         if worst is None or pct > worst[0]:
@@ -74,12 +69,12 @@ def check() -> tuple[int, str]:
     helper = load_helper()
     helper.RPC_TIMEOUT = REFRESH_TIMEOUT
     now = time.time()
-    worst = reading(helper.read_cache(now), now)
+    worst = worst_window(helper, helper.read_cache(now), now)
     if worst is None:
         live = helper.fetch_live()
         if live is not None:
             helper.write_cache(live, now)
-            worst = reading(live, now)
+            worst = worst_window(helper, live, now)
     if worst is None:
         return UNKNOWN, "codex usage unknown: no fresh, readable usage cache and the live fetch failed"
     pct, resets = worst

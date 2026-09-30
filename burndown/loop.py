@@ -33,6 +33,19 @@ class LoopError(Exception):
     a controller needs the reason it is refused, not a stack."""
 
 
+def origin_default(run):
+    """`origin/<default>`, as the checkout `run(args) -> stdout` runs in
+    records it — never assumed to be `main`."""
+    try:
+        return run(
+            ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).strip()
+    except LoopError as exc:
+        raise LoopError(
+            f"{exc} — this checkout has no recorded default branch, and the "
+            "loop will not assume `main`: record it with `git remote set-head "
+            "origin -a`") from None
+
+
 def seat(run):
     """The branch the controller is sitting on, or a refusal saying why this
     seat is not a controller's.
@@ -57,14 +70,7 @@ def seat(run):
         raise LoopError(
             "detached HEAD — neither a controller's seat nor a worker's. "
             "Check out the default branch.")
-    try:
-        default = run(
-            ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).strip()
-    except LoopError as exc:
-        raise LoopError(
-            f"{exc} — this checkout has no recorded default branch, and the "
-            "loop will not assume `main`: record it with `git remote set-head "
-            "origin -a`") from None
+    default = origin_default(run)
     default = default.split("/", 1)[1] if "/" in default else default
     if branch != default:
         raise LoopError(
@@ -73,11 +79,12 @@ def seat(run):
     return branch
 
 
-def paths(clump):
-    """The files a clump owns: its resolved closure where there is one, its
-    named files where there is not. `closure.py` emits `closure` only in the
-    two modes that resolved one — in subtree mode there is no closure, and the
-    exclusion below still has to read something.
+def owned(clump):
+    """`(key, files)`: the field a clump's files are read from — its resolved
+    closure where there is one, its named files where there is not — and the
+    set it holds. `closure.py` emits `closure` only in the two modes that
+    resolved one — in subtree mode there is no closure, and the exclusion
+    below still has to read something.
 
     A value that is not a non-empty list of non-empty strings is refused
     rather than read: `set("shared.py")` is a set of six letters, which
@@ -94,8 +101,13 @@ def paths(clump):
             raise LoopError(
                 f"clump #{key_of(clump)}: {key} is not a list of paths: "
                 f"{value!r}")
-        return set(value)
+        return key, set(value)
     raise LoopError(f"clump #{key_of(clump)} names no files")
+
+
+def paths(clump):
+    """The files a clump owns; `owned` says where they are read from."""
+    return owned(clump)[1]
 
 
 def key_of(clump):
@@ -960,20 +972,16 @@ def load_run(run_id, root=None):
 def workspace_diff(workspace):
     """The files a workspace's branch really changes against its origin's
     default branch: `git diff --name-only origin/<default>...HEAD` run inside
-    it (#1212). Refuses when git cannot answer — a workspace whose diff could
-    not be read is not one that changed nothing.
+    it (#1212), plus its uncommitted and untracked files. Refuses when git
+    cannot answer — a workspace whose diff could not be read is not one that
+    changed nothing.
     """
     def in_workspace(args):
         try:
-            done = subprocess.run(["git", "-C", workspace, *args],
-                                  capture_output=True, text=True, timeout=30)
-        except (OSError, subprocess.SubprocessError) as exc:
+            return git(args, cwd=workspace, timeout=30)
+        except LoopError as exc:
             raise LoopError(
-                f"could not read {workspace}'s diff: {exc}") from exc
-        if done.returncode != 0:
-            raise LoopError(f"could not read {workspace}'s diff: git "
-                            f"{' '.join(args)} failed: {done.stderr.strip()}")
-        return done.stdout
+                f"could not read {workspace}'s diff: {exc}") from None
     # A workspace path whose `.git` is gone resolves to the checkout around it
     # (workspaces sit under the primary's `.claude/worktrees/`), whose diff is
     # empty on the default branch — an absent workspace read as no change.
@@ -981,13 +989,26 @@ def workspace_diff(workspace):
     if os.path.realpath(top) != os.path.realpath(workspace):
         raise LoopError(f"{workspace} is not a checkout root (git resolves it "
                         f"to {top}), so its diff is not its own")
-    default = in_workspace(
-        ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).strip()
+    default = origin_default(in_workspace)
     # NUL-separated, as `closure.py` reads `git ls-files`: the default output
-    # C-quotes a non-ASCII name, which then matches no raw path.
-    return [name for name in in_workspace(
-        ["diff", "--name-only", "-z", "--no-renames",
-         f"{default}...HEAD"]).split("\0") if name]
+    # C-quotes a non-ASCII name, which then matches no raw path. Committed
+    # history, then what the worker has edited but not committed, then what it
+    # has created but not added: all three are files it has reached.
+    names = []
+    for args in (["diff", "--name-only", "-z", "--no-renames",
+                  f"{default}...HEAD"],
+                 ["diff", "--name-only", "-z", "--no-renames", "HEAD"],
+                 ["ls-files", "-z", "--others", "--exclude-standard"]):
+        names += [n for n in in_workspace(args).split("\0") if n]
+    return list(dict.fromkeys(names))
+
+
+def run_target(run):
+    """`runfile.target_repo` with its refusal as a `LoopError`."""
+    try:
+        return runfile.target_repo(run)
+    except runfile.RunFileError as exc:
+        raise LoopError(str(exc)) from exc
 
 
 def with_workspace_diffs(in_flight, diff=workspace_diff):
@@ -1010,12 +1031,12 @@ def with_workspace_diffs(in_flight, diff=workspace_diff):
             changed = diff(clump["workspace"])
         except LoopError as exc:
             raise LoopError(f"clump #{key_of(clump)}: {exc}") from exc
-        key = "closure" if clump.get("closure") is not None else "files"
-        out.append({**clump, key: sorted(paths(clump) | set(changed))})
+        key, files = owned(clump)
+        out.append({**clump, key: sorted(files | set(changed))})
     return out
 
 
-def with_run_jobs(in_flight, run_id, root=None):
+def with_run_jobs(in_flight, run):
     """The in-flight clumps with each `job` read from the run file, matched by
     the clump's lowest ticket. `closure.py --json` carries no `job`, so the
     record `runfile.py job` wrote is the only source; a clump the run file
@@ -1023,8 +1044,8 @@ def with_run_jobs(in_flight, run_id, root=None):
     fix — unless its tickets overlap a clump registered under another key,
     which `runfile.py clump` would refuse, so that refusal names the overlap
     instead; a registered clump with no `job` gets `None`, which `job_cores`
-    refuses naming `runfile.py job`."""
-    run = load_run(run_id, root)
+    refuses naming `runfile.py job`. `run` is the loaded run file."""
+    run_id = run["run_id"]
     jobs = {min(entry["tickets"]): entry["job"] for entry in run["clumps"]}
     owner = {n: min(entry["tickets"]) for entry in run["clumps"]
              for n in entry["tickets"]}
@@ -1188,11 +1209,9 @@ def run(argv):
             candidates = read_clumps(args.candidates)
             in_flight = read_clumps(args.in_flight, live=True)
             root = runfile.env_root()
-            try:
-                repo = runfile.target_repo(load_run(args.run, root))
-            except runfile.RunFileError as exc:
-                raise LoopError(str(exc)) from exc
-            in_flight = with_run_jobs(in_flight, args.run, root)
+            run = load_run(args.run, root)
+            repo = run_target(run)
+            in_flight = with_run_jobs(in_flight, run)
             if args.no_workspace_diff:
                 # Said, not silent: this run's exclusion reads only the named
                 # closures, and its output must not read like one that also
@@ -1327,9 +1346,15 @@ def main(argv):
     return status
 
 
-def git(args):
-    """`git` as the seat check calls it, from the cwd the controller is in."""
-    done = subprocess.run(["git", *args], capture_output=True, text=True)
+def git(args, cwd=None, timeout=None):
+    """`git` with the arguments given, from `cwd` (the cwd the controller is in
+    by default) — the seat check's runner and, with a workspace, the diff's."""
+    cmd = ["git", *args] if cwd is None else ["git", "-C", cwd, *args]
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise LoopError(f"git {' '.join(args)} failed: {exc}") from exc
     if done.returncode != 0:
         raise LoopError(
             f"git {' '.join(args)} failed: {done.stderr.strip()}")

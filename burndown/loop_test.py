@@ -16,6 +16,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import loop  # noqa: E402
 import runfile  # noqa: E402
+from run_fixtures import drop_repo_field  # noqa: E402
 
 # A real git checkout to record as a run's target when the case is not about it.
 REPO = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -246,7 +247,7 @@ def test_dispatch_refuses_a_run_file_that_names_no_target_repo_1190():
     # A run file from before the field loads, but a command printed without
     # `--repo` would claim against the cwd's origin: refuse, never omit.
     with tempfile.TemporaryDirectory() as tmp:
-        cand, live, env = run_file_dispatch(tmp, ("none",), repo=None)
+        cand, live, env = run_file_dispatch(tmp, ("none",), legacy=True)
         got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
                       "--run", "burn-t", "--free", "2", "--processes", "4",
                       "--committed-gb", "4", env=env)
@@ -1964,26 +1965,17 @@ def main():
     print(f"{len(tests)} passed")
 
 
-def drop_repo_field(run_id, cache):
-    """Rewrite a run file as one written before the `repo` field existed."""
-    target = runfile.path(run_id, cache)
-    with open(target) as fh:
-        run = json.load(fh)
-    del run["repo"]
-    with open(target, "w") as fh:
-        json.dump(run, fh)
-
-
-def run_file_dispatch(tmp, recorded, repo=REPO):
+def run_file_dispatch(tmp, recorded, repo=REPO, legacy=False):
     """`closure.py --json` plus workspace as the controller builds it — no
     `job` field — and a run file in a private cache dir. `recorded` is the
     `runfile.py job` call for clump 351, or None to record nothing. `repo` is
-    the run's target checkout; None writes a run file from before the field."""
+    the run's target checkout; `legacy` writes a run file from before the
+    field."""
     import runfile
     cache = os.path.join(tmp, "cache")
     os.makedirs(cache)
-    runfile.start("burn-t", 5, None, root=cache, repo=repo or REPO)
-    if repo is None:
+    runfile.start("burn-t", 5, None, root=cache, repo=repo)
+    if legacy:
         drop_repo_field("burn-t", cache)
     runfile.clump("burn-t", [351], "/w/351", "sm-351", root=cache)
     runfile.clump("burn-t", [412], "/w/412", "sm-412", root=cache)
@@ -2257,6 +2249,22 @@ def test_workspace_diff_lists_files_changed_against_the_origin_default():
             pass
         else:
             raise AssertionError("a missing workspace was read as no diff")
+
+
+def test_workspace_diff_includes_uncommitted_and_untracked_edits_1254():
+    # #1212 P2: a worker that has not committed yet has still reached its
+    # files; the committed history alone reads it as touching nothing.
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_workspace(tmp, ["b.txt"])
+        with open(os.path.join(work, "a.txt"), "w") as fh:
+            fh.write("edited, unstaged")
+        with open(os.path.join(work, "staged.txt"), "w") as fh:
+            fh.write("s")
+        run_in(work, "git", "add", "staged.txt")
+        with open(os.path.join(work, "untracked.txt"), "w") as fh:
+            fh.write("u")
+        assert sorted(loop.workspace_diff(work)) == [
+            "a.txt", "b.txt", "staged.txt", "untracked.txt"]
 
 
 def test_workspace_diff_names_both_sides_of_a_rename():

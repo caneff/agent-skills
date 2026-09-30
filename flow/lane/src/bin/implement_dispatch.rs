@@ -261,15 +261,8 @@ fn seed_trust(claude_json: &str, wt: &str) -> ExitCode {
         std::process::id(),
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
     );
-    if std::fs::write(&tmp, rendered).is_err() {
-        let _ = std::fs::remove_file(&tmp);
-        return fail();
-    }
-    if let Some(mode) = mode {
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode));
-    }
-    if std::fs::rename(&tmp, claude_json).is_err() {
-        let _ = std::fs::remove_file(&tmp);
+    // `mode` keeps the file's existing permissions on the replacement.
+    if lane::atomic::replace(Path::new(claude_json), Path::new(&tmp), rendered.as_bytes(), mode, |_| {}).is_err() {
         return fail();
     }
     ExitCode::SUCCESS
@@ -448,9 +441,7 @@ fn hook_wrapper(guard_name: &str, foreign_name: &str, buffer_stdin: bool) -> Str
 /// assuming `set_permissions` and the filesystem agree.
 fn write_executable(path: &Path, text: &str) -> Result<(), String> {
     let tmp = path.with_file_name(format!("{}.lane-{}", path.file_name().and_then(|n| n.to_str()).unwrap_or("hook"), std::process::id()));
-    std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(|e| format!("cannot chmod {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| format!("cannot install {}: {e}", path.display()))?;
+    lane::atomic::replace(path, &tmp, text.as_bytes(), Some(0o755), |_| {}).map_err(|e| format!("cannot install {}: {e}", path.display()))?;
     let mode = std::fs::metadata(path).map_err(|e| format!("cannot stat {}: {e}", path.display()))?.permissions().mode();
     if mode & 0o111 == 0 {
         return Err(format!("installed {} but it is not executable (mode {mode:o})", path.display()));
@@ -831,11 +822,7 @@ fn run() -> Result<(), ExitCode> {
     }
 
     let repo = args.repo.clone().unwrap_or_else(|| env::current_dir().map(|p| p.display().to_string()).unwrap_or_default());
-    let primary = match worktree::primary_timeout(&repo, git_query_timeout()) {
-        Ok(Some(p)) => p,
-        Ok(None) => return Err(die(format!("not a git repo: {repo}"))),
-        Err(e) => return Err(die(e)),
-    };
+    let primary = worktree::primary_timeout(&repo, git_query_timeout()).map_err(die)?;
     let slug = git_origin::origin_slug_timeout(Path::new(&primary), git_query_timeout()).map_err(die)?.unwrap_or_default();
     if !valid_slug(&slug) {
         return Err(die(format!("origin in {primary} names no GitHub owner/name")));

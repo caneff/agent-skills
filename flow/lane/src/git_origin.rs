@@ -6,28 +6,16 @@ use crate::runner::{quiet_ok, quiet_ok_bounded, quiet_stdout, quiet_stdout_bound
 use std::path::Path;
 use std::time::Duration;
 
-/// `default_of <path>` -> main, master, whatever origin points at.
-pub fn default_branch(repo: &Path) -> String {
-    let repo_s = repo.to_string_lossy();
-    if let Some(d) = quiet_stdout("git", &["-C", &repo_s, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"]) {
-        let d = d.trim();
-        if !d.is_empty() {
-            return d.strip_prefix("origin/").unwrap_or(d).to_string();
-        }
-    }
-    for d in ["main", "master"] {
-        if quiet_ok("git", &["-C", &repo_s, "show-ref", "-q", "--verify", &format!("refs/remotes/origin/{d}")]) {
-            return d.to_string();
-        }
-    }
-    "main".to_string()
+/// The branch `refs/remotes/origin/HEAD` names, from `symbolic-ref --short`
+/// output; `None` when it printed nothing.
+fn head_branch(out: &str) -> Option<String> {
+    let d = out.trim();
+    (!d.is_empty()).then(|| d.strip_prefix("origin/").unwrap_or(d).to_string())
 }
 
-/// `slug_of <path>` -> owner/name, for the gh calls. `None` when there is no
-/// origin remote.
-pub fn origin_slug(repo: &Path) -> Option<String> {
-    let repo_s = repo.to_string_lossy();
-    let url = quiet_stdout("git", &["-C", &repo_s, "remote", "get-url", "origin"])?;
+/// `owner/name` out of an origin URL (ssh or https, `.git` or not); `None`
+/// for an empty URL. A URL that is not on github.com is returned as given.
+fn slug_of_url(url: &str) -> Option<String> {
     let url = url.trim();
     if url.is_empty() {
         return None;
@@ -43,6 +31,29 @@ pub fn origin_slug(repo: &Path) -> Option<String> {
     Some(url.to_string())
 }
 
+/// `default_of <path>` -> main, master, whatever origin points at.
+pub fn default_branch(repo: &Path) -> String {
+    let repo_s = repo.to_string_lossy();
+    if let Some(d) = quiet_stdout("git", &["-C", &repo_s, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"]) {
+        if let Some(branch) = head_branch(&d) {
+            return branch;
+        }
+    }
+    for d in ["main", "master"] {
+        if quiet_ok("git", &["-C", &repo_s, "show-ref", "-q", "--verify", &format!("refs/remotes/origin/{d}")]) {
+            return d.to_string();
+        }
+    }
+    "main".to_string()
+}
+
+/// `slug_of <path>` -> owner/name, for the gh calls. `None` when there is no
+/// origin remote.
+pub fn origin_slug(repo: &Path) -> Option<String> {
+    let repo_s = repo.to_string_lossy();
+    slug_of_url(&quiet_stdout("git", &["-C", &repo_s, "remote", "get-url", "origin"])?)
+}
+
 /// `default_branch`, bounded (#849): `implement-dispatch` is the only
 /// caller of this variant, so a hang on any of the underlying `git` calls
 /// fails loud — naming the command — rather than falling through to
@@ -53,9 +64,8 @@ pub fn default_branch_timeout(repo: &Path, timeout: Duration) -> Result<String, 
     if let Some(d) =
         quiet_stdout_bounded("git", &["-C", &repo_s, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], timeout)?
     {
-        let d = d.trim();
-        if !d.is_empty() {
-            return Ok(d.strip_prefix("origin/").unwrap_or(d).to_string());
+        if let Some(branch) = head_branch(&d) {
+            return Ok(branch);
         }
     }
     for d in ["main", "master"] {
@@ -69,22 +79,8 @@ pub fn default_branch_timeout(repo: &Path, timeout: Duration) -> Result<String, 
 /// `origin_slug`, bounded (#849) — see [`default_branch_timeout`].
 pub fn origin_slug_timeout(repo: &Path, timeout: Duration) -> Result<Option<String>, String> {
     let repo_s = repo.to_string_lossy();
-    let Some(url) = quiet_stdout_bounded("git", &["-C", &repo_s, "remote", "get-url", "origin"], timeout)? else {
-        return Ok(None);
-    };
-    let url = url.trim();
-    if url.is_empty() {
-        return Ok(None);
-    }
-    let url = url.strip_suffix(".git").unwrap_or(url);
-    let url = match url.find("github.com/") {
-        Some(i) => &url[i + "github.com/".len()..],
-        None => match url.find("github.com:") {
-            Some(i) => &url[i + "github.com:".len()..],
-            None => url,
-        },
-    };
-    Ok(Some(url.to_string()))
+    let url = quiet_stdout_bounded("git", &["-C", &repo_s, "remote", "get-url", "origin"], timeout)?;
+    Ok(url.and_then(|url| slug_of_url(&url)))
 }
 
 #[cfg(test)]
@@ -111,6 +107,21 @@ mod tests {
         git(&clone, &["commit", "-qm", "one"]);
         git(&clone, &["push", "-q", "-u", "origin", branch]);
         clone
+    }
+
+    #[test]
+    fn slug_of_url_reads_ssh_https_and_bare_forms() {
+        assert_eq!(slug_of_url("git@github.com:caneff/skills.git\n").as_deref(), Some("caneff/skills"));
+        assert_eq!(slug_of_url("https://github.com/caneff/skills").as_deref(), Some("caneff/skills"));
+        assert_eq!(slug_of_url("/some/where/x.git").as_deref(), Some("/some/where/x"));
+        assert_eq!(slug_of_url("  \n"), None);
+    }
+
+    #[test]
+    fn head_branch_strips_the_remote_and_refuses_empty() {
+        assert_eq!(head_branch("origin/trunk\n").as_deref(), Some("trunk"));
+        assert_eq!(head_branch("main").as_deref(), Some("main"));
+        assert_eq!(head_branch(""), None);
     }
 
     #[test]

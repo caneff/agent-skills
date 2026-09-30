@@ -236,24 +236,63 @@ pub fn run_in_timeout(dir: Option<&Path>, program: &str, args: &[&str], timeout:
     Ok(CommandOutput { success: status.success(), combined })
 }
 
-/// `quiet_stdout`, bounded — see [`run_timeout`].
-pub fn quiet_stdout_timeout(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
+/// One bounded quiet run: what [`run_bounded`] returned for a command with
+/// stdin closed, or the error naming the command when it could not start.
+struct Quiet {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    timed_out: bool,
+    truncated: bool,
+    /// `program arg arg`, and the bound it ran under: what an error names.
+    command: String,
+    timeout: Duration,
+}
+
+fn run_quiet(program: &str, args: &[&str], timeout: Duration) -> Result<Quiet, String> {
     let mut cmd = Command::new(program);
     cmd.args(args).stdin(Stdio::null());
-    let (status, stdout, _stderr, _timed_out, _truncated) = run_bounded(cmd, timeout).ok()?;
-    if !status.success() {
-        return None;
+    let command = format!("{program} {}", args.join(" "));
+    let (status, stdout, stderr, timed_out, truncated) = run_bounded(cmd, timeout).map_err(|e| format!("{command}: {e}"))?;
+    Ok(Quiet { status, stdout, stderr, timed_out, truncated, command, timeout })
+}
+
+impl Quiet {
+    /// The error a caller that must tell a genuine "no" from the bound
+    /// firing returns instead of an answer, or `None` when the run was
+    /// complete. A child that exited while a descendant still held a pipe
+    /// open past READ_GRACE (a hook backgrounding a daemon, e.g.) gives a
+    /// possibly partial read, which must not be handed back as the
+    /// command's real answer.
+    fn incomplete(&self) -> Option<String> {
+        if self.timed_out {
+            return Some(format!("{} timed out after {:?}", self.command, self.timeout));
+        }
+        if self.truncated {
+            return Some(format!(
+                "{}: a descendant is still holding a pipe open past {READ_GRACE:?}; the read may be incomplete",
+                self.command
+            ));
+        }
+        None
     }
-    let mut s = String::from_utf8_lossy(&stdout).into_owned();
-    trim_trailing_newlines(&mut s);
-    Some(s)
+
+    fn text(&self) -> String {
+        let mut s = String::from_utf8_lossy(&self.stdout).into_owned();
+        trim_trailing_newlines(&mut s);
+        s
+    }
+}
+
+/// `quiet_stdout`, bounded — see [`run_timeout`].
+pub fn quiet_stdout_timeout(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
+    let run = run_quiet(program, args, timeout).ok()?;
+    run.status.success().then(|| run.text())
 }
 
 /// `quiet_ok`, bounded — see [`run_timeout`].
 pub fn quiet_ok_timeout(program: &str, args: &[&str], timeout: Duration) -> bool {
-    let mut cmd = Command::new(program);
-    cmd.args(args).stdin(Stdio::null());
-    run_bounded(cmd, timeout).map(|(status, ..)| status.success()).unwrap_or(false)
+    run_quiet(program, args, timeout).map(|run| run.status.success()).unwrap_or(false)
 }
 
 /// Bounded read whose caller must be able to tell a genuine "no" — the
@@ -264,53 +303,37 @@ pub fn quiet_ok_timeout(program: &str, args: &[&str], timeout: Duration) -> bool
 /// ref, no origin remote); `Err` names the program and its arguments and
 /// must never be read that way (#849).
 pub fn quiet_stdout_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<Option<String>, String> {
-    let mut cmd = Command::new(program);
-    cmd.args(args).stdin(Stdio::null());
-    let (status, stdout, _stderr, timed_out, truncated) =
-        run_bounded(cmd, timeout).map_err(|e| format!("{program} {}: {e}", args.join(" ")))?;
-    if timed_out {
-        return Err(format!("{program} {} timed out after {timeout:?}", args.join(" ")));
+    let run = run_quiet(program, args, timeout)?;
+    if let Some(err) = run.incomplete() {
+        return Err(err);
     }
-    if truncated {
-        // The child itself exited, but a descendant still held a pipe open
-        // past READ_GRACE (a hook backgrounding a daemon, e.g.): the read is
-        // possibly partial, so it must not be handed back as a complete
-        // Some(...) a caller could mistake for the command's real answer.
-        return Err(format!(
-            "{program} {}: a descendant is still holding a pipe open past {READ_GRACE:?}; the read may be incomplete",
-            args.join(" ")
-        ));
+    Ok(run.status.success().then(|| run.text()))
+}
+
+/// [`quiet_stdout_bounded`] for a caller that has no negative answer to
+/// read: a command that ran and exited non-zero is an `Err` too, carrying the
+/// command's own stderr, so the refusal names why instead of a guess.
+pub fn stdout_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
+    let run = run_quiet(program, args, timeout)?;
+    if let Some(err) = run.incomplete() {
+        return Err(err);
     }
-    if !status.success() {
-        return Ok(None);
+    if !run.status.success() {
+        return Err(format!("{} failed: {}", run.command, String::from_utf8_lossy(&run.stderr).trim()));
     }
-    let mut s = String::from_utf8_lossy(&stdout).into_owned();
-    trim_trailing_newlines(&mut s);
-    Ok(Some(s))
+    Ok(run.text())
 }
 
 /// Bounded existence-style check whose caller must be able to tell a
-/// genuine "no" from the bound firing — see [`quiet_stdout_bounded`].
+/// genuine "no" from the bound firing — see [`quiet_stdout_bounded`]. Only
+/// the exit status is the answer here, but a pipe still open past READ_GRACE
+/// means a descendant is still running: the same uncertainty applies.
 pub fn quiet_ok_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<bool, String> {
-    let mut cmd = Command::new(program);
-    cmd.args(args).stdin(Stdio::null());
-    let (status, _stdout, _stderr, timed_out, truncated) =
-        run_bounded(cmd, timeout).map_err(|e| format!("{program} {}: {e}", args.join(" ")))?;
-    if timed_out {
-        return Err(format!("{program} {} timed out after {timeout:?}", args.join(" ")));
+    let run = run_quiet(program, args, timeout)?;
+    match run.incomplete() {
+        Some(err) => Err(err),
+        None => Ok(run.status.success()),
     }
-    if truncated {
-        // stdout/stderr aren't this function's answer (only the exit
-        // status is), but a pipe still open past READ_GRACE means a
-        // descendant of this command is still running — the same
-        // uncertainty `quiet_stdout_bounded` refuses to fold into a plain
-        // answer applies here too.
-        return Err(format!(
-            "{program} {}: a descendant is still holding a pipe open past {READ_GRACE:?}",
-            args.join(" ")
-        ));
-    }
-    Ok(status.success())
 }
 
 fn trim_trailing_newlines(s: &mut String) {
@@ -558,6 +581,13 @@ mod tests {
         use std::time::Duration;
         let got = quiet_stdout_bounded("printf", &["%s", "hello"], Duration::from_secs(5));
         assert_eq!(got, Ok(Some("hello".to_string())));
+    }
+
+    #[test]
+    fn stdout_bounded_carries_the_commands_own_stderr_on_a_non_zero_exit() {
+        let got = stdout_bounded("sh", &["-c", "echo boom >&2; exit 3"], Duration::from_secs(5));
+        let err = got.unwrap_err();
+        assert!(err.contains("failed: boom"), "{err}");
     }
 
     #[test]

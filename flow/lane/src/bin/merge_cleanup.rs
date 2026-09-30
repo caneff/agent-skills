@@ -542,7 +542,11 @@ impl WorktreeFiles {
             .map(|(k, v)| format!("{} {k}", v.len()))
             .collect();
         let others: Vec<String> = self.modified.iter().chain(&self.untracked).cloned().collect();
-        let names: Vec<String> = self.ignored.iter().cloned().chain((!others.is_empty()).then(|| first_names(&others))).collect();
+        let names: Vec<String> = (!self.ignored.is_empty())
+            .then(|| names_shown(IGNORED, &self.ignored))
+            .into_iter()
+            .chain((!others.is_empty()).then(|| names_shown("modified", &others)))
+            .collect();
         format!("{} file(s) would be lost: {}", kinds.join(", "), names.join(", "))
     }
 }
@@ -587,6 +591,21 @@ fn collapse_nested_worktrees(wt: &str, names: &[String]) -> Vec<String> {
         }
     }
     out
+}
+
+/// The kind whose names are never capped; every site that names it uses this.
+const IGNORED: &str = "ignored";
+
+/// How the refusal and the dry run's blocker lines show the `names` of one
+/// `kind` of dirty file — the one place the capping rule lives. Ignored names
+/// are never capped: `--discard` destroys them unseen, so none may fall into
+/// "and N more" (#838). Every other kind is capped at `NAMES_SHOWN`.
+fn names_shown(kind: &str, names: &[String]) -> String {
+    if kind == IGNORED {
+        names.join(", ")
+    } else {
+        first_names(names)
+    }
 }
 
 /// The first `NAMES_SHOWN` names, comma-separated, then "and <n> more".
@@ -646,21 +665,20 @@ impl Cleanup {
                 Some(files) => {
                     let (scratch, ignored): (Vec<String>, Vec<String>) =
                         files.ignored.iter().cloned().partition(|f| f == ".scratch/" || f.starts_with(".scratch/"));
-                    // Modified, untracked and scratch names are capped, as in
-                    // the refusal; ignored names never are (#838). A scratch
+                    // Names are shown as the refusal shows them
+                    // (`names_shown`). A scratch
                     // tree can hold thousands of files: the count stays the
                     // file count, the names collapse nested worktrees.
                     let scratch_count = scratch.len();
                     let scratch = collapse_nested_worktrees(&wt, &scratch);
-                    for (kind, names, count, capped) in [
-                        ("modified", files.modified.clone(), files.modified.len(), true),
-                        ("untracked", files.untracked.clone(), files.untracked.len(), true),
-                        ("ignored", ignored.clone(), ignored.len(), false),
-                        ("scratch", scratch, scratch_count, true),
+                    for (kind, names, count) in [
+                        ("modified", files.modified.clone(), files.modified.len()),
+                        ("untracked", files.untracked.clone(), files.untracked.len()),
+                        (IGNORED, ignored.clone(), ignored.len()),
+                        ("scratch", scratch, scratch_count),
                     ] {
                         if !names.is_empty() {
-                            let shown = if capped { first_names(&names) } else { names.join(", ") };
-                            lines.push(format!("{kind} {count} file(s): {shown}"));
+                            lines.push(format!("{kind} {count} file(s): {}", names_shown(kind, &names)));
                         }
                     }
                 }
@@ -1995,4 +2013,23 @@ fn main() -> ExitCode {
     }
     c.close_removed_herdr_workspaces();
     if ok && !c.claim_clear_failed && !c.remote_delete_failed { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(n: usize) -> Vec<String> {
+        (1..=n).map(|i| format!("f{i}")).collect()
+    }
+
+    #[test]
+    fn names_shown_caps_every_kind_but_ignored() {
+        let seven = names(NAMES_SHOWN + 2);
+        assert_eq!(names_shown(IGNORED, &seven), seven.join(", "));
+        for kind in ["modified", "untracked", "scratch"] {
+            assert_eq!(names_shown(kind, &seven), first_names(&seven));
+            assert!(names_shown(kind, &seven).ends_with("and 2 more"));
+        }
+    }
 }

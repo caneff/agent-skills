@@ -100,8 +100,9 @@ included — and say so to the controller. Never lower heavy to light: the label
 was read before anyone saw the diff, and code landing unreviewed is the
 outcome the heavy tier exists to stop.
 
-**Codex builds this one?** `--codex` on the invocation, or the owner saying
-their Claude quota is short, moves the build and its reviews to Codex: read
+**Codex builds this one?** `--codex` on the invocation, the owner saying
+their Claude quota is short, or a ruling by the owner in a ticket comment that
+names the lane, moves the build and its reviews to Codex: read
 [`codex-lane.md`](codex-lane.md) and follow it instead. Nothing but the
 owner's word turns it on.
 
@@ -535,7 +536,10 @@ Without the flag: read this PR's own dispositions sidecar,
 `leftover` lines. None: file nothing, the same zero-leftovers rule the
 burn sweep uses. Any: **check first, the same idempotent search the burn
 sweep uses** (`burndown/SKILL.md` § The sweep) — a crash after
-`/file-ticket` here is the same hazard —
+`/file-ticket` here is the same hazard. Its command and stop rules are
+written out in both skills on purpose (#1254): a worker holds this file and
+not the burn's, the titles differ (`PR #<n>` here, `burn <run-id>` there), and
+each copy has its own wording test; change one, change the other —
 
 ```
 gh issue list --repo <owner/name> --state all --limit 100 \

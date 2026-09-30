@@ -112,7 +112,7 @@ fi
 dispatch_out=$(HOME="$tmp/home" "$tmp/home/.local/bin/implement-dispatch" --repo "$tmp/nowhere" 1 2>&1)
 if [ -x "$tmp/home/.local/bin/implement-dispatch" ] && [ ! -L "$tmp/home/.local/bin/implement-dispatch" ] \
    && [ ! -e "$tmp/home/.local/bin/lane-fake" ] \
-   && printf '%s' "$dispatch_out" | grep -q "not a git repo"; then
+   && printf '%s' "$dispatch_out" | grep -q "worktree list --porcelain failed"; then
   echo "PASS implement-dispatch installed as a real binary, and the fake is never installed"
 else
   echo "FAIL implement-dispatch not installed correctly: $dispatch_out"; fails=1
@@ -312,9 +312,12 @@ fi
 # link() is read out of install.sh and run alone, so this case does not pay for
 # the cargo installs a whole run makes.
 lh="$tmp/linkhome"
+run_link() { # run_link <commands>: link() lifted out of install.sh, run with HOME=$lh
+  HOME="$lh" here="$repo/flow" bash -c 'set -euo pipefail; link_refused=""; eval "$(sed -n "/^link()/,/^}/p" "$here/install.sh")"; eval "$1"' _ "$1" 2>&1
+}
 mkdir -p "$lh/.claude"
 printf 'legacy\n' > "$lh/.claude/settings.json"
-link_out=$(HOME="$lh" here="$repo/flow" bash -c 'set -euo pipefail; eval "$(sed -n "/^link()/,/^}/p" "$here/install.sh")"; link claude/settings.json "$HOME/.claude/settings.json"' 2>&1) || { echo "FAIL link() failed on a real settings.json: $link_out"; fails=1; }
+link_out=$(run_link 'link claude/settings.json "$HOME/.claude/settings.json"') || { echo "FAIL link() failed on a real settings.json: $link_out"; fails=1; }
 if [ -L "$lh/.claude/settings.json" ] && [ "$(cat "$lh/.claude/settings.json.pre-flow" 2>/dev/null)" = "legacy" ]; then
   echo "PASS a real settings.json is moved to .pre-flow and replaced by the link"
 else
@@ -322,7 +325,7 @@ else
 fi
 rm "$lh/.claude/settings.json"
 printf 'newer\n' > "$lh/.claude/settings.json"
-link_out=$(HOME="$lh" here="$repo/flow" bash -c 'set -euo pipefail; link_refused=""; eval "$(sed -n "/^link()/,/^}/p" "$here/install.sh")"; link claude/settings.json "$HOME/.claude/settings.json"; echo "link_refused=$link_refused"' 2>&1); rc=$?
+link_out=$(run_link 'link claude/settings.json "$HOME/.claude/settings.json"; echo "link_refused=$link_refused"'); rc=$?
 if [ "$rc" -eq 0 ] && printf '%s' "$link_out" | grep -q '^refusing: ' && printf '%s' "$link_out" | grep -q '^link_refused=1$' \
    && [ "$(cat "$lh/.claude/settings.json.pre-flow")" = "legacy" ] && [ "$(cat "$lh/.claude/settings.json")" = "newer" ]; then
   echo "PASS a second real file is refused, not moved over the first backup, and the install carries on"
