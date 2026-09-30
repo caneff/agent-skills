@@ -870,6 +870,8 @@ def gh_answers(table):
     """A `gh_json` stand-in: `table` maps the api path to an answer or an
     exception to raise."""
     def run(args):
+        if args[-1] not in table:
+            raise AssertionError(f"unexpected gh call: {args[-1]}")
         answer = table[args[-1]]
         if isinstance(answer, Exception):
             raise answer
@@ -935,6 +937,21 @@ def test_an_empty_parent_answer_is_not_a_missing_parent():
         assert "no issue" in str(exc), exc
     else:
         raise AssertionError("an empty answer was read as no parent")
+
+
+def test_a_slice_with_an_unreadable_declaration_stays_unresolved():
+    got = read([issue(491, body="Blocked by: the database work, probably")],
+               parents={491: spec_parent()})
+    assert numbers(got["unresolved"]) == [491], got
+    assert numbers(got["slice"]) == [], got
+
+
+def test_a_fenced_part_of_line_is_not_a_parent_reference():
+    run = gh_answers({
+        "repos/owner/repo/issues/491/parent": F.FrontierError("gh: Not Found (HTTP 404)"),
+    })
+    body = "```\nPart of #483\n```\n"
+    assert F.fetch_parent("owner/repo", issue(491, body=body), run=run) is None
 
 
 def main():
