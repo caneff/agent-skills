@@ -102,6 +102,10 @@ class AppendMutationTest(MutationCase):
                 "--mutation-id", "tests/a.py::t1", "--outcome", "red", "--seconds", 1, "--ledger", self.ledger,
                 home=self.home)
         self.assertEqual(r.returncode, 2)
+        r = run("append", "--repo", "skills", "--ticket", 500, "--type", "witness-mutation",
+                "--mutation-id", "m1\n", "--outcome", "red", "--seconds", 1, "--ledger", self.ledger,
+                home=self.home)
+        self.assertEqual(r.returncode, 2)  # a trailing newline is not an id character
         self.assertFalse(self.ledger.exists())
 
     def test_a_review_type_refuses_mutation_arguments(self):

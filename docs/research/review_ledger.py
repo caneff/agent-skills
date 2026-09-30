@@ -756,7 +756,7 @@ def cmd_append_mutation(args) -> int:
     try:
         if args.cache is not None or args.transcripts is not None:
             raise ValueError("--cache and --transcripts are for review types, not mutation rows")
-        if not args.mutation_id or not _MUTATION_ID_RE.match(args.mutation_id):
+        if not args.mutation_id or not _MUTATION_ID_RE.fullmatch(args.mutation_id):
             raise ValueError("a mutation row needs --mutation-id made of letters, digits, . - _")
         if (args.status_file is None) == (args.outcome is None):
             raise ValueError("give exactly one of --status-file and --outcome")
