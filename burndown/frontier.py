@@ -391,7 +391,9 @@ def fetch_parent(repo, ticket, run=gh_json):
     try:
         return run(["api", f"{base}/{int(ticket['number'])}/parent"])
     except FrontierError as exc:
-        if "404" not in str(exc):
+        # gh's own status marker, not a bare "404": a failed call's message
+        # can carry the request URL, and a ticket #1404 would match it.
+        if "(HTTP 404)" not in str(exc):
             raise
     for _, line in visible((ticket.get("body") or "").splitlines()):
         part = _PART_OF.match(line)

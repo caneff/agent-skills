@@ -912,6 +912,20 @@ def test_fetch_parent_does_not_read_a_failed_call_as_no_parent():
         raise AssertionError("a 502 was read as an answer")
 
 
+def test_a_failure_naming_404_in_its_url_is_not_a_missing_parent():
+    # gh's own message for a dropped connection carries the request URL, so a
+    # ticket #1404 matched a bare "404" and was read as having no parent.
+    url_failure = F.FrontierError(
+        'gh: Get "https://api.github.com/repos/o/r/issues/1404/parent": connection refused')
+    run = gh_answers({"repos/owner/repo/issues/1404/parent": url_failure})
+    try:
+        F.fetch_parent("owner/repo", issue(1404, body="plain"), run=run)
+    except F.FrontierError as exc:
+        assert "connection refused" in str(exc), exc
+    else:
+        raise AssertionError("a failed call naming 404 in its URL was read as no parent")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
