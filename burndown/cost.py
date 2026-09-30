@@ -33,19 +33,22 @@ def tally(worktree, projects_root):
     `<session>/subagents/`, and their lines carry `isSidechain: true`.
 
     Every usage-bearing entry carries `message.id`, so that alone is the
-    dedup key. Keep the `is not None` guard below: an entry that somehow
-    lacks an id must still be counted, not folded into one `None` bucket.
+    dedup key. An entry that somehow lacks an id gets a key of its own
+    (`object()`), so it is still counted, not folded into one `None` bucket.
 
     One assistant message is written as one line per content block — thinking,
-    text, each tool call — and every one of them repeats the same `usage`, so
-    the tally counts each `message.id` once. Summing per line doubles the
-    totals (2.0x measured over this repo's own transcripts), and doubles them
-    unevenly: a tool-heavy build inflates more than a prose-heavy one, which is
-    the axis the cost file exists to compare.
+    text, each tool call. The input and cache kinds repeat on every line, but
+    streaming writes `output_tokens` rising across them (1, 1, then 192), so
+    each `message.id` costs the maximum of each kind over its lines. Summing
+    per line doubles the totals (2.0x measured over this repo's own
+    transcripts), and doubles them unevenly: a tool-heavy build inflates more
+    than a prose-heavy one, which is the axis the cost file exists to compare.
+    Keeping only the first line undercounts output instead (1481 against 8260
+    on one implement-941 subagent transcript).
     """
     root = os.path.join(projects_root, project_dir_name(worktree))
     builder = sidechain = 0
-    seen = set()
+    messages = {}  # message.id -> (is_sidechain, {kind: max over its lines})
     for parent, _, files in os.walk(root):
         for name in files:
             if not name.endswith(".jsonl"):
@@ -63,15 +66,19 @@ def tally(worktree, projects_root):
                     if not isinstance(usage, dict):
                         continue
                     key = message.get("id")
-                    if key is not None:
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                    n = sum(usage.get(k) or 0 for k in COUNTERS)
-                    if entry.get("isSidechain"):
-                        sidechain += n
-                    else:
-                        builder += n
+                    if key is None:
+                        key = object()
+                    _, maxima = messages.setdefault(
+                        key, (bool(entry.get("isSidechain")),
+                              dict.fromkeys(COUNTERS, 0)))
+                    for k in COUNTERS:
+                        maxima[k] = max(maxima[k], usage.get(k) or 0)
+    for is_sidechain, maxima in messages.values():
+        total = sum(maxima.values())
+        if is_sidechain:
+            sidechain += total
+        else:
+            builder += total
     return builder, sidechain
 
 
