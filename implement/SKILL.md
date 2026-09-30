@@ -831,9 +831,10 @@ The controller merges on a repo Chris owns; Chris reads it after via
    each name keeps the second pass from overwriting the record the gate
    launch wrote.
 
-   **Every pass is one ledger row** (#1269): its time and its share of the
-   weekly allowance. The block takes the usage reading with the gate's own
-   `--percent` flag, live and not from the cache, just before the launch and
+   **Every pass is one ledger row** (#1269): its time and its usage, in
+   percentage points of the worst usage window (the weekly one when it is the
+   worst). The block takes the usage reading with the gate's own `--percent`
+   flag, live and not from the cache, just before the launch and
    just after the run, and puts both in the record (`usage_before`,
    `usage_after`, each `<percent> <resetsAt>` or `unknown`). Once the
    fail-closed gate below has ruled on the run, write its row from the
