@@ -208,6 +208,17 @@ else
   echo "FAIL: no sidecar — want exit 1 + 'no dispositions sidecar' + 'verification pass', got $rc: $out"; fails=1
 fi
 
+# Round-1 findings on disk and no dispositions sidecar at all is the same
+# skipped pass (#1258): the gate refuses, never "check not run".
+printf '%s\n' '{"id": "S1"}' >"$reviews/findings-standards-7.jsonl"
+out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *"no dispositions sidecar"* ]] && [[ "$out" != *"check not run"* ]]; then
+  echo "PASS: round-1 findings with no sidecar fail the gate rather than skip the check"
+else
+  echo "FAIL: findings without sidecar — want exit 1 + 'no dispositions sidecar', got $rc: $out"; fails=1
+fi
+rm "$reviews/findings-standards-7.jsonl"
+
 # An empty sidecar beside real round-1 findings is a pass that recorded nothing.
 printf '%s\n' '{"id": "S1"}' >"$reviews/findings-standards-7.jsonl"
 : >"$sidecar"

@@ -12,6 +12,8 @@ python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | -
 python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
 python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
 python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --pr-body <path>
+python3 burndown/runfile.py check    --from <dispositions sidecar> --pr-body <path>
+python3 burndown/runfile.py sweep-check --ticket <sweep ticket body> --pr-body <path> --from <dispositions sidecar>
 python3 burndown/runfile.py show     <run-id>
 python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 ```
