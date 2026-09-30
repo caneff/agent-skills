@@ -108,37 +108,37 @@ class AppendRowTest(AppendCase):
 
 
 class AppendRefusalTest(AppendCase):
-    def refused(self, r, *needles):
+    def assert_refused(self, r, *needles):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         for n in needles:
             self.assertIn(n, r.stderr)
         self.assertEqual(self.rows(), {})
 
     def test_a_transcript_with_no_usage_is_refused_not_written_as_zero_cost(self):
-        self.refused(self.append(402, "standards"), "tokens", "usage")
+        self.assert_refused(self.append(402, "standards"), "tokens", "usage")
 
     def test_an_axis_run_with_no_transcript_is_refused_not_written_as_zero_cost(self):
-        self.refused(self.append(401, "standards"), "tokens", "no transcript")
+        self.assert_refused(self.append(401, "standards"), "tokens", "no transcript")
 
     def test_a_missing_transcripts_tree_is_refused(self):
-        self.refused(self.append(400, "standards", tr=self.tmp / "absent"), "transcripts tree not found")
+        self.assert_refused(self.append(400, "standards", tr=self.tmp / "absent"), "transcripts tree not found")
 
     def test_the_default_transcripts_tree_missing_is_refused_naming_it(self):
         r = run("append", "--repo", "skills", "--ticket", 400, "--type", "standards", "--cache", self.cache,
                 "--ledger", self.ledger, home=self.home)
-        self.refused(r, "transcripts tree not found")
+        self.assert_refused(r, "transcripts tree not found")
 
     def test_a_missing_findings_sidecar_is_refused_naming_it(self):
-        self.refused(self.append(999, "standards"), "findings sidecar", "standards", "#999")
+        self.assert_refused(self.append(999, "standards"), "findings sidecar", "standards", "#999")
 
     def test_a_sidecar_for_another_type_does_not_satisfy_the_append(self):
-        self.refused(self.append(405, "standards"), "findings sidecar")
+        self.assert_refused(self.append(405, "standards"), "findings sidecar")
 
     def test_a_run_with_a_transcript_and_no_sidecar_is_refused(self):
-        self.refused(self.append(406, "verification"), "findings sidecar")
+        self.assert_refused(self.append(406, "verification"), "findings sidecar")
 
     def test_a_missing_cache_is_refused(self):
-        self.refused(self.append(400, "standards", cache=self.tmp / "absent"), "absent")
+        self.assert_refused(self.append(400, "standards", cache=self.tmp / "absent"), "absent")
 
     def test_a_corrupt_ledger_is_refused_and_left_alone(self):
         self.ledger.write_text("not json\n")
