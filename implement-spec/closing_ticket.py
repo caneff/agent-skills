@@ -29,7 +29,7 @@ import sys
 # it.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 os.pardir, "burndown"))
-from frontier import key_line, visible  # noqa: E402
+from frontier import key_line, unfenced, visible  # noqa: E402
 
 _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
 _SEAM_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+end-to-end seam[ \t]*:?[ \t]*$",
@@ -41,22 +41,55 @@ class SeamError(Exception):
     this check exists to stop being written again."""
 
 
+def _indent(line):
+    return len(line) - len(line.lstrip(" \t"))
+
+
+def _continuation(raw, start, reachable):
+    """The lines wrapping the list item at `raw[start]`, one stripped string
+    per line: each adjacent line indented deeper than the item, up to a blank
+    line, a heading, a key line, or a line `reachable` (the indices outside a
+    fence) does not hold. A key line always ends the item, deeper or not, so
+    a declaration nested under a parent bullet still reads as before. Read
+    from the raw lines, not from `visible()`, because a four-space
+    continuation is what `visible()` drops as quoted material, and dropping
+    it is the truncation (#1243)."""
+    depth = _indent(raw[start])
+    wrapped = []
+    for index in range(start + 1, len(raw)):
+        line = raw[index]
+        if (index not in reachable or not line.strip()
+                or _indent(line) <= depth or _ANY_HEADING.match(line)
+                or key_line(line)):
+            break
+        wrapped.append(line.strip())
+    return wrapped
+
+
 def declaration(text):
     """`{seam, blind to}` from a document's `## End-to-end seam` section, or
     `None` when it has no such section — silence, which is not a
-    declaration."""
-    lines = visible((text or "").splitlines())
+    declaration. A value wrapped onto continuation lines is read whole
+    (#1243): a partial blind spot stated as the whole one is worse than none."""
+    raw = (text or "").splitlines()
+    lines = visible(raw)
+    reachable = {index for index, _ in unfenced(raw)}
     for pos, (_, line) in enumerate(lines):
         if not _SEAM_HEADING.match(line):
             continue
         found = {}
-        for _, rest in lines[pos + 1:]:
+        skip_to = 0
+        for index, rest in lines[pos + 1:]:
             if _ANY_HEADING.match(rest):
                 break
+            if index < skip_to:
+                continue
             pair = key_line(rest)
             if pair:
                 key, value = pair
-                found[key] = value
+                wrapped = _continuation(raw, index, reachable)
+                skip_to = index + 1 + len(wrapped)
+                found[key] = " ".join([value] + wrapped).strip()
         return found
     return None
 

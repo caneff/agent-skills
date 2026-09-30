@@ -406,6 +406,88 @@ def test_this_repos_own_agents_md_declares_a_seam_and_a_blind_spot():
     assert "a test asserts" in blind_to, blind_to
 
 
+WRAPPED = """# Fixture repo
+
+## End-to-end seam
+
+- **Seam**: `just test`
+- **Blind to**: the live app — solve time (`just time`),
+  how a link renders, and
+  what the share sheet shows
+- Notes: not a key of this section
+"""
+
+
+def test_a_wrapped_blind_spot_is_read_whole():
+    # #1243: a list item wrapped onto indented continuation lines was cut at
+    # its first line break, and the closing ticket stated a partial blind
+    # spot as the whole one.
+    seam, blind_to = T.seam_of(repo(agents=WRAPPED))
+    assert blind_to == ("the live app — solve time (`just time`), "
+                        "how a link renders, and what the share sheet shows"), \
+        blind_to
+
+
+def test_a_wrapped_value_reaches_the_ticket_body():
+    got = T.body(repo(agents=WRAPPED), spec=366, shas=SHAS, surfaces=[])
+    assert "what the share sheet shows" in got, got
+
+
+def test_a_continuation_indented_four_spaces_is_still_the_value():
+    # `visible()` drops a four-space line as quoted material; adjacent to a
+    # key line it is that item's continuation, not a quotation.
+    text = ("## End-to-end seam\n\n- **Seam**: `just test`\n"
+            "- **Blind to**: the live app\n"
+            "    and how a link renders\n")
+    assert T.declaration(text)["blind to"] == \
+        "the live app and how a link renders", T.declaration(text)
+
+
+def test_a_blank_line_ends_the_item():
+    # A known limit, not a claim about Markdown: an indented paragraph after
+    # a blank line is not a wrapped line, and is left out.
+    text = ("## End-to-end seam\n\n- **Blind to**: the live app\n\n"
+            "  a later paragraph\n")
+    assert T.declaration(text)["blind to"] == "the live app", \
+        T.declaration(text)
+
+
+def test_a_declaration_nested_under_a_parent_bullet_still_reads():
+    # A key line always ends the item, deeper or not: swallowing it into its
+    # parent would turn a present declaration into "declares nothing".
+    text = ("## End-to-end seam\n\n- Declaration:\n"
+            "  - **Seam**: `just test`\n  - **Blind to**: the live app\n")
+    got = T.declaration(text)
+    assert got["seam"] == "`just test`", got
+    assert got["blind to"] == "the live app", got
+
+
+def test_a_line_that_does_not_wrap_the_item_is_not_joined():
+    # Only lines indented deeper than the item continue it: a sibling bullet,
+    # a blockquote, a comment or a paragraph at the item's own depth is
+    # another block, and joining it states text the author never put in the
+    # blind spot.
+    for after in ("- Run the gate before merging", "> quoted aside",
+                  "<!-- keep in sync with CI -->", "The gate runs the suites."):
+        text = ("## End-to-end seam\n\n- **Blind to**: the live app\n"
+                + after + "\n")
+        assert T.declaration(text)["blind to"] == "the live app", after
+
+
+def test_a_fence_after_the_value_is_not_part_of_it():
+    text = ("## End-to-end seam\n\n- **Blind to**: the live app\n"
+            "  ```\n  echo hi\n  ```\n  and more\n")
+    assert T.declaration(text)["blind to"] == "the live app", \
+        T.declaration(text)
+
+
+def test_a_wrapped_value_stops_at_the_next_heading():
+    text = ("## End-to-end seam\n\n- **Blind to**: the live app\n"
+            "## Next\n- **Seam**: elsewhere\n")
+    assert T.declaration(text) == {"blind to": "the live app"}, \
+        T.declaration(text)
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     try:
