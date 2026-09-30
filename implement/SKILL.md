@@ -197,15 +197,17 @@ No PR and no reviewer; Chris reads the log after.
   git worktree add --detach .scratch/mutation-<id> HEAD
   ```
 
-  The first line clears a tree an earlier run left at that path, which would
-  make `worktree add` refuse and leave you mutating the stale one. Strip the
-  constraint there, run only the covering suite there, and
-  `git worktree remove --force .scratch/mutation-<id>` whether it went red or
-  not. The worktree holds only tracked files, so set up there whatever the
-  suite needs from the checkout's untracked or ignored state (#1219 is open
-  to build the common cases, `node_modules` and bytecode, into the recipe).
-  Then read the red message: it must be your stripped assertion, not a
-  missing file or a denied path (`AGENTS.md` § Recurring defect classes,
+  The first line clears a worktree an earlier run left registered at that
+  path, which would make `worktree add` refuse. If the add still refuses,
+  stop and pick another `<id>`: the path holds something git does not
+  know, and a mutation there would read a stale tree. Strip the constraint
+  there, run only the covering suite there, and
+  `git worktree remove --force .scratch/mutation-<id>` whether it went red
+  or not. The worktree holds only tracked files, so set up there whatever
+  the suite needs from the checkout's untracked or ignored state, such as
+  `node_modules` or a clean bytecode cache (#1219). Then read the red
+  message: it must be your stripped assertion, not a missing file or a
+  denied path (`AGENTS.md` § Recurring defect classes,
   class 3). Nothing is restored in the live checkout:
   `git checkout -- <file>`, `git restore` and `git stash` all return a file
   to its last commit, so any uncommitted edit in it goes with the mutation

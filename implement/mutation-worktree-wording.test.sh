@@ -36,6 +36,11 @@ has "§ Build" "$build" "not the review recipe's path outside the checkout, beca
 # the worktree is removed whatever the mutation's outcome.
 has "§ Build" "$build" 'git worktree remove --force .scratch/mutation-<id> 2>/dev/null git worktree add --detach .scratch/mutation-<id> HEAD'
 has "§ Build" "$build" 'whether it went red or not'
+# r1-P1/r1-C2: the pre-clear cannot remove a directory git does not know, so
+# a refused add stops the mutation rather than falling through to a stale tree.
+has "§ Build" "$build" 'If the add still refuses, stop'
+# r1-S1: the rule cites #1219 without claiming its tracker state.
+lacks "§ Build" "$build" '#1219 is open'
 # #1273 C2: the fresh tree lacks untracked and ignored setup, and the red
 # message must be the stripped assertion (defect class 3, #1219).
 has "§ Build" "$build" 'The worktree holds only tracked files'
