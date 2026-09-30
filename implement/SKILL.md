@@ -190,16 +190,30 @@ No PR and no reviewer; Chris reads the log after.
   the code that makes it pass. Once green, strip the constraint it verifies
   and see it fail — a test that passed with the fix reverted has shipped as
   proof of a fix it never checked. Commit the work first, then mutate in a
-  throwaway worktree: `git worktree add --detach .scratch/mutation-<id> HEAD`,
-  strip the constraint there, run only the covering suite there, and
-  `git worktree remove --force .scratch/mutation-<id>`. Nothing is restored in
-  the live checkout: `git checkout -- <file>`, `git restore` and `git stash`
-  all return a file to its last commit, so any uncommitted edit in it goes with
-  the mutation (#1261). The isolation recipe is
-  the *Isolation* paragraph of `multi-axis-code-review/SKILL.md`'s witness-check
-  block (not a heading, so no section sign) — a fenced recipe, not a script you
-  can call, so follow its rules (never a byte copy of the tree) rather than
-  copy its code.
+  throwaway worktree, one per mutation:
+
+  ```
+  git worktree remove --force .scratch/mutation-<id> 2>/dev/null
+  git worktree add --detach .scratch/mutation-<id> HEAD
+  ```
+
+  The first line clears a tree an earlier run left at that path, which would
+  make `worktree add` refuse and leave you mutating the stale one. Strip the
+  constraint there, run only the covering suite there, and
+  `git worktree remove --force .scratch/mutation-<id>` whether it went red or
+  not. The worktree holds only tracked files, so set up there whatever the
+  suite needs from the checkout's untracked or ignored state (#1219 is open
+  to build the common cases, `node_modules` and bytecode, into the recipe).
+  Then read the red message: it must be your stripped assertion, not a
+  missing file or a denied path (`AGENTS.md` § Recurring defect classes,
+  class 3). Nothing is restored in the live checkout:
+  `git checkout -- <file>`, `git restore` and `git stash` all return a file
+  to its last commit, so any uncommitted edit in it goes with the mutation
+  (#1261). The worktree sits under `.scratch/`, not the review recipe's path
+  outside the checkout, because this workspace is yours and § Before the PR
+  step 3 clears it. Otherwise follow the *Isolation* paragraph of
+  `multi-axis-code-review/SKILL.md`'s witness check: never a byte copy of
+  the tree.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
   report it as a follow-up. Why: an unasked fix widens the diff past what the
@@ -626,8 +640,8 @@ Controller: Chris merges this PR; you dispatched me, so after the Codex pass
   the reason.
 - **A mutation check**, when the ticket's deliverable is a test or a gate:
   name one change that makes the new test or gate fail, that you saw it
-  fail, and the throwaway worktree the mutation ran in. Nothing else in the report tells a gate from a test that always
-  passes.
+  fail, and the throwaway worktree the mutation ran in. Nothing else in the
+  report tells a gate from a test that always passes.
 
 Add "Chris merges" when — and only when — this run's own brief line carried the
 literal `--chris-merges` flag. Nothing else earns the phrase: not the ticket
