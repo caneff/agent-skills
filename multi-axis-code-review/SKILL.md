@@ -432,7 +432,7 @@ is worse than a slow one.
 worktree=<the worktree under review>
 ids=<space-separated mutation ids, one per new or changed test — the names you report by>
 ledger_args=( --repo <repo> --ticket <n> --round <k> )   # as in § 4's append line
-call_site_ids=" "   # <space-separated ids of the call-site mutations among $ids; every other id is a constraint mutation>
+call_site_ids=""   # <space-separated ids of the call-site mutations among $ids; every other id is a constraint mutation>
 mutate() { :; }   # <$1 the id, $2 the witness worktree, $3 a marker path: strip that test's constraint in $2, create the marker with `: >"$3"` on the line IMMEDIATELY before the covering suite's command, and run only that suite>
 
 # Job control, so each background mutation is its own process group and an
@@ -587,7 +587,7 @@ done
 append_failed=0
 for id in "${mutations[@]}"; do
   kind=witness-mutation
-  case "$call_site_ids" in *" $id "*) kind=call-site-mutation ;; esac
+  case " $call_site_ids " in *" $id "*) kind=call-site-mutation ;; esac
   if [ -e "$root/ran/$id" ]; then source=( --status-file "$root/status/$id" ); else source=( --outcome unknown ); fi
   python3 ~/.agents/skills/docs/research/review_ledger.py append "${ledger_args[@]}" --type "$kind" \
     --mutation-id "$id" "${source[@]}" --seconds "$(cat "$root/seconds/$id" 2>/dev/null)" \

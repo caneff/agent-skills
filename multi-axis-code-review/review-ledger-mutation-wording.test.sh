@@ -34,7 +34,7 @@ check_in "§ 4" "$four" '`call-site-mutation` for an id listed in `call_site_ids
 check_in "§ 4" "$four" 'An `unknown` stays `unknown`'
 check_in "§ 4" "$four" 'the recipe exits 4'
 check_in "§ 4 recipe" "$four" '--type "$kind"'
-check_in "§ 4 recipe" "$four" 'case "$call_site_ids" in *" $id "*) kind=call-site-mutation'
+check_in "§ 4 recipe" "$four" 'case " $call_site_ids " in *" $id "*) kind=call-site-mutation'
 check_in "§ 4 recipe" "$four" 'else source=( --outcome unknown )'
 check_in "§ 4 recipe" "$four" '--seconds "$(cat "$root/seconds/$id"'
 check_in "diff-reviewer" "$agent_text" 'appends one mutation row per mutation too'

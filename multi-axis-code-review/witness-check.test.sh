@@ -273,7 +273,7 @@ substitute() { # <ids> <mutate body> -> a runnable script on stdout
         -e "s|^ids=<.*|ids=\"$1\"|" \
         -e "s|^mutate() .*|mutate() { $body; }|" \
         -e "s|^ledger_args=(.*|ledger_args=( --repo skills --ticket 1 --round 1 --ledger ${ledger_path:-$scratch/ledger.jsonl} )|" \
-        -e "s|^call_site_ids=.*|call_site_ids=\" cs1 \"|"
+        -e "s|^call_site_ids=.*|call_site_ids=\"cs1 cs2\"|"
 }
 
 # The recipe computes its bound from the live process table, so on a loaded box
@@ -697,17 +697,17 @@ print(eval(expr, {"r": hit[0]}) if len(hit) == 1 else "MISSING")
 PY
 }
 body='case "$1" in early) exit 4;; esac; : >"$3"; echo "MUTANT-$1"; case "$1" in g1) exit 0;; esac; exit 1'
-substitute 'r1 g1 cs1 early' "$body" >"$scratch/recipe-rows.sh"
+substitute 'r1 g1 cs1 cs2 early' "$body" >"$scratch/recipe-rows.sh"
 ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-rows.sh" ) \
   >"$scratch/rows.out" 2>&1 || { echo "FAIL: the ledger-appending run exited non-zero" >&2; cat "$scratch/rows.out" >&2; fail=1; }
-for want in "r1|witness-mutation red" "g1|witness-mutation green" "cs1|call-site-mutation red" "early|witness-mutation unknown"; do
+for want in "r1|witness-mutation red" "g1|witness-mutation green" "cs1|call-site-mutation red" "cs2|call-site-mutation red" "early|witness-mutation unknown"; do
   id="${want%%|*}"; got="$(row_field "$id" 'r["type"] + " " + r["outcome"]')"
   [ "$got" = "${want#*|}" ] || { echo "FAIL: mutation $id's ledger row is '$got', wanted '${want#*|}'" >&2; fail=1; }
 done
 # `early` exited 4 without reaching its suite: its status file says red, and only the
 # marker says otherwise. A row that follows the status file turns class 1 into a red.
-[ "$(cat "$scratch/rows.out" | grep -c 'appended 1 row')" -eq 4 ] ||
-  { echo "FAIL: the run did not append exactly four rows" >&2; cat "$scratch/rows.out" >&2; fail=1; }
+[ "$(cat "$scratch/rows.out" | grep -c 'appended 1 row')" -eq 5 ] ||
+  { echo "FAIL: the run did not append exactly five rows" >&2; cat "$scratch/rows.out" >&2; fail=1; }
 [ "$(row_field r1 'r["cost"]["wall_clock"]["status"]')" = known ] ||
   { echo "FAIL: a mutation row carries no known wall clock" >&2; fail=1; }
 
