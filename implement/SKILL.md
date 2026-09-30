@@ -224,8 +224,8 @@ No PR and no reviewer; Chris reads the log after.
   ```
 
   `<repo>` is the review cache's directory name, as in § The PR. A mutation
-  that never reached its suite is `unknown`, never `red`. A refusal goes to
-  the controller, never skipped.
+  that never reached its suite is `unknown`, never `red`. `<id>` is letters,
+  digits, `.`, `-` or `_`. A refusal goes to the controller, never skipped.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
   report it as a follow-up. Why: an unasked fix widens the diff past what the
