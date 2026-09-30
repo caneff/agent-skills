@@ -8,6 +8,7 @@ path's re-announce step against a stub agent list.
 import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -2015,6 +2016,24 @@ def test_a_qualified_sidecar_id_the_body_records_fixed_is_refused_until_rewritte
                    "fixed, abc1234.\n")
     got = refusal_of(sidecar, landed_root(), body)
     assert "implement/SKILL.md P9" in got and "'fixed'" in got, got
+
+
+def test_run_file_md_usage_block_mirrors_the_runfile_docstring():
+    """run-file.md's usage block is runfile.py's docstring usage (#1258): a
+    subcommand in one and not the other is drift. Both must also list every
+    subcommand the parser defines."""
+    def usage(text):
+        return [" ".join(ln.split()) for ln in text.splitlines()
+                if ln.lstrip().startswith("python3 burndown/runfile.py ")]
+    doc = os.path.join(os.path.dirname(RUNFILE), "references", "run-file.md")
+    # The first fenced block only: later blocks are worked examples.
+    block = open(doc).read().split("```")[1]
+    assert sorted(usage(block)) == sorted(usage(runfile.__doc__)), (
+        usage(block), usage(runfile.__doc__))
+    listed = {ln.split()[2] for ln in usage(runfile.__doc__)}
+    defined = set(re.findall(r'subs\.add_parser\(\s*"([a-z-]+)"',
+                             open(RUNFILE).read()))
+    assert listed == defined, (listed, defined)
 
 
 def main():
