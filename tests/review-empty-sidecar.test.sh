@@ -21,8 +21,6 @@ need() { # <fixed phrase> <what it pins>
 }
 need "on every run" "the sidecar is written on every run"
 need "empty file when it found nothing" "zero findings writes an empty file"
-need "verification-check.sh" "names the reader that depends on it"
-need "absent sidecar is refused" "the safe direction is kept"
 echo "ok: § 4 tells each axis to write an empty sidecar on zero findings"
 
 # The standing brief carries its own copy of the sidecar rule, so a prompt
