@@ -3,7 +3,7 @@
 The **frontier** is the set of tickets a run may dispatch right now: open,
 carrying the run's label, unclaimed, and not waiting on anything. Reading it
 is `burndown/frontier.py` — `python3 burndown/frontier.py <owner/repo>
-<label>`, or `frontier(repo, label)` in process — and it answers in four
+<label>`, or `frontier(repo, label)` in process — and it answers in five
 buckets, not two.
 
 ```
@@ -11,6 +11,7 @@ unblocked   901 The closure resolver
 blocked     903 The dispatch loop  (blocked by #901)
 unresolved  907 Liveness  (no native dependencies and no `## Blocked by` section)
 spec        885 Spec: the lane rebuilt  (a spec parent: dispatch with `implement-dispatch --spec 885 --slots <k>`)
+slice       891 Slice one  (a slice of spec #885: hand off with `implement-dispatch --spec 885 --slots <k>`, never as its own ticket)
 ```
 
 **A bucket is a claim about what an entry is**, so an entry that fits no
@@ -77,6 +78,28 @@ spec parent that never mentions blockers is off the frontier's blocking
 question by its own nature. A ticket that *states* prerequisites this reader
 cannot resolve has not been silent, and an unknown prerequisite is not a met
 one. The route is offered only once the prerequisites are known and met.
+
+## `slice` — a ticket whose parent is a spec
+
+A spec parent reaches the `spec` bucket only when it carries the queried
+label. One left by an earlier spec run with `spec` alone never does, and its
+slices then read as ordinary `unblocked` tickets and are built one by one,
+which is the failure `references/spec-handoff.md` exists to stop (#1242,
+seen on burn-2026-09-27). So the reader also looks at each candidate's
+**parent**: `gh api repos/<o>/<r>/issues/<n>/parent`, and where that answers
+404, the body's `Part of #<n>` line. A parent carrying `spec` puts the
+candidate in `slice`, naming the parent and the `--spec <parent>` handoff.
+
+The same ordering as `spec` applies. `blocked` outranks `slice`; silence
+about blockers goes to `slice`, since the spec run orders its own slices; a
+stated declaration the reader could not resolve stays `unresolved`. A claim
+removes the ticket first. A candidate that is itself a `spec` parent is not
+asked for its own parent.
+
+**A parent that cannot be read is `unresolved`**, never unblocked: a failed
+call that answered nothing is not an answer of "no parent", and reading it so
+dispatches the slice under a spec nobody could see. Only a 404 with no
+`Part of #<n>` line is "no parent".
 
 ## Three sources, in order
 
