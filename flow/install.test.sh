@@ -112,7 +112,7 @@ fi
 dispatch_out=$(HOME="$tmp/home" "$tmp/home/.local/bin/implement-dispatch" --repo "$tmp/nowhere" 1 2>&1)
 if [ -x "$tmp/home/.local/bin/implement-dispatch" ] && [ ! -L "$tmp/home/.local/bin/implement-dispatch" ] \
    && [ ! -e "$tmp/home/.local/bin/lane-fake" ] \
-   && printf '%s' "$dispatch_out" | grep -q "not a git repo"; then
+   && printf '%s' "$dispatch_out" | grep -q "worktree list --porcelain failed"; then
   echo "PASS implement-dispatch installed as a real binary, and the fake is never installed"
 else
   echo "FAIL implement-dispatch not installed correctly: $dispatch_out"; fails=1
