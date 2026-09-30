@@ -444,22 +444,41 @@ def test_a_continuation_indented_four_spaces_is_still_the_value():
 
 
 def test_a_blank_line_ends_the_item():
+    # A known limit, not a claim about Markdown: an indented paragraph after
+    # a blank line is not a wrapped line, and is left out.
     text = ("## End-to-end seam\n\n- **Blind to**: the live app\n\n"
             "  a later paragraph\n")
     assert T.declaration(text)["blind to"] == "the live app", \
         T.declaration(text)
 
 
-def test_a_nested_key_line_is_part_of_the_wrapped_value():
-    # A sub-bullet shaped like a key is indented deeper than its parent, so
-    # it continues the parent instead of ending it (and being read as a key
-    # of the section).
-    text = ("## End-to-end seam\n\n- **Blind to**: the live app:\n"
-            "  - render: how a link looks\n- **Seam**: `just test`\n")
+def test_a_declaration_nested_under_a_parent_bullet_still_reads():
+    # A key line always ends the item, deeper or not: swallowing it into its
+    # parent would turn a present declaration into "declares nothing".
+    text = ("## End-to-end seam\n\n- Declaration:\n"
+            "  - **Seam**: `just test`\n  - **Blind to**: the live app\n")
     got = T.declaration(text)
-    assert got["blind to"] == "the live app: - render: how a link looks", got
     assert got["seam"] == "`just test`", got
-    assert "render" not in got, got
+    assert got["blind to"] == "the live app", got
+
+
+def test_a_line_that_does_not_wrap_the_item_is_not_joined():
+    # Only lines indented deeper than the item continue it: a sibling bullet,
+    # a blockquote, a comment or a paragraph at the item's own depth is
+    # another block, and joining it states text the author never put in the
+    # blind spot.
+    for after in ("- Run the gate before merging", "> quoted aside",
+                  "<!-- keep in sync with CI -->", "The gate runs the suites."):
+        text = ("## End-to-end seam\n\n- **Blind to**: the live app\n"
+                + after + "\n")
+        assert T.declaration(text)["blind to"] == "the live app", after
+
+
+def test_a_fence_after_the_value_is_not_part_of_it():
+    text = ("## End-to-end seam\n\n- **Blind to**: the live app\n"
+            "  ```\n  echo hi\n  ```\n  and more\n")
+    assert T.declaration(text)["blind to"] == "the live app", \
+        T.declaration(text)
 
 
 def test_a_wrapped_value_stops_at_the_next_heading():

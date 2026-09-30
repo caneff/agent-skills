@@ -16,10 +16,12 @@ declaration:
 - **Blind to**: the live editor — grid rendering at 4x4 and 6x6
 ```
 
-A value may wrap onto indented continuation lines, as a Markdown list item
-does; they are joined onto it with single spaces, up to a blank line, a
-heading or the next key (#1243). Reading only the first line would state a
-partial blind spot as the whole one.
+A value may wrap onto continuation lines indented deeper than its item, as a
+Markdown list item does; they are joined onto it with single spaces (#1243).
+The value ends at a blank line, a heading, a fence, a key line (nested or
+not), or the first line at the item's own indent or shallower. Reading only
+the first line would state a partial blind spot as the whole one; reading
+past these would pad it with text the author never wrote there.
 
 Both keys are required, and a value of nothing but emphasis markers is
 refused as naming nothing: `- **Seam**:**` reads as the value `**` (#1104).

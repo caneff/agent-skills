@@ -29,7 +29,7 @@ import sys
 # it.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 os.pardir, "burndown"))
-from frontier import key_line, visible  # noqa: E402
+from frontier import key_line, unfenced, visible  # noqa: E402
 
 _ANY_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+\S")
 _SEAM_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+end-to-end seam[ \t]*:?[ \t]*$",
@@ -45,20 +45,25 @@ def _indent(line):
     return len(line) - len(line.lstrip(" \t"))
 
 
-def _continuation(raw, start, parent):
-    """The lines that wrap the list item at `raw[start]`, joined with
-    single spaces: each adjacent line up to a blank line, a heading, a fence
-    or a key line no deeper than the item. Read from the raw lines, not from
-    `visible()`, because a four-space continuation is what `visible()` drops
-    as quoted material — and dropping it is the truncation (#1243)."""
-    words = []
-    for line in raw[start + 1:]:
-        if (not line.strip() or _ANY_HEADING.match(line)
-                or line.lstrip().startswith(("```", "~~~"))
-                or (key_line(line) and _indent(line) <= _indent(parent))):
+def _continuation(raw, start, reachable):
+    """The lines wrapping the list item at `raw[start]`, one stripped string
+    per line: each adjacent line indented deeper than the item, up to a blank
+    line, a heading, a key line, or a line `reachable` (the indices outside a
+    fence) does not hold. A key line always ends the item, deeper or not, so
+    a declaration nested under a parent bullet still reads as before. Read
+    from the raw lines, not from `visible()`, because a four-space
+    continuation is what `visible()` drops as quoted material, and dropping
+    it is the truncation (#1243)."""
+    depth = _indent(raw[start])
+    wrapped = []
+    for index in range(start + 1, len(raw)):
+        line = raw[index]
+        if (index not in reachable or not line.strip()
+                or _indent(line) <= depth or _ANY_HEADING.match(line)
+                or key_line(line)):
             break
-        words.append(line.strip())
-    return words
+        wrapped.append(line.strip())
+    return wrapped
 
 
 def declaration(text):
@@ -68,6 +73,7 @@ def declaration(text):
     (#1243): a partial blind spot stated as the whole one is worse than none."""
     raw = (text or "").splitlines()
     lines = visible(raw)
+    reachable = {index for index, _ in unfenced(raw)}
     for pos, (_, line) in enumerate(lines):
         if not _SEAM_HEADING.match(line):
             continue
@@ -81,7 +87,7 @@ def declaration(text):
             pair = key_line(rest)
             if pair:
                 key, value = pair
-                wrapped = _continuation(raw, index, rest)
+                wrapped = _continuation(raw, index, reachable)
                 skip_to = index + 1 + len(wrapped)
                 found[key] = " ".join([value] + wrapped).strip()
         return found
