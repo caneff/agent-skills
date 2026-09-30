@@ -1,0 +1,282 @@
+[
+ {
+  "body": "edit `multi-axis-code-review/SKILL.md` § 6",
+  "target": "multi-axis-code-review/SKILL.md"
+ },
+ {
+  "body": "SKILL.md.",
+  "target": "SKILL.md"
+ },
+ {
+  "body": "edit skill.MD please",
+  "target": "skill.MD"
+ },
+ {
+  "body": "see a/b.py, then",
+  "target": "a/b.py"
+ },
+ {
+  "body": "see x.ts, then",
+  "target": "x.ts"
+ },
+ {
+  "body": "see x.js, then",
+  "target": "x.js"
+ },
+ {
+  "body": "see hooks/g.sh, then",
+  "target": "hooks/g.sh"
+ },
+ {
+  "body": "see src/lib.rs, then",
+  "target": "src/lib.rs"
+ },
+ {
+  "body": "see settings.json, then",
+  "target": "settings.json"
+ },
+ {
+  "body": "see .github/workflows/ci.yml, then",
+  "target": ".github/workflows/ci.yml"
+ },
+ {
+  "body": "see Cargo.toml, then",
+  "target": "Cargo.toml"
+ },
+ {
+  "body": "see hooks/x.bash, then",
+  "target": "hooks/x.bash"
+ },
+ {
+  "body": "see a.tsx, then",
+  "target": "a.tsx"
+ },
+ {
+  "body": "see a.mjs, then",
+  "target": "a.mjs"
+ },
+ {
+  "body": "see settings.local.json, then",
+  "target": "settings.local.json"
+ },
+ {
+  "body": "see bin/implement-dispatch, then",
+  "target": "bin/implement-dispatch"
+ },
+ {
+  "body": "see Makefile, then",
+  "target": "Makefile"
+ },
+ {
+  "body": "see build/Dockerfile, then",
+  "target": "build/Dockerfile"
+ },
+ {
+  "body": "see .githooks/pre-push, then",
+  "target": ".githooks/pre-push"
+ },
+ {
+  "body": "see hooks/commit-msg, then",
+  "target": "hooks/commit-msg"
+ },
+ {
+  "body": "see a.go, then",
+  "target": "a.go"
+ },
+ {
+  "body": "see a.zsh, then",
+  "target": "a.zsh"
+ },
+ {
+  "body": "see a.ps1, then",
+  "target": "a.ps1"
+ },
+ {
+  "body": "see a.lua, then",
+  "target": "a.lua"
+ },
+ {
+  "body": "see a.ini, then",
+  "target": "a.ini"
+ },
+ {
+  "body": "see a.cfg, then",
+  "target": "a.cfg"
+ },
+ {
+  "body": "see x/y.rb, then",
+  "target": "x/y.rb"
+ },
+ {
+  "body": "see src/main.dart, then",
+  "target": "src/main.dart"
+ },
+ {
+  "body": "see tools/Gemfile, then",
+  "target": "tools/Gemfile"
+ },
+ {
+  "body": "see a/b.sql, then",
+  "target": "a/b.sql"
+ },
+ {
+  "body": "see infra/main.tf, then",
+  "target": "infra/main.tf"
+ },
+ {
+  "body": "see Gemfile, then",
+  "target": "Gemfile"
+ },
+ {
+  "body": "see lib/Rakefile, then",
+  "target": "lib/Rakefile"
+ },
+ {
+  "body": "see config/.env, then",
+  "target": "config/.env"
+ },
+ {
+  "body": "see x/.eslintrc, then",
+  "target": "x/.eslintrc"
+ },
+ {
+  "body": "see scripts/node.js, then",
+  "target": "scripts/node.js"
+ },
+ {
+  "body": "see Bin/foo, then",
+  "target": "Bin/foo"
+ },
+ {
+  "body": "see x/HOOKS/run, then",
+  "target": "x/HOOKS/run"
+ },
+ {
+  "body": "see A.PY, then",
+  "target": "A.PY"
+ },
+ {
+  "body": "see MAKEFILE, then",
+  "target": "MAKEFILE"
+ },
+ {
+  "body": "see x/Dockerfile, then",
+  "target": "x/Dockerfile"
+ },
+ {
+  "body": "Research why ./e2e.sh.",
+  "target": "./e2e.sh"
+ },
+ {
+  "body": "a.py..",
+  "target": "a.py"
+ },
+ {
+  "body": "then docs/x.md and a.py",
+  "target": "a.py"
+ },
+ {
+  "body": "see bin\\implement-dispatch, then",
+  "target": "bin/implement-dispatch"
+ },
+ {
+  "body": "edit .githooks\\pre-push",
+  "target": ".githooks/pre-push"
+ },
+ {
+  "body": "src\\main.dart",
+  "target": "src/main.dart"
+ },
+ {
+  "body": "see (a_b-c.py)",
+  "target": "a_b-c.py"
+ },
+ {
+  "body": "read/write and and/or",
+  "target": null
+ },
+ {
+  "body": "docs/notes.md",
+  "target": null
+ },
+ {
+  "body": "a/b.txt",
+  "target": null
+ },
+ {
+  "body": "a/b.rst",
+  "target": null
+ },
+ {
+  "body": "a/b.markdown",
+  "target": null
+ },
+ {
+  "body": "ratio 3/4.5 here",
+  "target": null
+ },
+ {
+  "body": "docs/.notes.md",
+  "target": null
+ },
+ {
+  "body": "i.e. this",
+  "target": null
+ },
+ {
+  "body": "e.g. that",
+  "target": null
+ },
+ {
+  "body": "bump to v1.2 now",
+  "target": null
+ },
+ {
+  "body": "runs on Node.js",
+  "target": null
+ },
+ {
+  "body": "read/write and/or edit",
+  "target": null
+ },
+ {
+  "body": "version 3.10.2",
+  "target": null
+ },
+ {
+  "body": "docs\\notes.md",
+  "target": null
+ },
+ {
+  "body": "Add docs/research/note.md and update AGENTS.md. Use rust, not a .rs-less thing",
+  "target": null
+ },
+ {
+  "body": "",
+  "target": null
+ },
+ {
+  "body": "build.gradle",
+  "target": null
+ },
+ {
+  "body": "notes in .env",
+  "target": null
+ },
+ {
+  "body": "a/b.",
+  "target": null
+ },
+ {
+  "body": "user.email is set",
+  "target": null
+ },
+ {
+  "body": "node.js.",
+  "target": null
+ },
+ {
+  "body": "a bare .py or .json is an extension, not a file",
+  "target": null
+ }
+]

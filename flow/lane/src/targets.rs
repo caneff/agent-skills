@@ -17,7 +17,8 @@
 //! other extensionless name reads as prose too. `tier.py` strips the label
 //! for both gaps before dispatch, from the clumper's file list. `tier.py` also
 //! copies the lists below to read a body as this does (#1211), and
-//! `burndown/tier_test.py` fails when a list here changes and its copy doesn't.
+//! `burndown/tier_test.py` fails when a list here changes and its copy doesn't, and
+//! both suites run `tests/fixtures/body_targets.json` (#1239).
 
 /// Extensions read as code: § Gate 2's, the ones that wire the harness or CI
 /// (its "hooks, CI config"), and other scripting and config languages.
@@ -74,39 +75,26 @@ fn is_code_path(token: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// One fixture of body-to-verdict cases, read by this suite and by
+    /// `burndown/tier_test.py`: a case added for one reader is asserted
+    /// against the other, so the two tokenisers cannot drift apart (#1239).
     #[test]
-    fn names_a_skill_body_at_any_depth() {
-        assert_eq!(first_code_target("edit `multi-axis-code-review/SKILL.md` § 6").as_deref(), Some("multi-axis-code-review/SKILL.md"));
-        assert_eq!(first_code_target("SKILL.md."), Some("SKILL.md".into()));
-    }
-
-    #[test]
-    fn names_the_gate_two_code_extensions() {
-        for p in [
-            "a/b.py", "x.ts", "x.js", "hooks/g.sh", "src/lib.rs", "settings.json", ".github/workflows/ci.yml", "Cargo.toml",
-            "hooks/x.bash", "a.tsx", "a.mjs", "settings.local.json",
-        ] {
-            assert_eq!(first_code_target(&format!("see {p}, then")), Some(p.into()), "{p}");
-        }
-    }
-
-    #[test]
-    fn names_extensionless_scripts_and_unlisted_extensions() {
-        for p in [
-            "bin/implement-dispatch", "Makefile", "build/Dockerfile", ".githooks/pre-push", "hooks/commit-msg",
-            "a.go", "a.zsh", "a.ps1", "a.lua", "a.ini", "a.cfg", "x/y.rb",
-        ] {
-            assert_eq!(first_code_target(&format!("see {p}, then")), Some(p.into()), "{p}");
-        }
-    }
-
-    #[test]
-    fn a_slash_path_is_code_unless_its_extension_is_prose() {
-        for p in ["src/main.dart", "tools/Gemfile", "a/b.sql", "x/y.lua", "infra/main.tf", "Gemfile", "lib/Rakefile", "config/.env", "x/.eslintrc"] {
-            assert_eq!(first_code_target(&format!("see {p}, then")), Some(p.into()), "{p}");
-        }
-        for body in ["read/write and and/or", "docs/notes.md", "a/b.txt", "a/b.rst", "a/b.markdown", "ratio 3/4.5 here", "docs/.notes.md"] {
-            assert_eq!(first_code_target(body), None, "{body}");
+    fn the_shared_fixture_cases_hold() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/body_targets.json");
+        let cases: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        // A fixture that parsed to nothing would pass the loop below for no reason.
+        assert!(cases.len() >= 20, "fixture holds only {} cases", cases.len());
+        assert!(cases.iter().any(|c| c.get("target").is_some_and(|t| t.is_null())), "fixture has no prose case");
+        assert!(cases.iter().any(|c| c.get("target").is_some_and(|t| t.is_string())), "fixture has no code case");
+        for c in &cases {
+            let body = c["body"].as_str().expect("case body is a string");
+            // `target` is required and is a string or null: a missing or mistyped one is not "expects prose".
+            let want = match c.get("target") {
+                Some(serde_json::Value::Null) => None,
+                Some(serde_json::Value::String(t)) => Some(t.as_str()),
+                other => panic!("case {body:?} has a bad target: {other:?}"),
+            };
+            assert_eq!(first_code_target(body).as_deref(), want, "{body:?}");
         }
     }
 
@@ -123,29 +111,5 @@ mod tests {
         ours.sort_unstable();
         assert!(!theirs.is_empty(), "no extensions parsed from: {line}");
         assert_eq!(ours, theirs, "targets.rs PROSE_EXTENSIONS and burndown/tier.py's disagree");
-    }
-
-    #[test]
-    fn a_backslash_path_reads_like_a_slash_path() {
-        // `tier.py` normalises `\` to `/` before it classifies; so does this.
-        assert_eq!(first_code_target(r"see bin\implement-dispatch, then").as_deref(), Some("bin/implement-dispatch"));
-        assert_eq!(first_code_target(r"edit .githooks\pre-push").as_deref(), Some(".githooks/pre-push"));
-        assert_eq!(first_code_target(r"src\main.dart"), Some("src/main.dart".into()));
-        assert_eq!(first_code_target(r"docs\notes.md"), None);
-    }
-
-    #[test]
-    fn ordinary_prose_tokens_are_not_code() {
-        for body in ["i.e. this", "e.g. that", "bump to v1.2 now", "runs on Node.js", "read/write and/or edit", "version 3.10.2"] {
-            assert_eq!(first_code_target(body), None, "{body}");
-        }
-        // A product name is prose; a path ending in one is a file.
-        assert_eq!(first_code_target("edit scripts/node.js"), Some("scripts/node.js".into()));
-    }
-
-    #[test]
-    fn prose_and_bare_words_are_not_code() {
-        assert_eq!(first_code_target("Add docs/research/note.md and update AGENTS.md. Use rust, not a .rs-less thing"), None);
-        assert_eq!(first_code_target(""), None);
     }
 }
