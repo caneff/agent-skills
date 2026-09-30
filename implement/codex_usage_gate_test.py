@@ -19,14 +19,14 @@ GATE = os.path.join(HERE, "codex-usage-gate.py")
 DAY = 86400
 
 
-def run(cache):
+def run(cache, *args):
     """(exit status, stdout) with `cache` (a dict, a str, or None) as the cache file."""
     with tempfile.TemporaryDirectory() as d:
         if cache is not None:
             with open(os.path.join(d, "usage-cache.json"), "w") as f:
                 f.write(cache if isinstance(cache, str) else json.dumps(cache))
         env = {"CODEX_HOME": d, "PATH": "/nonexistent"}
-        p = subprocess.run([sys.executable, GATE], env=env, capture_output=True, text=True)
+        p = subprocess.run([sys.executable, GATE, *args], env=env, capture_output=True, text=True)
         return p.returncode, p.stdout
 
 
@@ -91,6 +91,15 @@ check("over 100", run(cache(103)), 20)
 # The worst window governs.
 check("secondary governs",
       run(cache(10, secondary={"usedPercent": 100, "resetsAt": time.time() + DAY})), 20)
+# `--percent` prints the reading alone, for the review ledger's before/after rows (#1269),
+# and `unknown` (exit 30) where the gate itself would be 30 — never a number it did not read.
+check("percent", run(cache(44), "--percent"), 0, "44")
+assert run(cache(44), "--percent")[1] == "44\n", run(cache(44), "--percent")
+assert run(cache(103), "--percent")[1] == "103\n"
+assert run(cache(44.5), "--percent")[1] == "44.5\n"
+check("percent, capped still reads", run(cache(100), "--percent"), 0, "100")
+assert run(None, "--percent") == (30, "unknown\n"), run(None, "--percent")
+assert run(cache(100, resets=time.time() - 60), "--percent") == (30, "unknown\n")
 # Absent or malformed is never headroom.
 check("no cache", run(None), 30)
 check("stale cache", run(cache(5, fetched=time.time() - 3600)), 30)

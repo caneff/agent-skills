@@ -15,6 +15,11 @@ One line on stdout, and an exit status the caller branches on:
   30  unknown — no fresh, well-formed reading; launch nothing
 
 A missing, stale or malformed reading is 30, never 0: it is not headroom.
+
+`--percent` prints the worst window's percentage alone (`12.5`), or `unknown`
+with exit 30, and is always 0 or 30. `review_ledger.py append` reads usage
+through `read_percent` below, and the controller passes `--percent`'s output
+as its `--usage-before` (#1269): one reader before and after a Codex pass.
 """
 
 from __future__ import annotations
@@ -65,7 +70,9 @@ def worst_window(helper, limits: object, now: float) -> tuple[float, float] | No
     return worst
 
 
-def check() -> tuple[int, str]:
+def reading() -> tuple[float, float] | None:
+    """(worst usedPercent, its resetsAt) from the cache, refreshed live when it
+    is missing or stale, or None when no fresh, well-formed reading exists."""
     helper = load_helper()
     helper.RPC_TIMEOUT = REFRESH_TIMEOUT
     now = time.time()
@@ -75,6 +82,17 @@ def check() -> tuple[int, str]:
         if live is not None:
             helper.write_cache(live, now)
             worst = worst_window(helper, live, now)
+    return worst
+
+
+def read_percent() -> float | None:
+    """The worst window's percentage, or None: the reading `--percent` prints."""
+    worst = reading()
+    return None if worst is None else worst[0]
+
+
+def check() -> tuple[int, str]:
+    worst = reading()
     if worst is None:
         return UNKNOWN, "codex usage unknown: no fresh, readable usage cache and the live fetch failed"
     pct, resets = worst
@@ -87,6 +105,13 @@ def check() -> tuple[int, str]:
 
 
 def main() -> int:
+    if sys.argv[1:] == ["--percent"]:
+        try:
+            pct = read_percent()
+        except Exception:
+            pct = None
+        print("unknown" if pct is None else f"{pct:g}")
+        return UNKNOWN if pct is None else PROCEED
     # Any failure is exit 30: a crash's own exit 1 is a status neither caller
     # has a rule for, and an unread reading is not headroom.
     try:

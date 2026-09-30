@@ -829,6 +829,34 @@ The controller merges on a repo Chris owns; Chris reads it after via
    each name keeps the second pass from overwriting the record the gate
    launch wrote.
 
+   **Every pass is one ledger row** (#1269), written with the review ledger's
+   `append`: the pass's time and its share of the weekly allowance, read with
+   the gate's own reader before the launch and again after the run. The
+   `--percent` read goes on the line just before `launch_sha=`; the `append`
+   goes on the line after the record is written:
+
+   ```
+   before=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)
+   python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type codex-$phase --usage-before "$before"
+   ```
+
+   `append` reads the pass's record and `.out` from the cache, reads usage
+   itself, and records the change in percentage points. A usage reading that
+   fails, on either side, is `unknown`, never zero, and so is a percentage
+   that fell (the window reset under the pass). A pass not launched — exit 20
+   or 30 of the usage gate, a failed preflight, or the per-burn budget if
+   #1217 has landed — has no record and reads no usage: append it with its
+   reason, which gets a row of zero cost that `report` counts as skipped and
+   never as a clean pass:
+
+   ```
+   python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type codex-<phase> --skip-reason "<the printed line>"
+   ```
+
+   A run the gate refuses as raced or stale is not appended: its record reads
+   as a collected pass. A refusal from `append` itself goes to the
+   controller, never skipped.
+
    **The pass launches once, here, at PR-up** — not earlier, at the
    worker's round-1 report: an earlier launch races the worker's own
    round-1 fix commits, is refused as stale, and is rerun here anyway,
