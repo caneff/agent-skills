@@ -244,14 +244,17 @@ struct Quiet {
     stderr: Vec<u8>,
     timed_out: bool,
     truncated: bool,
+    /// `program arg arg`, and the bound it ran under: what an error names.
+    command: String,
+    timeout: Duration,
 }
 
 fn run_quiet(program: &str, args: &[&str], timeout: Duration) -> Result<Quiet, String> {
     let mut cmd = Command::new(program);
     cmd.args(args).stdin(Stdio::null());
-    let (status, stdout, stderr, timed_out, truncated) =
-        run_bounded(cmd, timeout).map_err(|e| format!("{program} {}: {e}", args.join(" ")))?;
-    Ok(Quiet { status, stdout, stderr, timed_out, truncated })
+    let command = format!("{program} {}", args.join(" "));
+    let (status, stdout, stderr, timed_out, truncated) = run_bounded(cmd, timeout).map_err(|e| format!("{command}: {e}"))?;
+    Ok(Quiet { status, stdout, stderr, timed_out, truncated, command, timeout })
 }
 
 impl Quiet {
@@ -261,14 +264,14 @@ impl Quiet {
     /// open past READ_GRACE (a hook backgrounding a daemon, e.g.) gives a
     /// possibly partial read, which must not be handed back as the
     /// command's real answer.
-    fn incomplete(&self, program: &str, args: &[&str], timeout: Duration) -> Option<String> {
+    fn incomplete(&self) -> Option<String> {
         if self.timed_out {
-            return Some(format!("{program} {} timed out after {timeout:?}", args.join(" ")));
+            return Some(format!("{} timed out after {:?}", self.command, self.timeout));
         }
         if self.truncated {
             return Some(format!(
-                "{program} {}: a descendant is still holding a pipe open past {READ_GRACE:?}; the read may be incomplete",
-                args.join(" ")
+                "{}: a descendant is still holding a pipe open past {READ_GRACE:?}; the read may be incomplete",
+                self.command
             ));
         }
         None
@@ -301,7 +304,7 @@ pub fn quiet_ok_timeout(program: &str, args: &[&str], timeout: Duration) -> bool
 /// must never be read that way (#849).
 pub fn quiet_stdout_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<Option<String>, String> {
     let run = run_quiet(program, args, timeout)?;
-    if let Some(err) = run.incomplete(program, args, timeout) {
+    if let Some(err) = run.incomplete() {
         return Err(err);
     }
     Ok(run.status.success().then(|| run.text()))
@@ -312,11 +315,11 @@ pub fn quiet_stdout_bounded(program: &str, args: &[&str], timeout: Duration) -> 
 /// command's own stderr, so the refusal names why instead of a guess.
 pub fn stdout_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
     let run = run_quiet(program, args, timeout)?;
-    if let Some(err) = run.incomplete(program, args, timeout) {
+    if let Some(err) = run.incomplete() {
         return Err(err);
     }
     if !run.status.success() {
-        return Err(format!("{program} {} failed: {}", args.join(" "), String::from_utf8_lossy(&run.stderr).trim()));
+        return Err(format!("{} failed: {}", run.command, String::from_utf8_lossy(&run.stderr).trim()));
     }
     Ok(run.text())
 }
@@ -327,7 +330,7 @@ pub fn stdout_bounded(program: &str, args: &[&str], timeout: Duration) -> Result
 /// means a descendant is still running: the same uncertainty applies.
 pub fn quiet_ok_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<bool, String> {
     let run = run_quiet(program, args, timeout)?;
-    match run.incomplete(program, args, timeout) {
+    match run.incomplete() {
         Some(err) => Err(err),
         None => Ok(run.status.success()),
     }

@@ -54,7 +54,7 @@ mod tests {
     }
 
     #[test]
-    fn applies_the_mode_before_the_file_is_visible() {
+    fn applies_the_requested_mode() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("hook");
         replace(&path, &dir.path().join("hook.tmp"), b"#!/bin/sh\n", Some(0o755), |_| {}).unwrap();
