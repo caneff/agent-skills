@@ -236,23 +236,10 @@ def test_index_from_manifests_missing_manifest_is_a_failure_row():
     fixture log containing an unrelated .html path must not land in the
     index — the audit that never wrote a manifest renders as a named
     failure row instead of silently reusing a stray path from its log."""
-    fake_claude_dir = os.path.dirname(os.path.abspath(__file__))
     with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as cache_dir, tempfile.TemporaryDirectory() as bin_dir:
-        os.symlink(os.path.join(fake_claude_dir, "fake_claude_fixture.sh"), os.path.join(bin_dir, "claude"))
-
         # A stray .html path in duplication's log — must never be mistaken
         # for its report now that the driver reads manifests, not logs.
-        env = {
-            **os.environ,
-            "PATH": f"{bin_dir}:{os.environ['PATH']}",
-            "XDG_CACHE_HOME": cache_dir,
-            "AUDITS_NO_OPEN": "1",
-            "AUDITS_NO_SYNTH": "1",
-        }
-        r = subprocess.run(
-            [sys.executable, os.path.join(fake_claude_dir, "driver.py"), tmp, "--only", "dead-code,duplication", "--out", os.path.join(tmp, "out")],
-            capture_output=True, text=True, env=env,
-        )
+        r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code,duplication")
         assert r.returncode != 0, "an audit that wrote no manifest must fail the sweep (#1278)"
         assert "[dead-code] done" in r.stdout, r.stdout
         assert "[duplication] done" not in r.stdout, "no manifest must never print done (#1278)"
