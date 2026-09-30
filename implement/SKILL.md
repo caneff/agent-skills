@@ -536,7 +536,10 @@ Without the flag: read this PR's own dispositions sidecar,
 `leftover` lines. None: file nothing, the same zero-leftovers rule the
 burn sweep uses. Any: **check first, the same idempotent search the burn
 sweep uses** (`burndown/SKILL.md` § The sweep) — a crash after
-`/file-ticket` here is the same hazard —
+`/file-ticket` here is the same hazard. Its command and stop rules are
+written out in both skills on purpose (#1254): a worker holds this file and
+not the burn's, the titles differ (`PR #<n>` here, `burn <run-id>` there), and
+each copy has its own wording test; change one, change the other —
 
 ```
 gh issue list --repo <owner/name> --state all --limit 100 \
