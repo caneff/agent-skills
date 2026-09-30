@@ -319,6 +319,10 @@ def run_one(name, repo, outlogs, manifests_dir):
     log_path = os.path.join(outlogs, f"{name}.log")
     manifest = manifest_path_for(manifests_dir, name)
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
+    # `--out` accumulates: an earlier run's manifest would otherwise prove
+    # this run succeeded (#1278).
+    if os.path.exists(manifest):
+        os.remove(manifest)
     with open(log_path, "w", encoding="utf-8") as log:
         r = subprocess.run(["claude", *CLAUDE_FLAGS, audit_prompt(name, repo, manifest)], stdout=log, stderr=subprocess.STDOUT, check=False, env=scrubbed_env())
     if r.returncode != 0:

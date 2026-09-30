@@ -304,6 +304,24 @@ def test_audit_exiting_nonzero_fails_the_sweep_even_with_a_manifest():
         assert os.path.isfile(os.path.join(tmp, "out", "collection", "index.html")), "the index is still built"
 
 
+def test_stale_manifest_from_an_earlier_run_does_not_count_as_success():
+    """#1278: `--out` accumulates, so a rerun into the same dir (the issue's
+    own recovery command) finds the last run's manifest. An audit that writes
+    nothing this time must still fail, not inherit the old manifest."""
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as cache_dir, tempfile.TemporaryDirectory() as bin_dir:
+        first = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code")
+        assert first.returncode == 0, first.stdout + first.stderr
+        assert os.path.isfile(os.path.join(tmp, "out", "manifests", "dead-code", "manifest.json")), "fixture setup: run 1 leaves a manifest"
+        again = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), tmp, "--only", "dead-code", "--force", "--out", os.path.join(tmp, "out")],
+            capture_output=True, text=True,
+            env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_CACHE_HOME": cache_dir,
+                 "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", "FAKE_CLAUDE_NOOP": "1"},
+        )
+        assert again.returncode != 0, again.stdout + again.stderr
+        assert "[dead-code] FAILED: no manifest" in again.stdout, again.stdout
+
+
 @contextlib.contextmanager
 def _leaked_git_env(victim):
     """Run the body with GIT_DIR/GIT_WORK_TREE pointing at `victim`, the way a

@@ -12,6 +12,9 @@ prompt="${*: -1}"
 # what env the driver handed it (#1278).
 echo "ceiling=${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-unset}"
 
+# An audit that dies silently: exits 0, writes nothing (#1278).
+[ -z "${FAKE_CLAUDE_NOOP:-}" ] || exit 0
+
 manifest="$(printf '%s' "$prompt" | grep -oP 'write a manifest to \K\S+' || true)"
 [ -n "$manifest" ] || exit 0
 
