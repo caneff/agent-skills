@@ -852,8 +852,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    line>"` and no other flag, and it gets a row of zero cost that `report`
    counts as skipped and never as a clean pass. That is an exit 20 or 30 of
    the usage gate, a failed preflight, or the per-burn budget if #1217 has
-   landed. A refusal from `append` itself goes to the controller, never
-   skipped.
+   landed. A refusal from `append` itself is named in the merge report to
+   Chris, never skipped, and does not hold the merge.
 
    **The pass launches once, here, at PR-up** — not earlier, at the
    worker's round-1 report: an earlier launch races the worker's own

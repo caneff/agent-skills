@@ -29,6 +29,6 @@ check_in "$merge" 'append it with `--skip-reason "<the printed line>"` and no ot
 check_in "$merge" 'append its ledger skip row (below), and go to step 4;'
 check_in "$merge" 'append its ledger row with `--refusal` (below)'
 check_in "$merge" 'A usage reading that fails, on either side, is `unknown`, never zero'
-check_in "$merge" 'A refusal from `append` itself goes to the controller, never skipped'
+check_in "$merge" 'A refusal from `append` itself is named in the merge report to Chris, never skipped, and does not hold the merge'
 [ "$fail" -eq 0 ] && echo "PASS $0"
 exit "$fail"
