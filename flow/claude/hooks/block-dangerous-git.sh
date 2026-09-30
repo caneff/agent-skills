@@ -111,14 +111,20 @@ done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g')
 ieq() { [ "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$2" | tr 'A-Z' 'a-z')" ]; }
 
 # --- Ownership of this repo, cached. ---
-# Verdict is keyed on the repo's toplevel path. Only the OWNED verdict is
-# cached: it's the hot path (allow), so caching it keeps `gh` off every
-# subsequent Bash call, while a not-owned/lookup-failed verdict is never
-# written — a block is rare, so re-asking costs nothing and a stale "no" (or a
-# cached network blip) can never harden into a permanent block. Delete
-# $cache_dir if a repo's origin changes hands.
+# Verdict is keyed on the origin URL, normalised to owner/name, so a verdict
+# earned once covers every worktree of the repo and a fresh `implement-*`
+# worktree never re-asks gh. Only the OWNED verdict is cached: it's the hot
+# path (allow), so caching it keeps `gh` off every subsequent Bash call, while
+# a not-owned/lookup-failed verdict is never written — a block is rare, so
+# re-asking costs nothing and a stale "no" (or a cached network blip) can
+# never harden into a permanent block. Delete $cache_dir if a repo's origin
+# changes hands.
+# Returns 0 owned, 1 not owned (gh answered), 2 gh could not answer; on 2,
+# OWNERSHIP_ERR holds gh's error text so the block can say it was a blip.
+OWNERSHIP_ERR=""
+OWNERSHIP_ORIGIN=""
 repo_is_owned() {
-  local toplevel origin cache_dir key me target
+  local toplevel origin cache_dir key me target errf slug
   toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
   origin=$(git remote get-url origin 2>/dev/null)
 
@@ -129,17 +135,28 @@ repo_is_owned() {
     *) return 0 ;;
   esac
 
+  # https://github.com/o/n.git, git@github.com:o/n.git and ssh://git@github.com/o/n
+  # all name the same repo.
+  slug=${origin#*github.com}
+  slug=${slug#[:/]}; slug=${slug%/}; slug=${slug%.git}
+  # The block text names the slug, never the URL: an origin can carry a token.
+  OWNERSHIP_ORIGIN=$slug
   cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-git-guard"
-  key=$(printf '%s' "$toplevel" | tr -c 'A-Za-z0-9' '_')
+  # `/` becomes `@`, which GitHub names cannot hold, so `a-b/c` and `a/b-c`
+  # never share a key.
+  key=$(printf '%s' "$slug" | tr 'A-Z' 'a-z' | tr '/' '@' | tr -c 'a-z0-9@._-' '_')
   [ -f "$cache_dir/$key" ] && return 0
 
   # Evaluate ORIGIN explicitly (a bare `gh repo view` would resolve to an
   # `upstream` remote instead), and a fork's real base repo is its parent.
-  # Any failure here returns non-zero -> blocked.
-  me=$(gh api user -q .login 2>/dev/null) || return 1
+  # gh's own error text goes to a temp file; with no temp file the block says so.
+  errf=$(mktemp 2>/dev/null) || errf=""
+  lookup_failed() { OWNERSHIP_ERR=$([ -n "$errf" ] && tr '\n' ' ' < "$errf" | sed 's/ *$//'); [ -z "$errf" ] || rm -f "$errf"; return 2; }
+  me=$(gh api user -q .login 2>"${errf:-/dev/null}") || { lookup_failed; return 2; }
   target=$(gh repo view "$origin" --json owner,name,isFork,parent \
-      -q 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' 2>/dev/null) || return 1
-  [ -n "$me" ] && [ -n "$target" ] || return 1
+      -q 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' 2>"${errf:-/dev/null}") || { lookup_failed; return 2; }
+  [ -z "$errf" ] || rm -f "$errf"
+  [ -n "$me" ] && [ -n "$target" ] || { OWNERSHIP_ERR="empty answer from gh"; return 2; }
   ieq "${target%%/*}" "$me" || return 1
 
   mkdir -p "$cache_dir" 2>/dev/null && printf '%s\n' "$target" > "$cache_dir/$key" 2>/dev/null
@@ -227,10 +244,13 @@ fi
 
 # --- Push policy: your repo = allowed, anyone else's = handed off. ---
 if echo "$SCAN" | grep -qE '(^|[;&|[:space:]])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push([[:space:]]|$)'; then
-  if repo_is_owned; then
-    exit 0
+  repo_is_owned; rc=$?
+  [ "$rc" = 0 ] && exit 0
+  if [ "$rc" = 2 ]; then
+    echo "BLOCKED: could not verify ownership of $OWNERSHIP_ORIGIN (gh: ${OWNERSHIP_ERR:-no error text}) — retry once gh is reachable. This is a lookup failure, not a foreign repo." >&2
+    exit 2
   fi
-  echo "BLOCKED: pushing to a repo you don't own (or ownership couldn't be verified — gh down?). Hand the user the exact '! git push -u origin <branch>' line and a drafted 'gh pr create' line to run in their own shell — the outward-facing step is theirs, not yours." >&2
+  echo "BLOCKED: pushing to a repo you don't own. Hand the user the exact '! git push -u origin <branch>' line and a drafted 'gh pr create' line to run in their own shell — the outward-facing step is theirs, not yours." >&2
   exit 2
 fi
 
