@@ -29,15 +29,15 @@ optin="$(awk '/^## / { exit } { print }' "$lane" | flatten)"
 build="$(section '^## The build$')"
 reviews="$(section '^## The reviews$')"
 cap="$(section "^## When Codex's own quota runs out$")"
-guard() { # guard <section name> <extracted text>
-  [ -n "$2" ] || { echo "FAIL: could not extract § $1 from its doc" >&2; exit 1; }
+guard() { # guard <section name> <file it comes from> <extracted text>
+  [ -n "$3" ] || { echo "FAIL: could not extract § $1 from $2" >&2; exit 1; }
 }
 entry="$(awk '/^\*\*Codex builds this one\?\*\*/ { on = 1 } on && /^$/ { exit } on { print }' "$here/SKILL.md" | flatten)"
-guard "opt-in" "$optin"
-guard "The build" "$build"
-guard "The reviews" "$reviews"
-guard "Codex's own quota" "$cap"
-guard "SKILL.md Codex routing" "$entry"
+guard "opt-in" implement/codex-lane.md "$optin"
+guard "The build" implement/codex-lane.md "$build"
+guard "The reviews" implement/codex-lane.md "$reviews"
+guard "Codex's own quota" implement/codex-lane.md "$cap"
+guard "Codex routing" implement/SKILL.md "$entry"
 
 fail=0
 check_in() {
