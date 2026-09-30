@@ -8,6 +8,8 @@ per-review-type value table.
     review_ledger.py append  --repo R --ticket N --type witness-mutation|call-site-mutation|worker-mutation
                              --mutation-id ID --seconds S (--status-file PATH | --outcome red|green|unknown)
                              [--round K] [--ledger PATH]
+    review_ledger.py append  --repo R --ticket N --type codex-gate|codex-second|codex-third
+                             [--skip-reason WHY | --refusal WHY] [--cache DIR] [--ledger PATH]
     review_ledger.py report  [--ledger PATH] [--weights FILE] [--prices FILE] [--split 1/k|none]
                              [--format md|json]
 
@@ -48,6 +50,18 @@ with a non-zero status is a refusal row: no findings, counted in `report`'s `ref
 `clean passes`. Outcomes are read from the dispositions sidecar only, where the controller writes a line by rule for
 a `leftover` alone, so most backfilled Codex outcomes are `unknown` and the known ones skew to leftover. A `.out` whose findings cannot be read is `unknown`, never empty.
 
+Codex rows from `append` (#1269) are the ones the controller writes at merge, one per pass. The pass's
+record carries `usage_before` and `usage_after`, each `<percent> <resetsAt>` as `implement/codex-usage-gate.py
+--percent` prints it from a live read, taken just before the launch and just after the run. `append --type
+codex-<phase>` and `harvest` both read them into the row's usage change, the percentage points between the two
+readings of one window (the reset time names the window). A reading that is missing, unreadable or failed, two
+readings of different windows, and a percentage that fell are `unknown` with the reason, never zero; usage is
+per account, so other Codex use during the pass is counted in it. A pass not launched (the weekly limit, a
+spent budget) is appended with `--skip-reason` and no record: zero wall clock and a known zero change, findings
+status `skipped`, counted in `report`'s `skipped` column and never in `clean passes`. A run the gate refuses
+as raced or stale is appended with `--refusal WHY`: its findings describe a diff the PR no longer has, so
+the row holds none and counts as refused, and a later `harvest` keeps it.
+
 Mutation rows (#1270) come only from `append`, one per mutation id: the outcome (`red`, `green`
 or `unknown`) and the mutation's wall clock, no findings and no tokens (a reviewer's tokens stay
 with its correctness row). A status file holds one of the words `red`, `green`, `unknown` (the witness
@@ -83,6 +97,7 @@ REVIEW_TYPES = (
     "codex-third", "worker-mutation",
 )
 MUTATION_TYPES = ("witness-mutation", "call-site-mutation", "worker-mutation")
+CODEX_TYPES = ("codex-gate", "codex-second", "codex-third")
 
 DEFAULT_WEIGHTS = {"hard": 3, "judgement": 1, "high": 3, "medium": 2, "low": 1}
 VALUE_OUTCOMES = ("fixed", "filed")
@@ -660,7 +675,7 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
             f"{repo}/{ticket}/codex-{phase}/1/{stem}", repo, [ticket], f"codex-{phase}", 1, stem, findings, fstatus,
             sources, cost={"tokens": {"status": "not-applicable", "reason": "Codex is costed in wall clock and usage share"},
                            "wall_clock": _codex_wall(rec),
-                           "usage_delta": {"status": "unknown", "reason": "backfilled row: usage was not read before and after the pass"}},
+                           "usage_delta": _usage_delta(rec.get("usage_before"), rec.get("usage_after"))},
             extra=extra))
     return rows
 
@@ -672,7 +687,10 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     `only` is (repo, ticket): harvest just that ticket's sidecars and transcripts, which is
     what `append` does, so its rows are the ones a full harvest writes."""
     pairs = find_sidecar_files(cache)  # FileNotFoundError when the cache is missing
-    codex_pairs = [] if only else _walk_cache_layout(cache, ("codex-adversarial-*.json",))
+    codex_pairs = _walk_cache_layout(cache, ("codex-adversarial-*.json",))
+    if only:
+        codex_pairs = [(d, n) for d, n in codex_pairs if fold_repo(d) == fold_repo(only[0])
+                       and re.fullmatch(rf"codex-adversarial-{only[1]}-.+\.json", n)]
     if not pairs and not codex_pairs:
         raise ValueError(f"no findings or dispositions sidecars or Codex records under {cache}")
     if only:  # a cache directory name is literal; only a transcript's project directory loses `_` and `.`
@@ -892,7 +910,10 @@ def cmd_harvest(args) -> int:
         def replace_harvest_rows(ledger: dict) -> None:
             for k in [k for k, r in ledger.items() if r.get("origin") == "harvest"]:
                 del ledger[k]
-            ledger.update({r["row_id"]: r for r in rows})
+            for r in rows:
+                old = ledger.get(r["row_id"])
+                # A refusal is the controller's ruling on a run, which the record alone does not say: keep it.
+                ledger[r["row_id"]] = old if old and old.get("origin") == "append" and old.get("refusal") else r
 
         update_ledger(args.ledger, replace_harvest_rows)
     except (FileNotFoundError, ValueError) as e:
@@ -940,11 +961,8 @@ def cmd_append_mutation(args) -> int:
             raise ValueError("a mutation row needs --mutation-id made of letters, digits, . - _")
         if (args.status_file is None) == (args.outcome is None):
             raise ValueError("give exactly one of --status-file and --outcome")
-        try:
-            seconds = float(args.seconds)
-        except (TypeError, ValueError):
-            seconds = None
-        if seconds is None or not 0 <= seconds < float("inf"):
+        seconds = _finite_nonneg(args.seconds)
+        if seconds is None:
             raise ValueError("a mutation row needs --seconds, its wall clock as a finite number of seconds")
         outcome = args.outcome or decode_status(args.status_file.read_text())
     except (OSError, ValueError) as e:
@@ -968,14 +986,124 @@ def cmd_append_mutation(args) -> int:
     return 0
 
 
+def _finite_nonneg(text) -> float | None:
+    """`text` as a finite number of at least zero, or None."""
+    try:
+        x = float(text)
+    except (TypeError, ValueError):
+        return None
+    return x if 0 <= x < float("inf") else None
+
+
+def _parse_usage(text) -> tuple[tuple[float, int] | None, str]:
+    """((percent, window reset time), why not) from one usage reading as `codex-usage-gate.py
+    --percent` prints it: `<percent> <resetsAt>`. The reset time names the window, so two
+    readings of different windows are never subtracted."""
+    parts = text.split() if isinstance(text, str) else []
+    pct = _finite_nonneg(parts[0]) if len(parts) == 2 else None
+    resets = _finite_nonneg(parts[1]) if len(parts) == 2 else None
+    if pct is None or resets is None:
+        return None, "missing" if text is None else f"unreadable {text!r}"
+    return (pct, int(resets)), ""
+
+
+def _usage_delta(before_text, after_text) -> dict:
+    """The usage change of a pass in percentage points of the window both readings name, or
+    `unknown` with the reason: a missing or failed reading on either side is never a zero, and
+    neither is a pair from two windows, or a window that reset under the pass."""
+    (before, bwhy), (after, awhy) = _parse_usage(before_text), _parse_usage(after_text)
+    if before is None or after is None:
+        return {"status": "unknown", "reason": "; ".join(
+            f"{name} reading {why}" for name, why in (("before", bwhy), ("after", awhy)) if why)}
+    if before[1] != after[1]:
+        return {"status": "unknown", "before": before[0], "after": after[0],
+                "reason": "the readings name different windows: the worst window changed or reset during the pass"}
+    if after[0] < before[0]:
+        return {"status": "unknown", "before": before[0], "after": after[0],
+                "reason": f"usage fell from {before[0]:g} to {after[0]:g} within one window"}
+    return {"status": "known", "before": before[0], "after": after[0], "delta": round(after[0] - before[0], 4)}
+
+
+def cmd_append_codex(args) -> int:
+    """Write the row of the Codex pass that just ran, or of one that was skipped. A pass's row is
+    what `harvest` writes for its record, usage change included: the record carries the two
+    readings the controller took around the pass. `--refusal` marks a run the gate refused
+    (raced, stale): it cost usage but its findings describe a diff the PR no longer has."""
+    phase, repo = args.type.removeprefix("codex-"), fold_repo(args.repo)
+    if args.round != 1:
+        print(f"review_ledger append: {args.type} rows are round 1", file=sys.stderr)
+        return 2
+    if args.skip_reason is not None:
+        if not args.skip_reason.strip() or args.refusal is not None or args.cache is not None:
+            print("review_ledger append: --skip-reason is a non-empty reason, alone: a pass not launched has "
+                  "no record to read", file=sys.stderr)
+            return 2
+        stem = f"codex-skipped-{args.ticket}-{phase}"
+        mine = [new_row(f"{repo}/{args.ticket}/{args.type}/1/{stem}", repo, [args.ticket], args.type, 1, stem, [],
+                        {"status": "skipped", "reason": args.skip_reason}, [],
+                        cost={"tokens": {"status": "not-applicable", "reason": "Codex is costed in wall clock and usage share"},
+                              "wall_clock": {"status": "known", "seconds": 0},
+                              "usage_delta": {"status": "known", "delta": 0, "reason": "the pass was not launched"}},
+                        extra={"skip_reason": args.skip_reason})]
+    else:
+        try:
+            rows, _ = harvest_cache(args.cache or REVIEWS_ROOT, None, only=(args.repo, args.ticket))
+        except (FileNotFoundError, ValueError) as e:
+            print(f"review_ledger append: {e}", file=sys.stderr)
+            return 2
+        mine = [r for r in rows if r["type"] == args.type and r["run_id"].endswith(f"codex-adversarial-{args.ticket}-{phase}")]
+        if len(mine) != 1:
+            print(f"review_ledger append: {len(mine)} Codex record(s) for {args.type} of {args.repo} #{args.ticket} "
+                  f"under {args.cache or REVIEWS_ROOT}: expected exactly one", file=sys.stderr)
+            return 2
+        if args.refusal is not None:
+            if not args.refusal.strip():
+                print("review_ledger append: --refusal needs the reason", file=sys.stderr)
+                return 2
+            row = mine[0]
+            row["findings"] = []
+            row["status"]["fields"]["findings"] = {"status": "refused", "reason": args.refusal}
+            row["refusal"] = args.refusal
+    return _write_appended(args, mine)
+
+
+def _write_appended(args, mine: list[dict]) -> int:
+    ticket = (mine[0]["repo"], mine[0]["ticket"])
+
+    def add_rows(ledger: dict) -> None:
+        ledger.update({r["row_id"]: {**r, "origin": "append"} for r in mine})
+        # The ticket's other reviewers may have appended already: re-split credit across all of them.
+        # Only rows of reviewer types, Codex included: a mutation row is not ours to re-score.
+        mark_overlap([r for r in ledger.values() if (r.get("repo"), r.get("ticket")) == ticket
+                      and (r.get("type") in REVIEWER_TYPES or str(r.get("type")).startswith("codex-"))], [], [])
+
+    try:
+        update_ledger(args.ledger, add_rows)
+    except ValueError as e:
+        print(f"review_ledger append: {e}", file=sys.stderr)
+        return 2
+    print(f"appended {len(mine)} row(s) to {args.ledger}: {', '.join(r['row_id'] for r in mine)}")
+    return 0
+
+
 def cmd_append(args) -> int:
     """Write the rows of one review that just ran: what `harvest` would write for that
     ticket's sidecars and transcripts, selected by type and round. A review's own cost or
     findings sidecar being absent is a refusal, never a row with zero cost. A round-1 review
     ends before its dispositions exist, so its findings' outcomes are `unknown` until the
     same append is run again after them, or a harvest reads them."""
+    if args.type not in CODEX_TYPES and (args.skip_reason is not None or args.refusal is not None):
+        print(f"review_ledger append: --skip-reason and --refusal are for codex types, not {args.type}",
+              file=sys.stderr)
+        return 2
     if args.type in MUTATION_TYPES:
         return cmd_append_mutation(args)
+    if args.type in CODEX_TYPES:
+        if args.mutation_id or args.status_file or args.outcome or args.seconds is not None or args.transcripts:
+            print(f"review_ledger append: --mutation-id, --status-file, --outcome, --seconds and --transcripts "
+                  f"are not for {args.type}", file=sys.stderr)
+            return 2
+        return cmd_append_codex(args)
     if args.mutation_id or args.status_file or args.outcome or args.seconds is not None:
         print(f"review_ledger append: --mutation-id, --status-file, --outcome and --seconds are for "
               f"mutation types, not {args.type}", file=sys.stderr)
@@ -1000,22 +1128,7 @@ def cmd_append(args) -> int:
         if (why := _refusal(r)):
             print(f"review_ledger append: {r['row_id']}: {why}", file=sys.stderr)
             return 2
-    ticket = (mine[0]["repo"], mine[0]["ticket"])
-
-    def add_rows(ledger: dict) -> None:
-        ledger.update({r["row_id"]: {**r, "origin": "append"} for r in mine})
-        # The ticket's other reviewers may have appended already: re-split credit across all of them.
-        # Only rows of reviewer types, Codex included: a mutation row is not ours to re-score.
-        mark_overlap([r for r in ledger.values() if (r.get("repo"), r.get("ticket")) == ticket
-                      and (r.get("type") in REVIEWER_TYPES or str(r.get("type")).startswith("codex-"))], [], [])
-
-    try:
-        update_ledger(args.ledger, add_rows)
-    except ValueError as e:
-        print(f"review_ledger append: {e}", file=sys.stderr)
-        return 2
-    print(f"appended {len(mine)} row(s) to {args.ledger}: {', '.join(r['row_id'] for r in mine)}")
-    return 0
+    return _write_appended(args, mine)
 
 
 def _row_value(row: dict, weights: dict, split: str) -> tuple[float, int]:
@@ -1060,6 +1173,9 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
         rate = lambda outcome: (sum(f["outcome"] == outcome for f in known) / len(known)) if known else None
         inside = t == "over-engineering"
         mutation = t in MUTATION_TYPES
+        codex = t in CODEX_TYPES
+        usage = [r["cost"].get("usage_delta", {}) for r in mine] if codex else []
+        known_usage = [u["delta"] for u in usage if u["status"] == "known"]
         outcomes = Counter(r.get("outcome") for r in mine) if mutation else Counter()
         known_outcomes = outcomes["red"] + outcomes["green"]
         costs = [r["cost"] for r in mine]
@@ -1082,7 +1198,13 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
             "unknown_outcomes": None if mutation else len(findings) - len(known),
             "unweighted": None if mutation else unweighted,
             "unknown_finding_rows": sum(
-                r["status"]["fields"]["findings"]["status"] not in ("known", "not-applicable", "refused") for r in mine),
+                r["status"]["fields"]["findings"]["status"] not in ("known", "not-applicable", "refused", "skipped")
+                for r in mine),
+            "skipped_rows": sum(r["status"]["fields"]["findings"]["status"] == "skipped" for r in mine) if codex else None,
+            # Usage change in percentage points over the passes whose change is known; the rest are
+            # counted beside it, never added as zero.
+            "usage_percent": sum(known_usage) if known_usage else None,
+            "unknown_usage_rows": sum(u["status"] == "unknown" for u in usage) if codex else None,
             # A refused Codex pass (usage limit, failed run) found nothing because it reviewed nothing:
             # counted here, never in `clean_rows`, which holds only Codex passes that read the diff and found no
             # finding; a Claude row's empty sidecar is `unknown`, so that column is n/a for them.
@@ -1152,13 +1274,14 @@ def cmd_report(args) -> int:
         return 0
     print("| type | rows | findings | value | unique share | leftover rate | dispute rate "
           "| unknown outcomes | unweighted | unknown-findings rows | unknown-cost rows "
-          "| refused | clean passes | tokens | wall clock | dollars | value per dollar | red rate | unknown mutations |")
-    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+          "| refused | skipped | clean passes | usage % | unknown usage | tokens | wall clock | dollars | value per dollar | red rate | unknown mutations |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for t in result["types"]:
         print(f"| {t['type']} | {t['rows']} | {_n(t['findings'])} | {_n(t['value'], '.2f')} | {_pct(t['unique_share'])} "
               f"| {_pct(t['leftover_rate'])} | {_pct(t['dispute_rate'])} | {_n(t['unknown_outcomes'])} "
               f"| {_n(t['unweighted'])} | {t['unknown_finding_rows']} | {t['unknown_cost_rows']} "
-              f"| {t['refused_rows']} | {_n(t['clean_rows'])} "
+              f"| {t['refused_rows']} | {_n(t['skipped_rows'])} | {_n(t['clean_rows'])} "
+              f"| {_n(t['usage_percent'], 'g')} | {_n(t['unknown_usage_rows'])} "
               f"| {' | '.join(_cost_cells(t))} | {_pct(t['red_rate'])} | {_n(t['unknown_mutations'])} |")
     print()
     for note in result["notes"]:
@@ -1178,12 +1301,14 @@ def main(argv=None) -> int:
     a = sub.add_parser("append")
     a.add_argument("--repo", required=True, help="the review cache's repo directory name")
     a.add_argument("--ticket", type=int, required=True)
-    a.add_argument("--type", choices=APPEND_TYPES + MUTATION_TYPES, required=True)
+    a.add_argument("--type", choices=APPEND_TYPES + MUTATION_TYPES + CODEX_TYPES, required=True)
     a.add_argument("--round", type=int, default=1)
     a.add_argument("--cache", type=Path, default=None, help=f"default {REVIEWS_ROOT}")
     a.add_argument("--mutation-id", help="a mutation type: the id the mutation is reported by")
     a.add_argument("--status-file", type=Path, help="a mutation type: the witness check's status file for the id")
     a.add_argument("--outcome", choices=MUTATION_OUTCOMES, help="a mutation type: the outcome, when no status file")
+    a.add_argument("--refusal", help="a codex type: the run was refused (raced, stale), and why; its usage still counts")
+    a.add_argument("--skip-reason", help="a codex type: the pass was not launched, and why; no record is read")
     a.add_argument("--seconds", help="a mutation type: the mutation's wall clock")
     a.add_argument("--transcripts", type=Path, help=f"default {DEFAULT_TRANSCRIPTS}")
     a.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
