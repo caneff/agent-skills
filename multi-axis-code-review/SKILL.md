@@ -229,7 +229,7 @@ shows neither a refusal nor the `appended` line sends the reviewer back.
 **A witness check ends with one `append` per mutation** (#1270). The recipe
 under *Isolation* below runs `review_ledger.py append --type witness-mutation`
 (`call-site-mutation` for an id listed in `call_site_ids`) once per mutation id,
-reading that id's status file and wall clock, before it removes them. The row
+reading the outcome its report loop wrote for that id and its wall clock, before it removes them. The row
 holds the outcome `red`, `green` or `unknown` and no tokens, which stay with the
 correctness row. An `unknown` stays `unknown`. A refusal is reported like the
 review's own: the recipe exits 4 and the reviewer puts the stderr on the first
@@ -480,7 +480,7 @@ esac
 # worktree `x.out` while mutation `x` is opening its output file at that same
 # path, so `x`'s redirection fails against a directory and `x` is reported red
 # without its suite ever having run.
-mkdir -p "$root/worktrees" "$root/output" "$root/status" "$root/ran" "$root/seconds" || exit 1
+mkdir -p "$root/worktrees" "$root/output" "$root/status" "$root/ran" "$root/seconds" "$root/outcome" || exit 1
 # Cleanup that reports rather than covers: an `rm -rf` over a worktree git
 # failed to deregister - a full disk is the plausible way - leaves exactly the
 # stale entry this recipe's own prose says never to create, and the run would
@@ -566,6 +566,7 @@ for id in "${mutations[@]}"; do
   # witnessed.
   if [ ! -e "$root/ran/$id" ]; then
     printf '%s: unknown — it never reached its covering suite, whatever it exited with\n' "$id"
+    printf 'unknown\n' >"$root/outcome/$id"
     continue
   fi
   # 126 and 127 are the kernel answering directly: the command was not
@@ -573,24 +574,27 @@ for id in "${mutations[@]}"; do
   # that - it is written on the line before - and every proxy for "the suite
   # ran" is a proxy. Where a real answer exists, take it instead of inferring.
   case "$(cat "$root/status/$id" 2>/dev/null)" in
-    126|127) printf '%s: unknown — its covering suite command never executed (not found, or not executable)\n' "$id" ;;
-    0) printf '%s: HOLLOW — the assertion still passed with its constraint stripped\n' "$id" ;;
+    126|127) printf '%s: unknown — its covering suite command never executed (not found, or not executable)\n' "$id"
+             printf 'unknown\n' >"$root/outcome/$id" ;;
+    0) printf '%s: HOLLOW — the assertion still passed with its constraint stripped\n' "$id"
+       printf 'green\n' >"$root/outcome/$id" ;;
     [1-9]*) printf '%s: red — its own message follows; confirm it is your assertion, not a missing file or a denied path\n' "$id"
-            show "$id" ;;
-    *) printf '%s: unknown — the mutation never ran to completion; report it by name, never as a pass\n' "$id" ;;
+            show "$id"
+            printf 'red\n' >"$root/outcome/$id" ;;
+    *) printf '%s: unknown — the mutation never ran to completion; report it by name, never as a pass\n' "$id"
+       printf 'unknown\n' >"$root/outcome/$id" ;;
   esac
 done
-# One ledger row per mutation (#1270), written here because cleanup removes the status
-# files. A mutation whose marker never appeared was reported `unknown` above whatever
-# its status file holds, so it is appended `unknown` the same way; a missing wall clock
-# is refused by `append`, never written as zero.
+# One ledger row per mutation (#1270), written here because cleanup removes the files.
+# The outcome is the word the report loop above wrote for the id (`red`, `green` or
+# `unknown`), so the mapping from exit status to outcome has this one home; a missing
+# outcome file or wall clock is refused by `append`, never written as a stand-in.
 append_failed=0
 for id in "${mutations[@]}"; do
   kind=witness-mutation
   case " $call_site_ids " in *" $id "*) kind=call-site-mutation ;; esac
-  if [ -e "$root/ran/$id" ]; then source=( --status-file "$root/status/$id" ); else source=( --outcome unknown ); fi
   python3 ~/.agents/skills/docs/research/review_ledger.py append "${ledger_args[@]}" --type "$kind" \
-    --mutation-id "$id" "${source[@]}" --seconds "$(cat "$root/seconds/$id" 2>/dev/null)" \
+    --mutation-id "$id" --status-file "$root/outcome/$id" --seconds "$(cat "$root/seconds/$id" 2>/dev/null)" \
     || append_failed=$(( append_failed + 1 ))
 done
 cleanup || exit 3

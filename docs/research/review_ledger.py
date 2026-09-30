@@ -40,9 +40,8 @@ are both known.
 
 Mutation rows (#1270) come only from `append`, one per mutation id: the outcome (`red`, `green`
 or `unknown`) and the mutation's wall clock, no findings and no tokens (a reviewer's tokens stay
-with its correctness row). A witness-check status file is read as the recipe writes it: the words
-`red`, `green`, `unknown`, or a raw exit status (0 green, 126 and 127 unknown, any other number
-red); anything else is `unknown`, never red or green. `report` gives a mutation type its red rate
+with its correctness row). A status file holds one of the words `red`, `green`, `unknown` (the witness
+recipe writes them and owns the exit-status mapping); anything else is `unknown`, never red or green. `report` gives a mutation type its red rate
 over the mutations whose outcome is known, and counts the `unknown` ones beside it.
 """
 from __future__ import annotations
@@ -744,16 +743,11 @@ def _refusal(row: dict) -> str | None:
 
 
 def decode_status(text: str) -> str:
-    """A witness-check status file's outcome. The words, or the raw exit status the recipe
-    records (its own case: 0 still passed, 126/127 never executed, other numbers failed);
-    an empty or malformed file is `unknown`, never a pass or a red."""
+    """A status file's outcome: one of the words `red`, `green`, `unknown`. The witness-check
+    recipe writes the word, the one home of the exit-status mapping; anything else, an empty
+    file and a raw exit status included, is `unknown`, never a pass or a red."""
     word = text.strip()
-    if word in MUTATION_OUTCOMES:
-        return word
-    if re.fullmatch(r"\d+", word):
-        code = int(word)
-        return "green" if code == 0 else "unknown" if code in (126, 127) else "red"
-    return "unknown"
+    return word if word in MUTATION_OUTCOMES else "unknown"
 
 
 def cmd_append_mutation(args) -> int:

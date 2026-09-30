@@ -48,14 +48,8 @@ class AppendMutationTest(MutationCase):
         self.ok("m1", status="unknown\n")
         self.assertEqual(next(iter(self.rows().values()))["outcome"], "unknown")
 
-    def test_the_witness_scripts_raw_exit_statuses_decode_as_it_reports_them(self):
-        for i, (text, want) in enumerate([("1\n", "red"), ("2\n", "red"), ("0\n", "green"),
-                                          ("126\n", "unknown"), ("127\n", "unknown")]):
-            self.ok(f"m{i}", status=text)
-            self.assertEqual(self.rows()[f"skills/500/witness-mutation/1/m{i}"]["outcome"], want, text)
-
     def test_an_empty_or_malformed_status_is_unknown_never_red_or_green(self):
-        for i, text in enumerate(["", "\n", "RED?\n", "redgreen\n", "-1\n", "1 0\n"]):
+        for i, text in enumerate(["", "\n", "RED?\n", "redgreen\n", "-1\n", "1 0\n", "1\n", "0\n", "127\n"]):
             self.ok(f"m{i}", status=text)
             self.assertEqual(self.rows()[f"skills/500/witness-mutation/1/m{i}"]["outcome"], "unknown", repr(text))
 
