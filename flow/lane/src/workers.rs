@@ -78,10 +78,16 @@ pub fn append(home: &Path, pid: &str, record: &WorkerRecord) -> std::io::Result<
     }
     let line = serde_json::to_string(record).map_err(std::io::Error::other)?;
     let _guard = lock(&path)?;
-    let raw = read_if_present(&path)?;
+    add_line(&path, &line)
+}
+
+/// Publishes the locked sidecar at `path` with `line` added after its
+/// existing records. The caller holds `lock`.
+fn add_line(path: &Path, line: &str) -> std::io::Result<()> {
+    let raw = read_if_present(path)?;
     let mut lines = non_empty_lines(&raw);
-    lines.push(&line);
-    publish(&path, &lines)
+    lines.push(line);
+    publish(path, &lines)
 }
 
 /// Every well-formed record for the controller session at `pid`, in the
@@ -226,8 +232,7 @@ pub fn remove_workspace(home: &Path, workspace: &str) -> bool {
 /// Replaces the whole of a locked sidecar with `lines`, one record each, so
 /// that a death, kill or full disk at any point leaves either the old file or
 /// the new one, never a truncated one (#1101): the new contents go to
-/// `<sidecar>.tmp`, are fsynced, and are renamed over the sidecar, and the
-/// directory is fsynced so the rename itself survives a crash. The caller
+/// `<sidecar>.tmp` and replace the sidecar through `atomic::replace`. The caller
 /// holds `lock`, which is what makes one fixed temp name safe; a temp file a
 /// crash left behind is truncated by the next publish.
 fn publish(path: &Path, lines: &[&str]) -> std::io::Result<()> {
@@ -235,25 +240,7 @@ fn publish(path: &Path, lines: &[&str]) -> std::io::Result<()> {
     if !out.is_empty() {
         out.push('\n');
     }
-    let tmp = sibling(path, "tmp");
-    let written = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
-        abort_mid_write(path, &mut f, out.as_bytes());
-        f.write_all(out.as_bytes())?;
-        f.sync_all()?;
-        std::fs::rename(&tmp, path)
-    })();
-    if written.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    written?;
-    // The rename has landed, so a failed directory fsync is noted rather than
-    // returned: a caller told a landed write failed acts on a false answer
-    // (#1101 review C2) — adoption would refuse a worker it had just taken.
-    if let Err(e) = std::fs::File::open(path.parent().unwrap_or(Path::new("."))).and_then(|d| d.sync_all()) {
-        eprintln!("workers: published {}, but could not fsync its directory: {e}", path.display());
-    }
-    Ok(())
+    crate::atomic::replace(path, &sibling(path, "tmp"), out.as_bytes(), None, |f| abort_mid_write(path, f, out.as_bytes()))
 }
 
 /// Test-only failpoint, absent from a release build: a process death partway
@@ -267,6 +254,16 @@ fn abort_mid_write(path: &Path, f: &mut std::fs::File, bytes: &[u8]) {
     }
     #[cfg(not(debug_assertions))]
     let _ = (path, f, bytes);
+}
+
+/// Test-only failpoint, absent from a release build: a real process death
+/// after `adopt` landed the record in the adopter's sidecar and before it
+/// removed it from the source, when `LANE_ADOPT_ABORT_AFTER_LANDING` is set.
+fn abort_after_landing() {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("LANE_ADOPT_ABORT_AFTER_LANDING").is_some() {
+        std::process::abort();
+    }
 }
 
 /// Every `<pid>.workers.jsonl` under `<home>/.claude/sessions`, as
@@ -442,16 +439,8 @@ fn move_record(
         // Landing first: a failed publish leaves the source untouched
         // (#1098 review C3), and a death after it leaves a duplicate the
         // live copy outranks rather than a worker in neither file.
-        let dst_raw = read_if_present(&own).map_err(io)?;
-        let mut landed = non_empty_lines(&dst_raw);
-        landed.push(&line);
-        publish(&own, &landed).map_err(io)?;
-        #[cfg(debug_assertions)]
-        if std::env::var_os("LANE_ADOPT_ABORT_AFTER_LANDING").is_some() {
-            // Test-only failpoint, absent from a release build: a real
-            // process death in exactly that window.
-            std::process::abort();
-        }
+        add_line(&own, &line).map_err(io)?;
+        abort_after_landing();
         publish(from, &kept).is_err()
     };
     Ok(Some(Adopted { from_pid: from_pid.to_string(), record: adopted, stale_copy_left }))

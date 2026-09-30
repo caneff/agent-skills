@@ -3,6 +3,7 @@
 //! sessions-registry reader, typed herdr output, and a command runner.
 //! Nothing built ahead for the multi-worker supervisor.
 
+pub mod atomic;
 pub mod git_origin;
 pub mod herdr;
 pub mod io_safe;
