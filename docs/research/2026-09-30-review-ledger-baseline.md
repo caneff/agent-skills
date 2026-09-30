@@ -6,7 +6,7 @@ Chris's call.
 
 ## Where the data lives, and how to regenerate it
 
-The 2413-row ledger is **not committed**. Chris ruled (relayed by the burn controller
+The baseline ledger (2452 rows: 2413 from harvest, 39 written by `append`) is **not committed**. Chris ruled (relayed by the burn controller
 `skills-burn-ctl`) that raw rows stay out of the repo, because the rows carry finding titles
 and file paths from private repos and this repo is public. This replaces the ticket's
 "committed snapshot / reproducible from the snapshot" criterion: the note commits the report and
@@ -14,15 +14,17 @@ aggregates, and the snapshot is regenerated from the cache.
 
 | What | Where |
 |---|---|
-| Ledger (harvest rows plus 62 rows `append` had written) | `~/.cache/agent-reviews/ledger-baseline-2026-09-30.jsonl` |
+| Ledger (2413 harvest rows plus 39 mutation rows `append` had written) | `~/.cache/agent-reviews/ledger-baseline-2026-09-30.jsonl` |
 | Review file (label mappings, matches, unjoined dispositions) | `~/.cache/agent-reviews/ledger-baseline-2026-09-30.review.md` |
 
 The live `~/.cache/agent-reviews/ledger.jsonl` was not touched. The harvest ran on a copy of it,
-so the 62 live `append` rows are in the baseline and the regenerated copy below reproduces them
-only if they are copied in first.
+so the live file's 62 `append` rows went into the harvest's input. 23 of them were reviewer rows
+that share a row id with a harvest row, so harvest replaced them; the other 39, all mutation rows,
+are in the baseline. Mutation rows exist only in a ledger that started from a copy of the live
+file, so the regenerated copy below needs that copy first.
 
 ```
-cp ~/.cache/agent-reviews/ledger.jsonl /path/to/ledger.jsonl    # carries the 62 append rows
+cp ~/.cache/agent-reviews/ledger.jsonl /path/to/ledger.jsonl    # carries the 39 mutation rows
 python3 docs/research/review_ledger.py harvest --ledger /path/to/ledger.jsonl --review-file /path/to/ledger.review.md
 python3 docs/research/review_ledger.py report  --ledger /path/to/ledger.jsonl
 ```
@@ -30,31 +32,35 @@ python3 docs/research/review_ledger.py report  --ledger /path/to/ledger.jsonl
 A harvest replaces every earlier harvest row, so re-running it gives the same harvest rows as
 long as the cache and transcripts are unchanged. They were read 2026-09-30; reviews written
 since add rows. Run on the real cache (`~/.cache/agent-reviews`) and transcripts
-(`~/.claude/projects`): 5 seconds, one process, `ulimit -v` 4 GB, exit 0. Its summary line:
-2413 rows, 2 unmapped values, 62 overlap matches, 20 sidecars not harvested, 27 skipped lines or
+(`~/.claude/projects`). Box budget, stated before the launch: one worker (the harvest is a single
+Python process), `ulimit -v` 4 GB, a 15-minute `timeout`; the box had load 2.2, 31 GB available and 15
+Claude sessions against the cap of 28. It ran under `job-run --name baseline-1271`, progress in
+`~/.cache/agent-jobs/baseline-1271/progress`, and finished in 5 seconds, exit 0. Its summary line:
+2413 harvest rows, 2 unmapped values, 62 overlap matches, 20 sidecars not harvested, 27 skipped lines or
 duplicates, 104 transcripts not attributed.
 
 ## Per-type table (`report`, default weights, `--split 1/k`, no price table)
 
-| type | rows | findings | value | unique share | leftover rate | dispute rate | unknown outcomes | unknown-findings rows | unknown-cost rows | refused | skipped | clean passes | tokens | wall clock | red rate | unknown mutations |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| standards | 523 | 1732 | 1265.00 | 97.7% | 17.0% | 18.4% | 18 | 108 | 8 | 0 | n/a | n/a | 172,575,023 | 52875s | n/a | n/a |
-| spec | 522 | 973 | 627.33 | 96.1% | 10.2% | 31.4% | 12 | 139 | 8 | 0 | n/a | n/a | 143,208,114 | 52474s | n/a | n/a |
-| correctness | 506 | 1437 | 1413.00 | 97.1% | 7.8% | 12.4% | 22 | 108 | 11 | 0 | n/a | n/a | 341,199,008 | 135033s | n/a | n/a |
-| over-engineering | 74 | 146 | 76.00 | 100.0% | 24.8% | 22.8% | 1 | 0 | 0 | 0 | n/a | n/a | inside standards | inside standards | n/a | n/a |
-| verification | 492 | 37 | 14.00 | 100.0% | 16.7% | 0.0% | 25 | 472 | 3 | 0 | n/a | n/a | 195,544,518 | 70334s | n/a | n/a |
-| witness-mutation | 22 | n/a | n/a | n/a | n/a | n/a | n/a | 0 | 0 | 0 | n/a | n/a | n/a | 31s | 90.9% | 0 |
-| call-site-mutation | 6 | n/a | n/a | n/a | n/a | n/a | n/a | 0 | 0 | 0 | n/a | n/a | n/a | 8s | 50.0% | 0 |
-| worker-mutation | 11 | n/a | n/a | n/a | n/a | n/a | n/a | 0 | 0 | 0 | n/a | n/a | n/a | 16s | 100.0% | 0 |
-| codex-gate | 218 | 137 | 17.00 | 100.0% | 41.7% | 8.3% | 125 | 0 | 0 | 39 | 0 | 77 | n/a | 13889s | n/a | n/a |
-| codex-second | 70 | 74 | 3.00 | 100.0% | 42.9% | 42.9% | 67 | 0 | 0 | 0 | 0 | 10 | n/a | 6112s | n/a | n/a |
-| codex-third | 8 | 11 | 0.00 | 100.0% | 100.0% | 0.0% | 3 | 0 | 0 | 0 | 0 | 2 | n/a | 782s | n/a | n/a |
+| type | rows | findings | value | unique share | leftover rate | dispute rate | unknown outcomes | unknown-findings rows | unknown-cost rows | refused | skipped | clean passes | unknown usage | tokens | wall clock | red rate | unknown mutations |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| standards | 523 | 1732 | 1265.00 | 97.7% | 17.0% | 18.4% | 18 | 108 | 8 | 0 | n/a | n/a | n/a | 172,575,023 | 52875s | n/a | n/a |
+| spec | 522 | 973 | 627.33 | 96.1% | 10.2% | 31.4% | 12 | 139 | 8 | 0 | n/a | n/a | n/a | 143,208,114 | 52474s | n/a | n/a |
+| correctness | 506 | 1437 | 1413.00 | 97.1% | 7.8% | 12.4% | 22 | 108 | 11 | 0 | n/a | n/a | n/a | 341,199,008 | 135033s | n/a | n/a |
+| over-engineering | 74 | 146 | 76.00 | 100.0% | 24.8% | 22.8% | 1 | 0 | 0 | 0 | n/a | n/a | n/a | inside standards | inside standards | n/a | n/a |
+| verification | 492 | 37 | 14.00 | 100.0% | 16.7% | 0.0% | 25 | 472 | 3 | 0 | n/a | n/a | n/a | 195,544,518 | 70334s | n/a | n/a |
+| witness-mutation | 22 | n/a | n/a | n/a | n/a | n/a | n/a | 0 | 0 | 0 | n/a | n/a | n/a | n/a | 31s | 90.9% | 0 |
+| call-site-mutation | 6 | n/a | n/a | n/a | n/a | n/a | n/a | 0 | 0 | 0 | n/a | n/a | n/a | n/a | 8s | 50.0% | 0 |
+| worker-mutation | 11 | n/a | n/a | n/a | n/a | n/a | n/a | 0 | 0 | 0 | n/a | n/a | n/a | n/a | 16s | 100.0% | 0 |
+| codex-gate | 218 | 137 | 17.00 | 100.0% | 41.7% | 8.3% | 125 | 0 | 0 | 39 | 0 | 77 | 218 | n/a | 13889s | n/a | n/a |
+| codex-second | 70 | 74 | 3.00 | 100.0% | 42.9% | 42.9% | 67 | 0 | 0 | 0 | 0 | 10 | 70 | n/a | 6112s | n/a | n/a |
+| codex-third | 8 | 11 | 0.00 | 100.0% | 100.0% | 0.0% | 3 | 0 | 0 | 0 | 0 | 2 | 8 | n/a | 782s | n/a | n/a |
 
-Two columns are dropped from the table for width and are `n/a` on every row: `unweighted` is 0
-on every reviewer and Codex row, and `usage %`, `dollars` and `value per dollar` are `n/a`
-because no `--prices` file was given (`report` prints "No price table: dollars and value per
-dollar are n/a, not zero"). Value is the report's severity-weighted sum over findings with a
-known severity, not a judgement.
+`report` prints 22 columns; this table shows 18. Dropped for width: `unweighted` (0 on every row that has
+findings), `usage %` (`n/a` on every row: no backfilled row has a usage reading), and `dollars` and
+`value per dollar` (`n/a` on every row: no `--prices` file was given, and `report` prints "No price
+table: dollars and value per dollar are n/a, not zero"). `unknown usage` is kept because it carries
+real counts. Value is the report's severity-weighted sum over findings with a known severity, not a
+judgement.
 
 Read the rates with the unknowns beside them: each rate is over findings whose outcome is
 known, so a type with many unknown outcomes has a rate over fewer findings (codex-gate: 137
@@ -66,15 +72,25 @@ Counted over the baseline ledger; nothing is folded into an average or a rate. T
 repo names and finding ids in the reasons are replaced by `<…>`. The count matches `report`'s
 `unknown outcomes` and `unknown-findings rows` columns for each type.
 
-```python
-# rows = [json.loads(l) for l in open(ledger)]
-for r in rows:
-    for f, s in r['cost'].items():                      # tokens, wall_clock, usage_delta
-        if isinstance(s, dict) and s.get('status') == 'unknown': key(r['type'], 'cost.' + f, s['reason'])
-    fs = r['status']['fields'].get('findings', {})
-    if fs.get('status') == 'unknown': key(r['type'], 'findings', fs['reason'])
-    for x in r['findings'] or []:
-        if x['outcome_status']['status'] == 'unknown': key(r['type'], 'outcome', x['outcome_status']['reason'])
+```
+python3 - ~/.cache/agent-reviews/ledger-baseline-2026-09-30.jsonl <<'PY'
+import collections, json, re, sys
+c = collections.Counter()
+def key(*k):
+    k = [re.sub(r"ticket [0-9-]+", "ticket <id>", x) for x in k]
+    k = [re.sub(r"line for [A-Z]+[0-9]+", "line for <id>", x) for x in k]
+    k = [re.sub(r"(codex-(?:gate|second|third))-[0-9] or -[HM][0-9]", r"\1-<k> or -<sev><k>", x) for x in k]
+    c[tuple(k)] += 1
+for l in open(sys.argv[1]):
+    r = json.loads(l)
+    for f, s in r["cost"].items():                       # tokens, wall_clock, usage_delta
+        if isinstance(s, dict) and s.get("status") == "unknown": key(r["type"], "cost." + f, s["reason"])
+    fs = r["status"]["fields"].get("findings", {})
+    if fs.get("status") == "unknown": key(r["type"], "findings", fs["reason"])
+    for x in r["findings"] or []:
+        if x["outcome_status"]["status"] == "unknown": key(r["type"], "outcome", x["outcome_status"]["reason"])
+for k, n in sorted(c.items()): print(n, *k, sep=" | ")
+PY
 ```
 
 | type | field | reason | count |
@@ -116,17 +132,16 @@ for r in rows:
 "No findings sidecar" and "sidecar is empty" both read "nothing found, or nothing written": the
 harvest cannot tell a clean review from one whose sidecar was never written, so those rows are
 unknown, not zero-finding. Verification is 467 of 492 rows in that state because verification
-rows come from transcripts and its findings sidecar is written only when the pass finds
-something.
+rows come from transcripts and most passes leave no findings sidecar (5 more left an empty one).
 
 **Codex outcomes are mostly unknown, and why.** Of 222 Codex findings read, 195 have no known
 outcome (125 + 67 + 3). The only joinable source is the dispositions sidecar, where the controller
 writes a `codex-<phase>-<label>` line by rule for a `leftover` alone (`implement/SKILL.md` § The
 merge step 3). Fixed and disputed Codex findings live in the PR body as prose, which the harvest
 does not parse. So the Codex value, leftover-rate and dispute-rate cells are over 27 findings
-and skew to leftover; read them as a floor on unknown, not as a rate. Detail:
+and only leftovers get a line by rule, so the leftover rate is biased upward and the fixed and disputed rates downward; read them as bounds, not rates. Detail:
 `2026-09-30-codex-outcome-source.md`. Fixing the harvest for this is not part of this baseline.
-Codex usage change is unknown on every one of the 296 Codex rows (table above): backfilled rows
+Codex usage change is unknown on every one of the 296 Codex rows (the `unknown usage` column above): backfilled rows
 have no before or after reading.
 
 ## Label mappings applied (from the review file)
@@ -144,7 +159,7 @@ have no before or after reading.
 Unmapped, so `unknown`: outcome `contested` (1) and `open` (1). Also listed, not harvested: 20
 sidecars whose names match no harvested pattern (6 retired `early` Codex records, plus
 differently-named round, spec and re-run sidecars); 27 skipped lines or
-duplicates, where duplicate ids keep both findings and join them to one disposition; 104
+duplicates (23 duplicate finding ids, which keep both findings and join them to one disposition; 2 duplicate disposition ids, where the later line wins; 1 unreadable Codex record; 1 finding line missing its fields); 104
 transcripts that could not be attributed to a row.
 
 ## Spot-check of the overlap matcher
