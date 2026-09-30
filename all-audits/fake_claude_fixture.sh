@@ -2,11 +2,19 @@
 # Test fixture (#559): a fake `claude` binary for driver_test.py's manifest
 # tests. Reads the last argv (the audit prompt), and — only for the audit
 # named "dead-code" — writes a report + the manifest the prompt asked for.
+# FAKE_CLAUDE_NOOP=1 makes every audit, dead-code included, write nothing.
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
 # simulating a crashed/silent process so the driver must render a missing
 # manifest as a named failure, never as a silent skip.
 set -euo pipefail
 prompt="${*: -1}"
+
+# Record the wait-ceiling variable in this process's log, so a test can see
+# what env the driver handed it (#1278).
+echo "ceiling=${CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS:-unset}"
+
+# An audit that dies silently: exits 0, writes nothing (#1278).
+[ -z "${FAKE_CLAUDE_NOOP:-}" ] || exit 0
 
 manifest="$(printf '%s' "$prompt" | grep -oP 'write a manifest to \K\S+' || true)"
 [ -n "$manifest" ] || exit 0
@@ -18,6 +26,8 @@ case "$prompt" in
     echo '<html><body>dead-code report</body></html>' >"$dir/report.html"
     mkdir -p "$(dirname "$manifest")"
     printf '{"report_path": "%s/report.html", "count": 1, "headline": "one finding"}\n' "$dir" >"$manifest"
+    # A nonzero exit even with a manifest on disk (#1278), when a test asks.
+    exit "${FAKE_CLAUDE_EXIT_DEAD_CODE:-0}"
     ;;
   *)
     # Every other audit: no manifest — the crashed/silent-process case. Print
