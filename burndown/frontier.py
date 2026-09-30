@@ -389,7 +389,10 @@ def fetch_parent(repo, ticket, run=gh_json):
     not answer is not an answer of "no parent"."""
     base = f"repos/{quote(repo, safe='/')}/issues"
     try:
-        return run(["api", f"{base}/{int(ticket['number'])}/parent"])
+        answer = run(["api", f"{base}/{int(ticket['number'])}/parent"])
+        if not isinstance(answer, dict) or "number" not in answer:
+            raise FrontierError("the parent endpoint answered with no issue")
+        return answer
     except FrontierError as exc:
         # gh's own status marker, not a bare "404": a failed call's message
         # can carry the request URL, and a ticket #1404 would match it.

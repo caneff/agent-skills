@@ -926,6 +926,17 @@ def test_a_failure_naming_404_in_its_url_is_not_a_missing_parent():
         raise AssertionError("a failed call naming 404 in its URL was read as no parent")
 
 
+def test_an_empty_parent_answer_is_not_a_missing_parent():
+    # `gh_json` turns empty stdout into None; that is no answer, not "no parent".
+    run = gh_answers({"repos/owner/repo/issues/491/parent": None})
+    try:
+        F.fetch_parent("owner/repo", issue(491, body="plain"), run=run)
+    except F.FrontierError as exc:
+        assert "no issue" in str(exc), exc
+    else:
+        raise AssertionError("an empty answer was read as no parent")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for test in tests:
