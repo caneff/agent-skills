@@ -237,6 +237,19 @@ def _native(issue):
     return bool(summary.get("blocked_by") or 0)
 
 
+def _handoff(number):
+    """The one verb a spec run is dispatched by, for a spec parent's own
+    entry and for each of its slices'."""
+    return f"`implement-dispatch --spec {number} --slots <k>`"
+
+
+def _is_clear(name, stated):
+    """Whether a ticket's own blocking state leaves it free to be handed off
+    by a verb: unblocked, or silent. `blocked` outranks the verb, and a
+    stated declaration this reader could not resolve is not silence."""
+    return name == "unblocked" or (name == "unresolved" and not stated)
+
+
 def classify(issues, state_of, parent_of=lambda ticket: None):
     """`{unblocked, blocked, unresolved, spec, slice}` over GitHub issue
     objects. `state_of(number) -> "open" | "closed" | None` reads a blocker's
@@ -244,8 +257,9 @@ def classify(issues, state_of, parent_of=lambda ticket: None):
     a guess. `parent_of(ticket) -> issue | None` reads the ticket's parent
     issue, `None` being a ticket with no parent; it raises `FrontierError`
     for a parent that could not be read, which is unresolved too. A claimed
-    ticket, a ticket carrying a non-dispatchable label, and anything that is really a PR, is in no bucket at all — each is off
-    the frontier by its own nature, not by a blocking relationship."""
+    ticket, a ticket carrying a non-dispatchable label, and anything that is
+    really a PR, is in no bucket at all — each is off the frontier by its own
+    nature, not by a blocking relationship."""
     buckets = {"unblocked": [], "blocked": [], "unresolved": [], "spec": [],
                "slice": []}
 
@@ -294,8 +308,7 @@ def classify(issues, state_of, parent_of=lambda ticket: None):
         entry = {"number": issue.get("number"), "title": issue.get("title"),
                  "blockers": [], "why": ""}
         name, stated = rank(issue, entry)
-        if SPEC_LABEL in _labels(issue) and (
-                name == "unblocked" or (name == "unresolved" and not stated)):
+        if SPEC_LABEL in _labels(issue) and _is_clear(name, stated):
             # The prerequisites are checked *first*, so `blocked` outranks
             # `spec` on one entry: both are true claims, but only `spec`
             # carries a dispatch verb, and a controller copies lines like
@@ -306,10 +319,10 @@ def classify(issues, state_of, parent_of=lambda ticket: None):
             # prerequisite this reader could not resolve is not silence,
             # and an unknown prerequisite is not a met one.
             entry["blockers"] = []
-            entry["why"] = ("a spec parent: dispatch with `implement-dispatch"
-                            f" --spec {entry['number']} --slots <k>`")
+            entry["why"] = ("a spec parent: dispatch with "
+                            + _handoff(entry["number"]))
             name = "spec"
-        elif name == "unblocked" or (name == "unresolved" and not stated):
+        elif _is_clear(name, stated):
             # Same ordering as above: a blocked slice stays `blocked`, since
             # only `slice` carries a verb to copy. Silence is ruled in for
             # the reason it is for `spec` — the spec run orders its own
@@ -324,8 +337,8 @@ def classify(issues, state_of, parent_of=lambda ticket: None):
                     entry["blockers"] = []
                     entry["why"] = (
                         f"a slice of spec #{parent['number']}: hand off with "
-                        f"`implement-dispatch --spec {parent['number']}"
-                        " --slots <k>`, never as its own ticket")
+                        + _handoff(parent["number"])
+                        + ", never as its own ticket")
                     name = "slice"
         buckets[name].append(entry)
     return buckets
