@@ -197,6 +197,13 @@ sidecar must tolerate and skip a malformed line rather than fail the whole
 file on it. No cost tracking: never add tokens or wall-clock to this line,
 in the sidecar or the prose."
 
+**Every axis writes its sidecar on every run** (#1257): "Write the sidecar on
+every run, an empty file when it found nothing — never skip the write."
+`implement/verification-check.sh` passes a PR with no verification pass only
+when all three sidecars exist and are empty, so a clean round that left no
+file would be refused at "PR up". The safe direction stays: an absent sidecar
+is refused, because it cannot be told from a reviewer that never ran.
+
 **Expand `<dir>` yourself before writing the prompt**, and prune anything
 untouched for 14 days, the same folder style and retention `job-run` gives
 `~/.cache/agent-jobs` — this sidecar lives in the same directory as the
