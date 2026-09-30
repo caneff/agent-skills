@@ -15,6 +15,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runfile  # noqa: E402
+from run_fixtures import drop_repo_field  # noqa: E402
 import sweep  # noqa: E402
 
 RUNFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runfile.py")
@@ -196,24 +197,14 @@ def test_show_prints_the_recorded_target_repo_and_says_when_there_is_none():
     root = cache()
     runfile.start("burn-1", slots=1, root=root, repo=REPO)
     assert f"repo {REPO}" in cli(root, "show", "burn-1").stdout
-    target = runfile.path("burn-1", root)
-    with open(target) as fh:
-        old = json.load(fh)
-    del old["repo"]
-    with open(target, "w") as fh:
-        json.dump(old, fh)
+    drop_repo_field("burn-1", root)
     assert "repo none recorded" in cli(root, "show", "burn-1").stdout
 
 
 def test_a_run_file_written_before_the_repo_field_loads_and_names_no_target():
     root = cache()
     runfile.start("burn-1", slots=1, root=root, repo=REPO)
-    target = runfile.path("burn-1", root)
-    with open(target) as fh:
-        old = json.load(fh)
-    del old["repo"]
-    with open(target, "w") as fh:
-        json.dump(old, fh)
+    drop_repo_field("burn-1", root)
     run = runfile.load("burn-1", root=root)
     assert run["repo"] is None, run
     try:

@@ -14,6 +14,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import frontier  # noqa: E402
 import runfile  # noqa: E402
+from run_fixtures import drop_repo_field  # noqa: E402
 import sweep  # noqa: E402
 
 # A real git checkout to record as a run's target when the case is not about it.
@@ -437,12 +438,7 @@ def test_cli_counts_refuses_a_run_file_that_names_no_target_repo_1190():
     home = home_fixture()
     target = git_repo(home, "target-repo")
     landed_run(root, "burn-l", target)
-    target_file = runfile.path("burn-l", root)
-    with open(target_file) as fh:
-        run = json.load(fh)
-    del run["repo"]
-    with open(target_file, "w") as fh:
-        json.dump(run, fh)
+    drop_repo_field("burn-l", root)
     got = cli(root, "counts", "burn-l", "--repo", target, home=home)
     assert got.returncode == 1, got
     assert "names no target repo" in got.stderr, got.stderr
