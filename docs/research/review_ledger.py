@@ -97,7 +97,7 @@ def unknown_cost(reason: str) -> dict:
 # A subagent transcript lives at <projects>/<project>/<session>/subagents/agent-<id>.{jsonl,meta.json}, and
 # <project> is the working directory with "/" and "/." both written "-" and "--".
 _PROJECT_RE = re.compile(
-    r"^-home-[^-]+(?:-src-(?P<src>.+?)|--agents-(?P<agents>.+?))(?:--claude-worktrees-(?:implement-(?P<n>\d+)|.+))?$")
+    r"^-home-[^-]+(?:-src-(?P<src>.+?)|--agents-(?P<agents>.+?))(?:--claude-worktrees-(?:implement-(?P<n>\d+)|(?P<other>.+)))?$")
 
 
 def _axis_of(text: str) -> str | None:
@@ -180,6 +180,9 @@ def attribute(meta: dict, project: str, first: str | None) -> tuple[dict | None,
     pm = _PROJECT_RE.match(project)
     if not pm:
         return None, f"project directory {project!r} names no known repo"
+    if pm.group("other"):
+        return None, ("worktree is not implement-N: its repo cannot be told from the directory it sits under, "
+                      "which may hold a checkout of another repo")
     repo = fold_repo(pm.group("src") or pm.group("agents"))
     desc, head = str(meta.get("description") or ""), (first or "")
     ticket = int(pm.group("n")) if pm.group("n") else None
@@ -278,9 +281,9 @@ def new_row(row_id, repo, tickets, row_type, rnd, run_id, findings, findings_sta
             "sources": sources, "mappings": list(mappings)}}
 
 
-def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> tuple[list[dict], list[str]]:
+def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> tuple[list[dict], dict]:
     """Fill each row's cost from its transcripts; returns (rows for runs no sidecar row holds,
-    the rows that sum more than one transcript). A verification run whose round differs from
+    {"multi": the rows that sum more than one transcript, "shared": the transcripts behind a shared key}). A verification run whose round differs from
     its sidecar's joins that row when the ticket has exactly one verification row. Two sidecar
     rows on one key cannot split a transcript between them, so both stay unknown. Over-engineering
     cost stays inside standards."""
@@ -293,6 +296,7 @@ def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> tup
         by_type.setdefault((r["repo"], r["ticket"], r["type"]), []).append(r)
     joined: dict[str, list[dict]] = {}
     shared: dict[str, str] = {}
+    shared_runs: dict[str, list[str]] = {}
     extra: list[dict] = []
     for run in runs:
         run["repo"] = canon.get(_norm_repo(run["repo"]), run["repo"])
@@ -301,6 +305,8 @@ def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> tup
             hits = by_type.get((run["repo"], run["ticket"], "verification"), [])
             hits = hits if len(hits) == 1 else []
         if len(hits) > 1:
+            key = f"({run['repo']}, #{run['ticket']}, {run['type']}, round {run['round']})"
+            shared_runs.setdefault(key, []).append(run["source"])
             for h in hits:
                 shared[h["row_id"]] = (f"{len(hits)} sidecar rows share ({run['repo']}, #{run['ticket']}, "
                                        f"{run['type']}, round {run['round']}); a transcript cannot be split between them")
@@ -333,7 +339,7 @@ def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> tup
             [run["ticket"]], run["type"], run["round"], run["agent"], [],
             {"status": "unknown", "reason": "no findings sidecar for this run: nothing found, or nothing written"},
             [run["source"]], model=model, cost=cost))
-    return new_rows, multi
+    return new_rows, {"multi": multi, "shared": [f"{k}: {', '.join(v)}" for k, v in sorted(shared_runs.items())]}
 
 
 def _dict_line(raw: str):
@@ -572,13 +578,13 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
                 if (group, fid) not in joined:
                     orphans.append(f"{repo_dir} #{group} `{fid}` ({table[fid].get('outcome')})")
     runs, unattributed, ignored = read_transcripts(transcripts) if transcripts else ([], [], 0)
-    new_rows, multi = attach_costs(rows, runs, missing)
+    new_rows, listed = attach_costs(rows, runs, missing)
     rows += new_rows
     rows.sort(key=lambda r: r["row_id"])
     matches: list[dict] = []
     restatements: list[dict] = []
     mark_overlap(rows, matches, restatements)
-    return rows, {"multi": multi, "restatements": restatements, "unattributed": sorted(unattributed), "ignored": ignored,
+    return rows, {**listed, "restatements": restatements, "unattributed": sorted(unattributed), "ignored": ignored,
                   "mappings": mappings, "unmapped": unmapped, "matches": matches,
                   "orphans": sorted(set(orphans)), "skipped": sorted(set(skipped)),
                   "unharvested": sorted(unharvested)}
@@ -617,6 +623,9 @@ def review_file_text(facts: dict) -> str:
         "## Rows with more than one transcript",
         "Summed. Two or more can be a retried reviewer, or a transcript joined to the wrong row.",
         bullets(facts["multi"]), "",
+        "## Transcripts behind a key several sidecar rows share",
+        "Not summed into any row: which sidecar row a transcript belongs to cannot be told.",
+        bullets(facts["shared"]), "",
         "## Transcripts not attributed",
         f"{facts['ignored']} transcript(s) of other agent types were out of scope and are not listed.",
         bullets(facts["unattributed"]), ""])
@@ -694,6 +703,11 @@ def _row_dollars(row: dict, prices: dict | None) -> float | None:
 
 def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None = None) -> dict:
     types = []
+    oe_value: dict[tuple, float] = {}
+    for r in rows:
+        if r["type"] == "over-engineering":
+            key = (r["repo"], r["ticket"], r["round"])
+            oe_value[key] = oe_value.get(key, 0.0) + _row_value(r, weights, split)[0]
     present = {r["type"] for r in rows}
     for t in [*(t for t in REVIEW_TYPES if t in present), *sorted(present - set(REVIEW_TYPES))]:
         mine = [r for r in rows if r["type"] == t]
@@ -709,7 +723,12 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
         priced = [(r, v, d) for r, v, _, d in per_row if d is not None]
         # Value per dollar divides only the value of rows whose cost and findings are both
         # known by those rows' dollars: an unknown row is left out, never counted as free.
-        rated = [(v, d) for r, v, d in priced if r["status"]["fields"]["findings"]["status"] == "known"]
+        rated = []
+        for r, v, d in priced:
+            if r["status"]["fields"]["findings"]["status"] == "known":
+                # Over-engineering cost is inside its standards row's dollars, so its value joins the numerator.
+                extra = oe_value.pop((r["repo"], r["ticket"], r["round"]), 0.0) if t == "standards" else 0.0
+                rated.append((v + extra, d))
         rated_dollars = sum(d for _, d in rated)
         types.append({
             "type": t, "rows": len(mine), "findings": len(findings), "value": round(value, 4),

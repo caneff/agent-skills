@@ -506,6 +506,9 @@ def add_edge_cases(cache: Path, tr: Path) -> None:
     sidecar(skills, "standards", 416)
     one(wt(SKILLS_PROJ, 416), "cfl", "Standards review #416", "Axis: spec. Repo: x", ["2026-09-20T10:00:00Z"],
         [usage(66, 66, 66, 66)])
+    sidecar(skills, "standards", 418)
+    one(wt(SKILLS_PROJ, 418), "bts", "Standards review #418", "Repo: x",
+        ["2026-09-20T10:00:00Z", "yesterday"], [ok, ok])
     sidecar(skills, "standards", 417)
     d = tr / wt(SKILLS_PROJ, 417) / "s1" / "subagents"
     d.mkdir(parents=True)
@@ -619,6 +622,14 @@ class CostHarvestTest(Case):
         self.assertEqual(t["status"], "unknown")
         self.assertIn("unreadable", t["reason"])
 
+    def test_a_torn_transcript_or_an_unparseable_timestamp_makes_wall_clock_unknown(self):
+        torn = self.cost("skills/409/standards/1/findings-standards-409")["wall_clock"]
+        self.assertEqual(torn["status"], "unknown")
+        self.assertIn("unreadable", torn["reason"])
+        bad = self.cost("skills/418/standards/1/findings-standards-418")["wall_clock"]
+        self.assertEqual(bad["status"], "unknown")
+        self.assertIn("timestamp", bad["reason"])
+
     def test_naive_and_aware_timestamps_do_not_crash_the_harvest(self):
         self.assertEqual(self.cost("skills/410/standards/1/findings-standards-410")["wall_clock"]["seconds"], 60)
 
@@ -640,9 +651,12 @@ class CostHarvestTest(Case):
         self.assertEqual(self.tokens_of("foo_bar/413/standards/1/findings-standards-413")["input"], 4)
         self.assertFalse([r for r in self.rows() if r.startswith("foo-bar/")])
 
-    def test_a_worktree_not_named_implement_n_does_not_make_a_repo_name(self):
-        self.assertEqual(self.tokens_of("otherrepo/414/standards/1/findings-standards-414")["input"], 4)
-        self.assertFalse([r for r in self.rows() if "--claude" in r])
+    def test_a_worktree_not_named_implement_n_is_listed_because_its_repo_cannot_be_told(self):
+        # .../src/drills/.claude/worktrees/<name> may be a checkout of a different repo than "drills".
+        self.assertEqual(self.tokens_of("otherrepo/414/standards/1/findings-standards-414")["status"], "unknown")
+        self.assertIn("agent-drl", self.unattributed_section())
+        self.assertIn("not implement-N", self.unattributed_section())
+        self.assertFalse([r for r in self.rows() if r.startswith("otherrepo--") or "drills" in r])
 
     def test_a_verification_run_joins_the_only_verify_row_when_its_round_differs(self):
         self.assertEqual(self.tokens_of("skills/415/verification/1/findings-verify-415")["input"], 4)
@@ -650,6 +664,10 @@ class CostHarvestTest(Case):
     def test_description_and_first_message_naming_different_axes_is_listed_not_guessed(self):
         self.assertEqual(self.tokens_of("skills/416/standards/1/findings-standards-416")["status"], "unknown")
         self.assertIn("agent-cfl", self.unattributed_section())
+
+    def test_transcripts_behind_a_shared_key_are_listed(self):
+        section = self.review.read_text().split("## Transcripts behind a key several sidecar rows share")[1].split("\n## ")[0]
+        self.assertIn("agent-twin", section)
 
     def test_an_unreadable_transcript_is_listed_and_does_not_stop_the_harvest(self):
         self.assertIn("agent-dir", self.unattributed_section())
@@ -764,10 +782,10 @@ def cost_rows():
     def fnd(fid, sev, outcome="fixed", overlap="unique", k=1):
         return {"id": fid, "severity": sev, "outcome": outcome, "partial": False, "overlap": overlap, "k": k}
 
-    def row(rid, typ, model, tokens, secs, findings, findings_status="known"):
+    def row(rid, typ, model, tokens, secs, findings, findings_status="known", ticket=1):
         tk = {"status": "known", **tokens} if isinstance(tokens, dict) else tokens
         wall = {"status": "known", "seconds": secs} if secs is not None else {"status": "unknown", "reason": "x"}
-        return {"row_id": rid, "repo": "skills", "ticket": 1, "type": typ, "round": 1, "model": model,
+        return {"row_id": rid, "repo": "skills", "ticket": ticket, "type": typ, "round": 1, "model": model,
                 "findings": findings, "status": {"fields": {"findings": {"status": findings_status}}},
                 "cost": {"tokens": tk, "wall_clock": wall}}
 
@@ -777,11 +795,13 @@ def cost_rows():
     inside = {"status": "inside-standards", "reason": "in standards"}
     return [
         row("A", "standards", "m-opus", tok(1_000_000, 100_000, 200_000, 3_000_000), 100, [fnd("a", "hard")]),
-        row("B", "standards", "m-opus", tok(2_000_000), 50, [fnd("b", "judgement")]),
+        row("B", "standards", "m-opus", tok(2_000_000), 50, [fnd("b", "judgement")], ticket=2),
         row("C", "standards", "m-opus", {"status": "unknown", "reason": "transcript has no usage block"}, None,
-            [fnd("c", "hard")]),
-        row("D", "standards", "m-unpriced", tok(10), 5, [fnd("d", "hard")]),
-        row("E", "over-engineering", None, inside, None, [fnd("e", "judgement")]),
+            [fnd("c", "hard")], ticket=3),
+        row("D", "standards", "m-unpriced", tok(10), 5, [fnd("d", "hard")], ticket=4),
+        row("E", "over-engineering", None, inside, None, [fnd("e", "judgement")]),  # A's ticket
+        row("E3", "over-engineering", None, inside, None, [fnd("e3", "hard")], ticket=3),  # C's: cost unknown
+        row("E4", "over-engineering", None, inside, None, [fnd("e4", "hard")], ticket=4),  # D's: unpriced
         dict(row("E2", "over-engineering", None, inside, None, []),
              cost={"tokens": inside, "wall_clock": inside}),
         row("F", "spec", "m-sonnet", tok(1_000_000, 1_000_000), 60, [fnd("f", "hard", "fixed", "shared", 2)]),
@@ -828,8 +848,10 @@ class CostReportTest(Case):
         self.assertEqual(self.report(dearer)["standards"]["dollars"], 105.75)
 
     def test_value_per_dollar_uses_only_rows_with_known_cost_and_findings(self):
-        # A (3) + B (1) over 60.75; C (unknown cost), D (unpriced) and their value are left out.
-        self.assertEqual(self.report()["standards"]["value_per_dollar"], round(4 / 60.75, 4))
+        # A (3) + its over-engineering E (1) + B (1) over 60.75. C (unknown cost) and D (unpriced) are left out,
+        # and so are their over-engineering rows E3 and E4: the OE cost is inside the standards dollars, so
+        # its value belongs in the same numerator, and only when the standards row itself is counted.
+        self.assertEqual(self.report()["standards"]["value_per_dollar"], round(5 / 60.75, 4))
         # F: 3 / k=2 = 1.5 over 18 dollars; G has no cost, and H has cost but unknown findings.
         self.assertEqual(self.report()["spec"]["value_per_dollar"], round(1.5 / 18, 4))
 
@@ -838,8 +860,6 @@ class CostReportTest(Case):
         self.assertEqual((std["unknown_cost_rows"], std["unpriced_rows"]), (1, 1))
         spec = self.report()["spec"]
         self.assertEqual(spec["unknown_cost_rows"], 1)
-        # C is in neither the dollars nor the value-per-dollar divisor (see the tests above).
-        self.assertEqual(std["dollars"], 60.75)
 
     def test_rows_on_an_unpriced_model_are_named_in_a_note(self):
         self.report()
@@ -857,7 +877,7 @@ class CostReportTest(Case):
         self.assertIsNone(oe["dollars"])
         self.assertIsNone(oe["value_per_dollar"])
         self.assertEqual(oe["unknown_cost_rows"], 0)
-        self.assertEqual(oe["value"], 1.0)  # its value is still reported, separately
+        self.assertEqual(oe["value"], 1.0 + 3.0 + 3.0)  # E + E3 + E4: reported apart in the value column
         line = next(x for x in self.report(fmt="md").splitlines() if x.startswith("| over-engineering"))
         self.assertIn("inside standards", line)
 
