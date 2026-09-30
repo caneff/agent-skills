@@ -243,8 +243,8 @@ def classify(issues, state_of, parent_of=lambda ticket: None):
     state; `None` means it could not be read, which is unresolved rather than
     a guess. `parent_of(ticket) -> issue | None` reads the ticket's parent
     issue, `None` being a ticket with no parent; it raises `FrontierError`
-    for a parent that could not be read, which is unresolved too. A claimed ticket, a ticket carrying a non-dispatchable label,
-    and anything that is really a PR, is in no bucket at all — each is off
+    for a parent that could not be read, which is unresolved too. A claimed
+    ticket, a ticket carrying a non-dispatchable label, and anything that is really a PR, is in no bucket at all — each is off
     the frontier by its own nature, not by a blocking relationship."""
     buckets = {"unblocked": [], "blocked": [], "unresolved": [], "spec": [],
                "slice": []}

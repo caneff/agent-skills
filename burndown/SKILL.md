@@ -304,7 +304,9 @@ a different verb, and its entry names that verb —
 line without opening another document. A `slice` is the same verb seen from
 the other side: a ticket whose parent carries `spec` is handed off with its
 parent (`implement-dispatch --spec <parent> --slots <k>`), never dispatched as
-an ordinary ticket, whether or not the parent itself carries the queue label.
+an ordinary ticket, whether or not the parent itself carries the queue label. When the parent
+carries the queue label too, its `spec` line and its slices' `slice` lines
+are one handoff: run the `--spec <parent>` line once.
 The grammar and the three sources:
 [`references/frontier.md`](references/frontier.md).
 

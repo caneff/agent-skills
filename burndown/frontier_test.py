@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Tests for the frontier reader (#890). Seam: `frontier(repo, label)` with
-its two fetchers injected — a list of GitHub issue objects in, five buckets
-(`unblocked`, `blocked`, `unresolved`, `spec`, `slice`) out. No network: every case is
-a ticket fixture, which is the point of the seam.
+its three fetchers injected (issues, blocker state, parent) — a list of
+GitHub issue objects in, five buckets (`unblocked`, `blocked`, `unresolved`,
+`spec`, `slice`) out. No network: every case is a ticket fixture, which is
+the point of the seam.
 """
 import os
 import subprocess
