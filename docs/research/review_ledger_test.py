@@ -663,6 +663,8 @@ def cost_rows():
              cost={"tokens": inside, "wall_clock": inside}),
         row("F", "spec", "m-sonnet", tok(1_000_000, 1_000_000), 60, [fnd("f", "hard", "fixed", "shared", 2)]),
         row("G", "spec", "m-sonnet", {"status": "unknown", "reason": "no transcript"}, None, [], "unknown"),
+        # H: a priced run whose sidecar was never written; its $3 must stay out of value per dollar.
+        row("H", "spec", "m-sonnet", tok(1_000_000), 10, [], "unknown"),
     ]
 
 
@@ -691,7 +693,7 @@ class CostReportTest(Case):
                                          "cache_read": 3_000_000})
         self.assertEqual(std["wall_clock_seconds"], 155)
         # F: 3 + 15 = 18.
-        self.assertEqual(self.report()["spec"]["dollars"], 18.0)
+        self.assertEqual(self.report()["spec"]["dollars"], 21.0)  # plus H: 3
 
     def test_changing_a_price_changes_the_dollars(self):
         dearer = {**PRICES, "m-opus": {**PRICES["m-opus"], "input": 30}}
@@ -701,7 +703,7 @@ class CostReportTest(Case):
     def test_value_per_dollar_uses_only_rows_with_known_cost_and_findings(self):
         # A (3) + B (1) over 60.75; C (unknown cost), D (unpriced) and their value are left out.
         self.assertEqual(self.report()["standards"]["value_per_dollar"], round(4 / 60.75, 4))
-        # F: 3 / k=2 = 1.5 over 18 dollars; G has no findings status known and no cost.
+        # F: 3 / k=2 = 1.5 over 18 dollars; G has no cost, and H has cost but unknown findings.
         self.assertEqual(self.report()["spec"]["value_per_dollar"], round(1.5 / 18, 4))
 
     def test_unknown_and_unpriced_rows_are_counted_never_averaged_as_zero(self):
@@ -733,7 +735,7 @@ class CostReportTest(Case):
         for col in ("tokens", "wall clock", "dollars", "value per dollar"):
             self.assertIn(col, head)
         line = next(x for x in self.report(fmt="md").splitlines() if x.startswith("| spec"))
-        self.assertIn("$18.00", line)
+        self.assertIn("$21.00", line)
 
 
 class ReportTest(Case):
