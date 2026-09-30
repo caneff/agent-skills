@@ -4,7 +4,7 @@ Status: accepted
 
 ## Context
 
-`implement/SKILL.md` § Build says a mutation check runs in a throwaway
+In `implement/SKILL.md` § Build, a mutation check runs in a throwaway
 worktree and "nothing is restored in the live checkout", because
 `git checkout -- <file>`, `git restore` and `git stash` take any uncommitted
 edit in the file with the mutation (#1261). Review of PR #1272 (finding S2,
@@ -14,10 +14,11 @@ an `implement-*` worktree with a dirty tree.
 
 ## Decision
 
-No hook. The rule's mechanism is the recipe, not a guard: § Build's
-mutation steps never touch the live checkout, so there is no restore step to
-refuse, and `implement/mutation-worktree-wording.test.sh` fails if § Build
-names a restore command anywhere outside the sentence that forbids it.
+No hook. The rule's mechanism is the recipe, not a guard. The mutation
+steps (`implement/SKILL.md` § Build) never touch the live checkout, so there
+is no restore step to refuse. `implement/mutation-worktree-wording.test.sh`
+fails if that section names a restore command anywhere outside the sentence
+that forbids it.
 
 A hook would also refuse work that is sanctioned in a dirty `implement-*`
 tree. `~/.claude/CLAUDE.md` names `git checkout --ours|--theirs <paths>`
@@ -33,5 +34,5 @@ every session on the box.
 
 - Reopen this if a worker is seen restoring in place again after #1261's
   recipe landed: that would show the recipe alone does not carry the rule.
-- § Build's "Commit the work first" bounds the loss a stray restore can
+- The recipe's "Commit the work first" bounds the loss a stray restore can
   cause to edits made since the last commit.
