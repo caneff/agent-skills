@@ -195,10 +195,10 @@ same id in the prose report next to each finding, so a reader can join the
 two. A partial write costs one line, not the file — readers of this
 sidecar must tolerate and skip a malformed line rather than fail the whole
 file on it. No cost tracking: never add tokens or wall-clock to this line,
-in the sidecar or the prose."
+in the sidecar or the prose. Write the sidecar on every run, an empty file
+when it found nothing."
 
-**Every axis writes its sidecar on every run** (#1257): "Write the sidecar on
-every run, an empty file when it found nothing — never skip the write."
+**Why the sidecar is written on a clean run too** (#1257):
 `implement/verification-check.sh` passes a PR with no verification pass only
 when all three sidecars exist and are empty, so a clean round that left no
 file would be refused at "PR up". The safe direction stays: an absent sidecar
