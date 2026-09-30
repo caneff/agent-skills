@@ -33,8 +33,8 @@ def tally(worktree, projects_root):
     `<session>/subagents/`, and their lines carry `isSidechain: true`.
 
     Every usage-bearing entry carries `message.id`, so that alone is the
-    dedup key. Keep the `is not None` guard below: an entry that somehow
-    lacks an id must still be counted, not folded into one `None` bucket.
+    dedup key. An entry that somehow lacks an id gets a key of its own
+    (`object()`), so it is still counted, not folded into one `None` bucket.
 
     One assistant message is written as one line per content block — thinking,
     text, each tool call. The input and cache kinds repeat on every line, but

@@ -99,7 +99,8 @@ def test_a_dotted_path_segment_doubles_the_hyphen():
 
 def test_one_message_split_over_several_lines_counts_once():
     """Claude writes one assistant message as one JSONL entry per content
-    block — thinking, text, each tool call — all carrying the same usage."""
+    block — thinking, text, each tool call — all carrying the same input and
+    cache usage."""
     with tempfile.TemporaryDirectory() as tmp:
         _write(os.path.join(tmp, PROJECT_DIR, "session.jsonl"), [
             _line(False, inp=6, out=1, mid="msg_1"),
