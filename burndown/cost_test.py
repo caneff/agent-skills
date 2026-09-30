@@ -115,12 +115,14 @@ def test_one_message_split_over_several_lines_counts_once():
 def test_a_streamed_message_counts_its_final_output_tokens():
     """Streaming writes `output_tokens` rising across a message's lines (1, 1,
     then 192) while the input and cache kinds repeat, so the message costs the
-    per-kind maximum, not its first line (#1280)."""
+    per-kind maximum, not its first or last line: the final line drops to 50,
+    so only a true maximum reaches the asserted total (#1280)."""
     with tempfile.TemporaryDirectory() as tmp:
         _write(os.path.join(tmp, PROJECT_DIR, "session.jsonl"), [
             _line(False, inp=6, cache_read=100, out=1, mid="msg_1"),
             _line(False, inp=6, cache_read=100, out=1, mid="msg_1"),
             _line(False, inp=6, cache_read=100, out=192, mid="msg_1"),
+            _line(False, inp=6, cache_read=100, out=50, mid="msg_1"),
             _line(False, inp=2, out=0, mid="msg_2"),
         ])
         r = _run(tmp)
