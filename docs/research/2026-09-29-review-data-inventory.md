@@ -90,3 +90,7 @@ correctness, OE over-engineering.
    each 1/k of its weighted value, and the split is an analysis parameter.
    Escapes (defects a review missed that a later ticket fixed) are a
    follow-up, not part of this work.
+8. **Verification and overlap** (P6 on PR #1275): a verification pass never
+   counts toward overlap for a round-1 finding it re-checks. It keeps
+   credit only for findings it raises new, such as V1 on PR #1275. Built
+   in #1266.
