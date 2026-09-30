@@ -260,8 +260,11 @@ def test_index_from_manifests_missing_manifest_is_a_failure_row():
 def _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, **extra_env):
     here = os.path.dirname(os.path.abspath(__file__))
     os.symlink(os.path.join(here, "fake_claude_fixture.sh"), os.path.join(bin_dir, "claude"))
+    # The ceiling variable is dropped from the ambient env so a shell that
+    # already exports it cannot make the driver's own setting look unneeded.
+    ambient = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"}
     env = {
-        **os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_CACHE_HOME": cache_dir,
+        **ambient, "PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_CACHE_HOME": cache_dir,
         "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", **extra_env,
     }
     return subprocess.run(
