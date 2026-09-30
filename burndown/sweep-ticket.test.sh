@@ -63,8 +63,8 @@ check_in "$sweep_text" 'in:title' 'burndown/SKILL.md § The sweep'
 # #1095: the edit targets the number the search returned; the exact-title
 # filter, the result cap, the failed-search stop and the more-than-one
 # refusal are each pinned by their own clause.
-check_in "$sweep_text" '--json number,title' 'burndown/SKILL.md § The sweep'
-check_in "$sweep_text" 'select(.title == "Sweep: leftovers from burn <run-id>")' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" '--json number,title,state' 'burndown/SKILL.md § The sweep'
+check_in "$sweep_text" 'select(.title == "Sweep: leftovers from burn <run-id>" and .state == "OPEN")' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" '--limit 100' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'gh issue edit "$sweep"' 'burndown/SKILL.md § The sweep'
 check_in "$sweep_text" 'A non-zero exit from the search stops the run' 'burndown/SKILL.md § The sweep'
