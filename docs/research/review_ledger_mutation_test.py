@@ -112,6 +112,16 @@ class AppendMutationTest(MutationCase):
         r = run("append", "--repo", "skills", "--ticket", 500, "--type", "standards", "--mutation-id", "m1",
                 "--outcome", "red", "--seconds", 1, "--ledger", self.ledger, home=self.home)
         self.assertEqual(r.returncode, 2)
+        self.assertIn("are for mutation types", r.stderr)  # the guard's own message, not a missing transcripts tree
+
+    def test_a_mutation_type_refuses_the_review_cache_arguments(self):
+        for flag in ("--cache", "--transcripts"):
+            r = run("append", "--repo", "skills", "--ticket", 500, "--type", "witness-mutation", "--mutation-id",
+                    "m1", "--outcome", "red", "--seconds", 1, flag, self.tmp, "--ledger", self.ledger,
+                    home=self.home)
+            self.assertEqual(r.returncode, 2, flag)
+            self.assertIn("are for review types", r.stderr)
+        self.assertFalse(self.ledger.exists())
 
     def test_a_corrupt_ledger_is_refused_and_left_alone(self):
         self.ledger.write_text("not json\n")
