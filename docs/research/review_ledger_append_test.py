@@ -43,6 +43,23 @@ class AppendCase(Case):
 
 
 class AppendRowTest(AppendCase):
+    def test_a_later_append_keeps_a_claude_and_codex_finding_shared_on_both_sides(self):
+        skills = self.cache / "skills"
+        (skills / "codex-adversarial-400-gate.json").write_text(json.dumps({
+            "ticket": 400, "phase": "gate", "status": 0, "started": "2026-09-22T09:00:00-04:00",
+            "completed": "2026-09-22T09:01:00-04:00"}))
+        (skills / "codex-adversarial-400-gate.out").write_text(
+            "Findings:\n- [high] Thing 400 (a.py:1)\n  Body.\n\nNext steps:\n- Fix.\n")
+        r = run("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", self.ledger,
+                "--review-file", self.tmp / "h.md", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.ok(400, "standards")
+        rows = self.rows()
+        codex = rows["skills/400/codex-gate/1/codex-adversarial-400-gate"]["findings"][0]
+        std = next(f for f in rows["skills/400/standards/1/findings-standards-400"]["findings"] if f["id"] == "S1")
+        self.assertEqual((codex["overlap"], codex["k"]), ("shared", 2))
+        self.assertEqual((std["overlap"], std["k"]), ("shared", 2))
+
     def test_writes_the_row_harvest_writes_for_the_same_inputs(self):
         self.ok(400, "standards")
         self.ok(400, "spec")
@@ -147,8 +164,8 @@ class AppendRowTest(AppendCase):
         self.assertEqual([r["round"] for r in self.rows().values()], [2])
 
     def test_a_foreign_row_of_the_same_ticket_is_not_rescored_and_does_not_crash_the_append(self):
-        foreign = {"row_id": "skills/403/codex-gate/1/x", "origin": "codex", "repo": "skills", "ticket": 403,
-                   "type": "codex-gate", "findings": [{"id": "codex-gate-1", "overlap": "unique", "k": 1}]}
+        foreign = {"row_id": "skills/403/witness-mutation/1/x", "origin": "append", "repo": "skills", "ticket": 403,
+                   "type": "witness-mutation", "findings": [{"id": "m1", "overlap": "unique", "k": 1}]}
         write_jsonl(self.ledger, [foreign])
         self.ok(403, "verification")
         self.assertEqual(self.rows()[foreign["row_id"]], foreign)

@@ -38,6 +38,16 @@ in the ledger, so changing any of them needs no reharvest. `report` sums cost ov
 rows only, counts the rest, and divides value by dollars over rows whose cost and findings
 are both known.
 
+Codex rows (#1267) are harvested from `codex-adversarial-<n>-<phase>.{json,out}` records in the cache:
+typed `codex-gate`, `codex-second` or `codex-third` (`gate-retry` is a gate row; `early` is listed, not
+harvested), wall clock from the record's `started` and `completed`, findings from the `.out`'s
+`- [severity] title (file:lines)` lines with severity as written, outcomes from the ticket's dispositions
+sidecar lines `codex-<phase>-<label>` (label: the finding's number, or its severity's initial and number
+among that severity; no such line is `unknown`). Usage change is `unknown` on every backfilled row. A record
+with a non-zero status is a refusal row: no findings, counted in `report`'s `refused` column and never in
+`clean passes`. Outcomes are read from the dispositions sidecar only, where the controller writes a line by rule for
+a `leftover` alone, so most backfilled Codex outcomes are `unknown` and the known ones skew to leftover. A `.out` whose findings cannot be read is `unknown`, never empty.
+
 Mutation rows (#1270) come only from `append`, one per mutation id: the outcome (`red`, `green`
 or `unknown`) and the mutation's wall clock, no findings and no tokens (a reviewer's tokens stay
 with its correctness row). A status file holds one of the words `red`, `green`, `unknown` (the witness
@@ -57,8 +67,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tally_review_axes import (
-    _OUTCOME_DETAIL_FIELD, ALL_AXES, REVIEWS_ROOT, find_sidecar_files, fold_repo, load_jsonl,
-    parse_disposition_sidecar_filename, parse_finding_sidecar_filename)
+    _OUTCOME_DETAIL_FIELD, ALL_AXES, REVIEWS_ROOT, _walk_cache_layout, find_sidecar_files, fold_repo,
+    load_jsonl, parse_disposition_sidecar_filename, parse_finding_sidecar_filename)
 
 DEFAULT_LEDGER = REVIEWS_ROOT / "ledger.jsonl"
 DEFAULT_TRANSCRIPTS = Path.home() / ".claude" / "projects"
@@ -66,7 +76,7 @@ TOKEN_KINDS = ("input", "output", "cache_write", "cache_read")
 _USAGE_FIELDS = {"input": "input_tokens", "output": "output_tokens",
                  "cache_write": "cache_creation_input_tokens", "cache_read": "cache_read_input_tokens"}
 
-# Report order. Mutation rows come from `append` only, Codex rows from nowhere yet.
+# Report order. Mutation rows come from `append` only.
 REVIEW_TYPES = (
     "standards", "spec", "correctness", "over-engineering", "verification",
     "witness-mutation", "call-site-mutation", "codex-gate", "codex-second",
@@ -420,8 +430,9 @@ def titles_match(a: dict, b: dict) -> bool:
 
 
 def _reviewer(row_type: str) -> str:
-    """The reviewer that wrote a row: OE findings come from the standards run."""
-    return "standards" if row_type == "over-engineering" else row_type
+    """The reviewer that wrote a row: OE findings come from the standards run, and the
+    Codex phases are one reviewer, so a second pass re-raising a gate finding shares nothing."""
+    return "standards" if row_type == "over-engineering" else "codex" if row_type.startswith("codex-") else row_type
 
 
 def mark_overlap(rows: list[dict], matches: list[dict], restatements: list[dict]) -> None:
@@ -494,6 +505,166 @@ def _name_tickets(name: str) -> list[int]:
     return [int(t) for t in group.split("-")] if group else []
 
 
+# A Codex pass record is `codex-adversarial-<n>-<phase>.json`; `gate-retry` is a gate run repeated
+# after a refusal or a stale head. Any other phase (`early`, retired in #1015) has no review type.
+_CODEX_PHASES = {"gate": "gate", "second": "second", "third": "third", "gate-retry": "gate"}
+_CODEX_FINDING_RE = re.compile(r"^- \[(\w+)\] (.+)$")
+_CODEX_FILE_RE = re.compile(r"^(.*?) \(([^()\s]+?)(?::\d[\d,\-\u2013]*)?\)$")
+
+
+def parse_codex_out(text: str) -> tuple[list[dict] | None, str]:
+    """(findings, why) from a Codex `.out`: `- [severity] title (file:lines)` lines under
+    `Findings:`. `[]` only when the output says `No material findings`; anything the parser
+    cannot read is (None, why), never an empty list."""
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == "Findings:"), None)
+    if start is None:
+        if any(line.startswith("No material findings") for line in lines):
+            return [], ""
+        return None, "no Findings section and no 'No material findings' line in the .out"
+    found, bad = [], 0
+    for line in lines[start + 1:]:
+        if line.strip() == "Next steps:":
+            break
+        if not line.startswith("- "):
+            continue
+        m = _CODEX_FINDING_RE.match(line)
+        if not m:
+            bad += 1
+            continue
+        title, file = m.group(2), ""
+        fm = _CODEX_FILE_RE.match(title)
+        if fm:
+            title, file = fm.group(1), fm.group(2)
+        found.append({"severity": m.group(1), "file": file, "title": title})
+    if bad or not found:
+        return None, (f"{bad} finding line(s) in the .out do not read as '- [severity] title'" if bad
+                      else "the Findings section holds no '- [severity] title' line")
+    return found, ""
+
+
+def _codex_labels(findings: list[dict]) -> list[list[str]]:
+    """The labels each finding may be recorded under in a dispositions sidecar: its 1-based
+    position, and its severity's initial with its 1-based position among that severity."""
+    seen: Counter = Counter()
+    out = []
+    for n, f in enumerate(findings, 1):
+        seen[f["severity"]] += 1
+        out.append([str(n), f"{f['severity'][:1].upper()}{seen[f['severity']]}"])
+    return out
+
+
+def _codex_wall(rec: dict) -> dict:
+    try:
+        lo, hi = (datetime.fromisoformat(rec[k]) for k in ("started", "completed"))
+        lo, hi = (t if t.tzinfo else t.replace(tzinfo=timezone.utc) for t in (lo, hi))
+    except (KeyError, TypeError, ValueError):
+        return {"status": "unknown", "reason": "record has no parseable started and completed"}
+    if hi < lo:
+        return {"status": "unknown", "reason": "record completed before it started"}
+    return {"status": "known", "start": rec["started"], "end": rec["completed"],
+            "seconds": round((hi - lo).total_seconds(), 3)}
+
+
+def _ticket_groups(dispositions: dict[str, dict], ticket: int) -> list[str]:
+    """The dispositions groups (`1016`, `975-983`) that cover a ticket."""
+    return [g for g in sorted(dispositions) if str(ticket) in g.split("-")]
+
+
+def _tally_mapping(mapping: dict | None, mappings: Counter, unmapped: Counter) -> None:
+    if mapping:
+        (unmapped if mapping["to"] == "unknown" else mappings)[f"{mapping['from']} -> {mapping['to']}"] += 1
+
+
+def _finding_entry(fid, severity, outcome, partial, status, file, title) -> dict:
+    return {"id": fid, "severity": severity, "severity_status": {"status": "known"}, "outcome": outcome,
+            "outcome_status": status, "partial": partial, "file": file, "title": title}
+
+
+def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dict[str, dict[str, dict]],
+                  joined: set, mappings: Counter, unmapped: Counter, skipped: list, unharvested: list) -> list[dict]:
+    """One row per `codex-adversarial-<n>-<phase>.json` in a repo's cache directory. Findings
+    come from the `.out`, outcomes from `codex-<phase>-<label>` lines of the ticket's own
+    dispositions sidecar (the PR body's prose is not read, and the controller writes a sidecar line
+    by rule only for a `leftover`, so most real outcomes are `unknown`); a finding with no such
+    line is `unknown`. A line credits one finding: a second claimant is `unknown`. A record with a
+    non-zero status is a refusal: no findings, never a pass that found nothing."""
+    rows = []
+    credited: dict[tuple, str] = {}
+    # A retried gate sorts after the gate itself, so the gate's disposition is not taken by its retry.
+    for name in sorted(names, key=lambda n: (n.endswith("-gate-retry.json"), n)):
+        m = re.fullmatch(r"codex-adversarial-(\d+)-(.+)\.json", name)
+        if not m:
+            continue
+        where = f"{repo_dir.name}/{name}"
+        try:
+            rec = json.loads((repo_dir / name).read_text())
+        except (ValueError, OSError):
+            rec = None
+        if not (isinstance(rec, dict) and isinstance(rec.get("status"), int) and not isinstance(rec["status"], bool)
+                and rec.get("ticket") == int(m.group(1)) and rec.get("phase") == m.group(2)):
+            skipped.append(f"{where}: record is unreadable or disagrees with its file name")
+            continue
+        phase = _CODEX_PHASES.get(rec["phase"])
+        if phase is None:
+            unharvested.append(f"{where} (phase {rec['phase']!r} has no review type)")
+            continue
+        if rec["phase"] != phase:
+            mappings[f"phase {rec['phase']} -> codex-{phase}"] += 1
+        ticket, stem = rec["ticket"], name.removesuffix(".json")
+        out_path = repo_dir / (stem + ".out")
+        out = out_path.read_text(errors="replace") if out_path.exists() else None
+        sources = [where] + ([f"{repo_dir.name}/{stem}.out"] if out is not None else [])
+        extra = {"exit_status": rec["status"]}
+        findings: list[dict] = []
+        if rec["status"] != 0:
+            err = re.search(r"Codex error: (.*)", out or "")
+            detail = err.group(1).strip()[:200] if err else (
+                "no .out beside the record" if out is None else "no error line in the .out")
+            why = f"exit status {rec['status']}: {detail}"
+            fstatus = {"status": "refused", "reason": why}
+            extra["refusal"] = why
+        elif out is None:
+            fstatus = {"status": "unknown", "reason": "record has no .out beside it"}
+        else:
+            parsed, why = parse_codex_out(out)
+            fstatus = {"status": "unknown", "reason": why} if parsed is None else {"status": "known"}
+            groups = _ticket_groups(dispositions, ticket)
+            for k, (f, labels) in enumerate(zip(parsed or [], _codex_labels(parsed or [])), 1):
+                hits = [(label, g, dispositions[g][f"codex-{phase}-{label}"]) for label in labels for g in groups
+                        if f"codex-{phase}-{label}" in dispositions[g]]
+                if len(hits) == 1:
+                    label, g, disp = hits[0]
+                    key = (g, f"codex-{phase}-{label}")
+                    if key in credited:
+                        outcome, partial, ostatus = "unknown", False, {
+                            "status": "unknown", "reason": f"{key[1]} already credits {credited[key]}"}
+                    else:
+                        credited[key] = stem
+                        joined.add(key)
+                        outcome, partial, ostatus, mapping = normalise_outcome(disp)
+                        if not label.isdigit():
+                            mappings[f"codex label {label[0]}<k> -> k-th finding of that severity"] += 1
+                        _tally_mapping(mapping, mappings, unmapped)
+                elif hits:
+                    outcome, partial, ostatus = "unknown", False, {
+                        "status": "unknown", "reason": f"labels {' and '.join(h[0] for h in hits)} both name this finding"}
+                else:
+                    outcome, partial, ostatus = "unknown", False, {
+                        "status": "unknown", "reason": f"no dispositions line codex-{phase}-{labels[0]} or -{labels[1]}"}
+                findings.append(_finding_entry(f"codex-{phase}-{k}", f["severity"], outcome, partial, ostatus,
+                                               f["file"], f["title"]))
+            if findings:
+                sources += [f"{repo_dir.name}/dispositions-{g}.jsonl" for g in groups]
+        rows.append(new_row(
+            f"{repo}/{ticket}/codex-{phase}/1/{stem}", repo, [ticket], f"codex-{phase}", 1, stem, findings, fstatus,
+            sources, cost={"tokens": {"status": "not-applicable", "reason": "Codex is costed in wall clock and usage share"},
+                           "wall_clock": _codex_wall(rec),
+                           "usage_delta": {"status": "unknown", "reason": "backfilled row: usage was not read before and after the pass"}},
+            extra=extra))
+    return rows
+
+
 def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = None,
                   only: tuple[str, int] | None = None) -> tuple[list[dict], dict]:
     """(rows, review-file facts) for a whole cache tree. `transcripts` is the tree the
@@ -501,14 +672,17 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     `only` is (repo, ticket): harvest just that ticket's sidecars and transcripts, which is
     what `append` does, so its rows are the ones a full harvest writes."""
     pairs = find_sidecar_files(cache)  # FileNotFoundError when the cache is missing
-    if not pairs:
-        raise ValueError(f"no findings or dispositions sidecars under {cache}")
+    codex_pairs = [] if only else _walk_cache_layout(cache, ("codex-adversarial-*.json",))
+    if not pairs and not codex_pairs:
+        raise ValueError(f"no findings or dispositions sidecars or Codex records under {cache}")
     if only:  # a cache directory name is literal; only a transcript's project directory loses `_` and `.`
         pairs = [(d, n) for d, n in pairs if fold_repo(d) == fold_repo(only[0]) and only[1] in _name_tickets(n)]
+    pairs += codex_pairs
     by_repo: dict[str, list[str]] = {}
     for repo_dir, name in pairs:
         by_repo.setdefault(repo_dir, []).append(name)
     rows: list[dict] = []
+    codex_rows: list[dict] = []  # costed from their own records, so kept out of the transcript join
     seen_ids: set[str] = set()
     mappings: Counter = Counter()
     unmapped: Counter = Counter()
@@ -575,14 +749,11 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
                 else:
                     joined.add((group, raw["id"]))
                     outcome, partial, status, mapping = normalise_outcome(file_dispositions[raw["id"]])
+                _tally_mapping(mapping, mappings, unmapped)
                 if mapping:
-                    (unmapped if mapping["to"] == "unknown" else mappings)[
-                        f"{mapping['from']} -> {mapping['to']}"] += 1
                     row_mappings.setdefault(key, []).append(mapping)
-                by_type.setdefault(key, []).append({
-                    "id": raw["id"], "severity": raw["severity"], "severity_status": {"status": "known"},
-                    "outcome": outcome, "outcome_status": status, "partial": partial,
-                    "file": raw["file"], "title": raw["title"]})
+                by_type.setdefault(key, []).append(_finding_entry(
+                    raw["id"], raw["severity"], outcome, partial, status, raw["file"], raw["title"]))
             # A file named for round 1 whose every id says round 2 holds no round-1 run.
             base_key = (base, name_round)
             if not by_type[base_key] and len(by_type) > 1 and all(rnd != name_round for _, rnd in by_type if _ != base or rnd != name_round):
@@ -607,6 +778,13 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
                 rows.append(new_row(
                     row_id, repo, tickets, row_type, rnd, run_id, findings, findings_status, sources,
                     mappings=row_mappings.get((row_type, rnd), [])))
+        for r in harvest_codex(cache / repo_dir, repo, by_repo[repo_dir], dispositions, joined,
+                               mappings, unmapped, skipped, unharvested):
+            if r["row_id"] in seen_ids:  # the alias fold put two directories' records on one key
+                r["run_id"] = f"{repo_dir}:{r['run_id']}"
+                r["row_id"] = f"{repo}/{r['ticket']}/{r['type']}/{r['round']}/{r['run_id']}"
+            seen_ids.add(r["row_id"])
+            codex_rows.append(r)
         for group, table in sorted(dispositions.items()):
             for fid in sorted(table):
                 if (group, fid) not in joined:
@@ -616,7 +794,7 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     if only:  # a ticket number repeats across repos
         runs = [r for r in runs if _norm_repo(fold_repo(r["repo"])) == _norm_repo(fold_repo(only[0]))]
     new_rows, listed = attach_costs(rows, runs, missing)
-    rows += new_rows
+    rows += new_rows + codex_rows
     rows.sort(key=lambda r: r["row_id"])
     matches: list[dict] = []
     restatements: list[dict] = []
@@ -827,9 +1005,9 @@ def cmd_append(args) -> int:
     def add_rows(ledger: dict) -> None:
         ledger.update({r["row_id"]: {**r, "origin": "append"} for r in mine})
         # The ticket's other reviewers may have appended already: re-split credit across all of them.
-        # Only rows of reviewer types: a row another writer adds (codex, mutation) is not ours to re-score.
+        # Only rows of reviewer types, Codex included: a mutation row is not ours to re-score.
         mark_overlap([r for r in ledger.values() if (r.get("repo"), r.get("ticket")) == ticket
-                      and r.get("type") in REVIEWER_TYPES], [], [])
+                      and (r.get("type") in REVIEWER_TYPES or str(r.get("type")).startswith("codex-"))], [], [])
 
     try:
         update_ledger(args.ledger, add_rows)
@@ -904,7 +1082,13 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
             "unknown_outcomes": None if mutation else len(findings) - len(known),
             "unweighted": None if mutation else unweighted,
             "unknown_finding_rows": sum(
-                r["status"]["fields"]["findings"]["status"] not in ("known", "not-applicable") for r in mine),
+                r["status"]["fields"]["findings"]["status"] not in ("known", "not-applicable", "refused") for r in mine),
+            # A refused Codex pass (usage limit, failed run) found nothing because it reviewed nothing:
+            # counted here, never in `clean_rows`, which holds only Codex passes that read the diff and found no
+            # finding; a Claude row's empty sidecar is `unknown`, so that column is n/a for them.
+            "refused_rows": sum(r["status"]["fields"]["findings"]["status"] == "refused" for r in mine),
+            "clean_rows": sum(r["status"]["fields"]["findings"]["status"] == "known" and not r["findings"]
+                              for r in mine) if t.startswith("codex-") else None,
             "unknown_cost_rows": 0 if inside else sum(
                 any(c.get(f, {}).get("status") not in ("known", "not-applicable") for f in ("tokens", "wall_clock"))
                 for c in costs),
@@ -968,12 +1152,13 @@ def cmd_report(args) -> int:
         return 0
     print("| type | rows | findings | value | unique share | leftover rate | dispute rate "
           "| unknown outcomes | unweighted | unknown-findings rows | unknown-cost rows "
-          "| tokens | wall clock | dollars | value per dollar | red rate | unknown mutations |")
-    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+          "| refused | clean passes | tokens | wall clock | dollars | value per dollar | red rate | unknown mutations |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for t in result["types"]:
         print(f"| {t['type']} | {t['rows']} | {_n(t['findings'])} | {_n(t['value'], '.2f')} | {_pct(t['unique_share'])} "
               f"| {_pct(t['leftover_rate'])} | {_pct(t['dispute_rate'])} | {_n(t['unknown_outcomes'])} "
               f"| {_n(t['unweighted'])} | {t['unknown_finding_rows']} | {t['unknown_cost_rows']} "
+              f"| {t['refused_rows']} | {_n(t['clean_rows'])} "
               f"| {' | '.join(_cost_cells(t))} | {_pct(t['red_rate'])} | {_n(t['unknown_mutations'])} |")
     print()
     for note in result["notes"]:
