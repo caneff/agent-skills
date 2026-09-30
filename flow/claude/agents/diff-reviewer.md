@@ -67,7 +67,10 @@ line here — its own `OE1`, `OE2`, … series, still `axis: "standards"` — so
 it can be disposed of by id like any other finding (#1021).
 **Then run `review_ledger.py append` as your last step**, exactly as
 `multi-axis-code-review/SKILL.md` § 4 *Every review ends with `append`* says. A
-refusal is the first line of your summary, never skipped.
+refusal is the first line of your summary, never skipped. The correctness
+axis's witness-check recipe appends one mutation row per mutation too
+(`multi-axis-code-review/SKILL.md` § 4, *A witness check ends with one `append`
+per mutation*); its refusal goes on that first line as well.
 
 ## Axes
 

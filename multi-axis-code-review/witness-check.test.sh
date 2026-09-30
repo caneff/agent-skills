@@ -271,7 +271,9 @@ substitute() { # <ids> <mutate body> -> a runnable script on stdout
   printf '%s\n' "$recipe" |
     sed -e "s|^worktree=<.*|worktree=$repo|" \
         -e "s|^ids=<.*|ids=\"$1\"|" \
-        -e "s|^mutate() .*|mutate() { $body; }|"
+        -e "s|^mutate() .*|mutate() { $body; }|" \
+        -e "s|^ledger_args=(.*|ledger_args=( --repo skills --ticket 1 --round 1 --ledger ${ledger_path:-$scratch/ledger.jsonl} )|" \
+        -e "s|^call_site_ids=.*|call_site_ids=\" cs1 \"|"
 }
 
 # The recipe computes its bound from the live process table, so on a loaded box
@@ -678,6 +680,47 @@ if [ "$trees_glob" -ne 2 ]; then
   git -C "$repo" worktree list >&2
   fail=1
 fi
+
+# #1270: the recipe appends one ledger row per mutation, before cleanup removes the
+# status files. HOME points at a scratch tree whose ~/.agents/skills is this
+# checkout, so the recipe's own `append` line runs the script under test and
+# never touches the real ledger.
+home="$scratch/home"; mkdir -p "$home/.agents"; ln -s "$(cd "$here/.." && pwd)" "$home/.agents/skills"
+ledger_path="$scratch/rows.jsonl"
+row_field() { # <mutation id> <jq-ish python expression over the row r> -> prints it, or MISSING
+  python3 - "$ledger_path" "$1" "$2" <<'PY'
+import json, sys
+path, mid, expr = sys.argv[1:]
+rows = [json.loads(l) for l in open(path)] if __import__("os").path.exists(path) else []
+hit = [r for r in rows if r.get("mutation_id") == mid]
+print(eval(expr, {"r": hit[0]}) if len(hit) == 1 else "MISSING")
+PY
+}
+body='case "$1" in early) exit 4;; esac; : >"$3"; echo "MUTANT-$1"; case "$1" in g1) exit 0;; esac; exit 1'
+substitute 'r1 g1 cs1 early' "$body" >"$scratch/recipe-rows.sh"
+( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-rows.sh" ) \
+  >"$scratch/rows.out" 2>&1 || { echo "FAIL: the ledger-appending run exited non-zero" >&2; cat "$scratch/rows.out" >&2; fail=1; }
+for want in "r1|witness-mutation red" "g1|witness-mutation green" "cs1|call-site-mutation red" "early|witness-mutation unknown"; do
+  id="${want%%|*}"; got="$(row_field "$id" 'r["type"] + " " + r["outcome"]')"
+  [ "$got" = "${want#*|}" ] || { echo "FAIL: mutation $id's ledger row is '$got', wanted '${want#*|}'" >&2; fail=1; }
+done
+# `early` exited 4 without reaching its suite: its status file says red, and only the
+# marker says otherwise. A row that follows the status file turns class 1 into a red.
+[ "$(cat "$scratch/rows.out" | grep -c 'appended 1 row')" -eq 4 ] ||
+  { echo "FAIL: the run did not append exactly four rows" >&2; cat "$scratch/rows.out" >&2; fail=1; }
+[ "$(row_field r1 'r["cost"]["wall_clock"]["status"]')" = known ] ||
+  { echo "FAIL: a mutation row carries no known wall clock" >&2; fail=1; }
+
+# A refused append is reported, not skipped: the run exits 4 and says so.
+ledger_path="$scratch/corrupt.jsonl"; printf 'not json\n' >"$ledger_path"
+substitute 'r1' "$body" >"$scratch/recipe-refused.sh"
+if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-refused.sh" ) >"$scratch/refused.out" 2>&1; then
+  echo "FAIL: a refused ledger append left the recipe exiting 0" >&2; fail=1
+elif ! grep -q 'mutation row(s) not appended' "$scratch/refused.out"; then
+  echo "FAIL: a refused ledger append was not reported" >&2; cat "$scratch/refused.out" >&2; fail=1
+fi
+trees_rows="$(git -C "$repo" worktree list | wc -l)"
+[ "$trees_rows" -eq 2 ] || { echo "FAIL: the append runs left $trees_rows worktrees registered, not 2" >&2; fail=1; }
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS multi-axis-code-review/witness-check.test.sh"
