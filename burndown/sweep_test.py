@@ -322,6 +322,32 @@ def git_repo(parent, name):
     return path
 
 
+def test_cli_counts_accepts_the_primary_checkout_of_a_run_started_in_a_worktree_1254():
+    # #1190 C2: `start --repo <linked worktree>` and `counts --repo <primary>`
+    # name one target and read one sidecar directory.
+    root = cache()
+    home = home_fixture()
+    target = git_repo(home, "target-repo")
+    subprocess.run(["git", "-C", target, "commit", "-q", "--allow-empty", "-m",
+                    "x"], check=True, env={**os.environ,
+                    "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+                    "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"})
+    linked = os.path.join(home, "linked")
+    subprocess.run(["git", "-C", target, "worktree", "add", "-q", "--detach",
+                    linked], check=True)
+    runfile.start("burn-x", slots=1, root=root, repo=linked)
+    runfile.clump("burn-x", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-x", 901, "abc1234", root=root)
+    d = os.path.join(home, ".cache", "agent-reviews", "target-repo")
+    os.makedirs(d)
+    write_sidecar(d, 901, [{"id": "S1", "outcome": "filed", "sha": "a",
+                            "ticket": 5}])
+    for where in (target, linked):
+        got = cli(root, "counts", "burn-x", "--repo", where, home=home)
+        assert got.returncode == 0, (where, got)
+        assert "standalone: 1" in got.stdout, got.stdout
+
+
 def test_cli_counts_reads_the_target_repos_sidecars_from_another_cwd():
     # The controller runs from one primary checkout and addresses another
     # with `--repo` (#1093): the sidecar directory is the target's, not the

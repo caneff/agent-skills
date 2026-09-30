@@ -35,7 +35,7 @@ too.
 
 1. Take the seat (above), then `runfile.py start` the run with its slot
    budget (5 when `--slots` is omitted), the controller's own herdr
-   agent name, and `--repo <target checkout>`, required: the run's target,
+   agent name, and `--repo <primary checkout>`, required: the run's target,
    which every printed `implement-dispatch` command carries and
    `sweep.py counts --repo` is checked against (§ Run state). Resuming an existing run instead:
    `runfile.py resume`, and then **one message per live, unlanded worker**
@@ -353,7 +353,7 @@ A run's state is **one JSON file per run** at `~/.cache/burndown/<run-id>.json`,
 read and written by `burndown/runfile.py` — not the controller's context, and
 not a per-repo log. It holds the run id, the slot budget (default 5, set by
 `runfile.py start --slots <k>`), the controller's herdr agent name, the target repo
-(`runfile.py start --repo <checkout>`, recorded as its absolute top-level; a
+(`runfile.py start --repo <checkout>`, recorded as the absolute path of its primary checkout, so a linked worktree names the same target; a
 run file from before the field makes `loop.py dispatch` and `sweep.py counts
 --repo` refuse, since a missing target must not read as no check), and
 per clump its ticket list, workspace, worker's herdr agent name, the

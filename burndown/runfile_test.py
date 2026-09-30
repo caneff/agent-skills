@@ -19,8 +19,9 @@ import sweep  # noqa: E402
 
 RUNFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runfile.py")
 # A real git checkout for every `start` that is not about the target repo: this
-# repo's own top-level, which `runfile.start` resolves the same way.
-REPO = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+# repo's own primary checkout, which `runfile.start` resolves the same way
+# (this suite may run from a linked worktree).
+REPO = runfile.checkout_top(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 
 # Every fixture cache dir this run makes, removed at the end whatever the run
@@ -91,6 +92,32 @@ def git_checkout(parent, name):
     os.makedirs(path)
     subprocess.run(["git", "init", "-q", path], check=True)
     return os.path.realpath(path)
+
+
+def linked_worktree(primary, name):
+    """A linked worktree of `primary` (an empty commit gives it a HEAD)."""
+    ident = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+             "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+    env = {**os.environ, **ident}
+    subprocess.run(["git", "-C", primary, "commit", "-q", "--allow-empty",
+                    "-m", "x"], check=True, env=env)
+    path = os.path.join(os.path.dirname(primary), name)
+    subprocess.run(["git", "-C", primary, "worktree", "add", "-q", "--detach",
+                    path], check=True)
+    return os.path.realpath(path)
+
+
+def test_checkout_top_of_a_linked_worktree_is_the_primary_checkout_1254():
+    # A run started with `--repo <worktree>` must still match
+    # `sweep.py counts --repo <primary checkout>` (#1190 C2): both name the
+    # one checkout the sidecars are keyed on.
+    primary = git_checkout(cache(), "target")
+    linked = linked_worktree(primary, "linked")
+    assert runfile.checkout_top(linked) == primary
+    assert runfile.checkout_top(primary) == primary
+    root = cache()
+    runfile.start("burn-1", slots=1, root=root, repo=linked)
+    assert runfile.load("burn-1", root=root)["repo"] == primary
 
 
 def test_start_records_the_absolute_top_level_of_the_target_checkout():
