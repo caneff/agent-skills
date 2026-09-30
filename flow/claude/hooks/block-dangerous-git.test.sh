@@ -79,6 +79,34 @@ rm -rf "$XDG_CACHE_HOME"
 export STUB_LOGIN= STUB_OWNER=
 run "ownership lookup failure blocks" 2 "git push origin main" "BLOCKED"
 
+# A gh failure is named as one, not dressed as a foreign repo (#1293).
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN= STUB_OWNER=
+run "gh failure with no cache names the verify failure" 2 "git push origin main" "could not verify ownership of https://github.com/caneff/agent-skills.git"
+out=$(printf '%s' "git push origin main" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
+      | (cd "$repo" && PATH="$stubdir:$PATH" bash "$hook") 2>&1)
+if [[ "$out" == *"you don't own"* ]]; then
+  echo "FAIL: gh failure printed the not-owned text"; echo "  out: $out"; fails=1
+else
+  echo "PASS: gh failure does not print the not-owned text"
+fi
+export STUB_LOGIN=caneff STUB_OWNER=someone-else
+rm -rf "$XDG_CACHE_HOME"
+run "foreign origin still prints the not-owned line" 2 "git push origin main" "pushing to a repo you don't own"
+
+# The verdict is keyed on origin, not worktree path: a second worktree of an
+# owned repo is allowed with gh down (#1293).
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN=caneff STUB_OWNER=caneff
+run "owned repo: first worktree earns the verdict" 0 "git push origin main"
+git -C "$repo" commit -q --allow-empty -m init
+git -C "$repo" worktree add -q "$tmp/wt2" -b wt2
+export STUB_LOGIN= STUB_OWNER=
+out=$(printf '%s' "git push origin wt2" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
+      | (cd "$tmp/wt2" && PATH="$stubdir:$PATH" bash "$hook") 2>&1); rc=$?
+if [ "$rc" = 0 ]; then echo "PASS: second worktree of an owned repo allowed with gh down"
+else echo "FAIL: second worktree — got exit $rc"; echo "  out: $out"; fails=1; fi
+
 # Merging a PR follows ownership (#790): the controller merges on an owned
 # repo, and every other repo's merge stays the user's.
 rm -rf "$XDG_CACHE_HOME"
