@@ -72,13 +72,12 @@ class AppendRowTest(AppendCase):
         self.assertEqual(self.ledger.read_text(), first)
         self.assertEqual(len(first.splitlines()), 1)
 
-    def test_a_row_already_in_the_ledger_is_rewritten_not_duplicated_by_a_later_harvest(self):
+    def test_a_later_harvest_leaves_exactly_the_rows_a_harvest_alone_writes(self):
         self.ok(403, "verification")
         r = run("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", self.ledger,
                 "--review-file", self.tmp / "h.md", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
-        ids = [json.loads(l)["row_id"] for l in self.ledger.read_text().splitlines()]
-        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(sorted(self.rows()), sorted(self.harvested()))
 
     def test_other_rows_in_the_ledger_are_kept(self):
         write_jsonl(self.ledger, [{"row_id": "keep", "origin": "harvest", "type": "spec"}])
@@ -90,7 +89,7 @@ class AppendRowTest(AppendCase):
                     [finding("S1", "hard", "a.py", "Duplicated loader helper")])
         write_jsonl(self.cache / "skills" / "findings-spec-420.jsonl",
                     [finding("P1", "hard", "a.py", "loader helper duplicated", axis="spec")])
-        for n, (axis, agent) in enumerate((("Standards", "s"), ("Spec", "p"))):
+        for axis, agent in (("Standards", "s"), ("Spec", "p")):
             transcript(self.tr, wt(SKILLS_PROJ, 420), agent, f"{axis} review #420", "Repo: x",
                        [("2026-09-20T10:00:00Z", "m1", usage(1, 1, 1, 1))])
         self.ok(420, "standards")
@@ -100,11 +99,44 @@ class AppendRowTest(AppendCase):
         for row in self.rows().values():
             self.assertEqual((row["findings"][0]["overlap"], row["findings"][0]["k"]), ("shared", 2))
 
-    def test_parallel_appends_by_the_three_axes_lose_no_row(self):
-        with ThreadPoolExecutor(3) as pool:
-            results = list(pool.map(lambda t: self.append(400, t), ("standards", "spec", "correctness")))
-        self.assertEqual([r.returncode for r in results], [0, 0, 0], [r.stderr for r in results])
+    def test_parallel_appends_lose_no_row(self):
+        jobs = [t for _ in range(4) for t in ("standards", "spec", "correctness")]
+        with ThreadPoolExecutor(6) as pool:  # 12 short single-core processes, 6 at a time
+            results = list(pool.map(lambda t: self.append(400, t), jobs))
+        self.assertEqual({r.returncode for r in results}, {0}, [r.stderr for r in results])
         self.assertEqual(len(self.rows()), 4)
+
+    def test_a_harvest_running_beside_appends_loses_no_appended_row(self):
+        def harvest():
+            return run("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", self.ledger,
+                       "--review-file", self.tmp / "h.md", home=self.home)
+        with ThreadPoolExecutor(4) as pool:
+            futures = [pool.submit(self.append, 400, t) for t in ("standards", "spec", "correctness")]
+            futures.append(pool.submit(harvest))
+            results = [f.result() for f in futures]
+        self.assertEqual({r.returncode for r in results}, {0}, [r.stderr for r in results])
+        self.assertTrue({"skills/400/spec/1/findings-spec-400", "skills/400/correctness/1/findings-correctness-400",
+                         "skills/400/standards/1/findings-standards-400"} <= set(self.rows()))
+
+    def test_a_clean_later_round_with_an_empty_sidecar_appends_under_its_own_round(self):
+        (self.cache / "skills" / "findings-standards-430-r2.jsonl").write_text("")
+        transcript(self.tr, wt(SKILLS_PROJ, 430), "c2", "Standards review round-2 #430", "Repo: x",
+                   [("2026-09-20T10:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(430, "standards", 2)
+        self.assertEqual([r["round"] for r in self.rows().values()], [2])
+
+    def test_a_foreign_row_of_the_same_ticket_is_not_rescored_and_does_not_crash_the_append(self):
+        foreign = {"row_id": "skills/403/codex-gate/1/x", "origin": "codex", "repo": "skills", "ticket": 403,
+                   "type": "codex-gate", "findings": [{"id": "codex-gate-1", "overlap": "unique", "k": 1}]}
+        write_jsonl(self.ledger, [foreign])
+        self.ok(403, "verification")
+        self.assertEqual(self.rows()[foreign["row_id"]], foreign)
+
+    def test_another_ticket_spoken_to_from_the_primary_checkout_is_not_appended(self):
+        transcript(self.tr, SKILLS_PROJ, "xt", "Standards review #402 extra", "Repo: x",
+                   [("2026-09-20T10:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(400, "standards")
+        self.assertEqual({r["ticket"] for r in self.rows().values()}, {400})
 
 
 class AppendRefusalTest(AppendCase):
@@ -119,6 +151,12 @@ class AppendRefusalTest(AppendCase):
 
     def test_an_axis_run_with_no_transcript_is_refused_not_written_as_zero_cost(self):
         self.assert_refused(self.append(401, "standards"), "tokens", "no transcript")
+
+    def test_a_round_the_ticket_has_no_sidecar_for_is_refused(self):
+        self.assert_refused(self.append(404, "standards", 1), "findings sidecar", "round 1")
+
+    def test_known_tokens_with_unreadable_wall_clock_is_still_refused(self):
+        self.assert_refused(self.append(418, "standards"), "wall_clock", "timestamp")
 
     def test_a_missing_transcripts_tree_is_refused(self):
         self.assert_refused(self.append(400, "standards", tr=self.tmp / "absent"), "transcripts tree not found")

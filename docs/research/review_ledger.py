@@ -492,7 +492,7 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     pairs = find_sidecar_files(cache)  # FileNotFoundError when the cache is missing
     if not pairs:
         raise ValueError(f"no findings or dispositions sidecars under {cache}")
-    if only:
+    if only:  # a cache directory name is literal; only a transcript's project directory loses `_` and `.`
         pairs = [(d, n) for d, n in pairs if fold_repo(d) == fold_repo(only[0]) and only[1] in _name_tickets(n)]
     by_repo: dict[str, list[str]] = {}
     for repo_dir, name in pairs:
@@ -674,6 +674,21 @@ def read_ledger(path: Path) -> list[dict]:
     return rows
 
 
+def update_ledger(path: Path, change) -> None:
+    """The one writer of the ledger: `change` edits {row_id: row} in place, under a lock, and the
+    result replaces the file whole. `harvest` and `append` both come through here because three
+    reviewers finish together and a harvest can overlap them; two plain read-modify-writes lose a row.
+    A ledger that is not valid JSON raises ValueError and is left as found."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name(path.name + ".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        rows = {r["row_id"]: r for r in read_ledger(path)} if path.exists() else {}
+        change(rows)
+        tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+        tmp.write_text("".join(json.dumps(rows[k], sort_keys=True) + "\n" for k in sorted(rows)))
+        os.replace(tmp, path)
+
+
 def cmd_harvest(args) -> int:
     try:
         transcripts, missing = args.transcripts, None
@@ -684,15 +699,16 @@ def cmd_harvest(args) -> int:
         elif not transcripts.is_dir():
             raise FileNotFoundError(f"transcripts tree not found: {transcripts}")
         rows, facts = harvest_cache(args.cache, transcripts, missing)
-        kept = [r for r in read_ledger(args.ledger) if r.get("origin") != "harvest"] \
-            if args.ledger.exists() else []
+
+        def replace_harvest_rows(ledger: dict) -> None:
+            for k in [k for k, r in ledger.items() if r.get("origin") == "harvest"]:
+                del ledger[k]
+            ledger.update({r["row_id"]: r for r in rows})
+
+        update_ledger(args.ledger, replace_harvest_rows)
     except (FileNotFoundError, ValueError) as e:
         print(f"review_ledger: {e}", file=sys.stderr)
         return 2
-    everything = {r["row_id"]: r for r in kept}
-    everything.update({r["row_id"]: r for r in rows})
-    args.ledger.parent.mkdir(parents=True, exist_ok=True)
-    args.ledger.write_text("".join(json.dumps(everything[k], sort_keys=True) + "\n" for k in sorted(everything)))
     review = args.review_file or args.ledger.with_suffix(".review.md")
     review.write_text(review_file_text(facts))
     print(f"harvested {len(rows)} rows into {args.ledger}; {sum(facts['unmapped'].values())} unmapped values, "
@@ -703,6 +719,7 @@ def cmd_harvest(args) -> int:
 
 
 APPEND_TYPES = ("standards", "spec", "correctness", "verification")
+REVIEWER_TYPES = APPEND_TYPES + ("over-engineering",)
 
 
 def _refusal(row: dict) -> str | None:
@@ -717,7 +734,9 @@ def _refusal(row: dict) -> str | None:
 def cmd_append(args) -> int:
     """Write the rows of one review that just ran: what `harvest` would write for that
     ticket's sidecars and transcripts, selected by type and round. A review's own cost or
-    findings sidecar being absent is a refusal, never a row with zero cost."""
+    findings sidecar being absent is a refusal, never a row with zero cost. A round-1 review
+    ends before its dispositions exist, so its findings' outcomes are `unknown` until the
+    same append is run again after them, or a harvest reads them."""
     try:
         transcripts = args.transcripts or DEFAULT_TRANSCRIPTS
         if not transcripts.is_dir():
@@ -737,21 +756,20 @@ def cmd_append(args) -> int:
         if (why := _refusal(r)):
             print(f"review_ledger append: {r['row_id']}: {why}", file=sys.stderr)
             return 2
-    args.ledger.parent.mkdir(parents=True, exist_ok=True)
-    with open(args.ledger.with_name(args.ledger.name + ".lock"), "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)  # three axes finish together; each read-modify-write is whole
-        try:
-            ledger = {r["row_id"]: r for r in read_ledger(args.ledger)} if args.ledger.exists() else {}
-        except ValueError as e:
-            print(f"review_ledger append: {e}", file=sys.stderr)
-            return 2
+    ticket = (mine[0]["repo"], mine[0]["ticket"])
+
+    def add_rows(ledger: dict) -> None:
         ledger.update({r["row_id"]: {**r, "origin": "append"} for r in mine})
         # The ticket's other reviewers may have appended already: re-split credit across all of them.
-        mark_overlap([r for r in ledger.values() if (r.get("repo"), r.get("ticket")) == (mine[0]["repo"], mine[0]["ticket"])],
-                     [], [])
-        tmp = args.ledger.with_name(args.ledger.name + f".{os.getpid()}.tmp")
-        tmp.write_text("".join(json.dumps(ledger[k], sort_keys=True) + "\n" for k in sorted(ledger)))
-        os.replace(tmp, args.ledger)
+        # Only rows of reviewer types: a row another writer adds (codex, mutation) is not ours to re-score.
+        mark_overlap([r for r in ledger.values() if (r.get("repo"), r.get("ticket")) == ticket
+                      and r.get("type") in REVIEWER_TYPES], [], [])
+
+    try:
+        update_ledger(args.ledger, add_rows)
+    except ValueError as e:
+        print(f"review_ledger append: {e}", file=sys.stderr)
+        return 2
     print(f"appended {len(mine)} row(s) to {args.ledger}: {', '.join(r['row_id'] for r in mine)}")
     return 0
 
