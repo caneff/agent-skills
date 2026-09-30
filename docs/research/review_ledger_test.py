@@ -714,6 +714,21 @@ class CostReportTest(Case):
         # Averaging C in as zero would lower the per-row means; the report carries sums and counts only.
         self.assertNotIn("mean", " ".join(std))
 
+    def test_rows_on_an_unpriced_model_are_named_in_a_note(self):
+        notes = json.loads(run("report", "--ledger", self.ledger_with_cost(), "--prices", self.prices_file(),
+                               "--format", "json", home=self.home).stdout)["notes"]
+        self.assertTrue(any(n.startswith("standards: 1 row(s)") for n in notes), notes)
+
+    def ledger_with_cost(self):
+        ledger = self.tmp / "in.jsonl"
+        write_jsonl(ledger, cost_rows())
+        return ledger
+
+    def prices_file(self):
+        pf = self.tmp / "prices.json"
+        pf.write_text(json.dumps(PRICES))
+        return pf
+
     def test_no_price_table_means_no_dollars_not_zero_dollars(self):
         std = self.report(None)["standards"]
         self.assertIsNone(std["dollars"])

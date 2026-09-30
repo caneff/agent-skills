@@ -677,6 +677,10 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
     if not present & set(MUTATION_TYPES):
         notes.append(f"No mutation rows: harvest writes none ({', '.join(MUTATION_TYPES)}); nothing on disk "
                      "records them in a form a script can read.")
+    for t in types:
+        if prices is not None and t["unpriced_rows"]:
+            notes.append(f"{t['type']}: {t['unpriced_rows']} row(s) have tokens but no price for their model; "
+                         "left out of dollars and value per dollar, not counted as free.")
     if prices is None:
         notes.append("No price table: dollars and value per dollar are n/a, not zero (pass --prices).")
     return {"types": types, "notes": notes}
