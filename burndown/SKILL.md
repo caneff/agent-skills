@@ -186,8 +186,8 @@ leftovers a ticket, because the sweep is not what the run stopped on.
 **Filing is not one-shot, so check first.** A crash after `/file-ticket`
 creates the issue but before the controller records it, or a later run
 close following an earlier two-park stop, both re-render the same run and
-must not file a second `Sweep: leftovers from burn <run-id>`. The title is
-deterministic, so the search is the recovery: before filing, at either
+must not file a second open `Sweep: leftovers from burn <run-id>`. The
+title is deterministic, so the search is the recovery: before filing, at either
 moment,
 
 ```
@@ -201,13 +201,12 @@ out on purpose (#1254): a worker holds its file and not this one, and the
 titles differ. Change one, change the other. The search is fuzzy, so the
 `--jq` keeps only an exact title match that is still **open** and
 prints one bare number per line: the sweep's own number, never a run or
-ticket number. `--state all` stays so the search reads every state, but a
-**closed** match is not this run's sweep: its items already landed, it
-never reaches the frontier, and rewriting it loses the new leftovers
-(#1248). A closed match is skipped, so a later run close files a new sweep
-under the same title; the next search finds only that open one. A non-zero exit from the search stops the run; it is not
-zero matches, and filing on it makes a duplicate. Exit 0 and more than one
-line stops the run rather than editing a guess. Exit 0 and one line: put
+ticket number. A **closed** match is not this run's sweep: it never
+reaches the frontier, so rewriting it loses the new leftovers (#1248). It is
+skipped, so a later run close files a new sweep under the same title; the
+next search finds only that open one. A non-zero exit from the search
+stops the run; it is not zero matches, and filing on it makes a duplicate.
+Exit 0 and more than one line stops the run rather than editing a guess. Exit 0 and one line: put
 that number in `sweep`; that issue already **is** this run's sweep, so
 update its body instead
 of filing another — a fresh render of the run's own leftovers, with any

@@ -550,8 +550,9 @@ gh issue list --repo <owner/name> --state all --limit 100 \
 The search is fuzzy, so the `--jq` keeps only an exact title match that is
 still **open** and prints one bare number per line: the sweep's own number,
 never this PR's `<n>`, which is your own implementation ticket. A **closed**
-match already landed its items and never reaches the frontier, so it is
-skipped and a new sweep is filed (#1248). A non-zero exit from the
+match is not this PR's sweep: it never reaches the frontier, so rewriting it
+loses the new leftovers (#1248). It is skipped and a new sweep is filed; the
+next search finds only that open one. A non-zero exit from the
 search stops you and goes to the controller; it is not zero matches, and
 filing on it makes the duplicate this search exists to prevent. Exit 0 and
 one line: put that number in `sweep` and update its body instead of filing
