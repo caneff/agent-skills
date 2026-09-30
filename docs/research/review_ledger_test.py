@@ -636,6 +636,106 @@ def report_rows():
     ]
 
 
+def cost_rows():
+    """Rows with cost, computed by hand in CostReportTest. Prices are per million tokens."""
+    def fnd(fid, sev, outcome="fixed", overlap="unique", k=1):
+        return {"id": fid, "severity": sev, "outcome": outcome, "partial": False, "overlap": overlap, "k": k}
+
+    def row(rid, typ, model, tokens, secs, findings, findings_status="known"):
+        tk = {"status": "known", **tokens} if isinstance(tokens, dict) else tokens
+        wall = {"status": "known", "seconds": secs} if secs is not None else {"status": "unknown", "reason": "x"}
+        return {"row_id": rid, "repo": "skills", "ticket": 1, "type": typ, "round": 1, "model": model,
+                "findings": findings, "status": {"fields": {"findings": {"status": findings_status}}},
+                "cost": {"tokens": tk, "wall_clock": wall}}
+
+    def tok(i=0, o=0, cw=0, cr=0):
+        return {"input": i, "output": o, "cache_write": cw, "cache_read": cr}
+
+    inside = {"status": "inside-standards", "reason": "in standards"}
+    return [
+        row("A", "standards", "m-opus", tok(1_000_000, 100_000, 200_000, 3_000_000), 100, [fnd("a", "hard")]),
+        row("B", "standards", "m-opus", tok(2_000_000), 50, [fnd("b", "judgement")]),
+        row("C", "standards", "m-opus", {"status": "unknown", "reason": "transcript has no usage block"}, None,
+            [fnd("c", "hard")]),
+        row("D", "standards", "m-unpriced", tok(10), 5, [fnd("d", "hard")]),
+        row("E", "over-engineering", None, inside, None, [fnd("e", "judgement")]),
+        dict(row("E2", "over-engineering", None, inside, None, []),
+             cost={"tokens": inside, "wall_clock": inside}),
+        row("F", "spec", "m-sonnet", tok(1_000_000, 1_000_000), 60, [fnd("f", "hard", "fixed", "shared", 2)]),
+        row("G", "spec", "m-sonnet", {"status": "unknown", "reason": "no transcript"}, None, [], "unknown"),
+    ]
+
+
+PRICES = {"m-opus": {"input": 15, "output": 75, "cache_write": 18.75, "cache_read": 1.5},
+          "m-sonnet": {"input": 3, "output": 15, "cache_write": 3.75, "cache_read": 0.3}}
+
+
+class CostReportTest(Case):
+    def report(self, prices=PRICES, *extra, fmt="json"):
+        ledger = self.tmp / "in.jsonl"
+        write_jsonl(ledger, cost_rows())
+        args = ["report", "--ledger", ledger, "--format", fmt, *extra]
+        if prices is not None:
+            pf = self.tmp / "prices.json"
+            pf.write_text(json.dumps(prices))
+            args += ["--prices", pf]
+        result = run(*args, home=self.home)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return {t["type"]: t for t in json.loads(result.stdout)["types"]} if fmt == "json" else result.stdout
+
+    def test_dollars_match_the_hand_computed_fixture(self):
+        # A: 15 + 7.5 + 3.75 + 4.5 = 30.75.  B: 2 x 15 = 30.  D has no price, C no tokens.
+        std = self.report()["standards"]
+        self.assertEqual(std["dollars"], 60.75)
+        self.assertEqual(std["tokens"], {"input": 3_000_010, "output": 100_000, "cache_write": 200_000,
+                                         "cache_read": 3_000_000})
+        self.assertEqual(std["wall_clock_seconds"], 155)
+        # F: 3 + 15 = 18.
+        self.assertEqual(self.report()["spec"]["dollars"], 18.0)
+
+    def test_changing_a_price_changes_the_dollars(self):
+        dearer = {**PRICES, "m-opus": {**PRICES["m-opus"], "input": 30}}
+        # A: 30 + 7.5 + 3.75 + 4.5 = 45.75.  B: 60.
+        self.assertEqual(self.report(dearer)["standards"]["dollars"], 105.75)
+
+    def test_value_per_dollar_uses_only_rows_with_known_cost_and_findings(self):
+        # A (3) + B (1) over 60.75; C (unknown cost), D (unpriced) and their value are left out.
+        self.assertEqual(self.report()["standards"]["value_per_dollar"], round(4 / 60.75, 4))
+        # F: 3 / k=2 = 1.5 over 18 dollars; G has no findings status known and no cost.
+        self.assertEqual(self.report()["spec"]["value_per_dollar"], round(1.5 / 18, 4))
+
+    def test_unknown_and_unpriced_rows_are_counted_never_averaged_as_zero(self):
+        std = self.report()["standards"]
+        self.assertEqual((std["unknown_cost_rows"], std["unpriced_rows"]), (1, 1))
+        spec = self.report()["spec"]
+        self.assertEqual(spec["unknown_cost_rows"], 1)
+        # Averaging C in as zero would lower the per-row means; the report carries sums and counts only.
+        self.assertNotIn("mean", " ".join(std))
+
+    def test_no_price_table_means_no_dollars_not_zero_dollars(self):
+        std = self.report(None)["standards"]
+        self.assertIsNone(std["dollars"])
+        self.assertIsNone(std["value_per_dollar"])
+        self.assertIn("n/a", self.report(None, fmt="md"))
+
+    def test_over_engineering_cost_is_inside_standards(self):
+        oe = self.report()["over-engineering"]
+        self.assertEqual(oe["cost_note"], "inside standards")
+        self.assertIsNone(oe["dollars"])
+        self.assertIsNone(oe["value_per_dollar"])
+        self.assertEqual(oe["unknown_cost_rows"], 0)
+        self.assertEqual(oe["value"], 1.0)  # its value is still reported, separately
+        line = next(x for x in self.report(fmt="md").splitlines() if x.startswith("| over-engineering"))
+        self.assertIn("inside standards", line)
+
+    def test_markdown_table_carries_the_cost_columns(self):
+        head = self.report(fmt="md").splitlines()[0]
+        for col in ("tokens", "wall clock", "dollars", "value per dollar"):
+            self.assertIn(col, head)
+        line = next(x for x in self.report(fmt="md").splitlines() if x.startswith("| spec"))
+        self.assertIn("$18.00", line)
+
+
 class ReportTest(Case):
     def report(self, *extra, rows=None):
         ledger = self.tmp / "in.jsonl"
@@ -644,14 +744,20 @@ class ReportTest(Case):
         self.assertEqual(result.returncode, 0, result.stderr)
         return {t["type"]: t for t in json.loads(result.stdout)["types"]}
 
+    OLD = ("type", "rows", "findings", "value", "unique_share", "leftover_rate", "dispute_rate",
+           "unknown_outcomes", "unweighted", "unknown_finding_rows", "unknown_cost_rows")
+
+    def old_columns(self, t):
+        return {k: t[k] for k in self.OLD}
+
     def test_table_matches_hand_computed_values(self):
         types = self.report()
-        self.assertEqual(types["standards"], {
+        self.assertEqual(self.old_columns(types["standards"]), {
             "type": "standards", "rows": 1, "findings": 5, "value": 3.5,
             "unique_share": 0.8, "leftover_rate": 0.25, "dispute_rate": 0.25,
             "unknown_outcomes": 1, "unweighted": 0, "unknown_finding_rows": 1,
             "unknown_cost_rows": 1})
-        self.assertEqual(types["spec"], {
+        self.assertEqual(self.old_columns(types["spec"]), {
             "type": "spec", "rows": 1, "findings": 2, "value": 1.5,
             "unique_share": 0.5, "leftover_rate": 0.0, "dispute_rate": 0.0,
             "unknown_outcomes": 0, "unweighted": 1, "unknown_finding_rows": 0,
@@ -693,7 +799,8 @@ class ReportTest(Case):
         result = run("report", "--ledger", ledger, home=self.home)
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
-        self.assertIn("| standards | 1 | 5 | 3.50 | 80.0% | 25.0% | 25.0% | 1 | 0 | 1 | 1 |", lines)
+        self.assertIn("| standards | 1 | 5 | 3.50 | 80.0% | 25.0% | 25.0% | 1 | 0 | 1 | 1 "
+                      "| n/a | n/a | n/a | n/a |", lines)
         self.assertIn("No mutation rows", result.stdout)
 
     def test_a_type_outside_the_known_list_is_still_reported(self):

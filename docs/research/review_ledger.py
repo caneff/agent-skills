@@ -2,8 +2,8 @@
 """Review ledger (#1262 slice 1, #1265): one JSONL row per review run, and a
 per-review-type value table.
 
-    review_ledger.py harvest [--cache DIR] [--ledger PATH] [--review-file PATH]
-    review_ledger.py report  [--ledger PATH] [--weights FILE] [--split 1/k|none]
+    review_ledger.py harvest [--cache DIR] [--transcripts DIR] [--ledger PATH] [--review-file PATH]
+    review_ledger.py report  [--ledger PATH] [--weights FILE] [--prices FILE] [--split 1/k|none]
                              [--format md|json]
 
 `harvest` reads the findings and dispositions sidecars under a review cache
@@ -19,9 +19,19 @@ harvest replaces every earlier harvest row and keeps rows written any other way.
 A sidecar whose name is off the harvested patterns, an unreadable line and an
 empty sidecar are listed or marked `unknown`, never dropped or read as clean.
 
-Cost fields are `unknown` here (slice 2 fills them); nothing is ever zero
-because it could not be read. Severity weights and the overlap split live in
-`report`, never in the ledger, so changing either needs no reharvest.
+Cost (#1266) is read from the diff-reviewer subagent transcripts under
+`--transcripts` (`<project>/<session>/subagents/agent-<id>.{jsonl,meta.json}`): the
+project directory names the repo and the worktree's ticket, the description and first
+message name the axis and round. Tokens by kind come from each message's `usage`
+(a streamed message counts once), wall clock from the first and last timestamps. A row
+with no attributable transcript, or a transcript with no `usage`, is `unknown` with the
+reason, never zero; over-engineering's cost stays inside its standards row. A transcript
+no row holds becomes a row with unknown findings; one that cannot be attributed is listed.
+A verification pass never counts toward overlap. Severity weights, the overlap split and
+the price table (`--prices`, dollars per million tokens by model) live in `report`, never
+in the ledger, so changing any of them needs no reharvest. `report` sums cost over known
+rows only, counts the rest, and divides value by dollars over rows whose cost and findings
+are both known.
 """
 from __future__ import annotations
 
@@ -600,35 +610,75 @@ def cmd_harvest(args) -> int:
     return 0
 
 
-def summarise(rows: list[dict], weights: dict, split: str) -> dict:
+def _row_value(row: dict, weights: dict, split: str) -> tuple[float, int]:
+    """(weighted value, findings whose severity has no weight) of one row."""
+    value, unweighted = 0.0, 0
+    for f in row["findings"]:
+        if f["outcome"] not in VALUE_OUTCOMES:
+            continue
+        weight = weights.get(f["severity"])
+        if weight is None:
+            unweighted += 1
+            continue
+        value += weight / (f["k"] if split == "1/k" else 1)
+    return value, unweighted
+
+
+def _row_dollars(row: dict, prices: dict | None) -> float | None:
+    """Dollars of one row from its token kinds and its model's price per million tokens, or
+    None when the tokens are unknown or the model has no price."""
+    tokens = row["cost"].get("tokens", {})
+    price = (prices or {}).get(row.get("model"))
+    if tokens.get("status") != "known" or not isinstance(price, dict) \
+            or not all(isinstance(price.get(k), (int, float)) for k in TOKEN_KINDS):
+        return None
+    return sum(tokens[k] * price[k] for k in TOKEN_KINDS) / 1_000_000
+
+
+def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None = None) -> dict:
     types = []
     present = {r["type"] for r in rows}
     for t in [*(t for t in REVIEW_TYPES if t in present), *sorted(present - set(REVIEW_TYPES))]:
         mine = [r for r in rows if r["type"] == t]
         findings = [f for r in mine for f in r["findings"]]
         value, unweighted = 0.0, 0
-        for f in findings:
-            if f["outcome"] not in VALUE_OUTCOMES:
-                continue
-            weight = weights.get(f["severity"])
-            if weight is None:
-                unweighted += 1
-                continue
-            value += weight / (f["k"] if split == "1/k" else 1)
+        for r in mine:
+            v, u = _row_value(r, weights, split)
+            value, unweighted = value + v, unweighted + u
         known = [f for f in findings if f["outcome"] != "unknown"]
         rate = lambda outcome: (sum(f["outcome"] == outcome for f in known) / len(known)) if known else None
+        inside = t == "over-engineering"
+        costs = [r["cost"] for r in mine]
+        token_rows = [c["tokens"] for c in costs if c.get("tokens", {}).get("status") == "known"]
+        wall_rows = [c["wall_clock"] for c in costs if c.get("wall_clock", {}).get("status") == "known"]
+        priced = [(r, d) for r in mine if (d := _row_dollars(r, prices)) is not None]
+        # Value per dollar divides only the value of rows whose cost and findings are both
+        # known by those rows' dollars: an unknown row is left out, never counted as free.
+        rated = [(r, d) for r, d in priced if r["status"]["fields"]["findings"]["status"] == "known"]
+        rated_dollars = sum(d for _, d in rated)
         types.append({
             "type": t, "rows": len(mine), "findings": len(findings), "value": round(value, 4),
             "unique_share": (sum(f["overlap"] == "unique" for f in findings) / len(findings)) if findings else None,
             "leftover_rate": rate("leftover"), "dispute_rate": rate("disputed"),
             "unknown_outcomes": len(findings) - len(known), "unweighted": unweighted,
             "unknown_finding_rows": sum(r["status"]["fields"]["findings"]["status"] != "known" for r in mine),
-            "unknown_cost_rows": sum(
-                any(v.get("status") == "unknown" for v in r["cost"].values()) for r in mine)})
+            "unknown_cost_rows": 0 if inside else sum(
+                any(c.get(f, {}).get("status") != "known" for f in ("tokens", "wall_clock")) for c in costs),
+            "cost_note": "inside standards" if inside else None,
+            "tokens": None if inside or not token_rows else {k: sum(c[k] for c in token_rows) for k in TOKEN_KINDS},
+            "wall_clock_seconds": None if inside or not wall_rows else sum(c["seconds"] for c in wall_rows),
+            "dollars": None if inside or not priced else round(sum(d for _, d in priced), 4),
+            "unpriced_rows": 0 if inside else sum(
+                1 for c, r in zip(costs, mine) if c.get("tokens", {}).get("status") == "known"
+                and _row_dollars(r, prices) is None),
+            "value_per_dollar": round(sum(_row_value(r, weights, split)[0] for r, _ in rated) / rated_dollars, 4)
+            if not inside and rated_dollars else None})
     notes = []
     if not present & set(MUTATION_TYPES):
         notes.append(f"No mutation rows: harvest writes none ({', '.join(MUTATION_TYPES)}); nothing on disk "
                      "records them in a form a script can read.")
+    if prices is None:
+        notes.append("No price table: dollars and value per dollar are n/a, not zero (pass --prices).")
     return {"types": types, "notes": notes}
 
 
@@ -636,24 +686,37 @@ def _pct(x):
     return "n/a" if x is None else f"{x * 100:.1f}%"
 
 
+def _cost_cells(t: dict) -> list[str]:
+    if t["cost_note"]:
+        return [t["cost_note"]] * 3 + ["n/a"]
+    tokens = "n/a" if t["tokens"] is None else f"{sum(t['tokens'].values()):,}"
+    wall = "n/a" if t["wall_clock_seconds"] is None else f"{t['wall_clock_seconds']:.0f}s"
+    dollars = "n/a" if t["dollars"] is None else f"${t['dollars']:.2f}"
+    vpd = "n/a" if t["value_per_dollar"] is None else f"{t['value_per_dollar']:.4f}"
+    return [tokens, wall, dollars, vpd]
+
+
 def cmd_report(args) -> int:
     try:
         rows = read_ledger(args.ledger)
+        prices = json.loads(args.prices.read_text()) if args.prices else None
     except (FileNotFoundError, ValueError) as e:
         print(f"review_ledger: {e}", file=sys.stderr)
         return 2
     weights = json.loads(args.weights.read_text()) if args.weights else DEFAULT_WEIGHTS
-    result = summarise(rows, weights, args.split)
+    result = summarise(rows, weights, args.split, prices)
     if args.format == "json":
         print(json.dumps(result, indent=2))
         return 0
     print("| type | rows | findings | value | unique share | leftover rate | dispute rate "
-          "| unknown outcomes | unweighted | unknown-findings rows | unknown-cost rows |")
-    print("|---|---|---|---|---|---|---|---|---|---|---|")
+          "| unknown outcomes | unweighted | unknown-findings rows | unknown-cost rows "
+          "| tokens | wall clock | dollars | value per dollar |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for t in result["types"]:
         print(f"| {t['type']} | {t['rows']} | {t['findings']} | {t['value']:.2f} | {_pct(t['unique_share'])} "
               f"| {_pct(t['leftover_rate'])} | {_pct(t['dispute_rate'])} | {t['unknown_outcomes']} "
-              f"| {t['unweighted']} | {t['unknown_finding_rows']} | {t['unknown_cost_rows']} |")
+              f"| {t['unweighted']} | {t['unknown_finding_rows']} | {t['unknown_cost_rows']} "
+              f"| {' | '.join(_cost_cells(t))} |")
     print()
     for note in result["notes"]:
         print(note)
@@ -672,6 +735,8 @@ def main(argv=None) -> int:
     r = sub.add_parser("report")
     r.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     r.add_argument("--weights", type=Path)
+    r.add_argument("--prices", type=Path, help="JSON: model -> {input, output, cache_write, cache_read} "
+                   "dollars per million tokens")
     r.add_argument("--split", choices=("1/k", "none"), default="1/k")
     r.add_argument("--format", choices=("md", "json"), default="md")
     r.set_defaults(func=cmd_report)
