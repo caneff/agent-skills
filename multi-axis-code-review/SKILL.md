@@ -586,7 +586,9 @@ under those ids), the worker's
 claimed dispositions — each a claim to check, never
 settled, and never with an outcome pre-assigned — and the settled decisions.
 It writes `dispositions-<n>.jsonl` in the grammar of `implement/SKILL.md` § Review,
-and its report to `<dir>/review-verify-<n>.md`.
+keeping every line already in the file whose id holds a space: on a sweep ticket's
+PR those are the worker's `<file> <id>` leftovers, and its own lines go beside
+them (#1259). It also writes its report to `<dir>/review-verify-<n>.md`.
 
 The brief: "Check each round-1 finding id against its fix or its claimed
 disposition. Fail the pass, naming the finding id, on any of five things:

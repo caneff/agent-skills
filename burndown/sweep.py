@@ -134,7 +134,9 @@ def render_body(leftovers):
             # A sweep item left undone is recorded as `<file> <id>`; under
             # its own file's heading the bullet carries the bare id, the
             # grammar `runfile.sweep_items` reads back (#1259).
-            bare = item["id"].removeprefix(f"{file} ")
+            owner, bare = runfile.split_qualified(item["id"])
+            if owner not in (None, file):
+                bare = item["id"]
             lines.append(
                 f"- **{bare}** ({item['severity']}) {inline_safe(item['title'])} "
                 f"— clump #{item['clump']}, {tickets}, PR #{item['pr']}: "

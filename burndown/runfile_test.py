@@ -1944,6 +1944,45 @@ def test_a_sweep_pr_accounting_for_every_item_is_accepted():
     assert got is None, got
 
 
+def test_an_item_body_line_that_says_not_fixed_is_not_done():
+    # C1: only a stated `fixed` outcome accounts for an item without a sidecar
+    # line; an outcome word elsewhere on the line does not.
+    for said in ("not fixed, deferred", "disputed: unreachable",
+                 "left undone; will be filed later"):
+        got = sweep_refusal(
+            [sweep_leftover("implement/SKILL.md", "P9")],
+            "## Decisions made\n\n- **implement/SKILL.md P9**: leftover.\n"
+            f"- **implement/SKILL.md P14**: {said}\n"
+            "- **burndown/runfile.py P9**: fixed, abc1234.\n")
+        assert got is not None and "implement/SKILL.md P14" in got, (said, got)
+
+
+def test_a_ticket_with_no_parsable_item_is_refused_not_passed():
+    ticket = os.path.join(cache(), "empty-ticket.md")
+    with open(ticket, "w") as fh:
+        fh.write("Just prose, no sweep sections.\n")
+    try:
+        runfile.refuse_unaccounted_sweep_items(
+            ticket, pr_body("## Decisions made\n\n- S1: fixed.\n"),
+            sidecar_of({"id": "S1", "outcome": "fixed", "sha": "abc1234"}))
+    except runfile.RunFileError as exc:
+        assert "holds no" in str(exc), exc
+    else:
+        raise AssertionError("an item-less ticket was accepted")
+
+
+def test_sweep_items_read_spaced_headings_star_bullets_and_skip_fences():
+    text = ("## my notes.md\n\n* **P1** (low) t\n  - **P2** (low) t\n\n"
+            "```\n## fenced.md\n- **P3** (low) t\n```\n\n"
+            "## Blocked by\n\nNone — can start immediately.\n")
+    assert runfile.sweep_items(text) == ["my notes.md P1", "my notes.md P2"]
+
+
+def test_a_bullet_keeping_its_own_files_prefix_is_read_bare():
+    assert runfile.sweep_items(
+        "## a/one.md\n\n- **a/one.md P9** (low) t\n") == ["a/one.md P9"]
+
+
 def test_a_same_id_fixed_under_another_file_does_not_account_for_an_item():
     got = sweep_refusal(
         [sweep_leftover("implement/SKILL.md", "P14")],

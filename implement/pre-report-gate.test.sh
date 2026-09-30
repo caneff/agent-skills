@@ -249,15 +249,15 @@ fi
 # done in the body. One item in neither is refused, by name.
 printf '%s\n' 'Sweep: leftovers from burn r1' >"$tmp/ticket-title"
 printf '## a/one.md\n\n- **P9** (hard) t — clump #1, #1, PR #2: x\n- **P14** (low) t — clump #1, #1, PR #2: y\n' >"$tmp/ticket-body"
-printf '%s\n' '{"id": "a/one.md P9", "outcome": "leftover", "file": "a/one.md", "title": "t", "severity": "hard", "text": "x"}' >"$sidecar"
-printf '## Decisions made\n\n- **a/one.md P9**: leftover.\n' >"$body"
+printf '%s\n' '{"id": "a/one.md P9", "outcome": "leftover", "file": "a/one.md", "title": "t", "severity": "hard", "text": "x"}' '{"id": "r1-S1", "outcome": "fixed", "sha": "abc1234"}' >"$sidecar"
+printf '## Decisions made\n\n- **a/one.md P9**: leftover.\n- r1-S1: fixed, abc1234.\n' >"$body"
 out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
 if [ "$rc" = 1 ] && [[ "$out" == *"a/one.md P14"* ]] && [[ "$out" != *"a/one.md P9,"* ]]; then
   echo "PASS: a sweep PR missing one item from sidecar and body fails the gate, naming it"
 else
   echo "FAIL: sweep item missing — want exit 1 naming 'a/one.md P14', got $rc: $out"; fails=1
 fi
-printf '## Decisions made\n\n- **a/one.md P9**: leftover.\n- **a/one.md P14**: fixed, abc1234.\n' >"$body"
+printf '## Decisions made\n\n- **a/one.md P9**: leftover.\n- **a/one.md P14**: fixed, abc1234.\n- r1-S1: fixed, abc1234.\n' >"$body"
 out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
 if [ "$rc" = 0 ] && [[ "$out" == *"sweep item"* ]]; then
   echo "PASS: a sweep PR accounting for every item passes and says so"

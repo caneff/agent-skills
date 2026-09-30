@@ -83,6 +83,18 @@ def test_a_file_qualified_leftover_id_renders_bare_under_its_own_file():
     assert "**implement/SKILL.md P9**" not in body, body
 
 
+def test_two_undone_sweep_items_render_under_their_original_files():
+    items = [
+        leftover(901, [901], 950, "implement/SKILL.md P9",
+                 "implement/SKILL.md", "T", "hard", "x"),
+        leftover(901, [901], 950, "burndown/runfile.py P10",
+                 "burndown/runfile.py", "T", "low", "y"),
+    ]
+    body = sweep.render_body(items)
+    assert runfile.sweep_items(body) == [
+        "implement/SKILL.md P9", "burndown/runfile.py P10"], body
+
+
 def test_every_field_of_a_leftover_appears_in_the_render():
     items = [leftover(901, [901, 902], 950, "P2", "burndown/loop.py",
                        "Mysterious name", "judgement",

@@ -558,6 +558,23 @@ def test_tally_sidecars_warns_on_an_orphan_disposition():
         assert "orphan" in err
 
 
+def test_tally_sidecars_does_not_warn_on_a_worker_written_sweep_leftover():
+    # #1259: a sweep item's leftover line is keyed `<file> <id>` and no
+    # reviewer raised it, so it is not an orphan.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "skills").mkdir()
+        (root / "skills" / "findings-standards-1.jsonl").write_text("")
+        (root / "skills" / "dispositions-1.jsonl").write_text(
+            json.dumps({"id": "a/one.md P9", "outcome": "leftover", "file": "a/one.md",
+                        "title": "t", "severity": "hard", "text": "x"})
+        )
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            t.tally_sidecars(root)
+        assert "orphan" not in stderr.getvalue(), stderr.getvalue()
+
+
 def test_tally_sidecars_counts_an_over_engineering_cut_as_a_standards_finding():
     # #1021: an OE-id finding and its leftover disposition tally exactly
     # like an S-id one — nothing about the join keys on the id's prefix.

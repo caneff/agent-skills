@@ -294,6 +294,10 @@ def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
 
     resolved_keys = {(repo, issue, fid) for (repo, issue, fid) in findings_by_key}
     for (repo, issue, fid) in dispositions_by_key:
+        # A sweep PR's worker writes `<file> <id>` leftovers for the sweep's
+        # own items (implement/SKILL.md § Review); no finding raised them.
+        if " " in fid:
+            continue
         if (repo, issue, fid) not in resolved_keys:
             print(
                 f"warning: orphan disposition {fid!r} for {repo}#{issue} "

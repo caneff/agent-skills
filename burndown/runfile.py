@@ -579,6 +579,13 @@ def qualified_id(file, fid):
     return f"{file} {fid}"
 
 
+def split_qualified(key):
+    """`(file or None, id)` of a finding id: the inverse of `qualified_id`.
+    An id never holds a space, so the last one splits a `<file> <id>`."""
+    file, _, fid = key.rpartition(" ")
+    return (file or None), fid
+
+
 def stated_outcome(rest):
     """The outcome a line states outright: the disposition word opening the
     text after its first colon outside parentheses, as in `S1 (hard):
@@ -607,15 +614,18 @@ def body_records(body_lines):
     nothing."""
     records = {}
     for n, line in decisions_made(body_lines) or []:
-        ids, rest = cited_ids(line)
+        cites, pos = _cites(line)
+        ids = [fid for _, fid in cites]
+        ids += [m.group(1) for m in _TAIL_ID.finditer(line)]
+        rest = line[pos:]
         words = {normal_outcome(w) for w in
                  re.findall(r"\b" + _OUTCOME_WORD + r"\b", rest, re.IGNORECASE)}
         if ids and words:
             # A file-qualified citation is recorded under its `<file> <id>`
             # as well as the bare id: a sweep item's sidecar line is keyed
             # by the qualified form, since a bare id repeats across files.
-            keys = ids + [qualified_id(file, fid)
-                          for file, fid in _cites(line)[0] if file]
+            keys = ids + [qualified_id(file, fid) for file, fid in cites
+                          if file]
             for key in keys:
                 records.setdefault(key, []).append(
                     (n, stated_outcome(rest), words))
@@ -701,7 +711,7 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
                 "--allow-stale")
     # A sweep item's sidecar line is keyed `<file> <id>`; the bare id a
     # qualified citation is also recorded under is not a second finding.
-    qualified = {h.rsplit(" ", 1)[-1] for h in held if " " in h}
+    qualified = {split_qualified(h)[1] for h in held}
     for fid, found in records.items():
         body_n, stated, _ = found[-1]
         if stated == "leftover" and fid not in held | qualified:
@@ -711,34 +721,41 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
                 "Review's leftover grammar, or pass --allow-stale")
 
 
-_SWEEP_FILE = re.compile(r"##\s+`?([^`\s]+)`?\s*$")
-_SWEEP_ITEM = re.compile(r"-\s+\*\*([^*\s]+)\*\*")
+_SWEEP_FILE = re.compile(r"##\s+(.+?)\s*$")
+_SWEEP_ITEM = re.compile(r"\s*[-*+]\s+\*\*(.+?)\*\*")
+_FENCE = re.compile(r"\s*(```|~~~)")
 
 
 def sweep_items(ticket_text):
     """A sweep ticket's items as `<file> <id>`, in order: the grammar
     `sweep.py render_body` emits — one `## <file>` section per file, one
-    `- **<id>**` bullet per item. The `## Blocked by` declaration is not a
-    file."""
-    items, file = [], None
+    `- **<id>**` bullet per item. A fenced block is skipped, and the
+    `## Blocked by` declaration is not a file. A bullet that kept its own
+    file's prefix reads bare."""
+    items, file, fenced = [], None, False
     for line in ticket_text.splitlines():
+        if _FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
         heading = _SWEEP_FILE.match(line)
         if heading:
-            file = None if heading.group(1) == "Blocked" else heading.group(1)
-            continue
-        if line.startswith("## "):
-            file = None  # a heading that is not a bare file name
+            file = heading.group(1).strip("`")
+            if file.lower() == "blocked by":
+                file = None
             continue
         item = _SWEEP_ITEM.match(line)
         if item and file:
-            items.append(qualified_id(file, item.group(1)))
+            bare = item.group(1).removeprefix(f"{file} ")
+            items.append(qualified_id(file, bare))
     return items
 
 
 def refuse_unaccounted_sweep_items(ticket_path, body_path, sidecar_path):
     """A sweep PR's worker accounts for every item of the sweep ticket: a
     `leftover` line in the sidecar under its `<file> <id>`, or a
-    Decisions made line in the PR body stating another outcome for it (#1259).
+    Decisions made line in the PR body stating it `fixed` (#1259).
     An item in neither is one the next sweep never sees, since
     `leftover` harvests the sidecar and nothing else. Refused by item name."""
     try:
@@ -762,8 +779,7 @@ def refuse_unaccounted_sweep_items(ticket_path, body_path, sidecar_path):
             continue
         found = records.get(item)
         if found:
-            _, stated, words = found[-1]
-            if ({stated} if stated else words) - {"leftover"}:
+            if found[-1][1] == "fixed":
                 continue
         missing.append(item)
     if missing:

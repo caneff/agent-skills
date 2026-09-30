@@ -385,8 +385,10 @@ No PR and no reviewer; Chris reads the log after.
    carried from the sweep's bullet. Decisions made cites it the same way
    (`**<file> <id>**: leftover.`; a bare-named file goes in backticks). These
    lines are the one exception to the next sentence: the worker writes them,
-   since no reviewer raised the item, and the verification pass leaves them
-   in the file beside its own lines. The pre-report gate checks them.
+   since no reviewer raised the item, and the verification pass keeps them
+   (§ 6 of `multi-axis-code-review/SKILL.md` says so in its brief) beside its
+   own lines. `verification-check.sh` does not count them as the pass having
+   run. The pre-report gate checks them.
    Apart from those sweep lines, the worker never writes this file: it is the adversarial read, and the
    worker grading its own homework is not the honest source for it. No
    cost tracking here either.
@@ -448,7 +450,7 @@ time, not from the worker: § The merge.
    verify and passes. The Codex lane writes neither sidecar and runs it with
    `PRE_REPORT_NO_VERIFICATION="<why>"`, named in the PR-up report. On a
    sweep ticket's PR it also refuses, naming it, a sweep item that is neither
-   a sidecar `leftover` line nor recorded as done in the body (#1259).
+   a sidecar `leftover` line nor stated `fixed` in the body (#1259).
 6. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
    prints `false` and `CLEAN` before "PR up" goes out — a PR reported on a
    draft or a conflict fails the controller's merge. `headRefOid` is the sha
