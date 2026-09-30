@@ -29,9 +29,15 @@ optin="$(awk '/^## / { exit } { print }' "$lane" | flatten)"
 build="$(section '^## The build$')"
 reviews="$(section '^## The reviews$')"
 cap="$(section "^## When Codex's own quota runs out$")"
-for pair in "opt-in:$optin" "The build:$build" "The reviews:$reviews" "Codex's own quota:$cap"; do
-  [ -n "${pair#*:}" ] || { echo "FAIL: could not extract § ${pair%%:*} from implement/codex-lane.md" >&2; exit 1; }
-done
+guard() { # guard <section name> <extracted text>
+  [ -n "$2" ] || { echo "FAIL: could not extract § $1 from its doc" >&2; exit 1; }
+}
+entry="$(awk '/^\*\*Codex builds this one\?\*\*/ { on = 1 } on && /^$/ { exit } on { print }' "$here/SKILL.md" | flatten)"
+guard "opt-in" "$optin"
+guard "The build" "$build"
+guard "The reviews" "$reviews"
+guard "Codex's own quota" "$cap"
+guard "SKILL.md Codex routing" "$entry"
 
 fail=0
 check_in() {
@@ -41,7 +47,9 @@ check_in() {
   esac
 }
 
-# Gap 4: the ticket-comment opt-in, owner's own word only.
+# Gap 4: the ticket-comment opt-in, owner's own word only, in the lane doc and
+# in the entry point a worker reads first.
+check_in "$entry" 'a ruling by the owner in a ticket comment' 'SKILL.md routing paragraph'
 check_in "$optin" 'a ruling by the owner in a ticket comment' 'opt-in'
 check_in "$optin" "Another author's comment never opts a build in" 'opt-in'
 
