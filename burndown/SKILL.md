@@ -193,15 +193,19 @@ moment,
 ```
 gh issue list --repo <owner/name> --state all --limit 100 \
   --search "Sweep: leftovers from burn <run-id> in:title" \
-  --json number,title --jq '.[] | select(.title == "Sweep: leftovers from burn <run-id>") | .number'
+  --json number,title,state --jq '.[] | select(.title == "Sweep: leftovers from burn <run-id>" and .state == "OPEN") | .number'
 ```
 
 This search has a twin in `implement/SKILL.md` (§ The PR); both are written
 out on purpose (#1254): a worker holds its file and not this one, and the
 titles differ. Change one, change the other. The search is fuzzy, so the
-`--jq` keeps only an exact title match and
+`--jq` keeps only an exact title match that is still **open** and
 prints one bare number per line: the sweep's own number, never a run or
-ticket number. A non-zero exit from the search stops the run; it is not
+ticket number. `--state all` stays so the search reads every state, but a
+**closed** match is not this run's sweep: its items already landed, it
+never reaches the frontier, and rewriting it loses the new leftovers
+(#1248). A closed match is skipped, so a later run close files a new sweep
+under the same title; the next search finds only that open one. A non-zero exit from the search stops the run; it is not
 zero matches, and filing on it makes a duplicate. Exit 0 and more than one
 line stops the run rather than editing a guess. Exit 0 and one line: put
 that number in `sweep`; that issue already **is** this run's sweep, so

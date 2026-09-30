@@ -91,8 +91,8 @@ check_in "§ The PR" "$the_pr" 'Sweep: leftovers from PR #<n> in:title'
 # #1095: the edit targets the number the search returned, never the PR's
 # own `<n>`; the exact-title filter, the result cap, the failed-search stop
 # and the more-than-one refusal are each pinned by their own clause.
-check_in "§ The PR" "$the_pr" '--json number,title'
-check_in "§ The PR" "$the_pr" 'select(.title == "Sweep: leftovers from PR #<n>")'
+check_in "§ The PR" "$the_pr" '--json number,title,state'
+check_in "§ The PR" "$the_pr" 'select(.title == "Sweep: leftovers from PR #<n>" and .state == "OPEN")'
 check_in "§ The PR" "$the_pr" '--limit 100'
 check_in "§ The PR" "$the_pr" 'gh issue edit "$sweep"'
 check_in "§ The PR" "$the_pr" 'A non-zero exit from the search stops you'
