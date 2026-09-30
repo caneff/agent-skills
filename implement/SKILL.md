@@ -859,12 +859,13 @@ The controller merges on a repo Chris owns; Chris reads it after via
    second pass is judged against below: the diff is only half this pass's
    input, and a requirement commented onto the ticket between the two
    passes moves the other half while the sha sits still.
-   The worker disposes of each one — fixed in a commit (always, for one of
-   § Review's blocking kinds), `disputed: <why>`, filed if it is high, or
-   `leftover`, under § Review's reachability bar first and its severity
-   mapping second — adds each disposition to
-   the PR body's Decisions made section (`gh pr edit <pr> --repo
-   <owner/name> --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md`), and sends "PR up" again.
+   The worker disposes of each one under § Review's reachability bar first
+   and its severity mapping second: one of § Review's blocking kinds as
+   that rule disposes of it, never `leftover`; any other fixed in a commit,
+   `disputed: <why>`, filed if it is high, or `leftover`. It adds each
+   disposition to the PR body's Decisions made section
+   (`gh pr edit <pr> --repo <owner/name> --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md`),
+   and sends "PR up" again.
    Re-run step 2 (not-draft, CLEAN — commits landed since the first check).
 
    **The second pass runs only if the head sha moved or the ticket text
@@ -900,36 +901,38 @@ The controller merges on a repo Chris owns; Chris reads it after via
    before any reaches the worker, as it did the first pass's. **A
    second-pass finding that passes § Review's adjacent-fix rule, or is one
    of § Review's blocking kinds, goes to the worker, who fixes it in one
-   round.** The worker makes each fix in
-   a commit of its own. It records each with § Review's adjacent-fix
-   disposition, or a blocking kind's plain `fixed`, and that sha in the PR
-   body's Decisions made section, and sends "PR up" again. Then the
-   controller reads that fix diff itself, against the finding it answers
-   and the adjacent-fix rule (a blocking kind's fix has no size limit),
-   rather than sending it back to Codex. It re-runs
-   step 2. The fail-closed gate does not refuse the second pass as stale
-   over an in-round fix: the controller's read of the fix diff is the
+   round.** The worker makes each fix in a commit of its own. It records
+   each with § Review's adjacent-fix disposition, or a blocking kind's
+   plain `fixed`, and that sha in the PR body's Decisions made section, and
+   sends "PR up" again. Then the controller reads that fix diff itself,
+   against the finding it answers and the adjacent-fix rule, or a blocking
+   kind's fix against that rule, rather than sending it back to Codex. It
+   re-runs step 2. The fail-closed gate does not refuse the second pass as
+   stale over an in-round fix: the controller's read of the fix diff is the
    review of every commit past the second pass's sha, up to the head it
    read. So the controller records the head sha it read the fix diff at,
    beside the finding it answers: `read at <sha>` appended to that
    finding's line in the PR body's Decisions made (`gh pr edit`, the same
-   body file). Immediately before step 4, the PR's
-   `headRefOid` must still equal that sha. If it moved, the controller
-   reads the new commits the same way and records the new sha, or refuses
-   the merge. A commit the controller has not read never merges. The
-   controller disposes of every other second-pass finding in the PR body itself:
-   `disputed: <why>`, filed if it is high, or `leftover`, under § Review's
-   reachability bar first and its severity mapping second. A fix outside the rule is a change, not a round.
+   body file). Immediately before step 4, the PR's `headRefOid` must still
+   equal that sha. If it moved, the controller reads the new commits the
+   same way and records the new sha, or refuses the merge. A commit the
+   controller has not read never merges. The controller disposes of every
+   other second-pass finding in the PR body itself: `disputed: <why>`,
+   filed if it is high, or `leftover`, under § Review's reachability bar
+   first and its severity mapping second. A fix outside those two rules is
+   a change, not a round.
 
    A third Codex run happens only when a second-pass finding fixed in the
    round was high. The third run is final: its findings are `disputed` or
    `leftover`, except one of § Review's blocking kinds, which goes to the
-   worker for one fix round that the controller reads as it reads a
-   second-pass fix; never a fourth run. That makes a third-run high the one
-   place a high finding is not filed. The third run uses the same block
-   with `phase=third` and posts the same way. The controller disposes of
-   each of its other findings in the PR body.
-   With no high among the second-pass fixes, the controller's own read of
+   worker for one fix round; never a fourth run. For that round the
+   controller reads that fix diff and records `read at <sha>` exactly as
+   for a second-pass fix, so the gate does not refuse the third pass as
+   stale over it. That makes a third-run high the one place a high finding
+   is not filed. The third run uses the same block with `phase=third` and
+   posts the same way. The controller disposes of each of its other
+   findings in the PR body. With no high among the second-pass fixes, the
+   controller's own read of
    the fix diff is the last review, and step 4 follows once every
    disposition is recorded.
 
