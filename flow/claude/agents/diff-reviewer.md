@@ -54,6 +54,8 @@ with a stable `id` (your axis's letter plus an ordinal: `S1`, `P2`, `C3`),
 `axis`, `severity` (`hard` or `judgement`), `file`, and `title` (#855). This
 is the standing brief's own copy of that requirement, not just the caller's
 per-call paste, so a run whose prompt drops the sidecar line still gets one.
+Write it on every run, an empty file when you found nothing (#1257): a missing
+sidecar is read downstream as an axis that never ran.
 A finding of one of `implement/SKILL.md` § Review's blocking kinds opens its
 `title` with `blocking:` and names the kind, so the worker cannot read it as
 a `leftover` (#1252).
