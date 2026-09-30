@@ -79,6 +79,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 from tally_review_axes import (
     _OUTCOME_DETAIL_FIELD, ALL_AXES, REVIEWS_ROOT, _walk_cache_layout, find_sidecar_files, fold_repo,
@@ -324,7 +325,7 @@ def new_row(row_id, repo, tickets, row_type, rnd, run_id, findings, findings_sta
                        "model": {"status": "known"} if model else
                        {"status": "unknown", "reason": "not in the sidecars or the transcripts"},
                        "findings": findings_status},
-            "sources": sources, "mappings": list(mappings)},
+            "sources": sources, "mappings": [m.as_row() for m in mappings]},
         **(extra or {})}
 
 
@@ -407,26 +408,43 @@ def _read_sidecar(path: Path, skipped: list) -> tuple[list[dict], int]:
     return rows, lost
 
 
-def normalise_outcome(disp: dict) -> tuple[str, bool, dict, dict | None]:
-    """(outcome, partial, outcome_status, mapping) for one dispositions line."""
+class Mapping(NamedTuple):
+    """A label the harvest rewrote: what it read and what it took it for."""
+    source: str
+    to: str
+
+    def as_row(self) -> dict:
+        return {"from": self.source, "to": self.to}
+
+
+class Joined(NamedTuple):
+    """One finding's joined outcome, with the mapping that produced it, if any."""
+    outcome: str
+    partial: bool
+    status: dict
+    mapping: Mapping | None = None
+
+    @classmethod
+    def unknown(cls, reason: str, mapping: Mapping | None = None) -> "Joined":
+        return cls("unknown", False, {"status": "unknown", "reason": reason}, mapping)
+
+
+def normalise_outcome(disp: dict) -> Joined:
+    """The joined outcome of one dispositions line."""
     label = disp.get("outcome")
     if not isinstance(label, str):
-        return "unknown", False, {"status": "unknown", "reason": f"unmapped outcome {label!r}"}, \
-            {"from": repr(label), "to": "unknown"}
+        return Joined.unknown(f"unmapped outcome {label!r}", Mapping(repr(label), "unknown"))
     if label in _OUTCOME_DETAIL_FIELD:
-        return label, False, {"status": "known"}, None
+        return Joined(label, False, {"status": "known"})
     if label in PARTIAL_LABELS:
-        return PARTIAL_LABELS[label], True, {"status": "known"}, {"from": label, "to": "fixed+partial"}
+        return Joined(PARTIAL_LABELS[label], True, {"status": "known"}, Mapping(label, "fixed+partial"))
     if label in NOT_FIXED_LABELS:
         words = " ".join(str(disp.get(k) or "") for k in ("reason", "text")).lower()
         if not words.strip():
-            return "unknown", False, {
-                "status": "unknown", "reason": f"{label!r} carries no reason or text to read"}, \
-                {"from": label, "to": "unknown"}
+            return Joined.unknown(f"{label!r} carries no reason or text to read", Mapping(label, "unknown"))
         to = "disputed" if any(m in words for m in DISPUTE_MARKERS) else "leftover"
-        return to, False, {"status": "known"}, {"from": label, "to": to}
-    return "unknown", False, {"status": "unknown", "reason": f"unmapped outcome {label!r}"}, \
-        {"from": label, "to": "unknown"}
+        return Joined(to, False, {"status": "known"}, Mapping(label, to))
+    return Joined.unknown(f"unmapped outcome {label!r}", Mapping(label, "unknown"))
 
 
 def _tokens(title: str) -> frozenset:
@@ -448,6 +466,13 @@ def _reviewer(row_type: str) -> str:
     """The reviewer that wrote a row: OE findings come from the standards run, and the
     Codex phases are one reviewer, so a second pass re-raising a gate finding shares nothing."""
     return "standards" if row_type == "over-engineering" else "codex" if row_type.startswith("codex-") else row_type
+
+
+class MatchSide(NamedTuple):
+    """One finding of an overlap match, with the review type that raised it."""
+    type: str
+    id: str
+    title: str
 
 
 def mark_overlap(rows: list[dict], matches: list[dict], restatements: list[dict]) -> None:
@@ -477,7 +502,8 @@ def mark_overlap(rows: list[dict], matches: list[dict], restatements: list[dict]
                 if _reviewer(ri["type"]) == _reviewer(rj["type"]) or not titles_match(fi, fj):
                     continue
                 pair = {"repo": repo, "ticket": ticket, "file": fi["file"],
-                        "a": (ri["type"], fi["id"], fi["title"]), "b": (rj["type"], fj["id"], fj["title"])}
+                        "a": MatchSide(ri["type"], fi["id"], fi["title"]),
+                        "b": MatchSide(rj["type"], fj["id"], fj["title"])}
                 if "verification" in (ri["type"], rj["type"]):
                     restated.add(i if ri["type"] == "verification" else j)
                     restatements.append(pair)
@@ -586,14 +612,14 @@ def _ticket_groups(dispositions: dict[str, dict], ticket: int) -> list[str]:
     return [g for g in sorted(dispositions) if str(ticket) in g.split("-")]
 
 
-def _tally_mapping(mapping: dict | None, mappings: Counter, unmapped: Counter) -> None:
+def _tally_mapping(mapping: Mapping | None, mappings: Counter, unmapped: Counter) -> None:
     if mapping:
-        (unmapped if mapping["to"] == "unknown" else mappings)[f"{mapping['from']} -> {mapping['to']}"] += 1
+        (unmapped if mapping.to == "unknown" else mappings)[mapping] += 1
 
 
-def _finding_entry(fid, severity, outcome, partial, status, file, title) -> dict:
-    return {"id": fid, "severity": severity, "severity_status": {"status": "known"}, "outcome": outcome,
-            "outcome_status": status, "partial": partial, "file": file, "title": title}
+def _finding_entry(fid, severity, joined: Joined, file, title) -> dict:
+    return {"id": fid, "severity": severity, "severity_status": {"status": "known"}, "outcome": joined.outcome,
+            "outcome_status": joined.status, "partial": joined.partial, "file": file, "title": title}
 
 
 def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dict[str, dict[str, dict]],
@@ -625,7 +651,7 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
             unharvested.append(f"{where} (phase {rec['phase']!r} has no review type)")
             continue
         if rec["phase"] != phase:
-            mappings[f"phase {rec['phase']} -> codex-{phase}"] += 1
+            mappings[Mapping(f"phase {rec['phase']}", f"codex-{phase}")] += 1
         ticket, stem = rec["ticket"], name.removesuffix(".json")
         out_path = repo_dir / (stem + ".out")
         out = out_path.read_text(errors="replace") if out_path.exists() else None
@@ -652,23 +678,19 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
                     label, g, disp = hits[0]
                     key = (g, f"codex-{phase}-{label}")
                     if key in credited:
-                        outcome, partial, ostatus = "unknown", False, {
-                            "status": "unknown", "reason": f"{key[1]} already credits {credited[key]}"}
+                        outcome = Joined.unknown(f"{key[1]} already credits {credited[key]}")
                     else:
                         credited[key] = stem
                         joined.add(key)
-                        outcome, partial, ostatus, mapping = normalise_outcome(disp)
+                        outcome = normalise_outcome(disp)
                         if not label.isdigit():
-                            mappings[f"codex label {label[0]}<k> -> k-th finding of that severity"] += 1
-                        _tally_mapping(mapping, mappings, unmapped)
+                            mappings[Mapping(f"codex label {label[0]}<k>", "k-th finding of that severity")] += 1
+                        _tally_mapping(outcome.mapping, mappings, unmapped)
                 elif hits:
-                    outcome, partial, ostatus = "unknown", False, {
-                        "status": "unknown", "reason": f"labels {' and '.join(h[0] for h in hits)} both name this finding"}
+                    outcome = Joined.unknown(f"labels {' and '.join(h[0] for h in hits)} both name this finding")
                 else:
-                    outcome, partial, ostatus = "unknown", False, {
-                        "status": "unknown", "reason": f"no dispositions line codex-{phase}-{labels[0]} or -{labels[1]}"}
-                findings.append(_finding_entry(f"codex-{phase}-{k}", f["severity"], outcome, partial, ostatus,
-                                               f["file"], f["title"]))
+                    outcome = Joined.unknown(f"no dispositions line codex-{phase}-{labels[0]} or -{labels[1]}")
+                findings.append(_finding_entry(f"codex-{phase}-{k}", f["severity"], outcome, f["file"], f["title"]))
             if findings:
                 sources += [f"{repo_dir.name}/dispositions-{g}.jsonl" for g in groups]
         rows.append(new_row(
@@ -739,7 +761,7 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
             axis, group, name_round = parsed
             tickets = [int(t) for t in group.split("-")]
             if axis == "verify":
-                mappings["verify -> verification (axis in filename)"] += 1
+                mappings[Mapping("verify", "verification (axis in filename)")] += 1
             base = "verification" if axis in ("verify", "verification") else axis
             path = cache / repo_dir / name
             raw_findings, lost = _read_sidecar(path, skipped)
@@ -759,19 +781,17 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
                 rm = _ROUND_ID_RE.match(raw["id"])
                 key = (row_type, int(rm.group(1)) if rm else name_round)
                 if file_dispositions is None:
-                    outcome, partial, status, mapping = "unknown", False, {
-                        "status": "unknown", "reason": f"no dispositions file for ticket {group}"}, None
+                    outcome = Joined.unknown(f"no dispositions file for ticket {group}")
                 elif raw["id"] not in file_dispositions:
-                    outcome, partial, status, mapping = "unknown", False, {
-                        "status": "unknown", "reason": f"no disposition line for {raw['id']}"}, None
+                    outcome = Joined.unknown(f"no disposition line for {raw['id']}")
                 else:
                     joined.add((group, raw["id"]))
-                    outcome, partial, status, mapping = normalise_outcome(file_dispositions[raw["id"]])
-                _tally_mapping(mapping, mappings, unmapped)
-                if mapping:
-                    row_mappings.setdefault(key, []).append(mapping)
+                    outcome = normalise_outcome(file_dispositions[raw["id"]])
+                _tally_mapping(outcome.mapping, mappings, unmapped)
+                if outcome.mapping:
+                    row_mappings.setdefault(key, []).append(outcome.mapping)
                 by_type.setdefault(key, []).append(_finding_entry(
-                    raw["id"], raw["severity"], outcome, partial, status, raw["file"], raw["title"]))
+                    raw["id"], raw["severity"], outcome, raw["file"], raw["title"]))
             # A file named for round 1 whose every id says round 2 holds no round-1 run.
             base_key = (base, name_round)
             if not by_type[base_key] and len(by_type) > 1 and all(rnd != name_round for _, rnd in by_type if _ != base or rnd != name_round):
@@ -825,16 +845,15 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
 
 def review_file_text(facts: dict) -> str:
     def table(counter):
-        return "\n".join(f"- `{k.split(' -> ')[0]}` -> {k.split(' -> ', 1)[1]}: {n}"
-                         for k, n in sorted(counter.items())) or "- none"
+        return "\n".join(f"- `{k.source}` -> {k.to}: {n}" for k, n in sorted(counter.items())) or "- none"
 
     def bullets(items):
         return "\n".join(f"- {i}" for i in items) or "- none"
 
     def match_lines(found):
         return "\n".join(
-            f"- {m['repo']} #{m['ticket']} `{m['file']}`: {m['a'][0]} {m['a'][1]} \"{m['a'][2]}\""
-            f" = {m['b'][0]} {m['b'][1]} \"{m['b'][2]}\""
+            f"- {m['repo']} #{m['ticket']} `{m['file']}`: {m['a'].type} {m['a'].id} \"{m['a'].title}\""
+            f" = {m['b'].type} {m['b'].id} \"{m['b'].title}\""
             for m in sorted(found, key=lambda m: (m["repo"], m["ticket"], m["a"], m["b"]))) or "- none"
 
     matches = match_lines(facts["matches"])
