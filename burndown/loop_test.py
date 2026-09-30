@@ -2259,6 +2259,22 @@ def test_workspace_diff_lists_files_changed_against_the_origin_default():
             raise AssertionError("a missing workspace was read as no diff")
 
 
+def test_workspace_diff_includes_uncommitted_and_untracked_edits_1254():
+    # #1212 P2: a worker that has not committed yet has still reached its
+    # files; the committed history alone reads it as touching nothing.
+    with tempfile.TemporaryDirectory() as tmp:
+        work = make_workspace(tmp, ["b.txt"])
+        with open(os.path.join(work, "a.txt"), "w") as fh:
+            fh.write("edited, unstaged")
+        with open(os.path.join(work, "staged.txt"), "w") as fh:
+            fh.write("s")
+        run_in(work, "git", "add", "staged.txt")
+        with open(os.path.join(work, "untracked.txt"), "w") as fh:
+            fh.write("u")
+        assert sorted(loop.workspace_diff(work)) == [
+            "a.txt", "b.txt", "staged.txt", "untracked.txt"]
+
+
 def test_workspace_diff_names_both_sides_of_a_rename():
     # #1212 C1: a candidate naming the old path collides with the rename.
     with tempfile.TemporaryDirectory() as tmp:

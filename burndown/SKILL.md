@@ -84,8 +84,8 @@ too.
    `--run <run-id>` is required, and dispatch reads it from the run file by
    the clump's lowest ticket, ignoring any `job` in the in-flight file.
    `loop.py dispatch` then unions each unlanded in-flight workspace's real
-   `git diff --name-only origin/<default>...HEAD` into that closure (#1212),
-   so a file the worker reached that no candidate list named still holds
+   `git diff --name-only origin/<default>...HEAD`, its uncommitted edits and
+   its untracked files into that closure (#1212), so a file the worker reached that no candidate list named still holds
    the clumps that share it; a diff it cannot read refuses the tick. A clump whose closure intersects a
    live workspace's is **off the frontier**: `loop.py dispatch` picks from
    what is left, **widest closure first** so a wide clump does not sit
@@ -318,7 +318,9 @@ directive and its generator command in `AGENTS.md`; the resolver follows
 that declaration one hop and **never runs the generator**. A repo that declares nothing is
 clumped conservatively by directory subtree, and the run's **opening report
 carries the announcement line** the reader returns, so a controller can see
-which of the three modes it got. The grammar and the evidence:
+which of the three modes it got. An in-flight clump's file set is wider than
+its closure by the time a dispatch reads it: the run loop's step 5 unions in
+its workspace's real diff. The grammar and the evidence:
 [`references/closure.md`](references/closure.md).
 
 ## Tier tagging
