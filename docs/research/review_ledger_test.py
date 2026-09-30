@@ -306,8 +306,9 @@ class HarvestTest(Case):
 
     def test_cost_fields_are_unknown_never_zero(self):
         for row in self.rows().values():
-            for field in ("tokens", "wall_clock", "usage_delta"):
-                self.assertEqual(row["cost"][field]["status"], "unknown")
+            for field in ("tokens", "wall_clock"):
+                want = "inside-standards" if row["type"] == "over-engineering" else "unknown"
+                self.assertEqual(row["cost"][field]["status"], want)
                 self.assertNotIn("value", row["cost"][field])
 
     def test_dispositions_with_no_finding_are_listed_not_dropped(self):
@@ -319,6 +320,240 @@ class HarvestTest(Case):
 
     def test_no_mutation_rows(self):
         self.assertFalse(any("mutation" in r["type"] for r in self.rows().values()))
+
+
+class VerificationOverlapTest(Case):
+    """Ruling 8 (P6 on PR #1275): the verification pass never counts toward
+    overlap for a round-1 finding it re-checks."""
+    def setUp(self):
+        super().setUp()
+        cache = self.tmp / "cache"
+        skills = cache / "skills"
+        write_jsonl(skills / "findings-standards-200.jsonl", [finding("S1", "hard", "a.py", "Widget leak on close")])
+        write_jsonl(skills / "findings-verify-200.jsonl", [
+            finding("V1", "judgement", "a.py", "widget leak on close", axis="verify"),
+            finding("V2", "judgement", "b.py", "Fix left a stale docstring", axis="verify")])
+        write_jsonl(skills / "dispositions-200.jsonl", [
+            {"id": "S1", "outcome": "fixed", "sha": "e"}, {"id": "V1", "outcome": "fixed", "sha": "e"},
+            {"id": "V2", "outcome": "fixed", "sha": "e"}])
+        self.harvest(cache)
+
+    def find(self, kind, fid):
+        row = next(r for r in self.rows().values() if r["type"] == kind)
+        return next(f for f in row["findings"] if f["id"] == fid)
+
+    def test_restated_round_one_finding_stays_unique_on_both_sides(self):
+        for kind, fid in (("standards", "S1"), ("verification", "V1")):
+            f = self.find(kind, fid)
+            self.assertEqual((f["overlap"], f["k"]), ("unique", 1), fid)
+
+    def test_finding_the_verification_pass_raises_new_keeps_its_credit(self):
+        f = self.find("verification", "V2")
+        self.assertEqual((f["overlap"], f["k"]), ("unique", 1))
+
+    def test_restatement_is_not_written_as_an_overlap_match(self):
+        section = self.review.read_text().split("## Overlap matches")[1].split("\n## ")[0]
+        self.assertNotIn("Widget leak", section)
+
+
+def usage(inp, out, cw, cr):
+    return {"input_tokens": inp, "output_tokens": out,
+            "cache_creation_input_tokens": cw, "cache_read_input_tokens": cr}
+
+
+def transcript(root: Path, project: str, agent: str, description: str, first: str, lines: list,
+               agent_type="diff-reviewer", session="s1"):
+    """One subagent transcript. `lines` are (timestamp, message id, usage or None) triples;
+    a repeated message id is one streamed message written as several lines."""
+    d = root / project / session / "subagents"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"agent-{agent}.meta.json").write_text(json.dumps(
+        {"agentType": agent_type, "description": description, "model": "opus"}))
+    out = [{"type": "user", "timestamp": lines[0][0], "message": {"role": "user", "content": first}}]
+    for ts, mid, u in lines:
+        msg = {"role": "assistant", "id": mid, "model": "claude-opus-5-5", "content": []}
+        if u is not None:
+            msg["usage"] = u
+        out.append({"type": "assistant", "timestamp": ts, "message": msg})
+    (d / f"agent-{agent}.jsonl").write_text("".join(json.dumps(o) + "\n" for o in out))
+
+
+def wt(repo_path: str, n: int) -> str:
+    """The project directory Claude Code names for a worktree."""
+    return f"{repo_path}--claude-worktrees-implement-{n}"
+
+
+SKILLS_PROJ = "-home-u--agents-skills"
+OTHER_PROJ = "-home-u-src-otherrepo"
+
+
+def build_cost_fixture(root: Path) -> tuple[Path, Path]:
+    cache, tr = root / "cache", root / "projects"
+    skills, other = cache / "skills", cache / "otherrepo"
+    for n in (400, 401, 402, 405):
+        write_jsonl(skills / f"findings-standards-{n}.jsonl" if n != 405 else skills / "findings-spec-405.jsonl",
+                    [finding("S1" if n != 405 else "P1", "hard", "a.py", f"Thing {n}")])
+        write_jsonl(skills / f"dispositions-{n}.jsonl",
+                    [{"id": "S1" if n != 405 else "P1", "outcome": "fixed", "sha": "e"}])
+    write_jsonl(skills / "findings-standards-400.jsonl", [
+        finding("S1", "hard", "a.py", "Thing 400"), finding("OE1", "judgement", "c.py", "Wrapper")])
+    write_jsonl(skills / "dispositions-400.jsonl", [
+        {"id": "S1", "outcome": "fixed", "sha": "e"}, {"id": "OE1", "outcome": "fixed", "sha": "e"}])
+    write_jsonl(skills / "findings-spec-400.jsonl", [finding("P1", "judgement", "d.py", "Spec thing", axis="spec")])
+    write_jsonl(skills / "findings-correctness-400.jsonl", [
+        finding("C1", "judgement", "e.py", "Corr thing", axis="correctness")])
+    write_jsonl(skills / "dispositions-400.jsonl", [
+        {"id": i, "outcome": "fixed", "sha": "e"} for i in ("S1", "OE1", "P1", "C1")])
+    write_jsonl(skills / "findings-verify-403.jsonl", [finding("V1", "judgement", "v.py", "Hollow", axis="verify")])
+    write_jsonl(skills / "dispositions-403.jsonl", [{"id": "V1", "outcome": "fixed", "sha": "e"}])
+    write_jsonl(skills / "findings-standards-404-r2.jsonl", [finding("r2-S1", "hard", "r.py", "Round two")])
+    write_jsonl(skills / "dispositions-404.jsonl", [{"id": "r2-S1", "outcome": "fixed", "sha": "e"}])
+    write_jsonl(other / "findings-standards-400.jsonl", [finding("S1", "hard", "o.py", "Other repo")])
+    write_jsonl(other / "dispositions-400.jsonl", [{"id": "S1", "outcome": "fixed", "sha": "e"}])
+    p400 = wt(SKILLS_PROJ, 400)
+    # Standards: one streamed message (two lines, the second final) and one more; 330 s.
+    transcript(tr, p400, "std", "Standards axis review of #400 diff", "Axis: **Standards**. Repo: x", [
+        ("2026-09-20T10:00:00.000Z", "m1", usage(2, 1, 100, 10)),
+        ("2026-09-20T10:00:05.000Z", "m1", usage(2, 50, 100, 10)),
+        ("2026-09-20T10:05:30.000Z", "m2", usage(3, 70, 20, 200))])
+    transcript(tr, p400, "spec", "Spec review #400", "Repo: x", [
+        ("2026-09-20T10:00:00.000Z", "m1", usage(10, 20, 30, 40)),
+        ("2026-09-20T10:01:00.000Z", "m2", usage(0, 0, 0, 0))])
+    # A generic description: the axis comes from the first message.
+    transcript(tr, p400, "cor", "Reviewer", "Axis: correctness. Repo: x", [
+        ("2026-09-20T10:00:00.000Z", "m1", usage(1, 2, 3, 4))])
+    transcript(tr, wt(OTHER_PROJ, 400), "oth", "Standards review #400", "Repo: y", [
+        ("2026-09-21T09:00:00.000Z", "m1", usage(7, 7, 7, 7))])
+    transcript(tr, wt(SKILLS_PROJ, 402), "nou", "Standards review #402", "Repo: x", [
+        ("2026-09-20T11:00:00.000Z", "m1", None), ("2026-09-20T11:02:00.000Z", "m2", None)])
+    transcript(tr, wt(SKILLS_PROJ, 403), "ver", "Verification pass", "Verification of round 1", [
+        ("2026-09-20T12:00:00.000Z", "m1", usage(5, 5, 5, 5))])
+    transcript(tr, wt(SKILLS_PROJ, 404), "rnd", "Standards review round-2 #404", "Repo: x", [
+        ("2026-09-20T13:00:00.000Z", "m1", usage(6, 6, 6, 6))])
+    transcript(tr, wt(SKILLS_PROJ, 405), "sp1", "Spec review #405", "Repo: x", [
+        ("2026-09-20T14:00:00.000Z", "m1", usage(1, 1, 1, 1))])
+    transcript(tr, wt(SKILLS_PROJ, 405), "sp2", "Spec review #405 retry", "Repo: x", [
+        ("2026-09-20T14:10:00.000Z", "m1", usage(2, 2, 2, 2))], session="s2")
+    # A verification pass whose findings sidecar was never written: still a run.
+    transcript(tr, wt(SKILLS_PROJ, 406), "vno", "Verify dispositions #406", "Repo: x", [
+        ("2026-09-20T15:00:00.000Z", "m1", usage(9, 9, 9, 9))])
+    # Not attributable: no ticket anywhere.
+    transcript(tr, SKILLS_PROJ, "lost", "Standards review", "Repo: x", [
+        ("2026-09-20T16:00:00.000Z", "m1", usage(99, 99, 99, 99))])
+    # Not a diff-reviewer: ignored.
+    transcript(tr, p400, "gp", "Standards review #400", "Repo: x", [
+        ("2026-09-20T16:00:00.000Z", "m1", usage(500, 500, 500, 500))], agent_type="general-purpose")
+    (tr / p400 / "s1" / "subagents" / "agent-bad.meta.json").write_text("")
+    return cache, tr
+
+
+class CostHarvestTest(Case):
+    def setUp(self):
+        super().setUp()
+        self.cache, self.tr = build_cost_fixture(self.tmp)
+        self.ledger = self.tmp / "ledger.jsonl"
+        self.review = self.tmp / "review.md"
+        r = run("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", self.ledger,
+                "--review-file", self.review, home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def cost(self, row_id):
+        return self.rows()[row_id]["cost"]
+
+    def test_tokens_by_kind_from_the_axis_transcript_deduping_streamed_lines(self):
+        t = self.cost("skills/400/standards/1/findings-standards-400")["tokens"]
+        self.assertEqual(t, {"status": "known", "input": 5, "output": 120, "cache_write": 120, "cache_read": 210})
+
+    def test_two_reviewers_of_one_pr_each_get_their_own_transcript(self):
+        spec = self.cost("skills/400/spec/1/findings-spec-400")["tokens"]
+        corr = self.cost("skills/400/correctness/1/findings-correctness-400")["tokens"]
+        self.assertEqual((spec["input"], spec["output"], spec["cache_write"], spec["cache_read"]), (10, 20, 30, 40))
+        self.assertEqual((corr["input"], corr["output"], corr["cache_write"], corr["cache_read"]), (1, 2, 3, 4))
+
+    def test_the_same_ticket_number_in_another_repo_is_not_mixed_in(self):
+        other = self.cost("otherrepo/400/standards/1/findings-standards-400")["tokens"]
+        self.assertEqual(other["input"], 7)
+        self.assertEqual(self.cost("skills/400/standards/1/findings-standards-400")["tokens"]["input"], 5)
+
+    def test_wall_clock_is_first_to_last_timestamp(self):
+        w = self.cost("skills/400/standards/1/findings-standards-400")["wall_clock"]
+        self.assertEqual((w["status"], w["seconds"]), ("known", 330))
+        self.assertEqual((w["start"], w["end"]), ("2026-09-20T10:00:00.000Z", "2026-09-20T10:05:30.000Z"))
+
+    def test_row_model_is_read_from_the_transcript(self):
+        self.assertEqual(self.rows()["skills/400/spec/1/findings-spec-400"]["model"], "claude-opus-5-5")
+
+    def test_round_two_transcript_attributes_to_the_round_two_row(self):
+        self.assertEqual(self.cost("skills/404/standards/2/findings-standards-404-r2")["tokens"]["input"], 6)
+
+    def test_verification_transcript_attributes_to_the_verify_sidecar_row(self):
+        self.assertEqual(self.cost("skills/403/verification/1/findings-verify-403")["tokens"]["input"], 5)
+
+    def test_transcript_without_usage_is_unknown_tokens_never_zero(self):
+        c = self.cost("skills/402/standards/1/findings-standards-402")
+        self.assertEqual(c["tokens"]["status"], "unknown")
+        self.assertIn("usage", c["tokens"]["reason"])
+        for kind in ("input", "output", "cache_write", "cache_read"):
+            self.assertNotIn(kind, c["tokens"])
+        self.assertEqual(c["wall_clock"]["seconds"], 120)
+
+    def test_axis_run_with_no_transcript_is_unknown_never_zero(self):
+        c = self.cost("skills/401/standards/1/findings-standards-401")
+        for field in ("tokens", "wall_clock"):
+            self.assertEqual(c[field]["status"], "unknown", field)
+            self.assertIn("no transcript", c[field]["reason"])
+            self.assertNotIn("input", c[field])
+            self.assertNotIn("seconds", c[field])
+
+    def test_two_transcripts_for_one_row_are_summed_and_both_listed(self):
+        row = self.rows()["skills/405/spec/1/findings-spec-405"]
+        self.assertEqual(row["cost"]["tokens"]["input"], 3)
+        self.assertEqual(len([s for s in row["status"]["sources"] if "agent-" in s]), 2)
+
+    def test_over_engineering_cost_stays_inside_standards(self):
+        oe = self.cost("skills/400/over-engineering/1/findings-standards-400")
+        self.assertEqual(oe["tokens"]["status"], "inside-standards")
+        self.assertEqual(oe["wall_clock"]["status"], "inside-standards")
+        self.assertNotIn("input", oe["tokens"])
+
+    def test_verification_run_without_a_sidecar_gets_its_own_row(self):
+        row = next(r for rid, r in self.rows().items() if r["type"] == "verification" and r["ticket"] == 406)
+        self.assertEqual(row["cost"]["tokens"]["input"], 9)
+        self.assertEqual(row["findings"], [])
+        self.assertEqual(row["status"]["fields"]["findings"]["status"], "unknown")
+
+    def test_unattributable_transcripts_are_listed_with_a_reason_not_dropped(self):
+        section = self.review.read_text().split("## Transcripts not attributed")[1].split("\n## ")[0]
+        self.assertIn("agent-lost", section)
+        self.assertIn("no ticket", section)
+        self.assertIn("agent-bad", section)
+        self.assertNotIn("agent-gp", section)  # a non diff-reviewer is out of scope, not a failure
+
+    def test_unattributed_spend_is_in_no_row(self):
+        total = sum(r["cost"]["tokens"].get("input", 0) for r in self.rows().values())
+        self.assertNotIn(99, [r["cost"]["tokens"].get("input") for r in self.rows().values()])
+        self.assertNotIn(500, [r["cost"]["tokens"].get("input") for r in self.rows().values()])
+        self.assertEqual(total, 5 + 10 + 1 + 7 + 5 + 6 + 3 + 9)
+
+    def test_reharvest_gives_the_same_ledger(self):
+        first = self.ledger.read_text()
+        r = run("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", self.ledger,
+                "--review-file", self.review, home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.ledger.read_text(), first)
+
+    def test_missing_explicit_transcripts_tree_fails_loud(self):
+        r = run("harvest", "--cache", self.cache, "--transcripts", self.tmp / "nope", "--ledger",
+                self.tmp / "l2.jsonl", "--review-file", self.tmp / "r2.md", home=self.home)
+        self.assertEqual(r.returncode, 2)
+
+    def test_default_transcripts_tree_missing_is_unknown_cost_not_a_failure(self):
+        r = run("harvest", "--cache", self.cache, "--ledger", self.tmp / "l3.jsonl",
+                "--review-file", self.tmp / "r3.md", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = [json.loads(x) for x in (self.tmp / "l3.jsonl").read_text().splitlines()]
+        self.assertTrue(all(r["cost"]["tokens"]["status"] in ("unknown", "inside-standards") for r in rows))
+        self.assertIn("not found", rows[0]["cost"]["tokens"].get("reason", "not found"))
 
 
 class HarvestRerunTest(Case):
