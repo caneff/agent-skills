@@ -111,6 +111,9 @@ def build_cache(root: Path) -> None:
     (skills / "findings-spec-111.jsonl").write_text(
         json.dumps(finding("P1", "judgement", "q.py", "Half written", axis="spec")) + '\n{"id": "P2", "sev')
     write_jsonl(skills / "dispositions-111.jsonl", [{"id": "P1", "outcome": "fixed", "sha": "e"}])
+    # 112: a plainly named file whose every id is round 2 holds no round-1 run.
+    write_jsonl(skills / "findings-spec-112.jsonl", [finding("r2-P1", "judgement", "w.py", "Later round", axis="spec")])
+    write_jsonl(skills / "dispositions-112.jsonl", [{"id": "r2-P1", "outcome": "fixed", "sha": "e"}])
     # A scratch directory is not a review directory.
     write_jsonl(root / "scratch-9" / "findings-spec-999.jsonl", [
         finding("P1", "hard", "x.py", "scratch", axis="spec"),
@@ -171,6 +174,7 @@ class HarvestTest(Case):
             "skills/107/spec/1/findings-spec-107-108",
             "skills/110/correctness/1/findings-correctness-110",
             "skills/111/spec/1/findings-spec-111",
+            "skills/112/spec/2/findings-spec-112",
         ])
 
     def test_oe_finding_leaves_the_standards_row(self):
@@ -325,7 +329,7 @@ class HarvestRerunTest(Case):
         first = self.ledger.read_text()
         self.harvest(cache)
         self.assertEqual(self.ledger.read_text(), first)
-        self.assertEqual(len(first.splitlines()), 16)
+        self.assertEqual(len(first.splitlines()), 17)
 
     def test_a_row_no_longer_in_the_cache_leaves_the_ledger(self):
         cache = self.tmp / "cache"
@@ -333,7 +337,7 @@ class HarvestRerunTest(Case):
         self.harvest(cache)
         (cache / "skills" / "findings-standards-101.jsonl").rename(cache / "skills" / "notes-101.txt")
         self.harvest(cache)
-        self.assertEqual(len(self.ledger.read_text().splitlines()), 15)
+        self.assertEqual(len(self.ledger.read_text().splitlines()), 16)
         self.assertNotIn("skills/101/standards/1/findings-standards-101", self.ledger.read_text())
 
     def test_rows_not_written_by_harvest_survive_a_reharvest(self):

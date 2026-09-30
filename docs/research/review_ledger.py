@@ -268,6 +268,10 @@ def harvest_cache(cache: Path) -> tuple[list[dict], dict]:
                     "id": raw["id"], "severity": raw["severity"], "severity_status": {"status": "known"},
                     "outcome": outcome, "outcome_status": status, "partial": partial,
                     "file": raw["file"], "title": raw["title"]})
+            # A file named for round 1 whose every id says round 2 holds no round-1 run.
+            base_key = (base, name_round)
+            if not by_type[base_key] and len(by_type) > 1 and all(rnd != name_round for _, rnd in by_type if _ != base or rnd != name_round):
+                del by_type[base_key]
             if lost:
                 findings_status = {"status": "unknown", "reason": f"{lost} unreadable line(s) in the sidecar"}
             elif not raw_findings:
