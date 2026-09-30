@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """The frontier of a ticket queue: `python3 burndown/frontier.py <owner/repo>
-<label>` prints the open, unclaimed, dispatchable tickets split four ways —
+<label>` prints the open, unclaimed, dispatchable tickets split five ways —
 
     unblocked   <n> <title>
     blocked     <n> <title>  (blocked by #a, #b)
     unresolved  <n> <title>  (<why>)
     spec        <n> <title>  (a spec parent: dispatch with ... --spec <n> ...)
+    slice       <n> <title>  (a slice of spec #<p>: hand off with ... --spec <p> ...)
 
 Three sources, in order: the tracker's native dependencies where it has them
 (`issue_dependencies_summary.blocked_by`, open blockers only, the live gate),
@@ -86,6 +87,14 @@ NON_DISPATCHABLE_LABELS = frozenset({"needs-info"})
 # blocking state when what it needs is a different verb. Both would be a
 # lie about what the entry is, so it gets its own bucket (#910).
 SPEC_LABEL = "spec"
+
+# A slice is the other half of that verb (#1242). The spec parent need not
+# carry the queried label — burn-2026-09-27's carried `spec` alone — so the
+# parent never reaches this reader as a candidate, and its slices would read
+# as ordinary unblocked tickets and be built one by one. The slice is found
+# from its side: its parent, by the sub-issue endpoint or a `Part of #<n>`
+# line, carries `spec`.
+_PART_OF = re.compile(r"^ {0,3}Part of #(\d+)\b", re.IGNORECASE)
 
 
 class FrontierError(Exception):
@@ -228,14 +237,31 @@ def _native(issue):
     return bool(summary.get("blocked_by") or 0)
 
 
-def classify(issues, state_of):
-    """`{unblocked, blocked, unresolved, spec}` over GitHub issue objects.
-    `state_of(number) -> "open" | "closed" | None` reads a blocker's state;
-    `None` means it could not be read, which is unresolved rather than a
-    guess. A claimed ticket, a ticket carrying a non-dispatchable label,
-    and anything that is really a PR, is in no bucket at all — each is off
-    the frontier by its own nature, not by a blocking relationship."""
-    buckets = {"unblocked": [], "blocked": [], "unresolved": [], "spec": []}
+def _handoff(number):
+    """The one verb a spec run is dispatched by, for a spec parent's own
+    entry and for each of its slices'."""
+    return f"`implement-dispatch --spec {number} --slots <k>`"
+
+
+def _is_clear(name, stated):
+    """Whether a ticket's own blocking state leaves it free to be handed off
+    by a verb: unblocked, or silent. `blocked` outranks the verb, and a
+    stated declaration this reader could not resolve is not silence."""
+    return name == "unblocked" or (name == "unresolved" and not stated)
+
+
+def classify(issues, state_of, parent_of=lambda ticket: None):
+    """`{unblocked, blocked, unresolved, spec, slice}` over GitHub issue
+    objects. `state_of(number) -> "open" | "closed" | None` reads a blocker's
+    state; `None` means it could not be read, which is unresolved rather than
+    a guess. `parent_of(ticket) -> issue | None` reads the ticket's parent
+    issue, `None` being a ticket with no parent; it raises `FrontierError`
+    for a parent that could not be read, which is unresolved too. A claimed
+    ticket, a ticket carrying a non-dispatchable label, and anything that is
+    really a PR, is in no bucket at all — each is off the frontier by its own
+    nature, not by a blocking relationship."""
+    buckets = {"unblocked": [], "blocked": [], "unresolved": [], "spec": [],
+               "slice": []}
 
     def rank(issue, entry):
         """`(bucket, stated)` from this ticket's blocking state alone.
@@ -282,8 +308,7 @@ def classify(issues, state_of):
         entry = {"number": issue.get("number"), "title": issue.get("title"),
                  "blockers": [], "why": ""}
         name, stated = rank(issue, entry)
-        if SPEC_LABEL in _labels(issue) and (
-                name == "unblocked" or (name == "unresolved" and not stated)):
+        if SPEC_LABEL in _labels(issue) and _is_clear(name, stated):
             # The prerequisites are checked *first*, so `blocked` outranks
             # `spec` on one entry: both are true claims, but only `spec`
             # carries a dispatch verb, and a controller copies lines like
@@ -294,9 +319,27 @@ def classify(issues, state_of):
             # prerequisite this reader could not resolve is not silence,
             # and an unknown prerequisite is not a met one.
             entry["blockers"] = []
-            entry["why"] = ("a spec parent: dispatch with `implement-dispatch"
-                            f" --spec {entry['number']} --slots <k>`")
+            entry["why"] = ("a spec parent: dispatch with "
+                            + _handoff(entry["number"]))
             name = "spec"
+        elif _is_clear(name, stated):
+            # Same ordering as above: a blocked slice stays `blocked`, since
+            # only `slice` carries a verb to copy. Silence is ruled in for
+            # the reason it is for `spec` — the spec run orders its own
+            # slices — and a parent that cannot be read is not "no parent".
+            try:
+                parent = parent_of(issue)
+            except FrontierError as exc:
+                entry["why"] = f"its parent could not be read ({exc})"
+                name = "unresolved"
+            else:
+                if parent and SPEC_LABEL in _labels(parent):
+                    entry["blockers"] = []
+                    entry["why"] = (
+                        f"a slice of spec #{parent['number']}: hand off with "
+                        + _handoff(parent["number"])
+                        + ", never as its own ticket")
+                    name = "slice"
         buckets[name].append(entry)
     return buckets
 
@@ -351,8 +394,33 @@ def fetch_state(repo, number, run=gh_json):
     return (answer or {}).get("state")
 
 
-def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state):
-    """`(repo, label) -> {unblocked, blocked, unresolved, spec}`. Each
+def fetch_parent(repo, ticket, run=gh_json):
+    """The parent issue of `ticket`, `None` when it has none. The sub-issue
+    endpoint first; a 404 there means no sub-issue link, and the body's
+    `Part of #<n>` line is the fallback the tree writes where sub-issues are
+    not enabled. Any other failure raises `FrontierError`: a call that did
+    not answer is not an answer of "no parent"."""
+    base = f"repos/{quote(repo, safe='/')}/issues"
+    try:
+        answer = run(["api", f"{base}/{int(ticket['number'])}/parent"])
+        if not isinstance(answer, dict) or "number" not in answer:
+            raise FrontierError("the parent endpoint answered with no issue")
+        return answer
+    except FrontierError as exc:
+        # gh's own status marker, not a bare "404": a failed call's message
+        # can carry the request URL, and a ticket #1404 would match it.
+        if "(HTTP 404)" not in str(exc):
+            raise
+    for _, line in visible((ticket.get("body") or "").splitlines()):
+        part = _PART_OF.match(line)
+        if part:
+            return run(["api", f"{base}/{int(part.group(1))}"])
+    return None
+
+
+def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state,
+             parent_of=fetch_parent):
+    """`(repo, label) -> {unblocked, blocked, unresolved, spec, slice}`. Each
     blocker's state is read once however many tickets name it."""
     seen = {}
 
@@ -361,18 +429,19 @@ def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state):
             seen[number] = state_of(repo, number)
         return seen[number]
 
-    return classify(fetch(repo, label), cached)
+    return classify(fetch(repo, label), cached,
+                    lambda ticket: parent_of(repo, ticket))
 
 
 def render(buckets):
     lines = []
-    for name in ("unblocked", "blocked", "unresolved", "spec"):
+    for name in ("unblocked", "blocked", "unresolved", "spec", "slice"):
         for entry in buckets[name]:
             note = ""
             if name == "blocked" and entry["blockers"]:
                 note = "  (blocked by " + ", ".join(
                     f"#{n}" for n in entry["blockers"]) + ")"
-            elif name in ("unresolved", "spec"):
+            elif name in ("unresolved", "spec", "slice"):
                 note = f"  ({entry['why']})"
             lines.append(f"{name:<11} {entry['number']} {entry['title']}{note}")
     return "\n".join(lines)

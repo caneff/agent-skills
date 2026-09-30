@@ -295,13 +295,18 @@ is a source.
 Which tickets a run may dispatch next — open, labelled, unclaimed, waiting on
 nothing — is read by `burndown/frontier.py`, not by a regex at the call site:
 `python3 burndown/frontier.py <owner/repo> <label>` prints the `unblocked`,
-`blocked`, `unresolved` and `spec` buckets. Native tracker dependencies
+`blocked`, `unresolved`, `spec` and `slice` buckets. Native tracker dependencies
 first, the `## Blocked by` section as the fallback, and a ticket with neither
 is **unresolved** — never dispatched on the assumption that silence means
 clear. A `spec`-labelled parent is none of those three: it is dispatchable by
 a different verb, and its entry names that verb —
 `implement-dispatch --spec <n> --slots <k>` — so a controller can act on the
-line without opening another document.
+line without opening another document. A `slice` is the same verb seen from
+the other side: a ticket whose parent carries `spec` is handed off with its
+parent (`implement-dispatch --spec <parent> --slots <k>`), never dispatched as
+an ordinary ticket, whether or not the parent itself carries the queue label. When the parent
+carries the queue label too, its `spec` line and its slices' `slice` lines
+are one handoff: run the `--spec <parent>` line once.
 The grammar and the three sources:
 [`references/frontier.md`](references/frontier.md).
 

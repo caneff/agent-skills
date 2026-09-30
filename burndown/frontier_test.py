@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Tests for the frontier reader (#890). Seam: `frontier(repo, label)` with
-its two fetchers injected — a list of GitHub issue objects in, four buckets
-(`unblocked`, `blocked`, `unresolved`, `spec`) out. No network: every case is
-a ticket fixture, which is the point of the seam.
+its three fetchers injected (issues, blocker state, parent) — a list of
+GitHub issue objects in, five buckets (`unblocked`, `blocked`, `unresolved`,
+`spec`, `slice`) out. No network: every case is a ticket fixture, which is
+the point of the seam.
 """
 import os
 import subprocess
@@ -42,15 +43,29 @@ def issue(number, *, title=None, body="", assignees=(), labels=("ready-for-agent
     return out
 
 
-def read(issues, states=None):
+def read(issues, states=None, parents=None):
     """`frontier(repo, label)` over a fixture list, with blocker states from a
     dict instead of the tracker. A number missing from `states` is a blocker
-    whose state could not be read."""
+    whose state could not be read.
+
+    `parents` maps a ticket number to its parent issue object, `None` for a
+    ticket with no parent, or an exception to raise for a parent that could
+    not be read. A ticket missing from it has no parent, which is what every
+    ticket in the cases that predate slices looks like."""
     states = states or {}
+    parents = parents or {}
+
+    def parent_of(repo, ticket):
+        answer = parents.get(ticket["number"])
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
     return F.frontier(
         "owner/repo", "ready-for-agent",
         fetch=lambda repo, label: issues,
         state_of=lambda repo, number: states.get(number),
+        parent_of=parent_of,
     )
 
 
@@ -61,7 +76,7 @@ def numbers(bucket):
 # Every bucket empty: what a ticket that is off the frontier altogether
 # leaves behind. Spelled out rather than derived, so a bucket added without
 # a thought about the off-the-frontier cases fails here.
-EMPTY = {"unblocked": [], "blocked": [], "unresolved": [], "spec": []}
+EMPTY = {"unblocked": [], "blocked": [], "unresolved": [], "spec": [], "slice": []}
 
 
 def unresolved_count(issues, dropped, states=None):
@@ -766,6 +781,178 @@ def test_a_folded_per_pr_body_keeps_one_blocked_by_declaration():
     folded = run_sweep_body + per_pr_files_only
     assert F.blocked_by_section(folded) == F.blocked_by_section(run_sweep_body), folded
     assert F.blocked_by_section(folded) is not None, folded
+
+
+# --- A spec's slice is handed off, not dispatched (#1242) -------------------
+
+NO_BLOCKERS = "Blocked by: None"
+
+
+def spec_parent(number=483, labels=("spec",)):
+    """The parent issue as `/issues/<n>/parent` answers: a full issue object.
+    Its labels omit the queried one by default, the shape burn-2026-09-27 hit:
+    the parent carried `spec` and no `ready-for-agent`."""
+    return issue(number, labels=labels)
+
+
+def test_a_slice_of_a_spec_lacking_the_queried_label_is_not_unblocked():
+    got = read([issue(491, body=NO_BLOCKERS)], parents={491: spec_parent()})
+    assert numbers(got["slice"]) == [491], got
+    assert numbers(got["unblocked"]) == [], got
+
+
+def test_a_slice_entry_names_its_parent_and_the_handoff():
+    got = read([issue(491, body=NO_BLOCKERS)], parents={491: spec_parent(483)})
+    why = got["slice"][0]["why"]
+    assert "#483" in why, why
+    assert "implement-dispatch --spec 483 --slots" in why, why
+
+
+def test_a_slice_under_a_parent_without_spec_is_ordinary():
+    got = read([issue(491, body=NO_BLOCKERS)], parents={491: spec_parent(483, labels=("ready-for-agent",))})
+    assert numbers(got["unblocked"]) == [491], got
+    assert numbers(got["slice"]) == [], got
+
+
+def test_a_ticket_with_no_parent_is_ordinary():
+    got = read([issue(491, body=NO_BLOCKERS)], parents={491: None})
+    assert numbers(got["unblocked"]) == [491], got
+
+
+def test_a_blocked_slice_stays_blocked():
+    # Same ordering as a spec parent: only `slice` carries a verb to copy.
+    got = read([issue(491, body=NO_BLOCKERS, blocked_by=1)], parents={491: spec_parent()})
+    assert numbers(got["blocked"]) == [491], got
+    assert numbers(got["slice"]) == [], got
+
+
+def test_a_silent_slice_is_a_slice_not_unresolved():
+    # The handoff removes the slice from the burn's candidate set whatever
+    # its own blockers say; the spec run orders its slices itself.
+    got = read([issue(491, body="")], parents={491: spec_parent()})
+    assert numbers(got["slice"]) == [491], got
+    assert numbers(got["unresolved"]) == [], got
+
+
+def test_an_unreadable_parent_is_unresolved_not_unblocked():
+    # An absent answer is not "no parent": the ticket would dispatch as
+    # ordinary work under a spec nobody could see.
+    got = read([issue(491, body=NO_BLOCKERS)],
+               parents={491: F.FrontierError("gh: HTTP 502")})
+    assert numbers(got["unresolved"]) == [491], got
+    assert numbers(got["unblocked"]) == [], got
+    assert "parent" in got["unresolved"][0]["why"], got
+
+
+def test_a_claimed_slice_is_off_the_frontier():
+    got = read([issue(491, body=NO_BLOCKERS, assignees=("caneff",))], parents={491: spec_parent()})
+    assert got == EMPTY, got
+
+
+def test_the_rendered_report_names_the_slice_handoff():
+    line = F.render(read([issue(491, body=NO_BLOCKERS, title="Slice one")],
+                         parents={491: spec_parent(483)})).splitlines()[0]
+    assert line.startswith("slice       491 Slice one  ("), line
+    assert "--spec 483" in line, line
+
+
+def test_the_parent_is_read_for_the_ticket_not_a_spec_parent():
+    # A spec parent is already its own bucket; its own parent is not asked.
+    asked = []
+    F.frontier("owner/repo", "ready-for-agent",
+               fetch=lambda repo, label: [issue(1, labels=("ready-for-agent", "spec"),
+                                                body=NO_BLOCKERS)],
+               state_of=lambda repo, number: None,
+               parent_of=lambda repo, ticket: asked.append(ticket["number"]))
+    assert asked == [], asked
+
+
+def gh_answers(table):
+    """A `gh_json` stand-in: `table` maps the api path to an answer or an
+    exception to raise."""
+    def run(args):
+        if args[-1] not in table:
+            raise AssertionError(f"unexpected gh call: {args[-1]}")
+        answer = table[args[-1]]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    return run
+
+
+def test_fetch_parent_reads_the_sub_issue_parent_endpoint():
+    run = gh_answers({"repos/owner/repo/issues/491/parent": spec_parent(483)})
+    got = F.fetch_parent("owner/repo", issue(491), run=run)
+    assert got["number"] == 483, got
+
+
+def test_fetch_parent_falls_back_to_a_part_of_line_on_a_404():
+    run = gh_answers({
+        "repos/owner/repo/issues/491/parent": F.FrontierError("gh: Not Found (HTTP 404)"),
+        "repos/owner/repo/issues/483": spec_parent(483),
+    })
+    got = F.fetch_parent("owner/repo", issue(491, body="Part of #483\n\nBody."), run=run)
+    assert got["number"] == 483, got
+
+
+def test_fetch_parent_with_no_parent_anywhere_is_none():
+    run = gh_answers({
+        "repos/owner/repo/issues/491/parent": F.FrontierError("gh: Not Found (HTTP 404)"),
+    })
+    assert F.fetch_parent("owner/repo", issue(491, body="plain"), run=run) is None
+
+
+def test_fetch_parent_does_not_read_a_failed_call_as_no_parent():
+    # The fallback's target is answerable, so a 502 read as a 404 returns a
+    # parent and trips the assertion below instead of a missing-key error.
+    run = gh_answers({"repos/owner/repo/issues/491/parent": F.FrontierError("gh: HTTP 502"),
+                      "repos/owner/repo/issues/483": spec_parent(483)})
+    try:
+        F.fetch_parent("owner/repo", issue(491, body="Part of #483"), run=run)
+    except F.FrontierError as exc:
+        assert "502" in str(exc), exc
+    else:
+        raise AssertionError("a 502 was read as an answer")
+
+
+def test_a_failure_naming_404_in_its_url_is_not_a_missing_parent():
+    # gh's own message for a dropped connection carries the request URL, so a
+    # ticket #1404 matched a bare "404" and was read as having no parent.
+    url_failure = F.FrontierError(
+        'gh: Get "https://api.github.com/repos/o/r/issues/1404/parent": connection refused')
+    run = gh_answers({"repos/owner/repo/issues/1404/parent": url_failure})
+    try:
+        F.fetch_parent("owner/repo", issue(1404, body="plain"), run=run)
+    except F.FrontierError as exc:
+        assert "connection refused" in str(exc), exc
+    else:
+        raise AssertionError("a failed call naming 404 in its URL was read as no parent")
+
+
+def test_an_empty_parent_answer_is_not_a_missing_parent():
+    # `gh_json` turns empty stdout into None; that is no answer, not "no parent".
+    run = gh_answers({"repos/owner/repo/issues/491/parent": None})
+    try:
+        F.fetch_parent("owner/repo", issue(491, body="plain"), run=run)
+    except F.FrontierError as exc:
+        assert "no issue" in str(exc), exc
+    else:
+        raise AssertionError("an empty answer was read as no parent")
+
+
+def test_a_slice_with_an_unreadable_declaration_stays_unresolved():
+    got = read([issue(491, body="Blocked by: the database work, probably")],
+               parents={491: spec_parent()})
+    assert numbers(got["unresolved"]) == [491], got
+    assert numbers(got["slice"]) == [], got
+
+
+def test_a_fenced_part_of_line_is_not_a_parent_reference():
+    run = gh_answers({
+        "repos/owner/repo/issues/491/parent": F.FrontierError("gh: Not Found (HTTP 404)"),
+    })
+    body = "```\nPart of #483\n```\n"
+    assert F.fetch_parent("owner/repo", issue(491, body=body), run=run) is None
 
 
 def main():
