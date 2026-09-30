@@ -285,6 +285,8 @@ class HarvestTest(Case):
                        "skills/104/over-engineering/1/findings-standards-104"):
             f = rows[row_id]["findings"][0]
             self.assertEqual((f["overlap"], f["k"]), ("unique", 1), row_id)
+        section = self.review.read_text().split("## Overlap matches")[1].split("\n## ")[0]
+        self.assertNotIn("Dead branch", section)  # a reviewer matching its own OE cut is not an overlap match
 
     def test_same_title_in_different_files_is_not_a_match(self):
         for row_id in ("skills/105/standards/1/findings-standards-105", "skills/105/spec/1/findings-spec-105"):
