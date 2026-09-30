@@ -551,7 +551,7 @@ def execute(repo, plan, run):
     if re.search(r"cannot be used with Skill tool|disable-model-invocation", log_text, re.IGNORECASE):
         print(f"ABORT: -p slash invocation was rejected by the guard. See {run.logs}/{smoke}.log", file=sys.stderr)
         sys.exit(1)
-    print("smoke test passed; fanning out the rest\n")
+    print("smoke test passed; fanning out the rest\n" if not failed else f"smoke audit {smoke} failed (not the guard); fanning out the rest anyway\n")
     rest = plan.to_run[1:]
     if rest:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(rest)) as ex:

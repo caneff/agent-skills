@@ -301,6 +301,7 @@ def test_audit_exiting_nonzero_fails_the_sweep_even_with_a_manifest():
         assert r.returncode != 0, r.stdout + r.stderr
         assert "[dead-code] FAILED: exit 3" in r.stdout, r.stdout
         assert "[dead-code] done" not in r.stdout, r.stdout
+        assert "smoke test passed" not in r.stdout, "a failed smoke audit must not be announced as passed"
         assert os.path.isfile(os.path.join(tmp, "out", "collection", "index.html")), "the index is still built"
 
 
