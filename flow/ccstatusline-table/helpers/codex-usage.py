@@ -19,11 +19,17 @@ that no longer exists). No stale case is marked, because a failed refresh
 never falls back to old numbers — it prints nothing instead.
 
 Stdin is ignored (the table fans the session JSON out to every helper).
+
+A second consumer: `implement/codex-usage-gate.py` imports this file and
+calls `read_cache`, `fetch_live`, `write_cache`, `valid_window` and sets
+`RPC_TIMEOUT`. Renaming or changing the contract of any of them breaks that
+gate, which fails closed (exit 30) and skips every Codex pass.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
 import select
 import subprocess
@@ -52,13 +58,28 @@ def countdown(seconds: float) -> str:
     return "1m"
 
 
-def window(limit: object, now: float) -> str:
+def valid_window(limit: object) -> tuple[float, float] | None:
+    """`(usedPercent, resetsAt)` of one rate-limit window, or None when the
+    window is not a dict holding two finite, non-boolean numbers with a
+    non-negative percentage. `json.loads` accepts NaN and Infinity, and
+    `True` is an `int`; none of them is a reading. The one validator behind
+    both the cell below and `implement/codex-usage-gate.py`."""
     if not isinstance(limit, dict):
+        return None
+    pct, resets = limit.get("usedPercent"), limit.get("resetsAt")
+    if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+           for v in (pct, resets)):
+        return None
+    if pct < 0:
+        return None
+    return pct, resets
+
+
+def window(limit: object, now: float) -> str:
+    parsed = valid_window(limit)
+    if parsed is None:
         return ""
-    pct = limit.get("usedPercent")
-    resets = limit.get("resetsAt")
-    if not isinstance(pct, (int, float)) or not isinstance(resets, (int, float)):
-        return ""
+    pct, resets = parsed
     if resets <= now:
         return ""  # window already rolled over; the percentage is about nothing
     return " ".join(x for x in (f"{int(pct)}%", countdown(resets - now)) if x)
@@ -249,6 +270,14 @@ if __name__ == "__main__":
         assert cell(None, now) == ""
         assert cell({}, now) == ""
         assert cell({"primary": {"usedPercent": 5.0}}, now) == ""
+        # One validator serves the cell and the usage gate: a boolean, a
+        # non-finite number and a negative percentage are no window at all.
+        future = now + 86400
+        for bad in (True, float("nan"), float("inf"), -1.0):
+            assert cell({"primary": {"usedPercent": bad, "resetsAt": future}}, now) == "", bad
+        assert cell({"primary": {"usedPercent": 5.0, "resetsAt": True}}, now) == ""
+        assert valid_window({"usedPercent": 5, "resetsAt": future}) == (5, future)
+        assert valid_window({"usedPercent": -1, "resetsAt": future}) is None
         assert countdown(45) == "1m" and countdown(0) == ""
         # The real shape the app-server returns.
         real = {
