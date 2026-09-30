@@ -79,6 +79,7 @@ c = collections.Counter()
 def key(*k):
     k = [re.sub(r"ticket [0-9-]+", "ticket <id>", x) for x in k]
     k = [re.sub(r"line for [A-Z]+[0-9]+", "line for <id>", x) for x in k]
+    k = [re.sub(r"\(([\w-]+), #[0-9]+, ", "(<repo>, <ticket>, ", x) for x in k]
     k = [re.sub(r"(codex-(?:gate|second|third))-[0-9] or -[HM][0-9]", r"\1-<k> or -<sev><k>", x) for x in k]
     c[tuple(k)] += 1
 for l in open(sys.argv[1]):
@@ -139,7 +140,7 @@ outcome (125 + 67 + 3). The only joinable source is the dispositions sidecar, wh
 writes a `codex-<phase>-<label>` line by rule for a `leftover` alone (`implement/SKILL.md` § The
 merge step 3). Fixed and disputed Codex findings live in the PR body as prose, which the harvest
 does not parse. So the Codex value, leftover-rate and dispute-rate cells are over 27 findings
-and only leftovers get a line by rule, so the leftover rate is biased upward and the fixed and disputed rates downward; read them as bounds, not rates. Detail:
+and only leftovers get a line by rule, so the leftover rate is an upper bound; the fixed and disputed rates have no bound in either direction (codex-second's 42.9% dispute rate is over 7 known outcomes of 74 findings, so it could be anywhere from 3/74 to 70/74). Read them as counts of known outcomes, not as rates. Detail:
 `2026-09-30-codex-outcome-source.md`. Fixing the harvest for this is not part of this baseline.
 Codex usage change is unknown on every one of the 296 Codex rows (the `unknown usage` column above): backfilled rows
 have no before or after reading.
