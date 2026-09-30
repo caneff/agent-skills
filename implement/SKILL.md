@@ -239,11 +239,10 @@ No PR and no reviewer; Chris reads the log after.
    finding, under the severity mapping below. A finding that is not high and
    not fixed in the round takes `leftover` (never one of the blocking
    kinds below): no ticket of its own, only a sidecar line (step 2) and
-   `leftover` in prose. A burn's own sweep, one
-   ticket per run, is `burndown/SKILL.md` § The sweep; a worker whose
-   brief carries **no `--run <run-id>`** has no run file under it and
-   files its own per-PR sweep instead, at report time: this file's § The PR
-   below.
+   `leftover` in prose. A burn's own sweep, one ticket per run, is
+   `burndown/SKILL.md` § The sweep; a worker whose brief carries **no
+   `--run <run-id>`** has no run file under it and files its own per-PR
+   sweep instead, at report time (this file's § The PR).
 
    **The split grammar.** A ruling that genuinely divides a controller-only
    finding — one with no line of its own in a `findings-<axis>-<n>.jsonl`
