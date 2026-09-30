@@ -545,16 +545,16 @@ show() {
 for id in "${mutations[@]}"; do
   while [ "$(jobs -pr | wc -l)" -ge "$slots" ]; do wait -n; done
   witness="$root/worktrees/$id"
+  started=$(date +%s)
   if ! git -C "$worktree" worktree add --detach -q "$witness" HEAD; then
     printf 'unknown\n' >"$root/status/$id"   # class 1: an unreached mutation is not a pass
-    printf '0\n' >"$root/seconds/$id"
+    printf '%s\n' "$(( $(date +%s) - started ))" >"$root/seconds/$id"   # the time the failed attempt took, never a stand-in zero
     continue
   fi
   # `mutate` in its own subshell: a mutation body ends in a failing suite and
   # is naturally written with `exit`, which would otherwise kill this job
   # before its status is recorded and read back below as `unknown`.
-  { started=$(date +%s)
-    ( mutate "$id" "$witness" "$root/ran/$id" ) >"$root/output/$id" 2>&1
+  { ( mutate "$id" "$witness" "$root/ran/$id" ) >"$root/output/$id" 2>&1
     printf '%s\n' "$?" >"$root/status/$id"
     printf '%s\n' "$(( $(date +%s) - started ))" >"$root/seconds/$id"; } &
 done
