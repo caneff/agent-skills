@@ -56,9 +56,6 @@ is the standing brief's own copy of that requirement, not just the caller's
 per-call paste, so a run whose prompt drops the sidecar line still gets one.
 Write it on every run, an empty file when you found nothing (#1257): a missing
 sidecar is read downstream as an axis that never ran.
-**Then run `review_ledger.py append` as your last step**, exactly as
-`multi-axis-code-review/SKILL.md` § 4 *Every review ends with `append`* says. A
-refusal is the first line of your summary, never skipped.
 A finding of one of `implement/SKILL.md` § Review's blocking kinds opens its
 `title` with `blocking:` and names the kind, so the worker cannot read it as
 a `leftover` (#1252).
@@ -68,6 +65,9 @@ When the prompt names an id prefix (`id prefix: r2-`), prefix every id with it
 On the standards axis, a cut the over-engineering lens reports also gets a
 line here — its own `OE1`, `OE2`, … series, still `axis: "standards"` — so
 it can be disposed of by id like any other finding (#1021).
+**Then run `review_ledger.py append` as your last step**, exactly as
+`multi-axis-code-review/SKILL.md` § 4 *Every review ends with `append`* says. A
+refusal is the first line of your summary, never skipped.
 
 ## Axes
 

@@ -28,6 +28,8 @@ check_in "§ 4" "$four" 'A refusal is reported, never skipped'
 check_in "§ 4" "$four" 'the caller repeats it in its own report'
 check_in "§ 6" "$six" 'It ends with `append --type verification`'
 check_in "§ 6" "$six" "§ 4's *Every review ends with \`append\`*"
+check_in "§ 6" "$six" 'findings sidecar `<dir>/findings-verify-<n>.jsonl`'
+check_in "§ 4" "$four" "sidecar is named \`findings-<axis>-<n>-r<k>.jsonl\`"
 check_in "diff-reviewer" "$agent_text" 'run `review_ledger.py append` as your last step'
 check_in "diff-reviewer" "$agent_text" 'A refusal is the first line of your summary, never skipped'
 [ "$fail" -eq 0 ] && echo "PASS $0"
