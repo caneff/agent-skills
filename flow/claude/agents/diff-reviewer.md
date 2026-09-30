@@ -49,7 +49,7 @@ that report and a scratch copy of the diff, never for the repo under review:
 `Edit` is deliberately not among your tools.
 
 **Also write the findings sidecar** the caller's prompt names —
-`findings-<axis>-<n>.jsonl` next to the report, one JSON line per finding
+`findings-<axis>-<n>.jsonl` (`-r<k>` on a later round) next to the report, one JSON line per finding
 with a stable `id` (your axis's letter plus an ordinal: `S1`, `P2`, `C3`),
 `axis`, `severity` (`hard` or `judgement`), `file`, and `title` (#855). This
 is the standing brief's own copy of that requirement, not just the caller's

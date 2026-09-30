@@ -2,13 +2,15 @@
 """Tests for `review_ledger.py append` (#1268). Every test runs the command line on
 the fixture trees `review_ledger_test.py` builds and reads the ledger it leaves;
 HOME is a temp dir, so no default path reaches the real ~/.cache or ~/.claude."""
+import fcntl
 import json
+import os
 import subprocess
 import sys
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 
-from review_ledger_test import (SKILLS_PROJ, Case, build_cost_fixture, finding, run, transcript, usage,
+from review_ledger_test import (SCRIPT, SKILLS_PROJ, Case, build_cost_fixture, finding, run, transcript, usage,
                                 write_jsonl, wt)
 
 
@@ -99,24 +101,43 @@ class AppendRowTest(AppendCase):
         for row in self.rows().values():
             self.assertEqual((row["findings"][0]["overlap"], row["findings"][0]["k"]), ("shared", 2))
 
-    def test_parallel_appends_lose_no_row(self):
-        jobs = [t for _ in range(4) for t in ("standards", "spec", "correctness")]
-        with ThreadPoolExecutor(6) as pool:  # 12 short single-core processes, 6 at a time
-            results = list(pool.map(lambda t: self.append(400, t), jobs))
+    def hold_ledger_lock(self):
+        """Take the ledger's lock the way a writer does; the test's own process is the writer in progress."""
+        lock = open(self.ledger.with_name(self.ledger.name + ".lock"), "w")
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        self.addCleanup(lock.close)
+        return lock
+
+    def assert_blocks_until_released(self, args, lock):
+        """A command that writes the ledger waits for the lock: still running while it is held, done after."""
+        proc = subprocess.Popen([sys.executable, str(SCRIPT), *map(str, args)], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, env=dict(os.environ, HOME=str(self.home)))
+        self.addCleanup(proc.kill)
+        with self.assertRaises(subprocess.TimeoutExpired):
+            proc.wait(timeout=3)  # a finished run here wrote the ledger without the lock
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        out, err = proc.communicate(timeout=30)
+        self.assertEqual(proc.returncode, 0, err)
+
+    def test_an_append_waits_for_the_ledger_lock(self):
+        lock = self.hold_ledger_lock()
+        self.assert_blocks_until_released(
+            ["append", "--repo", "skills", "--ticket", 403, "--type", "verification", "--cache", self.cache,
+             "--transcripts", self.tr, "--ledger", self.ledger], lock)
+        self.assertEqual(len(self.rows()), 1)
+
+    def test_a_harvest_waits_for_the_ledger_lock(self):
+        lock = self.hold_ledger_lock()
+        self.assert_blocks_until_released(
+            ["harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", self.ledger,
+             "--review-file", self.tmp / "h.md"], lock)
+        self.assertEqual(sorted(self.rows()), sorted(self.harvested()))
+
+    def test_parallel_appends_by_the_three_axes_all_land(self):
+        with ThreadPoolExecutor(3) as pool:
+            results = list(pool.map(lambda t: self.append(400, t), ("standards", "spec", "correctness")))
         self.assertEqual({r.returncode for r in results}, {0}, [r.stderr for r in results])
         self.assertEqual(len(self.rows()), 4)
-
-    def test_a_harvest_running_beside_appends_loses_no_appended_row(self):
-        def harvest():
-            return run("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", self.ledger,
-                       "--review-file", self.tmp / "h.md", home=self.home)
-        with ThreadPoolExecutor(4) as pool:
-            futures = [pool.submit(self.append, 400, t) for t in ("standards", "spec", "correctness")]
-            futures.append(pool.submit(harvest))
-            results = [f.result() for f in futures]
-        self.assertEqual({r.returncode for r in results}, {0}, [r.stderr for r in results])
-        self.assertTrue({"skills/400/spec/1/findings-spec-400", "skills/400/correctness/1/findings-correctness-400",
-                         "skills/400/standards/1/findings-standards-400"} <= set(self.rows()))
 
     def test_a_clean_later_round_with_an_empty_sidecar_appends_under_its_own_round(self):
         (self.cache / "skills" / "findings-standards-430-r2.jsonl").write_text("")
