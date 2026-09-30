@@ -54,7 +54,8 @@ SKILL_BODY = "skill.md"
 
 # The ticket body's own reading, the one `implement-dispatch` applies at claim
 # time (`flow/lane/src/targets.rs`, which owns these lists; `tier_test.py`
-# compares them literal for literal). A label written for a ticket whose body
+# compares them literal for literal, and both suites run the body-to-verdict
+# cases in `flow/lane/tests/fixtures/body_targets.json`, #1239). A label written for a ticket whose body
 # names code is a label dispatch strips again, so the run's report would say
 # it wrote a label the ticket no longer carries (#1211).
 BODY_CODE_EXTENSIONS = {

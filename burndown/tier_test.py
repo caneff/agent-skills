@@ -503,26 +503,17 @@ def test_the_body_reader_lists_match_targets_rs():
     assert sorted(T.PROSE_EXTENSIONS) == _rust_list(src, "PROSE_EXTENSIONS")
 
 
-def test_the_body_reader_agrees_with_targets_rs_on_its_own_test_cases():
-    """The cases targets.rs's tests assert, replayed here."""
-    for p in ["a/b.py", "hooks/g.sh", "settings.json", "bin/implement-dispatch", "Makefile",
-              "src/main.dart", "tools/Gemfile", "config/.env", "x/.eslintrc", "a.go",
-              "scripts/node.js", "multi-axis-code-review/SKILL.md", ".githooks/pre-push"]:
-        assert T.body_code_target(f"see {p}, then") == p, p
-    assert T.body_code_target(r"edit .githooks\pre-push") == ".githooks/pre-push"
-    for body in ["read/write and and/or", "docs/notes.md", "a/b.rst", "ratio 3/4.5 here",
-                 "docs/.notes.md", "i.e. this", "runs on Node.js", "version 3.10.2", ""]:
-        assert T.body_code_target(body) is None, body
-
-
-def test_the_body_reader_trims_a_sentence_dot_and_reads_backslashes():
-    """targets.rs trims trailing dots and folds `\\`; without the trim,
-    `Research why ./e2e.sh.` reads as prose and #1211 reopens."""
-    assert T.body_code_target("Research why ./e2e.sh.") == "./e2e.sh"
-    assert T.body_code_target("edit SKILL.md.") == "SKILL.md"
-    assert T.body_code_target(r"see bin\implement-dispatch, then") == "bin/implement-dispatch"
-    assert T.body_code_target(r"src\main.dart") == "src/main.dart"
-    assert T.body_code_target(r"docs\notes.md") is None
+def test_the_body_reader_agrees_with_targets_rs_on_the_shared_fixture():
+    """`targets.rs`'s tests read the same file: a case added for one reader is
+    asserted against the other (#1239)."""
+    path = os.path.join(os.path.dirname(TIER), "..", "flow", "lane", "tests", "fixtures",
+                        "body_targets.json")
+    cases = json.load(open(path))
+    # A fixture that parsed to nothing would pass the loop below for no reason.
+    assert len(cases) >= 20, len(cases)
+    assert any(c["target"] is None for c in cases) and any(c["target"] for c in cases)
+    for c in cases:
+        assert T.body_code_target(c["body"]) == c["target"], c["body"]
 
 
 def test_fetch_ticket_refuses_an_answer_with_no_body():
