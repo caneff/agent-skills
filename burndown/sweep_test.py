@@ -71,6 +71,18 @@ def test_leftovers_group_by_file_in_first_seen_order():
     assert "S2" not in two_section, two_section
 
 
+def test_a_file_qualified_leftover_id_renders_bare_under_its_own_file():
+    # A sweep item left undone keeps its `<file> <id>` sidecar id; the next
+    # sweep's bullet is `- **<id>**` under `## <file>`, the grammar the gate
+    # parses, so the file is not repeated in the bullet.
+    items = [leftover(901, [901], 950, "implement/SKILL.md P9",
+                      "implement/SKILL.md", "T", "hard", "x")]
+    body = sweep.render_body(items)
+    assert "## implement/SKILL.md\n" in body, body
+    assert "- **P9** (hard)" in body, body
+    assert "**implement/SKILL.md P9**" not in body, body
+
+
 def test_every_field_of_a_leftover_appears_in_the_render():
     items = [leftover(901, [901, 902], 950, "P2", "burndown/loop.py",
                        "Mysterious name", "judgement",

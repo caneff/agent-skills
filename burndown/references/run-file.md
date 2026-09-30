@@ -131,6 +131,15 @@ skipped the second without a word, while `counts` counted both. Codex numbers
 each pass's findings from 1, which is why a Codex-pass leftover's id carries
 its pass (`implement/SKILL.md` § The merge).
 
+A sweep PR's own undone items reach the next sweep the same way (#1259): the
+worker writes each one as a `leftover` line whose `id` is `<file> <id>` and
+whose `file` is the item's own file, and `sweep.py render` prints it bare
+under that file's `## <file>` heading. A body citation `**<file> <id>**` is
+recorded under the qualified id as well as the bare one, so it joins that
+line. `runfile.py sweep-check --ticket <body> --pr-body <path> --from
+<sidecar>` is the pre-report gate's test that every item of the sweep ticket
+is such a line, or stated done in Decisions made.
+
 `<dispositions sidecar>` must be named `dispositions-<n>.jsonl` with `<n>` one
 of the clump's tickets, else it is refused (#1084). The name is checked
 after the lines are read and the clump is found to have landed, so a
