@@ -124,9 +124,9 @@ ieq() { [ "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$2" | tr 'A-Z
 OWNERSHIP_ERR=""
 OWNERSHIP_ORIGIN=""
 repo_is_owned() {
-  local origin cache_dir key me target errf slug
+  local toplevel origin cache_dir key me target errf slug
+  toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
   origin=$(git remote get-url origin 2>/dev/null)
-  OWNERSHIP_ORIGIN=$origin
 
   # Non-github origins — a local path, a private host, or no remote at all —
   # are the user's own experiments. There is no outward gate to enforce.
@@ -139,19 +139,23 @@ repo_is_owned() {
   # all name the same repo.
   slug=${origin#*github.com}
   slug=${slug#[:/]}; slug=${slug%/}; slug=${slug%.git}
+  # The block text names the slug, never the URL: an origin can carry a token.
+  OWNERSHIP_ORIGIN=$slug
   cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-git-guard"
-  key=$(printf '%s' "$slug" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9' '_')
+  # `/` becomes `@`, which GitHub names cannot hold, so `a-b/c` and `a/b-c`
+  # never share a key.
+  key=$(printf '%s' "$slug" | tr 'A-Z' 'a-z' | tr '/' '@' | tr -c 'a-z0-9@._-' '_')
   [ -f "$cache_dir/$key" ] && return 0
 
   # Evaluate ORIGIN explicitly (a bare `gh repo view` would resolve to an
   # `upstream` remote instead), and a fork's real base repo is its parent.
-  errf=$(mktemp 2>/dev/null) || errf=/dev/null
-  me=$(gh api user -q .login 2>"$errf") || {
-    OWNERSHIP_ERR=$(tr '\n' ' ' < "$errf"); rm -f "$errf"; return 2; }
+  # gh's own error text goes to a temp file; with no temp file the block says so.
+  errf=$(mktemp 2>/dev/null) || errf=""
+  lookup_failed() { OWNERSHIP_ERR=$([ -n "$errf" ] && tr '\n' ' ' < "$errf" | sed 's/ *$//'); [ -z "$errf" ] || rm -f "$errf"; return 2; }
+  me=$(gh api user -q .login 2>"${errf:-/dev/null}") || { lookup_failed; return 2; }
   target=$(gh repo view "$origin" --json owner,name,isFork,parent \
-      -q 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' 2>"$errf") || {
-    OWNERSHIP_ERR=$(tr '\n' ' ' < "$errf"); rm -f "$errf"; return 2; }
-  rm -f "$errf"
+      -q 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' 2>"${errf:-/dev/null}") || { lookup_failed; return 2; }
+  [ -z "$errf" ] || rm -f "$errf"
   [ -n "$me" ] && [ -n "$target" ] || { OWNERSHIP_ERR="empty answer from gh"; return 2; }
   ieq "${target%%/*}" "$me" || return 1
 
@@ -246,7 +250,7 @@ if echo "$SCAN" | grep -qE '(^|[;&|[:space:]])git([[:space:]]+-C[[:space:]]+[^[:
     echo "BLOCKED: could not verify ownership of $OWNERSHIP_ORIGIN (gh: ${OWNERSHIP_ERR:-no error text}) — retry once gh is reachable. This is a lookup failure, not a foreign repo." >&2
     exit 2
   fi
-  echo "BLOCKED: pushing to a repo you don't own (or ownership couldn't be verified — gh down?). Hand the user the exact '! git push -u origin <branch>' line and a drafted 'gh pr create' line to run in their own shell — the outward-facing step is theirs, not yours." >&2
+  echo "BLOCKED: pushing to a repo you don't own. Hand the user the exact '! git push -u origin <branch>' line and a drafted 'gh pr create' line to run in their own shell — the outward-facing step is theirs, not yours." >&2
   exit 2
 fi
 

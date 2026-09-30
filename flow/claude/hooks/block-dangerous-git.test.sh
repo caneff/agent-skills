@@ -27,8 +27,8 @@ mkdir -p "$stubdir"
 cat > "$stubdir/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$1 $2" in
-  "api user")  [ -n "${STUB_LOGIN:-}" ] || exit 1; printf '%s\n' "$STUB_LOGIN" ;;
-  "repo view") [ -n "${STUB_OWNER:-}" ] || exit 1; printf '%s/agent-skills\n' "$STUB_OWNER" ;;
+  "api user")  [ -n "${STUB_LOGIN:-}" ] || { echo "${STUB_ERR:-}" >&2; exit 1; }; printf '%s\n' "$STUB_LOGIN" ;;
+  "repo view") [ -n "${STUB_OWNER:-}" ] || { echo "${STUB_ERR:-}" >&2; exit 1; }; printf '%s/agent-skills\n' "$STUB_OWNER" ;;
   *) exit 1 ;;
 esac
 STUB
@@ -36,17 +36,21 @@ chmod +x "$stubdir/gh"
 
 fails=0
 # run <name> <expected-exit> <command-string> [<substring stderr must contain>]
+# RUN_CWD picks the directory (default $repo); RUN_FORBID is a substring stderr must not hold.
 run() {
   local name=$1 want=$2 cmd=$3 needle=${4:-}
   local out rc
   out=$(printf '%s' "$cmd" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
-        | (cd "$repo" && PATH="$stubdir:$PATH" bash "$hook") 2>&1)
+        | (cd "${RUN_CWD:-$repo}" && PATH="$stubdir:$PATH" bash "$hook") 2>&1)
   rc=$?
   if [ "$rc" != "$want" ]; then
     echo "FAIL: $name — want exit $want, got $rc"; echo "  out: $out"; fails=1; return
   fi
   if [ -n "$needle" ] && [[ "$out" != *"$needle"* ]]; then
     echo "FAIL: $name — stderr missing '$needle'"; echo "  out: $out"; fails=1; return
+  fi
+  if [ -n "${RUN_FORBID:-}" ] && [[ "$out" == *"$RUN_FORBID"* ]]; then
+    echo "FAIL: $name — stderr holds '$RUN_FORBID'"; echo "  out: $out"; fails=1; return
   fi
   echo "PASS: $name"
 }
@@ -81,18 +85,18 @@ run "ownership lookup failure blocks" 2 "git push origin main" "BLOCKED"
 
 # A gh failure is named as one, not dressed as a foreign repo (#1293).
 rm -rf "$XDG_CACHE_HOME"
-export STUB_LOGIN= STUB_OWNER=
-run "gh failure with no cache names the verify failure" 2 "git push origin main" "could not verify ownership of https://github.com/caneff/agent-skills.git"
-out=$(printf '%s' "git push origin main" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
-      | (cd "$repo" && PATH="$stubdir:$PATH" bash "$hook") 2>&1)
-if [[ "$out" == *"you don't own"* ]]; then
-  echo "FAIL: gh failure printed the not-owned text"; echo "  out: $out"; fails=1
-else
-  echo "PASS: gh failure does not print the not-owned text"
-fi
+export STUB_LOGIN= STUB_OWNER= STUB_ERR="boom: network unreachable"
+RUN_FORBID="you don't own" run "gh failure with no cache names the verify failure, with gh's error" 2 \
+  "git push origin main" "could not verify ownership of caneff/agent-skills (gh: boom: network unreachable)"
+unset STUB_ERR
 export STUB_LOGIN=caneff STUB_OWNER=someone-else
 rm -rf "$XDG_CACHE_HOME"
-run "foreign origin still prints the not-owned line" 2 "git push origin main" "pushing to a repo you don't own"
+RUN_FORBID="could not verify" run "foreign origin prints the not-owned line, no hedge" 2 "git push origin main" "pushing to a repo you don't own."
+
+# Outside any repo nothing can be verified: stay closed (#1293).
+export STUB_LOGIN=caneff STUB_OWNER=caneff
+rm -rf "$XDG_CACHE_HOME"
+RUN_CWD="$tmp" run "outside a git repo: push blocked" 2 "git push origin main" "BLOCKED"
 
 # The verdict is keyed on origin, not worktree path: a second worktree of an
 # owned repo is allowed with gh down (#1293).
@@ -102,10 +106,14 @@ run "owned repo: first worktree earns the verdict" 0 "git push origin main"
 git -C "$repo" commit -q --allow-empty -m init
 git -C "$repo" worktree add -q "$tmp/wt2" -b wt2
 export STUB_LOGIN= STUB_OWNER=
-out=$(printf '%s' "git push origin wt2" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
-      | (cd "$tmp/wt2" && PATH="$stubdir:$PATH" bash "$hook") 2>&1); rc=$?
-if [ "$rc" = 0 ]; then echo "PASS: second worktree of an owned repo allowed with gh down"
-else echo "FAIL: second worktree — got exit $rc"; echo "  out: $out"; fails=1; fi
+RUN_CWD="$tmp/wt2" run "second worktree of an owned repo allowed with gh down" 0 "git push origin wt2"
+
+# Every URL form of the same origin shares one verdict; a look-alike does not.
+git -C "$repo" worktree add -q "$tmp/wt3" -b wt3
+git -C "$tmp/wt3" remote set-url origin git@github.com:CANEFF/agent-skills.git
+RUN_CWD="$tmp/wt3" run "scp-style, mixed-case origin shares the cached verdict" 0 "git push origin wt3"
+git -C "$tmp/wt3" remote set-url origin https://github.com/caneff-agent/skills.git
+RUN_CWD="$tmp/wt3" run "look-alike repo name does not share the cached verdict" 2 "git push origin wt3" "could not verify"
 
 # Merging a PR follows ownership (#790): the controller merges on an owned
 # repo, and every other repo's merge stays the user's.
