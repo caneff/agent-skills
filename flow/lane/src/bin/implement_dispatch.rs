@@ -822,11 +822,7 @@ fn run() -> Result<(), ExitCode> {
     }
 
     let repo = args.repo.clone().unwrap_or_else(|| env::current_dir().map(|p| p.display().to_string()).unwrap_or_default());
-    let primary = match worktree::primary_timeout(&repo, git_query_timeout()) {
-        Ok(Some(p)) => p,
-        Ok(None) => return Err(die(format!("not a git repo: {repo}"))),
-        Err(e) => return Err(die(e)),
-    };
+    let primary = worktree::primary_timeout(&repo, git_query_timeout()).map_err(die)?;
     let slug = git_origin::origin_slug_timeout(Path::new(&primary), git_query_timeout()).map_err(die)?.unwrap_or_default();
     if !valid_slug(&slug) {
         return Err(die(format!("origin in {primary} names no GitHub owner/name")));

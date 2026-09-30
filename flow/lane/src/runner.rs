@@ -241,6 +241,7 @@ pub fn run_in_timeout(dir: Option<&Path>, program: &str, args: &[&str], timeout:
 struct Quiet {
     status: ExitStatus,
     stdout: Vec<u8>,
+    stderr: Vec<u8>,
     timed_out: bool,
     truncated: bool,
 }
@@ -248,9 +249,9 @@ struct Quiet {
 fn run_quiet(program: &str, args: &[&str], timeout: Duration) -> Result<Quiet, String> {
     let mut cmd = Command::new(program);
     cmd.args(args).stdin(Stdio::null());
-    let (status, stdout, _stderr, timed_out, truncated) =
+    let (status, stdout, stderr, timed_out, truncated) =
         run_bounded(cmd, timeout).map_err(|e| format!("{program} {}: {e}", args.join(" ")))?;
-    Ok(Quiet { status, stdout, timed_out, truncated })
+    Ok(Quiet { status, stdout, stderr, timed_out, truncated })
 }
 
 impl Quiet {
@@ -304,6 +305,20 @@ pub fn quiet_stdout_bounded(program: &str, args: &[&str], timeout: Duration) -> 
         return Err(err);
     }
     Ok(run.status.success().then(|| run.text()))
+}
+
+/// [`quiet_stdout_bounded`] for a caller that has no negative answer to
+/// read: a command that ran and exited non-zero is an `Err` too, carrying the
+/// command's own stderr, so the refusal names why instead of a guess.
+pub fn stdout_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
+    let run = run_quiet(program, args, timeout)?;
+    if let Some(err) = run.incomplete(program, args, timeout) {
+        return Err(err);
+    }
+    if !run.status.success() {
+        return Err(format!("{program} {} failed: {}", args.join(" "), String::from_utf8_lossy(&run.stderr).trim()));
+    }
+    Ok(run.text())
 }
 
 /// Bounded existence-style check whose caller must be able to tell a
@@ -563,6 +578,13 @@ mod tests {
         use std::time::Duration;
         let got = quiet_stdout_bounded("printf", &["%s", "hello"], Duration::from_secs(5));
         assert_eq!(got, Ok(Some("hello".to_string())));
+    }
+
+    #[test]
+    fn stdout_bounded_carries_the_commands_own_stderr_on_a_non_zero_exit() {
+        let got = stdout_bounded("sh", &["-c", "echo boom >&2; exit 3"], Duration::from_secs(5));
+        let err = got.unwrap_err();
+        assert!(err.contains("failed: boom"), "{err}");
     }
 
     #[test]
