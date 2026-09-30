@@ -3,6 +3,8 @@
 per-review-type value table.
 
     review_ledger.py harvest [--cache DIR] [--transcripts DIR] [--ledger PATH] [--review-file PATH]
+    review_ledger.py append  --repo R --ticket N --type standards|spec|correctness|verification
+                             [--round K] [--cache DIR] [--transcripts DIR] [--ledger PATH]
     review_ledger.py report  [--ledger PATH] [--weights FILE] [--prices FILE] [--split 1/k|none]
                              [--format md|json]
 
@@ -36,7 +38,9 @@ are both known.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -207,8 +211,10 @@ def attribute(meta: dict, project: str, first: str | None) -> tuple[dict | None,
     return {"repo": repo, "ticket": ticket, "type": axis, "round": int(rm.group(1)) if rm else 1}, ""
 
 
-def read_transcripts(root: Path) -> tuple[list[dict], list[str], int]:
-    """(attributed runs, unattributed with reasons, count of other agent types ignored)."""
+def read_transcripts(root: Path, tickets: set[int] | None = None) -> tuple[list[dict], list[str], int]:
+    """(attributed runs, unattributed with reasons, count of other agent types ignored).
+    `tickets` keeps only runs of those tickets, and skips a worktree project directory
+    named for another ticket without reading its transcripts."""
     runs: list[dict] = []
     unattributed: list[str] = []
     ignored = 0
@@ -225,6 +231,9 @@ def read_transcripts(root: Path) -> tuple[list[dict], list[str], int]:
         if meta.get("agentType") != "diff-reviewer":
             ignored += 1
             continue
+        pm = _PROJECT_RE.match(project)
+        if tickets is not None and pm and pm.group("n") and int(pm.group("n")) not in tickets:
+            continue
         path = meta_path.with_name(agent + ".jsonl")
         if not path.exists():
             unattributed.append(f"{label}: meta.json has no transcript beside it")
@@ -237,6 +246,8 @@ def read_transcripts(root: Path) -> tuple[list[dict], list[str], int]:
         key, why = attribute(meta, project, read["first"])
         if key is None:
             unattributed.append(f"{label}: {why}")
+            continue
+        if tickets is not None and key["ticket"] not in tickets:
             continue
         runs.append({**key, "agent": agent, "source": f"{project}/{agent}.jsonl", "model": read["model"],
                      "tokens": read["tokens"], "wall_clock": read["wall_clock"]})
@@ -465,12 +476,24 @@ def _dispositions_group(name: str) -> str | None:
     return m.group(1) if m else None
 
 
-def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = None) -> tuple[list[dict], dict]:
+def _name_tickets(name: str) -> list[int]:
+    """The tickets a findings or dispositions file name covers; none when the name is off-pattern."""
+    found = _findings_name(name)
+    group = found[1] if found else _dispositions_group(name)
+    return [int(t) for t in group.split("-")] if group else []
+
+
+def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = None,
+                  only: tuple[str, int] | None = None) -> tuple[list[dict], dict]:
     """(rows, review-file facts) for a whole cache tree. `transcripts` is the tree the
-    Claude reviewers' cost is read from; None means there is none, for the reason `missing`."""
+    Claude reviewers' cost is read from; None means there is none, for the reason `missing`.
+    `only` is (repo, ticket): harvest just that ticket's sidecars and transcripts, which is
+    what `append` does, so its rows are the ones a full harvest writes."""
     pairs = find_sidecar_files(cache)  # FileNotFoundError when the cache is missing
     if not pairs:
         raise ValueError(f"no findings or dispositions sidecars under {cache}")
+    if only:  # a cache directory name is literal; only a transcript's project directory loses `_` and `.`
+        pairs = [(d, n) for d, n in pairs if fold_repo(d) == fold_repo(only[0]) and only[1] in _name_tickets(n)]
     by_repo: dict[str, list[str]] = {}
     for repo_dir, name in pairs:
         by_repo.setdefault(repo_dir, []).append(name)
@@ -577,7 +600,10 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
             for fid in sorted(table):
                 if (group, fid) not in joined:
                     orphans.append(f"{repo_dir} #{group} `{fid}` ({table[fid].get('outcome')})")
-    runs, unattributed, ignored = read_transcripts(transcripts) if transcripts else ([], [], 0)
+    wanted = {t for r in rows for t in r["tickets"]} if only else None
+    runs, unattributed, ignored = read_transcripts(transcripts, wanted) if transcripts else ([], [], 0)
+    if only:  # a ticket number repeats across repos
+        runs = [r for r in runs if _norm_repo(fold_repo(r["repo"])) == _norm_repo(fold_repo(only[0]))]
     new_rows, listed = attach_costs(rows, runs, missing)
     rows += new_rows
     rows.sort(key=lambda r: r["row_id"])
@@ -648,6 +674,21 @@ def read_ledger(path: Path) -> list[dict]:
     return rows
 
 
+def update_ledger(path: Path, change) -> None:
+    """The one writer of the ledger: `change` edits {row_id: row} in place, under a lock, and the
+    result replaces the file whole. `harvest` and `append` both come through here because three
+    reviewers finish together and a harvest can overlap them; two plain read-modify-writes lose a row.
+    A ledger that is not valid JSON raises ValueError and is left as found."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name(path.name + ".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        rows = {r["row_id"]: r for r in read_ledger(path)} if path.exists() else {}
+        change(rows)
+        tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+        tmp.write_text("".join(json.dumps(rows[k], sort_keys=True) + "\n" for k in sorted(rows)))
+        os.replace(tmp, path)
+
+
 def cmd_harvest(args) -> int:
     try:
         transcripts, missing = args.transcripts, None
@@ -658,21 +699,78 @@ def cmd_harvest(args) -> int:
         elif not transcripts.is_dir():
             raise FileNotFoundError(f"transcripts tree not found: {transcripts}")
         rows, facts = harvest_cache(args.cache, transcripts, missing)
-        kept = [r for r in read_ledger(args.ledger) if r.get("origin") != "harvest"] \
-            if args.ledger.exists() else []
+
+        def replace_harvest_rows(ledger: dict) -> None:
+            for k in [k for k, r in ledger.items() if r.get("origin") == "harvest"]:
+                del ledger[k]
+            ledger.update({r["row_id"]: r for r in rows})
+
+        update_ledger(args.ledger, replace_harvest_rows)
     except (FileNotFoundError, ValueError) as e:
         print(f"review_ledger: {e}", file=sys.stderr)
         return 2
-    everything = {r["row_id"]: r for r in kept}
-    everything.update({r["row_id"]: r for r in rows})
-    args.ledger.parent.mkdir(parents=True, exist_ok=True)
-    args.ledger.write_text("".join(json.dumps(everything[k], sort_keys=True) + "\n" for k in sorted(everything)))
     review = args.review_file or args.ledger.with_suffix(".review.md")
     review.write_text(review_file_text(facts))
     print(f"harvested {len(rows)} rows into {args.ledger}; {sum(facts['unmapped'].values())} unmapped values, "
           f"{len(facts['matches'])} overlap matches, {len(facts['unharvested'])} sidecars not harvested, "
           f"{len(facts['skipped'])} skipped lines or duplicates, "
           f"{len(facts['unattributed'])} transcripts not attributed, listed in {review}")
+    return 0
+
+
+APPEND_TYPES = ("standards", "spec", "correctness", "verification")
+REVIEWER_TYPES = APPEND_TYPES + ("over-engineering",)
+
+
+def _refusal(row: dict) -> str | None:
+    """Why a row cannot be appended: the cost source it was read from is missing or unreadable."""
+    for field in ("tokens", "wall_clock"):
+        c = row["cost"][field]
+        if c["status"] == "unknown":
+            return f"cost source missing ({field}): {c['reason']}"
+    return None
+
+
+def cmd_append(args) -> int:
+    """Write the rows of one review that just ran: what `harvest` would write for that
+    ticket's sidecars and transcripts, selected by type and round. A review's own cost or
+    findings sidecar being absent is a refusal, never a row with zero cost. A round-1 review
+    ends before its dispositions exist, so its findings' outcomes are `unknown` until the
+    same append is run again after them, or a harvest reads them."""
+    try:
+        transcripts = args.transcripts or DEFAULT_TRANSCRIPTS
+        if not transcripts.is_dir():
+            raise FileNotFoundError(f"transcripts tree not found: {transcripts}")
+        rows, _ = harvest_cache(args.cache, transcripts, only=(args.repo, args.ticket))
+    except (FileNotFoundError, ValueError) as e:
+        print(f"review_ledger append: {e}", file=sys.stderr)
+        return 2
+    want = {args.type} | ({"over-engineering"} if args.type == "standards" else set())
+    mine = [r for r in rows if r["type"] in want and r["round"] == args.round]
+    if not any(r["type"] == args.type and any(Path(x).name.startswith("findings-") for x in r["status"]["sources"])
+               for r in mine):
+        print(f"review_ledger append: no findings sidecar for {args.type} round {args.round} of "
+              f"{args.repo} #{args.ticket} under {args.cache}", file=sys.stderr)
+        return 2
+    for r in mine:
+        if (why := _refusal(r)):
+            print(f"review_ledger append: {r['row_id']}: {why}", file=sys.stderr)
+            return 2
+    ticket = (mine[0]["repo"], mine[0]["ticket"])
+
+    def add_rows(ledger: dict) -> None:
+        ledger.update({r["row_id"]: {**r, "origin": "append"} for r in mine})
+        # The ticket's other reviewers may have appended already: re-split credit across all of them.
+        # Only rows of reviewer types: a row another writer adds (codex, mutation) is not ours to re-score.
+        mark_overlap([r for r in ledger.values() if (r.get("repo"), r.get("ticket")) == ticket
+                      and r.get("type") in REVIEWER_TYPES], [], [])
+
+    try:
+        update_ledger(args.ledger, add_rows)
+    except ValueError as e:
+        print(f"review_ledger append: {e}", file=sys.stderr)
+        return 2
+    print(f"appended {len(mine)} row(s) to {args.ledger}: {', '.join(r['row_id'] for r in mine)}")
     return 0
 
 
@@ -811,6 +909,15 @@ def main(argv=None) -> int:
     h.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     h.add_argument("--review-file", type=Path)
     h.set_defaults(func=cmd_harvest)
+    a = sub.add_parser("append")
+    a.add_argument("--repo", required=True, help="the review cache's repo directory name")
+    a.add_argument("--ticket", type=int, required=True)
+    a.add_argument("--type", choices=APPEND_TYPES, required=True)
+    a.add_argument("--round", type=int, default=1)
+    a.add_argument("--cache", type=Path, default=REVIEWS_ROOT)
+    a.add_argument("--transcripts", type=Path, help=f"default {DEFAULT_TRANSCRIPTS}")
+    a.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
+    a.set_defaults(func=cmd_append)
     r = sub.add_parser("report")
     r.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     r.add_argument("--weights", type=Path)
