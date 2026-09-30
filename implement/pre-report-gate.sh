@@ -11,7 +11,7 @@
 # the PR-up report by setting PRE_REPORT_KEEP_SCRATCH="<why>", which passes
 # the check and folds the reason into the pass line itself.
 # On a sweep ticket's PR (title "Sweep: leftovers from ...", read with gh) it
-# also refuses a sweep item that is neither a sidecar leftover nor done in the
+# also refuses a sweep item that is neither a sidecar leftover nor stated `fixed` in the
 # body (#1259).
 # Usage: bash pre-report-gate.sh <sha> [<tip, default HEAD>]
 # Exit 0 + a pass line to quote in the report; 1 + a one-line reason; 2 on
@@ -99,7 +99,7 @@ if [[ "$branch" =~ ^implement-([0-9]+)$ ]]; then
   fi
   # A sweep ticket's undone items reach the next sweep only as sidecar
   # leftover lines (#1259): `runfile.py leftover` harvests nothing else. So on
-  # a sweep PR every item of the ticket is a sidecar line or done in the body.
+  # a sweep PR every item of the ticket is a sidecar line or stated `fixed` in the body.
   # A ticket that cannot be read is not "not a sweep" (exit 2).
   title=$(gh issue view "$n" --json title --jq .title 2>&1) ||
     { echo "pre-report gate: cannot read ticket #$n to tell whether it is a sweep (gh: $title)" >&2; exit 2; }

@@ -83,16 +83,26 @@ def test_a_file_qualified_leftover_id_renders_bare_under_its_own_file():
     assert "**implement/SKILL.md P9**" not in body, body
 
 
-def test_two_undone_sweep_items_render_under_their_original_files():
-    items = [
-        leftover(901, [901], 950, "implement/SKILL.md P9",
-                 "implement/SKILL.md", "T", "hard", "x"),
-        leftover(901, [901], 950, "burndown/runfile.py P10",
-                 "burndown/runfile.py", "T", "low", "y"),
-    ]
-    body = sweep.render_body(items)
-    assert runfile.sweep_items(body) == [
-        "implement/SKILL.md P9", "burndown/runfile.py P10"], body
+def test_two_undone_sweep_items_are_harvested_then_rendered_under_their_files():
+    # #1259 AC1 end to end: the worker's `<file> <id>` sidecar lines are
+    # copied by `runfile.leftover` and rendered by the CLI under their files.
+    root = cache()
+    sidecar = runfile.dispositions_path(cache(), 901)
+    with open(sidecar, "w") as fh:
+        for file, id_ in (("implement/SKILL.md", "P9"),
+                          ("burndown/runfile.py", "P10")):
+            fh.write(json.dumps({
+                "id": f"{file} {id_}", "outcome": "leftover", "file": file,
+                "title": "t", "severity": "hard", "text": "x"}) + "\n")
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-1", 901, "abc1234", root=root)
+    _, added = runfile.leftover("burn-1", 901, 950, sidecar, root=root)
+    assert added == ["implement/SKILL.md P9", "burndown/runfile.py P10"], added
+    body = cli(root, "render", "burn-1").stdout
+    assert body.index("## implement/SKILL.md") < body.index("- **P9**"), body
+    assert body.index("## burndown/runfile.py") < body.index("- **P10**"), body
+    assert runfile.sweep_items(body) == added, body
 
 
 def test_every_field_of_a_leftover_appears_in_the_render():

@@ -1978,6 +1978,12 @@ def test_sweep_items_read_spaced_headings_star_bullets_and_skip_fences():
     assert runfile.sweep_items(text) == ["my notes.md P1", "my notes.md P2"]
 
 
+def test_a_tilde_fence_holding_a_backtick_line_does_not_end_the_ticket():
+    # S4: frontier's fence reader, not a second copy of it.
+    text = ("## a.md\n\n~~~\n```\n~~~\n\n- **P1** (low) t\n")
+    assert runfile.sweep_items(text) == ["a.md P1"]
+
+
 def test_a_bullet_keeping_its_own_files_prefix_is_read_bare():
     assert runfile.sweep_items(
         "## a/one.md\n\n- **a/one.md P9** (low) t\n") == ["a/one.md P9"]

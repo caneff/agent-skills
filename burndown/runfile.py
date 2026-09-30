@@ -37,6 +37,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frontier  # noqa: E402
+
 CACHE_DIR = "~/.cache/burndown"
 # The one form of the PR-body fetch `leftover --pr-body` reads.
 _FETCH_BODY = "gh pr view <pr> --repo <owner/name> --json body --jq .body"
@@ -564,13 +567,15 @@ def _cites(line):
 
 
 def cited_ids(line):
-    """The ids a Decisions made line cites, and the text after the leading
-    ones: `- S1, P2 and C1: fixed` cites all three. A file-qualified id
-    (`**e2e/scenarios.mjs S8**`) cites the id alone."""
+    """`(ids, rest, cites)` of a Decisions made line: the ids it cites, the
+    text after the leading ones, and the `(file or None, id)` pairs of the
+    leading ones. `- S1, P2 and C1: fixed` cites all three. A file-qualified
+    id (`**e2e/scenarios.mjs S8**`) cites the id alone; `cites` keeps its
+    file."""
     cites, pos = _cites(line)
     ids = [fid for _, fid in cites]
     ids += [m.group(1) for m in _TAIL_ID.finditer(line)]
-    return ids, line[pos:]
+    return ids, line[pos:], cites
 
 
 def qualified_id(file, fid):
@@ -614,10 +619,7 @@ def body_records(body_lines):
     nothing."""
     records = {}
     for n, line in decisions_made(body_lines) or []:
-        cites, pos = _cites(line)
-        ids = [fid for _, fid in cites]
-        ids += [m.group(1) for m in _TAIL_ID.finditer(line)]
-        rest = line[pos:]
+        ids, rest, cites = cited_ids(line)
         words = {normal_outcome(w) for w in
                  re.findall(r"\b" + _OUTCOME_WORD + r"\b", rest, re.IGNORECASE)}
         if ids and words:
@@ -723,22 +725,16 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
 
 _SWEEP_FILE = re.compile(r"##\s+(.+?)\s*$")
 _SWEEP_ITEM = re.compile(r"\s*[-*+]\s+\*\*(.+?)\*\*")
-_FENCE = re.compile(r"\s*(```|~~~)")
 
 
 def sweep_items(ticket_text):
     """A sweep ticket's items as `<file> <id>`, in order: the grammar
     `sweep.py render_body` emits — one `## <file>` section per file, one
-    `- **<id>**` bullet per item. A fenced block is skipped, and the
+    `- **<id>**` bullet per item. A fenced block is skipped (`frontier.unfenced`), and the
     `## Blocked by` declaration is not a file. A bullet that kept its own
     file's prefix reads bare."""
-    items, file, fenced = [], None, False
-    for line in ticket_text.splitlines():
-        if _FENCE.match(line):
-            fenced = not fenced
-            continue
-        if fenced:
-            continue
+    items, file = [], None
+    for _, line in frontier.unfenced(ticket_text.splitlines()):
         heading = _SWEEP_FILE.match(line)
         if heading:
             file = heading.group(1).strip("`")

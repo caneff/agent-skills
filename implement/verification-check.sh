@@ -36,7 +36,7 @@ if [ "$empty_round" = 1 ]; then
   exit 0
 fi
 if [ -e "$sidecar" ]; then
-  echo "the dispositions sidecar $sidecar is empty although round 1 has findings — the verification pass recorded no dispositions (implement/SKILL.md § Review step 2)"
+  echo "the dispositions sidecar $sidecar is empty, or holds only a sweep worker's <file> <id> lines, although round 1 has findings — the verification pass recorded no dispositions (implement/SKILL.md § Review step 2)"
 else
   echo "no dispositions sidecar at $sidecar — the verification pass (implement/SKILL.md § Review step 2) has not run; run it before reporting"
 fi

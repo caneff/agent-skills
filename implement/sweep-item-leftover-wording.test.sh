@@ -23,6 +23,6 @@ need "§ Review" "$review" '`<file> <id>`'
 need "§ Before the PR" "$before_pr" 'sweep item that is neither'
 verify="$(sed -n '/^### 6\. The verification pass$/,/^## Why separate axes$/p' "$here/../multi-axis-code-review/SKILL.md" | flatten)"
 [ -n "$verify" ] || { echo "FAIL: could not extract multi-axis § 6" >&2; exit 1; }
-need "multi-axis § 6" "$verify" 'keeping every line already in the file whose id holds a space'
+need "multi-axis § 6" "$verify" 'Keep every line already in the file whose id holds a space'
 [ "$fail" = 0 ] && echo "ok: sweep items left undone are sidecar leftovers"
 exit "$fail"
