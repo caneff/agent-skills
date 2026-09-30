@@ -11,10 +11,10 @@
     python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 
 It holds the run id, the slot budget, the controller's herdr agent name, the
-**target repo** (the absolute top-level of the checkout the run works on,
-which `loop.py dispatch` prints into every `implement-dispatch` command and
-`sweep.py counts --repo` is checked against), and one entry per clump — its ticket list, its workspace, its worker's **herdr
-agent name**, and its squash sha once it lands. It also holds the run's
+**target repo** (the absolute path of the primary checkout of the repo the
+run works on, which `loop.py dispatch` prints into every `implement-dispatch`
+command and `sweep.py counts --repo` is checked against), and one entry per
+clump — its ticket list, its workspace, its worker's **herdr agent name**, and its squash sha once it lands. It also holds the run's
 **leftovers**, copied at landing from each PR's dispositions sidecar
 (`implement/SKILL.md` § Review) rather than transcribed by hand. `resume`
 reads it back and splits the clumps against the agents that are alive: the
@@ -606,8 +606,8 @@ def refuse_reused_ids(body_path, records, held):
     """A finding id the sidecar holds that the body records twice with two
     different stated outcomes is an id two review rounds both used (#1177):
     a round after the first prefixes its ids (`r2-S1`; the rule is in
-    `multi-axis-code-review/SKILL.md` § 4), so a bare id names one finding. Only ids the sidecar holds
-    are compared: a sweep PR's body cites sweep items whose ids repeat across
+    `multi-axis-code-review/SKILL.md` § 4), so a bare id names one finding.
+    Only ids the sidecar holds are compared: a sweep PR's body cites sweep items whose ids repeat across
     their source PRs (#1213), and those are nobody's finding here."""
     for fid, found in records.items():
         if fid not in held:
@@ -988,8 +988,8 @@ def main(argv):
                      help=f"slot budget, a positive integer (default {DEFAULT_SLOTS})")
     new.add_argument("--controller", help="the controller's herdr agent name")
     new.add_argument("--repo", required=True,
-                     help="the target repo's checkout; its absolute top-level "
-                          "path is recorded")
+                     help="the target repo's checkout; the absolute path of its "
+                          "primary checkout is recorded")
 
     reg = subs.add_parser("clump", help="register or re-register a clump")
     reg.add_argument("run_id")

@@ -58,7 +58,8 @@ A finding of one of `implement/SKILL.md` § Review's blocking kinds opens its
 `title` with `blocking:` and names the kind, so the worker cannot read it as
 a `leftover` (#1252).
 When the prompt names an id prefix (`id prefix: r2-`), prefix every id with it
-(`r2-S1`); one that names none gets bare ids. The rule is `multi-axis-code-review/SKILL.md` § 4's Round ids.
+(`r2-S1`); one that names none gets bare ids. The rule is
+`multi-axis-code-review/SKILL.md` § 4's Round ids.
 On the standards axis, a cut the over-engineering lens reports also gets a
 line here — its own `OE1`, `OE2`, … series, still `axis: "standards"` — so
 it can be disposed of by id like any other finding (#1021).
