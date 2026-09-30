@@ -2,6 +2,7 @@
 # Test fixture (#559): a fake `claude` binary for driver_test.py's manifest
 # tests. Reads the last argv (the audit prompt), and — only for the audit
 # named "dead-code" — writes a report + the manifest the prompt asked for.
+# FAKE_CLAUDE_NOOP=1 makes every audit, dead-code included, write nothing.
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
 # simulating a crashed/silent process so the driver must render a missing
 # manifest as a named failure, never as a silent skip.

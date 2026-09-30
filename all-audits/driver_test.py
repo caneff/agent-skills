@@ -257,9 +257,10 @@ def test_index_from_manifests_missing_manifest_is_a_failure_row():
         assert "no manifest" in index_text, "duplication (no manifest written) must render as a named failure"
 
 
-def _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, **extra_env):
+def _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, extra_args=(), **extra_env):
     here = os.path.dirname(os.path.abspath(__file__))
-    os.symlink(os.path.join(here, "fake_claude_fixture.sh"), os.path.join(bin_dir, "claude"))
+    if not os.path.lexists(os.path.join(bin_dir, "claude")):  # a second run reuses the same bin_dir
+        os.symlink(os.path.join(here, "fake_claude_fixture.sh"), os.path.join(bin_dir, "claude"))
     # The ceiling variable is dropped from the ambient env so a shell that
     # already exports it cannot make the driver's own setting look unneeded.
     ambient = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"}
@@ -268,7 +269,7 @@ def _sweep_with_fake_claude(tmp, cache_dir, bin_dir, only, **extra_env):
         "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", **extra_env,
     }
     return subprocess.run(
-        [sys.executable, os.path.join(here, "driver.py"), tmp, "--only", only, "--out", os.path.join(tmp, "out")],
+        [sys.executable, os.path.join(here, "driver.py"), tmp, "--only", only, *extra_args, "--out", os.path.join(tmp, "out")],
         capture_output=True, text=True, env=env,
     )
 
@@ -303,12 +304,7 @@ def test_stale_manifest_from_an_earlier_run_does_not_count_as_success():
         first = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code")
         assert first.returncode == 0, first.stdout + first.stderr
         assert os.path.isfile(os.path.join(tmp, "out", "manifests", "dead-code", "manifest.json")), "fixture setup: run 1 leaves a manifest"
-        again = subprocess.run(
-            [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "driver.py"), tmp, "--only", "dead-code", "--force", "--out", os.path.join(tmp, "out")],
-            capture_output=True, text=True,
-            env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_CACHE_HOME": cache_dir,
-                 "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", "FAKE_CLAUDE_NOOP": "1"},
-        )
+        again = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code", extra_args=("--force",), FAKE_CLAUDE_NOOP="1")
         assert again.returncode != 0, again.stdout + again.stderr
         assert "[dead-code] FAILED: no manifest" in again.stdout, again.stdout
 
