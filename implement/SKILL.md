@@ -190,16 +190,32 @@ No PR and no reviewer; Chris reads the log after.
   the code that makes it pass. Once green, strip the constraint it verifies
   and see it fail — a test that passed with the fix reverted has shipped as
   proof of a fix it never checked. Commit the work first, then mutate in a
-  throwaway worktree: `git worktree add --detach .scratch/mutation-<id> HEAD`,
-  strip the constraint there, run only the covering suite there, and
-  `git worktree remove --force .scratch/mutation-<id>`. Nothing is restored in
-  the live checkout: `git checkout -- <file>`, `git restore` and `git stash`
-  all return a file to its last commit, so any uncommitted edit in it goes with
-  the mutation (#1261). The isolation recipe is
-  the *Isolation* paragraph of `multi-axis-code-review/SKILL.md`'s witness-check
-  block (not a heading, so no section sign) — a fenced recipe, not a script you
-  can call, so follow its rules (never a byte copy of the tree) rather than
-  copy its code.
+  throwaway worktree, one per mutation:
+
+  ```
+  git worktree remove --force .scratch/mutation-<id> 2>/dev/null
+  git worktree add --detach .scratch/mutation-<id> HEAD
+  ```
+
+  The first line clears a worktree an earlier run left registered at that
+  path, which would make `worktree add` refuse. If the add still refuses,
+  stop and pick another `<id>`: the path holds a directory git does not
+  know or a locked worktree, and a mutation there would read a stale tree. Strip the constraint
+  there, run only the covering suite there, and
+  `git worktree remove --force .scratch/mutation-<id>` whether it went red
+  or not. The worktree holds only tracked files, so set up there whatever
+  the suite needs from the checkout's untracked or ignored state, such as
+  `node_modules` or a clean bytecode cache (#1219). Then read the red
+  message: it must be your stripped assertion, not a missing file or a
+  denied path (`AGENTS.md` § Recurring defect classes,
+  class 3). Nothing is restored in the live checkout:
+  `git checkout -- <file>`, `git restore` and `git stash` all return a file
+  to its last commit, so any uncommitted edit in it goes with the mutation
+  (#1261). The worktree sits under `.scratch/`, not the review recipe's path
+  outside the checkout, because this workspace is yours and § Before the PR
+  step 3 clears it. Otherwise follow the *Isolation* paragraph of
+  `multi-axis-code-review/SKILL.md`'s witness check: never a byte copy of
+  the tree.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
   report it as a follow-up. Why: an unasked fix widens the diff past what the
@@ -225,11 +241,10 @@ No PR and no reviewer; Chris reads the log after.
    finding, under the severity mapping below. A finding that is not high and
    not fixed in the round takes `leftover` (never one of the blocking
    kinds below): no ticket of its own, only a sidecar line (step 2) and
-   `leftover` in prose. A burn's own sweep, one
-   ticket per run, is `burndown/SKILL.md` § The sweep; a worker whose
-   brief carries **no `--run <run-id>`** has no run file under it and
-   files its own per-PR sweep instead, at report time: this file's § The PR
-   below.
+   `leftover` in prose. A burn's own sweep, one ticket per run, is
+   `burndown/SKILL.md` § The sweep; a worker whose brief carries **no
+   `--run <run-id>`** has no run file under it and files its own per-PR
+   sweep instead, at report time (this file's § The PR).
 
    **The split grammar.** A ruling that genuinely divides a controller-only
    finding — one with no line of its own in a `findings-<axis>-<n>.jsonl`
@@ -292,18 +307,22 @@ No PR and no reviewer; Chris reads the log after.
 
    **The blocking kinds.** Stated here once, applied after the reachability
    bar; the reviewer briefs in `multi-axis-code-review` point here. A
-   round-1 finding that the PR (a) added a second copy of existing code or
-   data, or (b) left a doc, docstring, comment or alias claiming a state the
-   PR changed, is fixed in this PR before merge. The adjacent-fix rule's
-   size limit does not apply: the fix may cross files and run past 20
-   lines. It is never `leftover`, and never `filed` unless the fix needs its
-   own design, which the disposition names. Its sidecar line is the plain
-   `fixed` line, with no `scope`, so `check_adjacent.py` does not measure
-   it; the verification pass checks the fix like any other. A reviewer
-   marks one by opening its sidecar `title` with `blocking:`, but the kind
-   is the finding's, not the tag's: an untagged copy is still kind (a). Kind (a)
-   is a copy of something the base branch already holds, not a shape
-   repeated inside the diff, which is the standards axis's Duplicated Code.
+   finding of round 1, or of any Codex pass at merge (§ The merge step 3),
+   that the PR (a) added a second copy of existing code or data, or (b)
+   left a doc, docstring, comment or alias claiming a state the PR changed,
+   is fixed in this PR before merge. The adjacent-fix rule's size limit
+   does not apply: the fix may cross files and run past 20 lines. It is
+   never `leftover`, and never `filed` unless the fix needs its own design,
+   which the disposition names. A round-1 blocking finding's sidecar line is
+   the plain `fixed` line, with no `scope`, so `check_adjacent.py` does not
+   measure it; the verification pass checks the fix like any other. A
+   Codex-pass one is checked by the next Codex pass or the controller's own
+   read of the fix diff, as § The merge step 3 says for each pass. A
+   reviewer marks one by opening its sidecar `title` with `blocking:`, but
+   the kind is the finding's, not the tag's: an untagged copy is still kind
+   (a). Kind (a) is a copy of something the base branch already holds, not
+   a shape repeated inside the diff, which is the standards axis's
+   Duplicated Code.
    Kind (b) includes the claim this PR's own rename or removal left behind.
    Why: in `caneff/sudokupad-art`, 63 of 85 leftover findings sat in lines
    the PR itself wrote, and copies deferred as `leftover` took four sweep
@@ -622,8 +641,8 @@ Controller: Chris merges this PR; you dispatched me, so after the Codex pass
   the reason.
 - **A mutation check**, when the ticket's deliverable is a test or a gate:
   name one change that makes the new test or gate fail, that you saw it
-  fail, and the throwaway worktree the mutation ran in. Nothing else in the report tells a gate from a test that always
-  passes.
+  fail, and the throwaway worktree the mutation ran in. Nothing else in the
+  report tells a gate from a test that always passes.
 
 Add "Chris merges" when — and only when — this run's own brief line carried the
 literal `--chris-merges` flag. Nothing else earns the phrase: not the ticket
@@ -842,11 +861,13 @@ The controller merges on a repo Chris owns; Chris reads it after via
    second pass is judged against below: the diff is only half this pass's
    input, and a requirement commented onto the ticket between the two
    passes moves the other half while the sha sits still.
-   The worker disposes of each one — fixed in a commit, `disputed: <why>`,
-   filed if it is high, or `leftover`, under § Review's reachability bar
-   first and its severity mapping second — adds each disposition to
-   the PR body's Decisions made section (`gh pr edit <pr> --repo
-   <owner/name> --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md`), and sends "PR up" again.
+   The worker disposes of each one under § Review's reachability bar first
+   and its severity mapping second: one of § Review's blocking kinds as
+   that rule disposes of it, never `leftover`; any other fixed in a commit,
+   `disputed: <why>`, filed if it is high, or `leftover`. It adds each
+   disposition to the PR body's Decisions made section
+   (`gh pr edit <pr> --repo <owner/name> --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md`),
+   and sends "PR up" again.
    Re-run step 2 (not-draft, CLEAN — commits landed since the first check).
 
    **The second pass runs only if the head sha moved or the ticket text
@@ -880,36 +901,41 @@ The controller merges on a repo Chris owns; Chris reads it after via
    its own `phase`-named `out_file`. No material findings → go to step 4.
    Findings → the controller evaluates every finding and its recommendation
    before any reaches the worker, as it did the first pass's. **A
-   second-pass finding that passes § Review's adjacent-fix rule goes to
-   the worker, who fixes it in one round.** The worker makes each fix in
-   a commit of its own. It records each with § Review's adjacent-fix
-   disposition and that sha in the PR body's Decisions made section, and
+   second-pass finding that passes § Review's adjacent-fix rule, or is one
+   of § Review's blocking kinds, goes to the worker, who fixes it in one
+   round.** The worker makes each fix in a commit of its own. It records
+   each with § Review's adjacent-fix disposition, or a blocking kind's
+   plain `fixed`, and that sha in the PR body's Decisions made section, and
    sends "PR up" again. Then the controller reads that fix diff itself,
-   against the finding it answers and the adjacent-fix rule, rather than
-   sending it back to Codex. It re-runs
-   step 2. The fail-closed gate does not refuse the second pass as stale
-   over an in-round fix: the controller's read of the fix diff is the
+   against the finding it answers and the adjacent-fix rule, or a blocking
+   kind's fix against that rule, rather than sending it back to Codex. It
+   re-runs step 2. The fail-closed gate does not refuse the second pass as
+   stale over an in-round fix: the controller's read of the fix diff is the
    review of every commit past the second pass's sha, up to the head it
    read. So the controller records the head sha it read the fix diff at,
    beside the finding it answers: `read at <sha>` appended to that
    finding's line in the PR body's Decisions made (`gh pr edit`, the same
-   body file). Immediately before step 4, the PR's
-   `headRefOid` must still equal that sha. If it moved, the controller
-   reads the new commits the same way and records the new sha, or refuses
-   the merge. A commit the controller has not read never merges. The
-   controller disposes of every other second-pass finding in the PR body itself:
-   `disputed: <why>`, filed if it is high, or `leftover`, under § Review's
-   reachability bar first and its severity mapping second. A fix outside the rule is a change, not a round.
+   body file). Immediately before step 4, the PR's `headRefOid` must still
+   equal that sha. If it moved, the controller reads the new commits the
+   same way and records the new sha, or refuses the merge. A commit the
+   controller has not read never merges. The controller disposes of every
+   other second-pass finding in the PR body itself: `disputed: <why>`,
+   filed if it is high, or `leftover`, under § Review's reachability bar
+   first and its severity mapping second. A fix outside those two rules is
+   a change, not a round.
 
    A third Codex run happens only when a second-pass finding fixed in the
    round was high. The third run is final: its findings are `disputed` or
-   `leftover`, never a fourth run. That makes a third-run high the one
-   place a high finding is not filed. The third run uses the same block
-   with `phase=third` and posts the same way. The controller disposes of
-   each of its findings in the PR body; no worker fix round follows it.
-   With no high among the second-pass fixes, the controller's own read of
-   the fix diff is the last review, and step 4 follows once every
-   disposition is recorded.
+   `leftover`, except one of § Review's blocking kinds, which goes to the
+   worker for one fix round; never a fourth run. For that round the
+   controller reads that fix diff and records `read at <sha>` exactly as
+   for a second-pass fix, so the gate does not refuse the third pass as
+   stale over it. That makes a third-run high the one place a high finding
+   is not filed. The third run uses the same block with `phase=third` and
+   posts the same way. The controller disposes of each of its other
+   findings in the PR body. With no high among the second-pass fixes, the
+   controller's own read of the fix diff is the last review, and step 4
+   follows once every disposition is recorded.
 
    A Codex-pass finding disposed of as `leftover`, whichever pass raised
    it, is recorded twice. Its PR-body disposition is the first record.

@@ -75,6 +75,22 @@ order="$(grep -n -F -e '**The severity mapping.**' -e '**The reachability bar.**
 [ "$order" = '**The severity mapping.*|**The reachability bar.*|**The blocking kinds.** |**The adjacent-fix rule.|' ] ||
   { echo "FAIL: § Review's four rules are out of order: $order" >&2; fail=1; }
 
+# Chris's ruling on PR #1263 (P1): the blocking kinds cover a Codex-pass
+# finding at merge as well as a round-1 one, and each Codex disposition site
+# points back at § Review instead of offering `leftover` unqualified.
+grep -qx '### The merge' "$skill" || { echo "FAIL: heading '### The merge' missing from SKILL.md" >&2; exit 1; }
+grep -q '^## Someone else' "$skill" || { echo "FAIL: heading '## Someone else' missing from SKILL.md" >&2; exit 1; }
+merge="$(sed -n '/^### The merge$/,/^## Someone else/p' "$skill" | flatten)"
+[ -n "$merge" ] || { echo "FAIL: could not extract section 'merge'" >&2; exit 1; }
+check_in "§ Review" "$review" 'or of any Codex pass at merge'
+check_in "§ The merge first pass" "$merge" "one of § Review's blocking kinds as that rule disposes of it, never \`leftover\`"
+check_in "§ The merge second pass" "$merge" "or is one of § Review's blocking kinds, goes to the worker"
+check_in "§ The merge third pass" "$merge" "except one of § Review's blocking kinds"
+# The verification pass and the sidecar belong to round 1; a Codex-pass
+# blocking fix is checked where § The merge checks every Codex fix.
+check_in "§ Review" "$review" 'A round-1 blocking finding'"'"'s sidecar line is the plain `fixed` line'
+check_in "§ Review" "$review" "A Codex-pass one is checked by the next Codex pass or the controller's own read of the fix diff"
+
 # multi-axis-code-review points at the rule, and states neither kind itself.
 check_in "multi-axis-code-review § 4" "$spawn" "\`implement/SKILL.md\` § Review's blocking kinds"
 check_in "multi-axis-code-review § 4" "$spawn" '`blocking:`'

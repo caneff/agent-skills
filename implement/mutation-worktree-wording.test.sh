@@ -26,7 +26,26 @@ has "§ Build" "$build" 'Commit the work first'
 has "§ Build" "$build" 'git worktree add --detach .scratch/'
 has "§ Build" "$build" 'git worktree remove --force'
 has "§ Build" "$build" 'Nothing is restored in the live checkout'
-has "§ Build" "$build" "the *Isolation* paragraph of \`multi-axis-code-review/SKILL.md\`'s witness-check block"
+has "§ Build" "$build" "follow the *Isolation* paragraph of \`multi-axis-code-review/SKILL.md\`'s witness check"
+# #1273 S3/OE1/OE2: the pointer is one clause, with no authoring aside.
+lacks "§ Build" "$build" 'not a heading, so no section sign'
+lacks "§ Build" "$build" 'a fenced recipe'
+# #1273 P3: the one departure from the review recipe says why.
+has "§ Build" "$build" "not the review recipe's path outside the checkout, because this workspace is yours"
+# #1273 C3: a tree an earlier run left behind is cleared before the add, and
+# the worktree is removed whatever the mutation's outcome.
+has "§ Build" "$build" 'git worktree remove --force .scratch/mutation-<id> 2>/dev/null git worktree add --detach .scratch/mutation-<id> HEAD'
+has "§ Build" "$build" 'whether it went red or not'
+# r1-P1/r1-C2: the pre-clear cannot remove a directory git does not know, so
+# a refused add stops the mutation rather than falling through to a stale tree.
+has "§ Build" "$build" 'If the add still refuses, stop'
+# r1-S1: the rule cites #1219 without claiming its tracker state.
+lacks "§ Build" "$build" '#1219 is open'
+# #1273 C2: the fresh tree lacks untracked and ignored setup, and the red
+# message must be the stripped assertion (defect class 3, #1219).
+has "§ Build" "$build" 'The worktree holds only tracked files'
+has "§ Build" "$build" '#1219'
+has "§ Build" "$build" 'it must be your stripped assertion, not a missing file or a denied path'
 lacks "§ Build" "$build" 'then restore it'
 # The only place Build may name a restore command is the sentence that forbids
 # it; a reworded instruction elsewhere ("put the file back with git checkout")
