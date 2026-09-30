@@ -14,9 +14,10 @@ It holds the run id, the slot budget, the controller's herdr agent name, the
 **target repo** (the absolute path of the primary checkout of the repo the
 run works on, which `loop.py dispatch` prints into every `implement-dispatch`
 command and `sweep.py counts --repo` is checked against), and one entry per
-clump — its ticket list, its workspace, its worker's **herdr agent name**, and its squash sha once it lands. It also holds the run's
-**leftovers**, copied at landing from each PR's dispositions sidecar
-(`implement/SKILL.md` § Review) rather than transcribed by hand. `resume`
+clump — its ticket list, its workspace, its worker's **herdr agent name**, and
+its squash sha once it lands. It also holds the run's **leftovers**, copied at
+landing from each PR's dispositions sidecar (`implement/SKILL.md` § Review)
+rather than transcribed by hand. `resume`
 reads it back and splits the clumps against the agents that are alive: the
 live workers to re-announce the controller to, the vanished ones to
 reconcile by hand, and the landings already banked. Only the controller
@@ -86,7 +87,8 @@ _SIDECAR_OUTCOMES = ("fixed", "disputed", "filed", "handed-back", "leftover")
 
 def clean_git_env():
     # GIT_DIR and friends would repoint git at another repo whatever the path
-    # says. The one definition of which variables are scrubbed.
+    # says. The scrub `checkout_top` and `sweep.default_reviews_dir` share;
+    # `closure.git_listing` has its own, wider one.
     return {k: v for k, v in os.environ.items()
             if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")}
 
@@ -96,9 +98,8 @@ def checkout_top(where):
     in — `where` a checkout root, a linked worktree, or any directory inside
     either, a trailing slash included — or a `RunFileError` when `where` is
     not in a git checkout. Comparing primary checkouts, not spellings, is
-    what makes a subdirectory, `path/` or a linked worktree the same target,
-    and is the one checkout the review cache is keyed on. A blank `where` is
-    refused: `git -C ""` stays in the cwd, so an unset shell variable would
+    what makes a subdirectory, `path/` or a linked worktree the same target.
+    A blank `where` is refused: `git -C ""` stays in the cwd, so an unset shell variable would
     record whatever repo the controller stands in."""
     if not isinstance(where, str) or not where.strip():
         raise RunFileError("no checkout named: the path is blank")
@@ -607,8 +608,9 @@ def refuse_reused_ids(body_path, records, held):
     different stated outcomes is an id two review rounds both used (#1177):
     a round after the first prefixes its ids (`r2-S1`; the rule is in
     `multi-axis-code-review/SKILL.md` § 4), so a bare id names one finding.
-    Only ids the sidecar holds are compared: a sweep PR's body cites sweep items whose ids repeat across
-    their source PRs (#1213), and those are nobody's finding here."""
+    Only ids the sidecar holds are compared: a sweep PR's body cites sweep
+    items whose ids repeat across their source PRs (#1213), and those are
+    nobody's finding here."""
     for fid, found in records.items():
         if fid not in held:
             continue

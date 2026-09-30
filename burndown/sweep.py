@@ -34,6 +34,7 @@ it does not call `gh`. Only an update rewrites the section, through
 import os
 import re
 import string
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -173,15 +174,18 @@ def with_blocked_by(body):
         f"## Blocked by\n\n{BLOCKED_BY_TEXT}\n"
 
 
-def default_reviews_dir(primary_checkout):
+def default_reviews_dir(checkout):
     """`~/.cache/agent-reviews/<repo>`, keyed the same way
-    `multi-axis-code-review/SKILL.md`'s own dir expansion is: the primary
-    checkout's basename. The argument is `runfile.checkout_top`'s answer,
-    which already names the primary checkout even when the caller stood in
-    a task worktree — `git rev-parse --show-toplevel` there returns the
-    worktree's own path, not the repo's name every review's cache directory
-    is keyed on."""
-    repo = os.path.basename(primary_checkout)
+    `multi-axis-code-review/SKILL.md`'s own dir expansion is: the basename of
+    the directory holding the common `.git`, which is also right for a
+    submodule or a `--separate-git-dir` checkout where the primary
+    checkout's own name is not the key. `checkout` is `runfile.checkout_top`'s
+    answer, so it is already a checkout of the repo the run targets."""
+    top = subprocess.run(
+        ["git", "-C", checkout, "rev-parse", "--path-format=absolute",
+         "--git-common-dir"], capture_output=True, text=True, check=True,
+        env=runfile.clean_git_env()).stdout.strip()
+    repo = os.path.basename(os.path.dirname(top))
     return os.path.join(os.path.expanduser("~/.cache/agent-reviews"), repo)
 
 
@@ -324,7 +328,12 @@ def main(argv):
             print(f"sweep.py: --repo {args.repo} is {top}, but run "
                   f"{args.run_id} targets {recorded}", file=sys.stderr)
             return 1
-        reviews_dir = default_reviews_dir(top)
+        try:
+            reviews_dir = default_reviews_dir(top)
+        except (subprocess.CalledProcessError, OSError) as exc:
+            print(f"sweep.py: --repo {args.repo} is not a git checkout: {exc}",
+                  file=sys.stderr)
+            return 1
     else:
         print("sweep.py: counts needs --repo <primary checkout> (or "
               "--reviews-dir): the cwd's repo is not the run's target",

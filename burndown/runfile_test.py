@@ -15,7 +15,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runfile  # noqa: E402
-from run_fixtures import drop_repo_field  # noqa: E402
+from run_fixtures import drop_repo_field, linked_worktree  # noqa: E402
 import sweep  # noqa: E402
 
 RUNFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runfile.py")
@@ -92,19 +92,6 @@ def git_checkout(parent, name):
     path = os.path.join(parent, name)
     os.makedirs(path)
     subprocess.run(["git", "init", "-q", path], check=True)
-    return os.path.realpath(path)
-
-
-def linked_worktree(primary, name):
-    """A linked worktree of `primary` (an empty commit gives it a HEAD)."""
-    ident = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-             "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
-    env = {**os.environ, **ident}
-    subprocess.run(["git", "-C", primary, "commit", "-q", "--allow-empty",
-                    "-m", "x"], check=True, env=env)
-    path = os.path.join(os.path.dirname(primary), name)
-    subprocess.run(["git", "-C", primary, "worktree", "add", "-q", "--detach",
-                    path], check=True)
     return os.path.realpath(path)
 
 

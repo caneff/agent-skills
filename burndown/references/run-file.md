@@ -150,8 +150,9 @@ bolded or not, file-qualified or not (`**e2e/scenarios.mjs S8**` cites `S8`,
 #1213; the path has a `/`, or is a bare file name in backticks, and may end
 `:42` or `#L42`), or one named as `sidecar <id>` at the end of the line. A line
 naming an id with no outcome word records nothing. A line states its outcome
-when the word right after its first colon outside parentheses is one of `fixed`, `disputed`, `filed`, `handed back` or
-`leftover`, and the sidecar must hold exactly that. A line that only mentions
+when the word right after its first colon outside parentheses is one of
+`fixed`, `disputed`, `filed`, `handed back` or `leftover`, and the sidecar
+must hold exactly that. A line that only mentions
 outcome words, as in `S1 (hard): overflows. Claimed fixed; contested.
 leftover.`, disagrees when the sidecar's outcome is not among them. The
 command refuses:

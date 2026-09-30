@@ -14,7 +14,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import frontier  # noqa: E402
 import runfile  # noqa: E402
-from run_fixtures import drop_repo_field  # noqa: E402
+from run_fixtures import drop_repo_field, linked_worktree  # noqa: E402
 import sweep  # noqa: E402
 
 # A real git checkout to record as a run's target when the case is not about it.
@@ -329,13 +329,7 @@ def test_cli_counts_accepts_the_primary_checkout_of_a_run_started_in_a_worktree_
     root = cache()
     home = home_fixture()
     target = git_repo(home, "target-repo")
-    subprocess.run(["git", "-C", target, "commit", "-q", "--allow-empty", "-m",
-                    "x"], check=True, env={**os.environ,
-                    "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-                    "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"})
-    linked = os.path.join(home, "linked")
-    subprocess.run(["git", "-C", target, "worktree", "add", "-q", "--detach",
-                    linked], check=True)
+    linked = linked_worktree(target, "linked")
     runfile.start("burn-x", slots=1, root=root, repo=linked)
     runfile.clump("burn-x", [901], "/w/a", "agent-a", root=root)
     runfile.land("burn-x", 901, "abc1234", root=root)
@@ -347,6 +341,30 @@ def test_cli_counts_accepts_the_primary_checkout_of_a_run_started_in_a_worktree_
         got = cli(root, "counts", "burn-x", "--repo", where, home=home)
         assert got.returncode == 0, (where, got)
         assert "standalone: 1" in got.stdout, got.stdout
+
+
+def test_cli_counts_keys_the_cache_on_the_common_git_dir_not_the_checkout_name_1254():
+    # multi-axis-code-review keys its directory on the dirname of
+    # `--git-common-dir`; a `--separate-git-dir` checkout is the layout where
+    # that and the checkout's own name differ.
+    root = cache()
+    home = home_fixture()
+    work = os.path.join(home, "the-checkout")
+    gitdir = os.path.join(home, "gitdirs", "sep.git")
+    os.makedirs(os.path.dirname(gitdir))
+    os.makedirs(work)
+    subprocess.run(["git", "init", "-q", "--separate-git-dir", gitdir, work],
+                   check=True)
+    runfile.start("burn-x", slots=1, root=root, repo=work)
+    runfile.clump("burn-x", [901], "/w/a", "agent-a", root=root)
+    runfile.land("burn-x", 901, "abc1234", root=root)
+    d = os.path.join(home, ".cache", "agent-reviews", "gitdirs")
+    os.makedirs(d)
+    write_sidecar(d, 901, [{"id": "S1", "outcome": "filed", "sha": "a",
+                            "ticket": 5}])
+    got = cli(root, "counts", "burn-x", "--repo", work, home=home)
+    assert got.returncode == 0, got
+    assert "standalone: 1" in got.stdout, got.stdout
 
 
 def test_cli_counts_reads_the_target_repos_sidecars_from_another_cwd():

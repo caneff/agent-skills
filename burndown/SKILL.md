@@ -85,8 +85,9 @@ too.
    the clump's lowest ticket, ignoring any `job` in the in-flight file.
    `loop.py dispatch` then unions each unlanded in-flight workspace's real
    `git diff --name-only origin/<default>...HEAD`, its uncommitted edits and
-   its untracked files into that closure (#1212), so a file the worker reached that no candidate list named still holds
-   the clumps that share it; a diff it cannot read refuses the tick. A clump whose closure intersects a
+   its untracked files into that closure (#1212), so a file the worker
+   reached that no candidate list named still holds the clumps that share it;
+   a diff it cannot read refuses the tick. A clump whose closure intersects a
    live workspace's is **off the frontier**: `loop.py dispatch` picks from
    what is left, **widest closure first** so a wide clump does not sit
    behind narrow ones and block them later (#1026), and names what holds
@@ -195,7 +196,10 @@ gh issue list --repo <owner/name> --state all --limit 100 \
   --json number,title --jq '.[] | select(.title == "Sweep: leftovers from burn <run-id>") | .number'
 ```
 
-The search is fuzzy, so the `--jq` keeps only an exact title match and
+This search has a twin in `implement/SKILL.md` (§ The PR); both are written
+out on purpose (#1254): a worker holds its file and not this one, and the
+titles differ. Change one, change the other. The search is fuzzy, so the
+`--jq` keeps only an exact title match and
 prints one bare number per line: the sweep's own number, never a run or
 ticket number. A non-zero exit from the search stops the run; it is not
 zero matches, and filing on it makes a duplicate. Exit 0 and more than one
@@ -355,7 +359,8 @@ A run's state is **one JSON file per run** at `~/.cache/burndown/<run-id>.json`,
 read and written by `burndown/runfile.py` — not the controller's context, and
 not a per-repo log. It holds the run id, the slot budget (default 5, set by
 `runfile.py start --slots <k>`), the controller's herdr agent name, the target repo
-(`runfile.py start --repo <checkout>`, recorded as the absolute path of its primary checkout, so a linked worktree names the same target; a
+(`runfile.py start --repo <checkout>`, recorded as the absolute path of its
+primary checkout, so a linked worktree names the same target; a
 run file from before the field makes `loop.py dispatch` and `sweep.py counts
 --repo` refuse, since a missing target must not read as no check), and
 per clump its ticket list, workspace, worker's herdr agent name, the
