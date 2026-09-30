@@ -226,6 +226,15 @@ skipped: the reviewer puts the command's stderr on the first line of its
 summary, and the caller repeats it in its own report. A caller whose summary
 shows neither a refusal nor the `appended` line sends the reviewer back.
 
+**A witness check ends with one `append` per mutation** (#1270). The recipe
+under *Isolation* below runs `review_ledger.py append --type witness-mutation`
+(`call-site-mutation` for an id listed in `call_site_ids`) once per mutation id,
+reading the outcome its report loop wrote for that id and its wall clock, before it removes them. The row
+holds the outcome `red`, `green` or `unknown` and no tokens, which stay with the
+correctness row. An `unknown` stays `unknown`. A refusal is reported like the
+review's own: the recipe exits 4 and the reviewer puts the stderr on the first
+line of its summary.
+
 **Expand `<dir>` yourself before writing the prompt**, and prune anything
 untouched for 14 days, the same folder style and retention `job-run` gives
 `~/.cache/agent-jobs` — this sidecar lives in the same directory as the
@@ -422,6 +431,8 @@ is worse than a slow one.
 ```
 worktree=<the worktree under review>
 ids=<space-separated mutation ids, one per new or changed test — the names you report by>
+ledger_args=( --repo <repo> --ticket <n> --round <k> )   # as in § 4's append line
+call_site_ids=""   # <space-separated ids of the call-site mutations among $ids; every other id is a constraint mutation>
 mutate() { :; }   # <$1 the id, $2 the witness worktree, $3 a marker path: strip that test's constraint in $2, create the marker with `: >"$3"` on the line IMMEDIATELY before the covering suite's command, and run only that suite>
 
 # Job control, so each background mutation is its own process group and an
@@ -469,7 +480,7 @@ esac
 # worktree `x.out` while mutation `x` is opening its output file at that same
 # path, so `x`'s redirection fails against a directory and `x` is reported red
 # without its suite ever having run.
-mkdir -p "$root/worktrees" "$root/output" "$root/status" "$root/ran" || exit 1
+mkdir -p "$root/worktrees" "$root/output" "$root/status" "$root/ran" "$root/seconds" "$root/outcome" || exit 1
 # Cleanup that reports rather than covers: an `rm -rf` over a worktree git
 # failed to deregister - a full disk is the plausible way - leaves exactly the
 # stale entry this recipe's own prose says never to create, and the run would
@@ -534,15 +545,18 @@ show() {
 for id in "${mutations[@]}"; do
   while [ "$(jobs -pr | wc -l)" -ge "$slots" ]; do wait -n; done
   witness="$root/worktrees/$id"
+  started=$(date +%s)
   if ! git -C "$worktree" worktree add --detach -q "$witness" HEAD; then
     printf 'unknown\n' >"$root/status/$id"   # class 1: an unreached mutation is not a pass
+    printf '%s\n' "$(( $(date +%s) - started ))" >"$root/seconds/$id"   # the time the failed attempt took, never a stand-in zero
     continue
   fi
   # `mutate` in its own subshell: a mutation body ends in a failing suite and
   # is naturally written with `exit`, which would otherwise kill this job
   # before its status is recorded and read back below as `unknown`.
   { ( mutate "$id" "$witness" "$root/ran/$id" ) >"$root/output/$id" 2>&1
-    printf '%s\n' "$?" >"$root/status/$id"; } &
+    printf '%s\n' "$?" >"$root/status/$id"
+    printf '%s\n' "$(( $(date +%s) - started ))" >"$root/seconds/$id"; } &
 done
 wait
 for id in "${mutations[@]}"; do
@@ -552,6 +566,7 @@ for id in "${mutations[@]}"; do
   # witnessed.
   if [ ! -e "$root/ran/$id" ]; then
     printf '%s: unknown — it never reached its covering suite, whatever it exited with\n' "$id"
+    printf 'unknown\n' >"$root/outcome/$id"
     continue
   fi
   # 126 and 127 are the kernel answering directly: the command was not
@@ -559,15 +574,32 @@ for id in "${mutations[@]}"; do
   # that - it is written on the line before - and every proxy for "the suite
   # ran" is a proxy. Where a real answer exists, take it instead of inferring.
   case "$(cat "$root/status/$id" 2>/dev/null)" in
-    126|127) printf '%s: unknown — its covering suite command never executed (not found, or not executable)\n' "$id" ;;
-    0) printf '%s: HOLLOW — the assertion still passed with its constraint stripped\n' "$id" ;;
+    126|127) printf '%s: unknown — its covering suite command never executed (not found, or not executable)\n' "$id"
+             printf 'unknown\n' >"$root/outcome/$id" ;;
+    0) printf '%s: HOLLOW — the assertion still passed with its constraint stripped\n' "$id"
+       printf 'green\n' >"$root/outcome/$id" ;;
     [1-9]*) printf '%s: red — its own message follows; confirm it is your assertion, not a missing file or a denied path\n' "$id"
-            show "$id" ;;
-    *) printf '%s: unknown — the mutation never ran to completion; report it by name, never as a pass\n' "$id" ;;
+            show "$id"
+            printf 'red\n' >"$root/outcome/$id" ;;
+    *) printf '%s: unknown — the mutation never ran to completion; report it by name, never as a pass\n' "$id"
+       printf 'unknown\n' >"$root/outcome/$id" ;;
   esac
+done
+# One ledger row per mutation (#1270), written here because cleanup removes the files.
+# The outcome is the word the report loop above wrote for the id (`red`, `green` or
+# `unknown`), so the mapping from exit status to outcome has this one home; a missing
+# outcome file or wall clock is refused by `append`, never written as a stand-in.
+append_failed=0
+for id in "${mutations[@]}"; do
+  kind=witness-mutation
+  case " $call_site_ids " in *" $id "*) kind=call-site-mutation ;; esac
+  python3 ~/.agents/skills/docs/research/review_ledger.py append "${ledger_args[@]}" --type "$kind" \
+    --mutation-id "$id" --status-file "$root/outcome/$id" --seconds "$(cat "$root/seconds/$id" 2>/dev/null)" \
+    || append_failed=$(( append_failed + 1 ))
 done
 cleanup || exit 3
 trap - EXIT INT TERM
+[ "$append_failed" -eq 0 ] || { echo "witness check: $append_failed mutation row(s) not appended - put the refusal above on the first line of your summary" >&2; exit 4; }
 ```
 
 `git worktree remove`, never `rm -rf`: a directory deleted out from under the

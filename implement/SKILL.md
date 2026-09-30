@@ -216,7 +216,16 @@ No PR and no reviewer; Chris reads the log after.
   outside the checkout, because this workspace is yours and § Before the PR
   step 3 clears it. Otherwise follow the *Isolation* paragraph of
   `multi-axis-code-review/SKILL.md`'s witness check: never a byte copy of
-  the tree.
+  the tree. Time each mutation (`started=$(date +%s)` before its suite) and,
+  once it has gone red, green or never reached its suite, record it (#1270):
+
+  ```
+  python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type worker-mutation --mutation-id <id> --outcome red|green|unknown --seconds <s>
+  ```
+
+  `<repo>` is the review cache's directory name, as in § The PR. A mutation
+  that never reached its suite is `unknown`, never `red`. `<id>` is letters,
+  digits, `.`, `-` or `_`. A refusal goes to the controller, never skipped.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
   report it as a follow-up. Why: an unasked fix widens the diff past what the

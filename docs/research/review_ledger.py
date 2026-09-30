@@ -5,6 +5,9 @@ per-review-type value table.
     review_ledger.py harvest [--cache DIR] [--transcripts DIR] [--ledger PATH] [--review-file PATH]
     review_ledger.py append  --repo R --ticket N --type standards|spec|correctness|verification
                              [--round K] [--cache DIR] [--transcripts DIR] [--ledger PATH]
+    review_ledger.py append  --repo R --ticket N --type witness-mutation|call-site-mutation|worker-mutation
+                             --mutation-id ID --seconds S (--status-file PATH | --outcome red|green|unknown)
+                             [--round K] [--ledger PATH]
     review_ledger.py report  [--ledger PATH] [--weights FILE] [--prices FILE] [--split 1/k|none]
                              [--format md|json]
 
@@ -34,6 +37,12 @@ the price table (`--prices`, dollars per million tokens by model) live in `repor
 in the ledger, so changing any of them needs no reharvest. `report` sums cost over known
 rows only, counts the rest, and divides value by dollars over rows whose cost and findings
 are both known.
+
+Mutation rows (#1270) come only from `append`, one per mutation id: the outcome (`red`, `green`
+or `unknown`) and the mutation's wall clock, no findings and no tokens (a reviewer's tokens stay
+with its correctness row). A status file holds one of the words `red`, `green`, `unknown` (the witness
+recipe writes them and owns the exit-status mapping); anything else is `unknown`, never red or green. `report` gives a mutation type its red rate
+over the mutations whose outcome is known, and counts the `unknown` ones beside it.
 """
 from __future__ import annotations
 
@@ -57,7 +66,7 @@ TOKEN_KINDS = ("input", "output", "cache_write", "cache_read")
 _USAGE_FIELDS = {"input": "input_tokens", "output": "output_tokens",
                  "cache_write": "cache_creation_input_tokens", "cache_read": "cache_read_input_tokens"}
 
-# Report order. Mutation and Codex types have no harvested rows in this slice.
+# Report order. Mutation rows come from `append` only, Codex rows from nowhere yet.
 REVIEW_TYPES = (
     "standards", "spec", "correctness", "over-engineering", "verification",
     "witness-mutation", "call-site-mutation", "codex-gate", "codex-second",
@@ -278,10 +287,11 @@ def _norm_repo(name: str) -> str:
 
 
 def new_row(row_id, repo, tickets, row_type, rnd, run_id, findings, findings_status, sources, *,
-            model=None, cost=None, mappings=()) -> dict:
-    """A harvested ledger row: the one place its shape is written."""
+            model=None, cost=None, mappings=(), origin="harvest", extra=None) -> dict:
+    """A ledger row: the one place its shape is written. `extra` holds the keys only one kind
+    of row carries (a mutation row's `mutation_id` and `outcome`)."""
     return {
-        "row_id": row_id, "origin": "harvest", "repo": repo, "pr": None, "ticket": tickets[0],
+        "row_id": row_id, "origin": origin, "repo": repo, "pr": None, "ticket": tickets[0],
         "tickets": tickets, "type": row_type, "round": rnd, "run_id": run_id, "model": model,
         "findings": findings, "cost": cost,
         "status": {
@@ -289,7 +299,8 @@ def new_row(row_id, repo, tickets, row_type, rnd, run_id, findings, findings_sta
                        "model": {"status": "known"} if model else
                        {"status": "unknown", "reason": "not in the sidecars or the transcripts"},
                        "findings": findings_status},
-            "sources": sources, "mappings": list(mappings)}}
+            "sources": sources, "mappings": list(mappings)},
+        **(extra or {})}
 
 
 def attach_costs(rows: list[dict], runs: list[dict], missing: str | None) -> tuple[list[dict], dict]:
@@ -720,6 +731,8 @@ def cmd_harvest(args) -> int:
 
 APPEND_TYPES = ("standards", "spec", "correctness", "verification")
 REVIEWER_TYPES = APPEND_TYPES + ("over-engineering",)
+MUTATION_OUTCOMES = ("red", "green", "unknown")
+_MUTATION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 def _refusal(row: dict) -> str | None:
@@ -731,12 +744,65 @@ def _refusal(row: dict) -> str | None:
     return None
 
 
+def decode_status(text: str) -> str:
+    """A status file's outcome: one of the words `red`, `green`, `unknown`. The witness-check
+    recipe writes the word, the one home of the exit-status mapping; anything else, an empty
+    file and a raw exit status included, is `unknown`, never a pass or a red."""
+    word = text.strip()
+    return word if word in MUTATION_OUTCOMES else "unknown"
+
+
+def cmd_append_mutation(args) -> int:
+    """Write the one row of a mutation that just ran. Its outcome comes from a status file or
+    `--outcome`, its wall clock from `--seconds`; there is no cache or transcript to read."""
+    try:
+        if args.cache is not None or args.transcripts is not None:
+            raise ValueError("--cache and --transcripts are for review types, not mutation rows")
+        if not args.mutation_id or not _MUTATION_ID_RE.fullmatch(args.mutation_id):
+            raise ValueError("a mutation row needs --mutation-id made of letters, digits, . - _")
+        if (args.status_file is None) == (args.outcome is None):
+            raise ValueError("give exactly one of --status-file and --outcome")
+        try:
+            seconds = float(args.seconds)
+        except (TypeError, ValueError):
+            seconds = None
+        if seconds is None or not 0 <= seconds < float("inf"):
+            raise ValueError("a mutation row needs --seconds, its wall clock as a finite number of seconds")
+        outcome = args.outcome or decode_status(args.status_file.read_text())
+    except (OSError, ValueError) as e:
+        print(f"review_ledger append: {e}", file=sys.stderr)
+        return 2
+    seconds = int(seconds) if seconds == int(seconds) else seconds
+    repo = fold_repo(args.repo)
+    row_id = f"{repo}/{args.ticket}/{args.type}/{args.round}/{args.mutation_id}"
+    row = new_row(row_id, repo, [args.ticket], args.type, args.round,
+                  args.mutation_id, [], {"status": "not-applicable", "reason": "a mutation row holds no findings"},
+                  [], cost={"tokens": {"status": "not-applicable",
+                                       "reason": "a mutation's tokens stay with the correctness reviewer, or with the worker for worker-mutation"},
+                            "wall_clock": {"status": "known", "seconds": seconds}},
+                  origin="append", extra={"mutation_id": args.mutation_id, "outcome": outcome})
+    try:
+        update_ledger(args.ledger, lambda ledger: ledger.update({row_id: row}))
+    except ValueError as e:
+        print(f"review_ledger append: {e}", file=sys.stderr)
+        return 2
+    print(f"appended 1 row to {args.ledger}: {row_id} ({outcome})")
+    return 0
+
+
 def cmd_append(args) -> int:
     """Write the rows of one review that just ran: what `harvest` would write for that
     ticket's sidecars and transcripts, selected by type and round. A review's own cost or
     findings sidecar being absent is a refusal, never a row with zero cost. A round-1 review
     ends before its dispositions exist, so its findings' outcomes are `unknown` until the
     same append is run again after them, or a harvest reads them."""
+    if args.type in MUTATION_TYPES:
+        return cmd_append_mutation(args)
+    if args.mutation_id or args.status_file or args.outcome or args.seconds is not None:
+        print(f"review_ledger append: --mutation-id, --status-file, --outcome and --seconds are for "
+              f"mutation types, not {args.type}", file=sys.stderr)
+        return 2
+    args.cache = args.cache or REVIEWS_ROOT
     try:
         transcripts = args.transcripts or DEFAULT_TRANSCRIPTS
         if not transcripts.is_dir():
@@ -815,6 +881,9 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
         known = [f for f in findings if f["outcome"] != "unknown"]
         rate = lambda outcome: (sum(f["outcome"] == outcome for f in known) / len(known)) if known else None
         inside = t == "over-engineering"
+        mutation = t in MUTATION_TYPES
+        outcomes = Counter(r.get("outcome") for r in mine) if mutation else Counter()
+        known_outcomes = outcomes["red"] + outcomes["green"]
         costs = [r["cost"] for r in mine]
         token_rows = [c["tokens"] for c in costs if c.get("tokens", {}).get("status") == "known"]
         wall_rows = [c["wall_clock"] for c in costs if c.get("wall_clock", {}).get("status") == "known"]
@@ -829,13 +898,20 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
                 rated.append((v + extra, d))
         rated_dollars = sum(d for _, d in rated)
         types.append({
-            "type": t, "rows": len(mine), "findings": len(findings), "value": round(value, 4),
+            "type": t, "rows": len(mine), "findings": None if mutation else len(findings), "value": None if mutation else round(value, 4),
             "unique_share": (sum(f["overlap"] == "unique" for f in findings) / len(findings)) if findings else None,
             "leftover_rate": rate("leftover"), "dispute_rate": rate("disputed"),
-            "unknown_outcomes": len(findings) - len(known), "unweighted": unweighted,
-            "unknown_finding_rows": sum(r["status"]["fields"]["findings"]["status"] != "known" for r in mine),
+            "unknown_outcomes": None if mutation else len(findings) - len(known),
+            "unweighted": None if mutation else unweighted,
+            "unknown_finding_rows": sum(
+                r["status"]["fields"]["findings"]["status"] not in ("known", "not-applicable") for r in mine),
             "unknown_cost_rows": 0 if inside else sum(
-                any(c.get(f, {}).get("status") != "known" for f in ("tokens", "wall_clock")) for c in costs),
+                any(c.get(f, {}).get("status") not in ("known", "not-applicable") for f in ("tokens", "wall_clock"))
+                for c in costs),
+            # A mutation type's red rate leaves the `unknown` ones out, like the outcome rates above;
+            # they are counted beside it. Only mutation rows carry either.
+            "red_rate": outcomes["red"] / known_outcomes if known_outcomes else None,
+            "unknown_mutations": len(mine) - known_outcomes if mutation else None,
             "cost_note": "inside standards" if inside else None,
             "tokens": None if inside or not token_rows else {k: sum(c[k] for c in token_rows) for k in TOKEN_KINDS},
             "wall_clock_seconds": None if inside or not wall_rows else sum(c["seconds"] for c in wall_rows),
@@ -845,9 +921,9 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
             "value_per_dollar": round(sum(v for v, _ in rated) / rated_dollars, 4)
             if not inside and rated_dollars else None})
     notes = []
-    if not present & set(MUTATION_TYPES):
-        notes.append(f"No mutation rows: harvest writes none ({', '.join(MUTATION_TYPES)}); nothing on disk "
-                     "records them in a form a script can read.")
+    notes.append("Reviews before #1270 carry no mutation data: a review run earlier has no mutation rows, "
+                 "so a mutation type's counts start at that change and a type with no rows is left out, not shown as zero."
+                 + ("" if present & set(MUTATION_TYPES) else " No mutation rows are in this ledger yet."))
     for t in types:
         if prices is not None and t["unpriced_rows"]:
             notes.append(f"{t['type']}: {t['unpriced_rows']} row(s) have tokens but no price for their model; "
@@ -855,6 +931,11 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
     if prices is None:
         notes.append("No price table: dollars and value per dollar are n/a, not zero (pass --prices).")
     return {"types": types, "notes": notes}
+
+
+def _n(x, spec=""):
+    """A count or value cell; n/a when the type has none (a mutation type holds no findings)."""
+    return "n/a" if x is None else format(x, spec)
 
 
 def _pct(x):
@@ -887,13 +968,13 @@ def cmd_report(args) -> int:
         return 0
     print("| type | rows | findings | value | unique share | leftover rate | dispute rate "
           "| unknown outcomes | unweighted | unknown-findings rows | unknown-cost rows "
-          "| tokens | wall clock | dollars | value per dollar |")
-    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+          "| tokens | wall clock | dollars | value per dollar | red rate | unknown mutations |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for t in result["types"]:
-        print(f"| {t['type']} | {t['rows']} | {t['findings']} | {t['value']:.2f} | {_pct(t['unique_share'])} "
-              f"| {_pct(t['leftover_rate'])} | {_pct(t['dispute_rate'])} | {t['unknown_outcomes']} "
-              f"| {t['unweighted']} | {t['unknown_finding_rows']} | {t['unknown_cost_rows']} "
-              f"| {' | '.join(_cost_cells(t))} |")
+        print(f"| {t['type']} | {t['rows']} | {_n(t['findings'])} | {_n(t['value'], '.2f')} | {_pct(t['unique_share'])} "
+              f"| {_pct(t['leftover_rate'])} | {_pct(t['dispute_rate'])} | {_n(t['unknown_outcomes'])} "
+              f"| {_n(t['unweighted'])} | {t['unknown_finding_rows']} | {t['unknown_cost_rows']} "
+              f"| {' | '.join(_cost_cells(t))} | {_pct(t['red_rate'])} | {_n(t['unknown_mutations'])} |")
     print()
     for note in result["notes"]:
         print(note)
@@ -912,9 +993,13 @@ def main(argv=None) -> int:
     a = sub.add_parser("append")
     a.add_argument("--repo", required=True, help="the review cache's repo directory name")
     a.add_argument("--ticket", type=int, required=True)
-    a.add_argument("--type", choices=APPEND_TYPES, required=True)
+    a.add_argument("--type", choices=APPEND_TYPES + MUTATION_TYPES, required=True)
     a.add_argument("--round", type=int, default=1)
-    a.add_argument("--cache", type=Path, default=REVIEWS_ROOT)
+    a.add_argument("--cache", type=Path, default=None, help=f"default {REVIEWS_ROOT}")
+    a.add_argument("--mutation-id", help="a mutation type: the id the mutation is reported by")
+    a.add_argument("--status-file", type=Path, help="a mutation type: the witness check's status file for the id")
+    a.add_argument("--outcome", choices=MUTATION_OUTCOMES, help="a mutation type: the outcome, when no status file")
+    a.add_argument("--seconds", help="a mutation type: the mutation's wall clock")
     a.add_argument("--transcripts", type=Path, help=f"default {DEFAULT_TRANSCRIPTS}")
     a.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     a.set_defaults(func=cmd_append)

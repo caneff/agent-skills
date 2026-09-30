@@ -229,6 +229,10 @@ trap 'git -C "$scratch/repo" worktree prune 2>/dev/null; rm -rf "$scratch"' EXIT
   git worktree add -q --detach "$scratch/reviewed" HEAD
 ) || { echo "FAIL: could not build the scratch repo" >&2; exit 1; }
 repo="$scratch/reviewed"
+# Every recipe run below gets a HOME whose ~/.agents/skills is this checkout (#1270), so the
+# recipe's own `append` line runs the script under test, never the installed copy, and a
+# ledger path is always substituted in, never the real one.
+home="$scratch/home"; mkdir -p "$home/.agents"; ln -s "$(cd "$here/.." && pwd)" "$home/.agents/skills"
 [ -f "$repo/.git" ] ||
   { echo "FAIL: the fixture's reviewed tree is not a linked worktree" >&2; exit 1; }
 
@@ -271,7 +275,9 @@ substitute() { # <ids> <mutate body> -> a runnable script on stdout
   printf '%s\n' "$recipe" |
     sed -e "s|^worktree=<.*|worktree=$repo|" \
         -e "s|^ids=<.*|ids=\"$1\"|" \
-        -e "s|^mutate() .*|mutate() { $body; }|"
+        -e "s|^mutate() .*|mutate() { $body; }|" \
+        -e "s|^ledger_args=(.*|ledger_args=( --repo skills --ticket 1 --round 1 --ledger ${ledger_path:-$scratch/ledger.jsonl} )|" \
+        -e "s|^call_site_ids=.*|call_site_ids=\"cs1 cs2\"|"
 }
 
 # The recipe computes its bound from the live process table, so on a loaded box
@@ -297,7 +303,7 @@ grep -q '^mutate() { bash ' "$scratch/recipe.sh" ||
 
 # The run itself exits non-zero or not depending on how the doc ends it; what
 # this suite asserts is what it left behind, not its status.
-( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe.sh" ) >"$scratch/run.out" 2>&1 || true
+( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe.sh" ) >"$scratch/run.out" 2>&1 || true
 
 # Concurrent, asserted by the two worktrees existing at the same instant.
 # Serialising the launch fails exactly here, and for its own reason: the first
@@ -382,7 +388,7 @@ SHIM
 chmod +x "$scratch/bin-git/git"
 
 substitute 'ok bad' ": >\"\$3\"; echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-unknown.sh"
-( cd "$repo" && PATH="$scratch/bin-git:$scratch/bin:$PATH" bash "$scratch/recipe-unknown.sh" ) \
+( cd "$repo" && HOME="$home" PATH="$scratch/bin-git:$scratch/bin:$PATH" bash "$scratch/recipe-unknown.sh" ) \
   >"$scratch/unknown.out" 2>&1 || true
 if ! grep -i 'unknown' "$scratch/unknown.out" | grep -q 'bad'; then
   echo "FAIL: a mutation whose worktree could not be created was not reported as unknown" >&2
@@ -408,7 +414,7 @@ mkdir -p "$scratch/bin-nops"
 { echo '#!/usr/bin/env bash'; echo 'exit 1'; } >"$scratch/bin-nops/ps"
 chmod +x "$scratch/bin-nops/ps"
 substitute 'u1 u2' "bash \"$scratch/mutate.sh\" \"\$1\" \"\$2\" \"\$3\"" >"$scratch/recipe-nops.sh"
-( cd "$repo" && PATH="$scratch/bin-nops:$PATH" bash "$scratch/recipe-nops.sh" ) \
+( cd "$repo" && HOME="$home" PATH="$scratch/bin-nops:$PATH" bash "$scratch/recipe-nops.sh" ) \
   >"$scratch/nops.out" 2>&1 || true
 for id in u1 u2; do
   if ! grep -q "MUTANT-$id" "$scratch/nops.out"; then
@@ -428,7 +434,7 @@ mkdir -p "$scratch/bin-busy"
 { echo '#!/usr/bin/env bash'; echo 'for _ in $(seq 1 30); do echo claude; done'; } >"$scratch/bin-busy/ps"
 chmod +x "$scratch/bin-busy/ps"
 substitute 'b1 b2' ": >\"\$3\"; echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-busy.sh"
-( cd "$repo" && PATH="$scratch/bin-busy:$PATH" bash "$scratch/recipe-busy.sh" ) \
+( cd "$repo" && HOME="$home" PATH="$scratch/bin-busy:$PATH" bash "$scratch/recipe-busy.sh" ) \
   >"$scratch/busy.out" 2>&1 || true
 for id in b1 b2; do
   if ! grep -q "MUTANT-$id" "$scratch/busy.out"; then
@@ -452,7 +458,7 @@ sleep 8
 : >"$scratch/\$1.late"
 SLEEP
 substitute 'k1 k2' "bash \"$scratch/sleeper.sh\" \"\$1\" \"\$2\" \"\$3\"" >"$scratch/recipe-kill.sh"
-( cd "$repo" && PATH="$scratch/bin:$PATH" exec bash "$scratch/recipe-kill.sh" ) >/dev/null 2>&1 &
+( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" exec bash "$scratch/recipe-kill.sh" ) >/dev/null 2>&1 &
 killpid=$!
 for _ in $(seq 1 100); do
   [ -e "$scratch/k1.up" ] && [ -e "$scratch/k2.up" ] && break
@@ -490,7 +496,7 @@ done
 # before anything is created — never mangled into a path inside its own
 # worktree, which is how a message gets attached to the wrong mutation.
 substitute 'tests/a.py::t1' ": >\"\$3\"; echo \"MUTANT-\$1\"; exit 1" >"$scratch/recipe-badid.sh"
-if ( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-badid.sh" ) \
+if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-badid.sh" ) \
      >"$scratch/badid.out" 2>&1; then
   echo "FAIL: a pytest nodeid was accepted as a mutation id" >&2
   cat "$scratch/badid.out" >&2
@@ -506,7 +512,7 @@ fi
 # assertion — there is no message to read — so it is `unknown`, by name, not a
 # red. Status alone cannot tell the two apart.
 substitute 's1' "exit 4" >"$scratch/recipe-silent.sh"
-( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-silent.sh" ) \
+( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-silent.sh" ) \
   >"$scratch/silent.out" 2>&1 || true
 if ! grep -i 'unknown' "$scratch/silent.out" | grep -q 's1'; then
   echo "FAIL: a mutation that exited nonzero with no output was not reported as unknown" >&2
@@ -524,7 +530,7 @@ fi
 # an output file inside a worktree, both at once. Disjoint directories are what
 # make this pair ordinary.
 substitute 'x x.out' ": >\"\$3\"; echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-collide.sh"
-( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-collide.sh" ) \
+( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-collide.sh" ) \
   >"$scratch/collide.out" 2>&1 || true
 for id in x x.out; do
   if ! grep -q "$id|.*MUTANT-$id" "$scratch/collide.out"; then
@@ -537,7 +543,7 @@ done
 # The same id twice would have one mutation overwrite the other's output, so it
 # is refused by name rather than silently halving the check.
 substitute 'd1 d1' "exit 1" >"$scratch/recipe-dup.sh"
-if ( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-dup.sh" ) \
+if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-dup.sh" ) \
      >"$scratch/dup.out" 2>&1; then
   echo "FAIL: a duplicated mutation id was accepted" >&2
   fail=1
@@ -567,7 +573,7 @@ NORM
 chmod +x "$scratch/bin-norm/git"
 cp "$scratch/bin/ps" "$scratch/bin-norm/ps"
 substitute 'r1' ": >\"\$3\"; echo \"MUTANT-\$1: covering suite red\"; exit 1" >"$scratch/recipe-norm.sh"
-if ( cd "$repo" && PATH="$scratch/bin-norm:$PATH" bash "$scratch/recipe-norm.sh" ) \
+if ( cd "$repo" && HOME="$home" PATH="$scratch/bin-norm:$PATH" bash "$scratch/recipe-norm.sh" ) \
      >"$scratch/norm.out" 2>&1; then
   echo "FAIL: a witness run whose worktree removal failed still exited 0" >&2
   cat "$scratch/norm.out" >&2
@@ -606,7 +612,7 @@ fi
 # indistinguishable from a red unless the mutation says for itself that it got
 # as far as the suite. The marker is that statement.
 substitute 'p1' "echo 'bash: no such test file' >&2; exit 2" >"$scratch/recipe-presuite.sh"
-( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-presuite.sh" ) \
+( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-presuite.sh" ) \
   >"$scratch/presuite.out" 2>&1 || true
 if ! grep -i 'unknown' "$scratch/presuite.out" | grep -q 'p1'; then
   echo "FAIL: a mutation that died before its covering suite was not reported as unknown" >&2
@@ -623,7 +629,7 @@ fi
 # whole ticket's defect inside the tool the ticket builds: a check that
 # witnessed nothing, reporting clean.
 substitute '' ": >\"\$3\"; exit 1" >"$scratch/recipe-empty.sh"
-if ( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-empty.sh" ) \
+if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-empty.sh" ) \
      >"$scratch/empty.out" 2>&1; then
   echo "FAIL: an empty mutation list exited 0 as a clean witness check" >&2
   cat "$scratch/empty.out" >&2
@@ -639,7 +645,7 @@ fi
 # without the kernel's own answer being read that is a red whose failure message
 # is "command not found" — the same unreached-suite defect, one line further on.
 substitute 'e1' ": >\"\$3\"; /nonexistent/covering-suite" >"$scratch/recipe-noexec.sh"
-( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-noexec.sh" ) \
+( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-noexec.sh" ) \
   >"$scratch/noexec.out" 2>&1 || true
 if ! grep -i 'unknown' "$scratch/noexec.out" | grep -q 'e1'; then
   echo "FAIL: a marked mutation whose suite command never executed was not reported as unknown" >&2
@@ -656,7 +662,7 @@ fi
 # checkout's filenames, every one of which passes the character check, and the
 # run mutates a set nobody asked for while omitting the requested id.
 substitute '*' ": >\"\$3\"; echo \"MUTANT-\$1\"; exit 1" >"$scratch/recipe-glob.sh"
-if ( cd "$repo" && PATH="$scratch/bin:$PATH" bash "$scratch/recipe-glob.sh" ) \
+if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-glob.sh" ) \
      >"$scratch/glob.out" 2>&1; then
   echo "FAIL: ids='*' was accepted" >&2
   cat "$scratch/glob.out" >&2
@@ -678,6 +684,44 @@ if [ "$trees_glob" -ne 2 ]; then
   git -C "$repo" worktree list >&2
   fail=1
 fi
+
+# #1270: the recipe appends one ledger row per mutation, before cleanup removes the
+# status files.
+ledger_path="$scratch/rows.jsonl"
+row_field() { # <mutation id> <jq-ish python expression over the row r> -> prints it, or MISSING
+  python3 - "$ledger_path" "$1" "$2" <<'PY'
+import json, os, sys
+path, mid, expr = sys.argv[1:]
+rows = [json.loads(l) for l in open(path)] if os.path.exists(path) else []
+hit = [r for r in rows if r.get("mutation_id") == mid]
+print(eval(expr, {"r": hit[0]}) if len(hit) == 1 else "MISSING")
+PY
+}
+body='case "$1" in early) exit 4;; esac; : >"$3"; echo "MUTANT-$1"; case "$1" in g1) exit 0;; esac; exit 1'
+substitute 'r1 g1 cs1 cs2 early' "$body" >"$scratch/recipe-rows.sh"
+( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-rows.sh" ) \
+  >"$scratch/rows.out" 2>&1 || { echo "FAIL: the ledger-appending run exited non-zero" >&2; cat "$scratch/rows.out" >&2; fail=1; }
+for want in "r1|witness-mutation red" "g1|witness-mutation green" "cs1|call-site-mutation red" "cs2|call-site-mutation red" "early|witness-mutation unknown"; do
+  id="${want%%|*}"; got="$(row_field "$id" 'r["type"] + " " + r["outcome"]')"
+  [ "$got" = "${want#*|}" ] || { echo "FAIL: mutation $id's ledger row is '$got', wanted '${want#*|}'" >&2; fail=1; }
+done
+# `early` exited 4 without reaching its suite: its status file says red, and only the
+# marker says otherwise. A row that follows the status file turns class 1 into a red.
+[ "$(grep -c 'appended 1 row' "$scratch/rows.out")" -eq 5 ] ||
+  { echo "FAIL: the run did not append exactly five rows" >&2; cat "$scratch/rows.out" >&2; fail=1; }
+[ "$(row_field r1 'r["cost"]["wall_clock"]["status"]')" = known ] ||
+  { echo "FAIL: a mutation row carries no known wall clock" >&2; fail=1; }
+
+# A refused append is reported, not skipped: the run exits 4 and says so.
+ledger_path="$scratch/corrupt.jsonl"; printf 'not json\n' >"$ledger_path"
+substitute 'r1' "$body" >"$scratch/recipe-refused.sh"
+if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-refused.sh" ) >"$scratch/refused.out" 2>&1; then
+  echo "FAIL: a refused ledger append left the recipe exiting 0" >&2; fail=1
+elif ! grep -q 'mutation row(s) not appended' "$scratch/refused.out"; then
+  echo "FAIL: a refused ledger append was not reported" >&2; cat "$scratch/refused.out" >&2; fail=1
+fi
+trees_rows="$(git -C "$repo" worktree list | wc -l)"
+[ "$trees_rows" -eq 2 ] || { echo "FAIL: the append runs left $trees_rows worktrees registered, not 2" >&2; fail=1; }
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS multi-axis-code-review/witness-check.test.sh"
