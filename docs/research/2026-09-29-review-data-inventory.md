@@ -94,3 +94,12 @@ correctness, OE over-engineering.
    counts toward overlap for a round-1 finding it re-checks. It keeps
    credit only for findings it raises new, such as V1 on PR #1275. Built
    in #1266.
+9. **Where the baseline's rows live** (#1271, 2026-09-30, relayed by the
+   burn controller): the raw ledger rows stay out of this public repo,
+   because four of the harvested repos are private and a row carries their
+   finding titles and file paths. Only the report and its aggregate numbers
+   are committed under `docs/research/`; the row snapshot stays in
+   `~/.cache/agent-reviews/`, and the note names that path and the harvest
+   and report commands that regenerate it. This replaces the spec's
+   "snapshot to `docs/research/data/`" for any analysis that harvests a
+   private repo.
