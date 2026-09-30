@@ -321,7 +321,12 @@ def run_one(name, repo, outlogs, manifests_dir):
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
     with open(log_path, "w", encoding="utf-8") as log:
         r = subprocess.run(["claude", *CLAUDE_FLAGS, audit_prompt(name, repo, manifest)], stdout=log, stderr=subprocess.STDOUT, check=False, env=scrubbed_env())
-    reason = f"exit {r.returncode}" if r.returncode != 0 else ("no manifest" if read_manifest(manifests_dir, name) is None else None)
+    if r.returncode != 0:
+        reason = f"exit {r.returncode}"
+    elif read_manifest(manifests_dir, name) is None:
+        reason = "no manifest"
+    else:
+        reason = None
     if reason:
         print(f"[{name}] FAILED: {reason} — see {log_path}")
         return reason
