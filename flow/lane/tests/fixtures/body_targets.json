@@ -274,5 +274,9 @@
  {
   "body": "node.js.",
   "target": null
+ },
+ {
+  "body": "a bare .py or .json is an extension, not a file",
+  "target": null
  }
 ]
