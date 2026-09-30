@@ -48,7 +48,7 @@ def tally(worktree, projects_root):
     """
     root = os.path.join(projects_root, project_dir_name(worktree))
     builder = sidechain = 0
-    messages = {}  # message.id -> [is_sidechain, {kind: max over its lines}]
+    messages = {}  # message.id -> (is_sidechain, {kind: max over its lines})
     for parent, _, files in os.walk(root):
         for name in files:
             if not name.endswith(".jsonl"):
@@ -65,19 +65,20 @@ def tally(worktree, projects_root):
                     usage = message.get("usage")
                     if not isinstance(usage, dict):
                         continue
-                    kinds = {k: usage.get(k) or 0 for k in COUNTERS}
                     key = message.get("id")
                     if key is None:
                         key = object()
-                    record = messages.setdefault(
-                        key, [bool(entry.get("isSidechain")), {}])
-                    for k, v in kinds.items():
-                        record[1][k] = max(record[1].get(k, 0), v)
-    for is_sidechain, kinds in messages.values():
+                    _, maxima = messages.setdefault(
+                        key, (bool(entry.get("isSidechain")),
+                              dict.fromkeys(COUNTERS, 0)))
+                    for k in COUNTERS:
+                        maxima[k] = max(maxima[k], usage.get(k) or 0)
+    for is_sidechain, maxima in messages.values():
+        total = sum(maxima.values())
         if is_sidechain:
-            sidechain += sum(kinds.values())
+            sidechain += total
         else:
-            builder += sum(kinds.values())
+            builder += total
     return builder, sidechain
 
 
