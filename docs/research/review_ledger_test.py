@@ -953,7 +953,7 @@ class ReportTest(Case):
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
         self.assertIn("| standards | 1 | 5 | 3.50 | 80.0% | 25.0% | 25.0% | 1 | 0 | 1 | 1 "
-                      "| n/a | n/a | n/a | n/a | n/a | n/a |", lines)
+                      "| 0 | 0 | n/a | n/a | n/a | n/a | n/a | n/a |", lines)
         self.assertIn("Reviews before #1270 carry no mutation data", result.stdout)
         self.assertIn("No mutation rows", result.stdout)
 
