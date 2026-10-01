@@ -42,7 +42,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -50,7 +49,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RESEARCH = ROOT / "docs" / "research"
 sys.path.insert(0, str(RESEARCH))
 from review_ledger_codex_test import OUT_TWO, put  # noqa: E402
-from review_ledger_test import SKILLS_PROJ, finding, transcript, usage, wt, write_jsonl  # noqa: E402
+from review_ledger_test import SKILLS_PROJ, Case, finding, transcript, usage, wt, write_jsonl  # noqa: E402
 
 SCRIPT = RESEARCH / "review_ledger.py"
 MODEL = "claude-opus-5-5"
@@ -68,12 +67,9 @@ def fixed(fid):
     return {"id": fid, "outcome": "fixed", "sha": "abc1234"}
 
 
-class LedgerEndToEnd(unittest.TestCase):
+class LedgerEndToEnd(Case):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.tmp = Path(self._tmp.name)
-        (self.tmp / "home").mkdir()
+        super().setUp()
         self.cache, self.tr = self.tmp / "cache", self.tmp / "projects"
         self.skills = self.cache / "skills"
         self.ledger = self.tmp / "ledger.jsonl"
@@ -81,7 +77,7 @@ class LedgerEndToEnd(unittest.TestCase):
         self.prices.write_text(json.dumps(PRICES))
 
     def run_cli(self, *args):
-        env = dict(os.environ, HOME=str(self.tmp / "home"))
+        env = dict(os.environ, HOME=str(self.home))
         return subprocess.run([sys.executable, str(SCRIPT), *map(str, args)], capture_output=True, text=True, env=env)
 
     def ok(self, *args):
@@ -99,9 +95,6 @@ class LedgerEndToEnd(unittest.TestCase):
         if rtype in ("spec", "standards", "correctness", "verification"):
             sources += ["--transcripts", self.tr]
         return self.run_cli("append", "--repo", "skills", "--ledger", self.ledger, *sources, *args)
-
-    def rows(self):
-        return {r["row_id"]: r for r in map(json.loads, self.ledger.read_text().splitlines())}
 
     # -- fixtures ----------------------------------------------------------------
 
