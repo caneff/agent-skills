@@ -323,6 +323,21 @@ class HarvestTest(Case):
         self.assertFalse(any("mutation" in r["type"] for r in self.rows().values()))
 
 
+class MappingLabelTest(Case):
+    """A drifted label is data: one holding the review file's own ` -> ` separator
+    (#1276) is listed whole, not split at the wrong arrow."""
+
+    def test_label_containing_an_arrow_is_listed_whole(self):
+        cache = self.tmp / "cache"
+        write_jsonl(cache / "skills" / "findings-standards-300.jsonl",
+                    [finding("S1", "hard", "a.py", "Some finding")])
+        write_jsonl(cache / "skills" / "dispositions-300.jsonl",
+                    [{"id": "S1", "outcome": "fixed -> shipped", "sha": "abc1234"}])
+        self.harvest(cache)
+        section = self.review.read_text().split("## Unmapped values")[1].split("\n## ")[0]
+        self.assertIn("- `fixed -> shipped` -> unknown: 1", section)
+
+
 class VerificationOverlapTest(Case):
     """Ruling 8 (P6 on PR #1275): the verification pass never counts toward
     overlap for a round-1 finding it re-checks."""
