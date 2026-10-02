@@ -29,7 +29,10 @@ necessarily the target repo's checkout: the loop addresses the target with
 linked worktree and says why, because inside one `/implement`'s front-door
 rule reads the session as a **worker** and the same prompt would start a
 build instead of a run. It refuses a detached HEAD and a non-default branch
-too.
+too. The one linked worktree it accepts, and says so, is a `spec-<n>`
+branch: a spec run's nested `implement-spec` run (started through
+`implement-dispatch`, `implement/SKILL.md` § Dispatch) sits there, a
+controller's by construction.
 
 **Open the run.**
 

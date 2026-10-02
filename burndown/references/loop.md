@@ -10,7 +10,10 @@ mechanical half.
 The loop refuses to run from a linked worktree, and says so. Inside one,
 `/implement`'s front-door rule reads the session as a **worker**: the same
 prompt that starts a controller starts a build instead, on the branch that
-worktree holds. The check is `--absolute-git-dir` against `--git-common-dir`,
+worktree holds. The one linked worktree it accepts is the `spec-<n>` branch
+`implement-dispatch --spec <n>` makes for the nested `implement-spec` run,
+which is a controller's by construction (#1312). The check is
+`--absolute-git-dir` against `--git-common-dir`,
 not the path's spelling, and the branch is checked against
 `refs/remotes/origin/HEAD` rather than against `main` — a repo whose default
 branch is `trunk` is a checkout, not an exception.

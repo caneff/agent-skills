@@ -57,6 +57,39 @@ def test_seat_refuses_a_worktree_and_says_why():
         raise AssertionError("a worktree seat must be refused")
 
 
+def test_seat_accepts_a_spec_run_worktree_and_says_so():
+    # #1312: `implement-dispatch --spec <n>` starts the nested run in
+    # `.claude/worktrees/spec-<n>`, a linked worktree on branch `spec-<n>`.
+    run = git_stub(branch="spec-1262",
+                   git_dir="/repo/.git/worktrees/spec-1262")
+    got = loop.seat(run)
+    assert got.startswith("spec-1262"), got
+    assert "spec" in got.split("spec-1262", 1)[1], got
+
+
+def test_seat_still_refuses_a_worktree_whose_branch_only_looks_like_a_spec():
+    for branch in ("spec-", "spec-12x", "myspec-12", "implement-12", ""):
+        run = git_stub(branch=branch,
+                       git_dir="/repo/.git/worktrees/implement-12")
+        try:
+            loop.seat(run)
+        except loop.LoopError as exc:
+            assert "worktree" in str(exc), (branch, exc)
+        else:
+            raise AssertionError(f"{branch!r} in a worktree must be refused")
+
+
+def test_seat_refuses_a_spec_branch_in_the_primary_checkout():
+    # The exception is for the linked worktree `--spec` makes; a spec branch
+    # on the primary checkout is still not the default branch.
+    try:
+        loop.seat(git_stub(branch="spec-1262"))
+    except loop.LoopError as exc:
+        assert "spec-1262" in str(exc) and "main" in str(exc), exc
+    else:
+        raise AssertionError("a spec branch on the primary must be refused")
+
+
 def test_seat_refuses_a_branch_that_is_not_the_default():
     try:
         loop.seat(git_stub(branch="implement-893"))
@@ -1151,6 +1184,25 @@ def test_the_cli_refuses_a_seat_in_a_worktree_it_makes_itself():
         got = loop_py("seat", cwd=linked)
         assert got.returncode == 1, got
         assert "worktree" in got.stderr and "worker" in got.stderr, got.stderr
+        subprocess.run(["git", "-C", primary, "worktree", "remove", "--force",
+                        linked], check=True, timeout=60)
+
+
+def test_the_cli_accepts_a_seat_in_a_spec_worktree_it_makes_itself():
+    with tempfile.TemporaryDirectory() as tmp:
+        primary = os.path.join(tmp, "primary")
+        linked = os.path.join(tmp, "linked")
+        git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t"]
+        subprocess.run(["git", "init", "-q", primary], check=True, timeout=60)
+        open(os.path.join(primary, "f"), "w").close()
+        subprocess.run([*git, "-C", primary, "add", "f"], check=True, timeout=60)
+        subprocess.run([*git, "-C", primary, "commit", "-q", "-m", "one"],
+                       check=True, timeout=60)
+        subprocess.run(["git", "-C", primary, "worktree", "add", "-q", linked,
+                        "-b", "spec-1262"], check=True, timeout=60)
+        got = loop_py("seat", cwd=linked)
+        assert got.returncode == 0, got
+        assert got.stdout.startswith("spec-1262"), got.stdout
         subprocess.run(["git", "-C", primary, "worktree", "remove", "--force",
                         linked], check=True, timeout=60)
 
