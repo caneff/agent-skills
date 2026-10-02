@@ -1047,15 +1047,13 @@ def with_run_jobs(in_flight, run):
     instead; a registered clump with no `job` gets `None`, which `job_cores`
     refuses naming `runfile.py job`. `run` is the loaded run file."""
     run_id = run["run_id"]
-    jobs = {min(entry["tickets"]): entry["job"] for entry in run["clumps"]}
-    closed = {min(entry["tickets"]): entry["closed"]
-              for entry in run["clumps"]}
+    entries = {min(entry["tickets"]): entry for entry in run["clumps"]}
     owner = {n: min(entry["tickets"]) for entry in run["clumps"]
              for n in entry["tickets"]}
     with_jobs = []
     for clump in in_flight:
         key = key_of(clump)
-        if key not in jobs:
+        if key not in entries:
             shared = sorted({owner[n] for n in clump["tickets"] if n in owner})
             if shared:
                 # `runfile.py clump` would refuse these tickets as held.
@@ -1070,7 +1068,9 @@ def with_run_jobs(in_flight, run):
                 f"{run_id} — register it with `runfile.py clump` (then "
                 "`runfile.py job`) before dispatching; `runfile.py job` "
                 "alone fails on an unregistered clump")
-        with_jobs.append({**clump, "job": jobs[key], "closed": closed[key]})
+        entry = entries[key]
+        with_jobs.append({**clump, "job": entry["job"],
+                          "closed": entry["closed"]})
     return with_jobs
 
 
