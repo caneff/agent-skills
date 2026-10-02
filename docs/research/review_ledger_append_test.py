@@ -223,9 +223,7 @@ class AppendRefusalTest(AppendCase):
         self.assertEqual(self.ledger.read_text(), "not json\n")
 
     def test_a_type_outside_the_reviewer_list_is_refused(self):
-        r = self.append(400, "not-a-ledger-type")
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("invalid choice: 'not-a-ledger-type'", r.stderr)
+        self.assert_refused(self.append(400, "not-a-ledger-type"), "invalid choice: 'not-a-ledger-type'")
 
 
 if __name__ == "__main__":
