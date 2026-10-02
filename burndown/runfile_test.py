@@ -872,12 +872,16 @@ def test_a_run_file_with_a_blank_close_reason_is_refused_on_load():
 
 
 def test_a_run_file_written_before_closes_existed_loads_with_none_closed():
+    # No landing in this run: a landed clump would trip the both-landed-and-
+    # closed refusal before the fill-in this test is about could be read.
     root = cache()
-    three_clumps(root)
-    for index in range(3):
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.clump("burn-1", [903], "/w/b", "agent-b", root=root)
+    for index in range(2):
         hand_edit_clump(root, index, closed=...)
     run = runfile.load("burn-1", root=root)
-    assert [c["closed"] for c in run["clumps"]] == [None, None, None], run
+    assert [c["closed"] for c in run["clumps"]] == [None, None], run
 
 
 def test_close_from_the_cli_is_what_resume_reads_back():
