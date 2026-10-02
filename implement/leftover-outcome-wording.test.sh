@@ -99,5 +99,13 @@ check_in "§ The PR" "$the_pr" 'A non-zero exit from the search stops you'
 check_in "§ The PR" "$the_pr" 'More than one line is two sweeps for one PR: stop and tell the controller, and never edit `<n>` as a fallback'
 
 
+# #1314: one sweep grammar. The per-PR sweep's body is `sweep.py render`'s
+# shape, the one `runfile.sweep_items` reads; the PR's own bullets once
+# read `- PR #<n>, ticket #<m>, finding <id>` and failed the pre-report gate.
+check_in "§ The PR" "$the_pr" '## <file>'
+check_in "§ The PR" "$the_pr" '- **<id>** (<severity>) <title> — PR #<n>, ticket #<m>: <text>'
+check_in "§ The PR" "$the_pr" 'never `- PR #<n>, ticket #<m>, finding <id>`'
+
+
 [ "$fail" -eq 0 ] && echo "PASS $0"
 exit "$fail"
