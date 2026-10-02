@@ -802,6 +802,84 @@ def test_a_close_names_its_reason():
     assert runfile.load("burn-1", root=root)["clumps"][1]["closed"] is None
 
 
+def test_re_registering_a_closed_clump_reopens_it():
+    # A clump closed by mistake and dispatched again has a worker in its
+    # files: left closed, resume would never re-announce to that worker and
+    # dispatch would hand its files to another.
+    root = cache()
+    three_clumps(root)
+    runfile.close("burn-1", 903, "dup", root=root)
+    runfile.clump("burn-1", [903], "/w/b2", "agent-b2", root=root)
+    got = runfile.resume("burn-1", ["agent-a", "agent-b2"], root=root)
+    assert [c["agent"] for c in got["announce"]] == ["agent-a", "agent-b2"], got
+    assert got["closed"] == [], got
+
+
+def test_closing_again_with_the_same_reason_is_a_no_op_and_another_is_refused():
+    root = cache()
+    three_clumps(root)
+    runfile.close("burn-1", 903, "dup", root=root)
+    runfile.close("burn-1", 903, "dup", root=root)
+    try:
+        runfile.close("burn-1", 903, "nested spec run", root=root)
+    except runfile.RunFileError as exc:
+        assert "already closed: dup" in str(exc), exc
+    else:
+        raise AssertionError("a close reason was overwritten")
+    assert runfile.load("burn-1", root=root)["clumps"][1]["closed"] == "dup"
+
+
+def hand_edit_clump(root, index, **fields):
+    """Rewrite one clump of run `burn-1` in place, as a controller's hand
+    edit of the file would."""
+    target = runfile.path("burn-1", root)
+    with open(target) as fh:
+        run = json.load(fh)
+    run["clumps"][index].update(fields)
+    for key, value in fields.items():
+        if value is ...:
+            del run["clumps"][index][key]
+    with open(target, "w") as fh:
+        json.dump(run, fh)
+
+
+def test_a_run_file_with_a_clump_both_landed_and_closed_is_refused_on_load():
+    # The burn-skills-2026-09-30 shape: a clump landed at main's tip, then
+    # marked closed by hand. Read as either, one reader is wrong.
+    root = cache()
+    three_clumps(root)
+    hand_edit_clump(root, 2, closed="already fixed on main")
+    try:
+        runfile.load("burn-1", root=root)
+    except runfile.RunFileError as exc:
+        assert "#905 both landed and closed" in str(exc), exc
+    else:
+        raise AssertionError("a clump both landed and closed was loaded")
+
+
+def test_a_run_file_with_a_blank_close_reason_is_refused_on_load():
+    # `""` read as no close would put a finished clump back in flight.
+    root = cache()
+    three_clumps(root)
+    for bad in ("", True, "x\ry"):
+        hand_edit_clump(root, 1, closed=bad)
+        try:
+            runfile.load("burn-1", root=root)
+        except runfile.RunFileError as exc:
+            assert "close reason" in str(exc), (bad, exc)
+        else:
+            raise AssertionError(f"closed={bad!r} was loaded")
+
+
+def test_a_run_file_written_before_closes_existed_loads_with_none_closed():
+    root = cache()
+    three_clumps(root)
+    for index in range(3):
+        hand_edit_clump(root, index, closed=...)
+    run = runfile.load("burn-1", root=root)
+    assert [c["closed"] for c in run["clumps"]] == [None, None, None], run
+
+
 def test_close_from_the_cli_is_what_resume_reads_back():
     root = cache()
     three_clumps(root)

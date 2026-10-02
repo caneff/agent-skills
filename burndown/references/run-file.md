@@ -57,7 +57,8 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
   by `resume --controller <name>` on every resume.
 - **A clump** is keyed by its **lowest ticket** — the same number its branch
   and its workspace are named for. Registering the same lowest again moves the
-  workspace and the agent and keeps the landing sha, and it may **grow** the
+  workspace and the agent, keeps the landing sha and reopens a closed clump
+  (it has a worker again), and it may **grow** the
   clump — a closure re-resolve that adds a ticket — but never drop one out of
   the run: this file is what answers "which tickets are out". A ticket that
   already sits in *another* clump is refused too, because one ticket in two

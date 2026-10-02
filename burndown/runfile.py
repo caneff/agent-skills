@@ -921,7 +921,7 @@ def clump(run_id, tickets, workspace, agent, root=None):
 
     Registering the same lowest ticket again moves the workspace and the agent
     and keeps the landing sha — a clump redispatched after a park is the same
-    clump. A ticket that already sits in another clump is refused: one ticket
+    clump — and reopens a closed one, which now has a worker again. A ticket that already sits in another clump is refused: one ticket
     in two clumps is two workers in the same files."""
     tickets = ticket_numbers(tickets)
     workspace = named(workspace, "workspace path")
@@ -945,7 +945,8 @@ def clump(run_id, tickets, workspace, agent, root=None):
                     "may grow a clump, never drop a ticket out of the run")
         entry = {"tickets": tickets, "workspace": workspace, "agent": agent,
                  "landed": same["landed"] if same else None,
-                 "closed": same["closed"] if same else None,
+                 # A closed clump registered again is dispatched again.
+                 "closed": None,
                  "job": same["job"] if same else None,
                  # A new agent has sent no "PR up" of its own.
                  "pr_up": same["pr_up"] if same and same["agent"] == agent
