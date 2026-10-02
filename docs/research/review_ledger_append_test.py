@@ -118,6 +118,38 @@ class AppendRowTest(AppendCase):
         for row in self.rows().values():
             self.assertEqual((row["findings"][0]["overlap"], row["findings"][0]["k"]), ("shared", 2))
 
+    def test_the_verification_append_fills_the_outcomes_of_the_rounds_axis_rows(self):
+        # The axes append before dispositions exist; the verification pass writes them, then appends.
+        skills = self.cache / "skills"
+        write_jsonl(skills / "findings-standards-430.jsonl", [finding("S1", "hard", "a.py", "Early thing")])
+        transcript(self.tr, wt(SKILLS_PROJ, 430), "s", "Standards review #430", "Repo: x",
+                   [("2026-09-20T10:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(430, "standards")
+        row_id = "skills/430/standards/1/findings-standards-430"
+        self.assertEqual(self.rows()[row_id]["findings"][0]["outcome"], "unknown")
+        cost = self.rows()[row_id]["cost"]
+        write_jsonl(skills / "dispositions-430.jsonl", [{"id": "S1", "outcome": "fixed", "sha": "e"}])
+        write_jsonl(skills / "findings-verify-430.jsonl", [])
+        transcript(self.tr, wt(SKILLS_PROJ, 430), "v", "Verification pass", "Verification of round 1",
+                   [("2026-09-20T11:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(430, "verification")
+        row = self.rows()[row_id]
+        self.assertEqual(row["findings"][0]["outcome"], "fixed")
+        self.assertIn("skills/dispositions-430.jsonl", row["status"]["sources"])
+        self.assertEqual(row["cost"], cost)
+        self.assertEqual(row["origin"], "append")
+
+    def test_the_verification_append_adds_no_axis_row_that_was_never_appended(self):
+        self.ok(400, "standards")
+        write_jsonl(self.cache / "skills" / "findings-verify-400.jsonl", [])
+        transcript(self.tr, wt(SKILLS_PROJ, 400), "v", "Verification pass", "Verification of round 1",
+                   [("2026-09-20T11:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(400, "verification")
+        self.assertEqual(sorted(self.rows()), [
+            "skills/400/over-engineering/1/findings-standards-400",
+            "skills/400/standards/1/findings-standards-400",
+            "skills/400/verification/1/findings-verify-400"])
+
     def hold_ledger_lock(self):
         """Take the ledger's lock the way a writer does; the test's own process is the writer in progress."""
         lock = open(self.ledger.with_name(self.ledger.name + ".lock"), "w")

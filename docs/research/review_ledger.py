@@ -1086,11 +1086,20 @@ def cmd_append_codex(args) -> int:
     return _write_appended(args, mine)
 
 
-def _write_appended(args, mine: list[dict]) -> int:
+def _write_appended(args, mine: list[dict], refresh: list[dict] = ()) -> int:
+    """Write `mine` whole. Each `refresh` row replaces only the findings of the ledger row it
+    shares a row id with, and only one `append` wrote: the axis rows a verification pass
+    finds already appended, whose outcomes were `unknown` until its dispositions existed."""
     ticket = (mine[0]["repo"], mine[0]["ticket"])
 
     def add_rows(ledger: dict) -> None:
         ledger.update({r["row_id"]: {**r, "origin": "append"} for r in mine})
+        for r in refresh:
+            old = ledger.get(r["row_id"])
+            if old and old.get("origin") == "append":
+                old["findings"] = r["findings"]
+                old["status"]["fields"]["findings"] = r["status"]["fields"]["findings"]
+                old["status"]["sources"], old["status"]["mappings"] = r["status"]["sources"], r["status"]["mappings"]
         # The ticket's other reviewers may have appended already: re-split credit across all of them.
         # Only rows of reviewer types, Codex included: a mutation row is not ours to re-score.
         mark_overlap([r for r in ledger.values() if (r.get("repo"), r.get("ticket")) == ticket
@@ -1108,9 +1117,10 @@ def _write_appended(args, mine: list[dict]) -> int:
 def cmd_append(args) -> int:
     """Write the rows of one review that just ran: what `harvest` would write for that
     ticket's sidecars and transcripts, selected by type and round. A review's own cost or
-    findings sidecar being absent is a refusal, never a row with zero cost. A round-1 review
+    findings sidecar being absent is a refusal, never a row with zero cost. An axis review
     ends before its dispositions exist, so its findings' outcomes are `unknown` until the
-    same append is run again after them, or a harvest reads them."""
+    verification pass appends: that append, run after it writes the dispositions, also
+    refills the findings of every axis row of its round already in the ledger."""
     if args.type not in CODEX_TYPES and (args.skip_reason is not None or args.refusal is not None):
         print(f"review_ledger append: --skip-reason and --refusal are for codex types, not {args.type}",
               file=sys.stderr)
@@ -1147,7 +1157,9 @@ def cmd_append(args) -> int:
         if (why := _refusal(r)):
             print(f"review_ledger append: {r['row_id']}: {why}", file=sys.stderr)
             return 2
-    return _write_appended(args, mine)
+    refresh = [r for r in rows if args.type == "verification" and r["round"] == args.round
+               and r["type"] in REVIEWER_TYPES and r["type"] != "verification"]
+    return _write_appended(args, mine, refresh)
 
 
 def _row_value(row: dict, weights: dict, split: str) -> tuple[float, int]:
