@@ -2,15 +2,16 @@
 disable-model-invocation: true
 name: extract-coding-standards
 description: >-
-  Extract the coding standards a repo actually enforces from recent PRs, reviews, commits, and current code, and write them into CODING_STANDARDS.md. Use when the user says "extract coding standards", "mine recent commits or PRs for standards", "last N submissions", or "write CODING_STANDARDS".
+  Extract the coding standards a repo actually enforces from recent PRs, reviews, commits, and current code, propose them, and write the ones the user approves into CODING_STANDARDS.md. Use when the user says "extract coding standards", "mine recent commits or PRs for standards", "last N submissions", or "write CODING_STANDARDS".
 argument-hint: "[N | all]"
 ---
 
 Read what a repo's history reveals about how its people write code, and turn the
 conventions the team actually enforces into rules a future contributor — human
 or agent — can follow. The output is a `CODING_STANDARDS.md` that `/multi-axis-code-review`
-reads as its Standards axis, so every rule you write becomes a check on future
-diffs.
+reads as its Standards axis, so every rule written becomes a check on future
+diffs. Every rule is a **proposal** until the user approves it: the file changes
+only in step 4, and only by what they approved.
 
 `$ARGUMENTS` sets the scope: a number `N` looks at the last N merged PRs (or the
 last N commits if the repo has no PR history), and `all` scans the whole history.
@@ -38,7 +39,7 @@ Two ideas keep you honest, both drawn from how convention-mining tools work:
 
 For each convention you spot, sort it into one of three tiers.
 
-**Write it as a rule** when either test passes:
+**Propose it as a rule** when either test passes:
 
 - **Corrected and kept** — an accepted review correction asked for it, **and**
   the current code conforms. The correction shows a person cared; the code shows
@@ -47,15 +48,15 @@ For each convention you spot, sort it into one of three tiers.
 - **Repeated correction** — the same kind of accepted correction appears in
   **two or more separate PRs**. Two deliberate human acts, not one preference.
 
-**Write it, but mark it "contested"** when the code mostly follows it but not
+**Propose it, marked "contested"** when the code mostly follows it but not
 cleanly — roughly 60–90% of the sites conform, with real counter-examples. Say
 so in the rule; do not assert a contested pattern as settled.
 
-**Report it as a candidate, do not write it** — everything below the bar: a
+**List it as a candidate, with no rule text** — everything below the bar: a
 single sighting, a correction the current code does not keep, or consistency
 without any human signal behind it. Surface these to the user so a person can
 promote them by hand. This is the holding pen for doubt — record it, never
-graduate it.
+graduate it yourself.
 
 Score conformance by **adherence ratio across the call-sites, not one example**:
 near-100% → clean rule; 60–90% → contested; below that → candidate at most.
@@ -98,17 +99,18 @@ Group the evidence into distinct conventions. Drop anything a tool already
 enforces (the filter above). Run each survivor through **the promotion gate** and
 label it **rule**, **contested**, or **candidate**.
 
-### 3. Write CODING_STANDARDS.md
+### 3. Present the proposals
 
 Choose the target so the output slots into what `/multi-axis-code-review` already reads:
 
 - If the repo already documents standards in `CODING_STANDARDS.md` or
-  `CONTRIBUTING.md`, append there.
-- Otherwise create `CODING_STANDARDS.md` at the repo root.
-- Never create a second competing standards file.
+  `CONTRIBUTING.md`, that file is the target.
+- Otherwise the target is a new `CODING_STANDARDS.md` at the repo root.
+- Never a second competing standards file.
 
-Write each rule in the house format — a bold one-line claim as an imperative,
-then the *why* and the concrete thing that breaks silently when it is ignored:
+Draft each rule and contested rule in the house format — a bold one-line claim
+as an imperative, then the *why* and the concrete thing that breaks silently
+when it is ignored:
 
 ```
 N. **The claim as an imperative.** The reason it exists, and the concrete
@@ -117,21 +119,37 @@ N. **The claim as an imperative.** The reason it exists, and the concrete
 ```
 
 Mark a contested rule as contested in its own text (e.g. "Most of the code does
-X; a few places still do Y — prefer X"). Keep the doc short: cite the evidence in
-your report to the user, not in the doc. If the range gave you three real rules,
-write three; do not pad to look thorough.
+X; a few places still do Y — prefer X"). If the range gave you three real rules,
+propose three; do not pad to look thorough.
+
+Then hand the user one numbered list and end your turn with the target file
+untouched:
+
+- **Each proposal** — its exact text as it would be written, its tier (rule or
+  contested), and the evidence behind it: the PR or commit that proves the team
+  enforces it, and its adherence ratio. The evidence lives here, not in the doc.
+- **The candidates**, numbered on in the same list, each with why it fell below
+  the bar (thin evidence), so the user can promote one by number.
+- **Drift** — where the recent history now **contradicts** a rule already in the
+  target (e.g. "rule N says X, but the last 8 PRs do Y"). The call is the user's.
+- Anything a tool already enforces that you deliberately left out.
+- The target file, and whether it exists yet.
+
+Done when every rule and contested rule from step 2 is in the list with its
+exact text and evidence, and the target file is unchanged.
+
+### 4. Write what the user approved
+
+Write the items the user approved, in the wording they approved — their edit
+to a proposal's text replaces yours. An item they asked a question about waits
+for their ruling; an item they did not answer stays unwritten. A candidate
+they promote is written like any approved rule.
 
 If the target file already exists, **merge, don't clobber**: keep every existing
-rule, add only new ones. Where the recent history now **contradicts** a written
-rule, do not edit or delete it — **flag the drift** in your report (e.g. "rule N
-says X, but the last 8 PRs do Y") and leave the call to the user.
+rule, add only the approved ones. A rule the user ruled on as drift is edited or
+removed only as they said; drift they did not rule on stays as written.
 
-### 4. Report
+### 5. Report
 
-Hand the user:
-
-- The rules written or added, each with the evidence behind it — the PR or commit
-  that proves the team enforces it, and its tier (rule or contested).
-- The candidates you did **not** write, and why (thin evidence).
-- Any drift you flagged against existing rules.
-- Anything a tool already enforces that you deliberately left out.
+Hand the user the rules written and the file they went into, and the proposals
+and candidates left unwritten.
