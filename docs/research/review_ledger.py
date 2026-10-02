@@ -907,6 +907,29 @@ def update_ledger(path: Path, change) -> None:
         os.replace(tmp, path)
 
 
+def merge_harvest(ledger: dict, rows: list[dict]) -> None:
+    """Replace every earlier harvest row with `rows`, never losing a row `append` wrote (#1304):
+    the review cache is pruned after 14 days, so a later harvest may have nothing to rebuild it
+    from. A rebuilt appended row stays `append`, so that later harvest leaves it as it is. A row
+    with no findings sidecar whose every transcript an appended row already holds is that row's
+    run, its sidecar pruned: adding it would count the transcript's cost twice."""
+    for k in [k for k, r in ledger.items() if r.get("origin") == "harvest"]:
+        del ledger[k]
+    held = {s for r in ledger.values() if r.get("origin") == "append" for s in r.get("status", {}).get("sources", [])}
+    for r in rows:
+        old = ledger.get(r["row_id"])
+        sources = r["status"]["sources"]
+        if old and old.get("origin") == "append":
+            # A refusal is the controller's ruling on a run, which the record alone does not say: keep it.
+            if not old.get("refusal"):
+                ledger[r["row_id"]] = {**r, "origin": "append"}
+        elif r["type"] in REVIEWER_TYPES and sources and set(sources) <= held \
+                and not any(Path(s).name.startswith("findings-") for s in sources):
+            continue
+        else:
+            ledger[r["row_id"]] = r
+
+
 def cmd_harvest(args) -> int:
     try:
         transcripts, missing = args.transcripts, None
@@ -917,16 +940,7 @@ def cmd_harvest(args) -> int:
         elif not transcripts.is_dir():
             raise FileNotFoundError(f"transcripts tree not found: {transcripts}")
         rows, facts = harvest_cache(args.cache, transcripts, missing)
-
-        def replace_harvest_rows(ledger: dict) -> None:
-            for k in [k for k, r in ledger.items() if r.get("origin") == "harvest"]:
-                del ledger[k]
-            for r in rows:
-                old = ledger.get(r["row_id"])
-                # A refusal is the controller's ruling on a run, which the record alone does not say: keep it.
-                ledger[r["row_id"]] = old if old and old.get("origin") == "append" and old.get("refusal") else r
-
-        update_ledger(args.ledger, replace_harvest_rows)
+        update_ledger(args.ledger, lambda ledger: merge_harvest(ledger, rows))
     except (FileNotFoundError, ValueError) as e:
         print(f"review_ledger: {e}", file=sys.stderr)
         return 2

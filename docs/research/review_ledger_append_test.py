@@ -98,6 +98,25 @@ class AppendRowTest(AppendCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(sorted(self.rows()), sorted(self.harvested()))
 
+    def harvest(self, tr=None):
+        r = run("harvest", "--cache", self.cache, "--transcripts", tr or self.tr, "--ledger", self.ledger,
+                "--review-file", self.tmp / "h.md", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_harvest_after_the_sidecars_are_pruned_keeps_the_rows_and_adds_no_second_cost(self):
+        # #1304: the prune takes ticket 400's sidecars; its transcripts outlive them.
+        self.ok(400, "spec")
+        appended = self.rows()
+        self.harvest()
+        for name in ("findings-spec-400.jsonl", "findings-standards-400.jsonl", "findings-correctness-400.jsonl",
+                     "dispositions-400.jsonl"):
+            (self.cache / "skills" / name).unlink()
+        self.harvest()
+        rows = self.rows()
+        self.assertEqual(rows["skills/400/spec/1/findings-spec-400"], appended["skills/400/spec/1/findings-spec-400"])
+        # The spec transcript's cost is held by the appended row: no transcript-only spec row beside it.
+        self.assertEqual([k for k in rows if k.startswith("skills/400/spec/")], ["skills/400/spec/1/findings-spec-400"])
+
     def test_other_rows_in_the_ledger_are_kept(self):
         write_jsonl(self.ledger, [{"row_id": "keep", "origin": "harvest", "type": "spec"}])
         self.ok(403, "verification")

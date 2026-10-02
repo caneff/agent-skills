@@ -132,6 +132,24 @@ class UsageChangeTest(CodexAppendCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual({**self.only_row(), "origin": "append"}, appended)
 
+    def harvest(self):
+        r = subprocess.run([sys.executable, str(SCRIPT), "harvest", "--cache", str(self.cache), "--transcripts",
+                            str(self.tmp), "--ledger", str(self.ledger), "--review-file", str(self.tmp / "h.md")],
+                           capture_output=True, text=True, env={"HOME": str(self.home)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_harvest_after_the_record_is_pruned_keeps_the_appended_row(self):
+        # #1304: append, harvest, the 14-day prune takes the record, harvest again.
+        self.record(500, before=f"10 {W1}", after=f"12 {W1}", out=OUT_TWO)
+        self.record(501)  # a second record, so the cache is not empty once ticket 500's is gone
+        self.ok(500, "gate")
+        appended = self.rows()["skills/500/codex-gate/1/codex-adversarial-500-gate"]
+        self.harvest()
+        for suffix in (".json", ".out"):
+            (self.skills / f"codex-adversarial-500-gate{suffix}").unlink()
+        self.harvest()
+        self.assertEqual(self.rows().get("skills/500/codex-gate/1/codex-adversarial-500-gate"), appended)
+
     def test_other_rows_of_the_ticket_are_not_written(self):
         self.record(500, "gate")
         self.record(500, "second")
