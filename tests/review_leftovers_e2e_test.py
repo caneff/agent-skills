@@ -157,7 +157,7 @@ def fold(per_pr_body):
 def frontier_buckets(number, body):
     issue = {"number": number, "title": f"Sweep: leftovers from burn {RUN}",
              "body": body, "labels": [{"name": "ready-for-agent"}]}
-    buckets = frontier.classify([issue], lambda n: "closed")
+    buckets = frontier.classify([issue], lambda n: "closed", lambda ticket: None)
     return {name: [e["number"] for e in entries] for name, entries in buckets.items()}
 
 
