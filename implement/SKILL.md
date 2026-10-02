@@ -596,8 +596,14 @@ Exit 0 and no output: file
 `Sweep: leftovers from PR #<n>` through `/file-ticket`,
 labelled `ready-for-agent`, in #1030's body shape
 (`burndown/SKILL.md` § The sweep: grouped by file, one bullet per
-item). More than one line is two sweeps for one PR: stop and tell the
-controller, and never edit `<n>` as a fallback. A burn controller that later finds this ticket open on the
+item). The heading and the bullet's opening are `sweep.py render`'s
+grammar, the part the pre-report gate reads (#1314): a `## <file>`
+heading per file, then one bullet per item,
+`- **<id>** (<severity>) <title> — PR #<n>, ticket #<m>: <text>`
+(no clump, which a per-PR sweep has none of), never
+`- PR #<n>, ticket #<m>, finding <id>`. More than one line is two
+sweeps for one PR: stop and tell the controller, and never edit `<n>`
+as a fallback. A burn controller that later finds this ticket open on the
 frontier folds it into its own run's sweep
 (`burndown/SKILL.md` § The sweep) rather than leaving it standing
 beside one.
