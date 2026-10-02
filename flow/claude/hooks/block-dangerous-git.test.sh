@@ -300,6 +300,8 @@ run "owned verdict cached for the merge login case" 0 "git push origin main"
 export STUB_LOGIN= STUB_ERR="boom2: login read failed"
 RUN_FORBID="you don't own" run "merge naming a repo, login read failing, keeps gh's text" 2 \
   "gh pr merge 1 --repo caneff/x" "(gh: boom2: login read failed)"
+RUN_FORBID="ownership of caneff-agent/skills" run "merge naming a repo, login read failing, names that repo's owner" 2 \
+  "gh pr merge 1 --repo caneff/x" "could not verify ownership of the repo the command names (owner caneff)"
 unset STUB_ERR
 export STUB_LOGIN=caneff STUB_OWNER=caneff
 

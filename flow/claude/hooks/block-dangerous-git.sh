@@ -254,7 +254,8 @@ merge_is_owned() {
   [ "$rc" = 0 ] || return "$rc"
   owners=$(named_merge_owners)
   [ -n "$owners" ] || return 0
-  gh_login || return 2
+  # The checkout is already verified; what is left unread is the named repo.
+  gh_login || { OWNERSHIP_ORIGIN="the repo the command names (owner $(printf '%s' "$owners" | paste -sd, -))"; return 2; }
   while IFS= read -r owner; do
     ieq "$owner" "$GH_LOGIN" || return 1
   done <<< "$owners"
