@@ -119,8 +119,9 @@ ieq() { [ "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$2" | tr 'A-Z
 # re-asking costs nothing and a stale "no" (or a cached network blip) can
 # never harden into a permanent block. Delete $cache_dir if a repo's origin
 # changes hands.
-# Returns 0 owned, 1 not owned (gh answered), 2 gh could not answer; on 2,
-# OWNERSHIP_ERR holds gh's error text so the block can say it was a blip.
+# Returns 0 owned, 1 not owned (gh answered, a repo this login cannot see
+# included), 2 gh could not answer; on 2, OWNERSHIP_ERR holds gh's error text
+# so the block can say it was a blip.
 OWNERSHIP_ERR=""
 OWNERSHIP_ORIGIN=""
 repo_is_owned() {
@@ -154,7 +155,12 @@ repo_is_owned() {
   lookup_failed() { OWNERSHIP_ERR=$([ -n "$errf" ] && tr '\n' ' ' < "$errf" | sed 's/ *$//'); [ -z "$errf" ] || rm -f "$errf"; return 2; }
   me=$(gh api user -q .login 2>"${errf:-/dev/null}") || { lookup_failed; return 2; }
   target=$(gh repo view "$origin" --json owner,name,isFork,parent \
-      -q 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' 2>"${errf:-/dev/null}") || { lookup_failed; return 2; }
+      -q 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' 2>"${errf:-/dev/null}") || {
+    lookup_failed
+    # gh reached GitHub and was told the repo does not exist for this login.
+    case "$OWNERSHIP_ERR" in *"Could not resolve to a Repository"* | *"(HTTP 404)"*) return 1 ;; esac
+    return 2
+  }
   [ -z "$errf" ] || rm -f "$errf"
   [ -n "$me" ] && [ -n "$target" ] || { OWNERSHIP_ERR="empty answer from gh"; return 2; }
   ieq "${target%%/*}" "$me" || return 1
@@ -226,20 +232,28 @@ named_merge_owners() {
   printf '%s\n' "$SCAN" | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/pull/' \
     | cut -d/ -f2
 }
+# Returns as repo_is_owned does: 0 owned, 1 not owned, 2 gh could not answer.
 merge_is_owned() {
-  local owners me owner
-  repo_is_owned || return 1
+  local owners me owner rc
+  repo_is_owned; rc=$?
+  [ "$rc" = 0 ] || return "$rc"
   owners=$(named_merge_owners)
   [ -n "$owners" ] || return 0
-  me=$(gh api user -q .login 2>/dev/null) || return 1
-  [ -n "$me" ] || return 1
+  me=$(gh api user -q .login 2>/dev/null) || { OWNERSHIP_ERR="gh api user failed"; return 2; }
+  [ -n "$me" ] || { OWNERSHIP_ERR="empty answer from gh"; return 2; }
   while IFS= read -r owner; do
     ieq "$owner" "$me" || return 1
   done <<< "$owners"
 }
-if runs_pr_merge && ! merge_is_owned; then
-  echo "BLOCKED: '$COMMAND' merges a PR on a repo you don't own (or ownership couldn't be verified — gh down?). That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact '! gh pr merge ...' line to run themselves. Do not attempt it yourself." >&2
-  exit 2
+if runs_pr_merge; then
+  merge_is_owned; rc=$?
+  if [ "$rc" = 2 ]; then
+    echo "BLOCKED: '$COMMAND' merges a PR, and ownership of $OWNERSHIP_ORIGIN could not be verified (gh: ${OWNERSHIP_ERR:-no error text}) — retry once gh is reachable. This is a lookup failure, not a foreign repo." >&2
+    exit 2
+  elif [ "$rc" != 0 ]; then
+    echo "BLOCKED: '$COMMAND' merges a PR on a repo you don't own. That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact '! gh pr merge ...' line to run themselves. Do not attempt it yourself." >&2
+    exit 2
+  fi
 fi
 
 # --- Push policy: your repo = allowed, anyone else's = handed off. ---

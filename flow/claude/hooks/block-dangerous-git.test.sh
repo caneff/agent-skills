@@ -265,6 +265,28 @@ run "git -C push -f still blocked" 2 "git -C /r push -f origin main" "force-push
 run "force-push in a later segment still blocked" 2 \
   "git fetch && git push --force origin main" "force-push"
 
+# The merge block tells a gh failure from a foreign repo, as the push block
+# does (#1309).
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN= STUB_OWNER= STUB_ERR="boom: network unreachable"
+RUN_FORBID="you don't own" run "merge with gh failing names the verify failure, with gh's error" 2 \
+  "gh pr merge 12 --squash" "(gh: boom: network unreachable)"
+unset STUB_ERR
+export STUB_LOGIN=caneff STUB_OWNER=someone-else
+rm -rf "$XDG_CACHE_HOME"
+RUN_FORBID="could not verify" run "merge on a foreign origin prints the not-owned line, no hedge" 2 \
+  "gh pr merge 12 --squash" "merges a PR on a repo you don't own."
+
+# gh answering that the repo does not exist for this login is an answer,
+# not a blip to retry: the repo is not this login's (#1309).
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN=caneff STUB_OWNER= \
+  STUB_ERR="GraphQL: Could not resolve to a Repository with the name 'caneff/agent-skills'. (repository)"
+RUN_FORBID="could not verify" run "repo gh cannot see is not owned, not a lookup failure" 2 \
+  "git push origin main" "pushing to a repo you don't own."
+unset STUB_ERR
+export STUB_LOGIN=caneff STUB_OWNER=caneff
+
 # Reading git is untouched.
 run "ordinary git command allowed" 0 "git status"
 
