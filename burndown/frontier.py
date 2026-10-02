@@ -93,8 +93,12 @@ SPEC_LABEL = "spec"
 # parent never reaches this reader as a candidate, and its slices would read
 # as ordinary unblocked tickets and be built one by one. The slice is found
 # from its side: its parent, by the sub-issue endpoint or a `Part of #<n>`
-# line, carries `spec`.
+# line, carries `spec`. `/to-tickets` writes it under a `## Parent` heading
+# as `Part of [Spec: ...](https://github.com/<o>/<r>/issues/<n>).` (#1282), and
+# a bare `#<n>` under that heading is the same declaration.
 _PART_OF = re.compile(r"^ {0,3}Part of #(\d+)\b", re.IGNORECASE)
+_PARENT_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+parent[ \t]*$", re.IGNORECASE)
+_ISSUE_LINK = r"https://github\.com/{repo}/issues/(\d+)\b"
 
 
 class FrontierError(Exception):
@@ -416,10 +420,30 @@ def fetch_parent(repo, ticket, run=gh_json):
         # can carry the request URL, and a ticket #1404 would match it.
         if "(HTTP 404)" not in str(exc):
             raise
-    for _, line in visible((ticket.get("body") or "").splitlines()):
+    parent = _parent_number(ticket.get("body") or "", repo)
+    return None if parent is None else run(["api", f"{base}/{parent}"])
+
+
+def _parent_number(body, repo):
+    """The parent issue number a ticket body declares in this repo, or `None`:
+    a `Part of #<n>` line, a `Part of [..](<this repo's issue URL>)` line, or
+    the first `#<n>` / this repo's issue URL under a `## Parent` heading."""
+    link = re.compile(_ISSUE_LINK.format(repo=re.escape(repo)), re.IGNORECASE)
+    in_parent = False
+    for _, line in visible(body.splitlines()):
         part = _PART_OF.match(line)
         if part:
-            return run(["api", f"{base}/{int(part.group(1))}"])
+            return int(part.group(1))
+        if _ANY_HEADING.match(line):
+            in_parent = bool(_PARENT_HEADING.match(line))
+            continue
+        found = link.search(line)
+        if re.match(r"^ {0,3}Part of\b", line, re.IGNORECASE) and found:
+            return int(found.group(1))
+        if in_parent:
+            found = found or _REFERENCE.search(line)
+            if found:
+                return int(found.group(1))
     return None
 
 
