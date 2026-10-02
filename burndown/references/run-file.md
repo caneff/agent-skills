@@ -10,6 +10,7 @@ python3 burndown/runfile.py start    <run-id> --repo <checkout> [--slots <k>] [-
 python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
 python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
 python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
+python3 burndown/runfile.py close    <run-id> --clump 901 --reason <text>
 python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
 python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --pr-body <path>
 python3 burndown/runfile.py check    --from <dispositions sidecar> --pr-body <path>
@@ -29,11 +30,11 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
   "clumps": [
     {"tickets": [901, 902], "workspace": "/home/c/src/x/.claude/worktrees/implement-901",
      "agent": "implement-901-42", "job": {"state": "running", "cores": 8},
-     "pr_up": null, "landed": null},
+     "pr_up": null, "landed": null, "closed": null},
     {"tickets": [905], "workspace": "/home/c/src/x/.claude/worktrees/implement-905",
      "agent": "implement-905-7", "job": {"state": "none", "cores": 0},
      "pr_up": 950,
-     "landed": "0123456789abcdef0123456789abcdef01234567"}
+     "landed": "0123456789abcdef0123456789abcdef01234567", "closed": null}
   ],
   "leftovers": [
     {"clump": 905, "tickets": [905], "pr": 950, "id": "S3",
@@ -51,12 +52,13 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
   the budget minus that, so a controller that comes back does not have to count
   panes to know what it may dispatch. A vanished clump holds its slot until
   someone reconciles it: its worker may still be in those files, and only a
-  landing frees a slot for certain.
+  landing or a close frees a slot for certain.
 - **The controller** is the controller's own **herdr agent name**, rewritten
   by `resume --controller <name>` on every resume.
 - **A clump** is keyed by its **lowest ticket** — the same number its branch
   and its workspace are named for. Registering the same lowest again moves the
-  workspace and the agent and keeps the landing sha, and it may **grow** the
+  workspace and the agent, keeps the landing sha and reopens a closed clump
+  (it has a worker again), and it may **grow** the
   clump — a closure re-resolve that adds a ticket — but never drop one out of
   the run: this file is what answers "which tickets are out". A ticket that
   already sits in *another* clump is refused too, because one ticket in two
@@ -66,6 +68,20 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 - **`landed`** is the clump's squash sha, or `null`. It must be a git object
   name, and once written a *different* sha is refused: the squash sha is
   final, so a second one is a stale writer rather than a correction.
+- **`closed`** is the one-line reason a clump finished with **no landing of
+  its own**, or `null` (#1310): its ticket was found already fixed on the
+  default branch, or it was handed to a nested spec run whose landings live in
+  that run's own file. A nested run's clump is closed once that run has
+  finished, never at the hand-off: a closed clump's files are free to this
+  run's dispatch, which never reads the nested run's file, so closing early
+  dispatches into files its workers are still editing. `runfile.py close <run-id> --clump <n> --reason <text>`
+  writes it. A clump is landed or closed, never both: `close` refuses a landed
+  clump and `land` a closed one. Recording `main`'s tip as a landing instead is
+  a sha with no PR behind it, and `sweep.py counts` then refuses the run over
+  the sidecar that PR never wrote. A closed clump holds no slot, gets no
+  re-announce, is no live workspace to `loop.py dispatch` or its liveness
+  sweep, and `sweep.py counts` names it as skipped. A file written before this
+  field existed loads with it as `null`.
 
 
 ## The job record
@@ -257,13 +273,14 @@ handle, and it is the one recorded here.
 ## Resume
 
 `resume <run-id> --live <names> --controller <my agent name>` reads the file
-and splits the clumps three ways against the agents that are alive:
+and splits the clumps four ways against the agents that are alive:
 
 ```
 run burn-2026-09-20-0905  slots 3  held 2  free 1  controller burn-ctl-f3
 re-announce  implement-901-42  #901,#902  /home/c/src/x/.claude/worktrees/implement-901
 vanished     implement-903-9   #903       /home/c/src/x/.claude/worktrees/implement-903
 landed       0123456789abcdef0123456789abcdef01234567  #905
+closed       #907  duplicate of #880, already fixed on main
 ```
 
 1. **The live names come from the machine**, never from the file and never
@@ -289,7 +306,8 @@ landed       0123456789abcdef0123456789abcdef01234567  #905
    with the new workspace and agent) or parks it — and the slot frees when the
    clump lands.
 4. **A landed clump is in neither working bucket**, however its agent looks —
-   its sha is banked and re-announcing to a finished worker is noise.
+   its sha is banked and re-announcing to a finished worker is noise. **A
+   closed clump** is in neither either, and is listed with its reason.
 
 ## Writing
 

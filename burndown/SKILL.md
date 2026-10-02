@@ -40,7 +40,7 @@ too.
    `sweep.py counts --repo` is checked against (§ Run state). Resuming an existing run instead:
    `runfile.py resume`, and then **one message per live, unlanded worker**
    — its `announce` bucket and only that one, via `loop.announce`. A
-   landed clump's worker gets none however its agent looks; a vanished one
+   landed or closed clump's worker gets none however its agent looks; a vanished one
    gets none either, and is reconciled or parked by hand. The bucket
    names each worker by its **herdr agent name**, which is
    the durable key and not an address: resolve it to a reachable session at
@@ -83,7 +83,8 @@ too.
    `loop.py dispatch`'s `--in-flight`; its job record is in neither, and
    `--run <run-id>` is required, and dispatch reads it from the run file by
    the clump's lowest ticket, ignoring any `job` in the in-flight file.
-   `loop.py dispatch` then unions each unlanded in-flight workspace's real
+   `loop.py dispatch` reads a clump the run file records as closed as not
+   live, and then unions each unlanded in-flight workspace's real
    `git diff --name-only origin/<default>...HEAD`, its uncommitted edits and
    its untracked files into that closure (#1212), so a file the worker
    reached that no candidate list named still holds the clumps that share it;
@@ -151,7 +152,11 @@ too.
    each dispatched clump with
    `runfile.py clump` — its workspace and its worker's herdr agent name, or
    step 1's resume has nothing to re-announce to — each landing with
-   `runfile.py land`, each "PR up" with `runfile.py pr-up <run-id> --clump
+   `runfile.py land`, each clump that finishes with no landing of its own
+   (its ticket found already fixed on `main`, or handed to a nested spec
+   run, once that run has finished and not at the hand-off) with `runfile.py close <run-id> --clump <n> --reason <text>` rather
+   than a `land` at `main`'s tip, which `sweep.py counts` refuses for the
+   sidecar no PR wrote, each "PR up" with `runfile.py pr-up <run-id> --clump
    <n> --pr <n>` as it arrives, for § Liveness, and each landing's leftover
    findings with `runfile.py leftover <run-id> --clump <n> --pr <n> --from
    <dispositions sidecar> --pr-body <the PR's body, from `gh pr view <pr>
@@ -257,7 +262,7 @@ infer it from an absent link.
 python3 burndown/sweep.py counts <run-id> --repo <primary checkout>
 ```
 
-reads them from each landed clump's dispositions sidecar (`implement/SKILL.md` § Review) under the `--repo` checkout's cache directory — never the cwd's, which is not always the target, and refused unless `--repo` is the run's recorded target — so Chris can see whether the adjacent-fix rule is doing its job
+reads them from each landed clump's dispositions sidecar (`implement/SKILL.md` § Review), names each closed clump as skipped, under the `--repo` checkout's cache directory — never the cwd's, which is not always the target, and refused unless `--repo` is the run's recorded target — so Chris can see whether the adjacent-fix rule is doing its job
 without re-deriving it from the PRs by hand. Controller observations about
 the loop itself stay standalone tickets (§ Before a controller rules), never
 folded into the sweep and never in any sidecar — the controller adds its own

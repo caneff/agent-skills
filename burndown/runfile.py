@@ -5,6 +5,7 @@
     python3 burndown/runfile.py clump    <run-id> --tickets 901,902 --workspace <path> --agent <name>
     python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | --done
     python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
+    python3 burndown/runfile.py close    <run-id> --clump 901 --reason <text>
     python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
     python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --pr-body <path>
     python3 burndown/runfile.py check    --from <dispositions sidecar> --pr-body <path>
@@ -17,13 +18,14 @@ It holds the run id, the slot budget, the controller's herdr agent name, the
 run works on, which `loop.py dispatch` prints into every `implement-dispatch`
 command and `sweep.py counts --repo` is checked against), and one entry per
 clump — its ticket list, its workspace, its worker's **herdr agent name**, and
-its squash sha once it lands. It also holds the run's **leftovers**, copied at
+its squash sha once it lands — or, for a clump that closed with no landing
+of its own, the reason it closed. It also holds the run's **leftovers**, copied at
 landing from each PR's dispositions sidecar (`implement/SKILL.md` § Review)
 rather than transcribed by hand. `resume`
 reads it back and splits the clumps against the agents that are alive: the
 live workers to re-announce the controller to, the vanished ones to
-reconcile by hand, and the landings already banked. Only the controller
-writes.
+reconcile by hand, the landings already banked, and the clumps closed with no
+landing. Only the controller writes.
 
 Why one file per run, why `~/.cache`, why the herdr agent name and why each
 write replaces the file in one step: `references/run-file.md`, which is where
@@ -328,6 +330,12 @@ def load(run_id, root=None):
             entry["pr_up"] = None if pr is None else pr_number(pr)
             if entry["landed"] is not None:
                 checked_sha(entry["landed"])
+            # Filled in the same way: a clump closed with no landing (#1310).
+            closed = entry.get("closed")
+            entry["closed"] = None if closed is None else close_reason(closed)
+            if entry["landed"] is not None and closed is not None:
+                raise RunFileError(
+                    f"has clump #{entry['tickets'][0]} both landed and closed")
         # Filled in rather than demanded, the same as `job` above: a run file
         # written before leftovers existed is still that controller's run.
         leftovers = run.get("leftovers", [])
@@ -913,7 +921,7 @@ def clump(run_id, tickets, workspace, agent, root=None):
 
     Registering the same lowest ticket again moves the workspace and the agent
     and keeps the landing sha — a clump redispatched after a park is the same
-    clump. A ticket that already sits in another clump is refused: one ticket
+    clump — and reopens a closed one, which now has a worker again. A ticket that already sits in another clump is refused: one ticket
     in two clumps is two workers in the same files."""
     tickets = ticket_numbers(tickets)
     workspace = named(workspace, "workspace path")
@@ -937,6 +945,8 @@ def clump(run_id, tickets, workspace, agent, root=None):
                     "may grow a clump, never drop a ticket out of the run")
         entry = {"tickets": tickets, "workspace": workspace, "agent": agent,
                  "landed": same["landed"] if same else None,
+                 # A closed clump registered again is dispatched again.
+                 "closed": None,
                  "job": same["job"] if same else None,
                  # A new agent has sent no "PR up" of its own.
                  "pr_up": same["pr_up"] if same and same["agent"] == agent
@@ -964,22 +974,65 @@ def land(run_id, lowest, sha, root=None):
         if entry["landed"] not in (None, sha):
             raise RunFileError(
                 f"clump #{lowest} already landed at {entry['landed']}")
+        if entry["closed"] is not None:
+            raise RunFileError(
+                f"clump #{lowest} is closed without a landing "
+                f"({entry['closed']})")
         entry["landed"] = sha
         save(run, root)
         return run
 
 
+def close_reason(reason):
+    """Why a clump closed with no landing: one non-blank line, the hygiene a
+    leftover's fields keep, since `render_resume` prints it on one line."""
+    return leftover_field(reason, "close reason")
+
+
+def close(run_id, lowest, reason, root=None):
+    """Record that a clump closed with no landing of its own — its ticket
+    found already fixed on the default branch, or handed to a nested spec run
+    whose landings live in that run's own file (#1310). Distinct from `land`:
+    no squash sha exists, and `main`'s tip recorded as one is a landing the
+    sweep then looks for a sidecar behind. A closed clump holds no slot, has
+    no worker to re-announce to, and has no sidecar for `sweep.py counts`.
+    A landed clump is refused; closing again with the same reason is a no-op,
+    with another reason is refused."""
+    reason = close_reason(reason)
+    with locked(run_id, root):
+        run = load(run_id, root)
+        entry = clump_entry(run, lowest)
+        if entry["landed"] is not None:
+            raise RunFileError(
+                f"clump #{lowest} already landed at {entry['landed']}")
+        if entry["closed"] not in (None, reason):
+            raise RunFileError(
+                f"clump #{lowest} is already closed: {entry['closed']}")
+        entry["closed"] = reason
+        save(run, root)
+        return run
+
+
+def settled(entry):
+    """A clump that has finished in this run, landed or closed: no worker
+    to reach, no workspace holding files, no slot held."""
+    return bool(entry.get("landed") or entry.get("closed"))
+
+
 def reconcile(run, live_agents):
-    """Split a run's clumps three ways against the agents that are alive:
+    """Split a run's clumps four ways against the agents that are alive:
     the live workers to re-announce to, the vanished ones a controller has to
-    reconcile by hand, and the landings. A landed clump is in neither working
-    bucket however its worker looks — its slot is free and its sha is final.
+    reconcile by hand, the landings, and the clumps closed with no landing. A
+    landed or closed clump is in neither working bucket however its worker
+    looks — its slot is free and its outcome is final.
     """
     live = set(live_agents)
-    announce, vanished, landed = [], [], []
+    announce, vanished, landed, closed = [], [], [], []
     for entry in run["clumps"]:
         if entry["landed"]:
             landed.append(entry)
+        elif entry["closed"]:
+            closed.append(entry)
         elif entry["agent"] in live:
             announce.append(entry)
         else:
@@ -987,12 +1040,13 @@ def reconcile(run, live_agents):
     # A vanished clump counts against the budget with the live ones: its
     # worker may still be holding its tickets, so refilling its slot before
     # anyone has reconciled it puts a second worker in the same files. Only a
-    # landing frees a slot for certain.
+    # landing or a close frees a slot for certain.
     held = len(announce) + len(vanished)
     return {"run_id": run["run_id"], "slots": run["slots"],
             "controller": run["controller"],
             "free": max(0, run["slots"] - held), "held": held,
-            "announce": announce, "vanished": vanished, "landed": landed}
+            "announce": announce, "vanished": vanished, "landed": landed,
+            "closed": closed}
 
 
 def resume(run_id, live_agents, controller=None, root=None):
@@ -1011,12 +1065,14 @@ def resume(run_id, live_agents, controller=None, root=None):
 
 def render(run):
     """The run as the controller reads it back: one header line, one line per
-    clump, landings marked with their sha."""
+    clump, landings marked with their sha and closes with their reason."""
     lines = [f"run {run['run_id']}  slots {run['slots']}  "
              f"controller {run['controller'] or '-'}  "
              f"repo {run.get('repo') or 'none recorded'}"]
     for entry in run["clumps"]:
-        state = f"landed {entry['landed']}" if entry["landed"] else "in flight"
+        state = (f"landed {entry['landed']}" if entry["landed"]
+                 else f"closed: {entry['closed']}" if entry["closed"]
+                 else "in flight")
         lines.append(f"clump #{entry['tickets'][0]}  {tickets_of(entry)}  "
                      f"{entry['agent']}  {entry['workspace']}  {state}  "
                      f"{render_job(entry.get('job'))}  "
@@ -1051,7 +1107,7 @@ def tickets_of(entry):
 def render_resume(state):
     """What resume owes the controller: the slot budget it recovered, the live
     workers to re-announce itself to, the vanished ones to reconcile by hand,
-    and the landings already banked."""
+    the landings already banked, and the clumps closed with no landing."""
     lines = [f"run {state['run_id']}  slots {state['slots']}  "
              f"held {state['held']}  free {state['free']}  "
              f"controller {state['controller'] or '-'}"]
@@ -1063,6 +1119,8 @@ def render_resume(state):
                      f"{entry['workspace']}")
     for entry in state["landed"]:
         lines.append(f"landed       {entry['landed']}  {tickets_of(entry)}")
+    for entry in state["closed"]:
+        lines.append(f"closed       {tickets_of(entry)}  {entry['closed']}")
     return "\n".join(lines)
 
 
@@ -1105,6 +1163,15 @@ def main(argv):
     done.add_argument("--clump", type=int, required=True,
                       help="the clump's lowest ticket")
     done.add_argument("--sha", required=True)
+
+    shut = subs.add_parser(
+        "close", help="record a clump that closed with no landing of its own")
+    shut.add_argument("run_id")
+    shut.add_argument("--clump", type=int, required=True,
+                      help="the clump's lowest ticket")
+    shut.add_argument("--reason", required=True,
+                      help="why, on one line: e.g. already fixed on main as "
+                           "#1202, or a nested spec run under its own run file")
 
     lo = subs.add_parser(
         "leftover",
@@ -1194,6 +1261,8 @@ def main(argv):
                                args.workspace, args.agent, root)))
         elif args.command == "land":
             print(render(land(args.run_id, args.clump, args.sha, root)))
+        elif args.command == "close":
+            print(render(close(args.run_id, args.clump, args.reason, root)))
         elif args.command == "leftover":
             run, added = leftover(args.run_id, args.clump, args.pr,
                                   args.from_path, root, args.pr_body)

@@ -278,7 +278,7 @@ def test_a_clump_records_its_tickets_workspace_and_herdr_agent_name():
     got = runfile.load("burn-1", root=root)["clumps"]
     assert got == [{"tickets": [901, 902], "workspace": "/w/implement-901",
                     "agent": "implement-901-42", "landed": None,
-                    "job": None, "pr_up": None}], got
+                    "closed": None, "job": None, "pr_up": None}], got
 
 
 def test_a_clump_is_keyed_by_its_lowest_ticket_and_re_registers_in_place():
@@ -738,6 +738,162 @@ def test_a_landing_frees_the_slot_a_vanished_clump_was_holding():
     runfile.land("burn-1", 903, "def5678", root=root)
     after = runfile.resume("burn-1", ["agent-a"], root=root)["free"]
     assert (before, after) == (1, 2), (before, after)
+
+
+def test_a_closed_clump_is_reported_closed_and_frees_its_slot():
+    # #1236 was found already fixed on main and #1262 was a nested spec run:
+    # neither landed a PR here, and neither has a worker to re-announce to.
+    root = cache()
+    three_clumps(root)
+    runfile.close("burn-1", 903, "duplicate of #1202, already fixed on main",
+                  root=root)
+    got = runfile.resume("burn-1", ["agent-a", "agent-b"], root=root)
+    assert [c["agent"] for c in got["announce"]] == ["agent-a"], got
+    assert got["vanished"] == [], got
+    assert [c["tickets"] for c in got["closed"]] == [[903]], got
+    assert [c["tickets"] for c in got["landed"]] == [[905]], got
+    assert got["free"] == 2, got
+    shown = runfile.render_resume(got)
+    assert ("closed       #903  duplicate of #1202, already fixed on main"
+            in shown), shown
+
+
+def test_a_closed_clump_reads_closed_in_show_and_survives_a_reload():
+    root = cache()
+    three_clumps(root)
+    runfile.close("burn-1", 903, "nested spec run", root=root)
+    run = runfile.load("burn-1", root=root)
+    assert run["clumps"][1]["closed"] == "nested spec run", run
+    assert run["clumps"][1]["landed"] is None, run
+    assert "closed: nested spec run" in runfile.render(run), runfile.render(run)
+
+
+def test_closing_a_landed_clump_and_landing_a_closed_one_are_refused():
+    # Landed and closed are two different facts about one clump; recording
+    # both would make the sweep both count its sidecar and skip it.
+    root = cache()
+    three_clumps(root)
+    for act, why in ((lambda: runfile.close("burn-1", 905, "x", root=root),
+                      "abc1234"),
+                     (lambda: (runfile.close("burn-1", 903, "dup", root=root),
+                               runfile.land("burn-1", 903, "def5678",
+                                            root=root)), "closed")):
+        try:
+            act()
+        except runfile.RunFileError as exc:
+            assert why in str(exc), exc
+        else:
+            raise AssertionError("a clump recorded as landed and closed")
+    run = runfile.load("burn-1", root=root)
+    assert run["clumps"][1]["landed"] is None, run
+    assert run["clumps"][2]["closed"] is None, run
+
+
+def test_a_close_names_its_reason():
+    root = cache()
+    three_clumps(root)
+    refused = []
+    for reason in ("", "   ", "two\nlines"):
+        try:
+            runfile.close("burn-1", 903, reason, root=root)
+        except runfile.RunFileError as exc:
+            refused.append("close reason" in str(exc))
+    assert refused == [True, True, True], refused
+    assert runfile.load("burn-1", root=root)["clumps"][1]["closed"] is None
+
+
+def test_re_registering_a_closed_clump_reopens_it():
+    # A clump closed by mistake and dispatched again has a worker in its
+    # files: left closed, resume would never re-announce to that worker and
+    # dispatch would hand its files to another.
+    root = cache()
+    three_clumps(root)
+    runfile.close("burn-1", 903, "dup", root=root)
+    runfile.clump("burn-1", [903], "/w/b2", "agent-b2", root=root)
+    got = runfile.resume("burn-1", ["agent-a", "agent-b2"], root=root)
+    assert [c["agent"] for c in got["announce"]] == ["agent-a", "agent-b2"], got
+    assert got["closed"] == [], got
+
+
+def test_closing_again_with_the_same_reason_is_a_no_op_and_another_is_refused():
+    root = cache()
+    three_clumps(root)
+    runfile.close("burn-1", 903, "dup", root=root)
+    runfile.close("burn-1", 903, "dup", root=root)
+    try:
+        runfile.close("burn-1", 903, "nested spec run", root=root)
+    except runfile.RunFileError as exc:
+        assert "already closed: dup" in str(exc), exc
+    else:
+        raise AssertionError("a close reason was overwritten")
+    assert runfile.load("burn-1", root=root)["clumps"][1]["closed"] == "dup"
+
+
+def hand_edit_clump(root, index, **fields):
+    """Rewrite one clump of run `burn-1` in place, as a controller's hand
+    edit of the file would."""
+    target = runfile.path("burn-1", root)
+    with open(target) as fh:
+        run = json.load(fh)
+    run["clumps"][index].update(fields)
+    for key, value in fields.items():
+        if value is ...:
+            del run["clumps"][index][key]
+    with open(target, "w") as fh:
+        json.dump(run, fh)
+
+
+def test_a_run_file_with_a_clump_both_landed_and_closed_is_refused_on_load():
+    # The burn-skills-2026-09-30 shape: a clump landed at main's tip, then
+    # marked closed by hand. Read as either, one reader is wrong.
+    root = cache()
+    three_clumps(root)
+    hand_edit_clump(root, 2, closed="already fixed on main")
+    try:
+        runfile.load("burn-1", root=root)
+    except runfile.RunFileError as exc:
+        assert "#905 both landed and closed" in str(exc), exc
+    else:
+        raise AssertionError("a clump both landed and closed was loaded")
+
+
+def test_a_run_file_with_a_blank_close_reason_is_refused_on_load():
+    # `""` read as no close would put a finished clump back in flight.
+    root = cache()
+    three_clumps(root)
+    for bad in ("", True, "x\ry"):
+        hand_edit_clump(root, 1, closed=bad)
+        try:
+            runfile.load("burn-1", root=root)
+        except runfile.RunFileError as exc:
+            assert "close reason" in str(exc), (bad, exc)
+        else:
+            raise AssertionError(f"closed={bad!r} was loaded")
+
+
+def test_a_run_file_written_before_closes_existed_loads_with_none_closed():
+    # No landing in this run: a landed clump would trip the both-landed-and-
+    # closed refusal before the fill-in this test is about could be read.
+    root = cache()
+    runfile.start("burn-1", slots=2, root=root, repo=REPO)
+    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
+    runfile.clump("burn-1", [903], "/w/b", "agent-b", root=root)
+    for index in range(2):
+        hand_edit_clump(root, index, closed=...)
+    run = runfile.load("burn-1", root=root)
+    assert [c["closed"] for c in run["clumps"]] == [None, None], run
+
+
+def test_close_from_the_cli_is_what_resume_reads_back():
+    root = cache()
+    three_clumps(root)
+    got = cli(root, "close", "burn-1", "--clump", "903", "--reason",
+              "nested spec run")
+    assert got.returncode == 0, got.stderr
+    back = cli(root, "resume", "burn-1", "--live", "agent-a,agent-b")
+    assert back.returncode == 0, back.stderr
+    assert "closed       #903  nested spec run" in back.stdout, back.stdout
+    assert "agent-b" not in back.stdout, back.stdout
 
 
 def test_resume_writes_the_controllers_current_agent_name_into_the_run_file():

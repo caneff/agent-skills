@@ -1620,6 +1620,50 @@ def test_the_cli_dispatch_frontier_ignores_a_landed_clumps_own_closure():
         assert "held" not in got.stdout, got.stdout
 
 
+def test_the_cli_dispatch_reads_a_clump_closed_in_the_run_file_as_not_live():
+    # #1310: a clump closed with no landing (already fixed on main, or a
+    # nested spec run) is still listed in --in-flight, with no job on record
+    # and a closure the candidate shares. The run file's `closed` is what
+    # frees its slot and its files — nothing in --in-flight says so.
+    with tempfile.TemporaryDirectory() as tmp:
+        cache = os.path.join(tmp, "cache")
+        runfile.start("burn-close", 5, None, root=cache, repo=REPO)
+        runfile.clump("burn-close", [351], "/w/351", "sm-351", root=cache)
+        runfile.clump("burn-close", [412], "/w/412", "sm-412", root=cache)
+        runfile.job("burn-close", 412, "none", root=cache)
+        runfile.close("burn-close", 351, "nested spec run", root=cache)
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [500], "closure": ["verify.py"]}], fh)
+        with open(live, "w") as fh:
+            json.dump(in_flight_clumps(), fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "1", "--processes", "4", "--committed-gb", "4",
+                      "--run", "burn-close", env={"BURNDOWN_CACHE_DIR": cache})
+        assert got.returncode == 0, got.stderr
+        assert "dispatch  #500" in got.stdout, got.stdout
+        assert "held" not in got.stdout, got.stdout
+
+
+def test_a_closed_clump_is_not_diffed():
+    asked = []
+    live = [{"tickets": [9], "workspace": "/w/9", "closure": ["a"],
+             "closed": "nested spec run"}]
+    got = loop.with_workspace_diffs(live, lambda ws: asked.append(ws) or ["z"])
+    assert asked == [] and loop.paths(got[0]) == {"a"}, (asked, got)
+
+
+def test_the_sweep_skips_a_closed_clump():
+    calls = []
+    clumps = live_clumps()
+    clumps[1]["closed"] = "already fixed on main"
+    get = agent_stub({"skills-1": herdr_agent("working"),
+                      "skills-3": HERDR_GONE}, calls)
+    loop.sweep(clumps, get)
+    assert calls == ["skills-1", "skills-3"], calls
+
+
 def test_the_cli_refuses_a_dispatch_while_a_worker_is_unrecorded():
     with tempfile.TemporaryDirectory() as tmp:
         cand, live = dispatch_files(tmp, None)

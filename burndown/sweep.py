@@ -23,7 +23,8 @@ refused, exit 1, since the update it feeds would blank the ticket.
 prints the closing report's three counts — fixed in-round, leftover,
 standalone — read from each landed clump's dispositions sidecar
 (`implement/SKILL.md` § Review's `dispositions-<lowest ticket>.jsonl`, the
-same file the verification pass writes). Nothing here writes one either.
+same file the verification pass writes), and names every clump closed with no
+landing as skipped. Nothing here writes one either.
 
 Filing the ticket through `/file-ticket` — the label, the first filing's
 `## Blocked by` section, and when the controller calls this — is
@@ -208,13 +209,19 @@ def counts(run, reviews_dir):
     function's to count; the controller adds its own filed-observation
     count to standalone by hand (`burndown/SKILL.md` § The sweep).
 
+    A clump closed with no landing (`runfile.py close`, #1310) has no PR and
+    so no sidecar: it is listed under `closed` as `(lowest, reason)`, by
+    name, so the report says which clumps it did not read.
+
     A landed clump with no sidecar on disk is refused by clump number,
     never silently counted as zero: a controller reading a low count cannot
     otherwise tell "this clump genuinely left nothing" from "this run's own
     bookkeeping is missing" (defect class 1)."""
     fixed = adjacent = leftover = standalone = 0
-    missing = []
+    missing, closed = [], []
     for entry in run["clumps"]:
+        if entry.get("closed"):
+            closed.append((entry["tickets"][0], entry["closed"]))
         if not entry["landed"]:
             continue
         lowest = entry["tickets"][0]
@@ -239,12 +246,16 @@ def counts(run, reviews_dir):
             " have no dispositions sidecar under " + reviews_dir +
             " — counts refused rather than read as zero")
     return {"fixed": fixed, "adjacent": adjacent, "leftover": leftover,
-            "standalone": standalone}
+            "standalone": standalone, "closed": closed}
 
 
 def render_counts(c):
-    return (f"fixed in-round: {c['fixed']} ({c['adjacent']} adjacent)  "
+    line = (f"fixed in-round: {c['fixed']} ({c['adjacent']} adjacent)  "
             f"leftover: {c['leftover']}  standalone: {c['standalone']}")
+    if c["closed"]:
+        line += "\nskipped, closed without a landing: " + ", ".join(
+            f"#{n} ({reason})" for n, reason in c["closed"])
+    return line
 
 
 def main(argv):

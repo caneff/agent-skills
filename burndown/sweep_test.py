@@ -256,7 +256,8 @@ def test_counts_sums_fixed_adjacent_leftover_and_standalone_across_landed_clumps
     ])
     run = runfile.load("burn-c", root=root)
     got = sweep.counts(run, reviews)
-    assert got == {"fixed": 2, "adjacent": 1, "leftover": 1, "standalone": 1}, got
+    assert got == {"fixed": 2, "adjacent": 1, "leftover": 1, "standalone": 1,
+                   "closed": []}, got
 
 
 def test_counts_treats_split_ids_as_independent_findings():
@@ -277,7 +278,7 @@ def test_counts_treats_split_ids_as_independent_findings():
     run = runfile.load("burn-f", root=root)
     got = sweep.counts(run, reviews)
     assert got == {"fixed": 1, "adjacent": 0, "leftover": 1,
-                   "standalone": 0}, got
+                   "standalone": 0, "closed": []}, got
 
 
 def test_counts_ignores_an_unlanded_clumps_sidecar():
@@ -294,7 +295,8 @@ def test_counts_ignores_an_unlanded_clumps_sidecar():
     # not be refused, only a *landed* clump's missing sidecar is.
     run = runfile.load("burn-d", root=root)
     got = sweep.counts(run, reviews)
-    assert got == {"fixed": 0, "adjacent": 0, "leftover": 1, "standalone": 0}, got
+    assert got == {"fixed": 0, "adjacent": 0, "leftover": 1, "standalone": 0,
+                   "closed": []}, got
 
 
 def test_counts_refuses_a_landed_clump_with_no_sidecar_rather_than_read_zero():
@@ -310,6 +312,27 @@ def test_counts_refuses_a_landed_clump_with_no_sidecar_rather_than_read_zero():
         assert "901" in str(exc), exc
     else:
         raise AssertionError("a missing sidecar was read as zero")
+
+
+def test_counts_names_a_closed_clump_as_skipped_rather_than_refusing_it():
+    # burn-skills-2026-09-30: #1236 (already fixed on main) and #1262 (a
+    # nested spec run) closed with no PR here, so neither has a sidecar. The
+    # report names them, so a reader can tell them from a clump never read.
+    root = cache()
+    reviews = reviews_dir_fixture()
+    runfile.start("burn-g", slots=3, root=root, repo=REPO)
+    runfile.clump("burn-g", [901], "/w/a", "agent-a", root=root)
+    runfile.clump("burn-g", [1236], "/w/b", "agent-b", root=root)
+    runfile.clump("burn-g", [1262], "/w/c", "agent-c", root=root)
+    runfile.land("burn-g", 901, "abc1234", root=root)
+    runfile.close("burn-g", 1236, "duplicate of #1202", root=root)
+    runfile.close("burn-g", 1262, "nested spec run", root=root)
+    write_sidecar(reviews, 901, [{"id": "S1", "outcome": "fixed", "sha": "a"}])
+    got = cli(root, "counts", "burn-g", "--reviews-dir", reviews)
+    assert got.returncode == 0, got.stderr
+    assert "fixed in-round: 1 (0 adjacent)" in got.stdout, got.stdout
+    assert ("skipped, closed without a landing: #1236 (duplicate of #1202), "
+            "#1262 (nested spec run)") in got.stdout, got.stdout
 
 
 def test_cli_counts_prints_the_three_counts():
