@@ -955,6 +955,64 @@ def test_a_slice_with_an_unreadable_declaration_stays_unresolved():
     assert numbers(got["slice"]) == [], got
 
 
+def _parent_run():
+    return gh_answers({
+        "repos/owner/repo/issues/491/parent": F.FrontierError("gh: Not Found (HTTP 404)"),
+        "repos/owner/repo/issues/483": spec_parent(483),
+    })
+
+
+def test_fetch_parent_reads_the_link_form_to_tickets_writes():
+    body = ("## Parent\n\nPart of [Spec: the thing](https://github.com/owner/repo/issues/483).\n\n"
+            "## TL;DR\n\nSomething.\n")
+    got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    assert got["number"] == 483, got
+
+
+def test_fetch_parent_reads_a_bare_reference_under_the_parent_heading():
+    body = "## Parent\n\n#483\n\n## TL;DR\n\nSee #7.\n"
+    got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    assert got["number"] == 483, got
+
+
+def test_fetch_parent_reads_a_part_of_link_line_outside_a_parent_heading():
+    body = "Part of [Spec: the thing](https://github.com/owner/repo/issues/483)\n\nBody.\n"
+    got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    assert got["number"] == 483, got
+
+
+def test_fetch_parent_reads_a_bare_issue_url_under_the_parent_heading():
+    body = "## Parent\n\nhttps://github.com/owner/repo/issues/483\n"
+    got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    assert got["number"] == 483, got
+
+
+def test_the_parent_section_ends_at_the_next_heading():
+    body = "## Parent\n\nnone yet\n\n## TL;DR\n\nSee #483.\n"
+    assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+
+
+def test_a_link_to_another_repo_is_decided_by_its_url_not_its_text():
+    body = "## Parent\n\nPart of [Spec: fix #483 crash](https://github.com/other/place/issues/12).\n"
+    assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+
+
+def test_a_bare_reference_beside_a_foreign_link_is_still_the_parent():
+    body = "## Parent\n\n#483 (mirrors https://github.com/other/place/issues/12)\n"
+    got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    assert got["number"] == 483, got
+
+
+def test_fetch_parent_ignores_a_bare_reference_outside_the_parent_heading():
+    body = "## TL;DR\n\n#483 is related.\n"
+    assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+
+
+def test_fetch_parent_ignores_a_link_to_another_repo():
+    body = "## Parent\n\nPart of [Spec](https://github.com/other/place/issues/483).\n"
+    assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+
+
 def test_a_fenced_part_of_line_is_not_a_parent_reference():
     run = gh_answers({
         "repos/owner/repo/issues/491/parent": F.FrontierError("gh: Not Found (HTTP 404)"),

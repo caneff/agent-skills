@@ -87,7 +87,9 @@ slices then read as ordinary `unblocked` tickets and are built one by one,
 which is the failure `references/spec-handoff.md` exists to stop (#1242,
 seen on burn-2026-09-27). So the reader also looks at each candidate's
 **parent**: `gh api repos/<o>/<r>/issues/<n>/parent`, and where that answers
-404, the body's `Part of #<n>` line. A parent carrying `spec` puts the
+404, the body's parent line: `Part of #<n>`, a `Part of` line linking this repo's issue URL (what
+`/to-tickets` writes under `## Parent`), or a bare `#<n>` / issue URL under a
+`## Parent` heading. A parent carrying `spec` puts the
 candidate in `slice`, naming the parent and the `--spec <parent>` handoff.
 
 The same ordering as `spec` applies. `blocked` outranks `slice`; silence
@@ -99,7 +101,7 @@ asked for its own parent.
 **A parent that cannot be read is `unresolved`**, never unblocked: a failed
 call that answered nothing is not an answer of "no parent", and reading it so
 dispatches the slice under a spec nobody could see. Only a 404 with no
-`Part of #<n>` line is "no parent".
+parent line is "no parent".
 
 ## Three sources, in order
 
