@@ -577,7 +577,9 @@ def _mutation_with_fake_claude(repo, tmp, out, **extra_env):
         with open(os.path.join(bin_dir, "uv"), "w") as f:
             f.write("#!/bin/sh\nexit 0\n")
         os.chmod(os.path.join(bin_dir, "uv"), 0o755)
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_CACHE_HOME": cache_dir,
+    # The ceiling is dropped from the ambient env, as in `_sweep_with_fake_claude`.
+    ambient = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"}
+    env = {**ambient, "PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_CACHE_HOME": cache_dir,
            "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", **extra_env}
     return subprocess.run(
         [sys.executable, os.path.join(here, "driver.py"), repo, "--mutation", "solver.py", "--out", out],
