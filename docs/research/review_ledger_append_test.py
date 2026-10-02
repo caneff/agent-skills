@@ -34,6 +34,12 @@ class AppendCase(Case):
         return {r["row_id"]: r for r in map(json.loads, self.ledger.read_text().splitlines())} \
             if self.ledger.exists() else {}
 
+    def harvest(self, tr=None):
+        r = run("harvest", "--cache", self.cache, "--transcripts", tr or self.tr, "--ledger", self.ledger,
+                "--review-file", self.tmp / "h.md", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r
+
     def harvested(self):
         other = self.tmp / "harvested.jsonl"
         r = run("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", other,
@@ -50,9 +56,7 @@ class AppendRowTest(AppendCase):
             "completed": "2026-09-22T09:01:00-04:00"}))
         (skills / "codex-adversarial-400-gate.out").write_text(
             "Findings:\n- [high] Thing 400 (a.py:1)\n  Body.\n\nNext steps:\n- Fix.\n")
-        r = run("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", self.ledger,
-                "--review-file", self.tmp / "h.md", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.harvest()
         self.ok(400, "standards")
         rows = self.rows()
         codex = rows["skills/400/codex-gate/1/codex-adversarial-400-gate"]["findings"][0]
@@ -93,10 +97,135 @@ class AppendRowTest(AppendCase):
 
     def test_a_later_harvest_leaves_exactly_the_rows_a_harvest_alone_writes(self):
         self.ok(403, "verification")
-        r = run("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", self.ledger,
-                "--review-file", self.tmp / "h.md", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.harvest()
         self.assertEqual(sorted(self.rows()), sorted(self.harvested()))
+
+    def test_a_harvest_after_the_sidecars_are_pruned_keeps_the_rows_and_adds_no_second_cost(self):
+        # #1304: the prune takes ticket 400's sidecars; its transcripts outlive them.
+        self.ok(400, "spec")
+        appended = self.rows()
+        self.harvest()
+        for name in ("findings-spec-400.jsonl", "findings-standards-400.jsonl", "findings-correctness-400.jsonl",
+                     "dispositions-400.jsonl"):
+            (self.cache / "skills" / name).unlink()
+        self.harvest()
+        rows = self.rows()
+        self.assertEqual(rows["skills/400/spec/1/findings-spec-400"], appended["skills/400/spec/1/findings-spec-400"])
+        # The spec transcript's cost is held by the appended row: no transcript-only spec row beside it.
+        self.assertEqual([k for k in rows if k.startswith("skills/400/spec/")], ["skills/400/spec/1/findings-spec-400"])
+
+    def test_a_harvest_keeps_a_later_rounds_row_from_a_sidecar_an_appended_row_shares(self):
+        # One sidecar holds round 1 and round 2 ids; only round 1 was appended, so its sources are held.
+        write_jsonl(self.cache / "skills" / "findings-spec-600.jsonl", [
+            finding("P1", "hard", "a.py", "First", axis="spec"), finding("r2-P2", "hard", "b.py", "Second", axis="spec")])
+        write_jsonl(self.cache / "skills" / "dispositions-600.jsonl", [{"id": "P1", "outcome": "fixed", "sha": "e"}])
+        transcript(self.tr, wt(SKILLS_PROJ, 600), "p", "Spec review #600", "Repo: x",
+                   [("2026-09-20T10:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(600, "spec")
+        self.harvest()
+        self.assertEqual(sorted(k for k in self.rows() if "/600/" in k),
+                         ["skills/600/spec/1/findings-spec-600", "skills/600/spec/2/findings-spec-600"])
+
+    def test_a_harvest_after_transcript_cleanup_keeps_the_known_cost_and_model(self):
+        self.ok(400, "spec")
+        appended = self.rows()["skills/400/spec/1/findings-spec-400"]
+        empty = self.tmp / "cleaned"
+        empty.mkdir()
+        self.harvest(tr=empty)
+        row = self.rows()["skills/400/spec/1/findings-spec-400"]
+        self.assertEqual(row["cost"], appended["cost"])
+        self.assertEqual((row["model"], row["status"]["fields"]["model"]),
+                         (appended["model"], appended["status"]["fields"]["model"]))
+
+    def test_a_harvest_after_one_of_two_transcripts_is_cleaned_up_keeps_the_summed_cost(self):
+        # Ticket 405's spec review ran twice, in two sessions; cleanup takes the second session first.
+        self.ok(405, "spec")
+        appended = self.rows()["skills/405/spec/1/findings-spec-405"]
+        for name in ("agent-sp2.jsonl", "agent-sp2.meta.json"):
+            (self.tr / wt(SKILLS_PROJ, 405) / "s2" / "subagents" / name).unlink()
+        self.harvest()
+        self.assertEqual(self.rows()["skills/405/spec/1/findings-spec-405"]["cost"], appended["cost"])
+
+    def test_a_harvest_after_one_rounds_sidecar_is_pruned_counts_each_transcript_once(self):
+        skills = self.cache / "skills"
+        write_jsonl(skills / "findings-verify-700.jsonl", [finding("V1", "judgement", "v.py", "One", axis="verify")])
+        write_jsonl(skills / "findings-verify-700-r2.jsonl", [finding("r2-V1", "judgement", "w.py", "Two", axis="verify")])
+        transcript(self.tr, wt(SKILLS_PROJ, 700), "v1", "Verification pass #700", "Verification of round 1",
+                   [("2026-09-20T10:00:00Z", "m1", usage(100, 0, 0, 0))])
+        transcript(self.tr, wt(SKILLS_PROJ, 700), "v2", "Verification pass round 2 #700", "Verification of round 2",
+                   [("2026-09-21T10:00:00Z", "m1", usage(1, 0, 0, 0))])
+        self.ok(700, "verification", 1)
+        self.ok(700, "verification", 2)
+        (skills / "findings-verify-700.jsonl").unlink()  # round 1 is older, so the prune takes it first
+        self.harvest()
+        rows = [r for r in self.rows().values() if r["ticket"] == 700]
+        self.assertEqual(sorted(r["cost"]["tokens"]["input"] for r in rows), [1, 100])
+
+    def test_a_harvest_never_adds_an_appended_rows_transcript_to_a_harvested_row(self):
+        # codex-gate-1 / V1: round 1 appended, round 2 only harvested, round 1's sidecar pruned.
+        skills = self.cache / "skills"
+        write_jsonl(skills / "findings-verify-700.jsonl", [finding("V1", "judgement", "v.py", "One", axis="verify")])
+        write_jsonl(skills / "findings-verify-700-r2.jsonl", [finding("r2-V1", "judgement", "w.py", "Two", axis="verify")])
+        transcript(self.tr, wt(SKILLS_PROJ, 700), "v1", "Verification pass #700", "Verification of round 1",
+                   [("2026-09-20T10:00:00Z", "m1", usage(100, 0, 0, 0))])
+        transcript(self.tr, wt(SKILLS_PROJ, 700), "v2", "Verification pass round 2 #700", "Verification of round 2",
+                   [("2026-09-21T10:00:00Z", "m1", usage(1, 0, 0, 0))])
+        self.ok(700, "verification", 1)
+        (skills / "findings-verify-700.jsonl").unlink()
+        self.harvest()
+        rows = [r for r in self.rows().values() if r["ticket"] == 700]
+        self.assertEqual(sorted(r["cost"]["tokens"]["input"] for r in rows), [1, 100])
+
+    def test_a_harvest_after_the_dispositions_are_pruned_keeps_the_known_outcomes(self):
+        self.ok(400, "spec")
+        (self.cache / "skills" / "dispositions-400.jsonl").unlink()
+        self.harvest()
+        (p1,) = self.rows()["skills/400/spec/1/findings-spec-400"]["findings"]
+        self.assertEqual((p1["outcome"], p1["outcome_status"]), ("fixed", {"status": "known"}))
+
+    def test_a_harvest_after_the_dispositions_are_pruned_keeps_the_label_mappings(self):
+        write_jsonl(self.cache / "skills" / "findings-spec-430.jsonl", [finding("P1", "hard", "a.py", "Half", axis="spec")])
+        write_jsonl(self.cache / "skills" / "dispositions-430.jsonl", [{"id": "P1", "outcome": "partial", "sha": "e"}])
+        transcript(self.tr, wt(SKILLS_PROJ, 430), "p", "Spec review #430", "Repo: x",
+                   [("2026-09-20T10:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(430, "spec")
+        (self.cache / "skills" / "dispositions-430.jsonl").unlink()
+        self.harvest()
+        self.assertEqual(self.rows()["skills/430/spec/1/findings-spec-430"]["status"]["mappings"],
+                         [{"from": "partial", "to": "fixed+partial"}])
+
+    def test_a_harvest_after_one_reviewers_sidecar_is_pruned_keeps_the_shared_credit(self):
+        write_jsonl(self.cache / "skills" / "findings-standards-420.jsonl",
+                    [finding("S1", "hard", "a.py", "Duplicated loader helper")])
+        write_jsonl(self.cache / "skills" / "findings-spec-420.jsonl",
+                    [finding("P1", "hard", "a.py", "loader helper duplicated", axis="spec")])
+        for axis, agent in (("Standards", "s"), ("Spec", "p")):
+            transcript(self.tr, wt(SKILLS_PROJ, 420), agent, f"{axis} review #420", "Repo: x",
+                       [("2026-09-20T10:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(420, "standards")
+        self.ok(420, "spec")
+        (self.cache / "skills" / "findings-standards-420.jsonl").unlink()
+        self.harvest()
+        (p1,) = self.rows()["skills/420/spec/1/findings-spec-420"]["findings"]
+        self.assertEqual((p1["overlap"], p1["k"]), ("shared", 2))
+
+    def test_a_harvest_reports_the_credit_it_re_split_and_counts_only_rows_it_wrote(self):
+        write_jsonl(self.cache / "skills" / "findings-standards-420.jsonl",
+                    [finding("S1", "hard", "a.py", "Duplicated loader helper")])
+        write_jsonl(self.cache / "skills" / "findings-spec-420.jsonl",
+                    [finding("P1", "hard", "a.py", "loader helper duplicated", axis="spec")])
+        for axis, agent in (("Standards", "s"), ("Spec", "p")):
+            transcript(self.tr, wt(SKILLS_PROJ, 420), agent, f"{axis} review #420", "Repo: x",
+                       [("2026-09-20T10:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(420, "standards")
+        self.ok(420, "spec")
+        (self.cache / "skills" / "findings-standards-420.jsonl").unlink()
+        # A fresh harvest also writes the standards transcript as a row of its own; this one holds it already.
+        written = len(self.harvested()) - 1
+        out = self.harvest().stdout
+        self.assertIn(f"harvested {written} rows", out)
+        matches = (self.tmp / "h.md").read_text().split("## Overlap matches")[1].split("\n## ")[0]
+        self.assertIn('#420 `a.py`', matches)
 
     def test_other_rows_in_the_ledger_are_kept(self):
         write_jsonl(self.ledger, [{"row_id": "keep", "origin": "harvest", "type": "spec"}])

@@ -205,11 +205,11 @@ class LedgerEndToEnd(Case):
             self.assertEqual(r.returncode, 0, r.stderr)
         self.ok("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", self.ledger,
                 "--review-file", review)
-        # (`origin` names the last writer, harvest or append; nothing else may differ.)
+        # (A row append wrote stays `append` through a harvest, #1304: nothing may differ, origin included.)
         again = self.rows()
         self.assertEqual(set(again), set(rows))
         for row_id, row in rows.items():
-            self.assertEqual({**again[row_id], "origin": None}, {**row, "origin": None}, row_id)
+            self.assertEqual(again[row_id], row, row_id)
 
         # 4. The report, every figure worked by hand (default weights: hard 3, judgement 1,
         #    Codex high 3, medium 2, low 1; overlap split 1/k).

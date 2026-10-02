@@ -22,7 +22,8 @@ normalises drifted outcome labels, and marks each finding unique or shared
 across the reviewers on the same ticket. Every label mapping, unmapped value,
 overlap match and unjoinable disposition goes to the review file. Rows are
 keyed by row id, so harvesting the same tree twice rewrites the same rows; a
-harvest replaces every earlier harvest row and keeps rows written any other way.
+harvest replaces every earlier harvest row, and never deletes a row `append` wrote
+or loses what it knew (`merge_harvest`, #1304).
 A sidecar whose name is off the harvested patterns, an unreadable line and an
 empty sidecar are listed or marked `unknown`, never dropped or read as clean.
 
@@ -694,11 +695,12 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
 
 
 def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = None,
-                  only: tuple[str, int] | None = None) -> tuple[list[dict], dict]:
+                  only: tuple[str, int] | None = None, held: frozenset = frozenset()) -> tuple[list[dict], dict]:
     """(rows, review-file facts) for a whole cache tree. `transcripts` is the tree the
     Claude reviewers' cost is read from; None means there is none, for the reason `missing`.
     `only` is (repo, ticket): harvest just that ticket's sidecars and transcripts, which is
-    what `append` does, so its rows are the ones a full harvest writes."""
+    what `append` does, so its rows are the ones a full harvest writes. `held` names the
+    transcripts an appended row already counts, which no row here is costed from (#1304)."""
     pairs = find_sidecar_files(cache)  # FileNotFoundError when the cache is missing
     codex_pairs = find_codex_records(cache)
     if only:
@@ -823,6 +825,7 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     runs, unattributed, ignored = read_transcripts(transcripts, wanted) if transcripts else ([], [], 0)
     if only:  # a ticket number repeats across repos
         runs = [r for r in runs if _norm_repo(fold_repo(r["repo"])) == _norm_repo(fold_repo(only[0]))]
+    runs = [r for r in runs if r["source"] not in held]
     new_rows, listed = attach_costs(rows, runs, missing)
     rows += new_rows + codex_rows
     rows.sort(key=lambda r: r["row_id"])
@@ -907,6 +910,72 @@ def update_ledger(path: Path, change) -> None:
         os.replace(tmp, path)
 
 
+def rescore(ledger: dict, ticket: tuple, matches: list | None = None) -> None:
+    """Re-split overlap credit across every reviewer row of one (repo, ticket) in the ledger,
+    appending each cross-reviewer match to `matches`. Only rows of reviewer types, Codex
+    included: a mutation row is not ours to re-score."""
+    mark_overlap([r for r in ledger.values() if (r.get("repo"), r.get("ticket")) == ticket
+                  and (r.get("type") in REVIEWER_TYPES or str(r.get("type")).startswith("codex-"))],
+                 [] if matches is None else matches, [])
+
+
+def _known(field) -> bool:
+    return isinstance(field, dict) and field.get("status") == "known"
+
+
+def _keep_known(old: dict, new: dict) -> dict:
+    """`new`, a harvest's rebuild of the row `old` that `append` wrote, kept `append`. `old`'s known
+    cost fields and model win outright; its findings, or a finding's outcome with the label mappings,
+    fill in what `new` reads as unknown."""
+    status = {**new["status"], "fields": dict(new["status"]["fields"]),
+              "sources": list(dict.fromkeys(new["status"]["sources"] + old["status"]["sources"]))}
+    if _known(old["status"]["fields"].get("findings")) and not _known(status["fields"]["findings"]):
+        # The findings source itself is gone (a Codex `.out` pruned before its record): keep them whole.
+        findings = old["findings"]
+        status["fields"]["findings"], status["mappings"] = old["status"]["fields"]["findings"], old["status"]["mappings"]
+    else:
+        known_outcomes = {f["id"]: f for f in old.get("findings", []) if f.get("outcome") != "unknown"}
+        findings = [{**f, **{k: known_outcomes[f["id"]][k] for k in ("outcome", "outcome_status", "partial")}}
+                    if f["outcome"] == "unknown" and f["id"] in known_outcomes else f for f in new["findings"]]
+        if findings != new["findings"]:
+            # One dispositions sidecar serves the whole ticket, so a restored outcome means the rebuild
+            # joined none and mapped no label: the labels mapped are the ones `old` recorded.
+            status["mappings"] = old["status"]["mappings"]
+    # A rebuild can read fewer transcripts than append summed, or one from a round whose sidecar is gone.
+    kept_cost = {k: v for k, v in (old.get("cost") or {}).items() if _known(v)}
+    row = {**new, "origin": "append", "status": status, "findings": findings, "cost": {**new["cost"], **kept_cost}}
+    if old.get("model"):
+        row["model"], status["fields"]["model"] = old["model"], old["status"]["fields"]["model"]
+    return row
+
+
+def merge_harvest(ledger: dict, rows: list[dict]) -> tuple[int, list[dict]]:
+    """Replace every earlier harvest row with `rows`, never losing a row `append` wrote (#1304):
+    the review cache is pruned after 14 days, so a later harvest may have nothing to rebuild it
+    from. A rebuilt appended row stays `append`, so that later harvest keeps it, re-splitting only
+    its overlap credit. Returns (rows written, the overlap matches of every ticket an appended row is on)."""
+    for k in [k for k, r in ledger.items() if r.get("origin") == "harvest"]:
+        del ledger[k]
+    written, matches = 0, []
+    for r in rows:
+        old = ledger.get(r["row_id"])
+        if old and old.get("origin") == "append":
+            # A refusal is the controller's ruling on a run, which the record alone does not say: keep it.
+            if not old.get("refusal"):
+                ledger[r["row_id"]], written = _keep_known(old, r), written + 1
+        else:
+            ledger[r["row_id"]], written = r, written + 1
+    # A ticket's harvested findings were scored without its appended rows the harvest could not rebuild.
+    for ticket in {(r.get("repo"), r.get("ticket")) for r in ledger.values() if r.get("origin") == "append"}:
+        rescore(ledger, ticket, matches)
+    return written, matches
+
+
+def _match_key(m: dict) -> tuple:
+    """One overlap match, whichever of its two findings `mark_overlap` met first."""
+    return m["repo"], m["ticket"], frozenset((m["a"], m["b"]))
+
+
 def cmd_harvest(args) -> int:
     try:
         transcripts, missing = args.transcripts, None
@@ -916,23 +985,29 @@ def cmd_harvest(args) -> int:
                 transcripts, missing = None, f"transcripts tree not found: {DEFAULT_TRANSCRIPTS}"
         elif not transcripts.is_dir():
             raise FileNotFoundError(f"transcripts tree not found: {transcripts}")
-        rows, facts = harvest_cache(args.cache, transcripts, missing)
+        merged = []
 
-        def replace_harvest_rows(ledger: dict) -> None:
-            for k in [k for k, r in ledger.items() if r.get("origin") == "harvest"]:
-                del ledger[k]
-            for r in rows:
-                old = ledger.get(r["row_id"])
-                # A refusal is the controller's ruling on a run, which the record alone does not say: keep it.
-                ledger[r["row_id"]] = old if old and old.get("origin") == "append" and old.get("refusal") else r
+        def harvest_into(ledger: dict) -> None:
+            # Under the ledger's lock, so no append lands between reading what is held and the merge.
+            # A transcript an appended row holds is counted there, whichever row it would join here.
+            held = frozenset(s for r in ledger.values() if r.get("origin") == "append"
+                             for s in r.get("status", {}).get("sources", []))
+            rows, facts = harvest_cache(args.cache, transcripts, missing, held=held)
+            merged.append((facts, *merge_harvest(ledger, rows)))
 
-        update_ledger(args.ledger, replace_harvest_rows)
+        update_ledger(args.ledger, harvest_into)
+        facts, written, rescored = merged[0]
+        seen = {_match_key(m) for m in facts["matches"]}
+        for m in rescored:  # a match with an appended row the harvest could not rebuild
+            if _match_key(m) not in seen:
+                seen.add(_match_key(m))
+                facts["matches"].append(m)
     except (FileNotFoundError, ValueError) as e:
         print(f"review_ledger: {e}", file=sys.stderr)
         return 2
     review = args.review_file or args.ledger.with_suffix(".review.md")
     review.write_text(review_file_text(facts))
-    print(f"harvested {len(rows)} rows into {args.ledger}; {sum(facts['unmapped'].values())} unmapped values, "
+    print(f"harvested {written} rows into {args.ledger}; {sum(facts['unmapped'].values())} unmapped values, "
           f"{len(facts['matches'])} overlap matches, {len(facts['unharvested'])} sidecars not harvested, "
           f"{len(facts['skipped'])} skipped lines or duplicates, "
           f"{len(facts['unattributed'])} transcripts not attributed, listed in {review}")
@@ -1093,9 +1168,7 @@ def _write_appended(args, mine: list[dict], refresh: list[dict] = ()) -> int:
                 old["status"]["fields"]["findings"] = r["status"]["fields"]["findings"]
                 old["status"]["sources"], old["status"]["mappings"] = r["status"]["sources"], r["status"]["mappings"]
         # The ticket's other reviewers may have appended already: re-split credit across all of them.
-        # Only rows of reviewer types, Codex included: a mutation row is not ours to re-score.
-        mark_overlap([r for r in ledger.values() if (r.get("repo"), r.get("ticket")) == ticket
-                      and (r.get("type") in REVIEWER_TYPES or str(r.get("type")).startswith("codex-"))], [], [])
+        rescore(ledger, ticket)
 
     try:
         update_ledger(args.ledger, add_rows)
