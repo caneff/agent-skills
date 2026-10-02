@@ -455,11 +455,10 @@ worker declare earlier. A clump with **no** record at all (a file from before
 jobs existed) is still refused: silence is not zero. The controller records
 the declaration on the clump — `runfile.py job <run-id> --clump <n> --cores
 <k>`, or `--none`, or `--done` when the worker reports it finished — and
-`loop.py dispatch --run <run-id>` reads the charge from **that record**, never from its own argv or
-`--in-flight`: a declaration that
-lived in one command line is a hold a restart cannot recover, and the free
-slot a resumed controller then dispatches into is the contention #351
-produced.
+`loop.py dispatch --run <run-id>` reads the charge from **that record**,
+never from its own argv or `--in-flight`: a declaration that lived in one
+command line is a hold a restart cannot recover, and the free slot a resumed
+controller then dispatches into is the contention #351 produced.
 
 The charge is arithmetic, so "heavy" needs no threshold: a slot is one core's
 worth of machine until a worker says otherwise, and the cores past the job's
