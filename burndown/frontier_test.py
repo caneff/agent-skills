@@ -992,6 +992,11 @@ def test_the_parent_section_ends_at_the_next_heading():
     assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
 
 
+def test_a_link_to_another_repo_is_decided_by_its_url_not_its_text():
+    body = "## Parent\n\nPart of [Spec: fix #483 crash](https://github.com/other/place/issues/12).\n"
+    assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+
+
 def test_fetch_parent_ignores_a_bare_reference_outside_the_parent_heading():
     body = "## TL;DR\n\n#483 is related.\n"
     assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None

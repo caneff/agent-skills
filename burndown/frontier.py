@@ -98,6 +98,7 @@ SPEC_LABEL = "spec"
 # a bare `#<n>` under that heading is the same declaration.
 _PART_OF = re.compile(r"^ {0,3}Part of #(\d+)\b", re.IGNORECASE)
 _PARENT_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+parent[ \t]*$", re.IGNORECASE)
+_ANY_ISSUE_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/issues/\d+", re.IGNORECASE)
 _ISSUE_LINK = r"https://github\.com/{repo}/issues/(\d+)\b"
 
 
@@ -406,9 +407,9 @@ def fetch_state(repo, number, run=gh_json):
 def fetch_parent(repo, ticket, run=gh_json):
     """The parent issue of `ticket`, `None` when it has none. The sub-issue
     endpoint first; a 404 there means no sub-issue link, and the body's
-    `Part of #<n>` line is the fallback the tree writes where sub-issues are
-    not enabled. Any other failure raises `FrontierError`: a call that did
-    not answer is not an answer of "no parent"."""
+    parent line (`_parent_number`) is the fallback the tree writes where
+    sub-issues are not enabled. Any other failure raises `FrontierError`: a
+    call that did not answer is not an answer of "no parent"."""
     base = f"repos/{quote(repo, safe='/')}/issues"
     try:
         answer = run(["api", f"{base}/{int(ticket['number'])}/parent"])
@@ -440,6 +441,8 @@ def _parent_number(body, repo):
         found = link.search(line)
         if re.match(r"^ {0,3}Part of\b", line, re.IGNORECASE) and found:
             return int(found.group(1))
+        if _ANY_ISSUE_URL.search(line) and not found:
+            continue  # another repo's link: its text may name an unrelated #<n>
         if in_parent:
             found = found or _REFERENCE.search(line)
             if found:
