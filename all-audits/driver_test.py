@@ -329,7 +329,7 @@ def _leaked_git_env(victim):
 def _init_git_repo(path):
     # A caller's leaked GIT_DIR/GIT_WORK_TREE would redirect these calls at
     # that repo instead of `path` (#620) — scrub them from the child env.
-    env = driver.scrubbed_env()
+    env = driver.child_env()
     subprocess.run(["git", "-C", path, "init", "-q"], check=True, env=env)
     subprocess.run(["git", "-C", path, "config", "user.email", "t@example.com"], check=True, env=env)
     subprocess.run(["git", "-C", path, "config", "user.name", "t"], check=True, env=env)
@@ -345,7 +345,7 @@ def test_init_git_repo_ignores_leaked_git_dir():
     GIT_DIR made `git init` on a /tmp path silently reinitialize that other
     repo instead and rewrite its .git/config."""
     with tempfile.TemporaryDirectory() as victim, tempfile.TemporaryDirectory() as target:
-        clean_env = driver.scrubbed_env()
+        clean_env = driver.child_env()
         subprocess.run(["git", "init", "-q", victim], check=True, env=clean_env)
         subprocess.run(["git", "-C", victim, "-c", "user.email=v@example.com", "-c", "user.name=v",
                         "commit", "-q", "--allow-empty", "-m", "victim"], check=True, env=clean_env)
@@ -375,7 +375,7 @@ def test_decide_and_head_sha_ignore_leaked_git_dir():
         _init_git_repo(victim)
         # a second commit, so the victim's HEAD can never coincide with the
         # audited repo's (both repos hold the same tree otherwise)
-        clean_env = driver.scrubbed_env()
+        clean_env = driver.child_env()
         subprocess.run(["git", "-C", victim, "commit", "-q", "--allow-empty", "-m", "second"],
                        check=True, env=clean_env)
         open(os.path.join(victim, "untracked.py"), "w").write("x = 2\n")  # victim reads dirty
@@ -408,7 +408,7 @@ def test_mutation_worktree_add_ignores_leaked_git_dir():
             tempfile.TemporaryDirectory() as tmp:
         # the victim has no commit, so a `worktree add HEAD` aimed at it by a
         # leak fails outright while the same call on `repo` succeeds
-        clean_env = driver.scrubbed_env()
+        clean_env = driver.child_env()
         subprocess.run(["git", "init", "-q", victim], check=True, env=clean_env)
         _init_git_repo(repo)
         run = _seed_run_dir(tmp, worktrees=True)
@@ -548,7 +548,9 @@ def test_mutation_run_dir_prunes_old_runs_and_makes_worktrees():
             capture_output=True, text=True,
             env={**os.environ, "XDG_CACHE_HOME": cache_dir, "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1"},
         )
-        assert r.returncode == 0, r.stdout + r.stderr
+        # A setup failure is a failed module (#1309), so the run exits nonzero.
+        assert r.returncode != 0, r.stdout + r.stderr
+        assert "[mutation:solver.py] FAILED: no recognized env manifest" in r.stdout, r.stdout
         assert not os.path.exists(stale), "mutation mode must prune run dirs past the TTL"
 
         runs = [d for d in os.listdir(base) if d.startswith("run-")]
@@ -562,6 +564,61 @@ def test_mutation_run_dir_prunes_old_runs_and_makes_worktrees():
         failure_page = open(os.path.join(run_dir, "collection", "solver.py", "report.html")).read()
         assert '../assets/base/base.css' in failure_page
         assert os.path.isfile(os.path.join(run_dir, "collection", "assets", "base", "base.css"))
+
+
+def _mutation_with_fake_claude(repo, cache_dir, bin_dir, out, **extra_env):
+    """Mutation mode over `solver.py` with the fake `claude` and a `uv` that
+    succeeds, so the module reaches its audit."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.lexists(os.path.join(bin_dir, "claude")):
+        os.symlink(os.path.join(here, "fake_claude_fixture.sh"), os.path.join(bin_dir, "claude"))
+        with open(os.path.join(bin_dir, "uv"), "w") as f:
+            f.write("#!/bin/sh\nexit 0\n")
+        os.chmod(os.path.join(bin_dir, "uv"), 0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "XDG_CACHE_HOME": cache_dir,
+           "AUDITS_NO_OPEN": "1", "AUDITS_NO_SYNTH": "1", **extra_env}
+    return subprocess.run(
+        [sys.executable, os.path.join(here, "driver.py"), repo, "--mutation", "solver.py", "--out", out],
+        capture_output=True, text=True, env=env,
+    )
+
+
+def _repo_with_env_manifest(path):
+    _init_git_repo(path)
+    open(os.path.join(path, "pyproject.toml"), "w").write("[project]\nname = 'x'\n")
+    env = driver.child_env()
+    subprocess.run(["git", "-C", path, "add", "."], check=True, env=env)
+    subprocess.run(["git", "-C", path, "commit", "-q", "-m", "env"], check=True, env=env)
+
+
+def test_mutation_audit_that_succeeds_prints_done_and_exits_zero():
+    with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as tmp:
+        _repo_with_env_manifest(repo)
+        r = _mutation_with_fake_claude(repo, tmp, tmp, os.path.join(tmp, "out"))
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "[mutation:solver.py] done" in r.stdout, r.stdout
+
+
+def test_mutation_audit_exiting_nonzero_fails_the_run_even_with_a_manifest():
+    """#1309, the sweep's #1278 rule in mutation mode: a nonzero `claude`
+    exit is a failure line and a nonzero exit, never `done`."""
+    with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as tmp:
+        _repo_with_env_manifest(repo)
+        r = _mutation_with_fake_claude(repo, tmp, tmp, os.path.join(tmp, "out"), FAKE_CLAUDE_EXIT_MUTATION="3")
+        assert r.returncode != 0, r.stdout + r.stderr
+        assert "[mutation:solver.py] FAILED: exit 3" in r.stdout, r.stdout
+        assert "[mutation:solver.py] done" not in r.stdout, r.stdout
+
+
+def test_mutation_stale_manifest_from_an_earlier_run_does_not_count_as_success():
+    with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as tmp:
+        _repo_with_env_manifest(repo)
+        out = os.path.join(tmp, "out")
+        first = _mutation_with_fake_claude(repo, tmp, tmp, out)
+        assert first.returncode == 0, first.stdout + first.stderr
+        again = _mutation_with_fake_claude(repo, tmp, tmp, out, FAKE_CLAUDE_NOOP="1")
+        assert again.returncode != 0, again.stdout + again.stderr
+        assert "[mutation:solver.py] FAILED: no manifest" in again.stdout, again.stdout
 
 
 def _seed_run_dir(tmp, worktrees=False):
