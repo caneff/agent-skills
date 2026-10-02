@@ -963,8 +963,7 @@ def merge_harvest(ledger: dict, rows: list[dict]) -> None:
             # A refusal is the controller's ruling on a run, which the record alone does not say: keep it.
             if not old.get("refusal"):
                 ledger[r["row_id"]] = _keep_known(old, r)
-        elif r["type"] in REVIEWER_TYPES and sources and set(sources) <= held \
-                and not any(Path(s).name.startswith("findings-") for s in sources):
+        elif sources and set(sources) <= held and all(Path(s).name.startswith("agent-") for s in sources):
             continue
         else:
             ledger[r["row_id"]] = r

@@ -117,6 +117,18 @@ class AppendRowTest(AppendCase):
         # The spec transcript's cost is held by the appended row: no transcript-only spec row beside it.
         self.assertEqual([k for k in rows if k.startswith("skills/400/spec/")], ["skills/400/spec/1/findings-spec-400"])
 
+    def test_a_harvest_keeps_a_later_rounds_row_from_a_sidecar_an_appended_row_shares(self):
+        # One sidecar holds round 1 and round 2 ids; only round 1 was appended, so its sources are held.
+        write_jsonl(self.cache / "skills" / "findings-spec-600.jsonl", [
+            finding("P1", "hard", "a.py", "First", axis="spec"), finding("r2-P2", "hard", "b.py", "Second", axis="spec")])
+        write_jsonl(self.cache / "skills" / "dispositions-600.jsonl", [{"id": "P1", "outcome": "fixed", "sha": "e"}])
+        transcript(self.tr, wt(SKILLS_PROJ, 600), "p", "Spec review #600", "Repo: x",
+                   [("2026-09-20T10:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(600, "spec")
+        self.harvest()
+        self.assertEqual(sorted(k for k in self.rows() if "/600/" in k),
+                         ["skills/600/spec/1/findings-spec-600", "skills/600/spec/2/findings-spec-600"])
+
     def test_a_harvest_after_transcript_cleanup_keeps_the_known_cost_and_model(self):
         self.ok(400, "spec")
         appended = self.rows()["skills/400/spec/1/findings-spec-400"]
