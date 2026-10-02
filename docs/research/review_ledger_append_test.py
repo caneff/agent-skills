@@ -159,6 +159,17 @@ class AppendRowTest(AppendCase):
         (p1,) = self.rows()["skills/400/spec/1/findings-spec-400"]["findings"]
         self.assertEqual((p1["outcome"], p1["outcome_status"]), ("fixed", {"status": "known"}))
 
+    def test_a_harvest_after_the_dispositions_are_pruned_keeps_the_label_mappings(self):
+        write_jsonl(self.cache / "skills" / "findings-spec-430.jsonl", [finding("P1", "hard", "a.py", "Half", axis="spec")])
+        write_jsonl(self.cache / "skills" / "dispositions-430.jsonl", [{"id": "P1", "outcome": "partial", "sha": "e"}])
+        transcript(self.tr, wt(SKILLS_PROJ, 430), "p", "Spec review #430", "Repo: x",
+                   [("2026-09-20T10:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(430, "spec")
+        (self.cache / "skills" / "dispositions-430.jsonl").unlink()
+        self.harvest()
+        self.assertEqual(self.rows()["skills/430/spec/1/findings-spec-430"]["status"]["mappings"],
+                         [{"from": "partial", "to": "fixed+partial"}])
+
     def test_a_harvest_after_one_reviewers_sidecar_is_pruned_keeps_the_shared_credit(self):
         write_jsonl(self.cache / "skills" / "findings-standards-420.jsonl",
                     [finding("S1", "hard", "a.py", "Duplicated loader helper")])

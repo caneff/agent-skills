@@ -934,6 +934,10 @@ def _keep_known(old: dict, new: dict) -> dict:
         was = {f["id"]: f for f in old.get("findings", []) if f.get("outcome") != "unknown"}
         findings = [{**f, **{k: was[f["id"]][k] for k in ("outcome", "outcome_status", "partial")}}
                     if f["outcome"] == "unknown" and f["id"] in was else f for f in new["findings"]]
+        if findings != new["findings"]:
+            # One dispositions sidecar serves the whole ticket, so a restored outcome means the rebuild
+            # joined none and mapped no label: the labels mapped are the ones `old` recorded.
+            status["mappings"] = old["status"]["mappings"]
     # A known cost is append's record of the run and wins outright: a rebuild can read fewer transcripts
     # than append summed (some cleaned up), or a transcript joined to it from a round whose sidecar is gone.
     kept_cost = {k: v for k, v in (old.get("cost") or {}).items() if _known(v)}
