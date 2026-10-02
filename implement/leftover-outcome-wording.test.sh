@@ -105,6 +105,22 @@ check_in "§ The PR" "$the_pr" 'More than one line is two sweeps for one PR: sto
 check_in "§ The PR" "$the_pr" '## <file>'
 check_in "§ The PR" "$the_pr" '- **<id>** (<severity>) <title> — PR #<n>, ticket #<m>: <text>'
 check_in "§ The PR" "$the_pr" 'never `- PR #<n>, ticket #<m>, finding <id>`'
+# The pinned bullet must be one the reader accepts: wording alone let the
+# reader drift from the template unseen (#1314). Fill the template's
+# placeholders, put it under a heading, and read it back.
+template="$(printf '%s' "$the_pr" | grep -o -- '`- \*\*<id>\*\* (<severity>)[^`]*`' | head -1 | tr -d '`')"
+[ -n "$template" ] || { echo "FAIL: § The PR has no bullet template to parse" >&2; fail=1; }
+parsed="$(TEMPLATE="$template" python3 -c '
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import runfile
+bullet = os.environ["TEMPLATE"]
+for old, new in (("<id>", "S1"), ("<severity>", "hard"), ("<title>", "t"),
+                 ("<n>", "5"), ("<m>", "4"), ("<text>", "x")):
+    bullet = bullet.replace(old, new)
+print(runfile.sweep_items("## a.md\n\n" + bullet + "\n"))
+' "$here/../burndown")"
+[ "$parsed" = "['a.md S1']" ] || { echo "FAIL: § The PR's sweep bullet does not parse through runfile.sweep_items: $parsed" >&2; fail=1; }
 
 
 [ "$fail" -eq 0 ] && echo "PASS $0"
