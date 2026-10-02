@@ -16,6 +16,20 @@ def drop_repo_field(run_id, root):
         json.dump(run, fh)
 
 
+def drop_job(run_id, root, lowest):
+    """Rewrite a run file as one written before jobs existed: a clump with no
+    `job` key, which reads as no record at all (a fresh registration records
+    `none`, #1311)."""
+    target = runfile.path(run_id, root)
+    with open(target) as fh:
+        run = json.load(fh)
+    for entry in run["clumps"]:
+        if min(entry["tickets"]) == lowest:
+            del entry["job"]
+    with open(target, "w") as fh:
+        json.dump(run, fh)
+
+
 def linked_worktree(primary, name):
     """A linked worktree of the git checkout `primary`, a sibling directory
     called `name` (an empty commit gives the checkout a HEAD to branch from)."""

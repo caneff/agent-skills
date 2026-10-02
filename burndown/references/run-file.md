@@ -86,10 +86,12 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 
 ## The job record
 
-Each clump carries what parallel job its worker has out: `null` when nothing
-is on record, `{"state": "running", "cores": <n>}` while a job is out,
-`{"state": "none", "cores": 0}` when the worker declared it launched none, and
-`{"state": "done", "cores": 0}` once it reports the job finished.
+Each clump carries what parallel job its worker has out: `{"state": "none",
+"cores": 0}` from `runfile.py clump` on, since a worker starts with nothing out
+(#1311); `{"state": "running", "cores": <n>}` while a job is out; the same
+`none` record when the worker declared it launched none; and
+`{"state": "done", "cores": 0}` once it reports the job finished. `null` means
+nothing on record and appears only in a file written before jobs existed.
 `runfile.py job <run-id> --clump <n> --cores <k> | --none | --done` writes it.
 
 Three states and not a bare number, because `null` and `none` are different

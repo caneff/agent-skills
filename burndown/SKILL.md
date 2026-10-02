@@ -446,12 +446,13 @@ behind the ranking, and what each source costs when it is read the other way:
    it, the sweep prints herdr's own word.
 
 **A worker declares its job size.** A worker that launches a parallel job
-names that job and its **core count** in its report, and a worker that
-launched none **says so explicitly**: silence is not zero. A worker that
-forgot to declare reads exactly like one that ran nothing, and the controller
-would charge zero against the free slots either way — the same fail-closed
-posture the reader takes one layer down. The controller records it on the
-clump — `runfile.py job <run-id> --clump <n> --cores <k>`, or `--none`, or
+names that job and its **core count** in its report. `runfile.py clump`
+records `none` when it registers the clump, because a worker starts with
+nothing out and a record that waited for its "PR up" idled every free slot
+for the hour before it (#1311); a worker that launches a job declares it, and
+the controller records the change. A clump with **no** record at all (a file
+from before jobs existed) is still refused: silence is not zero. The
+controller records it on the clump — `runfile.py job <run-id> --clump <n> --cores <k>`, or `--none`, or
 `--done` when the worker reports it finished — and `loop.py dispatch --run <run-id>`
 reads the charge from **that record**, never from its own argv or
 `--in-flight`: a declaration that

@@ -16,6 +16,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import loop  # noqa: E402
 import runfile  # noqa: E402
+from run_fixtures import drop_job  # noqa: E402
 from run_fixtures import drop_repo_field  # noqa: E402
 
 # A real git checkout to record as a run's target when the case is not about it.
@@ -973,7 +974,7 @@ def loop_py(*args, cwd=None, env=None, real_workspaces=False):
 
 def fixture_run(cache, in_flight_path):
     """A run file in `cache` holding each in-flight fixture entry as a clump,
-    with its `job` recorded when the fixture carries one."""
+    with its `job` recorded when the fixture carries one, else left unrecorded."""
     import runfile
     runfile.start("fixture", 5, None, root=cache, repo=REPO)
     with open(in_flight_path) as fh:
@@ -987,6 +988,10 @@ def fixture_run(cache, in_flight_path):
             if job is not None:
                 runfile.job("fixture", lowest, job["state"],
                             job.get("cores", 0), root=cache)
+            else:
+                # A registration records `none` (#1311); the fixture's
+                # "no job" is the legacy no-record state.
+                drop_job("fixture", cache, lowest)
         except (KeyError, TypeError, ValueError, AttributeError,
                 runfile.RunFileError):
             # A malformed entry is the test's subject: dispatch's own reader
@@ -2108,6 +2113,8 @@ def run_file_dispatch(tmp, recorded, repo=REPO, legacy=False):
     runfile.job("burn-t", 412, "none", root=cache)
     if recorded:
         runfile.job("burn-t", 351, *recorded, root=cache)
+    else:
+        drop_job("burn-t", cache, 351)
     cand = os.path.join(tmp, "candidates.json")
     live = os.path.join(tmp, "live.json")
     with open(cand, "w") as fh:
@@ -2141,6 +2148,26 @@ def test_dispatch_refuses_a_clump_the_run_file_has_no_job_for_1107():
         assert "#351 is live with no job record" in got.stderr, got.stderr
 
 
+def test_dispatch_does_not_wait_for_pr_up_on_a_freshly_registered_clump_1311():
+    # A clump registered and never declared (the worker has sent nothing yet)
+    # charges nothing, so the free slot is dispatched into at once.
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live, env = run_file_dispatch(tmp, ("none",))
+        cache = env["BURNDOWN_CACHE_DIR"]
+        runfile.clump("burn-t", [777], "/w/777", "sm-777", root=cache)
+        with open(live) as fh:
+            clumps = json.load(fh)
+        clumps.append({"tickets": [777], "workspace": "/w/777",
+                       "agent": "sm-777", "closure": ["x.py"]})
+        with open(live, "w") as fh:
+            json.dump(clumps, fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--run", "burn-t", "--free", "1", "--processes", "4",
+                      "--committed-gb", "4", env=env)
+        assert got.returncode == 0, got
+        assert "dispatch  #500" in got.stdout, got.stdout
+
+
 def test_dispatch_names_runfile_clump_for_an_unregistered_clump_1126():
     # `runfile.py job` fails with "has no clump" on a clump the run file never
     # registered, so the refusal must name `runfile.py clump`, not `job`.
@@ -2163,6 +2190,7 @@ def test_dispatch_names_runfile_clump_for_an_unregistered_clump_1126():
         assert "no job record" not in got.stderr, got.stderr
         # A registered clump with no job still names `job`.
         runfile.clump("burn-t", [888], "/w/888", "sm-888", root=cache)
+        drop_job("burn-t", cache, 888)
         clumps[-1]["tickets"] = [888]
         with open(live, "w") as fh:
             json.dump(clumps, fh)
