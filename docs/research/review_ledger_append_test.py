@@ -117,6 +117,39 @@ class AppendRowTest(AppendCase):
         # The spec transcript's cost is held by the appended row: no transcript-only spec row beside it.
         self.assertEqual([k for k in rows if k.startswith("skills/400/spec/")], ["skills/400/spec/1/findings-spec-400"])
 
+    def test_a_harvest_after_transcript_cleanup_keeps_the_known_cost_and_model(self):
+        self.ok(400, "spec")
+        appended = self.rows()["skills/400/spec/1/findings-spec-400"]
+        empty = self.tmp / "cleaned"
+        empty.mkdir()
+        self.harvest(tr=empty)
+        row = self.rows()["skills/400/spec/1/findings-spec-400"]
+        self.assertEqual(row["cost"], appended["cost"])
+        self.assertEqual((row["model"], row["status"]["fields"]["model"]),
+                         (appended["model"], appended["status"]["fields"]["model"]))
+
+    def test_a_harvest_after_the_dispositions_are_pruned_keeps_the_known_outcomes(self):
+        self.ok(400, "spec")
+        (self.cache / "skills" / "dispositions-400.jsonl").unlink()
+        self.harvest()
+        (p1,) = self.rows()["skills/400/spec/1/findings-spec-400"]["findings"]
+        self.assertEqual((p1["outcome"], p1["outcome_status"]), ("fixed", {"status": "known"}))
+
+    def test_a_harvest_after_one_reviewers_sidecar_is_pruned_keeps_the_shared_credit(self):
+        write_jsonl(self.cache / "skills" / "findings-standards-420.jsonl",
+                    [finding("S1", "hard", "a.py", "Duplicated loader helper")])
+        write_jsonl(self.cache / "skills" / "findings-spec-420.jsonl",
+                    [finding("P1", "hard", "a.py", "loader helper duplicated", axis="spec")])
+        for axis, agent in (("Standards", "s"), ("Spec", "p")):
+            transcript(self.tr, wt(SKILLS_PROJ, 420), agent, f"{axis} review #420", "Repo: x",
+                       [("2026-09-20T10:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(420, "standards")
+        self.ok(420, "spec")
+        (self.cache / "skills" / "findings-standards-420.jsonl").unlink()
+        self.harvest()
+        (p1,) = self.rows()["skills/420/spec/1/findings-spec-420"]["findings"]
+        self.assertEqual((p1["overlap"], p1["k"]), ("shared", 2))
+
     def test_other_rows_in_the_ledger_are_kept(self):
         write_jsonl(self.ledger, [{"row_id": "keep", "origin": "harvest", "type": "spec"}])
         self.ok(403, "verification")

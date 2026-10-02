@@ -22,7 +22,9 @@ normalises drifted outcome labels, and marks each finding unique or shared
 across the reviewers on the same ticket. Every label mapping, unmapped value,
 overlap match and unjoinable disposition goes to the review file. Rows are
 keyed by row id, so harvesting the same tree twice rewrites the same rows; a
-harvest replaces every earlier harvest row and keeps rows written any other way.
+harvest replaces every earlier harvest row. A row `append` wrote stays `append`:
+a harvest rebuilds it without losing any field it knew, and once the 14-day prune
+leaves nothing to rebuild it from, a harvest leaves it as it is (#1304).
 A sidecar whose name is off the harvested patterns, an unreadable line and an
 empty sidecar are listed or marked `unknown`, never dropped or read as clean.
 
@@ -907,6 +909,34 @@ def update_ledger(path: Path, change) -> None:
         os.replace(tmp, path)
 
 
+def rescore(ledger: dict, ticket: tuple) -> None:
+    """Re-split overlap credit across every reviewer row of one (repo, ticket) in the ledger.
+    Only rows of reviewer types, Codex included: a mutation row is not ours to re-score."""
+    mark_overlap([r for r in ledger.values() if (r.get("repo"), r.get("ticket")) == ticket
+                  and (r.get("type") in REVIEWER_TYPES or str(r.get("type")).startswith("codex-"))], [], [])
+
+
+def _known(field) -> bool:
+    return isinstance(field, dict) and field.get("status") == "known"
+
+
+def _keep_known(old: dict, new: dict) -> dict:
+    """`new`, a harvest's rebuild of the row `old` that `append` wrote, still `append`, with each
+    field `old` knew and `new` reads as unknown taken from `old`: a cost field and the model (a
+    transcript cleaned up since), and a finding's outcome (its dispositions sidecar pruned)."""
+    was = {f["id"]: f for f in old.get("findings", []) if f.get("outcome") != "unknown"}
+    findings = [{**f, **{k: was[f["id"]][k] for k in ("outcome", "outcome_status", "partial")}}
+                if f["outcome"] == "unknown" and f["id"] in was else f for f in new["findings"]]
+    status = {**new["status"], "fields": dict(new["status"]["fields"]),
+              "sources": list(dict.fromkeys(new["status"]["sources"] + old["status"]["sources"]))}
+    row = {**new, "origin": "append", "status": status, "findings": findings,
+           "cost": {**new["cost"], **{k: v for k, v in (old.get("cost") or {}).items()
+                                      if _known(v) and not _known(new["cost"].get(k))}}}
+    if old.get("model") and not new.get("model"):
+        row["model"], status["fields"]["model"] = old["model"], old["status"]["fields"]["model"]
+    return row
+
+
 def merge_harvest(ledger: dict, rows: list[dict]) -> None:
     """Replace every earlier harvest row with `rows`, never losing a row `append` wrote (#1304):
     the review cache is pruned after 14 days, so a later harvest may have nothing to rebuild it
@@ -922,12 +952,15 @@ def merge_harvest(ledger: dict, rows: list[dict]) -> None:
         if old and old.get("origin") == "append":
             # A refusal is the controller's ruling on a run, which the record alone does not say: keep it.
             if not old.get("refusal"):
-                ledger[r["row_id"]] = {**r, "origin": "append"}
+                ledger[r["row_id"]] = _keep_known(old, r)
         elif r["type"] in REVIEWER_TYPES and sources and set(sources) <= held \
                 and not any(Path(s).name.startswith("findings-") for s in sources):
             continue
         else:
             ledger[r["row_id"]] = r
+    # A ticket's harvested findings were scored without its appended rows the harvest could not rebuild.
+    for ticket in {(r.get("repo"), r.get("ticket")) for r in ledger.values() if r.get("origin") == "append"}:
+        rescore(ledger, ticket)
 
 
 def cmd_harvest(args) -> int:
@@ -1107,9 +1140,7 @@ def _write_appended(args, mine: list[dict], refresh: list[dict] = ()) -> int:
                 old["status"]["fields"]["findings"] = r["status"]["fields"]["findings"]
                 old["status"]["sources"], old["status"]["mappings"] = r["status"]["sources"], r["status"]["mappings"]
         # The ticket's other reviewers may have appended already: re-split credit across all of them.
-        # Only rows of reviewer types, Codex included: a mutation row is not ours to re-score.
-        mark_overlap([r for r in ledger.values() if (r.get("repo"), r.get("ticket")) == ticket
-                      and (r.get("type") in REVIEWER_TYPES or str(r.get("type")).startswith("codex-"))], [], [])
+        rescore(ledger, ticket)
 
     try:
         update_ledger(args.ledger, add_rows)
