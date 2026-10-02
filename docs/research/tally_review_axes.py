@@ -72,7 +72,7 @@ _VALID_SEVERITIES = {"hard", "judgement"}
 # (the fixing commit sha / the dispute reason / the follow-up ticket / the
 # handed-back `/file-ticket` command, #871's fourth outcome / the leftover
 # finding's one-line text, #1027's fifth).
-_OUTCOME_DETAIL_FIELD = {
+OUTCOME_DETAIL_FIELD = {
     "fixed": "sha", "disputed": "reason", "filed": "ticket", "handed-back": "command",
     "leftover": "text",
 }
@@ -106,7 +106,7 @@ class Finding:
 class Disposition:
     id: str
     outcome: str  # "fixed" | "disputed" | "filed" | "handed-back" | "leftover"
-    detail: str  # the outcome's field per _OUTCOME_DETAIL_FIELD, always as str
+    detail: str  # the outcome's field per OUTCOME_DETAIL_FIELD, always as str
 
 
 def parse_report_filename(filename: str) -> ReportInfo | None:
@@ -176,7 +176,7 @@ def parse_disposition_line(raw: str) -> Disposition | None:
     if not isinstance(obj, dict):
         return None
     fid, outcome = obj.get("id"), obj.get("outcome")
-    if not (isinstance(fid, str) and fid) or outcome not in _OUTCOME_DETAIL_FIELD:
+    if not (isinstance(fid, str) and fid) or outcome not in OUTCOME_DETAIL_FIELD:
         return None
     # Severity is checked for presence only, not against _VALID_SEVERITIES: a
     # leftover's severity is the reviewer's own word, and Codex and correctness
@@ -185,7 +185,7 @@ def parse_disposition_line(raw: str) -> Disposition | None:
             isinstance(obj.get(key), str) and obj[key]
             for key in ("file", "title", "severity")):
         return None
-    detail = obj.get(_OUTCOME_DETAIL_FIELD[outcome])
+    detail = obj.get(OUTCOME_DETAIL_FIELD[outcome])
     expected = _OUTCOME_DETAIL_TYPE[outcome]
     if expected is str:
         if not (isinstance(detail, str) and detail):
@@ -280,10 +280,10 @@ def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
     for (repo, issue, fid), finding in findings_by_key.items():
         counts = table.setdefault(
             (repo, finding.axis),
-            # _OUTCOME_DETAIL_FIELD is the one place that owns which outcomes
+            # OUTCOME_DETAIL_FIELD is the one place that owns which outcomes
             # exist (S1, #973) — a future outcome needs only that one entry,
             # not this seed too.
-            {"raised": 0, "undisposed": 0, **{o: 0 for o in _OUTCOME_DETAIL_FIELD}},
+            {"raised": 0, "undisposed": 0, **{o: 0 for o in OUTCOME_DETAIL_FIELD}},
         )
         counts["raised"] += 1
         disposition = dispositions_by_key.get((repo, issue, fid))
@@ -321,9 +321,9 @@ def _walk_cache_layout(root: Path, patterns: tuple[str, ...]) -> list[tuple[str,
     """Return (repo_dir, filename) pairs for every file matching any of
     `patterns` one level under `root`, skipping any scratch*-prefixed dir
     (not real reports). Raises FileNotFoundError if `root` doesn't exist,
-    rather than silently reporting zero files. Shared by find_report_files
-    and find_sidecar_files (#855 round-1 standards S1) — one statement of
-    the cache layout rule, not two copies drifting apart."""
+    rather than silently reporting zero files. Shared by find_report_files,
+    find_sidecar_files and find_codex_records (#855 round-1 standards S1) —
+    one statement of the cache layout rule, not copies drifting apart."""
     if not root.is_dir():
         raise FileNotFoundError(f"reviews cache not found: {root}")
 
@@ -340,6 +340,13 @@ def _walk_cache_layout(root: Path, patterns: tuple[str, ...]) -> list[tuple[str,
                 continue
             out.append((rel_parts[0], path.name))
     return out
+
+
+def find_codex_records(root: Path = REVIEWS_ROOT) -> list[tuple[str, str]]:
+    """Return (repo_dir, filename) pairs for every Codex pass record,
+    codex-adversarial-*.json, one level under `root`, same layout and
+    scratch-dir skip as find_report_files."""
+    return _walk_cache_layout(root, ("codex-adversarial-*.json",))
 
 
 def find_report_files(root: Path = REVIEWS_ROOT) -> list[tuple[str, str]]:

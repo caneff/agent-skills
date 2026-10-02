@@ -73,6 +73,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import math
 import os
 import re
 import sys
@@ -82,8 +83,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from tally_review_axes import (
-    _OUTCOME_DETAIL_FIELD, ALL_AXES, REVIEWS_ROOT, _walk_cache_layout, find_sidecar_files, fold_repo,
-    load_jsonl, parse_disposition_sidecar_filename, parse_finding_sidecar_filename)
+    ALL_AXES, OUTCOME_DETAIL_FIELD, REVIEWS_ROOT, find_codex_records, find_sidecar_files, fold_repo, load_jsonl)
 
 DEFAULT_LEDGER = REVIEWS_ROOT / "ledger.jsonl"
 DEFAULT_TRANSCRIPTS = Path.home() / ".claude" / "projects"
@@ -113,12 +113,13 @@ DISPUTE_MARKERS = ("dispute", "false positive", "unreachable", "not a bug", "by 
 # and the word sets of their normalised titles overlap at least this much.
 TITLE_MATCH_JACCARD = 0.5
 
-# The findings sidecar names `parse_finding_sidecar_filename` does not accept:
-# the verification axis, a multi-ticket clump (`975-983`) and a round suffix
-# (`-r2`, `-round1`). A name matching neither is listed, never dropped.
-_EXTRA_FINDINGS_RE = re.compile(
+# Every findings and dispositions sidecar name the harvest reads: beyond the
+# plain `findings-<axis>-<n>` and `dispositions-<n>`, the verification axis, a
+# multi-ticket clump (`975-983`) and a round suffix (`-r2`, `-round1`). A name
+# matching neither is listed, never dropped.
+_FINDINGS_NAME_RE = re.compile(
     rf"^findings-({'|'.join(ALL_AXES)}|verify|verification)-(\d+(?:-\d+)*?)(?:-(?:r|round)(\d+))?\.jsonl$")
-_MULTI_DISPOSITIONS_RE = re.compile(r"^dispositions-(\d+(?:-\d+)+)\.jsonl$")
+_DISPOSITIONS_NAME_RE = re.compile(r"^dispositions-(\d+(?:-\d+)*)\.jsonl$")
 _OE_ID_RE = re.compile(r"^(?:r\d+-)?OE\d")
 _ROUND_ID_RE = re.compile(r"^r(\d+)-")
 
@@ -325,7 +326,7 @@ def new_row(row_id, repo, tickets, row_type, rnd, run_id, findings, findings_sta
                        "model": {"status": "known"} if model else
                        {"status": "unknown", "reason": "not in the sidecars or the transcripts"},
                        "findings": findings_status},
-            "sources": sources, "mappings": [m.as_row() for m in mappings]},
+            "sources": sources, "mappings": [{"from": m.source, "to": m.to} for m in mappings]},
         **(extra or {})}
 
 
@@ -413,9 +414,6 @@ class Mapping(NamedTuple):
     source: str
     to: str
 
-    def as_row(self) -> dict:
-        return {"from": self.source, "to": self.to}
-
 
 class Joined(NamedTuple):
     """One finding's joined outcome, with the mapping that produced it, if any."""
@@ -434,7 +432,7 @@ def normalise_outcome(disp: dict) -> Joined:
     label = disp.get("outcome")
     if not isinstance(label, str):
         return Joined.unknown(f"unmapped outcome {label!r}", Mapping(repr(label), "unknown"))
-    if label in _OUTCOME_DETAIL_FIELD:
+    if label in OUTCOME_DETAIL_FIELD:
         return Joined(label, False, {"status": "known"})
     if label in PARTIAL_LABELS:
         return Joined(PARTIAL_LABELS[label], True, {"status": "known"}, Mapping(label, "fixed+partial"))
@@ -524,18 +522,12 @@ def mark_overlap(rows: list[dict], matches: list[dict], restatements: list[dict]
 
 def _findings_name(name: str):
     """(axis, ticket group, round from the name) or None."""
-    strict = parse_finding_sidecar_filename(name)
-    if strict:
-        return strict[0], str(strict[1]), 1
-    m = _EXTRA_FINDINGS_RE.match(name)
+    m = _FINDINGS_NAME_RE.match(name)
     return (m.group(1), m.group(2), int(m.group(3) or 1)) if m else None
 
 
 def _dispositions_group(name: str) -> str | None:
-    n = parse_disposition_sidecar_filename(name)
-    if n is not None:
-        return str(n)
-    m = _MULTI_DISPOSITIONS_RE.match(name)
+    m = _DISPOSITIONS_NAME_RE.match(name)
     return m.group(1) if m else None
 
 
@@ -678,19 +670,19 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
                     label, g, disp = hits[0]
                     key = (g, f"codex-{phase}-{label}")
                     if key in credited:
-                        outcome = Joined.unknown(f"{key[1]} already credits {credited[key]}")
+                        joined_outcome = Joined.unknown(f"{key[1]} already credits {credited[key]}")
                     else:
                         credited[key] = stem
                         joined.add(key)
-                        outcome = normalise_outcome(disp)
+                        joined_outcome = normalise_outcome(disp)
                         if not label.isdigit():
                             mappings[Mapping(f"codex label {label[0]}<k>", "k-th finding of that severity")] += 1
-                        _tally_mapping(outcome.mapping, mappings, unmapped)
+                        _tally_mapping(joined_outcome.mapping, mappings, unmapped)
                 elif hits:
-                    outcome = Joined.unknown(f"labels {' and '.join(h[0] for h in hits)} both name this finding")
+                    joined_outcome = Joined.unknown(f"labels {' and '.join(h[0] for h in hits)} both name this finding")
                 else:
-                    outcome = Joined.unknown(f"no dispositions line codex-{phase}-{labels[0]} or -{labels[1]}")
-                findings.append(_finding_entry(f"codex-{phase}-{k}", f["severity"], outcome, f["file"], f["title"]))
+                    joined_outcome = Joined.unknown(f"no dispositions line codex-{phase}-{labels[0]} or -{labels[1]}")
+                findings.append(_finding_entry(f"codex-{phase}-{k}", f["severity"], joined_outcome, f["file"], f["title"]))
             if findings:
                 sources += [f"{repo_dir.name}/dispositions-{g}.jsonl" for g in groups]
         rows.append(new_row(
@@ -709,7 +701,7 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     `only` is (repo, ticket): harvest just that ticket's sidecars and transcripts, which is
     what `append` does, so its rows are the ones a full harvest writes."""
     pairs = find_sidecar_files(cache)  # FileNotFoundError when the cache is missing
-    codex_pairs = _walk_cache_layout(cache, ("codex-adversarial-*.json",))
+    codex_pairs = find_codex_records(cache)
     if only:
         codex_pairs = [(d, n) for d, n in codex_pairs if fold_repo(d) == fold_repo(only[0])
                        and re.fullmatch(rf"codex-adversarial-{only[1]}-.+\.json", n)]
@@ -781,20 +773,21 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
                 rm = _ROUND_ID_RE.match(raw["id"])
                 key = (row_type, int(rm.group(1)) if rm else name_round)
                 if file_dispositions is None:
-                    outcome = Joined.unknown(f"no dispositions file for ticket {group}")
+                    joined_outcome = Joined.unknown(f"no dispositions file for ticket {group}")
                 elif raw["id"] not in file_dispositions:
-                    outcome = Joined.unknown(f"no disposition line for {raw['id']}")
+                    joined_outcome = Joined.unknown(f"no disposition line for {raw['id']}")
                 else:
                     joined.add((group, raw["id"]))
-                    outcome = normalise_outcome(file_dispositions[raw["id"]])
-                _tally_mapping(outcome.mapping, mappings, unmapped)
-                if outcome.mapping:
-                    row_mappings.setdefault(key, []).append(outcome.mapping)
+                    joined_outcome = normalise_outcome(file_dispositions[raw["id"]])
+                _tally_mapping(joined_outcome.mapping, mappings, unmapped)
+                if joined_outcome.mapping:
+                    row_mappings.setdefault(key, []).append(joined_outcome.mapping)
                 by_type.setdefault(key, []).append(_finding_entry(
-                    raw["id"], raw["severity"], outcome, raw["file"], raw["title"]))
+                    raw["id"], raw["severity"], joined_outcome, raw["file"], raw["title"]))
             # A file named for round 1 whose every id says round 2 holds no round-1 run.
             base_key = (base, name_round)
-            if not by_type[base_key] and len(by_type) > 1 and all(rnd != name_round for _, rnd in by_type if _ != base or rnd != name_round):
+            others = [key[1] for key in by_type if key != base_key]
+            if not by_type[base_key] and others and name_round not in others:
                 del by_type[base_key]
             if lost:
                 findings_status = {"status": "unknown", "reason": f"{lost} unreadable line(s) in the sidecar"}
@@ -980,8 +973,8 @@ def cmd_append_mutation(args) -> int:
             raise ValueError("a mutation row needs --mutation-id made of letters, digits, . - _")
         if (args.status_file is None) == (args.outcome is None):
             raise ValueError("give exactly one of --status-file and --outcome")
-        seconds = _finite_nonneg(args.seconds)
-        if seconds is None:
+        seconds = args.seconds
+        if seconds is None or not (math.isfinite(seconds) and seconds >= 0):
             raise ValueError("a mutation row needs --seconds, its wall clock as a finite number of seconds")
         outcome = args.outcome or decode_status(args.status_file.read_text())
     except (OSError, ValueError) as e:
@@ -1340,7 +1333,7 @@ def main(argv=None) -> int:
     a.add_argument("--outcome", choices=MUTATION_OUTCOMES, help="a mutation type: the outcome, when no status file")
     a.add_argument("--refusal", help="a codex type: the run was refused (raced, stale), and why; its usage still counts")
     a.add_argument("--skip-reason", help="a codex type: the pass was not launched, and why; no record is read")
-    a.add_argument("--seconds", help="a mutation type: the mutation's wall clock")
+    a.add_argument("--seconds", type=float, help="a mutation type: the mutation's wall clock")
     a.add_argument("--transcripts", type=Path, help=f"default {DEFAULT_TRANSCRIPTS}")
     a.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     a.set_defaults(func=cmd_append)
