@@ -73,7 +73,6 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
-import math
 import os
 import re
 import sys
@@ -973,8 +972,8 @@ def cmd_append_mutation(args) -> int:
             raise ValueError("a mutation row needs --mutation-id made of letters, digits, . - _")
         if (args.status_file is None) == (args.outcome is None):
             raise ValueError("give exactly one of --status-file and --outcome")
-        seconds = args.seconds
-        if seconds is None or not (math.isfinite(seconds) and seconds >= 0):
+        seconds = _finite_nonneg(args.seconds)
+        if seconds is None:
             raise ValueError("a mutation row needs --seconds, its wall clock as a finite number of seconds")
         outcome = args.outcome or decode_status(args.status_file.read_text())
     except (OSError, ValueError) as e:
