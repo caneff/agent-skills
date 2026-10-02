@@ -87,7 +87,10 @@ controller's by construction.
    `--run <run-id>` is required, and dispatch reads it from the run file by
    the clump's lowest ticket, ignoring any `job` in the in-flight file.
    `loop.py dispatch` reads a clump the run file records as closed as not
-   live, and then unions each unlanded in-flight workspace's real
+   live, drops any candidate whose lowest ticket is a clump the run file
+   records as landed or closed (printing `landed #<n>: skipped` for each),
+   so the candidates file stays the frozen set and the run file is the
+   progress, and then unions each unlanded in-flight workspace's real
    `git diff --name-only origin/<default>...HEAD`, its uncommitted edits and
    its untracked files into that closure (#1212), so a file the worker
    reached that no candidate list named still holds the clumps that share it;

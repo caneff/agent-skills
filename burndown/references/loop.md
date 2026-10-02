@@ -31,7 +31,9 @@ step, and it is the step that makes the closures comparable: a clump resolved
 against one repo scan can be checked against every other candidate, and a
 candidate explored later cannot.
 
-So the set is frozen once it is explored. A ticket filed while the run is
+So the set is frozen once it is explored, and it stays frozen as clumps
+land: `loop.py dispatch` skips a candidate the run file records as landed or
+closed rather than expecting the file to be pruned (#1313). A ticket filed while the run is
 going does not join it; the run drains what it explored, and the next run
 takes the rest. Growing the set mid-run means re-resolving every closure
 against a new member, which is the full re-exploration below, for a ticket

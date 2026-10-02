@@ -1698,6 +1698,37 @@ def test_the_cli_dispatch_reads_a_clump_closed_in_the_run_file_as_not_live():
         assert "held" not in got.stdout, got.stdout
 
 
+def test_the_cli_dispatch_skips_a_candidate_the_run_file_records_as_landed():
+    # #1313: the candidates file is the frozen set and the run file is the
+    # progress, so a landed or closed clump is not offered again.
+    with tempfile.TemporaryDirectory() as tmp:
+        cache = os.path.join(tmp, "cache")
+        runfile.start("burn-skip", 5, None, root=cache, repo=REPO)
+        runfile.clump("burn-skip", [1258], "/w/1258", "a-1258", root=cache)
+        runfile.clump("burn-skip", [1293, 1294], "/w/1293", "a-1293", root=cache)
+        runfile.clump("burn-skip", [1278], "/w/1278", "a-1278", root=cache)
+        runfile.land("burn-skip", 1258, "a1b2c3d", root=cache)
+        runfile.close("burn-skip", 1293, "already fixed on main", root=cache)
+        cand = os.path.join(tmp, "candidates.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [1258], "closure": ["a.py"]},
+                       {"tickets": [1293, 1294], "closure": ["b.py"]},
+                       {"tickets": [1278], "closure": ["c.py"]},
+                       {"tickets": [1400], "closure": ["d.py"]}], fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight",
+                      EMPTY_LIVE, "--free", "4", "--processes", "4",
+                      "--committed-gb", "4", "--run", "burn-skip",
+                      env={"BURNDOWN_CACHE_DIR": cache})
+        assert got.returncode == 0, got.stderr
+        for n in (1258, 1293):
+            assert f"landed #{n}: skipped" in got.stdout, got.stdout
+            assert f"dispatch  #{n}" not in got.stdout, got.stdout
+        # Still in flight (neither landed nor closed): not skipped.
+        assert "landed #1278" not in got.stdout, got.stdout
+        assert "dispatch  #1278" in got.stdout, got.stdout
+        assert "dispatch  #1400" in got.stdout, got.stdout
+
+
 def test_a_closed_clump_is_not_diffed():
     asked = []
     live = [{"tickets": [9], "workspace": "/w/9", "closure": ["a"],

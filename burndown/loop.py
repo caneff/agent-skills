@@ -971,6 +971,18 @@ def read_clumps(path, live=False, closure=True):
     return clumps
 
 
+def without_settled(candidates, run):
+    """`(kept, skipped)`: the candidates minus those whose lowest ticket is a
+    clump this run has landed or closed, and those lowest tickets in the
+    candidates' order. The candidates file is the frozen set and the run file
+    is the progress, so a finished clump is not offered again (#1313)."""
+    done = {entry["tickets"][0] for entry in run["clumps"]
+            if runfile.settled(entry)}
+    kept = [c for c in candidates if key_of(c) not in done]
+    skipped = [key_of(c) for c in candidates if key_of(c) in done]
+    return kept, skipped
+
+
 def load_run(run_id, root=None):
     """The run file for `run_id`, its refusal as a `LoopError`."""
     try:
@@ -1225,6 +1237,9 @@ def run(argv):
             run = load_run(args.run, root)
             repo = run_target(run)
             in_flight = with_run_jobs(in_flight, run)
+            candidates, skipped = without_settled(candidates, run)
+            for lowest in skipped:
+                print(f"landed #{lowest}: skipped")
             if args.no_workspace_diff:
                 # Said, not silent: this run's exclusion reads only the named
                 # closures, and its output must not read like one that also
