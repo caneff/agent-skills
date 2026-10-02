@@ -24,8 +24,8 @@ landing from each PR's dispositions sidecar (`implement/SKILL.md` § Review)
 rather than transcribed by hand. `resume`
 reads it back and splits the clumps against the agents that are alive: the
 live workers to re-announce the controller to, the vanished ones to
-reconcile by hand, and the landings already banked. Only the controller
-writes.
+reconcile by hand, the landings already banked, and the clumps closed with no
+landing. Only the controller writes.
 
 Why one file per run, why `~/.cache`, why the herdr agent name and why each
 write replaces the file in one step: `references/run-file.md`, which is where
