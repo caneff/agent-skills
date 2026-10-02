@@ -128,6 +128,30 @@ class AppendRowTest(AppendCase):
         self.assertEqual((row["model"], row["status"]["fields"]["model"]),
                          (appended["model"], appended["status"]["fields"]["model"]))
 
+    def test_a_harvest_after_one_of_two_transcripts_is_cleaned_up_keeps_the_summed_cost(self):
+        # Ticket 405's spec review ran twice, in two sessions; cleanup takes the second session first.
+        self.ok(405, "spec")
+        appended = self.rows()["skills/405/spec/1/findings-spec-405"]
+        for name in ("agent-sp2.jsonl", "agent-sp2.meta.json"):
+            (self.tr / wt(SKILLS_PROJ, 405) / "s2" / "subagents" / name).unlink()
+        self.harvest()
+        self.assertEqual(self.rows()["skills/405/spec/1/findings-spec-405"]["cost"], appended["cost"])
+
+    def test_a_harvest_after_one_rounds_sidecar_is_pruned_counts_each_transcript_once(self):
+        skills = self.cache / "skills"
+        write_jsonl(skills / "findings-verify-700.jsonl", [finding("V1", "judgement", "v.py", "One", axis="verify")])
+        write_jsonl(skills / "findings-verify-700-r2.jsonl", [finding("r2-V1", "judgement", "w.py", "Two", axis="verify")])
+        transcript(self.tr, wt(SKILLS_PROJ, 700), "v1", "Verification pass #700", "Verification of round 1",
+                   [("2026-09-20T10:00:00Z", "m1", usage(100, 0, 0, 0))])
+        transcript(self.tr, wt(SKILLS_PROJ, 700), "v2", "Verification pass round 2 #700", "Verification of round 2",
+                   [("2026-09-21T10:00:00Z", "m1", usage(1, 0, 0, 0))])
+        self.ok(700, "verification", 1)
+        self.ok(700, "verification", 2)
+        (skills / "findings-verify-700.jsonl").unlink()  # round 1 is older, so the prune takes it first
+        self.harvest()
+        rows = [r for r in self.rows().values() if r["ticket"] == 700]
+        self.assertEqual(sorted(r["cost"]["tokens"]["input"] for r in rows), [1, 100])
+
     def test_a_harvest_after_the_dispositions_are_pruned_keeps_the_known_outcomes(self):
         self.ok(400, "spec")
         (self.cache / "skills" / "dispositions-400.jsonl").unlink()

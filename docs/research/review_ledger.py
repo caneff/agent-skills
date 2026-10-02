@@ -929,10 +929,11 @@ def _keep_known(old: dict, new: dict) -> dict:
                 if f["outcome"] == "unknown" and f["id"] in was else f for f in new["findings"]]
     status = {**new["status"], "fields": dict(new["status"]["fields"]),
               "sources": list(dict.fromkeys(new["status"]["sources"] + old["status"]["sources"]))}
-    row = {**new, "origin": "append", "status": status, "findings": findings,
-           "cost": {**new["cost"], **{k: v for k, v in (old.get("cost") or {}).items()
-                                      if _known(v) and not _known(new["cost"].get(k))}}}
-    if old.get("model") and not new.get("model"):
+    # A known cost is append's record of the run and wins outright: a rebuild can read fewer transcripts
+    # than append summed (some cleaned up), or a transcript joined to it from a round whose sidecar is gone.
+    kept_cost = {k: v for k, v in (old.get("cost") or {}).items() if _known(v)}
+    row = {**new, "origin": "append", "status": status, "findings": findings, "cost": {**new["cost"], **kept_cost}}
+    if old.get("model"):
         row["model"], status["fields"]["model"] = old["model"], old["status"]["fields"]["model"]
     return row
 
