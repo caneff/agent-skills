@@ -4,12 +4,10 @@ and `harvest`, both reading the usage change from the two live readings the pass
 (`usage_before`, `usage_after`, as `codex-usage-gate.py --percent` prints them). Every test runs the
 command line; HOME is a temp dir, so no default path reaches the real ~/.cache."""
 import json
-import subprocess
-import sys
 import unittest
 
 from review_ledger_codex_test import OUT_CLEAN, OUT_REFUSED, OUT_TWO, put
-from review_ledger_test import SCRIPT, Case, run
+from review_ledger_test import Case, run
 
 STARTED, COMPLETED = "2026-09-30T09:00:00-04:00", "2026-09-30T09:02:30-04:00"
 W1, W2 = 1790000000, 1790600000  # two windows' reset times
@@ -45,6 +43,11 @@ class CodexAppendCase(Case):
     def only_row(self):
         (row,) = self.rows().values()
         return row
+
+    def harvest(self):
+        r = run("harvest", "--cache", self.cache, "--transcripts", self.tmp, "--ledger", self.ledger,
+                "--review-file", self.tmp / "h.md", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
 
 
 class UsageChangeTest(CodexAppendCase):
@@ -126,17 +129,8 @@ class UsageChangeTest(CodexAppendCase):
         self.record(500, before=f"10 {W1}", after=f"12 {W1}", out=OUT_TWO)
         self.ok(500, "gate")
         appended = self.only_row()
-        r = subprocess.run([sys.executable, str(SCRIPT), "harvest", "--cache", str(self.cache), "--transcripts",
-                            str(self.tmp), "--ledger", str(self.ledger), "--review-file", str(self.tmp / "h.md")],
-                           capture_output=True, text=True, env={"HOME": str(self.home)})
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual({**self.only_row(), "origin": "append"}, appended)
-
-    def harvest(self):
-        r = subprocess.run([sys.executable, str(SCRIPT), "harvest", "--cache", str(self.cache), "--transcripts",
-                            str(self.tmp), "--ledger", str(self.ledger), "--review-file", str(self.tmp / "h.md")],
-                           capture_output=True, text=True, env={"HOME": str(self.home)})
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.harvest()
+        self.assertEqual(self.only_row(), appended)
 
     def test_a_harvest_after_the_record_is_pruned_keeps_the_appended_row(self):
         # #1304: append, harvest, the 14-day prune takes the record, harvest again.
@@ -218,10 +212,7 @@ class RefusalTest(CodexAppendCase):
     def test_a_later_harvest_keeps_the_refusal(self):
         self.record(500, before=f"10 {W1}", after=f"12 {W1}", out=OUT_TWO)
         self.ok(500, "gate", "--refusal", "raced")
-        r = subprocess.run([sys.executable, str(SCRIPT), "harvest", "--cache", str(self.cache), "--transcripts",
-                            str(self.tmp), "--ledger", str(self.ledger), "--review-file", str(self.tmp / "h.md")],
-                           capture_output=True, text=True, env={"HOME": str(self.home)})
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.harvest()
         self.assertEqual(self.only_row()["findings"], [])
         self.assertEqual(self.only_row()["status"]["fields"]["findings"]["status"], "refused")
 

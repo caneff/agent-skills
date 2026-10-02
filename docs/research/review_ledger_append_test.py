@@ -34,6 +34,11 @@ class AppendCase(Case):
         return {r["row_id"]: r for r in map(json.loads, self.ledger.read_text().splitlines())} \
             if self.ledger.exists() else {}
 
+    def harvest(self, tr=None):
+        r = run("harvest", "--cache", self.cache, "--transcripts", tr or self.tr, "--ledger", self.ledger,
+                "--review-file", self.tmp / "h.md", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def harvested(self):
         other = self.tmp / "harvested.jsonl"
         r = run("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", other,
@@ -50,9 +55,7 @@ class AppendRowTest(AppendCase):
             "completed": "2026-09-22T09:01:00-04:00"}))
         (skills / "codex-adversarial-400-gate.out").write_text(
             "Findings:\n- [high] Thing 400 (a.py:1)\n  Body.\n\nNext steps:\n- Fix.\n")
-        r = run("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", self.ledger,
-                "--review-file", self.tmp / "h.md", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.harvest()
         self.ok(400, "standards")
         rows = self.rows()
         codex = rows["skills/400/codex-gate/1/codex-adversarial-400-gate"]["findings"][0]
@@ -93,15 +96,8 @@ class AppendRowTest(AppendCase):
 
     def test_a_later_harvest_leaves_exactly_the_rows_a_harvest_alone_writes(self):
         self.ok(403, "verification")
-        r = run("harvest", "--cache", self.cache, "--transcripts", self.tr, "--ledger", self.ledger,
-                "--review-file", self.tmp / "h.md", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.harvest()
         self.assertEqual(sorted(self.rows()), sorted(self.harvested()))
-
-    def harvest(self, tr=None):
-        r = run("harvest", "--cache", self.cache, "--transcripts", tr or self.tr, "--ledger", self.ledger,
-                "--review-file", self.tmp / "h.md", home=self.home)
-        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_a_harvest_after_the_sidecars_are_pruned_keeps_the_rows_and_adds_no_second_cost(self):
         # #1304: the prune takes ticket 400's sidecars; its transcripts outlive them.
