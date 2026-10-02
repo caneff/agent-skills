@@ -127,8 +127,20 @@ class AppendRowTest(AppendCase):
         self.ok(430, "standards")
         row_id = "skills/430/standards/1/findings-standards-430"
         self.assertEqual(self.rows()[row_id]["findings"][0]["outcome"], "unknown")
+        # A cost no harvest would recompute: the refresh keeps the appended row's own.
+        ledger = [json.loads(x) for x in self.ledger.read_text().splitlines()]
+        for r in ledger:
+            if r["row_id"] == row_id:
+                r["cost"]["marker"] = "kept from the axis append"
+        write_jsonl(self.ledger, ledger)
         cost = self.rows()[row_id]["cost"]
-        write_jsonl(skills / "dispositions-430.jsonl", [{"id": "S1", "outcome": "fixed", "sha": "e"}])
+        # A round-2 axis row of the same ticket is not this verification's round.
+        write_jsonl(skills / "findings-standards-430-r2.jsonl", [finding("r2-S1", "hard", "b.py", "Later thing")])
+        transcript(self.tr, wt(SKILLS_PROJ, 430), "s2", "Standards review round-2 #430", "Repo: x",
+                   [("2026-09-20T10:30:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(430, "standards", 2)
+        write_jsonl(skills / "dispositions-430.jsonl", [{"id": "S1", "outcome": "fixed", "sha": "e"},
+                                                        {"id": "r2-S1", "outcome": "fixed", "sha": "e"}])
         write_jsonl(skills / "findings-verify-430.jsonl", [])
         transcript(self.tr, wt(SKILLS_PROJ, 430), "v", "Verification pass", "Verification of round 1",
                    [("2026-09-20T11:00:00Z", "m1", usage(1, 1, 1, 1))])
@@ -138,6 +150,8 @@ class AppendRowTest(AppendCase):
         self.assertIn("skills/dispositions-430.jsonl", row["status"]["sources"])
         self.assertEqual(row["cost"], cost)
         self.assertEqual(row["origin"], "append")
+        later = self.rows()["skills/430/standards/2/findings-standards-430-r2"]
+        self.assertEqual(later["findings"][0]["outcome"], "unknown")
 
     def test_the_verification_append_adds_no_axis_row_that_was_never_appended(self):
         self.ok(400, "standards")
