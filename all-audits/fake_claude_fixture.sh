@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Test fixture (#559): a fake `claude` binary for driver_test.py's manifest
 # tests. Reads the last argv (the audit prompt), and — only for the audit
-# named "dead-code" — writes a report + the manifest the prompt asked for.
+# named "dead-code" and for "/mutation-audit" — writes a report + the
+# manifest the prompt asked for.
 # FAKE_CLAUDE_NOOP=1 makes every audit, dead-code included, write nothing.
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
 # simulating a crashed/silent process so the driver must render a missing
@@ -28,6 +29,15 @@ case "$prompt" in
     printf '{"report_path": "%s/report.html", "count": 1, "headline": "one finding"}\n' "$dir" >"$manifest"
     # A nonzero exit even with a manifest on disk (#1278), when a test asks.
     exit "${FAKE_CLAUDE_EXIT_DEAD_CODE:-0}"
+    ;;
+  /mutation-audit\ *)
+    # Mutation mode's audit, run inside its worktree: the same report and
+    # manifest, and its own exit code when a test asks.
+    dir="$(dirname "$manifest")/report"
+    mkdir -p "$dir"
+    echo '<html><body>mutation report</body></html>' >"$dir/report.html"
+    printf '{"report_path": "%s/report.html", "count": 0, "headline": "no survivors"}\n' "$dir" >"$manifest"
+    exit "${FAKE_CLAUDE_EXIT_MUTATION:-0}"
     ;;
   *)
     # Every other audit: no manifest — the crashed/silent-process case. Print

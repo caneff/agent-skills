@@ -59,10 +59,12 @@ record comes from the run file through the required `--run <run-id>`. The
 closure is only what the ticket's named files reach, so dispatch also unions
 each unlanded in-flight workspace's `git diff --name-only
 origin/<default>...HEAD`, uncommitted edits and untracked files into it
-(#1212): on burn-trs-2026-09-27 two workers ran concurrently in files no candidate list named. An unreadable diff refuses
-the tick rather than reading as no change; `--no-workspace-diff` exists for
-fixtures without real checkouts and a controller never passes it. That is cheap and it is enough for the one
-question a dispatch asks: does *this* clump collide with anyone live?
+(#1212): on burn-trs-2026-09-27 two workers ran concurrently in files no
+candidate list named. An unreadable diff refuses the tick rather than reading
+as no change; `--no-workspace-diff` exists for fixtures without real
+checkouts and a controller never passes it. That is cheap and it is enough
+for the one question a dispatch asks: does *this* clump collide with anyone
+live?
 
 A **full** re-exploration is a different question, and it fires on one
 trigger: a landing whose diff touched a **hub** — a file two or more

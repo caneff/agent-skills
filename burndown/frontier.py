@@ -250,7 +250,11 @@ def _is_clear(name, stated):
     return name == "unblocked" or (name == "unresolved" and not stated)
 
 
-def classify(issues, state_of, parent_of=lambda ticket: None):
+# The buckets `classify` fills, in the order `render` prints them.
+BUCKETS = ("unblocked", "blocked", "unresolved", "spec", "slice")
+
+
+def classify(issues, state_of, parent_of):
     """`{unblocked, blocked, unresolved, spec, slice}` over GitHub issue
     objects. `state_of(number) -> "open" | "closed" | None` reads a blocker's
     state; `None` means it could not be read, which is unresolved rather than
@@ -260,8 +264,7 @@ def classify(issues, state_of, parent_of=lambda ticket: None):
     ticket, a ticket carrying a non-dispatchable label, and anything that is
     really a PR, is in no bucket at all — each is off the frontier by its own
     nature, not by a blocking relationship."""
-    buckets = {"unblocked": [], "blocked": [], "unresolved": [], "spec": [],
-               "slice": []}
+    buckets = {name: [] for name in BUCKETS}
 
     def rank(issue, entry):
         """`(bucket, stated)` from this ticket's blocking state alone.
@@ -330,7 +333,9 @@ def classify(issues, state_of, parent_of=lambda ticket: None):
             try:
                 parent = parent_of(issue)
             except FrontierError as exc:
-                entry["why"] = f"its parent could not be read ({exc})"
+                # A silent ticket keeps its own reason: that one a human fixes.
+                own = f"{entry['why']}; " if name == "unresolved" else ""
+                entry["why"] = f"{own}its parent could not be read ({exc})"
                 name = "unresolved"
             else:
                 if parent and SPEC_LABEL in _labels(parent):
@@ -435,13 +440,14 @@ def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state,
 
 def render(buckets):
     lines = []
-    for name in ("unblocked", "blocked", "unresolved", "spec", "slice"):
+    for name in BUCKETS:
         for entry in buckets[name]:
             note = ""
-            if name == "blocked" and entry["blockers"]:
-                note = "  (blocked by " + ", ".join(
-                    f"#{n}" for n in entry["blockers"]) + ")"
-            elif name in ("unresolved", "spec", "slice"):
+            if name == "blocked":
+                if entry["blockers"]:
+                    note = "  (blocked by " + ", ".join(
+                        f"#{n}" for n in entry["blockers"]) + ")"
+            elif name != "unblocked":
                 note = f"  ({entry['why']})"
             lines.append(f"{name:<11} {entry['number']} {entry['title']}{note}")
     return "\n".join(lines)

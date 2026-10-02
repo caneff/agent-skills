@@ -119,13 +119,30 @@ ieq() { [ "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$2" | tr 'A-Z
 # re-asking costs nothing and a stale "no" (or a cached network blip) can
 # never harden into a permanent block. Delete $cache_dir if a repo's origin
 # changes hands.
-# Returns 0 owned, 1 not owned (gh answered), 2 gh could not answer; on 2,
-# OWNERSHIP_ERR holds gh's error text so the block can say it was a blip.
+# Returns 0 owned, 1 not owned (gh answered, a repo this login cannot see
+# included), 2 ownership could not be read (gh failed, or no checkout); on 2,
+# OWNERSHIP_ERR says why, gh's own error text included, so the block can say
+# it was a blip. On a repo gh cannot see, OWNERSHIP_ERR holds gh's answer.
 OWNERSHIP_ERR=""
 OWNERSHIP_ORIGIN=""
+# gh's own error text from the file $1 into OWNERSHIP_ERR; the file is removed.
+gh_failed() {
+  local text
+  text=$([ -n "$1" ] && tr '\n' ' ' < "$1" | sed 's/ *$//')
+  OWNERSHIP_ERR="gh: ${text:-no error text}"
+  [ -z "$1" ] || rm -f "$1"
+}
+# The gh login into GH_LOGIN; 2, with OWNERSHIP_ERR set, when gh cannot say.
+gh_login() {
+  local errf
+  errf=$(mktemp 2>/dev/null) || errf=""
+  GH_LOGIN=$(gh api user -q .login 2>"${errf:-/dev/null}") || { gh_failed "$errf"; return 2; }
+  [ -z "$errf" ] || rm -f "$errf"
+  [ -n "$GH_LOGIN" ] || { OWNERSHIP_ERR="gh: empty answer"; return 2; }
+}
 repo_is_owned() {
-  local toplevel origin cache_dir key me target errf slug
-  toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
+  local toplevel origin cache_dir key target errf slug
+  toplevel=$(git rev-parse --show-toplevel 2>/dev/null) || { OWNERSHIP_ERR="not inside a git checkout"; return 2; }
   origin=$(git remote get-url origin 2>/dev/null)
 
   # Non-github origins — a local path, a private host, or no remote at all —
@@ -150,14 +167,18 @@ repo_is_owned() {
   # Evaluate ORIGIN explicitly (a bare `gh repo view` would resolve to an
   # `upstream` remote instead), and a fork's real base repo is its parent.
   # gh's own error text goes to a temp file; with no temp file the block says so.
+  gh_login || return 2
   errf=$(mktemp 2>/dev/null) || errf=""
-  lookup_failed() { OWNERSHIP_ERR=$([ -n "$errf" ] && tr '\n' ' ' < "$errf" | sed 's/ *$//'); [ -z "$errf" ] || rm -f "$errf"; return 2; }
-  me=$(gh api user -q .login 2>"${errf:-/dev/null}") || { lookup_failed; return 2; }
   target=$(gh repo view "$origin" --json owner,name,isFork,parent \
-      -q 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' 2>"${errf:-/dev/null}") || { lookup_failed; return 2; }
+      -q 'if .isFork then (.parent.owner.login + "/" + .parent.name) else (.owner.login + "/" + .name) end' 2>"${errf:-/dev/null}") || {
+    gh_failed "$errf"
+    # gh reached GitHub and was told the repo does not exist for this login.
+    case "$OWNERSHIP_ERR" in *"Could not resolve to a Repository"* | *"(HTTP 404)"*) return 1 ;; esac
+    return 2
+  }
   [ -z "$errf" ] || rm -f "$errf"
-  [ -n "$me" ] && [ -n "$target" ] || { OWNERSHIP_ERR="empty answer from gh"; return 2; }
-  ieq "${target%%/*}" "$me" || return 1
+  [ -n "$target" ] || { OWNERSHIP_ERR="gh: empty answer"; return 2; }
+  ieq "${target%%/*}" "$GH_LOGIN" || return 1
 
   mkdir -p "$cache_dir" 2>/dev/null && printf '%s\n' "$target" > "$cache_dir/$key" 2>/dev/null
   return 0
@@ -226,20 +247,36 @@ named_merge_owners() {
   printf '%s\n' "$SCAN" | grep -oE 'github\.com/[^/[:space:]]+/[^/[:space:]]+/pull/' \
     | cut -d/ -f2
 }
+# Returns as repo_is_owned does: 0 owned, 1 not owned, 2 gh could not answer.
 merge_is_owned() {
-  local owners me owner
-  repo_is_owned || return 1
+  local owners owner rc
+  repo_is_owned; rc=$?
+  [ "$rc" = 0 ] || return "$rc"
   owners=$(named_merge_owners)
   [ -n "$owners" ] || return 0
-  me=$(gh api user -q .login 2>/dev/null) || return 1
-  [ -n "$me" ] || return 1
+  # The checkout is already verified; what is left unread is the named repo.
+  gh_login || { OWNERSHIP_ORIGIN="the repo the command names (owner $(printf '%s' "$owners" | paste -sd, -))"; return 2; }
   while IFS= read -r owner; do
-    ieq "$owner" "$me" || return 1
+    ieq "$owner" "$GH_LOGIN" || return 1
   done <<< "$owners"
 }
-if runs_pr_merge && ! merge_is_owned; then
-  echo "BLOCKED: '$COMMAND' merges a PR on a repo you don't own (or ownership couldn't be verified — gh down?). That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact '! gh pr merge ...' line to run themselves. Do not attempt it yourself." >&2
-  exit 2
+# The two block texts both policies share: ownership unreadable (rc 2), and
+# the gh answer behind a not-owned verdict on a repo gh cannot see.
+lookup_blocked() { # <what the command does, as a lead-in, or empty>
+  echo "BLOCKED: $1could not verify ownership of ${OWNERSHIP_ORIGIN:-this checkout} (${OWNERSHIP_ERR:-no error text}) — retry once it can be verified. This is a lookup failure, not a foreign repo." >&2
+}
+unseen_note() {
+  [ -z "$OWNERSHIP_ERR" ] || printf ' (%s — if it is yours, the gh token cannot see it.)' "$OWNERSHIP_ERR"
+}
+if runs_pr_merge; then
+  merge_is_owned; rc=$?
+  if [ "$rc" = 2 ]; then
+    lookup_blocked "'$COMMAND' merges a PR; "
+    exit 2
+  elif [ "$rc" != 0 ]; then
+    echo "BLOCKED: '$COMMAND' merges a PR on a repo you don't own.$(unseen_note) That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact '! gh pr merge ...' line to run themselves. Do not attempt it yourself." >&2
+    exit 2
+  fi
 fi
 
 # --- Push policy: your repo = allowed, anyone else's = handed off. ---
@@ -247,10 +284,10 @@ if echo "$SCAN" | grep -qE '(^|[;&|[:space:]])git([[:space:]]+-C[[:space:]]+[^[:
   repo_is_owned; rc=$?
   [ "$rc" = 0 ] && exit 0
   if [ "$rc" = 2 ]; then
-    echo "BLOCKED: could not verify ownership of $OWNERSHIP_ORIGIN (gh: ${OWNERSHIP_ERR:-no error text}) — retry once gh is reachable. This is a lookup failure, not a foreign repo." >&2
+    lookup_blocked ""
     exit 2
   fi
-  echo "BLOCKED: pushing to a repo you don't own. Hand the user the exact '! git push -u origin <branch>' line and a drafted 'gh pr create' line to run in their own shell — the outward-facing step is theirs, not yours." >&2
+  echo "BLOCKED: pushing to a repo you don't own.$(unseen_note) Hand the user the exact '! git push -u origin <branch>' line and a drafted 'gh pr create' line to run in their own shell — the outward-facing step is theirs, not yours." >&2
   exit 2
 fi
 

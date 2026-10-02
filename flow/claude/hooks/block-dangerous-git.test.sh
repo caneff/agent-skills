@@ -265,6 +265,46 @@ run "git -C push -f still blocked" 2 "git -C /r push -f origin main" "force-push
 run "force-push in a later segment still blocked" 2 \
   "git fetch && git push --force origin main" "force-push"
 
+# The merge block tells a gh failure from a foreign repo, as the push block
+# does (#1309).
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN= STUB_OWNER= STUB_ERR="boom: network unreachable"
+RUN_FORBID="you don't own" run "merge with gh failing names the verify failure, with gh's error" 2 \
+  "gh pr merge 12 --squash" "(gh: boom: network unreachable)"
+unset STUB_ERR
+export STUB_LOGIN=caneff STUB_OWNER=someone-else
+rm -rf "$XDG_CACHE_HOME"
+RUN_FORBID="could not verify" run "merge on a foreign origin prints the not-owned line, no hedge" 2 \
+  "gh pr merge 12 --squash" "merges a PR on a repo you don't own."
+
+# gh answering that the repo does not exist for this login is an answer,
+# not a blip to retry: the repo is not this login's (#1309).
+rm -rf "$XDG_CACHE_HOME"
+export STUB_LOGIN=caneff STUB_OWNER= \
+  STUB_ERR="GraphQL: Could not resolve to a Repository with the name 'caneff/agent-skills'. (repository)"
+RUN_FORBID="could not verify" run "repo gh cannot see is not owned, not a lookup failure" 2 \
+  "git push origin main" "pushing to a repo you don't own."
+run "repo gh cannot see: the block carries gh's answer and the token hint" 2 \
+  "git push origin main" "the gh token cannot see it"
+unset STUB_ERR
+export STUB_LOGIN=caneff STUB_OWNER=caneff
+
+# A merge outside any checkout is unverifiable, not foreign (#1309).
+rm -rf "$XDG_CACHE_HOME"
+RUN_CWD="$tmp" RUN_FORBID="you don't own" run "merge outside a checkout is a lookup failure" 2 \
+  "gh pr merge 12 --repo caneff/agent-skills" "could not verify ownership of this checkout (not inside a git checkout)"
+
+# The merge's own login read keeps gh's error text (#1309).
+rm -rf "$XDG_CACHE_HOME"
+run "owned verdict cached for the merge login case" 0 "git push origin main"
+export STUB_LOGIN= STUB_ERR="boom2: login read failed"
+RUN_FORBID="you don't own" run "merge naming a repo, login read failing, keeps gh's text" 2 \
+  "gh pr merge 1 --repo caneff/x" "(gh: boom2: login read failed)"
+RUN_FORBID="ownership of caneff-agent/skills" run "merge naming a repo, login read failing, names that repo's owner" 2 \
+  "gh pr merge 1 --repo caneff/x" "could not verify ownership of the repo the command names (owner caneff)"
+unset STUB_ERR
+export STUB_LOGIN=caneff STUB_OWNER=caneff
+
 # Reading git is untouched.
 run "ordinary git command allowed" 0 "git status"
 

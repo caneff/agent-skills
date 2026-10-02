@@ -202,6 +202,17 @@ class HarvestTest(Case):
                   if f["id"] == "P1")
         self.assertFalse(p1["partial"])
 
+    def test_a_row_lists_each_label_mapping_it_applied_as_from_and_to(self):
+        self.assertEqual(self.rows()["skills/100/standards/1/findings-standards-100"]["status"]["mappings"],
+                         [{"from": "partial", "to": "fixed+partial"}])
+
+    def test_an_unknown_outcome_is_never_a_partial_fix(self):
+        rows = self.rows()["skills/100/correctness/1/findings-correctness-100"]["findings"]
+        unknown = [f for f in rows if f["outcome"] == "unknown"]
+        self.assertTrue(unknown)
+        for f in unknown:
+            self.assertFalse(f["partial"], f["id"])
+
     def test_not_fixed_is_read_from_its_own_words(self):
         rows = self.rows()["skills/100/correctness/1/findings-correctness-100"]["findings"]
         by_id = {f["id"]: f["outcome"] for f in rows}
@@ -303,6 +314,11 @@ class HarvestTest(Case):
         self.assertIn("duplicated loader helper", section)
         self.assertNotIn("Long function", section)
         self.assertIn("Jaccard", section)
+
+    def test_a_match_line_names_each_side_by_type_then_id(self):
+        section = self.review.read_text().split("## Overlap matches")[1].split("\n## ")[0]
+        self.assertIn('\n- skills #100 `./a.py`: spec P1 "duplicated loader helper"'
+                      ' = standards S1 "Duplicated helper loader"\n', section)
 
     def test_without_transcripts_cost_is_unknown_never_zero_and_oe_is_inside_standards(self):
         for row in self.rows().values():
@@ -709,7 +725,10 @@ class CostHarvestTest(Case):
         self.assertEqual(r.returncode, 0, r.stderr)
         rows = [json.loads(x) for x in (self.tmp / "l3.jsonl").read_text().splitlines()]
         self.assertTrue(all(r["cost"]["tokens"]["status"] in ("unknown", "inside-standards") for r in rows))
-        self.assertIn("not found", rows[0]["cost"]["tokens"].get("reason", "not found"))
+        unknown = [r for r in rows if r["cost"]["tokens"]["status"] == "unknown"]
+        self.assertTrue(unknown)
+        for row in unknown:
+            self.assertIn("transcripts tree not found", row["cost"]["tokens"]["reason"], row["row_id"])
 
 
 class HarvestRerunTest(Case):

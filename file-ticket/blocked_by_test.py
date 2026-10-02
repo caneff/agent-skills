@@ -57,7 +57,7 @@ def classify(body, states=None, deps=None):
              "assignees": [], "labels": [{"name": "ready-for-agent"}]}
     if deps:
         issue["issue_dependencies_summary"] = deps
-    buckets = F.classify([issue], lambda n: states.get(n))
+    buckets = F.classify([issue], lambda n: states.get(n), lambda ticket: None)
     named = [name for name, entries in buckets.items() if entries]
     return named[0] if named else "no bucket"
 

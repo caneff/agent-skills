@@ -123,21 +123,23 @@ GIT_REDIRECT_VARS = (
 
 
 def scrubbed_env():
-    """The current environment minus the git-redirecting variables (#625),
-    plus an unlimited `claude -p` background-task wait (#1278).
-
-    Every child the driver spawns gets this — `claude` and `uv` run git of
-    their own inside a worktree, so they must not inherit the leak either.
-    An audit fans out shards that outlive `claude -p`'s 600 s default wait
-    ceiling, which terminates the process with no report; `0` waits forever.
-    """
-    env = {k: v for k, v in os.environ.items() if k not in GIT_REDIRECT_VARS}
-    env["CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"] = "0"
-    return env
+    """The current environment minus the git-redirecting variables (#625).
+    Every child the driver spawns gets at least this — `claude` and `uv` run
+    git of their own inside a worktree, so they must not inherit the leak
+    either."""
+    return {k: v for k, v in os.environ.items() if k not in GIT_REDIRECT_VARS}
 
 
-def _run(cmd, cwd=None):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False, env=scrubbed_env())
+def claude_env():
+    """`scrubbed_env` plus an unlimited `claude -p` background-task wait
+    (#1278): an audit fans out shards that outlive `claude -p`'s 600 s
+    default wait ceiling, which terminates the process with no report; `0`
+    waits forever."""
+    return {**scrubbed_env(), "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": "0"}
+
+
+def _run(cmd, cwd=None, env=None):
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False, env=env or scrubbed_env())
 
 
 def git_state(repo, last_sha):
@@ -311,6 +313,23 @@ def collect_from_manifest(manifests_dir, name, collection_dir, dest_name):
     return None
 
 
+def clear_manifest(manifest):
+    """`--out` accumulates: an earlier run's manifest would otherwise prove
+    this run succeeded (#1278)."""
+    if os.path.exists(manifest):
+        os.remove(manifest)
+
+
+def audit_failure(returncode, manifest_failure):
+    """Why one audit's `claude` run failed, or None: a nonzero exit, else
+    what `manifest_failure()` finds wrong with its manifest (#1278)."""
+    return f"exit {returncode}" if returncode != 0 else manifest_failure()
+
+
+def report_failure(label, reason, log_path):
+    print(f"[{label}] FAILED: {reason} — see {log_path}")
+
+
 def run_one(name, repo, outlogs, manifests_dir):
     """Run one audit. Returns None on success, else the failure reason —
     a nonzero `claude` exit or no manifest (#1278); `done` prints only on
@@ -319,20 +338,13 @@ def run_one(name, repo, outlogs, manifests_dir):
     log_path = os.path.join(outlogs, f"{name}.log")
     manifest = manifest_path_for(manifests_dir, name)
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
-    # `--out` accumulates: an earlier run's manifest would otherwise prove
-    # this run succeeded (#1278).
-    if os.path.exists(manifest):
-        os.remove(manifest)
+    clear_manifest(manifest)
     with open(log_path, "w", encoding="utf-8") as log:
-        r = subprocess.run(["claude", *CLAUDE_FLAGS, audit_prompt(name, repo, manifest)], stdout=log, stderr=subprocess.STDOUT, check=False, env=scrubbed_env())
-    if r.returncode != 0:
-        reason = f"exit {r.returncode}"
-    elif read_manifest(manifests_dir, name) is None:
-        reason = "no manifest"
-    else:
-        reason = None
+        r = subprocess.run(["claude", *CLAUDE_FLAGS, audit_prompt(name, repo, manifest)], stdout=log, stderr=subprocess.STDOUT, check=False, env=claude_env())
+    reason = audit_failure(
+        r.returncode, lambda: "no manifest" if read_manifest(manifests_dir, name) is None else None)
     if reason:
-        print(f"[{name}] FAILED: {reason} — see {log_path}")
+        report_failure(name, reason, log_path)
         return reason
     print(f"[{name}] done")
     return None
@@ -635,7 +647,7 @@ def collect(run, repo, plan, base=None):
             "the repo's overall state for the lede of an index page. Plain prose only — no preamble, no "
             f"markdown, no headings, no lists. Files: {' '.join(report_files)}"
         )
-        result = _run(["claude", *CLAUDE_FLAGS, prompt])
+        result = _run(["claude", *CLAUDE_FLAGS, prompt], env=claude_env())
         synthesis = result.stdout.strip()
 
     pagelib.copy_assets(collection, components=INDEX_COMPONENTS)
@@ -708,7 +720,7 @@ def mutation_mode(repo, modules, out):
     if final_targets is None:
         candidates = []
         if os.environ.get("AUDITS_NO_SYNTH", "0") != "1":
-            result = _run(["claude", *CLAUDE_FLAGS, mutation_prepass_prompt(repo)])
+            result = _run(["claude", *CLAUDE_FLAGS, mutation_prepass_prompt(repo)], env=claude_env())
             candidates = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
         max_n = int(os.environ.get("MUTATION_MAX", "10"))
         final_targets = candidates[:max_n]
@@ -750,55 +762,56 @@ def mutation_mode(repo, modules, out):
         return
 
     try:
-        for module in final_targets:
-            _run_mutation_module(repo, module, run)
+        failed = [module for module in final_targets if _run_mutation_module(repo, module, run)]
     finally:
         for d in os.listdir(run.worktrees):
             _run(["git", "-C", repo, "worktree", "remove", "--force", os.path.join(run.worktrees, d)])
         _run(["git", "-C", repo, "worktree", "prune"])
 
     print(f"\ncollection: {collection}")
+    if failed:
+        print(f"FAILED modules: {', '.join(failed)}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _run_mutation_module(repo, module, run):
+    """Audit one module in its own worktree. Returns None on success, else
+    the failure reason — a setup failure, a nonzero `claude` exit or no
+    manifest, the sweep's `run_one` rule (#1278); `done` prints only on
+    success."""
     slug = module_slug(module)
     collection = run.collection
     wt = os.path.join(run.worktrees, slug)
     log = os.path.join(run.logs, f"mutation-{slug}.log")
     manifest = manifest_path_for(run.manifests, slug)
     os.makedirs(os.path.dirname(manifest), exist_ok=True)
+    clear_manifest(manifest)
 
     print(f"[mutation:{module}] creating worktree")
     try:
         with open(log, "w", encoding="utf-8") as f:
             r = subprocess.run(["git", "-C", repo, "worktree", "add", "--detach", wt, "HEAD"], stdout=f, stderr=subprocess.STDOUT, env=scrubbed_env())
         if r.returncode != 0:
-            print(f"[mutation:{module}] worktree creation failed — see {log}", file=sys.stderr)
-            write_setup_failure_report(collection, module, "git worktree add failed")
-            return
-
-        if not (os.path.isfile(os.path.join(wt, "uv.lock")) or os.path.isfile(os.path.join(wt, "pyproject.toml"))):
-            print(f"[mutation:{module}] no recognized env manifest (uv.lock/pyproject.toml) — see {log}", file=sys.stderr)
-            write_setup_failure_report(collection, module, "no recognized env manifest (uv.lock/pyproject.toml); env resolution heuristic ceiling")
-            return
-
-        print(f"[mutation:{module}] resolving env (uv sync)")
-        with open(log, "a", encoding="utf-8") as f:
-            r = subprocess.run(["uv", "sync"], cwd=wt, stdout=f, stderr=subprocess.STDOUT, env=scrubbed_env())
-        if r.returncode != 0:
-            print(f"[mutation:{module}] env resolution failed — see {log}", file=sys.stderr)
-            write_setup_failure_report(collection, module, "uv sync failed")
-            return
-
-        print(f"[mutation:{module}] running /mutation-audit {module}")
-        prompt = f"/mutation-audit {module}\n{manifest_instruction(manifest)}"
-        with open(log, "a", encoding="utf-8") as f:
-            subprocess.run(["claude", *CLAUDE_FLAGS, prompt], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False, env=scrubbed_env())
-
-        reason = collect_from_manifest(run.manifests, slug, collection, slug)
+            reason = "git worktree add failed"
+        elif not (os.path.isfile(os.path.join(wt, "uv.lock")) or os.path.isfile(os.path.join(wt, "pyproject.toml"))):
+            reason = "no recognized env manifest (uv.lock/pyproject.toml); env resolution heuristic ceiling"
+        else:
+            print(f"[mutation:{module}] resolving env (uv sync)")
+            with open(log, "a", encoding="utf-8") as f:
+                r = subprocess.run(["uv", "sync"], cwd=wt, stdout=f, stderr=subprocess.STDOUT, env=scrubbed_env())
+            if r.returncode != 0:
+                reason = "uv sync failed"
+            else:
+                print(f"[mutation:{module}] running /mutation-audit {module}")
+                prompt = f"/mutation-audit {module}\n{manifest_instruction(manifest)}"
+                with open(log, "a", encoding="utf-8") as f:
+                    r = subprocess.run(["claude", *CLAUDE_FLAGS, prompt], cwd=wt, stdout=f, stderr=subprocess.STDOUT, check=False, env=claude_env())
+                reason = audit_failure(
+                    r.returncode, lambda: collect_from_manifest(run.manifests, slug, collection, slug))
         if reason:
-            print(f"[mutation:{module}] {reason} — see {log}", file=sys.stderr)
+            report_failure(f"mutation:{module}", reason, log)
             write_setup_failure_report(collection, module, reason)
+            return reason
     finally:
         # The one cleanup for this worktree — every exit path, including an
         # exception, comes through here (#606). mutation_mode keeps an outer
@@ -806,6 +819,7 @@ def _run_mutation_module(repo, module, run):
         _run(["git", "-C", repo, "worktree", "remove", "--force", wt])
         _run(["git", "-C", repo, "worktree", "prune"])
     print(f"[mutation:{module}] done")
+    return None
 
 
 # --- CLI ----------------------------------------------------------------

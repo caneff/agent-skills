@@ -844,6 +844,14 @@ def test_an_unreadable_parent_is_unresolved_not_unblocked():
     assert "parent" in got["unresolved"][0]["why"], got
 
 
+def test_a_silent_ticket_whose_parent_cannot_be_read_keeps_its_own_reason():
+    # Silence is what a human must fix; the failed parent read is said beside it.
+    got = read([issue(491, body="")], parents={491: F.FrontierError("gh: HTTP 502")})
+    why = got["unresolved"][0]["why"]
+    assert "no `Blocked by` of any form" in why, why
+    assert "its parent could not be read (gh: HTTP 502)" in why, why
+
+
 def test_a_claimed_slice_is_off_the_frontier():
     got = read([issue(491, body=NO_BLOCKERS, assignees=("caneff",))], parents={491: spec_parent()})
     assert got == EMPTY, got
