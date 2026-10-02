@@ -112,3 +112,12 @@ a0d7e43.
 
 No tracked linter or formatter config exists at the repo root, and no suite
 checks line width, naming, unused imports, stale docs or duplication.
+
+## Ruling
+
+2026-10-02, Chris: write four rules into a new `CODING_STANDARDS.md` at the
+repo root — honest messages and tests-and-live-state as rules, wrap width
+and one-home-per-rule as contested. Not written: git `-z`, positional
+indexing and prose placement (thin or uncountable evidence), and the stale
+claim and second copy conventions, which stay stated once as the blocking
+kinds in `implement/SKILL.md`.
