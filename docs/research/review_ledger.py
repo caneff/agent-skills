@@ -22,9 +22,8 @@ normalises drifted outcome labels, and marks each finding unique or shared
 across the reviewers on the same ticket. Every label mapping, unmapped value,
 overlap match and unjoinable disposition goes to the review file. Rows are
 keyed by row id, so harvesting the same tree twice rewrites the same rows; a
-harvest replaces every earlier harvest row. A row `append` wrote stays `append`:
-a harvest rebuilds it without losing any field it knew, and once the 14-day prune
-leaves nothing to rebuild it from, a harvest leaves it as it is (#1304).
+harvest replaces every earlier harvest row, and never deletes a row `append` wrote
+or loses what it knew (`merge_harvest`, #1304).
 A sidecar whose name is off the harvested patterns, an unreadable line and an
 empty sidecar are listed or marked `unknown`, never dropped or read as clean.
 
@@ -921,9 +920,9 @@ def _known(field) -> bool:
 
 
 def _keep_known(old: dict, new: dict) -> dict:
-    """`new`, a harvest's rebuild of the row `old` that `append` wrote, still `append`, with each
-    field `old` knew and `new` reads as unknown taken from `old`: a cost field and the model (a
-    transcript cleaned up since), and a finding's outcome (its dispositions sidecar pruned)."""
+    """`new`, a harvest's rebuild of the row `old` that `append` wrote, kept `append`. `old`'s known
+    cost fields and model win outright; its findings, or a finding's outcome with the label mappings,
+    fill in what `new` reads as unknown."""
     status = {**new["status"], "fields": dict(new["status"]["fields"]),
               "sources": list(dict.fromkeys(new["status"]["sources"] + old["status"]["sources"]))}
     if _known(old["status"]["fields"].get("findings")) and not _known(status["fields"]["findings"]):
@@ -931,15 +930,14 @@ def _keep_known(old: dict, new: dict) -> dict:
         findings = old["findings"]
         status["fields"]["findings"], status["mappings"] = old["status"]["fields"]["findings"], old["status"]["mappings"]
     else:
-        was = {f["id"]: f for f in old.get("findings", []) if f.get("outcome") != "unknown"}
-        findings = [{**f, **{k: was[f["id"]][k] for k in ("outcome", "outcome_status", "partial")}}
-                    if f["outcome"] == "unknown" and f["id"] in was else f for f in new["findings"]]
+        known_outcomes = {f["id"]: f for f in old.get("findings", []) if f.get("outcome") != "unknown"}
+        findings = [{**f, **{k: known_outcomes[f["id"]][k] for k in ("outcome", "outcome_status", "partial")}}
+                    if f["outcome"] == "unknown" and f["id"] in known_outcomes else f for f in new["findings"]]
         if findings != new["findings"]:
             # One dispositions sidecar serves the whole ticket, so a restored outcome means the rebuild
             # joined none and mapped no label: the labels mapped are the ones `old` recorded.
             status["mappings"] = old["status"]["mappings"]
-    # A known cost is append's record of the run and wins outright: a rebuild can read fewer transcripts
-    # than append summed (some cleaned up), or a transcript joined to it from a round whose sidecar is gone.
+    # A rebuild can read fewer transcripts than append summed, or one from a round whose sidecar is gone.
     kept_cost = {k: v for k, v in (old.get("cost") or {}).items() if _known(v)}
     row = {**new, "origin": "append", "status": status, "findings": findings, "cost": {**new["cost"], **kept_cost}}
     if old.get("model"):
@@ -950,9 +948,9 @@ def _keep_known(old: dict, new: dict) -> dict:
 def merge_harvest(ledger: dict, rows: list[dict]) -> None:
     """Replace every earlier harvest row with `rows`, never losing a row `append` wrote (#1304):
     the review cache is pruned after 14 days, so a later harvest may have nothing to rebuild it
-    from. A rebuilt appended row stays `append`, so that later harvest leaves it as it is. A row
-    with no findings sidecar whose every transcript an appended row already holds is that row's
-    run, its sidecar pruned: adding it would count the transcript's cost twice."""
+    from. A rebuilt appended row stays `append`, so that later harvest keeps it, re-splitting only
+    its overlap credit. A transcript-only row whose every transcript an appended row already holds
+    is that row's run, its sidecar pruned: adding it would count the transcript's cost twice."""
     for k in [k for k, r in ledger.items() if r.get("origin") == "harvest"]:
         del ledger[k]
     held = {s for r in ledger.values() if r.get("origin") == "append" for s in r.get("status", {}).get("sources", [])}
