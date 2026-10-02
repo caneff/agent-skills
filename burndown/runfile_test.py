@@ -1899,6 +1899,22 @@ def test_a_file_qualified_id_is_read_as_that_id():
     assert "records S8 as 'fixed'" in got, got
 
 
+def test_a_missing_sweep_leftover_line_is_refused_under_its_qualified_id():
+    # #1315: a file-qualified cite's sidecar line is keyed `<file> <id>`, so
+    # the refusal names that form the first time, not the bare id.
+    sidecar = sidecar_of(dict(LEFTOVER_S3, id="r1-S3"))
+    body = pr_body("## Decisions made\n\n- r1-S3: leftover.\n"
+                   "- **e2e/scenarios.mjs S8**: leftover.\n")
+    got = refusal_of(sidecar, landed_root(), body)
+    assert "records e2e/scenarios.mjs S8 as a leftover" in got, got
+    assert "`id` takes" in got, got
+    # A bare cite's refusal still names the bare id.
+    bare = refusal_of(sidecar, landed_root(),
+                      pr_body("## Decisions made\n\n- r1-S3: leftover.\n"
+                              "- S8: leftover.\n"))
+    assert "records S8 as a leftover" in bare, bare
+
+
 def test_a_file_qualifier_may_carry_a_line_and_a_bare_file_needs_backticks():
     # C1: a line number or #L anchor on the path is part of the qualifier.
     for line in ("- **e2e/scenarios.mjs:42 S8**: fixed",
