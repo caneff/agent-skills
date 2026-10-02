@@ -792,12 +792,14 @@ def test_closing_a_landed_clump_and_landing_a_closed_one_are_refused():
 def test_a_close_names_its_reason():
     root = cache()
     three_clumps(root)
+    refused = []
     for reason in ("", "   ", "two\nlines"):
         try:
             runfile.close("burn-1", 903, reason, root=root)
-        except runfile.RunFileError:
-            continue
-        raise AssertionError(f"a close with reason {reason!r} was recorded")
+        except runfile.RunFileError as exc:
+            refused.append("close reason" in str(exc))
+    assert refused == [True, True, True], refused
+    assert runfile.load("burn-1", root=root)["clumps"][1]["closed"] is None
 
 
 def test_close_from_the_cli_is_what_resume_reads_back():
