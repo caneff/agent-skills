@@ -161,6 +161,21 @@ class AppendRowTest(AppendCase):
         rows = [r for r in self.rows().values() if r["ticket"] == 700]
         self.assertEqual(sorted(r["cost"]["tokens"]["input"] for r in rows), [1, 100])
 
+    def test_a_harvest_never_adds_an_appended_rows_transcript_to_a_harvested_row(self):
+        # codex-gate-1 / V1: round 1 appended, round 2 only harvested, round 1's sidecar pruned.
+        skills = self.cache / "skills"
+        write_jsonl(skills / "findings-verify-700.jsonl", [finding("V1", "judgement", "v.py", "One", axis="verify")])
+        write_jsonl(skills / "findings-verify-700-r2.jsonl", [finding("r2-V1", "judgement", "w.py", "Two", axis="verify")])
+        transcript(self.tr, wt(SKILLS_PROJ, 700), "v1", "Verification pass #700", "Verification of round 1",
+                   [("2026-09-20T10:00:00Z", "m1", usage(100, 0, 0, 0))])
+        transcript(self.tr, wt(SKILLS_PROJ, 700), "v2", "Verification pass round 2 #700", "Verification of round 2",
+                   [("2026-09-21T10:00:00Z", "m1", usage(1, 0, 0, 0))])
+        self.ok(700, "verification", 1)
+        (skills / "findings-verify-700.jsonl").unlink()
+        self.harvest()
+        rows = [r for r in self.rows().values() if r["ticket"] == 700]
+        self.assertEqual(sorted(r["cost"]["tokens"]["input"] for r in rows), [1, 100])
+
     def test_a_harvest_after_the_dispositions_are_pruned_keeps_the_known_outcomes(self):
         self.ok(400, "spec")
         (self.cache / "skills" / "dispositions-400.jsonl").unlink()

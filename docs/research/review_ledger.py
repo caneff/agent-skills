@@ -695,11 +695,12 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
 
 
 def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = None,
-                  only: tuple[str, int] | None = None) -> tuple[list[dict], dict]:
+                  only: tuple[str, int] | None = None, held: frozenset = frozenset()) -> tuple[list[dict], dict]:
     """(rows, review-file facts) for a whole cache tree. `transcripts` is the tree the
     Claude reviewers' cost is read from; None means there is none, for the reason `missing`.
     `only` is (repo, ticket): harvest just that ticket's sidecars and transcripts, which is
-    what `append` does, so its rows are the ones a full harvest writes."""
+    what `append` does, so its rows are the ones a full harvest writes. `held` names the
+    transcripts an appended row already counts, which no row here is costed from (#1304)."""
     pairs = find_sidecar_files(cache)  # FileNotFoundError when the cache is missing
     codex_pairs = find_codex_records(cache)
     if only:
@@ -824,6 +825,7 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
     runs, unattributed, ignored = read_transcripts(transcripts, wanted) if transcripts else ([], [], 0)
     if only:  # a ticket number repeats across repos
         runs = [r for r in runs if _norm_repo(fold_repo(r["repo"])) == _norm_repo(fold_repo(only[0]))]
+    runs = [r for r in runs if r["source"] not in held]
     new_rows, listed = attach_costs(rows, runs, missing)
     rows += new_rows + codex_rows
     rows.sort(key=lambda r: r["row_id"])
@@ -951,22 +953,16 @@ def merge_harvest(ledger: dict, rows: list[dict]) -> tuple[int, list[dict]]:
     """Replace every earlier harvest row with `rows`, never losing a row `append` wrote (#1304):
     the review cache is pruned after 14 days, so a later harvest may have nothing to rebuild it
     from. A rebuilt appended row stays `append`, so that later harvest keeps it, re-splitting only
-    its overlap credit. A transcript-only row whose every transcript an appended row already holds
-    is that row's run, its sidecar pruned: adding it would count the transcript's cost twice.
-    Returns (rows written, the overlap matches of every ticket an appended row is on)."""
+    its overlap credit. Returns (rows written, the overlap matches of every ticket an appended row is on)."""
     for k in [k for k, r in ledger.items() if r.get("origin") == "harvest"]:
         del ledger[k]
     written, matches = 0, []
-    held = {s for r in ledger.values() if r.get("origin") == "append" for s in r.get("status", {}).get("sources", [])}
     for r in rows:
         old = ledger.get(r["row_id"])
-        sources = r["status"]["sources"]
         if old and old.get("origin") == "append":
             # A refusal is the controller's ruling on a run, which the record alone does not say: keep it.
             if not old.get("refusal"):
                 ledger[r["row_id"]], written = _keep_known(old, r), written + 1
-        elif sources and set(sources) <= held and all(Path(s).name.startswith("agent-") for s in sources):
-            continue
         else:
             ledger[r["row_id"]], written = r, written + 1
     # A ticket's harvested findings were scored without its appended rows the harvest could not rebuild.
@@ -989,10 +985,18 @@ def cmd_harvest(args) -> int:
                 transcripts, missing = None, f"transcripts tree not found: {DEFAULT_TRANSCRIPTS}"
         elif not transcripts.is_dir():
             raise FileNotFoundError(f"transcripts tree not found: {transcripts}")
-        rows, facts = harvest_cache(args.cache, transcripts, missing)
         merged = []
-        update_ledger(args.ledger, lambda ledger: merged.append(merge_harvest(ledger, rows)))
-        written, rescored = merged[0]
+
+        def harvest_into(ledger: dict) -> None:
+            # Under the ledger's lock, so no append lands between reading what is held and the merge.
+            # A transcript an appended row holds is counted there, whichever row it would join here.
+            held = frozenset(s for r in ledger.values() if r.get("origin") == "append"
+                             for s in r.get("status", {}).get("sources", []))
+            rows, facts = harvest_cache(args.cache, transcripts, missing, held=held)
+            merged.append((facts, *merge_harvest(ledger, rows)))
+
+        update_ledger(args.ledger, harvest_into)
+        facts, written, rescored = merged[0]
         seen = {_match_key(m) for m in facts["matches"]}
         for m in rescored:  # a match with an appended row the harvest could not rebuild
             if _match_key(m) not in seen:
