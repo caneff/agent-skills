@@ -707,8 +707,9 @@ for want in "r1|witness-mutation red" "g1|witness-mutation green" "cs1|call-site
 done
 # `early` exited 4 without reaching its suite, so the marker is absent and the row must be
 # `unknown`. This holds the marker check only: `decode_status` reads a raw exit status
-# as `unknown` too, so a recipe pointed at the status file still passes here. The
-# status-file wiring is witnessed by the `r1`, `g1` and call-site rows above (#1306).
+# as `unknown` too, so a recipe that handed `append` the raw exit-status file
+# (`status/<id>`) instead of the outcome word (`outcome/<id>`) still passes here. That
+# wiring is witnessed by the `r1`, `g1` and call-site rows above (#1306).
 [ "$(grep -c 'appended 1 row' "$scratch/rows.out")" -eq 5 ] ||
   { echo "FAIL: the run did not append exactly five rows" >&2; cat "$scratch/rows.out" >&2; fail=1; }
 [ "$(row_field r1 'r["cost"]["wall_clock"]["status"]')" = known ] ||
