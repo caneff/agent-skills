@@ -45,7 +45,7 @@ the backstop reads the machine — one `herdr agent get` per live slot — rathe
 than waiting harder on a channel that has nothing to deliver.
 
 Bounded means what it says: one call per live, unlanded slot, no retry, no
-wait, and nothing for a clump that already landed. `sweep` never raises on a
+wait, and nothing for a clump that already landed or closed with no landing. `sweep` never raises on a
 worker's own probe failure either — a herdr that answers for two workers and
 not the third still tells the controller about two, and the third is reported
 as `unreachable`, which is a different fact from `vanished`.

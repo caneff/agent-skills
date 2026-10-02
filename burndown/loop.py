@@ -685,7 +685,7 @@ def resolve_via_binary(agent):
 
 
 def announce(state, send, resolve=resolve_via_binary):
-    """Tell every live, unlanded worker who its controller is now — exactly
+    """Tell every live, unsettled worker who its controller is now — exactly
     one message each, and nothing to anyone else.
 
     `state` is `runfile.reconcile`'s answer; `send(agent, message)` is the
@@ -801,7 +801,7 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
 
     `get(agent, timeout) -> decoded herdr answer` is the caller's probe —
     `herdr agent get <name>`, which the controller runs itself. **Bounded**
-    twice over: at most one call per live, unlanded clump, no retry and no
+    twice over: at most one call per live, unsettled clump, no retry and no
     wait, and the whole sweep inside one `budget` seconds however many slots
     there are. Each probe is handed the budget that is **left**, and a slot
     the deadline did not reach is `unswept` — a slot nobody asked about, read
@@ -821,7 +821,7 @@ def sweep(clumps, get, budget=SWEEP_BUDGET, clock=time.monotonic):
     verdict, so a herdr that answers for two workers and not the third still
     tells the controller about two.
     """
-    workers = [c for c in clumps if not c.get("landed")]
+    workers = [c for c in clumps if not runfile.settled(c)]
     started = clock()
     calls = 0
     read = []
@@ -1015,16 +1015,16 @@ def with_workspace_diffs(in_flight, diff=workspace_diff):
     """The in-flight clumps with each live workspace's real diff unioned into
     the files it owns (#1212). A closure resolved from the ticket's named
     files is frozen at what the controller wrote by hand; the worker's diff
-    is what it actually reached, so the exclusion reads both. A landed clump
-    is skipped: its change is on the default branch and its workspace holds
-    nothing.
+    is what it actually reached, so the exclusion reads both. A landed or
+    closed clump is skipped: its change is on the default branch, or there is
+    none, and its workspace holds nothing.
 
     `diff(workspace) -> [path]`; its `LoopError` is re-raised naming the
     workspace. The clumps passed in are not mutated.
     """
     out = []
     for clump in in_flight:
-        if clump.get("landed"):
+        if runfile.settled(clump):
             out.append(clump)
             continue
         try:
@@ -1037,9 +1037,10 @@ def with_workspace_diffs(in_flight, diff=workspace_diff):
 
 
 def with_run_jobs(in_flight, run):
-    """The in-flight clumps with each `job` read from the run file, matched by
-    the clump's lowest ticket. `closure.py --json` carries no `job`, so the
-    record `runfile.py job` wrote is the only source; a clump the run file
+    """The in-flight clumps with each `job`, and `closed` (#1310), read from
+    the run file, matched by the clump's lowest ticket. `closure.py --json`
+    carries neither, so the records `runfile.py job` and `runfile.py close`
+    wrote are the only source; a clump the run file
     holds no record for is refused here by name, `runfile.py clump` being the
     fix — unless its tickets overlap a clump registered under another key,
     which `runfile.py clump` would refuse, so that refusal names the overlap
@@ -1047,6 +1048,8 @@ def with_run_jobs(in_flight, run):
     refuses naming `runfile.py job`. `run` is the loaded run file."""
     run_id = run["run_id"]
     jobs = {min(entry["tickets"]): entry["job"] for entry in run["clumps"]}
+    closed = {min(entry["tickets"]): entry["closed"]
+              for entry in run["clumps"]}
     owner = {n: min(entry["tickets"]) for entry in run["clumps"]
              for n in entry["tickets"]}
     with_jobs = []
@@ -1067,7 +1070,7 @@ def with_run_jobs(in_flight, run):
                 f"{run_id} — register it with `runfile.py clump` (then "
                 "`runfile.py job`) before dispatching; `runfile.py job` "
                 "alone fails on an unregistered clump")
-        with_jobs.append({**clump, "job": jobs[key]})
+        with_jobs.append({**clump, "job": jobs[key], "closed": closed[key]})
     return with_jobs
 
 
@@ -1224,7 +1227,8 @@ def run(argv):
             # Measured before any early return: a broken herdr or `ps` must
             # refuse here too, not hide behind "nothing to dispatch".
             count, counter, working, unlisted = agent_count(args)
-            # A landed clump awaiting cleanup is not a live worker: it is
+            # A landed clump awaiting cleanup, or one closed with no landing
+            # (#1310), is not a live worker: it is
             # filtered out before the core accounting, the peak live count,
             # and the frontier all see it, so a run file that sets `landed`
             # without ever clearing `job` reads as a freed slot instead of
@@ -1232,8 +1236,8 @@ def run(argv):
             # recorded (#1003) — and its dead workspace (the change is on
             # `main`; the next worker branches from there) never blocks a
             # candidate sharing its closure (Codex gate, PR #1050).
-            unlanded = [c for c in in_flight if not c.get("landed")]
-            cores = core_room(free, unlanded)
+            unsettled = [c for c in in_flight if not runfile.settled(c)]
+            cores = core_room(free, unsettled)
             cores_line = render_cores(cores, free)
             if cores_line:
                 print(cores_line)
@@ -1246,10 +1250,10 @@ def run(argv):
                 # dispatch.
                 print("nothing to dispatch: every free slot is held by a "
                       "declared job")
-                print(render_dispatch([], frontier(candidates, unlanded)["held"],
+                print(render_dispatch([], frontier(candidates, unsettled)["held"],
                                       args.run, repo))
                 return 0
-            live = len(unlanded)
+            live = len(unsettled)
             room, refusals = box_room(count, args.committed_gb,
                                       args.add_gb, cores["room"], counter,
                                       live)
@@ -1258,7 +1262,7 @@ def run(argv):
                     print(f"loop.py: {refusal}", file=sys.stderr)
                 return 1
             print(render_peak(count, live, room, working, unlisted))
-            state = frontier(candidates, unlanded)
+            state = frontier(candidates, unsettled)
             picked, same_tick_held = picks(state, room)
             lines = render_dispatch(picked, state["held"] + same_tick_held,
                                     args.run, repo)

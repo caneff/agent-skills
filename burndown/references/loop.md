@@ -57,7 +57,7 @@ but no closure, and a closure stored at claim time is exactly what goes
 stale. The two are what `loop.py dispatch` reads as `--in-flight`; the job
 record comes from the run file through the required `--run <run-id>`. The
 closure is only what the ticket's named files reach, so dispatch also unions
-each unlanded in-flight workspace's `git diff --name-only
+each unlanded, unclosed in-flight workspace's `git diff --name-only
 origin/<default>...HEAD`, uncommitted edits and untracked files into it
 (#1212): on burn-trs-2026-09-27 two workers ran concurrently in files no
 candidate list named. An unreadable diff refuses the tick rather than reading
@@ -176,8 +176,8 @@ run's.
 A WSL restart renames every Claude session, and every worker's brief
 names its controller in `--controller "<name>"`, a session name that a restart invalidates when the controller had no herdr agent name. So on resume the controller re-announces
 itself — **exactly one message per live, unlanded worker**, which is
-`runfile.reconcile`'s `announce` bucket and only that one. A landed clump's
-worker is finished however its agent looks. A vanished one is reconciled or
+`runfile.reconcile`'s `announce` bucket and only that one. A landed or
+closed clump's worker is finished however its agent looks. A vanished one is reconciled or
 parked by hand; messaging an agent nobody can find is not reconciliation.
 
 `loop.announce` takes the messenger as an argument because sending is
