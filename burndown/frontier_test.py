@@ -997,6 +997,12 @@ def test_a_link_to_another_repo_is_decided_by_its_url_not_its_text():
     assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
 
 
+def test_a_bare_reference_beside_a_foreign_link_is_still_the_parent():
+    body = "## Parent\n\n#483 (mirrors https://github.com/other/place/issues/12)\n"
+    got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    assert got["number"] == 483, got
+
+
 def test_fetch_parent_ignores_a_bare_reference_outside_the_parent_heading():
     body = "## TL;DR\n\n#483 is related.\n"
     assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None

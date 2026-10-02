@@ -96,9 +96,9 @@ SPEC_LABEL = "spec"
 # line, carries `spec`. `/to-tickets` writes it under a `## Parent` heading
 # as `Part of [Spec: ...](https://github.com/<o>/<r>/issues/<n>).` (#1282), and
 # a bare `#<n>` under that heading is the same declaration.
-_PART_OF = re.compile(r"^ {0,3}Part of #(\d+)\b", re.IGNORECASE)
+_PART_OF = re.compile(r"^ {0,3}Part of\b(?:\s+#(\d+)\b)?", re.IGNORECASE)
 _PARENT_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+parent[ \t]*$", re.IGNORECASE)
-_ANY_ISSUE_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/issues/\d+", re.IGNORECASE)
+_LINK = re.compile(r"\[[^\]]*\]\([^)]*\)|https?://\S+")  # text and URL: not a bare #<n>
 _ISSUE_LINK = r"https://github\.com/{repo}/issues/(\d+)\b"
 
 
@@ -433,20 +433,18 @@ def _parent_number(body, repo):
     in_parent = False
     for _, line in visible(body.splitlines()):
         part = _PART_OF.match(line)
-        if part:
+        if part and part.group(1):
             return int(part.group(1))
         if _ANY_HEADING.match(line):
             in_parent = bool(_PARENT_HEADING.match(line))
             continue
         found = link.search(line)
-        if re.match(r"^ {0,3}Part of\b", line, re.IGNORECASE) and found:
+        if found and (part or in_parent):
             return int(found.group(1))
-        if _ANY_ISSUE_URL.search(line) and not found:
-            continue  # another repo's link: its text may name an unrelated #<n>
         if in_parent:
-            found = found or _REFERENCE.search(line)
-            if found:
-                return int(found.group(1))
+            ref = _REFERENCE.search(_LINK.sub("", line))
+            if ref:
+                return int(ref.group(1))
     return None
 
 
