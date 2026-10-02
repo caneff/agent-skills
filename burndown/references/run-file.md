@@ -86,18 +86,23 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 
 ## The job record
 
-Each clump carries what parallel job its worker has out: `null` when nothing
-is on record, `{"state": "running", "cores": <n>}` while a job is out,
-`{"state": "none", "cores": 0}` when the worker declared it launched none, and
-`{"state": "done", "cores": 0}` once it reports the job finished.
+Each clump carries what parallel job its worker has out: `{"state": "none",
+"cores": 0}` from `runfile.py clump` on, since a worker starts with nothing out
+(#1311); `{"state": "running", "cores": <n>}` while a job is out; the same
+`none` record when the worker declared it launched none; and
+`{"state": "done", "cores": 0}` once it reports the job finished. `null` means
+nothing on record and appears only in a file written before jobs existed.
 `runfile.py job <run-id> --clump <n> --cores <k> | --none | --done` writes it.
 
-Three states and not a bare number, because `null` and `none` are different
-facts: a worker nobody recorded and a worker that declared nothing read alike
-to a controller charging cores, and charging the first as the second is the
-dispatch into a loaded box that #894 exists to stop. A file written before
-this field existed still loads — the field is filled in as `null`, which is
-the honest reading of a run that never recorded one.
+Three states and not a bare number. `null` and `none` are different facts: a
+worker nobody recorded and a worker that declared nothing read alike to a
+controller charging cores, and charging the first as the second is the
+dispatch into a loaded box that #894 exists to stop. #1311 accepts that
+trade for a clump just registered: the `none` `runfile.py clump` writes reads
+the same as a declared one, because a controller that waited for the worker's
+first word idled every free slot for the hour before its "PR up". A file
+written before this field existed still loads with `null`, the honest reading
+of a run that never recorded one, and is still refused.
 
 
 ## The PR-up record

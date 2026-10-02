@@ -74,12 +74,16 @@ _TICKET = re.compile(r"[0-9]+\Z")
 # inside the first read a resumed controller does.
 _KEYS = ("run_id", "slots", "controller", "clumps")
 _CLUMP_KEYS = ("tickets", "workspace", "agent", "landed")
-# A clump's parallel-job state. `None` is "nothing on record", which is not
+# A clump's parallel-job state. `None` is "nothing on record" — only a #892-era
+# file has it, since registration records `none` (#1311) — which is not
 # the same fact as "no job": a worker that never declared and a worker that
 # declared none read alike to a controller charging cores, and silence read
 # as zero is the #351 dispatch into a box already at 25.8 load. Absent from
 # a #892-era file, so it is filled in on load rather than demanded.
 _JOB_STATES = ("running", "none", "done")
+# What a clump registered for the first time records: its worker has launched
+# nothing yet (#1311).
+NEW_CLUMP_JOB = {"state": "none", "cores": 0}
 # The keys a `leftover` sidecar line carries.
 _SIDECAR_LEFTOVER_KEYS = ("id", "file", "title", "severity", "text")
 # What one leftover entry holds: the clump that carried the finding, the
@@ -921,8 +925,10 @@ def clump(run_id, tickets, workspace, agent, root=None):
 
     Registering the same lowest ticket again moves the workspace and the agent
     and keeps the landing sha — a clump redispatched after a park is the same
-    clump — and reopens a closed one, which now has a worker again. A ticket that already sits in another clump is refused: one ticket
-    in two clumps is two workers in the same files."""
+    clump — and reopens a closed one, which now has a worker again. A new clump
+    records job `none`: its worker has launched nothing yet (#1311). A ticket
+    that already sits in another clump is refused: one ticket in two clumps is
+    two workers in the same files."""
     tickets = ticket_numbers(tickets)
     workspace = named(workspace, "workspace path")
     agent = named(agent, "herdr agent name")
@@ -947,7 +953,8 @@ def clump(run_id, tickets, workspace, agent, root=None):
                  "landed": same["landed"] if same else None,
                  # A closed clump registered again is dispatched again.
                  "closed": None,
-                 "job": same["job"] if same else None,
+                 # A re-registration keeps a declared job (#1311).
+                 "job": same["job"] if same else NEW_CLUMP_JOB,
                  # A new agent has sent no "PR up" of its own.
                  "pr_up": same["pr_up"] if same and same["agent"] == agent
                  else None}

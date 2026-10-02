@@ -16,7 +16,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runfile  # noqa: E402
-from run_fixtures import drop_repo_field, linked_worktree  # noqa: E402
+from run_fixtures import drop_job, drop_repo_field, linked_worktree  # noqa: E402
 import sweep  # noqa: E402
 
 RUNFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runfile.py")
@@ -278,7 +278,9 @@ def test_a_clump_records_its_tickets_workspace_and_herdr_agent_name():
     got = runfile.load("burn-1", root=root)["clumps"]
     assert got == [{"tickets": [901, 902], "workspace": "/w/implement-901",
                     "agent": "implement-901-42", "landed": None,
-                    "closed": None, "job": None, "pr_up": None}], got
+                    "closed": None,
+                    "job": {"state": "none", "cores": 0},
+                    "pr_up": None}], got
 
 
 def test_a_clump_is_keyed_by_its_lowest_ticket_and_re_registers_in_place():
@@ -1396,11 +1398,23 @@ def test_an_empty_environment_value_reads_as_unset():
     assert runfile.load("burn-1", root=root)["slots"] == 1
 
 
-def test_a_clump_starts_with_no_job_on_record():
+def test_a_clump_starts_with_a_none_job_on_record_1311():
+    """A worker starts with nothing out, so registration records `none`:
+    otherwise `loop.py dispatch` refuses every tick until the worker's "PR up"
+    declares a job, idling the free slots for an hour."""
     root = cache()
     runfile.start("r-job", 3, "dc", root, repo=REPO)
     run = runfile.clump("r-job", [351], "/w/351", "sm-351", root)
-    assert run["clumps"][0]["job"] is None, run
+    assert run["clumps"][0]["job"] == {"state": "none", "cores": 0}, run
+
+
+def test_re_registering_a_clump_keeps_its_declared_job_1311():
+    root = cache()
+    runfile.start("r-job", 3, "dc", root, repo=REPO)
+    runfile.clump("r-job", [351], "/w/351", "sm-351", root)
+    runfile.job("r-job", 351, "running", 4, root)
+    run = runfile.clump("r-job", [351], "/w/351", "sm-351b", root)
+    assert run["clumps"][0]["job"] == {"state": "running", "cores": 4}, run
 
 
 def test_a_declared_job_survives_a_restart():
@@ -1454,12 +1468,7 @@ def test_a_run_file_written_before_jobs_existed_still_reads():
     root = cache()
     runfile.start("r-old", 2, "dc", root, repo=REPO)
     runfile.clump("r-old", [401], "/w/401", "sm-401", root)
-    target = runfile.path("r-old", root)
-    with open(target) as fh:
-        raw = json.load(fh)
-    del raw["clumps"][0]["job"]
-    with open(target, "w") as fh:
-        json.dump(raw, fh)
+    drop_job("r-old", root, 401)
     run = runfile.load("r-old", root)
     assert run["clumps"][0]["job"] is None, run
 
