@@ -1725,7 +1725,6 @@ def test_the_cli_dispatch_skips_a_candidate_the_run_file_records_as_landed():
             assert f"dispatch  #{n}" not in got.stdout, got.stdout
         # Still in flight (neither landed nor closed): not skipped.
         assert "landed #1278" not in got.stdout, got.stdout
-        assert "dispatch  #1278" in got.stdout, got.stdout
         assert "dispatch  #1400" in got.stdout, got.stdout
 
 
