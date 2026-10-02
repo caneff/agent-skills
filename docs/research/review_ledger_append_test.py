@@ -38,6 +38,7 @@ class AppendCase(Case):
         r = run("harvest", "--cache", self.cache, "--transcripts", tr or self.tr, "--ledger", self.ledger,
                 "--review-file", self.tmp / "h.md", home=self.home)
         self.assertEqual(r.returncode, 0, r.stderr)
+        return r
 
     def harvested(self):
         other = self.tmp / "harvested.jsonl"
@@ -192,6 +193,24 @@ class AppendRowTest(AppendCase):
         self.harvest()
         (p1,) = self.rows()["skills/420/spec/1/findings-spec-420"]["findings"]
         self.assertEqual((p1["overlap"], p1["k"]), ("shared", 2))
+
+    def test_a_harvest_reports_the_credit_it_re_split_and_counts_only_rows_it_wrote(self):
+        write_jsonl(self.cache / "skills" / "findings-standards-420.jsonl",
+                    [finding("S1", "hard", "a.py", "Duplicated loader helper")])
+        write_jsonl(self.cache / "skills" / "findings-spec-420.jsonl",
+                    [finding("P1", "hard", "a.py", "loader helper duplicated", axis="spec")])
+        for axis, agent in (("Standards", "s"), ("Spec", "p")):
+            transcript(self.tr, wt(SKILLS_PROJ, 420), agent, f"{axis} review #420", "Repo: x",
+                       [("2026-09-20T10:00:00Z", "m1", usage(1, 1, 1, 1))])
+        self.ok(420, "standards")
+        self.ok(420, "spec")
+        (self.cache / "skills" / "findings-standards-420.jsonl").unlink()
+        # A fresh harvest also writes the standards transcript as a row of its own; this one holds it already.
+        written = len(self.harvested()) - 1
+        out = self.harvest().stdout
+        self.assertIn(f"harvested {written} rows", out)
+        matches = (self.tmp / "h.md").read_text().split("## Overlap matches")[1].split("\n## ")[0]
+        self.assertIn('#420 `a.py`', matches)
 
     def test_other_rows_in_the_ledger_are_kept(self):
         write_jsonl(self.ledger, [{"row_id": "keep", "origin": "harvest", "type": "spec"}])
