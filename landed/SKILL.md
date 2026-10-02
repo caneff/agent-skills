@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: landed
 description: Render recent commits across the workspace's repos as a local HTML review page, and open it in the browser. Use when the user asks what landed, what was committed recently, wants to review recent agent work, or asks to open the landed page.
 ---

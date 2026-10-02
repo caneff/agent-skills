@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: find-skills
 description: >-
   Discover, evaluate, and install agent skills from the open skills ecosystem. Use when the user asks "what other skills", "skills like X", "which skills should we adopt", "find a skill for", or shares a skills repository to assess.

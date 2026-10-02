@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: visual-recap
 description: >-
   Turn a PR, branch, commit, or git diff into an interactive visual recap with

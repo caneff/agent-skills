@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 name: extract-coding-standards
 description: >-
   Extract the coding standards a repo actually enforces from recent PRs, reviews, commits, and current code, and write them into CODING_STANDARDS.md. Use when the user says "extract coding standards", "mine recent commits or PRs for standards", "last N submissions", or "write CODING_STANDARDS".
