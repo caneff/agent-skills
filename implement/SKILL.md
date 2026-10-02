@@ -154,6 +154,17 @@ undone. The stop hook alerts the controller on such a stop, and a burn's
 sweep reads the pane as `stalled`, but both are backstops that fire after
 the time is lost; the send is the report.
 
+**Declare a parallel job before you launch it** (#1311). The controller
+registers your clump with job `none` and dispatches into every free slot
+until you say otherwise, so a job you start past one core — a solve, a
+build, a test gate with several workers — is charged zero until your "PR up"
+unless you declare it first. Before launching one, send the controller one
+message naming the job and its core count, and launch after the send. When it
+finishes, send the controller `job done`. A subagent is a process the
+controller's box check already counts, so it needs no message; the "PR up"
+`Parallel jobs` line stays as the closing statement of everything you
+launched.
+
 ## Light tier
 
 1. Make the change on this branch. Commit with `Closes #<n>` in the body,

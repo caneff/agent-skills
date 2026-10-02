@@ -449,10 +449,13 @@ behind the ranking, and what each source costs when it is read the other way:
 names that job and its **core count** in its report. `runfile.py clump`
 records `none` when it registers the clump, because a worker starts with
 nothing out and a record that waited for its "PR up" idled every free slot
-for the hour before it (#1311). The cost: a job the worker launches before
-its "PR up" is charged nothing until that report, since no step has the
-worker declare earlier. A clump with **no** record at all (a file from before
-jobs existed) is still refused: silence is not zero. The controller records
+for the hour before it (#1311). That default would charge a later job
+nothing, so the worker's half closes it: a worker declares a job past one
+core before it launches it, and says when it finishes
+(`implement/SKILL.md` § Control), and the controller records each such
+message on arrival, not only at "PR up". A clump with **no** record at all
+(a file from before jobs existed) is still refused: silence is not zero. The
+controller records
 the declaration on the clump — `runfile.py job <run-id> --clump <n> --cores
 <k>`, or `--none`, or `--done` when the worker reports it finished — and
 `loop.py dispatch --run <run-id>` reads the charge from **that record**,
