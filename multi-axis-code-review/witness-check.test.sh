@@ -705,8 +705,10 @@ for want in "r1|witness-mutation red" "g1|witness-mutation green" "cs1|call-site
   id="${want%%|*}"; got="$(row_field "$id" 'r["type"] + " " + r["outcome"]')"
   [ "$got" = "${want#*|}" ] || { echo "FAIL: mutation $id's ledger row is '$got', wanted '${want#*|}'" >&2; fail=1; }
 done
-# `early` exited 4 without reaching its suite: its status file says red, and only the
-# marker says otherwise. A row that follows the status file turns class 1 into a red.
+# `early` exited 4 without reaching its suite, so the marker is absent and the row must be
+# `unknown`. This holds the marker check only: `decode_status` reads a raw exit status
+# as `unknown` too, so a recipe pointed at the status file still passes here. The
+# status-file wiring is witnessed by the `r1`, `g1` and call-site rows above (#1306).
 [ "$(grep -c 'appended 1 row' "$scratch/rows.out")" -eq 5 ] ||
   { echo "FAIL: the run did not append exactly five rows" >&2; cat "$scratch/rows.out" >&2; fail=1; }
 [ "$(row_field r1 'r["cost"]["wall_clock"]["status"]')" = known ] ||
