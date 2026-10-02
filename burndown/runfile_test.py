@@ -1907,7 +1907,7 @@ def test_a_missing_sweep_leftover_line_is_refused_under_its_qualified_id():
                    "- **e2e/scenarios.mjs S8**: leftover.\n")
     got = refusal_of(sidecar, landed_root(), body)
     assert "records e2e/scenarios.mjs S8 as a leftover" in got, got
-    assert "`id` takes" in got, got
+    assert "its `id` is the `<file> <id>` form" in got, got
     # A bare cite's refusal still names the bare id.
     bare = refusal_of(sidecar, landed_root(),
                       pr_body("## Decisions made\n\n- r1-S3: leftover.\n"
