@@ -4,6 +4,8 @@
 # named "dead-code" and for "/mutation-audit" — writes a report + the
 # manifest the prompt asked for.
 # FAKE_CLAUDE_NOOP=1 makes every audit, dead-code included, write nothing.
+# FAKE_CLAUDE_MISSING_REPORT=1 makes dead-code write a manifest whose
+# report_path names a file that does not exist (#1292).
 # Any other audit (e.g. "duplication" in the same test run) writes nothing,
 # simulating a crashed/silent process so the driver must render a missing
 # manifest as a named failure, never as a silent skip.
@@ -24,7 +26,7 @@ case "$prompt" in
   /dead-code\ *)
     dir="$(dirname "$manifest")/report"
     mkdir -p "$dir"
-    echo '<html><body>dead-code report</body></html>' >"$dir/report.html"
+    [ -n "${FAKE_CLAUDE_MISSING_REPORT:-}" ] || echo '<html><body>dead-code report</body></html>' >"$dir/report.html"
     mkdir -p "$(dirname "$manifest")"
     printf '{"report_path": "%s/report.html", "count": 1, "headline": "one finding"}\n' "$dir" >"$manifest"
     # A nonzero exit even with a manifest on disk (#1278), when a test asks.
