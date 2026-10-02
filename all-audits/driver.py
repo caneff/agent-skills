@@ -331,10 +331,10 @@ def clear_manifest(manifest):
         os.remove(manifest)
 
 
-def audit_failure(returncode, manifest_failure):
+def audit_failure(returncode, manifest_check):
     """Why one audit's `claude` run failed, or None: a nonzero exit, else
-    what `manifest_failure()` finds wrong with its manifest (#1278)."""
-    return f"exit {returncode}" if returncode != 0 else manifest_failure()
+    what `manifest_check()` finds wrong with its manifest (#1278)."""
+    return f"exit {returncode}" if returncode != 0 else manifest_check()
 
 
 def report_failure(label, reason, log_path):
