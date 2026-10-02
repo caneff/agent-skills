@@ -300,7 +300,8 @@ def read_manifest(manifests_dir, name):
 def manifest_failure(manifests_dir, name):
     """Why `name`'s manifest does not prove success, or None: "no manifest",
     or a manifest naming a missing report. What success means for an audit,
-    shared by `run_one`, mutation mode and `collect_from_manifest` (#1292)."""
+    shared by `run_one` and `collect_from_manifest`, which mutation mode
+    reaches it through (#1292)."""
     manifest = read_manifest(manifests_dir, name)
     if manifest is None:
         return "no manifest"
