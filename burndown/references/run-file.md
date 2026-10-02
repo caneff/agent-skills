@@ -71,7 +71,10 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 - **`closed`** is the one-line reason a clump finished with **no landing of
   its own**, or `null` (#1310): its ticket was found already fixed on the
   default branch, or it was handed to a nested spec run whose landings live in
-  that run's own file. `runfile.py close <run-id> --clump <n> --reason <text>`
+  that run's own file. A nested run's clump is closed once that run has
+  finished, never at the hand-off: a closed clump's files are free to this
+  run's dispatch, which never reads the nested run's file, so closing early
+  dispatches into files its workers are still editing. `runfile.py close <run-id> --clump <n> --reason <text>`
   writes it. A clump is landed or closed, never both: `close` refuses a landed
   clump and `land` a closed one. Recording `main`'s tip as a landing instead is
   a sha with no PR behind it, and `sweep.py counts` then refuses the run over

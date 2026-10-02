@@ -154,7 +154,7 @@ too.
    step 1's resume has nothing to re-announce to — each landing with
    `runfile.py land`, each clump that finishes with no landing of its own
    (its ticket found already fixed on `main`, or handed to a nested spec
-   run) with `runfile.py close <run-id> --clump <n> --reason <text>` rather
+   run, once that run has finished and not at the hand-off) with `runfile.py close <run-id> --clump <n> --reason <text>` rather
    than a `land` at `main`'s tip, which `sweep.py counts` refuses for the
    sidecar no PR wrote, each "PR up" with `runfile.py pr-up <run-id> --clump
    <n> --pr <n>` as it arrives, for § Liveness, and each landing's leftover
