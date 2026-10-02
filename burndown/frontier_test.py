@@ -981,6 +981,17 @@ def test_fetch_parent_reads_a_part_of_link_line_outside_a_parent_heading():
     assert got["number"] == 483, got
 
 
+def test_fetch_parent_reads_a_bare_issue_url_under_the_parent_heading():
+    body = "## Parent\n\nhttps://github.com/owner/repo/issues/483\n"
+    got = F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run())
+    assert got["number"] == 483, got
+
+
+def test_the_parent_section_ends_at_the_next_heading():
+    body = "## Parent\n\nnone yet\n\n## TL;DR\n\nSee #483.\n"
+    assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+
+
 def test_fetch_parent_ignores_a_bare_reference_outside_the_parent_heading():
     body = "## TL;DR\n\n#483 is related.\n"
     assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
