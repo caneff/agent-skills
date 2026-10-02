@@ -150,6 +150,17 @@ class UsageChangeTest(CodexAppendCase):
         self.harvest()
         self.assertEqual(self.rows().get("skills/500/codex-gate/1/codex-adversarial-500-gate"), appended)
 
+    def test_a_harvest_after_the_out_is_pruned_keeps_the_known_findings(self):
+        # The controller writes the .out seconds before the .json, so the prune can take it first.
+        self.record(500, before=f"10 {W1}", after=f"12 {W1}", out=OUT_TWO)
+        self.ok(500, "gate")
+        appended = self.only_row()
+        (self.skills / "codex-adversarial-500-gate.out").unlink()
+        self.harvest()
+        row = self.only_row()
+        self.assertEqual((row["findings"], row["status"]["fields"]["findings"]),
+                         (appended["findings"], appended["status"]["fields"]["findings"]))
+
     def test_other_rows_of_the_ticket_are_not_written(self):
         self.record(500, "gate")
         self.record(500, "second")

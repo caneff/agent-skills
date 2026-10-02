@@ -924,11 +924,16 @@ def _keep_known(old: dict, new: dict) -> dict:
     """`new`, a harvest's rebuild of the row `old` that `append` wrote, still `append`, with each
     field `old` knew and `new` reads as unknown taken from `old`: a cost field and the model (a
     transcript cleaned up since), and a finding's outcome (its dispositions sidecar pruned)."""
-    was = {f["id"]: f for f in old.get("findings", []) if f.get("outcome") != "unknown"}
-    findings = [{**f, **{k: was[f["id"]][k] for k in ("outcome", "outcome_status", "partial")}}
-                if f["outcome"] == "unknown" and f["id"] in was else f for f in new["findings"]]
     status = {**new["status"], "fields": dict(new["status"]["fields"]),
               "sources": list(dict.fromkeys(new["status"]["sources"] + old["status"]["sources"]))}
+    if _known(old["status"]["fields"].get("findings")) and not _known(status["fields"]["findings"]):
+        # The findings source itself is gone (a Codex `.out` pruned before its record): keep them whole.
+        findings = old["findings"]
+        status["fields"]["findings"], status["mappings"] = old["status"]["fields"]["findings"], old["status"]["mappings"]
+    else:
+        was = {f["id"]: f for f in old.get("findings", []) if f.get("outcome") != "unknown"}
+        findings = [{**f, **{k: was[f["id"]][k] for k in ("outcome", "outcome_status", "partial")}}
+                    if f["outcome"] == "unknown" and f["id"] in was else f for f in new["findings"]]
     # A known cost is append's record of the run and wins outright: a rebuild can read fewer transcripts
     # than append summed (some cleaned up), or a transcript joined to it from a round whose sidecar is gone.
     kept_cost = {k: v for k, v in (old.get("cost") or {}).items() if _known(v)}
