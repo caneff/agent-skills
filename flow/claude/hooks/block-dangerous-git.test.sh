@@ -284,6 +284,22 @@ export STUB_LOGIN=caneff STUB_OWNER= \
   STUB_ERR="GraphQL: Could not resolve to a Repository with the name 'caneff/agent-skills'. (repository)"
 RUN_FORBID="could not verify" run "repo gh cannot see is not owned, not a lookup failure" 2 \
   "git push origin main" "pushing to a repo you don't own."
+run "repo gh cannot see: the block carries gh's answer and the token hint" 2 \
+  "git push origin main" "the gh token cannot see it"
+unset STUB_ERR
+export STUB_LOGIN=caneff STUB_OWNER=caneff
+
+# A merge outside any checkout is unverifiable, not foreign (#1309).
+rm -rf "$XDG_CACHE_HOME"
+RUN_CWD="$tmp" RUN_FORBID="you don't own" run "merge outside a checkout is a lookup failure" 2 \
+  "gh pr merge 12 --repo caneff/agent-skills" "could not verify ownership of this checkout (not inside a git checkout)"
+
+# The merge's own login read keeps gh's error text (#1309).
+rm -rf "$XDG_CACHE_HOME"
+run "owned verdict cached for the merge login case" 0 "git push origin main"
+export STUB_LOGIN= STUB_ERR="boom2: login read failed"
+RUN_FORBID="you don't own" run "merge naming a repo, login read failing, keeps gh's text" 2 \
+  "gh pr merge 1 --repo caneff/x" "(gh: boom2: login read failed)"
 unset STUB_ERR
 export STUB_LOGIN=caneff STUB_OWNER=caneff
 
