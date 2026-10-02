@@ -718,8 +718,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    entry in `~/.claude/plugins/installed_plugins.json`: comment
    `Codex pass skipped: <why>` on the PR, append its ledger skip row (below),
    and go to step 4 — a skip adds no trial row. A pass that launched and
-   errored is not a skip: it has a record, and the fail-closed gate below
-   refuses it with a `--refusal` row.
+   errored has a record, so its ledger row is the fail-closed gate's
+   `--refusal` row below, never a skip row.
 
    Then check the plan's usage before every launch of this block (#1204) —
    the gate, and the second and third passes, each a launch:

@@ -443,10 +443,11 @@ def render(buckets):
     for name in BUCKETS:
         for entry in buckets[name]:
             note = ""
-            if name == "blocked" and entry["blockers"]:
-                note = "  (blocked by " + ", ".join(
-                    f"#{n}" for n in entry["blockers"]) + ")"
-            elif name not in ("unblocked", "blocked"):
+            if name == "blocked":
+                if entry["blockers"]:
+                    note = "  (blocked by " + ", ".join(
+                        f"#{n}" for n in entry["blockers"]) + ")"
+            elif name != "unblocked":
                 note = f"  ({entry['why']})"
             lines.append(f"{name:<11} {entry['number']} {entry['title']}{note}")
     return "\n".join(lines)
