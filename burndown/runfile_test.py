@@ -1913,6 +1913,13 @@ def test_a_missing_sweep_leftover_line_is_refused_under_its_qualified_id():
                       pr_body("## Decisions made\n\n- r1-S3: leftover.\n"
                               "- S8: leftover.\n"))
     assert "records S8 as a leftover" in bare, bare
+    assert "<file> <id>" not in bare, bare
+    # The qualified skip is per body line: a bare leftover on a later line is
+    # not shadowed by an earlier line's qualified cite of the same id.
+    later = refusal_of(sidecar, landed_root(), pr_body(
+        "## Decisions made\n\n- r1-S3: leftover.\n"
+        "- **d/a.py S8**: fixed, abc1234.\n- S8: leftover.\n"))
+    assert "records S8 as a leftover" in later, later
 
 
 def test_a_file_qualifier_may_carry_a_line_and_a_bare_file_needs_backticks():
