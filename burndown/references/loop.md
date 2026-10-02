@@ -10,10 +10,13 @@ mechanical half.
 The loop refuses to run from a linked worktree, and says so. Inside one,
 `/implement`'s front-door rule reads the session as a **worker**: the same
 prompt that starts a controller starts a build instead, on the branch that
-worktree holds. The check is `--absolute-git-dir` against `--git-common-dir`,
-not the path's spelling, and the branch is checked against
-`refs/remotes/origin/HEAD` rather than against `main` — a repo whose default
-branch is `trunk` is a checkout, not an exception.
+worktree holds. The one linked worktree it accepts is the `spec-<n>` branch
+`implement-dispatch --spec <n>` makes for the nested `implement-spec` run,
+which is a controller's by construction (#1312). The check is
+`--absolute-git-dir` against `--git-common-dir`, not the path's spelling, and
+the branch is checked against `refs/remotes/origin/HEAD` rather than against
+`main` — a repo whose default branch is `trunk` is a checkout, not an
+exception.
 
 The checkout the controller sits in need not hold the repo the run targets. A
 run against `caneff/sudokumaker-custom-constraints` is driven perfectly well
@@ -28,9 +31,11 @@ step, and it is the step that makes the closures comparable: a clump resolved
 against one repo scan can be checked against every other candidate, and a
 candidate explored later cannot.
 
-So the set is frozen once it is explored. A ticket filed while the run is
-going does not join it; the run drains what it explored, and the next run
-takes the rest. Growing the set mid-run means re-resolving every closure
+So the set is frozen once it is explored, and it stays frozen as clumps land:
+`loop.py dispatch` skips a candidate the run file records as landed or closed
+rather than expecting the file to be pruned (#1313). A ticket filed while the
+run is going does not join it; the run drains what it explored, and the next
+run takes the rest. Growing the set mid-run means re-resolving every closure
 against a new member, which is the full re-exploration below, for a ticket
 nobody is waiting on.
 

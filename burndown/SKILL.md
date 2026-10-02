@@ -29,7 +29,10 @@ necessarily the target repo's checkout: the loop addresses the target with
 linked worktree and says why, because inside one `/implement`'s front-door
 rule reads the session as a **worker** and the same prompt would start a
 build instead of a run. It refuses a detached HEAD and a non-default branch
-too.
+too. The one linked worktree it accepts, and says so, is a `spec-<n>`
+branch: a spec run's nested `implement-spec` run (started through
+`implement-dispatch`, `implement/SKILL.md` § Dispatch) sits there, a
+controller's by construction.
 
 **Open the run.**
 
@@ -84,7 +87,10 @@ too.
    `--run <run-id>` is required, and dispatch reads it from the run file by
    the clump's lowest ticket, ignoring any `job` in the in-flight file.
    `loop.py dispatch` reads a clump the run file records as closed as not
-   live, and then unions each unlanded in-flight workspace's real
+   live, drops any candidate whose lowest ticket is a clump the run file
+   records as landed or closed (printing `landed #<n>: skipped` for each),
+   so the candidates file stays the frozen set and the run file is the
+   progress, and then unions each unlanded in-flight workspace's real
    `git diff --name-only origin/<default>...HEAD`, its uncommitted edits and
    its untracked files into that closure (#1212), so a file the worker
    reached that no candidate list named still holds the clumps that share it;

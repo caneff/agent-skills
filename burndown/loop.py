@@ -19,6 +19,7 @@ Why each rule reads the way it does: `references/loop.md`.
 import argparse
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -46,26 +47,35 @@ def origin_default(run):
             "origin -a`") from None
 
 
+SPEC_BRANCH = re.compile(r"spec-[0-9]+")
+
+
 def seat(run):
     """The branch the controller is sitting on, or a refusal saying why this
     seat is not a controller's.
 
     `run(args) -> stdout` is `git` with the arguments given. Three refusals:
     a linked worktree, a detached HEAD, and any branch other than this
-    checkout's default. Why each, and why the checkout need not hold the
-    target repo: `references/loop.md`.
+    checkout's default. One linked worktree is accepted, and the answer says
+    so: the `spec-<n>` branch `implement-dispatch --spec <n>` creates for the
+    nested `implement-spec` run, a controller's by construction (#1312). Why
+    each, and why the checkout need not hold the target repo:
+    `references/loop.md`.
     """
     git_dir = os.path.realpath(run(["rev-parse", "--absolute-git-dir"]).strip())
     common = run(["rev-parse", "--git-common-dir"]).strip()
     # `--git-common-dir` answers relative to the cwd in an older git, so it is
     # resolved rather than compared as text.
     common = os.path.realpath(common)
+    branch = run(["branch", "--show-current"]).strip()
     if git_dir != common:
+        if SPEC_BRANCH.fullmatch(branch):
+            return (f"{branch} (a spec run's linked worktree: "
+                    "a controller's seat)")
         raise LoopError(
             f"this is a linked worktree ({git_dir}) — inside one, /implement "
             "reads the session as a worker, not a controller. Run the loop "
             "from a primary checkout's default branch.")
-    branch = run(["branch", "--show-current"]).strip()
     if not branch:
         raise LoopError(
             "detached HEAD — neither a controller's seat nor a worker's. "
@@ -961,6 +971,18 @@ def read_clumps(path, live=False, closure=True):
     return clumps
 
 
+def without_settled(candidates, run):
+    """`(kept, skipped)`: the candidates minus those whose lowest ticket is a
+    clump this run has landed or closed, and those lowest tickets in the
+    candidates' order. The candidates file is the frozen set and the run file
+    is the progress, so a finished clump is not offered again (#1313)."""
+    done = {entry["tickets"][0] for entry in run["clumps"]
+            if runfile.settled(entry)}
+    kept = [c for c in candidates if key_of(c) not in done]
+    skipped = [key_of(c) for c in candidates if key_of(c) in done]
+    return kept, skipped
+
+
 def load_run(run_id, root=None):
     """The run file for `run_id`, its refusal as a `LoopError`."""
     try:
@@ -1215,6 +1237,9 @@ def run(argv):
             run = load_run(args.run, root)
             repo = run_target(run)
             in_flight = with_run_jobs(in_flight, run)
+            candidates, skipped = without_settled(candidates, run)
+            for lowest in skipped:
+                print(f"landed #{lowest}: skipped")
             if args.no_workspace_diff:
                 # Said, not silent: this run's exclusion reads only the named
                 # closures, and its output must not read like one that also
