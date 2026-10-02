@@ -296,6 +296,17 @@ def test_audit_exiting_nonzero_fails_the_sweep_even_with_a_manifest():
         assert os.path.isfile(os.path.join(tmp, "out", "collection", "index.html")), "the index is still built"
 
 
+def test_manifest_naming_a_missing_report_fails_the_sweep():
+    """#1292: success in `run_one` is what `collect_from_manifest` means —
+    the manifest's report file exists. The console and exit code must agree
+    with the index's failure row."""
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as cache_dir, tempfile.TemporaryDirectory() as bin_dir:
+        r = _sweep_with_fake_claude(tmp, cache_dir, bin_dir, "dead-code", FAKE_CLAUDE_MISSING_REPORT="1")
+        assert r.returncode != 0, r.stdout + r.stderr
+        assert "[dead-code] FAILED: manifest names a missing report:" in r.stdout, r.stdout
+        assert "[dead-code] done" not in r.stdout, r.stdout
+
+
 def test_stale_manifest_from_an_earlier_run_does_not_count_as_success():
     """#1278: `--out` accumulates, so a rerun into the same dir (the issue's
     own recovery command) finds the last run's manifest. An audit that writes

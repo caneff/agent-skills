@@ -297,18 +297,30 @@ def read_manifest(manifests_dir, name):
     return data
 
 
-def collect_from_manifest(manifests_dir, name, collection_dir, dest_name):
-    """Read `name`'s manifest and copy its report dir into
-    `collection_dir/dest_name`. Returns None on success, else a failure
-    reason: "no manifest" or a manifest naming a missing report. The one
-    seam both the audit sweep and mutation mode use to find a report —
-    never a log-grepping fallback (#559, and #580 for mutation mode)."""
+def manifest_failure(manifests_dir, name):
+    """Why `name`'s manifest does not prove success, or None: "no manifest",
+    or a manifest naming a missing report. What success means for an audit,
+    shared by `run_one` and `collect_from_manifest`, which mutation mode
+    reaches it through (#1292)."""
     manifest = read_manifest(manifests_dir, name)
     if manifest is None:
         return "no manifest"
     report = manifest["report_path"]
     if not os.path.isfile(report):
         return f"manifest names a missing report: {report}"
+    return None
+
+
+def collect_from_manifest(manifests_dir, name, collection_dir, dest_name):
+    """Read `name`'s manifest and copy its report dir into
+    `collection_dir/dest_name`. Returns None on success, else
+    `manifest_failure`'s reason. The one seam both the audit sweep and
+    mutation mode use to find a report — never a log-grepping fallback
+    (#559, and #580 for mutation mode)."""
+    reason = manifest_failure(manifests_dir, name)
+    if reason:
+        return reason
+    report = read_manifest(manifests_dir, name)["report_path"]
     replace_dir(os.path.dirname(report), os.path.join(collection_dir, dest_name))
     return None
 
@@ -320,10 +332,10 @@ def clear_manifest(manifest):
         os.remove(manifest)
 
 
-def audit_failure(returncode, manifest_failure):
+def audit_failure(returncode, manifest_check):
     """Why one audit's `claude` run failed, or None: a nonzero exit, else
-    what `manifest_failure()` finds wrong with its manifest (#1278)."""
-    return f"exit {returncode}" if returncode != 0 else manifest_failure()
+    what `manifest_check()` finds wrong with its manifest (#1278)."""
+    return f"exit {returncode}" if returncode != 0 else manifest_check()
 
 
 def report_failure(label, reason, log_path):
@@ -332,8 +344,8 @@ def report_failure(label, reason, log_path):
 
 def run_one(name, repo, outlogs, manifests_dir):
     """Run one audit. Returns None on success, else the failure reason —
-    a nonzero `claude` exit or no manifest (#1278); `done` prints only on
-    success."""
+    a nonzero `claude` exit, no manifest or a manifest naming a missing
+    report (#1278, #1292); `done` prints only on success."""
     print(f"[{name}] starting")
     log_path = os.path.join(outlogs, f"{name}.log")
     manifest = manifest_path_for(manifests_dir, name)
@@ -341,8 +353,7 @@ def run_one(name, repo, outlogs, manifests_dir):
     clear_manifest(manifest)
     with open(log_path, "w", encoding="utf-8") as log:
         r = subprocess.run(["claude", *CLAUDE_FLAGS, audit_prompt(name, repo, manifest)], stdout=log, stderr=subprocess.STDOUT, check=False, env=claude_env())
-    reason = audit_failure(
-        r.returncode, lambda: "no manifest" if read_manifest(manifests_dir, name) is None else None)
+    reason = audit_failure(r.returncode, lambda: manifest_failure(manifests_dir, name))
     if reason:
         report_failure(name, reason, log_path)
         return reason
