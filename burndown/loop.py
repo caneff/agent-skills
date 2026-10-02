@@ -1087,9 +1087,9 @@ def with_run_jobs(in_flight, run):
                     "tickets; fix the stale one before dispatching")
             raise LoopError(
                 f"#{key} is live but not registered in run "
-                f"{run_id} — register it with `runfile.py clump` (then "
-                "`runfile.py job`) before dispatching; `runfile.py job` "
-                "alone fails on an unregistered clump")
+                f"{run_id} — register it with `runfile.py clump` "
+                "before dispatching, which records the job as `none`; "
+                "`runfile.py job` alone fails on an unregistered clump")
         entry = entries[key]
         with_jobs.append({**clump, "job": entry["job"],
                           "closed": entry["closed"]})

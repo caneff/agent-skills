@@ -89,9 +89,10 @@ long as the job is out, and the reader prints which clump is holding what so
 the controller's status line can carry it.
 
 **The declaration is state on the clump, not an argument to a dispatch.** It
-lives in the run file — `running` with its core count, `none` when the worker
-says it launched nothing, `done` when it reports the job finished — because a
-controller that restarts mid-run has only that file. A hold that lived in one
+lives in the run file — `running` with its core count, `none` from the
+clump's registration on (its worker has launched nothing yet, #1311) or when
+the worker says it launched nothing, `done` when it reports the job
+finished — because a controller that restarts mid-run has only that file. A hold that lived in one
 command line is a hold the resume cannot recover, and the free slot it then
 dispatches into is the 25.8 load above, reached a second time by a controller
 that had already been told. For the same reason a live clump with no record

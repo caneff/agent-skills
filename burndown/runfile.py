@@ -926,8 +926,9 @@ def clump(run_id, tickets, workspace, agent, root=None):
     Registering the same lowest ticket again moves the workspace and the agent
     and keeps the landing sha — a clump redispatched after a park is the same
     clump — and reopens a closed one, which now has a worker again. A new clump
-    records job `none`: its worker has launched nothing yet (#1311). A ticket that already sits in another clump is refused: one ticket
-    in two clumps is two workers in the same files."""
+    records job `none`: its worker has launched nothing yet (#1311). A ticket
+    that already sits in another clump is refused: one ticket in two clumps is
+    two workers in the same files."""
     tickets = ticket_numbers(tickets)
     workspace = named(workspace, "workspace path")
     agent = named(agent, "herdr agent name")
@@ -952,10 +953,7 @@ def clump(run_id, tickets, workspace, agent, root=None):
                  "landed": same["landed"] if same else None,
                  # A closed clump registered again is dispatched again.
                  "closed": None,
-                 # A worker starts with nothing out (#1311): recording `none`
-                 # here is what keeps dispatch from refusing every tick until
-                 # its "PR up". A worker that then launches a job is
-                 # declared with `job`; a re-registration keeps that.
+                 # A re-registration keeps a declared job (#1311).
                  "job": same["job"] if same else NEW_CLUMP_JOB,
                  # A new agent has sent no "PR up" of its own.
                  "pr_up": same["pr_up"] if same and same["agent"] == agent

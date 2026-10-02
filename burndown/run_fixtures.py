@@ -23,9 +23,10 @@ def drop_job(run_id, root, lowest):
     target = runfile.path(run_id, root)
     with open(target) as fh:
         run = json.load(fh)
-    for entry in run["clumps"]:
-        if min(entry["tickets"]) == lowest:
-            del entry["job"]
+    matched = [e for e in run["clumps"] if min(e["tickets"]) == lowest]
+    if not matched:
+        raise KeyError(f"no clump #{lowest} in run {run_id}")
+    del matched[0]["job"]
     with open(target, "w") as fh:
         json.dump(run, fh)
 

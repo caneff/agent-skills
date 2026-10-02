@@ -16,7 +16,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runfile  # noqa: E402
-from run_fixtures import drop_repo_field, linked_worktree  # noqa: E402
+from run_fixtures import drop_job, drop_repo_field, linked_worktree  # noqa: E402
 import sweep  # noqa: E402
 
 RUNFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runfile.py")
@@ -1468,12 +1468,7 @@ def test_a_run_file_written_before_jobs_existed_still_reads():
     root = cache()
     runfile.start("r-old", 2, "dc", root, repo=REPO)
     runfile.clump("r-old", [401], "/w/401", "sm-401", root)
-    target = runfile.path("r-old", root)
-    with open(target) as fh:
-        raw = json.load(fh)
-    del raw["clumps"][0]["job"]
-    with open(target, "w") as fh:
-        json.dump(raw, fh)
+    drop_job("r-old", root, 401)
     run = runfile.load("r-old", root)
     assert run["clumps"][0]["job"] is None, run
 
