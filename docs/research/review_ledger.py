@@ -785,8 +785,8 @@ def harvest_cache(cache: Path, transcripts: Path | None, missing: str | None = N
                     raw["id"], raw["severity"], joined_outcome, raw["file"], raw["title"]))
             # A file named for round 1 whose every id says round 2 holds no round-1 run.
             base_key = (base, name_round)
-            others = [key[1] for key in by_type if key != base_key]
-            if not by_type[base_key] and others and name_round not in others:
+            other_rounds = [row_key[1] for row_key in by_type if row_key != base_key]
+            if not by_type[base_key] and other_rounds and name_round not in other_rounds:
                 del by_type[base_key]
             if lost:
                 findings_status = {"status": "unknown", "reason": f"{lost} unreadable line(s) in the sidecar"}
