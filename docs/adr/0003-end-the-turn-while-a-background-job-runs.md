@@ -25,8 +25,8 @@ when a job exits or its output matches a failure signature
 
 ## Consequences
 
-- The OPERATIONS § Wait sentence is rewritten in the same change that ships
-  the wake mod, not before: removing it first would reopen the lost-wake
+- The sentence in `flow/claude/OPERATIONS.md` § Wait, which this ADR retires,
+  is rewritten in the same change that ships the wake mod, not before: removing it first would reopen the lost-wake
   failure with nothing behind it.
 - Unverified when ruled: whether a mod's `$.prompt.submit` wakes an idle
   session. The mod's ticket probes this first; if it cannot, this ADR
