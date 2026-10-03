@@ -747,7 +747,11 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
             if (fid, body_n) in shadowed:
                 continue
             if fid in held_forms:
-                cite = " or ".join(f"`{h}`" for h in sorted(held_forms[fid]))
+                # The file in backticks, then the id: the one form
+                # `_FILE_QUALIFIER` reads for a root-level file too.
+                cite = " or ".join(
+                    f"`{split_qualified(h)[0]}` {fid}"
+                    for h in sorted(held_forms[fid]))
                 raise RunFileError(
                     f"{body_path}:{body_n} records {fid} as a leftover, but "
                     f"{sidecar_path} holds it only file-qualified — cite it "

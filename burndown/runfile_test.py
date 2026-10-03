@@ -1956,11 +1956,22 @@ def test_a_bare_leftover_cite_is_not_joined_to_a_qualified_sidecar_line():
                    "- S8: leftover.\n")
     got = refusal_of(sidecar_of(held, qualified), landed_root(), body)
     assert "records S8 as a leftover" in got, got
-    assert "cite it as `a.md S8`" in got, got
+    assert "cite it as `a.md` S8" in got, got
     # Every qualified form the sidecar holds is named.
     other = dict(qualified, id="b.md S8", file="b.md")
     both = refusal_of(sidecar_of(held, qualified, other), landed_root(), body)
-    assert "`a.md S8`" in both and "`b.md S8`" in both, both
+    assert "`a.md` S8" in both and "`b.md` S8" in both, both
+    # codex-gate-1: the refusal's own advice, fed back as a body, is read as a
+    # cite of the held line, so a conflicting sidecar outcome is refused.
+    for cite in ("`a.md` S8", "`docs/a.md` S8"):
+        file = cite.split("`")[1]
+        held_q = dict(qualified, id=f"{file} S8", file=file, outcome="fixed",
+                      sha="abc1234")
+        advised = pr_body("## Decisions made\n\n- r1-S3: leftover.\n"
+                          f"- {cite}: leftover.\n")
+        got = refusal_of(sidecar_of(held, held_q), landed_root(), advised)
+        assert f"records {file} S8 as 'leftover'" in got and \
+            "says 'fixed'" in got, got
 
 
 def test_a_file_qualifier_may_carry_a_line_and_a_bare_file_needs_backticks():
