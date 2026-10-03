@@ -2173,7 +2173,6 @@ def test_a_tick_between_the_workers_own_write_and_the_controllers_turn_holds_the
     # into the free slot. The worker then records its own 8-core job with the
     # CLI, in its own process, and no controller turn follows: the next tick
     # must read that record and hold the slots (#1339, owner ruling (b)).
-    import runfile as runfile_module
     with tempfile.TemporaryDirectory() as tmp:
         cand, live, env = run_file_dispatch(tmp, ("none",))
         tick = ("dispatch", "--candidates", cand, "--in-flight", live,
@@ -2182,7 +2181,7 @@ def test_a_tick_between_the_workers_own_write_and_the_controllers_turn_holds_the
         before = loop_py(*tick, env=env)
         assert "dispatch  #500" in before.stdout, before
         wrote = subprocess.run(
-            [sys.executable, runfile_module.__file__, "job", "burn-t",
+            [sys.executable, runfile.__file__, "job", "burn-t",
              "--clump", "351", "--cores", "8"],
             capture_output=True, text=True, timeout=30,
             env={**os.environ, **env})
