@@ -12,6 +12,10 @@ fail=0
 check_in() { # <file> <needle> — fixed-string, case-insensitive
   grep -qiF -- "$2" "$1" || { echo "FAIL $(basename "$1"): missing: $2"; fail=1; }
 }
+# The ceiling the prose quotes is the gate's own constant, so a retune that
+# leaves the prose behind goes red here.
+ceiling=$(sed -n 's/^RESERVE_PERCENT = \([0-9][0-9]*\)$/\1/p' "$here/codex-usage-gate.py")
+[ -n "$ceiling" ] || { echo "FAIL codex-usage-gate.py: no RESERVE_PERCENT"; fail=1; }
 check_not_in() { # <file> <needle> — fixed-string, case-insensitive
   ! grep -qiF -- "$2" "$1" || { echo "FAIL $(basename "$1"): still says: $2"; fail=1; }
 }
@@ -36,7 +40,9 @@ check_in "$here/SKILL.md" 'Codex pass skipped: under size threshold (<churn> < 3
 check_in "$here/SKILL.md" '`--skip-reason size`'
 check_in "$here/SKILL.md" 'no durations row and no trial'
 check_in "$here/SKILL.md" '`needs-codex` label'
-check_in "$here/SKILL.md" 'Codex pass skipped: usage <pct>% at or above reserve ceiling 70%, resets <when>'
+check_in "$here/SKILL.md" "the reserve ceiling, ${ceiling}%"
+check_in "$here/SKILL.md" "Codex pass skipped: usage <pct>% at or above reserve ceiling ${ceiling}%, resets <when>"
+check_in "$here/codex-lane.md" "the ${ceiling}% reserve ceiling"
 check_in "$here/SKILL.md" '`--skip-reason ceiling`'
 check_in "$here/../docs/agents/triage-labels.md" 'reserve ceiling'
 check_in "$here/../docs/agents/triage-labels.md" '`needs-codex`'
