@@ -29,8 +29,8 @@ launches have no PR diff to measure.
 
 The kill switch is `~/.config/agent-skills/codex-reviews-off`, any content:
 while it exists every check is 20, answered before the size check or any
-cache read or live fetch, so a disabled gate costs no RPC. Removing the file re-enables Codex
-reviews.
+cache read or live fetch, so a disabled gate costs no RPC. Removing the file
+re-enables Codex reviews.
 
 A missing, stale or malformed reading is 30, never 0: it is not headroom.
 
