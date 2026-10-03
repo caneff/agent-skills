@@ -14,11 +14,12 @@ human before me, and cannot be taken back.
 ## Gate 2 — the two lanes
 
 **Code file** = anything executed, imported, or wired into the harness:
-`.py/.ts/.js/.sh/.rs`, `settings.json`, hooks, CI config, and a skill's
+`.py/.ts/.js/.sh/.rs`, hooks, CI config, and a skill's
 `SKILL.md` (its body changes what I do). A mixed diff is code.
 **Not code** = `AGENTS.md`, `CLAUDE.md`, `CODING_STANDARDS.md`,
-`Memory/RULES.md`, research notes and the scripts under `docs/research/`
-that nothing imports or runs.
+`Memory/RULES.md`, `settings.json` (Chris, 2026-10-03: never the code
+lane on its own; a hook script it wires in is still code), research notes
+and the scripts under `docs/research/` that nothing imports or runs.
 
 - **Auto-ship** (zero code files): edit on `main`, commit, push,
   report. A fenced code block still gets its format check first (formatters

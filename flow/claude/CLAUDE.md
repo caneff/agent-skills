@@ -27,9 +27,10 @@
   branch cut in place.
   Auto-ship edits and commits on `main` by design.
 - **Gate 2 — code or not?** A code file is anything executed, imported, or
-  wired into the harness — `.py/.ts/.js/.sh/.rs`, `settings.json`, hooks, CI
+  wired into the harness — `.py/.ts/.js/.sh/.rs`, hooks, CI
   config, a skill's `SKILL.md`; a mixed diff is code. `AGENTS.md`,
-  `CLAUDE.md`, `CODING_STANDARDS.md`, `RULES.md` and `docs/research/` are not.
+  `CLAUDE.md`, `CODING_STANDARDS.md`, `RULES.md`, `settings.json` and
+  `docs/research/` are not.
   Code → code lane (workspace from the ticket, `/implement`, PR, the
   controller merges; I merge a `ready-for-human` ticket's PR).
   Not code → auto-ship (edit on `main`, commit, push). Lane mechanics and
