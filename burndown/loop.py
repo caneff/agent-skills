@@ -126,14 +126,6 @@ def directories(clump):
             if posixpath.dirname(p)}
 
 
-def shared_directories(a, b):
-    """The directories two clumps share, a directory and one inside it
-    counting as shared, as `closure.py`'s `subtree_collides` reads it
-    (#1342). Each overlap is named by the outer directory."""
-    return sorted({min(x, y, key=len) for x in directories(a)
-                   for y in directories(b) if x.startswith(y) or y.startswith(x)})
-
-
 def key_of(clump):
     """The clump's lowest ticket — the number its branch and workspace are
     named for."""
@@ -216,10 +208,10 @@ def picks(state, free):
         # though they share no file. The repo root is not a directory here —
         # every root file would hold every other.
         blocker = next((earlier for earlier in picked
-                        if shared_directories(clump, earlier)), None)
+                        if directories(clump) & directories(earlier)), None)
         if blocker is not None:
             held.append({"clump": clump, "holder": key_of(blocker),
-                        "over": shared_directories(clump, blocker),
+                        "over": sorted(directories(clump) & directories(blocker)),
                         "same_tick": True})
             continue
         # Past the free-slot cut the walk goes on so a collision with a pick
