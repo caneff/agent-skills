@@ -126,9 +126,10 @@ def directories(clump):
             if posixpath.dirname(p)}
 
 
-def nested(a, b):
+def _nested(a, b):
     """The directories two clumps share, one inside the other counting, as
-    `closure.py`'s `subtree_collides` reads it (#1342)."""
+    `closure.py`'s `subtree_collides` reads a directory pair (#1342); unlike
+    it, the repo root is left out (`directories`)."""
     return sorted({min(x, y, key=len) for x in directories(a)
                    for y in directories(b) if x.startswith(y) or y.startswith(x)})
 
@@ -215,10 +216,10 @@ def picks(state, free):
         # though they share no file. The repo root is not a directory here —
         # every root file would hold every other.
         blocker = next((earlier for earlier in picked
-                        if nested(clump, earlier)), None)
+                        if _nested(clump, earlier)), None)
         if blocker is not None:
             held.append({"clump": clump, "holder": key_of(blocker),
-                        "over": nested(clump, blocker), "same_tick": True})
+                        "over": _nested(clump, blocker), "same_tick": True})
             continue
         # Past the free-slot cut the walk goes on so a collision with a pick
         # is still named (#1049); a clump that collides with nothing is only
