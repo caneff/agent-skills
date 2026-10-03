@@ -353,6 +353,44 @@ def test_counts_refuses_when_a_findings_sidecar_is_missing_too_1336():
         raise AssertionError("a missing review was read as a clean one")
 
 
+def test_counts_refuses_when_any_one_axis_findings_sidecar_is_missing_1336():
+    axes = ["standards", "spec", "correctness"]
+    for gone in axes:
+        root = cache()
+        reviews = reviews_dir_fixture()
+        run = landed_clump_without_dispositions("burn-" + gone, root)
+        write_findings(reviews, [a for a in axes if a != gone], 901)
+        try:
+            sweep.counts(run, reviews)
+        except runfile.RunFileError as exc:
+            assert "901" in str(exc), exc
+        else:
+            raise AssertionError(f"missing {gone} review read as clean")
+
+
+def test_counts_reads_whitespace_only_findings_sidecars_as_empty_1336():
+    root = cache()
+    reviews = reviews_dir_fixture()
+    run = landed_clump_without_dispositions("burn-blank", root)
+    write_findings(reviews, ["standards", "spec", "correctness"], 901, " \n\n")
+    assert sweep.counts(run, reviews)["leftover"] == 0
+
+
+def test_counts_refuses_a_findings_sidecar_that_is_not_utf8_1336():
+    root = cache()
+    reviews = reviews_dir_fixture()
+    run = landed_clump_without_dispositions("burn-bin", root)
+    write_findings(reviews, ["standards", "spec"], 901)
+    with open(runfile.findings_path(reviews, "correctness", 901), "wb") as fh:
+        fh.write(b"\xff\xfe\n")
+    try:
+        sweep.counts(run, reviews)
+    except runfile.RunFileError as exc:
+        assert "901" in str(exc), exc
+    else:
+        raise AssertionError("an undecodable review was read as clean")
+
+
 def test_counts_refuses_a_non_empty_findings_sidecar_with_no_dispositions_1336():
     root = cache()
     reviews = reviews_dir_fixture()
