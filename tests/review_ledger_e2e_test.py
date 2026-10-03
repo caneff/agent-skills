@@ -239,7 +239,8 @@ class LedgerEndToEnd(Case):
         # verification: V1 judgement 1, $0.01.
         check("verification", rows=1, findings=1, value=1.0, dollars=0.01, value_per_dollar=100.0)
         # Codex: the gate's high is fixed (3) and its medium left over; the second pass's high is fixed (3), its medium
-        # disputed; the second pass cost 12.5 - 10 points of usage. #702's second pass was skipped: a known zero, not a clean pass.
+        # disputed; the second pass cost 12.5 - 10 points of usage. #702's second pass was skipped: a known
+        # zero, not a clean pass.
         check("codex-gate", rows=1, findings=2, value=3.0, leftover_rate=0.5, unknown_usage_rows=1, usage_percent=None)
         check("codex-second", rows=2, skipped_rows=1, clean_rows=0, findings=2, value=3.0, dispute_rate=0.5,
               usage_percent=2.5, unknown_usage_rows=0)

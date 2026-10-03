@@ -764,8 +764,9 @@ The controller merges on a repo Chris owns; Chris reads it after via
    line. Exit 0: launch. Exit 20 (capped) or exit 30 (no fresh,
    readable reading): comment `Codex pass skipped: <printed line>` on the PR,
    launch nothing, write no refused duration row — no run existed to refuse —
-   append its ledger skip row (below), and go to step 4; on the second pass, the pass already collected
-   stands and its dispositions carry on to step 4. An unreadable cache is exit 30, never headroom.
+   append its ledger skip row (below), and go to step 4; on the second
+   pass, the pass already collected stands and its dispositions carry on to
+   step 4. An unreadable cache is exit 30, never headroom.
    Exit 20 also answers usage at or above the reserve ceiling, 70% (#1359),
    so the weekly audit of skipped PRs always has quota left. Its comment is
    `Codex pass skipped: usage <pct>% at or above reserve ceiling 70%, resets <when>`

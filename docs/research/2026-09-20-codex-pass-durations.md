@@ -17,9 +17,9 @@ table starts at the first pass run under #942's shape.
 
 `phase` is where the run launched: `gate` (at PR-up, the merge gate) or
 `second` (#888's conditional re-run). Those two are the live phases.
-`outcome` is `collected`, or the
-reason the gate refused the verdict — `errored`, `raced`, `stale`,
-`unreadable`, or `absent` when no record was written at all. A refused run
+`outcome` is `collected`, or the reason the gate refused the verdict —
+`errored`, `raced`, `stale`, `unreadable`, or `absent` when no record was
+written at all. A refused run
 still gets its row: it spent the same wall clock and the same tokens. An
 `absent` row is the one the controller writes from what it knows, the
 record being the thing that is missing.
