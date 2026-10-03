@@ -131,8 +131,7 @@ from a one-line mention in a doc.
 
 # Agents and jobs
 
-- Every Agent call passes `model` (explore → `sonnet`, review → `opus`; the
-  `agent-model` mod fills in a bare Explore and denies other bare calls);
+- Every Agent call passes `model` (explore → `sonnet`, review → `opus`);
   never a permission-skipping flag.
 - A dispatched agent's status comes from the process table, never the
   terminal tail. Long job → `job-run` + a progress file.
