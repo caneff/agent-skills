@@ -15,17 +15,18 @@ One line on stdout, and an exit status the caller branches on:
       launch nothing, write no duration row
   30  unknown — no fresh, well-formed reading; launch nothing
 
-The kill switch is `~/.config/agent-skills/codex-reviews-off`, any content: while
-it exists every check is 20, answered before any cache read or live fetch, so a
-disabled gate costs no RPC. Removing the file re-enables Codex reviews.
+The kill switch is `~/.config/agent-skills/codex-reviews-off`, any content:
+while it exists every check is 20, answered before any cache read or live
+fetch, so a disabled gate costs no RPC. Removing the file re-enables Codex
+reviews.
 
 A missing, stale or malformed reading is 30, never 0: it is not headroom.
 
 `--percent` prints the worst window's percentage and its reset time
 (`12.5 1790000000`), or `unknown` with exit 30, and is always 0 or 30. It
-ignores the cache and reads live, and the kill switch (a reading is not a
-launch), since a cached reading can be 30 minutes
-old and a pass is shorter than that. The controller takes it just before a
+ignores the cache and reads live, since a cached reading can be 30 minutes
+old and a pass is shorter than that. It also ignores the kill switch: a reading
+is not a launch. The controller takes it just before a
 Codex launch and just after the run, and both go into the pass's record for
 `review_ledger.py` (#1269). The reset time names the window, so two readings
 of different windows are never subtracted.
