@@ -770,8 +770,9 @@ def test_a_closed_clump_reads_closed_in_show_and_survives_a_reload():
     assert "closed: nested spec run" in runfile.render(run), runfile.render(run)
 
 
-def refusal(act):
-    """The `RunFileError` text `act` raises; a call that succeeds fails the test."""
+def landed_closed_refusal(act):
+    """The `RunFileError` text `act` raises when it would record a clump as
+    both landed and closed; a call that succeeds fails the test."""
     try:
         act()
     except runfile.RunFileError as exc:
@@ -784,7 +785,8 @@ def refusal(act):
 def test_closing_a_landed_clump_is_refused():
     root = cache()
     three_clumps(root)
-    assert "abc1234" in refusal(lambda: runfile.close("burn-1", 905, "x", root=root))
+    assert "abc1234" in landed_closed_refusal(
+        lambda: runfile.close("burn-1", 905, "x", root=root))
     assert runfile.load("burn-1", root=root)["clumps"][2]["closed"] is None
 
 
@@ -792,7 +794,7 @@ def test_landing_a_closed_clump_is_refused():
     root = cache()
     three_clumps(root)
     runfile.close("burn-1", 903, "dup", root=root)
-    assert "closed" in refusal(
+    assert "closed" in landed_closed_refusal(
         lambda: runfile.land("burn-1", 903, "def5678", root=root))
     assert runfile.load("burn-1", root=root)["clumps"][1]["landed"] is None
 
