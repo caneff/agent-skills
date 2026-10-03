@@ -295,7 +295,11 @@ def cmd_mark(args) -> int:
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.date):
             raise Stop(ERROR, f"--date {args.date!r} is not YYYY-MM-DD, so the next run could not read the mark")
         repo = repo_name()
-        sha = git("rev-parse", "--verify", "--quiet", f"{args.sha}^{{commit}}").strip()
+        r = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{args.sha}^{{commit}}"],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise Stop(ERROR, f"--sha {args.sha} is not a commit in this checkout")
+        sha = r.stdout.strip()
         text = trial.read_text()
         marks = list(_MARK_RE.finditer(text))
         if not marks:

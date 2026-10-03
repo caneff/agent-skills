@@ -299,9 +299,11 @@ class MarkTest(Case):
         self.assertIn(newest, self.trial.read_text())
 
     def test_mark_refuses_a_sha_that_is_not_a_commit_here(self):
+        self.set_mark("- sudokupad-art: 2026-09-01 " + "0" * 40)  # no skills line, so no descent check
         r = self.mark("--sha", "f" * 40)
         self.assertEqual(r.returncode, 2)
-        self.assertIn(self.root, self.trial.read_text())
+        self.assertIn("is not a commit in this checkout", r.stderr)
+        self.assertNotIn("- skills:", self.trial.read_text())
 
     def test_mark_refuses_a_date_the_next_run_could_not_read(self):
         r = self.mark("--sha", self.root, "--date", "Oct 9")
