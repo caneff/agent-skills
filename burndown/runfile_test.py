@@ -2198,6 +2198,22 @@ def test_an_item_body_line_that_says_not_fixed_is_not_done():
         assert got is not None and "implement/SKILL.md P14" in got, (said, got)
 
 
+def test_two_bullets_sharing_one_file_and_id_are_refused_not_collapsed():
+    # C3: one sidecar line would satisfy both, and the harvest would carry one.
+    ticket = os.path.join(cache(), "dup-ticket.md")
+    with open(ticket, "w") as fh:
+        fh.write("## a.md\n\n- **S1** (low) t — clump #1: x\n"
+                 "- **S1** (low) u — clump #2: y\n")
+    try:
+        runfile.refuse_unaccounted_sweep_items(
+            ticket, pr_body("## Decisions made\n\n- **a.md S1**: leftover.\n"),
+            sidecar_of(sweep_leftover("a.md", "S1")))
+    except runfile.RunFileError as exc:
+        assert "a.md S1" in str(exc) and "twice" in str(exc), exc
+    else:
+        raise AssertionError("a repeated sweep item was accepted")
+
+
 def test_a_ticket_with_no_parsable_item_is_refused_not_passed():
     ticket = os.path.join(cache(), "empty-ticket.md")
     with open(ticket, "w") as fh:
