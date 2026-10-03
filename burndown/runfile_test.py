@@ -770,6 +770,8 @@ def test_a_closed_clump_reads_closed_in_show_and_survives_a_reload():
     assert "closed: nested spec run" in runfile.render(run), runfile.render(run)
 
 
+# Landed and closed are two different facts about one clump; recording
+# both would make the sweep both count its sidecar and skip it.
 def landed_closed_refusal(act):
     """The `RunFileError` text `act` raises when it would record a clump as
     both landed and closed; a call that succeeds fails the test."""
@@ -780,8 +782,6 @@ def landed_closed_refusal(act):
     raise AssertionError("a clump recorded as landed and closed")
 
 
-# Landed and closed are two different facts about one clump; recording
-# both would make the sweep both count its sidecar and skip it.
 def test_closing_a_landed_clump_is_refused():
     root = cache()
     three_clumps(root)
