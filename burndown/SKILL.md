@@ -444,7 +444,8 @@ behind the ranking, and what each source costs when it is read the other way:
    it, the sweep prints herdr's own word.
 
 **A worker declares its job size.** A worker that launches a parallel job
-writes its own record before it launches, and `--done` when it ends
+writes its own record, naming the job's **core count**, before it launches,
+and `--done` when it ends
 (`implement/SKILL.md` § Control, #1339). `runfile.py clump` records `none`
 when it registers the clump, because a worker starts with nothing out and a
 record that waited for its "PR up" idled every free slot for the hour before
