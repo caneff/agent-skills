@@ -92,8 +92,9 @@ def check(name, got, want_status, want_text=None):
 check("headroom", run(cache(44)), 0, "44%")
 # The reserve ceiling (#1359): a launch stops at 70%, so the weekly audit keeps the rest.
 check("one below the ceiling", run(cache(69)), 0, "69%")
-status, out = run(cache(70, resets=time.time() + 2 * DAY))
-when = time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time() + 2 * DAY))
+resets = time.time() + 2 * DAY
+status, out = run(cache(70, resets=resets))
+when = time.strftime("%Y-%m-%d %H:%M", time.localtime(resets))
 assert (status, out) == (20, f"usage 70% at or above reserve ceiling 70%, resets {when}\n"), (status, out)
 check("above the ceiling", run(cache(95)), 20, "reserve ceiling 70%")
 # `--audit` lifts the ceiling to the 100% cap: the audit may spend the reserve.
