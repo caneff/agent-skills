@@ -135,6 +135,16 @@ if [ -f "$durations" ]; then
     grep -qF -- "| $col |" "$durations" ||
       { echo "FAIL: durations file has no '$col' column" >&2; fail=1; }
   done
+  # #1360: the header names the live phases and dates the retirement of
+  # `third`, and no row launched after that date carries it.
+  for needle in 'Those two are the live phases.' 'Retired by #1360 on 2026-10-03: `third`'; do
+    grep -qF -- "$needle" "$durations" ||
+      { echo "FAIL: durations file is missing: $needle" >&2; fail=1; }
+  done
+  late_third=$(awk -F'|' '{ p = $4; d = substr($5, 2, 10); gsub(/ /, "", p) }
+    p == "third" && d > "2026-10-03" { print }' "$durations")
+  [ -z "$late_third" ] ||
+    { echo "FAIL: durations rows carry the retired phase after 2026-10-03: $late_third" >&2; fail=1; }
 fi
 
 # Rule 8: the old unconditional shape is gone — the pass is no longer
