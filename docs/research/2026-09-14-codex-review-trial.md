@@ -272,3 +272,4 @@ Filed from conversation — controller, map #776 merge tail.
 | agent-skills#1339 | #1348 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#1336 | #1349 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#1343 | #1350 | 2 | 0 | 0 | Gate [high]: the new refusal advised a cite form (`a.md S8`) the body parser reads as no citation for a root-level file; no Claude axis raised it; fixed 5cdd9cf. Second [medium]: an explicit bare leftover beside a qualified cite of the same id still escapes the check; fix measured at 55 lines, past the adjacent bound; recorded leftover, filed #1352, fix parked on fix-1343-codex-second-1. |
+| agent-skills#1342 | #1351 | 0 | 1 | 0 | Gate: approve. Second (after the fixture fix) [medium]: cross-tick directory exclusion against live clumps — the correctness axis had it as C1 (leftover) and the ticket names it as loop.py P5; disputed as beyond the ask. |
