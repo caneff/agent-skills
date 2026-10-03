@@ -10,6 +10,8 @@ per-review-type value table.
                              [--round K] [--ledger PATH]
     review_ledger.py append  --repo R --ticket N --type codex-gate|codex-second|codex-third
                              [--skip-reason WHY | --refusal WHY] [--cache DIR] [--ledger PATH]
+    review_ledger.py append  --repo R --type codex-audit (--record PATH [--refusal WHY] | --skip-reason WHY)
+                             [--ledger PATH]
     review_ledger.py report  [--ledger PATH] [--weights FILE] [--prices FILE] [--split 1/k|none]
                              [--format md|json]
 
@@ -63,6 +65,14 @@ status `skipped`, counted in `report`'s `skipped` column and never in `clean pas
 as raced or stale is appended with `--refusal WHY`: its findings describe a diff the PR no longer has, so
 the row holds none and counts as refused, and a later `harvest` keeps it.
 
+An audit row (#1361) is the weekly Codex audit's one run over the merged PRs that skipped the
+gate (`implement/codex-audit-range.py`): `append --type codex-audit --record PATH`, no ticket. The
+record is a JSON object holding `prs` (the PR numbers), `range` (the diff range reviewed), `status`,
+`started`, `completed`, `usage_before` and `usage_after`; findings come from the `.out` beside it.
+Its usage change, refusal and skip follow the pass rows' rules above. Its findings' outcomes are
+`unknown`: the controller confirms each by reading the code and files a ticket, which this row does
+not join. `report` gives it its own row and counts its PRs under `audited PRs`.
+
 Mutation rows (#1270) come only from `append`, one per mutation id: the outcome (`red`, `green`
 or `unknown`) and the mutation's wall clock, no findings and no tokens (a reviewer's tokens stay
 with its correctness row). A status file holds one of the words `red`, `green`, `unknown` (the witness
@@ -95,10 +105,11 @@ _USAGE_FIELDS = {"input": "input_tokens", "output": "output_tokens",
 REVIEW_TYPES = (
     "standards", "spec", "correctness", "over-engineering", "verification",
     "witness-mutation", "call-site-mutation", "codex-gate", "codex-second",
-    "codex-third", "worker-mutation",
+    "codex-third", "codex-audit", "worker-mutation",
 )
 MUTATION_TYPES = ("witness-mutation", "call-site-mutation", "worker-mutation")
 CODEX_TYPES = ("codex-gate", "codex-second", "codex-third")
+AUDIT_TYPE = "codex-audit"
 
 DEFAULT_WEIGHTS = {"hard": 3, "judgement": 1, "high": 3, "medium": 2, "low": 1}
 VALUE_OUTCOMES = ("fixed", "filed")
@@ -126,6 +137,15 @@ _ROUND_ID_RE = re.compile(r"^r(\d+)-")
 _NOT_APPLICABLE = {"status": "not-applicable", "reason": "Codex only; this is a Claude reviewer"}
 _INSIDE_STANDARDS = {"status": "inside-standards",
                      "reason": "over-engineering is written by the standards run; its cost is in that row"}
+
+
+_CODEX_TOKENS = {"status": "not-applicable", "reason": "Codex is costed in wall clock and usage share"}
+
+
+def not_launched_cost(what: str) -> dict:
+    """The cost of a Codex run that never started: zero wall clock and a known zero usage change."""
+    return {"tokens": dict(_CODEX_TOKENS), "wall_clock": {"status": "known", "seconds": 0},
+            "usage_delta": {"status": "known", "delta": 0, "reason": f"the {what} was not launched"}}
 
 
 def unknown_cost(reason: str) -> dict:
@@ -318,7 +338,7 @@ def new_row(row_id, repo, tickets, row_type, rnd, run_id, findings, findings_sta
     """A ledger row: the one place its shape is written. `extra` holds the keys only one kind
     of row carries (a mutation row's `mutation_id` and `outcome`)."""
     return {
-        "row_id": row_id, "origin": origin, "repo": repo, "pr": None, "ticket": tickets[0],
+        "row_id": row_id, "origin": origin, "repo": repo, "pr": None, "ticket": tickets[0] if tickets else None,
         "tickets": tickets, "type": row_type, "round": rnd, "run_id": run_id, "model": model,
         "findings": findings, "cost": cost,
         "status": {
@@ -687,7 +707,7 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
                 sources += [f"{repo_dir.name}/dispositions-{g}.jsonl" for g in groups]
         rows.append(new_row(
             f"{repo}/{ticket}/codex-{phase}/1/{stem}", repo, [ticket], f"codex-{phase}", 1, stem, findings, fstatus,
-            sources, cost={"tokens": {"status": "not-applicable", "reason": "Codex is costed in wall clock and usage share"},
+            sources, cost={"tokens": dict(_CODEX_TOKENS),
                            "wall_clock": _codex_wall(rec),
                            "usage_delta": _usage_delta(rec.get("usage_before"), rec.get("usage_after"))},
             extra=extra))
@@ -1127,9 +1147,7 @@ def cmd_append_codex(args) -> int:
         stem = f"codex-skipped-{args.ticket}-{phase}"
         mine = [new_row(f"{repo}/{args.ticket}/{args.type}/1/{stem}", repo, [args.ticket], args.type, 1, stem, [],
                         {"status": "skipped", "reason": args.skip_reason}, [],
-                        cost={"tokens": {"status": "not-applicable", "reason": "Codex is costed in wall clock and usage share"},
-                              "wall_clock": {"status": "known", "seconds": 0},
-                              "usage_delta": {"status": "known", "delta": 0, "reason": "the pass was not launched"}},
+                        cost=not_launched_cost("pass"),
                         extra={"skip_reason": args.skip_reason})]
     else:
         try:
@@ -1151,6 +1169,69 @@ def cmd_append_codex(args) -> int:
             row["status"]["fields"]["findings"] = {"status": "refused", "reason": args.refusal}
             row["refusal"] = args.refusal
     return _write_appended(args, mine)
+
+
+def cmd_append_audit(args) -> int:
+    """Write the row of the weekly Codex audit that just ran, or of one not launched. It covers many
+    PRs and no one ticket, so it carries `prs` and `range` from its record in place of a ticket."""
+    def refuse(why: str) -> int:
+        print(f"review_ledger append: {AUDIT_TYPE}: {why}", file=sys.stderr)
+        return 2
+    if args.ticket is not None or args.cache is not None:
+        return refuse("an audit row takes no --ticket or --cache: it covers the PRs its record names")
+    if args.round != 1:
+        return refuse("an audit row is round 1")
+    if args.mutation_id or args.status_file or args.outcome or args.seconds is not None or args.transcripts:
+        return refuse("--mutation-id, --status-file, --outcome, --seconds and --transcripts are not for an audit row")
+    if (args.record is None) == (args.skip_reason is None):
+        return refuse("give exactly one of --record and --skip-reason")
+    repo = fold_repo(args.repo)
+    if args.skip_reason is not None:
+        if not args.skip_reason.strip() or args.refusal is not None:
+            return refuse("--skip-reason is a non-empty reason, alone: an audit not launched has no record")
+        stem = f"codex-audit-skipped-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}"
+        row = new_row(f"{repo}/audit/{AUDIT_TYPE}/1/{stem}", repo, [], AUDIT_TYPE, 1, stem, [],
+                      {"status": "skipped", "reason": args.skip_reason}, [], cost=not_launched_cost("audit"),
+                      origin="append", extra={"skip_reason": args.skip_reason, "prs": [], "range": None})
+    else:
+        try:
+            rec = json.loads(args.record.read_text())
+        except (OSError, ValueError) as e:
+            return refuse(f"record {args.record}: {e}")
+        if not isinstance(rec, dict) or not isinstance(rec.get("prs"), list) \
+                or not all(isinstance(n, int) for n in rec["prs"]) or not isinstance(rec.get("range"), str):
+            return refuse(f"record {args.record} needs `prs`, a list of PR numbers, and `range`, a string")
+        findings, fstatus = [], {"status": "known"}
+        if "status" not in rec:
+            fstatus = {"status": "refused", "reason": "the audit record has no status: whether the run finished is unknown"}
+        elif rec["status"] != 0:
+            fstatus = {"status": "refused", "reason": f"the audit run exited {rec['status']!r}"}
+        elif args.refusal is not None:
+            if not args.refusal.strip():
+                return refuse("--refusal needs the reason")
+            fstatus = {"status": "refused", "reason": args.refusal}
+        else:
+            out = args.record.with_suffix(".out")
+            parsed, why = parse_codex_out(out.read_text()) if out.is_file() else (None, f"no {out.name}")
+            if parsed is None:
+                fstatus = {"status": "unknown", "reason": why}
+            unconfirmed = Joined.unknown("the controller confirms an audit finding by reading the code; not joined here")
+            for k, f in enumerate(parsed or [], 1):
+                findings.append({**_finding_entry(f"{AUDIT_TYPE}-{k}", f["severity"], unconfirmed, f["file"], f["title"]),
+                                 "overlap": "unique", "k": 1})
+        stem = args.record.stem
+        row = new_row(f"{repo}/audit/{AUDIT_TYPE}/1/{stem}", repo, [], AUDIT_TYPE, 1, stem, findings, fstatus,
+                      [str(args.record)],
+                      cost={"tokens": dict(_CODEX_TOKENS), "wall_clock": _codex_wall(rec),
+                            "usage_delta": _usage_delta(rec.get("usage_before"), rec.get("usage_after"))},
+                      origin="append", extra={"prs": rec["prs"], "range": rec["range"],
+                                              **({"refusal": args.refusal} if args.refusal else {})})
+    try:
+        update_ledger(args.ledger, lambda ledger: ledger.update({row["row_id"]: row}))
+    except ValueError as e:
+        return refuse(str(e))
+    print(f"appended 1 row to {args.ledger}: {row['row_id']}")
+    return 0
 
 
 def _write_appended(args, mine: list[dict], refresh: list[dict] = ()) -> int:
@@ -1186,6 +1267,14 @@ def cmd_append(args) -> int:
     ends before its dispositions exist, so its findings' outcomes are `unknown` until the
     verification pass appends: that append, run after it writes the dispositions, also
     refills the findings of every axis row of its round already in the ledger."""
+    if args.type == AUDIT_TYPE:
+        return cmd_append_audit(args)
+    if args.ticket is None:
+        print(f"review_ledger append: {args.type} needs --ticket", file=sys.stderr)
+        return 2
+    if args.record is not None:
+        print(f"review_ledger append: --record is for {AUDIT_TYPE}, not {args.type}", file=sys.stderr)
+        return 2
     if args.type not in CODEX_TYPES and (args.skip_reason is not None or args.refusal is not None):
         print(f"review_ledger append: --skip-reason and --refusal are for codex types, not {args.type}",
               file=sys.stderr)
@@ -1269,7 +1358,7 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
         rate = lambda outcome: (sum(f["outcome"] == outcome for f in known) / len(known)) if known else None
         inside = t == "over-engineering"
         mutation = t in MUTATION_TYPES
-        codex = t in CODEX_TYPES
+        codex = t in CODEX_TYPES or t == AUDIT_TYPE
         usage = [r["cost"].get("usage_delta", {}) for r in mine] if codex else []
         known_usage = [u["delta"] for u in usage if u["status"] == "known"]
         outcomes = Counter(r.get("outcome") for r in mine) if mutation else Counter()
@@ -1304,6 +1393,7 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
             # A refused Codex pass (usage limit, failed run) found nothing because it reviewed nothing:
             # counted here, never in `clean_rows`, which holds only Codex passes that read the diff and found no
             # finding; a Claude row's empty sidecar is `unknown`, so that column is n/a for them.
+            "audited_prs": sum(len(r.get("prs") or []) for r in mine) if t == AUDIT_TYPE else None,
             "refused_rows": sum(r["status"]["fields"]["findings"]["status"] == "refused" for r in mine),
             "clean_rows": sum(r["status"]["fields"]["findings"]["status"] == "known" and not r["findings"]
                               for r in mine) if t.startswith("codex-") else None,
@@ -1370,13 +1460,13 @@ def cmd_report(args) -> int:
         return 0
     print("| type | rows | findings | value | unique share | leftover rate | dispute rate "
           "| unknown outcomes | unweighted | unknown-findings rows | unknown-cost rows "
-          "| refused | skipped | clean passes | usage % | unknown usage | tokens | wall clock | dollars | value per dollar | red rate | unknown mutations |")
-    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+          "| refused | skipped | clean passes | audited PRs | usage % | unknown usage | tokens | wall clock | dollars | value per dollar | red rate | unknown mutations |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for t in result["types"]:
         print(f"| {t['type']} | {t['rows']} | {_n(t['findings'])} | {_n(t['value'], '.2f')} | {_pct(t['unique_share'])} "
               f"| {_pct(t['leftover_rate'])} | {_pct(t['dispute_rate'])} | {_n(t['unknown_outcomes'])} "
               f"| {_n(t['unweighted'])} | {t['unknown_finding_rows']} | {t['unknown_cost_rows']} "
-              f"| {t['refused_rows']} | {_n(t['skipped_rows'])} | {_n(t['clean_rows'])} "
+              f"| {t['refused_rows']} | {_n(t['skipped_rows'])} | {_n(t['clean_rows'])} | {_n(t['audited_prs'])} "
               f"| {_n(t['usage_percent'], 'g')} | {_n(t['unknown_usage_rows'])} "
               f"| {' | '.join(_cost_cells(t))} | {_pct(t['red_rate'])} | {_n(t['unknown_mutations'])} |")
     print()
@@ -1396,8 +1486,8 @@ def main(argv=None) -> int:
     h.set_defaults(func=cmd_harvest)
     a = sub.add_parser("append")
     a.add_argument("--repo", required=True, help="the review cache's repo directory name")
-    a.add_argument("--ticket", type=int, required=True)
-    a.add_argument("--type", choices=APPEND_TYPES + MUTATION_TYPES + CODEX_TYPES, required=True)
+    a.add_argument("--ticket", type=int, help=f"every type but {AUDIT_TYPE}")
+    a.add_argument("--type", choices=APPEND_TYPES + MUTATION_TYPES + CODEX_TYPES + (AUDIT_TYPE,), required=True)
     a.add_argument("--round", type=int, default=1)
     a.add_argument("--cache", type=Path, default=None, help=f"default {REVIEWS_ROOT}")
     a.add_argument("--mutation-id", help="a mutation type: the id the mutation is reported by")
@@ -1405,6 +1495,7 @@ def main(argv=None) -> int:
     a.add_argument("--outcome", choices=MUTATION_OUTCOMES, help="a mutation type: the outcome, when no status file")
     a.add_argument("--refusal", help="a codex type: the run was refused (raced, stale), and why; its usage still counts")
     a.add_argument("--skip-reason", help="a codex type: the pass was not launched, and why; no record is read")
+    a.add_argument("--record", type=Path, help=f"{AUDIT_TYPE}: the audit run's record; its .out sits beside it")
     a.add_argument("--seconds", type=float, help="a mutation type: the mutation's wall clock")
     a.add_argument("--transcripts", type=Path, help=f"default {DEFAULT_TRANSCRIPTS}")
     a.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)

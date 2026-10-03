@@ -247,5 +247,135 @@ class FlagTest(CodexAppendCase):
         self.assertIn("round 1", r.stderr)
 
 
+class AuditTest(CodexAppendCase):
+    """`append --type codex-audit` (#1361): the weekly audit's one run over the PRs that skipped the gate."""
+    PRS, RANGE = [101, 104, 107], "aaa..bbb"
+
+    def audit_record(self, before=f"10 {W1}", after=f"14 {W1}", out=OUT_TWO, status=0, name="2026-10-09",
+                     drop=(), **fields):
+        """An audit record at its own path per `name`; `fields` replace its values, `drop` removes keys."""
+        rec = {"prs": self.PRS, "range": self.RANGE, "status": status, "started": STARTED, "completed": COMPLETED,
+               "usage_before": before, "usage_after": after, **fields}
+        for key in drop:
+            rec.pop(key)
+        path = self.skills / f"codex-audit-{name}.json"
+        self.skills.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(rec) + "\n")
+        if out is not None:
+            path.with_suffix(".out").write_text(out)
+        return path
+
+    def audit(self, *extra):
+        return run("append", "--repo", "skills", "--type", "codex-audit", "--ledger", self.ledger, *extra,
+                   home=self.home)
+
+    def report(self):
+        r = run("report", "--ledger", self.ledger, "--format", "json", home=self.home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return {t["type"]: t for t in json.loads(r.stdout)["types"]}
+
+    def test_an_audit_row_holds_its_prs_range_usage_change_and_findings(self):
+        r = self.audit("--record", self.audit_record())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        row = self.only_row()
+        self.assertEqual((row["type"], row["prs"], row["range"]), ("codex-audit", self.PRS, self.RANGE))
+        self.assertEqual(row["cost"]["usage_delta"], {"status": "known", "before": 10.0, "after": 14.0, "delta": 4.0})
+        self.assertEqual(row["cost"]["wall_clock"]["seconds"], 150)
+        self.assertEqual([f["severity"] for f in row["findings"]], ["high", "medium"])
+        self.assertEqual(row["status"]["fields"]["findings"], {"status": "known"})
+
+    def test_the_report_counts_an_audit_under_its_own_audit_column(self):
+        self.audit("--record", self.audit_record())
+        self.record(500, before=f"1 {W1}", after=f"2 {W1}")
+        self.ok(500, "gate")
+        types = self.report()
+        self.assertEqual((types["codex-audit"]["rows"], types["codex-audit"]["audited_prs"]), (1, 3))
+        self.assertEqual(types["codex-audit"]["usage_percent"], 4.0)
+        self.assertIsNone(types["codex-gate"]["audited_prs"])
+        md = run("report", "--ledger", self.ledger, home=self.home).stdout
+        header = [c.strip() for c in md.splitlines()[0].strip("|").split("|")]
+        (audit_line,) = [line for line in md.splitlines() if line.startswith("| codex-audit |")]
+        cells = [c.strip() for c in audit_line.strip("|").split("|")]
+        self.assertEqual(cells[header.index("audited PRs")], "3")
+
+    def test_usage_change_follows_the_two_reading_rule(self):
+        for before, after, why in ((None, f"14 {W1}", "before reading missing"),
+                                   (f"10 {W1}", f"1 {W2}", "different windows"),
+                                   (f"10 {W1}", f"9 {W1}", "usage fell")):
+            self.audit("--record", self.audit_record(before=before, after=after))
+            delta = self.only_row()["cost"]["usage_delta"]
+            self.assertEqual(delta["status"], "unknown", why)
+            self.assertIn(why, delta["reason"])
+            self.ledger.unlink()
+
+    def test_an_audit_that_failed_is_a_refusal_with_no_findings(self):
+        self.audit("--record", self.audit_record(status=1, out=OUT_REFUSED))
+        row = self.only_row()
+        self.assertEqual((row["findings"], row["status"]["fields"]["findings"]["status"]), ([], "refused"))
+        self.audit("--record", self.audit_record(), "--refusal", "range moved")
+        row = self.only_row()
+        self.assertEqual((row["findings"], row["refusal"]), ([], "range moved"))
+        self.assertEqual(row["cost"]["usage_delta"]["delta"], 4.0)
+        self.assertEqual(self.report()["codex-audit"]["refused_rows"], 1)
+
+    def test_an_unreadable_out_is_unknown_never_a_clean_audit(self):
+        self.audit("--record", self.audit_record(out=None))
+        self.assertEqual(self.only_row()["status"]["fields"]["findings"]["status"], "unknown")
+        self.assertEqual(self.report()["codex-audit"]["clean_rows"], 0)
+
+    def test_an_audit_not_launched_is_a_skipped_row(self):
+        r = self.audit("--skip-reason", "ceiling")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        row = self.only_row()
+        self.assertEqual((row["type"], row["skip_reason"], row["cost"]["usage_delta"]["delta"]),
+                         ("codex-audit", "ceiling", 0))
+        self.assertEqual(self.report()["codex-audit"]["skipped_rows"], 1)
+
+    def test_a_later_harvest_keeps_the_audit_row(self):
+        self.audit("--record", self.audit_record())
+        self.record(500, before=f"1 {W1}", after=f"2 {W1}")  # harvest refuses a cache with no record at all
+        self.harvest()
+        (row,) = [r for r in self.rows().values() if r["type"] == "codex-audit"]
+        self.assertEqual(row["prs"], self.PRS)
+
+    def test_a_bad_audit_append_is_refused_by_its_own_guard_and_writes_nothing(self):
+        good = self.audit_record()
+        cases = [
+            (["--record", good, "--ticket", "500"], "takes no --ticket or --cache"),
+            (["--record", good, "--cache", self.cache], "takes no --ticket or --cache"),
+            (["--record", good, "--round", "2"], "is round 1"),
+            (["--record", good, "--seconds", "3"], "are not for an audit row"),
+            ([], "exactly one of --record and --skip-reason"),
+            (["--record", good, "--skip-reason", "x"], "exactly one of --record and --skip-reason"),
+            (["--skip-reason", " "], "non-empty reason"),
+            (["--record", self.tmp / "absent.json"], "absent.json"),
+            (["--record", self.audit_record(name="prs-not-ints", prs=["101"])], "needs `prs`"),
+            (["--record", self.audit_record(name="prs-missing", drop=("prs",))], "needs `prs`"),
+            (["--record", self.audit_record(name="range-not-str", range=7)], "needs `prs`"),
+            (["--record", good, "--refusal", " "], "--refusal needs the reason"),
+        ]
+        for extra, why in cases:
+            r = self.audit(*extra)
+            self.assertEqual(r.returncode, 2, extra)
+            self.assertIn(f"codex-audit: ", r.stderr, extra)
+            self.assertIn(why, r.stderr, extra)
+        self.assertFalse(self.ledger.exists())
+
+    def test_a_record_with_no_status_is_refused_saying_so(self):
+        self.audit("--record", self.audit_record(drop=("status",)))
+        fstatus = self.only_row()["status"]["fields"]["findings"]
+        self.assertEqual(fstatus["status"], "refused")
+        self.assertIn("has no status", fstatus["reason"])
+
+    def test_a_pass_type_still_needs_its_ticket_and_takes_no_record(self):
+        for extra, why in ((["--type", "codex-gate", "--skip-reason", "size"], "codex-gate needs --ticket"),
+                           (["--type", "spec", "--cache", self.cache], "spec needs --ticket"),
+                           (["--type", "codex-gate", "--ticket", "500", "--skip-reason", "size",
+                             "--record", self.audit_record()], "--record is for codex-audit, not codex-gate")):
+            r = run("append", "--repo", "skills", "--ledger", self.ledger, *extra, home=self.home)
+            self.assertEqual(r.returncode, 2, extra)
+            self.assertIn(why, r.stderr)
+        self.assertFalse(self.ledger.exists())
+
 if __name__ == "__main__":
     unittest.main()
