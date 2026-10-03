@@ -24,6 +24,15 @@ table and the keep/drop recommendation, then moves the date to its own row.
 Added because the trigger had become uncomputable — 44 rows had landed with
 no record of which had already been read.
 
+**Rationing (#1357).** From the date below, a heavy Claude-lane PR gets the
+merge-gate pass only when its non-test, non-Markdown churn is at least 300
+lines or a ticket of its clump carries `needs-codex` (#1358), and no PR pass
+launches at or above 70 % weekly usage (#1359); skipped PRs are reviewed
+together by a weekly audit. The code landed 2026-10-03; rationing takes
+effect when the kill switch (#1354) is removed. **Rationing took effect:**
+_not yet — filled in at #1363_. Rows dated after it come from rationed PRs
+only.
+
 | Ticket | PR | codex-only, confirmed | also found by Claude | disputed | codex-only confirmed findings |
 |---|---|---|---|---|---|
 | #814 | #816 | 1 | 2 | 1 | Documented worker invocation interpolated the ticket body directly into a double-quoted shell string (`"<ticket body verbatim>"`), so a body containing `"`, backticks, or `$(` would run as shell instead of reading as text. |
