@@ -251,12 +251,14 @@ class AuditTest(CodexAppendCase):
     """`append --type codex-audit` (#1361): the weekly audit's one run over the PRs that skipped the gate."""
     PRS, RANGE = [101, 104, 107], "aaa..bbb"
 
-    def audit_record(self, before=f"10 {W1}", after=f"14 {W1}", out=OUT_TWO, status=0, **drop):
+    def audit_record(self, before=f"10 {W1}", after=f"14 {W1}", out=OUT_TWO, status=0, name="2026-10-09",
+                     drop=(), **fields):
+        """An audit record at its own path per `name`; `fields` replace its values, `drop` removes keys."""
         rec = {"prs": self.PRS, "range": self.RANGE, "status": status, "started": STARTED, "completed": COMPLETED,
-               "usage_before": before, "usage_after": after}
+               "usage_before": before, "usage_after": after, **fields}
         for key in drop:
             rec.pop(key)
-        path = self.skills / "codex-audit-2026-10-09.json"
+        path = self.skills / f"codex-audit-{name}.json"
         self.skills.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(rec) + "\n")
         if out is not None:
@@ -336,16 +338,44 @@ class AuditTest(CodexAppendCase):
         (row,) = [r for r in self.rows().values() if r["type"] == "codex-audit"]
         self.assertEqual(row["prs"], self.PRS)
 
-    def test_a_bad_audit_append_is_refused_and_writes_nothing(self):
+    def test_a_bad_audit_append_is_refused_by_its_own_guard_and_writes_nothing(self):
         good = self.audit_record()
-        for extra in (["--record", good, "--ticket", "500"], [], ["--record", self.tmp / "absent.json"],
-                      ["--record", self.audit_record(prs=1)], ["--record", self.audit_record(range=1)],
-                      ["--record", good, "--skip-reason", "x"], ["--skip-reason", " "]):
+        cases = [
+            (["--record", good, "--ticket", "500"], "takes no --ticket or --cache"),
+            (["--record", good, "--cache", self.cache], "takes no --ticket or --cache"),
+            (["--record", good, "--round", "2"], "is round 1"),
+            (["--record", good, "--seconds", "3"], "are not for an audit row"),
+            ([], "exactly one of --record and --skip-reason"),
+            (["--record", good, "--skip-reason", "x"], "exactly one of --record and --skip-reason"),
+            (["--skip-reason", " "], "non-empty reason"),
+            (["--record", self.tmp / "absent.json"], "absent.json"),
+            (["--record", self.audit_record(name="prs-not-ints", prs=["101"])], "needs `prs`"),
+            (["--record", self.audit_record(name="prs-missing", drop=("prs",))], "needs `prs`"),
+            (["--record", self.audit_record(name="range-not-str", range=7)], "needs `prs`"),
+            (["--record", good, "--refusal", " "], "--refusal needs the reason"),
+        ]
+        for extra, why in cases:
             r = self.audit(*extra)
             self.assertEqual(r.returncode, 2, extra)
-            self.assertIn("codex-audit", r.stderr, extra)
+            self.assertIn(f"codex-audit: ", r.stderr, extra)
+            self.assertIn(why, r.stderr, extra)
         self.assertFalse(self.ledger.exists())
 
+    def test_a_record_with_no_status_is_refused_saying_so(self):
+        self.audit("--record", self.audit_record(drop=("status",)))
+        fstatus = self.only_row()["status"]["fields"]["findings"]
+        self.assertEqual(fstatus["status"], "refused")
+        self.assertIn("has no status", fstatus["reason"])
+
+    def test_a_pass_type_still_needs_its_ticket_and_takes_no_record(self):
+        for extra, why in ((["--type", "codex-gate", "--skip-reason", "size"], "codex-gate needs --ticket"),
+                           (["--type", "spec", "--cache", self.cache], "spec needs --ticket"),
+                           (["--type", "codex-gate", "--ticket", "500", "--skip-reason", "size",
+                             "--record", self.audit_record()], "--record is for codex-audit, not codex-gate")):
+            r = run("append", "--repo", "skills", "--ledger", self.ledger, *extra, home=self.home)
+            self.assertEqual(r.returncode, 2, extra)
+            self.assertIn(why, r.stderr)
+        self.assertFalse(self.ledger.exists())
 
 if __name__ == "__main__":
     unittest.main()
