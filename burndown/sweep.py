@@ -230,9 +230,6 @@ def counts(run, reviews_dir):
         lowest = entry["tickets"][0]
         path = runfile.dispositions_path(reviews_dir, lowest)
         if not os.path.exists(path):
-            # A clean round 1 gets no verification pass and so no sidecar
-            # (verification-check.sh, #1336); only provably empty findings
-            # sidecars read as zero, a missing review stays refused.
             if not runfile.round_1_found_nothing(reviews_dir, lowest):
                 missing.append(lowest)
             continue
@@ -251,7 +248,9 @@ def counts(run, reviews_dir):
             "landed clump(s) " +
             ", ".join(f"#{n}" for n in missing) +
             " have no dispositions sidecar under " + reviews_dir +
-            " — counts refused rather than read as zero")
+            " and round 1 is not provably empty (a findings sidecar is"
+            " missing or holds findings) — counts refused rather than read"
+            " as zero")
     return {"fixed": fixed, "adjacent": adjacent, "leftover": leftover,
             "standalone": standalone, "closed": closed}
 
