@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The Codex usage preflight (#1204): `codex-usage-gate.py` reads the usage
 cache and answers with an exit status a controller can branch on — 0 proceed,
-10 tell Chris first, 20 capped (skip, no run), 30 unknown (skip, no run).
+20 capped (skip, no run), 30 unknown (skip, no run), 40 under the size threshold.
 
 Every run gets `HOME` set to its temporary directory, so the kill-switch file
 (#1354) on the real box never reaches a test.
@@ -90,9 +90,15 @@ def check(name, got, want_status, want_text=None):
 
 
 check("headroom", run(cache(44)), 0, "44%")
-check("just under threshold", run(cache(79)), 0)
-check("at threshold", run(cache(80)), 10, "80%")
-check("above threshold", run(cache(95)), 10)
+# The reserve ceiling (#1359): a launch stops at 70%, so the weekly audit keeps the rest.
+check("one below the ceiling", run(cache(69)), 0, "69%")
+status, out = run(cache(70, resets=time.time() + 2 * DAY))
+when = time.strftime("%Y-%m-%d %H:%M", time.localtime(time.time() + 2 * DAY))
+assert (status, out) == (20, f"usage 70% at or above reserve ceiling 70%, resets {when}\n"), (status, out)
+check("above the ceiling", run(cache(95)), 20, "reserve ceiling 70%")
+# `--audit` lifts the ceiling to the 100% cap: the audit may spend the reserve.
+check("audit above the ceiling", run(cache(95), "--audit"), 0, "95%")
+check("audit at the cap", run(cache(100), "--audit"), 20, "capped")
 status, out = run(cache(100, resets=time.time() + 5 * DAY))
 check("capped", (status, out), 20, "100%")
 assert "resets" in out and time.strftime("%Y-%m-%d", time.localtime(time.time() + 5 * DAY)) in out, out
@@ -175,6 +181,8 @@ for content in ("", "off\n"):
     assert (status, out) == (20, want), f"switch {content!r}: {(status, out)!r}"
 status, out, _ = run_switch(None)
 check("switch absent", (status, out), 0, "5%")
+# The audit's launch is still a launch: the switch wins over `--audit` too.
+check("switch beats audit", run_switch("", "--audit")[:2], 20, "codex reviews off")
 # `--percent` is a reading, not a launch: the switch leaves it alone.
 # A number in the output proves the switch was ignored: honouring it would print no number.
 reset = int(time.time() + 4 * DAY)
@@ -289,7 +297,10 @@ assert run_size(dict(tests_md, **{"x.sh": 10})) == (40, "under size threshold (1
 check("deletions count", run_size({"seed.py": 0, "b.py": 297}), 0, "5%")
 # The forcing label, on any ticket of the clump, sends a small PR on to the usage read.
 check("label forces", run_size({"a.py": 5}, tickets=("7", "8"), labels={"8": ["needs-codex"]}), 0, "5%")
-check("label forces into warn", run_size({"a.py": 5}, labels={"1": ["needs-codex"]}, pct=85), 10, "85%")
+# The label never bypasses the reserve ceiling.
+check("ceiling beats label", run_size({"a.py": 5}, labels={"1": ["needs-codex"]}, pct=70), 20,
+      "usage 70% at or above reserve ceiling 70%")
+check("ceiling beats a large PR", run_size({"a.py": 5000}, pct=70), 20, "reserve ceiling 70%")
 assert run_size({"a.py": 5}, labels={"1": ["ready-for-agent", "codex"]})[0] == 40
 # The label bypasses the size check only: the kill switch still wins.
 status, out = run_size({"a.py": 5}, labels={"1": ["needs-codex"]}, switch=True)
@@ -319,7 +330,8 @@ for labels, want_status, want_called in (({}, 40, False), ({"1": ["needs-codex"]
         assert (p.returncode, called) == (want_status, want_called), (labels, p.returncode, p.stdout, called)
 # Malformed size arguments are unknown (30) with a usage line, never a silent full-size pass.
 for bad in (["--base", "main"], ["--base", "main", "--tickets"], ["--tickets", "1", "--base", "main"],
-            ["--base", "main", "--tickets", "#1"]):
+            ["--base", "main", "--tickets", "#1"], ["--audit", "--base", "main", "--tickets", "1"],
+            ["--audit", "--audit"]):
     status, out = run(cache(5), *bad)
     assert status == 30 and out.startswith("usage: codex-usage-gate.py"), (bad, status, out)
 # A base git cannot resolve is unknown, never a size verdict either way, and the line names git's

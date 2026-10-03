@@ -761,12 +761,17 @@ The controller merges on a repo Chris owns; Chris reads it after via
    the gate, and the second and third passes, each a launch:
    `python3 ~/.agents/skills/implement/codex-usage-gate.py`. It reads the
    usage cache, refreshing a missing or stale one itself, and prints one
-   line. Exit 0: launch. Exit 10 (at or above 80%): tell Chris its line in a
-   message of its own, then launch. Exit 20 (capped) or exit 30 (no fresh,
+   line. Exit 0: launch. Exit 20 (capped) or exit 30 (no fresh,
    readable reading): comment `Codex pass skipped: <printed line>` on the PR,
    launch nothing, write no refused duration row — no run existed to refuse —
    append its ledger skip row (below), and go to step 4; on the second or third pass, the pass already collected
    stands and its dispositions carry on to step 4. An unreadable cache is exit 30, never headroom.
+   Exit 20 also answers usage at or above the reserve ceiling, 70% (#1359),
+   so the weekly audit of skipped PRs always has quota left. Its comment is
+   `Codex pass skipped: usage <pct>% at or above reserve ceiling 70%, resets <when>`
+   — its printed line — and its ledger skip row takes `--skip-reason ceiling`
+   exactly, distinct from the cap's printed-line reason, so the audit can
+   find it. Only the audit's own launch (`--audit`) runs past the ceiling.
 
    The gate launch, and only it, also measures the PR (#1358): run it from
    the PR's workspace after `git fetch origin`, as
@@ -779,7 +784,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    row, append its ledger skip row with `--skip-reason size` exactly (one
    reason for every size skip, so the ledger can count them), and go to
    step 4. The label sends a small PR on to the usage read; it never
-   overrides the kill switch or the cap, which still answer exit 20. The
+   overrides the kill switch, the reserve ceiling or the cap, which still
+   answer exit 20. The
    second and third passes run the gate bare: the PR already earned its
    pass at the gate.
 
@@ -905,7 +911,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    launched has no record: append it with `--skip-reason "<the printed
    line>"` and no other flag, and it gets a row of zero cost that `report`
    counts as skipped and never as a clean pass. That is an exit 20 or 30 of
-   the usage gate, its exit 40 (whose reason is `size`, not the line), a
+   the usage gate (a reserve-ceiling exit 20's reason is `ceiling`, not the
+   line), its exit 40 (whose reason is `size`, not the line), a
    failed preflight, or the per-burn budget if #1217 has landed. A refusal
    from `append` itself is named in the merge report to Chris, never
    skipped, and does not hold the merge.

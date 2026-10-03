@@ -9,10 +9,10 @@ it through the helper's own live fetch, which still answers at the cap.
 
 One line on stdout, and an exit status the caller branches on:
 
-  0   proceed — usage is under WARN_PERCENT
-  10  tell Chris before starting — usage is at or above WARN_PERCENT
-  20  capped — usage is at 100%, or the kill-switch file is present (#1354);
-      launch nothing, write no duration row
+  0   proceed — usage is under RESERVE_PERCENT (under 100% with `--audit`)
+  20  capped — usage is at or above RESERVE_PERCENT (#1359), at 100% under
+      `--audit`, or the kill-switch file is present (#1354); launch nothing,
+      write no duration row
   30  unknown — no fresh, well-formed reading; launch nothing
   40  under the size threshold (#1358) — a PR pass only; launch nothing
 
@@ -37,6 +37,12 @@ re-enables Codex reviews.
 
 A missing, stale or malformed reading is 30, never 0: it is not headroom.
 
+RESERVE_PERCENT is the reserve ceiling: every launch stops there, its line
+`usage <pct>% at or above reserve ceiling <ceiling>%, resets <when>`, so the
+weekly audit of skipped PRs always has quota left. `--audit` marks the audit's
+own launch and lifts the ceiling to the 100% cap; it takes no size check, since
+the audit reviews merged PRs, not one PR's workspace. FORCE_LABEL never lifts it.
+
 `--percent` prints the worst window's percentage and its reset time
 (`12.5 1790000000`), or `unknown` with exit 30, and is always 0 or 30. It
 ignores the cache and reads live, since a cached reading can be 30 minutes
@@ -56,7 +62,6 @@ import sys
 import time
 from pathlib import Path
 
-WARN_PERCENT = 80
 # The helper's 1.3s RPC_TIMEOUT is tuned to a statusline tick; a loaded box
 # answers in 0.6-1.2s, and a spurious timeout here skips a pass (exit 30).
 REFRESH_TIMEOUT = 5.0
@@ -65,9 +70,11 @@ HELPER = Path(__file__).resolve().parent.parent / "flow/ccstatusline-table/helpe
 # A PR pass runs only on this much churn (#1358, basis
 # docs/research/2026-10-03-codex-yield-by-pr-size.md), unless FORCE_LABEL forces it.
 SIZE_THRESHOLD = 300
+# Launches stop here so the weekly audit keeps the rest of the window (#1359); `--audit` lifts it.
+RESERVE_PERCENT = 70
 FORCE_LABEL = "needs-codex"
 
-PROCEED, WARN, CAPPED, UNKNOWN, SMALL = 0, 10, 20, 30, 40
+PROCEED, CAPPED, UNKNOWN, SMALL = 0, 20, 30, 40
 
 
 def kill_switch() -> Path:
@@ -174,8 +181,9 @@ def forced(tickets: list[str]) -> bool:
     return False
 
 
-def check(base: str | None = None, tickets: list[str] = ()) -> tuple[int, str]:
-    """`base` and the clump's `tickets` mark a PR's gate pass; without `base`, no size check."""
+def check(base: str | None = None, tickets: list[str] = (), audit: bool = False) -> tuple[int, str]:
+    """`base` and the clump's `tickets` mark a PR's gate pass; without `base`, no size check.
+    `audit` lifts the reserve ceiling to the cap."""
     switch = kill_switch()
     if switch.exists():
         return CAPPED, f"codex reviews off by Chris's ruling ({switch}) — remove the file to re-enable"
@@ -194,8 +202,8 @@ def check(base: str | None = None, tickets: list[str] = ()) -> tuple[int, str]:
     when = time.strftime("%Y-%m-%d %H:%M", time.localtime(resets))
     if pct >= 100:
         return CAPPED, f"codex usage {pct:g}% — capped, resets {when}"
-    if pct >= WARN_PERCENT:
-        return WARN, f"codex usage {pct:g}% — at or above {WARN_PERCENT}%, resets {when}"
+    if pct >= RESERVE_PERCENT and not audit:
+        return CAPPED, f"usage {pct:g}% at or above reserve ceiling {RESERVE_PERCENT}%, resets {when}"
     return PROCEED, f"codex usage {pct:g}% — ok, resets {when}"
 
 
@@ -210,15 +218,15 @@ def main() -> int:
     # Any failure is exit 30: a crash's own exit 1 is a status neither caller
     # has a rule for, and an unread reading is not headroom.
     args = sys.argv[1:]
-    base, tickets = None, []
-    if args:
+    base, tickets, audit = None, [], args == ["--audit"]
+    if args and not audit:
         if len(args) < 4 or args[0] != "--base" or args[2] != "--tickets" or not all(
                 n.isdigit() for n in args[3:]):
-            print("usage: codex-usage-gate.py [--percent | --base <ref> --tickets <n>...]")
+            print("usage: codex-usage-gate.py [--percent | --audit | --base <ref> --tickets <n>...]")
             return UNKNOWN
         base, tickets = args[1], args[3:]
     try:
-        status, line = check(base, tickets)
+        status, line = check(base, tickets, audit)
     except Exception as exc:
         status, line = UNKNOWN, f"codex usage unknown: {type(exc).__name__}: {exc}"
     print(line)
