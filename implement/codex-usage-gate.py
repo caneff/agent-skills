@@ -11,14 +11,20 @@ One line on stdout, and an exit status the caller branches on:
 
   0   proceed — usage is under WARN_PERCENT
   10  tell Chris before starting — usage is at or above WARN_PERCENT
-  20  capped — usage is at 100%; launch nothing, write no duration row
+  20  capped — usage is at 100%, or the kill-switch file is present (#1354);
+      launch nothing, write no duration row
   30  unknown — no fresh, well-formed reading; launch nothing
+
+The kill switch is `~/.config/agent-skills/codex-reviews-off`, any content: while
+it exists every check is 20, answered before any cache read or live fetch, so a
+disabled gate costs no RPC. Removing the file re-enables Codex reviews.
 
 A missing, stale or malformed reading is 30, never 0: it is not headroom.
 
 `--percent` prints the worst window's percentage and its reset time
 (`12.5 1790000000`), or `unknown` with exit 30, and is always 0 or 30. It
-ignores the cache and reads live, since a cached reading can be 30 minutes
+ignores the cache and reads live, and the kill switch (a reading is not a
+launch), since a cached reading can be 30 minutes
 old and a pass is shorter than that. The controller takes it just before a
 Codex launch and just after the run, and both go into the pass's record for
 `review_ledger.py` (#1269). The reset time names the window, so two readings
@@ -39,6 +45,10 @@ REFRESH_TIMEOUT = 5.0
 HELPER = Path(__file__).resolve().parent.parent / "flow/ccstatusline-table/helpers/codex-usage.py"
 
 PROCEED, WARN, CAPPED, UNKNOWN = 0, 10, 20, 30
+
+
+def kill_switch() -> Path:
+    return Path.home() / ".config/agent-skills/codex-reviews-off"
 
 
 def load_helper():
@@ -91,6 +101,9 @@ def reading(live_only: bool = False) -> tuple[float, float] | None:
 
 
 def check() -> tuple[int, str]:
+    switch = kill_switch()
+    if switch.exists():
+        return CAPPED, f"codex reviews off by Chris's ruling ({switch}) — remove the file to re-enable"
     worst = reading()
     if worst is None:
         return UNKNOWN, "codex usage unknown: no fresh, readable usage cache and the live fetch failed"
