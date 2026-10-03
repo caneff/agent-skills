@@ -19,10 +19,9 @@ table starts at the first pass run under #942's shape.
 `second` (#888's conditional re-run). Those two are the live phases.
 `outcome` is `collected`, or the reason the gate refused the verdict —
 `errored`, `raced`, `stale`, `unreadable`, or `absent` when no record was
-written at all. A refused run
-still gets its row: it spent the same wall clock and the same tokens. An
-`absent` row is the one the controller writes from what it knows, the
-record being the thing that is missing.
+written at all. A refused run still gets its row: it spent the same wall
+clock and the same tokens. An `absent` row is the one the controller
+writes from what it knows, the record being the thing that is missing.
 
 Retired by #1015: `early` (at the worker's "Round 1 out") and `gate-retry`
 (at the merge gate, retrying a refused `early` verdict) were the phases
