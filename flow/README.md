@@ -14,7 +14,8 @@ every commit here is a backup.
 | `claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Global instructions (hard rules, the two gates) |
 | `claude/settings.json` | `~/.claude/settings.json` | Harness config: hooks, permissions |
 | `claude/settings.local.json` | `~/.claude/settings.local.json` | Machine-local overrides |
-| `claude/hooks/*` | `~/.claude/hooks/*` | git guardrail, landed-refresh, agent-model-guard hooks |
+| `mods/*` | loaded in place via `CLAUDE_CODE_PLUGIN_DIRS` (`settings.json` `env`) and `--plugin-dir` (`implement-dispatch`) | Claude Code mods (hooks plugins), tested by `tests/all.sh` through `claude plugin test` |
+| `claude/hooks/*` | `~/.claude/hooks/*` | git guardrail, landed-refresh hooks |
 
 `~/.claude/skills` is already this repo, so it isn't duplicated here.
 

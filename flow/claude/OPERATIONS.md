@@ -24,7 +24,10 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   commit about to be pushed against the same checkout-configured
   `user.email` and the same `COMMIT_IDENTITY_OVERRIDE` escape (#1006).
 - Every Agent call passes `model` — a bare call inherits the session's model.
-  Explore/lookup → `sonnet`, review/diagnosis → `opus`. Rubric:
+  Explore/lookup → `sonnet`, review/diagnosis → `opus`. The `agent-model` mod
+  (`flow/mods/agent-model/`) rewrites a bare or non-`sonnet`/`haiku` Explore
+  call to `sonnet`, passes `fork` and a type whose agent file sets its own
+  `model`, and denies any other bare call. Rubric:
   `~/.agents/skills/flow/claude/subagent-tiers.md`. Why: a bare call runs a
   lookup on the session's own, most expensive model.
 - Never add `--dangerously-skip-permissions` (or any flag) to an agent
