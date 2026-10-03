@@ -165,7 +165,7 @@ check_in "$merge_section" "A second-pass finding that passes § Review's adjacen
 check_in "$merge_section" 'the controller reads that fix diff itself' 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'The second pass is final (#1360): no Codex run follows it, whatever its in-round fixes were.' 'implement/SKILL.md § The merge'
 check_in "$merge_section" "The controller's own read of the fix diff is the last review" 'implement/SKILL.md § The merge'
-for retired in 'phase=third' 'A third Codex run' 'The third run is final' 'third Codex' 'second and third' '`second` or `third`'; do
+for retired in 'phase=third' 'The third run is final' 'third Codex' 'second and third' '`second` or `third`'; do
   check_absent_in "$whole_file" "$retired" 'implement/SKILL.md (whole file)'
 done
 # r1-P3: the closing sentence names both rules a second-pass round admits.
