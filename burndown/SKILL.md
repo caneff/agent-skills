@@ -448,11 +448,11 @@ writes its own record before it launches, and `--done` when it ends
 (`implement/SKILL.md` § Control, #1339). `runfile.py clump` records `none`
 when it registers the clump, because a worker starts with nothing out and a
 record that waited for its "PR up" idled every free slot for the hour before
-it (#1311). That default would charge a later job nothing, so a worker declares a job
-past one core before it launches it. Writing the record itself
-removes the controller's turn from the send-to-record interval (#1339); a
-tick that has already loaded the run file when the write lands still dispatches
-on what it read, and the next tick holds the slots. The worker's
+it (#1311). That default would charge a later job nothing, so a worker
+declares a job past one core before it launches it. Writing the record
+itself removes the controller's turn from the send-to-record interval
+(#1339); a tick that has already loaded the run file when the write lands
+still dispatches on what it read, and the next tick holds the slots. The worker's
 `job: <k> cores` message is a notice. The controller's own `runfile.py job` is
 the fallback, for a worker whose write was refused (its clump not yet
 registered, or the lock timed out) and who is waiting on the reply: record the
