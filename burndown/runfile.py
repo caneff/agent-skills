@@ -586,7 +586,8 @@ def cited_ids(line):
     text after the leading ones, and the `(file or None, id)` pairs of the
     leading ones. `- S1, P2 and C1: fixed` cites all three. A file-qualified
     id (`**e2e/scenarios.mjs S8**`) cites the id alone; `cites` keeps its
-    file."""
+    file. `ids` lists the leading ids first, then the `sidecar <id>` tail
+    ids, so `ids[len(cites):]` is the tail."""
     cites, pos = _cites(line)
     ids = [fid for _, fid in cites]
     ids += [m.group(1) for m in _TAIL_ID.finditer(line)]
