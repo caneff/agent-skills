@@ -42,9 +42,9 @@ For each finding, read the code at the range's newest merge and decide:
 
 - **Confirmed**: the failure it describes happens, under the
   reachability bar of `SKILL.md` § Review. Find the PR that introduced
-  it — the one printed, or `git log` on the lines when none was. A finding whose cause
-  predates every audited PR is still confirmed; its ticket says so in
-  place of an originating PR.
+  it — the one printed, or `git log` on the lines when none was. A
+  finding whose cause predates every audited PR is still confirmed; its
+  ticket says so in place of an originating PR.
 - **Disputed**: say why in one line. It goes in the trial row, not a
   ticket.
 
