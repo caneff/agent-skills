@@ -80,6 +80,7 @@ class SkippedSinceMarkTest(Case):
         self.write_ledger([skip_row(10, "size"), skip_row(11, "size"),
                            skip_row(12, "codex usage 100% — capped, resets 2026-10-03 17:53"),
                            pass_row(13), skip_row(14, "ceiling"),
+                           skip_row(13, "ceiling", phase="second"),  # its gate pass ran
                            skip_row(12, "size", repo="sudokupad-art")])  # merged here, but another repo's skip
 
     def expected(self):

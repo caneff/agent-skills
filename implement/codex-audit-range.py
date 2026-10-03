@@ -5,12 +5,13 @@ as one diff range for a single Codex run.
     codex-audit-range.py --ledger PATH --repo R --mark SHA|DATE [--base REF]
 
 Run from a checkout of the repo. Reads the review ledger (`docs/research/review_ledger.py`) for
-PR-pass skip rows (`codex-gate`, `codex-second`, `codex-third`; never the audit's own) of repo R whose
-skip reason is exactly `size` or `ceiling` (`SKILL.md` § The merge step 3), and finds each skipped
-ticket's merge commit on `--base` (default `origin/HEAD`): a squash commit whose subject ends `(#<pr>)`
-and either names `(#<ticket>)` earlier in the subject or has a body line closing it. A ledger row carries
-no date, so "since the mark" is read off that merge commit: not an ancestor of the mark sha, or
-committed after the mark date (an ISO date or date-time; one with no zone is UTC).
+gate skip rows of repo R whose skip reason is exactly `size` or `ceiling` (`SKILL.md` § The merge
+step 3): `codex-gate` only, since a later pass skipped at the ceiling follows a gate pass that ran.
+Finds each skipped ticket's merge commit on `--base` (default `origin/HEAD`): a squash commit whose
+subject ends `(#<pr>)` and either names `(#<ticket>)` earlier in the subject or has a body line
+closing it. A ledger row carries no date, so "since the mark" is read off that merge commit: not an
+ancestor of the mark sha, or committed after the mark date (an ISO date or date-time; one with no
+zone is UTC).
 
 On stdout, oldest merge first:
 
@@ -37,7 +38,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "docs" / "research"))
-from review_ledger import CODEX_TYPES, read_ledger  # noqa: E402
+from review_ledger import read_ledger  # noqa: E402
 from tally_review_axes import fold_repo  # noqa: E402
 
 AUDITED_REASONS = ("size", "ceiling")
@@ -50,10 +51,10 @@ def git(*args: str) -> str:
 
 
 def skipped_tickets(rows: list[dict], repo: str) -> dict[int, str]:
-    """{ticket: skip reason} of every Codex row of `repo` skipped for an audited reason."""
+    """{ticket: skip reason} of every gate row of `repo` skipped for an audited reason."""
     out: dict[int, str] = {}
     for r in rows:
-        if (r.get("type") in CODEX_TYPES and fold_repo(str(r.get("repo"))) == fold_repo(repo)
+        if (r.get("type") == "codex-gate" and fold_repo(str(r.get("repo"))) == fold_repo(repo)
                 and r.get("skip_reason") in AUDITED_REASONS):
             for t in r.get("tickets") or [r.get("ticket")]:
                 out.setdefault(t, r["skip_reason"])
