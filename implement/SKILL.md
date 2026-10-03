@@ -154,16 +154,32 @@ undone. The stop hook alerts the controller on such a stop, and a burn's
 sweep reads the pane as `stalled`, but both are backstops that fire after
 the time is lost; the send is the report.
 
-**Declare a parallel job before you launch it** (#1311). The controller
+**Declare a parallel job before you launch it** (#1311, #1339). The controller
 registers your clump with job `none` and dispatches into every free slot
-until you say otherwise, so a job you start past one core — a solve, a
-build, a test gate with several workers — is charged zero until your "PR up"
-unless you declare it first. Before launching one, send the controller one
-message naming the job and its core count, and launch after the send. When it
-finishes, send the controller `job done`. A subagent is a process the
-controller's box check already counts, so it needs no message; the "PR up"
-`Parallel jobs` line stays as the closing statement of everything you
-launched.
+until a record says otherwise, so a job you start past one core — a solve, a
+build, a test gate with several workers — is charged zero unless it is on
+record first. You write that record yourself, under the run-file lock, before
+you launch:
+
+```
+python3 ~/.agents/skills/burndown/runfile.py job <run-id> --clump <n> --cores <k>
+```
+
+`<run-id>` is the brief's `--run`, `<n>` the clump's lowest ticket, `<k>` the
+job's own core count. The lock serialises the write against `loop.py dispatch`,
+so a tick that runs before the controller's next turn already reads the
+declared cores; a record the controller wrote after your message left a window
+where a tick read `none` (#1339). When the job ends, run the same line with
+`--done` in place of `--cores <k>` (`runfile.py job <run-id> --clump <n> --done`).
+A refusal from `runfile.py` goes to the controller and the job waits. A brief
+with no `--run <run-id>` has no run file under it: send the controller the
+message below and launch after the send, as before.
+
+Also send the controller one message naming the job and its core count
+(`job: <k> cores`), and `job done` when it finishes: a notice, not the record.
+A subagent is a process the controller's box check already counts, so it needs
+neither; the "PR up" `Parallel jobs` line stays as the closing statement of
+everything you launched.
 
 ## Light tier
 

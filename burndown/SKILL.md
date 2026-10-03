@@ -444,22 +444,28 @@ behind the ranking, and what each source costs when it is read the other way:
    it, the sweep prints herdr's own word.
 
 **A worker declares its job size.** A worker that launches a parallel job
-names that job and its **core count** in its report. `runfile.py clump`
+writes its own record, `runfile.py job <run-id> --clump <n> --cores <k>`,
+under the run-file lock before it launches, and `--done` when it ends
+(`implement/SKILL.md` § Control, #1339). `runfile.py clump`
 records `none` when it registers the clump, because a worker starts with
 nothing out and a record that waited for its "PR up" idled every free slot
 for the hour before it (#1311). That default would charge a later job
 nothing, so the worker's half closes it: a worker declares a job past one
-core before it launches it, and says when it finishes
-(`implement/SKILL.md` § Control), and the controller records each such
-message on arrival, not only at "PR up". A clump with **no** record at all
-(a file from before jobs existed) is still refused: silence is not zero. The
-controller records
-the declaration on the clump — `runfile.py job <run-id> --clump <n> --cores
-<k>`, or `--none`, or `--done` when the worker reports it finished — and
-`loop.py dispatch --run <run-id>` reads the charge from **that record**,
-never from its own argv or `--in-flight`: a declaration that lived in one
-command line is a hold a restart cannot recover, and the free slot a resumed
-controller then dispatches into is the contention #351 produced.
+core before it launches it. The lock serialises that write against
+`loop.py dispatch`, so a tick never reads `none` over a job already out; a
+record the controller wrote on receiving the worker's message would leave
+the send-to-record window (#1339). The worker's `job: <k> cores` message is a
+notice. The controller's own `runfile.py job` is the fallback, for a worker
+that cannot reach the run file (a brief with no `--run`, or a refused write),
+recorded on arrival of that worker's message, not only at "PR up". A clump
+with **no** record at all (a file from before jobs existed) is still
+refused: silence is not zero. Whoever writes it, the record is on the clump
+— `runfile.py job <run-id> --clump <n> --cores <k>`, or `--none`, or
+`--done` once the job has finished — and `loop.py dispatch --run <run-id>`
+reads the charge from **that record**, never from its own argv or
+`--in-flight`: a declaration that lived in one command line is a hold a
+restart cannot recover, and the free slot a resumed controller then
+dispatches into is the contention #351 produced.
 
 The charge is arithmetic, so "heavy" needs no threshold: a slot is one core's
 worth of machine until a worker says otherwise, and the cores past the job's

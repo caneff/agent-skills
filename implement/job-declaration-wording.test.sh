@@ -27,16 +27,24 @@ check_in() {
   esac
 }
 
-# Worker half: declare before launching, past one core, and say when done.
+# Worker half (#1339): the worker writes its own job record under the run-file
+# lock before it launches, so no controller turn sits between the launch and
+# the record; the message to the controller is only a notice.
 check_in "$control_section" 'Declare a parallel job before you launch it' 'implement/SKILL.md § Control'
 check_in "$control_section" 'past one core' 'implement/SKILL.md § Control'
-check_in "$control_section" 'naming the job and its core count' 'implement/SKILL.md § Control'
-check_in "$control_section" 'When it finishes, send the controller `job done`' 'implement/SKILL.md § Control'
+check_in "$control_section" 'runfile.py job <run-id> --clump <n> --cores <k>' 'implement/SKILL.md § Control'
+check_in "$control_section" 'under the run-file lock' 'implement/SKILL.md § Control'
+check_in "$control_section" 'before you launch' 'implement/SKILL.md § Control'
+check_in "$control_section" 'runfile.py job <run-id> --clump <n> --done' 'implement/SKILL.md § Control'
+check_in "$control_section" 'a notice, not the record' 'implement/SKILL.md § Control'
+check_in "$control_section" 'no `--run <run-id>`' 'implement/SKILL.md § Control'
 check_in "$control_section" 'the "PR up" `Parallel jobs` line stays' 'implement/SKILL.md § Control'
 
-# Controller half: record each message on arrival, not only at PR-up.
+# Controller half: the worker's write is the primary record; the controller's
+# own `runfile.py job` is the fallback.
+check_in "$declares_section" 'writes its own record' 'burndown/SKILL.md § Liveness'
+check_in "$declares_section" 'fallback' 'burndown/SKILL.md § Liveness'
 check_in "$declares_section" 'on arrival' 'burndown/SKILL.md § Liveness'
-check_in "$declares_section" 'not only at "PR up"' 'burndown/SKILL.md § Liveness'
 check_in "$declares_section" 'a worker declares a job past one core before it launches it' 'burndown/SKILL.md § Liveness'
 
 [ "$fail" -eq 0 ] || exit 1
