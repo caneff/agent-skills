@@ -4,10 +4,11 @@
 # runs directly under python3, each `audit.py` that implements
 # `--selfcheck` runs with that flag, each `Cargo.toml` runs `cargo test`, and
 # each mod folder under `flow/mods/` runs `claude plugin test <folder>`. One
-# line per suite; exits non-zero on the first failure (and prints that suite's output). A suite is failed on
-# its exit status *or* on a failure signature at the start of a line in its
-# output, because exit status alone read a suite that reported findings and
-# exited 0 as green (#954; the signature set and its reason are below).
+# line per suite; exits non-zero on the first failure (and prints that
+# suite's output). A suite is failed on its exit status *or* on a failure
+# signature at the start of a line in its output, because exit status alone
+# read a suite that reported findings and exited 0 as green (#954; the
+# signature set and its reason are below).
 # `--list` prints the labels the rules select, without running anything.
 # This is the merge gate (`git config land.testcmd`), not a push hook — see
 # #633.
