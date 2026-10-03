@@ -157,7 +157,7 @@ class LedgerEndToEnd(Case):
             self.append("--ticket", 702, "--type", "spec"),
             self.append("--ticket", 701, "--type", "verification"),
             self.append("--ticket", 701, "--type", "codex-second"),
-            self.append("--ticket", 701, "--type", "codex-third", "--skip-reason", "usage capped until 2026-10-03"),
+            self.append("--ticket", 702, "--type", "codex-second", "--skip-reason", "usage capped until 2026-10-03"),
             self.append("--ticket", 701, "--type", "worker-mutation", "--mutation-id", "m1", "--outcome", "red", "--seconds", 20),
             self.append("--ticket", 701, "--type", "worker-mutation", "--mutation-id", "m2", "--outcome", "green", "--seconds", 10),
             self.append("--ticket", 701, "--type", "witness-mutation", "--mutation-id", "w1", "--status-file", st / "w1", "--seconds", 30),
@@ -216,7 +216,7 @@ class LedgerEndToEnd(Case):
         table = json.loads(self.ok("report", "--ledger", self.ledger, "--prices", self.prices,
                                    "--format", "json").stdout)["types"]
         got = {t["type"]: t for t in table}
-        self.assertEqual(sorted(got), ["call-site-mutation", "codex-gate", "codex-second", "codex-third", "correctness",
+        self.assertEqual(sorted(got), ["call-site-mutation", "codex-gate", "codex-second", "correctness",
                                        "over-engineering", "spec", "standards", "verification", "witness-mutation",
                                        "worker-mutation"])
 
@@ -239,10 +239,11 @@ class LedgerEndToEnd(Case):
         # verification: V1 judgement 1, $0.01.
         check("verification", rows=1, findings=1, value=1.0, dollars=0.01, value_per_dollar=100.0)
         # Codex: the gate's high is fixed (3) and its medium left over; the second pass's high is fixed (3), its medium
-        # disputed; the second pass cost 12.5 - 10 points of usage; the third was skipped, not clean.
+        # disputed; the second pass cost 12.5 - 10 points of usage. #702's second pass was skipped: a known
+        # zero, not a clean pass.
         check("codex-gate", rows=1, findings=2, value=3.0, leftover_rate=0.5, unknown_usage_rows=1, usage_percent=None)
-        check("codex-second", rows=1, findings=2, value=3.0, dispute_rate=0.5, usage_percent=2.5, unknown_usage_rows=0)
-        check("codex-third", rows=1, skipped_rows=1, clean_rows=0, findings=0, value=0.0)
+        check("codex-second", rows=2, skipped_rows=1, clean_rows=0, findings=2, value=3.0, dispute_rate=0.5,
+              usage_percent=2.5, unknown_usage_rows=0)
         # Mutations: red rate leaves unknown out and counts it beside.
         check("worker-mutation", rows=2, red_rate=0.5, unknown_mutations=0)
         check("witness-mutation", rows=2, red_rate=1.0, unknown_mutations=1)

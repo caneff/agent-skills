@@ -85,7 +85,6 @@ merge="$(sed -n '/^### The merge$/,/^## Someone else/p' "$skill" | flatten)"
 check_in "§ Review" "$review" 'or of any Codex pass at merge'
 check_in "§ The merge first pass" "$merge" "one of § Review's blocking kinds as that rule disposes of it, never \`leftover\`"
 check_in "§ The merge second pass" "$merge" "or is one of § Review's blocking kinds, goes to the worker"
-check_in "§ The merge third pass" "$merge" "except one of § Review's blocking kinds"
 # The verification pass and the sidecar belong to round 1; a Codex-pass
 # blocking fix is checked where § The merge checks every Codex fix.
 check_in "§ Review" "$review" 'A round-1 blocking finding'"'"'s sidecar line is the plain `fixed` line'

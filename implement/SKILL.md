@@ -758,14 +758,15 @@ The controller merges on a repo Chris owns; Chris reads it after via
    `--refusal` row below, never a skip row.
 
    Then check the plan's usage before every launch of this block (#1204) —
-   the gate, and the second and third passes, each a launch:
+   the gate and the second pass, each a launch:
    `python3 ~/.agents/skills/implement/codex-usage-gate.py`. It reads the
    usage cache, refreshing a missing or stale one itself, and prints one
    line. Exit 0: launch. Exit 20 (capped) or exit 30 (no fresh,
    readable reading): comment `Codex pass skipped: <printed line>` on the PR,
    launch nothing, write no refused duration row — no run existed to refuse —
-   append its ledger skip row (below), and go to step 4; on the second or third pass, the pass already collected
-   stands and its dispositions carry on to step 4. An unreadable cache is exit 30, never headroom.
+   append its ledger skip row (below), and go to step 4; on the second
+   pass, the pass already collected stands and its dispositions carry on to
+   step 4. An unreadable cache is exit 30, never headroom.
    Exit 20 also answers usage at or above the reserve ceiling, 70% (#1359),
    so the weekly audit of skipped PRs always has quota left. Its comment is
    `Codex pass skipped: usage <pct>% at or above reserve ceiling 70%, resets <when>`
@@ -787,7 +788,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    reason for every size skip, so the ledger can count them), and go to
    step 4. The label sends a small PR on to the usage read; it never
    overrides the kill switch, the reserve ceiling or the cap, which still
-   answer exit 20. The second and third passes run the gate bare: the PR
+   answer exit 20. The second pass runs the gate bare: the PR
    already earned its pass at the gate.
 
    From the worker's workspace, fetch the ticket yourself — you did
@@ -861,7 +862,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    ```
    dir="$HOME/.cache/agent-reviews/<repo>"   # expanded as
    mkdir -p "$dir"                           # multi-axis-code-review/SKILL.md does it
-   phase=gate                                # or second, or third
+   phase=gate                                # or second
    body_file=<absolute path you wrote the ticket body, comments and appendix to>
    out_file="$dir/codex-adversarial-<n>-$phase.out"
    record="$dir/codex-adversarial-<n>-$phase.json"
@@ -947,7 +948,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
    started run answers to this gate, and there is no retry: a refused run
    ends the step for its own phase, the same as a refused preflight. A
    refusal with no pass yet collected for this PR leaves no trial row to
-   write. A refusal of the conditional second or third pass is different: the gate
+   write. A refusal of the conditional second pass is different: the gate
    pass earlier in this same step was collected and posted, and its trial
    row is not undone by a later refusal — nothing already earned is
    discarded.
@@ -960,7 +961,7 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
    **Every run records its duration**, collected or refused, as one row
    appended to `docs/research/2026-09-20-codex-pass-durations.md`: ticket,
-   PR, phase (`gate`, `second` or `third`), launched, completed, duration in
+   PR, phase (`gate` or `second`), launched, completed, duration in
    minutes, and outcome — `collected`, or the refusal that discarded it. A
    refused run still gets its row: it spent the same wall clock and the
    same tokens, and that cost is what #1015 measured to retire the early
@@ -1044,25 +1045,16 @@ The controller merges on a repo Chris owns; Chris reads it after via
    first and its severity mapping second. A fix outside those two rules is
    a change, not a round.
 
-   A third Codex run happens only when a second-pass finding fixed in the
-   round was high. The third run is final: its findings are `disputed` or
-   `leftover`, except one of § Review's blocking kinds, which goes to the
-   worker for one fix round; never a fourth run. For that round the
-   controller reads that fix diff and records `read at <sha>` exactly as
-   for a second-pass fix, so the gate does not refuse the third pass as
-   stale over it. That makes a third-run high the one place a high finding
-   is not filed. The third run uses the same block with `phase=third` and
-   posts the same way. The controller disposes of each of its other
-   findings in the PR body. With no high among the second-pass fixes, the
-   controller's own read of the fix diff is the last review, and step 4
-   follows once every disposition is recorded.
+   The second pass is final (#1360): no Codex run follows it, whatever
+   its in-round fixes were. The controller's own read of the fix diff is
+   the last review, and step 4 follows once every disposition is recorded.
 
    A Codex-pass finding disposed of as `leftover`, whichever pass raised
    it, is recorded twice. Its PR-body disposition is the first record.
    Beside it, the controller appends one line for it to
    `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl`, in § Review's
    `leftover` grammar, under the id `codex-<phase>-<label>`: the pass's
-   `phase` (`gate`, `second` or `third`) and the label Codex gave the
+   `phase` (`gate` or `second`) and the label Codex gave the
    finding, as in `codex-second-1`. The PR-body disposition line in
    Decisions made opens with that id, or ends `sidecar <id>`, so
    `runfile.py leftover` can join the two (§ The PR). Codex numbers each pass's findings from 1, so a bare label repeats
