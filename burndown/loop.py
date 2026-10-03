@@ -196,23 +196,22 @@ def picks(state, free):
         # another candidate picked this same tick, so the held entry is
         # tagged `same_tick` explicitly rather than distinguished by which
         # keys it happens to carry (#971).
-        blocker = next((earlier for earlier in picked
-                        if paths(clump) & paths(earlier)), None)
-        if blocker is not None:
-            held.append({"clump": clump, "holder": key_of(blocker),
-                        "over": sorted(paths(clump) & paths(blocker)),
-                        "same_tick": True})
-            continue
         # A ticket body under-names what its diff reaches (#1342): two
-        # clumps whose lists share a directory are not picked in one tick,
-        # though they share no file. The repo root is not a directory here —
-        # every root file would hold every other.
-        blocker = next((earlier for earlier in picked
-                        if directories(clump) & directories(earlier)), None)
+        # clumps whose lists share a directory are held too, though they
+        # share no file. The repo root is not a directory here — every root
+        # file would hold every other.
+        blocker, over = None, []
+        for overlap in (paths, directories):
+            for earlier in picked:
+                over = sorted(overlap(clump) & overlap(earlier))
+                if over:
+                    blocker = earlier
+                    break
+            if blocker is not None:
+                break
         if blocker is not None:
             held.append({"clump": clump, "holder": key_of(blocker),
-                        "over": sorted(directories(clump) & directories(blocker)),
-                        "same_tick": True})
+                        "over": over, "same_tick": True})
             continue
         # Past the free-slot cut the walk goes on so a collision with a pick
         # is still named (#1049); a clump that collides with nothing is only
