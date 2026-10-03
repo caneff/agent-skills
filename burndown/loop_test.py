@@ -210,6 +210,18 @@ def test_picks_holds_a_clump_sharing_a_directory_with_a_same_tick_pick():
     assert held[0]["same_tick"] is True
 
 
+def test_picks_holds_a_clump_in_a_directory_inside_a_same_tick_pick():
+    # #1342 C2: a doc under `burndown/references/` and the module it
+    # describes in `burndown/` are the same collision.
+    candidates = [
+        {"tickets": [1, 2], "files": ["burndown/loop.py", "burndown/a.py"]},
+        {"tickets": [3], "files": ["burndown/references/loop.md"]},
+    ]
+    picked, held = loop.picks(loop.frontier(candidates, []), 2)
+    assert [c["tickets"] for c in picked] == [[1, 2]]
+    assert held[0]["over"] == ["burndown/"]
+
+
 def test_picks_does_not_treat_the_repo_root_as_a_shared_directory():
     candidates = [
         {"tickets": [1], "files": ["AGENTS.md"]},
