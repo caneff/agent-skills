@@ -2168,6 +2168,30 @@ def test_dispatch_does_not_wait_for_pr_up_on_a_freshly_registered_clump_1311():
         assert "dispatch  #500" in got.stdout, got.stdout
 
 
+def test_a_tick_between_the_workers_own_write_and_the_controllers_turn_holds_the_slots_1339():
+    # Registration records `none`, so a tick before any declaration dispatches
+    # into the free slot. The worker then records its own 8-core job with the
+    # CLI, in its own process, and no controller turn follows: the next tick
+    # must read that record and hold the slots (#1339, owner ruling (b)).
+    with tempfile.TemporaryDirectory() as tmp:
+        cand, live, env = run_file_dispatch(tmp, ("none",))
+        tick = ("dispatch", "--candidates", cand, "--in-flight", live,
+                "--run", "burn-t", "--free", "1", "--processes", "4",
+                "--committed-gb", "4")
+        before = loop_py(*tick, env=env)
+        assert "dispatch  #500" in before.stdout, before
+        wrote = subprocess.run(
+            [sys.executable, runfile.__file__, "job", "burn-t",
+             "--clump", "351", "--cores", "8"],
+            capture_output=True, text=True, timeout=30,
+            env={**os.environ, **env})
+        assert wrote.returncode == 0, wrote
+        after = loop_py(*tick, env=env)
+        assert after.returncode == 0, after
+        assert "#351 declared 8 cores" in after.stdout, after.stdout
+        assert "dispatch  #500" not in after.stdout, after.stdout
+
+
 def test_dispatch_names_runfile_clump_for_an_unregistered_clump_1126():
     # `runfile.py job` fails with "has no clump" on a clump the run file never
     # registered, so the refusal must name `runfile.py clump`, not `job`.

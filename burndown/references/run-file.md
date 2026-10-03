@@ -93,6 +93,8 @@ Each clump carries what parallel job its worker has out: `{"state": "none",
 `{"state": "done", "cores": 0}` once it reports the job finished. `null` means
 nothing on record and appears only in a file written before jobs existed.
 `runfile.py job <run-id> --clump <n> --cores <k> | --none | --done` writes it.
+The worker writes it before launching its job (#1339), and who writes it when
+that is refused is `burndown/SKILL.md` § Liveness.
 
 Three states and not a bare number. `null` and `none` are different facts: a
 worker nobody recorded and a worker that declared nothing read alike to a
