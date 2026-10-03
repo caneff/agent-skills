@@ -1947,6 +1947,22 @@ def test_a_missing_sweep_leftover_line_is_refused_under_its_qualified_id():
     assert "records S8 as a leftover" in later, later
 
 
+def test_a_bare_leftover_cite_is_not_joined_to_a_qualified_sidecar_line():
+    # #1343: a bare `S8` cite matches only a bare `S8` sidecar line; when the
+    # sidecar holds only `<file> S8` lines, the refusal names those forms.
+    qualified = dict(LEFTOVER_S3, id="a.md S8", file="a.md")
+    held = dict(LEFTOVER_S3, id="r1-S3")
+    body = pr_body("## Decisions made\n\n- r1-S3: leftover.\n"
+                   "- S8: leftover.\n")
+    got = refusal_of(sidecar_of(held, qualified), landed_root(), body)
+    assert "records S8 as a leftover" in got, got
+    assert "cite it as `a.md S8`" in got, got
+    # Every qualified form the sidecar holds is named.
+    other = dict(qualified, id="b.md S8", file="b.md")
+    both = refusal_of(sidecar_of(held, qualified, other), landed_root(), body)
+    assert "`a.md S8`" in both and "`b.md S8`" in both, both
+
+
 def test_a_file_qualifier_may_carry_a_line_and_a_bare_file_needs_backticks():
     # C1: a line number or #L anchor on the path is part of the qualifier.
     for line in ("- **e2e/scenarios.mjs:42 S8**: fixed",

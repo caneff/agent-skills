@@ -164,7 +164,9 @@ under that file's `## <file>` heading. A body citation `**<file> <id>**` is
 recorded under the qualified id as well as the bare one, so it joins that
 line. `runfile.py sweep-check --ticket <body> --pr-body <path> --from
 <sidecar>` is the pre-report gate's test that every item of the sweep ticket
-is such a line, or stated `fixed` in Decisions made.
+is such a line, or stated `fixed` in Decisions made. A bare cite (`- S8:
+leftover`) joins only a bare sidecar line: when the sidecar holds `S8` only as
+`<file> S8`, `leftover` refuses and names those forms to cite (#1343).
 
 `<dispositions sidecar>` must be named `dispositions-<n>.jsonl` with `<n>` one
 of the clump's tickets, else it is refused (#1084). The name is checked
