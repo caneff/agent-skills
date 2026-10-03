@@ -1,6 +1,6 @@
-// Cases ported from flow/claude/hooks/require-agent-model.test.sh (deleted in
-// the same change). One case per old case; Explore without a usable model is
-// now a rewrite to sonnet, not a deny. Mapping in the PR body.
+// Ported from the shell hook this mod replaced, case for case, except that
+// Explore without a usable model is now a rewrite to sonnet, not a deny. Added
+// cases: an agent file's own model, `inherit`, an empty key, precedence.
 import { test, expect, mock } from 'claude-code/testing'
 
 const AGENTS = '/home/test/.claude/agents'
@@ -105,4 +105,14 @@ test('a project definition without a model is not overridden by a user one that 
     [`${AGENTS}/dup.md`]: '---\nname: dup\nmodel: opus\n---\nbody',
   })
   expect(seen).toBe(undefined)
+})
+
+test('a non-Agent tool call is untouched', async ($, on) => {
+  let seen: any
+  on('tool.call', { tool: 'Bash' }, (_$: any, e: any) => {
+    seen = e
+    return { result: 'ran' }
+  })
+  await $.tool.call({ tool: 'Bash', command: 'ls' })
+  expect(seen.command).toBe('ls')
 })
