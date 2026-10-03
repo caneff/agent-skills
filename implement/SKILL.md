@@ -768,6 +768,21 @@ The controller merges on a repo Chris owns; Chris reads it after via
    append its ledger skip row (below), and go to step 4; on the second or third pass, the pass already collected
    stands and its dispositions carry on to step 4. An unreadable cache is exit 30, never headroom.
 
+   The gate launch, and only it, also measures the PR (#1358): run it from
+   the PR's workspace after `git fetch origin`, as
+   `python3 ~/.agents/skills/implement/codex-usage-gate.py --base origin/<default> --tickets <n>...`,
+   every ticket of the clump named. Exit 40 (under the size threshold): its
+   non-test, non-Markdown churn is under 300 lines and no ticket carries the
+   `needs-codex` label. Comment
+   `Codex pass skipped: under size threshold (<churn> < 300)` — its printed
+   line — on the PR, launch nothing, write no durations row and no trial
+   row, append its ledger skip row with `--skip-reason size` exactly (one
+   reason for every size skip, so the ledger can count them), and go to
+   step 4. The label sends a small PR on to the usage read; it never
+   overrides the kill switch or the cap, which still answer exit 20. The
+   second and third passes run the gate bare: the PR already earned its
+   pass at the gate.
+
    From the worker's workspace, fetch the ticket yourself — you did
    not build this ticket, so you don't already hold it — body and comments
    both, rendered as in § The brief, since a requirement added in a comment
@@ -890,9 +905,10 @@ The controller merges on a repo Chris owns; Chris reads it after via
    launched has no record: append it with `--skip-reason "<the printed
    line>"` and no other flag, and it gets a row of zero cost that `report`
    counts as skipped and never as a clean pass. That is an exit 20 or 30 of
-   the usage gate, a failed preflight, or the per-burn budget if #1217 has
-   landed. A refusal from `append` itself is named in the merge report to
-   Chris, never skipped, and does not hold the merge.
+   the usage gate, its exit 40 (whose reason is `size`, not the line), a
+   failed preflight, or the per-burn budget if #1217 has landed. A refusal
+   from `append` itself is named in the merge report to Chris, never
+   skipped, and does not hold the merge.
 
    **The pass launches once, here, at PR-up** — not earlier, at the
    worker's round-1 report: an earlier launch races the worker's own
