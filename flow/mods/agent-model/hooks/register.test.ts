@@ -10,7 +10,9 @@ const AGENTS = '/home/test/.claude/agents'
 const call = async ($: any, on: any, input: Record<string, unknown>, files: Record<string, string> = {}) => {
   mock.env(on, { HOME: '/home/test' })
   on('fs.read', ($$: any, e: any) => {
-    const text = files[e.path]
+    // A relative path reaches the hook resolved against the working directory.
+    const key = Object.keys(files).find(k => e.path === k || (!k.startsWith('/') && e.path.endsWith(`/${k}`)))
+    const text = key === undefined ? undefined : files[key]
     if (text === undefined) return { deny: `ENOENT ${e.path}` }
     return { value: text }
   })
@@ -89,6 +91,14 @@ test('model: inherit does not count as the definition setting its own model', as
 test('an empty model key does not borrow the next key as its value', async ($, on) => {
   const { seen } = await call($, on, { subagent_type: 'emp' }, {
     [`${AGENTS}/emp.md`]: '---\nname: emp\nmodel:\ntools: Read\n---\nbody',
+  })
+  expect(seen).toBe(undefined)
+})
+
+test('a project definition without a model is not overridden by a user one that sets it', async ($, on) => {
+  const { seen } = await call($, on, { subagent_type: 'dup' }, {
+    ['.claude/agents/dup.md']: '---\nname: dup\n---\nbody',
+    [`${AGENTS}/dup.md`]: '---\nname: dup\nmodel: opus\n---\nbody',
   })
   expect(seen).toBe(undefined)
 })

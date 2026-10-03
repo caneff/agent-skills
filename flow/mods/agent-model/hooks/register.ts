@@ -29,7 +29,11 @@ export const register: Register = on => {
       if (home !== undefined) paths.push(`${home}/.claude/agents/${type}.md`)
       for (const path of paths) {
         const text = await $.fs.read(path).catch(() => undefined)
-        if (typeof text === 'string' && setsOwnModel(text)) return next(e)
+        // The first definition found is the one the engine spawns.
+        if (typeof text === 'string') {
+          if (setsOwnModel(text)) return next(e)
+          break
+        }
       }
     }
     return { deny: DENY }
