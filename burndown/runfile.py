@@ -733,18 +733,21 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
     # naming those forms (#1343).
     shadowed = {(split_qualified(k)[1], found[-1][0])
                 for k, found in records.items() if split_qualified(k)[0]}
+    held_forms = {}
+    for h in held:
+        file, bare = split_qualified(h)
+        if file:
+            held_forms.setdefault(bare, []).append(h)
     for fid, found in records.items():
         body_n, stated, _ = found[-1]
         if stated != "leftover" or fid in held:
             continue
         file = split_qualified(fid)[0]
-        if not file and (fid, body_n) in shadowed:
-            continue
         if not file:
-            forms = sorted(h for h in held if split_qualified(h)[0]
-                           and split_qualified(h)[1] == fid)
-            if forms:
-                cite = " or ".join(f"`{h}`" for h in forms)
+            if (fid, body_n) in shadowed:
+                continue
+            if fid in held_forms:
+                cite = " or ".join(f"`{h}`" for h in sorted(held_forms[fid]))
                 raise RunFileError(
                     f"{body_path}:{body_n} records {fid} as a leftover, but "
                     f"{sidecar_path} holds it only file-qualified — cite it "
