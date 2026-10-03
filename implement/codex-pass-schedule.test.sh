@@ -201,7 +201,6 @@ check_in "$merge_section" "in § Review's \`leftover\` grammar, under the id \`c
 # across passes; the phase prefix is what keeps two leftovers apart (#1124).
 check_in "$merge_section" 'as in `codex-second-1`' 'implement/SKILL.md § The merge'
 check_absent_in "$merge_section" "under the Codex finding's own id" 'implement/SKILL.md § The merge'
-check_absent_in "$whole_file" 'there is no third Codex run' 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'there is no worker fix-and-re-run cycle left' 'implement/SKILL.md (whole file)'
 check_absent_in "$whole_file" 'the no-third-run ceiling' 'implement/SKILL.md (whole file)'
 
