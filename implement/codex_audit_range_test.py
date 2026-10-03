@@ -12,7 +12,8 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "codex-audit-range.py"
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
+           "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
 
 
 def skip_row(ticket, reason, repo="skills", phase="gate"):
@@ -33,6 +34,7 @@ class Case(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
+        self.env = {**os.environ, **GIT_ENV, "HOME": str(self.tmp)}  # no real ~/.gitconfig or ~/.cache
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
         self.git("init", "-q", "-b", "main")
@@ -43,7 +45,7 @@ class Case(unittest.TestCase):
         self._tmp.cleanup()
 
     def git(self, *args, date=None):
-        env = {**os.environ, **GIT_ENV, **({"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else {})}
+        env = {**self.env, **({"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else {})}
         return subprocess.run(["git", *args], cwd=self.repo, env=env, check=True,
                               capture_output=True, text=True).stdout.strip()
 
@@ -60,10 +62,10 @@ class Case(unittest.TestCase):
     def write_ledger(self, rows):
         self.ledger.write_text("".join(json.dumps(r) + "\n" for r in rows))
 
-    def run_script(self, mark, *extra):
+    def run_script(self, mark, *extra, cwd=None):
         return subprocess.run([sys.executable, SCRIPT, "--ledger", self.ledger, "--repo", "skills",
                                "--base", "main", "--mark", mark, *extra],
-                              cwd=self.repo, capture_output=True, text=True)
+                              cwd=cwd or self.repo, env=self.env, capture_output=True, text=True)
 
 
 class SkippedSinceMarkTest(Case):
@@ -78,7 +80,7 @@ class SkippedSinceMarkTest(Case):
         self.write_ledger([skip_row(10, "size"), skip_row(11, "size"),
                            skip_row(12, "codex usage 100% — capped, resets 2026-10-03 17:53"),
                            pass_row(13), skip_row(14, "ceiling"),
-                           skip_row(11, "size", repo="sudokupad-art")])
+                           skip_row(12, "size", repo="sudokupad-art")])  # merged here, but another repo's skip
 
     def expected(self):
         return (f"range {self.mark}..{self.ceiling}\n"  # the oldest merge's parent is the mark
@@ -102,6 +104,30 @@ class SkippedSinceMarkTest(Case):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout, self.expected())
         self.assertIn("ticket #99 (size) left out: 0 merge commits on main close it", r.stderr)
+
+    def test_the_audits_own_skip_row_is_not_a_skipped_pr(self):
+        audit_skip = {**skip_row(0, "ceiling", phase="audit"), "ticket": None, "tickets": []}
+        self.write_ledger([skip_row(11, "size"), skip_row(14, "ceiling"), audit_skip])
+        r = self.run_script(self.mark)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, self.expected())
+        self.assertEqual(r.stderr, "")
+
+    def test_a_merge_naming_the_ticket_only_in_its_subject_is_found(self):
+        later = self.commit("Fix a thing (#15) (#105)\n\n* a commit with no closing line\n",
+                            "2026-09-30T12:00:00+00:00")
+        self.write_ledger([skip_row(15, "size")])
+        r = self.run_script(self.mark)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, f"range {self.ceiling}..{later}\nPR #105 ticket #15 size {later}\n")
+
+    def test_a_ticket_closed_by_two_merges_is_named_and_left_out(self):
+        self.merge(106, 11, "2026-09-30T12:00:00+00:00")
+        self.write_ledger([skip_row(11, "size"), skip_row(14, "ceiling")])
+        r = self.run_script(self.mark)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, f"range {self.passed}..{self.ceiling}\nPR #104 ticket #14 ceiling {self.ceiling}\n")
+        self.assertIn("ticket #11 (size) left out: 2 merge commits on main close it", r.stderr)
 
 
 class NothingToAuditTest(Case):
@@ -128,6 +154,7 @@ class NothingToAuditTest(Case):
         self.assertEqual(r.returncode, self.EMPTY, r.stderr)
         self.assertIn("ticket #98 (size) left out", r.stderr)
         self.assertIn("ticket #99 (ceiling) left out", r.stderr)
+        self.assertIn("2 skipped ticket(s) left out undated", r.stdout)
 
 
 class BadInputTest(Case):
@@ -136,6 +163,15 @@ class BadInputTest(Case):
         r = self.run_script("not-a-mark")
         self.assertEqual(r.returncode, 2)
         self.assertIn("neither a commit nor an ISO date", r.stderr)
+
+    def test_outside_a_repo_is_a_git_error_not_a_bad_mark(self):
+        self.write_ledger([skip_row(11, "size")])
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        r = self.run_script("not-a-mark", cwd=outside)  # git cannot answer, so the mark is not to blame
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not a git repository", r.stderr)
+        self.assertNotIn("neither a commit nor an ISO date", r.stderr)
 
     def test_a_missing_ledger_is_an_error_not_an_empty_set(self):
         r = self.run_script("2026-09-01")
