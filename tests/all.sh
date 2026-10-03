@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Runs every test suite in the repo. Three discovery rules over git-tracked
+# Runs every test suite in the repo. Discovery rules over git-tracked
 # files, no per-file special cases: `*.test.sh` runs under bash, `*_test.py`
-# runs directly under python3, and each `audit.py` that implements
-# `--selfcheck` runs with that flag. One line per suite; exits non-zero on
+# runs directly under python3, each `audit.py` that implements
+# `--selfcheck` runs with that flag, each `Cargo.toml` runs `cargo test`, and
+# each folder holding `.claude-plugin/plugin.json` (a mod) runs
+# `claude plugin test <folder>`. One line per suite; exits non-zero on
 # the first failure (and prints that suite's output). A suite is failed on
 # its exit status *or* on a failure signature at the start of a line in its
 # output, because exit status alone read a suite that reported findings and
@@ -33,6 +35,11 @@ suites() { # prints "<label>\t<command>" per discovered suite
     done
   git ls-files -- '*Cargo.toml' |
     while IFS= read -r f; do printf '%s\tcargo test --manifest-path %s\n' "$f" "$f"; done
+  git ls-files -- '*.claude-plugin/plugin.json' |
+    while IFS= read -r f; do
+      dir=$(dirname "$(dirname "$f")")
+      printf '%s\tclaude plugin test %s\n' "$dir" "$dir"
+    done
 }
 
 case "${1:-}" in
@@ -44,6 +51,12 @@ esac
 # A missing cargo must fail the gate, not silently skip every Cargo suite.
 if suites | cut -f2 | grep -q '^cargo test ' && ! command -v cargo >/dev/null 2>&1; then
   echo "tests/all.sh: cargo is not on PATH, and a tracked Cargo.toml needs it" >&2
+  exit 1
+fi
+
+# Likewise a missing claude must fail the gate, not silently skip every mod.
+if suites | cut -f2 | grep -q '^claude plugin test ' && ! command -v claude >/dev/null 2>&1; then
+  echo "tests/all.sh: claude is not on PATH, and a tracked mod needs it" >&2
   exit 1
 fi
 
