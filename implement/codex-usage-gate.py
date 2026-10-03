@@ -23,8 +23,8 @@ in files that are neither Markdown nor tests (what `tests/all.sh` discovers —
 directory). Below SIZE_THRESHOLD it answers 40, `under size threshold (<churn>
 < <threshold>)`, before any usage read, so a skipped PR costs no RPC — unless
 any of the clump's tickets carries FORCE_LABEL, which sends it on to the usage
-read. The label bypasses the size check only; the kill switch and the cap
-still answer 20. With no arguments there is no size check: the Codex lane's
+read. The label bypasses the size check only; the kill switch, the reserve
+ceiling and the cap still answer 20. With no arguments there is no size check: the Codex lane's
 launches have no PR diff to measure.
 A `git` or `gh` failure, or a diff that changes no files at all (HEAD is the
 base, so this is not the PR's workspace), is 30 `size check failed: ...`,
