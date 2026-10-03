@@ -728,17 +728,34 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
                 "--allow-stale")
     # A sweep item's sidecar line is keyed `<file> <id>`; the bare id a
     # qualified citation is also recorded under is not a second finding, and
-    # is skipped so the refusal names the qualified form (#1315).
-    qualified = {split_qualified(h)[1] for h in held}
+    # is skipped so the refusal names the qualified form (#1315). A bare cite
+    # matches only a bare line: one held only as `<file> <id>` is refused,
+    # naming those forms (#1343).
     shadowed = {(split_qualified(k)[1], found[-1][0])
                 for k, found in records.items() if split_qualified(k)[0]}
+    held_forms = {}
+    for h in held:
+        file, bare = split_qualified(h)
+        if file:
+            held_forms.setdefault(bare, []).append(h)
     for fid, found in records.items():
         body_n, stated, _ = found[-1]
         if stated != "leftover" or fid in held:
             continue
         file = split_qualified(fid)[0]
-        if not file and (fid in qualified or (fid, body_n) in shadowed):
-            continue
+        if not file:
+            if (fid, body_n) in shadowed:
+                continue
+            if fid in held_forms:
+                # The file in backticks, then the id: the one form
+                # `_FILE_QUALIFIER` reads for a root-level file too.
+                cite = " or ".join(
+                    f"`{split_qualified(h)[0]}` {fid}"
+                    for h in sorted(held_forms[fid]))
+                raise RunFileError(
+                    f"{body_path}:{body_n} records {fid} as a leftover, but "
+                    f"{sidecar_path} holds it only file-qualified — cite it "
+                    f"as {cite}")
         keyed = " (its `id` is the `<file> <id>` form)" if file else ""
         raise RunFileError(
             f"{body_path}:{body_n} records {fid} as a leftover, but "
