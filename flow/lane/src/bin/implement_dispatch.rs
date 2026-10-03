@@ -1151,9 +1151,18 @@ fn run() -> Result<(), ExitCode> {
         }
     }
 
+    // #1368: the flow's mods load in the worker. `herdr agent start` runs
+    // claude in an existing pane and takes no environment, so the folder
+    // rides on the agent's own command line; a folder of plugins loads each
+    // child (`claude --help`, `--plugin-dir`).
+    let mods = format!("{home}/.agents/skills/flow/mods");
     claim.step(
         "herdr agent start",
-        run_timeout("herdr", &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &model], HERDR_MUTATION_TIMEOUT),
+        run_timeout(
+            "herdr",
+            &["agent", "start", &agent, "--kind", "claude", "--pane", &pane, "--", "--model", &model, "--plugin-dir", &mods],
+            HERDR_MUTATION_TIMEOUT,
+        ),
         None,
     )?;
 

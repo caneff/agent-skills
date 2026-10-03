@@ -39,7 +39,7 @@ link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 # user`); backup-sync.sh --commit still backs it up, straight off this link.
 link claude/settings.json       "$HOME/.claude/settings.json"
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
-for h in block-dangerous-git.sh refresh-landed.sh require-agent-model.sh \
+for h in block-dangerous-git.sh refresh-landed.sh \
          wrap-background-jobs.sh worker-stop-alert.sh worker-spin-alert.sh \
          worker-alert-lib.sh package.json; do
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
@@ -54,6 +54,12 @@ done
 # symlink so a rename doesn't leave the old name pointing into this repo.
 if [ -L "$HOME/.claude/hooks/sync-primary-main.sh" ]; then
   rm -f "$HOME/.claude/hooks/sync-primary-main.sh"
+fi
+
+# require-agent-model.sh became the agent-model mod (flow/mods/, #1368): drop
+# the stale symlink it leaves behind.
+if [ -L "$HOME/.claude/hooks/require-agent-model.sh" ]; then
+  rm -f "$HOME/.claude/hooks/require-agent-model.sh"
 fi
 
 # The pre-push hook that ran tests/all.sh is retired (#633): a push is not the

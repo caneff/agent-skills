@@ -16,6 +16,12 @@ fn refused(out: &std::process::Output, calls: &str, repo: &std::path::Path, n: &
         && !std::path::Path::new(&format!("{}/.git/refs/heads/spec-{n}", repo.display())).exists()
 }
 
+/// The mods folder every worker is started with (#1368): `--plugin-dir` on the
+/// agent's own command line, because `herdr agent start` has no env channel.
+fn mods(f: &Fixture) -> String {
+    format!("{}/.agents/skills/flow/mods", f.home().display())
+}
+
 #[test]
 fn refuses_when_no_herdr_server_is_running() {
     let f = Fixture::new();
@@ -258,7 +264,7 @@ fn calls_open_start_prompt_in_order_with_the_truncated_agent_name() {
             repo.display(),
             wt.display()
         ),
-        format!("herdr agent start {name} --kind claude --pane w7:p1 -- --model sonnet"),
+        format!("herdr agent start {name} --kind claude --pane w7:p1 -- --model sonnet --plugin-dir {}", mods(&f)),
         format!("herdr agent prompt {name} /implement 395 --tier heavy --controller \"skills-ctl\" --wait --until working --timeout 120000"),
     ];
     assert_eq!(herdr_calls, expected, "herdr calls wrong:\n{herdr_calls:?}");
@@ -426,7 +432,7 @@ fn model_reaches_agent_start_and_pane_falls_back_to_pane_list() {
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "--model", "opus", "397"], &scenario);
     assert!(out.status.success(), "{}", out_text(&out));
     assert!(
-        f.calls().lines().any(|l| l == "herdr agent start sudokumaker-custom-constrain-397 --kind claude --pane w8:p3 -- --model opus"),
+        f.calls().lines().any(|l| l == format!("herdr agent start sudokumaker-custom-constrain-397 --kind claude --pane w8:p3 -- --model opus --plugin-dir {}", mods(&f))),
         "{}",
         f.calls()
     );
@@ -663,7 +669,7 @@ fn spec_mode_briefs_implement_spec_in_a_spec_workspace() {
     assert_eq!(name.len(), 32);
     let expected = vec![
         format!("herdr worktree open --cwd {} --path {} --label spec-395 --no-focus --trust-repository", repo.display(), wt.display()),
-        format!("herdr agent start {name} --kind claude --pane w7:p1 -- --model opus"),
+        format!("herdr agent start {name} --kind claude --pane w7:p1 -- --model opus --plugin-dir {}", mods(&f)),
         format!("herdr agent prompt {name} /implement-spec 395 --slots 3 --controller \"skills-ctl\" --wait --until working --timeout 120000"),
     ];
     assert_eq!(herdr_calls, expected, "herdr calls wrong:\n{herdr_calls:?}");
@@ -850,7 +856,7 @@ fn spec_mode_briefs_the_parsed_slot_count_and_honours_model() {
     assert!(out.status.success(), "{}", out_text(&out));
     let calls = f.calls();
     let name = "sudokumaker-custom-cons-spec-395";
-    assert!(calls.lines().any(|l| l == format!("herdr agent start {name} --kind claude --pane w7:p1 -- --model sonnet")), "{calls}");
+    assert!(calls.lines().any(|l| l == format!("herdr agent start {name} --kind claude --pane w7:p1 -- --model sonnet --plugin-dir {}", mods(&f))), "{calls}");
     assert!(
         calls.lines().any(|l| l
             == format!("herdr agent prompt {name} /implement-spec 395 --slots 7 --controller \"skills-ctl\" --wait --until working --timeout 120000")),
