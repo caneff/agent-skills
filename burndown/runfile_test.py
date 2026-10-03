@@ -1974,6 +1974,32 @@ def test_a_bare_leftover_cite_is_not_joined_to_a_qualified_sidecar_line():
             "says 'fixed'" in got, got
 
 
+def test_an_explicit_bare_leftover_cite_is_checked_beside_a_qualified_one():
+    # codex-second-1: a qualified cite also records its bare id, and that
+    # alias must not stand in for an explicit bare cite of the same id.
+    held = dict(LEFTOVER_S3, id="r1-S3")
+    qualified = dict(LEFTOVER_S3, id="a.md S8", file="a.md")
+    for name, lines in (
+            ("bare then qualified", "- S8: leftover.\n- `a.md` S8: leftover.\n"),
+            ("qualified then bare", "- `a.md` S8: leftover.\n- S8: leftover.\n"),
+            ("grouped", "- S8, `a.md` S8: leftover.\n")):
+        body = pr_body("## Decisions made\n\n- r1-S3: leftover.\n" + lines)
+        got = refusal_of(sidecar_of(held, qualified), landed_root(), body)
+        assert "records S8 as a leftover" in got and "`a.md` S8" in got, \
+            (name, got)
+        assert "append its bare sidecar line" in got, (name, got)
+
+
+def test_a_leftover_cited_only_by_a_sidecar_tail_is_checked_when_unheld():
+    # C1: the tail id is a written-out bare cite too; with no sidecar line
+    # for it, the body is refused by name.
+    held = dict(LEFTOVER_S3, id="r1-S3")
+    body = pr_body("## Decisions made\n\n- r1-S3: leftover.\n"
+                   "- Codex gate: leftover; sidecar codex-gate-1.\n")
+    got = refusal_of(sidecar_of(held), landed_root(), body)
+    assert "records codex-gate-1 as a leftover" in got, got
+
+
 def test_a_file_qualifier_may_carry_a_line_and_a_bare_file_needs_backticks():
     # C1: a line number or #L anchor on the path is part of the qualifier.
     for line in ("- **e2e/scenarios.mjs:42 S8**: fixed",

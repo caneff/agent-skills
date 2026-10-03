@@ -586,7 +586,8 @@ def cited_ids(line):
     text after the leading ones, and the `(file or None, id)` pairs of the
     leading ones. `- S1, P2 and C1: fixed` cites all three. A file-qualified
     id (`**e2e/scenarios.mjs S8**`) cites the id alone; `cites` keeps its
-    file."""
+    file. `ids` lists the leading ids first, then the `sidecar <id>` tail
+    ids, so `ids[len(cites):]` is the tail."""
     cites, pos = _cites(line)
     ids = [fid for _, fid in cites]
     ids += [m.group(1) for m in _TAIL_ID.finditer(line)]
@@ -727,26 +728,32 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
                 "grammar), each with its own sidecar line; otherwise pass "
                 "--allow-stale")
     # A sweep item's sidecar line is keyed `<file> <id>`; the bare id a
-    # qualified citation is also recorded under is not a second finding, and
-    # is skipped so the refusal names the qualified form (#1315). A bare cite
-    # matches only a bare line: one held only as `<file> <id>` is refused,
-    # naming those forms (#1343).
-    shadowed = {(split_qualified(k)[1], found[-1][0])
-                for k, found in records.items() if split_qualified(k)[0]}
+    # qualified citation is also recorded under is not a second finding, so
+    # only a bare id the line cites itself is checked against a bare line, and
+    # the refusal for a qualified one names the qualified form (#1315). A bare
+    # cite matches only a bare line: one held only as `<file> <id>` is
+    # refused, naming those forms (#1343). Every such record is checked, not
+    # only the last, so a qualified cite beside it cannot stand in for it.
+    explicit = set()
+    for n, line in decisions_made(body_lines):
+        ids, _, cites = cited_ids(line)
+        explicit.update((fid, n) for fid in ids[len(cites):])
+        explicit.update((fid, n) for file, fid in cites if not file)
     held_forms = {}
     for h in held:
         file, bare = split_qualified(h)
         if file:
             held_forms.setdefault(bare, []).append(h)
     for fid, found in records.items():
-        body_n, stated, _ = found[-1]
-        if stated != "leftover" or fid in held:
-            continue
         file = split_qualified(fid)[0]
-        if not file:
-            if (fid, body_n) in shadowed:
+        if fid in held:
+            continue
+        checked = found[-1:] if file else [r for r in found
+                                           if (fid, r[0]) in explicit]
+        for body_n, stated, _ in checked:
+            if stated != "leftover":
                 continue
-            if fid in held_forms:
+            if not file and fid in held_forms:
                 # The file in backticks, then the id: the one form
                 # `_FILE_QUALIFIER` reads for a root-level file too.
                 cite = " or ".join(
@@ -755,12 +762,13 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
                 raise RunFileError(
                     f"{body_path}:{body_n} records {fid} as a leftover, but "
                     f"{sidecar_path} holds it only file-qualified — cite it "
-                    f"as {cite}")
-        keyed = " (its `id` is the `<file> <id>` form)" if file else ""
-        raise RunFileError(
-            f"{body_path}:{body_n} records {fid} as a leftover, but "
-            f"{sidecar_path} has no line for it — append it in § "
-            f"Review's leftover grammar{keyed}, or pass --allow-stale")
+                    f"as {cite}, or, when it is a separate bare finding, "
+                    f"append its bare sidecar line")
+            keyed = " (its `id` is the `<file> <id>` form)" if file else ""
+            raise RunFileError(
+                f"{body_path}:{body_n} records {fid} as a leftover, but "
+                f"{sidecar_path} has no line for it — append it in § "
+                f"Review's leftover grammar{keyed}, or pass --allow-stale")
 
 
 _SWEEP_FILE = re.compile(r"##\s+(.+?)\s*$")
