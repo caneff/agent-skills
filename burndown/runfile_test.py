@@ -1987,6 +1987,7 @@ def test_an_explicit_bare_leftover_cite_is_checked_beside_a_qualified_one():
         got = refusal_of(sidecar_of(held, qualified), landed_root(), body)
         assert "records S8 as a leftover" in got and "`a.md` S8" in got, \
             (name, got)
+        assert "append its bare sidecar line" in got, (name, got)
 
 
 def test_a_leftover_cited_only_by_a_sidecar_tail_is_checked_when_unheld():
