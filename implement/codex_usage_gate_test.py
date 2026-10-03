@@ -219,19 +219,21 @@ print(json.dumps({{"labels": [{{"name": x}} for x in names]}}))
 
 
 def write_lines(root, rel, count):
+    """`count` lines at `rel`, or `count` itself when it is bytes (a binary file)."""
     path = os.path.join(root, rel)
     os.makedirs(os.path.dirname(path) or root, exist_ok=True)
-    with open(path, "w") as f:
-        f.write("".join(f"line {i}\n" for i in range(count)))
+    with open(path, "wb") as f:
+        f.write(count if isinstance(count, bytes) else "".join(f"line {i}\n" for i in range(count)).encode())
 
 
 @contextlib.contextmanager
-def fake_repo(changes, base_files=None, moves=(), labels=None, pct=5, switch=False):
+def fake_repo(changes, base_files=None, moves=(), labels=None, pct=5, switch=False, stale=False):
     """Yields (repo, env): a fabricated repo whose `main` holds `seed.py` and `base_files`
     ({path: line count}), and whose checked-out `pr` branch renames each (src, dst) of `moves`
     and writes `changes` on top. `labels` maps a ticket number to its label names, served by a
     fake `gh`; `env` runs the gate there with a `pct` usage cache and, with `switch`, the kill
-    switch."""
+    switch. With `stale` the cache is an hour old, so any usage read runs the fake `codex`, which
+    leaves `<HOME>/codex-called` behind."""
     with tempfile.TemporaryDirectory() as d:
         repo = os.path.join(d, "repo")
         os.mkdir(repo)
@@ -241,6 +243,11 @@ def fake_repo(changes, base_files=None, moves=(), labels=None, pct=5, switch=Fal
         with open(os.path.join(bindir, "gh"), "w") as f:
             f.write(FAKE_GH.format(py=sys.executable))
         os.chmod(os.path.join(bindir, "gh"), 0o755)
+        with open(os.path.join(d, "fake_codex.py"), "w") as f:
+            f.write(FAKE_CODEX.format(py=sys.executable))
+        with open(os.path.join(bindir, "codex"), "w") as f:
+            f.write(f'#!/bin/sh\n: >"{d}/codex-called"\nexec {sys.executable} "{d}/fake_codex.py"\n')
+        os.chmod(os.path.join(bindir, "codex"), 0o755)
         genv = {"HOME": d, "PATH": bindir, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
                 "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
         g = lambda *a: subprocess.run([GIT, *a], cwd=repo, env=genv, check=True, capture_output=True)
@@ -255,7 +262,7 @@ def fake_repo(changes, base_files=None, moves=(), labels=None, pct=5, switch=Fal
             write_lines(repo, rel, count)
         g("add", "-A"); g("commit", "-q", "--allow-empty", "-m", "pr")
         with open(os.path.join(d, "usage-cache.json"), "w") as f:
-            json.dump(cache(pct), f)
+            json.dump(cache(pct, fetched=time.time() - 3600 if stale else None), f)
         if switch:
             os.makedirs(os.path.join(d, ".config", "agent-skills"))
             open(os.path.join(d, SWITCH_REL), "w").close()
@@ -288,28 +295,28 @@ assert run_size({"a.py": 5}, labels={"1": ["ready-for-agent", "codex"]})[0] == 4
 status, out = run_size({"a.py": 5}, labels={"1": ["needs-codex"]}, switch=True)
 check("switch beats label", (status, out), 20, "codex reviews off")
 check("switch beats a large PR", run_size({"a.py": 5000}, switch=True), 20, "codex reviews off")
+check("switch beats a small PR", run_size({"a.py": 5}, switch=True), 20, "codex reviews off")
+# A binary file has no lines to review: it counts 0 and does not break the count.
+assert run_size({"img.png": b"\x00\x89PNG" * 100, "a.py": 5}) == (40, "under size threshold (5 < 300)\n")
+# Every suite `tests/all.sh` discovers in this repo is a test file the size check skips, so the
+# gate's patterns cannot drift from the discovery rules unnoticed. Cargo manifests are not tests.
+suites = subprocess.run(["bash", os.path.join(HERE, "..", "tests", "all.sh"), "--list"],
+                        cwd=HERE, capture_output=True, text=True, check=True).stdout.split("\n")
+suites = [x.removesuffix(" --selfcheck") for x in suites if x and not x.endswith("Cargo.toml")]
+assert len(suites) > 50, suites
+assert run_size({x: 1 for x in suites}) == (40, "under size threshold (0 < 300)\n"), run_size({x: 1 for x in suites})
 # A pure rename carries no churn, not a 400-line delete plus a 400-line add, and the paths after
 # it still parse (`-z` writes a rename's two paths as fields of their own).
 assert run_size({"z.py": 10}, base_files={"big.py": 400}, moves=[("big.py", "moved.py")]) == (
     40, "under size threshold (10 < 300)\n")
-# A size skip answers before any usage read: the helper is never loaded.
-with fake_repo({"a.py": 5}) as (cwd, env):
-    saved_env, saved_cwd = dict(os.environ), os.getcwd()
-    os.environ.update(env)
-    os.chdir(cwd)
-    spec = importlib.util.spec_from_file_location("gate", GATE)
-    gate = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(gate)
-
-    def boom():
-        raise AssertionError("load_helper called on a size skip")
-    gate.load_helper = boom
-    try:
-        assert gate.check("main", ["1"]) == (40, "under size threshold (5 < 300)")
-    finally:
-        os.chdir(saved_cwd)
-        os.environ.clear()
-        os.environ.update(saved_env)
+# A size skip answers before any usage read: with a stale cache any read would run `codex`, and
+# it never runs. The labelled control proves the marker does appear when the read happens.
+for labels, want_status, want_called in (({}, 40, False), ({"1": ["needs-codex"]}, 30, True)):
+    with fake_repo({"a.py": 5}, labels=labels, stale=True) as (cwd, env):
+        p = subprocess.run([sys.executable, GATE, "--base", "main", "--tickets", "1"],
+                           cwd=cwd, env=env, capture_output=True, text=True)
+        called = os.path.exists(os.path.join(env["HOME"], "codex-called"))
+        assert (p.returncode, called) == (want_status, want_called), (labels, p.returncode, p.stdout, called)
 # Malformed size arguments are unknown (30) with a usage line, never a silent full-size pass.
 for bad in (["--base", "main"], ["--base", "main", "--tickets"], ["--tickets", "1", "--base", "main"],
             ["--base", "main", "--tickets", "#1"]):
