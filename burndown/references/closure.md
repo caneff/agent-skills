@@ -111,11 +111,11 @@ So a component is a **family**, and it is split:
 - Every other member is a clump of one.
 - **Serializing needs no new mechanism.** `loop.py dispatch` already holds
   a clump whose closure intersects a live workspace's, and `picks` never
-  takes two clumps sharing a file or a directory in one tick (#1342). So the loop dispatches the
-  lowest free clump of a family, and those two keep back every clump that
-  shares a file with it. Two family members that share no
-  file and no directory can run together. The invariant is "no two live workspaces share a
-  file", not "one live member per family".
+  takes two clumps sharing a file or a directory in one tick (#1342). So
+  the loop dispatches the lowest free clump of a family, and those two keep
+  back every clump that shares a file with it. Two family members that share
+  no file and no directory can run together. The invariant is "no two live
+  workspaces share a file", not "one live member per family".
 - **A `subtree`-mode family is never split.** There, two tickets are in a
   family because their directories overlap, not their files. The dispatch
   hold compares files, so splitting would let two workers into one
