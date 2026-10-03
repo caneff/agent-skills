@@ -688,13 +688,17 @@ fi
 # #1270: the recipe appends one ledger row per mutation, before cleanup removes the
 # status files.
 ledger_path="$scratch/rows.jsonl"
-row_field() { # <mutation id> <jq-ish python expression over the row r> -> prints it, or MISSING
-  python3 - "$ledger_path" "$1" "$2" <<'PY'
+row_field() { # <mutation id> <dotted field path>... -> the values, space-joined, or MISSING
+  python3 - "$ledger_path" "$@" <<'PY'
 import json, os, sys
-path, mid, expr = sys.argv[1:]
+path, mid, *fields = sys.argv[1:]
 rows = [json.loads(l) for l in open(path)] if os.path.exists(path) else []
 hit = [r for r in rows if r.get("mutation_id") == mid]
-print(eval(expr, {"r": hit[0]}) if len(hit) == 1 else "MISSING")
+def get(row, dotted):
+    for key in dotted.split("."):
+        row = row[key]
+    return row
+print(" ".join(str(get(hit[0], f)) for f in fields) if len(hit) == 1 else "MISSING")
 PY
 }
 body='case "$1" in early) exit 4;; esac; : >"$3"; echo "MUTANT-$1"; case "$1" in g1) exit 0;; esac; exit 1'
@@ -702,7 +706,7 @@ substitute 'r1 g1 cs1 cs2 early' "$body" >"$scratch/recipe-rows.sh"
 ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-rows.sh" ) \
   >"$scratch/rows.out" 2>&1 || { echo "FAIL: the ledger-appending run exited non-zero" >&2; cat "$scratch/rows.out" >&2; fail=1; }
 for want in "r1|witness-mutation red" "g1|witness-mutation green" "cs1|call-site-mutation red" "cs2|call-site-mutation red" "early|witness-mutation unknown"; do
-  id="${want%%|*}"; got="$(row_field "$id" 'r["type"] + " " + r["outcome"]')"
+  id="${want%%|*}"; got="$(row_field "$id" type outcome)"
   [ "$got" = "${want#*|}" ] || { echo "FAIL: mutation $id's ledger row is '$got', wanted '${want#*|}'" >&2; fail=1; }
 done
 # `early` exited 4 without reaching its suite, so the marker is absent and the row must be
@@ -712,7 +716,7 @@ done
 # wiring is witnessed by the `r1`, `g1` and call-site rows above (#1306).
 [ "$(grep -c 'appended 1 row' "$scratch/rows.out")" -eq 5 ] ||
   { echo "FAIL: the run did not append exactly five rows" >&2; cat "$scratch/rows.out" >&2; fail=1; }
-[ "$(row_field r1 'r["cost"]["wall_clock"]["status"]')" = known ] ||
+[ "$(row_field r1 cost.wall_clock.status)" = known ] ||
   { echo "FAIL: a mutation row carries no known wall clock" >&2; fail=1; }
 
 # A refused append is reported, not skipped: the run exits 4 and says so.
