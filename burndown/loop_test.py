@@ -210,6 +210,13 @@ def test_picks_holds_a_clump_sharing_a_directory_with_a_same_tick_pick():
     assert held[0]["same_tick"] is True
 
 
+def test_picks_holds_a_nested_directory():
+    c = [{"tickets": [1], "files": ["d/a.py", "d/b.py"]},
+         {"tickets": [2], "files": ["d/r/x.md"]}]
+    picked, held = loop.picks(loop.frontier(c, []), 2)
+    assert [x["tickets"] for x in picked] == [[1]] and held[0]["over"] == ["d/"]
+
+
 def test_picks_does_not_treat_the_repo_root_as_a_shared_directory():
     candidates = [
         {"tickets": [1], "files": ["AGENTS.md"]},
