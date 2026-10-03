@@ -3,10 +3,14 @@
 cache and answers with an exit status a controller can branch on — 0 proceed,
 10 tell Chris first, 20 capped (skip, no run), 30 unknown (skip, no run).
 
+Every run gets `HOME` set to its temporary directory, so the kill-switch file
+(#1354) on the real box never reaches a test.
+
 Seam: the script's command line — stdout line and exit status — against a
 cache file under a temporary `$CODEX_HOME`. `PATH` is emptied so a stale or
 missing cache cannot reach a real `codex app-server`.
 """
+import importlib.util
 import json
 import os
 import subprocess
@@ -25,7 +29,7 @@ def run(cache, *args):
         if cache is not None:
             with open(os.path.join(d, "usage-cache.json"), "w") as f:
                 f.write(cache if isinstance(cache, str) else json.dumps(cache))
-        env = {"CODEX_HOME": d, "PATH": "/nonexistent"}
+        env = {"CODEX_HOME": d, "HOME": d, "PATH": "/nonexistent"}
         p = subprocess.run([sys.executable, GATE, *args], env=env, capture_output=True, text=True)
         return p.returncode, p.stdout
 
@@ -42,7 +46,7 @@ for line in sys.stdin:
 """
 
 
-def run_live(stale_cache, limits, *args):
+def run_live(stale_cache, limits, *args, switch=False):
     """A stale cache with a fake `codex app-server` answering `limits` (or nothing).
 
     Returns (exit status, stdout, the cache file's content after the run)."""
@@ -50,13 +54,16 @@ def run_live(stale_cache, limits, *args):
         path = os.path.join(d, "usage-cache.json")
         with open(path, "w") as f:
             json.dump(stale_cache, f)
+        if switch:
+            os.makedirs(os.path.join(d, ".config", "agent-skills"))
+            open(os.path.join(d, ".config", "agent-skills", "codex-reviews-off"), "w").close()
         bindir = os.path.join(d, "bin")
         os.mkdir(bindir)
         fake = os.path.join(bindir, "codex")
         with open(fake, "w") as f:
             f.write(FAKE_CODEX.format(py=sys.executable))
         os.chmod(fake, 0o755)
-        env = {"CODEX_HOME": d, "PATH": bindir}
+        env = {"CODEX_HOME": d, "HOME": d, "PATH": bindir}
         if limits is not None:
             env["FAKE_LIMITS"] = json.dumps(limits)
         p = subprocess.run([sys.executable, GATE, *args], env=env, capture_output=True, text=True)
@@ -138,3 +145,60 @@ assert run_live(fresh, {"primary": {"usedPercent": 5, "resetsAt": time.time() - 
                 "--percent")[:2] == (30, "unknown\n")
 assert run(None, "--percent") == (30, "unknown\n")
 print("ok percent")
+
+# The kill switch (#1354): `~/.config/agent-skills/codex-reviews-off`, any content, turns the
+# gate to CAPPED before any cache read or live fetch.
+SWITCH_REL = os.path.join(".config", "agent-skills", "codex-reviews-off")
+
+
+def run_switch(content, *args):
+    """(exit status, stdout, switch path) with the switch file under a temporary HOME holding
+    `content` (None: no file), and a headroom cache that would proceed if it were read."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, SWITCH_REL)
+        if content is not None:
+            os.makedirs(os.path.dirname(path))
+            with open(path, "w") as f:
+                f.write(content)
+        with open(os.path.join(d, "usage-cache.json"), "w") as f:
+            json.dump(cache(5), f)
+        env = {"CODEX_HOME": d, "HOME": d, "PATH": "/nonexistent"}
+        p = subprocess.run([sys.executable, GATE, *args], env=env, capture_output=True, text=True)
+        return p.returncode, p.stdout, path
+
+
+for content in ("", "off\n"):
+    status, out, path = run_switch(content)
+    want = f"codex reviews off by Chris's ruling ({path}) — remove the file to re-enable\n"
+    assert (status, out) == (20, want), f"switch {content!r}: {(status, out)!r}"
+status, out, _ = run_switch(None)
+check("switch absent", (status, out), 0, "5%")
+# `--percent` is a reading, not a launch: the switch leaves it alone.
+# A number in the output proves the switch was ignored: honouring it would print no number.
+reset = int(time.time() + 4 * DAY)
+live = {"primary": {"usedPercent": 12.5, "resetsAt": reset}, "secondary": None}
+status, out, _ = run_live(cache(10), live, "--percent", switch=True)
+assert (status, out) == (0, f"12.5 {reset}\n"), (status, out)
+
+# With the switch present the helper is never loaded: a disabled gate costs no RPC.
+with tempfile.TemporaryDirectory() as d:
+    saved_home = os.environ.get("HOME")
+    os.environ["HOME"] = d
+    path = os.path.join(d, SWITCH_REL)
+    os.makedirs(os.path.dirname(path))
+    open(path, "w").close()
+    spec = importlib.util.spec_from_file_location("gate", GATE)
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+
+    def boom():
+        raise AssertionError("load_helper called with the kill switch present")
+    gate.load_helper = boom
+    try:
+        assert gate.check() == (20, f"codex reviews off by Chris's ruling ({path}) — remove the file to re-enable")
+    finally:
+        if saved_home is None:
+            del os.environ["HOME"]
+        else:
+            os.environ["HOME"] = saved_home
+print("ok kill switch")
