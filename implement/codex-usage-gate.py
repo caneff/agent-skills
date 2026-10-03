@@ -26,6 +26,9 @@ any of the clump's tickets carries FORCE_LABEL, which sends it on to the usage
 read. The label bypasses the size check only; the kill switch and the cap
 still answer 20. With no arguments there is no size check: the Codex lane's
 launches have no PR diff to measure.
+A `git` or `gh` failure, or a diff that changes no files at all (HEAD is the
+base, so this is not the PR's workspace), is 30 `size check failed: ...`,
+never a size verdict.
 
 The kill switch is `~/.config/agent-skills/codex-reviews-off`, any content:
 while it exists every check is 20, answered before the size check or any
@@ -129,11 +132,26 @@ def is_counted(path: str) -> bool:
     return not (path.startswith("tests/") or "/tests/" in path)
 
 
+class SizeCheckError(Exception):
+    """The size check could not measure the PR; the gate answers 30 with this message."""
+
+
+def run_cmd(argv: list[str]) -> str:
+    """`argv`'s stdout, or SizeCheckError carrying the command and its own stderr."""
+    p = subprocess.run(argv, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise SizeCheckError(f"`{' '.join(argv)}` exited {p.returncode}: {p.stderr.strip()}")
+    return p.stdout
+
+
 def churn(base: str) -> int:
     """Added plus deleted lines of counted files in `base...HEAD`, in the current directory.
-    A binary file's `-` counts carry no lines to review and count as 0."""
-    out = subprocess.run(["git", "diff", "--numstat", "-z", f"{base}...HEAD"],
-                         capture_output=True, text=True, check=True).stdout
+    A binary file's `-` counts carry no lines to review and count as 0. A diff with no
+    files at all is not a small PR — HEAD is the base, so this is not the PR's
+    workspace — and raises SizeCheckError."""
+    out = run_cmd(["git", "diff", "--numstat", "-z", f"{base}...HEAD"])
+    if not out:
+        raise SizeCheckError(f"{base}...HEAD changes no files — run from the PR's workspace")
     total = 0
     fields = out.split("\0")
     i = 0
@@ -150,22 +168,24 @@ def churn(base: str) -> int:
 
 def forced(tickets: list[str]) -> bool:
     for n in tickets:
-        out = subprocess.run(["gh", "issue", "view", n, "--json", "labels"],
-                             capture_output=True, text=True, check=True).stdout
+        out = run_cmd(["gh", "issue", "view", n, "--json", "labels"])
         if any(label["name"] == FORCE_LABEL for label in json.loads(out)["labels"]):
             return True
     return False
 
 
-def check(size: tuple[str, list[str]] | None = None) -> tuple[int, str]:
-    """`size` is (base ref, the clump's ticket numbers) for a PR pass, None for any other launch."""
+def check(base: str | None = None, tickets: list[str] = ()) -> tuple[int, str]:
+    """`base` and the clump's `tickets` mark a PR's gate pass; without `base`, no size check."""
     switch = kill_switch()
     if switch.exists():
         return CAPPED, f"codex reviews off by Chris's ruling ({switch}) — remove the file to re-enable"
-    if size is not None:
-        base, tickets = size
-        lines = churn(base)
-        if lines < SIZE_THRESHOLD and not forced(tickets):
+    if base is not None:
+        try:
+            lines = churn(base)
+            small = lines < SIZE_THRESHOLD and not forced(tickets)
+        except SizeCheckError as exc:
+            return UNKNOWN, f"size check failed: {exc}"
+        if small:
             return SMALL, f"under size threshold ({lines} < {SIZE_THRESHOLD})"
     worst = reading()
     if worst is None:
@@ -190,15 +210,15 @@ def main() -> int:
     # Any failure is exit 30: a crash's own exit 1 is a status neither caller
     # has a rule for, and an unread reading is not headroom.
     args = sys.argv[1:]
-    size = None
+    base, tickets = None, []
     if args:
         if len(args) < 4 or args[0] != "--base" or args[2] != "--tickets" or not all(
                 n.isdigit() for n in args[3:]):
             print("usage: codex-usage-gate.py [--percent | --base <ref> --tickets <n>...]")
             return UNKNOWN
-        size = (args[1], args[3:])
+        base, tickets = args[1], args[3:]
     try:
-        status, line = check(size)
+        status, line = check(base, tickets)
     except Exception as exc:
         status, line = UNKNOWN, f"codex usage unknown: {type(exc).__name__}: {exc}"
     print(line)

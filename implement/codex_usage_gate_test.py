@@ -253,7 +253,7 @@ def fake_repo(changes, base_files=None, moves=(), labels=None, pct=5, switch=Fal
             g("mv", src, dst)
         for rel, count in changes.items():
             write_lines(repo, rel, count)
-        g("add", "-A"); g("commit", "-qm", "pr")
+        g("add", "-A"); g("commit", "-q", "--allow-empty", "-m", "pr")
         with open(os.path.join(d, "usage-cache.json"), "w") as f:
             json.dump(cache(pct), f)
         if switch:
@@ -305,7 +305,7 @@ with fake_repo({"a.py": 5}) as (cwd, env):
         raise AssertionError("load_helper called on a size skip")
     gate.load_helper = boom
     try:
-        assert gate.check(("main", ["1"])) == (40, "under size threshold (5 < 300)")
+        assert gate.check("main", ["1"]) == (40, "under size threshold (5 < 300)")
     finally:
         os.chdir(saved_cwd)
         os.environ.clear()
@@ -315,6 +315,12 @@ for bad in (["--base", "main"], ["--base", "main", "--tickets"], ["--tickets", "
             ["--base", "main", "--tickets", "#1"]):
     status, out = run(cache(5), *bad)
     assert status == 30 and out.startswith("usage: codex-usage-gate.py"), (bad, status, out)
-# A base git cannot resolve is unknown, never a size verdict either way.
-check("bad base", run_size({"a.py": 5}, base="nope"), 30, "codex usage unknown")
+# A base git cannot resolve is unknown, never a size verdict either way, and the line names git's
+# own error rather than a usage read that never happened.
+status, out = run_size({"a.py": 5}, base="nope")
+assert status == 30 and out.startswith("size check failed: `git diff") and "nope" in out, (status, out)
+# A diff with no files at all is HEAD sitting at the base — the wrong checkout — never a 0-line PR.
+status, out = run_size({})
+assert (status, out) == (30, "size check failed: main...HEAD changes no files — run from the PR's workspace\n"), (
+    status, out)
 print("ok size")
