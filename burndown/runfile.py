@@ -748,7 +748,7 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
                 raise RunFileError(
                     f"{body_path}:{body_n} records {fid} as a leftover, but "
                     f"{sidecar_path} holds it only file-qualified — cite it "
-                    f"as {cite}, or pass --allow-stale")
+                    f"as {cite}")
         keyed = " (its `id` is the `<file> <id>` form)" if file else ""
         raise RunFileError(
             f"{body_path}:{body_n} records {fid} as a leftover, but "
