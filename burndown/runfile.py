@@ -726,15 +726,23 @@ def refuse_disagreeing_pr_body(sidecar_path, body_path):
                 "grammar), each with its own sidecar line; otherwise pass "
                 "--allow-stale")
     # A sweep item's sidecar line is keyed `<file> <id>`; the bare id a
-    # qualified citation is also recorded under is not a second finding.
+    # qualified citation is also recorded under is not a second finding, and
+    # is skipped so the refusal names the qualified form (#1315).
     qualified = {split_qualified(h)[1] for h in held}
+    shadowed = {(split_qualified(k)[1], found[-1][0])
+                for k, found in records.items() if split_qualified(k)[0]}
     for fid, found in records.items():
         body_n, stated, _ = found[-1]
-        if stated == "leftover" and fid not in held | qualified:
-            raise RunFileError(
-                f"{body_path}:{body_n} records {fid} as a leftover, but "
-                f"{sidecar_path} has no line for it — append it in § "
-                "Review's leftover grammar, or pass --allow-stale")
+        if stated != "leftover" or fid in held:
+            continue
+        file = split_qualified(fid)[0]
+        if not file and (fid in qualified or (fid, body_n) in shadowed):
+            continue
+        keyed = " (its `id` is the `<file> <id>` form)" if file else ""
+        raise RunFileError(
+            f"{body_path}:{body_n} records {fid} as a leftover, but "
+            f"{sidecar_path} has no line for it — append it in § "
+            f"Review's leftover grammar{keyed}, or pass --allow-stale")
 
 
 _SWEEP_FILE = re.compile(r"##\s+(.+?)\s*$")
