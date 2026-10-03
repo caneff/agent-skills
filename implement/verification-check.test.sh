@@ -53,6 +53,8 @@ printf '\n  \n' >"$rev/findings-spec-5.jsonl"
 t "a blank-only findings sidecar counts as empty" 0 "round 1 found nothing"
 printf '{"id": "P1"' >"$rev/findings-spec-5.jsonl"
 t "a malformed findings line counts as a finding" 1 "verification pass"
+printf '\377\376\n' >"$rev/findings-spec-5.jsonl"
+t "an undecodable findings sidecar is not an empty round (#1336)" 1 "verification pass"
 clear_rev; printf '{"id": "S1", "outcome": "fixed", "sha": "abc"}\n' >"$rev/dispositions-5.jsonl"
 t "the cache keys on the shared .git from the primary checkout too" 0 "present" "$repo"
 out=$(cd "$repo" && bash "$check" 2>&1); rc=$?

@@ -961,6 +961,23 @@ def cli(root, *args):
         env={**os.environ, "BURNDOWN_CACHE_DIR": root})
 
 
+def test_round_1_empty_exits_zero_only_for_three_empty_findings_sidecars_1336():
+    root = cache()
+    rev = tempfile.mkdtemp(prefix="round1-")
+    FIXTURES.append(rev)
+
+    def ask():
+        return cli(root, "round-1-empty", "--reviews-dir", rev, "7")
+
+    assert ask().returncode == 1  # no sidecars: a missing review
+    for axis in ("standards", "spec", "correctness"):
+        open(runfile.findings_path(rev, axis, 7), "w").close()
+    assert ask().returncode == 0
+    with open(runfile.findings_path(rev, "spec", 7), "w") as fh:
+        fh.write('{"id": "P1"}\n')
+    assert ask().returncode == 1
+
+
 def test_a_run_killed_mid_flight_is_recovered_by_a_second_process():
     # The round trip the ticket asks for, across process boundaries: nothing
     # of the run survives in memory, only the file.

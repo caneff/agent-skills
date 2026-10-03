@@ -825,15 +825,16 @@ def findings_path(reviews_dir, axis, lowest):
 
 def round_1_found_nothing(reviews_dir, lowest):
     """True only when all three axes' findings sidecars exist, are readable
-    and hold no non-blank line — the same test `verification-check.sh`
-    passes a clump on without a verification pass. A missing or unreadable
-    one is not an empty round."""
+    and hold no non-blank line. This is the one home of the test:
+    `implement/verification-check.sh` runs it through `runfile.py
+    round-1-empty` to pass a clump without a verification pass. A missing,
+    unreadable or undecodable one is not an empty round."""
     for axis in ("standards", "spec", "correctness"):
         try:
             with open(findings_path(reviews_dir, axis, lowest)) as fh:
                 if fh.read().strip():
                     return False
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             return False
     return True
 
@@ -1275,6 +1276,13 @@ def main(argv):
                      metavar="PATH",
                      help="the dispositions sidecar; may be absent or empty")
 
+    rnd = subs.add_parser(
+        "round-1-empty",
+        help="exit 0 only when ticket <n>'s three findings sidecars all "
+             "exist and are empty (#1336)")
+    rnd.add_argument("--reviews-dir", required=True, metavar="DIR")
+    rnd.add_argument("ticket", type=int)
+
     out = subs.add_parser("show", help="print the run file")
     out.add_argument("run_id")
 
@@ -1315,6 +1323,12 @@ def main(argv):
             refuse_unaccounted_sweep_items(args.ticket, args.pr_body,
                                            args.from_path)
             print(f"every sweep item in {args.ticket} is accounted for")
+        elif args.command == "round-1-empty":
+            if not round_1_found_nothing(args.reviews_dir, args.ticket):
+                raise RunFileError(
+                    f"round 1 of #{args.ticket} is not provably empty under "
+                    f"{args.reviews_dir}")
+            print(f"round 1 of #{args.ticket} found nothing")
         elif args.command == "job":
             state = ("running" if args.cores is not None
                      else "none" if args.none else "done")
