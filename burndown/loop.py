@@ -19,6 +19,7 @@ Why each rule reads the way it does: `references/loop.md`.
 import argparse
 import json
 import os
+import posixpath
 import re
 import shlex
 import shutil
@@ -118,6 +119,21 @@ def paths(clump):
     return owned(clump)[1]
 
 
+def directories(clump):
+    """The directories, each as `dir/`, that a clump's files sit in. The
+    repo root is left out (#1342)."""
+    return {posixpath.dirname(p) + "/" for p in paths(clump)
+            if posixpath.dirname(p)}
+
+
+def _nested(a, b):
+    """The directories two clumps share, one inside the other counting, as
+    `closure.py`'s `subtree_collides` reads a directory pair (#1342); unlike
+    it, the repo root is left out (`directories`)."""
+    return sorted({min(x, y, key=len) for x in directories(a)
+                   for y in directories(b) if x.startswith(y) or y.startswith(x)})
+
+
 def key_of(clump):
     """The clump's lowest ticket — the number its branch and workspace are
     named for."""
@@ -160,7 +176,8 @@ def picks(state, free):
     """`(picked, held)`: the clumps to dispatch, taken from a frontier
     already read — widest closure first, ties broken by lowest ticket, every
     free slot at once — and every clump the same-tick guard skipped, each
-    naming the earlier pick it collided with. The walk goes past the free
+    naming the earlier pick it collided with — over a shared file, or over a
+    shared directory (#1342). The walk goes past the free
     slots (#1049), so a clump beyond the cut that collides with a pick is
     held too; one that collides with nothing is in neither list. Sorted
     before the guard runs
@@ -193,6 +210,16 @@ def picks(state, free):
             held.append({"clump": clump, "holder": key_of(blocker),
                         "over": sorted(paths(clump) & paths(blocker)),
                         "same_tick": True})
+            continue
+        # A ticket body under-names what its diff reaches (#1342): two
+        # clumps whose lists share a directory are not picked in one tick,
+        # though they share no file. The repo root is not a directory here —
+        # every root file would hold every other.
+        blocker = next((earlier for earlier in picked
+                        if _nested(clump, earlier)), None)
+        if blocker is not None:
+            held.append({"clump": clump, "holder": key_of(blocker),
+                        "over": _nested(clump, blocker), "same_tick": True})
             continue
         # Past the free-slot cut the walk goes on so a collision with a pick
         # is still named (#1049); a clump that collides with nothing is only
