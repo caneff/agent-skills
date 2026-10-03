@@ -25,13 +25,11 @@ if [ -s "$sidecar" ] && grep -Eq '"id": ?"[^" ]+"' "$sidecar"; then
 fi
 
 # No dispositions: fine only if every axis wrote a findings sidecar and none
-# holds a line. An absent or unreadable one is not an empty round.
-empty_round=1
-for axis in standards spec correctness; do
-  f="$reviews/findings-$axis-$n.jsonl"
-  if [ ! -r "$f" ] || grep -q '[^[:space:]]' "$f"; then empty_round=0; fi
-done
-if [ "$empty_round" = 1 ]; then
+# holds a line. An absent or unreadable one is not an empty round. The test
+# lives in runfile.py, which burndown/sweep.py counts reads too (#1336); a
+# python that cannot run fails closed, as "the pass is missing".
+if python3 "$(dirname "${BASH_SOURCE[0]}")/../burndown/runfile.py" \
+    round-1-empty --reviews-dir "$reviews" "$n" >/dev/null 2>&1; then
   echo "round 1 found nothing (all three findings sidecars empty), no verification pass needed"
   exit 0
 fi

@@ -213,7 +213,10 @@ def counts(run, reviews_dir):
     so no sidecar: it is listed under `closed` as `(lowest, reason)`, by
     name, so the report says which clumps it did not read.
 
-    A landed clump with no sidecar on disk is refused by clump number,
+    A landed clump with no sidecar on disk counts as zero only when all
+    three of its findings sidecars exist and are empty (a clean round 1,
+    which `implement/verification-check.sh` passes without a verification
+    pass, #1336). Otherwise it is refused by clump number,
     never silently counted as zero: a controller reading a low count cannot
     otherwise tell "this clump genuinely left nothing" from "this run's own
     bookkeeping is missing" (defect class 1)."""
@@ -227,7 +230,8 @@ def counts(run, reviews_dir):
         lowest = entry["tickets"][0]
         path = runfile.dispositions_path(reviews_dir, lowest)
         if not os.path.exists(path):
-            missing.append(lowest)
+            if not runfile.round_1_found_nothing(reviews_dir, lowest):
+                missing.append(lowest)
             continue
         for _, obj in runfile.read_dispositions(path):
             outcome = obj["outcome"]
@@ -244,7 +248,9 @@ def counts(run, reviews_dir):
             "landed clump(s) " +
             ", ".join(f"#{n}" for n in missing) +
             " have no dispositions sidecar under " + reviews_dir +
-            " — counts refused rather than read as zero")
+            " and round 1 is not provably empty (a findings sidecar is"
+            " missing or holds findings) — counts refused rather than read"
+            " as zero")
     return {"fixed": fixed, "adjacent": adjacent, "leftover": leftover,
             "standalone": standalone, "closed": closed}
 
