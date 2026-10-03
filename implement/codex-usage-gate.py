@@ -70,7 +70,8 @@ HELPER = Path(__file__).resolve().parent.parent / "flow/ccstatusline-table/helpe
 # A PR pass runs only on this much churn (#1358, basis
 # docs/research/2026-10-03-codex-yield-by-pr-size.md), unless FORCE_LABEL forces it.
 SIZE_THRESHOLD = 300
-# Launches stop here so the weekly audit keeps the rest of the window (#1359); `--audit` lifts it.
+# Launches stop here so the weekly audit keeps the rest of the window (#1359);
+# `--audit` lifts it.
 RESERVE_PERCENT = 70
 FORCE_LABEL = "needs-codex"
 
