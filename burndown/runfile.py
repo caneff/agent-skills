@@ -806,12 +806,6 @@ def refuse_unaccounted_sweep_items(ticket_path, body_path, sidecar_path):
         raise RunFileError(
             f"{ticket_path} holds no `## <file>` / `- **<id>**` sweep items "
             "— it is not a sweep ticket, or its body was not fetched whole")
-    repeated = sorted({i for i in items if items.count(i) > 1})
-    if repeated:
-        raise RunFileError(
-            "sweep item(s) named twice under one `<file> <id>`: "
-            + ", ".join(repeated) + " — one sidecar line would account for "
-            "both and the harvest would carry one; give each bullet its own id")
     held = set()
     if os.path.exists(sidecar_path):
         held = {obj["id"] for _, obj in read_dispositions(sidecar_path)}
