@@ -16,8 +16,8 @@ measurement, and writing it into a table would launder it into one. The
 table starts at the first pass run under #942's shape.
 
 `phase` is where the run launched: `gate` (at PR-up, the merge gate) or
-`second` (#888's conditional re-run) or `third` (#1028's, only after
-a second-pass high was fixed in the round). `outcome` is `collected`, or the
+`second` (#888's conditional re-run). Those two are the live phases.
+`outcome` is `collected`, or the
 reason the gate refused the verdict — `errored`, `raced`, `stale`,
 `unreadable`, or `absent` when no record was written at all. A refused run
 still gets its row: it spent the same wall clock and the same tokens. An
@@ -35,6 +35,11 @@ dated before 2026-09-22 keep those phase and outcome names as recorded;
 `gate` is what a `gate-retry` row would have been called, and plain
 `collected` what a `collected-after-retry` row would have read, had the
 rename landed sooner.
+
+Retired by #1360 on 2026-10-03: `third` (#1028's run, only after a
+second-pass high was fixed in the round). The second pass is final now.
+Rows dated on or before 2026-10-03 keep `third` as recorded; no later row
+carries it, and `review_ledger.py append --type codex-third` refuses.
 
 ## Table
 

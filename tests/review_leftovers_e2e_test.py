@@ -37,7 +37,7 @@ step, a worker spinning on no-op tool calls, a pane closing before a
 question is answered, #925). So a green run here does not show that a
 worker applies the adjacent-fix rule rather than filing, that a verifier
 reads `CONFIRMED` off a correctness report, that a controller runs the
-second or third Codex pass only when the rule says to, or that `/file-ticket`
+second Codex pass only when the rule says to, or that `/file-ticket`
 is actually called with the rendered body — only that every command those
 steps name does what the step relies on, and that each one's output is
 what the next one reads. The wording of those rules is held by the

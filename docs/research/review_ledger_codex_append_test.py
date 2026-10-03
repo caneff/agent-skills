@@ -66,10 +66,19 @@ class UsageChangeTest(CodexAppendCase):
         self.assertEqual(self.only_row()["cost"]["usage_delta"]["delta"], 0)
 
     def test_each_phase_writes_its_own_row(self):
-        for phase in ("gate", "second", "third"):
+        for phase in ("gate", "second"):
             self.record(500, phase, f"1 {W1}", f"2 {W1}")
             self.ok(500, phase)
-        self.assertEqual(sorted(r["type"] for r in self.rows().values()), ["codex-gate", "codex-second", "codex-third"])
+        self.assertEqual(sorted(r["type"] for r in self.rows().values()), ["codex-gate", "codex-second"])
+
+    def test_the_retired_third_phase_is_refused_by_name(self):
+        """#1360: the second pass is final, so a stale controller's third row is refused, not written."""
+        self.record(500, "third", f"1 {W1}", f"2 {W1}")
+        for extra in ((), ("--skip-reason", "usage capped"), ("--refusal", "stale")):
+            r = self.append(500, "third", *extra)
+            self.assertNotEqual(r.returncode, 0, extra)
+            self.assertIn("codex-third is retired", r.stderr)
+        self.assertFalse(self.ledger.exists())
 
     def test_a_missing_or_unreadable_reading_is_unknown_never_zero(self):
         good = f"10 {W1}"

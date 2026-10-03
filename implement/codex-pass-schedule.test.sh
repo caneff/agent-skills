@@ -125,9 +125,9 @@ check_in "$merge_section" 'keeps the second pass from overwriting the record the
 
 # Rule 7: every run is timed, discarded ones included, into a file that
 # exists and carries the columns the row is written against, with phases
-# narrowed to `gate`, `second` and `third` (#1028's conditional third run).
+# narrowed to `gate` and `second` (#1360 retired #1028's conditional third run).
 check_in "$merge_section" 'docs/research/2026-09-20-codex-pass-durations.md' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'phase (`gate`, `second` or `third`)' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'phase (`gate` or `second`)' 'implement/SKILL.md § The merge'
 check_absent_in "$whole_file" 'collected-after-retry' 'implement/SKILL.md (whole file)'
 [ -f "$durations" ] || { echo "FAIL: missing docs/research/2026-09-20-codex-pass-durations.md" >&2; fail=1; }
 if [ -f "$durations" ]; then
@@ -144,32 +144,26 @@ check_absent_in "$merge_section" 'Otherwise, from this PR' 'implement/SKILL.md �
 # Rule 9 (#1028): a second-pass finding small enough for § Review's
 # adjacent-fix rule is fixed by the worker in one round instead of filed, and
 # the controller reads that fix diff itself. The controller still evaluates
-# every finding before it reaches the worker. A third run happens only when
-# a fixed second-pass finding was high, and it is final — its findings are
-# disputed or leftover, never a fourth run. The old "second run is final, no
-# worker fix left" wording is retired whole-file, since a copy of it anywhere
-# would contradict the fix round.
+# every finding before it reaches the worker. The second pass is final (#1360):
+# no Codex run follows it, so the third run's wording is gone whole-file. The
+# old "no worker fix left" wording is retired whole-file too, since a copy of
+# it anywhere would contradict the fix round.
 # The evaluation covers Codex's recommendation as well as the finding: a
 # controller can agree a finding exists and still forward its remedy unread (#1082).
 check_in "$merge_section" 'the controller evaluates every finding and its recommendation before any reaches the worker' 'implement/SKILL.md § The merge'
 check_in "$merge_section" "A second-pass finding that passes § Review's adjacent-fix rule, or is one of § Review's blocking kinds, goes to the worker, who fixes it in one round" 'implement/SKILL.md § The merge'
 check_in "$merge_section" 'the controller reads that fix diff itself' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'A third Codex run happens only when a second-pass finding fixed in the round was high.' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'The third run is final: its findings are `disputed` or `leftover`, except one of § Review'"'"'s blocking kinds, which goes to the worker for one fix round; never a fourth run.' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'phase=third' 'implement/SKILL.md § The merge'
-# r1-C1 (PR for #1274): a third-pass blocking fix lands past the third pass's
-# sha, so the stale refusal's in-round exemption must name it too.
-check_in "$merge_section" 'the controller reads that fix diff and records `read at <sha>` exactly as for a second-pass fix, so the gate does not refuse the third pass as stale over it' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'The second pass is final (#1360): no Codex run follows it, whatever its in-round fixes were.' 'implement/SKILL.md § The merge'
+check_in "$merge_section" "The controller's own read of the fix diff is the last review" 'implement/SKILL.md § The merge'
+for retired in 'phase=third' 'A third Codex run' 'The third run is final' 'third Codex' 'second and third' '`second` or `third`'; do
+  check_absent_in "$whole_file" "$retired" 'implement/SKILL.md (whole file)'
+done
 # r1-P3: the closing sentence names both rules a second-pass round admits.
 check_in "$merge_section" 'A fix outside those two rules is a change, not a round.' 'implement/SKILL.md § The merge'
-[ "$(grep -oF 'The third run is final' <<<"$whole_file" | wc -l)" -eq 1 ] ||
-  { echo "FAIL: 'The third run is final' does not appear exactly once in implement/SKILL.md" >&2; fail=1; }
 # The in-round fix moves the head past the second pass's verdict; without
 # saying so, the fail-closed gate reads that verdict as stale and blocks a
-# reviewed PR (C1). The ruling sends a third-run high to `leftover`, which
-# § Review's "a high finding is filed" would otherwise forbid (C2).
+# reviewed PR (C1).
 check_in "$merge_section" 'The fail-closed gate does not refuse the second pass as stale over an in-round fix' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'the one place a high finding is not filed' 'implement/SKILL.md § The merge'
 # The controller's read of an in-round fix is bound to the head it read:
 # unbound, a commit pushed after the read passes step 2's CLEAN re-run and
 # merges unreviewed (Codex gate [high] on PR 1080).
@@ -184,12 +178,9 @@ check_in "$merge_section" 'A commit the controller has not read never merges' 'i
 # does not take "round-1" as the rule's whole reach (P1).
 check_in "$whole_file" "§ The merge step 3 applies the same rule to a Codex second-pass finding" 'implement/SKILL.md (whole file)'
 # The rest of the fix round's contract: the CLEAN check reruns after the
-# worker's fix, a non-adjacent high is still filed, and the third run is
-# followed by no worker fix round (C3) but a blocking kind's, which the
-# controller reads itself (Chris's ruling on PR #1263, P1).
+# worker's fix, and a non-adjacent high is still filed.
 check_in "$merge_section" 'adjacent-fix rule, or a blocking kind'"'"'s fix against that rule, rather than sending it back to Codex. It re-runs step 2.' 'implement/SKILL.md § The merge'
 check_in "$merge_section" '`disputed: <why>`, filed if it is high, or `leftover`' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'The controller disposes of each of its other findings in the PR body.' 'implement/SKILL.md § The merge'
 # A Codex-pass leftover lives only in the PR body unless the controller
 # also writes it where the sweep harvests: the dispositions sidecar the
 # verification pass wrote, in § Review's leftover grammar (P2, ruled by the

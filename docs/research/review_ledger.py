@@ -8,7 +8,7 @@ per-review-type value table.
     review_ledger.py append  --repo R --ticket N --type witness-mutation|call-site-mutation|worker-mutation
                              --mutation-id ID --seconds S (--status-file PATH | --outcome red|green|unknown)
                              [--round K] [--ledger PATH]
-    review_ledger.py append  --repo R --ticket N --type codex-gate|codex-second|codex-third
+    review_ledger.py append  --repo R --ticket N --type codex-gate|codex-second
                              [--skip-reason WHY | --refusal WHY] [--cache DIR] [--ledger PATH]
     review_ledger.py append  --repo R --type codex-audit (--record PATH [--refusal WHY] | --skip-reason WHY)
                              [--ledger PATH]
@@ -45,7 +45,8 @@ are both known.
 
 Codex rows (#1267) are harvested from `codex-adversarial-<n>-<phase>.{json,out}` records in the cache:
 typed `codex-gate`, `codex-second` or `codex-third` (`gate-retry` is a gate row; `early` is listed, not
-harvested), wall clock from the record's `started` and `completed`, findings from the `.out`'s
+harvested; `codex-third` rows were written before #1360 made the second pass final, and `append`
+refuses the type), wall clock from the record's `started` and `completed`, findings from the `.out`'s
 `- [severity] title (file:lines)` lines with severity as written, outcomes from the ticket's dispositions
 sidecar lines `codex-<phase>-<label>` (label: the finding's number, or its severity's initial and number
 among that severity; no such line is `unknown`). Usage change is `unknown` on every backfilled row. A record
@@ -109,6 +110,9 @@ REVIEW_TYPES = (
 )
 MUTATION_TYPES = ("witness-mutation", "call-site-mutation", "worker-mutation")
 CODEX_TYPES = ("codex-gate", "codex-second", "codex-third")
+# A phase the merge step no longer runs: `harvest` and `report` still read its recorded rows, and
+# `append` refuses it by name, so a controller reading a stale copy of the step writes nothing.
+RETIRED_CODEX_TYPES = {"codex-third": "#1360: the second Codex pass is final"}
 AUDIT_TYPE = "codex-audit"
 
 DEFAULT_WEIGHTS = {"hard": 3, "judgement": 1, "high": 3, "medium": 2, "low": 1}
@@ -1267,6 +1271,10 @@ def cmd_append(args) -> int:
     ends before its dispositions exist, so its findings' outcomes are `unknown` until the
     verification pass appends: that append, run after it writes the dispositions, also
     refills the findings of every axis row of its round already in the ledger."""
+    if args.type in RETIRED_CODEX_TYPES:
+        print(f"review_ledger append: {args.type} is retired ({RETIRED_CODEX_TYPES[args.type]}); "
+              f"append codex-gate or codex-second", file=sys.stderr)
+        return 2
     if args.type == AUDIT_TYPE:
         return cmd_append_audit(args)
     if args.ticket is None:

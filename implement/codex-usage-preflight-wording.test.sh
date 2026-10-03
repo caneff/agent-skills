@@ -30,7 +30,7 @@ done
 check_in "$here/SKILL.md" 'no refused duration row'
 check_in "$here/SKILL.md" 'comment `Codex pass skipped: <printed line>` on the PR'
 check_in "$here/SKILL.md" 'before every launch of this block'
-check_in "$here/SKILL.md" 'the second and third passes'
+check_in "$here/SKILL.md" 'the gate and the second pass, each a launch'
 check_in "$here/SKILL.md" 'launch nothing'
 check_in "$here/SKILL.md" 'an unreadable cache is exit 30, never headroom'
 check_in "$here/SKILL.md" 'no plugin entry, the usage gate'
