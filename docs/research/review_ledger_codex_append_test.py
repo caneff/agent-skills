@@ -78,6 +78,7 @@ class UsageChangeTest(CodexAppendCase):
             r = self.append(500, "third", *extra)
             self.assertNotEqual(r.returncode, 0, extra)
             self.assertIn("codex-third is retired", r.stderr)
+            self.assertIn("append no row for it", r.stderr)
         self.assertFalse(self.ledger.exists())
 
     def test_a_missing_or_unreadable_reading_is_unknown_never_zero(self):

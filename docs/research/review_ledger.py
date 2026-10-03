@@ -1273,7 +1273,7 @@ def cmd_append(args) -> int:
     refills the findings of every axis row of its round already in the ledger."""
     if args.type in RETIRED_CODEX_TYPES:
         print(f"review_ledger append: {args.type} is retired ({RETIRED_CODEX_TYPES[args.type]}); "
-              f"append codex-gate or codex-second", file=sys.stderr)
+              f"no such pass should have run, so append no row for it", file=sys.stderr)
         return 2
     if args.type == AUDIT_TYPE:
         return cmd_append_audit(args)
