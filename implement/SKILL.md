@@ -166,20 +166,22 @@ python3 ~/.agents/skills/burndown/runfile.py job <run-id> --clump <n> --cores <k
 ```
 
 `<run-id>` is the brief's `--run`, `<n>` the clump's lowest ticket, `<k>` the
-job's own core count. The lock serialises the write against `loop.py dispatch`,
-so a tick that runs before the controller's next turn already reads the
-declared cores; a record the controller wrote after your message left a window
-where a tick read `none` (#1339). When the job ends, run the same line with
-`--done` in place of `--cores <k>` (`runfile.py job <run-id> --clump <n> --done`).
-A refusal from `runfile.py` goes to the controller and the job waits. A brief
-with no `--run <run-id>` has no run file under it: send the controller the
-message below and launch after the send, as before.
+job's own core count. The record is on disk before the job exists, so the
+next `loop.py dispatch` tick reads the declared cores with no controller turn
+in between. When the job ends, run the same line with `--done` in place of
+`--cores <k>`.
 
-Also send the controller one message naming the job and its core count
+Then send the controller one message naming the job and its core count
 (`job: <k> cores`), and `job done` when it finishes: a notice, not the record.
 A subagent is a process the controller's box check already counts, so it needs
 neither; the "PR up" `Parallel jobs` line stays as the closing statement of
 everything you launched.
+
+If `runfile.py` refuses (the clump is not registered yet, or the lock times
+out), do not launch: send the controller the refusal and the job's core count
+in place of the notice and end your turn. The controller records the job
+itself and replies; launch on that reply. A brief with no `--run <run-id>` has
+no run file: send the notice and launch after the send.
 
 ## Light tier
 
