@@ -33,6 +33,20 @@ effect when the kill switch (#1354) is removed. **Rationing took effect:**
 _not yet — filled in at #1363_. Rows dated after it come from rationed PRs
 only.
 
+**Audit marks (#1362).** The weekly audit of skipped PRs
+(`implement/codex-audit.md`) starts each repo after its mark: one line per
+audited repo, `- <repo>: <YYYY-MM-DD> <sha>`, the date of that repo's last
+audit and the full sha of the newest merge it covered on the default branch.
+`<repo>` is the review cache's directory name. `implement/codex-audit.py run`
+reads the line; `implement/codex-audit.py mark --sha <sha>` writes it, once
+that audit's findings are filed, and is its only writer. A repo with no line
+has never been audited, and `run` refuses until one is written. The `skills`
+line is #1358's merge, before which no PR was skipped for size. An audit's
+row in the table below reads `audit <date> (<repo>)` in the Ticket column and
+lists the audited PRs in the PR column.
+
+- skills: 2026-10-03 9761cb225583ca6adeabb990fc9c98c53858492f
+
 | Ticket | PR | codex-only, confirmed | also found by Claude | disputed | codex-only confirmed findings |
 |---|---|---|---|---|---|
 | #814 | #816 | 1 | 2 | 1 | Documented worker invocation interpolated the ticket body directly into a double-quoted shell string (`"<ticket body verbatim>"`), so a body containing `"`, backticks, or `$(` would run as shell instead of reading as text. |

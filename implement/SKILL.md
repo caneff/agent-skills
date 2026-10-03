@@ -772,6 +772,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    — its printed line — and its ledger skip row takes `--skip-reason ceiling`
    exactly, distinct from the cap's printed-line reason, so the audit can
    find it. Only the audit's own launch (`--audit`) runs past the ceiling.
+   The audit and what the controller running it owes:
+   [`codex-audit.md`](codex-audit.md).
 
    The gate launch, and only it, also measures the PR (#1358): run it from
    the PR's workspace after `git fetch origin`, as
