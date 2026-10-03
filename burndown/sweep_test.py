@@ -314,6 +314,60 @@ def test_counts_refuses_a_landed_clump_with_no_sidecar_rather_than_read_zero():
         raise AssertionError("a missing sidecar was read as zero")
 
 
+def landed_clump_without_dispositions(run_id, root):
+    runfile.start(run_id, slots=1, root=root, repo=REPO)
+    runfile.clump(run_id, [901], "/w/a", "agent-a", root=root)
+    runfile.land(run_id, 901, "abc1234", root=root)
+    return runfile.load(run_id, root=root)
+
+
+def write_findings(reviews_dir, axes, lowest, text=""):
+    for axis in axes:
+        with open(os.path.join(reviews_dir,
+                               f"findings-{axis}-{lowest}.jsonl"), "w") as fh:
+            fh.write(text)
+
+
+def test_counts_reads_a_clean_round_1_as_zero_findings_1336():
+    # verification-check.sh passes a clump whose three findings sidecars are
+    # all empty and never writes a dispositions sidecar for it.
+    root = cache()
+    reviews = reviews_dir_fixture()
+    run = landed_clump_without_dispositions("burn-clean", root)
+    write_findings(reviews, ["standards", "spec", "correctness"], 901)
+    got = sweep.counts(run, reviews)
+    assert got == {"fixed": 0, "adjacent": 0, "leftover": 0, "standalone": 0,
+                   "closed": []}, got
+
+
+def test_counts_refuses_when_a_findings_sidecar_is_missing_too_1336():
+    root = cache()
+    reviews = reviews_dir_fixture()
+    run = landed_clump_without_dispositions("burn-part", root)
+    write_findings(reviews, ["standards", "spec"], 901)  # no correctness
+    try:
+        sweep.counts(run, reviews)
+    except runfile.RunFileError as exc:
+        assert "901" in str(exc), exc
+    else:
+        raise AssertionError("a missing review was read as a clean one")
+
+
+def test_counts_refuses_a_non_empty_findings_sidecar_with_no_dispositions_1336():
+    root = cache()
+    reviews = reviews_dir_fixture()
+    run = landed_clump_without_dispositions("burn-found", root)
+    write_findings(reviews, ["standards", "spec"], 901)
+    write_findings(reviews, ["correctness"], 901,
+                   '{"id": "C1", "title": "t"}\n')
+    try:
+        sweep.counts(run, reviews)
+    except runfile.RunFileError as exc:
+        assert "901" in str(exc), exc
+    else:
+        raise AssertionError("an unverified finding was read as a clean round")
+
+
 def test_counts_names_a_closed_clump_as_skipped_rather_than_refusing_it():
     # burn-skills-2026-09-30: #1236 (already fixed on main) and #1262 (a
     # nested spec run) closed with no PR here, so neither has a sidecar. The

@@ -817,6 +817,27 @@ def dispositions_path(reviews_dir, lowest):
     return os.path.join(reviews_dir, f"dispositions-{lowest}.jsonl")
 
 
+def findings_path(reviews_dir, axis, lowest):
+    """Round 1's `findings-<axis>-<lowest>.jsonl` (`implement/SKILL.md`
+    § Review), which `implement/verification-check.sh` also reads."""
+    return os.path.join(reviews_dir, f"findings-{axis}-{lowest}.jsonl")
+
+
+def round_1_found_nothing(reviews_dir, lowest):
+    """True only when all three axes' findings sidecars exist, are readable
+    and hold no non-blank line — the same test `verification-check.sh`
+    passes a clump on without a verification pass. A missing or unreadable
+    one is not an empty round."""
+    for axis in ("standards", "spec", "correctness"):
+        try:
+            with open(findings_path(reviews_dir, axis, lowest)) as fh:
+                if fh.read().strip():
+                    return False
+        except OSError:
+            return False
+    return True
+
+
 def refuse_foreign_sidecar(sidecar_path, tickets):
     """A sidecar is `dispositions-<n>.jsonl` for the ticket `<n>` its PR was
     dispatched for (`implement/SKILL.md` § Review). One whose `<n>` is not a
