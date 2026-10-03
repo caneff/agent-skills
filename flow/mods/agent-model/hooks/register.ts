@@ -7,7 +7,7 @@ const DENY =
 // `---` lines) carries a `model:` key; the body is never read.
 const setsOwnModel = (text: string): boolean => {
   const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
-  return match !== null && /^model:\s*\S/m.test(match[1])
+  return match !== null && /^model:[ \t]*(?!inherit\b)\S/m.test(match[1])
 }
 
 export const register: Register = on => {

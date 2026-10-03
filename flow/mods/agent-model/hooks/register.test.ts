@@ -78,3 +78,17 @@ test('an agent type whose definition sets no model is denied when bare', async (
   expect(seen).toBe(undefined)
   expect(String(answer.text ?? answer.deny)).toContain('explore/lookup')
 })
+
+test('model: inherit does not count as the definition setting its own model', async ($, on) => {
+  const { seen } = await call($, on, { subagent_type: 'inh' }, {
+    [`${AGENTS}/inh.md`]: '---\nname: inh\nmodel: inherit\n---\nbody',
+  })
+  expect(seen).toBe(undefined)
+})
+
+test('an empty model key does not borrow the next key as its value', async ($, on) => {
+  const { seen } = await call($, on, { subagent_type: 'emp' }, {
+    [`${AGENTS}/emp.md`]: '---\nname: emp\nmodel:\ntools: Read\n---\nbody',
+  })
+  expect(seen).toBe(undefined)
+})
