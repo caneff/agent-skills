@@ -271,8 +271,8 @@ without re-deriving it from the PRs by hand.
 A landed clump with no dispositions sidecar counts as zero only when its
 three findings sidecars all exist and are empty (a clean round 1, which
 gets no verification pass); a missing findings sidecar is still refused.
-Controller observations about the loop itself stay standalone tickets (§ Before a controller rules), never
-folded into the sweep and never in any sidecar — the controller adds its own
+Controller observations about the loop itself stay standalone tickets
+(§ Before a controller rules), never folded into the sweep and never in any sidecar — the controller adds its own
 filed-observation count to `counts`' standalone number by hand.
 
 **A per-PR sweep found on the frontier** (`implement/SKILL.md` § The PR: a
