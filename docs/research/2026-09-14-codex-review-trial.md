@@ -268,3 +268,4 @@ Filed from conversation — controller, map #776 merge tail.
 | agent-skills#1311 | #1338 | 1 | 0 | 0 | Gate [high]: launch-time job declaration missing (ticket option (a)'s second half); the Claude axes had it only as leftover P1/C1, controller ruled a fix round, fixed 7cc3a97. Second [high]: send-to-record window between declaration and record; remedy (ack before launch) disputed as design-sized, finding filed #1339. |
 | agent-skills#1314 | #1340 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
 | agent-skills#1315 | #1341 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
+| agent-skills#1344 | #1346 | 0 | 0 | 0 | One run, approve, no material findings. No second pass. |
