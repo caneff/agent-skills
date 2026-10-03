@@ -27,12 +27,12 @@ the audit mark. Read the exit before anything else:
 
 | Exit | Meaning | What you do |
 |---|---|---|
-| 0 | Codex ran; findings, or `no material findings`, are printed | § 2 |
+| 0 | Codex ran; findings, or `no material findings`, are printed | Step 2 |
 | 3 | No PR skipped since the mark | Nothing. The week is recorded. |
 | 20 | Capped or the kill switch | Nothing this window. Tell Chris if the cap, not the switch, stopped it: the reserve did not hold. |
 | 30 | No usage reading | Retry once later in the window; a second 30 goes to Chris. |
 | 4 | The Codex run exited non-zero | Its `.out` says why. Report to Chris; never relaunch silently. |
-| 5 | Codex output the ledger cannot read as findings | Read the `.out` yourself, then § 2 with the findings you find in it. |
+| 5 | Codex output the ledger cannot read as findings | Read the `.out` yourself, then step 2 with the findings you find in it. |
 | 2 | A usage, git, `gh` or ledger error, or no mark line for this repo | Fix the cause it names. A missing mark line is written once with `codex-audit.py mark --sha <the newest merge already reviewed>`. |
 
 ## 2. Confirm
@@ -40,9 +40,9 @@ the audit mark. Read the exit before anything else:
 Each printed finding names the audited PRs whose merge touched its file.
 For each finding, read the code at the range's newest merge and decide:
 
-- **Confirmed**: the failure it describes happens, under `SKILL.md`
-  § Review's reachability bar. Find the PR that introduced it — the one
-  printed, or `git log` on the lines when none was. A finding whose cause
+- **Confirmed**: the failure it describes happens, under the
+  reachability bar of `SKILL.md` § Review. Find the PR that introduced
+  it — the one printed, or `git log` on the lines when none was. A finding whose cause
   predates every audited PR is still confirmed; its ticket says so in
   place of an originating PR.
 - **Disputed**: say why in one line. It goes in the trial row, not a
