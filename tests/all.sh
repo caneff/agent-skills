@@ -3,7 +3,7 @@
 # files, no per-file special cases: `*.test.sh` runs under bash, `*_test.py`
 # runs directly under python3, each `audit.py` that implements
 # `--selfcheck` runs with that flag, each `Cargo.toml` runs `cargo test`, and
-# each folder holding `.claude-plugin/plugin.json` (a mod) runs
+# each mod folder under `flow/mods/` runs
 # `claude plugin test <folder>`. One line per suite; exits non-zero on
 # the first failure (and prints that suite's output). A suite is failed on
 # its exit status *or* on a failure signature at the start of a line in its
@@ -35,7 +35,12 @@ suites() { # prints "<label>\t<command>" per discovered suite
     done
   git ls-files -- '*Cargo.toml' |
     while IFS= read -r f; do printf '%s\tcargo test --manifest-path %s\n' "$f" "$f"; done
-  git ls-files -- '*.claude-plugin/plugin.json' |
+  # Every mod under flow/mods/ (#1368). Scoped to that folder, not every
+  # plugin: `humanizer/` (a skill plugin) and `exa-search-hook/` (a mod with
+  # no test yet) also hold a plugin.json, and `claude plugin test` fails a
+  # plugin that has no `*.test.ts`. A mod under flow/mods/ with no test fails
+  # the same way, which is the point.
+  git ls-files -- 'flow/mods/*/.claude-plugin/plugin.json' |
     while IFS= read -r f; do
       dir=$(dirname "$(dirname "$f")")
       printf '%s\tclaude plugin test %s\n' "$dir" "$dir"
