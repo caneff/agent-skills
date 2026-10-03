@@ -11,7 +11,11 @@ const call = async ($: any, on: any, input: Record<string, unknown>, files: Reco
   mock.env(on, { HOME: '/home/test' })
   on('fs.read', ($$: any, e: any) => {
     // A relative path reaches the hook resolved against the working directory.
-    const key = Object.keys(files).find(k => e.path === k || (!k.startsWith('/') && e.path.endsWith(`/${k}`)))
+    // An exact key wins, so `/home/test/.claude/agents/x.md` is never taken
+    // for the project-relative `.claude/agents/x.md` it ends with.
+    const keys = Object.keys(files)
+    const key = keys.find(k => e.path === k) ??
+      (e.path.startsWith('/home/test/') ? undefined : keys.find(k => !k.startsWith('/') && e.path.endsWith(`/${k}`)))
     const text = key === undefined ? undefined : files[key]
     if (text === undefined) return { deny: `ENOENT ${e.path}` }
     return { value: text }
