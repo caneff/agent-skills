@@ -14,10 +14,22 @@ One line on stdout, and an exit status the caller branches on:
   20  capped — usage is at 100%, or the kill-switch file is present (#1354);
       launch nothing, write no duration row
   30  unknown — no fresh, well-formed reading; launch nothing
+  40  under the size threshold (#1358) — a PR pass only; launch nothing
+
+`--base <ref> --tickets <n>...` marks the launch as a PR's gate pass: from the
+PR's workspace, the gate sums the added plus deleted lines of `<ref>...HEAD`
+in files that are neither Markdown nor tests (what `tests/all.sh` discovers —
+`*_test.py`, `*.test.sh`, `audit.py` — or anything under a `tests/`
+directory). Below SIZE_THRESHOLD it answers 40, `under size threshold (<churn>
+< <threshold>)`, before any usage read, so a skipped PR costs no RPC — unless
+any of the clump's tickets carries FORCE_LABEL, which sends it on to the usage
+read. The label bypasses the size check only; the kill switch and the cap
+still answer 20. With no arguments there is no size check: the Codex lane's
+launches have no PR diff to measure.
 
 The kill switch is `~/.config/agent-skills/codex-reviews-off`, any content:
-while it exists every check is 20, answered before any cache read or live
-fetch, so a disabled gate costs no RPC. Removing the file re-enables Codex
+while it exists every check is 20, answered before the size check or any
+cache read or live fetch, so a disabled gate costs no RPC. Removing the file re-enables Codex
 reviews.
 
 A missing, stale or malformed reading is 30, never 0: it is not headroom.
@@ -35,6 +47,8 @@ of different windows are never subtracted.
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -45,7 +59,12 @@ WARN_PERCENT = 80
 REFRESH_TIMEOUT = 5.0
 HELPER = Path(__file__).resolve().parent.parent / "flow/ccstatusline-table/helpers/codex-usage.py"
 
-PROCEED, WARN, CAPPED, UNKNOWN = 0, 10, 20, 30
+# A PR pass runs only on this much churn (#1358, basis
+# docs/research/2026-10-03-codex-yield-by-pr-size.md), unless FORCE_LABEL forces it.
+SIZE_THRESHOLD = 300
+FORCE_LABEL = "needs-codex"
+
+PROCEED, WARN, CAPPED, UNKNOWN, SMALL = 0, 10, 20, 30, 40
 
 
 def kill_switch() -> Path:
@@ -101,10 +120,53 @@ def reading(live_only: bool = False) -> tuple[float, float] | None:
     return worst
 
 
-def check() -> tuple[int, str]:
+def is_counted(path: str) -> bool:
+    """A path whose churn counts toward the size check: not Markdown, and not a file
+    `tests/all.sh` discovers as a suite or keeps under a `tests/` directory."""
+    name = path.rsplit("/", 1)[-1]
+    if name.endswith((".md", "_test.py", ".test.sh")) or name == "audit.py":
+        return False
+    return not (path.startswith("tests/") or "/tests/" in path)
+
+
+def churn(base: str) -> int:
+    """Added plus deleted lines of counted files in `base...HEAD`, in the current directory.
+    A binary file's `-` counts carry no lines to review and count as 0."""
+    out = subprocess.run(["git", "diff", "--numstat", "-z", f"{base}...HEAD"],
+                         capture_output=True, text=True, check=True).stdout
+    total = 0
+    fields = out.split("\0")
+    i = 0
+    while i < len(fields) - 1:
+        added, deleted, path = fields[i].split("\t")
+        i += 1
+        if not path:  # a rename: `added\tdeleted\t\0src\0dst\0`
+            path = fields[i + 1]
+            i += 2
+        if is_counted(path) and added != "-":
+            total += int(added) + int(deleted)
+    return total
+
+
+def forced(tickets: list[str]) -> bool:
+    for n in tickets:
+        out = subprocess.run(["gh", "issue", "view", n, "--json", "labels"],
+                             capture_output=True, text=True, check=True).stdout
+        if any(label["name"] == FORCE_LABEL for label in json.loads(out)["labels"]):
+            return True
+    return False
+
+
+def check(size: tuple[str, list[str]] | None = None) -> tuple[int, str]:
+    """`size` is (base ref, the clump's ticket numbers) for a PR pass, None for any other launch."""
     switch = kill_switch()
     if switch.exists():
         return CAPPED, f"codex reviews off by Chris's ruling ({switch}) — remove the file to re-enable"
+    if size is not None:
+        base, tickets = size
+        lines = churn(base)
+        if lines < SIZE_THRESHOLD and not forced(tickets):
+            return SMALL, f"under size threshold ({lines} < {SIZE_THRESHOLD})"
     worst = reading()
     if worst is None:
         return UNKNOWN, "codex usage unknown: no fresh, readable usage cache and the live fetch failed"
@@ -127,8 +189,16 @@ def main() -> int:
         return UNKNOWN if worst is None else PROCEED
     # Any failure is exit 30: a crash's own exit 1 is a status neither caller
     # has a rule for, and an unread reading is not headroom.
+    args = sys.argv[1:]
+    size = None
+    if args:
+        if len(args) < 4 or args[0] != "--base" or args[2] != "--tickets" or not all(
+                n.isdigit() for n in args[3:]):
+            print("usage: codex-usage-gate.py [--percent | --base <ref> --tickets <n>...]")
+            return UNKNOWN
+        size = (args[1], args[3:])
     try:
-        status, line = check()
+        status, line = check(size)
     except Exception as exc:
         status, line = UNKNOWN, f"codex usage unknown: {type(exc).__name__}: {exc}"
     print(line)

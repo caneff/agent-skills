@@ -2,7 +2,9 @@
 # Guards #1204: both places that start a Codex run — § The merge step 3 in
 # SKILL.md and the Codex lane's preflight — run codex-usage-gate.py and say
 # what each exit status means. A prose assertion: nothing runs the skill's
-# own prose. The script's behavior is tested in codex_usage_gate_test.py.
+# own prose. #1358 adds the size skip (exit 40) and its forcing label, which
+# the triage-labels doc names. The script's behavior is tested in
+# codex_usage_gate_test.py.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fail=0
@@ -22,6 +24,13 @@ check_in "$here/SKILL.md" 'the second and third passes'
 check_in "$here/SKILL.md" 'launch nothing'
 check_in "$here/SKILL.md" 'an unreadable cache is exit 30, never headroom'
 check_in "$here/SKILL.md" 'no plugin entry, the usage gate'
+check_in "$here/SKILL.md" '--base origin/<default> --tickets <n>...'
+check_in "$here/SKILL.md" 'Exit 40 (under the size threshold)'
+check_in "$here/SKILL.md" 'Codex pass skipped: under size threshold (<churn> < 300)'
+check_in "$here/SKILL.md" '`--skip-reason size`'
+check_in "$here/SKILL.md" 'no durations row and no trial'
+check_in "$here/SKILL.md" '`needs-codex` label'
+check_in "$here/../docs/agents/triage-labels.md" '`needs-codex`'
 check_in "$here/codex-lane.md" 'before the build and again before each review'
 check_in "$here/codex-lane.md" 'start no Codex run'
 check_in "$here/codex-lane.md" 'never headroom'
