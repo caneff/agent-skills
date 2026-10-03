@@ -785,9 +785,8 @@ The controller merges on a repo Chris owns; Chris reads it after via
    reason for every size skip, so the ledger can count them), and go to
    step 4. The label sends a small PR on to the usage read; it never
    overrides the kill switch, the reserve ceiling or the cap, which still
-   answer exit 20. The
-   second and third passes run the gate bare: the PR already earned its
-   pass at the gate.
+   answer exit 20. The second and third passes run the gate bare: the PR
+   already earned its pass at the gate.
 
    From the worker's workspace, fetch the ticket yourself — you did
    not build this ticket, so you don't already hold it — body and comments
