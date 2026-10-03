@@ -770,25 +770,31 @@ def test_a_closed_clump_reads_closed_in_show_and_survives_a_reload():
     assert "closed: nested spec run" in runfile.render(run), runfile.render(run)
 
 
-def test_closing_a_landed_clump_and_landing_a_closed_one_are_refused():
-    # Landed and closed are two different facts about one clump; recording
-    # both would make the sweep both count its sidecar and skip it.
+def refusal(act):
+    """The `RunFileError` text `act` raises; a call that succeeds fails the test."""
+    try:
+        act()
+    except runfile.RunFileError as exc:
+        return str(exc)
+    raise AssertionError("a clump recorded as landed and closed")
+
+
+# Landed and closed are two different facts about one clump; recording
+# both would make the sweep both count its sidecar and skip it.
+def test_closing_a_landed_clump_is_refused():
     root = cache()
     three_clumps(root)
-    for act, why in ((lambda: runfile.close("burn-1", 905, "x", root=root),
-                      "abc1234"),
-                     (lambda: (runfile.close("burn-1", 903, "dup", root=root),
-                               runfile.land("burn-1", 903, "def5678",
-                                            root=root)), "closed")):
-        try:
-            act()
-        except runfile.RunFileError as exc:
-            assert why in str(exc), exc
-        else:
-            raise AssertionError("a clump recorded as landed and closed")
-    run = runfile.load("burn-1", root=root)
-    assert run["clumps"][1]["landed"] is None, run
-    assert run["clumps"][2]["closed"] is None, run
+    assert "abc1234" in refusal(lambda: runfile.close("burn-1", 905, "x", root=root))
+    assert runfile.load("burn-1", root=root)["clumps"][2]["closed"] is None
+
+
+def test_landing_a_closed_clump_is_refused():
+    root = cache()
+    three_clumps(root)
+    runfile.close("burn-1", 903, "dup", root=root)
+    assert "closed" in refusal(
+        lambda: runfile.land("burn-1", 903, "def5678", root=root))
+    assert runfile.load("burn-1", root=root)["clumps"][1]["landed"] is None
 
 
 def test_a_close_names_its_reason():

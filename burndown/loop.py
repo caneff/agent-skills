@@ -57,10 +57,8 @@ def seat(run):
     `run(args) -> stdout` is `git` with the arguments given. Three refusals:
     a linked worktree, a detached HEAD, and any branch other than this
     checkout's default. One linked worktree is accepted, and the answer says
-    so: the `spec-<n>` branch `implement-dispatch --spec <n>` creates for the
-    nested `implement-spec` run, a controller's by construction (#1312). Why
-    each, and why the checkout need not hold the target repo:
-    `references/loop.md`.
+    so: a `spec-<n>` branch (#1312). Why each, why that one, and why the
+    checkout need not hold the target repo: `references/loop.md`.
     """
     git_dir = os.path.realpath(run(["rev-parse", "--absolute-git-dir"]).strip())
     common = run(["rev-parse", "--git-common-dir"]).strip()
@@ -978,8 +976,13 @@ def without_settled(candidates, run):
     is the progress, so a finished clump is not offered again (#1313)."""
     done = {entry["tickets"][0] for entry in run["clumps"]
             if runfile.settled(entry)}
-    kept = [c for c in candidates if key_of(c) not in done]
-    skipped = [key_of(c) for c in candidates if key_of(c) in done]
+    kept, skipped = [], []
+    for candidate in candidates:
+        lowest = key_of(candidate)
+        if lowest in done:
+            skipped.append(lowest)
+        else:
+            kept.append(candidate)
     return kept, skipped
 
 
