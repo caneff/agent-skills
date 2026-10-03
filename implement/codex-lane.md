@@ -27,10 +27,10 @@ Then check the plan's usage (#1204):
 before the build and again before each review call (§ The reviews), since a
 build can run for hours and the cap can land between them:
 `python3 ~/.agents/skills/implement/codex-usage-gate.py`, which prints one
-line. Exit 0: go on. Exit 20 (capped) — usage at the 70% reserve ceiling or
-the 100% cap, or the kill switch — or exit 30 (no fresh, readable reading): stop,
-start no Codex run, and hand the owner the line — an unreadable cache is
-never headroom.
+line. Exit 0: go on. Exit 20 (capped) — usage at the 70% reserve ceiling
+or the 100% cap, or the kill switch — or exit 30 (no fresh, readable
+reading): stop, start no Codex run, and hand the owner the line — an
+unreadable cache is never headroom.
 
 Load the plugin's `gpt-5-4-prompting` skill before writing the brief. A prompt
 shaped for Claude is not shaped for Codex, and the handoff is one shot.
