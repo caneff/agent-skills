@@ -2244,7 +2244,7 @@ def test_run_file_md_usage_block_mirrors_the_runfile_docstring():
     assert sorted(usage(block)) == sorted(usage(runfile.__doc__)), (
         usage(block), usage(runfile.__doc__))
     listed = {ln.split()[2] for ln in usage(runfile.__doc__)}
-    defined = set(re.findall(r'subs\.add_parser\(\s*"([a-z-]+)"',
+    defined = set(re.findall(r'subs\.add_parser\(\s*"([a-z0-9-]+)"',
                              open(RUNFILE).read()))
     assert listed == defined, (listed, defined)
 
