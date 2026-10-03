@@ -267,8 +267,11 @@ python3 burndown/sweep.py counts <run-id> --repo <primary checkout>
 ```
 
 reads them from each landed clump's dispositions sidecar (`implement/SKILL.md` § Review), names each closed clump as skipped, under the `--repo` checkout's cache directory — never the cwd's, which is not always the target, and refused unless `--repo` is the run's recorded target — so Chris can see whether the adjacent-fix rule is doing its job
-without re-deriving it from the PRs by hand. A landed clump with no dispositions sidecar counts as zero only when its three findings sidecars all exist and are empty (a clean round 1, which gets no verification pass); a missing findings sidecar is still refused. Controller observations about
-the loop itself stay standalone tickets (§ Before a controller rules), never
+without re-deriving it from the PRs by hand.
+A landed clump with no dispositions sidecar counts as zero only when its
+three findings sidecars all exist and are empty (a clean round 1, which
+gets no verification pass); a missing findings sidecar is still refused.
+Controller observations about the loop itself stay standalone tickets (§ Before a controller rules), never
 folded into the sweep and never in any sidecar — the controller adds its own
 filed-observation count to `counts`' standalone number by hand.
 
