@@ -26,7 +26,7 @@ what each exit means. This table is only what you do about each:
 | 0 | Step 2. |
 | 5 | Read the findings from the `.out` it names, then step 2. |
 | 3 | Nothing. The week is recorded. |
-| 6, or 0 with `left out:` lines | Report each left-out ticket to Chris: its skip was never audited, and it is left out again every week until its merge commit closes it in a form the range script reads. |
+| 6, or 0 or 5 with `left out:` lines | Report each left-out ticket to Chris: its skip was never audited, and it is left out again every week until its merge commit closes it in a form the range script reads. |
 | 20 | Nothing this window. Tell Chris if the cap, not the kill switch, stopped it: the reserve did not hold. |
 | 30 | Retry once later in the window; a second 30 goes to Chris. |
 | 4 | Report it to Chris with its `.out`; never relaunch silently. |
