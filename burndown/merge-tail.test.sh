@@ -118,6 +118,8 @@ check_in "$escaped" 'escaped the closure' 'references/merge-tail.md § An escape
 check_in "$escaped" 'Include closure' 'references/merge-tail.md § An escaped collision'
 check_in "$escaped" 'AGENTS.md' 'references/merge-tail.md § An escaped collision'
 check_in "$escaped" 'file-ticket' 'references/merge-tail.md § An escaped collision' 
+check_in "$escaped" 'the four shapes' 'references/merge-tail.md § An escaped collision'
+check_in "$escaped" 'under-names its targets' 'references/merge-tail.md § An escaped collision'
 
 # Rule 4: the ordering, stated as the literal order — and stated as a
 # **heading**, which `section` asserts by name. A clause can be negated in

@@ -192,6 +192,51 @@ def test_picks_names_a_same_tick_collision_past_the_free_slot_cut():
     assert by_ticket[(458,)]["same_tick"] is True
 
 
+def test_picks_holds_a_clump_sharing_a_directory_with_a_same_tick_pick():
+    # #1342: #1337 and #1338 named disjoint files in `burndown/` and both
+    # diffs reached `burndown/loop.py`. A body under-names its targets, so
+    # two clumps whose lists share a directory are not picked in one tick.
+    candidates = [
+        {"tickets": [1311], "files": ["burndown/runfile.py", "burndown/SKILL.md"]},
+        {"tickets": [1312, 1313], "files": ["burndown/loop.py"]},
+        {"tickets": [1400], "files": ["implement/SKILL.md"]},
+    ]
+    picked, held = loop.picks(loop.frontier(candidates, []), 3)
+    assert [c["tickets"] for c in picked] == [[1311], [1400]]
+    assert len(held) == 1
+    assert held[0]["clump"]["tickets"] == [1312, 1313]
+    assert held[0]["holder"] == 1311
+    assert held[0]["over"] == ["burndown/"]
+    assert held[0]["same_tick"] is True
+
+
+def test_picks_does_not_treat_the_repo_root_as_a_shared_directory():
+    candidates = [
+        {"tickets": [1], "files": ["AGENTS.md"]},
+        {"tickets": [2], "files": ["CONTEXT.md"]},
+    ]
+    picked, held = loop.picks(loop.frontier(candidates, []), 2)
+    assert [c["tickets"] for c in picked] == [[1], [2]]
+    assert held == []
+
+
+def test_the_cli_names_a_same_tick_directory_hold_as_a_held_line():
+    with tempfile.TemporaryDirectory() as tmp:
+        cand = os.path.join(tmp, "candidates.json")
+        live = os.path.join(tmp, "live.json")
+        with open(cand, "w") as fh:
+            json.dump([{"tickets": [10], "files": ["d/a.py"]},
+                       {"tickets": [11], "files": ["d/b.py"]}], fh)
+        with open(live, "w") as fh:
+            json.dump([], fh)
+        got = loop_py("dispatch", "--candidates", cand, "--in-flight", live,
+                      "--free", "2", "--processes", "4", "--committed-gb", "4")
+        assert got.returncode == 0, got
+        assert "dispatch  #10" in got.stdout, got.stdout
+        assert "dispatch  #11" not in got.stdout, got.stdout
+        assert "held      #11  by #10 this tick  over d/" in got.stdout, got.stdout
+
+
 def test_picks_takes_the_widest_closure_first():
     # #1026: two free slots, three independent candidates (no collisions)
     # with closure sizes 1, 4 and 2 in ticket order — the widest goes out

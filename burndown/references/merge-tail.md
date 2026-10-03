@@ -94,7 +94,7 @@ A collision that reached the merge tail **escaped the closure**, and that is
 a defect in the repo's declared include grammar, not bad luck. File it against
 the repo with `/file-ticket` — never an ad hoc `gh issue create`, which leaves
 it with no routing role — naming the two files, the two tickets, and which of
-the three shapes it was:
+the four shapes it was:
 
 - **No declaration.** The repo has no `## Include closure` section in its
   `AGENTS.md`, so the run clumped conservatively by directory subtree and the
@@ -106,6 +106,12 @@ the three shapes it was:
 - **A hub past the one-hop ceiling.** The edge was real and two hops away.
   One hop is a stated cost ceiling, so the fix is not a deeper walk: the
   ticket names the hub file as a target on the tickets that reach it.
+- **A body that under-names its targets.** The repo declares no include
+  graph, so a candidate's closure is the files its body names, and the diff
+  reached more (#1342: `loop.py` and `loop_test.py` beside a ticket that named
+  `runfile.py`). `loop.py dispatch` already holds two clumps sharing a
+  directory in one tick, so this shape is a collision across directories or
+  with a live workspace. The ticket names the file the body missed.
 
 Without the ticket the same two files collide on every run, the closure never
 learns, and each run pays this tail again.

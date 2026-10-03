@@ -97,8 +97,8 @@ branch (`references/loop.md` says why).
    what is left, **widest closure first** so a wide clump does not sit
    behind narrow ones and block them later (#1026), and names what holds
    the rest. That hold, with `picks`'
-   same-tick guard (two clumps sharing a file are never picked in one tick,
-   and that skip prints its own `held` line, naming the earlier pick it
+   same-tick guard (two clumps sharing a file or a directory are never picked
+   in one tick — a ticket body under-names its diff, #1342 — and that skip prints its own `held` line, naming the earlier pick it
    collided with rather than a live workspace), is what keeps a **family's
    clumps** apart: a clump sharing a file with a live or just-picked one waits, and
    family members sharing no file run at once. Two consequences, because

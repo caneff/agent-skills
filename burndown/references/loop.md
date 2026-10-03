@@ -105,6 +105,12 @@ clump came first. That is the same-tick guard's ordinary behaviour, not a
 bug in the sort — the run drains a slot behind schedule rather than into a
 collision.
 
+The guard also holds two clumps whose lists share a **directory**, not only
+a file (#1342): a ticket body names fewer files than its diff reaches, so two
+clumps naming disjoint files under one directory collided in the merge tail
+anyway. The repo root is not a shared directory. The cost is the same kind
+of idle slot, and larger in a repo that keeps its code in one directory.
+
 Both consequences are stated in the skill because neither is visible from the
 frontier's own definition:
 
