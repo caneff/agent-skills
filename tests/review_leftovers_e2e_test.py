@@ -175,7 +175,7 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
             {"tickets": [905], "closure": ["burndown/cost.py"]},
             {"tickets": [901, 902], "closure": ["burndown/loop.py", "burndown/frontier.py",
                                                 "burndown/runfile.py", "burndown/sweep.py"]},
-            {"tickets": [910], "closure": ["burndown/references/loop.md", "implement/SKILL.md"]},
+            {"tickets": [910], "closure": ["implement/SKILL.md", "implement/stale_refs.py"]},
         ], fh)
     with open(in_flight_file, "w") as fh:
         json.dump([], fh)
