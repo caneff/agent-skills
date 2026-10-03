@@ -3,6 +3,7 @@
 the ledger row, and the audit mark it reads and moves. Every test drives the command line against a
 fabricated repo, ledger, usage cache, trial doc and `gh`, with `--dry-run` in place of the Codex
 launch, so nothing reaches the real ~/.cache, the real kill switch, GitHub or the Codex quota."""
+import hashlib
 import json
 import os
 import subprocess
@@ -49,6 +50,7 @@ FINDINGS_OUT = """Verdict: needs-attention
 Findings:
 - [high] The gate reads an absent answer as a pass (a:3-9)
 - [medium] A helper nobody calls (g)
+- [low] A finding that names no file
 
 Next steps:
 - fix them
@@ -175,6 +177,21 @@ class RangeStopsTest(Case):
         [row] = self.rows()
         self.assertEqual(row["skip_reason"], "empty")
 
+    def test_only_left_out_tickets_stop_as_unmatched_never_as_empty(self):
+        self.write_ledger([skip_row(11, "size")])
+        self.merge(101, 11, "a", "2026-09-26T12:00:00+00:00")
+        self.merge(102, 11, "b", "2026-09-27T12:00:00+00:00")  # two merges close #11: undated
+        r = self.run_audit()
+        self.assertEqual(r.returncode, 6, r.stdout + r.stderr)
+        [row] = self.rows()
+        self.assertEqual(row["skip_reason"], "left out, unaudited: ticket #11")
+
+    def test_two_mark_lines_for_one_repo_stop_the_run(self):
+        self.set_mark(f"- skills: 2026-09-01 {self.root}\n- skills: 2026-09-02 {self.root}")
+        r = self.run_audit()
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("2 audit marks for skills", r.stderr)
+
     def test_a_repo_with_no_mark_line_stops_and_names_the_line_to_write(self):
         self.set_mark("- sudokupad-art: 2026-09-01 " + "0" * 40)
         r = self.run_audit()
@@ -221,17 +238,19 @@ class DryRunTest(Case):
                                          "## Controller context", "**Open sibling branches.**", "**Posture.**")]
         self.assertEqual(order, sorted(order), text)
         self.assertNotIn("Ticket 12", text, "a PR that had its gate pass is not briefed")
-        self.assertEqual(self.record()["body_sha256"], __import__("hashlib").sha256(brief.read_bytes()).hexdigest())
+        self.assertEqual(self.record()["body_sha256"], hashlib.sha256(brief.read_bytes()).hexdigest())
 
     def test_findings_print_with_the_audited_prs_that_touched_their_file(self):
         out = self.tmp / "findings.out"
         out.write_text(FINDINGS_OUT)
         r = self.run_audit("--simulate-out", out)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("finding 1 [high] The gate reads an absent answer as a pass (a) — PR #101 ticket #11", r.stdout)
-        self.assertIn("finding 2 [medium] A helper nobody calls (g) — no audited PR touched g", r.stdout)
+        lines = r.stdout.splitlines()
+        self.assertIn("finding 1 [high] The gate reads an absent answer as a pass (a) — PR #101 ticket #11", lines)
+        self.assertIn("finding 2 [medium] A helper nobody calls (g) — no audited PR touched g", lines)
+        self.assertIn("finding 3 [low] A finding that names no file () — names no file", lines)
         [row] = self.rows()
-        self.assertEqual(len(row["findings"]), 2)
+        self.assertEqual(len(row["findings"]), 3)
 
     def test_a_codex_run_that_exits_non_zero_is_a_refusal_and_the_mark_stays(self):
         r = self.run_audit("--simulate-status", "1")
@@ -248,6 +267,7 @@ class DryRunTest(Case):
         r = self.run_audit("--simulate-out", out)
         self.assertEqual(r.returncode, 5, r.stdout)
         self.assertIn("read it yourself", r.stdout)
+        self.assertIn(f"codex-audit.py mark --sha {self.ceiling}", r.stdout, "its findings are filed too")
         [row] = self.rows()
         self.assertEqual(row["status"]["fields"]["findings"]["status"], "unknown")
 
@@ -258,6 +278,32 @@ class DryRunTest(Case):
         self.assertFalse(list(self.cache.glob("codex-audit-*.json")), "nothing launched, so no record")
         [row] = self.rows()
         self.assertIn("ticket #14", row["skip_reason"])
+
+    def test_a_ticket_no_single_merge_closes_is_printed_as_left_out(self):
+        self.write_ledger([skip_row(11, "size"), skip_row(14, "ceiling"), skip_row(99, "size")])
+        r = self.run_audit()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("left out: ticket #99, not in this audit", r.stdout)
+        self.assertEqual(self.record()["left_out"], [99])
+
+    def test_a_missing_tool_stops_with_a_row_not_a_traceback(self):
+        for tool in ("git", "python3"):  # everything else, `jq` included, is off PATH
+            os.symlink(subprocess.run(["which", tool], capture_output=True, text=True).stdout.strip(),
+                       self.bin / tool)
+        self.env["PATH"] = str(self.bin)
+        r = self.run_audit()
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        [row] = self.rows()
+        self.assertIn("jq", row["skip_reason"])
+
+    def test_simulate_flags_without_dry_run_refuse_rather_than_launch(self):
+        r = subprocess.run([sys.executable, SCRIPT, "run", "--ledger", self.ledger, "--cache", self.cache,
+                            "--trial", self.trial, "--simulate-status", "0"],
+                           cwd=self.repo, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("are for --dry-run", r.stderr)
+        self.assertEqual(self.rows(), [], "refused before the gate: nothing ran, nothing recorded")
 
     def test_a_dry_run_refuses_to_default_to_the_real_ledger(self):
         r = subprocess.run([sys.executable, SCRIPT, "run", "--dry-run", "--cache", self.cache],
@@ -310,6 +356,14 @@ class MarkTest(Case):
         self.assertEqual(r.returncode, 2)
         self.assertIn("--date", r.stderr)
         self.assertIn(f"- skills: 2026-09-01 {self.root}", self.trial.read_text())
+
+    def test_mark_refuses_to_pick_between_two_lines_for_one_repo(self):
+        twice = f"- skills: 2026-09-01 {self.root}\n- skills: 2026-09-02 {self.root}"
+        self.set_mark(twice)
+        r = self.mark("--sha", self.root)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("2 audit marks for skills", r.stderr)
+        self.assertIn(twice, self.trial.read_text())
 
     def test_mark_adds_a_line_for_a_repo_never_audited(self):
         other = "- sudokupad-art: 2026-09-01 " + "0" * 40

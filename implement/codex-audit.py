@@ -15,7 +15,9 @@ row saying why, so a week with no audit is never read as a week audited clean:
 
   1. `codex-usage-gate.py --audit`. Capped (20) or unknown (30): stop with that status.
   2. This repo's audit mark from the trial doc (`- <repo>: <date> <sha>`), then
-     `codex-audit-range.py` from it. Nothing skipped since the mark: stop with 3.
+     `codex-audit-range.py` from it. Nothing skipped since the mark: stop with 3. Nothing to
+     audit but skipped tickets the range script left out (no single merge commit closes them):
+     stop with 6, never 3, since an undated skip is not one known to be audited.
   3. The brief: each audited ticket rendered with `implement/SKILL.md`'s own jq program, then the
      controller-context appendix, as a gate pass's brief is built.
   4. The launch, from a detached worktree at the range's newest merge with `--base` its oldest
@@ -23,9 +25,13 @@ row saying why, so a week with no audit is never read as a week audited clean:
   5. The record and the ledger audit row. A run that exited non-zero: stop with 4. Output the
      ledger cannot read as findings: stop with 5, and the controller reads the `.out` itself.
 
-Exit 0 prints each finding with the audited PRs whose merge touched its file; the controller
-confirms and files them, then moves the mark with `mark`. A usage, git, `gh` or ledger error is 2.
-No exit but 0 is a run whose findings may be filed, and no stop moves the mark.
+Exit 0 prints each finding with the audited PRs whose merge touched its file, every left-out
+ticket as `left out: ticket #<t>`, and a `next:` line naming the sha the mark moves to once the
+controller has confirmed and filed them. Exit 5 prints the same `next:` line; the controller reads
+the findings from the `.out` itself. Exits 0 and 5 are the runs whose findings are filed; no other
+exit is, and nothing here moves the mark. A usage, git, `gh`, `jq` or ledger error is 2, recorded
+like any stop, except outside a git checkout, where there is no repo to record it under. An error
+after Codex ran names the run's record, so the controller appends its row rather than relaunching.
 
 `--dry-run` replaces only the Codex launch: the launch step writes `--simulate-out` (default a
 no-findings output) and exits `--simulate-status` (default 0), so every branch walks without
@@ -44,6 +50,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
 GATE = HERE / "codex-usage-gate.py"
@@ -57,28 +64,44 @@ sys.path.insert(0, str(HERE.parent / "docs" / "research"))
 from review_ledger import DEFAULT_LEDGER, parse_codex_out  # noqa: E402
 from tally_review_axes import REVIEWS_ROOT  # noqa: E402
 
-OK, ERROR, EMPTY, REFUSED, UNREADABLE = 0, 2, 3, 4, 5
+OK, ERROR, EMPTY, REFUSED, UNREADABLE, UNMATCHED = 0, 2, 3, 4, 5, 6
 CAPPED, UNKNOWN = 20, 30
 # The skip reason of an audit with nothing to review, one word like the gate's `size` and `ceiling`.
 EMPTY_REASON = "empty"
 # `implement/SKILL.md`'s ticket read, whose jq program renders a ticket and its comments; the audit
 # runs that program rather than a copy of it.
-_FETCH_RE = re.compile(r"--json body,comments --jq '(?P<program>.*?)'\n", re.DOTALL)
+FETCH_RE = re.compile(r"--json body,comments --jq '(?P<program>.*?)'\n", re.DOTALL)
 _MARK_RE = re.compile(r"^- (?P<repo>[\w.-]+): (?P<date>\d{4}-\d{2}-\d{2}) (?P<sha>[0-9a-f]{40})$", re.MULTILINE)
+_LEFT_OUT_RE = re.compile(r"ticket #(\d+) \(\S+\) left out")
+
+
+class Merge(NamedTuple):
+    """One audited PR: its squash merge on the base, the ticket it closed, why its pass was skipped."""
+    pr: int
+    ticket: int
+    reason: str
+    sha: str
+
+
+class Span(NamedTuple):
+    """The range Codex reviews: the oldest audited merge's parent to the newest audited merge."""
+    base: str
+    newest: str
+
+    def __str__(self) -> str:
+        return f"{self.base}..{self.newest}"
 
 
 class Stop(Exception):
     """A step that ends the run: its exit status, and the reason its ledger skip row carries."""
 
-    def __init__(self, status: int, reason: str):
+    def __init__(self, status: int, reason: str, hint: str = ""):
         super().__init__(reason)
-        self.status, self.reason = status, reason
+        self.status, self.reason, self.hint = status, reason, hint
 
 
 def repo_name() -> str:
-    top = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                         check=True, capture_output=True, text=True).stdout.strip()
-    return Path(top).parent.name
+    return Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").strip()).parent.name
 
 
 def append_row(ledger: Path, repo: str, *args: str) -> None:
@@ -105,18 +128,24 @@ def read_mark(trial: Path, repo: str) -> str:
         raise Stop(ERROR, f"trial doc {trial}: {e}") from None
     shas = [m["sha"] for m in _MARK_RE.finditer(text) if m["repo"] == repo]
     if len(shas) != 1:
-        raise Stop(ERROR, f"no audit mark for {repo} in {trial}" if not shas else
-                   f"{len(shas)} audit marks for {repo} in {trial}, not one")
+        if not shas:
+            raise Stop(ERROR, f"no audit mark for {repo} in {trial}",
+                       hint="write it with `codex-audit.py mark --sha <the newest merge already reviewed>` "
+                            "from this checkout")
+        raise Stop(ERROR, f"{len(shas)} audit marks for {repo} in {trial}, not one")
     return shas[0]
 
 
-def audit_range(ledger: Path, repo: str, mark: str, base: str) -> tuple[str, list[tuple[int, int, str, str]]]:
-    """(range, [(PR, ticket, reason, merge sha)]) from `codex-audit-range.py`, oldest first."""
+def audit_range(ledger: Path, repo: str, mark: str, base: str) -> tuple[Span, list[Merge], list[int]]:
+    """(the range, its merges oldest first, the skipped tickets `codex-audit-range.py` left out)."""
     r = subprocess.run([sys.executable, RANGE, "--ledger", str(ledger), "--repo", repo, "--mark", mark,
                         "--base", base], capture_output=True, text=True)
-    sys.stderr.write(r.stderr)  # the tickets it left out, named
+    sys.stderr.write(r.stderr)  # each left-out ticket, with why
+    left_out = [int(t) for t in _LEFT_OUT_RE.findall(r.stderr)]
     if r.returncode == EMPTY:
         print(r.stdout.strip())
+        if left_out:
+            raise Stop(UNMATCHED, "left out, unaudited: " + ", ".join(f"ticket #{t}" for t in left_out))
         raise Stop(EMPTY, EMPTY_REASON)
     lines = r.stdout.splitlines()
     if r.returncode != OK or not lines or not lines[0].startswith("range "):
@@ -126,10 +155,10 @@ def audit_range(ledger: Path, repo: str, mark: str, base: str) -> tuple[str, lis
         m = re.fullmatch(r"PR #(\d+) ticket #(\d+) (\S+) ([0-9a-f]{40})", line)
         if not m:
             raise Stop(ERROR, f"codex-audit-range.py printed an unreadable line: {line!r}")
-        prs.append((int(m[1]), int(m[2]), m[3], m[4]))
+        prs.append(Merge(int(m[1]), int(m[2]), m[3], m[4]))
     if not prs:
         raise Stop(ERROR, "codex-audit-range.py printed a range and no PR")
-    return lines[0].removeprefix("range "), prs
+    return Span(*lines[0].removeprefix("range ").split("..")), prs, left_out
 
 
 def git(*args: str) -> str:
@@ -139,31 +168,31 @@ def git(*args: str) -> str:
     return r.stdout
 
 
-def render_ticket(slug: str, ticket: int) -> str:
-    """The ticket's body and comments, as `implement/SKILL.md` § The brief renders them."""
-    programs = _FETCH_RE.findall(SKILL.read_text())
-    if not programs:
-        raise Stop(ERROR, f"no `--json body,comments --jq` ticket read in {SKILL}")
+def render_ticket(slug: str, ticket: int, program: str) -> str:
+    """The ticket's body and comments, rendered by `program`, `implement/SKILL.md`'s jq program."""
     r = subprocess.run(["gh", "issue", "view", str(ticket), "--repo", slug, "--json", "body,comments"],
                        capture_output=True, text=True)
     if r.returncode != 0:
         raise Stop(ERROR, f"gh could not read ticket #{ticket}: {r.stderr.strip()}")
-    j = subprocess.run(["jq", "-r", programs[0]], input=r.stdout, capture_output=True, text=True)
+    j = subprocess.run(["jq", "-r", program], input=r.stdout, capture_output=True, text=True)
     if j.returncode != 0:
         raise Stop(ERROR, f"jq could not render ticket #{ticket}: {j.stderr.strip()}")
     return j.stdout
 
 
-def brief(slug: str, span: str, prs) -> str:
+def brief(slug: str, span: Span, prs: list[Merge]) -> str:
     """The focus text: what the range is, each audited ticket, and the controller-context appendix
     a gate pass's brief ends with (`implement/SKILL.md` § The merge step 3)."""
-    listed = "".join(f"- PR #{pr} (ticket #{t}, skipped for {why}): {sha}\n" for pr, t, why, sha in prs)
+    programs = FETCH_RE.findall(SKILL.read_text())
+    if not programs:
+        raise Stop(ERROR, f"no `--json body,comments --jq` ticket read in {SKILL}")
+    listed = "".join(f"- PR #{m.pr} (ticket #{m.ticket}, skipped for {m.reason}): {m.sha}\n" for m in prs)
     parts = [f"# Codex audit: merged PRs that skipped their own Codex pass\n\n"
              f"This is not one PR. It is the range {span} on the default branch, holding these squash "
              f"merges, each already merged with no Codex pass of its own:\n\n{listed}\n"
              f"The range also holds merges that had their own pass; judge those only where a listed PR's "
              f"change meets them. Each listed ticket follows, rendered as its own gate pass would read it.\n"]
-    parts += [f"\n## PR #{pr}: ticket #{t}\n\n{render_ticket(slug, t)}" for pr, t, _, _ in prs]
+    parts += [f"\n## PR #{m.pr}: ticket #{m.ticket}\n\n{render_ticket(slug, m.ticket, programs[0])}" for m in prs]
     parts.append("\n## Controller context — written by the controller, not part of the ticket\n\n"
                  "**Open sibling branches.** None: every PR in this range is merged to the default branch, "
                  "and nothing in it is split onto an open branch.\n\n"
@@ -192,34 +221,35 @@ def companion() -> Path:
     return Path(root) / "scripts" / "codex-companion.mjs"
 
 
-def launch(args, span: str, body: Path, out: Path) -> int:
+def launch(args, span: Span, body: Path, out: Path) -> int:
     """Run Codex over `span` from a detached worktree at its newest merge; its exit status."""
-    base, newest = span.split("..")
     script = None if args.dry_run else companion()
     tree = out.with_name(out.stem + "-tree")
-    git("worktree", "add", "--detach", str(tree), newest)
+    git("worktree", "add", "--detach", str(tree), span.newest)
     try:
         if script is None:
             out.write_text(args.simulate_out.read_text() if args.simulate_out else
                            "No material findings (dry run: Codex was not launched).\n")
-            return args.simulate_status
+            return args.simulate_status or 0
         with out.open("w") as f:
-            return subprocess.run(["node", str(script), "adversarial-review", "--wait", "--base", base, "--",
+            return subprocess.run(["node", str(script), "adversarial-review", "--wait", "--base", span.base, "--",
                                    body.read_text()], cwd=tree, stdout=f, stderr=subprocess.STDOUT).returncode
     finally:
-        git("worktree", "remove", "--force", str(tree))
+        try:
+            git("worktree", "remove", "--force", str(tree))
+        except Stop as left:  # the run's own outcome stands; a stale worktree is named, not blamed on it
+            print(f"codex-audit: {left.reason}; remove {tree} by hand", file=sys.stderr)
 
 
-def touched_by(prs) -> dict[int, set[str]]:
-    return {pr: set(git("show", "--name-only", "--format=", sha).split()) for pr, _, _, sha in prs}
-
-
-def report(findings: list[dict], prs) -> None:
-    files = touched_by(prs)
+def report(findings: list[dict], prs: list[Merge]) -> None:
+    files = {m.pr: set(git("show", "--name-only", "--format=", m.sha).split()) for m in prs}
     for k, f in enumerate(findings, 1):
-        hits = [f"PR #{pr} ticket #{t}" for pr, t, _, _ in prs
-                if f["file"] and any(p == f["file"] or p.endswith("/" + f["file"]) for p in files[pr])]
-        where = ", ".join(hits) or f"no audited PR touched {f['file'] or 'a named file'}"
+        if not f["file"]:
+            where = "names no file"
+        else:
+            where = ", ".join(f"PR #{m.pr} ticket #{m.ticket}" for m in prs
+                              if any(p == f["file"] or p.endswith("/" + f["file"]) for p in files[m.pr])) \
+                or f"no audited PR touched {f['file']}"
         print(f"finding {k} [{f['severity']}] {f['title']} ({f['file']}) — {where}")
 
 
@@ -227,12 +257,20 @@ def cmd_run(args) -> int:
     if args.dry_run and (args.ledger is None or args.cache is None):
         print("codex-audit: --dry-run needs --ledger and --cache named", file=sys.stderr)
         return ERROR
-    repo = repo_name()
+    if not args.dry_run and (args.simulate_status is not None or args.simulate_out is not None):
+        print("codex-audit: --simulate-status and --simulate-out are for --dry-run; without it Codex "
+              "would launch", file=sys.stderr)
+        return ERROR
+    try:
+        repo = repo_name()
+    except Stop as stop:
+        print(f"codex-audit: not in a git checkout, so no repo to record under: {stop.reason}", file=sys.stderr)
+        return ERROR
     ledger = args.ledger or DEFAULT_LEDGER
     try:
         gate()
-        span, prs = audit_range(ledger, repo, read_mark(args.trial or TRIAL, repo), args.base)
-        print(f"audit range {span}: {', '.join(f'PR #{pr}' for pr, _, _, _ in prs)}")
+        span, prs, left_out = audit_range(ledger, repo, read_mark(args.trial or TRIAL, repo), args.base)
+        print(f"audit range {span}: {', '.join(f'PR #{m.pr}' for m in prs)}")
         cache = args.cache or REVIEWS_ROOT / repo
         cache.mkdir(parents=True, exist_ok=True)
         stem = cache / f"codex-audit-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
@@ -241,42 +279,46 @@ def cmd_run(args) -> int:
         out, record = stem.with_suffix(".out"), stem.with_suffix(".json")
         usage_before, started = usage_percent(), datetime.now(timezone.utc).isoformat()
         status = launch(args, span, body, out)
+    except OSError as e:  # a missing `gh`, `jq` or `node`: nothing launched
+        return stopped(Stop(ERROR, str(e)), ledger, repo)
     except Stop as stop:
         return stopped(stop, ledger, repo)
     # Codex ran: from here a failure is never recorded as an audit not launched.
     record.write_text(json.dumps({
-        "prs": [pr for pr, _, _, _ in prs], "range": span, "status": status,
-        "launch_sha": span.split("..")[1], "body_sha256": hashlib.sha256(body.read_bytes()).hexdigest(),
+        "prs": [m.pr for m in prs], "range": str(span), "status": status, "left_out": left_out,
+        "launch_sha": span.newest, "body_sha256": hashlib.sha256(body.read_bytes()).hexdigest(),
         "started": started, "completed": datetime.now(timezone.utc).isoformat(),
         "usage_before": usage_before, "usage_after": usage_percent(), "dry_run": args.dry_run}) + "\n")
     try:
         append_row(ledger, repo, "--record", str(record))
+        if status != 0:
+            print(f"Codex audit run refused: it exited {status}; its output is {out}")
+            print("the audit mark does not move", file=sys.stderr)
+            return REFUSED
+        findings, why = parse_codex_out(out.read_text())
+        for t in left_out:
+            print(f"left out: ticket #{t}, not in this audit: no single merge commit on {args.base} closes it")
+        if findings is None:
+            print(f"Codex output unreadable as findings ({why}): read it yourself: {out}")
+        elif not findings:
+            print(f"no material findings; output {out}")
+        else:
+            report(findings, prs)
     except Stop as failed:
-        print(f"codex-audit: {failed.reason}; the run's record is {record} and its output {out}", file=sys.stderr)
+        print(f"codex-audit: {failed.reason}; Codex already ran: its record is {record} and its output {out}",
+              file=sys.stderr)
         return ERROR
-    if status != 0:
-        print(f"Codex audit run refused: it exited {status}; its output is {out}")
-        print("the audit mark does not move", file=sys.stderr)
-        return REFUSED
-    findings, why = parse_codex_out(out.read_text())
-    if findings is None:
-        print(f"Codex output unreadable as findings ({why}): read it yourself: {out}")
-        return UNREADABLE
-    if not findings:
-        print(f"no material findings; output {out}")
-    report(findings, prs)
     print(f"next: confirm and file each finding (implement/codex-audit.md), then "
-          f"`codex-audit.py mark --sha {span.split('..')[1]}`")
-    return OK
+          f"`codex-audit.py mark --sha {span.newest}`")
+    return OK if findings is not None else UNREADABLE
 
 
 def stopped(stop: Stop, ledger: Path, repo: str) -> int:
     """End the run on `stop`: say why, and record it as an audit not launched."""
     if stop.status == ERROR:
         print(f"codex-audit: {stop.reason}", file=sys.stderr)
-        if stop.reason.startswith("no audit mark for "):
-            print(f"codex-audit: write it with `codex-audit.py mark --sha <the newest merge already "
-                  f"reviewed>` from this checkout", file=sys.stderr)
+        if stop.hint:
+            print(f"codex-audit: {stop.hint}", file=sys.stderr)
     elif stop.status != EMPTY:
         print(stop.reason)
     try:
@@ -332,7 +374,7 @@ def main(argv=None) -> int:
     run.add_argument("--cache", type=Path)
     run.add_argument("--trial", type=Path)
     run.add_argument("--dry-run", action="store_true")
-    run.add_argument("--simulate-status", type=int, default=0)
+    run.add_argument("--simulate-status", type=int)
     run.add_argument("--simulate-out", type=Path)
     mark = sub.add_parser("mark")
     mark.add_argument("--sha", required=True)
