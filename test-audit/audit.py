@@ -5,13 +5,18 @@ Scans pytest-style test files and emits `file:line: <smell>` candidates for the
 judgment pass (SKILL.md) to sort into Cut/Rewrite/Keep. This script never
 classifies — it only surfaces candidates.
 
-Five detectors, each a small AST check:
+Six detectors, five small AST checks and one shell-source check:
   1. assertion-free   — no assert / pytest.raises / self.assert*, or only a
                          trivial `assert True` / `assert x is not None`.
   2. tautology         — `assert x == x` (same expression both sides).
   3. mock-the-world     — many Mock/MagicMock/patch constructs, few real calls.
   4. interaction-only   — the only checks are `assert_called*` / `.called`.
   5. empty/skipped      — `pass`-body test, or `@skip` with no reason.
+  6. prose-assertion    — a test whose only assertions are that a prose file
+                         (Markdown, a SKILL.md) contains or lacks a string.
+                         Python tests are judged per function, `*.test.sh`
+                         per file. A test that runs any code is never flagged
+                         here: what it reads is the judgment pass's business.
 
 Wherever a detector keys off the `assert` name prefix, leading underscores are
 stripped first: `_assert_*` is the private-helper spelling of a delegated
@@ -25,6 +30,7 @@ out-of-scope follow-ups per the parent spec (#275).
 """
 import ast
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "all-audits", "harness"))
@@ -196,6 +202,114 @@ def is_empty_or_skipped(func):
             return True
     return False
 
+# --- 6. prose-assertion ------------------------------------------------------
+
+PROSE_FILE = re.compile(r"\.md\b")
+# A call outside this set might run code under test, so the test is not a pure
+# prose assertion. The set is file reads and string handling only; anything
+# else (a subprocess, an imported function) keeps the test out of the category
+# and leaves it to the judgment pass.
+PROSE_OK_CALLS = frozenset(
+    {
+        "Path", "open", "read", "read_text", "read_bytes", "joinpath", "join", "resolve", "dirname",
+        "abspath", "exists", "is_file", "lower", "upper", "strip", "lstrip", "rstrip", "split",
+        "splitlines", "replace", "format", "sub", "search", "match", "fullmatch", "findall",
+        "compile", "count", "startswith", "endswith", "find", "index", "escape", "decode", "str",
+        "len", "sorted", "set", "list", "any", "all", "get", "items", "keys", "values", "group",
+    }
+)
+# Shell commands that only read or reshape text. Same idea as PROSE_OK_CALLS.
+SHELL_OK_WORDS = frozenset(
+    {
+        "grep", "egrep", "fgrep", "sed", "tr", "cat", "awk", "test", "[", "[[", "echo", "printf", "cd",
+        "dirname", "pwd", "set", "case", "esac", "for", "do", "done", "if", "then", "else", "elif", "fi",
+        "while", "read", "local", "return", "exit", "shift", "true", "false", ":", "head", "tail", "wc",
+        "sort", "cut", "uniq", "basename", "readlink", "unset", "export", "declare", "!", "{", "}", ";;",
+        "((", "unset", "command",
+    }
+)
+
+
+def _is_containment_assert(node):
+    """True for `assert x in y`, `assert x not in y`, `assert not x in y`, and
+    a bare `assert re.search(...)` / `assert not re.search(...)`."""
+    test = node.test
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        test = test.operand
+    if isinstance(test, ast.Compare):
+        return all(isinstance(op, (ast.In, ast.NotIn)) for op in test.ops)
+    return _call_name(test) in {"search", "match", "fullmatch", "findall"}
+
+
+def _prose_names(tree):
+    """Module-level names bound from an expression that spells a `.md` path."""
+    names = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            consts = [
+                n.value for n in ast.walk(node.value) if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            ]
+            if any(PROSE_FILE.search(c) for c in consts):
+                names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return names
+
+
+def is_prose_assertion(func, prose_names=frozenset()):
+    """6. prose-assertion (Python) — every assertion is a containment check,
+    the test reads a prose file, and it calls nothing but file reads and
+    string handling."""
+    mechs = _assertion_mechanisms(func)
+    if not mechs or not all(isinstance(m, ast.Assert) and _is_containment_assert(m) for m in mechs):
+        return False
+    reads_prose = any(
+        (isinstance(n, ast.Constant) and isinstance(n.value, str) and PROSE_FILE.search(n.value))
+        or (isinstance(n, ast.Name) and n.id in prose_names)
+        for n in ast.walk(func)
+    )
+    if not reads_prose:
+        return False
+    return all(_call_name(n) in PROSE_OK_CALLS for n in ast.walk(func) if isinstance(n, ast.Call))
+
+
+def _shell_command_words(source):
+    """The first word of every command in a shell script, comments dropped.
+    Quoted text and `${...}` expansions are blanked first, except a quoted
+    string holding a `$(` command substitution. A word the blanking misses
+    can only make the script look more like code, never less."""
+    words = []
+    for raw in source.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        line = re.sub(r"\$\{[^}]*\}", "", line)
+        line = re.sub(r"'[^']*'", "''", line)
+        line = re.sub(r'"((?:[^"\\$]|\\.|\$(?!\())*)"', '""', line)
+        line = re.sub(r"\s#.*$", "", line)  # a trailing comment
+        for part in re.split(r"\|\||&&|;|\||\$\(|\(|\{", line):
+            tokens = part.split()
+            while tokens and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[0]):
+                tokens.pop(0)
+            if tokens:
+                word = tokens[0].rstrip(")'\"")
+                # a case-arm pattern (`*"x"*)`) or a bare `)` is data, not a command
+                if word and not word.startswith(("*", ")")):
+                    words.append(word)
+    return words
+
+
+def is_shell_prose_test(source):
+    """6. prose-assertion (shell) — a `*.test.sh` that names a Markdown file
+    and runs nothing but text commands (`grep`, `sed`, `case`, `test`, ...)
+    or functions it defines itself."""
+    code = "\n".join(l for l in source.splitlines() if not l.strip().startswith("#"))
+    if not PROSE_FILE.search(code):
+        return False
+    defined = set(re.findall(r"^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(\)", source, re.M))
+    for word in _shell_command_words(source):
+        if word not in SHELL_OK_WORDS and word not in defined:
+            return False
+    return True
+
 
 DETECTORS = [
     ("assertion-free test", is_assertion_free),
@@ -204,6 +318,9 @@ DETECTORS = [
     ("interaction-only assertion", is_interaction_only),
     ("empty/skipped test", is_empty_or_skipped),
 ]
+
+
+PROSE_SMELL = "prose-assertion"
 
 
 def _is_pytest_file(path, tree):
@@ -229,11 +346,23 @@ def scan_file(path):
     if not _is_pytest_file(path, tree):
         return []
     findings = []
+    prose_names = _prose_names(tree)
     for func in _test_functions(tree):
         for smell, detector in DETECTORS:
             if detector(func):
                 findings.append((path, func.lineno, smell))
+        if is_prose_assertion(func, prose_names):
+            findings.append((path, func.lineno, PROSE_SMELL))
     return findings
+
+
+def scan_shell_file(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            source = f.read()
+    except OSError:
+        return []
+    return [(path, 1, PROSE_SMELL)] if is_shell_prose_test(source) else []
 
 
 def scan_path(root):
@@ -241,9 +370,10 @@ def scan_path(root):
         paths = [root]
     else:
         paths = [os.path.join(root, rel) for rel in auditlib.walk_source(root)]
+        paths += [os.path.join(root, rel) for rel in auditlib.walk_source(root, suffix=".test.sh")]
     findings = []
     for path in paths:
-        findings.extend(scan_file(path))
+        findings.extend(scan_shell_file(path) if path.endswith(".test.sh") else scan_file(path))
     return findings
 
 
@@ -392,6 +522,34 @@ def _selfcheck():
         _func_from("@pytest.mark.skip(reason='flaky')\ndef test_x():\n    assert True\n")
     )
     assert not is_empty_or_skipped(_func_from("def test_x():\n    x = compute()\n    assert x == 5\n"))
+
+    # 6. prose-assertion
+    prose = _func_from(
+        "def test_x():\n    text = (ROOT / 'SKILL.md').read_text()\n    assert 'a sentence' in text\n"
+    )
+    assert is_prose_assertion(prose)
+    # the prose path may sit in a module-level constant
+    assert is_prose_assertion(
+        _func_from("def test_x():\n    assert 'a sentence' in SKILL.read_text()\n"), {"SKILL"}
+    )
+    assert not is_prose_assertion(_func_from("def test_x():\n    assert 'a sentence' in SKILL.read_text()\n"))
+    # a test that runs code is not a prose assertion, whatever it greps
+    assert not is_prose_assertion(
+        _func_from("def test_x():\n    out = render('SKILL.md')\n    assert 'a sentence' in out\n")
+    )
+    assert not is_prose_assertion(
+        _func_from("def test_x():\n    text = open('SKILL.md').read()\n    assert parse(text) == 3\n")
+    )
+    assert is_shell_prose_test(
+        "set -euo pipefail\nskill=\"$here/SKILL.md\"\ngrep -q 'a sentence' \"$skill\" || exit 1\n"
+    )
+    assert is_shell_prose_test(
+        "check() {\n  case \"$1\" in\n    *\"x\"*) ;;\n    *) exit 1 ;;\n  esac\n}\n"
+        "check \"$(sed -n '/^## A$/,/^## B$/p' SKILL.md)\"\n"
+    )
+    assert not is_shell_prose_test("grep -q x SKILL.md\nbash ./run-the-thing.sh\n")
+    assert not is_shell_prose_test("out=$(python3 gen.py)\ngrep -q x \"$out\"\n")
+    assert not is_shell_prose_test("grep -q x not-prose.txt\n")
 
     # scan_path walks via auditlib.walk_source (#611), so a dot-dir like
     # .tox is pruned the same way every other audit prunes it.
