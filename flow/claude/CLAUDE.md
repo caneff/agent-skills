@@ -59,7 +59,8 @@ doc-vs-code contradiction is mine to rule on: report both sides.
 - `~/.claude/settings.json` is a symlink: edit it in place, never replace it
   through a temp file and `mv`.
 - My desktop is Windows; WSL is the shell only, never a Linux GUI.
-- Before you show me a file, window or page, or judge visual work: read
+- Before you show me a file, window or page, judge visual work, or when an
+  image I pasted did not reach you: read
   `~/.agents/skills/flow/claude/VISUAL-INSPECTION.md`.
 - Before you dispatch, wait on, merge or clean up after a worker with no
   skill loaded: read `~/.agents/skills/flow/claude/OPERATIONS.md`.

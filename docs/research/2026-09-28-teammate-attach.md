@@ -4,8 +4,10 @@ Question (#1232): how does Chris view and type into a named teammate or
 subagent, how does he hand it an image, and which case is a session that
 reported `CLAUDE.md` missing?
 
-Every claim below is marked **stated** (the page says it, quoted) or
-**inferred** (ours, from stated facts or a live run). Pages were fetched in
+Every claim below is marked **stated** (the page says it; quoted where a
+quotation marks follow, otherwise a close paraphrase), **inferred** (ours, from
+stated facts), **checked** (read from this repo or box on the date given) or
+**tried live** (run on the date given, result stated). Pages were fetched in
 full on 2026-10-04 against Claude Code 2.1.289; the ticket's preliminary
 pointers were checked against them, not trusted.
 
@@ -70,7 +72,8 @@ managed `settings.json` sets `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and no
 `teammateMode`, so the default `in-process` holds. Split-pane mode would need
 tmux inside the pane; not set up, and out of scope here. Why a teammate was
 "hard to find": the row hides 30 seconds after the panel goes idle, and
-because `agent teams` is on, any subagent the lead names becomes a teammate
+because `agent teams` is on, any subagent the lead names becomes a teammate (a fork, or a call passing
+`isolation`, does not)
 whether or not Chris asked for one.
 
 **Spawning one he can enter** (inferred from the above and
