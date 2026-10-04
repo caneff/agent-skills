@@ -110,7 +110,7 @@ Anything in the repo that documents how code should be written, such as `CODING_
 
 **List them from the worktree, never from memory** (#1329). Briefs once
 contradicted each other on whether `docs/agents/defect-classes.md` exists in the
-same repo, because the caller asserted it. `render-brief.py` (§ 4) runs the
+same repo, because the caller asserted it. `render-brief.py` (§ 4 of this file) runs the
 existence check itself: it lists the standards files present in the worktree, names
 `docs/agents/defect-classes.md` as a source only when it exists there, and
 prints the three defect shapes inline when it does not — the skill's own
