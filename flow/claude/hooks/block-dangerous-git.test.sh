@@ -151,6 +151,24 @@ run "gh pr merge naming someone else's repo by https URL blocked" 2 \
   "gh pr merge 1 --repo https://github.com/someone-else/x" "BLOCKED"
 run "GH_REPO naming someone else's repo by https URL blocked" 2 \
   "GH_REPO=https://github.com/someone-else/x gh pr merge 1" "BLOCKED"
+# The scanner (command-scan-lib.sh) decides what text is a command. Each case
+# below is a foreign merge the scanner must still see, or text it must not
+# take for one.
+run "foreign merge after a comment holding an apostrophe blocked" 2 \
+  "# don't skip this
+gh pr merge 1 --repo someone-else/x" "BLOCKED"
+run "foreign merge after an escaped space before # blocked" 2 \
+  'echo a\ #x; gh pr merge 5 --repo someone-else/x' "BLOCKED"
+run "foreign merge after a here-string blocked" 2 \
+  "cat <<<x
+gh pr merge 5 --repo someone-else/x" "BLOCKED"
+run "foreign merge after a shift in arithmetic blocked" 2 \
+  'echo $((a << b))
+gh pr merge 5 --repo someone-else/x' "BLOCKED"
+run "foreign merge inside a heredoc body is text" 0 \
+  "cat > notes.md <<'EOF'
+gh pr merge 5 --repo someone-else/x
+EOF"
 run "gh pr merge naming someone else's repo by ssh URL blocked" 2 \
   "gh pr merge 1 --repo ssh://git@github.com/someone-else/x" "BLOCKED"
 run "gh pr merge with a URL --repo naming no owner blocked" 2 \
