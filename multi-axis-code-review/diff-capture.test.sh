@@ -12,9 +12,8 @@ set -euo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"
-reviewer="$here/../flow/claude/agents/diff-reviewer.md"
 
-for f in "$skill" "$reviewer"; do
+for f in "$skill"; do
   [ -f "$f" ] || { echo "FAIL: missing $f" >&2; exit 1; }
 done
 

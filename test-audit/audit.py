@@ -209,15 +209,21 @@ PROSE_FILE = re.compile(r"\.md\b")
 # prose assertion. The set is file reads and string handling only; anything
 # else (a subprocess, an imported function) keeps the test out of the category
 # and leaves it to the judgment pass.
-PROSE_OK_CALLS = frozenset(
+PROSE_OK_BUILTINS = frozenset({"Path", "open", "str", "len", "sorted", "set", "list", "any", "all"})
+# Methods on any receiver: file reads and string handling.
+PROSE_OK_METHODS = frozenset(
     {
-        "Path", "open", "read", "read_text", "read_bytes", "joinpath", "join", "resolve", "dirname",
-        "abspath", "exists", "is_file", "lower", "upper", "strip", "lstrip", "rstrip", "split",
-        "splitlines", "replace", "format", "sub", "search", "match", "fullmatch", "findall",
-        "compile", "count", "startswith", "endswith", "find", "index", "escape", "decode", "str",
-        "len", "sorted", "set", "list", "any", "all", "get", "items", "keys", "values", "group",
+        "read", "read_text", "read_bytes", "lower", "upper",
+        "strip", "lstrip", "rstrip", "split", "splitlines", "replace", "startswith", "endswith", "find",
+        "index", "count", "decode", "group",
     }
 )
+# Methods whose names are generic enough to belong to code under test, so they
+# count only on the stdlib module that owns them.
+PROSE_OK_MODULE_METHODS = {
+    "re": frozenset({"search", "match", "fullmatch", "findall", "sub", "compile", "escape"}),
+    "path": frozenset({"join", "dirname", "abspath", "exists"}),
+}
 # Shell commands that only read or reshape text. Same idea as PROSE_OK_CALLS.
 SHELL_OK_WORDS = frozenset(
     {
@@ -225,7 +231,7 @@ SHELL_OK_WORDS = frozenset(
         "dirname", "pwd", "set", "case", "esac", "for", "do", "done", "if", "then", "else", "elif", "fi",
         "while", "read", "local", "return", "exit", "shift", "true", "false", ":", "head", "tail", "wc",
         "sort", "cut", "uniq", "basename", "readlink", "unset", "export", "declare", "!", "{", "}", ";;",
-        "((", "unset", "command",
+        "((", "unset",
     }
 )
 
@@ -239,6 +245,22 @@ def _is_containment_assert(node):
     if isinstance(test, ast.Compare):
         return all(isinstance(op, (ast.In, ast.NotIn)) for op in test.ops)
     return _call_name(test) in {"search", "match", "fullmatch", "findall"}
+
+
+def _is_prose_call(call):
+    """A file read or string handling, not a call into code under test."""
+    f = call.func
+    if isinstance(f, ast.Name):
+        return f.id in PROSE_OK_BUILTINS
+    if isinstance(f, ast.Attribute):
+        if f.attr in PROSE_OK_METHODS:
+            return True
+        # Path operations, only on a path built in place: `Path(x).resolve()`.
+        if f.attr in {"resolve", "exists", "is_file", "joinpath"} and isinstance(f.value, (ast.Call, ast.BinOp)):
+            return True
+        owner = _name_of(f.value)
+        return f.attr in PROSE_OK_MODULE_METHODS.get(owner, ())
+    return False
 
 
 def _prose_names(tree):
@@ -268,7 +290,7 @@ def is_prose_assertion(func, prose_names=frozenset()):
     )
     if not reads_prose:
         return False
-    return all(_call_name(n) in PROSE_OK_CALLS for n in ast.walk(func) if isinstance(n, ast.Call))
+    return all(_is_prose_call(n) for n in ast.walk(func) if isinstance(n, ast.Call))
 
 
 def _shell_command_words(source):
@@ -281,11 +303,20 @@ def _shell_command_words(source):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        line = re.sub(r"\$\{[^}]*\}", "", line)
+        # A `${...}` holding a command substitution is code, so it stays.
+        line = re.sub(r"\$\{[^}$`]*\}", "", line)
         line = re.sub(r"'[^']*'", "''", line)
-        line = re.sub(r'"((?:[^"\\$]|\\.|\$(?!\())*)"', '""', line)
+        # A quoted string is blanked unless it holds a command substitution. One
+        # in command position is the command itself (`"$here/run.sh"`), so it
+        # becomes a word no text command matches.
+        def _blank(m):
+            before = line[: m.start()].rstrip()
+            at_command = not before or before.endswith(("|", "&", ";", "(", "{", "then", "do", "else"))
+            return "EXECQUOTED" if at_command else '""'
+
+        line = re.sub(r'"((?:[^"\\$`]|\\.|\$(?!\())*)"', _blank, line)
         line = re.sub(r"\s#.*$", "", line)  # a trailing comment
-        for part in re.split(r"\|\||&&|;|\||\$\(|\(|\{", line):
+        for part in re.split(r"\|\||&&|;|\||\$\(|`|\(|\{", line):
             tokens = part.split()
             while tokens and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tokens[0]):
                 tokens.pop(0)
@@ -551,11 +582,48 @@ def _selfcheck():
     assert not is_shell_prose_test("out=$(python3 gen.py)\ngrep -q x \"$out\"\n")
     assert not is_shell_prose_test("grep -q x not-prose.txt\n")
 
-    # scan_path walks via auditlib.walk_source (#611), so a dot-dir like
-    # .tox is pruned the same way every other audit prunes it.
     import shutil
     import tempfile
 
+    # a non-containment assertion is not a prose assertion, even over a prose read
+    assert not is_prose_assertion(
+        _func_from("def test_x():\n    text = open('SKILL.md').read()\n    assert len(text) == 3\n")
+    )
+    # a generic method name on code under test is a call into that code
+    assert not is_prose_assertion(
+        _func_from("def test_x():\n    out = report.format('SKILL.md')\n    assert 'a sentence' in out\n")
+    )
+    assert not is_prose_assertion(
+        _func_from("def test_x():\n    out = T.resolve('SKILL.md')\n    assert 'a sentence' in out\n")
+    )
+    # shell: a command run through a quoted path, a substitution or `command`
+    assert not is_shell_prose_test('grep -q x SKILL.md\n"$here/render.sh"\n')
+    assert not is_shell_prose_test('grep -q x SKILL.md\nout=$("$here/run.sh")\n')
+    assert not is_shell_prose_test('grep -q x SKILL.md\nout="${v:-$(render)}"\n')
+    assert not is_shell_prose_test('grep -q x SKILL.md\necho "`./run.sh`"\n')
+    assert not is_shell_prose_test("grep -q x SKILL.md\ncommand ./run.sh\n")
+
+    # the detector is wired into scanning: a prose Python test (its path in a
+    # module-level constant), a prose shell test, and a test that runs code
+    tmp = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(tmp, "test_prose.py"), "w", encoding="utf-8") as f:
+            f.write(
+                "from pathlib import Path\nSKILL = Path('SKILL.md')\n\n"
+                "def test_prose():\n    assert 'a sentence' in SKILL.read_text()\n\n"
+                "def test_code():\n    assert render(SKILL) == 3\n"
+            )
+        with open(os.path.join(tmp, "prose.test.sh"), "w", encoding="utf-8") as f:
+            f.write("grep -q 'a sentence' SKILL.md\n")
+        with open(os.path.join(tmp, "code.test.sh"), "w", encoding="utf-8") as f:
+            f.write("grep -q 'a sentence' SKILL.md\nbash ./run.sh\n")
+        found = sorted((os.path.basename(p), line) for p, line, smell in scan_path(tmp) if smell == PROSE_SMELL)
+        assert found == [("prose.test.sh", 1), ("test_prose.py", 4)], found
+    finally:
+        shutil.rmtree(tmp)
+
+    # scan_path walks via auditlib.walk_source (#611), so a dot-dir like
+    # .tox is pruned the same way every other audit prunes it.
     tmp = tempfile.mkdtemp()
     try:
         os.makedirs(os.path.join(tmp, ".tox"))

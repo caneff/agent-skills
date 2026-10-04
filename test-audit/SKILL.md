@@ -288,7 +288,7 @@ exist for pass one's scanners to flag; the answer key does not cover them.
    itself; the same skip applies to the judgment sweep.
 
 2. **Pass one — run both mechanical scanners.** `python3
-   ~/.agents/skills/test-audit/audit.py <scope>` scans pytest files; `node
+   ~/.agents/skills/test-audit/audit.py <scope>` scans pytest and `*.test.sh` files; `node
    ~/.agents/skills/test-audit/audit.mjs <scope>` scans
    vitest and node:test files. Run both and concatenate their output into one
    `file:line: <smell>` candidate list for the six mechanically detectable
