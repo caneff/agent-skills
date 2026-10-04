@@ -16,7 +16,7 @@
 # GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES would point
 # show-toplevel at that caller's repo instead of this one (#620); resolving
 # via BASH_SOURCE sidesteps it entirely rather than relying on the scrub.
-# Section-scoped for SKILL.md, the way codex-fourth-axis-wording.test.sh is:
+# Section-scoped for SKILL.md, the way codex-wave.test.sh is:
 # the appendix belongs to § The Codex pass (the review wave's Codex block,
 # #1401), and a whole-file check would still pass with it pasted anywhere at
 # all.

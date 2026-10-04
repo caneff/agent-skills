@@ -73,7 +73,7 @@ check_absent() {
 
 # SKILL.md § The Codex pass (the review wave's Codex block):
 # direct script invocation, not the disabled slash command. Which section
-# the block sits in is codex-fourth-axis-wording.test.sh's rule, not this
+# the block sits in is codex-wave.test.sh's rule, not this
 # file's — this file only pins the invocation's own shape.
 check "$skill" 'disable-model-invocation: true'
 check "$skill" "codex@openai-codex"
