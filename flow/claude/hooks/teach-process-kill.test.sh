@@ -26,6 +26,7 @@ expect_has "extraction: a subagent of s1 is its own session" \
 expect_has "extraction: pgrep as an if condition" "$(context "$hook" k1 "if pgrep -f hunt; then echo up; fi")" "${section[@]}"
 expect_has "extraction: ps in a brace group" "$(context "$hook" k2 "{ ps aux; }")" "${section[@]}"
 expect_has "extraction: ps under sudo" "$(context "$hook" k3 "sudo ps -ef")" "${section[@]}"
+expect_has "extraction: ps in a substitution inside double quotes" "$(context "$hook" k5 'echo "$(ps aux | wc -l)"')" "${section[@]}"
 expect_has "extraction: ps after a comment holding an apostrophe" "$(context "$hook" k4 "# don't kill yet
 ps -eo pid,args")" "${section[@]}"
 

@@ -209,6 +209,16 @@
             "statusMessage": "Restoring controlled workers"
           }
         ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/caneff/.agents/skills/flow/claude/hooks/teach-reset.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PermissionRequest": [

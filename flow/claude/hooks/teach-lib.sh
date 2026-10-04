@@ -22,15 +22,17 @@ TEACH_DOCS="$(dirname "$teach_dir")"
 # A subagent's calls carry its parent's session id, so the agent id joins the
 # key: a reviewer's `ps` must not spend the main session's section.
 mapfile -d '' -t teach_fields < <(jq -j '(.tool_input.command // ""), "\u0000",
-  (.cwd // ""), "\u0000", (.session_id // "no-session"), "\u0000", (.agent_id // ""), "\u0000"' 2>/dev/null)
+  (.cwd // ""), "\u0000", (.session_id // "no-session"), "\u0000", (.agent_id // ""), "\u0000",
+  (.source // ""), "\u0000"' 2>/dev/null)
 TEACH_COMMAND=${teach_fields[0]-}
 TEACH_CWD=${teach_fields[1]-}
 TEACH_SESSION=$(printf '%s' "${teach_fields[2]-no-session}${teach_fields[3]:+-${teach_fields[3]}}" | tr -c 'A-Za-z0-9_-' '_')
+TEACH_SOURCE=${teach_fields[4]-}
 TEACH_CONTEXT=""
 TEACH_PENDING=()
 
 # The words the shell would run, one command per line: heredoc bodies,
-# comments and quoted text dropped (a trigger in any of them is data), then
+# comments and quoted text dropped (a `$(...)` inside double quotes kept) (a trigger in any of them is data), then
 # split at every separator, with leading `VAR=value` assignments and the
 # words that only introduce a command (`if`, `{`, `sudo`, `time`, ...) taken
 # off. Built on the first `runs` that gets past its word gate, since the scan
@@ -41,7 +43,9 @@ teach_parse() {
   [ -n "$TEACH_SCAN" ] && return 0
   TEACH_SCAN=$(printf '%s\n' "$TEACH_COMMAND" | strip_heredocs)
   quote_views "$TEACH_SCAN"
-  TEACH_RUN=$(printf '%s\n' "$BARE" | sed -E 's/(&&|\|\||[;&|()`]|\$\()/\n/g' \
+  # BARE drops a `$(...)` inside double quotes, which still runs; EXPANDS
+  # keeps it, so its body is added back as a command of its own.
+  TEACH_RUN=$( { printf '%s\n' "$BARE"; printf '%s\n' "$EXPANDS" | grep -oE '\$\([^)]*' | cut -c3-; } | sed -E 's/(&&|\|\||[;&|()`]|\$\()/\n/g' \
     | sed -E ':a; s/^[[:space:]]+//; s/^([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*|if|then|else|elif|do|while|until|!|\{|sudo|time|env|nohup|exec|command)([[:space:]]+|$)//; ta')
 }
 
@@ -58,6 +62,9 @@ runs() {
 
 teach_cache="${XDG_CACHE_HOME:-$HOME/.cache}/claude-teaching-hooks"
 shown() { grep -qxF "$1" "$teach_cache/$TEACH_SESSION" 2>/dev/null; }
+# A subagent's record is `<session>-<agent>`, so this names every record the
+# session owns: teach-reset.sh clears them after a compaction.
+session_records() { printf '%s\n' "$teach_cache/$TEACH_SESSION" "$teach_cache/$TEACH_SESSION"-*; }
 
 # section <doc> <heading>: the body under `## <heading>`, up to the next `#`
 # or `##` heading, leading and trailing blank lines dropped. Exits 2 when the
