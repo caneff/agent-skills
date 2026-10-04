@@ -50,3 +50,28 @@ symlink to `flow/claude/settings.json` when this work started and was a
 regular file, drifted from the repo copy, by the end of the same day; until
 it is a link again, merging this branch does not wire the hooks into live
 sessions (round-1 finding C1).
+
+## Through the live user settings (#1413, 2026-10-04)
+
+`~/.claude/settings.json` is a link to `flow/claude/settings.json` again, so
+the caveat above no longer holds. Checked with the user settings loaded, not
+`--setting-sources project`: from a scratch directory, `claude -p --model
+claude-haiku-4-5-20251001 --allowedTools='Bash(ps:*)'` was asked to run
+`ps -o pid= -p 1` twice. The session's transcript
+(`2d6eb335-9713-463a-9d60-712ef5a42702.jsonl`) holds one
+`hook_additional_context` attachment, after the first call, carrying
+SHELL-SAFETY.md § Killing a process, and none after the second; the cache
+record for that session lists the section once. The stream-json output does
+not carry `additionalContext`, so read the transcript, not the stream.
+
+## What #1417 changed in block-dangerous-git.sh
+
+Moving the scanner into `command-scan-lib.sh` changed the guard on purpose in
+two ways, named here because the spec said the blocking guards stay as they
+are: the guard blocks every Bash command when the lib is missing (fail
+closed), and the scanner drops unquoted `#` comments and reads byte by byte.
+The comment rule closed a bypass (an apostrophe in a comment opening a quote
+that hid a later `gh pr merge`), and the spec-level review of #1409 found it
+opened one (`a\ #x`, an escaped blank read as a word break). #1413 fixed that
+and two older scanner gaps (`<<<` and a `<<` shift read as heredoc openers),
+each with a guard test in `block-dangerous-git.test.sh`.
