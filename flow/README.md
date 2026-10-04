@@ -49,6 +49,12 @@ git clone <agent-skills>  ~/.agents/skills   # or wherever it lives
 ~/.agents/skills/flow/install.sh
 ```
 
+`install-check.sh` (run at the end of `install.sh`, and on its own) verifies the
+result: `~/.claude/settings.json` is the link to `claude/settings.json` and
+fails loudly when it is a plain file, every hook in `hooks-manifest.sh`'s
+`LINKED_HOOKS` is linked to its repo file, and every repo hook is registered in
+`settings.json` or named in `UNREGISTERED_BY_DESIGN`.
+
 `install.sh` is idempotent and moves any existing real file aside to
 `<file>.pre-flow` before linking, so nothing is overwritten silently.
 

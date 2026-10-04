@@ -40,9 +40,9 @@ link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 # user`); backup-sync.sh --commit still backs it up, straight off this link.
 link claude/settings.json       "$HOME/.claude/settings.json"
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
-for h in block-dangerous-git.sh refresh-landed.sh \
-         wrap-background-jobs.sh worker-stop-alert.sh \
-         worker-alert-lib.sh package.json; do
+# shellcheck source=hooks-manifest.sh
+. "$here/hooks-manifest.sh"
+for h in "${LINKED_HOOKS[@]}"; do
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
 done
 for a in "$here/claude/agents"/*.md; do
@@ -123,6 +123,12 @@ echo "Done. The live flow tooling now points at this repo; commit to back it up.
 status=0
 if [ -n "$link_refused" ]; then
   echo "one or more files were left as they were (see \"refusing:\" above); the rest of the install ran" >&2
+  status=1
+fi
+
+# The check names what a link or a settings entry still lacks (#1224).
+if ! bash "$here/install-check.sh"; then
+  echo "install-check.sh found problems (see above); the install ran anyway" >&2
   status=1
 fi
 
