@@ -13,11 +13,10 @@ import time
 import unittest
 from pathlib import Path
 
+from codex_audit_fixtures import GIT_ENV, GitRepoCase, skip_row
+
 HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "codex-audit.py"
-GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
-           "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
 
 # A `gh` that answers `issue view <n>` with FAKE_ISSUES[n] whole, whatever `--json` fields are asked
 # for, and fails on any other command or ticket, so a call the script was not meant to make shows up.
@@ -57,14 +56,6 @@ Next steps:
 """
 
 
-def skip_row(ticket, reason, repo="skills"):
-    """A gate skip row as `review_ledger.py append --skip-reason` writes it."""
-    return {"row_id": f"{repo}/{ticket}/codex-gate/1/codex-skipped-{ticket}-gate", "origin": "append",
-            "repo": repo, "ticket": ticket, "tickets": [ticket], "type": "codex-gate", "findings": [],
-            "skip_reason": reason,
-            "status": {"fields": {"findings": {"status": "skipped", "reason": reason}}}}
-
-
 def usage_cache(pct):
     now = time.time()
     return {"fetchedAt": now,
@@ -72,7 +63,7 @@ def usage_cache(pct):
             "secondary": None}
 
 
-class Case(unittest.TestCase):
+class Case(GitRepoCase, unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
@@ -90,7 +81,7 @@ class Case(unittest.TestCase):
         self.repo.mkdir()
         self.git("init", "-q", "-b", "main")
         self.git("remote", "add", "origin", "https://github.com/caneff/skills.git")
-        self.root = self.commit("root", "f", "2026-09-01T00:00:00+00:00")
+        self.root = self.commit("root", "2026-09-01T00:00:00+00:00")
         self.ledger = self.tmp / "ledger.jsonl"
         self.ledger.write_text("")
         self.cache = self.tmp / "cache"
@@ -101,21 +92,10 @@ class Case(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def git(self, *args, date=None):
-        env = {**self.env, **({"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else {})}
-        return subprocess.run(["git", *args], cwd=self.repo, env=env, check=True,
-                              capture_output=True, text=True).stdout.strip()
-
-    def commit(self, message, path, date):
-        (self.repo / path).write_text(message)
-        self.git("add", path)
-        self.git("commit", "-q", "-m", message, date=date)
-        return self.git("rev-parse", "HEAD")
-
     def merge(self, pr, ticket, path, date):
         """A squash merge as GitHub writes it, touching `path`; its ticket is readable through `gh`."""
         self.issues[str(ticket)] = {"body": f"Ticket {ticket} asks for {path}.", "comments": []}
-        return self.commit(f"Work for {ticket} (#{pr})\n\nCloses #{ticket}\n", path, date)
+        return self.commit(f"Work for {ticket} (#{pr})\n\nCloses #{ticket}\n", date, path)
 
     def set_mark(self, line):
         self.trial.write_text(TRIAL_HEAD.format(marks=line))

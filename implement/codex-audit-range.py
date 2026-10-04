@@ -5,8 +5,9 @@ as one diff range for a single Codex run.
     codex-audit-range.py --ledger PATH --repo R --mark SHA|DATE [--base REF]
 
 Run from a checkout of the repo. Reads the review ledger (`docs/research/review_ledger.py`) for
-gate skip rows of repo R whose skip reason is exactly `size` or `ceiling` (`SKILL.md` § The Codex
-pass): `codex-gate` only, since a later pass skipped at the ceiling follows a gate pass that ran.
+gate skip rows of repo R whose skip reason is exactly `size`, `ceiling` or `unmeasured` (`SKILL.md`
+§ The Codex pass): `codex-gate` only, since a later pass skipped at the ceiling follows a gate pass
+that ran.
 Finds each skipped ticket's merge commit on `--base` (default `origin/HEAD`): a squash commit whose
 subject ends `(#<pr>)` and either names `(#<ticket>)` earlier in the subject or has a body line
 closing it. A ledger row carries no date, so "since the mark" is read off that merge commit: not an
@@ -32,22 +33,20 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "docs" / "research"))
+from gitcmd import GitError, git  # noqa: E402
 from review_ledger import read_ledger  # noqa: E402
 from tally_review_axes import fold_repo  # noqa: E402
 
-AUDITED_REASONS = ("size", "ceiling")
+# `unmeasured`: the gate answered exit 30 (size or usage unread), so the PR may have been large (#1405).
+AUDITED_REASONS = ("size", "ceiling", "unmeasured")
 OK, ERROR, EMPTY = 0, 2, 3
 _PR_SUBJECT_RE = re.compile(r"\(#(\d+)\)$")
-
-
-def git(*args: str) -> str:
-    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
 
 
 def skipped_tickets(rows: list[dict], repo: str) -> dict[int, str]:
@@ -65,7 +64,7 @@ def merges(base: str) -> list[tuple[str, datetime, int, str]]:
     """(sha, commit date, PR, message) of every first-parent commit on `base` whose subject names
     a PR, oldest first."""
     found = []
-    for rec in git("log", "--first-parent", "--reverse", "--format=%H%x00%cI%x00%B%x1e", base).split("\x1e"):
+    for rec in git("log", "--first-parent", "--reverse", "--format=%H%x00%cI%x00%B%x1e", base).stdout.split("\x1e"):
         if not rec.strip():
             continue
         sha, date, body = rec.strip("\n").split("\x00", 2)
@@ -77,9 +76,7 @@ def merges(base: str) -> list[tuple[str, datetime, int, str]]:
 
 def after_mark(mark: str):
     """A predicate on (sha, date): is this merge after the mark? A mark is a commit or a date."""
-    r = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{mark}^{{commit}}"], capture_output=True, text=True)
-    if r.returncode not in (0, 1):  # not a repo, or git itself failed: no reading of the mark at all
-        raise subprocess.CalledProcessError(r.returncode, r.args, stderr=r.stderr)
+    r = git("rev-parse", "--verify", "--quiet", f"{mark}^{{commit}}", ok=(0, 1))  # a failed git is no reading at all
     sha = r.stdout.strip()
     if r.returncode == 1:
         try:
@@ -90,10 +87,7 @@ def after_mark(mark: str):
         return lambda _sha, date: date > when
 
     def not_ancestor(merge_sha: str, _date) -> bool:
-        r = subprocess.run(["git", "merge-base", "--is-ancestor", merge_sha, sha], capture_output=True, text=True)
-        if r.returncode not in (0, 1):  # an error is neither answer
-            raise subprocess.CalledProcessError(r.returncode, r.args, stderr=r.stderr)
-        return r.returncode == 1
+        return git("merge-base", "--is-ancestor", merge_sha, sha, ok=(0, 1)).returncode == 1
     return not_ancestor
 
 
@@ -135,17 +129,17 @@ def main(argv=None) -> int:
         is_after = after_mark(args.mark)
         history = merges(args.base)
         picked, left_out = pick(skipped, history, is_after, args.base)
-    except (OSError, ValueError, subprocess.CalledProcessError) as e:
-        print(f"codex-audit-range: {getattr(e, 'stderr', None) or e}".rstrip(), file=sys.stderr)
+    except (OSError, ValueError, GitError) as e:
+        print(f"codex-audit-range: {e}", file=sys.stderr)
         return ERROR
     if not picked:
         undated = f"; {left_out} skipped ticket(s) left out undated, named on stderr" if left_out else ""
         print(f"no skipped PRs since the mark {args.mark}: nothing to audit{undated}")
         return EMPTY
     try:
-        parent = git("rev-parse", "--verify", f"{picked[0][1]}~1").strip()
-    except subprocess.CalledProcessError as e:
-        print(f"codex-audit-range: the oldest merge {picked[0][1]} has no parent: {e.stderr}".rstrip(), file=sys.stderr)
+        parent = git("rev-parse", "--verify", f"{picked[0][1]}~1").stdout.strip()
+    except GitError as e:
+        print(f"codex-audit-range: the oldest merge {picked[0][1]} has no parent: {e}", file=sys.stderr)
         return ERROR
     print(f"range {parent}..{picked[-1][1]}")
     for _, sha, pr, ticket, reason in picked:

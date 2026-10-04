@@ -9,10 +9,12 @@ it through the helper's own live fetch, which still answers at the cap.
 
 One line on stdout, and an exit status the caller branches on:
 
-  0   proceed — usage is under RESERVE_PERCENT (under 100% with `--audit`)
-  20  capped — usage is at or above RESERVE_PERCENT (#1359), at 100% under
-      `--audit`, or the kill-switch file is present (#1354); launch nothing,
-      write no duration row
+  0   proceed — usage is under RESERVE_PERCENT (under 100% with `--audit`); a PR's
+      line ends with why: `churn <n> >= <threshold>` or `needs-codex label forced
+      it, churn <n> < <threshold>` (#1405)
+  20  capped — usage is at or above RESERVE_PERCENT (#1359; 100% included, so
+      the weekly audit reads the skip), at 100% under `--audit`, or the
+      kill-switch file is present (#1354); launch nothing, write no duration row
   30  unknown — no fresh, well-formed reading; launch nothing
   40  under the size threshold (#1358) — a PR pass only; launch nothing
 
@@ -61,6 +63,7 @@ of different windows are never subtracted.
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import subprocess
@@ -194,24 +197,29 @@ def check(base: str | None = None, tickets: list[str] = (), audit: bool = False)
     switch = kill_switch()
     if switch.exists():
         return CAPPED, f"codex reviews off by Chris's ruling ({switch}) — remove the file to re-enable"
+    why = None
     if base is not None:
         try:
             lines = churn(base)
-            small = lines < SIZE_THRESHOLD and not forced(tickets)
+            if lines >= SIZE_THRESHOLD:
+                why = f"churn {lines} >= {SIZE_THRESHOLD}"
+            elif forced(tickets):
+                why = f"{FORCE_LABEL} label forced it, churn {lines} < {SIZE_THRESHOLD}"
+            else:
+                return SMALL, f"under size threshold ({lines} < {SIZE_THRESHOLD})"
         except (SizeCheckError, OSError, ValueError, KeyError, TypeError) as exc:  # a missing tool, unreadable output
             return UNKNOWN, f"size check failed: {exc}"
-        if small:
-            return SMALL, f"under size threshold ({lines} < {SIZE_THRESHOLD})"
     worst = reading()
     if worst is None:
         return UNKNOWN, "codex usage unknown: no fresh, readable usage cache and the live fetch failed"
     pct, resets = worst
     when = time.strftime("%Y-%m-%d %H:%M", time.localtime(resets))
+    if pct >= RESERVE_PERCENT and not audit:
+        # The cap included: the audit reads `ceiling` skips only, so a PR gated at 100% must read as one.
+        return CAPPED, f"usage {pct:g}% at or above reserve ceiling {RESERVE_PERCENT}%, resets {when}"
     if pct >= 100:
         return CAPPED, f"codex usage {pct:g}% — capped, resets {when}"
-    if pct >= RESERVE_PERCENT and not audit:
-        return CAPPED, f"usage {pct:g}% at or above reserve ceiling {RESERVE_PERCENT}%, resets {when}"
-    return PROCEED, f"codex usage {pct:g}% — ok, resets {when}"
+    return PROCEED, f"codex usage {pct:g}% — ok, resets {when}" + (f"; {why}" if why else "")
 
 
 def size_only(base: str) -> tuple[int, str]:
@@ -225,33 +233,73 @@ def size_only(base: str) -> tuple[int, str]:
     return PROCEED, f"at or above size threshold ({lines} >= {SIZE_THRESHOLD})"
 
 
+USAGE = "usage: codex-usage-gate.py [--percent | --audit | --base <ref> --tickets <n>... | --size --base <ref>]"
+# The flag sets one invocation may carry: no flags is the Codex lane's launch check.
+MODES = (set(), {"percent"}, {"audit"}, {"size", "base"}, {"base", "tickets"})
+
+
+class UsageError(Exception):
+    pass
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise UsageError(message)
+
+
+class Once(argparse.Action):
+    """Store the value, refusing a repeated flag: argparse would keep only the last, so a clump built
+    one `--tickets` at a time would lose every ticket but one, and its labels with it."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest) not in (None, False):
+            parser.error(f"{option_string} given twice")
+        setattr(namespace, self.dest, True if self.nargs == 0 else values)
+
+
+def ticket(text: str) -> str:
+    if not text.isdigit():
+        raise argparse.ArgumentTypeError(f"not a ticket number: {text!r}")
+    return text
+
+
+def parse(argv: list[str]) -> argparse.Namespace:
+    """The arguments in any flag order, or UsageError. No `--help` and no abbreviations: argparse's
+    own exit 0 for help would read as proceed, and its exit 2 for an error is no status a caller has
+    a rule for, so `main` maps every refusal to 30."""
+    p = Parser(add_help=False, allow_abbrev=False)
+    for flag in ("percent", "audit", "size"):
+        p.add_argument(f"--{flag}", action=Once, nargs=0, default=False)
+    p.add_argument("--base", action=Once)
+    p.add_argument("--tickets", action=Once, nargs="+", type=ticket)
+    args = p.parse_args(argv)
+    given = {k for k, v in vars(args).items() if v not in (None, False)}
+    if given not in MODES:
+        raise UsageError(f"unsupported combination: {sorted(given)}")
+    return args
+
+
 def main() -> int:
-    if sys.argv[1:] == ["--percent"]:
+    # Any failure is exit 30: a crash's own exit 1 is a status neither caller
+    # has a rule for, and an unread reading is not headroom.
+    try:
+        args = parse(sys.argv[1:])
+    except UsageError as exc:
+        print(f"{USAGE} — {exc}")
+        return UNKNOWN
+    if args.percent:
         try:
             worst = reading(live_only=True)
         except Exception:
             worst = None
         print("unknown" if worst is None else f"{worst[0]:g} {int(worst[1])}")
         return UNKNOWN if worst is None else PROCEED
-    # Any failure is exit 30: a crash's own exit 1 is a status neither caller
-    # has a rule for, and an unread reading is not headroom.
-    args = sys.argv[1:]
-    if args[:1] == ["--size"]:
-        if len(args) != 3 or args[1] != "--base":
-            print("usage: codex-usage-gate.py --size --base <ref>")
-            return UNKNOWN
-        status, line = size_only(args[2])
+    if args.size:
+        status, line = size_only(args.base)
         print(line)
         return status
-    base, tickets, audit = None, [], args == ["--audit"]
-    if args and not audit:
-        if len(args) < 4 or args[0] != "--base" or args[2] != "--tickets" or not all(
-                n.isdigit() for n in args[3:]):
-            print("usage: codex-usage-gate.py [--percent | --audit | --base <ref> --tickets <n>... | --size --base <ref>]")
-            return UNKNOWN
-        base, tickets = args[1], args[3:]
     try:
-        status, line = check(base, tickets, audit)
+        status, line = check(args.base, args.tickets or [], args.audit)
     except Exception as exc:
         status, line = UNKNOWN, f"codex usage unknown: {type(exc).__name__}: {exc}"
     print(line)
