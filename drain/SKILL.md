@@ -95,3 +95,14 @@ then the summary:
 - **merged**: each ticket set with its PR and squash sha.
 - **handed to Chris**: each ticket set with the reason, as drain printed it.
 - **stopped**: the reason, when drain printed one.
+- **Live layer**: when the target repo's `AGENTS.md` § End-to-end seam declares
+  a live layer above its merge seam (a command run once per run, on Chris's
+  go: `./e2e.sh` in twitch-rules-scroller, #1392), end the report with the ask
+  and run nothing yet: the layer is the one thing in a drain that takes Chris's
+  screen, and a `permissions.ask` rule on it makes any start without his go a
+  prompt. On his go, run it once on merged `main`, in the primary checkout after
+  `git pull --ff-only`, together with the owed live checks: the "Live check
+  after merge" acceptance items of every ticket this run merged, read from the
+  tickets. File a fix or revert ticket for anything red, search-before-filing,
+  and say so before the report closes. A repo that declares no live layer gets
+  no ask, and no ask is "none declared", never a skipped run.

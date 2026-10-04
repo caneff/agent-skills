@@ -71,6 +71,15 @@
       "Bash(uv run tools/upton_links/make_links.py:*)",
       "Bash(uv run tools/upton_links/make_big.py:*)"
     ],
+    "ask": [
+      "Bash(./e2e.sh *)",
+      "Bash(bash e2e.sh *)",
+      "Bash(bash ./e2e.sh *)",
+      "Bash(/home/caneff/src/twitch-rules-scroller/e2e.sh *)",
+      "Bash(bash /home/caneff/src/twitch-rules-scroller/e2e.sh *)",
+      "Bash(*/.claude/worktrees/*/e2e.sh *)",
+      "Bash(bash */.claude/worktrees/*/e2e.sh *)"
+    ],
     "deny": [
       "AskUserQuestion",
       "NotebookEdit",

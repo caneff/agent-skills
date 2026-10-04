@@ -42,6 +42,11 @@ for h in "${LINKED_HOOKS[@]}"; do
     problem "$h is not linked: $home/.claude/hooks/$h should link to $flow/claude/hooks/$h (run flow/install.sh)"
 done
 
+# A misplaced autoMode block or a list missing "$defaults" is silent damage.
+lint_out=$(bash "$(dirname "${BASH_SOURCE[0]}")/settings-lint.sh" "$settings") || {
+  while IFS= read -r line; do problem "${line#PROBLEM: }"; done <<< "$lint_out"
+}
+
 commands=$(jq -r '[.. | objects | select(has("command")) | .command] | .[]' "$settings") ||
   { echo "cannot read hook commands from $settings" >&2; exit 2; }
 in_array() { local x=$1; shift; for e in "$@"; do [ "$e" = "$x" ] && return 0; done; return 1; }

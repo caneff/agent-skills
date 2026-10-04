@@ -62,6 +62,14 @@ cat > "$FLOW/claude/settings.json" <<'JSON'
 JSON
 case_ "a hook registered under ~/.claude/hooks but not in the manifest fails" 1 "b.sh is registered under"
 
+fixture misplaced-automode
+cat > "$FLOW/claude/settings.json" <<'JSON'
+{"permissions":{"autoMode":{"allow":["$defaults"]}},"hooks":{"PreToolUse":[{"hooks":[
+  {"type":"command","command":"/x/.claude/hooks/a.sh"},
+  {"type":"command","command":"bash /x/flow/claude/hooks/b.sh"}]}]}}
+JSON
+case_ "a misplaced autoMode block fails the install check" 1 "permissions.autoMode"
+
 # This repo's own flow/, HOME linked from its manifest.
 real_home="$tmp/real-home"; mkdir -p "$real_home/.claude/hooks"
 # shellcheck source=hooks-manifest.sh
