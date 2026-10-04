@@ -118,7 +118,9 @@ from a one-line mention in a doc.
   open decision in full — number, options, your recommendation — including a
   status reply or one sent after a notification; never "as above". Ask only
   when the choice is contested or cannot be undone; apply your recommendation
-  to a routine reversible one and list what you applied.
+  to a routine reversible one and list what you applied. Order, timing and
+  how many workers run at once are always reversible: never ask them. Never
+  hold work back to dodge a rebase or a small conflict; start it now.
 - The first mention of a ticket, PR, option, sha, stash or coined label in a
   reply carries a few words saying what it is (for a ticket or PR, its
   title); I rule from the reply alone.
