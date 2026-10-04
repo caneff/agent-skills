@@ -43,12 +43,6 @@ scratch_repo() { # scratch_repo <dir> -> writes a patched backup-sync.sh + fixtu
   git -C "$dir" commit -q -m base
 }
 
-if grep -q '"claude/settings.json"' "$here/backup-sync.sh"; then
-  echo "FAIL claude/settings.json is still in backup-sync.sh's COPIES manifest"; fails=1
-else
-  echo "PASS claude/settings.json is not in backup-sync.sh's COPIES manifest"
-fi
-
 # --restore must not touch a symlinked settings.json: it is no longer in the
 # manifest, install.sh owns the link, and a copy through it would clobber
 # whatever the harness has written since.

@@ -16,9 +16,10 @@ an `implement-*` worktree with a dirty tree.
 
 No hook. The rule's mechanism is the recipe, not a guard. The mutation
 steps (`implement/SKILL.md` § Build) never touch the live checkout, so there
-is no restore step to refuse. `implement/mutation-worktree-wording.test.sh`
-fails if that section names a restore command anywhere outside the sentence
-that forbids it.
+is no restore step to refuse. Nothing enforces it
+mechanically: `implement/mutation-worktree-wording.test.sh` once failed if that
+section named a restore command outside the sentence that forbids it, and was
+deleted with the other wording tests (#1414).
 
 A hook would also refuse work that is sanctioned in a dirty `implement-*`
 tree. `~/.claude/CLAUDE.md` names `git checkout --ours|--theirs <paths>`

@@ -11,8 +11,7 @@ the last cases pin): on
 2026-09-20 were filed ad hoc during builds, each costing a controller a
 decision by hand.
 
-`file-ticket/blocked-by-wording.test.sh` asserts the prose that tells the
-filer to emit it; this file asserts the template actually parses.
+This file asserts the template actually parses.
 """
 import re
 import sys
@@ -82,13 +81,6 @@ def main():
                  "#890" in blocked, True)
     fail += case("one open blocker", classify(blocked, {890: "open"}), "blocked")
     fail += case("blocker since closed", classify(blocked, {890: "closed"}), "unblocked")
-
-    # The native edge is a second command, so it may never be made — an old
-    # `gh`, a tracker with no dependency support. The filed body carries the
-    # whole answer on its own: every case here classifies a ticket with no
-    # `issue_dependencies_summary` at all, and this one says so by name.
-    fail += case("native edge rejected, body alone",
-                 classify(blocked, {890: "open"}), "blocked")
 
     # Only the section answers. The same body without it carries `#906` in
     # its prose and still reads as silence — which is why the skill cannot

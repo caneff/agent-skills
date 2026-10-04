@@ -33,9 +33,7 @@ worker spinning on no-op tool calls, a pane closing before a question is answere
 verification pass actually ends by running `append`, that a controller writes one
 `codex-<phase>` row per pass at merge, or that a worker and the correctness
 reviewer record their mutations: only that every command those steps name does
-what the step relies on. The wording of those instructions is held by
-`multi-axis-code-review/review-ledger-*-wording.test.sh` and
-`implement/codex-ledger-append-wording.test.sh`; the rest is the closing ticket's
+what the step relies on. The rest is the closing ticket's
 three opens of the real thing, read off `~/.cache/agent-reviews/ledger.jsonl`.
 """
 import json

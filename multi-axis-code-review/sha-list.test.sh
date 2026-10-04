@@ -3,8 +3,8 @@
 # the axes seeing the union of those commits' own diffs. A review on a shared
 # `main` must never sweep in other people's merged work — the two-dot form of
 # one #888 comparison read 18 files and 1080 deletions of exactly that.
-# Prose assertions over SKILL.md, plus the documented capture block run for
-# real against a scratch repo with unrelated commits interleaved.
+# Runs the documented capture block for real against a scratch repo with
+# unrelated commits interleaved.
 # BASH_SOURCE rather than `git rev-parse --show-toplevel`, and GIT_* scrubbed:
 # a caller's leaked GIT_DIR/GIT_WORK_TREE would point git at the caller's repo
 # (#620).
@@ -14,32 +14,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"
 [ -f "$skill" ] || { echo "FAIL: missing $skill" >&2; exit 1; }
 
-flatten() { tr '\n' ' ' | tr -s ' '; }
-skill_text="$(flatten <"$skill")"
-
 fail=0
-check_in() {
-  local haystack="$1" needle="$2" where="$3"
-  case "$haystack" in
-    *"$needle"*) ;;
-    *) echo "FAIL: $where is missing: $needle" >&2; fail=1 ;;
-  esac
-}
-
-# The front door: a caller naming commits must land in this mode rather than
-# have the fixed point invented for it, which is the failure #897's closing
-# ticket was written to prevent.
-check_in "$skill_text" 'sha-list mode' multi-axis-code-review/SKILL.md
-# What three-dot becomes is the part that decides whether a finding lands on
-# this work or on somebody else's, so the doc has to say it, not imply it.
-check_in "$skill_text" "its own first parent" multi-axis-code-review/SKILL.md
-
-# The standing brief every axis reads must not let a fallback turn the list
-# back into a range — that is the contamination, re-derived.
-reviewer="$here/../flow/claude/agents/diff-reviewer.md"
-[ -f "$reviewer" ] || { echo "FAIL: missing $reviewer" >&2; exit 1; }
-check_in "$(flatten <"$reviewer")" 'never substitute a range for a sha list' flow/claude/agents/diff-reviewer.md
-
 recipe="$(awk '
   /^```$/ { if (inb) { if (buf ~ /sha-list review/) printf "%s", buf; buf = ""; inb = 0 }
             else inb = 1

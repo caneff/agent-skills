@@ -177,12 +177,6 @@ def test_a_ticket_list_entry_that_is_not_a_number_is_refused():
         raise AssertionError("a malformed ticket list was accepted")
 
 
-def test_the_fixture_evidence_states_which_side_of_the_boundary_it_is_on():
-    # C1: `absent` and `differs` are the whole rule, so the evidence a pass
-    # records has to say which it saw — "the code hardcodes it" reads as
-    # both until the decision's own behaviour is named.
-    assert "absent" in BUILT_BY_A_SLICE["evidence"], BUILT_BY_A_SLICE
-
 
 def main():
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

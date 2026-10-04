@@ -54,10 +54,6 @@ def clean_fixtures():
     return left
 
 
-def test_the_body_names_the_repos_declared_seam():
-    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
-    assert "`npm run test:e2e` over the headless solver bundle" in got, got
-
 
 def test_the_body_is_a_section_of_the_last_slice_not_a_ticket_of_its_own():
     # Stage 2 of the process redesign: the end-to-end test and the spec-level
@@ -410,19 +406,6 @@ def test_the_procedure_says_how_to_fall_back_and_how_to_tear_down():
     assert f"/multi-axis-code-review {SHAS[1]}~1" in got, got
     assert "git worktree remove" in got, got
 
-
-def test_this_repos_own_agents_md_declares_a_seam_and_a_blind_spot():
-    # `implement-spec/closing_ticket_test.py` otherwise builds only synthetic
-    # fixture roots (#993, filed from #927 round 1 findings S3/C2): rewording
-    # the `## End-to-end seam` heading or the `**Seam**`/`**Blind to**` key
-    # names in this repo's own `AGENTS.md` would revert this repo to
-    # "declares nothing" with nothing here to catch it — it would surface as
-    # a `SeamError` mid spec run instead. Pinned to the actual declared text,
-    # not just non-blankness: a rewrite to something non-empty but vacuous
-    # ("- **Seam**: tbd") would otherwise still pass.
-    seam, blind_to = T.seam_of(REPO_ROOT)
-    assert seam.strip() == "`bash tests/all.sh`", seam
-    assert "a test asserts" in blind_to, blind_to
 
 
 WRAPPED = """# Fixture repo
