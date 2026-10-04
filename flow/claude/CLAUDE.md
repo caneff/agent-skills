@@ -118,7 +118,9 @@ from a one-line mention in a doc.
   open decision in full — number, options, your recommendation — including a
   status reply or one sent after a notification; never "as above". Ask only
   when the choice is contested or cannot be undone; apply your recommendation
-  to a routine reversible one and list what you applied.
+  to a routine reversible one and list what you applied. Order, timing and
+  how many workers run at once are always reversible: never ask them. Never
+  hold work back to dodge a rebase or a small conflict; start it now.
 - The first mention of a ticket, PR, option, sha, stash or coined label in a
   reply carries a few words saying what it is (for a ticket or PR, its
   title); I rule from the reply alone.
@@ -186,6 +188,10 @@ from a one-line mention in a doc.
 
 # Gotchas
 
+- `~/.claude/settings.json` is a symlink to
+  `~/.agents/skills/flow/claude/settings.json`: edit the repo file in place
+  and commit it, never write the home path through a temp file and
+  `os.replace`/`mv`, which swaps the link for a copy (four times on 2026-10-04).
 - A process kill gets its own Bash call and nothing else.
   Searching and killing safely: `~/.agents/skills/flow/claude/SHELL-SAFETY.md`.
 - Never print a path and ask me to open it — open it for me
