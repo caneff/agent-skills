@@ -1199,46 +1199,83 @@ fn dispatch_installs_the_identity_guard_and_a_worktree_commit_is_refused() {
 }
 
 /// #1327: a `core.hooksPath` that cannot be used is reported with its value,
-/// its scope and the command that unsets it, not as a bare "cannot create".
-fn dispatch_on_a_bad_hooks_path(bad_path_of: impl Fn(&std::path::Path) -> std::path::PathBuf) -> (std::path::PathBuf, std::path::PathBuf, String) {
+/// its scope and the command that unsets it, not as a bare permission error.
+/// Returns the refusal text; `set` installs the bad value and returns its path.
+fn dispatch_on_a_bad_hooks_path(set: impl Fn(&Fixture, &std::path::Path) -> std::path::PathBuf) -> (std::path::PathBuf, std::path::PathBuf, String) {
     let f = Fixture::new();
     f.reset_home(true);
     let repo = f.mkfixture("sudokumaker-custom-constraints", "main");
-    let bad_path = bad_path_of(&repo);
-    let set = std::process::Command::new("git")
-        .arg("-C").arg(&repo).args(["config", "core.hooksPath"]).arg(&bad_path)
-        .output().unwrap();
-    assert!(set.status.success(), "{}", out_text(&set));
+    let bad_path = set(&f, &repo);
     let out = f.dispatch(&["--repo", repo.to_str().unwrap(), "395"], &default_scenario());
     assert!(!out.status.success(), "dispatch went ahead on an unusable hooksPath: {}", out_text(&out));
-    let text = out_text(&out);
-    // `Fixture` drops its tempdir on return; the strings are all the asserts need.
-    (repo, bad_path, text)
+    (repo, bad_path, out_text(&out))
 }
 
-fn assert_names_the_unset_command(repo: &std::path::Path, bad_path: &std::path::Path, text: &str) {
+fn git_config(args: &[&std::ffi::OsStr]) {
+    let out = std::process::Command::new("git").arg("config").args(args).output().unwrap();
+    assert!(out.status.success(), "{}", out_text(&out));
+}
+
+fn set_local_hooks_path(path: &std::path::Path, repo: &std::path::Path) {
+    git_config(&[std::ffi::OsStr::new("--file"), repo.join(".git/config").as_os_str(), "core.hooksPath".as_ref(), path.as_os_str()]);
+}
+
+fn assert_names_the_hooks_path(bad_path: &std::path::Path, scope: &str, unset: &str, text: &str) {
     assert!(text.contains(&format!("core.hooksPath is set to {}", bad_path.display())), "{text}");
-    assert!(text.contains("(local, "), "{text}");
-    assert!(text.contains(&format!("git -C {} config --unset core.hooksPath", repo.display())), "{text}");
+    assert!(text.contains(&format!("({scope}, ")), "{text}");
+    assert!(text.contains(&format!("unset it: {unset}")), "{text}");
 }
 
 #[test]
 fn a_hooks_path_that_cannot_be_created_is_reported_with_the_unset_command() {
     // /proc takes no new directories, the way /home/agent/... failed on this box.
-    let (repo, bad, text) = dispatch_on_a_bad_hooks_path(|_| std::path::PathBuf::from("/proc/lane-1327-no-hooks"));
-    assert!(text.contains("cannot create /proc/lane-1327-no-hooks"), "{text}");
-    assert_names_the_unset_command(&repo, &bad, &text);
+    let (repo, bad, text) = dispatch_on_a_bad_hooks_path(|_, repo| {
+        let p = std::path::PathBuf::from("/proc/lane-1327-no-hooks");
+        set_local_hooks_path(&p, repo);
+        p
+    });
+    assert!(text.contains("cannot use /proc/lane-1327-no-hooks as the hooks dir"), "{text}");
+    assert_names_the_hooks_path(&bad, "local", &format!("git -C '{}' config --unset core.hooksPath", repo.display()), &text);
 }
 
 #[test]
 fn a_hooks_path_git_cannot_resolve_is_reported_with_the_unset_command() {
-    let (repo, bad, text) = dispatch_on_a_bad_hooks_path(|repo| {
+    let (repo, bad, text) = dispatch_on_a_bad_hooks_path(|_, repo| {
         let blocker = repo.join("not-a-dir");
         std::fs::write(&blocker, "x").unwrap();
-        blocker.join("hooks")
+        let p = blocker.join("hooks");
+        set_local_hooks_path(&p, repo);
+        p
     });
     assert!(text.contains("cannot resolve the hooks dir"), "{text}");
-    assert_names_the_unset_command(&repo, &bad, &text);
+    assert_names_the_hooks_path(&bad, "local", &format!("git -C '{}' config --unset core.hooksPath", repo.display()), &text);
+}
+
+/// The ticket's own failure: the dir exists and this user cannot write it.
+/// `/proc/sys` takes no new files, so `create_dir_all` succeeds and only the
+/// write probe refuses.
+#[test]
+fn an_existing_unwritable_hooks_path_is_reported_with_the_unset_command() {
+    let (repo, bad, text) = dispatch_on_a_bad_hooks_path(|_, repo| {
+        let p = std::path::PathBuf::from("/proc/sys");
+        set_local_hooks_path(&p, repo);
+        p
+    });
+    assert!(text.contains("cannot use /proc/sys as the hooks dir"), "{text}");
+    assert!(!text.contains("cannot install"), "{text}");
+    assert_names_the_hooks_path(&bad, "local", &format!("git -C '{}' config --unset core.hooksPath", repo.display()), &text);
+}
+
+/// The ticket never found where the bad value came from; a global one is as
+/// likely as a local one, and its unset command is a different line.
+#[test]
+fn a_global_hooks_path_is_reported_with_the_global_unset_command() {
+    let (_, bad, text) = dispatch_on_a_bad_hooks_path(|f, _| {
+        let p = std::path::PathBuf::from("/proc/lane-1327-no-hooks");
+        git_config(&["--file".as_ref(), f.home().join(".gitconfig").as_os_str(), "core.hooksPath".as_ref(), p.as_os_str()]);
+        p
+    });
+    assert_names_the_hooks_path(&bad, "global", "git config --global --unset core.hooksPath", &text);
 }
 
 /// A repo already carrying *this build's own* pre-commit wrapper from an
