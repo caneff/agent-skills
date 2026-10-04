@@ -57,13 +57,14 @@ else
   echo "FAIL: push command did not invoke generate.py"; fails=1
 fi
 
-# The generate.py path the hook passed is a real file, wherever the checkout lives
-# (a path baked in for one machine would name a file that is not there).
+# The hook runs the generate.py of the checkout it lives in: a path baked in for
+# one machine would name a file that exists there and still be another checkout's.
 gen="$(grep 'generate.py' "$tmp/python3.args" | head -1)"
-if [ -n "$gen" ] && [ -f "$gen" ]; then
-  echo "PASS: the hook's generate.py path exists"
+want="$(cd "$here/../../../landed" && pwd -P)/generate.py"
+if [ -n "$gen" ] && [ "$(readlink -f "$gen")" = "$want" ]; then
+  echo "PASS: the hook runs this checkout's generate.py"
 else
-  echo "FAIL: the hook passed a generate.py path that is not a file: '$gen'"; fails=1
+  echo "FAIL: the hook ran '$gen', want '$want'"; fails=1
 fi
 
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

@@ -94,7 +94,10 @@ def test_codex_lane_renders_the_same_document_as_skill():
     lane = _programs(LANE)
     assert len(lane) == 1, f"want 1 body+comments fetch in codex-lane.md, found {len(lane)}"
     # Run both programs: a whitespace-neutral edit passes, a rendering drift fails.
-    for issue in ({"body": BODY, "comments": []}, {"body": BODY, "comments": COMMENTS}):
+    hidden_no_reason = {"author": {"login": "caneff"}, "createdAt": "2026-09-19T09:00:00Z", "isMinimized": True,
+                        "minimizedReason": None, "body": "Hidden with no stated reason."}
+    for issue in ({"body": BODY, "comments": []}, {"body": BODY, "comments": COMMENTS},
+                  {"body": BODY, "comments": [hidden_no_reason]}):
         assert _render(issue, LANE) == _render(issue), "codex-lane.md's ticket render drifted from SKILL.md's"
 
 

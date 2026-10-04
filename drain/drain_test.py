@@ -505,9 +505,20 @@ class DrainTest(Sandbox):
         import drain
         for name in drain.GUARD_HOOKS:
             self.assertIn(f'"{name}"', source)
-        lock_prefix = ".implement-dispatch-claim-"
-        self.assertIn(lock_prefix, read(os.path.join(HERE, "drain.py")))
-        self.assertIn("implement-dispatch-claim-", source)
+        # The lock drain takes is the path implement_dispatch.rs formats, not a
+        # name only the test knows: run drain's own lock under a scratch HOME and
+        # compare the file it creates with the Rust format string.
+        self.assertIn("{}/.implement-dispatch-claim-{}.lock", source)
+        self.assertIn("slug.replace('/', \"__\")", source)
+        import types
+        home = tempfile.mkdtemp()
+        old_home, os.environ["HOME"] = os.environ.get("HOME"), home
+        try:
+            with drain.claim_lock(types.SimpleNamespace(repo="owner/name")):
+                pass
+        finally:
+            os.environ["HOME"] = old_home
+        self.assertTrue(os.path.exists(os.path.join(home, ".implement-dispatch-claim-owner__name.lock")))
 
     def test_refuses_a_repo_the_user_does_not_own(self):
         self.write_state({1: {}})

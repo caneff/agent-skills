@@ -250,13 +250,23 @@ def test_a_colon_inside_the_emphasis_needs_no_space_before_a_code_span():
     assert "**Seam**: **" not in got, got
 
 
-def test_both_readers_use_frontiers_one_key_line_parser():
+def test_both_readers_parse_a_key_line_as_frontier_does():
     # One key-line parser, in `frontier` (#1000): a second copy is the drift
-    # #928 fixed once already. Identity, so a copy under any name fails.
+    # #928 fixed once already. Run the same awkward lines through each reader
+    # and compare with `frontier.key_line`, so a copy under any name that parses
+    # them differently fails.
     import closure
     import frontier
-    assert T.key_line is frontier.key_line
-    assert closure.key_line is frontier.key_line
+    lines = ["- **Seam**: bash tests/all.sh", "- **Seam:** bash tests/all.sh", "- **Seam**:**x**",
+             "- Seam: plain", "* __Blind to__: a thing", "- **Seam**:**"]
+    for line in lines:
+        pair = frontier.key_line(line)
+        got = T.declaration("## End-to-end seam\n" + line + "\n")
+        assert got == ({pair[0]: pair[1]} if pair else {}), (line, got, pair)
+    directive = "- **Directive**: `#include <x>`"
+    want = frontier.key_line(directive)[1].strip("`")
+    parsed = closure.parse_declaration("## Include closure\n" + directive + "\n- **Generator**: g\n")
+    assert parsed.directive == want, parsed
 
 
 def test_a_root_that_is_not_a_directory_is_not_a_missing_declaration():
