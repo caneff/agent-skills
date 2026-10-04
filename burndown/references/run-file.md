@@ -74,6 +74,15 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
   sweep, and `counts.py` names it as skipped. A file written before this
   field existed loads with it as `null`.
 
+  A landing already recorded at `main`'s tip cannot be moved to closed by any
+  command: `close` refuses a landed clump, `land` refuses a second sha, and
+  `load` refuses a clump that is both. The recovery is a hand edit under the
+  run file's lock, while the controller writes nothing else: `flock
+  ~/.cache/burndown/<run-id>.json.lock $EDITOR ~/.cache/burndown/<run-id>.json`,
+  set that clump's `landed` back to `null`, save, then `runfile.py show
+  <run-id>` to see it load and `runfile.py close <run-id> --clump <n> --reason
+  <text>`.
+
 
 ## The job record
 

@@ -109,17 +109,17 @@ So a component is a **family**, and it is split:
   should move it with evidence, not work around it. The render says
   `identical closures split at MAX_CLUMP=3` on any family it cut.
 - Every other member is a clump of one.
-- **Serializing needs no new mechanism.** `loop.py dispatch` already holds
-  a clump whose closure intersects a live workspace's, and `picks` never
-  takes two clumps sharing a file or a directory in one tick (#1342). So
-  the loop dispatches the lowest free clump of a family, and those two keep
-  back every clump that shares a file with it. Two family members that share
-  no file and no directory can run together. The invariant is "no two live
+- **Serializing needs no new mechanism.** `loop.py dispatch` holds a clump
+  sharing a file or a directory with a live workspace or an earlier pick
+  (`loop.md` § The exclusion rule and what it costs). So the
+  loop dispatches the lowest free clump of a family, and that hold keeps back
+  every clump that shares a file with it. Two family members that share no
+  file and no directory can run together. The invariant is "no two live
   workspaces share a file", not "one live member per family".
 - **A `subtree`-mode family is never split.** There, two tickets are in a
-  family because their directories overlap, not their files. The dispatch
-  hold compares files, so splitting would let two workers into one
-  directory.
+  family because their directories overlap, the repo root included. The
+  dispatch hold leaves the root out, so splitting would let two workers
+  into the root's files.
 
 `--json` prints every family's clumps as one list, in the shape `loop.py
 dispatch --candidates` reads, and the announcement on stderr. That way a

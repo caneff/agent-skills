@@ -86,7 +86,7 @@ check_in "$loop_text" 'opening report' 'burndown/SKILL.md § The loop'
 check_in "$loop_text" 'declared None' 'burndown/SKILL.md § The loop'
 check_in "$loop_text" 'silence' 'burndown/SKILL.md § The loop'
 
-# Rule 8: on resume, one message per live unlanded worker, and the herdr name
+# Rule 8: on resume, one message per live unsettled worker, and the herdr name
 # is resolved to an address at send time rather than stored.
 check_in "$loop_text" 'one message' 'burndown/SKILL.md § The loop'
 check_in "$loop_text" 'send time' 'burndown/SKILL.md § The loop'

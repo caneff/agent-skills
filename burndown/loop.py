@@ -134,6 +134,15 @@ def _nested(a, b):
                    for y in directories(b) if x.startswith(y) or y.startswith(x)})
 
 
+def overlap(a, b):
+    """What holds one clump off a slot beside another: the files they share,
+    else the directories they share (`_nested`). One rule for a live
+    workspace and a same-tick pick; why directories count, and why the repo
+    root does not: `references/loop.md` § The exclusion rule and what it
+    costs."""
+    return sorted(paths(a) & paths(b)) or _nested(a, b)
+
+
 def key_of(clump):
     """The clump's lowest ticket — the number its branch and workspace are
     named for."""
@@ -147,10 +156,10 @@ def frontier(candidates, in_flight):
     `candidates` are already open, labelled, unclaimed and unblocked — that
     is `frontier.py`'s answer, not this one's — and already clumped by
     `closure.py`. What this adds is the rule neither of those can see: a
-    clump whose closure intersects a **live workspace's** closure is off the
+    clump that `overlap`s a **live workspace's** closure is off the
     frontier, because dispatching it puts two workers in one file. Held
-    clumps carry the workspace and the intersecting files, so a controller
-    can say which worker is holding what.
+    clumps carry the workspace and what they overlap, so a controller can
+    say which worker is holding what.
     """
     dispatchable, held = [], []
     for clump in sorted(candidates, key=key_of):
@@ -158,10 +167,10 @@ def frontier(candidates, in_flight):
         # resolve is refused with nothing in flight too — where there is no
         # live workspace to compare it against and the refusal would
         # otherwise never fire.
-        own = paths(clump)
+        paths(clump)
         collisions = []
         for live in in_flight:
-            over = sorted(own & paths(live))
+            over = overlap(clump, live)
             if over:
                 collisions.append({"clump": clump, "workspace": live["workspace"],
                                    "holder": key_of(live), "over": over})
@@ -176,8 +185,7 @@ def picks(state, free):
     """`(picked, held)`: the clumps to dispatch, taken from a frontier
     already read — widest closure first, ties broken by lowest ticket, every
     free slot at once — and every clump the same-tick guard skipped, each
-    naming the earlier pick it collided with — over a shared file, or over a
-    shared directory (#1342). The walk goes past the free
+    naming the earlier pick it `overlap`s. The walk goes past the free
     slots (#1049), so a clump beyond the cut that collides with a pick is
     held too; one that collides with nothing is in neither list. Sorted
     before the guard runs
@@ -205,21 +213,10 @@ def picks(state, free):
         # tagged `same_tick` explicitly rather than distinguished by which
         # keys it happens to carry (#971).
         blocker = next((earlier for earlier in picked
-                        if paths(clump) & paths(earlier)), None)
+                        if overlap(clump, earlier)), None)
         if blocker is not None:
             held.append({"clump": clump, "holder": key_of(blocker),
-                        "over": sorted(paths(clump) & paths(blocker)),
-                        "same_tick": True})
-            continue
-        # A ticket body under-names what its diff reaches (#1342): two
-        # clumps whose lists share a directory are not picked in one tick,
-        # though they share no file. The repo root is not a directory here —
-        # every root file would hold every other.
-        blocker = next((earlier for earlier in picked
-                        if _nested(clump, earlier)), None)
-        if blocker is not None:
-            held.append({"clump": clump, "holder": key_of(blocker),
-                        "over": _nested(clump, blocker), "same_tick": True})
+                        "over": overlap(clump, blocker), "same_tick": True})
             continue
         # Past the free-slot cut the walk goes on so a collision with a pick
         # is still named (#1049); a clump that collides with nothing is only

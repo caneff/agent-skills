@@ -101,7 +101,9 @@ asked for its own parent.
 **A parent that cannot be read is `unresolved`**, never unblocked: a failed
 call that answered nothing is not an answer of "no parent", and reading it so
 dispatches the slice under a spec nobody could see. Only a 404 with no
-parent line is "no parent".
+parent line is "no parent". A `## Parent` section naming no issue in this
+repo — empty, prose, another repo's link — is a parent line that cannot be
+read, so `unresolved` too (#1406); `None` under it is no parent.
 
 ## Three sources, in order
 

@@ -109,9 +109,9 @@ the four shapes it was:
 - **A body that under-names its targets.** The repo declares no include
   graph, so a candidate's closure is the files its body names, and the diff
   reached more (#1342: `loop.py` and `loop_test.py` beside a ticket that named
-  `runfile.py`). `loop.py dispatch` already holds two clumps sharing a
-  directory in one tick, so this shape is a collision across directories or
-  with a live workspace. The ticket names the file the body missed.
+  `runfile.py`). `loop.py dispatch` already holds a clump sharing a
+  directory with a live workspace or an earlier pick, so this shape is a
+  collision across directories. The ticket names the file the body missed.
 
 Without the ticket the same two files collide on every run, the closure never
 learns, and each run pays this tail again.

@@ -428,15 +428,23 @@ def fetch_parent(repo, ticket, run=gh_json):
 def _parent_number(body, repo):
     """The parent issue number a ticket body declares in this repo, or `None`:
     a `Part of #<n>` line, a `Part of [..](<this repo's issue URL>)` line, or
-    the first `#<n>` / this repo's issue URL under a `## Parent` heading."""
+    the first `#<n>` / this repo's issue URL under a `## Parent` heading.
+
+    A `## Parent` section that names no such issue — empty, prose, another
+    repo's link — raises `FrontierError`: a declaration this reader cannot
+    resolve is not "no parent" (#1406). `None` under it, as `Blocked by`
+    says it, is no parent."""
     link = re.compile(_ISSUE_LINK.format(repo=re.escape(repo)), re.IGNORECASE)
     in_parent = False
+    unread = None  # the `## Parent` section's text while it names nothing
     for _, line in visible(body.splitlines()):
         part = _PART_OF.match(line)
         if part and part.group(1):
             return int(part.group(1))
         if _ANY_HEADING.match(line):
             in_parent = bool(_PARENT_HEADING.match(line))
+            if in_parent and unread is None:
+                unread = ""
             continue
         found = link.search(line)
         if found and (part or in_parent):
@@ -445,22 +453,33 @@ def _parent_number(body, repo):
             ref = _REFERENCE.search(_LINK.sub("", line))
             if ref:
                 return int(ref.group(1))
+            unread += line.strip() + " "
+    if unread is not None and not _NONE.match(unread):
+        raise FrontierError(f"`## Parent` names no issue in {repo}"
+                            + (f": {unread.strip()[:80]}" if unread.strip() else ""))
     return None
 
 
 def frontier(repo, label, fetch=fetch_issues, state_of=fetch_state,
-             parent_of=fetch_parent):
+             parent_of=fetch_parent, run=gh_json):
     """`(repo, label) -> {unblocked, blocked, unresolved, spec, slice}`. Each
-    blocker's state is read once however many tickets name it."""
-    seen = {}
+    blocker's state is read once however many tickets name it, and so is
+    each parent issue a `Part of` line names: slices of one spec share it.
+    The `/parent` call itself is one per ticket, which no cache shortens."""
+    seen, answers = {}, {}
 
     def cached(number):
         if number not in seen:
             seen[number] = state_of(repo, number)
         return seen[number]
 
+    def read_once(args):  # a failed call raises and is not kept
+        if tuple(args) not in answers:
+            answers[tuple(args)] = run(args)
+        return answers[tuple(args)]
+
     return classify(fetch(repo, label), cached,
-                    lambda ticket: parent_of(repo, ticket))
+                    lambda ticket: parent_of(repo, ticket, run=read_once))
 
 
 def render(buckets):
