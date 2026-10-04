@@ -118,6 +118,9 @@ check_in "$correctness" 'never the whole gate' 'the correctness axis brief'
 check_in "$correctness" 'git worktree add --detach' 'the correctness axis brief'
 check_in "$correctness" 'git worktree remove --force' 'the correctness axis brief'
 check_not_in "$correctness" 'scratch copy of the tree' 'the correctness axis brief'
+# #1219: the brief and the standing agent doc name the script that runs the
+# check, so no brief restates its setup by hand.
+check_in "$correctness" 'multi-axis-code-review/witness-check.sh' 'the correctness axis brief'
 
 # #957: the mutations run together, and the pairing survives the concurrency.
 # The serial loop cost the covering suite's runtime once per mutated test —
@@ -193,21 +196,13 @@ done
 reviewer_text="$(flatten <"$reviewer")"
 check_in "$reviewer_text" 'never in a copy of it' flow/claude/agents/diff-reviewer.md
 check_not_in "$reviewer_text" 'a witness check runs on a copy' flow/claude/agents/diff-reviewer.md
+check_in "$reviewer_text" 'multi-axis-code-review/witness-check.sh' flow/claude/agents/diff-reviewer.md
 
-# Prose can claim isolation and concurrency; only running the documented
-# recipe witnesses either. Extracting it out of SKILL.md rather than retyping
-# it here is what keeps the test honest — a copy in this file would pass
-# forever while the doc drifted.
-recipe="$(awk '
-  /^```$/ { if (inb) { if (buf ~ /mutate\(\)/) printf "%s", buf; buf = ""; inb = 0 }
-            else inb = 1
-            next }
-  inb { buf = buf $0 "\n" }
-' "$skill")"
-case "$recipe" in
-  *'mutate()'*) ;;
-  *) echo "FAIL: could not extract the concurrent witness recipe from $skill" >&2; exit 1 ;;
-esac
+# Prose can claim isolation and concurrency; only running the check witnesses
+# either. The check is a script shipped beside SKILL.md (#1219), so every run
+# below calls the script the skill tells reviewers to call, never a copy.
+checker="$here/witness-check.sh"
+[ -f "$checker" ] || { echo "FAIL: missing $checker" >&2; exit 1; }
 
 scratch="$(mktemp -d)" || { echo "FAIL: mktemp -d" >&2; exit 1; }
 trap 'git -C "$scratch/repo" worktree prune 2>/dev/null; rm -rf "$scratch"' EXIT
@@ -270,14 +265,19 @@ echo "MUTANT-\$id: covering suite red, its own message"
 exit 1
 MUTATE
 
-substitute() { # <ids> <mutate body> -> a runnable script on stdout
-  local body="${2//&/\\&}"   # & in a sed replacement means the whole matched line
-  printf '%s\n' "$recipe" |
-    sed -e "s|^worktree=<.*|worktree=$repo|" \
-        -e "s|^ids=<.*|ids=\"$1\"|" \
-        -e "s|^mutate() .*|mutate() { $body; }|" \
-        -e "s|^ledger_args=(.*|ledger_args=( --repo skills --ticket 1 --round 1 --ledger ${ledger_path:-$scratch/ledger.jsonl} )|" \
-        -e "s|^call_site_ids=.*|call_site_ids=\"cs1 cs2\"|"
+# <ids> <mutate body> -> on stdout, a runnable script that calls the checker
+# with a mutate file defining that body. `set -f` in the emitted script keeps
+# an id such as `*` literal all the way to the checker's own id check.
+sub_n=0
+substitute() {
+  sub_n=$(( sub_n + 1 ))
+  local mf="$scratch/mutate-def-$sub_n.sh" cs="" id
+  printf 'mutate() { %s; }\n' "$2" >"$mf"
+  for id in cs1 cs2; do
+    case " $1 " in *" $id "*) cs="$cs --call-site $id" ;; esac
+  done
+  printf 'set -f\nexec bash %q --worktree %q --mutate %q --repo skills --ticket 1 --round 1 --ledger %q%s -- %s\n' \
+    "$checker" "${target:-$repo}" "$mf" "${ledger_path:-$scratch/ledger.jsonl}" "$cs" "$1"
 }
 
 # The recipe computes its bound from the live process table, so on a loaded box
@@ -294,13 +294,6 @@ IDLE
 chmod +x "$scratch/bin/ps"
 
 substitute 'm1 m2' "bash \"$scratch/mutate.sh\" \"\$1\" \"\$2\" \"\$3\"" >"$scratch/recipe.sh"
-grep -q "^worktree=$repo\$" "$scratch/recipe.sh" ||
-  { echo "FAIL: the recipe's worktree placeholder did not substitute" >&2; exit 1; }
-grep -q '^ids="m1 m2"$' "$scratch/recipe.sh" ||
-  { echo "FAIL: the recipe's ids placeholder did not substitute" >&2; exit 1; }
-grep -q '^mutate() { bash ' "$scratch/recipe.sh" ||
-  { echo "FAIL: the recipe's mutate placeholder did not substitute" >&2; exit 1; }
-
 # The run itself exits non-zero or not depending on how the doc ends it; what
 # this suite asserts is what it left behind, not its status.
 ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe.sh" ) >"$scratch/run.out" 2>&1 || true
@@ -729,6 +722,67 @@ elif ! grep -q 'mutation row(s) not appended' "$scratch/refused.out"; then
 fi
 trees_rows="$(git -C "$repo" worktree list | wc -l)"
 [ "$trees_rows" -eq 2 ] || { echo "FAIL: the append runs left $trees_rows worktrees registered, not 2" >&2; fail=1; }
+
+# #1219: the checker's own environment hygiene. Each case gets its own fixture
+# repo, reviewed through a linked worktree as every review in this lane is.
+make_repo() { # <name> <setup commands, run in the new repo> -> the reviewed worktree's path
+  (
+    cd "$scratch" && git init -q -b main "$1" && cd "$1" &&
+    fixture_identity "$scratch/$1" "$scratch" && eval "$2" &&
+    git add -A && git commit -qm base &&
+    git worktree add -q --detach "$scratch/$1-reviewed" HEAD
+  ) >/dev/null 2>&1 || { echo "FAIL: could not build fixture repo $1" >&2; exit 1; }
+  printf '%s\n' "$scratch/$1-reviewed"
+}
+. "$here/../tests/fixture-identity.sh"
+py_setup='printf "def f():\n    return 1\n" >mod.py
+printf "import mod\nassert mod.f() == 1, \"MUTANT-py: mod.f() no longer returns 1\"\n" >test_mod.py'
+
+# A same-size mutation whose mtime matches the bytecode written by an earlier
+# suite run in the same witness reads that stale .pyc and passes. `touch -d`
+# pins the mtime, so the stale read is certain rather than a one-second race.
+# The caller's own PYTHONDONTWRITEBYTECODE is cleared: set, it would make this
+# case pass whether or not the checker sets it.
+target="$(make_repo pyrepo "$py_setup")" || exit 1
+substitute 'py1' 'cd "$2" && python3 test_mod.py && m=$(stat -c %Y mod.py) && sed -i "s/return 1/return 2/" mod.py && touch -d "@$m" mod.py && : >"$3" && python3 test_mod.py' >"$scratch/recipe-pyc.sh"
+( cd "$target" && env -u PYTHONDONTWRITEBYTECODE HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-pyc.sh" ) \
+  >"$scratch/pyc.out" 2>&1 || true
+if ! grep -q 'py1: red' "$scratch/pyc.out" || ! grep -q 'py1|.*MUTANT-py' "$scratch/pyc.out"; then
+  echo "FAIL: a same-size, same-mtime Python mutation did not report red with its own assertion (stale bytecode?)" >&2
+  cat "$scratch/pyc.out" >&2; fail=1
+fi
+
+# A __pycache__ the witness already carries — tracked, here, and compiled
+# unchecked-hash, so Python never compares it with its source — must be
+# cleared before `mutate` runs, or every edit to mod.py is invisible.
+target="$(make_repo pycache "$py_setup"'
+python3 -c "import py_compile as p; p.compile(\"mod.py\", invalidation_mode=p.PycInvalidationMode.UNCHECKED_HASH)"
+git add -f __pycache__')" || exit 1
+substitute 'pc1' 'cd "$2" && sed -i "s/return 1/return 22/" mod.py && : >"$3" && python3 test_mod.py' >"$scratch/recipe-pycache.sh"
+( cd "$target" && env -u PYTHONDONTWRITEBYTECODE HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-pycache.sh" ) \
+  >"$scratch/pycache.out" 2>&1 || true
+if ! grep -q 'pc1: red' "$scratch/pycache.out" || ! grep -q 'pc1|.*MUTANT-py' "$scratch/pycache.out"; then
+  echo "FAIL: a mutation under a tracked unchecked-hash __pycache__ did not report red with its own assertion" >&2
+  cat "$scratch/pycache.out" >&2; fail=1
+fi
+
+# A fresh worktree carries no ignored directory, so a Node suite in the witness
+# fails on a missing module and reads red for the wrong reason. The checker
+# links the reviewed tree's node_modules in; this body goes red only when it
+# can see node_modules/marker, with a message of its own.
+target="$(make_repo noderepo 'printf "node_modules/\n" >.gitignore')" || exit 1
+mkdir -p "$target/node_modules" && : >"$target/node_modules/marker"
+substitute 'n1' ': >"$3"; if [ -e "$2/node_modules/marker" ]; then echo "MARKER-PRESENT: node_modules/marker is reachable"; exit 1; fi; echo "no node_modules/marker"; exit 0' >"$scratch/recipe-node.sh"
+( cd "$target" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/recipe-node.sh" ) \
+  >"$scratch/node.out" 2>&1 || true
+if ! grep -q 'n1: red' "$scratch/node.out" || ! grep -q 'n1|.*MARKER-PRESENT' "$scratch/node.out"; then
+  echo "FAIL: the witness worktree did not see the reviewed tree's node_modules" >&2
+  cat "$scratch/node.out" >&2; fail=1
+fi
+# Removing the witness must remove the link, never what it points at.
+[ -e "$target/node_modules/marker" ] ||
+  { echo "FAIL: removing the witness deleted the reviewed tree's node_modules contents" >&2; fail=1; }
+unset target
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS multi-axis-code-review/witness-check.test.sh"
