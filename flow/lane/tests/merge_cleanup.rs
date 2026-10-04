@@ -2762,9 +2762,14 @@ fn a_clean_worktree_of_another_repo_nested_in_a_workspace_is_removed_too() {
     let c = Cleanup::new();
     let (r, wt) = lane_workspace(&c, "r1326e", "implement-1326e");
     std::fs::write(r.join(".git/info/exclude"), ".claude/worktrees/\n").unwrap();
-    let other = c.mkfixture("r1326e-other");
+    // Not `mkfixture`: it rewrites the shared fake-gh PR-head record for
+    // `caneff/merged-one`, so the run reads "not merged" whenever the two
+    // tips differ (they differ only when a second boundary ticks over).
+    let other = c.root().join("r1326e-other");
+    c.git_ok(&["init", "-q", "-b", "main", s(&other)]);
+    c.git_ok(&["-C", s(&other), "commit", "-q", "--allow-empty", "-m", "base"]);
     let nested = wt.join(".claude/worktrees/qqrr");
-    c.worktree_add(&other, &["--detach", s(&nested), "origin/main"]);
+    c.worktree_add(&other, &["--detach", s(&nested), "main"]);
     let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
     assert!(run.ok && !wt.exists(), "{}", run.text());
     assert!(!registered_names(&c, &other).contains("qqrr"), "{}", registered_names(&c, &other));
