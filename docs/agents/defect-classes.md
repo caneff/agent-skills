@@ -47,6 +47,11 @@ success have been produced by the thing not running at all?**
   path with no exit-status capture, no record and no validation.
 - `#951` — `codex-companion.mjs` advertises `--background` on reviews,
   parses it, and never reads it: a documented flag accepted and ignored.
+- `#1415` — `tests/all.test.sh` (dbddcb9, #620) re-ran the whole suite
+  inside itself to test one `unset` line. Cheap at 18 suites, 251 of 494 s
+  at 111, and no diff ever made it slow: nothing printed a suite's cost, so
+  silence about cost read as no cost. Fixed by a per-suite CPU budget in
+  `tests/all.sh`, since review only sees the diff in front of it.
 
 ## 2. A stated fallback with no mechanism behind it
 
