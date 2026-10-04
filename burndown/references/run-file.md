@@ -12,10 +12,6 @@ python3 burndown/runfile.py job      <run-id> --clump 901 --cores 8 | --none | -
 python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
 python3 burndown/runfile.py close    <run-id> --clump 901 --reason <text>
 python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
-python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --pr-body <path>
-python3 burndown/runfile.py check    --from <dispositions sidecar> --pr-body <path>
-python3 burndown/runfile.py sweep-check --ticket <sweep ticket body> --pr-body <path> --from <dispositions sidecar>
-python3 burndown/runfile.py round-1-empty --reviews-dir <dir> <ticket>
 python3 burndown/runfile.py show     <run-id>
 python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 ```
@@ -36,12 +32,6 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
      "agent": "implement-905-7", "job": {"state": "none", "cores": 0},
      "pr_up": 950,
      "landed": "0123456789abcdef0123456789abcdef01234567", "closed": null}
-  ],
-  "leftovers": [
-    {"clump": 905, "tickets": [905], "pr": 950, "id": "S3",
-     "file": "burndown/loop.py", "title": "Mysterious name: `tick2`",
-     "severity": "judgement",
-     "text": "tick2 says nothing about what it does; rename it for the frontier read it performs."}
   ]
 }
 ```
@@ -78,10 +68,10 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
   dispatches into files its workers are still editing. `runfile.py close <run-id> --clump <n> --reason <text>`
   writes it. A clump is landed or closed, never both: `close` refuses a landed
   clump and `land` a closed one. Recording `main`'s tip as a landing instead is
-  a sha with no PR behind it, and `sweep.py counts` then refuses the run over
+  a sha with no PR behind it, and `counts.py counts` then refuses the run over
   the sidecar that PR never wrote. A closed clump holds no slot, gets no
   re-announce, is no live workspace to `loop.py dispatch` or its liveness
-  sweep, and `sweep.py counts` names it as skipped. A file written before this
+  sweep, and `counts.py counts` names it as skipped. A file written before this
   field existed loads with it as `null`.
 
 
@@ -121,137 +111,13 @@ written before this field existed loads with it as `null`, which reads a
 finished pane as `stalled`: the loud reading, and the controller's read of
 the pane settles it.
 
-## Leftovers
+## Dispositions, and the closing counts
 
-The run carries a `leftovers` list: every small review finding a landed PR
-left for later rather than fixed or filed as its own ticket
-(`implement/SKILL.md` § Review, the `leftover` disposition). Each entry
-holds the clump that carried the finding, the full ticket list that clump
-closes, the PR it landed on, and the finding's own `id`, `file`, `title`,
-`severity` and `text` — copied verbatim from the dispositions sidecar line,
-not retyped.
+The run file holds no review findings: a worker fixes every valid finding in its own PR (`implement/SKILL.md` § Review), so nothing is carried from a landed PR into the run. What a landed PR records is its dispositions sidecar, `dispositions-<n>.jsonl` in the review cache, one line per finding with the outcome `fixed` (a sha), `moved` (the open ticket it was added to) or `disputed` (a reason). `implement/verification-check.sh` checks it before the PR merges.
 
-```
-python3 burndown/runfile.py leftover <run-id> --clump 905 --pr 950 --from <dispositions sidecar> --pr-body <path>
-```
+`counts.py counts <run-id> --repo <checkout>` reads each landed clump's sidecar through `runfile.read_dispositions` and prints the closing report's two counts, fixed and moved. `read_dispositions` refuses by file and line a line that is not a JSON object, whose `outcome` is none of the three, or with no `id`, and a second line carrying an id an earlier line already has (#1124): reading any of them as "skip" would report a low count with a clean exit, indistinguishable from a PR that genuinely had nothing to fix. A landed clump with no sidecar is refused by clump number, never counted as zero: the worker writes the sidecar even when its reviewers found nothing.
 
-reads every `outcome: leftover` line of `<dispositions sidecar>` — the
-`dispositions-<n>.jsonl` file written by `implement/SKILL.md` § Review, and
-appends one entry per line to the clump named by `--clump`; every other
-*recognised* outcome — `fixed`, `disputed`, `filed`, `handed-back` — is not
-this command's to transcribe, and is skipped. A line that is not a JSON
-object, or whose `outcome` is missing or none of the five sidecar outcomes,
-is refused by name (file and line) rather than skipped: `outcome !=
-"leftover"` alone cannot tell one of the sidecar's own four other outcomes
-from a wholly unrelated file, and reading both as "skip" is how a wrong or
-wrong-shaped `--from` copies zero and exits clean, indistinguishable from a
-PR that genuinely left nothing. It also prints `copied N leftover(s) from
-<path>` for the same reason. `sweep.py counts` reads the same sidecars
-through the same reader (`runfile.read_dispositions`), so it refuses the same
-lines rather than counting low.
-
-A line whose `id` an earlier line of the same sidecar already carries is
-refused by both line numbers (#1124). Every reader joins on the id, so
-before this refusal `leftover` copied the first of two `leftover` lines and
-skipped the second without a word, while `counts` counted both. Codex numbers
-each pass's findings from 1, which is why a Codex-pass leftover's id carries
-its pass (`implement/SKILL.md` § The merge).
-
-A sweep PR's own undone items reach the next sweep the same way (#1259): the
-worker writes each one as a `leftover` line whose `id` is `<file> <id>` and
-whose `file` is the item's own file, and `sweep.py render` prints it bare
-under that file's `## <file>` heading. A body citation `**<file> <id>**` is
-recorded under the qualified id as well as the bare one, so it joins that
-line. `runfile.py sweep-check --ticket <body> --pr-body <path> --from
-<sidecar>` is the pre-report gate's test that every item of the sweep ticket
-is such a line, or stated `fixed` in Decisions made. A bare cite (`- S8:
-leftover`) joins only a bare sidecar line: when the sidecar holds `S8` only as
-`<file> S8`, `leftover` refuses and names those forms to cite (#1343).
-
-`<dispositions sidecar>` must be named `dispositions-<n>.jsonl` with `<n>` one
-of the clump's tickets, else it is refused (#1084). The name is checked
-after the lines are read and the clump is found to have landed, so a
-misnamed sidecar with a malformed line is refused for that line first.
-The sidecar grammar carries no PR or ticket field, so the name is the only
-provenance there is: without the check, another PR's sidecar attributes its
-leftovers to this clump for good, and one holding no leftover records zero
-and exits clean.
-
-`--pr-body <path>` is the PR's body, as
-`gh pr view <pr> --repo <owner/name> --json body --jq .body` prints it; a
-process substitution, `--pr-body <(gh pr view ...)`, passes it without a
-file. Only the body's Decisions made section is read. Its lines cite a
-finding in the shapes PR bodies here are written in: ids leading a list
-item, alone or grouped by commas or "and" (`- S3, S5, P2: leftover`),
-bolded or not, file-qualified or not (`**e2e/scenarios.mjs S8**` cites `S8`,
-#1213; the path has a `/`, or is a bare file name in backticks, and may end
-`:42` or `#L42`), or one named as `sidecar <id>` at the end of the line. A line
-naming an id with no outcome word records nothing. A line states its outcome
-when the word right after its first colon outside parentheses is one of
-`fixed`, `disputed`, `filed`, `handed back` or `leftover`, and the sidecar
-must hold exactly that. A line that only mentions
-outcome words, as in `S1 (hard): overflows. Claimed fixed; contested.
-leftover.`, disagrees when the sidecar's outcome is not among them. The
-command refuses:
-
-- an id the sidecar holds that the body records twice with two different
-  stated outcomes (#1177): the id was reused across review rounds, and the
-  refusal says so and names the prefix rule (a round after the first cites
-  `r2-S1`; `multi-axis-code-review/SKILL.md` § 4). A changed
-  disposition is edited into its one line, never appended below the first.
-  Only ids the sidecar holds are compared: a sweep PR's body cites sweep items
-  whose ids repeat across their source PRs, and its own findings carry the
-  `r1-` prefix so they never collide with those.
-- a sidecar line the body contradicts. A disposition changed after the
-  verification pass rewrites its sidecar line in the same step that records
-  it in the PR body (`implement/SKILL.md` § The merge), so a disagreement is
-  a step that reached one record and not the other (#1085). A ruling that
-  genuinely splits a finding is refused the same way — it is still one id
-  holding two outcome words — until it is written as two ids per
-  `implement/SKILL.md` § Review's split grammar; the refusal itself names
-  that way past it, by this finding's own id.
-- a leftover the body states and the sidecar has no line for:
-  `implement/SKILL.md` § The merge's
-  case of a leftover kept only in the PR body, which never reaches a sweep.
-- a body whose Decisions made cites none of the sidecar's ids, which is
-  another PR's body or one this reader cannot parse at all.
-- a body with no Decisions made section, which covers the empty file a
-  failed `gh pr view` leaves behind.
-
-A sidecar id the body does not cite is not refused: absent is not
-disagreement, and refusing it would refuse every line shape the reader
-misses. Run over the 40 most recent merged PRs with a sidecar on disk, the
-check passed 38 and refused two, each a body and sidecar that really
-disagree (`docs/research/2026-09-24-pr-body-check-probe.md`).
-
-The check compares content, not times. A commit that changed no
-disposition, such as a doc fix, a test-only witness or a re-wrap, refuses
-nothing. The mtime guard it replaced refused every one of those, and in
-burn-2026-09-23 the controller overrode it on four PRs out of four (#1147).
-It cannot see a disposition changed in neither record. `--allow-stale`
-skips the check; one of the two flags is required, so omitting the check
-is a choice and never a default.
-
-`land` comes first: a clump with no recorded landing is refused, so a PR
-that may never land cannot persist leftovers nothing can later remove.
-
-It is idempotent per PR and finding id, and *conflicting* about it: running
-it twice against the same `--pr` and sidecar adds nothing a second time
-(a controller that runs the landing step twice, or resumes after a restart
-mid-step, must not double an entry the sweep would then count twice), but a
-finding already recorded for this clump under a *different* PR is refused —
-two PR numbers for one finding id is a typo'd `--pr`, not a second landing,
-and letting it through would double-count that finding in the sweep with no
-undo but hand-editing the run file. A clump `--clump` does not name is
-refused, the same as `land` and `job` refuse one.
-
-A file written before leftovers existed still loads — the field is filled
-in as `[]`, the honest reading of a run that never recorded one.
-
-Nothing here builds the sweep ticket itself: `sweep.py render` renders it,
-and filing it is described in `burndown/SKILL.md` § The sweep.
-This list is only the store, so a restart does not lose what a landed PR already
-carried.
+A run file written while the run still carried leftovers loads: its `leftovers` list is ignored and left in the file.
 
 ## Why `~/.cache/burndown/<run-id>.json`
 

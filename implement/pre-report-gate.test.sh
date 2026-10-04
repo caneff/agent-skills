@@ -29,24 +29,6 @@ echo side > "$repo/b.txt"; git -C "$repo" add -A; git -C "$repo" commit -qm side
 offbranch=$(git -C "$repo" rev-parse HEAD)
 git -C "$repo" checkout -q main
 
-# The gate asks gh whether the ticket is a sweep (#1259); no network here. The
-# stub answers from $tmp/ticket-title and $tmp/ticket-body, and fails when
-# $tmp/gh-down exists.
-mkdir -p "$tmp/bin"
-cat >"$tmp/bin/gh" <<STUB
-#!/usr/bin/env bash
-[ -e "$tmp/gh-down" ] && { echo "gh: no network" >&2; exit 1; }
-case "\$*" in
-  *--json\ title*) cat "$tmp/ticket-title" ;;
-  *--json\ body*) cat "$tmp/ticket-body" ;;
-  *) exit 1 ;;
-esac
-STUB
-chmod +x "$tmp/bin/gh"
-echo "Ordinary ticket" >"$tmp/ticket-title"
-: >"$tmp/ticket-body"
-export PATH="$tmp/bin:$PATH"
-
 fails=0
 # run <name> <expected-exit> <sha> [<substring the output must contain>]
 run() {
@@ -149,170 +131,77 @@ else
   echo "SKIP: unreadable .scratch/ case (running as root)"
 fi
 
-# The dispositions check (#1214): on an implement-<n> branch whose review
-# cache holds dispositions-<n>.jsonl, the PR body's Decisions made must agree
-# with the sidecar — the same comparison `runfile.py leftover` makes at
-# harvest, run here so the worker fixes a stale line, not the controller.
-git -C "$repo" checkout -q -b implement-7
+# The merge check (#1401): on an implement-<n> branch the gate runs
+# verification-check.sh, so a finding with no disposition, or a `fixed` sha off
+# the branch, stops the worker before "PR up". The check itself has its own
+# suite (fix_check_test.py); what is pinned here is that the gate runs it, from a
+# linked worktree, and quotes its answer.
+git -C "$repo" remote add origin "$repo"
+git -C "$repo" fetch -q origin
+git -C "$repo" remote set-head origin main
 cache_home="$tmp/home"
 reviews="$cache_home/.cache/agent-reviews/$(basename "$repo")"
 mkdir -p "$reviews"
-sidecar="$reviews/dispositions-7.jsonl"
-body="$reviews/pr-body-7.md"
-tip=$(git -C "$repo" rev-parse HEAD)
-printf '%s\n' '{"id": "S1", "outcome": "disputed", "reason": "no"}' >"$sidecar"
-printf '## Decisions made\n\n- S1: fixed, abc1234.\n' >"$body"
-out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
-if [ "$rc" = 1 ] && [[ "$out" == *"S1"* ]] && [[ "$out" == *"fixed"* ]]; then
-  echo "PASS: a sidecar line the PR body contradicts fails the gate, naming the id"
-else
-  echo "FAIL: stale sidecar — want exit 1 naming S1, got $rc: $out"; fails=1
-fi
-
-printf '%s\n' '{"id": "S1", "outcome": "fixed", "sha": "abc1234"}' >"$sidecar"
-out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
-if [ "$rc" = 0 ] && [[ "$out" == *"dispositions agree"* ]]; then
-  echo "PASS: an agreeing sidecar passes and the pass line says it was checked"
-else
-  echo "FAIL: agreeing sidecar — want exit 0 + 'dispositions agree', got $rc: $out"; fails=1
-fi
-
-rm "$body"
-out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
-if [ "$rc" = 1 ] && [[ "$out" == *"write the body there first"* ]]; then
-  echo "PASS: a sidecar with no PR body file fails closed"
-else
-  echo "FAIL: sidecar without body — want exit 1 + the gate's own 'write the body there first', got $rc: $out"; fails=1
-fi
-
-# A check that could not run (no runfile.py beside the gate) is an environment
-# error, exit 2, never a disagreement the worker is told to fix (#1214 C3).
-printf '%s\n' '{"id": "S1", "outcome": "fixed", "sha": "abc1234"}' >"$sidecar"
-printf '## Decisions made\n\n- S1: fixed, abc1234.\n' >"$body"
-mkdir -p "$tmp/lonely/implement"
-cp "$gate" "$tmp/lonely/implement/pre-report-gate.sh"
-out=$(cd "$repo" && HOME="$cache_home" bash "$tmp/lonely/implement/pre-report-gate.sh" "$tip" 2>&1); rc=$?
-if [ "$rc" = 2 ] && [[ "$out" == *"could not run"* ]]; then
-  echo "PASS: a check that cannot run is exit 2, not a disagreement"
-else
-  echo "FAIL: check cannot run — want exit 2 + 'could not run', got $rc: $out"; fails=1
-fi
-
-# A heavy PR with no verification pass has no sidecar (#1188): on an
-# implement-<n> branch that is a refusal, not a pass that skips the check.
-rm "$sidecar"
-out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
-if [ "$rc" = 1 ] && [[ "$out" == *"no dispositions sidecar"* ]] && [[ "$out" == *"verification pass"* ]]; then
-  echo "PASS: no sidecar on an implement-<n> branch fails the gate, naming the verification pass"
-else
-  echo "FAIL: no sidecar — want exit 1 + 'no dispositions sidecar' + 'verification pass', got $rc: $out"; fails=1
-fi
-
-# Round-1 findings on disk and no dispositions sidecar at all is the same
-# skipped pass (#1258): the gate refuses rather than skip the check.
-printf '%s\n' '{"id": "S1"}' >"$reviews/findings-standards-7.jsonl"
-out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
-if [ "$rc" = 1 ] && [[ "$out" == *"no dispositions sidecar"* ]]; then
-  echo "PASS: round-1 findings with no sidecar fail the gate rather than skip the check"
-else
-  echo "FAIL: findings without sidecar — want exit 1 + 'no dispositions sidecar', got $rc: $out"; fails=1
-fi
-rm "$reviews/findings-standards-7.jsonl"
-
-# An empty sidecar beside real round-1 findings is a pass that recorded nothing.
-printf '%s\n' '{"id": "S1"}' >"$reviews/findings-standards-7.jsonl"
-: >"$sidecar"
-out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
-if [ "$rc" = 1 ] && [[ "$out" == *"empty"* ]]; then
-  echo "PASS: an empty sidecar beside real findings fails the gate"
-else
-  echo "FAIL: empty sidecar — want exit 1 + 'empty', got $rc: $out"; fails=1
-fi
-rm "$sidecar" "$reviews/findings-standards-7.jsonl"
-
-# A clean round 1 (all three findings sidecars empty) leaves nothing to verify:
-# it passes, and there is no disposition to compare the PR body against.
+git -C "$repo" worktree add -q -b implement-7 "$tmp/implement-7" main
+echo fix > "$tmp/implement-7/fix.txt"; git -C "$tmp/implement-7" add -A; git -C "$tmp/implement-7" commit -qm fix
+wt_tip=$(git -C "$tmp/implement-7" rev-parse HEAD)
+wt() { (cd "$tmp/implement-7" && HOME="$cache_home" "$@" bash "$gate" "$wt_tip" 2>&1); }
 for a in standards spec correctness; do : >"$reviews/findings-$a-7.jsonl"; done
-out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
-if [ "$rc" = 0 ] && [[ "$out" == *"round 1 found nothing"* ]]; then
-  echo "PASS: a clean round 1 passes without a sidecar and the pass line says so"
-else
-  echo "FAIL: clean round 1 — want exit 0 + 'round 1 found nothing', got $rc: $out"; fails=1
-fi
-rm "$reviews"/findings-*-7.jsonl
+printf '%s\n' '{"id": "S1", "axis": "standards", "severity": "hard", "file": "f", "title": "t"}' >"$reviews/findings-standards-7.jsonl"
 
-# The Codex lane writes no findings sidecars: it waives the check by naming why,
-# and the reason lands in the pass line.
-out=$(cd "$repo" && HOME="$cache_home" PRE_REPORT_NO_VERIFICATION="codex lane, no Claude axes" bash "$gate" "$tip" 2>&1); rc=$?
+out=$(wt env); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *"no disposition for S1"* ]]; then
+  echo "PASS: a finding with no disposition fails the gate, naming the id"
+else
+  echo "FAIL: undisposed finding — want exit 1 naming S1, got $rc: $out"; fails=1
+fi
+
+printf '%s\n' "{\"id\": \"S1\", \"outcome\": \"fixed\", \"sha\": \"$wt_tip\"}" >"$reviews/dispositions-7.jsonl"
+touch "$reviews/findings-spec-7.done" "$reviews/findings-correctness-7.done"
+out=$(wt env); rc=$?
+if [ "$rc" = 0 ] && [[ "$out" == *"1 findings, each disposed once"* ]]; then
+  echo "PASS: a disposed review passes and the pass line quotes the check"
+else
+  echo "FAIL: disposed review — want exit 0 + the check's line, got $rc: $out"; fails=1
+fi
+
+# The Codex lane runs no review wave: it waives the check by naming why, and
+# the reason lands in the pass line.
+rm "$reviews/dispositions-7.jsonl"
+out=$(wt env PRE_REPORT_NO_VERIFICATION="codex lane, no Claude axes"); rc=$?
 if [ "$rc" = 0 ] && [[ "$out" == *"waived"* ]] && [[ "$out" == *"codex lane, no Claude axes"* ]]; then
   echo "PASS: PRE_REPORT_NO_VERIFICATION waives the check and quotes the reason"
 else
   echo "FAIL: waiver — want exit 0 + 'waived' + reason, got $rc: $out"; fails=1
 fi
-out=$(cd "$repo" && HOME="$cache_home" PRE_REPORT_NO_VERIFICATION="" bash "$gate" "$tip" 2>&1); rc=$?
+out=$(wt env PRE_REPORT_NO_VERIFICATION=""); rc=$?
 if [ "$rc" = 1 ]; then
   echo "PASS: an empty PRE_REPORT_NO_VERIFICATION is not a waiver"
 else
   echo "FAIL: empty waiver — want exit 1, got $rc: $out"; fails=1
 fi
 
-# A sweep ticket's PR (#1259): every item of the ticket is a sidecar leftover or
-# done in the body. One item in neither is refused, by name.
-printf '%s\n' 'Sweep: leftovers from burn r1' >"$tmp/ticket-title"
-printf '## a/one.md\n\n- **P9** (hard) t — clump #1, #1, PR #2: x\n- **P14** (low) t — clump #1, #1, PR #2: y\n' >"$tmp/ticket-body"
-printf '%s\n' '{"id": "a/one.md P9", "outcome": "leftover", "file": "a/one.md", "title": "t", "severity": "hard", "text": "x"}' '{"id": "r1-S1", "outcome": "fixed", "sha": "abc1234"}' >"$sidecar"
-printf '## Decisions made\n\n- **a/one.md P9**: leftover.\n- r1-S1: fixed, abc1234.\n' >"$body"
-out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
-if [ "$rc" = 1 ] && [[ "$out" == *"a/one.md P14"* ]] && [[ "$out" != *"a/one.md P9,"* ]]; then
-  echo "PASS: a sweep PR missing one item from sidecar and body fails the gate, naming it"
+# A check that could not run (no fix_check.py beside the gate) is an
+# environment error, exit 2, never a refusal the worker is told to fix.
+mkdir -p "$tmp/lonely/implement"
+cp "$gate" "$tmp/lonely/implement/pre-report-gate.sh"
+cp "$here/verification-check.sh" "$tmp/lonely/implement/verification-check.sh"
+out=$(cd "$tmp/implement-7" && HOME="$cache_home" bash "$tmp/lonely/implement/pre-report-gate.sh" "$wt_tip" 2>&1); rc=$?
+if [ "$rc" = 2 ] && [[ "$out" == *"could not run"* ]]; then
+  echo "PASS: a check that cannot run is exit 2, not a refusal"
 else
-  echo "FAIL: sweep item missing — want exit 1 naming 'a/one.md P14', got $rc: $out"; fails=1
+  echo "FAIL: check cannot run — want exit 2 + 'could not run', got $rc: $out"; fails=1
 fi
-printf '## Decisions made\n\n- **a/one.md P9**: leftover.\n- **a/one.md P14**: fixed, abc1234.\n- r1-S1: fixed, abc1234.\n' >"$body"
-out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
-if [ "$rc" = 0 ] && [[ "$out" == *"sweep item"* ]]; then
-  echo "PASS: a sweep PR accounting for every item passes and says so"
-else
-  echo "FAIL: sweep accounted — want exit 0 + 'sweep item', got $rc: $out"; fails=1
-fi
-# An unreadable ticket is not "not a sweep": the gate cannot tell, exit 2.
-touch "$tmp/gh-down"
-out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$tip" 2>&1); rc=$?
-rm "$tmp/gh-down"
-if [ "$rc" = 2 ] && [[ "$out" == *"cannot read ticket"* ]]; then
-  echo "PASS: a ticket gh cannot read fails the gate closed, exit 2"
-else
-  echo "FAIL: gh down — want exit 2 + 'cannot read ticket', got $rc: $out"; fails=1
-fi
-echo "Ordinary ticket" >"$tmp/ticket-title"
-printf '%s\n' '{"id": "S1", "outcome": "fixed", "sha": "abc1234"}' >"$sidecar"
-printf '## Decisions made\n\n- S1: fixed, abc1234.\n' >"$body"
+git -C "$repo" worktree remove --force "$tmp/implement-7"
 
 # Off an implement-<n> branch there is no ticket to look a sidecar up by: the
 # gate still passes and says the sidecar was not looked for.
-git -C "$repo" checkout -q main
 out=$(cd "$repo" && HOME="$cache_home" bash "$gate" "$(git -C "$repo" rev-parse HEAD)" 2>&1); rc=$?
 if [ "$rc" = 0 ] && [[ "$out" == *"not implement-<n>"* ]]; then
   echo "PASS: a non-implement branch passes and says dispositions were not looked for"
 else
   echo "FAIL: non-implement branch — want exit 0 + 'not implement-<n>', got $rc: $out"; fails=1
 fi
-git -C "$repo" checkout -q implement-7
-# Real workers run from a linked worktree, whose own directory name is not
-# the repo's: the cache folder must key on the shared .git (#1214), or the
-# check finds no sidecar and refuses a worker whose pass did run (#1188).
-git -C "$repo" worktree add -q -b implement-8 "$tmp/implement-8" main
-printf '%s\n' '{"id": "S1", "outcome": "disputed", "reason": "no"}' >"$reviews/dispositions-8.jsonl"
-printf '## Decisions made\n\n- S1: fixed, abc1234.\n' >"$reviews/pr-body-8.md"
-wt_tip=$(git -C "$tmp/implement-8" rev-parse HEAD)
-out=$(cd "$tmp/implement-8" && HOME="$cache_home" bash "$gate" "$wt_tip" 2>&1); rc=$?
-if [ "$rc" = 1 ] && [[ "$out" == *"S1"* ]]; then
-  echo "PASS: a linked worktree finds the repo's sidecar and refuses a stale one"
-else
-  echo "FAIL: linked worktree — want exit 1 naming S1, got $rc: $out"; fails=1
-fi
-git -C "$repo" worktree remove --force "$tmp/implement-8"
-git -C "$repo" checkout -q main
 
 # Wrong usage is a usage error, not a pass.
 out=$(cd "$repo" && bash "$gate" 2>&1); rc=$?

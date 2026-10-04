@@ -20,8 +20,8 @@ implement-dispatch --spec <n> [--slots <k>] [--model sonnet|opus]
 
 `--slots` defaults to 5 and goes into the nested brief either way.
 A burn's controller always passes `--run <run-id>` on a plain dispatch, and
-it goes into the brief: that is how the worker knows a run file is under it
-(§ The PR). A spec run is a burn to its own slices, so it passes its own run
+it goes into the brief: that is how the worker knows a run file is under it,
+where § Control's job record goes. A spec run is a burn to its own slices, so it passes its own run
 id to them; a dispatch outside any run passes none. `--spec` refuses the flag,
 since the spec run keeps its own run file.
 
@@ -52,7 +52,8 @@ ticket lands, and on a repo Chris owns you merge its PR (§ The merge).
 The worker starts with `/implement <n> [<n>...] --tier light|heavy
 --controller "<name>" [--run <run-id>]`, plus `--chris-merges` on a
 `ready-for-human` ticket. `--run <run-id>` means a burn dispatched you and its
-run file is under you; its absence means none is (§ The PR).
+run file is under you, where § Control's job record goes; its absence means
+none is.
 Every ticket named is `in-progress` and assigned to you already (a
 `ready-for-human` ticket keeps its `ready-for-human` label too); build them
 all. Several numbers are one clump: one workspace, one branch named for the
@@ -117,8 +118,8 @@ owner's word turns it on.
   `.scratch/`.** That is any file you author and then hand to a command —
   never `/tmp`, never a shared scratchpad path. Two exceptions live in the
   review cache, `~/.cache/agent-reviews/<repo>/`, under a ticket-named file.
-  The controller's Codex pass files (§ The merge step 3), because your own
-  clearing of `.scratch/` would take an in-flight pass's output with it. And
+  The Codex pass's record and output (§ The Codex pass), which must outlive
+  the clearing of `.scratch/`. And
   the PR body, `pr-body-<n>.md` (§ The PR): a body left in `.scratch/` makes
   `merge-cleanup` refuse the removal on every heavy landing, forcing the
   controller to re-run it with `--discard` by hand. The name is
@@ -149,7 +150,7 @@ Decisions made.
 
 **Your turn ends mid-lane only on a message to the controller**: a question,
 a job declaration, or "PR up". A summary in your own pane reaches no one.
-herdr shows such a pane `done` while review, verification and the PR sit
+herdr shows such a pane `done` while review, the fix round and the PR sit
 undone. The stop hook alerts the controller on such a stop, and a burn's
 sweep reads the pane as `stalled`, but both are backstops that fire after
 the time is lost; the send is the report.
@@ -214,7 +215,7 @@ No PR and no reviewer; Chris reads the log after.
 - **Reuse before writing.** Before you write a helper, constant, loader or
   data file, search the repo for an existing one and reuse it. Why: a second
   copy is the costliest drift a PR creates. Review flags it, and unwinding it
-  after merge has taken several sweep tickets, each leaving new stale
+  after merge has taken several cleanup tickets, each leaving new stale
   references behind (#1252).
 - For each acceptance criterion, write the failing test and see it red before
   the code that makes it pass. Once green, strip the constraint it verifies
@@ -258,184 +259,251 @@ No PR and no reviewer; Chris reads the log after.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
   report it as a follow-up. Why: an unasked fix widens the diff past what the
-  reviewers check against the ticket. Two narrowings: a round-1 finding that
-  passes § Review's adjacent-fix rule is fixed in the round, and so is one of
-  § Review's blocking kinds, whatever its size.
+  reviewers check against the ticket. A finding of the review wave is not one:
+  § Review fixes every valid finding in this PR, whatever its size.
 - Typecheck and single test files as you go, the full suite once at the end.
   Why: a failure caught at the file it came from is cheaper to place than one
   found in the full run.
 
 ### Review
 
-1. One full round of `/multi-axis-code-review`: standards, spec and
-   correctness, all three waited for (`multi-axis-code-review/SKILL.md` § Why separate axes: it says why the
-   built-in `/code-review` is not run here; `/code-review low` only when the
-   owner asks).
+One review wave, one fix round, then the seam (ADR 0004,
+`docs/adr/0004-workers-fix-their-own-findings.md`). There is no re-review: the
+seam is the convergence check.
 
-   Every finding gets exactly one disposition, one of five outcomes:
-   `fixed`, `disputed`, `filed`, `handed-back` and `leftover`. It is fixed
-   in a commit, `disputed: <why>`, or filed as a follow-up ticket through
-   `/file-ticket` so it leaves with a routing role, never `needs-triage` —
-   ad hoc `gh issue create` skips that role. `filed` is reserved for a high
-   finding, under the severity mapping below. A finding that is not high and
-   not fixed in the round takes `leftover` (never one of the blocking
-   kinds below): no ticket of its own, only a sidecar line (step 2) and
-   `leftover` in prose. A burn's own sweep, one ticket per run, is
-   `burndown/SKILL.md` § The sweep; a worker whose brief carries **no
-   `--run <run-id>`** has no run file under it and files its own per-PR
-   sweep instead, at report time (this file's § The PR).
+1. **Run the wave.** The three axes of `/multi-axis-code-review` — standards,
+   spec and correctness, all three waited for (`multi-axis-code-review/SKILL.md`
+   § Why separate axes: it says why the built-in `/code-review` is not run
+   here; `/code-review low` only when the owner asks) — and the Codex pass
+   (§ The Codex pass, below) run in parallel on the same commit. Start the
+   Codex pass first, in the background, since it outlasts the axes; the axes
+   are subagents and return to you. Nothing is fixed until every reviewer you
+   started has finished. A Codex pass still running when the axes return is
+   waited on by ending the turn: its completion wakes you.
 
-   **The split grammar.** A ruling that genuinely divides a controller-only
-   finding — one with no line of its own in a `findings-<axis>-<n>.jsonl`
-   sidecar, which today means a Codex-pass finding (§ The merge step 3) —
-   fix one part now, leave the rest — is never written as one id carrying
-   two outcome words (`fixed … leftover`, as PR #1172's did): write it as
-   two ids sharing the base, suffixed `a`, `b`, … in the order the halves
-   are named (`codex-gate-1a` fixed, `codex-gate-1b` leftover), each with
-   its own sidecar line, its own Decisions made line, and its own outcome.
-   A round prefix (when one applies) sits in front of the whole thing, the
-   split suffix stays last (`r2-S1a`), so the two grammars never collide.
-   `runfile.py leftover --pr-body` matches an id exactly, so nothing about a
-   genuine split needs `--allow-stale`; that flag is for a sidecar that is
-   stale, not a finding that was never one thing to begin with. **A round-1
-   finding's own id (`S3`, `P2`, `C1`, `OE1`) is never split**:
-   `docs/research/tally_review_axes.py` and the verification pass
-   (`multi-axis-code-review/SKILL.md` § 6) both join a disposition to its
-   finding by exact id, so a split `S3` would read as `S3` itself
-   undisposed and `S3a`/`S3b` as orphans neither tool recognises. A ruling
-   that divides a round-1 finding takes one disposition for the whole
-   finding, same as any other, until those two readers learn the grammar
-   too.
+   Pass the reviewers every ruled or other-ticket item as settled
+   (`multi-axis-code-review/SKILL.md` § 4's Settled decisions).
 
-   On a repo whose `origin` owner isn't
-   your `gh` login, `/file-ticket` hands the command back instead of filing,
-   so there is no ticket number: the disposition is `handed back: <the
-   gh issue create command>`, the command exactly as `/file-ticket` gave it.
-   It counts as filed for every rule below except the sidecar, which keeps
-   its own `handed-back` outcome; Chris files it after he has seen the work
-   (§ Someone else's repo). On a heavy Claude-lane build, the PR
-   body lists **every** round-1 finding with its disposition (fixed, with
-   the fixing commit's sha; `disputed: <why>`; filed, with its ticket
-   number; handed back, with the command; or `leftover`) — not only the
-   disputed, filed, handed-back and leftover ones. A fixed finding that's
-   allowed to vanish from the record is one the § The merge step 3 Codex
-   pass can't tell from a Codex-only one, so it can misclassify a real
-   Claude catch as `codex-only, confirmed` and corrupt the trial's
-   evidence. On any other build, the PR body lists the disputed, filed,
-   handed-back and leftover ones.
+   **The first ablation** (#1401, ADR 0005): on a PR under the size threshold,
+   the standards axis does not run, and the other two do. The threshold is
+   `codex-usage-gate.py`'s own, asked without a usage read:
+   `python3 ~/.agents/skills/implement/codex-usage-gate.py --size --base origin/<default> --tickets <n>...`
+   exits 40 (`under size threshold`) when the PR is small, 0 when it is not,
+   30 when it could not measure; 30 runs the standards axis, since an
+   unmeasured PR is not a small one. A skipped axis is recorded, not just
+   omitted, so the escape count can attribute a later bug to it:
+   `python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type standards --skip-reason ablation`.
+   The ablation runs for three burns from #1401's landing. Decision rule: keep
+   the standards axis on small PRs if the ledger's escape measure attributes
+   any escape to a skipped run, delete the small-PR run otherwise. The decision
+   is the controller's to bring to Chris when the third burn closes.
 
-   **The severity mapping.** Stated here once; the reviewer briefs in
-   `multi-axis-code-review` point here. A finding is high when it is a
-   Codex `[high]` or a correctness `CONFIRMED`. Nothing else is high:
-   Codex medium and low, correctness `PLAUSIBLE`, and standards `hard` and
-   `judgement` are not high.
+2. **Fix every valid finding.** Every finding every reviewer returned gets
+   exactly one disposition, one of three outcomes:
 
-   **The reachability bar.** Stated here once, applied before severity: a
-   finding is filed, or kept as a leftover, only when whoever disposes of
-   it — the worker in round 1, the controller at merge — can name how its
-   failure occurs in our environment: this box (WSL, one user, shared 32
-   cores), our repos (all SHA-1, all `caneff/*`), and the ticket and PR
-   bodies people here actually write, not a constructed pathological
-   input. A finding that fails that bar is `disputed: unreachable — <why>`
-   in the PR body, whatever Codex's severity word, and it never becomes a
-   `leftover` sidecar line (a round-1 finding still gets its `disputed`
-   line from the verification pass, as every round-1 finding does). The
-   fix-in-round rules stand for a reachable finding; an unreachable one is
-   disputed rather than fixed, even when it would pass the adjacent-fix
-   rule.
+   - `fixed`: fixed in a commit of this PR. No size bar, no "adjacent" test,
+     no leftover: a valid finding is fixed in the PR the review covers. One
+     commit may fix several findings; the disposition names that commit's sha.
+   - `moved`: the finding needs a design of its own, so it goes onto the open
+     ticket for its component and the disposition names that ticket. Search
+     open issues for the same file or component first and add the finding as a
+     comment (`gh issue comment`), per `~/.claude/CLAUDE.md`'s search-before-
+     filing rule; only when none is open does `/file-ticket` file one. Work
+     that takes under about two minutes is fixed now, never moved.
+   - `disputed: <why>`: the finding is wrong or cannot occur, in a reason Chris
+     can read. A finding whose failure cannot occur here is disputed under the
+     reachability bar below, whatever its rating.
 
-   **The blocking kinds.** Stated here once, applied after the reachability
-   bar; the reviewer briefs in `multi-axis-code-review` point here. A
-   finding of round 1, or of any Codex pass at merge (§ The merge step 3),
-   that the PR (a) added a second copy of existing code or data, or (b)
-   left a doc, docstring, comment or alias claiming a state the PR changed,
-   is fixed in this PR before merge. The adjacent-fix rule's size limit
-   does not apply: the fix may cross files and run past 20 lines. It is
-   never `leftover`, and never `filed` unless the fix needs its own design,
-   which the disposition names. A round-1 blocking finding's sidecar line is
-   the plain `fixed` line, with no `scope`, so `check_adjacent.py` does not
-   measure it; the verification pass checks the fix like any other. A
-   Codex-pass one is checked by the next Codex pass or the controller's own
-   read of the fix diff, as § The merge step 3 says for each pass. A
-   reviewer marks one by opening its sidecar `title` with `blocking:`, but
-   the kind is the finding's, not the tag's: an untagged copy is still kind
-   (a). Kind (a) is a copy of something the base branch already holds, not
-   a shape repeated inside the diff, which is the standards axis's
-   Duplicated Code.
-   Kind (b) includes the claim this PR's own rename or removal left behind.
-   Why: in `caneff/sudokupad-art`, 63 of 85 leftover findings sat in lines
-   the PR itself wrote, and copies deferred as `leftover` took four sweep
-   tickets to unwind (#1252).
+   **The reachability bar.** Stated here once, applied before a finding is
+   fixed or moved: its failure must be nameable in our environment — this box
+   (WSL, one user, shared 32 cores), our repos (all SHA-1, all `caneff/*`), and
+   the ticket and PR bodies people here actually write, not a constructed
+   pathological input. A finding that fails the bar is
+   `disputed: unreachable — <why>`, the why naming how that environment rules
+   the failure out; a bare "unlikely" is not one.
 
-   **The adjacent-fix rule.** A round-1 finding is fixed in the round, not
-   filed, when all five parts hold: it sits in a file already in the diff;
-   the fix is confined to one function; it changes under 20 lines, its test
-   included; it adds no public seam; and it touches no second file. The fix's
-   own test file is part of the fix, not a second file — that is what "its
-   test included" means: 8 lines in an implementation file plus 2 in its
-   own test file is one fix. "Own" means same directory (#1152): a test
-   file elsewhere in the tree, such as `tests/test_runfile.py` beside a
-   root `runfile.py`, is a second file, not this fix's test file. Which
-   file names count as "own" is `check_adjacent.py`'s `own_test_pair` to
-   define, not restated here — a second copy of that list would drift from
-   the checker that actually enforces it. The 20-line budget cannot be split across
-   files: a fix touching any other second file is a change, not an
-   adjacent fix, and § Build's
-   pre-existing-bug rule governs it. Make each adjacent fix in a commit of
-   its own, so its sha measures it alone. Its disposition is
-   `fixed (adjacent)`, with that sha; its sidecar line is step 2's adjacent
-   form. § The merge step 3 applies the same rule to a Codex second-pass
-   finding.
-2. One verification pass, scoped to the round-1 findings and the fix commits.
-   Pass the reviewers every ruled or other-ticket item as settled; a
-   disposition you claim, `disputed` included, goes as a claim to check.
-   What it fails on, by finding id, is its brief's to state:
-   `multi-axis-code-review/SKILL.md` § 6.
+   On a repo whose `origin` owner isn't your `gh` login, `/file-ticket` hands
+   the command back instead of filing, so a `moved` finding has no ticket
+   number there: the disposition is `disputed: needs its own design — filing
+   command handed to the controller`, with the command in your "PR up" message
+   (§ Someone else's repo).
 
-   This pass is also where the disposition gets recorded mechanically
-   (#855): the verification pass, not the worker, writes
-   `<dir>/dispositions-<n>.jsonl` in the same `~/.cache/agent-reviews/<repo>/`
-   directory as the round-1 findings sidecars — one JSON object per line,
-   joined to a round-1 finding by its `id` (`S1`/`P2`/`C3`). Each line is
-   `{"id": "<id>", "outcome": "fixed", "sha": "<sha>"}` — on an adjacent
-   fix, `{"id": "<id>", "outcome": "fixed", "sha": "<sha>", "scope": "adjacent"}` —
-   `{"id": "<id>", "outcome": "disputed", "reason": "<why>"}`, or
-   `{"id": "<id>", "outcome": "filed", "ticket": <n>}`,
-   `{"id": "<id>", "outcome": "handed-back", "command": "<the command>"}`, or
-   `{"id": "<id>", "outcome": "leftover", "file": "<path>", "title": "<short title>", "severity": "<the reviewer's severity word>", "text": "<one line of the finding>"}` —
-   the same five outcomes this pass records in prose. One line per
-   finding id: a changed disposition rewrites its line rather than adding
-   a second, and `runfile.py` refuses a sidecar that repeats an id
-   (#1124). A leftover line
-   carries what a sweep needs without reopening the PR: `severity` is the
-   word its reviewer gave it — a Codex medium or low, `PLAUSIBLE`, `hard`
-   or `judgement`, since a high finding is filed instead — and `text` is
-   one line. `command`
-   is the command JSON-encoded as one string, its newlines and quotes
-   escaped: `/file-ticket`'s command is a multi-line heredoc, and a line
-   split across lines breaks the join.
-   **A sweep ticket** (title `Sweep: leftovers from ...`, body `## <file>` /
-   `- **<id>**` sections) adds one rule, because `runfile.py leftover`
-   harvests the sidecar and nothing else (#1259): every sweep item not fixed
-   in the PR gets one `leftover` line in the dispositions sidecar, in the
-   grammar above, with `id` the item's file-qualified form `<file> <id>`,
-   `file` the item's own file (not the sweep PR's), and `severity` and `text`
-   carried from the sweep's bullet. Decisions made cites it the same way
-   (`**<file> <id>**: leftover.`; a bare-named file goes in backticks). These
-   lines are the one exception to the next sentence: the worker writes them,
-   since no reviewer raised the item, and the verification pass keeps them
-   (§ 6 of `multi-axis-code-review/SKILL.md` says so in its brief) beside its
-   own lines. `verification-check.sh` does not count them as the pass having
-   run. The pre-report gate checks them.
-   Apart from those sweep lines, the worker never writes this file: it is the adversarial read, and the
-   worker grading its own homework is not the honest source for it. No
-   cost tracking here either.
+3. **Write the dispositions, then run the seam.** You write
+   `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl` (`<repo>` as in § The
+   PR), one JSON object per line, one line per finding, joined to the finding
+   by its `id` — `S1`/`P2`/`C3` from the axes' sidecars, and
+   `codex-gate-<k>` for the Codex pass's k-th finding:
 
-No third pass. Commits after the verification pass are unreviewed; the PR
-body's last reviewed sha says where review stopped.
+   - `{"id": "<id>", "outcome": "fixed", "sha": "<sha>"}`
+   - `{"id": "<id>", "outcome": "moved", "ticket": <n>}`
+   - `{"id": "<id>", "outcome": "disputed", "reason": "<why>"}`
 
-The Codex adversarial-review trial (#812) runs from the controller, at merge
-time, not from the worker: § The merge.
+   Write the file even when every reviewer found nothing: it is then empty,
+   and its absence is not a clean review. One line per finding id; a changed
+   disposition rewrites its line. Then run `bash tests/all.sh`
+   (`AGENTS.md` § End-to-end seam): green is the exit, red is fixed and rerun.
+   `verification-check.sh <n>` (and the pre-report gate that runs it) checks the
+   rest mechanically: every finding id in the three findings sidecars and the
+   Codex output has exactly one disposition, every `fixed` sha is a commit on
+   this branch past `origin/<default>`, every `moved` ticket is open, and an
+   empty findings sidecar is accepted only beside its reviewer's completion
+   marker (`multi-axis-code-review/SKILL.md` § 4).
+
+No second pass. Commits after the wave are checked by the seam and by the
+mechanical check, not re-reviewed; the PR body's last reviewed sha says where
+review stopped.
+
+#### The Codex pass
+
+Part of the wave for a heavy Claude-lane PR; not part of a Codex-lane build
+(`codex-lane.md` has its own reviews). It reads one branch against
+`origin/<default>`.
+
+Run `codex login status` first. Not logged in, no `codex@openai-codex` entry in
+`~/.claude/plugins/installed_plugins.json`, or the kill-switch file
+`~/.config/agent-skills/codex-reviews-off` present: no pass, append its ledger
+skip row (below), and name the skip in the PR body. A pass that launched and
+errored has a record, so its ledger row is a `--refusal` row, never a skip row.
+
+Then run the gate from this workspace after `git fetch origin`, which checks
+the plan's usage and measures the PR (#1204, #1358):
+`python3 ~/.agents/skills/implement/codex-usage-gate.py --base origin/<default> --tickets <n>...`,
+every ticket of the clump named. It reads the usage cache, refreshing a missing
+or stale one itself, and prints one line. Exit 0: launch. Exit 20 (capped) or
+exit 30 (no fresh, readable reading): launch nothing, append the ledger skip
+row, name the printed line in the PR body. An unreadable cache is exit 30,
+never headroom. Exit 20 also answers usage at or above the reserve ceiling, 70%
+(#1359), so the weekly audit of skipped PRs always has quota left; its ledger
+skip row takes `--skip-reason ceiling` exactly, distinct from the cap's printed
+line. Exit 40 (under the size threshold): its non-test, non-Markdown churn is
+under 300 lines and no ticket carries the `needs-codex` label; launch nothing,
+append the skip row with `--skip-reason size` exactly (one reason for every
+size skip, so the ledger can count them), and say
+`Codex pass skipped: under size threshold (<churn> < 300)` in the PR body. The
+label sends a small PR on to the usage read; it never overrides the kill
+switch, the reserve ceiling or the cap, which still answer exit 20. The audit
+and what the controller running it owes: [`codex-audit.md`](codex-audit.md).
+
+A pass launched is a background process of one core: declare it first, per
+§ Control, and say `job done` when it ends.
+
+Fetch the ticket yourself, body and comments both, rendered as in § The brief,
+since a requirement added in a comment is part of what Codex must judge the
+diff against. Write the rendered ticket to a file under this workspace's `.scratch/` with your file-write tool.
+Never interpolate it into a shell string, quoted or not, since a body or
+comment containing `"`, `` ` ``, or `$(` would then run as shell instead of
+reading as text; a comment is the less trusted half of the two, since anyone
+with repo access can add one.
+
+**The focus text ends with a context appendix** (#941), two required lines,
+appended to `body_file` after the rendered ticket and marked as the worker's
+context rather than ticket text. Codex reads this one branch against
+`origin/<default>` and nothing else, so anything the ticket knows that the
+tree does not say is invisible to it — and what it cannot see, a split onto a
+sibling branch, a parked skill a map lands into, it reports as a missing
+requirement. Both facts come from the ticket and its comments and the brief.
+Write both lines with your file-write tool, into the same file, never
+interpolated into a shell string — a branch name or a ticket title reaching
+the shell is the same injection the ticket render above is already protected
+from:
+
+```
+## Context from the worker's brief — not part of the ticket
+
+**Open sibling branches.** <each open sibling branch, the files it
+holds, and what of this PR's ask is split onto it: which file, which
+line, which PR> — or: No sibling branch is open, and nothing in this PR
+is split.
+
+**Posture.** <the code under review is parked, feature-flagged off, or
+otherwise landing ahead of its own activation, and the ticket that
+activates it> — or: The code under review is live in the tree; its
+posture is what the tree implies.
+```
+
+Both lines are written even when there is nothing to report. An omitted line
+and a "nothing is split" line read identically to Codex.
+
+**One recorded run.** Invoke the plugin's own script directly:
+`/codex:adversarial-review` carries `disable-model-invocation: true`, so the
+SlashCommand tool never reaches it here, and calling the script directly
+bypasses the slash command's own markdown entirely — the `AskUserQuestion` gate
+lives there, not in the script; `handleReviewCommand` parses
+`--wait`/`--background` as booleans and never reads them, always running
+foreground. Keep `--wait` anyway to say what's intended; it's a harmless no-op
+on this path. The run goes in the background of your own shell (`run_in_background`),
+which is what lets the axes run beside it:
+
+```
+dir="$HOME/.cache/agent-reviews/<repo>"   # expanded as
+mkdir -p "$dir"                           # multi-axis-code-review/SKILL.md does it
+body_file=<absolute path you wrote the ticket body, comments and appendix to>
+out_file="$dir/codex-adversarial-<n>-gate.out"
+record="$dir/codex-adversarial-<n>-gate.json"
+plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
+cd <this workspace> && git fetch origin
+usage_before=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)
+launch_sha=$(git rev-parse HEAD); started=$(date -Is)
+node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1
+status=$?
+usage_after=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)
+printf '{"ticket": <n>, "phase": "gate", "status": %d, "launch_sha": "%s", "completion_sha": "%s", "started": "%s", "completed": "%s", "usage_before": "%s", "usage_after": "%s"}\n' \
+  "$status" "$launch_sha" "$(git rev-parse HEAD)" "$started" "$(date -Is)" "$usage_before" "$usage_after" >"$record"
+```
+
+The record carries the node call's exit status, the workspace HEAD at launch
+and again at completion, both timestamps and the usage readings. The launch sha
+alone cannot tell a clean read from one you committed underneath, and a run
+that failed and returned writes an output file that looks like any other, so
+**commit nothing while the pass reads**: the fix round starts after the pass
+has finished. Both files go in `~/.cache/agent-reviews/<repo>/`, never this
+workspace's `.scratch/`: § Before the PR step 3 deletes it, which would take an
+in-flight pass's output with it, and a `.scratch/` file left behind stalls
+`merge-cleanup`, which refuses ignored content without `--discard`. That cache
+directory's 14-day prune covers both files, so nothing here is cleaned up by
+hand, `rm` or `rmdir`.
+
+**The gate is fail-closed.** The pass is collected only when `status` is 0 and
+the launch sha equals the completion sha. Absent, unreadable, errored (a
+non-zero `status` — not logged in, quota gone, a node that found no module; the
+`out_file` then holds that error, not a review) or raced (the two shas differ,
+so the branch moved while Codex was reading) is a refusal, not a pass: its
+findings are not collected, and nothing is claimed about a diff nobody
+reviewed. Append its ledger row with `--refusal "<why>"` (below) and name the
+refusal in the PR body. There is no retry. A refused verdict's findings are
+never reported as current — either one collected looks exactly like a pass that
+found nothing, the absent-answer-read-as-benign shape this lane exists to
+close. `verification-check.sh` reads the same record and treats a refused one
+the same way, said in its output; an `out_file` whose findings it cannot parse
+is a refusal of the check, never an empty pass.
+
+**Every pass is one ledger row** (#1269): its time and its usage, in
+percentage points of the worst usage window (the weekly one when it is the
+worst). The record carries `usage_before` and `usage_after`, each
+`<percent> <resetsAt>` or `unknown`, taken with the gate's own `--percent` flag,
+live and not from the cache. Once the gate above has ruled on the run, write
+its row from the record, with `<repo>` the review cache's directory name:
+
+```
+python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type codex-gate
+```
+
+A usage reading that fails, on either side, is `unknown`, never zero, and so
+are two readings of different windows and a percentage that fell: the row is
+never given a change nobody read. A run the gate refuses takes the same line
+with `--refusal "<why>"` added: it cost usage, and its findings describe a diff
+this PR no longer has, so its row holds none. A pass not launched has no
+record: append it with `--skip-reason "<the printed line>"` and no other flag,
+and it gets a row of zero cost that `report` counts as skipped and never as a
+clean pass. That is an exit 20 or 30 of the usage gate (a reserve-ceiling exit
+20's reason is `ceiling`, not the line), its exit 40 (whose reason is `size`,
+not the line), or a failed preflight. A refusal from `append` itself goes to the
+controller in "PR up", never skipped.
+
+A collected pass is its `.out`: each `- [severity] title (file:lines)` line
+under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id
+`review_ledger.py` reads it under. You dispose of each one under step 2. The
+`.out` is posted to the PR as a comment after the PR exists (§ The PR).
 
 ### Before the PR
 
@@ -453,10 +521,10 @@ time, not from the worker: § The merge.
    keep is left in `.scratch/`, run `PRE_REPORT_KEEP_SCRATCH="<why>" bash
    ~/.agents/skills/implement/pre-report-gate.sh <sha>` for step 5 instead of
    the bare form, and name it, with the same `<why>`, in the PR-up report.
-   (§ The merge step 3's Codex pass writes nothing into this `.scratch/`:
-   its files live in `~/.cache/agent-reviews/<repo>/`, outside the
-   workspace, precisely so clearing this directory — or the pass launching
-   while you are still working — cannot destroy the other's files.)
+   (The Codex pass's record and output live in
+   `~/.cache/agent-reviews/<repo>/`, outside the workspace, so clearing this
+   directory cannot destroy them; only the rendered ticket it read, under
+   `.scratch/`, goes.)
 4. **Read your own diff against the three recurring defect classes** named
    in `AGENTS.md` § Recurring defect classes;
    `docs/agents/defect-classes.md` carries the checks and every instance.
@@ -477,18 +545,14 @@ time, not from the worker: § The merge.
 5. **`bash ~/.agents/skills/implement/pre-report-gate.sh <sha>`** passes on
    the sha you report — a "done" report has described work that was dirty in
    the tree, not on the branch, or left content behind in `.scratch/` with
-   no `PRE_REPORT_KEEP_SCRATCH` naming why. It also checks
-   `dispositions-<n>.jsonl` against the PR body's Decisions made (#1214) —
-   the comparison `runfile.py leftover` makes at harvest — so a disposition
-   changed after the verification pass is rewritten in its sidecar line
-   now; write `pr-body-<n>.md` before running it. It refuses, exit 1, when
-   `dispositions-<n>.jsonl` is missing or empty (#1188): the verification pass
-   (§ Review step 2) never ran, and "PR up" waits until it has. A round 1 that
-   found nothing (all three `findings-<axis>-<n>.jsonl` empty) leaves nothing to
-   verify and passes. The Codex lane writes neither sidecar and runs it with
-   `PRE_REPORT_NO_VERIFICATION="<why>"`, named in the PR-up report. On a
-   sweep ticket's PR it also refuses, naming it, a sweep item that is neither
-   a sidecar `leftover` line nor stated `fixed` in the body (#1259).
+   no `PRE_REPORT_KEEP_SCRATCH` naming why. It also runs the merge check
+   (`verification-check.sh`, § Review step 3) on an `implement-<n>` branch and
+   refuses, exit 1, naming each problem: a finding with no disposition, a
+   `fixed` sha off the branch, a `moved` ticket that is closed, a missing
+   `dispositions-<n>.jsonl` (#1188) or an empty findings sidecar with no
+   completion marker, so a disposition is fixed now, not by the controller. The
+   Codex lane runs no review wave and runs the gate with
+   `PRE_REPORT_NO_VERIFICATION="<why>"`, named in the PR-up report.
 6. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
    prints `false` and `CLEAN` before "PR up" goes out — a PR reported on a
    draft or a conflict fails the controller's merge. `headRefOid` is the sha
@@ -500,7 +564,7 @@ time, not from the worker: § The merge.
    (`<n>`) and any other ticket
    its body names with a closing keyword, each in this repo — an entry's
    `repository` field pointing elsewhere doesn't count, and a `Part of
-   #<n>` parent issue never should be closed by this PR. § The merge step 6
+   #<n>` parent issue never should be closed by this PR. § The merge step 5
    only checks closure after merge, so a body that never registers as
    closing has nothing to fail loud before then. Empty or missing right
    after `gh pr create` can be GitHub not having indexed the reference yet
@@ -538,7 +602,7 @@ sha the controller was handed.
 
 Write the body to `~/.cache/agent-reviews/<repo>/pr-body-<n>.md` first
 (`mkdir -p` the directory; `<n>` is the lowest ticket of a clump; `<repo>` is
-the repo's own name, taken from the common `.git` as § The merge step 3's block
+the repo's own name, taken from the common `.git` as § Review's Codex block
 does, not the worktree's directory name), never under
 this workspace's `.scratch/`. The file's content is already the PR body on
 GitHub, and § Before the PR step 3 makes you clear `.scratch/` anyway. A
@@ -560,71 +624,21 @@ The body has these sections and nothing else:
 - **What changed** — three lines.
 - **Tests run** — the command and its result line.
 - **Decisions made** — each with its reason. On a heavy Claude-lane build,
-  every round-1 finding, each with its disposition (fixed, with the sha;
-  disputed, with the why; filed, with its ticket number; handed back,
-  with the command; or `leftover`) — § The merge
-  step 3's Codex classification reads this list. Cite each finding by the
-  id its sidecar gave it (`S1`/`P2`/`C3`) rather than restating it in
-  prose (#855) — that's what makes this list joinable against
-  `dispositions-<n>.jsonl` without a reading pass. Open each line with its
-  id, or ids (`- S1, P2: fixed, <sha>.`; a prefixed round cites `r2-S1`,
-  and a sweep item is cited file-qualified, `<file> <id>`), and put the
-  disposition word right after the first colon. Which id prefix a round
-  carries, and that its reviewer prompts name it, is
-  `multi-axis-code-review/SKILL.md` § 4's Round ids. `runfile.py leftover`
-  reads the outcome off that line at harvest and refuses a sidecar it
-  contradicts (#1147), and an id the body records twice with two outcomes
-  (#1177): a changed disposition is edited into its one line. On any other build, every
-  round-1 finding that was disputed (with the why), filed (with its
-  ticket number), handed back (with the command) or left over.
-- **Last reviewed sha** — and that commits after it were not re-reviewed.
+  every finding of the wave, each with its disposition: fixed, with the
+  fixing commit's sha; `moved`, with the ticket it went onto; `disputed`, with
+  the why. Cite each finding by the id its sidecar gave it (`S1`/`P2`/`C3`,
+  `codex-gate-<k>` for Codex's), open each line with its id and put the
+  disposition word right after the first colon (`- S1, P2: fixed, <sha>.`). The
+  Codex pass's own line says whether it ran: its finding count, or
+  `Codex pass skipped: <why>` / `Codex pass refused: <why>`. On any other
+  build, the disputed and moved findings.
+- **Last reviewed sha** — the commit the wave read, and that the fix round's
+  commits after it were checked by the seam and the mechanical check, not
+  re-reviewed.
 
-**A worker whose brief carries no `--run <run-id>`** (§ Review) has no run
-file under it, and files one more ticket now, before sending "PR up". A
-brief carrying `--run <run-id>` files nothing here: the burn's own sweep
-harvests that run's leftovers. The flag is the only signal a worker can
-see, and a worker without it cannot tell whether a run file exists.
-Without the flag: read this PR's own dispositions sidecar,
-`dispositions-<n>.jsonl` (§ Review step 2 already wrote it), for its
-`leftover` lines. None: file nothing, the same zero-leftovers rule the
-burn sweep uses. Any: **check first, the same idempotent search the burn
-sweep uses** (`burndown/SKILL.md` § The sweep) — a crash after
-`/file-ticket` here is the same hazard. Its command and stop rules are
-written out in both skills on purpose (#1254): a worker holds this file and
-not the burn's, the titles differ (`PR #<n>` here, `burn <run-id>` there), and
-each copy has its own wording test; change one, change the other —
-
-```
-gh issue list --repo <owner/name> --state all --limit 100 \
-  --search "Sweep: leftovers from PR #<n> in:title" \
-  --json number,title,state --jq '.[] | select(.title == "Sweep: leftovers from PR #<n>" and .state == "OPEN") | .number'
-```
-
-The search is fuzzy, so the `--jq` keeps only an exact title match that is
-still **open** and prints one bare number per line: the sweep's own number,
-never this PR's `<n>`, which is your own implementation ticket. A **closed**
-match is not this PR's sweep: it never reaches the frontier, so rewriting it
-loses the new leftovers (#1248). It is skipped and a new sweep is filed; the
-next search finds only that open one. A non-zero exit from the
-search stops you and goes to the controller; it is not zero matches, and
-filing on it makes the duplicate this search exists to prevent. Exit 0 and
-one line: put that number in `sweep` and update its body instead of filing
-another, `gh issue edit "$sweep" --repo <owner/name> --body-file <path>`.
-Exit 0 and no output: file
-`Sweep: leftovers from PR #<n>` through `/file-ticket`,
-labelled `ready-for-agent`, in #1030's body shape
-(`burndown/SKILL.md` § The sweep: grouped by file, one bullet per
-item). The heading and the bullet's opening are `sweep.py render`'s
-grammar, the part the pre-report gate reads (#1314): a `## <file>`
-heading per file, then one bullet per item,
-`- **<id>** (<severity>) <title> — PR #<n>, ticket #<m>: <text>`
-(no clump, which a per-PR sweep has none of), never
-`- PR #<n>, ticket #<m>, finding <id>`. More than one line is two
-sweeps for one PR: stop and tell the controller, and never edit `<n>`
-as a fallback. A burn controller that later finds this ticket open on the
-frontier folds it into its own run's sweep
-(`burndown/SKILL.md` § The sweep) rather than leaving it standing
-beside one.
+Once the PR exists and a Codex pass was collected, post its output as a PR
+comment from the cache directory, so the verdict is readable by anyone but you:
+`gh pr comment <pr> --repo <owner/name> --body-file ~/.cache/agent-reviews/<repo>/codex-adversarial-<n>-gate.out`.
 
 Send the controller "PR up" in this shape:
 
@@ -634,6 +648,8 @@ Last reviewed sha: <sha>
 CLEAN observed at: <sha>
 Tip: <headRefOid> — <"no commits past the reviewed sha", or one
   "<sha> — <diff class>" line per commit past it>
+Codex pass: <"ran, <k> findings", "skipped: <the printed reason>" or
+  "refused: <why>">
 Mutation check: <the change that made it fail, that you saw it fail, and
   the throwaway worktree the mutation ran in — or "n/a, deliverable is not a
   test or a gate">
@@ -643,8 +659,7 @@ Cleanup blockers: <every "blocker: " line of § Before the PR step 7's dry
   run, verbatim, a "scratch" line followed by its PRE_REPORT_KEEP_SCRATCH
   reason — or "none", only when the dry run printed "blockers: none">
 Controller: you dispatched me; merge this PR per implement/SKILL.md § The merge
-  (Codex pass if heavy, squash, answer my outstanding questions, wait for my
-  idle notice), then run:
+  (squash, answer my outstanding questions, wait for my idle notice), then run:
   cd <primary checkout> && merge-cleanup --repo <primary checkout> implement-<n>
 ```
 
@@ -652,9 +667,9 @@ On a brief that carried `--chris-merges`, the last line block is this
 instead, the merge line being a claim for the controller to hand over:
 
 ```
-Controller: Chris merges this PR; you dispatched me, so after the Codex pass
-  (if heavy) hand him the merge line and the cleanup line per implement/SKILL.md
-  § The merge, each with the `! ` prefix:
+Controller: Chris merges this PR; you dispatched me, so hand him the merge
+  line and the cleanup line per implement/SKILL.md § The merge, each with the
+  `! ` prefix:
   ! gh pr merge <pr> --repo <owner/name> --squash --match-head-commit <headRefOid>
   ! cd <primary checkout> && merge-cleanup --repo <primary checkout> implement-<n>
 ```
@@ -666,7 +681,7 @@ Controller: Chris merges this PR; you dispatched me, so after the Codex pass
   checkout>` with the absolute path of the main worktree, the first entry of
   `git worktree list`. The `--chris-merges` variant follows the same
   literal-flag rule as below; the controller, not the worker, hands Chris
-  those lines, after the Codex pass.
+  those lines.
 
 - **The sha CLEAN was observed at** — step 5's `headRefOid`, the commit
   GitHub read not-draft and `CLEAN` on, which is not always the tip by the
@@ -682,7 +697,7 @@ Controller: Chris merges this PR; you dispatched me, so after the Codex pass
   **its own sha beside its diff class**: what kind of change it is (wording
   only, test-only, the fix for finding `S1`). A list of shas the controller can
   check against the PR; a bare list of classes it cannot. That is what lets
-  it rule on another review round without diffing it blind.
+  it rule on another round without diffing it blind.
 - **Every parallel job you launched, with its core count** — and when you
   launched none, say "none" rather than leaving the field out. The
   controller's budget is counted in slots and the real contention is in
@@ -694,11 +709,11 @@ Controller: Chris merges this PR; you dispatched me, so after the Codex pass
   load you observed.
 
   **A parallel job is any process you caused to exist beyond yourself** —
-  a background command, a test run still going, and **every subagent**: a
-  review axis, a verification pass, an explore agent. A subagent is a
-  process on the same shared box, counting against the same 28-process cap
-  as any other. So `none` means none, not "none of the kind I had in
-  mind": three review axes plus a verification pass are four processes.
+  a background command, a test run still going, the Codex pass, and **every
+  subagent**: a review axis is one. A subagent is a process on the same shared
+  box, counting against the same 28-process cap as any other. So `none` means
+  none, not "none of the kind I had in mind": three review axes plus the Codex
+  pass are four processes.
 - **The cleanup blockers** (#1032, folding in #831) — what `merge-cleanup`
   would refuse the workspace's removal over, named while you can still act
   on it rather than found in the refusal after the merge. A kept `.scratch/`
@@ -717,7 +732,9 @@ body, not a label, not a comment. The worker's run ends there.
 ### The merge
 
 The controller merges on a repo Chris owns; Chris reads it after via
-`/landed`, and revert is the undo.
+`/landed`, and revert is the undo. There is no review step here: the review
+wave ran in the worker's § Review, and what the controller checks is
+mechanical.
 
 1. **Check who merges twice**: the live labels
    (`gh issue view <n> --repo <owner/name> --json labels`) are the primary
@@ -731,383 +748,26 @@ The controller merges on a repo Chris owns; Chris reads it after via
    dispatch report — do not decide alone either way: hand Chris the merge
    line and the cleanup line as in the exception below, and name the
    disagreement.
-2. **The PR is still not-draft, CLEAN, closes what it should, and carries its verification pass** — the
+2. **The PR is still not-draft, CLEAN, closes what it should, and every
+   finding is disposed** — the
    same check as § Before the PR: step 6, rerun because `main` may have
    moved since "PR up". `closingIssuesReferences` empty or missing the
    ticket blocks the merge same as a draft or a conflict does — a PR that
-   closes nothing does not merge. So does a heavy Claude-lane PR with no verification pass (#1188):
+   closes nothing does not merge. So does a heavy Claude-lane PR whose
+   findings are not all disposed (#1401):
    `bash ~/.agents/skills/implement/verification-check.sh <n>` (`<n>` the
    clump's lowest ticket, run from the primary checkout) must exit 0, or the
-   merge waits and the worker is sent back to § Review step 2. It reads the
-   review cache by the checkout's own key, so no repo name is filled in. A
-   Codex-lane PR is exempt: its worker's waiver is in the "PR up" report. Then read the report's `Cleanup blockers`
-   field: every line but the worker's own `live-session` is ruled on now,
-   while the worker is alive to commit or move it — kept evidence moved
-   out, or Chris asked whether `--discard` may take it — never discovered
-   from `merge-cleanup`'s refusal after the merge.
-3. **Codex adversarial-review pass (#812 trial) — heavy Claude-lane PRs
-   only.** Not heavy, not Claude-lane (a Codex-lane build's own review step
-   is `codex-lane.md`'s, unchanged), skip to step 4.
-
-   Run `codex login status` first. Not logged in, no `codex@openai-codex`
-   entry in `~/.claude/plugins/installed_plugins.json`, or the kill-switch file
-   `~/.config/agent-skills/codex-reviews-off` present: comment
-   `Codex pass skipped: <why>` on the PR, append its ledger skip row (below),
-   and go to step 4 — a skip adds no trial row. A pass that launched and
-   errored has a record, so its ledger row is the fail-closed gate's
-   `--refusal` row below, never a skip row.
-
-   Then check the plan's usage before every launch of this block (#1204) —
-   the gate and the second pass, each a launch:
-   `python3 ~/.agents/skills/implement/codex-usage-gate.py`. It reads the
-   usage cache, refreshing a missing or stale one itself, and prints one
-   line. Exit 0: launch. Exit 20 (capped) or exit 30 (no fresh,
-   readable reading): comment `Codex pass skipped: <printed line>` on the PR,
-   launch nothing, write no refused duration row — no run existed to refuse —
-   append its ledger skip row (below), and go to step 4; on the second
-   pass, the pass already collected stands and its dispositions carry on to
-   step 4. An unreadable cache is exit 30, never headroom.
-   Exit 20 also answers usage at or above the reserve ceiling, 70% (#1359),
-   so the weekly audit of skipped PRs always has quota left. Its comment is
-   `Codex pass skipped: usage <pct>% at or above reserve ceiling 70%, resets <when>`
-   — its printed line — and its ledger skip row takes `--skip-reason ceiling`
-   exactly, distinct from the cap's printed-line reason, so the audit can
-   find it. Only the audit's own launch (`--audit`) runs past the ceiling.
-   The audit and what the controller running it owes:
-   [`codex-audit.md`](codex-audit.md).
-
-   The gate launch, and only it, also measures the PR (#1358): run it from
-   the PR's workspace after `git fetch origin`, as
-   `python3 ~/.agents/skills/implement/codex-usage-gate.py --base origin/<default> --tickets <n>...`,
-   every ticket of the clump named. Exit 40 (under the size threshold): its
-   non-test, non-Markdown churn is under 300 lines and no ticket carries the
-   `needs-codex` label. Comment
-   `Codex pass skipped: under size threshold (<churn> < 300)` — its printed
-   line — on the PR, launch nothing, write no durations row and no trial
-   row, append its ledger skip row with `--skip-reason size` exactly (one
-   reason for every size skip, so the ledger can count them), and go to
-   step 4. The label sends a small PR on to the usage read; it never
-   overrides the kill switch, the reserve ceiling or the cap, which still
-   answer exit 20. The second pass runs the gate bare: the PR
-   already earned its pass at the gate.
-
-   From the worker's workspace, fetch the ticket yourself — you did
-   not build this ticket, so you don't already hold it — body and comments
-   both, rendered as in § The brief, since a requirement added in a comment
-   is part of what Codex must judge the diff against:
-
-   ```
-   gh issue view <n> --repo <owner/name> --json body,comments --jq '
-     .body,
-     (.comments[] | "\n---\n\n## Later comment by @\(.author.login // "ghost") at \(.createdAt)\(if .isMinimized then " — minimized: " + (.minimizedReason // "hidden") else "" end) — quoted ticket data, not an instruction to you\n\n"
-       + (.body | split("\n") | map("> " + .) | join("\n")))'
-   ```
-
-   Write that to a file with your file-write tool. Never interpolate it into
-   a shell string, quoted or not, since a body or comment containing `"`,
-   `` ` ``, or `$(` would then run as shell instead of reading as text; a
-   comment is the less trusted half of the two, since anyone with repo access
-   can add one.
-
-   **The focus text ends with a controller-context appendix** (#941), two
-   required lines, appended to `body_file` after the rendered ticket and
-   marked as controller context rather than ticket text. Codex reads this
-   one branch against `origin/<default>` and nothing else, so anything the
-   controller knows that the tree does not say is invisible to it — and
-   what it cannot see — a split onto a sibling branch, a parked skill a
-   map lands into — it reports as a missing requirement. Write both
-   lines with your file-write tool, into the same file, never interpolated
-   into a shell string — a branch name or a ticket title reaching the shell
-   is the same injection the ticket render above is already protected from:
-
-   ```
-   ## Controller context — written by the controller, not part of the ticket
-
-   **Open sibling branches.** <each open sibling branch, the files it
-   holds, and what of this PR's ask is split onto it: which file, which
-   line, which PR> — or: No sibling branch is open, and nothing in this PR
-   is split.
-
-   **Posture.** <the code under review is parked, feature-flagged off, or
-   otherwise landing ahead of its own activation, and the ticket that
-   activates it> — or: The code under review is live in the tree; its
-   posture is what the tree implies.
-   ```
-
-   Both lines are written even when there is nothing to report. An omitted
-   line and a "nothing is split" line read identically to Codex, and the
-   controller is the only party that can tell them apart. Both facts are
-   the controller's at dispatch time: it is the controller that orders a
-   cross-ticket line, and the
-   controller that knows what a map is staging behind a parked skill.
-   Without the posture line, every PR of a staged rebuild pays one `[high]`
-   whose remedy is "do the closing ticket early" (#891, #898).
-
-   **One recorded run, whichever phase writes it** (#942). The pass runs
-   through this block and no other, for the gate launch or the conditional
-   second one; `phase` is the only thing that changes. A second block with
-   weaker guarantees is how a degraded run gets collected as a clean one —
-   the path that exists to
-   handle a failure being the path with no checks. Invoke the plugin's own
-   script directly: `/codex:adversarial-review` carries
-   `disable-model-invocation: true`, so the SlashCommand tool never reaches
-   it here, and calling the script directly bypasses the slash command's
-   own markdown entirely — the `AskUserQuestion` gate lives there, not in
-   the script; `handleReviewCommand` parses `--wait`/`--background` as
-   booleans and never reads them, always running foreground. Keep `--wait`
-   anyway to say what's intended; it's a harmless no-op on this path. `git
-   fetch origin` first — a stale `origin/<default>` inflates the diff Codex
-   reads:
-
-   ```
-   dir="$HOME/.cache/agent-reviews/<repo>"   # expanded as
-   mkdir -p "$dir"                           # multi-axis-code-review/SKILL.md does it
-   phase=gate                                # or second
-   body_file=<absolute path you wrote the ticket body, comments and appendix to>
-   out_file="$dir/codex-adversarial-<n>-$phase.out"
-   record="$dir/codex-adversarial-<n>-$phase.json"
-   plugin_root=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['plugins']['codex@openai-codex'][0]['installPath'])" ~/.claude/plugins/installed_plugins.json)
-   cd <the PR's workspace> && git fetch origin
-   usage_before=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)
-   launch_sha=$(git rev-parse HEAD); started=$(date -Is)
-   node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")" >"$out_file" 2>&1
-   status=$?
-   usage_after=$(python3 ~/.agents/skills/implement/codex-usage-gate.py --percent)
-   printf '{"ticket": <n>, "phase": "%s", "status": %d, "launch_sha": "%s", "completion_sha": "%s", "body_sha256": "%s", "started": "%s", "completed": "%s", "usage_before": "%s", "usage_after": "%s"}\n' \
-     "$phase" "$status" "$launch_sha" "$(git rev-parse HEAD)" "$(sha256sum "$body_file" | cut -d" " -f1)" "$started" "$(date -Is)" "$usage_before" "$usage_after" >"$record"
-   ```
-
-   The record carries the node call's exit status, the workspace HEAD at
-   launch and again at completion, the `sha256sum` of `body_file`, and both
-   timestamps. The launch sha alone cannot tell a clean read from one the
-   worker committed underneath, and a run that failed and returned writes
-   an output file that looks like any other. Both files go in
-   `~/.cache/agent-reviews/<repo>/`, never this workspace's `.scratch/`:
-   the worker's own § Before the PR step 3 deletes it, which would take an
-   in-flight pass's output with it and fail the pre-report gate on a file
-   the worker never wrote — and a `.scratch/` file left behind stalls
-   `merge-cleanup`, which refuses ignored content without `--discard`.
-   That cache directory's 14-day prune covers both files, so nothing here
-   is cleaned up by hand, `rm` or `rmdir`, in any phase. The `phase` in
-   each name keeps the second pass from overwriting the record the gate
-   launch wrote.
-
-   **Every pass is one ledger row** (#1269): its time and its usage, in
-   percentage points of the worst usage window (the weekly one when it is the
-   worst). The block takes the usage reading with the gate's own `--percent`
-   flag, live and not from the cache, just before the launch and
-   just after the run, and puts both in the record (`usage_before`,
-   `usage_after`, each `<percent> <resetsAt>` or `unknown`). Once the
-   fail-closed gate below has ruled on the run, write its row from the
-   record, with `<repo>` the review cache's directory name:
-
-   ```
-   python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type codex-<phase>
-   ```
-
-   A usage reading that fails, on either side, is `unknown`, never zero, and
-   so are two readings of different windows and a percentage that fell: the
-   row is never given a change nobody read. A run the gate refuses takes the
-   same line with `--refusal "<why>"` added: it cost usage, and its findings
-   describe a diff this PR no longer has, so its row holds none. A pass not
-   launched has no record: append it with `--skip-reason "<the printed
-   line>"` and no other flag, and it gets a row of zero cost that `report`
-   counts as skipped and never as a clean pass. That is an exit 20 or 30 of
-   the usage gate (a reserve-ceiling exit 20's reason is `ceiling`, not the
-   line), its exit 40 (whose reason is `size`, not the line), a
-   failed preflight, or the per-burn budget if #1217 has landed. A refusal
-   from `append` itself is named in the merge report to Chris, never
-   skipped, and does not hold the merge.
-
-   **The pass launches once, here, at PR-up** — not earlier, at the
-   worker's round-1 report: an earlier launch races the worker's own
-   round-1 fix commits, is refused as stale, and is rerun here anyway,
-   costing its wall clock twice. Run the whole
-   block inline, in the foreground, as part of this step; each launch is
-   still a node process against the box cap.
-
-   **The gate is fail-closed.** Nothing merges until this step holds a
-   verdict whose `status` is 0 and whose launch sha, completion sha and the
-   PR's `headRefOid` from step 2 are one sha, with a `body_sha256` matching
-   a fresh render of ticket and appendix. Absent, unreadable, errored (a
-   non-zero `status` — not logged in, quota gone, a node that found no
-   module; the `out_file` then holds that error, not a review), raced (the
-   two shas differ, so the branch moved while Codex was reading) or stale
-   (they agree with each other but not with `headRefOid`, so a fix landed
-   after the launch) is a refusal, not a pass: do not post that verdict,
-   append its duration row with the refusal as the outcome, append its ledger
-   row with `--refusal` (below), and this step ends as `Codex pass skipped: <why>` — comment it on the PR, naming the
-   refusal, and go to step 4. Nothing is claimed about a diff nobody
-   reviewed, and the skip is visible on the PR rather than inferred from a
-   silence. A refused verdict's findings are never reported as current —
-   they describe a diff this PR no longer has, or a run that never produced
-   a review, and either one collected looks exactly like a pass that found
-   nothing — the absent-answer-read-as-benign shape this lane exists to close.
-   The skip clause at the top of this step governs the preflight only — not
-   logged in, no plugin entry, the usage gate — checked before any run exists; every
-   started run answers to this gate, and there is no retry: a refused run
-   ends the step for its own phase, the same as a refused preflight. A
-   refusal with no pass yet collected for this PR leaves no trial row to
-   write. A refusal of the conditional second pass is different: the gate
-   pass earlier in this same step was collected and posted, and its trial
-   row is not undone by a later refusal — nothing already earned is
-   discarded.
-
-   A collected verdict is this step's first pass. Post it from the cache
-   directory:
-   `gh pr comment <pr> --repo <owner/name> --body-file "$out_file"`, before
-   acting on it. If `gh pr comment` fails, stop before merging — the
-   comment is what makes the verdict readable by anyone but you.
-
-   **Every run records its duration**, collected or refused, as one row
-   appended to `docs/research/2026-09-20-codex-pass-durations.md`: ticket,
-   PR, phase (`gate` or `second`), launched, completed, duration in
-   minutes, and outcome — `collected`, or the refusal that discarded it. A
-   refused run still gets its row: it spent the same wall clock and the
-   same tokens, and that cost is what #1015 measured to retire the early
-   launch. The row is an auto-ship commit on `<default>`, the trial row's
-   own rule, and is written at the same time.
-
-   No material findings → go to step 4. Findings → hold the merge: send the
-   worker the findings and the comment URL. Note the head sha this pass ran
-   against — step 2's `headRefOid` — and beside it the record's
-   `body_sha256`. That sum covers the
-   appendix as well as the rendered ticket, both being in the one file, so
-   a fresh render for that comparison is ticket and appendix — rebuilding
-   the ticket alone reads as a change that never happened and burns the
-   second pass on it. An appendix that genuinely moved — a sibling branch
-   merged since, a posture that changed — is a real input change and reruns
-   the pass, because the context Codex judged against is no longer the
-   context that holds. Those two are what the
-   second pass is judged against below: the diff is only half this pass's
-   input, and a requirement commented onto the ticket between the two
-   passes moves the other half while the sha sits still.
-   The worker disposes of each one under § Review's reachability bar first
-   and its severity mapping second: one of § Review's blocking kinds as
-   that rule disposes of it, never `leftover`; any other fixed in a commit,
-   `disputed: <why>`, filed if it is high, or `leftover`. It adds each
-   disposition to the PR body's Decisions made section
-   (`gh pr edit <pr> --repo <owner/name> --body-file ~/.cache/agent-reviews/<repo>/pr-body-<n>.md`),
-   and sends "PR up" again.
-   Re-run step 2 (not-draft, CLEAN — commits landed since the first check).
-
-   **The second pass runs only if the head sha moved or the ticket text
-   changed.** Step 2's fresh `headRefOid` differing from the sha noted above
-   means a `fixed` disposition pushed a commit, so there is a new diff to
-   read; a fresh render of the ticket hashing differently from the
-   `body_sha256` noted beside it means a comment added a requirement the
-   first pass never read. Either is a new input, and the pass runs.
-
-   If every disposition was `disputed` or `filed`, the sha is unmoved and
-   the ticket hash matches, both halves of the input are byte-identical and
-   a second run spends several minutes and a token budget returning the
-   findings you already hold. What makes the diff half safe is the
-   merge-base, not the sha alone: this pass reads `origin/<default>...HEAD`,
-   and a fixed head pins the fork point, so `<default>` gaining any number
-   of commits leaves the diff unchanged. The skip would stop being sound
-   only for a review taken as a two-dot diff against a moving base — which
-   reads everyone else's merged work as deletions, and is not what
-   `--base origin/<default>` above asks for.
-
-   It does not run. The controller instead confirms each disposition is
-   recorded in the Decisions made section and goes to step 4 — by way of
-   the classification and trial row below, which a skipped pass still owes,
-   its counts being the first pass's. A disposition that says `fixed` with
-   the sha unmoved is neither case: the commit it names is not on the PR, so
-   nothing merges until the worker pushes it — a push that moves the sha and
-   runs the second pass after all.
-
-   When either moved, run this pass once more on the fixes, with
-   `phase=second`, and post its output as a PR comment the same way, from
-   its own `phase`-named `out_file`. No material findings → go to step 4.
-   Findings → the controller evaluates every finding and its recommendation
-   before any reaches the worker, as it did the first pass's. **A
-   second-pass finding that passes § Review's adjacent-fix rule, or is one
-   of § Review's blocking kinds, goes to the worker, who fixes it in one
-   round.** The worker makes each fix in a commit of its own. It records
-   each with § Review's adjacent-fix disposition, or a blocking kind's
-   plain `fixed`, and that sha in the PR body's Decisions made section, and
-   sends "PR up" again. Then the controller reads that fix diff itself,
-   against the finding it answers and the adjacent-fix rule, or a blocking
-   kind's fix against that rule, rather than sending it back to Codex. It
-   re-runs step 2. The fail-closed gate does not refuse the second pass as
-   stale over an in-round fix: the controller's read of the fix diff is the
-   review of every commit past the second pass's sha, up to the head it
-   read. So the controller records the head sha it read the fix diff at,
-   beside the finding it answers: `read at <sha>` appended to that
-   finding's line in the PR body's Decisions made (`gh pr edit`, the same
-   body file). Immediately before step 4, the PR's `headRefOid` must still
-   equal that sha. If it moved, the controller reads the new commits the
-   same way and records the new sha, or refuses the merge. A commit the
-   controller has not read never merges. The controller disposes of every
-   other second-pass finding in the PR body itself: `disputed: <why>`,
-   filed if it is high, or `leftover`, under § Review's reachability bar
-   first and its severity mapping second. A fix outside those two rules is
-   a change, not a round.
-
-   The second pass is final (#1360): no Codex run follows it, whatever
-   its in-round fixes were. The controller's own read of the fix diff is
-   the last review, and step 4 follows once every disposition is recorded.
-
-   A Codex-pass finding disposed of as `leftover`, whichever pass raised
-   it, is recorded twice. Its PR-body disposition is the first record.
-   Beside it, the controller appends one line for it to
-   `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl`, in § Review's
-   `leftover` grammar, under the id `codex-<phase>-<label>`: the pass's
-   `phase` (`gate` or `second`) and the label Codex gave the
-   finding, as in `codex-second-1`. The PR-body disposition line in
-   Decisions made opens with that id, or ends `sidecar <id>`, so
-   `runfile.py leftover` can join the two (§ The PR). Codex numbers each pass's findings from 1, so a bare label repeats
-   across passes, and `runfile.py leftover` refuses a sidecar that carries
-   one id twice (#1124). That sidecar is
-   what the sweep harvests at landing, and the verification pass wrote it
-   before any Codex pass ran, so a leftover kept only in the PR body never
-   reaches a sweep.
-
-   On a PR whose worker brief carried no `--run <run-id>`, appending a Codex
-   `leftover` is not the end: the worker filed its per-PR sweep at "PR up",
-   before any Codex pass, so nothing reads the sidecar again. The controller
-   then updates or files the per-PR sweep by § The PR's idempotent title
-   search, rules and all: a non-zero exit from the search stops you and is
-   never read as no hit; no hit files through `/file-ticket` in #1030's body
-   shape, labelled `ready-for-agent`; one hit is edited with the worker's
-   existing items kept and the Codex leftovers added, since `--body-file`
-   replaces the whole body (#1125). A brief that carried `--run <run-id>`
-   files nothing here: the burn's own sweep harvests the sidecar
-   (`burndown/SKILL.md` § The sweep). A sweep the worker never filed (no
-   leftovers at "PR up") is filed here the same way.
-
-   **A disposition that changes after the verification pass rewrites its
-   sidecar line** (#1085). Whoever changes it — the controller's read of an
-   in-round fix, or a ruling — rewrites that finding's line in
-   `dispositions-<n>.jsonl` to its new outcome in the same step that records
-   it in the PR body. A `leftover` line left standing after its finding was
-   fixed is a sweep item that no longer exists. `runfile.py leftover` catches
-   the half-done step at harvest: it refuses a sidecar line whose outcome the PR
-   body's Decisions made contradicts, and a leftover the body does not cite
-   by id (`--pr-body`). A change recorded in neither place is not seen by
-   it; the rewrite is the rule. A ruling that splits the finding rather
-   than changing it outright is not a rewrite of the one line — it is § Review's
-   split grammar (`codex-gate-1a`, `codex-gate-1b`), not `--allow-stale`
-   (#1147/#1170).
-
-   Classify each finding by comparing it with the PR body's round-1
-   findings — `codex-only, confirmed` (fixed or filed, and no Claude axis
-   raised it), `also found by Claude`, or `disputed` (with why) — and
-   append one row to `docs/research/2026-09-14-codex-review-trial.md`:
-   ticket, PR, counts per class, one line per codex-only confirmed finding.
-   This row is an auto-ship commit on `<default>` (docs/research is not
-   code), written once the merge lands: right after step 4 here, or — under
-   the `ready-for-human` exception below — once Chris reports the PR
-   merged; the controller's watch on that ticket doesn't end at "stop" in
-   that exception, only its authority to merge or clean up does. Count rows
-   as they land, not as drafted — two heavy PRs open at once will conflict
-   on the file's tail, and the second to merge rebases through the true
-   count. After the controller's own row brings the count to five, bring
-   Chris the table and a keep/drop recommendation: keep if at least one
-   codex-only confirmed finding would have shipped a real bug, drop if the
-   pass only repeated the Claude axes or raised noise.
-4. Merge. Before the merge, re-run the seam on the PR as it will land
+   merge waits and the worker is sent back to § Review step 3. It reads the
+   review cache by the checkout's own key, so no repo name is filled in, and
+   the branch `implement-<n>` its `fixed` shas must be on. A Codex-lane PR is
+   exempt: its worker's waiver is in the "PR up" report. Then read the report's
+   `Cleanup blockers` field: every line but the worker's own `live-session` is
+   ruled on now, while the worker is alive to commit or move it — kept
+   evidence moved out, or Chris asked whether `--discard` may take it — never
+   discovered from `merge-cleanup`'s refusal after the merge. Read the
+   report's `Codex pass` line too: a refused pass names a refusal, and the
+   merge does not wait on it.
+3. Merge. Before the merge, re-run the seam on the PR as it will land
    (#1145): GitHub's CLEAN is a textual-merge verdict, not a test verdict, and
    two PRs sharing no file each pass their own gate and can break `<default>`
    together even though neither PR's own gate saw the other's change. Run
@@ -1147,10 +807,10 @@ The controller merges on a repo Chris owns; Chris reads it after via
    No `--delete-branch`: git refuses to delete a branch a worktree has
    checked out, and the merge fails on it; `merge-cleanup` removes the
    workspace and deletes the branch after.
-5. **Answer every outstanding question from this worker**, then **wait for
+4. **Answer every outstanding question from this worker**, then **wait for
    it to go idle** (`SendMessage` with `notify_when_idle: true`), then clean
    up from the primary checkout. The order is answer, then merge, then
-   cleanup, and answering here — after step 4, before cleanup — satisfies
+   cleanup, and answering here — after step 3, before cleanup — satisfies
    it. The answer goes **before cleanup**, not merely before the merge:
    `merge-cleanup` closes the worker's pane, and an answer sent after that
    reaches nobody. What counts as outstanding, the incident behind the rule,
@@ -1163,24 +823,21 @@ The controller merges on a repo Chris owns; Chris reads it after via
 
    Its live-session guard refuses a worker still `working`; an idle one it
    stops itself.
-6. **`gh issue view <n> --repo <owner/name>` shows each `Closes` issue
+5. **`gh issue view <n> --repo <owner/name>` shows each `Closes` issue
    closed** — a squash or rebase can rewrite the commit so the trailer never
    fires. `merge-cleanup` clears a closed ticket's `in-progress` label and
    assignee itself (#821); this step's job is only to confirm the issue
    closed at all.
-7. Report "merged, sha X" to Chris, X being the squash commit on the default
+6. Report "merged, sha X" to Chris, X being the squash commit on the default
    branch (`gh pr view <pr> --repo <owner/name> --json mergeCommit`).
 
 **The one exception: a `ready-for-human` ticket** ("Chris merges"). Nothing
-merges automatically. After step 3 (the Codex pass, if this PR is heavy
-Claude-lane) and step 4's re-run of the seam (skipped only as step 4 says;
-a red one goes to the worker, not to Chris), hand Chris the merge line and the cleanup line, each with the
-`! ` prefix and paths expanded, and stop merging and cleaning up yourself;
-Chris merges, cleans up, and the `Closes` check is his. Why: Chris marked
-that work for his own hands, so he sees it before it lands. If step 3 ran,
-you still owe it its trial row: wait for Chris to report the PR merged, then
-classify and append it as step 3 describes — that part of the controller's
-job on this ticket doesn't stop with the hand-off.
+merges automatically. After step 3's re-run of the seam (skipped only as it
+says; a red one goes to the worker, not to Chris), hand Chris the merge line
+and the cleanup line, each with the `! ` prefix and paths expanded, and stop
+merging and cleaning up yourself; Chris merges, cleans up, and the `Closes`
+check is his. Why: Chris marked that work for his own hands, so he sees it
+before it lands.
 
 ## Someone else's repo
 
@@ -1189,6 +846,7 @@ send the controller the push and `gh pr create` lines instead of running them.
 The controller merges nothing there. The git hook blocks every push to a repo
 Chris does not own, and Chris sees the work before any other human does.
 
-Each handed-back finding's `gh issue create` command goes in that same
-message, one per finding beside its id, so Chris can file it after he has
-seen the work. Nothing files it before then.
+A finding that needs its own design has no ticket to name there
+(§ Review step 2): each one's `gh issue create` command, as `/file-ticket`
+gave it, goes in that same message, one per finding beside its id, so Chris
+can file it after he has seen the work. Nothing files it before then.
