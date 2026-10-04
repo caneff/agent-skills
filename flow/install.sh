@@ -50,6 +50,13 @@ for a in "$here/claude/agents"/*.md; do
   [ -e "$a" ] || continue
   link "claude/agents/$(basename "$a")" "$HOME/.claude/agents/$(basename "$a")"
 done
+# Path-scoped rules (#1413): a `paths:` rule in ~/.claude/rules/ fires in every
+# repo, globbed against the session's cwd, and a per-file symlink loads
+# (docs/research/2026-10-04-user-path-rules-probe.md).
+for r in "$here/claude/rules"/*.md; do
+  [ -e "$r" ] || continue
+  link "claude/rules/$(basename "$r")" "$HOME/.claude/rules/$(basename "$r")"
+done
 # Renamed from sync-primary-main.sh to refresh-landed.sh: drop the stale
 # symlink so a rename doesn't leave the old name pointing into this repo.
 if [ -L "$HOME/.claude/hooks/sync-primary-main.sh" ]; then

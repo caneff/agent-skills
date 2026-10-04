@@ -1,6 +1,7 @@
 # Shell safety (read before a search you will assert from, or a process kill)
 
-Pointer target for `CLAUDE.md` § Gotchas.
+The teaching hook `hooks/teach-process-kill.sh` shows the kill section on a
+session's first process search; `CLAUDE.md` no longer points here (#1413).
 
 ## Searching
 

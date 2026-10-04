@@ -36,12 +36,16 @@ expect_none "ps as an argument" "$(context "$hook" s4 "echo ps")"
 expect_none "trigger in a grep pattern" "$(context "$hook" s4 "rg 'foo|pgrep -f' docs/")"
 expect_none "trigger in a double-quoted pattern" "$(context "$hook" s4 'grep -n "x; ps -eo" SHELL-SAFETY.md')"
 expect_none "trigger after a quoted separator" "$(context "$hook" s4 'git commit -m "stop it; ps aux"')"
-expect_none "trigger in a comment" "$(context "$hook" s4 "ls # then ps aux")"
+# Only comment handling keeps this quiet: without it, the `;` would split off
+# `ps aux` as a command of its own.
+expect_none "trigger in a comment" "$(context "$hook" s4 "ls # x; ps aux")"
 expect_none "trigger in a heredoc body" "$(context "$hook" s4 "cat > kill.sh <<'SH'
 ps -eo pid,args
 SH")"
 # A word that only starts with a trigger is a different command.
-expect_none "psql is not ps" "$(context "$hook" s4 "psql -c 'select 1'")"
+# The `echo ps` gets the line past the word gate, so the parse has to tell
+# `psql` from `ps`.
+expect_none "psql is not ps" "$(context "$hook" s4 "psql -c 'select 1'; echo ps")"
 expect_has "extraction: s4 still unspent after all that" "$(context "$hook" s4 "ps aux")" "${section[@]}"
 
 # A renamed source heading must say so, never print nothing: empty output
@@ -61,5 +65,24 @@ expect_has "missing doc is reported" \
 rm "$tmp/tree/claude/hooks/command-scan-lib.sh"
 expect_has "missing lib is reported" \
   "$(context "$tmp/tree/claude/hooks/teach-process-kill.sh" s8 "ps aux")" "command-scan-lib.sh is missing"
+
+# A `# ` line inside a code fence is the doc's text, not its next heading.
+copy_tree
+printf '## Killing a process\n\nBefore.\n```\n# a shell comment\nps -eo pid,args\n```\nAfter the fence.\n\n## Editing\n' \
+  > "$tmp/tree/claude/SHELL-SAFETY.md"
+expect_has "extraction: a fenced # line does not end the section" \
+  "$(context "$tmp/tree/claude/hooks/teach-process-kill.sh" f1 "ps aux")" "# a shell comment" "After the fence."
+
+# A missing teach-lib.sh, or no jq, is said too, never silence.
+copy_tree
+rm "$tmp/tree/claude/hooks/teach-lib.sh"
+expect_has "missing teach-lib.sh is reported" \
+  "$(context "$tmp/tree/claude/hooks/teach-process-kill.sh" l1 "ps aux")" "teach-lib.sh is missing"
+nojq="$tmp/nojq"
+mkdir -p "$nojq"
+for f in /usr/bin/*; do [ "${f##*/}" = jq ] || ln -s "$f" "$nojq/${f##*/}"; done
+got=$(printf '%s' '{"session_id":"j1","tool_input":{"command":"ps aux"}}' | PATH="$nojq" bash "$hook" 2>&1)
+if [[ "$got" == *"jq is not on PATH"* ]]; then echo "PASS: missing jq is reported"
+else echo "FAIL: missing jq is reported — got: ${got:0:300}"; fails=1; fi
 
 finish

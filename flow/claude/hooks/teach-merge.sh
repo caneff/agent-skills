@@ -4,7 +4,10 @@
 # preconditions, once per session. Shared mechanics: teach-lib.sh.
 
 # shellcheck source=teach-lib.sh
-. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/teach-lib.sh"
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/teach-lib.sh" 2>/dev/null || {
+  printf '%s\n' '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "Teaching hook error: teach-lib.sh is missing beside teach-merge.sh, so it cannot teach."}}'
+  exit 0
+}
 
 if runs gh pr view || runs gh pr checks; then
   teach OPERATIONS.md "Merge preconditions" "\`gh pr view\` and \`gh pr checks\` are the reads before a merge"

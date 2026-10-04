@@ -12,11 +12,18 @@
 
 teach_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 TEACH_DOCS="$(dirname "$teach_dir")"
-# shellcheck source=command-scan-lib.sh
-. "$teach_dir/command-scan-lib.sh" 2>/dev/null || {
-  printf '%s\n' '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "Teaching hook error: command-scan-lib.sh is missing beside teach-lib.sh, so no teaching hook can read a command."}}'
+TEACH_EVENT=${TEACH_EVENT:-PreToolUse}
+# teach_fail <message>: say why nothing can be taught, without jq, and stop.
+teach_fail() {
+  printf '{"hookSpecificOutput": {"hookEventName": "%s", "additionalContext": "Teaching hook error: %s"}}\n' \
+    "$TEACH_EVENT" "$1"
   exit 0
 }
+# shellcheck source=command-scan-lib.sh
+. "$teach_dir/command-scan-lib.sh" 2>/dev/null \
+  || teach_fail "command-scan-lib.sh is missing beside teach-lib.sh, so no teaching hook can read a command."
+command -v jq >/dev/null 2>&1 \
+  || teach_fail "jq is not on PATH, so no teaching hook can read its input or answer."
 
 # One jq call for every field, NUL-separated so a command keeps its newlines.
 # A subagent's calls carry its parent's session id, so the agent id joins the
@@ -32,8 +39,8 @@ TEACH_CONTEXT=""
 TEACH_PENDING=()
 
 # The words the shell would run, one command per line: heredoc bodies,
-# comments and quoted text dropped (a `$(...)` inside double quotes kept) (a trigger in any of them is data), then
-# split at every separator, with leading `VAR=value` assignments and the
+# comments and quoted text dropped, since a trigger in any of them is data (a
+# `$(...)` inside double quotes is kept: it runs). Then split at every separator, with leading `VAR=value` assignments and the
 # words that only introduce a command (`if`, `{`, `sudo`, `time`, ...) taken
 # off. Built on the first `runs` that gets past its word gate, since the scan
 # costs time on a long command.
@@ -67,33 +74,32 @@ shown() { grep -qxF "$1" "$teach_cache/$TEACH_SESSION" 2>/dev/null; }
 session_records() { printf '%s\n' "$teach_cache/$TEACH_SESSION" "$teach_cache/$TEACH_SESSION"-*; }
 
 # section <doc> <heading>: the body under `## <heading>`, up to the next `#`
-# or `##` heading, leading and trailing blank lines dropped. Exits 2 when the
-# doc cannot be read, 1 when it has no such heading, 3 when nothing is under
-# the heading.
+# or `##` heading outside a code fence, leading and trailing blank lines
+# dropped. Exits 2 when the doc cannot be read, 1 when it has no such heading,
+# 3 when nothing is under the heading.
 section() {
   [ -r "$TEACH_DOCS/$1" ] || return 2
   awk -v h="## $2" '
     $0 == h { on = found = 1; next }
-    on && /^##? / { exit }
+    on && /^(```|~~~)/ { fence = !fence }
+    on && !fence && /^##? / { exit }
     on && buf == "" && $0 !~ /[^[:space:]]/ { next }
     on { buf = buf $0 "\n"; if ($0 ~ /[^[:space:]]/) { out = buf; } }
     END { if (!found) exit 1; if (out == "") exit 3; printf "%s", out }' "$TEACH_DOCS/$1"
 }
 
 # teach <doc> <heading> <why this command>: add the section to the context,
-# unless this session has already been shown it. Returns 1 when it was
-# already shown, so a hook can skip work that only goes with the section.
-# The section, or the error saying why it is missing, counts as shown only
+# unless this session has already been shown it. The section, or the error saying why it is missing, counts as shown only
 # once teach_emit has printed it.
 teach() {
   local doc=$1 heading=$2 why=$3 key="$1#$2" text rc
-  shown "$key" && return 1
+  shown "$key" && return 0
   text=$(section "$doc" "$heading"); rc=$?
   # An error counts as shown too: said once, it is not repeated on every call.
   TEACH_PENDING+=("$key")
   case $rc in
     0) teach_add "Reference text from $TEACH_DOCS/$doc § $heading, shown once per session because $why:"$'\n\n'"$text" ;;
-    1) teach_add "Teaching hook error: $TEACH_DOCS/$doc has no \"## $heading\" heading, so the reference text for this command is missing; the section was not found because the hook and the doc disagree on its name." ;;
+    1) teach_add "Teaching hook error: $TEACH_DOCS/$doc has no \"## $heading\" heading, so the reference text for this command is missing: the section was not found under the name this hook asks for (renamed, moved or deleted)." ;;
     2) teach_add "Teaching hook error: $TEACH_DOCS/$doc cannot be read, so the reference text for this command (§ $heading) is missing." ;;
     *) teach_add "Teaching hook error: \"## $heading\" in $TEACH_DOCS/$doc has nothing under it, so the reference text for this command is missing." ;;
   esac
