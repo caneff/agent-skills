@@ -63,10 +63,18 @@ class CompositionTest(unittest.TestCase):
         self.assertIn("run_in_background", text)
         self.assertTrue(os.path.exists(os.path.join(ROOT, "flow", "bin", "job-run")))
 
-    def test_refuses_a_linked_worktree_with_seat(self):
+    def test_refuses_a_linked_worktree_by_comparing_git_dirs(self):
         text = skill_text()
-        self.assertIn("burndown/loop.py seat", text)
-        self.assertTrue(os.path.exists(os.path.join(ROOT, "burndown", "loop.py")))
+        self.assertIn("rev-parse --absolute-git-dir", text)
+        self.assertIn("--git-common-dir", text)
+
+    def test_names_the_run_after_the_primary_checkout(self):
+        self.assertIn("never `<dir>`'s", skill_text())
+
+    def test_separates_a_refused_start_from_a_crash(self):
+        text = skill_text()
+        self.assertIn("job-run --status drain-<repo-short>", text)
+        self.assertIn("already live", text)
 
     def test_points_at_drain_py_and_names_the_pane(self):
         text = skill_text()
