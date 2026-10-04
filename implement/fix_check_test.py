@@ -54,6 +54,8 @@ class World:
         self.git(self.primary, "worktree", "add", "-q", "-b", "implement-5", self.work)
         self.base_sha = self.git(self.primary, "rev-parse", "HEAD")
         self.fix_sha = self.commit(self.work, "fix")
+        # A second commit, so the branch's history is read across commits: one of them closes #6.
+        self.commit(self.work, "more", "more\n\nCloses #6")
         self.reviews = os.path.join(self.home, ".cache", "agent-reviews", "skills-repo")
         os.makedirs(self.reviews)
         self.tickets = {}
@@ -65,11 +67,11 @@ class World:
         assert done.returncode == 0, (args, done.stderr)
         return done.stdout.strip()
 
-    def commit(self, cwd, name):
+    def commit(self, cwd, name, message=None):
         with open(os.path.join(cwd, name), "w") as fh:
             fh.write(name)
         self.git(cwd, "add", name)
-        self.git(cwd, "commit", "-q", "-m", name)
+        self.git(cwd, "commit", "-q", "-m", message or name)
         return self.git(cwd, "rev-parse", "HEAD")
 
     def write_gh(self):
@@ -187,6 +189,9 @@ def main():
         w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 5})
         case("a finding moved onto the ticket this PR closes would be lost at the merge", w, 1,
              "P1: moved ticket #5 is one this PR closes")
+        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 6})
+        case("a finding moved onto a ticket a later commit of the branch closes", w, 1,
+             "P1: moved ticket #6 is one this PR closes")
         w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": "77"})
         case("a moved line without an integer ticket", w, 1, "P1: moved without a ticket number")
 

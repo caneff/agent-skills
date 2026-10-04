@@ -113,7 +113,7 @@ class Branch:
         self.base = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
         self.commits = set(git("rev-list", f"{self.base}..{name}").split())
         log = git("log", f"{self.base}..{name}", "--format=%ct%n%B%n==end==").split("==end==")
-        stamps = [int(chunk.split("\n", 1)[0]) for chunk in log if chunk.strip()]
+        stamps = [int(chunk.strip().split("\n", 1)[0]) for chunk in log if chunk.strip()]
         self.started = min(stamps) if stamps else None
         self.closes = {int(m.group(1)) for m in CLOSES.finditer("\n".join(log))}
 
