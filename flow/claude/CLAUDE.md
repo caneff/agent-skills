@@ -159,8 +159,7 @@ from a one-line mention in a doc.
 - **Before filing any ticket** (review follow-up, controller observation,
   retro digest item), search open issues for the same file or component;
   if one exists, add the item to it (`gh issue comment`) instead of filing.
-  A nit or style finding is never filed: fix it in the PR or drop it. Work
-  under about two minutes is done now or dropped, never ticketed. Why:
+  Work under about two minutes is done now, never ticketed. Why:
   2026-10-04, 295 tickets opened in 14 days against 271 closed, most of them
   one-paragraph items on a component that already had an open ticket;
   evidence in `docs/research/2026-10-04-agent-ticket-inflation.md`.
