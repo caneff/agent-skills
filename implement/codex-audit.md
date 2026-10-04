@@ -1,7 +1,8 @@
 # Weekly Codex audit
 
 Once per Codex quota window, one Codex adversarial review covers every
-merged PR that skipped its wave pass for size or the reserve ceiling
+merged PR that skipped its wave pass for size, the reserve ceiling or a size
+check that failed (`unmeasured`)
 (`SKILL.md` § The Codex pass). Confirmed findings become one
 `ready-for-agent` ticket each. The controller running it owns every step
 below; no worker is involved, and nothing is posted to the merged PRs.

@@ -102,8 +102,11 @@ check("audit above the ceiling", run(cache(95), "--audit"), 0, "95%")
 check("audit at the cap", run(cache(100), "--audit"), 20, "capped")
 status, out = run(cache(100, resets=time.time() + 5 * DAY))
 check("capped", (status, out), 20, "100%")
+# A PR gated at the cap answers the ceiling line, never a line of its own: the audit reads only
+# `ceiling` skip rows, so a cap-worded line would leave that PR out of the audit for good (#1405 C1).
+assert "reserve ceiling 70%" in out and "capped" not in out, out
 assert "resets" in out and time.strftime("%Y-%m-%d", time.localtime(time.time() + 5 * DAY)) in out, out
-check("over 100", run(cache(103)), 20)
+check("over 100", run(cache(103)), 20, "reserve ceiling 70%")
 # The worst window governs.
 check("secondary governs",
       run(cache(10, secondary={"usedPercent": 100, "resetsAt": time.time() + DAY})), 20)
@@ -130,6 +133,7 @@ stale = cache(5, fetched=time.time() - 3600)
 live = {"usedPercent": 100, "resetsAt": time.time() + 4 * DAY}
 status, out, after = run_live(stale, {"primary": live, "secondary": None})
 check("refresh reads live", (status, out), 20, "100%")
+assert "reserve ceiling 70%" in out, out
 assert after["primary"]["usedPercent"] == 100, f"cache not rewritten: {after}"
 assert time.time() - after["fetchedAt"] < 60, f"fetchedAt not renewed: {after}"
 status, out, after = run_live(stale, None)
@@ -287,6 +291,12 @@ def run_size(changes, tickets=("1",), base="main", **repo):
 
 
 check("size at threshold", run_size({"a.py": 300}), 0, "5%")
+# A proceed says why it proceeded (#1405 P1): the churn that passed the threshold, or the label
+# that forced a small PR on, with the churn it overrode.
+check("proceed names churn", run_size({"a.py": 300}), 0, "churn 300 >= 300")
+check("proceed names label", run_size({"a.py": 5}, labels={"1": ["needs-codex"]}), 0,
+      "needs-codex label forced it, churn 5 < 300")
+assert "churn" not in run(cache(5))[1], "no size check, no churn in the line"
 assert run_size({"a.py": 299}) == (40, "under size threshold (299 < 300)\n"), run_size({"a.py": 299})
 check("size far above", run_size({"a.py": 5000}), 0, "5%")
 # Tests and Markdown carry no churn: 2000 lines of them plus 10 counted lines is 10.
@@ -337,11 +347,20 @@ for labels, want_status, want_called in (({}, 40, False), ({"1": ["needs-codex"]
         called = os.path.exists(os.path.join(env["HOME"], "codex-called"))
         assert (p.returncode, called) == (want_status, want_called), (labels, p.returncode, p.stdout, called)
 # Malformed size arguments are unknown (30) with a usage line, never a silent full-size pass.
-for bad in (["--base", "main"], ["--base", "main", "--tickets"], ["--tickets", "1", "--base", "main"],
+for bad in (["--base", "main"], ["--base", "main", "--tickets"], ["--tickets", "1"],
             ["--base", "main", "--tickets", "#1"], ["--audit", "--base", "main", "--tickets", "1"],
-            ["--audit", "--audit"]):
+            ["--bogus"], ["--help"], ["-h"], ["--perc"], ["--base", "main", "--tickets", "1", "stray"],
+            ["--percent", "--audit"], ["--percent", "--base", "main", "--tickets", "1"], ["stray"]):
     status, out = run(cache(5), *bad)
     assert status == 30 and out.startswith("usage: codex-usage-gate.py"), (bad, status, out)
+# Flag order is free (#1405 OE1): the same arguments, tickets first.
+with fake_repo({"a.py": 5000}) as (cwd, env):
+    p = subprocess.run([sys.executable, GATE, "--tickets", "1", "2", "--base", "main"],
+                       cwd=cwd, env=env, capture_output=True, text=True)
+    assert (p.returncode, "5%" in p.stdout) == (0, True), (p.returncode, p.stdout)
+# `--help` must not be argparse's own exit 0, which a caller reads as proceed.
+status, out = run(cache(5), "--help")
+assert status == 30 and out.startswith("usage: codex-usage-gate.py"), (status, out)
 # A base git cannot resolve is unknown, never a size verdict either way, and the line names git's
 # own error rather than a usage read that never happened.
 status, out = run_size({"a.py": 5}, base="nope")

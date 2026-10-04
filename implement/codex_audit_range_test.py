@@ -10,18 +10,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from codex_audit_fixtures import GIT_ENV, GitRepoCase, skip_row
+
 SCRIPT = Path(__file__).resolve().parent / "codex-audit-range.py"
-GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
-           "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
-
-
-def skip_row(ticket, reason, repo="skills", phase="gate"):
-    """A ledger row as `review_ledger.py append --skip-reason` writes it (the fields the script reads)."""
-    return {"row_id": f"{repo}/{ticket}/codex-{phase}/1/codex-skipped-{ticket}-{phase}", "origin": "append",
-            "repo": repo, "ticket": ticket, "tickets": [ticket], "type": f"codex-{phase}", "findings": [],
-            "skip_reason": reason,
-            "status": {"fields": {"findings": {"status": "skipped", "reason": reason}}}}
 
 
 def pass_row(ticket, repo="skills"):
@@ -30,7 +21,7 @@ def pass_row(ticket, repo="skills"):
             "status": {"fields": {"findings": {"status": "known"}}}}
 
 
-class Case(unittest.TestCase):
+class Case(GitRepoCase, unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
@@ -43,17 +34,6 @@ class Case(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
-
-    def git(self, *args, date=None):
-        env = {**self.env, **({"GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date} if date else {})}
-        return subprocess.run(["git", *args], cwd=self.repo, env=env, check=True,
-                              capture_output=True, text=True).stdout.strip()
-
-    def commit(self, message, date):
-        (self.repo / "f").write_text(message)
-        self.git("add", "f")
-        self.git("commit", "-q", "-m", message, date=date)
-        return self.git("rev-parse", "HEAD")
 
     def merge(self, pr, ticket, date):
         """A squash merge as GitHub writes it: the subject ends `(#<pr>)`, the body closes the ticket."""
@@ -113,6 +93,13 @@ class SkippedSinceMarkTest(Case):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout, self.expected())
         self.assertEqual(r.stderr, "")
+
+    def test_a_pr_the_gate_could_not_measure_is_audited_like_a_size_skip(self):
+        # An exit-30 size check leaves a PR of unknown size unreviewed, so the audit takes it (#1405 C2).
+        self.write_ledger([skip_row(12, "unmeasured")])
+        r = self.run_script(self.mark)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, f"range {self.size}..{self.cap}\nPR #102 ticket #12 unmeasured {self.cap}\n")
 
     def test_a_merge_naming_the_ticket_only_in_its_subject_is_found(self):
         later = self.commit("Fix a thing (#15) (#105)\n\n* a commit with no closing line\n",

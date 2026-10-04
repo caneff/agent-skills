@@ -393,13 +393,17 @@ Then run the gate from this workspace after `git fetch origin`, which checks
 the plan's usage and measures the PR (#1204, #1358):
 `python3 ~/.agents/skills/implement/codex-usage-gate.py --base origin/<default> --tickets <n>...`,
 every ticket of the clump named. It reads the usage cache, refreshing a missing
-or stale one itself, and prints one line. Exit 0: launch. Exit 20 (capped) or
+or stale one itself, and prints one line. Exit 0: launch; its line says why it
+proceeded (the churn that passed the threshold, or the `needs-codex` label that
+forced a small PR on). Exit 20 (capped) or
 exit 30 (no fresh, readable reading): launch nothing, append the ledger skip
 row, name the printed line in the PR body. An unreadable cache is exit 30,
 never headroom. Exit 20 also answers usage at or above the reserve ceiling, 70%
-(#1359), so the weekly audit of skipped PRs always has quota left; its ledger
-skip row takes `--skip-reason ceiling` exactly, distinct from the cap's printed
-line. Exit 40 (under the size threshold): its non-test, non-Markdown
+(#1359), the 100% cap included, so the weekly audit of skipped PRs always has
+quota left; its ledger skip row takes `--skip-reason ceiling` exactly, whenever
+the printed line says `reserve ceiling`. An exit 30 whose line begins
+`size check failed:` leaves a PR of unknown size with no pass: its skip row takes
+`--skip-reason unmeasured` exactly, which the audit reads like `size`. Exit 40 (under the size threshold): its non-test, non-Markdown
 churn is under 300 lines and no ticket carries the `needs-codex` label;
 launch nothing,
 append the skip row with `--skip-reason size` exactly (one reason for every
@@ -522,8 +526,8 @@ this PR no longer has, so its row holds none. A pass not launched has no
 record: append it with `--skip-reason "<the printed line>"` and no other flag,
 and it gets a row of zero cost that `report` counts as skipped and never as a
 clean pass. That is an exit 20 or 30 of the usage gate (a reserve-ceiling exit
-20's reason is `ceiling`, not the line), its exit 40 (whose reason is `size`,
-not the line), or a failed preflight. A refusal from `append` itself goes to the
+20's reason is `ceiling`, not the line; a `size check failed:` exit 30's is
+`unmeasured`), its exit 40 (whose reason is `size`, not the line), or a failed preflight. A refusal from `append` itself goes to the
 controller in "PR up", never skipped.
 
 A collected pass is its `.out`: each `- [severity] title (file:lines)` line
