@@ -250,15 +250,23 @@ def test_a_colon_inside_the_emphasis_needs_no_space_before_a_code_span():
     assert "**Seam**: **" not in got, got
 
 
-def test_neither_reader_defines_a_key_regex_of_its_own():
-    # One key-line parser, in `frontier` (#1000): a second `_KEY` is the
-    # drift #928 fixed once already.
-    burndown = os.path.join(REPO_ROOT, "burndown")
-    for path in (GENERATOR, os.path.join(burndown, "closure.py")):
-        with open(path) as fh:
-            source = fh.read()
-        # The key grammar's own key group, under whatever name it is bound.
-        assert "[A-Za-z][A-Za-z -]*?" not in source, path
+def test_both_readers_parse_a_key_line_as_frontier_does():
+    # One key-line parser, in `frontier` (#1000): a second copy is the drift
+    # #928 fixed once already. Run the same awkward lines through each reader
+    # and compare with `frontier.key_line`, so a copy under any name that parses
+    # them differently fails.
+    import closure
+    import frontier
+    lines = ["- **Seam**: bash tests/all.sh", "- **Seam:** bash tests/all.sh", "- **Seam**:**x**",
+             "- Seam: plain", "* __Blind to__: a thing", "- **Seam**:**"]
+    for line in lines:
+        pair = frontier.key_line(line)
+        got = T.declaration("## End-to-end seam\n" + line + "\n")
+        assert got == ({pair[0]: pair[1]} if pair else {}), (line, got, pair)
+    directive = "- **Directive**: `#include <x>`"
+    want = frontier.key_line(directive)[1].strip("`")
+    parsed = closure.parse_declaration("## Include closure\n" + directive + "\n- **Generator**: g\n")
+    assert parsed.directive == want, parsed
 
 
 def test_a_root_that_is_not_a_directory_is_not_a_missing_declaration():

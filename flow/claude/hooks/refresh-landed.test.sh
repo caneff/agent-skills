@@ -58,11 +58,14 @@ else
   echo "FAIL: push command did not invoke generate.py"; fails=1
 fi
 
-# No hard-coded repo path anywhere in the hook.
-if grep -qE '/home/[a-zA-Z0-9_-]+/' "$hook"; then
-  echo "FAIL: hook contains a hard-coded home path"; fails=1
+# The hook runs the generate.py of the checkout it lives in: a path baked in for
+# one machine would name a file that exists there and still be another checkout's.
+gen="$(grep 'generate.py' "$tmp/python3.args" | head -1)"
+want="$(cd "$here/../../../landed" && pwd -P)/generate.py"
+if [ -n "$gen" ] && [ "$(readlink -f "$gen")" = "$want" ]; then
+  echo "PASS: the hook runs this checkout's generate.py"
 else
-  echo "PASS: hook contains no hard-coded repo path"
+  echo "FAIL: the hook ran '$gen', want '$want'"; fails=1
 fi
 
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

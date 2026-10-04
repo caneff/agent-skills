@@ -600,7 +600,23 @@ class DrainTest(Sandbox):
     def test_the_lock_and_agent_names_match_implement_dispatch(self):
         # drain cannot import the Rust it mirrors; this pins what it copies.
         source = read(os.path.join(HERE, "..", "flow", "lane", "src", "bin", "implement_dispatch.rs"))
-        self.assertIn("implement-dispatch-claim-", source)
+        sys.path.insert(0, HERE)
+        import drain
+        # The lock drain takes is the path implement_dispatch.rs formats, not a
+        # name only the test knows: run drain's own lock under a scratch HOME and
+        # compare the file it creates with the Rust format string.
+        self.assertIn("{}/.implement-dispatch-claim-{}.lock", source)
+        self.assertIn("slug.replace('/', \"__\")", source)
+        import types
+        home = tempfile.mkdtemp()
+        old_home, os.environ["HOME"] = os.environ.get("HOME"), home
+        try:
+            with drain.claim_lock(types.SimpleNamespace(repo="owner/name")):
+                pass
+        finally:
+            os.environ["HOME"] = old_home
+        self.assertTrue(os.path.exists(os.path.join(home, ".implement-dispatch-claim-owner__name.lock")))
+        # The worker's herdr agent name drain looks for is the one the Rust formats.
         self.assertIn("(32usize).saturating_sub(suffix.len())", source)
         self.assertIn('Mode::Plain => format!("-{n}")', source)
 

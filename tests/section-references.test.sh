@@ -31,15 +31,41 @@ run_fixture step-locator-inline-code-valid
 run_fixture multiline-code-span-valid
 run_fixture code-span-table-mismatch-valid
 
-for fixture in pointer-suffix-invalid bare-cross-file-collision step-heading-name-invalid \
-  step-number-invalid step-range-invalid \
-  step-colon-invalid step-descending-invalid step-emdash-invalid step-fence-steps-invalid \
-  step-fence-nested-invalid step-fence-char-invalid step-fence-length-invalid \
-  step-fence-info-invalid step-colon-name-invalid mention-unescaped-invalid long-name-step-invalid inline-code-name-invalid \
-  step-prefix-collision-invalid possessive-inline-code-invalid conjunction-inline-code-invalid \
-  step-duplicate-exact-invalid step-prefix-ambiguous-invalid multiline-code-span-unterminated-invalid; do
-  if run_fixture "$fixture"; then
+# Each invalid fixture is rejected for its own reason: a fixture that fails on
+# a crash or a setup error would otherwise count as "rejected". Pairs of
+# `fixture|message the checker prints for it`.
+for pair in \
+  'pointer-suffix-invalid|§ Build typo not found in target.md' \
+  'bare-cross-file-collision|bare § Build follows target.md' \
+  'step-heading-name-invalid|§ Step 3 not found in target.md' \
+  'step-number-invalid|§ Build steps [3] not all numbered items in target.md' \
+  'step-range-invalid|§ Build steps [2, 3, 4] not all numbered items in target.md' \
+  'step-colon-invalid|§ Build steps [9] not all numbered items in target.md' \
+  'step-descending-invalid|§ Build steps [5, 3] run backwards' \
+  'step-emdash-invalid|§ Build steps [2, 3, 4] not all numbered items in target.md' \
+  'step-fence-steps-invalid|§ Build steps [1] not all numbered items in target.md' \
+  'step-fence-nested-invalid|§ Build steps [1] not all numbered items in target.md' \
+  'step-fence-char-invalid|§ Build steps [1] not all numbered items in target.md' \
+  'step-fence-length-invalid|§ Build steps [1] not all numbered items in target.md' \
+  'step-fence-info-invalid|§ Build steps [1] not all numbered items in target.md' \
+  'step-colon-name-invalid|§ Build: deployment steps [3] not all numbered items in target.md' \
+  'mention-unescaped-invalid|says in words that silence is not zero not found in source.md' \
+  'long-name-step-invalid|steps [2] not all numbered items in source.md' \
+  'inline-code-name-invalid|§ Build is cut at inline code' \
+  'step-prefix-collision-invalid|§ Merge steps [6] not all numbered items in target.md' \
+  'possessive-inline-code-invalid|§ Build'"'"'s is cut at inline code' \
+  'conjunction-inline-code-invalid|§ Build and is cut at inline code' \
+  'step-duplicate-exact-invalid|§ Merge is ambiguous in target.md: matches Merge, Merge' \
+  'step-prefix-ambiguous-invalid|§ Mer is ambiguous in target.md: matches Merge, Mermaid' \
+  'multiline-code-span-unterminated-invalid|§ Build is cut at inline code'; do
+  fixture=${pair%%|*}
+  want=${pair#*|}
+  if output=$(run_fixture "$fixture" 2>&1); then
     echo "FAIL: checker accepted fixture $fixture"
+    exit 1
+  fi
+  if ! grep -qF -- "$want" <<<"$output"; then
+    echo "FAIL: fixture $fixture failed for another reason: $output"
     exit 1
   fi
 done

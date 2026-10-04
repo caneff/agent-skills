@@ -1,8 +1,8 @@
 ---
 name: mutation-audit
-description: Point at ONE module to learn which of its tests pass without actually catching a bug — run mutmut, scrape the survivors, emit test-audit findings. Opt-in, never in the default sweep.
+description: Point at ONE module to learn which of its tests pass without actually catching a bug — run mutmut, scrape the survivors, emit test-audit findings; or check ONE diff against its covering test (single-diff witness mode). Opt-in, never in the default sweep.
 disable-model-invocation: true
-argument-hint: "<target-module.py>"
+argument-hint: "<target-module.py> | --patch <file> --test <command>"
 ---
 
 Run mutmut against one target module and report which mutants survive. A
@@ -187,6 +187,37 @@ in that setup.
    and `git status --porcelain` or `git diff` on `setup.cfg`/`pyproject.toml`,
    not by assuming the removal worked — a failed cleanup leaves
    mutation-testing state for the next run to trip over.
+
+## Single-diff witness mode
+
+The mutmut run above scores a whole module. To ask whether one test notices
+one change — the witness check a correctness reviewer runs on each new test —
+hand over the change as a patch and the command that runs its covering suite:
+
+```sh
+bash ~/.agents/skills/mutation-audit/witness.sh --patch <file> \
+  --test '<covering test command>' [--worktree <path>] [--id <id>] \
+  (--repo <repo> --ticket <n> | --no-ledger)
+```
+
+It applies the patch in a throwaway worktree of the tree's `HEAD` and runs the
+command there, through `multi-axis-code-review/witness-check.sh`, so it gets
+that script's worktree, Python-bytecode and `node_modules` setup, its cleanup
+and its ledger row. Its last line is the answer:
+
+- `outcome: red` — the test failed; the suite's own message is printed above
+  it. Read it: a missing file or a denied path is not the assertion.
+- `outcome: green` — the test passed with the patch applied: a hollow witness.
+- `outcome: unknown` — the patch did not apply at `HEAD`, or the command never
+  ran. Never read as either of the others.
+
+Pass `--repo` and `--ticket` inside a review, so the row lands in the review
+ledger (`--call-site` types it as a call-site mutation); `--no-ledger`
+outside one. Several mutations at once go to `witness-check.sh` directly. The
+command runs as `bash -c`, from the worktree's top level; it never edits the
+reviewed checkout's tracked files. A linked `node_modules` is shared with it,
+though, so a tool cache written there lands in the checkout
+(`multi-axis-code-review/witness-check.sh`'s header).
 
 ## Verify against the fixture
 

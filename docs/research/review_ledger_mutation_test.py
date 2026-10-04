@@ -5,7 +5,7 @@ HOME is a temp dir, so no default path reaches the real ~/.cache or ~/.claude.""
 import json
 import unittest
 
-from review_ledger_test import Case, finding, run, write_jsonl
+from review_ledger_test import Case, finding, report_rows, run, write_jsonl
 
 
 class MutationCase(Case):
@@ -151,7 +151,11 @@ class ReportMutationTest(MutationCase):
 
     def test_a_review_type_has_no_mutation_columns(self):
         self.ok("m1")
-        self.assertNotIn("standards", self.types())
+        with self.ledger.open("a") as f:
+            f.write(json.dumps(report_rows()[0]) + "\n")
+        review = self.types()["standards"]
+        self.assertIsNone(review["red_rate"])
+        self.assertIsNone(review["unknown_mutations"])
         table = self.report("md")
         self.assertIn("red rate", table)
         self.assertIn("| witness-mutation | 1 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | 0 | 0 |", table)
