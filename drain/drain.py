@@ -43,6 +43,13 @@ The worker's brief names the controller `drain`, which no session bears;
 `implement/SKILL.md` § Control says what a worker does then (no messages, no
 job notices, "PR up" is its stop), and `drain` waits for that stop.
 
+Progress is one flushed line per event on stdout, which `job-run` copies into
+the run's progress file as it happens: `bundle started: #<n> <title>; ...
+pane <repo-short>-<anchor>` when a bundle's worker exists, `bundle ended: #<n>
+... merged <pr> <sha>` or `... handed to Chris: <reason>` or `... stopped:
+<reason>` when it ends, then the summary. `drain/SKILL.md` reads these lines
+for its same-turn print, its status and its completion report.
+
 State lives in GitHub, git and herdr, nowhere else. An open, in-progress
 ticket carrying drain's own `drain anchor:` comment is resumed (a worker
 started by `implement-dispatch` outside drain has none, so it is never taken)
@@ -629,8 +636,8 @@ def announce(ctx, anchor, tickets):
 
 
 def work(ctx, anchor, others, resumed, started):
-    """Appends the bundle's tickets to `started` once its worker exists."""
-    """`(merge result, None)` or `(None, the second failure's one-line reason)`.
+    """`(merge result, None)` or `(None, the second failure's one-line reason)`;
+    appends the bundle's tickets to `started` once its worker exists.
     Attempt 1 starts the worker (a resumed run finds it or its PR already
     there); attempt 2 prompts the same worker with the first failure's reason,
     since its workspace exists and a second dispatch would refuse it."""
@@ -706,7 +713,6 @@ def drain(ctx, limit):
                 others = [t for t in queue if t[0] != anchor]
                 if not note_anchor(ctx, anchor):
                     continue
-            started.clear()
             result, reason = work(ctx, anchor, others, resumed, started)
             if result:
                 say(f"bundle ended: {' '.join(f'#{n}' for n in result['tickets'])}  merged  {result['pr']}  "

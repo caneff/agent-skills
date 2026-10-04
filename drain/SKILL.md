@@ -43,8 +43,8 @@ steps below.
    step 2, read `date -u +%Y-%m-%dT%H:%M:%SZ` as `<start>`: the progress file
    holds the previous run's lines until `job-run` empties it, and only a line
    stamped at or after `<start>` is this run's. Arm the Monitor tool
-   (`timeout_ms` 250000) on a command that ends at the first such line and at
-   its own 240 seconds, with no `sleep` and no poll loop:
+   (`timeout_ms` 250000) on one blocking read that ends at the first such line
+   and at its own 240 seconds:
 
    ```
    awk -v s=<start> '$1 >= s && /bundle started:|nothing to drain|stopped:|drain\.py:/ {print; fflush(); exit}' < <(timeout 240 tail -n +1 -F ~/.cache/agent-jobs/drain-<repo-short>/progress)
@@ -58,9 +58,8 @@ steps below.
    - No line before the deadline, or the background command ends first (the
      `already live` refusal of step 2 never reaches the progress file): report
      it, quoting `job-run --status drain-<repo-short>` and the background
-     command's output. Never wait a second time.
-
-   Do not poll or wait on the run past this point; its completion wakes you.
+     command's output. This one wait is the only one; the run's completion
+     wakes you after the turn ends.
 
 Say where to watch it: each build is a herdr pane named
 `<repo-short>-<anchor>` (`herdr agent list`), and
@@ -68,8 +67,7 @@ Say where to watch it: each build is a herdr pane named
 
 ## Status
 
-`/drain status`, or `/drain` with no flags while `job-run --status
-drain-<repo-short>` says `alive`, starts nothing. Read the progress file
+Read the progress file
 (`~/.cache/agent-jobs/drain-<repo-short>/progress`), `herdr agent list` and
 `job-run --status drain-<repo-short>`, and print:
 
@@ -90,10 +88,9 @@ argparse error, `drain.py: ...`) is reported verbatim as a start that never
 ran, not as a crash. A run that ran ends with drain's summary, in
 `~/.cache/agent-jobs/drain-<repo-short>/progress` after the timestamp on each
 line, starting at the line `merged:`, `handed to Chris:`, `stopped:` or
-`nothing to drain`:
-
-Open the report with every bundle the run worked, one per `bundle started:`
-line in the progress file with its `bundle ended:` outcome, then the summary:
+`nothing to drain`. Open the report with every bundle the run worked, one per
+`bundle started:` line in the progress file with its `bundle ended:` outcome,
+then the summary:
 
 - **merged**: each ticket set with its PR and squash sha.
 - **handed to Chris**: each ticket set with the reason, as drain printed it.

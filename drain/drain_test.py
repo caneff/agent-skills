@@ -285,24 +285,24 @@ class Sandbox(unittest.TestCase):
     def state(self):
         return json.loads(read(self.state_path))
 
+    def drain_env(self, env=None):
+        return {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
+                "DISPATCH_LOG": self.dispatch_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
+                "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log,
+                "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3",
+                "DRAIN_LOG_DIR": os.path.join(self.tmp.name, "logs"), **(env or {})}
+
     def drain(self, *argv, env=None):
-        e = {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
-             "DISPATCH_LOG": self.dispatch_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
-             "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log,
-             "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3",
-             "DRAIN_LOG_DIR": os.path.join(self.tmp.name, "logs"), **(env or {})}
         return subprocess.run([sys.executable, DRAIN, "--repo", self.repo, *argv],
-                              capture_output=True, text=True, env=e)
+                              capture_output=True, text=True, env=self.drain_env(env))
 
     def drain_live(self, *argv, env=None):
         """Start drain and hand back the process, its stdout a pipe to read while it runs."""
-        e = {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
-             "DISPATCH_LOG": self.dispatch_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
-             "SEAM_LOG": self.seam_log, "CHOOSER_LOG": self.chooser_log,
-             "DRAIN_POLL_SECONDS": "0.05", "DRAIN_IDLE_GRACE_SECONDS": "0.3",
-             "DRAIN_LOG_DIR": os.path.join(self.tmp.name, "logs"), **(env or {})}
         return subprocess.Popen([sys.executable, DRAIN, "--repo", self.repo, *argv], stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, env=e)
+                                stderr=subprocess.PIPE, text=True, env=self.drain_env(env))
+
+    def ended_lines(self, result):
+        return [x for x in result.stdout.splitlines() if x.startswith("bundle ended:")]
 
     def dispatch_runs(self):
         """The `implement-dispatch` calls, one per bundle started."""
@@ -537,7 +537,7 @@ class DrainTest(Sandbox):
         self.write_state({1: {}})
         r = self.drain("--once")
         sha = self.state()["merged"][0][1]
-        ended = [x for x in r.stdout.splitlines() if x.startswith("bundle ended:")]
+        ended = self.ended_lines(r)
         self.assertEqual(len(ended), 1, r.stdout)
         for part in ("#1", "merged", "https://example.test/pull/101", "m" + sha):
             self.assertIn(part, ended[0])
@@ -545,7 +545,7 @@ class DrainTest(Sandbox):
     def test_a_bundle_handed_to_chris_gets_an_end_line_with_the_reason(self):
         self.write_state({1: {}})
         r = self.drain("--once", env={"DRAFT_TICKETS": "1"})
-        ended = [x for x in r.stdout.splitlines() if x.startswith("bundle ended:")]
+        ended = self.ended_lines(r)
         self.assertEqual(len(ended), 1, r.stdout)
         self.assertIn("handed to Chris", ended[0])
         self.assertIn("draft", ended[0])
@@ -554,7 +554,7 @@ class DrainTest(Sandbox):
         self.write_state({1: {}})
         r = self.drain("--once", env={"HERDR_FLAKY": "99"})
         self.assertEqual(r.returncode, 1)
-        ended = [x for x in r.stdout.splitlines() if x.startswith("bundle ended:")]
+        ended = self.ended_lines(r)
         self.assertEqual(len(ended), 1, r.stdout)
         self.assertIn("stopped", ended[0])
 
