@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""The spec's closing ticket: the end-to-end seam it names, and what that
-seam is blind to.
+"""The spec's closing check: the end-to-end seam it names, and what that
+seam is blind to. The text is a section appended to the last slice's body,
+not a ticket of its own (#1402).
 
 On #781's spec run the closing ticket said "write one end-to-end test over
 the whole spec's acceptance criteria" and named no seam, so the closing
@@ -37,7 +38,7 @@ _SEAM_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+end-to-end seam[ \t]*:?[ \t]*$",
 
 
 class SeamError(Exception):
-    """No seam to name. Fatal: a closing ticket that names none is the one
+    """No seam to name. Fatal: a closing check that names none is the one
     this check exists to stop being written again."""
 
 
@@ -125,7 +126,7 @@ def seam_of(root, seam=None, blind_to=None):
     if not seam:
         raise SeamError(
             f"{root} declares no `## End-to-end seam` section and the "
-            "exploration pass supplied no seam: the closing ticket has "
+            "exploration pass supplied no seam: the closing check has "
             "nothing to name")
     if not blind_to:
         raise SeamError(
@@ -212,10 +213,13 @@ def _settled(key, root, declared, explored):
 
 
 def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):
-    """The closing ticket's body for one spec: the seam it drives, what that
-    seam cannot see, and the merge shas the spec-level review is handed.
+    """The closing check for one spec, a section for the last slice's body: the
+    seam it drives, what that seam cannot see, and the merge shas the
+    spec-level review is handed.
 
-    `shas` are the spec's squash commits, read off the run file. They are a
+    `shas` are the squash commits of the slices that landed before the last
+    one, read off the run file; the last slice's own diff gets its own review
+    round.  They are a
     **list**, never a range: `<first>..origin/main` on a shared `main` held
     this spec's three commits and ~17 unrelated ones from other sessions, and
     `/multi-axis-code-review` takes one fixed point.
@@ -225,21 +229,23 @@ def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):
         # nobody asked about. The exploration pass answers the question, with
         # an empty list where the seam reaches everything.
         raise SeamError(
-            "the closing ticket must answer whether the spec has a "
+            "the closing check must answer whether the spec has a "
             "user-visible surface the seam cannot reach — pass the surfaces, "
             "or an empty list to say there are none")
     seam, blind_to = seam_of(root, seam, blind_to)
     shas = [s.strip() for s in shas if s and s.strip()]
     if not shas:
-        raise SeamError("the closing ticket has no merge shas to review: the "
+        raise SeamError("the closing check has no merge shas to review: the "
                         "run file's landings are what the spec-level review "
                         "reads")
     surfaces = [s.strip() for s in surfaces if s and s.strip()]
 
-    lines = [f"Close out the spec (#{spec}): one end-to-end test at this "
-             "repo's seam, and the spec-level review.",
+    lines = ["## Closing check", "",
+             f"This is the last slice of spec #{spec}: its PR also carries one "
+             "end-to-end test at this repo's seam and the spec-level review. "
+             "The spec closes when this slice merges.",
              "",
-             "## The seam",
+             "### The seam",
              "",
              f"- **Seam**: {seam}",
              f"- **Blind to**: {blind_to}",
@@ -249,12 +255,12 @@ def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):
                   "reach:", ""]
         lines += [f"- {s}" for s in surfaces]
         lines.append("")
-    lines += ["## The spec-level review", "",
-              "This spec's merge commits, from the run file, in landing "
-              "order:", ""]
+    lines += ["### The spec-level review", "",
+              "The merge commits of this spec's earlier slices, from the run "
+              "file, in landing order:", ""]
     lines += [f"- `{sha}`" for sha in shas]
     lines += ["", _review_procedure(spec, shas)]
-    lines += ["", "## Acceptance criteria", "",
+    lines += ["", "### Acceptance criteria", "",
               "- [ ] One end-to-end test drives the whole spec's acceptance "
               f"criteria at the seam above, and lives where `{seam}` runs it",
               "- [ ] What the seam is blind to is stated in the test's own "
@@ -271,7 +277,7 @@ def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):
 def main(argv):
     parser = argparse.ArgumentParser(
         prog="closing_ticket.py",
-        description="The closing ticket's body for one spec.")
+        description="The closing check section of a spec's last slice.")
     parser.add_argument("root", help="the repo root whose AGENTS.md declares "
                                      "the end-to-end seam")
     parser.add_argument("spec", type=int, help="the spec's issue number")

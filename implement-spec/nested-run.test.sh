@@ -85,6 +85,14 @@ check_in "$skill_text" 'blind' implement-spec/SKILL.md
 check_in "$skill_text" 'open of the real thing' implement-spec/SKILL.md
 check_in "$skill_text" 'closing_ticket.py' implement-spec/SKILL.md
 
+# Rule 5b (#1402): no separate closing ticket. The check runs in the last
+# slice's PR and the spec closes when that slice merges.
+check_in "$skill_text" 'last slice' implement-spec/SKILL.md
+check_in "$skill_text" "the last slice's PR" implement-spec/SKILL.md
+check_in "$skill_text" 'closes when its last slice merges' implement-spec/SKILL.md
+check_not_in "$skill_text" 'closing ticket' implement-spec/SKILL.md
+check_not_in "$closing_text" 'closing ticket' implement-spec/references/closing-ticket.md
+
 # Rule 6: the spec-level review is handed shas, and the reason a range is
 # wrong is stated where the reader decides.
 check_in "$skill_text" 'list of merge shas' implement-spec/SKILL.md

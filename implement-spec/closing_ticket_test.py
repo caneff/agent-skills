@@ -59,6 +59,16 @@ def test_the_body_names_the_repos_declared_seam():
     assert "`npm run test:e2e` over the headless solver bundle" in got, got
 
 
+def test_the_body_is_a_section_of_the_last_slice_not_a_ticket_of_its_own():
+    # Stage 2 of the process redesign: the end-to-end test and the spec-level
+    # review run in the last slice's PR, so the body is appended to that
+    # slice and never filed as a closing ticket.
+    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
+    assert got.startswith("## Closing check"), got
+    assert "last slice" in got, got
+    assert "Close out the spec" not in got, got
+
+
 def test_the_body_names_what_the_seam_is_blind_to():
     got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
     assert "grid rendering at 4x4 and 6x6" in got, got
