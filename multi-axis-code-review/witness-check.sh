@@ -15,11 +15,14 @@
 # its ledger row is typed call-site-mutation instead of witness-mutation.
 #
 # Before `mutate` runs, every witness gets the setup a fresh worktree lacks
-# (#1219): PYTHONDONTWRITEBYTECODE=1, so a body that runs its suite twice never
-# reads bytecode written by its own first run; no `__pycache__`, so a tracked
-# or otherwise inherited one cannot stand in for the mutated source; and, when
-# the reviewed tree's top level has a `node_modules` and the witness has none,
-# a symlink to it, so a Node suite fails on the mutation, not a missing module.
+# (#1219): PYTHONDONTWRITEBYTECODE=1 and no `__pycache__` (why: at the export
+# below), and, when the reviewed tree's top level has a `node_modules` and the
+# witness has none, a symlink to it, so a Node suite fails on the mutation, not
+# a missing module. The link is shared with the reviewed tree, not a copy: a
+# workspace package that `node_modules` links back into the tree resolves to
+# the reviewed tree's files, a tool cache written through it lands there, and
+# the link shows as untracked where `.gitignore` says `node_modules/`
+# (docs/research/2026-10-04-witness-node-modules-symlink.md).
 #
 # Exit: 0 every mutation was run and reported (red, HOLLOW or unknown — read
 # the output); 1 setup failed before any mutation; 2 bad arguments; 3 a
@@ -28,7 +31,7 @@
 set -u
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-usage() { sed -n '7,10p' "${BASH_SOURCE[0]}" | sed 's/^# //' >&2; exit 2; }
+usage() { sed -n '/^#   witness-check.sh/,/^#$/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# //' >&2; exit 2; }
 worktree="" mutate_file="" no_ledger=0
 ledger_args=() call_site_ids=" "
 while [ $# -gt 0 ]; do
@@ -203,6 +206,7 @@ for id in "${mutations[@]}"; do
   # witnessed.
   if [ ! -e "$root/ran/$id" ]; then
     printf '%s: unknown — it never reached its covering suite, whatever it exited with\n' "$id"
+    show "$id"   # what it said on the way: a patch that did not apply, a missing path
     printf 'unknown\n' >"$root/outcome/$id"
     continue
   fi
@@ -212,6 +216,7 @@ for id in "${mutations[@]}"; do
   # ran" is a proxy. Where a real answer exists, take it instead of inferring.
   case "$(cat "$root/status/$id" 2>/dev/null)" in
     126|127) printf '%s: unknown — its covering suite command never executed (not found, or not executable)\n' "$id"
+             show "$id"
              printf 'unknown\n' >"$root/outcome/$id" ;;
     0) printf '%s: HOLLOW — the assertion still passed with its constraint stripped\n' "$id"
        printf 'green\n' >"$root/outcome/$id" ;;

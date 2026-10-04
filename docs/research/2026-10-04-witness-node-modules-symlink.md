@@ -25,3 +25,17 @@ One repo and one runner. `twitch-rules-scroller` (`node --test`),
 `sudokumaker-custom-constraints` (`just test`) were not run. A tool that
 refuses a symlinked `node_modules` would show up as a red whose message names
 module resolution, which the reviewer is told to read for (defect class 3).
+
+## Limits seen in review
+
+Found by the correctness axis on #1219's PR, each shared with the reviewed
+tree by construction, since the link is not a copy:
+
+- A package manager's workspace entry (`node_modules/foo -> ../packages/foo`)
+  resolves through the link into the reviewed tree, so a mutation of that
+  package is invisible and reads HOLLOW. None of the five Node repos named
+  above declares `workspaces` (`rg '"workspaces"' package.json`, 0 hits each).
+- A cache a tool writes under `node_modules` (vitest's `.vite/` results file)
+  lands in the reviewed checkout.
+- Where `.gitignore` says `node_modules/`, that pattern matches directories
+  only, so the link shows as untracked in the witness.

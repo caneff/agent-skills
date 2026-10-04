@@ -214,8 +214,10 @@ and its ledger row. Its last line is the answer:
 Pass `--repo` and `--ticket` inside a review, so the row lands in the review
 ledger (`--call-site` types it as a call-site mutation); `--no-ledger`
 outside one. Several mutations at once go to `witness-check.sh` directly. The
-command runs as `bash -c`, from the worktree's top level; it never touches the
-reviewed checkout, which is left exactly as found.
+command runs as `bash -c`, from the worktree's top level; it never edits the
+reviewed checkout's tracked files. A linked `node_modules` is shared with it,
+though, so a tool cache written there lands in the checkout
+(`multi-axis-code-review/witness-check.sh`'s header).
 
 ## Verify against the fixture
 

@@ -37,9 +37,13 @@ make_patch inert 's/return 1/return 1  # same value/'
 printf -- '--- a/absent.py\n+++ b/absent.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n' >"$scratch/stale.patch"
 
 fail=0
+# A scratch HOME and an idle-box `ps`, so a run reads neither the real global git
+# config nor the live process table, which sizes the witness check's concurrency.
+mkdir -p "$scratch/home" "$scratch/bin"
+printf '#!/usr/bin/env bash\nprintf "claude\\nbash\\n"\n' >"$scratch/bin/ps"; chmod +x "$scratch/bin/ps"
 run() { # <out-name> <args...>: runs the tool from inside the reviewed tree
   local name="$1"; shift
-  ( cd "$repo" && bash "$tool" "$@" ) >"$scratch/$name.out" 2>&1
+  ( cd "$repo" && HOME="$scratch/home" PATH="$scratch/bin:$PATH" bash "$tool" "$@" ) >"$scratch/$name.out" 2>&1
   printf '%s\n' "$?" >"$scratch/$name.rc"
 }
 expect() { # <out-name> <outcome>
@@ -64,11 +68,31 @@ expect green green
 # though the run that tried it exited non-zero (defect class 1).
 run stale --patch "$scratch/stale.patch" --test 'python3 test_mod.py' --no-ledger
 expect stale unknown
+# Its own reason is shown, so a patch that did not apply reads differently from
+# a command that never ran.
+grep -q 'the patch does not apply at HEAD' "$scratch/stale.out" ||
+  { echo "FAIL: an unknown outcome did not carry the reason the suite was never reached" >&2; cat "$scratch/stale.out" >&2; fail=1; }
 
 # A covering command that does not exist never ran: unknown, not a red whose
 # message is "command not found".
 run noexec --patch "$scratch/breaks.patch" --test '/nonexistent/covering-suite' --no-ledger
 expect noexec unknown
+
+# A relative --patch still applies: the mutate runs in another directory.
+( cd "$scratch" && HOME="$scratch/home" PATH="$scratch/bin:$PATH" bash "$tool" --patch breaks.patch \
+    --test 'python3 test_mod.py' --worktree "$repo" --no-ledger ) >"$scratch/rel.out" 2>&1
+grep -qx 'outcome: red' "$scratch/rel.out" ||
+  { echo "FAIL: a relative --patch path did not reach the witness" >&2; cat "$scratch/rel.out" >&2; fail=1; }
+
+# A witness check whose report has no line for the id is refused, never an outcome.
+mkdir -p "$scratch/stub/mutation-audit" "$scratch/stub/multi-axis-code-review"
+cp "$tool" "$here/witness-mutate.sh" "$scratch/stub/mutation-audit/"
+printf '#!/usr/bin/env bash\necho "someone-else: red — not our id"\n' >"$scratch/stub/multi-axis-code-review/witness-check.sh"
+stub_rc=0
+( cd "$repo" && bash "$scratch/stub/mutation-audit/witness.sh" --patch "$scratch/breaks.patch" \
+    --test 'true' --no-ledger ) >"$scratch/noline.out" 2>&1 || stub_rc=$?
+{ [ "$stub_rc" -eq 1 ] && ! grep -q '^outcome:' "$scratch/noline.out"; } ||
+  { echo "FAIL: a report with no line for the id was not refused (exit $stub_rc)" >&2; cat "$scratch/noline.out" >&2; fail=1; }
 
 # The reviewed tree is untouched by every run above.
 [ "$(cat "$repo/mod.py")" = "$(printf 'def f():\n    return 1')" ] ||

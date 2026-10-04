@@ -15,11 +15,11 @@
 # patch did not apply or the command never ran.
 #
 # Exit: 0 when an outcome line was printed; otherwise witness-check.sh's own
-# non-zero exit (1 setup, 2 bad arguments, 3 cleanup, 4 ledger, 130 interrupt),
-# or 1 when its report carried no outcome for the id.
+# non-zero exit (its header lists them), or 1 when its report carried no
+# outcome for the id.
 set -u
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage() { sed -n '4,6p' "${BASH_SOURCE[0]}" | sed 's/^# //' >&2; exit 2; }
+usage() { sed -n '/^#   witness.sh/,/^#$/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# //' >&2; exit 2; }
 
 patch="" test_cmd="" worktree="." id="diff" call_site=0 pass=()
 while [ $# -gt 0 ]; do
@@ -38,7 +38,7 @@ done
 [ -f "$patch" ] && [ -r "$patch" ] || { echo "single-diff witness: cannot read patch '$patch'" >&2; exit 2; }
 [ "$call_site" -eq 1 ] && pass+=( --call-site "$id" )
 
-WITNESS_PATCH="$(cd "$(dirname "$patch")" && pwd)/$(basename "$patch")"
+WITNESS_PATCH="$(realpath "$patch")"
 WITNESS_TEST="$test_cmd"
 export WITNESS_PATCH WITNESS_TEST
 
