@@ -263,6 +263,45 @@ class CodexGuardTest(Case):
         self.assertEqual(wall["status"], "unknown")
         self.assertNotIn("seconds", wall)
 
+    def split(self, *halves):
+        def build(root):
+            put(root / "skills", 211, "gate", "2026-09-22T09:00:00-04:00", "2026-09-22T09:01:00-04:00", ONE_HIGH)
+            write_jsonl(root / "skills" / "dispositions-211.jsonl", list(halves))
+        return self.cache_rows(build)["skills/211/codex-gate/1/codex-adversarial-211-gate"]["findings"][0]
+
+    def test_a_split_id_whose_halves_differ_joins_its_finding_as_a_partial_fix(self):
+        f = self.split({"id": "codex-gate-1a", "outcome": "fixed", "sha": "a"},
+                       {"id": "codex-gate-1b", "outcome": "leftover", "text": "the race stays"})
+        self.assertEqual((f["outcome"], f["partial"], f["outcome_status"]), ("fixed", True, {"status": "known"}))
+        section = self.review.read_text().split("## Dispositions with no finding")[1].split("\n## ")[0]
+        self.assertNotIn("codex-gate-1", section)
+
+    def test_a_split_id_whose_halves_agree_takes_their_outcome(self):
+        f = self.split({"id": "codex-gate-H1a", "outcome": "disputed", "reason": "no"},
+                       {"id": "codex-gate-H1b", "outcome": "disputed", "reason": "no"})
+        self.assertEqual((f["outcome"], f["partial"]), ("disputed", False))
+
+    def test_a_split_id_with_no_valued_half_or_a_missing_half_is_unknown(self):
+        f = self.split({"id": "codex-gate-1a", "outcome": "leftover", "text": "x"},
+                       {"id": "codex-gate-1b", "outcome": "disputed", "reason": "no"})
+        self.assertEqual(f["outcome"], "unknown")
+        self.assertIn("codex-gate-1a and codex-gate-1b", f["outcome_status"]["reason"])
+        f = self.split({"id": "codex-gate-1a", "outcome": "fixed", "sha": "a"})
+        self.assertEqual(f["outcome"], "unknown")
+        self.assertIn("codex-gate-1b", f["outcome_status"]["reason"])
+
+    def test_a_codex_rows_own_mappings_name_its_phase_label_and_outcome_mappings(self):
+        def build(root):
+            put(root / "skills", 212, "gate-retry", "2026-09-22T09:00:00-04:00", "2026-09-22T09:01:00-04:00",
+                ONE_HIGH)
+            write_jsonl(root / "skills" / "dispositions-212.jsonl", [
+                {"id": "codex-gate-H1", "outcome": "partial", "sha": "a"}])
+        row = self.cache_rows(build)["skills/212/codex-gate/1/codex-adversarial-212-gate-retry"]
+        self.assertEqual(row["status"]["mappings"], [
+            {"from": "phase gate-retry", "to": "codex-gate"},
+            {"from": "codex label H<k>", "to": "k-th finding of that severity"},
+            {"from": "partial", "to": "fixed+partial"}])
+
     def test_a_gate_and_its_retry_do_not_both_take_one_disposition(self):
         def build(root):
             for phase in ("gate", "gate-retry"):

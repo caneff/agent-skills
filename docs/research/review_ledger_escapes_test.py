@@ -90,7 +90,7 @@ class AxisSkipRowTest(EscapeCase):
         r = run("append", "--repo", "skills", "--ticket", 11, "--type", "verification", "--skip-reason", "x",
                 "--ledger", self.ledger, home=self.home)
         self.assertEqual(r.returncode, 2)
-        self.assertIn("for codex types and the review axes", r.stderr)
+        self.assertIn("append --type verification: error: unrecognized arguments: --skip-reason x", r.stderr)
 
 
 class EscapeTest(EscapeCase):

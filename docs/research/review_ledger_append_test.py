@@ -30,10 +30,6 @@ class AppendCase(Case):
         self.assertEqual(r.returncode, 0, r.stderr)
         return r
 
-    def rows(self):
-        return {r["row_id"]: r for r in map(json.loads, self.ledger.read_text().splitlines())} \
-            if self.ledger.exists() else {}
-
     def harvest(self, tr=None):
         r = run("harvest", "--cache", self.cache, "--transcripts", tr or self.tr, "--ledger", self.ledger,
                 "--review-file", self.tmp / "h.md", home=self.home)
@@ -146,6 +142,25 @@ class AppendRowTest(AppendCase):
         self.harvest()
         self.assertEqual(self.rows()["skills/405/spec/1/findings-spec-405"]["cost"], appended["cost"])
 
+    def test_a_harvest_adds_a_retry_transcript_written_after_the_append(self):
+        # codex-second-1 (#1406): the append counted one run; a retry of the same review lands later.
+        self.ok(400, "spec")
+        transcript(self.tr, wt(SKILLS_PROJ, 400), "spec2", "Spec review #400 retry", "Repo: x",
+                   [("2026-09-20T12:00:00.000Z", "m1", usage(1000, 0, 0, 0))], session="s2")
+        self.harvest()
+        row = self.rows()["skills/400/spec/1/findings-spec-400"]
+        self.assertEqual(row["cost"]["tokens"]["input"], 10 + 1000)
+
+    def test_a_harvest_reads_a_transcript_that_grew_after_the_append(self):
+        self.ok(400, "spec")
+        transcript(self.tr, wt(SKILLS_PROJ, 400), "spec", "Spec review #400", "Repo: x", [
+            ("2026-09-20T10:00:00.000Z", "m1", usage(10, 20, 30, 40)),
+            ("2026-09-20T10:01:00.000Z", "m2", usage(0, 0, 0, 0)),
+            ("2026-09-20T10:09:00.000Z", "m3", usage(500, 0, 0, 0))])
+        self.harvest()
+        cost = self.rows()["skills/400/spec/1/findings-spec-400"]["cost"]
+        self.assertEqual((cost["tokens"]["input"], cost["wall_clock"]["seconds"]), (510, 540))
+
     def test_a_harvest_after_one_rounds_sidecar_is_pruned_counts_each_transcript_once(self):
         skills = self.cache / "skills"
         write_jsonl(skills / "findings-verify-700.jsonl", [finding("V1", "judgement", "v.py", "One", axis="verify")])
@@ -256,12 +271,6 @@ class AppendRowTest(AppendCase):
         self.ok(430, "standards")
         row_id = "skills/430/standards/1/findings-standards-430"
         self.assertEqual(self.rows()[row_id]["findings"][0]["outcome"], "unknown")
-        # A cost no harvest would recompute: the refresh keeps the appended row's own.
-        ledger = [json.loads(x) for x in self.ledger.read_text().splitlines()]
-        for r in ledger:
-            if r["row_id"] == row_id:
-                r["cost"]["marker"] = "kept from the axis append"
-        write_jsonl(self.ledger, ledger)
         cost = self.rows()[row_id]["cost"]
         # A round-2 axis row of the same ticket is not this verification's round.
         write_jsonl(skills / "findings-standards-430-r2.jsonl", [finding("r2-S1", "hard", "b.py", "Later thing")])

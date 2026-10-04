@@ -230,14 +230,13 @@ class RefusalTest(CodexAppendCase):
 class FlagTest(CodexAppendCase):
     def test_refusal_is_for_codex_types_and_skip_reason_for_codex_types_and_the_review_axes(self):
         # #1401: the axes may be skipped (the ablation), so `spec` + --skip-reason is a row, not a refusal.
-        cases = ((["--refusal", "x"], "spec", [], "--refusal is for codex types"),
-                 (["--refusal", "x"], "witness-mutation", ["--mutation-id", "m1", "--outcome", "red",
-                                                          "--seconds", "1"], "--refusal is for codex types"),
-                 (["--skip-reason", "x"], "witness-mutation", ["--mutation-id", "m1", "--outcome", "red",
-                                                              "--seconds", "1"],
-                  "for codex types and the review axes"))
+        # OE3 (#1406): each type's parser holds only its own flags, so argparse names the foreign one.
+        mutation = ["--mutation-id", "m1", "--outcome", "red", "--seconds", "1"]
+        cases = ((["--refusal", "x", "--cache", self.cache], "spec", [], "unrecognized arguments: --refusal x"),
+                 (["--refusal", "x"], "witness-mutation", mutation, "unrecognized arguments: --refusal x"),
+                 (["--skip-reason", "x"], "witness-mutation", mutation, "unrecognized arguments: --skip-reason x"))
         for flags, rtype, extra, message in cases:
-            r = run("append", "--repo", "skills", "--ticket", 500, "--type", rtype, "--cache", self.cache,
+            r = run("append", "--repo", "skills", "--ticket", 500, "--type", rtype,
                     "--ledger", self.ledger, *flags, *extra, home=self.home)
             self.assertEqual(r.returncode, 2, (rtype, flags))
             self.assertIn(message, r.stderr)
@@ -247,14 +246,14 @@ class FlagTest(CodexAppendCase):
         self.record(500, before=f"1 {W1}", after=f"2 {W1}")
         r = self.append(500, "gate", "--mutation-id", "m1", "--outcome", "red", "--seconds", 3)
         self.assertEqual(r.returncode, 2)
-        self.assertIn("are not for codex-gate", r.stderr)
+        self.assertIn("append --type codex-gate: error: unrecognized arguments: --mutation-id m1", r.stderr)
         self.assertFalse(self.ledger.exists())
 
     def test_a_codex_row_is_round_one(self):
         self.record(500)
         r = self.append(500, "gate", "--round", "2")
         self.assertEqual(r.returncode, 2)
-        self.assertIn("round 1", r.stderr)
+        self.assertIn("unrecognized arguments: --round 2", r.stderr)
 
 
 class AuditTest(CodexAppendCase):
@@ -362,10 +361,10 @@ class AuditTest(CodexAppendCase):
     def test_a_bad_audit_append_is_refused_by_its_own_guard_and_writes_nothing(self):
         good = self.audit_record()
         cases = [
-            (["--record", good, "--ticket", "500"], "takes no --ticket or --cache"),
-            (["--record", good, "--cache", self.cache], "takes no --ticket or --cache"),
-            (["--record", good, "--round", "2"], "is round 1"),
-            (["--record", good, "--seconds", "3"], "are not for an audit row"),
+            (["--record", good, "--ticket", "500"], "unrecognized arguments: --ticket 500"),
+            (["--record", good, "--cache", self.cache], "unrecognized arguments: --cache"),
+            (["--record", good, "--round", "2"], "unrecognized arguments: --round 2"),
+            (["--record", good, "--seconds", "3"], "unrecognized arguments: --seconds 3"),
             ([], "exactly one of --record and --skip-reason"),
             (["--record", good, "--skip-reason", "x"], "exactly one of --record and --skip-reason"),
             (["--skip-reason", " "], "non-empty reason"),
@@ -389,10 +388,12 @@ class AuditTest(CodexAppendCase):
         self.assertIn("has no status", fstatus["reason"])
 
     def test_a_pass_type_still_needs_its_ticket_and_takes_no_record(self):
-        for extra, why in ((["--type", "codex-gate", "--skip-reason", "size"], "codex-gate needs --ticket"),
-                           (["--type", "spec", "--cache", self.cache], "spec needs --ticket"),
+        for extra, why in ((["--type", "codex-gate", "--skip-reason", "size"],
+                            "append --type codex-gate: error: the following arguments are required: --ticket"),
+                           (["--type", "spec", "--cache", self.cache],
+                            "append --type spec: error: the following arguments are required: --ticket"),
                            (["--type", "codex-gate", "--ticket", "500", "--skip-reason", "size",
-                             "--record", self.audit_record()], "--record is for codex-audit, not codex-gate")):
+                             "--record", self.audit_record()], "unrecognized arguments: --record")):
             r = run("append", "--repo", "skills", "--ledger", self.ledger, *extra, home=self.home)
             self.assertEqual(r.returncode, 2, extra)
             self.assertIn(why, r.stderr)

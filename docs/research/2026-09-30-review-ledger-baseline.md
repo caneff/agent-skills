@@ -197,3 +197,18 @@ column is an upper bound until that is checked.
   and wall clock are the cost figures here.
 - **Cost on 30 reviewer rows.** `unknown-cost rows` (8 + 8 + 11 + 3) have no readable
   transcript; they are in neither the token nor the wall-clock sums.
+
+## Corrections, 2026-10-04 (#1406)
+
+- **No price table exists to supply (P6).** "No price table was supplied" above understates it:
+  none exists. `git ls-files` names no price file in this repo, no committed JSON holds the
+  `cache_write` key a `--prices` table needs, and `~/.cache/agent-reviews/` holds none. Every
+  dollars and value-per-dollar cell in this baseline is `n/a` for that reason, and a re-run gives
+  the same until someone writes a `--prices` file (model -> dollars per million tokens of each
+  token kind) from the provider's published rates. Tokens and wall clock remain the only cost.
+- **The progress file was not where #1271 asked (P7).** #1271's box budget asked for "a progress
+  file under the worktree's `.scratch/`". The run above wrote it under
+  `~/.cache/agent-jobs/baseline-1271/progress`, `job-run`'s own location, and this note recorded the
+  path without flagging that it differs from the ticket. Nothing in the results depends on it: the
+  file (still there, read 2026-10-04) holds the harvest's summary line and its `time` output, the
+  same summary quoted above.
