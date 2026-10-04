@@ -2,8 +2,7 @@
 
 The policy is `implement-spec/SKILL.md` § The closing check;
 `implement-spec/closing_ticket.py` generates the section appended to the last
-slice's body. This file is the
-declaration grammar and the evidence.
+slice's body. This file is the declaration grammar and the evidence.
 
 ## The declaration
 
@@ -45,10 +44,10 @@ it.
 ## Why a seam with no blind spot is refused
 
 On #781's spec run the spec's separate final ticket said "write one
-end-to-end test over the whole spec's acceptance criteria", named no seam,
-and the worker stopped and asked. Naming one would not have been enough either. The seam
-that existed was the headless solver bundle, and it had **already diverged
-from the live editor inside that same spec**: `#367`'s no-ring header
+end-to-end test over the whole spec's acceptance criteria", named no seam, and
+the worker stopped and asked. Naming one would not have been enough either.
+The seam that existed was the headless solver bundle, and it had **already
+diverged from the live editor inside that same spec**: `#367`'s no-ring header
 verified green headless and broke 4×4 and 6×6 in the real app.
 
 So the generator refuses a seam with no stated blind spot. A worker told only
@@ -85,14 +84,13 @@ The list alone is not enough, because `/multi-axis-code-review` pins **one**
 fixed point and reads `<fixed point>...HEAD`: it cannot take disjoint
 commits. A closing check that names the shas and stops states a procedure
 nothing can carry out, and a worker handed one invents the range the list
-exists to prevent. So the generated section carries the procedure that builds the
-comparison out of those commits: a detached worktree at the first sha, the
+exists to prevent. So the generated section carries the procedure that builds
+the comparison out of those commits: a detached worktree at the first sha, the
 rest cherry-picked on in landing order, and the review run against
-`<first>~1`, with the worktree removed after. HEAD is then this spec's
-commits and nothing else. Where a cherry-pick conflicts, the fallback is one
-run per sha against its own parent — also written out, because "fall back to
-per-sha" with no commands is the same unexecutable instruction one level
-down.
+`<first>~1`, with the worktree removed after. HEAD is then this spec's commits
+and nothing else. Where a cherry-pick conflicts, the fallback is one run per
+sha against its own parent — also written out, because "fall back to per-sha"
+with no commands is the same unexecutable instruction one level down.
 
 An empty sha list is the one-slice spec: the slice has no earlier landings,
 so the generated section omits the spec-level review and keeps the seam, the

@@ -66,9 +66,11 @@ had to resolve all of them before it could dispatch.
 
 `/wayfinder` is for work that outgrows one session — a shared map of decision
 tickets. Everyday non-trivial work: `/grill-me` when scope, assumptions, or
-decisions are fuzzy → `/to-spec` (only when the work needs more than one session) → `/to-tickets`
-(one ticket by default; slices only on disjoint files) → `/implement`. An existing PRD doesn't replace `/to-spec` if decisions changed
-since. Why: a PRD written before a decision changed builds the old decision.
+decisions are fuzzy → `/to-spec` (only when the work needs more than one
+session) → `/to-tickets` (one ticket by default; slices only on disjoint
+files) → `/implement`. An existing PRD doesn't replace `/to-spec` if decisions
+changed since. Why: a PRD written before a decision changed builds the old
+decision.
 Skills live in `~/.agents/skills` (symlinked into `~/.claude/skills`).
 
 ## Rulings and changes to the workflow

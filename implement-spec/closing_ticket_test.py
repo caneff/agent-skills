@@ -4,10 +4,9 @@
 One seam, named on the ticket: `body(...)` — the closing-check section's
 generated body, asserted against a fixture repo that declares an end-to-end
 seam and what that seam is blind to. On #781's spec run the then-separate
-closing ticket named no
-seam at all and the closing worker stopped and asked; the seam that existed
-had already diverged from the live editor inside that same spec, so naming
-it is necessary and not sufficient.
+closing ticket named no seam at all and the closing worker stopped and asked;
+the seam that existed had already diverged from the live editor inside that
+same spec, so naming it is necessary and not sufficient.
 """
 import os
 import shutil
