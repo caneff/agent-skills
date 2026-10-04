@@ -25,25 +25,16 @@
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 
-# A heredoc body is data being written to a file, not a command being run.
-# Scanning it for dangerous patterns produces false positives: writing a doc
-# that mentions a blocked git verb is harmless, yet the raw grep below would
-# block it. Strip heredoc bodies (keeping the opener line, which may carry the
-# real command) and scan the result. Detection uses $SCAN; error messages still
-# quote the original $COMMAND.
-strip_heredocs() {
-  local line delim="" indoc=0 trimmed
-  local re='<<-?[[:space:]]*["'"'"'`]?([A-Za-z_][A-Za-z0-9_]*)'
-  while IFS= read -r line; do
-    if [ "$indoc" -eq 1 ]; then
-      trimmed="${line#"${line%%[![:space:]]*}"}"
-      if [ "$line" = "$delim" ] || [ "$trimmed" = "$delim" ]; then indoc=0; fi
-      continue
-    fi
-    if [[ "$line" =~ $re ]]; then delim="${BASH_REMATCH[1]}"; indoc=1; fi
-    printf '%s\n' "$line"
-  done
-}
+# The lib resolves beside this file's real location: install.sh links this
+# hook into ~/.claude/hooks, and the lib is not linked there. Without it no
+# pattern below can match, so a missing lib blocks rather than allowing
+# every command unscanned.
+lib="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/command-scan-lib.sh"
+# shellcheck source=command-scan-lib.sh
+. "$lib" 2>/dev/null || { echo "BLOCKED: $lib is missing, so this guard cannot scan the command." >&2; exit 2; }
+
+# Detection uses $SCAN (heredoc bodies stripped, see the lib); error messages
+# still quote the original $COMMAND.
 SCAN=$(printf '%s\n' "$COMMAND" | strip_heredocs)
 
 # --- Always-blocked: history/worktree destroyers. ---
@@ -187,29 +178,6 @@ repo_is_owned() {
 # --- PR merge policy: your repo = allowed, anyone else's = handed off. ---
 merge_re='gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$)'
 cmd_start='(^|[;&|(`[:space:]])'
-# Two views of $1 from one pass that tracks quoting: BARE drops every quoted
-# character (what the shell runs as words); EXPANDS drops only single-quoted
-# ones, since `$(...)` and backticks still run inside double quotes.
-quote_views() {
-  local s=$1 i c q="" bare="" exp=""
-  for ((i = 0; i < ${#s}; i++)); do
-    c=${s:i:1}
-    case "$q" in
-      "'") [ "$c" = "'" ] && q="" ;;
-      '"')
-        if [ "$c" = '\' ]; then exp+=$c${s:i+1:1}; i=$((i + 1))
-        elif [ "$c" = '"' ]; then q=""
-        else exp+=$c; fi ;;
-      *)
-        case "$c" in
-          "'" | '"') q=$c ;;
-          '\') bare+=$c${s:i+1:1}; exp+=$c${s:i+1:1}; i=$((i + 1)) ;;
-          *) bare+=$c; exp+=$c ;;
-        esac ;;
-    esac
-  done
-  BARE=$bare EXPANDS=$exp
-}
 runs_pr_merge() {
   # Cheap gate on the raw command (heredoc bodies included) before the lexer.
   printf '%s\n' "$COMMAND" | grep -qE "$merge_re" || return 1
