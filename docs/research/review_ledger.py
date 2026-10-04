@@ -683,13 +683,19 @@ class HarvestFacts:
 def _split_outcome(fid: str, table: dict[str, dict]) -> Joined:
     """The outcome of a Codex finding disposed as two ids, `<id>a` and `<id>b`: one ruling that
     divides it. Halves that agree give their outcome; one valued half (fixed, filed, moved) beside
-    another gives that one as a partial; anything else, a missing half included, is unknown."""
+    another readable one gives that one as a partial; anything else, a missing or unreadable half
+    included, is unknown. An unreadable half's mapping is the one returned, so its label is listed
+    unmapped (the first one only, when both are unreadable)."""
     halves = [(h, table.get(h)) for h in (fid + "a", fid + "b")]
     missing = [h for h, d in halves if d is None]
     if missing:
         return Joined.unknown(f"{missing[0]} is missing: a split disposition needs both halves")
     (a_id, a), (b_id, b) = ((h, normalise_outcome(d)) for h, d in halves)
-    if a.outcome == b.outcome != "unknown":
+    unread = [(h, j) for h, j in ((a_id, a), (b_id, b)) if j.outcome == "unknown"]
+    if unread:
+        why = "; ".join(f"{h}: {j.status['reason']}" for h, j in unread)
+        return Joined.unknown(f"a split half is unreadable ({why})", unread[0][1].mapping)
+    if a.outcome == b.outcome:
         joined = Joined(a.outcome, a.partial or b.partial, {"status": "known"})
     elif valued := [j for j in (a, b) if j.outcome in VALUE_OUTCOMES]:
         joined = Joined(valued[0].outcome, True, {"status": "known"})

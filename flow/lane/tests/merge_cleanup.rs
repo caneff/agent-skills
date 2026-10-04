@@ -481,6 +481,34 @@ fn a_hung_step_is_killed_at_its_bound_and_fails_the_run() {
     }
 }
 
+/// A `git` that exec-replaces itself with a 60 s sleep on `sub`: the direct
+/// child is the hang, so `Child::kill` alone can end it.
+fn git_exec_hanging_on(sub: &str) -> String {
+    format!(
+        "#!/bin/bash\nfor a in \"$@\"; do [ \"$a\" = {sub} ] && exec \"{sleep}\" 60; done\nexec \"{real}\" \"$@\"\n",
+        sleep = which("sleep").display(),
+        real = which("git").display()
+    )
+}
+
+#[test]
+fn the_bound_holds_with_no_kill_on_path() {
+    // #1406 C6: the group kill runs the `kill` on PATH and discarded its
+    // result, so with none there the wait after it blocked unbounded. No
+    // `add_kill` here: the fallback must end the direct child itself.
+    for (sub, env) in [("ls-remote", "LANE_REMOTE_QUERY_TIMEOUT_MS"), ("push", "LANE_STEP_TIMEOUT_MS")] {
+        let c = Cleanup::new();
+        let r = c.mkfixture(&format!("r19-{sub}"));
+        replace_git_with(&c, "noherdr", git_exec_hanging_on(sub));
+        assert!(!c.root().join("noherdr").join("kill").exists(), "the fixture PATH must lack kill");
+        let start = std::time::Instant::now();
+        let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[(env, "500")]);
+        assert!(start.elapsed() < std::time::Duration::from_secs(30), "{sub} took {:?}: {}", start.elapsed(), run.text());
+        assert!(!run.ok, "{sub}: {}", run.text());
+        assert!(run.stderr.contains("timed out after"), "{sub}: {}", run.text());
+    }
+}
+
 #[test]
 fn a_sweep_row_for_a_denied_remote_delete_says_so_distinctly_and_still_fails_the_run() {
     let c = Cleanup::new();

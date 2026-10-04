@@ -1051,6 +1051,32 @@ def test_a_parent_section_linking_another_repo_is_unreadable():
     assert "## Parent" in str(unreadable_parent(body))
 
 
+# #1406 C2: the same declaration as a bare `Part of` line, with no heading,
+# is just as unreadable; read as none, the slice dispatches.
+def test_a_part_of_line_linking_another_repo_is_unreadable():
+    body = "Part of [Spec](https://github.com/other/place/issues/12).\n\nBody.\n"
+    assert "`Part of`" in str(unreadable_parent(body))
+
+
+def test_a_part_of_line_naming_another_repos_shorthand_is_unreadable():
+    assert "`Part of`" in str(unreadable_parent("Part of other/place#12\n"))
+
+
+def test_a_prose_line_starting_part_of_is_no_parent():
+    body = "Part of the work is a rename.\n"
+    assert F.fetch_parent("owner/repo", issue(491, body=body), run=_parent_run()) is None
+
+
+def test_a_slice_whose_part_of_line_links_another_repo_is_unresolved():
+    body = NO_BLOCKERS + "\n\nPart of [Spec](https://github.com/other/place/issues/12).\n"
+    got = F.frontier("owner/repo", "ready-for-agent",
+                     fetch=lambda repo, label: [issue(491, body=body)],
+                     state_of=lambda repo, number: "closed",
+                     run=_parent_run())
+    assert numbers(got["unresolved"]) == [491], got
+    assert numbers(got["unblocked"]) == [], got
+
+
 def test_a_fenced_part_of_line_is_not_a_parent_reference():
     run = gh_answers({
         "repos/owner/repo/issues/491/parent": F.FrontierError("gh: Not Found (HTTP 404)"),

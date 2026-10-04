@@ -463,6 +463,16 @@ def test_an_indented_paragraph_after_a_blank_line_is_still_the_value():
         "the live app and a later paragraph", T.declaration(text)
 
 
+def test_a_blank_line_ends_a_key_line_that_is_no_list_item():
+    # Markdown's loose paragraph lives inside a list item only: after a
+    # blank line, an indented block under a bare key line is a code block,
+    # never more of the value (#1406 C4).
+    text = ("## End-to-end seam\n\n**Blind to**: the live app\n\n"
+            "    $ bash tests/all.sh   # an example run\n")
+    assert T.declaration(text)["blind to"] == "the live app", \
+        T.declaration(text)
+
+
 def test_a_blank_line_then_a_line_at_the_item_depth_ends_the_item():
     text = ("## End-to-end seam\n\n- **Blind to**: the live app\n\n"
             "The gate runs the suites.\n")

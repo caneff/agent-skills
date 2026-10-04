@@ -691,11 +691,12 @@ impl WorktreeFiles {
             .filter(|(_, v)| !v.is_empty())
             .map(|(k, v)| format!("{} {k}", v.len()))
             .collect();
+        // One list of modified and untracked names, capped as `Modified` is.
         let others: Vec<String> = self.modified.iter().chain(&self.untracked).cloned().collect();
         let names: Vec<String> = (!self.ignored.is_empty())
             .then(|| names_shown(DirtyKind::Ignored, &self.ignored))
             .into_iter()
-            .chain((!others.is_empty()).then(|| names_shown(DirtyKind::ModifiedOrUntracked, &others)))
+            .chain((!others.is_empty()).then(|| names_shown(DirtyKind::Modified, &others)))
             .collect();
         format!("{} file(s) would be lost: {}", kinds.join(", "), names.join(", "))
     }
@@ -753,8 +754,6 @@ fn collapse_nested_worktrees(wt: &str, names: &[String]) -> Vec<String> {
 enum DirtyKind {
     Modified,
     Untracked,
-    /// The refusal's one list of modified and untracked names together.
-    ModifiedOrUntracked,
     Ignored,
     Scratch,
 }
@@ -764,7 +763,6 @@ impl DirtyKind {
         match self {
             DirtyKind::Modified => "modified",
             DirtyKind::Untracked => "untracked",
-            DirtyKind::ModifiedOrUntracked => "modified or untracked",
             DirtyKind::Ignored => "ignored",
             DirtyKind::Scratch => "scratch",
         }
@@ -776,7 +774,7 @@ impl DirtyKind {
     fn capped(self) -> bool {
         match self {
             DirtyKind::Ignored => false,
-            DirtyKind::Modified | DirtyKind::Untracked | DirtyKind::ModifiedOrUntracked | DirtyKind::Scratch => true,
+            DirtyKind::Modified | DirtyKind::Untracked | DirtyKind::Scratch => true,
         }
     }
 }
@@ -2237,7 +2235,7 @@ mod tests {
     fn names_shown_caps_every_kind_but_ignored() {
         let seven = names(NAMES_SHOWN + 2);
         assert_eq!(names_shown(DirtyKind::Ignored, &seven), "f1, f2, f3, f4, f5, f6, f7");
-        for kind in [DirtyKind::Modified, DirtyKind::Untracked, DirtyKind::ModifiedOrUntracked, DirtyKind::Scratch] {
+        for kind in [DirtyKind::Modified, DirtyKind::Untracked, DirtyKind::Scratch] {
             assert_eq!(names_shown(kind, &seven), "f1, f2, f3, f4, f5 and 2 more", "{}", kind.label());
         }
     }

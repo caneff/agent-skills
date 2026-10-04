@@ -1175,6 +1175,17 @@ def test_a_clump_with_no_files_is_refused_whatever_is_in_flight():
             raise AssertionError("a clump with no files must be refused")
 
 
+def test_the_frontier_itself_refuses_a_clump_with_no_files():
+    # `refill` would also refuse it later, in `picks`; the frontier's own
+    # check is what refuses it to a caller reading only the frontier.
+    try:
+        loop.frontier([{"tickets": [452]}], [])
+    except loop.LoopError as exc:
+        assert "#452" in str(exc) and "files" in str(exc), exc
+    else:
+        raise AssertionError("the frontier must refuse a clump with no files")
+
+
 def test_a_malformed_clump_file_is_one_line_and_not_a_traceback():
     with tempfile.TemporaryDirectory() as tmp:
         bad = os.path.join(tmp, "candidates.json")

@@ -119,6 +119,12 @@ def paths(clump):
     return owned(clump)[1]
 
 
+def check_declared(clump):
+    """Raises `LoopError` when a clump's files cannot be read (`owned`);
+    returns nothing. For a caller that needs the refusal, not the files."""
+    owned(clump)
+
+
 def directories(clump):
     """The directories, each as `dir/`, that a clump's files sit in. The
     repo root is left out (#1342)."""
@@ -163,11 +169,11 @@ def frontier(candidates, in_flight):
     """
     dispatchable, held = [], []
     for clump in sorted(candidates, key=key_of):
-        # Read before the inner loop, so a clump whose closure failed to
-        # resolve is refused with nothing in flight too — where there is no
-        # live workspace to compare it against and the refusal would
-        # otherwise never fire.
-        paths(clump)
+        # Before the inner loop, so a clump whose closure failed to resolve
+        # is refused with nothing in flight too — where there is no live
+        # workspace to compare it against and the refusal would otherwise
+        # never fire.
+        check_declared(clump)
         collisions = []
         for live in in_flight:
             over = overlap(clump, live)

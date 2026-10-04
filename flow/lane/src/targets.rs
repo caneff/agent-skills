@@ -11,10 +11,12 @@
 //! .rst`): a whitelist, as in `burndown/tier.py`. A bare token is the
 //! exception. It is code only by a fixed list of extensions, a blacklist,
 //! because prose is full of dotted words that are not files (`i.e`, `v1.2`,
-//! `user.email`), so a bare token with an unlisted extension (`build.gradle`)
-//! reads as prose here. Extensionless, a token is code by basename
-//! (`Makefile`, `Gemfile`) or under a script directory (`bin/`, `hooks/`); any
-//! other extensionless name reads as prose too. `tier.py` strips the label
+//! `user.email`), so a bare token with an unlisted extension (`re.compile`)
+//! reads as prose here, as does a listed product name (`node.js`). A
+//! listed basename is code whatever its extension (`build.gradle`).
+//! Extensionless, a token is code by basename (`Makefile`, `Gemfile`) or
+//! under a script directory (`bin/`, `hooks/`); any other extensionless name
+//! reads as prose too. `tier.py` strips the label
 //! for both gaps before dispatch, from the clumper's file list. `tier.py` also
 //! copies the lists below to read a body as this does (#1211), and
 //! `burndown/tier_test.py` fails when a list here changes and its copy doesn't, and

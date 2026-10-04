@@ -276,6 +276,16 @@ class CodexGuardTest(Case):
         section = self.review.read_text().split("## Dispositions with no finding")[1].split("\n## ")[0]
         self.assertNotIn("codex-gate-1", section)
 
+    def test_a_valued_half_beside_an_unreadable_half_is_unknown_and_listed_unmapped(self):
+        # #1406 C3: half the ruling unread is not a known partial fix.
+        f = self.split({"id": "codex-gate-1a", "outcome": "fixed", "sha": "a"},
+                       {"id": "codex-gate-1b", "outcome": "bogus-word"})
+        self.assertEqual((f["outcome"], f["partial"]), ("unknown", False))
+        self.assertIn("codex-gate-1b", f["outcome_status"]["reason"])
+        self.assertIn("bogus-word", f["outcome_status"]["reason"])
+        section = self.review.read_text().split("## Unmapped values")[1].split("\n## ")[0]
+        self.assertIn("bogus-word", section)
+
     def test_a_split_id_whose_halves_agree_takes_their_outcome(self):
         f = self.split({"id": "codex-gate-H1a", "outcome": "disputed", "reason": "no"},
                        {"id": "codex-gate-H1b", "outcome": "disputed", "reason": "no"})

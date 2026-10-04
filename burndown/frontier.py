@@ -100,6 +100,9 @@ _PART_OF = re.compile(r"^ {0,3}Part of\b(?:\s+#(\d+)\b)?", re.IGNORECASE)
 _PARENT_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+parent[ \t]*$", re.IGNORECASE)
 _LINK = re.compile(r"\[[^\]]*\]\([^)]*\)|https?://\S+")  # text and URL: not a bare #<n>
 _ISSUE_LINK = r"https://github\.com/{repo}/issues/(\d+)\b"
+# Any repo's issue, as a URL or `owner/repo#<n>`: on a `Part of` line that
+# names none in this repo, it is a declaration this reader cannot resolve.
+_ANY_ISSUE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/issues/\d+|[\w.-]+/[\w.-]+#\d+")
 
 
 class FrontierError(Exception):
@@ -433,10 +436,13 @@ def _parent_number(body, repo):
     A `## Parent` section that names no such issue — empty, prose, another
     repo's link — raises `FrontierError`: a declaration this reader cannot
     resolve is not "no parent" (#1406). `None` under it, as `Blocked by`
-    says it, is no parent."""
+    says it, is no parent. A `Part of` line outside the heading that names
+    another repo's issue and none in this one raises too; a `Part of` line
+    naming no issue at all is prose."""
     link = re.compile(_ISSUE_LINK.format(repo=re.escape(repo)), re.IGNORECASE)
     in_parent = False
     unread = None  # the `## Parent` section's text while it names nothing
+    foreign = None  # a `Part of` line naming only another repo's issue
     for _, line in visible(body.splitlines()):
         part = _PART_OF.match(line)
         if part and part.group(1):
@@ -449,6 +455,8 @@ def _parent_number(body, repo):
         found = link.search(line)
         if found and (part or in_parent):
             return int(found.group(1))
+        if part and not in_parent and foreign is None and _ANY_ISSUE.search(line):
+            foreign = line.strip()
         if in_parent:
             ref = _REFERENCE.search(_LINK.sub("", line))
             if ref:
@@ -457,6 +465,8 @@ def _parent_number(body, repo):
     if unread is not None and not _NONE.match(unread):
         raise FrontierError(f"`## Parent` names no issue in {repo}"
                             + (f": {unread.strip()[:80]}" if unread.strip() else ""))
+    if foreign is not None:
+        raise FrontierError(f"`Part of` names no issue in {repo}: {foreign[:80]}")
     return None
 
 
