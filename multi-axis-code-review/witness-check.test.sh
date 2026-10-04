@@ -125,6 +125,19 @@ for id in m1 m2; do
     fail=1; }
 done
 
+# #1324: with `--repo`, the throwaway worktrees live under the review cache's one
+# home, `~/.cache/agent-reviews/<repo>/`, not an anonymous /tmp directory a hook
+# or a reboot can strand; and the run leaves nothing there after it.
+for id in m1 m2; do
+  case "$(cat "$scratch/$id.wt" 2>/dev/null)" in
+    "$home/.cache/agent-reviews/skills/"*) ;;
+    *) echo "FAIL: $id's worktree '$(cat "$scratch/$id.wt" 2>/dev/null)' is not under $home/.cache/agent-reviews/skills/" >&2
+       fail=1 ;;
+  esac
+done
+left="$(find "$home/.cache/agent-reviews/skills" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
+[ "$left" -eq 0 ] || { echo "FAIL: the run left $left entr(ies) in the review cache home" >&2; fail=1; }
+
 # Each message stays paired with the mutation that produced it. Reading the
 # message rather than the exit code is what catches defect class 3, and N
 # concurrent reds collected into one stream is how that pairing is lost.
