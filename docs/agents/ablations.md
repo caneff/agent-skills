@@ -20,6 +20,9 @@ when a burn closes and brings Chris the table when the third burn has.
   small PRs if the table attributes any escape to `standards:ablation`, and
   delete its run from the small-PR path otherwise. The controller brings Chris
   the table and the rule's answer; Chris rules, and the heading becomes `ended`.
+  Read each escape the table lists before answering: it is matched by a commit
+  subject (a fix, a bug, a regression) and a `git blame` of the lines it
+  changed, so a false match is possible and one is not a reason to keep.
 
 ### Log
 
