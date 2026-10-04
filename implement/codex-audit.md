@@ -58,9 +58,14 @@ audit ran on. On top of what `file-ticket` requires, each one carries:
 ## 4. Close out
 
 One auto-ship commit on `main` of this skills repo, after every ticket is
-filed:
+filed. The trial log lives only there, whatever repo the audit ran on, so
+resolve its checkout first:
+`git -C ~/.agents/skills/implement rev-parse --show-toplevel` is
+`<skills checkout>`, and the commit is made in it. The audit runs from the
+audited repo, so the target is never the working directory.
 
-1. Append the trial row to `docs/research/2026-09-14-codex-review-trial.md`:
+1. Append the trial row to
+   `<skills checkout>/docs/research/2026-09-14-codex-review-trial.md`:
    `audit <YYYY-MM-DD> (<repo>)` in the Ticket column, the audited PRs in the
    PR column, then the three counts — confirmed, also found by Claude (the
    PR's own review wave raised it, per its body's Decisions made), and

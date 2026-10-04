@@ -373,5 +373,23 @@ class MarkTest(Case):
         self.assertIn(f"{other}\n- skills: 2026-10-03 {self.root}\n", self.trial.read_text())
 
 
+class AuditDocWording(unittest.TestCase):
+    """§ Close out names the checkout the trial row goes to, so the audit's cwd is never the target (#1227)."""
+
+    def close_out(self):
+        text = (HERE / "codex-audit.md").read_text()
+        return text.split("## 4. Close out", 1)[1].split("## Dry run", 1)[0]
+
+    def test_trial_row_goes_to_the_resolved_skills_checkout(self):
+        section = self.close_out()
+        self.assertIn("git -C ~/.agents/skills/implement rev-parse --show-toplevel", section)
+        self.assertIn("never the working directory", " ".join(section.split()))
+
+    def test_no_bare_relative_path_to_the_trial_log(self):
+        for line in self.close_out().splitlines():
+            if "codex-review-trial.md" in line:
+                self.assertIn("<skills checkout>/docs/research/", line)
+
+
 if __name__ == "__main__":
     unittest.main()
