@@ -343,4 +343,10 @@ assert status == 30 and out.startswith("size check failed: `git diff") and "nope
 status, out = run_size({})
 assert (status, out) == (30, "size check failed: main...HEAD changes no files — run from the PR's workspace\n"), (
     status, out)
+# A missing `gh` is a size check that failed too, never `codex usage unknown` for a read that never ran.
+with fake_repo({"a.py": 5}) as (cwd, env):
+    os.remove(os.path.join(env["HOME"], "bin", "gh"))
+    p = subprocess.run([sys.executable, GATE, "--base", "main", "--tickets", "1"], cwd=cwd, env=env,
+                       capture_output=True, text=True)
+    assert p.returncode == 30 and p.stdout.startswith("size check failed: ") and "'gh'" in p.stdout, p.stdout
 print("ok size")

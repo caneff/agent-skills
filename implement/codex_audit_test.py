@@ -19,8 +19,8 @@ GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
            "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
 
-# A `gh` that answers `issue view <n> ... --json body,comments` from FAKE_ISSUES, and fails on
-# anything else, so a call the script was not meant to make shows up as a failure.
+# A `gh` that answers `issue view <n>` with FAKE_ISSUES[n] whole, whatever `--json` fields are asked
+# for, and fails on any other command or ticket, so a call the script was not meant to make shows up.
 FAKE_GH = """#!{py}
 import json, os, sys
 a = sys.argv[1:]
