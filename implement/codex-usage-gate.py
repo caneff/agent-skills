@@ -192,7 +192,7 @@ def check(base: str | None = None, tickets: list[str] = (), audit: bool = False)
         try:
             lines = churn(base)
             small = lines < SIZE_THRESHOLD and not forced(tickets)
-        except SizeCheckError as exc:
+        except (SizeCheckError, OSError, ValueError, KeyError, TypeError) as exc:  # a missing tool, unreadable output
             return UNKNOWN, f"size check failed: {exc}"
         if small:
             return SMALL, f"under size threshold ({lines} < {SIZE_THRESHOLD})"
