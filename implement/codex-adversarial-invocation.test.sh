@@ -4,9 +4,9 @@
 # SlashCommand tool never reaches them for a dispatched, unattended session —
 # only a human typing the literal command in an interactive session runs
 # them. #817 moved the adversarial-review invocation in SKILL.md from the
-# worker's round-1 review to the controller's § The merge step 3 (the
-# Codex-lane's own invocation in codex-lane.md, run by the worker, is
-# unchanged and out of #817's scope); wherever it runs, the caller must
+# worker's round-1 review to the controller's merge step, and #1401 moved it
+# back into the worker's review wave (§ The Codex pass; the Codex-lane's own
+# invocation in codex-lane.md is unchanged); wherever it runs, the caller must
 # invoke the plugin's own companion script directly via Bash, resolving its
 # installPath from ~/.claude/plugins/installed_plugins.json rather than
 # assuming CLAUDE_PLUGIN_ROOT is set outside a slash-command's own execution
@@ -21,8 +21,8 @@
 # script's `handleReviewCommand` never reads either flag.
 # This is a prose assertion over the two files, not a behavioral test —
 # there is no harness that runs the skills' own prose.
-# #877: both of SKILL.md's ticket reads must fetch `--json body,comments`, a
-# comment having been invisible to both. What that fetch then renders is
+# #877: SKILL.md's ticket read must fetch `--json body,comments`, a comment
+# having been invisible to it; the Codex pass renders from that one read. What that fetch then renders is
 # executed, not grepped, by implement/ticket_comment_render_test.py.
 # A caller's leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR/
 # GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES would point
@@ -71,7 +71,7 @@ check_absent() {
   esac
 }
 
-# SKILL.md § The merge step 3 (controller, not the worker's § Review):
+# SKILL.md § The Codex pass (the review wave's Codex block):
 # direct script invocation, not the disabled slash command. Which section
 # the block sits in is codex-fourth-axis-wording.test.sh's rule, not this
 # file's — this file only pins the invocation's own shape.
@@ -84,9 +84,9 @@ check "$skill" 'the `AskUserQuestion` gate lives there, not in the script'
 check "$skill" '`handleReviewCommand` parses `--wait`/`--background` as booleans and'
 check_absent "$skill" '"<ticket body verbatim>"' 'the naive, unsafe form'
 
-# #877: two ticket reads, so two comment-carrying fetches, and no read left
-# on the comment-less form.
-check_count "$skill" '--json body,comments --jq' 2
+# #877: one ticket read, so one comment-carrying fetch, and no read left on the
+# comment-less form.
+check_count "$skill" '--json body,comments --jq' 1
 check_absent "$skill" '--json body --jq .body' 'a comment-less ticket read'
 
 # codex-lane.md § The reviews: same requirement, both commands it names.
@@ -101,21 +101,9 @@ check "$lane" 'codex-companion.mjs" review --wait'
 check "$lane" 'codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"'
 check_absent "$lane" '"<ticket body verbatim>"' 'the naive, unsafe form'
 
-# #888: step 3's second pass is conditional on a new input — the head sha
-# moving or the ticket text changing (a requirement commented onto the
-# ticket between the passes moves the input while the sha sits still, and
-# the pass reads `body_file`, not the diff alone), a `fixed` disposition
-# with the sha unmoved blocks. The second pass being final is asserted only in
-# codex-pass-schedule.test.sh.
-check "$skill" 'Note the head sha this pass ran against'
-check "$skill" 'The second pass runs only if the head sha moved'
-check "$skill" 'The second pass runs only if the head sha moved or the ticket text changed'
-check "$skill" 'sha256sum "$body_file"'
-check "$skill" 'a fresh render of the ticket hashing differently'
-check "$skill" 'If every disposition was `disputed` or `filed`, the sha is unmoved and the ticket hash matches'
-check "$skill" 'confirms each disposition is recorded in the Decisions made section and goes to step 4'
-check "$skill" 'A disposition that says `fixed` with the sha unmoved is neither case'
-check "$skill" 'which a skipped pass still owes'
+# #1401: one pass, in the wave: no second pass and no sha-keyed skip logic.
+check_absent "$skill" 'The second pass runs only if the head sha moved' 'the second-pass skip rule'
+check_absent "$skill" 'sha256sum "$body_file"' 'the second-pass input hash'
 check_absent "$skill" 'and then this pass once more on the fixes' 'the unconditional second run'
 
 if [ "$fail" -eq 0 ]; then

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Guards #1204: both places that start a Codex run — § The merge step 3 in
+# Guards #1204: both places that start a Codex run — § The Codex pass in
 # SKILL.md and the Codex lane's preflight — run codex-usage-gate.py and say
 # what each exit status means. A prose assertion: nothing runs the skill's
 # own prose. #1358 adds the size skip (exit 40) and its forcing label, which
@@ -27,21 +27,16 @@ for f in "$here/SKILL.md" "$here/codex-lane.md"; do
   check_in "$f" 'exit 20 (capped)'
   check_in "$f" 'exit 30 (no fresh'
 done
-check_in "$here/SKILL.md" 'no refused duration row'
-check_in "$here/SKILL.md" 'comment `Codex pass skipped: <printed line>` on the PR'
-check_in "$here/SKILL.md" 'before every launch of this block'
-check_in "$here/SKILL.md" 'the gate and the second pass, each a launch'
+check_in "$here/SKILL.md" 'name the printed line in the PR body'
 check_in "$here/SKILL.md" 'launch nothing'
-check_in "$here/SKILL.md" 'an unreadable cache is exit 30, never headroom'
-check_in "$here/SKILL.md" 'no plugin entry, the usage gate'
+check_in "$here/SKILL.md" 'An unreadable cache is exit 30'
+check_in "$here/SKILL.md" 'no `codex@openai-codex` entry'
 check_in "$here/SKILL.md" '--base origin/<default> --tickets <n>...'
 check_in "$here/SKILL.md" 'Exit 40 (under the size threshold)'
-check_in "$here/SKILL.md" 'Codex pass skipped: under size threshold (<churn> < 300)'
+check_in "$here/SKILL.md" '`Codex pass skipped: under size threshold (<churn> < 300)` in the PR body'
 check_in "$here/SKILL.md" '`--skip-reason size`'
-check_in "$here/SKILL.md" 'no durations row and no trial'
 check_in "$here/SKILL.md" '`needs-codex` label'
 check_in "$here/SKILL.md" "the reserve ceiling, ${ceiling}%"
-check_in "$here/SKILL.md" "Codex pass skipped: usage <pct>% at or above reserve ceiling ${ceiling}%, resets <when>"
 check_in "$here/codex-lane.md" "the ${ceiling}% reserve ceiling"
 check_in "$here/SKILL.md" '`--skip-reason ceiling`'
 check_in "$here/../docs/agents/triage-labels.md" 'reserve ceiling'

@@ -165,8 +165,8 @@ branch (`references/loop.md` says why).
    --clump <n> --pr <n>` as it arrives, for § Liveness, so a restart can pick
    the run back up with nothing transcribed by hand. The controller clears the
    PR-up record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever
-   it hands a failure back to the worker (a red seam, or any ruling that
-   sends it back to work), since the PR stays open through the fix round,
+   it hands findings back to the worker (a red seam's failure, or any ruling
+   that sends it back to work), since the PR stays open through the fix round,
    and records it again on the next "PR up".
 9. **Wait on the wake, and sweep on an idle one.** The loop waits by being
    idle, never inside a tool call: a controller in one hears no worker until
@@ -187,16 +187,27 @@ forward. The report carries two counts, **fixed** and **moved**,
 python3 burndown/counts.py counts <run-id> --repo <primary checkout>
 ```
 
-read from each landed clump's dispositions sidecar (`implement/SKILL.md`
-§ Review), naming each closed clump as skipped, under the `--repo` checkout's
-cache directory — never the cwd's, which is not always the target, and refused
+read from each landed clump's dispositions sidecar, which the
+worker writes (`implement/SKILL.md` § Review), naming each closed clump as
+skipped, under the `--repo` checkout's cache directory — never the cwd's, which is not always the target, and refused
 unless `--repo` is the run's recorded target. A landed clump with no
 dispositions sidecar is refused by number, never counted as zero: the worker
 writes the sidecar even when its reviewers found nothing.
 
+While an ablation runs (`implement/SKILL.md` § Review's first ablation), the
+report also carries the escape table, read from the review ledger:
+
+```
+python3 ~/.agents/skills/docs/research/review_ledger.py escapes --repo-dir <primary checkout>
+```
+
+one line per skipped component with the PRs it was skipped on and the escapes
+attributed to them. Its decision rule is the ablation's: keep the component if
+any escape is attributed, delete it otherwise, after three burns.
+
 The report also carries the **friction-log count**: how many lines the run
-appended to `docs/agents/friction-log.md` (§ The friction log). A run that
-stopped on two parks (§ Parking and escalation) sends the same report.
+appended to the log, which the next section describes. A run that stopped on
+two parks sends the same report: Parking and escalation, below, says when.
 
 ## The friction log
 
@@ -430,7 +441,8 @@ table instead of three options in the dark
 
 Two clauses, each a ruling that went wrong on #781. The evidence behind each:
 [`references/parking.md`](references/parking.md). A friction point met while
-ruling goes to the friction log (§ The friction log), not to a new ticket.
+ruling goes to the friction log (§ The friction log, in this file), not to a
+new ticket.
 
 1. A ruling about **runtime behaviour** is checked against **the thing that
    ships**, not a proxy. A headless bundle, a unit harness or a build artifact

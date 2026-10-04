@@ -110,7 +110,7 @@ quota. In this lane they swap for:
    ```
 
    `body_file` here carries the same two-line context appendix
-   `implement/SKILL.md` § The Codex pass requires (#941) — **Open sibling
+   `implement/SKILL.md` § The Codex pass, which requires (#941) **Open sibling
    branches.** and **Posture.** — in that section's shape and wording, which
    is the one copy of it; a second copy here would drift from it, and the
    pass would be judged against whichever the writer happened to read.
@@ -122,8 +122,8 @@ quota. In this lane they swap for:
    alone reports both as defects.
 
 A Codex-lane PR gets no second Codex pass.
-`implement/SKILL.md` § The Codex pass is part of the Claude lane's review wave
-only, and says so; the lane's own `/codex:adversarial-review` is its
+`implement/SKILL.md` § The Codex pass, part of the Claude lane's review wave
+only, says so; the lane's own `/codex:adversarial-review` is its
 adversarial pass, and running the wave's on top would spend the same Codex
 quota on the same diff. The controller merges on the lane's reviews.
 

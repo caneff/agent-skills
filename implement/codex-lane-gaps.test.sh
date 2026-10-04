@@ -6,7 +6,7 @@
 #      and never pick a substitute review.
 #   2. Codex's sandbox holds .git read-only: the worker commits Codex's diff as
 #      plumbing, and the PR body says so.
-#   3. No merge-time Codex pass on a Codex-lane PR (SKILL.md § The merge step 3
+#   3. No wave Codex pass on a Codex-lane PR (SKILL.md § The Codex pass
 #      is Claude-lane only).
 #   4. A ruling by the owner in a ticket comment is an opt-in.
 # This is a prose assertion over the doc, not a behavioral test — there is no
@@ -60,8 +60,8 @@ check_in "$build" 'authors none of it' '§ The build'
 check_in "$build" 'The PR body says the commit was made by the worker and the diff was written by Codex' '§ The build'
 
 # Gap 3: the relationship to the controller's merge-time gate.
-check_in "$reviews" 'A Codex-lane PR gets no merge-time Codex pass' '§ The reviews'
-check_in "$reviews" '`implement/SKILL.md` § The merge step 3' '§ The reviews'
+check_in "$reviews" 'A Codex-lane PR gets no second Codex pass' '§ The reviews'
+check_in "$reviews" '`implement/SKILL.md` § The Codex pass' '§ The reviews'
 check_in "$reviews" 'the lane'"'"'s own `/codex:adversarial-review` is its adversarial pass' '§ The reviews'
 
 # Gap 1: Codex's own cap.

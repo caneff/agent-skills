@@ -169,8 +169,7 @@ Belt and braces: append to **every** prompt — "Also write your full report to 
 
 A finding whose failure cannot occur here is disputed under
 `implement/SKILL.md` § Review's reachability bar, whatever its rating. Every
-valid finding is fixed in the PR the review covers (`implement/SKILL.md`
-§ Review): a reviewer rates in its own axis's words, and no rating decides
+valid finding is fixed in the PR the review covers (`implement/SKILL.md` § Review): a reviewer rates in its own axis's words, and no rating decides
 whether a finding is fixed.
 
 **Alongside the prose, each reviewer also writes a sidecar** so counting a

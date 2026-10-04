@@ -12,6 +12,8 @@ per-review-type value table.
                              [--skip-reason WHY | --refusal WHY] [--cache DIR] [--ledger PATH]
     review_ledger.py append  --repo R --type codex-audit (--record PATH [--refusal WHY] | --skip-reason WHY)
                              [--ledger PATH]
+    review_ledger.py append  --repo R --ticket N --type standards|spec|correctness --skip-reason WHY [--ledger PATH]
+    review_ledger.py escapes --repo-dir CHECKOUT [--ledger PATH] [--days 14] [--fix-pattern RE] [--format md|json]
     review_ledger.py report  [--ledger PATH] [--weights FILE] [--prices FILE] [--split 1/k|none]
                              [--format md|json]
 
@@ -87,6 +89,7 @@ import fcntl
 import json
 import os
 import re
+import subprocess
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -116,7 +119,7 @@ RETIRED_CODEX_TYPES = {"codex-third": "#1360: the second Codex pass is final"}
 AUDIT_TYPE = "codex-audit"
 
 DEFAULT_WEIGHTS = {"hard": 3, "judgement": 1, "high": 3, "medium": 2, "low": 1}
-VALUE_OUTCOMES = ("fixed", "filed")
+VALUE_OUTCOMES = ("fixed", "filed", "moved")
 # Drifted label -> canonical outcome, plus whether it flags a partial fix.
 PARTIAL_LABELS = {"partial": "fixed", "fixed-partial": "fixed"}
 NOT_FIXED_LABELS = ("not-fixed", "not_fixed")
@@ -1039,6 +1042,9 @@ def cmd_harvest(args) -> int:
 
 
 APPEND_TYPES = ("standards", "spec", "correctness", "verification")
+# The reviews a caller may switch off and record as skipped (#1401's ablation): the axes, not the
+# verification pass, which no worker runs any more.
+SKIPPABLE_AXES = ("standards", "spec", "correctness")
 REVIEWER_TYPES = APPEND_TYPES + ("over-engineering",)
 MUTATION_OUTCOMES = ("red", "green", "unknown")
 _MUTATION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -1175,6 +1181,23 @@ def cmd_append_codex(args) -> int:
     return _write_appended(args, mine)
 
 
+def cmd_append_axis_skip(args) -> int:
+    """Write the row of a review axis that was switched off for this PR (#1401's ablation), so the
+    escape measure can attribute a later bug to the missing review. It reads no cache and costs
+    nothing: the run never started."""
+    if (not args.skip_reason.strip() or args.refusal is not None or args.cache is not None
+            or args.round != 1):
+        print("review_ledger append: --skip-reason is a non-empty reason, alone, round 1: an axis not run "
+              "has no sidecar to read", file=sys.stderr)
+        return 2
+    repo = fold_repo(args.repo)
+    stem = f"axis-skipped-{args.ticket}-{args.type}"
+    row = new_row(f"{repo}/{args.ticket}/{args.type}/1/{stem}", repo, [args.ticket], args.type, 1, stem, [],
+                  {"status": "skipped", "reason": args.skip_reason}, [],
+                  cost=not_launched_cost("review"), extra={"skip_reason": args.skip_reason})
+    return _write_appended(args, [row])
+
+
 def cmd_append_audit(args) -> int:
     """Write the row of the weekly Codex audit that just ran, or of one not launched. It covers many
     PRs and no one ticket, so it carries `prs` and `range` from its record in place of a ticket."""
@@ -1283,10 +1306,15 @@ def cmd_append(args) -> int:
     if args.record is not None:
         print(f"review_ledger append: --record is for {AUDIT_TYPE}, not {args.type}", file=sys.stderr)
         return 2
-    if args.type not in CODEX_TYPES and (args.skip_reason is not None or args.refusal is not None):
-        print(f"review_ledger append: --skip-reason and --refusal are for codex types, not {args.type}",
+    if args.type not in CODEX_TYPES and args.refusal is not None:
+        print(f"review_ledger append: --refusal is for codex types, not {args.type}", file=sys.stderr)
+        return 2
+    if args.type not in CODEX_TYPES and args.type not in SKIPPABLE_AXES and args.skip_reason is not None:
+        print(f"review_ledger append: --skip-reason is for codex types and the review axes, not {args.type}",
               file=sys.stderr)
         return 2
+    if args.skip_reason is not None and args.type in SKIPPABLE_AXES:
+        return cmd_append_axis_skip(args)
     if args.type in MUTATION_TYPES:
         return cmd_append_mutation(args)
     if args.type in CODEX_TYPES:
@@ -1369,6 +1397,7 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
         codex = t in CODEX_TYPES or t == AUDIT_TYPE
         usage = [r["cost"].get("usage_delta", {}) for r in mine] if codex else []
         known_usage = [u["delta"] for u in usage if u["status"] == "known"]
+        skipped = sum(r["status"]["fields"]["findings"]["status"] == "skipped" for r in mine)
         outcomes = Counter(r.get("outcome") for r in mine) if mutation else Counter()
         known_outcomes = outcomes["red"] + outcomes["green"]
         costs = [r["cost"] for r in mine]
@@ -1393,7 +1422,7 @@ def summarise(rows: list[dict], weights: dict, split: str, prices: dict | None =
             "unknown_finding_rows": sum(
                 r["status"]["fields"]["findings"]["status"] not in ("known", "not-applicable", "refused", "skipped")
                 for r in mine),
-            "skipped_rows": sum(r["status"]["fields"]["findings"]["status"] == "skipped" for r in mine) if codex else None,
+            "skipped_rows": skipped if codex or skipped else None,
             # Usage change in percentage points over the passes whose change is known; the rest are
             # counted beside it, never added as zero.
             "usage_percent": sum(known_usage) if known_usage else None,
@@ -1452,6 +1481,132 @@ def _cost_cells(t: dict) -> list[str]:
     return [tokens, wall, dollars, vpd]
 
 
+# --- Escapes (#1401, ADR 0005) -----------------------------------------------------------------------
+# What ablation asks of the ledger: after a review component is switched off, did a bug it would
+# have been placed to catch reach the default branch? An escape is a fix commit, within DAYS of a
+# reviewed PR's landing, whose diff changes a line that PR wrote.
+ESCAPE_DAYS = 14
+FIX_PATTERN = r"(?i)\b(fix|fixes|fixed|bug|regression)\b"
+_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
+_BLAME_RE = re.compile(r"^([0-9a-f]{40}) \d+ \d+")
+
+
+class EscapeError(Exception):
+    """The history cannot answer: refused by name, never read as no escapes."""
+
+
+def _git(repo_dir: Path, *args: str) -> str:
+    done = subprocess.run(["git", "-C", str(repo_dir), *args], capture_output=True, text=True)
+    if done.returncode != 0:
+        raise EscapeError(f"`git {' '.join(args)}` failed: {done.stderr.strip()}")
+    return done.stdout
+
+
+def _old_ranges(repo_dir: Path, fix: str) -> dict[str, list[tuple[int, int]]]:
+    """The lines a commit changes or removes, as (first, last) in its parent, per file. A pure
+    addition has no parent line to attribute, so it names none."""
+    out: dict[str, list[tuple[int, int]]] = {}
+    path = None
+    for line in _git(repo_dir, "diff", "-U0", "--no-renames", f"{fix}^", fix).splitlines():
+        if line.startswith("--- "):
+            path = None if line == "--- /dev/null" else line[6:]
+        elif line.startswith("+++ ") and path is None:
+            continue
+        elif (m := _HUNK_RE.match(line)) and path:
+            first, count = int(m.group(1)), int(m.group(2) if m.group(2) is not None else 1)
+            if count:
+                out.setdefault(path, []).append((first, first + count - 1))
+    return out
+
+
+def _origins(repo_dir: Path, fix: str, path: str, first: int, last: int) -> set[str]:
+    blame = _git(repo_dir, "blame", "--porcelain", "-L", f"{first},{last}", f"{fix}^", "--", path)
+    return {m.group(1) for line in blame.splitlines() if (m := _BLAME_RE.match(line))}
+
+
+def find_escapes(repo_dir: Path, rows: list[dict], days: int, fix_pattern: str) -> dict:
+    """Escapes of the reviewed PRs the ledger's rows name, read from `repo_dir`'s default branch.
+    A reviewed ticket with no landing commit (`Closes #<n>` in a commit body) is listed in
+    `not_landed`, never counted as clean."""
+    common = _git(repo_dir, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+    repo = fold_repo(os.path.basename(os.path.dirname(common)))
+    try:
+        default = _git(repo_dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
+    except EscapeError as exc:
+        raise EscapeError(f"{exc} — record the default branch with `git remote set-head origin -a`; "
+                          "it is never assumed to be `main`") from None
+    skipped: dict[int, set[str]] = {}
+    reviewed: set[int] = set()
+    for r in rows:
+        if r["repo"] != repo or r["type"] not in REVIEWER_TYPES + CODEX_TYPES:
+            continue
+        for ticket in r.get("tickets") or [r["ticket"]]:
+            reviewed.add(ticket)
+            if r["status"]["fields"]["findings"]["status"] == "skipped":
+                skipped.setdefault(ticket, set()).add(f"{r['type']}:{r.get('skip_reason')}")
+    pattern = re.compile(fix_pattern)
+    landings, not_landed = {}, []
+    for ticket in sorted(reviewed):
+        found = _git(repo_dir, "log", default, "--extended-regexp", f"--grep=Closes #{ticket}([^0-9]|$)",
+                     "--format=%H%x09%ct").splitlines()
+        if not found:
+            not_landed.append(ticket)
+            continue
+        sha, ts = found[-1].split("\t")  # the oldest: a squash lands once, a later mention is a follow-up
+        landings[ticket] = (sha, int(ts))
+    escapes = []
+    for ticket, (landing, landed_at) in landings.items():
+        for line in _git(repo_dir, "log", f"{landing}..{default}", "--no-merges", "--reverse",
+                         "--format=%H%x09%ct%x09%s").splitlines():
+            fix, ts, subject = line.split("\t", 2)
+            if int(ts) - landed_at > days * 86400 or not pattern.search(subject):
+                continue
+            try:
+                ranges = _old_ranges(repo_dir, fix)
+            except EscapeError:  # a root commit has no parent to read
+                continue
+            files = sorted(f for f, spans in ranges.items()
+                           if any(landing in _origins(repo_dir, fix, f, a, b) for a, b in spans))
+            if files:
+                escapes.append({"ticket": ticket, "landing": landing, "fix": fix, "subject": subject,
+                                "days": (int(ts) - landed_at) // 86400, "files": files,
+                                "skipped": sorted(skipped.get(ticket, ()))})
+    components: dict[str, dict[str, int]] = {}
+    for ticket, names in skipped.items():
+        for name in names:
+            row = components.setdefault(name, {"prs": 0, "escapes": 0})
+            row["prs"] += ticket in landings
+            row["escapes"] += sum(e["ticket"] == ticket for e in escapes)
+    return {"repo": repo, "days": days, "reviewed": len(reviewed), "landed": len(landings),
+            "not_landed": not_landed, "escapes": escapes, "by_component": dict(sorted(components.items()))}
+
+
+def cmd_escapes(args) -> int:
+    try:
+        rows = read_ledger(args.ledger)
+        result = find_escapes(args.repo_dir, rows, args.days, args.fix_pattern)
+    except (FileNotFoundError, ValueError, EscapeError, re.error) as e:
+        print(f"review_ledger escapes: {e}", file=sys.stderr)
+        return 2
+    if args.format == "json":
+        print(json.dumps(result, indent=2))
+        return 0
+    print(f"{len(result['escapes'])} escape(s) across {result['landed']} landed reviewed PR(s) of "
+          f"{result['repo']}, fixes within {result['days']} days (fix subject matching {args.fix_pattern!r}).")
+    if result["not_landed"]:
+        print("Reviewed, never landed on the default branch (no escape can be counted): "
+              + ", ".join(f"#{n}" for n in result["not_landed"]))
+    print()
+    print("| skipped component | PRs | escapes |\n|---|---|---|")
+    for name, c in result["by_component"].items():
+        print(f"| {name} | {c['prs']} | {c['escapes']} |")
+    print()
+    for e in result["escapes"]:
+        print(f"- #{e['ticket']}: {e['fix'][:12]} {e['subject']} ({e['days']}d, {', '.join(e['files'])})"
+              + (f" — skipped: {', '.join(e['skipped'])}" if e["skipped"] else ""))
+    return 0
+
+
 def cmd_report(args) -> int:
     try:
         rows = read_ledger(args.ledger)
@@ -1508,6 +1663,14 @@ def main(argv=None) -> int:
     a.add_argument("--transcripts", type=Path, help=f"default {DEFAULT_TRANSCRIPTS}")
     a.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     a.set_defaults(func=cmd_append)
+    e = sub.add_parser("escapes", help="bugs fixed on the default branch within days of a reviewed PR landing, "
+                       "on lines it wrote, by skipped review component (#1401)")
+    e.add_argument("--repo-dir", type=Path, required=True, help="a checkout of the reviewed repo")
+    e.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
+    e.add_argument("--days", type=int, default=ESCAPE_DAYS)
+    e.add_argument("--fix-pattern", default=FIX_PATTERN, help="regex a fix commit's subject must match")
+    e.add_argument("--format", choices=("md", "json"), default="md")
+    e.set_defaults(func=cmd_escapes)
     r = sub.add_parser("report")
     r.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     r.add_argument("--weights", type=Path)

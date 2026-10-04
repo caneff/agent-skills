@@ -233,14 +233,19 @@ class RefusalTest(CodexAppendCase):
 
 
 class FlagTest(CodexAppendCase):
-    def test_skip_and_refusal_flags_are_for_codex_types(self):
-        for flags in (["--skip-reason", "x"], ["--refusal", "x"]):
-            for rtype, extra in (("spec", []), ("witness-mutation", ["--mutation-id", "m1", "--outcome", "red",
-                                                                     "--seconds", "1"])):
-                r = run("append", "--repo", "skills", "--ticket", 500, "--type", rtype, "--cache", self.cache,
-                        "--ledger", self.ledger, *flags, *extra, home=self.home)
-                self.assertEqual(r.returncode, 2, (rtype, flags))
-                self.assertIn("for codex types", r.stderr)
+    def test_refusal_is_for_codex_types_and_skip_reason_for_codex_types_and_the_review_axes(self):
+        # #1401: the axes may be skipped (the ablation), so `spec` + --skip-reason is a row, not a refusal.
+        cases = ((["--refusal", "x"], "spec", [], "--refusal is for codex types"),
+                 (["--refusal", "x"], "witness-mutation", ["--mutation-id", "m1", "--outcome", "red",
+                                                          "--seconds", "1"], "--refusal is for codex types"),
+                 (["--skip-reason", "x"], "witness-mutation", ["--mutation-id", "m1", "--outcome", "red",
+                                                              "--seconds", "1"],
+                  "for codex types and the review axes"))
+        for flags, rtype, extra, message in cases:
+            r = run("append", "--repo", "skills", "--ticket", 500, "--type", rtype, "--cache", self.cache,
+                    "--ledger", self.ledger, *flags, *extra, home=self.home)
+            self.assertEqual(r.returncode, 2, (rtype, flags))
+            self.assertIn(message, r.stderr)
         self.assertFalse(self.ledger.exists())
 
     def test_mutation_flags_are_refused_on_a_codex_type_by_the_guard_not_a_missing_cache(self):

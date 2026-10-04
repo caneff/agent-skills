@@ -259,8 +259,8 @@ No PR and no reviewer; Chris reads the log after.
 - A pre-existing bug, performance concern, or unmentioned behavior found along
   the way: don't fix it unless the ticket's behavior cannot work without it —
   report it as a follow-up. Why: an unasked fix widens the diff past what the
-  reviewers check against the ticket. A finding of the review wave is not one:
-  § Review fixes every valid finding in this PR, whatever its size.
+  reviewers check against the ticket. A finding of the review wave is not one: the
+  review step (§ Review) fixes every valid finding in this PR, whatever its size.
 - Typecheck and single test files as you go, the full suite once at the end.
   Why: a failure caught at the file it came from is cheaper to place than one
   found in the full run.
@@ -272,9 +272,9 @@ One review wave, one fix round, then the seam (ADR 0004,
 seam is the convergence check.
 
 1. **Run the wave.** The three axes of `/multi-axis-code-review` — standards,
-   spec and correctness, all three waited for (`multi-axis-code-review/SKILL.md`
-   § Why separate axes: it says why the built-in `/code-review` is not run
-   here; `/code-review low` only when the owner asks) — and the Codex pass
+   spec and correctness, all three waited for (`multi-axis-code-review/SKILL.md` § Why separate axes
+   says why the built-in `/code-review` is not run here; `/code-review low`
+   only when the owner asks) — and the Codex pass
    (§ The Codex pass, below) run in parallel on the same commit. Start the
    Codex pass first, in the background, since it outlasts the axes; the axes
    are subagents and return to you. Nothing is fixed until every reviewer you
@@ -329,8 +329,8 @@ seam is the convergence check.
    (§ Someone else's repo).
 
 3. **Write the dispositions, then run the seam.** You write
-   `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl` (`<repo>` as in § The
-   PR), one JSON object per line, one line per finding, joined to the finding
+   `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl` (`<repo>` as in
+   § The PR), one JSON object per line, one line per finding, joined to the finding
    by its `id` — `S1`/`P2`/`C3` from the axes' sidecars, and
    `codex-gate-<k>` for the Codex pass's k-th finding:
 

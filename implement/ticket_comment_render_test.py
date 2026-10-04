@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Runs implement/SKILL.md's own ticket renderer against fixture issues (#877).
 
-`implement/codex-adversarial-invocation.test.sh` asserts that SKILL.md's two
-ticket reads — the worker's, in § The brief, and the controller's Codex pass,
-in § The merge step 3 — *say* they fetch `--json body,comments`. This file
+`implement/codex-adversarial-invocation.test.sh` asserts that SKILL.md's ticket
+read in § The brief, which § The Codex pass renders the focus text with, *says*
+it fetches `--json body,comments`. This file
 extracts the jq program those snippets carry and executes it, so the rendering
 is a tested seam rather than prose: a comment-less ticket still renders as the
 bare body, comments render after it attributed and marked as data, and a
@@ -92,7 +92,7 @@ def _headers(rendered):
 
 def test_both_reads_render_the_same_document():
     programs = _programs()
-    assert len(programs) == 2, f"want 2 body+comments fetches in SKILL.md, found {len(programs)}"
+    assert len(programs) == 1, f"want 1 body+comments fetch in SKILL.md, found {len(programs)}"
     # The two snippets sit at different indents (one inside a numbered step),
     # so compare with each line's leading indent stripped — that indent is the
     # program's only multi-line structure.

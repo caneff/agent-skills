@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Guards #1125: a Codex-pass leftover on a PR with no run file reaches a sweep
-# ticket, because the controller updates or files the per-PR sweep after it
-# appends the leftover to the sidecar (§ The merge step 3). Guards #1145: the
-# controller re-runs the seam on the PR merged onto current main before step
-# 4's merge. Prose assertion over implement/SKILL.md § The merge.
+# Guards #1145: the controller re-runs the seam on the PR merged onto current
+# main before step 3's merge. Guards #1401: § The merge files no sweep and
+# disposes of no leftover (no step reviews the diff any more). Prose assertion
+# over implement/SKILL.md § The merge.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"
@@ -15,13 +14,13 @@ check_in() {
   case "$merge" in *"$1"*) ;; *) echo "FAIL: § The merge is missing: $1" >&2; fail=1 ;; esac
 }
 
-# #1125
-check_in 'On a PR whose worker brief carried no `--run <run-id>`, appending a Codex `leftover` is not the end'
-check_in 'The controller then updates or files the per-PR sweep by § The PR'"'"'s idempotent title search'
-check_in 'a non-zero exit from the search stops you and is never read as no hit'
-check_in 'no hit files through `/file-ticket`'
-check_in 'with the worker'"'"'s existing items kept and the Codex leftovers added'
-check_in 'A brief that carried `--run <run-id>` files nothing here'
+# #1401: the controller's merge carries no review step and no per-PR sweep.
+check_absent() {
+  case "$merge" in *"$1"*) echo "FAIL: § The merge still has: $1" >&2; fail=1 ;; *) ;; esac
+}
+check_absent 'per-PR sweep'
+check_absent 'leftover'
+check_absent '`/file-ticket`'
 
 # #1145
 check_in 'Before the merge, re-run the seam on the PR as it will land'
@@ -35,7 +34,7 @@ check_in 'its next "PR up" restarts at step 2'
 check_in 'git worktree remove --force'
 check_in 'State the run'"'"'s worker and core count'
 check_in "GitHub's CLEAN is a textual-merge verdict, not a test verdict"
-check_in "and step 4's re-run of the seam"
+check_in "After step 3's re-run of the seam"
 
 # Codex gate on #1172: the merge is bound to the head the seam ran on, and
 # the base is re-fetched right before it; both merge lines carry the flag.

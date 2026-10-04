@@ -30,3 +30,13 @@ brief=$(tr '\n' ' ' <flow/claude/agents/diff-reviewer.md | tr -s ' ')
 printf '%s' "$brief" | grep -qF "an empty file when you found nothing" ||
   fail "flow/claude/agents/diff-reviewer.md lacks the empty-sidecar rule"
 echo "ok: the standing brief carries it too"
+
+# #1401: the empty sidecar is accepted only beside the reviewer's completion
+# marker, so both the skill and the standing brief must tell a reviewer to
+# write it, and § 4 must say why an empty file alone is not enough.
+need "completion marker" "the marker is named"
+need "findings-<axis>-<n>.done" "the marker's file name"
+need "a reviewer that crashed" "why an empty sidecar alone is not enough"
+printf '%s' "$brief" | grep -qF "completion marker" ||
+  fail "flow/claude/agents/diff-reviewer.md lacks the completion-marker rule"
+echo "ok: both tell each axis to write the completion marker"

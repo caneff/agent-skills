@@ -4,7 +4,7 @@
 # PR body is the one exception, guarded in pr-body-location.test.sh). Both rules sit in implement/SKILL.md § The brief. A prose
 # assertion, not a behavioral test — there is no harness that runs the skill's
 # own prose. (The #963 trailer is guarded in pr-up-report-shape.test.sh, the
-# #951 --background wording in codex-pass-schedule.test.sh.)
+# #951 --background wording in codex-wave.test.sh.)
 # Resolving via BASH_SOURCE sidesteps a caller's leaked GIT_DIR (#620).
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,7 +32,7 @@ check 'GitHub'"'"'s email-privacy rule rejects a push signed with it'
 check 'A file whose contents become public lives under your own workspace'"'"'s `.scratch/`'
 check 'never `/tmp`, never a shared scratchpad path'
 check 'any file you author and then hand to a command'
-check 'The controller'"'"'s Codex pass files'
+check 'The Codex pass'"'"'s record and output'
 check '`~/.cache/agent-reviews/<repo>/`, under a ticket-named file'
 check 'can be overwritten by another session between the write and `gh pr create`'
 check 'Your "PR up" message ends with the controller trailer'

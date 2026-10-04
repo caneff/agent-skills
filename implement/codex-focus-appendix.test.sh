@@ -17,8 +17,9 @@
 # show-toplevel at that caller's repo instead of this one (#620); resolving
 # via BASH_SOURCE sidesteps it entirely rather than relying on the scrub.
 # Section-scoped for SKILL.md, the way codex-fourth-axis-wording.test.sh is:
-# the appendix belongs to the controller's § The merge, and a whole-file
-# check would still pass with it pasted anywhere at all.
+# the appendix belongs to § The Codex pass (the review wave's Codex block,
+# #1401), and a whole-file check would still pass with it pasted anywhere at
+# all.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"
@@ -26,8 +27,8 @@ lane="$here/codex-lane.md"
 
 flatten() { tr '\n' ' ' | tr -s ' '; }
 
-merge_section="$(sed -n '/^### The merge$/,/^## Someone else/p' "$skill" | flatten)"
-[ -n "$merge_section" ] || { echo "FAIL: could not extract § The merge from implement/SKILL.md" >&2; exit 1; }
+merge_section="$(sed -n '/^#### The Codex pass$/,/^### Before the PR$/p' "$skill" | flatten)"
+[ -n "$merge_section" ] || { echo "FAIL: could not extract § The Codex pass from implement/SKILL.md" >&2; exit 1; }
 lane_flat="$(flatten <"$lane")"
 
 fail=0
@@ -44,38 +45,31 @@ check_in() {
 
 # Rule 1: the appendix exists, is named as controller context rather than
 # ticket text, and is appended to the same body_file the pass already reads.
-check_in "$merge_section" 'Controller context — written by the controller, not part of the ticket' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'appended to `body_file` after the rendered ticket' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'Context from the worker'"'"'s brief — not part of the ticket' 'implement/SKILL.md § The Codex pass'
+check_in "$merge_section" 'appended to `body_file` after the rendered ticket' 'implement/SKILL.md § The Codex pass'
 
 # Rule 2: both required lines, by name.
-check_in "$merge_section" '**Open sibling branches.**' 'implement/SKILL.md § The merge'
-check_in "$merge_section" '**Posture.**' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'which file, which line, which PR' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'landing ahead of its own activation, and the ticket that activates it' 'implement/SKILL.md § The merge'
+check_in "$merge_section" '**Open sibling branches.**' 'implement/SKILL.md § The Codex pass'
+check_in "$merge_section" '**Posture.**' 'implement/SKILL.md § The Codex pass'
+check_in "$merge_section" 'which file, which line, which PR' 'implement/SKILL.md § The Codex pass'
+check_in "$merge_section" 'landing ahead of its own activation, and the ticket that activates it' 'implement/SKILL.md § The Codex pass'
 
 # Rule 3: the "nothing to report" case is written out, not omitted — the
 # absent answer read as the benign one is the shape this lane keeps closing.
-check_in "$merge_section" 'No sibling branch is open, and nothing in this PR is split.' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'its posture is what the tree implies' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'Both lines are written even when there is nothing to report' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'No sibling branch is open, and nothing in this PR is split.' 'implement/SKILL.md § The Codex pass'
+check_in "$merge_section" 'its posture is what the tree implies' 'implement/SKILL.md § The Codex pass'
+check_in "$merge_section" 'Both lines are written even when there is nothing to report' 'implement/SKILL.md § The Codex pass'
 
 # Rule 4: the appendix is written with the file-write tool, like the ticket
 # render it follows — a sibling branch name or a ticket title reaching the
 # shell as an interpolated string is the same injection the ticket body was
 # already protected from.
-check_in "$merge_section" 'Write both lines with your file-write tool, into the same file, never interpolated' 'implement/SKILL.md § The merge'
+check_in "$merge_section" 'Write both lines with your file-write tool, into the same file, never interpolated' 'implement/SKILL.md § The Codex pass'
 
-# Rule 5 (#888's skip key, now covering more than the ticket): the
-# `sha256sum` is taken over the file as passed, so the comparison render
-# must rebuild ticket *and* appendix, or a controller re-rendering the
-# ticket alone burns the second pass on a change that never happened.
-check_in "$merge_section" 'covers the appendix as well as the rendered ticket' 'implement/SKILL.md § The merge'
-check_in "$merge_section" 'a fresh render for that comparison is ticket and appendix' 'implement/SKILL.md § The merge'
-
-# Rule 6: the Codex lane's own invocation carries the same appendix, and
+# Rule 5: the Codex lane's own invocation carries the same appendix, and
 # its worker — who does not hold either fact — asks the controller rather
 # than inferring them from the tree, the one source that cannot see them.
-check_in "$lane_flat" 'the same two-line controller-context appendix' 'implement/codex-lane.md'
+check_in "$lane_flat" 'the same two-line context appendix' 'implement/codex-lane.md'
 check_in "$lane_flat" '**Open sibling branches.** and **Posture.**' 'implement/codex-lane.md'
 check_in "$lane_flat" 'which is the one copy of it; a second copy here would drift' 'implement/codex-lane.md'
 check_in "$lane_flat" 'ask the controller for both before you compose the file' 'implement/codex-lane.md'
