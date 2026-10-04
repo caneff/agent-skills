@@ -386,9 +386,10 @@ class AuditDocWording(unittest.TestCase):
         self.assertIn("never the working directory", " ".join(section.split()))
 
     def test_no_bare_relative_path_to_the_trial_log(self):
-        for line in self.close_out().splitlines():
-            if "codex-review-trial.md" in line:
-                self.assertIn("<skills checkout>/docs/research/", line)
+        lines = [l for l in self.close_out().splitlines() if "codex-review-trial.md" in l]
+        self.assertTrue(lines, "§ Close out no longer names the trial log")
+        for line in lines:
+            self.assertIn("<skills checkout>/docs/research/", line)
 
 
 if __name__ == "__main__":
