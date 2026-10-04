@@ -12,7 +12,9 @@ One line per friction point a controller or worker hits, instead of a prevention
 - 2026-10-04, sudokumaker-custom-constraints: implement/SKILL.md and runfile.py changed mid-run (#1401): verification-check.sh and `runfile.py leftover` vanished between one merge and the next in spec-649-smcc, and 46 leftovers recorded under the old rule are now swept by nothing. Cost: two refused commands at merge time and an orphaned-findings decision for Chris.
 - 2026-10-04, agent-skills: after a controller-ordered rebase, `fix_check.py` read every review sidecar of #1412 (PR #1417) as stale: it dates the branch by committer time (`%ct`), which a rebase resets. The controller waived the check with `PRE_REPORT_NO_FIX_CHECK` after comparing the sidecars against author time by hand. Cost: one worker round and one ruling. Already #1419.
 - 2026-10-04, twitch-rules-scroller: the same #1401 mid-run change hit burn-trs-2026-10-04: verification-check.sh vanished between PR #601's merge and PR #607's, and `sweep.py` vanished before run close, leaving 9 leftovers recorded under the old rule swept by nothing. Second occurrence (first: spec-649-smcc, line above). Cost: two refused commands and an orphaned-findings decision for Chris.
-- 2026-10-04, twitch-rules-scroller: implement/SKILL.md § The merge step 3 says the seam is `bash tests/all.sh` "here", but the seam is per repo (AGENTS.md § End-to-end seam); twitch-rules-scroller has no tests/all.sh, and the workers for #587 and #593 in burn-trs-2026-10-04 each stopped to note it. Cost: a check per worker and per merge.
+- 2026-10-04, twitch-rules-scroller: implement/SKILL.md § The merge step 3 says the seam is `bash tests/all.sh` "here",
+  but the seam is per repo (AGENTS.md § End-to-end seam);
+  twitch-rules-scroller has no tests/all.sh, and the workers for #587 and #593 in burn-trs-2026-10-04 each stopped to note it. Cost: a check per worker and per merge.
 
 Commit each line on its own with the subject `friction: <what happened>`.
 A burn's closing report counts them by that subject; the rule is
