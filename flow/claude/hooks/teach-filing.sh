@@ -1,7 +1,8 @@
 #!/bin/bash
-# Teaching hook (PreToolUse, Bash): `gh issue create` answers, once per
-# session, with WORKFLOW.md § Before filing a ticket and the open issues whose
-# title matches the new ticket's component, from a search this hook runs.
+# Teaching hook (PreToolUse, Bash): `gh issue create` answers with the open
+# issues whose title matches the new ticket's component, from a search this
+# hook runs on every filing, and, once per session, with WORKFLOW.md § Before
+# filing a ticket.
 # Shared mechanics: teach-lib.sh.
 #
 # The component is the title's text before its first ": " (the shape most
@@ -15,7 +16,9 @@
 . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/teach-lib.sh"
 
 runs gh issue create || teach_emit
-teach WORKFLOW.md "Before filing a ticket" "\`gh issue create\` files a ticket" || teach_emit
+# The section once per session; the search below on every filing, since its
+# matches belong to the ticket being filed (#1409 story 6).
+teach WORKFLOW.md "Before filing a ticket" "\`gh issue create\` files a ticket"
 
 # The `gh issue create` command as the shell runs it (quoted text dropped),
 # and the unquoted directory of the last `cd` before it.

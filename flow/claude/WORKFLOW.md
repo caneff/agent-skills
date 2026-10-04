@@ -71,9 +71,10 @@ searched. When one exists, the item goes onto it as a comment
 is done on the spot, never ticketed. Why: on 2026-10-04, 295 tickets had been
 opened in 14 days against 271 closed, most of them one-paragraph items on a
 component that already had an open ticket
-(`docs/research/2026-10-04-agent-ticket-inflation.md`). This section is shown
-by the teaching hook `hooks/teach-filing.sh` on the first `gh issue create`
-of a session, with the open issues its own title search found.
+(`docs/research/2026-10-04-agent-ticket-inflation.md`). The teaching hook
+`hooks/teach-filing.sh` shows this section on the first `gh issue create` of
+a session, and on every `gh issue create` lists the open issues its own title
+search found.
 
 ## Pipeline notes
 

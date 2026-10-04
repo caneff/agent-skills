@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Contract test for teach-filing.sh: `gh issue create` answers, once per
-# session, with WORKFLOW.md § Before filing a ticket and the open issues whose
-# title matches the new ticket's component, from a search the hook runs.
+# Contract test for teach-filing.sh: `gh issue create` answers with the open
+# issues whose title matches the new ticket's component, from a search the
+# hook runs on every filing, and, once per session, with WORKFLOW.md § Before
+# filing a ticket.
 # `gh` is stubbed via PATH so this runs offline.
 # Run: bash flow/claude/hooks/teach-filing.test.sh
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,8 +39,18 @@ if grep -qxF -- "--repo" "$STUB_ARGS" && grep -qxF "caneff/agent-skills" "$STUB_
 else
   echo "FAIL: search args were: $(paste -sd' ' "$STUB_ARGS")"; fails=1
 fi
-expect_none "second gh issue create in the same session" \
-  "$(context "$hook" s1 'gh issue create --title "merge-cleanup: another" --body x')"
+# The section is shown once per session; the search runs on every filing,
+# since its matches belong to the ticket being filed (controller ruling on
+# #1412, citing #1409 story 6).
+got=$(context "$hook" s1 'gh issue create --repo caneff/agent-skills --title "merge-cleanup: another" --body x')
+expect_has "second filing in the session still lists the matches" "$got" "#1365 merge-cleanup: repo-declared discardable paths"
+if [[ "$got" == *"${section[0]}"* ]]; then
+  echo "FAIL: second filing repeated the section"; fails=1
+else
+  echo "PASS: second filing does not repeat the section"
+fi
+got=$(STUB_ERR="HTTP 502" context "$hook" s1 'gh issue create --repo caneff/agent-skills --title "merge-cleanup: third" --body x')
+expect_has "failed search on a later filing is reported as failed" "$got" "failed" "HTTP 502"
 
 # No colon in the title: the first identifier-shaped word is the component.
 got=$(context "$hook" s2 "gh issue create -R caneff/agent-skills -t 'Make merge_cleanup dry-run deterministic' -b x")
