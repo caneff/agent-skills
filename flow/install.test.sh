@@ -266,19 +266,16 @@ fi
 # ~/.local/state cannot be written stands in for a read-only or root-owned
 # state dir, or a full disk: the record's own mkdir is what fails there.
 ro_home="$tmp/ro-home"
-mkdir -p "$ro_home/.local/state"
-chmod 500 "$ro_home/.local/state"
-if [ -w "$ro_home/.local/state" ]; then
-  echo "SKIP unwritable state dir (running as root?)"
+mkdir -p "$ro_home/.local"
+# A regular file where the state dir should be: mkdir fails for root too, where
+# a chmod would be ignored and the check would pass vacuously.
+: > "$ro_home/.local/state"
+out=$(HOME="$ro_home" bash "$recorded/flow/install.sh" 2>&1); rc=$?
+if [ "$rc" -eq 0 ] && [ -L "$ro_home/.claude/hooks/refresh-landed.sh" ]; then
+  echo "PASS an unwritable state dir does not fail the install"
 else
-  out=$(HOME="$ro_home" bash "$recorded/flow/install.sh" 2>&1); rc=$?
-  if [ "$rc" -eq 0 ] && [ -L "$ro_home/.claude/hooks/refresh-landed.sh" ]; then
-    echo "PASS an unwritable state dir does not fail the install"
-  else
-    echo "FAIL an unwritable state dir failed the install (rc=$rc): $out"; fails=1
-  fi
+  echo "FAIL an unwritable state dir failed the install (rc=$rc): $out"; fails=1
 fi
-chmod 700 "$ro_home/.local/state"
 
 # A failing lane-install.sh (a missing cargo, a compile error) runs last and
 # must not half-install everything else — it was never a gate on the rest of
