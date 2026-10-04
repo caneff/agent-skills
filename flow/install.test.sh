@@ -141,15 +141,10 @@ if [ -L "$tmp/home/.claude/hooks/worker-stop-alert.sh" ]; then
 else
   echo "FAIL claude/hooks/worker-stop-alert.sh not linked under the scratch HOME"; fails=1
 fi
-if [ -L "$tmp/home/.claude/hooks/worker-spin-alert.sh" ]; then
-  echo "PASS the worker-spin alert hook linked under the scratch HOME"
-else
-  echo "FAIL claude/hooks/worker-spin-alert.sh not linked under the scratch HOME"; fails=1
-fi
-# worker-stop-alert.sh and worker-spin-alert.sh source this file by
-# BASH_SOURCE-relative path, which resolves against the installed symlink's
-# own directory (~/.claude/hooks), not the repo — so it must be linked there
-# too, or both hooks silently fail to resolve any controller (#991).
+# worker-stop-alert.sh sources this file by BASH_SOURCE-relative path, which
+# resolves against the installed symlink's own directory (~/.claude/hooks),
+# not the repo — so it must be linked there too, or the hook silently fails
+# to resolve any controller (#991).
 if [ -L "$tmp/home/.claude/hooks/worker-alert-lib.sh" ]; then
   echo "PASS the shared worker-alert lib linked under the scratch HOME"
 else

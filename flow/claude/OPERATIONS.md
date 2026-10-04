@@ -224,15 +224,6 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   from `settings.json` on 2026-10-04 because it typed into Chris's own input
   and fired about a dozen times in one burn without once being right. The script
   stays installed, and re-adding its `Stop` entry restores it.
-- A worker that never stops raises no stop alert, and its transcript mtime
-  and `working` state read healthy while it spins. The `PostToolUse` hook
-  `worker-spin-alert.sh` runs inside the turn: the same tool with
-  byte-identical input 20 times in a row (no other call between) types
-  `[worker-spin-alert] worker #<n> repeated <tool> <input> at least <k>
-  times in a row` into your pane, once per run, logged to
-  `~/.claude/worker-spin-alerts.log`. To check a transcript on demand:
-  `bash ~/.claude/hooks/worker-spin-alert.sh --classify <transcript.jsonl>`.
-  Why: a worker made 180 `echo ok` calls waiting on a subagent (#925).
 - Long-running job: run it under `job-run --name <n> -- <cmd>` — output and
   exit survive a kill, and `job-run --status <n>` answers alive / finished /
   killed. Why: a plain background run loses its output and exit code when
