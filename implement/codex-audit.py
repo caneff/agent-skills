@@ -182,7 +182,7 @@ def render_ticket(slug: str, ticket: int, program: str) -> str:
 
 def brief(slug: str, span: Span, prs: list[Merge]) -> str:
     """The focus text: what the range is, each audited ticket, and the controller-context appendix
-    a gate pass's brief ends with (`implement/SKILL.md` § The merge step 3)."""
+    a gate pass's brief ends with (`implement/SKILL.md` § The Codex pass)."""
     programs = FETCH_RE.findall(SKILL.read_text())
     if not programs:
         raise Stop(ERROR, f"no `--json body,comments --jq` ticket read in {SKILL}")

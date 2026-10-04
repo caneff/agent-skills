@@ -49,19 +49,17 @@ that report and a scratch copy of the diff, never for the repo under review:
 `Edit` is deliberately not among your tools.
 
 **Also write the findings sidecar** the caller's prompt names —
-`findings-<axis>-<n>.jsonl` (`-r<k>` on a later round) next to the report, one JSON line per finding
+`findings-<axis>-<n>.jsonl` next to the report, one JSON line per finding
 with a stable `id` (your axis's letter plus an ordinal: `S1`, `P2`, `C3`),
 `axis`, `severity` (`hard` or `judgement`), `file`, and `title` (#855). This
 is the standing brief's own copy of that requirement, not just the caller's
 per-call paste, so a run whose prompt drops the sidecar line still gets one.
 Write it on every run, an empty file when you found nothing (#1257): a missing
-sidecar is read downstream as an axis that never ran.
-A finding of one of `implement/SKILL.md` § Review's blocking kinds opens its
-`title` with `blocking:` and names the kind, so the worker cannot read it as
-a `leftover` (#1252).
-When the prompt names an id prefix (`id prefix: r2-`), prefix every id with it
-(`r2-S1`); one that names none gets bare ids. The rule is
-`multi-axis-code-review/SKILL.md` § 4's Round ids.
+sidecar is read downstream as an axis that never ran. **Then create the empty
+completion marker `findings-<axis>-<n>.done`** beside it (#1401), as the last
+write once the sidecar is complete: an empty sidecar is accepted only beside
+its marker, since a reviewer that crashed leaves an empty one too. Ids are
+bare (`S1`); there is one wave per PR.
 On the standards axis, a cut the over-engineering lens reports also gets a
 line here — its own `OE1`, `OE2`, … series, still `axis: "standards"` — so
 it can be disposed of by id like any other finding (#1021).

@@ -423,8 +423,8 @@ def one_line(value, what):
 def read_dispositions(sidecar_path):
     """Every line of a dispositions sidecar (`implement/SKILL.md` § Review),
     in order, as `(line number, object)`. A line that is not a JSON object
-    with one of the five sidecar outcomes is refused by file and line — why
-    it is not skipped: `references/run-file.md` § Leftovers. So is a second
+    with one of the three sidecar outcomes is refused by file and line — why
+    it is not skipped: `references/run-file.md` § Dispositions and counts. So is a second
     line carrying an id an earlier line already used (#1124): every reader
     joins on the id, and one of the two would be dropped or counted twice."""
     try:

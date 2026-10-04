@@ -12,6 +12,7 @@ three axes (it was two until #732; callers still saying "two-axis" mean this):
 - **Correctness** — how does it fail in the field, and does each new test witness what it claims?
 
 The axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
+In the implement lane the Codex adversarial pass runs beside them in the same wave (`implement/SKILL.md` § Review); this skill spawns and aggregates the axes only.
 
 The issue tracker should have been provided to you — run `/setup-matt-pocock-skills` if `docs/agents/issue-tracker.md` is missing.
 
@@ -138,18 +139,19 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 This lens **owns** the three smells above that are really over-engineering — Speculative Generality, Middle Man, Refused Bequest. Report each such cut **once**, under the over-engineering subsection (step 4), never twice. A single smoke test or `assert`-based self-check is the minimum, not bloat — never flag it as a cut.
 
 **Every cut gets a sidecar line too** (#1021). An over-engineering cut is a
-finding like any other — it escapes disposition and the leftover sweep when
-it lives in prose only. Assign each cut a stable id in its own series —
-`OE1`, `OE2`, … — cite that id beside the cut in the prose subsection, and
-give it a line in the same `findings-standards-<n>.jsonl` sidecar as the rest
-of the Standards axis's findings (§ 4 below), `axis` still `"standards"` and
-`severity` always `"judgement"` — an over-engineering cut is not a
-documented repo standard, and § 3's own **Always a judgement call** rule
-already says nothing here can be `hard`. The verification pass, the dispositions
-sidecar, and the leftover sweep join an `OE` id exactly as they join an `S`,
+finding like any other — it escapes disposition when it lives in prose only.
+Assign each cut a stable id in its own series — `OE1`, `OE2`, … — cite that id
+beside the cut in the prose subsection, and give it a line in the same
+`findings-standards-<n>.jsonl` sidecar as the rest of the Standards axis's
+findings (§ 4 below), `axis` still `"standards"` and `severity` always
+`"judgement"` — an over-engineering cut is not a documented repo standard, and
+§ 3's own **Always a judgement call** rule already says nothing here can be
+`hard`. The caller's disposition joins an `OE` id exactly as it joins an `S`,
 `P`, or `C` one — nothing about the id format is axis-specific.
 
 ### 4. Spawn the three sub-agents in parallel
+
+A caller that has switched an axis off — `implement/SKILL.md` § Review's first ablation skips the standards axis on a small PR — names it, and you spawn the other two; the skipped axis is not reported as `NO REPORT RECEIVED` and has no sidecar.
 
 Spawn all three with the plain `Agent` tool, `subagent_type: diff-reviewer`, fire-and-return: no `name`, not background, no teammate messaging. This is what makes the result reach *you* as the agent's completion notification — even when you yourself are a subagent of some other caller. A named background teammate parks its report for `SendMessage`/`ListAgents` instead, and when you're a subagent nothing is polling for that: the report idles or lands nowhere.
 
@@ -165,13 +167,11 @@ Every prompt carries only the **diff, the commit list, the spec/standards source
 
 Belt and braces: append to **every** prompt — "Also write your full report to `<dir>/review-<axis>-<n>.md`", `<axis>` being `standards`, `spec` or `correctness`, `<n>` the issue number from step 2 (or the branch name if there is none). `/tmp` is wiped at every boot here and herdr workers never set `$CLAUDE_JOB_DIR`, so these reports — the only record of what each reviewer said — need a home that survives: `~/.cache/agent-reviews/<repo>/`. Never point the report at `./.scratch/` or anywhere under the repo — an untracked file there blocks `git worktree remove` (and so `ship`).
 
-Which rating counts as high is `implement/SKILL.md` § Review's severity mapping,
-stated there once; no brief here restates it, and a reviewer rates in its
-own axis's words. A finding whose failure cannot occur here is disputed
-under `implement/SKILL.md` § Review's reachability bar, whatever its rating.
-A finding of one of `implement/SKILL.md` § Review's blocking kinds opens
-its sidecar `title` with `blocking:` and names the kind, so the worker
-cannot read it as a `leftover`.
+A finding whose failure cannot occur here is disputed under
+`implement/SKILL.md` § Review's reachability bar, whatever its rating. Every
+valid finding is fixed in the PR the review covers (`implement/SKILL.md`
+§ Review): a reviewer rates in its own axis's words, and no rating decides
+whether a finding is fixed.
 
 **Alongside the prose, each reviewer also writes a sidecar** so counting a
 finding stops needing an LLM pass over prose (#855, #854): "Also write
@@ -181,47 +181,40 @@ or "judgement", "file": "<path>", "title": "<short title>"}`. Assign each
 finding a stable id — the axis's first letter (`S` standards, `P` spec, `C`
 correctness) plus a per-report ordinal, e.g. `S1`, `P2`, `C3`; an
 over-engineering cut instead takes its own `OE1`, `OE2`, … series, still
-under `axis: "standards"`. **Round ids** (#1177, #1213; this is the one home
-for the rule): a PR's first review round keeps the bare ids above; every
-later round in the same PR prefixes each id with its round, `r2-S1`,
-`r2-C3`, `r3-P1`, so a PR reviewed twice never has two findings named `S1`.
-The caller names the prefix in every reviewer prompt (`id prefix: r2-`, or
-`id prefix: none`), and a reviewer whose prompt names none writes bare ids. A
-sweep ticket's PR (title `Sweep: leftovers from ...`) carries a prefix on
-every round, its first included (`id prefix: r1-`), so its own findings stay
-apart from the sweep items it disposes, which keep their source PR's ids. A later round's
-sidecar is named `findings-<axis>-<n>-r<k>.jsonl`, so it never overwrites round
-1's and an empty one still carries its round (`append` reads the round from
-the name when no id does). A split suffix
-(`implement/SKILL.md` § Review) stays last: `r2-S1a`. Cite the
+under `axis: "standards"`. There is one wave per PR, so every id is bare. Cite the
 same id in the prose report next to each finding, so a reader can join the
 two. A partial write costs one line, not the file — readers of this
 sidecar must tolerate and skip a malformed line rather than fail the whole
 file on it. No cost tracking: never add tokens or wall-clock to this line,
 in the sidecar or the prose. Write the sidecar on every run, an empty file
-when it found nothing."
+when it found nothing, and then create the empty file
+`<dir>/findings-<axis>-<n>.done`, the completion marker."
 
-**Why the sidecar is written on a clean run too** (#1257):
-`implement/verification-check.sh` passes a PR with no verification pass only
-when all three sidecars exist and are empty, so a clean round that left no
-file would be refused at "PR up". The safe direction stays: an absent sidecar
-is refused, because it cannot be told from a reviewer that never ran.
+**Why the sidecar is written on a clean run too, and the completion marker**
+(#1257, #1401): `implement/verification-check.sh` passes a PR only when all three
+sidecars exist, and accepts one with no finding line only beside its
+`findings-<axis>-<n>.done` marker, so a clean round that left no file is
+refused at "PR up". An empty sidecar alone is also what a reviewer that crashed
+before writing leaves behind, and nothing on disk tells the two apart; the
+marker is written by the reviewer once the sidecar is complete, so an
+empty sidecar without it is read as an axis that never finished. The safe
+direction stays: an absent sidecar is refused, because it cannot be told from a
+reviewer that never ran.
 
 **Every review ends with `append`** (#1268; this is the one home for the rule,
-and the `diff-reviewer` definition and § 6 point here). Once its sidecar is
+and the `diff-reviewer` definition points here). Once its sidecar is
 written, each axis reviewer runs, from any directory:
 
 ```
-python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type <axis> --round <k>
+python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type <axis>
 ```
 
 `<repo>` is the review cache's directory name (the `<repo>` of `<dir>`), `<n>`
 the ticket, `<axis>` `standards`, `spec` or `correctness` (a `standards` append
-also writes the `OE` findings' row), `<k>` the round, 1 unless the prompt's id
-prefix says `r2-` or later. It writes the ledger row for that run, cost read
+also writes the `OE` findings' row). It writes the ledger row for that run, cost read
 from the reviewer's subagent transcript up to that call. Its findings'
-outcomes are `unknown` then, since no dispositions exist yet; the
-verification pass's own `append` (§ 6) refills them. It exits non-zero,
+outcomes are `unknown` then, since no dispositions exist yet; `review_ledger.py harvest`
+joins them from the dispositions sidecar later. It exits non-zero,
 naming what is missing, when that transcript has no usage or the findings
 sidecar is absent, and then writes nothing. A refusal is reported, never
 skipped: the reviewer puts the command's stderr on the first line of its
@@ -292,7 +285,7 @@ always the branch under review.
 
 **Every invocation gets its own capture, and re-captures at the start of every
 round.** The name carries the revision and a per-invocation nonce, and the
-block publishes by `mv` onto it, so a retry, a verification round begun while
+block publishes by `mv` onto it, so a retry, a re-review begun while
 a lagging axis is still reading, and another worktree on the same issue cannot
 overwrite each other — and no axis reads a half-written patch. Keying on `<n>`
 alone made the hazard *wrongness* while the fallback below tests only for
@@ -367,7 +360,7 @@ If the completion notification comes back missing or empty, read that file befor
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec, and the settled decisions.
-- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep), except a change an adjacent disposition names (`fixed (adjacent)`), which implement's adjacent-fix rule sanctions; (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Check `docs/agents/defect-classes.md` by name when present in the reviewed repo; when absent, check the three shapes inline instead: (1) an absent or malformed answer read as a benign one; (2) a stated fallback with no mechanism behind it; (3) a test that passes for a reason other than the one it claims. Findings and their evidence only, no preamble."
+- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. When the diff knowingly deviates from an acceptance criterion's literal wording, rule on whether it preserves the spec's intent, not the letter — look for a competing, higher AC the deviation exists to satisfy — but flag the deviation, never pass it silently. Quote the spec line for each finding. Check `docs/agents/defect-classes.md` by name when present in the reviewed repo; when absent, check the three shapes inline instead: (1) an absent or malformed answer read as a benign one; (2) a stated fallback with no mechanism behind it; (3) a test that passes for a reason other than the one it claims. Findings and their evidence only, no preamble."
 
 **Correctness sub-agent prompt** — include:
 
@@ -433,7 +426,7 @@ is worse than a slow one.
 ```
 worktree=<the worktree under review>
 ids=<space-separated mutation ids, one per new or changed test — the names you report by>
-ledger_args=( --repo <repo> --ticket <n> --round <k> )   # as in § 4's append line
+ledger_args=( --repo <repo> --ticket <n> )   # as in § 4's append line
 call_site_ids=""   # <space-separated ids of the call-site mutations among $ids; every other id is a constraint mutation>
 mutate() { :; }   # <$1 the id, $2 the witness worktree, $3 a marker path: strip that test's constraint in $2, create the marker with `: >"$3"` on the line IMMEDIATELY before the covering suite's command, and run only that suite>
 
@@ -624,62 +617,12 @@ If the spec is missing, skip the Spec sub-agent and note this in the final repor
 Present the reports under `## Standards`, `## Spec` and `## Correctness` headings, verbatim or lightly cleaned. Every finding every axis returned is in the aggregate — none is dropped as minor, duplicate, or already known; the caller disposes of findings, this skill only collects them. Do **not** merge or rerank findings — the axes are deliberately separate (see _Why separate axes_).
 
 Each finding carries the stable id its sidecar gave it (`S1`, `P2`, `C3`).
-A downstream pass — the verification pass's disposition, the PR body's
-Decisions made section — cites that id rather than restating the finding
+The worker's dispositions and the PR body's
+Decisions made section cite that id rather than restating the finding
 in its own prose; that's what makes the disposition sidecar joinable
 without a reading pass (#855).
 
 End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
-
-### 6. The verification pass
-
-A caller that follows round 1 with one verification pass (implement's review
-step 2) spawns one `diff-reviewer`, `model: opus`, fire-and-return as in § 4.
-Its prompt carries the round-1 findings sidecars, a fresh capture of the fix
-commits, the round's id prefix, named as § 4's Round ids say (`id prefix: none`,
-`r1-` on a sweep ticket, `r2-` for a second round: it writes its dispositions
-under those ids), the worker's
-claimed dispositions — each a claim to check, never
-settled, and never with an outcome pre-assigned — and the settled decisions.
-It writes `dispositions-<n>.jsonl` in the grammar of `implement/SKILL.md` § Review.
-It also writes its report to `<dir>/review-verify-<n>.md`, and its own
-findings sidecar `<dir>/findings-verify-<n>.jsonl` (`-r<k>` on a later round,
-as § 4's Round ids say) for any finding it raises beyond round 1's — ids `V1`,
-`V2`, …, an empty file when it raised none — because `append` refuses a review
-with no findings sidecar.
-It ends with `append --type verification`, as § 4's *Every review ends with
-`append`* says, once its sidecar and dispositions are written. That append
-also refills the outcomes of the round's axis rows already in the ledger,
-which were `unknown` when the axes appended before any disposition existed.
-
-The brief: "Check each round-1 finding id against its fix or its claimed
-disposition. Fail the pass, naming the finding id, on any of five things:
-(a) a round-1 finding with no disposition — `leftover` counts as one, as
-do the other four outcomes; (b) a `leftover` whose finding
-is high under implement's severity mapping, since a high finding is filed —
-read a correctness finding's `CONFIRMED` or `PLAUSIBLE` from its prose
-report, since its sidecar line carries only `hard` or `judgement`;
-(c) an adjacent fix that breaks `implement/SKILL.md` § Review's adjacent-fix
-rule. For (c), write the sidecar
-first, then run `python3 ~/.agents/skills/multi-axis-code-review/check_adjacent.py --repo <worktree> --base <fixed point> <dir>/dispositions-<n>.jsonl`:
-it measures every sidecar line with `"scope": "adjacent"` for one file — or
-that file plus its own test file in the same directory, one of the three
-naming patterns `own_test_pair` in `check_adjacent.py` defines (#1152) — a
-source file already in the diff and under 20 changed lines total, and prints
-`BREACH <id>` for each that breaks them, or for any line it cannot read. Judge the other
-two parts — one function and no public seam — by reading the fix commit, and
-fail by id on those the same way. (d) a `disputed: unreachable — <why>`
-disposition whose why does not name how the environment in
-`implement/SKILL.md` § Review's reachability bar (this box, our repos,
-bodies people here write) rules the failure out; a bare "unlikely" or
-"cannot happen" fails by id, since the bar would otherwise suppress a
-reachable finding unchecked; (e) a finding of one of
-`implement/SKILL.md` § Review's blocking kinds, whatever its reviewer's
-title said, disposed as `leftover`, or as `filed` with no design named for
-why the fix needs its own ticket. Report every breach beside the finding it
-belongs to. Keep every line already in the file whose id holds a space — on a
-sweep ticket's PR those are the worker's `<file> <id>` leftovers (#1259) — and
-write your own lines beside them."
 
 ## Why separate axes
 

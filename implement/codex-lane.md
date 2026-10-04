@@ -65,7 +65,7 @@ The brief carries what neither engine can infer:
 
   Write that to a file with your file-write tool and never interpolate it into
   a shell string: a comment is the less trusted half of the ticket, since
-  anyone with repo access can add one (`implement/SKILL.md` § The merge step 3
+  anyone with repo access can add one (`implement/SKILL.md` § The Codex pass
   says the same of the Codex focus text).
 - The repo's gate, read from `git config land.testcmd`, and the instruction to
   run it green before finishing.
@@ -100,7 +100,7 @@ quota. In this lane they swap for:
    Both carry `disable-model-invocation: true` (#814): the SlashCommand tool
    never reaches either for a dispatched worker. Invoke the plugin's own
    script instead of the slash command, for each — same commands, and the
-   same injection-safety and `--wait` rationale, as `implement/SKILL.md` § The merge step 3:
+   same injection-safety and `--wait` rationale, as `implement/SKILL.md` § The Codex pass:
 
    ```
    body_file=<absolute path you wrote the ticket body, comments and appendix to>
@@ -109,9 +109,9 @@ quota. In this lane they swap for:
    node "$plugin_root/scripts/codex-companion.mjs" adversarial-review --wait --base origin/<default> -- "$(cat "$body_file")"
    ```
 
-   `body_file` here carries the same two-line controller-context appendix
-   `implement/SKILL.md` § The merge step 3 requires (#941) — **Open sibling
-   branches.** and **Posture.** — in that step's shape and wording, which
+   `body_file` here carries the same two-line context appendix
+   `implement/SKILL.md` § The Codex pass requires (#941) — **Open sibling
+   branches.** and **Posture.** — in that section's shape and wording, which
    is the one copy of it; a second copy here would drift from it, and the
    pass would be judged against whichever the writer happened to read.
 
@@ -121,22 +121,20 @@ quota. In this lane they swap for:
    sibling branch or a deliberate parking, which is why Codex reading it
    alone reports both as defects.
 
-A Codex-lane PR gets no merge-time Codex pass.
-`implement/SKILL.md` § The merge step 3 applies to heavy Claude-lane PRs only,
-and says so; the lane's own `/codex:adversarial-review` is its adversarial pass, and running the controller's
-on top would spend the same Codex quota on the same diff. The controller merges
-on the lane's reviews and adds no trial row to
-`docs/research/2026-09-14-codex-review-trial.md`, which compares Codex against
-Claude axes and has none here.
+A Codex-lane PR gets no second Codex pass.
+`implement/SKILL.md` § The Codex pass is part of the Claude lane's review wave
+only, and says so; the lane's own `/codex:adversarial-review` is its
+adversarial pass, and running the wave's on top would spend the same Codex
+quota on the same diff. The controller merges on the lane's reviews.
 
 The Codex lane writes no `findings-<axis>-<n>.jsonl` and no
 `dispositions-<n>.jsonl`, so its worker runs the pre-report gate with
 `PRE_REPORT_NO_VERIFICATION="codex lane: no Claude axes"` (#1188) and the
 controller's merge step 2 does not require the sidecar.
 
-The one-round-plus-verification cap and the pre-report gate in
-`implement/SKILL.md` § Review and § Before the PR: both bind, the gate with the
-waiver above. So does the
+The one-wave rule (every valid finding fixed in one round, no re-review) and
+the pre-report gate in `implement/SKILL.md` § Review and § Before the PR: both
+bind, the gate with the waiver above. So does the
 disclosure: the PR body names the reviews that actually ran and says the diff
 was written by Codex, not Claude. A reader who assumes a Claude review
 happened is reading a claim nobody made.

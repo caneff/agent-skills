@@ -42,7 +42,7 @@ The tickets inside one family whose closures are identical, at most three (`MAX_
 _Avoid_: batch, group, cluster
 
 **Tier**:
-How much process a ticket's build gets, set at dispatch by its `documentation` label: light (label present; the worker pushes to the default branch, no PR, no reviewer) or heavy (no label; TDD, one review round plus one verification pass, PR). A worker may raise light to heavy, never the reverse.
+How much process a ticket's build gets, set at dispatch by its `documentation` label: light (label present; the worker pushes to the default branch, no PR, no reviewer) or heavy (no label; TDD, one review wave and the fix round, PR). A worker may raise light to heavy, never the reverse.
 _Avoid_: lane (that is auto-ship vs code), mode, level
 
 **Front end**:

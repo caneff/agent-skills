@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Codex usage preflight (#1204): may a Codex run start?
 
-Run before every Codex launch — the merge-time adversarial pass
-(`SKILL.md` § The merge step 3) and the Codex lane (`codex-lane.md`). Reads
+Run before every Codex launch — the review wave's adversarial pass
+(`SKILL.md` § The Codex pass) and the Codex lane (`codex-lane.md`). Reads
 the usage cache `flow/ccstatusline-table/helpers/codex-usage.py` keeps under
 `$CODEX_HOME`; when that cache is missing, stale or unreadable it refreshes
 it through the helper's own live fetch, which still answers at the cap.
@@ -34,6 +34,12 @@ The kill switch is `~/.config/agent-skills/codex-reviews-off`, any content:
 while it exists every check is 20, answered before the size check or any
 cache read or live fetch, so a disabled gate costs no RPC. Removing the file
 re-enables Codex reviews.
+
+`--size --base <ref> --tickets <n>...` answers only the size question (#1401),
+for the first ablation (`SKILL.md` § Review): 40 `under size threshold
+(<churn> < <threshold>)`, 0 `at or above size threshold (...)`, 30 when it
+could not measure. It reads no usage, ignores the kill switch and the forcing
+label, and writes nothing: a small PR is small whether or not Codex may run.
 
 A missing, stale or malformed reading is 30, never 0: it is not headroom.
 
@@ -208,6 +214,17 @@ def check(base: str | None = None, tickets: list[str] = (), audit: bool = False)
     return PROCEED, f"codex usage {pct:g}% — ok, resets {when}"
 
 
+def size_only(base: str) -> tuple[int, str]:
+    """The size verdict alone: SMALL, or PROCEED for a PR at or above the threshold."""
+    try:
+        lines = churn(base)
+    except SizeCheckError as exc:
+        return UNKNOWN, f"size check failed: {exc}"
+    if lines < SIZE_THRESHOLD:
+        return SMALL, f"under size threshold ({lines} < {SIZE_THRESHOLD})"
+    return PROCEED, f"at or above size threshold ({lines} >= {SIZE_THRESHOLD})"
+
+
 def main() -> int:
     if sys.argv[1:] == ["--percent"]:
         try:
@@ -219,11 +236,18 @@ def main() -> int:
     # Any failure is exit 30: a crash's own exit 1 is a status neither caller
     # has a rule for, and an unread reading is not headroom.
     args = sys.argv[1:]
+    if args[:1] == ["--size"]:
+        if len(args) < 5 or args[1] != "--base" or args[3] != "--tickets" or not all(n.isdigit() for n in args[4:]):
+            print("usage: codex-usage-gate.py --size --base <ref> --tickets <n>...")
+            return UNKNOWN
+        status, line = size_only(args[2])
+        print(line)
+        return status
     base, tickets, audit = None, [], args == ["--audit"]
     if args and not audit:
         if len(args) < 4 or args[0] != "--base" or args[2] != "--tickets" or not all(
                 n.isdigit() for n in args[3:]):
-            print("usage: codex-usage-gate.py [--percent | --audit | --base <ref> --tickets <n>...]")
+            print("usage: codex-usage-gate.py [--percent | --audit | --base <ref> --tickets <n>... | --size --base <ref> --tickets <n>...]")
             return UNKNOWN
         base, tickets = args[1], args[3:]
     try:

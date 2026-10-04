@@ -411,8 +411,8 @@ def components(candidates, collides):
 
 
 # The most tickets one clump of identical closures holds. It keeps the clump
-# inside one worker's context: a heavy build is TDD plus three review axes, a
-# verification pass and a Codex round per ticket. The value is a controller's
+# inside one worker's context: a heavy build is TDD plus three review axes
+# and a Codex pass per ticket. The value is a controller's
 # guess from 2026-09-21 with no measurement behind it — a run that hits it
 # should move it with evidence, not work around it. `render` says when it
 # split a family, so the cap is visible when it bites.

@@ -111,7 +111,7 @@ written before this field existed loads with it as `null`, which reads a
 finished pane as `stalled`: the loud reading, and the controller's read of
 the pane settles it.
 
-## Dispositions, and the closing counts
+## Dispositions and counts
 
 The run file holds no review findings: a worker fixes every valid finding in its own PR (`implement/SKILL.md` § Review), so nothing is carried from a landed PR into the run. What a landed PR records is its dispositions sidecar, `dispositions-<n>.jsonl` in the review cache, one line per finding with the outcome `fixed` (a sha), `moved` (the open ticket it was added to) or `disputed` (a reason). `implement/verification-check.sh` checks it before the PR merges.
 
