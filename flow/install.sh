@@ -33,6 +33,7 @@ link() { # link <repo-relative-src> <live-dest>
 
 link bin/issue-counts           "$HOME/.local/bin/issue-counts"
 link bin/job-run                "$HOME/.local/bin/job-run"
+link bin/drain                  "$HOME/.local/bin/drain"
 link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 # Symlinked, not copy-only (#1031): a probed harness write rewrote the live
 # file through the link without breaking it (`claude plugin disable --scope

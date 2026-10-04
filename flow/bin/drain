@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# `drain` on PATH: install.sh links this into ~/.local/bin; it runs the repo's
+# drain/drain.py with every argument passed through.
+exec python3 "$(dirname "$(realpath "$0")")/../../drain/drain.py" "$@"
