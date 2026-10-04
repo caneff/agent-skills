@@ -106,7 +106,7 @@ class AlwaysOn(unittest.TestCase):
 
     def test_hook_carried_lines_left_claude_md(self):
         text = (CLAUDE / "CLAUDE.md").read_text()
-        for gone in ("not-draft", "SHELL-SAFETY", "VISUAL-INSPECTION", "shot-scraper",
+        for gone in ("not-draft", "SHELL-SAFETY", "zed <path>", "shot-scraper",
                      "search open issues", "# Communication"):
             with self.subTest(gone=gone):
                 self.assertNotIn(gone, text)
