@@ -42,10 +42,17 @@ NOTE = "docs/research/2026-10-04-claude-md-pointer-reads.md"
 WINDOW = timedelta(days=14)
 CRON_TAG = "# pointer-reads-recount-1413"
 ROOT = Path(__file__).resolve().parents[2]
-# Absolute paths throughout: cron runs with PATH=/usr/bin:/bin and no cwd.
-CRON_LINE = (f"17 9 * * * PATH={Path.home()}/.local/bin:/usr/bin:/bin python3 "
-             f"{ROOT}/flow/claude/pointer_reads.py recount "
-             f">> {Path.home()}/.cache/pointer-reads-recount.log 2>&1  {CRON_TAG}")
+
+
+def cron_line() -> str:
+    # The primary checkout, never this file's own worktree, which merge-cleanup
+    # deletes. Absolute paths throughout: cron runs with PATH=/usr/bin:/bin.
+    common = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute",
+                             "--git-common-dir"], capture_output=True, text=True, check=True).stdout
+    primary = Path(common.strip()).parent
+    return (f"17 9 * * * PATH={Path.home()}/.local/bin:/usr/bin:/bin python3 "
+            f"{primary}/flow/claude/pointer_reads.py recount "
+            f">> {Path.home()}/.cache/pointer-reads-recount.log 2>&1  {CRON_TAG}")
 
 # (doc, trigger regex, skills that already carry the procedure): the
 # 2026-10-04 note's rows, in its order.
@@ -193,8 +200,9 @@ def install_cron() -> int:
         return 0
     if current and not current.endswith("\n"):
         current += "\n"
-    subprocess.run(["crontab", "-"], input=current + CRON_LINE + "\n", text=True, check=True)
-    print(CRON_LINE)
+    line = cron_line()
+    subprocess.run(["crontab", "-"], input=current + line + "\n", text=True, check=True)
+    print(line)
     return 0
 
 

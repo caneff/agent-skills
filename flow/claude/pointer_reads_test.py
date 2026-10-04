@@ -200,7 +200,12 @@ class Recount(unittest.TestCase):
         cron = self.crontab_file.read_text()
         self.assertEqual(cron.count(TAG), 1)
         self.assertIn("other-job  # other", cron)
-        self.assertIn("pointer_reads.py recount", cron)
+        # The line names the primary checkout, never a worktree that
+        # merge-cleanup will delete.
+        common = subprocess.run(["git", "-C", str(SCRIPT.parent), "rev-parse", "--path-format=absolute",
+                                 "--git-common-dir"], capture_output=True, text=True, check=True).stdout
+        primary = Path(common.strip()).parent
+        self.assertIn(f"{primary}/flow/claude/pointer_reads.py recount", cron)
 
 
 if __name__ == "__main__":
