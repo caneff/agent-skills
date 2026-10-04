@@ -1,4 +1,4 @@
-# Visual inspection (read when showing me a file, or looking at a rendered page, window, or image)
+# Visual inspection (read when showing me a file, or looking at a rendered page, window, or image, or when an image I pasted did not reach you)
 
 The teaching hook `hooks/teach-visual.sh` shows the matching section on a
 session's first `zed` or `shot-scraper` call; `CLAUDE.md` no longer points
@@ -54,6 +54,26 @@ a step your own hands can do.
   changes the picture opens the new render without being asked — the whole
   frame, beside the target at the same scale. Why: I can only rule on the
   image.
+
+## Getting a pasted image to an agent as a file
+
+A paste into a teammate or subagent I have entered is not known to reach it
+(`docs/research/2026-09-28-teammate-attach.md`). When I say an image is on my
+clipboard, or a paste did not arrive, save the clipboard yourself and read the
+file; never ask me to save it. From WSL:
+
+```
+out=<stable-dir>/clip-$(date +%Y%m%d-%H%M%S).png
+/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -STA -Command "Add-Type -AssemblyName System.Windows.Forms; \$i=[System.Windows.Forms.Clipboard]::GetImage(); if(\$i){\$i.Save('$(wslpath -w "$out")',[System.Drawing.Imaging.ImageFormat]::Png)}else{exit 3}"
+```
+
+Exit 3 means no image on the clipboard; a file copied in Explorer is a file,
+not an image, so it also gives 3 (use its path). Exit 1 is a failed save:
+`<stable-dir>` must already exist and its path must hold no `'`.
+`<stable-dir>` is a git-ignored directory outside `.claude/worktrees`
+(§ Showing me a file). Read the file
+yourself, or message its absolute path to the teammate, which opens it with
+`Read`. Tried 2026-10-04: a 64x64 test PNG round-tripped through the clipboard.
 
 ## Reading a rendered page yourself
 
