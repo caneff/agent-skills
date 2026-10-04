@@ -142,14 +142,16 @@ Local: `claude --version` = 2.1.289 (mods need 2.1.287+); no mod installed
 
 What a mod adds for disclosure, versus a settings hook:
 
-- **Text before the action.** A `tool.call` hook runs before the tool. It can
-  `deny`, rewrite arguments, or answer with `{ result }` so the tool never
-  runs. A settings PreToolUse `additionalContext` arrives "alongside the tool
-  result", i.e. after.
+- **Text before the action — only by stopping it.** A `tool.call` hook runs
+  before the tool, but its only ways to put text in front of Claude first are
+  `deny` or answering with `{ result }`; both stop the call, same as a settings
+  PreToolUse deny. Letting the call through and adding text puts it after,
+  like settings `additionalContext` ("alongside the tool result").
 - **Prompt-time context.** `prompt.submit` can append text only Claude reads
   (`context: [...]`), so a prompt mentioning "merge" can carry the merge
-  section. `skill.prompt` and `prompt.section` can rewrite a skill's text or a
-  system-prompt section.
+  section. A settings `UserPromptSubmit` hook's `additionalContext` does the
+  same, so this is not mod-only. What is mod-only: `skill.prompt` and
+  `prompt.section` can rewrite a skill's text or a system-prompt section.
 - **Shared state.** A mod's hooks share module variables, so "show the
   SHELL-SAFETY section once per session" needs no temp file.
 - **Subagents.** `tool.call` fires for subagent tool calls too.
