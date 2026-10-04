@@ -15,6 +15,9 @@
 # and are reported in discovery order. A suite whose first twenty lines carry
 # `all.sh: serial` cannot share the box (a fixed port, a shared global path):
 # it runs alone after the concurrent ones, and names why on that line.
+# Each suite is also held to a CPU budget (see `cpu_budget`): its own user+sys
+# time with every process it started, not wall-clock time, so load on a shared
+# box cannot make it flaky.
 # This is the merge gate (`git config land.testcmd`), not a push hook — see
 # #633.
 # -f: suite commands are word-split out of the tab-separated list, so keep
@@ -201,9 +204,33 @@ while IFS=$'\t' read -r label cmd; do
 done <<<"$selection"
 cat "$tmp/parallel" "$tmp/serial" >"$tmp/ordered"
 
+# The CPU budget of every suite, in seconds (#1415): a suite that costs more
+# fails the run, so a suite that re-runs the whole repo inside itself (the old
+# tests/all.test.sh was 251 of the suite's 494 serial seconds) is a red line and
+# not a quiet tax on every merge. A suite that needs more is named below with
+# its own budget and a one-line reason; adding a line is the visible diff.
+default_cpu_budget=15
+cpu_budget() { # <label>: prints the suite's budget in seconds
+  case $1 in
+    flow/lane/Cargo.toml) echo 90 ;; # compiles the lane crate and runs 140+ process-spawning tests
+    *) echo "${TESTS_CPU_BUDGET:-$default_cpu_budget}" ;;
+  esac
+}
+
+# User+sys seconds of everything this subshell waited for, from the `times`
+# builtin: line 2 is the children, descendants included. The builtin must run in
+# this shell itself, so it writes to a file (a pipe or `$(...)` would run it in a
+# fresh subshell that reports zero). A subshell starts at zero, so each suite
+# runs in one (backgrounded, or parenthesised).
+cpu_seconds() { # <file>
+  times >"$1.times"
+  awk '{ for (i = 1; i <= NF; i++) { split($i, p, "m"); t += p[1] * 60 + p[2] } } END { printf "%.1f", t }' "$1.times" >"$1"
+}
+
 run_suite() { # <index> <command>
   local out status after
   out=$($2 2>&1 </dev/null); status=$?
+  cpu_seconds "$tmp/$1.cpu"
   after=$(identity_snapshot)
   printf '%s' "$out" >"$tmp/$1.out"
   [ "$after" = "$identity_before" ] || printf '%s' "$after" >"$tmp/$1.ident"
@@ -221,7 +248,7 @@ dispatch() {
   wait
   while IFS=$'\t' read -r label cmd; do
     [ -e "$tmp/stop" ] && break
-    run_suite "$idx" "$cmd"
+    (run_suite "$idx" "$cmd")
     idx=$((idx + 1))
   done <"$tmp/serial"
 }
@@ -264,7 +291,15 @@ while IFS=$'\t' read -r label cmd; do
         "  $hit" \
         "$(logging_remedy "$hit")"
     fi
-    echo "PASS $label"
+    cpu=$(cat "$tmp/$idx.cpu"); budget=$(cpu_budget "$label")
+    if awk -v c="$cpu" -v b="$budget" 'BEGIN { exit !(c > b) }'; then
+      stop_and_wait
+      report_failure "$label" "$out" \
+        "tests/all.sh: over its CPU budget: ${cpu}s CPU against ${budget}s (user+sys, children included)." \
+        "  A suite that re-runs the repo inside itself is the usual cause. If this one really needs more," \
+        "  name it in cpu_budget in tests/all.sh with its own budget and a one-line reason."
+    fi
+    echo "PASS $label (${cpu}s cpu)"
     count=$((count + 1))
   else
     stop_and_wait

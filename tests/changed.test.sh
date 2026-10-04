@@ -15,6 +15,7 @@ check() { # <name> <0|1 condition status>
   if [ "$2" = 0 ]; then echo "ok   $1"; else echo "  FAIL $1"; fail=1; fi
 }
 has() { grep -qxF "$1" <<<"$out"; }
+has_pass() { grep -qE "^PASS $1 \(" <<<"$out"; } # a PASS line ends in the suite's CPU time
 
 # A fresh shadow: suites a/ and b/ (one each), tests/ (one), c/ with no suite.
 # `base` is the commit before any case's change.
@@ -62,7 +63,7 @@ check "an unreadable base exits 2 instead of selecting nothing" "$([ "$rc" = 2 ]
 
 fresh; change a/x.txt
 out=$(cd "$shadow/repo" && bash tests/all.sh --changed "$base" 2>&1); rc=$?
-check "a --changed run passes and runs the narrowed set" "$([ "$rc" = 0 ] && has 'PASS a/a.test.sh' && has 'PASS tests/t.test.sh' && ! has 'PASS b/b.test.sh'; echo $?)"
+check "a --changed run passes and runs the narrowed set" "$([ "$rc" = 0 ] && has_pass a/a.test.sh && has_pass tests/t.test.sh && ! has_pass b/b.test.sh; echo $?)"
 check "...and says which scope it chose" "$(has 'changed suites: a + tests'; echo $?)"
 
 # Concurrency: two suites that each wait for the other's marker finish only if
@@ -89,5 +90,15 @@ fresh
 printf '#!/usr/bin/env bash\necho line-one; echo line-two; exit 1\n' >"$shadow/repo/a/a.test.sh"
 out=$(cd "$shadow/repo" && bash tests/all.sh 2>&1); rc=$?
 check "a failing suite fails the run and prints all of its output" "$([ "$rc" = 1 ] && has 'FAIL a/a.test.sh' && has line-one && has line-two; echo $?)"
+
+# The CPU budget: a suite that burns CPU past it fails the run, naming both
+# numbers; the same suite under a raised budget passes.
+fresh
+printf '#!/usr/bin/env bash\nend=$((SECONDS + 2)); while [ $SECONDS -lt $end ]; do :; done\n' >"$shadow/repo/a/a.test.sh"
+out=$(cd "$shadow/repo" && TESTS_CPU_BUDGET=1 bash tests/all.sh 2>&1); rc=$?
+check "a suite over its CPU budget fails the run" "$([ "$rc" = 1 ] && has 'FAIL a/a.test.sh'; echo $?)"
+check "...naming its CPU time and its budget" "$(grep -qE 'over its CPU budget: [0-9.]+s CPU against 1s' <<<"$out"; echo $?)"
+out=$(cd "$shadow/repo" && TESTS_CPU_BUDGET=60 bash tests/all.sh 2>&1); rc=$?
+check "the same suite within its budget passes" "$([ "$rc" = 0 ] && has_pass a/a.test.sh; echo $?)"
 
 exit $fail

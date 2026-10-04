@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""`drain.py [--repo <path>] [--once] [--max <n>] [--bundle-max <k>]`: work the
-`ready-for-agent` queue unattended, serially, one PR at a time (#1403).
+"""`drain.py [--repo <path>] [--once] [--max <n>] [--bundle-max <k>] [--anchor <n>]`:
+work the `ready-for-agent` queue unattended, serially, one PR at a time (#1403).
 
-The **anchor** is the oldest unblocked ready ticket (`burndown/frontier.py`).
+The **anchor** is the oldest unblocked ready ticket (`burndown/frontier.py`),
+or, for the first bundle only, the ticket `--anchor <n>` names (refused unless
+`<n>` is open, ready and unblocked).
 `drain` claims it, leaves a `drain anchor:` comment, and starts one headless
 `claude -p` session in a worktree on `implement-<anchor>`, handing it the
 anchor and the number and title of every other unblocked ready ticket. The
@@ -14,7 +16,9 @@ for the heavy tier. `--max` stops the loop after that many tickets (a bundle
 counts all of its tickets); `--once` stops after one bundle.
 
 Then it checks (the PR is not draft, CLEAN, closes the anchor within the
-bundle cap, and the repo's seam passes on the PR merged into current main),
+bundle cap, and the repo's seam passes on the PR merged into current main,
+narrowed to what the PR touched; the check is skipped when main has not moved
+past the PR's base, because the worker ran the same suite on that exact tree),
 squash-merges, runs `merge-cleanup`, and returns any ticket the agent claimed
 but the PR did not close to the queue. A bundle that fails is built once more
 in the same worktree; a second failure labels the anchor and every claimed
@@ -31,6 +35,17 @@ run. The worktree setup is `implement-dispatch`'s steps without herdr, which
 that command cannot skip; the commit-identity guard it installs is a
 precondition here, not reinstalled. Only repos whose origin owner is the
 `gh` login.
+
+After the last bundle, one full `bash tests/all.sh` runs on current main (#1415):
+a red one stops the run and the summary names the merges since the last green
+full run (`last-green-<repo>` in the log directory), for Chris.
+
+Each build runs in a herdr pane, so `herdr agent list` shows it as
+`<repo-short>-drain-<anchor>` while it works, and `claude -p` streams
+`stream-json` into the pane and the build log as it happens. Without herdr on
+PATH the build is a bare subprocess streaming the same output into the log. A
+SIGKILL of drain leaves the pane's session running (nothing in the pane can
+know); the rerun's `busy()` check then stops on it.
 """
 import argparse
 import collections
@@ -38,8 +53,11 @@ import contextlib
 import ctypes
 import fcntl
 import os
+import json
 import re
 import resource
+import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -67,12 +85,17 @@ WALL_CLOCK_SECONDS = 3 * 60 * 60
 # under it headless (#1403 asks for that check): a refusal shows as a failed
 # build, and the consecutive-failure stop keeps it from emptying the queue.
 PERMISSION_MODE = "auto"
+# `claude -p` prints nothing until it exits unless asked to stream: the log of a
+# build stays empty for hours otherwise (#1415).
+STREAM_ARGS = ["--output-format", "stream-json", "--verbose"]
+FULL_SEAM = "bash tests/all.sh"
+PANE_POLL_SECONDS = 0.2
 # The hook files `implement-dispatch` installs (`install_identity_guard` in
 # flow/lane/src/bin/implement_dispatch.rs); drain refuses to run without them.
 GUARD_HOOKS = ("pre-commit", "pre-push", "commit-identity-guard", "commit-identity-guard-pre-push")
 _ORIGIN = re.compile(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
-Ctx = collections.namedtuple("Ctx", "root repo default log_dir bundle_max")
+Ctx = collections.namedtuple("Ctx", "root repo default log_dir bundle_max want", defaults=(None,))
 
 
 class DrainError(Exception):
@@ -172,6 +195,16 @@ def pick(ctx):
     except frontier.FrontierError as exc:
         raise DrainError(f"frontier: {exc}") from exc
     return [(t["number"], t["title"]) for t in queue if HUMAN not in labels_of(issues[t["number"]])]
+
+
+def put_first(queue, want):
+    """`queue` with ticket `want` first; refused when it is not in it. The
+    queue is the unblocked ready tickets, so `want` is open, ready and unblocked
+    exactly when it is there."""
+    chosen = [t for t in queue if t[0] == want]
+    if not chosen:
+        raise DrainError(f"--anchor #{want} is not an open, ready, unblocked ticket (not in the ready queue)")
+    return chosen + [t for t in queue if t[0] != want]
 
 
 @contextlib.contextmanager
@@ -295,14 +328,73 @@ def brief(anchor, others, bundle_max):
             "and checks each one's acceptance criteria.")
 
 
-def build(path, prompt, log):
-    """One headless session running `/implement`; a non-zero exit or the wall
-    clock is a failed build."""
+def herdr_usable():
+    return shutil.which("herdr") is not None and subprocess.run(
+        ["herdr", "status", "--json"], capture_output=True).returncode == 0
+
+
+def herdr_json(*args):
+    out = subprocess.run(["herdr", *args], capture_output=True, text=True)
+    if out.returncode:
+        raise DrainError(f"herdr {args[0]} {args[1]} failed: {one_line(out.stderr or out.stdout, 150)}")
+    return json.loads(out.stdout)["result"]
+
+
+def pane_session(path, prompt, log, name):
+    """The build in a herdr pane named `name`. The pane runs a launcher script
+    (so the prompt never passes through a shell string) that tees the session's
+    stream into `log` and leaves its exit status in `<log>.exit`; this waits
+    for that file under the wall clock. The workspace is closed on every way
+    out, which takes the session with it."""
+    exit_file = log + ".exit"
+    for stale in (exit_file, log):
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(stale)
+    with open(log + ".prompt", "w") as f:
+        f.write(prompt)
+    claude = " ".join(shlex.quote(a) for a in ["--permission-mode", PERMISSION_MODE, *STREAM_ARGS])
+    with open(log + ".sh", "w") as f:
+        f.write(f"#!/bin/bash\ncd {shlex.quote(path)} || exit 97\nulimit -v {MEMORY_CAP_BYTES >> 10}\n"
+                f"claude -p \"$(cat {shlex.quote(log + '.prompt')})\" {claude} 2>&1 | tee {shlex.quote(log)}\n"
+                f"echo ${{PIPESTATUS[0]}} > {shlex.quote(exit_file + '.tmp')}\n"
+                f"mv {shlex.quote(exit_file + '.tmp')} {shlex.quote(exit_file)}\n")
+    workspace_id = None
+    try:
+        made = herdr_json("workspace", "create", "--cwd", path, "--label", name, "--no-focus")
+        workspace_id, pane = made["workspace"]["workspace_id"], made["root_pane"]["pane_id"]
+        herdr_json("pane", "run", pane, "bash", log + ".sh")
+        named, deadline = False, time.monotonic() + WALL_CLOCK_SECONDS
+        while True:
+            if not named:  # the pane becomes an agent once herdr sees `claude` start
+                named = subprocess.run(["herdr", "agent", "rename", pane, name], capture_output=True).returncode == 0
+            if os.path.exists(exit_file):
+                break
+            if time.monotonic() > deadline:
+                raise DrainError(f"claude passed the {WALL_CLOCK_SECONDS}s wall clock")
+            time.sleep(PANE_POLL_SECONDS)
+        return int(read_text(exit_file).strip() or 1)
+    finally:
+        if workspace_id:
+            subprocess.run(["herdr", "workspace", "close", workspace_id], capture_output=True)
+
+
+def read_text(path):
+    with open(path) as f:
+        return f.read()
+
+
+def build(path, prompt, log, name=None):
+    """One headless session running `/implement`, streaming into `log`; a
+    non-zero exit or the wall clock is a failed build. With a `name` and a
+    usable herdr it runs in a pane of that name, else as a bare subprocess."""
     if busy(path):
         raise DrainStop(f"a process is still running in {path}; rerun when it exits")
-    with open(log, "w") as out:
-        code, _ = run_group(["claude", "-p", prompt, "--permission-mode", PERMISSION_MODE], path,
-                            WALL_CLOCK_SECONDS, out=out, preexec=_cap_session)
+    if name and herdr_usable():
+        code = pane_session(path, prompt, log, name)
+    else:
+        with open(log, "w") as out:
+            code, _ = run_group(["claude", "-p", prompt, "--permission-mode", PERMISSION_MODE, *STREAM_ARGS], path,
+                                WALL_CLOCK_SECONDS, out=out, preexec=_cap_session)
     if code:
         raise DrainError(f"build exited {code} (log {log})")
 
@@ -312,25 +404,76 @@ def open_pr(ctx, branch):
     return prs[0] if prs else None
 
 
-def seam(ctx, head, log):
-    """The repo's seam (`land.testcmd`, else `bash tests/all.sh`) on the PR head
-    merged into current main, in a throwaway worktree. The merge commit uses
-    the identity the repo is already configured with."""
-    cmd = run(["git", "config", "land.testcmd"], cwd=ctx.root, check=False) or "bash tests/all.sh"
-    run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
+def seam_cmd(ctx):
+    return run(["git", "config", "land.testcmd"], cwd=ctx.root, check=False) or FULL_SEAM
+
+
+def run_in_scratch_tree(ctx, cmd, log, head=None):
+    """`cmd` in a throwaway worktree of current main, with `head` merged in when
+    given. The merge commit uses the identity the repo is already configured
+    with. Raises `DrainError` on a conflict or a non-zero exit."""
     scratch = tempfile.mkdtemp(prefix="drain-seam-")
     try:
         run(["git", "worktree", "add", "-q", "--detach", scratch, ctx.default], cwd=ctx.root)
-        merged = subprocess.run(["git", "merge", "--no-edit", head], cwd=scratch, capture_output=True, text=True)
-        if merged.returncode:
-            raise DrainError("merging the PR into current main failed: "
-                             + one_line(merged.stderr or merged.stdout, 200))
+        if head:
+            merged = subprocess.run(["git", "merge", "--no-edit", head], cwd=scratch, capture_output=True, text=True)
+            if merged.returncode:
+                raise DrainError("merging the PR into current main failed: "
+                                 + one_line(merged.stderr or merged.stdout, 200))
         with open(log, "w") as out:
             code, _ = run_group(["sh", "-c", cmd], scratch, WALL_CLOCK_SECONDS, out=out)
         if code:
-            raise DrainError(f"seam `{cmd}` failed on the PR merged into main (output in {log})")
+            raise DrainError(f"`{cmd}` failed (output in {log})")
     finally:
         run(["git", "worktree", "remove", "--force", scratch], cwd=ctx.root, check=False)
+
+
+def seam(ctx, head, log):
+    """The repo's seam (`land.testcmd`, else `bash tests/all.sh`) on the PR head
+    merged into current main, in a throwaway worktree. The default seam is
+    narrowed with `--changed <default>`: the PR's own diff is what it touched.
+    Skipped when main is an ancestor of `head`: the worker ran the suite on that
+    exact tree after merging main in, and only a main that has moved since can
+    make two PRs break each other (#1415)."""
+    cmd = seam_cmd(ctx)
+    run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
+    moved = subprocess.run(["git", "merge-base", "--is-ancestor", ctx.default, head], cwd=ctx.root).returncode != 0
+    if not moved:
+        return
+    if cmd == FULL_SEAM:
+        cmd = f"{FULL_SEAM} --changed {shlex.quote(ctx.default)}"
+    try:
+        run_in_scratch_tree(ctx, cmd, log, head)
+    except DrainError as exc:
+        raise DrainError(f"seam {exc} on the PR merged into main") from exc
+
+
+def last_green_path(ctx):
+    return os.path.join(ctx.log_dir, "last-green-" + ctx.repo.replace("/", "__"))
+
+
+def full_run(ctx, merged):
+    """One full run of the seam on current main after the last bundle. `None`
+    when green, else the reason to stop, naming the merges since the last green
+    full run: the commits on main since it when its sha is on record, else this
+    run's merges."""
+    run(["git", "fetch", "-q", "origin"], cwd=ctx.root)
+    tip = run(["git", "rev-parse", ctx.default], cwd=ctx.root)
+    try:
+        run_in_scratch_tree(ctx, seam_cmd(ctx), os.path.join(ctx.log_dir, "full-suite.log"))
+    except DrainError as exc:
+        since = [f"{m['pr']} ({m['sha']})" for m in merged]
+        try:
+            last = read_text(last_green_path(ctx)).strip()
+            listed = run(["git", "log", "--first-parent", "--format=%h %s", f"{last}..{tip}"], cwd=ctx.root)
+            since = listed.splitlines() or since
+        except (OSError, DrainError):
+            pass
+        return (f"the full suite is red on main after this run ({one_line(exc, 150)}). Merges since the last "
+                "green full run: " + "; ".join(since))
+    with open(last_green_path(ctx), "w") as f:
+        f.write(tip + "\n")
+    return None
 
 
 def verify_pr(ctx, branch, anchor):
@@ -385,7 +528,8 @@ def work(ctx, anchor, others, resumed):
         try:
             path = workspace(ctx, branch)
             if not (resumed and attempt == 1 and open_pr(ctx, branch)):
-                build(path, prompt, os.path.join(ctx.log_dir, f"{branch}-{attempt}.log"))
+                build(path, prompt, os.path.join(ctx.log_dir, f"{branch}-{attempt}.log"),
+                      name=f"{os.path.basename(ctx.root)}-drain-{anchor}")
             if not open_pr(ctx, branch):
                 raise DrainError("the build ended with no open PR")
             view = verify_pr(ctx, branch, anchor)
@@ -411,9 +555,11 @@ def hand_to_chris(ctx, anchor, reason):
 
 def drain(ctx, limit):
     """`(merged, handed, stop reason or None)`; `limit` counts tickets."""
-    merged, handed, stop, failures, done = [], [], None, 0, 0
+    merged, handed, stop, failures, done, want = [], [], None, 0, 0, ctx.want
     try:
         require_guard(ctx)
+        if want:  # refuse before any work, and not only when the loop gets there
+            put_first(pick(ctx), want)
         while done < limit:
             anchor = resumable(ctx)
             resumed, others = anchor is not None, []
@@ -421,6 +567,8 @@ def drain(ctx, limit):
                 queue = pick(ctx)
                 if not queue:
                     break
+                if want:
+                    queue, want = put_first(queue, want) if any(t[0] == want for t in queue) else queue, None
                 anchor, others = queue[0][0], queue[1:]
                 if not claim(ctx, anchor):
                     continue
@@ -440,6 +588,12 @@ def drain(ctx, limit):
         stop = str(exc)
     except Exception as exc:  # noqa: BLE001 - the summary of what landed must still print
         stop = f"unexpected {type(exc).__name__}: {one_line(exc)}"
+    if merged:
+        try:
+            red = full_run(ctx, merged)
+        except (DrainError, OSError) as exc:
+            red = f"the full suite could not run on main: {one_line(exc, 150)}"
+        stop = "; ".join(x for x in (stop, red) if x) or None
     return merged, handed, stop
 
 
@@ -467,6 +621,8 @@ def main(argv):
     parser.add_argument("--once", action="store_true", help="one bundle, then stop")
     parser.add_argument("--max", type=positive, default=None, help="stop after this many tickets")
     parser.add_argument("--bundle-max", type=positive, default=BUNDLE_MAX)
+    parser.add_argument("--anchor", type=positive, default=None,
+                        help="start the first bundle from this ticket, not the oldest ready one")
     args = parser.parse_args(argv)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
@@ -482,7 +638,7 @@ def main(argv):
         print(f"drain.py: {exc}", file=sys.stderr)
         return 1
     limit = 1 if args.once else (args.max or sys.maxsize)
-    merged, handed, stop = drain(Ctx(root, repo, default, log_dir, args.bundle_max), limit)
+    merged, handed, stop = drain(Ctx(root, repo, default, log_dir, args.bundle_max, args.anchor), limit)
     print(summary(merged, handed, stop))
     return 1 if stop else 0
 

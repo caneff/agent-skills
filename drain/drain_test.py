@@ -113,6 +113,8 @@ take = env.get("TAKE", "").split()
 with open(env["CLAUDE_LOG"], "a") as f:
     f.write(json.dumps({"n": n, "prompt": prompt, "cwd": os.getcwd(), "argv": sys.argv[1:],
                         "as_limit": resource.getrlimit(resource.RLIMIT_AS)[0]}) + "\n")
+if env.get("STREAM_OUT"):
+    print(env["STREAM_OUT"], flush=True)
 if env.get("STUB_SLEEP"):
     open(env["PIDFILE"], "w").write(str(subprocess.Popen(["sleep", "30"]).pid))
     time.sleep(30)
@@ -145,6 +147,27 @@ st["prs"][branch] = {"number": 100 + int(n), "url": "https://example.test/pull/%
                      "head": head, "closes": closes, "draft": n in env.get("DRAFT_TICKETS", "").split(),
                      "status": env.get("STATUS", "CLEAN")}
 json.dump(st, open(env["FAKE_STATE"], "w"))
+"""
+
+# Stands in for herdr. Without HERDR_UP it is a herdr that is not running
+# (`status` fails), so a build is the bare subprocess and nothing touches the
+# real herdr on the box. With it, `pane run` starts the launcher script as the
+# pane's process, `agent rename` is recorded, and every call is logged.
+STUB_HERDR = r"""#!/usr/bin/env python3
+import json, os, subprocess, sys
+args = sys.argv[1:]
+with open(os.environ["HERDR_LOG"], "a") as f:
+    f.write(json.dumps(args) + "\n")
+if not os.environ.get("HERDR_UP"):
+    sys.stderr.write("herdr: no server\n"); sys.exit(1)
+if args[:1] == ["workspace"] and args[1] == "create":
+    cwd = args[args.index("--cwd") + 1]
+    print(json.dumps({"result": {"workspace": {"workspace_id": "w9"}, "root_pane": {"pane_id": "w9:p1", "cwd": cwd}}}))
+elif args[:2] == ["pane", "run"]:
+    subprocess.Popen(args[3:], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    print(json.dumps({"result": {"type": "ok"}}))
+elif args[:2] == ["agent", "rename"] and os.environ.get("HERDR_RENAME_FAIL"):
+    sys.exit(1)
 """
 
 STUB_CLEANUP = """#!/bin/sh
@@ -180,7 +203,8 @@ class Sandbox(unittest.TestCase):
                     "GIT_CONFIG_NOSYSTEM": "1", "XDG_CONFIG_HOME": os.path.join(self.home, "xdg")}
         self.bin = os.path.join(t, "bin")
         os.mkdir(self.bin)
-        for name, body in (("gh", FAKE_GH), ("claude", STUB_CLAUDE), ("merge-cleanup", STUB_CLEANUP)):
+        for name, body in (("gh", FAKE_GH), ("claude", STUB_CLAUDE), ("merge-cleanup", STUB_CLEANUP),
+                           ("herdr", STUB_HERDR)):
             write(os.path.join(self.bin, name), body, 0o755)
         self.origin = os.path.join(t, "origin.git")
         self.repo = os.path.join(t, "repo")
@@ -204,6 +228,8 @@ class Sandbox(unittest.TestCase):
         self.state_path = os.path.join(t, "state.json")
         self.claude_log = os.path.join(t, "claude.log")
         self.cleanup_log = os.path.join(t, "cleanup.log")
+        self.herdr_log = os.path.join(t, "herdr.log")
+        self.seam_log = os.path.join(t, "seam.log")
         self.write_state({})
 
     def tearDown(self):
@@ -235,7 +261,8 @@ class Sandbox(unittest.TestCase):
 
     def drain(self, *argv, env=None):
         e = {**self.env, "PATH": self.bin + os.pathsep + os.environ["PATH"], "FAKE_STATE": self.state_path,
-             "CLAUDE_LOG": self.claude_log, "CLEANUP_LOG": self.cleanup_log,
+             "CLAUDE_LOG": self.claude_log, "CLEANUP_LOG": self.cleanup_log, "HERDR_LOG": self.herdr_log,
+             "SEAM_LOG": self.seam_log,
              "DRAIN_LOG_DIR": os.path.join(self.tmp.name, "logs"), **(env or {})}
         return subprocess.run([sys.executable, DRAIN, "--repo", self.repo, *argv],
                               capture_output=True, text=True, env=e)
@@ -265,7 +292,7 @@ class DrainTest(Sandbox):
         run = self.claude_runs()[0]
         self.assertTrue(run["cwd"].endswith(".claude/worktrees/implement-1"))
         self.assertEqual(run["argv"][0], "-p")
-        self.assertEqual(run["argv"][2:], ["--permission-mode", "auto"])
+        self.assertEqual(run["argv"][2:], ["--permission-mode", "auto", "--output-format", "stream-json", "--verbose"])
         self.assertEqual(run["as_limit"], 32 << 30)
         tracking = subprocess.run(["git", "config", "--get", "branch.implement-1.remote"], cwd=self.repo,
                                   capture_output=True, text=True, env=self.env)
@@ -352,7 +379,7 @@ class DrainTest(Sandbox):
     def test_a_red_seam_is_a_failed_build(self):
         self.write_state({1: {}})
         self.git(self.repo, "config", "land.testcmd", "false")
-        self.drain("--once")
+        self.drain("--once", env={"RESET_TO_OLD": "1"})  # main moved past the PR's base, so the seam runs
         self.assertNotIn("merged", self.state())
         self.assertIn("seam `false` failed", self.handed_comment(1)[0])
 
@@ -522,6 +549,95 @@ class DrainTest(Sandbox):
         self.assertNotIn("unexpected", r.stdout)
         self.assertEqual(self.claude_runs(), [])
         self.assertEqual(self.labels(1), ["ready-for-agent"])
+
+    # --- #1415: targeted seam, one full run per drain run, --anchor ------------
+
+    def seam_runs(self):
+        return [x.rstrip() for x in read(self.seam_log).splitlines()] if os.path.exists(self.seam_log) else []
+
+    def test_the_seam_is_skipped_when_main_has_not_moved_past_the_pr(self):
+        self.write_state({1: {}, 2: {}})
+        self.git(self.repo, "config", "land.testcmd", 'echo "$0" >> "$SEAM_LOG"')
+        r = self.drain("--max", "2")
+        self.assertEqual([m[0] for m in self.state()["merged"]], [[1], [2]])
+        # Two bundles, neither with a moved main: the only run is the end-of-run full one.
+        self.assertEqual(len(self.seam_runs()), 1, r.stdout)
+
+    def test_the_default_seam_is_narrowed_with_changed_and_the_full_run_is_not(self):
+        self.write_state({1: {}})
+        os.makedirs(os.path.join(self.repo, "tests"))
+        write(os.path.join(self.repo, "tests", "all.sh"), '#!/bin/sh\necho "all.sh $*" >> "$SEAM_LOG"\n', 0o755)
+        self.git(self.repo, "add", ".")
+        self.git(self.repo, "commit", "-qm", "gate")
+        self.git(self.repo, "push", "-q", "origin", "main")
+        self.git(self.repo, "config", "--unset", "land.testcmd")
+        self.drain("--once", env={"RESET_TO_OLD": "1"})  # main moved: the per-merge check runs
+        self.assertEqual(self.seam_runs(), ["all.sh --changed origin/main", "all.sh"])
+
+    def test_one_full_run_after_the_last_bundle_and_a_red_one_stops_with_the_merges_named(self):
+        self.write_state({1: {}, 2: {}})
+        self.git(self.repo, "config", "land.testcmd", 'echo run >> "$SEAM_LOG"; test -z "$SEAM_RED"')
+        r = self.drain("--max", "2", env={"SEAM_RED": "1"})
+        self.assertEqual([m[0] for m in self.state()["merged"]], [[1], [2]], "both merges landed before the full run")
+        self.assertEqual(len(self.seam_runs()), 1)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("stopped: the full suite is red on main", r.stdout)
+        for url in ("https://example.test/pull/101", "https://example.test/pull/102"):
+            self.assertIn(url, r.stdout)
+
+    def test_a_green_full_run_records_main_and_a_later_red_one_names_the_merges_since(self):
+        self.write_state({1: {}, 2: {}})
+        self.git(self.repo, "config", "land.testcmd", 'test -z "$SEAM_RED"')
+        self.assertEqual(self.drain("--once").returncode, 0)
+        green = read(os.path.join(self.tmp.name, "logs", "last-green-me__repo")).strip()
+        self.assertEqual(green, self.git(self.repo, "rev-parse", "origin/main"))
+        r = self.drain("--once", env={"SEAM_RED": "1"})
+        self.assertIn("stopped: the full suite is red on main", r.stdout)
+        self.assertIn("Merges since the last green full run: ", r.stdout)
+
+    def test_no_merge_means_no_full_run(self):
+        self.write_state({})
+        self.git(self.repo, "config", "land.testcmd", 'echo run >> "$SEAM_LOG"')
+        self.drain()
+        self.assertEqual(self.seam_runs(), [])
+
+    def test_anchor_starts_the_bundle_from_that_ticket_and_only_the_first(self):
+        self.write_state({1: {}, 2: {}, 3: {}})
+        r = self.drain("--anchor", "3", "--max", "2")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([c["n"] for c in self.claude_runs()], ["3", "1"])
+        self.assertIn("- #1 ticket 1", self.claude_runs()[0]["prompt"])
+
+    def test_anchor_that_is_not_ready_or_is_blocked_is_refused_before_any_work(self):
+        self.write_state({1: {}, 2: {"labels": ["in-progress"]}, 3: {"body": "## Blocked by\n\n- #1\n"}})
+        for n in ("2", "3", "9"):
+            r = self.drain("--anchor", n)
+            self.assertEqual(r.returncode, 1, n)
+            self.assertIn(f"--anchor #{n} is not an open, ready, unblocked ticket", r.stdout)
+        self.assertEqual(self.claude_runs(), [])
+        self.assertEqual(self.labels(1), ["ready-for-agent"])
+
+    def test_a_build_runs_in_a_named_herdr_pane_and_streams_into_its_log(self):
+        self.write_state({1: {}})
+        r = self.drain("--once", env={"HERDR_UP": "1", "STREAM_OUT": '{"type":"system"}'})
+        self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+        calls = [json.loads(line) for line in read(self.herdr_log).splitlines()]
+        create = next(c for c in calls if c[:2] == ["workspace", "create"])
+        self.assertEqual(create[create.index("--label") + 1], "repo-drain-1")
+        self.assertTrue(create[create.index("--cwd") + 1].endswith("worktrees/implement-1"))
+        self.assertIn(["agent", "rename", "w9:p1", "repo-drain-1"], calls)
+        self.assertIn(["workspace", "close", "w9"], calls)
+        log = os.path.join(self.tmp.name, "logs", "implement-1-1.log")
+        self.assertIn('{"type":"system"}', read(log))
+        run = self.claude_runs()[0]
+        self.assertEqual(run["argv"][2:], ["--permission-mode", "auto", "--output-format", "stream-json", "--verbose"])
+        self.assertEqual(run["as_limit"], 32 << 30)
+
+    def test_a_pane_build_that_exits_non_zero_is_a_failed_build(self):
+        self.write_state({1: {}})
+        self.drain("--once", env={"HERDR_UP": "1", "FAIL_TICKETS": "1"})
+        self.assertNotIn("merged", self.state())
+        self.assertIn("build exited 1", self.handed_comment(1)[0])
 
     def test_an_empty_queue_says_so(self):
         r = self.drain()
