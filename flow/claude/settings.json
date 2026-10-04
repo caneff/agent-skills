@@ -139,6 +139,26 @@
           {
             "type": "command",
             "command": "/home/caneff/.claude/hooks/wrap-background-jobs.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash /home/caneff/.agents/skills/flow/claude/hooks/teach-process-kill.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash /home/caneff/.agents/skills/flow/claude/hooks/teach-visual.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash /home/caneff/.agents/skills/flow/claude/hooks/teach-merge.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash /home/caneff/.agents/skills/flow/claude/hooks/teach-filing.sh",
+            "timeout": 15
           }
         ]
       }
