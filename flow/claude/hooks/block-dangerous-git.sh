@@ -57,12 +57,12 @@ DANGEROUS_PATTERNS=(
 # `has_dot_pathspec`, `restore_is_unstage_only` and `git_verb` read one command
 # segment, so a chain is blocked when any one of its discards is. `git_verb`
 # takes the verb first, then the segment.
-has_dot_pathspec() { echo "$1" | grep -qE '(^|[[:space:]])\.([[:space:]]|$)'; }
+has_dot_pathspec() { echo "$1" | grep -qE '(^|[[:space:]])\.([[:space:])]|$)'; }
 restore_is_unstage_only() {
   echo "$1" | grep -q -- '--staged' && ! echo "$1" | grep -q -- '--worktree'
 }
 git_verb() {
-  echo "$2" | grep -qE "(^|[[:space:]])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+$1([[:space:]]|\$)"
+  echo "$2" | grep -qE "(^|[[:space:](])git([[:space:]]+(-[Cc][[:space:]]+[^[:space:]]+|--[a-z-]+(=[^[:space:]]+)?))*[[:space:]]+$1([[:space:]]|\$)"
 }
 # A discard aimed at a linked worktree under `.scratch/mutation-*` is the
 # point of that worktree (#1387): a disposable copy a reviewer or worker

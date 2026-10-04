@@ -342,6 +342,11 @@ run "dot discard: -C that backs out of a mutation path blocked" 2 \
   "git -C $repo/.scratch/mutation-m1/../.. checkout -- ." "$blocked"
 run "dot discard: -C that backs out of a mutation path into another worktree blocked" 2 \
   "git -C $repo/.scratch/mutation-m1/../../.claude/worktrees/implement-9 checkout -- ." "$blocked"
+run "dot discard: git -c key=value before the verb blocked" 2 \
+  "git -c core.fsmonitor=false checkout -- ." "$blocked"
+run "dot discard: --work-tree before the verb blocked" 2 \
+  "git --work-tree=$repo checkout -- ." "$blocked"
+run "dot discard: inside a subshell blocked" 2 "(git checkout -- .)" "$blocked"
 run "dot discard: quoted -C a mutation worktree allowed" 0 \
   "git -C \"$repo/.scratch/mutation-m1\" checkout -q -- ."
 RUN_CWD="$repo/.scratch/mutation-m1" run "dot discard: cd out of the mutation cwd blocked" 2 \
