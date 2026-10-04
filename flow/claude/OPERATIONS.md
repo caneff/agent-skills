@@ -1,7 +1,7 @@
 # Operations detail (read when dispatching agents, running long jobs, or merging)
 
 Pointer target for `CLAUDE.md` § Agents and jobs. One lane: dispatch, control,
-wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
+wait, status, merge preconditions, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
 
 ## Dispatch
 
@@ -272,6 +272,19 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   the rest into follow-up tickets when I say cut, or when the honest status
   is that it is overrunning. Why: an answer built from what a worker was told
   restates the plan, not the state.
+
+## Merge preconditions
+
+A merge — the controller's, or the line handed to Chris — names its repo
+with `--repo owner/name`. It runs only after
+`gh pr view <pr> --repo owner/name --json isDraft,mergeStateStatus` shows
+`isDraft` false and `mergeStateStatus` `CLEAN`; `UNKNOWN` means GitHub is
+still computing, and the read is repeated after a few seconds. Why: without
+`--repo`, `gh` resolves the PR number against whatever repo the current
+directory belongs to, and a draft or non-CLEAN PR either fails the merge or
+lands on a conflict. This section is shown by the teaching hook
+`hooks/teach-merge.sh` on the first `gh pr view` or `gh pr checks` of a
+session.
 
 ## End
 
