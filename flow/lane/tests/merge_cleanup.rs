@@ -2767,6 +2767,8 @@ fn a_clean_worktree_of_another_repo_nested_in_a_workspace_is_removed_too() {
     // tips differ (they differ only when a second boundary ticks over).
     let other = c.root().join("r1326e-other");
     c.git_ok(&["init", "-q", "-b", "main", s(&other)]);
+    c.git_ok(&["-C", s(&other), "config", "user.email", "t@example.com"]);
+    c.git_ok(&["-C", s(&other), "config", "user.name", "t"]);
     c.git_ok(&["-C", s(&other), "commit", "-q", "--allow-empty", "-m", "base"]);
     let nested = wt.join(".claude/worktrees/qqrr");
     c.worktree_add(&other, &["--detach", s(&nested), "main"]);
