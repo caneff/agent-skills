@@ -116,3 +116,10 @@ test('a non-Agent tool call is untouched', async ($, on) => {
   await $.tool.call({ tool: 'Bash', command: 'ls' })
   expect(seen.command).toBe('ls')
 })
+
+test('a quoted model: "inherit" does not count as an own model either', async ($, on) => {
+  const { seen } = await call($, on, { subagent_type: 'qin' }, {
+    [`${AGENTS}/qin.md`]: '---\nname: qin\nmodel: "inherit"\n---\nbody',
+  })
+  expect(seen).toBe(undefined)
+})
