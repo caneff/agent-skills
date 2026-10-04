@@ -67,6 +67,22 @@ Chris approved losing under one count is never misread as counted by the
 other. The list is fixed on purpose: an unknown ignored name is kept, since
 a wrongly kept cache costs a --discard and a discarded note cannot be undone.
 
+A repo may declare more ignored paths discardable (#1326): a line of its
+primary checkout's AGENTS.md starting `**Discardable**:` whose backtick spans
+name them, e.g. **Discardable**: `out/`, `*.egg-info`. Each is one path
+component, with at most a leading or trailing `*`; an ignored entry with a
+component matching one is removed with the worktree unasked, counted as
+declared-discardable file(s) apart from caches. The list holds only what git
+ignores, so a modified or untracked file never counts, and `.git`, `.scratch`
+and a bare `*` are never honoured. Anything outside the list still refuses.
+
+A linked worktree registered with any repo and nested beneath the one being
+removed — a timing or verification checkout under .scratch/ — is removed
+first, each against its own repo, so none is left registered. What git does
+not hold in it (modified, untracked or ignored files) refuses as ignored files
+under its path and takes --discard like any other; a clean one is not a
+blocker.
+
 An ignored directory is judged by what it holds, never by its entry: git
 collapses one to a single line whether it is empty or holds hundreds. A
 directory with no file anywhere beneath it loses nothing, so it never
@@ -319,6 +335,24 @@ struct WorktreeFiles {
     /// anywhere beneath them: the removal takes them and nothing is lost, so
     /// they are not work (#946).
     empty_dirs: Vec<String>,
+    /// Ignored entries the repo's own AGENTS.md declares discardable (#1326),
+    /// listed apart from `caches` so the output says who approved the loss.
+    declared: Vec<String>,
+    /// The names that declaration lists, read once per `read`.
+    declared_names: Vec<String>,
+    /// Registered linked worktrees nested anywhere beneath this one, outer
+    /// before inner. `git worktree remove --force` on the parent deletes their
+    /// files and leaves each registered, so they are removed first, inner
+    /// first (#1326). Their own uncommitted work is in `ignored`, prefixed.
+    nested: Vec<NestedWorktree>,
+}
+
+/// A linked worktree found inside another worktree's files.
+struct NestedWorktree {
+    path: String,
+    /// The git directory of the repo it is registered with, which may not be
+    /// the parent's: `git worktree remove` has to run against that one.
+    common_dir: String,
 }
 
 /// One `!!` porcelain entry, decoded once at the boundary in
@@ -434,6 +468,49 @@ fn ignores_all(dir: &Path) -> bool {
     std::fs::read_to_string(dir.join(".gitignore")).is_ok_and(|s| s.lines().any(|l| l.trim() == "*"))
 }
 
+/// The names the repo declares discardable (#1326): the backtick spans on the
+/// `**Discardable**:` line of its primary checkout's AGENTS.md, a trailing `/`
+/// dropped. One path component each, with at most a leading or trailing `*`;
+/// `.git`, `.scratch` and a bare `*` are never honoured, since a declaration
+/// that reached them would discard the evidence this guard exists to keep.
+/// An unreadable file or a missing line declares nothing.
+fn declared_discardable(wt: &str) -> Vec<String> {
+    let primary = primary_of(wt);
+    let Ok(text) = std::fs::read_to_string(Path::new(&primary).join("AGENTS.md")) else { return Vec::new() };
+    let Some(line) = text.lines().find_map(|l| l.strip_prefix("**Discardable**:")) else { return Vec::new() };
+    line.split('`')
+        .skip(1)
+        .step_by(2)
+        .map(|n| n.trim_end_matches('/').to_string())
+        .filter(|n| !n.is_empty() && !n.contains('/') && !matches!(n.as_str(), ".git" | ".scratch" | "*" | "." | ".."))
+        .collect()
+}
+
+/// A path component of `entry` matches a declared name, which covers
+/// everything beneath it. Unlike a cache, no `.gitignore` is required: the
+/// repo's own word is the approval.
+fn is_declared(names: &[String], entry: &IgnoredEntry) -> bool {
+    entry.path.split('/').any(|c| {
+        names.iter().any(|n| match (n.strip_prefix('*'), n.strip_suffix('*')) {
+            (Some(suffix), _) => c.ends_with(suffix),
+            (_, Some(prefix)) => c.starts_with(prefix),
+            _ => c == n,
+        })
+    })
+}
+
+/// `dir` is the root of a linked worktree registered with some repo: its
+/// `.git` is a file and git can name that repo's git directory. A directory
+/// with a made-up `.git` file, or a full clone, is not.
+fn nested_worktree(dir: &Path) -> Option<NestedWorktree> {
+    if !dir.join(".git").is_file() {
+        return None;
+    }
+    let path = dir.to_str()?;
+    let common_dir = quiet_stdout("git", &["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+    Some(NestedWorktree { path: path.to_string(), common_dir })
+}
+
 impl WorktreeFiles {
     /// `None` when git cannot read the status of a worktree that is on disk.
     /// A worktree whose directory is already gone holds nothing to lose. The
@@ -447,9 +524,15 @@ impl WorktreeFiles {
         let Some(out) = quiet_stdout("git", &["-C", wt, "status", "--porcelain", "--untracked-files=all", "--ignored=matching"]) else {
             return (!Path::new(wt).exists()).then(Self::default);
         };
-        let mut files = Self::default();
+        let mut files = Self { declared_names: declared_discardable(wt), ..Self::default() };
         for line in out.lines().filter(|l| l.len() > 3) {
             let (code, rest) = (&line[..2], &line[3..]);
+            if code == "??" {
+                let entry = IgnoredEntry::parse(rest);
+                if entry.is_dir && files.take_nested(wt, &Path::new(wt).join(&entry.path)) {
+                    continue;
+                }
+            }
             if code == "!!" {
                 files.file_ignored(wt, IgnoredEntry::parse(rest));
                 continue;
@@ -489,15 +572,41 @@ impl WorktreeFiles {
     fn file_ignored(&mut self, wt: &str, entry: IgnoredEntry) {
         if is_cache(wt, &entry) {
             self.caches.push(entry.shown());
+        } else if is_declared(&self.declared_names, &entry) {
+            self.declared.push(entry.shown());
         } else if !entry.is_dir {
             self.ignored.push(entry.shown());
+        } else if self.take_nested(wt, &Path::new(wt).join(&entry.path)) {
         } else {
-            match files_under(&Path::new(wt).join(&entry.path)) {
+            match files_under(&Path::new(wt).join(&entry.path), &mut |d| self.take_nested(wt, d)) {
                 Some(f) if f.is_empty() => self.empty_dirs.push(entry.path),
                 Some(f) => self.ignored.extend(f.into_iter().map(|rel| format!("{}/{rel}", entry.path))),
                 None => self.ignored.push(entry.shown()),
             }
         }
+    }
+
+    /// When `dir` is the root of a registered linked worktree, file it under
+    /// `nested` (and anything nested inside it after it), put its own
+    /// uncommitted work into `ignored` under its path from `wt`, and say so:
+    /// the walk then skips it. Its checkout is not work; what git does not
+    /// hold in it is, and `--discard` covers that like any other ignored file.
+    fn take_nested(&mut self, wt: &str, dir: &Path) -> bool {
+        let Some(nested) = nested_worktree(dir) else { return false };
+        let prefix = dir.strip_prefix(wt).unwrap_or(dir).display().to_string();
+        match Self::read(&nested.path) {
+            // Unreadable: not known clean, so it refuses under its own name.
+            None => self.ignored.push(format!("{prefix}/")),
+            Some(inner) => {
+                let held = inner.modified.iter().chain(&inner.untracked).chain(&inner.ignored);
+                self.ignored.extend(held.map(|f| format!("{prefix}/{f}")));
+                self.nested.push(nested);
+                self.nested.extend(inner.nested);
+                return true;
+            }
+        }
+        self.nested.push(nested);
+        true
     }
 
     /// Modified, untracked or non-cache ignored files: work a removal would
@@ -555,7 +664,7 @@ impl WorktreeFiles {
 /// any part of the walk cannot be read — the caller must not read an
 /// unreadable directory as an empty one. A symlink counts as a file and is
 /// never descended, so the walk cannot cycle.
-fn files_under(dir: &Path) -> Option<Vec<String>> {
+fn files_under(dir: &Path, skip: &mut dyn FnMut(&Path) -> bool) -> Option<Vec<String>> {
     let mut out = Vec::new();
     let mut stack = vec![(dir.to_path_buf(), String::new())];
     while let Some((d, prefix)) = stack.pop() {
@@ -563,7 +672,10 @@ fn files_under(dir: &Path) -> Option<Vec<String>> {
             let entry = entry.ok()?;
             let rel = format!("{prefix}{}", entry.file_name().to_string_lossy());
             if entry.file_type().ok()?.is_dir() {
-                stack.push((entry.path(), format!("{rel}/")));
+                // A registered worktree is handed to `skip`, which owns it.
+                if !skip(&entry.path()) {
+                    stack.push((entry.path(), format!("{rel}/")));
+                }
             } else {
                 out.push(rel);
             }
@@ -856,6 +968,10 @@ impl Cleanup {
         if !files.caches.is_empty() {
             let would = if self.dry { "would discard" } else { "discarding" };
             safe_println!("{would} {} cache file(s) in {wt}: {}", files.caches.len(), first_names(&files.caches));
+        }
+        if !files.declared.is_empty() {
+            let would = if self.dry { "would discard" } else { "discarding" };
+            safe_println!("{would} {} declared-discardable file(s) in {wt}: {}", files.declared.len(), first_names(&files.declared));
         }
         Some(files)
     }
@@ -1367,6 +1483,16 @@ impl Cleanup {
             }
             if !self.recheck(&wt, &approved, &closed) {
                 return false;
+            }
+            // Inner first: `remove --force` on the parent deletes a nested
+            // worktree's files but leaves it registered (#1326). Each is
+            // removed against its own repo, which may not be this one.
+            for n in approved.nested.iter().rev() {
+                let git_dir = format!("--git-dir={}", n.common_dir);
+                if !self.step(&format!("removing the nested worktree at {}", n.path), "git", &[&git_dir, "worktree", "remove", "--force", &n.path]) {
+                    eprintln!("merge-cleanup: refusing to remove {wt} — could not remove the nested worktree at {}", n.path);
+                    return false;
+                }
             }
             if self.step(&format!("removing the linked worktree at {wt}"), "git", &["-C", path, "worktree", "remove", "--force", &wt]) {
                 // After the removal, never before it: these went with the

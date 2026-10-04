@@ -2691,3 +2691,109 @@ fn a_script_written_while_sibling_threads_spawn_still_executes() {
     }
     assert!(failures.is_empty(), "{failures:?}");
 }
+
+// --- #1326: repo-declared discardable paths, nested registered worktrees -----
+
+/// The repo declares `out/` and `*.egg-info` discardable in its AGENTS.md, and
+/// git ignores them, as the sudokumaker repo does.
+fn declare_discardable(r: &std::path::Path, line: &str) {
+    std::fs::write(r.join("AGENTS.md"), format!("## Notes\n\n{line}\n")).unwrap();
+    std::fs::write(r.join(".git/info/exclude"), "out/\n*.egg-info/\n.scratch/\nkeep.log\n").unwrap();
+}
+
+#[test]
+fn ignored_paths_the_repo_declares_discardable_are_removed_without_discard() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326a", "implement-1326a");
+    declare_discardable(&r, "**Discardable**: `out/`, `*.egg-info`");
+    std::fs::create_dir_all(wt.join("out/deep")).unwrap();
+    std::fs::write(wt.join("out/deep/a.bin"), "x\n").unwrap();
+    std::fs::create_dir_all(wt.join("pkg.egg-info")).unwrap();
+    std::fs::write(wt.join("pkg.egg-info/PKG-INFO"), "x\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(run.has("discarding 2 declared-discardable file(s)"), "{}", run.text());
+}
+
+#[test]
+fn an_ignored_file_outside_the_declared_list_still_refuses() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326b", "implement-1326b");
+    declare_discardable(&r, "**Discardable**: `out/`");
+    std::fs::create_dir_all(wt.join("out")).unwrap();
+    std::fs::write(wt.join("out/a.bin"), "x\n").unwrap();
+    std::fs::write(wt.join("keep.log"), "evidence\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    let want = format!("merge-cleanup: refusing to remove {} — 1 ignored file(s) would be lost: keep.log (--discard overrides)", wt.display());
+    assert!(!run.ok && run.stderr.contains(&want), "{}", run.text());
+    assert!(wt.join("out/a.bin").is_file(), "{}", run.text());
+}
+
+#[test]
+fn a_declaration_naming_git_or_scratch_discards_nothing_extra() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326c", "implement-1326c");
+    declare_discardable(&r, "**Discardable**: `.scratch/`, `*`, `.git`");
+    std::fs::create_dir_all(wt.join(".scratch")).unwrap();
+    std::fs::write(wt.join(".scratch/evidence.log"), "kept\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains(".scratch/evidence.log"), "{}", run.text());
+    assert!(wt.join(".scratch/evidence.log").is_file(), "{}", run.text());
+}
+
+fn registered_names(c: &Cleanup, repo: &std::path::Path) -> String {
+    c.git_out(&["-C", s(repo), "worktree", "list", "--porcelain"])
+}
+
+#[test]
+fn a_clean_registered_worktree_nested_in_scratch_is_removed_with_its_parent() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326d", "implement-1326d");
+    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
+    let nested = wt.join(".scratch/timing");
+    c.worktree_add(&r, &["--detach", s(&nested), "origin/main"]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(!registered_names(&c, &r).contains("timing"), "{}", registered_names(&c, &r));
+}
+
+#[test]
+fn a_clean_worktree_of_another_repo_nested_in_a_workspace_is_removed_too() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326e", "implement-1326e");
+    std::fs::write(r.join(".git/info/exclude"), ".claude/worktrees/\n").unwrap();
+    let other = c.mkfixture("r1326e-other");
+    let nested = wt.join(".claude/worktrees/qqrr");
+    c.worktree_add(&other, &["--detach", s(&nested), "origin/main"]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(!registered_names(&c, &other).contains("qqrr"), "{}", registered_names(&c, &other));
+}
+
+#[test]
+fn a_nested_worktree_holding_uncommitted_work_refuses_until_discard() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326f", "implement-1326f");
+    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
+    let nested = wt.join(".scratch/timing");
+    c.worktree_add(&r, &["--detach", s(&nested), "origin/main"]);
+    std::fs::write(nested.join("result.txt"), "3.2s\n").unwrap();
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one"], &[]);
+    assert!(!run.ok && run.stderr.contains(".scratch/timing/result.txt"), "{}", run.text());
+    assert!(nested.join("result.txt").is_file() && wt.exists(), "{}", run.text());
+
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--discard"], &[]);
+    assert!(run.ok && !wt.exists(), "{}", run.text());
+    assert!(!registered_names(&c, &r).contains("timing"), "{}", registered_names(&c, &r));
+}
+
+#[test]
+fn a_dry_run_reports_no_blocker_for_a_clean_nested_worktree() {
+    let c = Cleanup::new();
+    let (r, wt) = lane_workspace(&c, "r1326g", "implement-1326g");
+    std::fs::write(r.join(".git/info/exclude"), ".scratch/\n").unwrap();
+    c.worktree_add(&r, &["--detach", s(&wt.join(".scratch/timing")), "origin/main"]);
+    let run = c.mc(Tools::NoHerdr, &["--repo", s(&r), "caneff/merged-one", "--dry-run"], &[]);
+    assert_eq!(blocker_lines(&run), vec!["blockers: none".to_string()], "{}", run.text());
+    assert!(wt.join(".scratch/timing").is_dir(), "{}", run.text());
+}
