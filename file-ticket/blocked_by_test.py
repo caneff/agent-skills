@@ -11,8 +11,7 @@ the last cases pin): on
 2026-09-20 were filed ad hoc during builds, each costing a controller a
 decision by hand.
 
-`file-ticket/blocked-by-wording.test.sh` asserts the prose that tells the
-filer to emit it; this file asserts the template actually parses.
+This file asserts the template actually parses.
 """
 import re
 import sys
