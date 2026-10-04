@@ -42,17 +42,17 @@ expect_none "second gh issue create in the same session" \
   "$(context "$hook" s1 'gh issue create --title "merge-cleanup: another" --body x')"
 
 # No colon in the title: the first identifier-shaped word is the component.
-got=$(context "$hook" s2 "gh issue create -t 'Make merge_cleanup dry-run deterministic' -b x")
+got=$(context "$hook" s2 "gh issue create -R caneff/agent-skills -t 'Make merge_cleanup dry-run deterministic' -b x")
 expect_has "extraction: component from an identifier word" "$got" "${section[@]}"
 grep -qxF "merge_cleanup in:title" "$STUB_ARGS" \
   && echo "PASS: identifier word searched" || { echo "FAIL: searched $(paste -sd' ' "$STUB_ARGS")"; fails=1; }
 
 export STUB_ISSUES=""
 expect_has "extraction: no match is said, with the space searched" \
-  "$(context "$hook" s3 'gh issue create --title "teach-lib: x" --body y')" "${section[@]}" "No open issue" "teach-lib"
+  "$(context "$hook" s3 'gh issue create --repo caneff/agent-skills --title "teach-lib: x" --body y')" "${section[@]}" "No open issue" "teach-lib"
 
 # A failed search never reads as "no duplicates" (defect class 1).
-got=$(STUB_ERR="HTTP 502" context "$hook" s4 'gh issue create --title "teach-lib: x" --body y')
+got=$(STUB_ERR="HTTP 502" context "$hook" s4 'gh issue create --repo caneff/agent-skills --title "teach-lib: x" --body y')
 expect_has "extraction: failed search is reported as failed" "$got" "${section[@]}" "failed" "HTTP 502"
 if [[ "$got" == *"No open issue"* ]]; then echo "FAIL: failed search read as no match"; fails=1; fi
 
