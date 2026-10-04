@@ -54,18 +54,42 @@ DANGEROUS_PATTERNS=(
 #
 # The one safe form is `git restore --staged` without `--worktree`: that only
 # unstages, and leaves the working tree alone.
-has_dot_pathspec() { echo "$SCAN" | grep -qE '(^|[[:space:]])\.([[:space:]]|$)'; }
+# Each is judged on one command segment ($1), so a chain is blocked when any
+# one of its discards is.
+has_dot_pathspec() { echo "$1" | grep -qE '(^|[[:space:]])\.([[:space:]]|$)'; }
 restore_is_unstage_only() {
-  echo "$SCAN" | grep -q -- '--staged' && ! echo "$SCAN" | grep -q -- '--worktree'
+  echo "$1" | grep -q -- '--staged' && ! echo "$1" | grep -q -- '--worktree'
 }
 git_verb() {
-  echo "$SCAN" | grep -qE "(^|[;&|[:space:]])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+$1([[:space:]]|\$)"
+  echo "$2" | grep -qE "(^|[;&|[:space:]])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+$1([[:space:]]|\$)"
 }
-
-if has_dot_pathspec && { git_verb checkout || { git_verb restore && ! restore_is_unstage_only; }; }; then
-  echo "BLOCKED: '$COMMAND' discards every uncommitted change under '.'. That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact line to run themselves. Do not attempt it yourself." >&2
-  exit 2
-fi
+# A discard aimed at a linked worktree under `.scratch/mutation-*` is the
+# point of that worktree (#1387): a disposable copy a reviewer or worker
+# plants one mutation in. The target is `git -C <path>` or the cwd, resolved
+# with realpath so a `..` or a symlink cannot name the primary checkout, and
+# it must be a linked worktree (git-dir differs from the common dir), so a
+# plain directory that only carries the name is not one.
+is_mutation_worktree() {
+  local dir real gitdir common
+  dir=$(echo "$1" | sed -nE 's/.*(^|[;&|[:space:]])git[[:space:]]+-C[[:space:]]+([^[:space:]]+).*/\2/p')
+  dir=$(printf '%s' "${dir:-.}" | tr -d "'\"")
+  real=$(realpath -- "$dir" 2>/dev/null) || return 1
+  case "$real" in */.scratch/mutation-*) ;; *) return 1 ;; esac
+  gitdir=$(git -C "$real" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  common=$(git -C "$real" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  [ "$gitdir" != "$common" ]
+}
+discards_worktree() {
+  has_dot_pathspec "$1" || return 1
+  git_verb checkout "$1" || { git_verb restore "$1" && ! restore_is_unstage_only "$1"; } || return 1
+  ! is_mutation_worktree "$1"
+}
+while IFS= read -r segment; do
+  if discards_worktree "$segment"; then
+    echo "BLOCKED: '$COMMAND' discards every uncommitted change under '.'. That part is the user's, not yours. HAND OFF: re-run the command without it, then give the user the exact line to run themselves. Do not attempt it yourself." >&2
+    exit 2
+  fi
+done < <(printf '%s\n' "$SCAN" | sed -E 's/(&&|\|\||;|\|)/\n/g')
 
 for pattern in "${DANGEROUS_PATTERNS[@]}"; do
   if echo "$SCAN" | grep -qE "$pattern"; then
