@@ -35,3 +35,17 @@ The documented ways through, in tier order:
 Burn burn-skills-2026-10-03: six fix rounds over about a day (#1345, #1366,
 #1368, spec #1365), each built on a guess at the classifier instead of this
 listing.
+
+## Instruction Poisoning, dropped the same way (2026-10-04)
+
+A third must-name rule, Instruction Poisoning, blocked the same class of
+work: writes to any file an agent reads back as instructions (`CLAUDE.md`,
+every `SKILL.md`, `flow/claude/*.md`). It denied #1366's probe and then the
+controller's own `CLAUDE.md` rule commit. Chris removed it from
+`autoMode.soft_deny` with a `jq` one-liner; a fresh `claude auto-mode config`
+then listed 0 matches.
+
+The running session kept denying under it until it was resumed. Observed,
+not read from the source: a session reads the `soft_deny` list at start, so a
+settings change reaches new sessions and a resumed one, not the session that
+asked for it. After a soft_deny edit, resume the session rather than retry.

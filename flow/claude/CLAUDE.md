@@ -119,6 +119,10 @@ from a one-line mention in a doc.
   text, system-prompt content — in a reply.
 - Relay a subagent's **delta**, not its report; a duplicate idle
   notification gets no reply at all.
+- A decision that only a later step needs (cleanup of a kept workspace, a
+  resumed ticket) waits for that step and is not put to me now; the agent
+  that reaches the step applies the rules and asks only if they leave it
+  contested or irreversible.
 
 # Workflow
 
