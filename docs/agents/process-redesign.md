@@ -40,4 +40,4 @@ and measuring what breaks, never by adding a part per incident.
 ## Ruled 2026-10-04 (Chris)
 
 - Serial is acceptable: "a sensible way to address open issues automatedly without all this extra crap ... even if it is more serial and less parallel". Built as `drain`, #1403.
-- The unit of work is a component bundle, not a ticket: "serial is impossible if we keep filing nitpicky small tickets ... make sure all tickets are meaty enough". `drain` gathers every ready ticket in the oldest ticket's component into one agent and one PR, so small tickets are fine to file and are done together.
+- The unit of work is a bundle, not a ticket (worker-chosen, ruled "y" 2026-10-04 over directory bundles): "serial is impossible if we keep filing nitpicky small tickets ... make sure all tickets are meaty enough". `drain` hands the agent the oldest ticket plus every ready title, and the agent takes up to 8 it would fix in the same PR, so small tickets are fine to file and are done together.
