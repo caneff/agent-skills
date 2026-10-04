@@ -36,13 +36,14 @@ defines them.
   `model`, and denies any other bare call. Rubric:
   `~/.agents/skills/flow/claude/subagent-tiers.md`. Why: a bare call runs a
   lookup on the session's own, most expensive model.
-- A worker verifies `pwd` and `git branch --show-current` against its own
-  workspace before every commit and before any long run. A subagent in a
-  shared session never calls EnterWorktree: the pin is session-wide and
-  re-pins everyone. Create with `git worktree add`, work via absolute paths
-  and `git -C`, pass `--repo` to every `gh` call. Why: an EnterWorktree that
-  lands in a path that already exists is someone else's tree, and a commit
-  made from the wrong cwd lands there.
+- A subagent in a shared session never calls EnterWorktree: the pin is
+  session-wide and re-pins everyone. Create with `git worktree add`, work via
+  absolute paths and `git -C`, pass `--repo` to every `gh` call. Why: an
+  EnterWorktree that lands in a path that already exists is someone else's
+  tree. (A worker's own `pwd` and branch check is `implement/SKILL.md`'s.)
+- No agent launch carries a permission-skipping flag (`CLAUDE.md` § Work).
+  Why: the permission prompt is the only stop between an agent and an
+  irreversible command.
 - Before every launch on this box, check `uptime` and `free -g`. Background
   runs share one 32-core, 39 GB WSL box with other agents; count every
   working Claude session against a 28-session cap, sessions you did not

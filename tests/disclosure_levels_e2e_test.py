@@ -23,8 +23,9 @@ What a green run does NOT cover (the seam is blind to it):
   shows is what the budget gate counted, and that `crontab -l` holds the
   tagged re-count line. Those are checked by opening the real thing
   (#1413's closing check), not here;
-- the live ~/.claude/rules/ links, which install.test.sh checks under a
-  scratch HOME only.
+- the live ~/.claude/rules/ links (`ls -l ~/.claude/rules`, three links into
+  flow/claude/rules/), which install.test.sh checks under a scratch HOME
+  only: a fourth open of the real thing.
 """
 import json
 import os

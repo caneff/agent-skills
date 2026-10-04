@@ -130,45 +130,76 @@ def tables(projects: Path, start: datetime, end: datetime) -> str:
                       "", *raw, "", *covered, ""])
 
 
+class Refusal(RuntimeError):
+    """A step that cannot be read or done; recount exits 1 and changes nothing more."""
+
+
 def closed_at() -> datetime | None:
     """#1413's closedAt; None while it is open. Raises on anything unreadable."""
     p = subprocess.run(["gh", "issue", "view", str(TICKET), "--repo", REPO, "--json", "state,closedAt"],
                        capture_output=True, text=True)
     if p.returncode != 0:
-        raise RuntimeError(f"gh could not read closedAt for #{TICKET}: {p.stderr.strip()}")
+        raise Refusal(f"gh could not read closedAt for #{TICKET}: {p.stderr.strip()}")
     try:
         data = json.loads(p.stdout)
         state, when = data["state"], data["closedAt"]
     except (ValueError, KeyError, TypeError) as e:
-        raise RuntimeError(f"gh returned no readable closedAt for #{TICKET}: {e!r}: {p.stdout[:200]}")
+        raise Refusal(f"gh returned no readable closedAt for #{TICKET}: {e!r}: {p.stdout[:200]}")
     if state == "OPEN":
         return None
     if not when:
-        raise RuntimeError(f"#{TICKET} is {state} but gh returned no closedAt")
+        raise Refusal(f"#{TICKET} is {state} but gh returned no closedAt")
     return iso(when)
 
 
 def git(*args: str, cwd: Path) -> str:
-    return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
-                          text=True).stdout
+    p = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
+    if p.returncode != 0:
+        # The cron log is the only place the reason lands: keep git's own.
+        raise Refusal(f"git {' '.join(args)} failed ({p.returncode}): {p.stderr.strip()}")
+    return p.stdout
+
+
+def read_crontab() -> str:
+    """The current crontab. Only "no crontab for <user>" reads as empty: any
+    other failure raises, since writing back a crontab built from nothing
+    would delete every other line on the box."""
+    p = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+    if p.returncode == 0:
+        return p.stdout
+    if p.stderr.startswith("no crontab for "):
+        return ""
+    raise Refusal(f"crontab -l failed ({p.returncode}): {p.stderr.strip()}")
+
+
+def write_crontab(text: str) -> None:
+    p = subprocess.run(["crontab", "-"], input=text, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise Refusal(f"crontab - failed ({p.returncode}): {p.stderr.strip()}")
 
 
 def crontab_without_tag() -> None:
-    p = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-    lines = p.stdout.splitlines(keepends=True) if p.returncode == 0 else []
-    subprocess.run(["crontab", "-"], input="".join(l for l in lines if CRON_TAG not in l),
-                   text=True, check=True)
+    lines = read_crontab().splitlines(keepends=True)
+    write_crontab("".join(l for l in lines if CRON_TAG not in l))
 
 
 def recount(today: datetime, root: Path, projects: Path) -> int:
     try:
-        closed = closed_at()
+        return recount_or_raise(today, root, projects)
     except RuntimeError as e:
         print(f"pointer_reads recount: {e}", file=sys.stderr)
         return 1
+
+
+def recount_or_raise(today: datetime, root: Path, projects: Path) -> int:
+    closed = closed_at()
     if closed is None or today < closed + WINDOW:
         return 0
     end = closed + WINDOW
+    # Fourteen days with no transcript on this box means the count could not
+    # see them (a moved or pruned projects dir), never that nothing ran.
+    if not sessions(projects, closed, end):
+        raise Refusal(f"no transcripts under {projects} between {stamp(closed)} and {stamp(end)}")
     heading = f"## Re-count {end:%Y-%m-%d}"
     body = (f"\n{heading}: 14 days after #{TICKET} closed\n\n"
             f"Same space and regexes as above, over the 14 days after #{TICKET} closed at "
@@ -194,14 +225,17 @@ def recount(today: datetime, root: Path, projects: Path) -> int:
 
 
 def install_cron() -> int:
-    p = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-    current = p.stdout if p.returncode == 0 else ""
-    if CRON_TAG in current:
-        return 0
-    if current and not current.endswith("\n"):
-        current += "\n"
-    line = cron_line()
-    subprocess.run(["crontab", "-"], input=current + line + "\n", text=True, check=True)
+    try:
+        current = read_crontab()
+        if CRON_TAG in current:
+            return 0
+        if current and not current.endswith("\n"):
+            current += "\n"
+        line = cron_line()
+        write_crontab(current + line + "\n")
+    except RuntimeError as e:
+        print(f"pointer_reads install-cron: {e}", file=sys.stderr)
+        return 1
     print(line)
     return 0
 

@@ -112,7 +112,12 @@ class Recount(unittest.TestCase):
         (bin_ / "crontab").write_text(
             "#!/usr/bin/env bash\n"
             f'f="{self.crontab_file}"\n'
-            'if [ "${1:-}" = -l ]; then cat "$f"; elif [ "${1:-}" = - ]; then cat > "$f"; else exit 2; fi\n')
+            f'm="{self.tmp}/crontab-mode"\n'
+            'if [ "${1:-}" = -l ]; then\n'
+            '  [ "$(cat "$m" 2>/dev/null)" = none ] && { echo "no crontab for u" >&2; exit 1; }\n'
+            '  [ "$(cat "$m" 2>/dev/null)" = broken ] && { echo "cannot open spool" >&2; exit 1; }\n'
+            '  cat "$f"\n'
+            'elif [ "${1:-}" = - ]; then cat > "$f"; else exit 2; fi\n')
         self.gh_out = self.tmp / "gh.json"
         (bin_ / "gh").write_text(
             "#!/usr/bin/env bash\n"
@@ -191,6 +196,49 @@ class Recount(unittest.TestCase):
                 self.assertEqual(self.origin_note(), "# note\n")
                 self.assertIn(TAG, self.crontab_file.read_text())
 
+    def test_unreadable_crontab_is_never_rewritten(self):
+        # Only "no crontab for <user>" is an empty crontab; any other failure
+        # of `crontab -l` must not install a crontab built from nothing.
+        before = self.crontab_file.read_text()
+        (self.tmp / "crontab-mode").write_text("broken")
+        out = subprocess.run([sys.executable, str(SCRIPT), "install-cron"],
+                             capture_output=True, text=True, env=self.env)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("cannot open spool", out.stderr)
+        self.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
+        out = self.recount("2026-10-19T12:00:00Z")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("cannot open spool", out.stderr)
+        self.assertEqual(self.crontab_file.read_text(), before)
+
+    def test_install_cron_with_no_crontab_yet(self):
+        (self.tmp / "crontab-mode").write_text("none")
+        out = subprocess.run([sys.executable, str(SCRIPT), "install-cron"],
+                             capture_output=True, text=True, env=self.env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(self.crontab_file.read_text().count(TAG), 1)
+
+    def test_empty_window_is_an_error_not_a_result(self):
+        # Fourteen days with no transcript means the count could not see
+        # them, not that nothing ran: nothing is appended, the line stays.
+        self.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
+        (self.projects / "x" / "s.jsonl").unlink()
+        out = self.recount("2026-10-19T12:00:00Z")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("no transcripts", out.stderr)
+        self.assertEqual(self.origin_note(), "# note\n")
+        self.assertIn(TAG, self.crontab_file.read_text())
+
+    def test_a_failed_push_names_git_s_reason(self):
+        self.gh({"state": "CLOSED", "closedAt": "2026-10-05T12:00:00Z"})
+        hook = self.origin / "hooks" / "pre-receive"
+        hook.write_text("#!/bin/sh\necho 'rejected by test hook' >&2\nexit 1\n")
+        hook.chmod(0o755)
+        out = self.recount("2026-10-19T12:00:00Z")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("rejected by test hook", out.stderr)
+        self.assertIn(TAG, self.crontab_file.read_text())
+
     def test_install_cron_adds_the_line_once(self):
         self.crontab_file.write_text("0 8 * * 1 other-job  # other\n")
         for _ in range(2):
@@ -200,12 +248,25 @@ class Recount(unittest.TestCase):
         cron = self.crontab_file.read_text()
         self.assertEqual(cron.count(TAG), 1)
         self.assertIn("other-job  # other", cron)
-        # The line names the primary checkout, never a worktree that
-        # merge-cleanup will delete.
-        common = subprocess.run(["git", "-C", str(SCRIPT.parent), "rev-parse", "--path-format=absolute",
-                                 "--git-common-dir"], capture_output=True, text=True, check=True).stdout
-        primary = Path(common.strip()).parent
-        self.assertIn(f"{primary}/flow/claude/pointer_reads.py recount", cron)
+        self.assertIn("pointer_reads.py recount", cron)
+
+    def test_install_cron_from_a_worktree_names_the_primary_checkout(self):
+        # merge-cleanup deletes the worktree the install ran from, so the line
+        # must name the primary checkout: here self.root, run from a linked
+        # worktree of it that holds the script.
+        (self.root / "flow" / "claude").mkdir(parents=True)
+        (self.root / "flow" / "claude" / "pointer_reads.py").write_text(SCRIPT.read_text())
+        self.git(self.root, "add", "-A")
+        self.git(self.root, "commit", "-q", "-m", "script")
+        wt = self.tmp / "wt"
+        self.git(self.root, "worktree", "add", "-q", str(wt))
+        self.crontab_file.write_text("")
+        out = subprocess.run([sys.executable, str(wt / "flow" / "claude" / "pointer_reads.py"), "install-cron"],
+                             capture_output=True, text=True, env=self.env)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        cron = self.crontab_file.read_text()
+        self.assertIn(f" {self.root.resolve()}/flow/claude/pointer_reads.py recount ", cron)
+        self.assertNotIn(str(wt), cron)
 
 
 if __name__ == "__main__":

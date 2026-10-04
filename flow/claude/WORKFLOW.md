@@ -35,9 +35,8 @@ a deletion".
 
 ## Gate 2 — the two lanes
 
-**Code file** = anything executed, imported, or wired into the harness:
-`.py/.ts/.js/.sh/.rs`, hooks, CI config, and a skill's
-`SKILL.md` (its body changes what I do). A mixed diff is code.
+**Code file**: examples are `.py/.ts/.js/.sh/.rs`, hooks and CI config; the
+test itself is Gate 2 in `CLAUDE.md` § Hard rules.
 **Not code** = `AGENTS.md`, `CLAUDE.md`, `CODING_STANDARDS.md`,
 `Memory/RULES.md`, `settings.json` (Chris, 2026-10-03: never the code
 lane on its own; a hook script it wires in is still code), and research notes
@@ -140,9 +139,7 @@ pre-dispatch check).
 
 A denial report names the root-cause fix: the user-level settings or
 `autoMode` entry that produces the denial, never a per-worktree or one-off
-allow. `~/.claude/settings.json` is a symlink to this repo's
-`flow/claude/settings.json`; writing the home path through a temp file and
-`os.replace`/`mv` swaps the link for a copy (four times on 2026-10-04).
+allow.
 
 On any classifier denial, read the matched rule before proposing a fix:
 `claude auto-mode config`, the rule named in the brackets, its section and
