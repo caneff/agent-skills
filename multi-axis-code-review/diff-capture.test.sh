@@ -171,7 +171,8 @@ run_block "$rev_c" >/dev/null
 # file beside a real change and the declaration itself.
 mkdir -p "$repo/gen" "$repo/docs/agents"
 printf '{"glyph": 1}\n' >"$repo/gen/glyphs.json"
-printf '# generated, never reviewed\n\ngen/\n' >"$repo/docs/agents/review-generated-paths.txt"
+# CRLF endings and no final newline: a declaration written on Windows must not be read as empty.
+printf '# generated, never reviewed\r\n\r\ngen/' >"$repo/docs/agents/review-generated-paths.txt"
 echo third >>"$repo/f.txt"
 git -C "$repo" add -A && git -C "$repo" commit -qm third
 rev_d="$(git -C "$repo" rev-parse HEAD)"

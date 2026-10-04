@@ -247,7 +247,7 @@ if [ ! -s "$gen_patch" ]; then
 else
   grep -q '^diff --git a/keep-a.txt' "$gen_patch" || { echo "FAIL: the real change is missing from the capture" >&2; fail=1; }
   ! grep -q 'gen/data.json' "$gen_patch" || { echo "FAIL: the declared generated file is in the capture" >&2; fail=1; }
-  printf '%s\n' "$gen_out" | grep -q 'excluded declared generated paths: gen/' ||
+  printf '%s\n' "$gen_out" | grep -q 'declared generated paths excluded: gen/' ||
     { echo "FAIL: no line naming the excluded generated paths: $gen_out" >&2; fail=1; }
 fi
 

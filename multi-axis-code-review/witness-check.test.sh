@@ -138,6 +138,23 @@ done
 left="$(find "$home/.cache/agent-reviews/skills" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l)"
 [ "$left" -eq 0 ] || { echo "FAIL: the run left $left entr(ies) in the review cache home" >&2; fail=1; }
 
+# #1325/#1324: `--slots <k>` caps the witness check's concurrency at the worker count a
+# brief states. On the idle box the shim above reports, two mutations would
+# overlap; with `--slots 1` the log must read start, end, start, end.
+substitute 'sl1 sl2' "echo \"start \$1\" >>\"$scratch/slots.log\"; : >\"\$3\"; sleep 0.4; echo \"end \$1\" >>\"$scratch/slots.log\"; exit 1" |
+  sed 's| -- sl1 sl2| --slots 1 -- sl1 sl2|' >"$scratch/launcher-slots.sh"
+( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash "$scratch/launcher-slots.sh" ) >"$scratch/slots.out" 2>&1 || true
+if [ "$(awk '{print $1}' "$scratch/slots.log" 2>/dev/null | paste -sd' ')" != "start end start end" ]; then
+  echo "FAIL: --slots 1 did not serialise the mutations; the log reads: $(paste -sd'|' "$scratch/slots.log" 2>/dev/null)" >&2
+  cat "$scratch/slots.out" >&2
+  fail=1
+fi
+if ( cd "$repo" && HOME="$home" PATH="$scratch/bin:$PATH" bash -c "$(sed 's| -- sl1 sl2| --slots 0 -- sl1 sl2|' "$scratch/launcher-slots.sh")" ) >"$scratch/slots0.out" 2>&1; then
+  echo "FAIL: --slots 0 was accepted" >&2; fail=1
+elif ! grep -q -- '--slots' "$scratch/slots0.out"; then
+  echo "FAIL: --slots 0 was refused without naming the flag: $(cat "$scratch/slots0.out")" >&2; fail=1
+fi
+
 # Each message stays paired with the mutation that produced it. Reading the
 # message rather than the exit code is what catches defect class 3, and N
 # concurrent reds collected into one stream is how that pairing is lost.

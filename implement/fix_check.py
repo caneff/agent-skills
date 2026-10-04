@@ -18,13 +18,15 @@ mechanically, what the removed verification pass used to grade:
 - a `moved` line's ticket is open, and is not a ticket this PR closes (the
   merge would close it and lose the finding);
 - a `disputed` line gives a reason;
-- a correctness finding's line carries `rating`, CONFIRMED or PLAUSIBLE (#1230);
+- a correctness finding's line carries `rating`, CONFIRMED or PLAUSIBLE
+  (#1230);
 - every review that ran left a sidecar beside its completion marker
   `findings-<axis>-<n>.done`, written after the sidecar was complete: an empty
   file is also what a reviewer that crashed leaves, and a truncated one is
   not told from a whole one without it (defect class 1);
-- every file of the review is newer than the branch's first authored commit, so a
-  leftover of an earlier dispatch of the same ticket is not read as this one.
+- every file of the review is newer than the branch's first authored commit,
+  so a leftover of an earlier dispatch of the same ticket is not read as this
+  one.
 
 A review the ledger records as skipped (`review_ledger.py append --type
 <axis> --skip-reason`, the ablation) needs no sidecar; a Codex pass needs a
@@ -157,9 +159,11 @@ def axis_findings(reviews, n, branch, skipped, problems):
             obj = json_object(line)
             if obj is None or not isinstance(obj.get("id"), str) or not obj["id"].strip():
                 problems.append(f"{name}:{num} is not a finding line with an id")
-            elif axis == "correctness" and obj.get("rating") not in RATINGS:
-                problems.append(f"{name}:{num} has no rating (CONFIRMED or PLAUSIBLE), which a correctness "
-                                "finding carries in its sidecar (#1230)")
+            elif axis == "correctness" and "rating" not in obj:
+                problems.append(f"{name}:{num} has no rating, which a correctness finding carries in its "
+                                "sidecar (#1230)")
+            elif axis == "correctness" and obj["rating"] not in RATINGS:
+                problems.append(f"{name}:{num} rating {obj['rating']!r} is not CONFIRMED or PLAUSIBLE")
             else:
                 ids.append(obj["id"])
     return ids

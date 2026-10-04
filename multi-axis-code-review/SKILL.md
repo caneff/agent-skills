@@ -109,13 +109,14 @@ Look for the originating spec, in this order:
 Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
 
 **List them from the worktree, never from memory** (#1329). Briefs once
-contradicted each other on whether `docs/agents/defect-classes.md` exists in the
-same repo, because the caller asserted it. `render-brief.py` (§ 4 of this file) runs the
-existence check itself: it lists the standards files present in the worktree, names
-`docs/agents/defect-classes.md` as a source only when it exists there, and
-prints the three defect shapes inline when it does not — the skill's own
-fallback, so a repo without the file is still checked for them. A prompt written
-without the renderer does the same `ls` first.
+contradicted each other on whether `docs/agents/defect-classes.md` exists in
+the same repo, because the caller asserted it. Step § 4 of this file has
+`render-brief.py` run the existence check itself: it lists the standards files
+present in the worktree, names `docs/agents/defect-classes.md` as a source only when it
+exists there, and prints the three defect shapes inline when it does not. Those
+shapes live in [`briefs/defect-shapes.md`](briefs/defect-shapes.md), one line
+each, so a repo without the file is still checked for them; a prompt written
+without the renderer does the same `ls` first and pastes that file.
 
 On top of whatever the repo documents, the Standards axis always carries the **smell baseline** below — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing. Two rules bind it:
 
@@ -175,9 +176,22 @@ The `diff-reviewer` agent definition (`flow/claude/agents/diff-reviewer.md`, ins
 
 **Settled decisions.** This is the one home for the rule; every caller passes the list and points here rather than rewording it. Every prompt carries a settled-decisions list: what the owner already ruled on — at a grill, in the issue's `**Settled:**` comments, or in an earlier round — one line each. With nothing settled, say so — "settled decisions: none" — rather than dropping the line, so the reviewer knows the list is empty and not forgotten. A reviewer that re-raises a settled decision costs a round the fixer spends re-arguing it, and a reviewer with the issue in reach reads those comments itself before writing a finding.
 
-**A "Settled decisions" block carries only what Chris or the controller ruled** (#1400). A choice the worker made itself is named as the worker's and marked flag-if-you-disagree (`--choice`) — never listed as settled, because settled tells the reviewer not to look. A check the worker ran itself is handled the same way: its result goes to the reviewer as a claim to re-run (`--claim`), never as settled. A verification brief hands the worker's claimed dispositions to the verifier as claims to check — never as settled, and never with the outcome pre-assigned, because a verdict written into the brief is the verdict that comes back.
+**A "Settled decisions" block carries only what Chris or the controller ruled**
+(#1400). A choice the worker made itself is named as the worker's and marked
+flag-if-you-disagree (`--choice`) — never listed as settled, because settled
+tells the reviewer not to look. A check the worker ran itself is handled the
+same way: its result goes to the reviewer as a claim to re-run (`--claim`),
+never as settled. A verification brief hands the worker's claimed dispositions
+to the verifier as claims to check — never as settled, and never with the
+outcome pre-assigned, because a verdict written into the brief is the verdict
+that comes back.
 
-**A reviewer does its own reading and running and spawns no nested subagent**, because a nested agent reports to the top-level session instead of its spawner and the work is lost; a task too large for one agent is reported as such and stopped. **A brief that asks an agent to run solves, builds or test gates on this box states the worker count and a wall-clock ceiling**, because three reviewers each defaulting to 8 workers is 24 cores for one diff.
+**A reviewer does its own reading and running and spawns no nested subagent**,
+because a nested agent reports to the top-level session instead of its spawner
+and the work is lost; a task too large for one agent is reported as such and
+stopped. **A brief that asks an agent to run solves, builds or test gates on
+this box states the worker count and a wall-clock ceiling**, because three
+reviewers each defaulting to 8 workers is 24 cores for one diff.
 
 **A finding names the file and the intent, not the edit.** This is the one home for the rule; callers point here rather than reword it. Say where the problem is and what outcome is wrong; the fixer owns the file and picks the change. The observable: a finding never contains a command to run. A finding written as a patch to apply verbatim ("exactly these, nothing else", or a `git checkout <sha> -- <path>` the fixer is told to paste) turns one round into four — the fixer stops reading for the problem and starts applying the script, so a wrong script lands four times instead of being caught once.
 
@@ -196,9 +210,10 @@ finding stops needing an LLM pass over prose (#855, #854): "Also write
 `<dir>/findings-<axis>-<n>.jsonl`, one JSON object per line, one line per
 finding: `{"id": "<letter+ordinal>", "axis": "<axis>", "severity": "hard"
 or "judgement", "file": "<path>", "title": "<short title>"}`; a correctness
-line also carries `"rating": "CONFIRMED"` or `"PLAUSIBLE"` (#1230) — the rating
+line also carries `"rating": "CONFIRMED"` or `"PLAUSIBLE"` (#1230): the rating
 the brief asks for decides how hard to look at a bug, and a verifier reads it
-from the sidecar instead of from prose; the other axes have no rating field. Assign each
+from the sidecar instead of from prose. `implement/fix-check.sh` refuses a
+correctness line without one; the other axes have no rating field. Assign each
 finding a stable id — the axis's first letter (`S` standards, `P` spec, `C`
 correctness) plus a per-report ordinal, e.g. `S1`, `P2`, `C3`; an
 over-engineering cut instead takes its own `OE1`, `OE2`, … series, still
@@ -273,7 +288,8 @@ worktree=<the worktree under review>
 # every capture; no file means nothing is excluded.
 generated=(); excludes=()
 if [ -f "$worktree/docs/agents/review-generated-paths.txt" ]; then
-  while IFS= read -r p; do
+  while IFS= read -r p || [ -n "$p" ]; do   # a last line with no newline still counts
+    p=${p%$'\r'}                              # and a CRLF file is not read as paths ending in CR
     case "$p" in ''|'#'*) ;; *) generated+=("$p"); excludes+=(":(exclude)$p") ;; esac
   done <"$worktree/docs/agents/review-generated-paths.txt"
 fi
@@ -378,7 +394,7 @@ for s in $ordered; do
     rm -f "$tmp"; echo "sha-list review: $s changes no files (outside the declared generated paths)" >&2; exit 1; }
   printf '%s\n' "$one" >>"$tmp"
 done
-printf 'captured: sha-list of %s commit(s); excluded declared generated paths: %s\n' \
+printf 'captured (sha-list): %s commit(s); declared generated paths excluded: %s\n' \
   "$(set -- $ordered; echo $#)" "${generated[*]:-none}"
 publish_capture "$tmp" "$patch" || exit 1
 ```
@@ -394,7 +410,8 @@ its report, rather than reviewing nothing.
 
 If the completion notification comes back missing or empty, read that file before treating the report as absent.
 
-**Render each axis's prompt; do not compose it** (#1216). About sixty briefs were
+**Render each axis's prompt; do not compose it** (#1216). About sixty
+briefs were
 once hand-composed from one skeleton and drifted: word caps that outlived their
 removal, contradictory `node_modules` instructions, the dispositions grammar
 spelled four ways, claimed dispositions in `/tmp`, the verification report
@@ -407,17 +424,21 @@ python3 ~/.agents/skills/multi-axis-code-review/render-brief.py --axis <axis> \
   --diff <the exact path the capture printed> --diff-command "<the capture's command>" \
   [--commit "<sha subject>"]... [--spec <path or pointer> | --no-spec] \
   [--ruling "<text>"]... [--choice "<text>"]... [--claim "<id>: <text>"]... \
-  [--workers <k>] [--ceiling <seconds>] [--test-command "<cmd>"]
+  [--workers <k>] [--ceiling <seconds>] [--test-command "<cmd>"] \\
+  [--capture-stat "<the capture's printed stat line>"]
 ```
 
-It reads the diff's line count from the file, lists the standards sources from
+It reads the diff's line count from the file, prints the capture's stat line
+under Inputs, refuses a spec or correctness axis that names neither `--spec` nor
+`--no-spec`, lists the standards sources from
 the worktree, pins one report name `review-<axis>-<n>.md` with the sidecar and
 marker beside it, prints a ruling only under *Settled decisions*, a worker's own
 choice only under its own flagged heading, and a claim only under *Claims to
 check* — a heading that is absent when there are none. It writes no outcome of
 its own. It states the worker count (default 1) and wall-clock ceiling (default
 600 seconds) any solve, build or test run is held to, and that the reviewer
-spawns no nested subagent. Exit 2 means a bad input and no prompt. Pass the
+spawns no nested subagent; the correctness prompt also passes the worker count
+to `witness-check.sh --slots`. Exit 2 means a bad input and no prompt. Pass the
 printed prompt to `Agent` as it stands.
 
 **Standards sub-agent prompt** — include:
@@ -443,12 +464,15 @@ check itself is the most valuable thing a review does. Neither line below runs i
 
 *Where they live* (#1324). One home: `witness-check.sh --repo <repo>` puts
 every throwaway worktree under `~/.cache/agent-reviews/<repo>/witness.XXXXXX/`,
-beside the reports the same review writes, and removes it before exiting. Not
-`mktemp -d` in `/tmp`: a worktree stranded there is on no sweep and in no
-listing. `git worktree remove --force` on that path is cleanup of the session's
-own throwaway checkout (`flow/claude/settings.json` autoMode allows it by
-name); a reviewer that is refused it reports the refusal verbatim and stops,
-never reaching the removal another way.
+beside the reports the same review writes, and removes it before exiting
+(`--no-ledger`, which has no repo, outside a review, keeps `mktemp -d`). Not a
+`/tmp` directory nothing names. The 14-day sweep above removes files, not
+directories, so a root kept after exit 3 stays until its worktrees are
+removed by hand. A hook or classifier may refuse `git worktree remove --force`
+on that path: `flow/claude/settings.json` has an autoMode allow entry added for
+it, written without reproducing the original denial (#1324 could not be
+reproduced from a worker session), so a reviewer that is still refused reports
+the refusal verbatim and stops, never reaching the removal another way.
 
 *Isolation.* `git worktree add` a throwaway worktree per mutation. **Never
 `cp -a`**, or any other byte copy of the reviewed tree: a linked worktree's

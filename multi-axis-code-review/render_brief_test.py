@@ -26,11 +26,13 @@ def check(name, ok, detail=""):
         FAILS.append(f"FAIL: {name} {detail}")
 
 
-def render(worktree, diff, *extra, axis="standards"):
+def render(worktree, diff, *extra, axis="standards", explicit_spec=False):
     args = ["python3", RENDER, "--axis", axis, "--repo", "skills", "--worktree", worktree,
             "--ticket", "1395", "--base", "origin/main", "--diff", diff,
             "--diff-command", "git -C WT diff origin/main...HEAD", "--commit", "abc1234 first commit",
             *extra]
+    if axis != "standards" and not {"--spec", "--no-spec"} & set(extra) and not explicit_spec:
+        args.append("--no-spec")
     done = subprocess.run(args, capture_output=True, text=True)
     return done.returncode, done.stdout, done.stderr
 
@@ -119,8 +121,25 @@ def main():
         check("a worktree that is not a directory is refused", code == 2 and "no-such-dir" in err, err)
         code, out, err = render(wt, diff, axis="docs")
         check("an unknown axis is refused", code == 2, err)
+        code, out, err = render(wt, diff, axis="spec", explicit_spec=True)
+        check("a spec axis with neither --spec nor --no-spec is refused, not read as 'no spec'",
+              code == 2 and "--spec" in err and not out, err)
+        code, out, err = render(wt, diff, "--spec", "x.md", "--no-spec", axis="correctness")
+        check("--spec together with --no-spec is refused", code == 2 and "both" in err and not out, err)
+        code, out, err = render(wt, diff, "--no-spec", axis="correctness")
+        check("--no-spec renders 'no spec available'", code == 0 and "no spec available" in out, err)
         code, out, err = render(wt, diff, "--claim", "no colon here")
         check("a claim with no finding id is refused", code == 2 and "no colon here" in err, err)
+
+        # #1218: the capture's stat line reaches the prompt.
+        code, out, _ = render(wt, diff, "--capture-stat", "captured: 3 files; excluded 1 generated file(s): g/x.json")
+        check("the capture's stat line is printed under Inputs",
+              "captured: 3 files; excluded 1 generated file(s): g/x.json" in (section(out, "Inputs") or ""), out)
+        # #1325/#1324: the worker cap binds the witness check, which has its own concurrency.
+        _, out_c, _ = render(wt, diff, "--workers", "2", axis="correctness")
+        _, out_s, _ = render(wt, diff, "--workers", "2")
+        check("the correctness prompt tells the witness check its slot cap", "--slots 2" in out_c, out_c)
+        check("a prompt with no witness check carries no --slots", "--slots" not in out_s, out_s)
 
         # Each axis renders its own brief, from the one file per axis.
         for axis, needle in (("standards", "Over-engineering"), ("spec", "scope creep"),

@@ -241,7 +241,8 @@ def main():
         case("a correctness finding with no rating is refused", w, 1, "findings-correctness-5.jsonl:1 has no rating")
         w.put("findings-correctness-5.jsonl", json.dumps({"id": "C1", "axis": "correctness", "severity": "hard",
                                                          "rating": "LIKELY", "file": "f", "title": "t"}) + "\n")
-        case("a correctness rating outside CONFIRMED/PLAUSIBLE is refused", w, 1, "has no rating")
+        case("a correctness rating outside CONFIRMED/PLAUSIBLE is refused by naming the wrong value", w, 1,
+             "rating 'LIKELY' is not CONFIRMED or PLAUSIBLE")
         w.findings(standards=["S1"], spec=["P1"])
         w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "disputed", "reason": "r"})
         case("standards and spec findings need no rating", w, 0, "2 findings")

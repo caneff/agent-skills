@@ -5,7 +5,7 @@
                     --ticket <n> --base <fixed point> --diff <capture> --diff-command <cmd>
                     (--commit "<sha subject>")... [--spec <path or pointer> | --no-spec]
                     [--ruling <text>]... [--choice <text>]... [--claim "<id>: <text>"]...
-                    [--workers <k>] [--ceiling <seconds>] [--test-command <cmd>]
+                    [--workers <k>] [--ceiling <seconds>] [--test-command <cmd>] [--capture-stat <line>]
 
 Prints the whole prompt for a `diff-reviewer` of that axis. About sixty hand-
 composed briefs drifted from one skeleton; this is the skeleton, so the parts
@@ -38,9 +38,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 AXES = ("standards", "spec", "correctness")
 STANDARDS_FILES = ("CODING_STANDARDS.md", "CONTRIBUTING.md", "AGENTS.md", "CONTEXT.md")
 DEFECT_CLASSES = "docs/agents/defect-classes.md"
-SHAPES = ("an absent or malformed answer read as a benign one",
-          "a stated fallback with no mechanism behind it",
-          "a test that passes for a reason other than the one it claims")
 SIDECAR = {
     "standards": '{"id": "S<n>" or "OE<n>", "axis": "standards", "severity": "hard" or "judgement", "file": "<path>", "title": "<short title>"}',
     "spec": '{"id": "P<n>", "axis": "spec", "severity": "hard" or "judgement", "file": "<path>", "title": "<short title>"}',
@@ -63,12 +60,11 @@ def read_diff(path):
     return lines
 
 
-def parse_claims(claims):
+def check_claims(claims):
     for claim in claims:
         head, sep, body = claim.partition(":")
         if not sep or not head.strip() or " " in head.strip() or not body.strip():
             raise BadInput(f"claim '{claim}' is not '<finding id>: <text>'")
-    return claims
 
 
 def bullets(items, empty):
@@ -78,7 +74,12 @@ def bullets(items, empty):
 def render(a):
     if not os.path.isdir(a.worktree):
         raise BadInput(f"worktree {a.worktree} is not a directory")
-    claims = parse_claims(a.claim)
+    check_claims(a.claim)
+    claims = a.claim
+    if a.spec and a.no_spec:
+        raise BadInput("both --spec and --no-spec were given")
+    if a.axis != "standards" and not (a.spec or a.no_spec):
+        raise BadInput(f"the {a.axis} axis needs --spec <path or pointer> or --no-spec")
     lines = read_diff(a.diff)
     with open(os.path.join(HERE, "briefs", f"{a.axis}.md")) as fh:
         brief = fh.read().strip()
@@ -87,8 +88,10 @@ def render(a):
         classes = (f"`{DEFECT_CLASSES}` exists in this worktree: read it by name — the three shapes this "
                    "repo keeps shipping, with every instance.")
     else:
+        with open(os.path.join(HERE, "briefs", "defect-shapes.md")) as fh:
+            shapes = fh.read().split("\n")
         classes = (f"`{DEFECT_CLASSES}` does not exist in this worktree. Check these three shapes:\n"
-                   + "\n".join(f"{n}. {s}" for n, s in enumerate(SHAPES, 1)))
+                   + "\n".join(f"{n}. {s}" for n, s in enumerate(filter(None, shapes), 1)))
     spec = "no spec available" if a.no_spec else a.spec
     out_dir = f"~/.cache/agent-reviews/{a.repo}"
     n, axis = a.ticket, a.axis
@@ -97,6 +100,7 @@ def render(a):
         f"- Fixed point: {a.base}",
         f"- Diff capture: {a.diff} ({lines} lines) — read it to the end.",
         f"- Produced by: `{a.diff_command}` — the fallback when the capture is missing or empty; say so if you use it.",
+        *([f"- Capture stat: {a.capture_stat}"] if a.capture_stat else []),
         "- Commits: " + ("; ".join(a.commit) if a.commit else "none given"),
     ]
     if axis != "standards":
@@ -140,15 +144,17 @@ def render(a):
         "## Limits",
         "\n".join([
             "- You do your own reading and running and spawn no nested subagent: a nested agent reports to the "
-            "top-level session, not to you, and its work is lost. A task too large for you is reported as such and stopped.",
+            "top-level session, not to you, and its work is lost. A task too large for one agent is reported as such and stopped.",
             f"- Any solve, build or test run uses at most {a.workers} worker{'s' if a.workers != 1 else ''} and "
-            f"finishes inside {a.ceiling} seconds of wall clock."]),
+            f"finishes inside {a.ceiling} seconds of wall clock."]
+            + ([f"- Run the witness check with `--slots {a.workers}`: it picks its own concurrency otherwise."]
+               if axis == "correctness" else [])),
     ]
     return "\n\n".join(p for p in parts if p) + "\n"
 
 
 def main(argv):
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], add_help=True)
+    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--axis", required=True, choices=AXES)
     p.add_argument("--repo", required=True)
     p.add_argument("--worktree", required=True)
@@ -165,10 +171,8 @@ def main(argv):
     p.add_argument("--workers", type=int, default=1)
     p.add_argument("--ceiling", type=int, default=600)
     p.add_argument("--test-command")
-    try:
-        a = p.parse_args(argv)
-    except SystemExit as exc:
-        return 2 if exc.code else 0
+    p.add_argument("--capture-stat")
+    a = p.parse_args(argv)
     try:
         sys.stdout.write(render(a))
     except BadInput as exc:

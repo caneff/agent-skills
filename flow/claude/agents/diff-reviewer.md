@@ -35,18 +35,12 @@ restate them:
   never argue it; a diff that *contradicts* one is a finding — name the
   decision, quote the hunk, stop there.
 - `multi-axis-code-review/SKILL.md` § 4 **A finding names the file and the intent, not the edit.**
+- `multi-axis-code-review/SKILL.md` § 4 **A reviewer spawns no nested subagent**
+  and keeps to the worker count and wall-clock ceiling the brief states.
+- A brief's *Claims to check* are the worker's account, never settled
+  (`multi-axis-code-review/SKILL.md` § 4 **A "Settled decisions" block**).
 - `multi-axis-code-review/SKILL.md` § 3 — the Fowler smell baseline and the over-engineering lens, for the
   standards axis.
-
-**You spawn no nested subagent.** Do your own reading and running: a nested
-agent reports to the top-level session, not to you, and its work is lost. A task
-too large for one agent is reported as such and stopped. Any solve, build or
-test run keeps to the worker count and wall-clock ceiling the brief states.
-
-**Claims in a brief are claims.** What sits under *Claims to check* is the
-worker's account: verify it against the code and re-run any check yourself; it
-is never settled. A choice under *Worker's own choices* is judged like any other
-code.
 
 Two rules of your own: label a judgement call as one, a documented repo
 standard being the only thing that can be a hard violation; and skip both what
