@@ -362,7 +362,7 @@ def pane_session(path, prompt, log, name):
     try:
         made = herdr_json("workspace", "create", "--cwd", path, "--label", name, "--no-focus")
         workspace_id, pane = made["workspace"]["workspace_id"], made["root_pane"]["pane_id"]
-        herdr_json("pane", "run", pane, "bash", log + ".sh")
+        run(["herdr", "pane", "run", pane, "bash", log + ".sh"])  # prints nothing on success
         named, deadline = False, time.monotonic() + WALL_CLOCK_SECONDS
         while True:
             if not named:  # the pane becomes an agent once herdr sees `claude` start

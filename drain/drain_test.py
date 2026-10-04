@@ -165,7 +165,6 @@ if args[:1] == ["workspace"] and args[1] == "create":
     print(json.dumps({"result": {"workspace": {"workspace_id": "w9"}, "root_pane": {"pane_id": "w9:p1", "cwd": cwd}}}))
 elif args[:2] == ["pane", "run"]:
     subprocess.Popen(args[3:], start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-    print(json.dumps({"result": {"type": "ok"}}))
 elif args[:2] == ["agent", "rename"] and os.environ.get("HERDR_RENAME_FAIL"):
     sys.exit(1)
 """
