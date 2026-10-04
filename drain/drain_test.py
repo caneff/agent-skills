@@ -501,8 +501,12 @@ class DrainTest(Sandbox):
     def test_the_guard_and_lock_names_match_implement_dispatch(self):
         # drain cannot import the Rust constants it mirrors; this pins them.
         source = read(os.path.join(HERE, "..", "flow", "lane", "src", "bin", "implement_dispatch.rs"))
-        for name in ("commit-identity-guard", "commit-identity-guard-pre-push", "pre-commit", "pre-push"):
+        sys.path.insert(0, HERE)
+        import drain
+        for name in drain.GUARD_HOOKS:
             self.assertIn(f'"{name}"', source)
+        lock_prefix = ".implement-dispatch-claim-"
+        self.assertIn(lock_prefix, read(os.path.join(HERE, "drain.py")))
         self.assertIn("implement-dispatch-claim-", source)
 
     def test_refuses_a_repo_the_user_does_not_own(self):

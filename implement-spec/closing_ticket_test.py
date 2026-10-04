@@ -250,15 +250,13 @@ def test_a_colon_inside_the_emphasis_needs_no_space_before_a_code_span():
     assert "**Seam**: **" not in got, got
 
 
-def test_neither_reader_defines_a_key_regex_of_its_own():
-    # One key-line parser, in `frontier` (#1000): a second `_KEY` is the
-    # drift #928 fixed once already.
-    burndown = os.path.join(REPO_ROOT, "burndown")
-    for path in (GENERATOR, os.path.join(burndown, "closure.py")):
-        with open(path) as fh:
-            source = fh.read()
-        # The key grammar's own key group, under whatever name it is bound.
-        assert "[A-Za-z][A-Za-z -]*?" not in source, path
+def test_both_readers_use_frontiers_one_key_line_parser():
+    # One key-line parser, in `frontier` (#1000): a second copy is the drift
+    # #928 fixed once already. Identity, so a copy under any name fails.
+    import closure
+    import frontier
+    assert T.key_line is frontier.key_line
+    assert closure.key_line is frontier.key_line
 
 
 def test_a_root_that_is_not_a_directory_is_not_a_missing_declaration():

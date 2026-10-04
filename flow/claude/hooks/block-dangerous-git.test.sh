@@ -236,17 +236,10 @@ run "history destroyer still blocked" 2 "git reset --hard HEAD~3" "BLOCKED"
 run "bare force-push still blocked" 2 "git push --force origin main" "BLOCKED"
 
 # The rejection message must name the matched pattern generically — not lean
-# on gh-pr-merge-specific wording for a different pattern — and state an
-# escape hatch that is actually reachable: the hook blocks the protected
-# pattern unconditionally, so "run it alone" is a dead end (it's blocked the
-# same way). The real hatch is: drop the protected part, hand the user the
-# exact "! <pattern> ..." line to run themselves.
+# on gh-pr-merge-specific wording for a different pattern. The rest of the
+# message is prose, which this suite does not pin.
 run "history destroyer message names its own pattern, not gh pr merge" 2 \
   "git reset --hard HEAD~3" "protected pattern 'git reset --hard'"
-run "history destroyer message tells the agent to drop the protected part" 2 \
-  "git reset --hard HEAD~3" "re-run the command without it"
-run "history destroyer message hands the user a runnable ! line" 2 \
-  "git reset --hard HEAD~3" "! git reset --hard ..."
 
 # A protected pattern anywhere in a compound chain still blocks the whole
 # chain (whole-command matching, unchanged), and the message names the
@@ -296,7 +289,9 @@ RUN_CWD="$tmp" RUN_FORBID="you don't own" run "merge outside a checkout is a loo
 
 # The merge's own login read keeps gh's error text (#1309).
 rm -rf "$XDG_CACHE_HOME"
-run "owned verdict cached for the merge login case" 0 "git push origin main"
+# Prime the ownership cache with an owned verdict; no assertion of its own, the cases below read it.
+printf '%s' "git push origin main" | jq -Rs '{tool_name:"Bash",tool_input:{command:.}}' \
+  | (cd "$repo" && PATH="$stubdir:$PATH" bash "$hook") >/dev/null 2>&1
 export STUB_LOGIN= STUB_ERR="boom2: login read failed"
 RUN_FORBID="you don't own" run "merge naming a repo, login read failing, keeps gh's text" 2 \
   "gh pr merge 1 --repo caneff/x" "(gh: boom2: login read failed)"

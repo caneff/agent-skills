@@ -69,11 +69,12 @@ def _programs(doc=SKILL):
     return [m.group("program") for m in FETCH.finditer(doc.read_text())]
 
 
-def _render(issue):
-    """What `gh issue view --json body,comments --jq '<program>'` prints."""
+def _render(issue, doc=SKILL):
+    """What `gh issue view --json body,comments --jq '<program>'` prints, for the
+    first fetch `doc` carries."""
     assert shutil.which("jq"), "jq must be on PATH: this suite runs the skill's jq program"
     out = subprocess.run(
-        ["jq", "-r", _programs()[0]],
+        ["jq", "-r", _programs(doc)[0]],
         input=json.dumps(issue), text=True, capture_output=True,
     )
     assert out.returncode == 0, out.stderr
@@ -92,8 +93,9 @@ def _headers(rendered):
 def test_codex_lane_renders_the_same_document_as_skill():
     lane = _programs(LANE)
     assert len(lane) == 1, f"want 1 body+comments fetch in codex-lane.md, found {len(lane)}"
-    shape = lambda p: "\n".join(line.strip() for line in p.splitlines())
-    assert shape(lane[0]) == shape(_programs()[0]), "codex-lane.md's jq program drifted from SKILL.md's"
+    # Run both programs: a whitespace-neutral edit passes, a rendering drift fails.
+    for issue in ({"body": BODY, "comments": []}, {"body": BODY, "comments": COMMENTS}):
+        assert _render(issue, LANE) == _render(issue), "codex-lane.md's ticket render drifted from SKILL.md's"
 
 
 def test_a_comment_less_ticket_renders_as_the_bare_body():

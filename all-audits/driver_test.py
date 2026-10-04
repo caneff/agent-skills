@@ -8,6 +8,7 @@ bad-last-run-SHA case, which must mean RUN.
 import contextlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -205,9 +206,8 @@ def test_no_test_modules_section():
         sub = open(os.path.join(tmp, "collection", "mutation", "index.html")).read()
         assert "2 of 6 source modules have no tests" in sub
         assert "widget.py" in sub and "gadget.py" in sub
-        assert "8/13" in sub
-        assert "weak" in sub.lower()
-        assert "no-coverage" in sub.lower() or "no coverage" in sub.lower()
+        # solver.py's row: killed/total, weak (survived) and no-coverage counts, in that order
+        assert "<td>solver.py</td><td>8/13</td><td>2</td><td>3</td>" in sub
 
 
 def test_index_from_manifests_missing_manifest_is_a_failure_row():
@@ -730,17 +730,19 @@ def test_mutation_worktree_is_removed_even_when_the_failure_report_raises():
     """#606: worktree cleanup is one try/finally per worktree. Before it, an
     exception between `git worktree add` and the explicit cleanup call left
     the worktree registered and on disk; here the failure-report write is made
-    to fail (unwritable collection) and the worktree must still be gone."""
+    to fail (a regular file where the collection should be) and the worktree must still be gone."""
     with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as tmp:
         _init_git_repo(repo)
         run = _seed_run_dir(tmp, worktrees=True)
-        os.chmod(run.collection, 0o555)  # the module has no env manifest, so the driver writes a setup-failure report here
+        # The module has no env manifest, so the driver writes a setup-failure report
+        # into the collection. A regular file in its place makes that write fail for
+        # root too, where a chmod would be ignored.
+        shutil.rmtree(run.collection)
+        open(run.collection, "w").close()
         try:
             driver._run_mutation_module(repo, "solver.py", run)
         except OSError:
             pass
-        finally:
-            os.chmod(run.collection, 0o755)
         assert os.listdir(run.worktrees) == [], "the worktree must be removed on every exit path"
 
 
