@@ -453,6 +453,9 @@ bash ~/.agents/skills/multi-axis-code-review/witness-check.sh \
 
 `--repo` and `--ticket` are the ledger's, as in § 4's append line; `--no-ledger`
 replaces them only outside a review. Each `--call-site` id is one of the ids.
+A single mutation that is already a patch, with the command that covers it,
+can go through `mutation-audit/witness.sh` instead, which writes the `mutate`
+for you (`mutation-audit/SKILL.md` § Single-diff witness mode).
 Exit 0 means every mutation ran and was reported — `<id>: red` with its own
 message, `<id>: HOLLOW`, or `<id>: unknown` — so read the output, not the
 status. 1 is setup failing before any mutation, 2 bad arguments, 3 a throwaway
