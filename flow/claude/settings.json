@@ -7,7 +7,8 @@
     "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "Opus 4.8 with 1M context window",
     "CLAUDE_PTY_ORPHAN_CHECK_MS": "20000",
     "CLAUDE_PTY_HEARTBEAT_MS": "180000",
-    "CLAUDE_CODE_AUTO_CONNECT_IDE": "false"
+    "CLAUDE_CODE_AUTO_CONNECT_IDE": "false",
+    "CLAUDE_CODE_PLUGIN_DIRS": "/home/caneff/.agents/skills/flow/mods"
   },
   "permissions": {
     "allow": [
