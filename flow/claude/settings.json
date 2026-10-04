@@ -60,6 +60,7 @@
       "mcp__c4ai__screenshot",
       "Bash(git push origin --delete *)",
       "Bash(merge-cleanup:*)",
+      "Bash(resolve-controller:*)",
       "Bash(diff:*)",
       "Bash(cat /home/caneff/.local/bin/*)",
       "Bash(head /home/caneff/.local/bin/*)",
