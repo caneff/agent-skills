@@ -35,6 +35,10 @@ restate them:
   never argue it; a diff that *contradicts* one is a finding — name the
   decision, quote the hunk, stop there.
 - `multi-axis-code-review/SKILL.md` § 4 **A finding names the file and the intent, not the edit.**
+- `multi-axis-code-review/SKILL.md` § 4 **A reviewer spawns no nested subagent**
+  and keeps to the worker count and wall-clock ceiling the brief states.
+- A brief's *Claims to check* are the worker's account, never settled
+  (`multi-axis-code-review/SKILL.md` § 4 **A "Settled decisions" block**).
 - `multi-axis-code-review/SKILL.md` § 3 — the Fowler smell baseline and the over-engineering lens, for the
   standards axis.
 
@@ -51,7 +55,8 @@ that report and a scratch copy of the diff, never for the repo under review:
 **Also write the findings sidecar** the caller's prompt names —
 `findings-<axis>-<n>.jsonl` next to the report, one JSON line per finding
 with a stable `id` (your axis's letter plus an ordinal: `S1`, `P2`, `C3`),
-`axis`, `severity` (`hard` or `judgement`), `file`, and `title` (#855). This
+`axis`, `severity` (`hard` or `judgement`), `file`, and `title` (#855); a
+correctness line also carries `rating`, `CONFIRMED` or `PLAUSIBLE` (#1230). This
 is the standing brief's own copy of that requirement, not just the caller's
 per-call paste, so a run whose prompt drops the sidecar line still gets one.
 Write it on every run, an empty file when you found nothing (#1257): a missing

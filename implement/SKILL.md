@@ -294,7 +294,10 @@ seam is the convergence check.
    completion wakes you.
 
    Pass the reviewers every ruled or other-ticket item as settled
-   (`multi-axis-code-review/SKILL.md` § 4's Settled decisions).
+   (`multi-axis-code-review/SKILL.md` § 4's Settled decisions). A choice you
+   made yourself goes as `--choice` and a check you ran as `--claim`, never as
+   settled (`multi-axis-code-review/SKILL.md` § 4's *A "Settled decisions"
+   block*).
 
    **The first ablation** (#1401, ADR 0005) is on while the heading in
    `~/.agents/skills/docs/agents/ablations.md` reads `running`. Then, on a PR

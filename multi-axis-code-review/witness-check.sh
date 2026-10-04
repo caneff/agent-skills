@@ -6,7 +6,7 @@
 #
 #   witness-check.sh --worktree <reviewed tree> --mutate <file>
 #                    (--repo <repo> --ticket <n> [--round <k>] [--ledger <path>] | --no-ledger)
-#                    [--call-site <id>]... -- <id>...
+#                    [--slots <k>] [--call-site <id>]... -- <id>...
 #
 # <file> is sourced and must define `mutate`: $1 the id, $2 the witness
 # worktree, $3 a marker path. It strips that test's constraint in $2, creates
@@ -32,13 +32,17 @@ set -u
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() { sed -n '/^#   witness-check.sh/,/^#$/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# //' >&2; exit 2; }
-worktree="" mutate_file="" no_ledger=0
+worktree="" mutate_file="" no_ledger=0 repo_name="" max_slots=""
 ledger_args=() call_site_ids=" "
 while [ $# -gt 0 ]; do
   case "$1" in
     --worktree) worktree="${2-}"; shift 2 || usage ;;
     --mutate) mutate_file="${2-}"; shift 2 || usage ;;
-    --repo|--ticket|--round|--ledger) [ $# -ge 2 ] || usage; ledger_args+=( "$1" "$2" ); shift 2 ;;
+    --repo|--ticket|--round|--ledger) [ $# -ge 2 ] || usage; ledger_args+=( "$1" "$2" )
+      [ "$1" = --repo ] && repo_name="$2"; shift 2 ;;
+    --slots)
+      case "${2-}" in ''|*[!0-9]*|0) echo "witness check: --slots needs a positive integer, got '${2-}'" >&2; exit 2 ;; esac
+      max_slots="$2"; shift 2 ;;
     --no-ledger) no_ledger=1; shift ;;
     --call-site) [ $# -ge 2 ] || usage; call_site_ids="$call_site_ids$2 "; shift 2 ;;
     --) shift; break ;;
@@ -93,13 +97,22 @@ for id in $call_site_ids; do
     *) echo "witness check: call-site id '$id' is not among the mutation ids - it would never run" >&2; exit 2;;
   esac
 done
-root=$(mktemp -d) || exit 1
-# Checked, not assumed: a TMPDIR under the reviewed tree would put the
+# One home (#1324): the review cache's `<repo>` directory, where every other
+# file of a review lives, rather than a /tmp directory nothing names. The
+# 14-day sweep removes files only, so a root kept after exit 3 stays until
+# its worktrees are removed by hand. `--no-ledger` runs have no repo and keep `mktemp -d`.
+if [ -n "$repo_name" ]; then
+  home_dir="${HOME:?}/.cache/agent-reviews/$repo_name"
+  mkdir -p "$home_dir" && root=$(mktemp -d "$home_dir/witness.XXXXXX") || exit 1
+else
+  root=$(mktemp -d) || exit 1
+fi
+# Checked, not assumed: a TMPDIR (or HOME) under the reviewed tree would put the
 # throwaway worktrees inside the checkout, and those untracked directories then
 # block `git worktree remove` and `ship` long after the review reported green.
 case "$root" in "$top"/*)
   rmdir "$root"
-  echo "witness check: TMPDIR is inside the checkout ($root)" >&2; exit 1;;
+  echo "witness check: the worktree root is inside the checkout ($root)" >&2; exit 1;;
 esac
 # Worktrees, outputs and statuses get disjoint directories: with all three in
 # one, the ids `x` and `x.out` are both legal and collide - the parent creates
@@ -156,6 +169,8 @@ else
   busy=28
 fi
 slots=$(( (28 - busy) / 3 )); [ "$slots" -gt 4 ] && slots=4; [ "$slots" -lt 1 ] && slots=1
+# The worker count a brief states binds this run too (`--slots`), never raises it.
+[ -z "$max_slots" ] || [ "$slots" -le "$max_slots" ] || slots="$max_slots"
 # A mutation's own output, head AND tail, every line tagged with the id that
 # produced it: pytest puts the assertion text at the end, so the head alone cuts
 # out exactly what you are reading for.
