@@ -30,7 +30,7 @@ lines or a ticket of its clump carries `needs-codex` (#1358), and no PR pass
 launches at or above 70 % weekly usage (#1359); skipped PRs are reviewed
 together by a weekly audit. The code landed 2026-10-03; rationing takes
 effect when the kill switch (#1354) is removed. **Rationing took effect:**
-_not yet — filled in at #1363_. Rows dated after it come from rationed PRs
+2026-10-04 (kill switch removed, #1363). Rows dated after it come from rationed PRs
 only.
 
 **Audit marks (#1362).** The weekly audit of skipped PRs
