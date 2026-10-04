@@ -22,8 +22,9 @@
 # This is a prose assertion over the two files, not a behavioral test —
 # there is no harness that runs the skills' own prose.
 # #877: SKILL.md's ticket read must fetch `--json body,comments`, a comment
-# having been invisible to it; the Codex pass renders from that one read. What that fetch then renders is
-# executed, not grepped, by implement/ticket_comment_render_test.py.
+# having been invisible to it; the Codex pass renders from that one read.
+# What that fetch then renders is executed, not grepped, by
+# implement/ticket_comment_render_test.py.
 # A caller's leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_COMMON_DIR/
 # GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES would point
 # show-toplevel at that caller's repo instead of this one (#620); resolving

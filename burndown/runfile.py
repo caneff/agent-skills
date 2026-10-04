@@ -13,7 +13,7 @@
 It holds the run id, the slot budget, the controller's herdr agent name, the
 **target repo** (the absolute path of the primary checkout of the repo the
 run works on, which `loop.py dispatch` prints into every `implement-dispatch`
-command and `counts.py counts --repo` is checked against), and one entry per
+command and `counts.py --repo` is checked against), and one entry per
 clump — its ticket list, its workspace, its worker's **herdr agent name**, and
 its squash sha once it lands — or, for a clump that closed with no landing
 of its own, the reason it closed. `resume`
@@ -37,7 +37,6 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import frontier  # noqa: E402
 
 CACHE_DIR = "~/.cache/burndown"
 # How long a writer waits for the run file's lock before refusing, matching the
@@ -78,8 +77,12 @@ _JOB_STATES = ("running", "none", "done")
 # nothing yet (#1311).
 NEW_CLUMP_JOB = {"state": "none", "cores": 0}
 # The outcomes `implement/SKILL.md` § Review's dispositions sidecar can carry;
-# why any other is refused, not skipped: `references/run-file.md`.
-_SIDECAR_OUTCOMES = ("fixed", "moved", "disputed")
+# why any other is refused, not skipped: `references/run-file.md`. The LEGACY
+# ones are what pre-#1401 workers wrote: `counts.py` still reads them, so a burn
+# that was running when the review changed can close, and the merge check never
+# accepts them.
+SIDECAR_OUTCOMES = ("fixed", "moved", "disputed")
+LEGACY_OUTCOMES = ("filed", "handed-back", "leftover")
 
 
 def clean_git_env():
@@ -116,9 +119,10 @@ def checkout_top(where):
 
 def target_repo(run):
     """The checkout a run targets, or a `RunFileError` when its run file names
-    none. A run file from before the field loads (as `job` does), so the refusal is here, at each reader that needs the answer: a
-    missing target read as "no check needed" is a `--repo`-less command
-    aimed at whatever repo the cwd happens to be."""
+    none. A run file from before the field loads (as `job` does), so the
+    refusal is here, at each reader that needs the answer: a missing target
+    read as "no check needed" is a `--repo`-less command aimed at whatever
+    repo the cwd happens to be."""
     if run.get("repo") is None:
         raise RunFileError(
             f"run {run['run_id']} names no target repo — it was started "
@@ -410,23 +414,15 @@ def pr_number(value):
     return positive_int(value, "PR number")
 
 
-def one_line(value, what):
-    """A non-blank string with no line break (a CommonMark line ends at LF
-    or a lone CR): `render` prints one line per entry, and an embedded break
-    would split that line in two."""
-    if (not isinstance(value, str) or not value.strip()
-            or "\n" in value or "\r" in value):
-        raise RunFileError(f"not a {what}: {value!r}")
-    return value
-
-
-def read_dispositions(sidecar_path):
+def read_dispositions(sidecar_path, legacy=False):
     """Every line of a dispositions sidecar (`implement/SKILL.md` § Review),
     in order, as `(line number, object)`. A line that is not a JSON object
-    with one of the three sidecar outcomes is refused by file and line — why
-    it is not skipped: `references/run-file.md` § Dispositions and counts. So is a second
-    line carrying an id an earlier line already used (#1124): every reader
-    joins on the id, and one of the two would be dropped or counted twice."""
+    with one of the three sidecar outcomes is refused by file and line, and
+    so is a second line carrying an id an earlier line already used (#1124):
+    every reader joins on the id, and one of the two would be dropped or
+    counted twice. Why a bad line is refused and not skipped:
+    `references/run-file.md` § Dispositions and counts. `legacy` also accepts
+    the pre-#1401 outcomes, for `counts.py`."""
     try:
         with open(sidecar_path) as fh:
             raw_lines = fh.readlines()
@@ -445,11 +441,12 @@ def read_dispositions(sidecar_path):
             raise RunFileError(
                 f"{sidecar_path}:{n} is not readable JSON: {exc}") from exc
         outcome = obj.get("outcome") if isinstance(obj, dict) else None
-        if outcome not in _SIDECAR_OUTCOMES:
+        allowed = SIDECAR_OUTCOMES + (LEGACY_OUTCOMES if legacy else ())
+        if outcome not in allowed:
             raise RunFileError(
                 f"{sidecar_path}:{n} is not a dispositions sidecar line — "
                 f"its outcome is {outcome!r}, not one of "
-                f"{', '.join(_SIDECAR_OUTCOMES)}")
+                f"{', '.join(allowed)}")
         fid = obj.get("id")
         if not isinstance(fid, str) or not fid.strip():
             raise RunFileError(
@@ -585,18 +582,22 @@ def land(run_id, lowest, sha, root=None):
 
 
 def close_reason(reason):
-    """Why a clump closed with no landing: one non-blank line, since
-    `render_resume` prints it on one line."""
-    return one_line(reason, "close reason")
+    """Why a clump closed with no landing: one non-blank line with no line
+    break (a CommonMark line ends at LF or a lone CR), since `render_resume`
+    prints it on one line."""
+    if (not isinstance(reason, str) or not reason.strip()
+            or "\n" in reason or "\r" in reason):
+        raise RunFileError(f"not a close reason: {reason!r}")
+    return reason
 
 
 def close(run_id, lowest, reason, root=None):
     """Record that a clump closed with no landing of its own — its ticket
     found already fixed on the default branch, or handed to a nested spec run
     whose landings live in that run's own file (#1310). Distinct from `land`:
-    no squash sha exists, and `main`'s tip recorded as one is a landing the
-    sweep then looks for a sidecar behind. A closed clump holds no slot, has
-    no worker to re-announce to, and has no sidecar for `counts.py counts`.
+    no squash sha exists, and `main`'s tip recorded as one is a landing
+    `counts.py` then looks for a sidecar behind. A closed clump holds no
+    slot, has no worker to re-announce to, and has no sidecar for `counts.py`.
     A landed clump is refused; closing again with the same reason is a no-op,
     with another reason is refused."""
     reason = close_reason(reason)

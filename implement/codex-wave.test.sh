@@ -5,7 +5,7 @@
 # and its findings are fixed in the same fix round as the axes'. A prose
 # assertion over implement/SKILL.md, not a behavioral test — no harness runs
 # the skill's own prose. The record shape the pass writes is read by
-# `verification-check.sh` (fix_check_test.py) and `review_ledger.py`.
+# `fix-check.sh` (fix_check_test.py) and `review_ledger.py`.
 # Each check is scoped to the section that owns the rule, so a phrase pasted
 # elsewhere does not satisfy it: § Review (the wave), § The Codex pass (the
 # block) and § The merge (which must no longer run a pass).

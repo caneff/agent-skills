@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The merge check (#1401): `verification-check.sh <n>` verifies mechanically
+"""The merge check (#1401): `fix-check.sh <n>` verifies mechanically
 that every review finding of ticket <n> has exactly one disposition, that a
 `fixed` sha is a commit on the PR branch, that a `moved` ticket is open, and
 that an empty findings sidecar carries its reviewer's completion marker.
@@ -16,9 +16,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CHECK = os.path.join(HERE, "verification-check.sh")
+CHECK = os.path.join(HERE, "fix-check.sh")
 IDENT = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
          "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
 
@@ -57,6 +58,7 @@ class World:
         os.makedirs(self.reviews)
         self.tickets = {}
         self.write_gh()
+        self.ledger_skip("codex-gate")  # no Codex record unless a case writes one
 
     def git(self, cwd, *args):
         done = subprocess.run(["git", *args], cwd=cwd, env=self.env, capture_output=True, text=True)
@@ -71,7 +73,8 @@ class World:
         return self.git(cwd, "rev-parse", "HEAD")
 
     def write_gh(self):
-        """A `gh issue view <n> --json state --jq .state` that answers from self.tickets."""
+        """A `gh issue view <n> --json state --jq .state` that answers from self.tickets (a ticket
+        not in it fails, as an unreachable gh does)."""
         table = "\n".join(f"{n}) echo {s};;" for n, s in self.tickets.items())
         with open(os.path.join(self.bin, "gh"), "w") as fh:
             fh.write(f'#!/usr/bin/env bash\ncase "$3" in\n{table}\n*) echo "no such issue" >&2; exit 1;;\nesac\n')
@@ -82,14 +85,21 @@ class World:
             fh.write(text)
 
     def findings(self, **by_axis):
-        """Write the three sidecars: axis -> ids; every empty one also gets its marker."""
+        """Write the three sidecars (axis -> ids), each beside its completion marker."""
         for axis in ("standards", "spec", "correctness"):
             ids = by_axis.get(axis, [])
             self.put(f"findings-{axis}-5.jsonl",
                      "".join(json.dumps({"id": i, "axis": axis, "severity": "hard", "file": "f", "title": "t"}) + "\n"
                              for i in ids))
-            if not ids:
-                self.put(f"findings-{axis}-5.done", "")
+            self.put(f"findings-{axis}-5.done", "")
+
+    def ledger_skip(self, rtype, ticket=5):
+        """A ledger row saying review `rtype` did not run for `ticket` (what `append --skip-reason` writes)."""
+        row = {"repo": "skills-repo", "ticket": ticket, "tickets": [ticket], "type": rtype,
+               "status": {"fields": {"findings": {"status": "skipped", "reason": "test"}}}}
+        path = os.path.join(self.home, ".cache", "agent-reviews", "ledger.jsonl")
+        with open(path, "a") as fh:
+            fh.write(json.dumps(row) + "\n")
 
     def dispositions(self, *lines):
         self.put("dispositions-5.jsonl", "".join(json.dumps(line) + "\n" for line in lines))
@@ -128,14 +138,14 @@ def case(name, world, want_code, needle):
 def main():
     w = World()
     try:
-        case("nothing in the cache: the reviewers never ran", w, 1, "findings-standards-5.jsonl")
+        case("nothing in the cache: the reviewers never ran", w, 1, "findings-standards-5.jsonl is missing")
 
         w.findings()
         case("no findings and no dispositions sidecar: a missing file is not a clean review", w, 1,
              "dispositions-5.jsonl is missing")
 
         w.findings(standards=["S1"], spec=["P1"])
-        case("findings and no dispositions sidecar", w, 1, "no disposition for S1")
+        case("findings and no dispositions sidecar", w, 1, "dispositions-5.jsonl is missing")
 
         w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "disputed", "reason": "the ticket asks for it"})
         case("every finding disposed once passes", w, 0, "2 findings")
@@ -145,7 +155,7 @@ def main():
 
         w.dispositions(fixed("S1", w.fix_sha), fixed("S1", w.fix_sha),
                        {"id": "P1", "outcome": "disputed", "reason": "r"})
-        case("one finding disposed twice", w, 1, "S1 has 2 dispositions")
+        case("one finding disposed twice", w, 1, "repeats finding id 'S1'")
 
         w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "disputed", "reason": "r"}, fixed("X9", w.fix_sha))
         case("a disposition for no finding", w, 1, "X9 is no finding")
@@ -155,6 +165,10 @@ def main():
 
         w.dispositions(fixed("S1", "0" * 40), {"id": "P1", "outcome": "disputed", "reason": "r"})
         case("a fixed sha that is no commit here", w, 1, "S1: fixed sha")
+
+        w.dispositions(fixed("S1", "HEAD"), {"id": "P1", "outcome": "disputed", "reason": "r"})
+        case("a symbolic fixed sha is refused: it means another commit from another checkout", w, 1,
+             "S1: fixed sha HEAD")
 
         w.dispositions(fixed("S1", w.fix_sha[:9]), {"id": "P1", "outcome": "disputed", "reason": "r"})
         case("an abbreviated fixed sha resolves", w, 0, "2 findings")
@@ -168,11 +182,17 @@ def main():
         case("a moved ticket that is closed", w, 1, "P1: moved ticket #77 is CLOSED")
         w.tickets = {}
         w.write_gh()
-        case("a moved ticket gh cannot read", w, 1, "P1: moved ticket #77")
+        case("a gh that cannot answer is the environment's, exit 2, not a refusal the worker fixes", w, 2,
+             "`gh issue view 77` failed")
+        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": 5})
+        case("a finding moved onto the ticket this PR closes would be lost at the merge", w, 1,
+             "P1: moved ticket #5 is one this PR closes")
+        w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "moved", "ticket": "77"})
+        case("a moved line without an integer ticket", w, 1, "P1: moved without a ticket number")
 
         for outcome in ("leftover", "filed", "handed-back"):
             w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": outcome})
-            case(f"the removed outcome {outcome}", w, 1, f"P1: outcome '{outcome}'")
+            case(f"the removed outcome {outcome}", w, 1, f"its outcome is '{outcome}'")
         w.dispositions(fixed("S1", w.fix_sha), {"id": "P1", "outcome": "disputed", "reason": "  "})
         case("disputed with no reason", w, 1, "P1: disputed without a reason")
 
@@ -181,11 +201,40 @@ def main():
         case("three empty sidecars with their markers need no dispositions", w, 0, "0 findings")
         os.remove(os.path.join(w.reviews, "findings-spec-5.done"))
         case("an empty sidecar without its marker is a reviewer that may have crashed", w, 1,
-             "findings-spec-5.jsonl is empty and has no completion marker")
+             "findings-spec-5.jsonl has no completion marker")
+        w.findings(spec=["P1"])
+        os.remove(os.path.join(w.reviews, "findings-spec-5.done"))
+        w.dispositions({"id": "P1", "outcome": "disputed", "reason": "r"})
+        case("a non-empty sidecar without its marker may be truncated: refused too", w, 1,
+             "findings-spec-5.jsonl has no completion marker")
+        w.findings(spec=["P1"])
+        old = time.time() - 10 * 86400
+        for name in ("findings-spec-5.jsonl", "findings-spec-5.done"):
+            os.utime(os.path.join(w.reviews, name), (old, old))
+        case("a sidecar older than the branch is a leftover of an earlier dispatch", w, 1,
+             "findings-spec-5.jsonl is older than the first commit")
+        w.findings()
+        w.dispositions()
+        old = time.time() - 10 * 86400
+        os.utime(os.path.join(w.reviews, "dispositions-5.jsonl"), (old, old))
+        case("a stale dispositions sidecar is refused the same way", w, 1,
+             "dispositions-5.jsonl is older than the first commit")
+        w.dispositions()
         w.put("findings-spec-5.jsonl", '{"id": "P1"')
         case("a malformed sidecar line is not skipped", w, 1, "findings-spec-5.jsonl:1")
-        w.put("findings-spec-5.jsonl", "")
-        w.put("findings-spec-5.done", "")
+        w.findings()
+
+        # The ablation: a review the ledger records as skipped needs no sidecar.
+        for name in ("findings-standards-5.jsonl", "findings-standards-5.done"):
+            os.remove(os.path.join(w.reviews, name))
+        case("a standards axis the ledger does not record as skipped needs its sidecar", w, 1,
+             "records no skip for it")
+        w.ledger_skip("standards", ticket=6)
+        case("a skip recorded for another ticket excuses nothing", w, 1, "records no skip for it")
+        w.ledger_skip("standards")
+        case("a standards axis the ledger records as skipped (the ablation) passes with no sidecar", w, 0,
+             "0 findings")
+        w.findings()
 
         # Codex: its findings are `codex-gate-<k>`, the id `review_ledger.py` harvests under.
         w.codex()
@@ -200,15 +249,38 @@ def main():
         case("a codex run the branch moved under is refused the same way", w, 0, "codex pass refused")
         w.codex(out="garbage\n")
         case("a codex output the parser cannot read is not a clean pass", w, 1, "codex-adversarial-5-gate.out")
+        w.put("codex-adversarial-5-gate.json", "{not json")
+        case("an unreadable codex record is refused, not read as no pass", w, 1,
+             "codex-adversarial-5-gate.json is unreadable")
         w.codex(out="No material findings\n")
         case("a codex run with no findings needs no dispositions", w, 0, "0 findings")
+        os.remove(os.path.join(w.reviews, "codex-adversarial-5-gate.json"))
+        ledger = os.path.join(w.home, ".cache", "agent-reviews", "ledger.jsonl")
+        os.rename(ledger, ledger + ".off")
+        case("no codex record and no ledger row saying why: the pass neither ran nor was skipped on record", w, 1,
+             "no codex-gate row")
+        os.rename(ledger + ".off", ledger)
 
-        # From the primary checkout, as the controller runs it.
-        code, out = w.run(cwd=w.primary)
+        # From the primary checkout, as the controller runs it: the branch is named, never HEAD.
+        w.findings(standards=["S1"])
+        w.dispositions(fixed("S1", w.fix_sha))
+        code, out = w.run(w.primary)
         if code != 0:
-            FAILS.append(f"FAIL: the primary checkout reads the same cache and branch — got {code}: {out}")
+            FAILS.append(f"FAIL: the primary checkout resolves the branch, not its own HEAD — got {code}: {out}")
         else:
-            print("PASS: the primary checkout reads the same cache and branch")
+            print("PASS: the primary checkout resolves the branch, not its own HEAD")
+        code, out = w.run(w.primary, "origin/implement-5")
+        if code != 2 or "origin/implement-5" not in out:
+            FAILS.append(f"FAIL: a branch that was never pushed is no PR head — want exit 2 naming it, got {code}: {out}")
+        else:
+            print("PASS: a branch that was never pushed is no PR head: the environment cannot answer")
+        w.git(w.work, "push", "-q", "origin", "implement-5")
+        w.dispositions(fixed("S1", w.fix_sha))
+        code, out = w.run(w.primary, "origin/implement-5")
+        if code != 0:
+            FAILS.append(f"FAIL: the pushed head, named as the controller names it, passes — got {code}: {out}")
+        else:
+            print("PASS: the pushed head, named as the controller names it, passes")
 
         done = subprocess.run(["bash", CHECK], cwd=w.work, env=w.env, capture_output=True, text=True)
         if done.returncode != 2 or "usage" not in done.stderr:

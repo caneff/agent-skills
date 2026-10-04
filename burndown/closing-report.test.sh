@@ -23,15 +23,18 @@ report="$(section 'The closing report')"
 [ -n "$report" ] || { echo "FAIL: could not extract § The closing report from burndown/SKILL.md" >&2; exit 1; }
 check_in "$report" 'one report to Chris, and no sweep ticket' '§ The closing report'
 check_in "$report" 'two counts, **fixed** and **moved**' '§ The closing report'
-check_in "$report" 'python3 burndown/counts.py counts <run-id> --repo <primary checkout>' '§ The closing report'
+check_in "$report" 'python3 burndown/counts.py <run-id> --repo <primary checkout>' '§ The closing report'
 check_in "$report" 'friction-log count' '§ The closing report'
 check_in "$report" 'review_ledger.py escapes --repo-dir <primary checkout>' '§ The closing report'
-check_in "$report" 'keep the component if any escape is attributed, delete it otherwise' '§ The closing report'
+check_in "$report" 'review_ledger.py harvest' '§ The closing report'
+check_in "$report" 'docs/agents/ablations.md' '§ The closing report'
+check_in "$report" "--grep='^friction:'" '§ The closing report'
 check_in "$report" 'refused by number, never counted as zero' '§ The closing report'
 
 friction="$(section 'The friction log')"
 [ -n "$friction" ] || { echo "FAIL: could not extract § The friction log from burndown/SKILL.md" >&2; exit 1; }
-check_in "$friction" 'one line appended to `docs/agents/friction-log.md`' '§ The friction log'
+check_in "$friction" 'one line appended to the one log' '§ The friction log'
+check_in "$friction" 'with the subject `friction: <what happened>`' '§ The friction log'
 check_in "$friction" 'never a ticket of its own' '§ The friction log'
 check_in "$friction" 'only on its second occurrence' '§ The friction log'
 

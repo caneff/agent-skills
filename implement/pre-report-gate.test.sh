@@ -132,7 +132,7 @@ else
 fi
 
 # The merge check (#1401): on an implement-<n> branch the gate runs
-# verification-check.sh, so a finding with no disposition, or a `fixed` sha off
+# fix-check.sh, so a finding with no disposition, or a `fixed` sha off
 # the branch, stops the worker before "PR up". The check itself has its own
 # suite (fix_check_test.py); what is pinned here is that the gate runs it, from a
 # linked worktree, and quotes its answer.
@@ -146,7 +146,10 @@ git -C "$repo" worktree add -q -b implement-7 "$tmp/implement-7" main
 echo fix > "$tmp/implement-7/fix.txt"; git -C "$tmp/implement-7" add -A; git -C "$tmp/implement-7" commit -qm fix
 wt_tip=$(git -C "$tmp/implement-7" rev-parse HEAD)
 wt() { (cd "$tmp/implement-7" && HOME="$cache_home" "$@" bash "$gate" "$wt_tip" 2>&1); }
-for a in standards spec correctness; do : >"$reviews/findings-$a-7.jsonl"; done
+for a in standards spec correctness; do : >"$reviews/findings-$a-7.jsonl"; : >"$reviews/findings-$a-7.done"; done
+# No Codex record, so the ledger must say why (the size gate skipped it).
+printf '%s\n' '{"repo": "repo", "ticket": 7, "tickets": [7], "type": "codex-gate", "status": {"fields": {"findings": {"status": "skipped"}}}}' \
+  >"$cache_home/.cache/agent-reviews/ledger.jsonl"
 printf '%s\n' '{"id": "S1", "axis": "standards", "severity": "hard", "file": "f", "title": "t"}' >"$reviews/findings-standards-7.jsonl"
 
 out=$(wt env); rc=$?
@@ -157,7 +160,6 @@ else
 fi
 
 printf '%s\n' "{\"id\": \"S1\", \"outcome\": \"fixed\", \"sha\": \"$wt_tip\"}" >"$reviews/dispositions-7.jsonl"
-touch "$reviews/findings-spec-7.done" "$reviews/findings-correctness-7.done"
 out=$(wt env); rc=$?
 if [ "$rc" = 0 ] && [[ "$out" == *"1 findings, each disposed once"* ]]; then
   echo "PASS: a disposed review passes and the pass line quotes the check"
@@ -168,15 +170,15 @@ fi
 # The Codex lane runs no review wave: it waives the check by naming why, and
 # the reason lands in the pass line.
 rm "$reviews/dispositions-7.jsonl"
-out=$(wt env PRE_REPORT_NO_VERIFICATION="codex lane, no Claude axes"); rc=$?
+out=$(wt env PRE_REPORT_NO_FIX_CHECK="codex lane, no Claude axes"); rc=$?
 if [ "$rc" = 0 ] && [[ "$out" == *"waived"* ]] && [[ "$out" == *"codex lane, no Claude axes"* ]]; then
-  echo "PASS: PRE_REPORT_NO_VERIFICATION waives the check and quotes the reason"
+  echo "PASS: PRE_REPORT_NO_FIX_CHECK waives the check and quotes the reason"
 else
   echo "FAIL: waiver — want exit 0 + 'waived' + reason, got $rc: $out"; fails=1
 fi
-out=$(wt env PRE_REPORT_NO_VERIFICATION=""); rc=$?
+out=$(wt env PRE_REPORT_NO_FIX_CHECK=""); rc=$?
 if [ "$rc" = 1 ]; then
-  echo "PASS: an empty PRE_REPORT_NO_VERIFICATION is not a waiver"
+  echo "PASS: an empty PRE_REPORT_NO_FIX_CHECK is not a waiver"
 else
   echo "FAIL: empty waiver — want exit 1, got $rc: $out"; fails=1
 fi
@@ -185,7 +187,7 @@ fi
 # environment error, exit 2, never a refusal the worker is told to fix.
 mkdir -p "$tmp/lonely/implement"
 cp "$gate" "$tmp/lonely/implement/pre-report-gate.sh"
-cp "$here/verification-check.sh" "$tmp/lonely/implement/verification-check.sh"
+cp "$here/fix-check.sh" "$tmp/lonely/implement/fix-check.sh"
 out=$(cd "$tmp/implement-7" && HOME="$cache_home" bash "$tmp/lonely/implement/pre-report-gate.sh" "$wt_tip" 2>&1); rc=$?
 if [ "$rc" = 2 ] && [[ "$out" == *"could not run"* ]]; then
   echo "PASS: a check that cannot run is exit 2, not a refusal"

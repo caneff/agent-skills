@@ -63,7 +63,7 @@ filed:
 1. Append the trial row to `docs/research/2026-09-14-codex-review-trial.md`:
    `audit <YYYY-MM-DD> (<repo>)` in the Ticket column, the audited PRs in the
    PR column, then the three counts — confirmed, also found by Claude (the
-   PR's own round-1 review raised it, per its body's Decisions made), and
+   PR's own review wave raised it, per its body's Decisions made), and
    disputed — and one line per confirmed finding with its filed ticket,
    then `not audited: ticket #<t>` for each left-out ticket.
 2. Move the mark, run from the audited repo's checkout:

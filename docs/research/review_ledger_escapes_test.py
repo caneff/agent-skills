@@ -147,6 +147,85 @@ class EscapeTest(EscapeCase):
         self.assertEqual(got["reviewed"], 3)
         self.assertEqual(got["landed"], 2)
 
+    def test_a_file_name_with_a_space_or_non_ascii_letters_is_attributed_not_fatal(self):
+        # #1401 C3: names come from `--name-only -z`, not from a patch header.
+        self.land({"Sticker Final é.json": "x1\nx2\nx3\n"}, "c: add the sticker (#33)", 3, "Closes #13")
+        self.skip(13, "spec", "ablation")
+        self.land({"Sticker Final é.json": "x1\nFIX\nx3\n"}, "fix: sticker", 4)
+        self.publish()
+        got = self.escapes()
+        self.assertEqual([(e["ticket"], e["files"]) for e in got["escapes"]], [(13, ["Sticker Final é.json"])])
+
+    def test_a_removed_line_that_looks_like_a_patch_header_is_not_misread(self):
+        self.land({"d.txt": "d1\n-- not a header\nd3\n"}, "d: add (#34)", 3, "Closes #14")
+        self.skip(14, "spec", "ablation")
+        self.land({"d.txt": "d1\nFIXED\nd3\n"}, "fix: d", 4)
+        self.publish()
+        self.assertEqual([e["files"] for e in self.escapes()["escapes"]], [["d.txt"]])
+
+    def test_a_fix_that_only_inserts_lines_is_attributed_to_the_lines_around_it(self):
+        self.land({"a.py": "a1\nA2\ninserted\na3\na4\na5\na6\n"}, "fix: missing guard in a.py", 4)
+        self.publish()
+        self.assertEqual([e["ticket"] for e in self.escapes()["escapes"]], [11])
+
+    def test_a_landing_is_found_by_the_ticket_in_its_subject_when_the_body_has_no_closes(self):
+        self.land({"e.py": "e1\ne2\ne3\n"}, "e: add the thing (#15) (#35)", 3)
+        self.skip(15, "spec", "ablation")
+        self.land({"e.py": "e1\nFIXED\ne3\n"}, "fix: e", 4)
+        self.publish()
+        got = self.escapes()
+        self.assertEqual(([e["ticket"] for e in got["escapes"]], got["not_landed"]), ([15], []))
+
+    def test_the_oldest_landing_is_the_pr_and_a_later_mention_is_a_follow_up(self):
+        # The follow-up commit says `Closes #11` too, later; blame points at the first landing.
+        self.land({"a.py": "a1\nA2\na3\na4\na5\na6\n", "g.txt": "g\n"}, "g: follow-up (#36)", 3, "Closes #11")
+        self.land({"a.py": "a1\nFIXED\na3\na4\na5\na6\n"}, "fix: a.py", 4)
+        self.publish()
+        (e,) = self.escapes()["escapes"]
+        self.assertEqual((e["ticket"], e["landing"]), (11, self.pr_a))
+
+    def test_a_merge_commit_is_not_a_fix_commit(self):
+        self.git(self.repo, "checkout", "-q", "-b", "side")
+        self.land({"a.py": "a1\nFIXED\na3\na4\na5\na6\n"}, "side work", 4)
+        self.git(self.repo, "checkout", "-q", "main")
+        self.land({"z.txt": "z\n"}, "z: unrelated", 5)
+        self.git(self.repo, "merge", "-q", "--no-ff", "-m", "fix: merge the side branch", "side", when=T0 + 6 * DAY)
+        self.publish()
+        self.assertEqual(self.escapes()["escapes"], [])
+
+    def test_a_sweep_commit_is_not_an_escape_whatever_its_subject_says(self):
+        self.land({"a.py": "a1\nSWEPT\na3\na4\na5\na6\n"}, "Sweep: fix leftovers from burn x", 4)
+        self.publish()
+        self.assertEqual(self.escapes()["escapes"], [])
+
+    def test_components_are_named_by_a_known_reason_and_free_text_is_one_other(self):
+        self.skip(16, "codex-gate", "codex usage 71% at or above reserve ceiling 70%, resets 2026-10-05")
+        self.land({"h.txt": "h\n"}, "h (#37)", 3, "Closes #16")
+        self.publish()
+        self.assertIn("codex-gate:other", self.escapes()["by_component"])
+
+    def test_origin_is_fetched_first_so_a_fix_pushed_from_elsewhere_counts(self):
+        other = self.tmp / "elsewhere"
+        self.git(self.tmp, "clone", "-q", str(self.tmp / "origin.git"), str(other))
+        self.publish()  # PR A and B are on origin; the fix arrives only through `other`
+        self.git(other, "pull", "-q", "origin", "main")
+        (other / "a.py").write_text("a1\nFIXED\na3\na4\na5\na6\n")
+        self.git(other, "add", "a.py")
+        self.git(other, "commit", "-q", "-m", "fix: a.py", when=T0 + 4 * DAY)
+        self.git(other, "push", "-q", "origin", "main")
+        r = run("escapes", "--repo-dir", self.repo, "--ledger", self.ledger, "--format", "json", "--no-fetch",
+                home=self.home)
+        self.assertEqual(json.loads(r.stdout)["escapes"], [])  # origin as this checkout last saw it
+        self.assertEqual(len(self.escapes()["escapes"]), 1)  # fetched first
+
+    def test_a_git_failure_is_refused_not_counted_as_fewer_escapes(self):
+        self.land({"a.py": "a1\nFIXED\na3\na4\na5\na6\n"}, "fix: crash in a.py", 4)
+        self.publish()
+        self.git(self.repo, "remote", "set-url", "origin", str(self.tmp / "no-such.git"))
+        r = run("escapes", "--repo-dir", self.repo, "--ledger", self.ledger, home=self.home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("git fetch", r.stderr)
+
     def test_no_default_branch_recorded_is_refused_by_name(self):
         r = run("escapes", "--repo-dir", self.repo, "--ledger", self.ledger, home=self.home)
         self.assertEqual(r.returncode, 2)

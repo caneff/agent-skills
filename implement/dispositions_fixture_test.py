@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The dispositions sidecar fixture and the grammar SKILL.md § Review states
-must agree (#1025, #1027). A reader's test that binds to the fixture is tested on every form the prose
-states only while the two agree; a fixture line the prose never states is a
+must agree (#1025, #1027). A reader's test that binds to the fixture is
+tested on every form the prose states only while the two agree; a fixture line the prose never states is a
 form no writer produces.
 
 Seam: the sidecar forms as § Review writes them — each backticked

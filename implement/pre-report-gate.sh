@@ -2,7 +2,7 @@
 # The pre-report gate: run from the worktree before reporting a sha.
 # Fails unless the tree is clean, <sha> is an ancestor of <tip>, the
 # workspace's .scratch/ is empty, and — on an implement-<n> branch — the
-# merge check (verification-check.sh, #1401) passes: every review finding has
+# merge check (fix-check.sh, #1401) passes: every review finding has
 # one disposition, a `fixed` sha is a commit on the branch, a `moved` ticket is
 # open: the ways a "done" report has described work that was not on the
 # branch, left cleanup for later, or dropped a finding.
@@ -57,20 +57,20 @@ if ! git merge-base --is-ancestor "$sha" "$tip_sha"; then
 fi
 
 # The merge check: on an implement-<n> branch every review finding of ticket
-# <n> is disposed (verification-check.sh). Off an implement-<n> branch there is
+# <n> is disposed (fix-check.sh). Off an implement-<n> branch there is
 # no ticket to look up, and the pass line says so.
 branch=$(git rev-parse --abbrev-ref HEAD)
 if [[ "$branch" =~ ^implement-([0-9]+)$ ]]; then
   n=${BASH_REMATCH[1]}
   # The Codex lane runs no review wave and waives the check by naming why.
   # Light tier never runs this gate.
-  if [ -n "${PRE_REPORT_NO_VERIFICATION:-}" ]; then
-    dispositions_status="fix check waived, acknowledged: $PRE_REPORT_NO_VERIFICATION"
+  if [ -n "${PRE_REPORT_NO_FIX_CHECK:-}" ]; then
+    dispositions_status="fix check waived, acknowledged: $PRE_REPORT_NO_FIX_CHECK"
   else
-    check=$(bash "$(dirname "${BASH_SOURCE[0]}")/verification-check.sh" "$n" 2>&1)
+    check=$(bash "$(dirname "${BASH_SOURCE[0]}")/fix-check.sh" "$n" 2>&1)
     rc=$?
     [ "$rc" -ne 1 ] || { echo "pre-report gate: $check" >&2; exit 1; }
-    [ "$rc" -eq 0 ] || { echo "pre-report gate: verification-check.sh could not run (exit $rc): $check" >&2; exit 2; }
+    [ "$rc" -eq 0 ] || { echo "pre-report gate: fix-check.sh could not run (exit $rc): $check" >&2; exit 2; }
     dispositions_status="$check"
   fi
 else

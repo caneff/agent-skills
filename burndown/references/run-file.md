@@ -68,10 +68,10 @@ python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
   dispatches into files its workers are still editing. `runfile.py close <run-id> --clump <n> --reason <text>`
   writes it. A clump is landed or closed, never both: `close` refuses a landed
   clump and `land` a closed one. Recording `main`'s tip as a landing instead is
-  a sha with no PR behind it, and `counts.py counts` then refuses the run over
+  a sha with no PR behind it, and `counts.py` then refuses the run over
   the sidecar that PR never wrote. A closed clump holds no slot, gets no
   re-announce, is no live workspace to `loop.py dispatch` or its liveness
-  sweep, and `counts.py counts` names it as skipped. A file written before this
+  sweep, and `counts.py` names it as skipped. A file written before this
   field existed loads with it as `null`.
 
 
@@ -113,11 +113,29 @@ the pane settles it.
 
 ## Dispositions and counts
 
-The run file holds no review findings: a worker fixes every valid finding in its own PR (`implement/SKILL.md` § Review), so nothing is carried from a landed PR into the run. What a landed PR records is its dispositions sidecar, `dispositions-<n>.jsonl` in the review cache, one line per finding with the outcome `fixed` (a sha), `moved` (the open ticket it was added to) or `disputed` (a reason). `implement/verification-check.sh` checks it before the PR merges.
+The run file holds no review findings: a worker fixes every valid finding in
+its own PR (`implement/SKILL.md` § Review), so nothing is carried from a
+landed PR into the run. What a landed PR records is its dispositions sidecar,
+`dispositions-<n>.jsonl` in the review cache, one line per finding with the
+outcome `fixed` (a sha), `moved` (the open ticket it was added to) or
+`disputed` (a reason). `implement/fix-check.sh` checks it before the PR
+merges.
 
-`counts.py counts <run-id> --repo <checkout>` reads each landed clump's sidecar through `runfile.read_dispositions` and prints the closing report's two counts, fixed and moved. `read_dispositions` refuses by file and line a line that is not a JSON object, whose `outcome` is none of the three, or with no `id`, and a second line carrying an id an earlier line already has (#1124): reading any of them as "skip" would report a low count with a clean exit, indistinguishable from a PR that genuinely had nothing to fix. A landed clump with no sidecar is refused by clump number, never counted as zero: the worker writes the sidecar even when its reviewers found nothing.
+`counts.py <run-id> --repo <checkout>` reads each landed clump's sidecar
+through `runfile.read_dispositions` and prints the closing report's two
+counts, fixed and moved. `read_dispositions` refuses by file and line a line
+that is not a JSON object, whose `outcome` is none of the three, or with no
+`id`, and a second line carrying an id an earlier line already has (#1124):
+reading any of them as "skip" would report a low count with a clean exit,
+indistinguishable from a PR that genuinely had nothing to fix. A landed clump
+with no sidecar is refused by clump number, never counted as zero: the worker
+writes the sidecar even when its reviewers found nothing.
 
-A run file written while the run still carried leftovers loads: its `leftovers` list is ignored and left in the file.
+A burn that was running when #1401 landed has sidecars in the old vocabulary.
+`counts.py` reads them (`legacy=True`): `filed` counts as moved, and
+`leftover` and `handed-back` are printed as a count that nothing sweeps, since
+the sweep is gone; the run file's own `leftovers` list is ignored by this code
+and left in the file. The merge check never accepts those outcomes.
 
 ## Why `~/.cache/burndown/<run-id>.json`
 

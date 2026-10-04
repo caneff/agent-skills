@@ -121,7 +121,7 @@ quota. In this lane they swap for:
    sibling branch or a deliberate parking, which is why Codex reading it
    alone reports both as defects.
 
-A Codex-lane PR gets no second Codex pass.
+A Codex-lane PR gets no wave Codex pass.
 `implement/SKILL.md` § The Codex pass, part of the Claude lane's review wave
 only, says so; the lane's own `/codex:adversarial-review` is its
 adversarial pass, and running the wave's on top would spend the same Codex
@@ -129,7 +129,7 @@ quota on the same diff. The controller merges on the lane's reviews.
 
 The Codex lane writes no `findings-<axis>-<n>.jsonl` and no
 `dispositions-<n>.jsonl`, so its worker runs the pre-report gate with
-`PRE_REPORT_NO_VERIFICATION="codex lane: no Claude axes"` (#1188) and the
+`PRE_REPORT_NO_FIX_CHECK="codex lane: no Claude axes"` (#1188) and the
 controller's merge step 2 does not require the sidecar.
 
 The one-wave rule (every valid finding fixed in one round, no re-review) and

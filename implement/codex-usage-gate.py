@@ -35,7 +35,7 @@ while it exists every check is 20, answered before the size check or any
 cache read or live fetch, so a disabled gate costs no RPC. Removing the file
 re-enables Codex reviews.
 
-`--size --base <ref> --tickets <n>...` answers only the size question (#1401),
+`--size --base <ref>` answers only the size question (#1401),
 for the first ablation (`SKILL.md` § Review): 40 `under size threshold
 (<churn> < <threshold>)`, 0 `at or above size threshold (...)`, 30 when it
 could not measure. It reads no usage, ignores the kill switch and the forcing
@@ -237,8 +237,8 @@ def main() -> int:
     # has a rule for, and an unread reading is not headroom.
     args = sys.argv[1:]
     if args[:1] == ["--size"]:
-        if len(args) < 5 or args[1] != "--base" or args[3] != "--tickets" or not all(n.isdigit() for n in args[4:]):
-            print("usage: codex-usage-gate.py --size --base <ref> --tickets <n>...")
+        if len(args) != 3 or args[1] != "--base":
+            print("usage: codex-usage-gate.py --size --base <ref>")
             return UNKNOWN
         status, line = size_only(args[2])
         print(line)
@@ -247,7 +247,7 @@ def main() -> int:
     if args and not audit:
         if len(args) < 4 or args[0] != "--base" or args[2] != "--tickets" or not all(
                 n.isdigit() for n in args[3:]):
-            print("usage: codex-usage-gate.py [--percent | --audit | --base <ref> --tickets <n>... | --size --base <ref> --tickets <n>...]")
+            print("usage: codex-usage-gate.py [--percent | --audit | --base <ref> --tickets <n>... | --size --base <ref>]")
             return UNKNOWN
         base, tickets = args[1], args[3:]
     try:

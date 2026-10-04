@@ -20,8 +20,8 @@ implement-dispatch --spec <n> [--slots <k>] [--model sonnet|opus]
 
 `--slots` defaults to 5 and goes into the nested brief either way.
 A burn's controller always passes `--run <run-id>` on a plain dispatch, and
-it goes into the brief: that is how the worker knows a run file is under it,
-where § Control's job record goes. A spec run is a burn to its own slices, so it passes its own run
+it goes into the brief: that is how the worker knows a run file is under
+it, where § Control's job record goes. A spec run is a burn to its own slices, so it passes its own run
 id to them; a dispatch outside any run passes none. `--spec` refuses the flag,
 since the spec run keeps its own run file.
 
@@ -271,32 +271,34 @@ One review wave, one fix round, then the seam (ADR 0004,
 `docs/adr/0004-workers-fix-their-own-findings.md`). There is no re-review: the
 seam is the convergence check.
 
-1. **Run the wave.** The three axes of `/multi-axis-code-review` — standards,
-   spec and correctness, all three waited for (`multi-axis-code-review/SKILL.md` § Why separate axes
-   says why the built-in `/code-review` is not run here; `/code-review low`
-   only when the owner asks) — and the Codex pass
-   (§ The Codex pass, below) run in parallel on the same commit. Start the
-   Codex pass first, in the background, since it outlasts the axes; the axes
-   are subagents and return to you. Nothing is fixed until every reviewer you
-   started has finished. A Codex pass still running when the axes return is
-   waited on by ending the turn: its completion wakes you.
+1. **Run the wave.** The three axes of `/multi-axis-code-review` —
+   standards, spec and correctness, all three waited for
+   (`multi-axis-code-review/SKILL.md` § Why separate axes, which says why
+   the built-in `/code-review` is not run here; `/code-review low` only when
+   the owner asks) — and the Codex pass (§ The Codex pass, below) run in parallel
+   on the same commit. Start the Codex pass first, in the background, since
+   it outlasts the axes; the axes are subagents and return to you. Nothing is
+   fixed until every reviewer you started has finished. A Codex pass still
+   running when the axes return is waited on by ending the turn: its
+   completion wakes you.
 
    Pass the reviewers every ruled or other-ticket item as settled
    (`multi-axis-code-review/SKILL.md` § 4's Settled decisions).
 
-   **The first ablation** (#1401, ADR 0005): on a PR under the size threshold,
-   the standards axis does not run, and the other two do. The threshold is
-   `codex-usage-gate.py`'s own, asked without a usage read:
-   `python3 ~/.agents/skills/implement/codex-usage-gate.py --size --base origin/<default> --tickets <n>...`
-   exits 40 (`under size threshold`) when the PR is small, 0 when it is not,
-   30 when it could not measure; 30 runs the standards axis, since an
-   unmeasured PR is not a small one. A skipped axis is recorded, not just
-   omitted, so the escape count can attribute a later bug to it:
+   **The first ablation** (#1401, ADR 0005) is on while the heading in
+   `~/.agents/skills/docs/agents/ablations.md` reads `running`. Then, on a PR
+   under the size threshold, the standards axis does not run and the other two
+   do. The threshold is `codex-usage-gate.py`'s own, asked without a usage
+   read: `python3 ~/.agents/skills/implement/codex-usage-gate.py --size
+   --base origin/<default>` exits 40 (`under size threshold`) when the PR is
+   small, 0 when it is not, 30 when it could not measure; 30 runs the
+   standards axis, since an unmeasured PR is not a small one. A skipped axis
+   is recorded, not just omitted, so the escape count has something to
+   attribute a later bug to, and so the merge check can tell it from a
+   reviewer that never ran:
    `python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --ticket <n> --type standards --skip-reason ablation`.
-   The ablation runs for three burns from #1401's landing. Decision rule: keep
-   the standards axis on small PRs if the ledger's escape measure attributes
-   any escape to a skipped run, delete the small-PR run otherwise. The decision
-   is the controller's to bring to Chris when the third burn closes.
+   How long it runs, how it is measured and what decides its fate are that
+   file's, stated once.
 
 2. **Fix every valid finding.** Every finding every reviewer returned gets
    exactly one disposition, one of three outcomes:
@@ -342,12 +344,13 @@ seam is the convergence check.
    and its absence is not a clean review. One line per finding id; a changed
    disposition rewrites its line. Then run `bash tests/all.sh`
    (`AGENTS.md` § End-to-end seam): green is the exit, red is fixed and rerun.
-   `verification-check.sh <n>` (and the pre-report gate that runs it) checks the
+   `fix-check.sh <n>` (and the pre-report gate that runs it) checks the
    rest mechanically: every finding id in the three findings sidecars and the
    Codex output has exactly one disposition, every `fixed` sha is a commit on
-   this branch past `origin/<default>`, every `moved` ticket is open, and an
-   empty findings sidecar is accepted only beside its reviewer's completion
-   marker (`multi-axis-code-review/SKILL.md` § 4).
+   this branch past `origin/<default>`, every `moved` ticket is open and is not one this PR
+   closes, and every review that ran left its sidecar beside its completion marker
+   (`multi-axis-code-review/SKILL.md` § 4). A review the ledger records as
+   skipped needs no sidecar.
 
 No second pass. Commits after the wave are checked by the seam and by the
 mechanical check, not re-reviewed; the PR body's last reviewed sha says where
@@ -389,7 +392,8 @@ A pass launched is a background process of one core: declare it first, per
 
 Fetch the ticket yourself, body and comments both, rendered as in § The brief,
 since a requirement added in a comment is part of what Codex must judge the
-diff against. Write the rendered ticket to a file under this workspace's `.scratch/` with your file-write tool.
+diff against. Write the rendered ticket to a file under this workspace's
+`.scratch/` with your file-write tool.
 Never interpolate it into a shell string, quoted or not, since a body or
 comment containing `"`, `` ` ``, or `$(` would then run as shell instead of
 reading as text; a comment is the less trusted half of the two, since anyone
@@ -473,7 +477,7 @@ reviewed. Append its ledger row with `--refusal "<why>"` (below) and name the
 refusal in the PR body. There is no retry. A refused verdict's findings are
 never reported as current — either one collected looks exactly like a pass that
 found nothing, the absent-answer-read-as-benign shape this lane exists to
-close. `verification-check.sh` reads the same record and treats a refused one
+close. `fix-check.sh` reads the same record and treats a refused one
 the same way, said in its output; an `out_file` whose findings it cannot parse
 is a refusal of the check, never an empty pass.
 
@@ -546,13 +550,13 @@ under `Findings:` is a finding, and the k-th is `codex-gate-<k>`, the id
    the sha you report — a "done" report has described work that was dirty in
    the tree, not on the branch, or left content behind in `.scratch/` with
    no `PRE_REPORT_KEEP_SCRATCH` naming why. It also runs the merge check
-   (`verification-check.sh`, § Review step 3) on an `implement-<n>` branch and
+   (`fix-check.sh`, § Review step 3) on an `implement-<n>` branch and
    refuses, exit 1, naming each problem: a finding with no disposition, a
    `fixed` sha off the branch, a `moved` ticket that is closed, a missing
    `dispositions-<n>.jsonl` (#1188) or an empty findings sidecar with no
    completion marker, so a disposition is fixed now, not by the controller. The
    Codex lane runs no review wave and runs the gate with
-   `PRE_REPORT_NO_VERIFICATION="<why>"`, named in the PR-up report.
+   `PRE_REPORT_NO_FIX_CHECK="<why>"`, named in the PR-up report.
 6. **`gh pr view <pr> --repo <owner/name> --json isDraft,mergeStateStatus,closingIssuesReferences,headRefOid`**
    prints `false` and `CLEAN` before "PR up" goes out — a PR reported on a
    draft or a conflict fails the controller's merge. `headRefOid` is the sha
@@ -755,11 +759,14 @@ mechanical.
    ticket blocks the merge same as a draft or a conflict does — a PR that
    closes nothing does not merge. So does a heavy Claude-lane PR whose
    findings are not all disposed (#1401):
-   `bash ~/.agents/skills/implement/verification-check.sh <n>` (`<n>` the
-   clump's lowest ticket, run from the primary checkout) must exit 0, or the
-   merge waits and the worker is sent back to § Review step 3. It reads the
-   review cache by the checkout's own key, so no repo name is filled in, and
-   the branch `implement-<n>` its `fixed` shas must be on. A Codex-lane PR is
+   `bash ~/.agents/skills/implement/fix-check.sh <n> origin/implement-<n>`
+   (`<n>` the clump's lowest ticket, run from the primary checkout after
+   `git fetch origin`) must exit 0, or the merge waits and the worker is sent
+   back to § Review step 3. It reads the review cache by the checkout's own
+   key, so no repo name is filled in, and `origin/implement-<n>` is the head
+   the PR merges, which the `fixed` shas must be on: the local branch can hold
+   a commit that was never pushed. Exit 2 is the environment's (git, `gh`), not
+   a refusal the worker can fix. A Codex-lane PR is
    exempt: its worker's waiver is in the "PR up" report. Then read the report's
    `Cleanup blockers` field: every line but the worker's own `live-session` is
    ruled on now, while the worker is alive to commit or move it — kept
@@ -828,8 +835,10 @@ mechanical.
    fires. `merge-cleanup` clears a closed ticket's `in-progress` label and
    assignee itself (#821); this step's job is only to confirm the issue
    closed at all.
-6. Report "merged, sha X" to Chris, X being the squash commit on the default
-   branch (`gh pr view <pr> --repo <owner/name> --json mergeCommit`).
+6. Record "merged, sha X" for the closing report, X being the squash commit on
+   the default branch (`gh pr view <pr> --repo <owner/name> --json
+   mergeCommit`). Chris is sent nothing per merge (`burndown/SKILL.md` § What
+   the controller says to Chris): he reads `/landed` after.
 
 **The one exception: a `ready-for-human` ticket** ("Chris merges"). Nothing
 merges automatically. After step 3's re-run of the seam (skipped only as it

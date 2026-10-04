@@ -90,14 +90,10 @@ def _headers(rendered):
     return re.findall("^" + re.escape(HEADER) + ".*$", rendered, re.MULTILINE)
 
 
-def test_both_reads_render_the_same_document():
+def test_skill_carries_exactly_one_ticket_read():
+    # § The Codex pass renders from § The brief's read rather than carrying a second copy.
     programs = _programs()
     assert len(programs) == 1, f"want 1 body+comments fetch in SKILL.md, found {len(programs)}"
-    # The two snippets sit at different indents (one inside a numbered step),
-    # so compare with each line's leading indent stripped — that indent is the
-    # program's only multi-line structure.
-    shapes = {"\n".join(line.strip() for line in p.splitlines()) for p in programs}
-    assert len(shapes) == 1, "SKILL.md's two ticket reads carry different jq programs"
 
 
 def test_codex_lane_renders_the_same_document_as_skill():

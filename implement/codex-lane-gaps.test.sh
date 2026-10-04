@@ -59,8 +59,8 @@ check_in "$build" "commits Codex's diff as plumbing" '§ The build'
 check_in "$build" 'authors none of it' '§ The build'
 check_in "$build" 'The PR body says the commit was made by the worker and the diff was written by Codex' '§ The build'
 
-# Gap 3: the relationship to the controller's merge-time gate.
-check_in "$reviews" 'A Codex-lane PR gets no second Codex pass' '§ The reviews'
+# Gap 3: the relationship to the review wave's Codex pass.
+check_in "$reviews" 'A Codex-lane PR gets no wave Codex pass' '§ The reviews'
 check_in "$reviews" '`implement/SKILL.md` § The Codex pass' '§ The reviews'
 check_in "$reviews" 'the lane'"'"'s own `/codex:adversarial-review` is its adversarial pass' '§ The reviews'
 

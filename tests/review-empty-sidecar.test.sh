@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Wording test for #1257: implement/verification-check.sh passes a heavy PR
-# with no verification pass only when all three findings sidecars exist and
-# are empty, and refuses an absent one. That is only reachable if each axis
-# reviewer is told to write its sidecar on every run, empty when it found
-# nothing. The instruction lives in multi-axis-code-review/SKILL.md § 4; this
+# Wording test for #1257: implement/fix-check.sh passes a heavy PR whose
+# reviewers found nothing only when all three findings sidecars exist, empty,
+# each beside its completion marker, and refuses an absent one. That is only
+# reachable if each axis reviewer is told to write its sidecar on every run,
+# empty when it found nothing. The instruction lives in multi-axis-code-review/SKILL.md § 4; this
 # pins it there (and not merely anywhere in the file), so deleting it is red.
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"

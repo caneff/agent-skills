@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The merge check and the closing counts must agree on where a ticket's
 dispositions sidecar lives (#1258). `fix_check.py` (behind
-`verification-check.sh` and `pre-report-gate.sh`) and `counts.py` each derive
+`fix-check.sh` and `pre-report-gate.sh`) and `counts.py` each derive
 `~/.cache/agent-reviews/<repo>/dispositions-<n>.jsonl`; a rename in either
 would otherwise turn the merge check into "no sidecar" for a worker whose
 sidecar is where the skill says, or the closing counts into a refusal.
@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "burndown"))
 import counts  # noqa: E402
 import runfile  # noqa: E402
 
-CHECK = os.path.join(HERE, "verification-check.sh")
+CHECK = os.path.join(HERE, "fix-check.sh")
 IDENT = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
          "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
 
@@ -72,7 +72,7 @@ def main():
             fh.write(json.dumps({"id": "S1", "outcome": "disputed", "reason": "no"}) + "\n")
         code, out = run(["bash", CHECK, "5"], work, env)
         assert code == 1 and "S1 is no finding" in out, (
-            f"verification-check.sh did not read {sidecar}: {code} {out}")
+            f"fix-check.sh did not read {sidecar}: {code} {out}")
         print("ok  the merge check reads the sidecar runfile.dispositions_path names")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

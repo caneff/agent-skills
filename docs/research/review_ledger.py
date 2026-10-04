@@ -13,7 +13,8 @@ per-review-type value table.
     review_ledger.py append  --repo R --type codex-audit (--record PATH [--refusal WHY] | --skip-reason WHY)
                              [--ledger PATH]
     review_ledger.py append  --repo R --ticket N --type standards|spec|correctness --skip-reason WHY [--ledger PATH]
-    review_ledger.py escapes --repo-dir CHECKOUT [--ledger PATH] [--days 14] [--fix-pattern RE] [--format md|json]
+    review_ledger.py escapes --repo-dir CHECKOUT [--ledger PATH] [--days 14] [--fix-pattern RE] [--no-fetch]
+                             [--format md|json]
     review_ledger.py report  [--ledger PATH] [--weights FILE] [--prices FILE] [--split 1/k|none]
                              [--format md|json]
 
@@ -1291,9 +1292,10 @@ def cmd_append(args) -> int:
     """Write the rows of one review that just ran: what `harvest` would write for that
     ticket's sidecars and transcripts, selected by type and round. A review's own cost or
     findings sidecar being absent is a refusal, never a row with zero cost. An axis review
-    ends before its dispositions exist, so its findings' outcomes are `unknown` until the
-    verification pass appends: that append, run after it writes the dispositions, also
-    refills the findings of every axis row of its round already in the ledger."""
+    ends before its dispositions exist, so its findings' outcomes are `unknown` until
+    `harvest` joins them from the dispositions sidecar. (Before #1401 a verification pass's
+    own `append --type verification` refilled them; the type is still accepted, for that
+    history.)"""
     if args.type in RETIRED_CODEX_TYPES:
         print(f"review_ledger append: {args.type} is retired ({RETIRED_CODEX_TYPES[args.type]}); "
               f"no such pass should have run, so append no row for it", file=sys.stderr)
@@ -1488,6 +1490,9 @@ def _cost_cells(t: dict) -> list[str]:
 ESCAPE_DAYS = 14
 FIX_PATTERN = r"(?i)\b(fix|fixes|fixed|bug|regression)\b"
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
+# A skip reason names a component only when it is one of these; a free-text reason (a Codex gate's
+# printed line) is one component, `other`, so the table is not split by wording.
+_SKIP_REASONS = ("ablation", "size", "ceiling")
 _BLAME_RE = re.compile(r"^([0-9a-f]{40}) \d+ \d+")
 
 
@@ -1503,20 +1508,30 @@ def _git(repo_dir: Path, *args: str) -> str:
 
 
 def _old_ranges(repo_dir: Path, fix: str) -> dict[str, list[tuple[int, int]]]:
-    """The lines a commit changes or removes, as (first, last) in its parent, per file. A pure
-    addition has no parent line to attribute, so it names none."""
+    """The lines a commit changes, removes or inserts beside, as (first, last) in its parent, per
+    file. File names come from `--name-only -z`, never from a patch header, so a space, a quoted
+    non-ASCII name or `diff.noprefix` cannot misread one; only `@@` hunk headers are parsed from the
+    patch, and no content line starts with `@@`. An insertion names the two parent lines around it."""
+    names = _git(repo_dir, "diff", "--name-only", "-z", "--no-renames", f"{fix}^", fix)
     out: dict[str, list[tuple[int, int]]] = {}
-    path = None
-    for line in _git(repo_dir, "diff", "-U0", "--no-renames", f"{fix}^", fix).splitlines():
-        if line.startswith("--- "):
-            path = None if line == "--- /dev/null" else line[6:]
-        elif line.startswith("+++ ") and path is None:
-            continue
-        elif (m := _HUNK_RE.match(line)) and path:
+    for path in filter(None, names.split("\0")):
+        parent_lines = len(_git(repo_dir, "show", f"{fix}^:{path}").splitlines()) if _exists(
+            repo_dir, f"{fix}^", path) else 0
+        patch = _git(repo_dir, "diff", "-U0", "--no-renames", f"{fix}^", fix, "--", path)
+        for line in patch.splitlines():
+            m = _HUNK_RE.match(line)
+            if not m or not parent_lines:
+                continue
             first, count = int(m.group(1)), int(m.group(2) if m.group(2) is not None else 1)
-            if count:
-                out.setdefault(path, []).append((first, first + count - 1))
+            span = (first, first + count - 1) if count else (max(min(first, parent_lines), 1),
+                                                             min(first + 1, parent_lines))
+            out.setdefault(path, []).append(span)
     return out
+
+
+def _exists(repo_dir: Path, rev: str, path: str) -> bool:
+    return subprocess.run(["git", "-C", str(repo_dir), "cat-file", "-e", f"{rev}:{path}"],
+                          capture_output=True).returncode == 0
 
 
 def _origins(repo_dir: Path, fix: str, path: str, first: int, last: int) -> set[str]:
@@ -1524,10 +1539,15 @@ def _origins(repo_dir: Path, fix: str, path: str, first: int, last: int) -> set[
     return {m.group(1) for line in blame.splitlines() if (m := _BLAME_RE.match(line))}
 
 
-def find_escapes(repo_dir: Path, rows: list[dict], days: int, fix_pattern: str) -> dict:
+def find_escapes(repo_dir: Path, rows: list[dict], days: int, fix_pattern: str, fetch: bool = True) -> dict:
     """Escapes of the reviewed PRs the ledger's rows name, read from `repo_dir`'s default branch.
-    A reviewed ticket with no landing commit (`Closes #<n>` in a commit body) is listed in
-    `not_landed`, never counted as clean."""
+    A landing is the oldest commit whose body says `Closes #<n>` (or Fixes, Resolves) or whose
+    subject carries `(#<n>)`; a reviewed ticket with none is listed in `not_landed`, never counted
+    as clean. `origin` is fetched first, so the default branch is not a stale copy. A fix that
+    only inserts lines is attributed to the two lines it inserts between. A git failure
+    anywhere is an error, never a smaller count."""
+    if fetch:
+        _git(repo_dir, "fetch", "-q", "origin")
     common = _git(repo_dir, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
     repo = fold_repo(os.path.basename(os.path.dirname(common)))
     try:
@@ -1543,11 +1563,13 @@ def find_escapes(repo_dir: Path, rows: list[dict], days: int, fix_pattern: str) 
         for ticket in r.get("tickets") or [r["ticket"]]:
             reviewed.add(ticket)
             if r["status"]["fields"]["findings"]["status"] == "skipped":
-                skipped.setdefault(ticket, set()).add(f"{r['type']}:{r.get('skip_reason')}")
+                reason = r.get("skip_reason")
+                skipped.setdefault(ticket, set()).add(f"{r['type']}:{reason if reason in _SKIP_REASONS else 'other'}")
     pattern = re.compile(fix_pattern)
     landings, not_landed = {}, []
     for ticket in sorted(reviewed):
-        found = _git(repo_dir, "log", default, "--extended-regexp", f"--grep=Closes #{ticket}([^0-9]|$)",
+        found = _git(repo_dir, "log", default, "--extended-regexp", "--regexp-ignore-case",
+                     f"--grep=(closes|fixes|resolves) #{ticket}([^0-9]|$)", f"--grep=\\(#{ticket}\\)",
                      "--format=%H%x09%ct").splitlines()
         if not found:
             not_landed.append(ticket)
@@ -1559,12 +1581,9 @@ def find_escapes(repo_dir: Path, rows: list[dict], days: int, fix_pattern: str) 
         for line in _git(repo_dir, "log", f"{landing}..{default}", "--no-merges", "--reverse",
                          "--format=%H%x09%ct%x09%s").splitlines():
             fix, ts, subject = line.split("\t", 2)
-            if int(ts) - landed_at > days * 86400 or not pattern.search(subject):
+            if int(ts) - landed_at > days * 86400 or not pattern.search(subject) or subject.startswith("Sweep:"):
                 continue
-            try:
-                ranges = _old_ranges(repo_dir, fix)
-            except EscapeError:  # a root commit has no parent to read
-                continue
+            ranges = _old_ranges(repo_dir, fix)
             files = sorted(f for f, spans in ranges.items()
                            if any(landing in _origins(repo_dir, fix, f, a, b) for a, b in spans))
             if files:
@@ -1584,7 +1603,7 @@ def find_escapes(repo_dir: Path, rows: list[dict], days: int, fix_pattern: str) 
 def cmd_escapes(args) -> int:
     try:
         rows = read_ledger(args.ledger)
-        result = find_escapes(args.repo_dir, rows, args.days, args.fix_pattern)
+        result = find_escapes(args.repo_dir, rows, args.days, args.fix_pattern, not args.no_fetch)
     except (FileNotFoundError, ValueError, EscapeError, re.error) as e:
         print(f"review_ledger escapes: {e}", file=sys.stderr)
         return 2
@@ -1669,6 +1688,7 @@ def main(argv=None) -> int:
     e.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     e.add_argument("--days", type=int, default=ESCAPE_DAYS)
     e.add_argument("--fix-pattern", default=FIX_PATTERN, help="regex a fix commit's subject must match")
+    e.add_argument("--no-fetch", action="store_true", help="read origin as it stands, without `git fetch origin`")
     e.add_argument("--format", choices=("md", "json"), default="md")
     e.set_defaults(func=cmd_escapes)
     r = sub.add_parser("report")

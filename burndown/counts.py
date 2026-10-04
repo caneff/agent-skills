@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """The closing report's counts:
 
-    python3 burndown/counts.py counts <run-id> --repo <checkout> | --reviews-dir <dir>
+    python3 burndown/counts.py <run-id> --repo <checkout> | --reviews-dir <dir>
 
 prints the closing report's two counts, fixed and moved, read from each
 landed clump's dispositions sidecar (`implement/SKILL.md` § Review's
 `dispositions-<lowest ticket>.jsonl`, the one the worker writes and
-`implement/verification-check.sh` checks), and names every clump closed with
+`implement/fix-check.sh` checks), and names every clump closed with
 no landing as skipped. Nothing here writes one.
 """
 import os
@@ -38,6 +38,12 @@ def counts(run, reviews_dir):
     `moved` line (a finding added to the open ticket for its component).
     `disputed` lands in neither: a disputed finding shipped nothing.
 
+    A sidecar written before #1401 is still read, so a burn that was running
+    when the review changed can close: its `filed` lines count as moved, and
+    its `leftover` and `handed-back` lines are returned as `carried`, which
+    `render_counts` prints. Nothing sweeps them any more; the run file's own
+    `leftovers` list still holds the leftover ones.
+
     A clump closed with no landing (`runfile.py close`, #1310) has no PR and
     so no sidecar: it is listed under `closed` as `(lowest, reason)`, by
     name, so the report says which clumps it did not read.
@@ -46,7 +52,7 @@ def counts(run, reviews_dir):
     counted as zero: the merge check refuses a PR with no sidecar, empty when
     its reviewers found nothing, so a missing one means this run's own
     bookkeeping is missing (defect class 1)."""
-    fixed = moved = 0
+    fixed = moved = carried = 0
     missing, closed = [], []
     for entry in run["clumps"]:
         if entry.get("closed"):
@@ -58,23 +64,28 @@ def counts(run, reviews_dir):
         if not os.path.exists(path):
             missing.append(lowest)
             continue
-        for _, obj in runfile.read_dispositions(path):
+        for _, obj in runfile.read_dispositions(path, legacy=True):
             outcome = obj["outcome"]
             if outcome == "fixed":
                 fixed += 1
-            elif outcome == "moved":
+            elif outcome in ("moved", "filed"):
                 moved += 1
+            elif outcome in ("leftover", "handed-back"):
+                carried += 1
     if missing:
         raise runfile.RunFileError(
             "landed clump(s) " +
             ", ".join(f"#{n}" for n in missing) +
             " have no dispositions sidecar under " + reviews_dir +
             " — counts refused rather than read as zero")
-    return {"fixed": fixed, "moved": moved, "closed": closed}
+    return {"fixed": fixed, "moved": moved, "carried": carried, "closed": closed}
 
 
 def render_counts(c):
     line = f"fixed: {c['fixed']}  moved: {c['moved']}"
+    if c["carried"]:
+        line += (f"\npre-#1401 leftover or handed-back, swept by nothing: {c['carried']} "
+                 "(the run file's leftovers list still holds the leftover ones)")
     if c["closed"]:
         line += "\nskipped, closed without a landing: " + ", ".join(
             f"#{n} ({reason})" for n, reason in c["closed"])
@@ -86,17 +97,13 @@ def main(argv):
 
     parser = argparse.ArgumentParser(
         prog="counts.py", description="A run's closing-report counts")
-    subs = parser.add_subparsers(dest="command", required=True)
-
-    c = subs.add_parser(
-        "counts", help="print the run's fixed and moved counts")
-    c.add_argument("run_id")
-    where = c.add_mutually_exclusive_group()
+    parser.add_argument("run_id")
+    where = parser.add_mutually_exclusive_group()
     where.add_argument("--repo",
-                   help="the target repo's primary checkout; its name keys "
-                        "~/.cache/agent-reviews/<repo>")
+                       help="the target repo's primary checkout; its name keys "
+                            "~/.cache/agent-reviews/<repo>")
     where.add_argument("--reviews-dir",
-                   help="the sidecar directory itself, instead of --repo")
+                       help="the sidecar directory itself, instead of --repo")
 
     args = parser.parse_args(argv[1:])
 
@@ -133,7 +140,7 @@ def main(argv):
                   file=sys.stderr)
             return 1
     else:
-        print("counts.py: counts needs --repo <primary checkout> (or "
+        print("counts.py: needs --repo <primary checkout> (or "
               "--reviews-dir): the cwd's repo is not the run's target",
               file=sys.stderr)
         return 1

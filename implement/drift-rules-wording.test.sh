@@ -67,3 +67,4 @@ done
 check_in "§ Review" "$review" 'a valid finding is fixed in the PR the review covers'
 check_in "§ Before the PR" "$before" 'Commit first'
 [ "$fail" -eq 0 ] && echo "PASS $0"
+exit "$fail"

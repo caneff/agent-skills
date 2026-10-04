@@ -39,13 +39,18 @@ check_in "$review" 'the disposition names that ticket' '§ Review'
 check_in "$review" 'Write the file even when every reviewer found nothing' '§ Review'
 check_in "$review" 'You write' '§ Review'
 
-# The first ablation: its gate, its record, its rule.
-check_in "$review" '**The first ablation** (#1401, ADR 0005)' '§ Review'
-check_in "$review" 'codex-usage-gate.py --size --base origin/<default> --tickets <n>...' '§ Review'
+# The first ablation: its switch, its gate and its record here; its length, measure and
+# decision rule once, in docs/agents/ablations.md.
+check_in "$review" '**The first ablation** (#1401, ADR 0005) is on while the heading in' '§ Review'
+check_in "$review" 'docs/agents/ablations.md' '§ Review'
+check_in "$review" 'codex-usage-gate.py --size --base origin/<default>' '§ Review'
 check_in "$review" 'an unmeasured PR is not a small one' '§ Review'
 check_in "$review" '--type standards --skip-reason ablation' '§ Review'
-check_in "$review" 'keep the standards axis on small PRs if the ledger'"'"'s escape measure attributes any escape to a skipped run' '§ Review'
-check_in "$review" 'The ablation runs for three burns' '§ Review'
+check_absent "$review" 'Decision rule' '§ Review (the rule lives in ablations.md)'
+ablations="$(flatten <"$here/../docs/agents/ablations.md")"
+check_in "$ablations" '## Standards axis on small PRs — running' 'docs/agents/ablations.md'
+check_in "$ablations" 'It runs for three closed burns' 'docs/agents/ablations.md'
+check_in "$ablations" 'keep the standards axis on small PRs if the table attributes any escape to `standards:ablation`' 'docs/agents/ablations.md'
 
 # Gone from the whole skill.
 for gone in '`leftover` outcome' 'adjacent-fix rule' 'verification pass' 'per-PR sweep' 'sweep ticket' 'handed-back' '`filed`' 'blocking kinds' 'severity mapping'; do

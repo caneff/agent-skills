@@ -83,8 +83,9 @@ OUTCOME_DETAIL_FIELD = {
 # through as a `command`/`sha`/`reason` still tallied under Codex's gate
 # finding on #973's own PR — `str(detail)` on a list or dict "worked" and
 # hid the malformed line as if it had parsed cleanly.
-_OUTCOME_DETAIL_TYPE = {"fixed": str, "disputed": str, "moved": int, "filed": int, "handed-back": str,
-                        "leftover": str}
+_OUTCOME_DETAIL_TYPE = {
+    "fixed": str, "disputed": str, "moved": int, "filed": int, "handed-back": str, "leftover": str,
+}
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,8 @@ class Finding:
 @dataclass(frozen=True)
 class Disposition:
     id: str
-    outcome: str  # "fixed" | "disputed" | "moved", or a pre-#1401 "filed" | "handed-back" | "leftover"
+    # "fixed" | "disputed" | "moved", or a pre-#1401 "filed" | "handed-back" | "leftover"
+    outcome: str
     detail: str  # the outcome's field per OUTCOME_DETAIL_FIELD, always as str
 
 
@@ -229,9 +231,9 @@ def find_sidecar_files(root: Path = REVIEWS_ROOT) -> list[tuple[str, str]]:
 def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
     """Roll every findings-<axis>-<n>.jsonl and dispositions-<n>.jsonl
     sidecar under `root` into a per-repo, per-axis table of raised vs
-    fixed/disputed/moved (and the pre-#1401 filed/handed-back/leftover)/undisposed (#855). Findings are keyed by (repo,
-    issue, id), so a disposition only ever resolves the finding it names —
-    never a same-id finding filed under a different issue or repo.
+    fixed/disputed/moved (and the pre-#1401 filed/handed-back/leftover)/undisposed
+    (#855). Findings are keyed by (repo, issue, id), so a disposition only
+    ever resolves the finding it names — never a same-id finding filed under a different issue or repo.
 
     Two conflicts are surfaced rather than silently absorbed (round-1
     correctness C2/C3, standards S2): a duplicate id within one (repo,

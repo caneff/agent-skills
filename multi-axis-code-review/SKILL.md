@@ -151,7 +151,12 @@ findings (§ 4 below), `axis` still `"standards"` and `severity` always
 
 ### 4. Spawn the three sub-agents in parallel
 
-A caller that has switched an axis off — `implement/SKILL.md` § Review's first ablation skips the standards axis on a small PR — names it, and you spawn the other two; the skipped axis is not reported as `NO REPORT RECEIVED` and has no sidecar.
+A caller that has switched an axis off — `implement/SKILL.md` § Review's
+first ablation skips the standards axis on a small PR — names it, and you
+spawn the other two. The skipped axis is not reported as `NO REPORT RECEIVED`
+and has no sidecar; the caller records the skip in the ledger
+(`review_ledger.py append --type <axis> --skip-reason <why>`), which is how
+`implement/fix-check.sh` tells it from a reviewer that never ran.
 
 Spawn all three with the plain `Agent` tool, `subagent_type: diff-reviewer`, fire-and-return: no `name`, not background, no teammate messaging. This is what makes the result reach *you* as the agent's completion notification — even when you yourself are a subagent of some other caller. A named background teammate parks its report for `SendMessage`/`ListAgents` instead, and when you're a subagent nothing is polling for that: the report idles or lands nowhere.
 
@@ -169,8 +174,9 @@ Belt and braces: append to **every** prompt — "Also write your full report to 
 
 A finding whose failure cannot occur here is disputed under
 `implement/SKILL.md` § Review's reachability bar, whatever its rating. Every
-valid finding is fixed in the PR the review covers (`implement/SKILL.md` § Review): a reviewer rates in its own axis's words, and no rating decides
-whether a finding is fixed.
+valid finding is fixed in the PR the review covers, as
+`implement/SKILL.md` § Review, so a reviewer rates in its own axis's words
+and no rating decides whether a finding is fixed.
 
 **Alongside the prose, each reviewer also writes a sidecar** so counting a
 finding stops needing an LLM pass over prose (#855, #854): "Also write
@@ -180,8 +186,8 @@ or "judgement", "file": "<path>", "title": "<short title>"}`. Assign each
 finding a stable id — the axis's first letter (`S` standards, `P` spec, `C`
 correctness) plus a per-report ordinal, e.g. `S1`, `P2`, `C3`; an
 over-engineering cut instead takes its own `OE1`, `OE2`, … series, still
-under `axis: "standards"`. There is one wave per PR, so every id is bare. Cite the
-same id in the prose report next to each finding, so a reader can join the
+under `axis: "standards"`. There is one wave per PR, so every id is bare.
+Cite the same id in the prose report next to each finding, so a reader can join the
 two. A partial write costs one line, not the file — readers of this
 sidecar must tolerate and skip a malformed line rather than fail the whole
 file on it. No cost tracking: never add tokens or wall-clock to this line,
@@ -190,15 +196,14 @@ when it found nothing, and then create the empty file
 `<dir>/findings-<axis>-<n>.done`, the completion marker."
 
 **Why the sidecar is written on a clean run too, and the completion marker**
-(#1257, #1401): `implement/verification-check.sh` passes a PR only when all three
-sidecars exist, and accepts one with no finding line only beside its
-`findings-<axis>-<n>.done` marker, so a clean round that left no file is
-refused at "PR up". An empty sidecar alone is also what a reviewer that crashed
-before writing leaves behind, and nothing on disk tells the two apart; the
-marker is written by the reviewer once the sidecar is complete, so an
-empty sidecar without it is read as an axis that never finished. The safe
-direction stays: an absent sidecar is refused, because it cannot be told from a
-reviewer that never ran.
+(#1257, #1401): `implement/fix-check.sh` passes a PR only when every review
+that ran left its sidecar beside its `findings-<axis>-<n>.done` marker, so a
+clean round that left no file is refused at "PR up". A sidecar alone cannot
+show the reviewer finished: an empty one is what a reviewer that crashed
+before writing leaves behind, and a truncated one reads as a shorter list.
+The marker is written by the reviewer once the sidecar is complete. The safe
+direction stays: an absent sidecar is refused, because it cannot be told from
+a reviewer that never ran, unless the ledger records that review as skipped.
 
 **Every review ends with `append`** (#1268; this is the one home for the rule,
 and the `diff-reviewer` definition points here). Once its sidecar is
@@ -210,10 +215,12 @@ python3 ~/.agents/skills/docs/research/review_ledger.py append --repo <repo> --t
 
 `<repo>` is the review cache's directory name (the `<repo>` of `<dir>`), `<n>`
 the ticket, `<axis>` `standards`, `spec` or `correctness` (a `standards` append
-also writes the `OE` findings' row). It writes the ledger row for that run, cost read
-from the reviewer's subagent transcript up to that call. Its findings'
-outcomes are `unknown` then, since no dispositions exist yet; `review_ledger.py harvest`
-joins them from the dispositions sidecar later. It exits non-zero,
+also writes the `OE` findings' row). It writes the ledger row for that run,
+cost read from the reviewer's subagent transcript up to that call. Its
+findings' outcomes are `unknown` then, since no dispositions exist yet;
+`review_ledger.py harvest` joins them from the dispositions sidecar, and the
+controller runs it in the closing report (`burndown/SKILL.md` § The closing
+report). It exits non-zero,
 naming what is missing, when that transcript has no usage or the findings
 sidecar is absent, and then writes nothing. A refusal is reported, never
 skipped: the reviewer puts the command's stderr on the first line of its

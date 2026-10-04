@@ -2,8 +2,8 @@
 # Guards #1086, as #1401 left it: a reachability bar, applied before a finding
 # is fixed or moved — a finding whose failure cannot occur here is
 # `disputed: unreachable — <why>`. The bar is stated once in
-# implement/SKILL.md § Review; multi-axis-code-review points at it. Prose assertion — no harness runs
-# the skill's own prose.
+# implement/SKILL.md § Review; multi-axis-code-review points at it. Prose
+# assertion — no harness runs the skill's own prose.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"

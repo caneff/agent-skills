@@ -38,7 +38,7 @@ branch (`references/loop.md` says why).
    budget (5 when `--slots` is omitted), the controller's own herdr
    agent name, and `--repo <primary checkout>`, required: the run's target,
    which every printed `implement-dispatch` command carries and
-   `counts.py counts --repo` is checked against (§ Run state). Resuming an existing run instead:
+   `counts.py --repo` is checked against (§ Run state). Resuming an existing run instead:
    `runfile.py resume`, and then **one message per live, unlanded worker**
    — its `announce` bucket and only that one, via `loop.announce`. A
    landed or closed clump's worker gets none however its agent looks; a vanished one
@@ -160,7 +160,7 @@ branch (`references/loop.md` says why).
    `runfile.py land`, each clump that finishes with no landing of its own
    (its ticket found already fixed on `main`, or handed to a nested spec
    run, once that run has finished and not at the hand-off) with `runfile.py close <run-id> --clump <n> --reason <text>` rather
-   than a `land` at `main`'s tip, which `counts.py counts` refuses for the
+   than a `land` at `main`'s tip, which `counts.py` refuses for the
    sidecar no PR wrote, and each "PR up" with `runfile.py pr-up <run-id>
    --clump <n> --pr <n>` as it arrives, for § Liveness, so a restart can pick
    the run back up with nothing transcribed by hand. The controller clears the
@@ -181,44 +181,53 @@ branch (`references/loop.md` says why).
 A burn ends with one report to Chris, and no sweep ticket: every valid review
 finding was fixed in the PR that raised it, or moved onto the open ticket for
 its component (`implement/SKILL.md` § Review), so no run carries findings
-forward. The report carries two counts, **fixed** and **moved**,
+forward. Before writing it, run `python3
+~/.agents/skills/docs/research/review_ledger.py harvest`, which joins each
+finding's outcome from the dispositions sidecars into the ledger. The report
+carries two counts, **fixed** and **moved**,
 
 ```
-python3 burndown/counts.py counts <run-id> --repo <primary checkout>
+python3 burndown/counts.py <run-id> --repo <primary checkout>
 ```
 
-read from each landed clump's dispositions sidecar, which the
-worker writes (`implement/SKILL.md` § Review), naming each closed clump as
-skipped, under the `--repo` checkout's cache directory — never the cwd's, which is not always the target, and refused
-unless `--repo` is the run's recorded target. A landed clump with no
-dispositions sidecar is refused by number, never counted as zero: the worker
-writes the sidecar even when its reviewers found nothing.
+read from each landed clump's dispositions sidecar, which the worker writes
+(`implement/SKILL.md` § Review), naming each closed clump as skipped. The
+sidecars are found under the `--repo` checkout's cache directory, never the
+cwd's, which is not always the target; `--repo` is refused unless it is the
+run's recorded target. A landed clump with no dispositions sidecar is refused
+by number, never counted as zero: the worker writes the sidecar even when its
+reviewers found nothing.
 
-While an ablation runs (`implement/SKILL.md` § Review's first ablation), the
-report also carries the escape table, read from the review ledger:
+While an ablation runs (`docs/agents/ablations.md`, a section whose heading
+ends `running`), the report also carries its escape table, read from the
+ledger, and the controller appends the burn's line to that file's log:
 
 ```
 python3 ~/.agents/skills/docs/research/review_ledger.py escapes --repo-dir <primary checkout>
 ```
 
-one line per skipped component with the PRs it was skipped on and the escapes
-attributed to them. Its decision rule is the ablation's: keep the component if
-any escape is attributed, delete it otherwise, after three burns.
+The table has one line per skipped component, with the number of PRs it was
+skipped on and the escapes attributed to them. What decides the ablation, and
+when, is that file's.
 
-The report also carries the **friction-log count**: how many lines the run
-appended to the log, which the next section describes. A run that stopped on
-two parks sends the same report: Parking and escalation, below, says when.
+The report also carries the **friction-log count**: the commits the run made
+to the log (§ The friction log), counted with
+`git -C ~/.agents/skills log --oneline --since=<run start> --grep='^friction:'`.
+A run that stopped on two parks (§ Parking and escalation) sends the same
+report.
 
 ## The friction log
 
 A friction point the controller hits — a harness refusal, a rule that cost a
-turn, a tool that misreported — is one line appended to
-`docs/agents/friction-log.md` in the run's target repo (date, repo, what
-happened, what it cost; ADR 0005), never a ticket of its own. The weekly retro
+turn, a tool that misreported — is one line appended to the one log,
+`docs/agents/friction-log.md` in this skills repo (`~/.agents/skills`),
+whichever repo the run targets, and never a ticket of its own. Each line is
+committed on its own with the subject `friction: <what happened>`; the line
+itself is date, repo, what happened, what it cost (ADR 0005). The weekly retro
 reads the log; a point becomes a ticket only on its second occurrence, and
 then through the search-before-filing rule in `~/.claude/CLAUDE.md`. The line
-is a docs-only change and ships on the default branch the way any
-non-code edit does.
+is a docs-only change and ships on the default branch the way any non-code
+edit does.
 
 ## What the controller says to Chris
 
@@ -302,7 +311,7 @@ not a per-repo log. It holds the run id, the slot budget (default 5, set by
 `runfile.py start --slots <k>`), the controller's herdr agent name, the target repo
 (`runfile.py start --repo <checkout>`, recorded as the absolute path of its
 primary checkout, so a linked worktree names the same target; a
-run file from before the field makes `loop.py dispatch` and `counts.py counts
+run file from before the field makes `loop.py dispatch` and `counts.py
 --repo` refuse, since a missing target must not read as no check), and
 per clump its ticket list, workspace, worker's herdr agent name, the
 parallel job its worker has out (§ Liveness) and squash sha once it
@@ -415,6 +424,9 @@ the ticket saying which of the three it is and what it is waiting on, plus a
 label swap to `ready-for-human`. What each cause cost on #781, and why a
 fourth one is not added quietly:
 [`references/parking.md`](references/parking.md).
+
+A park, and any friction the controller hit on the way to it, is also a line
+in the friction log (§ The friction log), not a ticket.
 
 A parked clump **keeps its workspace**, and its include closure stays **out of
 the frontier** while it is parked: releasing either invites a second worker

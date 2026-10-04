@@ -368,8 +368,6 @@ def test_re_registering_a_landed_clump_keeps_its_sha():
     assert runfile.load("burn-1", root=root)["clumps"][0]["landed"] == "abc1234"
 
 
-# --- Leftovers: copied at landing from a PR's dispositions sidecar --------
-
 # --- Resume: reconcile against the live agents, re-announce the controller -
 
 def three_clumps(root):
@@ -1241,29 +1239,6 @@ def test_pr_up_takes_a_pr_or_clear_but_not_both_and_not_neither():
     neither = cli(root, "pr-up", "r-pr8", "--clump", "1095")
     assert neither.returncode != 0 and "required" in neither.stderr, neither
     assert runfile.load("r-pr8", root)["clumps"][0]["pr_up"] is None
-
-
-# --- A sidecar the PR body disagrees with is stale (#1085, #1147) ---------
-
-def landed_root():
-    root = cache()
-    runfile.start("burn-1", slots=2, root=root, repo=REPO)
-    runfile.clump("burn-1", [901], "/w/a", "agent-a", root=root)
-    runfile.land("burn-1", 901, "abc1234", root=root)
-    return root
-
-
-SWEEP_TICKET = """Some preamble.
-
-## implement/SKILL.md
-
-- **P9** (hard) title nine — clump #10, #10, PR #11: text nine
-- **P14** (low) title fourteen — clump #10, #10, PR #11: text fourteen
-
-## burndown/runfile.py
-
-- **P9** (low) same id, other file — clump #12, #12, PR #13: text
-"""
 
 
 def test_run_file_md_usage_block_mirrors_the_runfile_docstring():
