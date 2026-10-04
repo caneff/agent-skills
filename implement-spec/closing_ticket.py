@@ -133,7 +133,7 @@ def seam_of(root, seam=None, blind_to=None):
             f"{root}: the seam is named but `**Blind to**` is not. The seam "
             "that existed on #781 had diverged from the live editor inside "
             "that same spec; a seam with no stated blind spot sends the "
-            "closing worker at it anyway")
+            "worker at it anyway")
     return seam, blind_to
 
 
@@ -219,8 +219,9 @@ def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):
 
     `shas` are the squash commits of the slices that landed before the last
     one, read off the run file; the last slice's own diff gets its own review
-    round.  They are a
-    **list**, never a range: `<first>..origin/main` on a shared `main` held
+    round. A spec with one slice has no earlier landings: the list is empty,
+    and the section drops the spec-level review it has nothing to read. They are
+    a **list**, never a range: `<first>..origin/main` on a shared `main` held
     this spec's three commits and ~17 unrelated ones from other sessions, and
     `/multi-axis-code-review` takes one fixed point.
     """
@@ -234,16 +235,14 @@ def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):
             "or an empty list to say there are none")
     seam, blind_to = seam_of(root, seam, blind_to)
     shas = [s.strip() for s in shas if s and s.strip()]
-    if not shas:
-        raise SeamError("the closing check has no merge shas to review: the "
-                        "run file's landings are what the spec-level review "
-                        "reads")
     surfaces = [s.strip() for s in surfaces if s and s.strip()]
 
     lines = ["## Closing check", "",
              f"This is the last slice of spec #{spec}: its PR also carries one "
-             "end-to-end test at this repo's seam and the spec-level review. "
-             "The spec closes when this slice merges.",
+             "end-to-end test at this repo's seam"
+             + (" and the spec-level review. " if shas else ". ")
+             + f"Add a bare `Closes #{spec}` line to the PR body and to the "
+             "last commit: the spec closes when this slice merges.",
              "",
              "### The seam",
              "",
@@ -255,19 +254,21 @@ def body(root, spec, shas, surfaces=None, seam=None, blind_to=None):
                   "reach:", ""]
         lines += [f"- {s}" for s in surfaces]
         lines.append("")
-    lines += ["### The spec-level review", "",
-              "The merge commits of this spec's earlier slices, from the run "
-              "file, in landing order:", ""]
-    lines += [f"- `{sha}`" for sha in shas]
-    lines += ["", _review_procedure(spec, shas)]
+    if shas:
+        lines += ["### The spec-level review", "",
+                  "The merge commits of this spec's earlier slices, from the "
+                  "run file, in landing order:", ""]
+        lines += [f"- `{sha}`" for sha in shas]
+        lines += ["", _review_procedure(spec, shas)]
     lines += ["", "### Acceptance criteria", "",
               "- [ ] One end-to-end test drives the whole spec's acceptance "
               f"criteria at the seam above, and lives where `{seam}` runs it",
               "- [ ] What the seam is blind to is stated in the test's own "
               "comment, so the next reader knows what a green run does not "
-              "cover",
-              "- [ ] `/multi-axis-code-review` run over the merge shas listed "
-              "above, every finding disposed of"]
+              "cover"]
+    if shas:
+        lines.append("- [ ] `/multi-axis-code-review` run over the merge shas "
+                     "listed above, every finding disposed of")
     for surface in surfaces:
         lines.append(f"- [ ] One open of the real thing: {surface} — checked "
                      "in the shipping surface, not in the seam")

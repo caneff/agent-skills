@@ -36,7 +36,7 @@ Start from one ticket that carries the whole plan. Slice it only when pieces tou
 - A slice that is not disjoint from another is not a slice: merge them, or order them with a blocking edge when one must land first
 - A completed slice is demoable or verifiable on its own
 - Any prefactoring is done first, inside the first ticket that needs it
-- A spec's end-to-end test and spec-level check go in its last slice's PR, never a ticket of their own
+- With more than one slice, the last slice is blocked by every other slice, and a spec's end-to-end test and spec-level check go in its PR as a closing-check section the spec run appends once those blockers land (`implement-spec/SKILL.md` § The closing check), never in a ticket of their own
 
 </slice-rules>
 
@@ -88,6 +88,8 @@ When the source was a tracker issue — a spec or plan these tickets now decompo
 
 **What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective — not a layer-by-layer implementation list.
 
+**Why this slice exists:** the disjoint files and what runs beside it, when the work is sliced; omit for a single ticket.
+
 **Blocked by:** the numbers/titles of the tickets that gate this one, or "None — can start immediately".
 
 **Seams under test:** the public boundaries the tests go against — user-approved, so `/implement` writes its failing tests here without asking again.
@@ -117,6 +119,10 @@ The end-to-end behaviour this ticket makes work, from the user's perspective —
 
 - [ ] Criterion 1
 - [ ] Criterion 2
+
+## Why this slice exists
+
+The disjoint files and what runs beside it, when the work is sliced; omit this section for a single ticket.
 
 ## Blocked by
 
