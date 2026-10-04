@@ -35,4 +35,5 @@ and measuring what breaks, never by adding a part per incident.
 1. Stages 1 and 7: done today; nothing more to build.
 2. Stage 5: #1401 (already filed).
 3. Stage 2: a one-paragraph change to `to-tickets` and `implement-spec`.
+3a. Stage 3's everyday command is built: `drain/drain.py` (#1403) works the ready queue serially, one agent-chosen bundle of tickets per PR, and replaces the burn for everyday use.
 4. Stage 3: ablate the burn machinery last, once stages 1, 2 and 5 have cut the ticket flow. What survives is kept.
