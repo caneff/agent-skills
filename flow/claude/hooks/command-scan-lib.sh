@@ -25,11 +25,22 @@ strip_heredocs() {
 
 # Two views of $1 from one pass that tracks quoting: BARE drops every quoted
 # character (what the shell runs as words); EXPANDS drops only single-quoted
-# ones, since `$(...)` and backticks still run inside double quotes.
+# ones, since `$(...)` and backticks still run inside double quotes. Both drop
+# an unquoted `#` comment up to its newline: nothing in it runs, and an
+# apostrophe in one would otherwise open a quote that hides every line after
+# it. Byte-wise (LC_ALL=C): every character it acts on is ASCII, and in a
+# UTF-8 locale `${s:i:1}` walks the string from the start, which made a 20 KB
+# command take three seconds.
 quote_views() {
+  local LC_ALL=C
   local s=$1 i c q="" bare="" exp=""
   for ((i = 0; i < ${#s}; i++)); do
     c=${s:i:1}
+    if [ -z "$q" ] && [ "$c" = '#' ] && { [ "$i" = 0 ] || [[ "${s:i-1:1}" == [[:space:]\;\&\|\(] ]]; }; then
+      while [ "$i" -lt "${#s}" ] && [ "${s:i:1}" != $'\n' ]; do i=$((i + 1)); done
+      bare+=$'\n'; exp+=$'\n'
+      continue
+    fi
     case "$q" in
       "'") [ "$c" = "'" ] && q="" ;;
       '"')
