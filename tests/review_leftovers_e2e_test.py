@@ -172,7 +172,7 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     in_flight_file = os.path.join(work, "live.json")
     with open(candidates, "w") as fh:
         json.dump([
-            {"tickets": [905], "closure": ["burndown/cost.py"]},
+            {"tickets": [905], "closure": ["burndown/closure.py"]},
             {"tickets": [901, 902], "closure": ["burndown/loop.py", "burndown/frontier.py",
                                                 "burndown/runfile.py", "burndown/sweep.py"]},
             {"tickets": [910], "closure": ["implement/SKILL.md", "implement/stale_refs.py"]},
@@ -202,7 +202,7 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     git(repo, "init", "-q", "-b", "main")
     git(repo, "config", "user.email", "fixture@example.invalid")
     git(repo, "config", "user.name", "fixture")
-    commit(repo, {"burndown/loop.py": numbered(40), "burndown/cost.py": numbered(40)}, "base")
+    commit(repo, {"burndown/loop.py": numbered(40), "burndown/closure.py": numbered(40)}, "base")
     base = git(repo, "rev-parse", "HEAD")
     commit(repo, {"burndown/loop.py": numbered(40) + "ticket work\n"}, "ticket work")
     ticket_fix = commit(repo, {"burndown/loop.py": numbered(40) + "ticket work, fixed\n"}, "S1")
@@ -226,13 +226,13 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     assert measured.stdout == "C2: ok, 3 changed lines in burndown/loop.py\n", measured.stdout
 
     two_files = commit(repo, {"burndown/loop.py": numbered(37) + "tick2 renamed again\n"
-                              + "ticket work, fixed\n", "burndown/cost.py": numbered(41)},
-                       "C2 again, spilling into cost.py")
+                              + "ticket work, fixed\n", "burndown/closure.py": numbered(41)},
+                       "C2 again, spilling into closure.py")
     breach = os.path.join(work, "dispositions-901-breach.jsonl")
     write_jsonl(breach, bound(dict(shas, C2=two_files)))
     failed = cli(CHECK_ADJACENT, "--repo", repo, "--base", base, breach)
     assert failed.returncode == 1, (failed.stdout, failed.stderr)
-    assert ("BREACH C2: touches burndown/cost.py and burndown/loop.py, "
+    assert ("BREACH C2: touches burndown/closure.py and burndown/loop.py, "
             "which are not one file and its own test file") in failed.stdout, failed.stdout
     # And one file, but over the line budget: 20 changed lines is not under 20.
     too_long = commit(repo, {"burndown/loop.py": numbered(37) + "tick2 renamed again\n"
@@ -246,13 +246,13 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     assert ("BREACH C2: 20 changed lines in burndown/loop.py; the budget is under 20"
             in failed.stdout), failed.stdout
     # And small, one file, but a file no commit on the branch had touched.
-    elsewhere = commit(repo, {"burndown/phases.py": "unrelated tidy\n"},
+    elsewhere = commit(repo, {"burndown/frontier.py": "unrelated tidy\n"},
                        "C2 again, in a file outside the diff")
     outside = os.path.join(work, "dispositions-901-outside.jsonl")
     write_jsonl(outside, bound(dict(shas, C2=elsewhere)))
     failed = cli(CHECK_ADJACENT, "--repo", repo, "--base", base, outside)
     assert failed.returncode == 1, (failed.stdout, failed.stderr)
-    assert ("BREACH C2: burndown/phases.py was not in the diff before this fix"
+    assert ("BREACH C2: burndown/frontier.py was not in the diff before this fix"
             in failed.stdout), failed.stdout
 
     # Clump #910's verification pass: two leftovers — one in a file #901's
@@ -341,7 +341,7 @@ def test_a_burn_from_widest_first_dispatch_to_one_sweep_ticket():
     # shape, folds in by its file sections alone.
     per_pr = with_blocked_by(
         "Filed from: a worker's per-PR sweep.\n\n"
-        "## burndown/cost.py\n\n"
+        "## burndown/closure.py\n\n"
         "- **S2** (judgement) Magic 28 — PR #960: name the process cap.\n")
     folded = with_blocked_by(body.rstrip("\n") + "\n\n" + fold(per_pr))
     assert folded.count("## Blocked by") == 1, folded

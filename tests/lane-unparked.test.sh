@@ -185,12 +185,12 @@ required=(
   'closure resolver|burndown/closure.py'
 )
 # Negative control, and it has to be a real tracked module that no lane doc
-# names — `burndown/phases.py`, referenced today only by its own tests and by
+# names — `burndown/run_fixtures.py`, referenced today only by its own siblings and by
 # `docs/research/`. A path nobody ever wrote could not match whatever the
 # matcher did, so it proved nothing; this one fires the moment the matcher
 # starts reading files the skills do not actually link. If a lane doc ever
 # does link it, wire it into `required` above and pick another control.
-absent='burndown/phases.py'
+absent='burndown/run_fixtures.py'
 [ -f "$absent" ] || { echo "FAIL: negative control $absent does not exist; pick a tracked module no lane doc names" >&2; exit 1; }
 
 for skill in burndown implement-spec; do
