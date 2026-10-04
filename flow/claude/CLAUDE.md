@@ -9,7 +9,11 @@
   file, evidence artifacts from an earlier run, history-rewriting git op) and
   before adding a dependency or changing a database schema. A *tracked* file
   removed in a commit is undoable — delete it in place, no ask needed. The bar
-  is "can I undo it," not "is it a deletion."
+  is "can I undo it," not "is it a deletion." A file a tool wrote and will
+  write again (build output, caches, engine-generated stubs and configs such
+  as a plugin's `.claude-plugin/types/` or `tsconfig.json`) is undoable too:
+  rerunning the tool is the undo, so `merge-cleanup --discard` deletes it
+  without asking.
   Two things are *not* history rewrites for this rule, because neither can
   reach `main` and both are recoverable: resolving a conflict inside a rebase
   already under way (`git checkout --ours|--theirs <paths>`, `git rebase
