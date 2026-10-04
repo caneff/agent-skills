@@ -148,6 +148,15 @@ never to Chris. An ordinary
 call you make yourself, under an assumption you state, and list under
 Decisions made.
 
+**A controller named `drain` is no session** (`drain/drain.py` names it in
+every brief it dispatches). Resolve nothing and send nothing: no question, no
+job notice, and the "PR up" report goes into your pane and no further. The run
+ends when the PR is up (heavy tier) or the ticket has landed (light tier) and
+you go idle, and `drain` waits for exactly that. A question you would have
+put to a controller you decide yourself and list under Decisions made; one you
+cannot decide leaves you idle with no PR, which `drain` reads as a failed
+build and hands to Chris. Everything else in this skill applies unchanged.
+
 **Your turn ends mid-lane only on a message to the controller**: a question,
 a job declaration, or "PR up". A summary in your own pane reaches no one.
 herdr shows such a pane `done` while review, the fix round and the PR sit
@@ -261,9 +270,11 @@ No PR and no reviewer; Chris reads the log after.
   report it as a follow-up. Why: an unasked fix widens the diff past what the
   reviewers check against the ticket. A finding of the review wave is not one: the
   review step (§ Review) fixes every valid finding in this PR, whatever its size.
-- Typecheck and single test files as you go, the full suite once at the end.
-  Why: a failure caught at the file it came from is cheaper to place than one
-  found in the full run.
+- Typecheck and run only the tests for the files you touch as you go; no
+  suite run at the end of the build. A ticket's one suite run is § Review
+  step 3's, after the fix round. Why: a failure caught at the file it came
+  from is cheaper to place than one found in a suite run, and a suite run
+  before the fix round is run again after it.
 
 ### Review
 
@@ -342,8 +353,15 @@ seam is the convergence check.
 
    Write the file even when every reviewer found nothing: it is then empty,
    and its absence is not a clean review. One line per finding id; a changed
-   disposition rewrites its line. Then run `bash tests/all.sh`
-   (`AGENTS.md` § End-to-end seam): green is the exit, red is fixed and rerun.
+   disposition rewrites its line. Then bring the branch up to current
+   `origin/<default>` with `git fetch origin && git merge --no-edit
+   origin/<default>` (a merge, not a rebase: a rebase rewrites the shas the
+   `fixed` dispositions name), and run
+   `bash tests/all.sh --changed origin/<default>` (`AGENTS.md` § End-to-end
+   seam, narrowed to what the PR touched): green is the exit, red is fixed and
+   rerun. This is the ticket's one suite run, just before "PR up"; the merger
+   re-runs only when `origin/<default>` has moved past the base it ran on
+   (§ The merge step 3).
    `fix-check.sh <n>` (and the pre-report gate that runs it) checks the
    rest mechanically: every finding id in the three findings sidecars and the
    Codex output has exactly one disposition, every `fixed` sha is a commit on
@@ -775,10 +793,12 @@ mechanical.
    discovered from `merge-cleanup`'s refusal after the merge. Read the
    report's `Codex pass` line too: a refused pass names a refusal, and the
    merge does not wait on it.
-3. Merge. Before the merge, re-run the seam on the PR as it will land
-   (#1145): GitHub's CLEAN is a textual-merge verdict, not a test verdict, and
-   two PRs sharing no file each pass their own gate and can break `<default>`
-   together even though neither PR's own gate saw the other's change. Run
+3. Merge. The worker's one suite run (§ Review step 3) ran on the PR merged
+   with the `<default>` it saw. GitHub's CLEAN is a textual-merge verdict, not a
+   test verdict, and two PRs sharing no file each pass their own gate and can
+   break `<default>` together even though neither PR's own gate saw the
+   other's change (#1145). Before the merge, re-run the seam on the PR as it
+   will land, and only when `<default>` has moved. Run
    `git fetch origin` first, then skip only when `origin/<default>` has not
    moved past the PR's merge base
    (`git merge-base --is-ancestor origin/<default> <headRefOid>` exits
@@ -790,10 +810,11 @@ mechanical.
    ```
 
    `<the repo's seam>` is the command declared in `AGENTS.md` § End-to-end seam,
-   which is `bash tests/all.sh` here; a repo declaring none: tell Chris and merge
-   nothing on this step's say-so. State the run's worker and core count in
-   your status line before you launch it. The controller merges only on
-   green. A merge conflict or a red seam blocks the merge: send the worker
+   which is `bash tests/all.sh` here, run as
+   `bash tests/all.sh --changed origin/<default>` from the merged worktree; a
+   repo declaring none: tell Chris and merge nothing on this step's say-so.
+   State the run's worker and core count in your status line before you launch
+   it. The controller merges only on green. A merge conflict or a red seam blocks the merge: send the worker
    the failure to fix, and its next "PR up" restarts at step 2, so the fix is
    read and re-run like any other commit. Remove the worktree afterwards with
    `git worktree remove --force`, since a conflicted merge leaves it dirty.

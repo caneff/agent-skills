@@ -89,7 +89,7 @@ out=$(run_gate expected-red-narration); rc=$?
 if [ "$rc" != 0 ]; then
   fail "gate rejected a passing suite for narrating an expected-red check"$'\n'"$out"
 fi
-printf '%s\n' "$out" | grep -q '^PASS tests/fixture.test.sh$' \
+printf '%s\n' "$out" | grep -qE '^PASS tests/fixture.test.sh \(' \
   || fail "gate exited 0 but did not report the narrating suite as PASS"$'\n'"$out"
 
 echo "ALL PASS"

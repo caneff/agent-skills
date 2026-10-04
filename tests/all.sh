@@ -10,6 +10,18 @@
 # read a suite that reported findings and exited 0 as green (#954; the
 # signature set and its reason are below).
 # `--list` prints the labels the rules select, without running anything.
+# `--changed <base>` narrows the run to the suites under every top-level
+# directory the diff `<base>...HEAD` touches plus everything under `tests/`
+# (the repo-wide checks); see `scope_changed` for when it widens to the full
+# suite. Suites run concurrently, `TESTS_JOBS` at a time (default `nproc`),
+# and are reported in discovery order. A suite with a comment line
+# `# all.sh: serial (<why>)` in its first twenty lines cannot share the box (a
+# fixed port, a shared global path): it runs alone after the concurrent ones.
+# Each suite is also held to a CPU budget (see `cpu_budget`): its own user+sys
+# time with every process it started, not wall-clock time, so load on a shared
+# box cannot make it flaky. `TESTS_CPU_BUDGET=<seconds>` can only lower every
+# budget (a test uses it to make a fixture suite go over); raising one is an
+# edit to `cpu_budget`, a visible diff line.
 # This is the merge gate (`git config land.testcmd`), not a push hook — see
 # #633.
 # -f: suite commands are word-split out of the tab-separated list, so keep
@@ -47,14 +59,64 @@ suites() { # prints "<label>\t<command>" per discovered suite
     done
 }
 
-case "${1:-}" in
-  --list) suites | cut -f1; exit 0 ;;
-  "") ;;
-  *) echo "usage: tests/all.sh [--list]" >&2; exit 2 ;;
-esac
+# Which suites a `--changed <base>` run keeps. The full suite is the answer
+# whenever the diff cannot be pinned to a directory that owns suites: a change
+# to this script, a file at the repo root, or a directory with no suite of its
+# own (nothing then says which suites cover it). An empty diff keeps only the
+# repo-wide checks. Prints the kept labels' directories as a space-separated
+# word list on stdout, or `*` for the full suite; the reason goes to stderr.
+scope_changed() { # <base>
+  local base=$1 files file dir all_dirs dirs=""
+  files=$(git diff --name-only --no-renames "$base...HEAD") || {
+    echo "tests/all.sh: cannot diff $base...HEAD" >&2; exit 2; }
+  all_dirs=$(suites | cut -f1 | awk -F/ 'NF > 1 {print $1}' | sort -u)
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    dir=${file%%/*}
+    if [ "$file" = tests/all.sh ] || [ "$dir" = "$file" ] || ! grep -qxF "$dir" <<<"$all_dirs"; then
+      if [ "$file" = tests/all.sh ]; then why="tests/all.sh itself changed"
+      elif [ "$dir" = "$file" ]; then why="$file is at the repo root, which no directory of suites owns"
+      else why="$dir/ holds no suite ($file)"; fi
+      echo "full suite: $why" >&2
+      echo '*'; return
+    fi
+    case " $dirs " in *" $dir "*) ;; *) dirs="$dirs $dir" ;; esac
+  done <<<"$files"
+  dirs=${dirs# }
+  echo "changed suites: ${dirs:-none} + tests" >&2
+  echo "$dirs"
+}
 
+filter_dirs() { # <dirs word list>: keeps suites under those dirs, under tests/, or at the root
+  awk -F'\t' -v dirs=" $1 tests " '{ n = split($1, p, "/"); if (n == 1 || index(dirs, " " p[1] " ")) print }'
+}
+
+list_only=0 changed_base=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --list) list_only=1; shift ;;
+    --changed) [ $# -ge 2 ] || { echo "usage: tests/all.sh [--list] [--changed <base>]" >&2; exit 2; }
+               changed_base=$2; shift 2 ;;
+    *) echo "usage: tests/all.sh [--list] [--changed <base>]" >&2; exit 2 ;;
+  esac
+done
+
+selected() { # prints the "<label>\t<command>" lines this run covers
+  if [ -z "$changed_base" ]; then suites; return; fi
+  local dirs
+  dirs=$(scope_changed "$changed_base") || exit $?
+  if [ "$dirs" = '*' ]; then suites; else suites | filter_dirs "$dirs"; fi
+}
+
+if [ "$list_only" = 1 ]; then selected 2>/dev/null | cut -f1; exit "${PIPESTATUS[0]}"; fi
+
+tmp=$(mktemp -d) || exit 1
+# The selection is read once: its scope line goes to the report and a diff that
+# cannot be read (exit 2) stops the run rather than selecting nothing.
+selection=$(selected 2>"$tmp/scope") || { cat "$tmp/scope" >&2; rm -rf "$tmp"; exit 2; }
+[ -s "$tmp/scope" ] && cat "$tmp/scope"
 # A missing cargo must fail the gate, not silently skip every Cargo suite.
-if suites | cut -f2 | grep -q '^cargo test ' && ! command -v cargo >/dev/null 2>&1; then
+if printf '%s\n' "$selection" | cut -f2 | grep -q '^cargo test ' && ! command -v cargo >/dev/null 2>&1; then
   echo "tests/all.sh: cargo is not on PATH, and a tracked Cargo.toml needs it" >&2
   exit 1
 fi
@@ -142,33 +204,144 @@ identity_snapshot() {
 }
 identity_before=$(identity_snapshot)
 
-count=0
+# Concurrency (#1415): the suites run `jobs` at a time, each writing its output
+# and exit status under "$tmp"; this shell reports them in discovery order, so
+# the transcript reads the same as a serial run. A failure stops new suites
+# from starting, lets those in flight finish (an orphaned suite would keep
+# writing into a directory this script is about to remove) and exits 1. The
+# identity check runs after each suite against the baseline above: suites
+# overlap, so one that finishes after a leak is flagged along with the leaker,
+# and the failure says so rather than naming a suite that may be innocent.
+jobs=${TESTS_JOBS:-$(nproc 2>/dev/null || echo 4)}
+case $jobs in ''|*[!0-9]*|0) echo "tests/all.sh: TESTS_JOBS must be a positive integer, got '$jobs'" >&2; exit 2 ;; esac
+
+is_serial() { # <label>: a suite file with a `# all.sh: serial` comment line in its head
+  local file=${1%% *}
+  [ -f "$file" ] && head -n 20 "$file" | grep -q '^# all\.sh: serial'
+}
+: >"$tmp/parallel"; : >"$tmp/serial"
 while IFS=$'\t' read -r label cmd; do
-  out=$($cmd 2>&1 </dev/null); suite_status=$?
-  # Before either failure branch: a suite that leaks and then fails is the
-  # likely shape of the real leak, and would otherwise never be named.
-  identity_after=$(identity_snapshot)
-  if [ "$identity_after" != "$identity_before" ]; then
+  [ -n "$label" ] || continue
+  if is_serial "$label"; then dest=serial; else dest=parallel; fi
+  printf '%s\t%s\n' "$label" "$cmd" >>"$tmp/$dest"
+done <<<"$selection"
+cat "$tmp/parallel" "$tmp/serial" >"$tmp/ordered"
+
+# The CPU budget of every suite, in seconds (#1415): a suite that costs more
+# fails the run, so a suite that re-runs the whole repo inside itself (the old
+# tests/all.test.sh was 251 of the suite's 494 serial seconds) is a red line and
+# not a quiet tax on every merge. A suite that needs more is named below with
+# its own budget and a one-line reason; adding a line is the visible diff.
+default_cpu_budget=15
+cpu_budget() { # <label>: prints the suite's budget in seconds
+  case $1 in
+    flow/lane/Cargo.toml) echo 150 ;; # compiles the lane crate (measured 74s with a warm target dir) and runs 140+ process-spawning tests
+    flow/install.test.sh) echo 160 ;; # runs install.sh, which cargo-builds the lane binaries into a scratch HOME (measured 109s)
+    drain/drain_test.py) echo 40 ;; # one real git repo, bare origin and stub processes per case, 43 cases (measured 23s)
+    *) echo "$default_cpu_budget" ;;
+  esac
+}
+# The budget actually applied: the named one, lowered (never raised) by the
+# environment's `TESTS_CPU_BUDGET`.
+effective_cpu_budget() { # <label>
+  local b; b=$(cpu_budget "$1")
+  case ${TESTS_CPU_BUDGET:-} in ''|*[!0-9]*) echo "$b" ;; *) [ "$TESTS_CPU_BUDGET" -lt "$b" ] && echo "$TESTS_CPU_BUDGET" || echo "$b" ;; esac
+}
+
+# User+sys seconds of this subshell and everything it waited for, from the
+# `times` builtin: line 1 is the shell itself, line 2 its children, descendants
+# included, and both are summed. The builtin must run in this shell itself, so
+# it writes to a file (a pipe or `$(...)` would run it in a fresh subshell that
+# reports zero). A subshell starts at zero, so each suite runs in one
+# (backgrounded, or parenthesised).
+cpu_seconds() { # <file>
+  times >"$1.times"
+  awk '{ for (i = 1; i <= NF; i++) { split($i, p, "m"); t += p[1] * 60 + p[2] } } END { printf "%.1f", t }' "$1.times" >"$1"
+}
+
+run_suite() { # <index> <command>
+  local out status after
+  out=$($2 2>&1 </dev/null); status=$?
+  cpu_seconds "$tmp/$1.cpu"
+  after=$(identity_snapshot)
+  printf '%s' "$out" >"$tmp/$1.out"
+  [ "$after" = "$identity_before" ] || printf '%s' "$after" >"$tmp/$1.ident"
+  # A failed suite stops new ones from starting at once, not when the reporter
+  # reaches it in discovery order.
+  [ "$status" -eq 0 ] || touch "$tmp/stop"
+  echo "$status" >"$tmp/$1.rc.tmp" && mv "$tmp/$1.rc.tmp" "$tmp/$1.rc"
+}
+
+dispatch() {
+  local idx=0 label cmd
+  while IFS=$'\t' read -r label cmd; do
+    while [ "$(jobs -pr | wc -l)" -ge "$jobs" ]; do wait -n; done
+    [ -e "$tmp/stop" ] && break
+    run_suite "$idx" "$cmd" &
+    idx=$((idx + 1))
+  done <"$tmp/parallel"
+  wait
+  while IFS=$'\t' read -r label cmd; do
+    [ -e "$tmp/stop" ] && break
+    (run_suite "$idx" "$cmd")
+    idx=$((idx + 1))
+  done <"$tmp/serial"
+}
+
+stop_and_wait() { touch "$tmp/stop"; wait "$dispatcher" 2>/dev/null; }
+trap 'stop_and_wait; rm -rf "$tmp"' EXIT
+trap 'exit 130' INT TERM
+dispatch &
+dispatcher=$!
+
+count=0 idx=0
+while IFS=$'\t' read -r label cmd; do
+  until [ -e "$tmp/$idx.rc" ]; do
+    # A dispatcher that is gone with no result for this suite never ran it:
+    # that is a failure, not a pass nobody has seen (defect class 1).
+    if ! kill -0 "$dispatcher" 2>/dev/null && [ ! -e "$tmp/$idx.rc" ]; then
+      report_failure "$label" "" "tests/all.sh: the runner ended before this suite reported a result"
+    fi
+    sleep 0.05
+  done
+  out=$(cat "$tmp/$idx.out"); suite_status=$(cat "$tmp/$idx.rc")
+  if [ -e "$tmp/$idx.ident" ]; then
+    stop_and_wait
+    identity_after=$(cat "$tmp/$idx.ident")
     report_failure "$label" "$out" \
       "tests/all.sh: the checkout's git identity changed while this suite ran (a fixture identity written without naming its repo, #1144):" \
       "  before: $(printf '%s' "$identity_before" | tr '\n' ' ')" \
       "  after:  $(printf '%s' "$identity_after" | tr '\n' ' ')" \
-      "  This config is shared by every worktree of the repo, so a session in another" \
-      "  worktree that changed the identity during this run reads the same way (#1173)." \
-      "  If one did, re-run; if none did, this suite wrote it."
+      "  Suites run concurrently, so any suite that finished after the change is flagged" \
+      "  as well: the leaker is the earliest of those, or none of them, because this config is" \
+      "  shared by every worktree of the repo and a session in another worktree that changed" \
+      "  the identity during this run reads the same way (#1173). Re-run with TESTS_JOBS=1" \
+      "  to name the suite."
   fi
   if [ "$suite_status" -eq 0 ]; then
     if hit=$(printf '%s\n' "$out" | grep -m1 -E "$failure_signature"); then
+      stop_and_wait
       report_failure "$label" "$out" \
         "tests/all.sh: exited 0, but its output carries a failure line:" \
         "  $hit" \
         "$(logging_remedy "$hit")"
     fi
-    echo "PASS $label"
+    cpu=$(cat "$tmp/$idx.cpu"); budget=$(effective_cpu_budget "$label")
+    if awk -v c="$cpu" -v b="$budget" 'BEGIN { exit !(c > b) }'; then
+      stop_and_wait
+      report_failure "$label" "$out" \
+        "tests/all.sh: over its CPU budget: ${cpu}s CPU against ${budget}s (user+sys, children included)." \
+        "  A suite that re-runs the repo inside itself is the usual cause. If this one really needs more," \
+        "  name it in cpu_budget in tests/all.sh with its own budget and a one-line reason."
+    fi
+    echo "PASS $label (${cpu}s cpu)"
     count=$((count + 1))
   else
+    stop_and_wait
     report_failure "$label" "$out"
   fi
-done < <(suites)
+  idx=$((idx + 1))
+done <"$tmp/ordered"
+wait "$dispatcher"
 
 echo "$count suites passed"

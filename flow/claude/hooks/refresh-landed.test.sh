@@ -46,10 +46,11 @@ fi
 # Push command: exits 0, and generate.py is invoked in the background.
 rm -f "$tmp/python3.args"
 run "push command allowed" 0 "git push origin main"
-# The hook backgrounds the call; give it a moment to land.
-for _ in 1 2 3 4 5; do
+# The hook backgrounds the call; give it up to ten seconds to land, since the
+# suite runs concurrently (#1415) and a loaded box can delay a background start.
+for _ in $(seq 100); do
   [ -e "$tmp/python3.args" ] && break
-  sleep 0.2
+  sleep 0.1
 done
 if [ -e "$tmp/python3.args" ] && grep -q "generate.py" "$tmp/python3.args"; then
   echo "PASS: push command invoked generate.py"

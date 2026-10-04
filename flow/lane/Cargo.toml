@@ -1,3 +1,4 @@
+# all.sh: serial (its merge_cleanup tests write a fake `git` script and exec it while sibling test threads fork; on a loaded box that races into ETXTBSY and a spurious "not a git repo", seen in 3 of 9 concurrent full runs and 0 of 8 alone)
 [package]
 name = "lane"
 version = "0.1.0"
