@@ -51,14 +51,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import frontier  # noqa: E402
 
 READY, HUMAN, CLAIMED = "ready-for-agent", "ready-for-human", frontier.CLAIMED_LABEL
-ANCHOR_NOTE, BUNDLE_NOTE = "drain anchor:", "drain bundle:"
+ANCHOR_NOTE, BUNDLE_NOTE, HANDED_NOTE = "drain anchor:", "drain bundle:", "drain could not land"
 BUNDLE_MAX = 8
 MAX_CONSECUTIVE_FAILURES = 2
 # The caps of one build session, stated here and nowhere else: the equivalent
 # of `ulimit -v 32G` (address space, not resident memory, hence generous) and a
 # three-hour wall clock after which the whole process group is killed. The seam
-# gets the same wall clock. A killed drain takes its build with it
-# (PR_SET_PDEATHSIG, and a TERM/INT handler that kills the group).
+# gets the same wall clock. TERM and ctrl-C kill the build's whole group;
+# SIGKILL of drain kills only the session itself (PR_SET_PDEATHSIG), and the
+# rerun's `busy()` check then stops on whatever it left running.
 MEMORY_CAP_BYTES = 32 << 30
 WALL_CLOCK_SECONDS = 3 * 60 * 60
 # Never a permission-skipping flag: the session runs in the mode the harness
@@ -197,35 +198,53 @@ def claim(ctx, anchor):
         view = gh_json("issue", "view", str(anchor), "--repo", ctx.repo, "--json", "state,labels")
         if view["state"].lower() != "open" or READY not in labels_of(view) or CLAIMED in labels_of(view):
             return False
+        # The note first: a kill between the two leaves a ready ticket with a
+        # stray note, which the next pick simply claims again; the other order
+        # leaves an in-progress ticket no rerun resumes and no pick offers.
+        gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body", f"{ANCHOR_NOTE} implement-{anchor}")
         gh("issue", "edit", str(anchor), "--repo", ctx.repo, "--remove-label", READY,
            "--add-label", CLAIMED, "--add-assignee", "@me")
-        gh("issue", "comment", str(anchor), "--repo", ctx.repo, "--body", f"{ANCHOR_NOTE} implement-{anchor}")
     return True
 
 
 def resumable(ctx):
-    """The lowest open in-progress ticket carrying drain's own anchor comment,
-    or `None`. A worker `implement-dispatch` started has none."""
-    for issue in sorted(frontier.fetch_issues(ctx.repo, CLAIMED), key=lambda i: i["number"]):
+    """The lowest open in-progress ticket whose latest drain comment is its
+    anchor note, or `None`. A worker `implement-dispatch` started has none, and
+    a ticket drain handed to Chris ends in `HANDED_NOTE`, so neither is taken."""
+    try:
+        claimed = frontier.fetch_issues(ctx.repo, CLAIMED)
+    except frontier.FrontierError as exc:
+        raise DrainError(f"frontier: {exc}") from exc
+    for issue in sorted(claimed, key=lambda i: i["number"]):
         if HUMAN in labels_of(issue) or issue.get("pull_request"):
             continue
         view = gh_json("issue", "view", str(issue["number"]), "--repo", ctx.repo, "--json", "comments")
-        if any(c["body"].startswith(ANCHOR_NOTE) for c in view["comments"]):
+        marks = [c["body"] for c in view["comments"] if c["body"].startswith((ANCHOR_NOTE, HANDED_NOTE))]
+        if marks and marks[-1].startswith(ANCHOR_NOTE):
             return issue["number"]
     return None
 
 
-def bundle_of(ctx, anchor, offered=()):
-    """The anchor plus every ticket it is still holding for this run: the
-    numbers in `drain bundle:` comments posted after the latest claim, and the
-    offered tickets now in-progress. Each is read live; a closed, human-held
-    or unclaimed one is not the bundle's."""
+def noted(ctx, anchor):
+    """The numbers in `drain bundle:` comments posted after the anchor's latest
+    claim: what the agent says it took. Digits are read with `findall`, so a
+    note that wraps lines or ends in punctuation still parses."""
     comments = gh_json("issue", "view", str(anchor), "--repo", ctx.repo, "--json", "comments")["comments"]
     start = max((i for i, c in enumerate(comments) if c["body"].startswith(ANCHOR_NOTE)), default=-1)
-    named = {int(x) for c in comments[start + 1:] if c["body"].strip().startswith(BUNDLE_NOTE)
-             for x in re.findall(r"\d+", c["body"])}
+    return {int(x) for c in comments[start + 1:] if c["body"].strip().startswith(BUNDLE_NOTE)
+            for x in re.findall(r"\d+", c["body"])} - {anchor}
+
+
+def bundle_of(ctx, anchor, branch):
+    """The anchor plus the tickets it is still holding: those the agent named
+    and those an open PR closes, each read live, so a closed, human-held or
+    unclaimed one is not the bundle's."""
+    hint = noted(ctx, anchor)
+    if open_pr(ctx, branch):
+        view = gh_json("pr", "view", branch, "--repo", ctx.repo, "--json", "closingIssuesReferences")
+        hint |= {r["number"] for r in view["closingIssuesReferences"]} - {anchor}
     held = []
-    for n in sorted((named | set(offered)) - {anchor}):
+    for n in sorted(hint):
         view = gh_json("issue", "view", str(n), "--repo", ctx.repo, "--json", "state,labels")
         if view["state"].lower() == "open" and CLAIMED in labels_of(view) and HUMAN not in labels_of(view):
             held.append(n)
@@ -266,9 +285,9 @@ def brief(anchor, others, bundle_max):
             "and file no leftover or sweep ticket (docs/adr/0004-workers-fix-their-own-findings.md).\n\n"
             f"Bundle: #{anchor} is the anchor. Other unblocked ready tickets:\n{listing}\n"
             f"Read the ones that look related and add those you would naturally fix in the same PR, "
-            f"at most {bundle_max} tickets in all with the anchor. First claim each one you add "
-            f"(`gh issue edit <n> --remove-label {READY} --add-label {CLAIMED} --add-assignee @me`) and "
-            f"post one comment on #{anchor} reading `{BUNDLE_NOTE} <numbers, anchor first>`. Then build "
+            f"at most {bundle_max} tickets in all with the anchor. First post one comment on "
+            f"#{anchor} reading `{BUNDLE_NOTE} <numbers, anchor first>`, then claim each ticket you add "
+            f"(`gh issue edit <n> --remove-label {READY} --add-label {CLAIMED} --add-assignee @me`). Then build "
             "them as one clump (implement/SKILL.md § The brief), working one ticket at a time: test first, "
             "green, one commit per ticket before the next. If you run out of context or time partway, the "
             f"PR closes only the finished tickets and you relabel the rest `{READY}` with `{CLAIMED}` and "
@@ -324,6 +343,10 @@ def verify_pr(ctx, branch, anchor):
     closed = {r["number"] for r in view["closingIssuesReferences"]}
     if anchor not in closed:
         raise DrainError(f"{view['url']} does not close the anchor #{anchor}")
+    unrecorded = closed - {anchor} - noted(ctx, anchor)
+    if unrecorded:
+        raise DrainError(f"{view['url']} closes " + ", ".join(f"#{n}" for n in sorted(unrecorded))
+                         + f" which no {BUNDLE_NOTE} comment on #{anchor} names")
     if len(closed) > ctx.bundle_max:
         raise DrainError(f"{view['url']} closes {len(closed)} tickets, over --bundle-max {ctx.bundle_max}")
     seam(ctx, view["headRefOid"], os.path.join(ctx.log_dir, f"{branch}-seam.log"))
@@ -331,7 +354,7 @@ def verify_pr(ctx, branch, anchor):
     return view
 
 
-def finish(ctx, anchor, others, branch, view):
+def finish(ctx, anchor, branch, view):
     """After the merge: the squash sha, `merge-cleanup`, and the tickets the
     agent claimed that the PR did not close back to the queue. A step that
     fails is a note on a merged PR, never a reason to build again."""
@@ -347,7 +370,7 @@ def finish(ctx, anchor, others, branch, view):
     except OSError as exc:
         notes.append(f"merge-cleanup: {exc}")
     try:
-        for n in set(bundle_of(ctx, anchor, [n for n, _ in others])) - set(view["closes"]):
+        for n in set(bundle_of(ctx, anchor, branch)) - set(view["closes"]):
             gh("issue", "edit", str(n), "--repo", ctx.repo, "--remove-label", CLAIMED, "--add-label", READY,
                "--remove-assignee", "@me")
     except DrainError as exc:
@@ -371,17 +394,17 @@ def work(ctx, anchor, others, resumed):
         except DrainError as exc:
             reason = one_line(exc)
         else:
-            return finish(ctx, anchor, others, branch, view), None
+            return finish(ctx, anchor, branch, view), None
     return None, reason
 
 
-def hand_to_chris(ctx, anchor, others, reason):
-    bundle = bundle_of(ctx, anchor, [n for n, _ in others])
+def hand_to_chris(ctx, anchor, reason):
+    bundle = bundle_of(ctx, anchor, f"implement-{anchor}")
     for n in bundle:
         gh("issue", "edit", str(n), "--repo", ctx.repo, "--remove-label", CLAIMED, "--add-label", HUMAN,
            "--remove-assignee", "@me")
         gh("issue", "comment", str(n), "--repo", ctx.repo, "--body",
-           f"drain could not land this ticket (bundle {' '.join(f'#{x}' for x in bundle)}) after two attempts. "
+           f"{HANDED_NOTE} this ticket (bundle {' '.join(f'#{x}' for x in bundle)}) after two attempts. "
            f"Last failure: {reason} The worktree implement-{anchor} is kept for inspection.")
     return bundle
 
@@ -406,14 +429,14 @@ def drain(ctx, limit):
                 merged.append(result)
                 done, failures = done + len(result["tickets"]), 0
             else:
-                bundle = hand_to_chris(ctx, anchor, others, reason)
+                bundle = hand_to_chris(ctx, anchor, reason)
                 handed.append((bundle, reason))
                 done, failures = done + len(bundle), failures + 1
                 if failures >= MAX_CONSECUTIVE_FAILURES:
                     stop = (f"{failures} bundles in a row went to Chris; the environment is the likelier "
                             "cause (auth, quota, permission mode, headless /implement). Check the build logs.")
                     break
-    except DrainStop as exc:
+    except (DrainStop, DrainError) as exc:  # a refusal or a tracker failure, said as it is
         stop = str(exc)
     except Exception as exc:  # noqa: BLE001 - the summary of what landed must still print
         stop = f"unexpected {type(exc).__name__}: {one_line(exc)}"

@@ -34,6 +34,8 @@ def opt(name):
     return args[args.index(name) + 1] if name in args else None
 def names(issue):
     return [dict(name=x) for x in issue["labels"]]
+if args[:2] == ["issue", os.environ.get("FAIL_VERB")]:
+    sys.stderr.write("fake gh: injected failure\n"); sys.exit(1)
 if args[:2] == ["api", "user"]:
     print(state["login"])
 elif args[0] == "api":
@@ -44,7 +46,7 @@ elif args[0] == "api":
         issues = [dict(number=int(n), title=i["title"], body=i["body"], state="open", labels=names(i),
                        assignees=[dict(login=a) for a in i.get("assignees", [])])
                   for n, i in state["issues"].items() if i["state"] == "open" and label in i["labels"]]
-        for t in os.environ.get("TAKE_AFTER_PICK", "").split():
+        for t in os.environ.get("TAKE_AFTER_PICK", "").split() if label == "ready-for-agent" else []:
             if "ready-for-agent" in state["issues"][t]["labels"]:
                 state["issues"][t]["labels"].remove("ready-for-agent")
                 state["issues"][t]["labels"].append("in-progress")
@@ -101,7 +103,7 @@ else:
 # the anchor is in FAIL_TICKETS (exit 1, no PR). Knobs: DRAFT_TICKETS, STATUS
 # (merge state), NO_ANCHOR / UNCLOSED (what the PR's closing keywords leave
 # out), RESET_TO_OLD (build on the commit before main's tip), MESSY_NOTE (a
-# multi-line, punctuated bundle comment), STUB_SLEEP (hang, with a grandchild).
+# multi-line, punctuated bundle comment), NO_NOTE (claims, posts none), STUB_SLEEP (hang, with a grandchild).
 STUB_CLAUDE = r"""#!/usr/bin/env python3
 import json, os, resource, subprocess, sys, time
 prompt = sys.argv[sys.argv.index("-p") + 1]
@@ -123,7 +125,7 @@ for t in take:
         labels.remove("ready-for-agent")
         labels.append("in-progress")
         st["issues"][t].setdefault("assignees", []).append("me")
-if take:
+if take and not env.get("NO_NOTE"):
     note = "drain bundle: " + " ".join([n] + take)
     if env.get("MESSY_NOTE"):
         note = "drain bundle: " + ", ".join([n] + take[:-1]) + ",\nand " + take[-1] + "."
@@ -265,6 +267,9 @@ class DrainTest(Sandbox):
         self.assertEqual(run["argv"][0], "-p")
         self.assertEqual(run["argv"][2:], ["--permission-mode", "auto"])
         self.assertEqual(run["as_limit"], 32 << 30)
+        tracking = subprocess.run(["git", "config", "--get", "branch.implement-1.remote"], cwd=self.repo,
+                                  capture_output=True, text=True, env=self.env)
+        self.assertEqual(tracking.stdout, "", "the workspace branch must not track a remote")
         self.assertIn("merged:\n  #1  https://example.test/pull/101  m" + st["merged"][0][1], r.stdout)
 
     def test_the_agents_bundle_is_one_pr_and_the_rest_stay_ready(self):
@@ -278,14 +283,16 @@ class DrainTest(Sandbox):
         prompt = self.claude_runs()[0]["prompt"]
         self.assertTrue(prompt.startswith("/implement 1 --tier heavy"))
         for line in ("- #2 ticket 2", "- #3 ticket 3", "- #4 ticket 4", "at most 8 tickets",
-                     "one commit per ticket", "file no leftover or sweep ticket"):
+                     "one commit per ticket", "file no leftover or sweep ticket", "First post one comment on #1"):
             self.assertIn(line, prompt)
         self.assertIn("#1 #2 #3", r.stdout)
 
     def test_max_counts_tickets_not_bundles(self):
-        self.write_state({1: {}, 2: {}, 3: {}})
-        self.drain("--max", "2")
-        self.assertEqual([m[0] for m in self.state()["merged"]], [[1], [2]])
+        # The first bundle holds two tickets, so --max 2 is spent; counting
+        # bundles it would go on to build ticket 3.
+        self.write_state({1: {}, 2: {}, 3: {}, 4: {}})
+        self.drain("--max", "2", env={"TAKE": "2"})
+        self.assertEqual([m[0] for m in self.state()["merged"]], [[1, 2]])
         self.assertEqual(self.labels(3), ["ready-for-agent"])
 
     def test_a_bundle_max_below_one_is_refused(self):
@@ -350,10 +357,10 @@ class DrainTest(Sandbox):
         self.assertIn("seam `false` failed", self.handed_comment(1)[0])
 
     def test_the_seam_runs_on_the_pr_merged_into_current_main(self):
-        # The PR is built on the commit before main's tip, so only the merged
-        # tree holds `marker`; a seam run on the PR head alone would fail.
+        # The PR is built on the commit before main's tip: `marker` comes from
+        # main, `work-1.txt` from the PR, so only the merge holds both.
         self.write_state({1: {}})
-        self.git(self.repo, "config", "land.testcmd", "test -e marker")
+        self.git(self.repo, "config", "land.testcmd", "test -e marker && test -e work-1.txt")
         self.drain("--once", env={"RESET_TO_OLD": "1"})
         self.assertEqual([m[0] for m in self.state().get("merged", [])], [[1]])
 
@@ -462,6 +469,42 @@ class DrainTest(Sandbox):
         self.assertEqual(self.claude_runs(), [])
         self.assertEqual(self.labels(1), ["in-progress"])
 
+    def test_a_ticket_drain_handed_to_chris_is_not_adopted_when_it_is_readied_again(self):
+        self.write_state({1: {"labels": ["in-progress"]}},
+                         comments=[["1", "drain anchor: implement-1"], ["1", "drain could not land this ticket (x)"]])
+        self.git(self.repo, "worktree", "add", "-q", "-b", "implement-1", self.worktree(1), "origin/main")
+        self.drain("--once")
+        self.assertEqual(self.claude_runs(), [])
+        self.assertEqual(self.labels(1), ["in-progress"])
+
+    def test_a_failed_claim_comment_leaves_the_ticket_ready(self):
+        self.write_state({1: {}})
+        r = self.drain("--once", env={"FAIL_VERB": "comment"})
+        self.assertEqual(self.labels(1), ["ready-for-agent"])
+        self.assertIn("stopped:", r.stdout)
+
+    def test_a_pr_closing_a_ticket_the_bundle_comment_does_not_name_is_a_failed_build(self):
+        self.write_state({1: {}, 2: {}})
+        self.drain("--once", env={"TAKE": "2", "NO_NOTE": "1"})
+        self.assertNotIn("merged", self.state())
+        self.assertIn("which no drain bundle: comment on #1 names", self.handed_comment(1)[0])
+        for n in (1, 2):
+            self.assertIn("ready-for-human", self.labels(n))
+
+    def test_a_ticket_another_worker_holds_is_not_touched_by_a_merge(self):
+        self.write_state({1: {}, 2: {}, 3: {"labels": ["in-progress"], "assignees": ["me"]}})
+        self.drain("--once", env={"TAKE": "2"})
+        self.assertEqual(self.state()["merged"][0][0], [1, 2])
+        self.assertEqual(self.labels(3), ["in-progress"])
+        self.assertEqual(self.state()["issues"]["3"]["assignees"], ["me"])
+
+    def test_the_guard_and_lock_names_match_implement_dispatch(self):
+        # drain cannot import the Rust constants it mirrors; this pins them.
+        source = read(os.path.join(HERE, "..", "flow", "lane", "src", "bin", "implement_dispatch.rs"))
+        for name in ("commit-identity-guard", "commit-identity-guard-pre-push", "pre-commit", "pre-push"):
+            self.assertIn(f'"{name}"', source)
+        self.assertIn("implement-dispatch-claim-", source)
+
     def test_refuses_a_repo_the_user_does_not_own(self):
         self.write_state({1: {}})
         self.set_origin("someone-else/repo")
@@ -475,7 +518,8 @@ class DrainTest(Sandbox):
         os.remove(os.path.join(self.hooks, "commit-identity-guard"))
         r = self.drain("--once")
         self.assertEqual(r.returncode, 1)
-        self.assertIn("commit-identity guard is not installed", r.stdout)
+        self.assertIn("stopped: the commit-identity guard is not installed", r.stdout)
+        self.assertNotIn("unexpected", r.stdout)
         self.assertEqual(self.claude_runs(), [])
         self.assertEqual(self.labels(1), ["ready-for-agent"])
 
