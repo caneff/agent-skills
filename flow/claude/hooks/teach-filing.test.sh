@@ -17,12 +17,19 @@ cat > "$tmp/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$STUB_ARGS"
 [ -z "${STUB_SLEEP:-}" ] || sleep "$STUB_SLEEP"
+[ -z "${STUB_WARN:-}" ] || echo "$STUB_WARN" >&2
+[ -z "${STUB_FAIL_QUIET:-}" ] || exit 4
 [ -z "${STUB_ERR:-}" ] || { echo "$STUB_ERR" >&2; exit 1; }
 [ "$1 $2" = "issue list" ] && printf '%s' "${STUB_ISSUES:-}"
 exit 0
 STUB
 chmod +x "$tmp/bin/gh"
 export STUB_PATH="$tmp/bin" STUB_ARGS="$tmp/gh.args"
+# expect_no_gh <name>: gh was never called since STUB_ARGS was last removed.
+expect_no_gh() {
+  if [ -e "$STUB_ARGS" ]; then echo "FAIL: $1 — gh ran: $(paste -sd' ' "$STUB_ARGS")"; fails=1
+  else echo "PASS: $1"; fi
+}
 
 section=(" § Before filing a ticket" "(\`gh issue comment <n>\`) instead of a new issue.")
 
@@ -40,15 +47,12 @@ else
   echo "FAIL: search args were: $(paste -sd' ' "$STUB_ARGS")"; fails=1
 fi
 # The section is shown once per session; the search runs on every filing,
-# since its matches belong to the ticket being filed (controller ruling on
-# #1412, citing #1409 story 6).
+# since its matches belong to the ticket being filed (#1409 story 6, and its
+# "the hook runs the open-issue search for the same component and returns the
+# matches").
 got=$(context "$hook" s1 'gh issue create --repo caneff/agent-skills --title "merge-cleanup: another" --body x')
 expect_has "second filing in the session still lists the matches" "$got" "#1365 merge-cleanup: repo-declared discardable paths"
-if [[ "$got" == *"${section[0]}"* ]]; then
-  echo "FAIL: second filing repeated the section"; fails=1
-else
-  echo "PASS: second filing does not repeat the section"
-fi
+expect_lacks "second filing does not repeat the section" "$got" "${section[0]}"
 got=$(STUB_ERR="HTTP 502" context "$hook" s1 'gh issue create --repo caneff/agent-skills --title "merge-cleanup: third" --body x')
 expect_has "failed search on a later filing is reported as failed" "$got" "failed" "HTTP 502"
 
@@ -65,12 +69,22 @@ expect_has "extraction: no match is said, with the space searched" \
 # A failed search never reads as "no duplicates" (defect class 1).
 got=$(STUB_ERR="HTTP 502" context "$hook" s4 'gh issue create --repo caneff/agent-skills --title "teach-lib: x" --body y')
 expect_has "extraction: failed search is reported as failed" "$got" "${section[@]}" "failed" "HTTP 502"
-if [[ "$got" == *"No open issue"* ]]; then echo "FAIL: failed search read as no match"; fails=1; fi
+expect_lacks "failed search is not read as no match" "$got" "No open issue"
+
+# gh's stderr is not a result: a warning on a good search is not a match,
+# and a quiet failure is not called a timeout.
+got=$(STUB_WARN="warning: token expires soon" STUB_ISSUES="#7 teach-lib: y" \
+      context "$hook" w1 'gh issue create --repo caneff/agent-skills --title "teach-lib: x" --body y')
+expect_has "a good search lists its matches" "$got" "#7 teach-lib: y"
+expect_lacks "a stderr warning is not listed as a match" "$got" "token expires soon"
+got=$(STUB_FAIL_QUIET=1 context "$hook" w2 'gh issue create --repo caneff/agent-skills --title "teach-lib: x" --body y')
+expect_has "a quiet failure names its exit status" "$got" "failed" "exited 4"
+expect_lacks "a quiet failure is not called a timeout" "$got" "timed out"
 
 rm -f "$STUB_ARGS"
 got=$(context "$hook" s5 "gh issue create --web")
 expect_has "extraction: no title: says no search ran" "$got" "${section[@]}" "no search ran"
-[ -e "$STUB_ARGS" ] && { echo "FAIL: gh ran with no component"; fails=1; } || echo "PASS: gh not run with no component"
+expect_no_gh "gh not run with no component"
 
 expect_none "unrelated command" "$(context "$hook" s6 "gh issue list --label backlog")"
 expect_none "trigger in a grep pattern" "$(context "$hook" s6 "rg 'x; gh issue create' file-ticket/")"
@@ -93,10 +107,16 @@ searched_repo caneff/other
 got=$(RUN_CWD="$tmp/other" context "$hook" r2 'gh issue create --title "other-thing: y" --body "see -R foo/bar"')
 expect_has "extraction: a -R inside the body is text" "$got" "${section[@]}" "in caneff/other"
 searched_repo caneff/other
+got=$(RUN_CWD="$tmp/plain" context "$hook" r5 'gh issue create --title "other-thing: y" --body "see -R foo/bar" --repo caneff/other')
+expect_has "extraction: the real --repo wins over a -R in the body" "$got" "in caneff/other"
+searched_repo caneff/other
+got=$(RUN_CWD="$tmp/plain" context "$hook" r6 'GH_REPO=caneff/other gh issue create --title "other-thing: y" --body z')
+expect_has "extraction: a GH_REPO prefix names the repo" "$got" "in caneff/other"
+searched_repo caneff/other
 rm -f "$STUB_ARGS"
 got=$(RUN_CWD="$tmp/plain" context "$hook" r3 'gh issue create --title "other-thing: y" --body z')
 expect_has "no GitHub origin: says no search ran" "$got" "No repo could be read"
-[ -e "$STUB_ARGS" ] && { echo "FAIL: gh ran with no repo"; fails=1; } || echo "PASS: gh not run with no repo"
+expect_no_gh "gh not run with no repo"
 got=$(context "$hook" r4 "cd \"$tmp/other\" && gh issue create --title 'other-thing: y' --body z")
 expect_has "a quoted cd path is not guessed at" "$got" "No repo could be read"
 

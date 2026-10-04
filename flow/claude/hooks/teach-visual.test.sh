@@ -15,9 +15,7 @@ reading=(" § Reading a rendered page yourself" "Bare paths work — it prefixes
 
 got=$(context "$hook" s1 "zed flow/claude/SHELL-SAFETY.md:12")
 expect_has "extraction: zed returns § Showing me a file" "$got" "${showing[@]}"
-if [[ "$got" == *"${reading[0]}"* ]]; then
-  echo "FAIL: zed also returned § Reading a rendered page yourself"; fails=1
-fi
+expect_lacks "zed does not also return § Reading a rendered page yourself" "$got" "${reading[0]}"
 expect_none "second zed in the same session" "$(context "$hook" s1 "zed README.md")"
 got=$(context "$hook" s1 "shot-scraper accessibility report.html")
 expect_has "extraction: shot-scraper returns § Reading a rendered page yourself" "$got" "${reading[@]}"

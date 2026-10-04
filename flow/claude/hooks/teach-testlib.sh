@@ -12,7 +12,8 @@ export XDG_CACHE_HOME="$tmp/cache"
 fails=0
 
 # context <hook> <session id> <command> -> the additionalContext printed, or
-# nothing. RUN_CWD sets the session cwd the hook is told about (default $PWD);
+# nothing. RUN_CWD sets the session cwd the hook is told about (default an
+# empty scratch dir, so no case reads the origin of the checkout running it);
 # RUN_AGENT adds the agent_id a subagent's tool call carries.
 # A non-zero exit or output that is not the PreToolUse shape is a failure of
 # its own, reported here, so an empty answer always means the hook chose to
@@ -20,7 +21,7 @@ fails=0
 context() {
   local hook=$1 session=$2 cmd=$3 out rc
   out=$(printf '%s' "$cmd" \
-        | jq -Rs --arg s "$session" --arg cwd "${RUN_CWD:-$PWD}" --arg a "${RUN_AGENT:-}" \
+        | jq -Rs --arg s "$session" --arg cwd "${RUN_CWD:-$tmp}" --arg a "${RUN_AGENT:-}" \
             '{session_id:$s,cwd:$cwd,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:.}}
              + (if $a == "" then {} else {agent_id:$a} end)' \
         | PATH="${STUB_PATH:-}${STUB_PATH:+:}$PATH" bash "$hook" 2>"$tmp/stderr")
@@ -41,6 +42,18 @@ expect_has() {
   for want in "$@"; do
     if [[ "$got" != *"$want"* ]]; then
       echo "FAIL: $name — context lacks '$want'"; echo "  got: ${got:0:400}"; fails=1; return
+    fi
+  done
+  echo "PASS: $name"
+}
+
+# expect_lacks <name> <context> <substring>...: no substring is present.
+expect_lacks() {
+  local name=$1 got=$2 bad
+  shift 2
+  for bad in "$@"; do
+    if [[ "$got" == *"$bad"* ]]; then
+      echo "FAIL: $name — context holds '$bad'"; echo "  got: ${got:0:400}"; fails=1; return
     fi
   done
   echo "PASS: $name"

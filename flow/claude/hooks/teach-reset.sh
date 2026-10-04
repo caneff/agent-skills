@@ -7,7 +7,11 @@
 # Shared mechanics: teach-lib.sh.
 
 # shellcheck source=teach-lib.sh
-. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/teach-lib.sh"
+TEACH_EVENT=SessionStart
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/teach-lib.sh" 2>/dev/null || {
+  printf '%s\n' '{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "Teaching hook error: teach-lib.sh is missing beside teach-reset.sh, so it cannot teach."}}'
+  exit 0
+}
 
 [ "$TEACH_SOURCE" = compact ] || exit 0
 while IFS= read -r record; do rm -f -- "$record"; done < <(session_records)
