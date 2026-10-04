@@ -8,7 +8,7 @@ disable-model-invocation: true
 starts `drain`. What a run does, picks, merges and refuses is
 the docstring of `drain/drain.py` (#1403); this skill restates none of it.
 
-`/drain status` starts nothing: it is `## Status`. So is a `/drain` with
+`/drain status` starts nothing: it is the `## Status` section. So is a `/drain` with
 no flags while `job-run --status drain-<repo-short>` says `alive` (that run's
 batch is what it lists); with flags while one is alive, `job-run` refuses a
 second run, and the refusal is reported as it stands. Neither case runs the
