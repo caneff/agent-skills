@@ -336,6 +336,37 @@ pub fn quiet_ok_bounded(program: &str, args: &[&str], timeout: Duration) -> Resu
     }
 }
 
+/// [`quiet_ok_bounded`] for a caller that reads the exit code itself
+/// (`git ls-remote --exit-code`, whose 2 is "no such ref"). `Ok(None)` is a
+/// child killed by a signal it was not sent here.
+pub fn quiet_code_bounded(program: &str, args: &[&str], timeout: Duration) -> Result<Option<i32>, String> {
+    let run = run_quiet(program, args, timeout)?;
+    match run.incomplete() {
+        Some(err) => Err(err),
+        None => Ok(run.status.code()),
+    }
+}
+
+/// [`status`], bounded: stdin, stderr and (unless `drop_stdout`) stdout are
+/// this process's own, so the operator sees the command's output as it runs,
+/// and the child's process group is killed past `timeout`. Its own group
+/// means a command reading the terminal (a credential prompt) is stopped
+/// rather than answered, and so fails at the bound. `Err` names the command
+/// and why: it timed out, or it could not be spawned.
+pub fn status_bounded(program: &str, args: &[&str], drop_stdout: bool, timeout: Duration) -> Result<bool, String> {
+    let command = format!("{program} {}", args.join(" "));
+    let mut cmd = Command::new(program);
+    cmd.args(args).process_group(0);
+    if drop_stdout {
+        cmd.stdout(Stdio::null());
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("{command}: {e}"))?;
+    match wait_bounded(&mut child, timeout).map_err(|e| format!("{command}: {e}"))? {
+        (_, true) => Err(format!("{command} timed out after {timeout:?}")),
+        (status, false) => Ok(status.success()),
+    }
+}
+
 fn trim_trailing_newlines(s: &mut String) {
     // Bash's `$(...)` strips trailing newlines; match that so callers that
     // parse or compare the captured text see what the bash port saw.

@@ -38,7 +38,7 @@ const PROSE_TOKENS: &[&str] = &["node.js"];
 /// Basenames that are code wherever they sit, whatever their extension: a
 /// skill's body changes what every later session does, and the rest are
 /// extensionless build and run files.
-const CODE_BASENAMES: &[&str] = &["skill.md", "makefile", "dockerfile", "justfile", "rakefile", "gemfile", "procfile"];
+const CODE_BASENAMES: &[&str] = &["skill.md", "makefile", "dockerfile", "justfile", "rakefile", "gemfile", "procfile", "build.gradle"];
 
 /// The first path-shaped token in `body` that is code, if any. A token is
 /// path-shaped when it holds only `/ - _ .` besides letters and digits;
@@ -88,6 +88,10 @@ mod tests {
         assert!(cases.iter().any(|c| c.get("target").is_some_and(|t| t.is_string())), "fixture has no code case");
         for c in &cases {
             let body = c["body"].as_str().expect("case body is a string");
+            // `why` names the rule a case pins, so the next editor can tell
+            // what deleting or flipping it would stop guarding.
+            let why = c.get("why").and_then(|w| w.as_str()).unwrap_or_default();
+            assert!(!why.trim().is_empty(), "case {body:?} has no `why` naming the rule it pins");
             // `target` is required and is a string or null: a missing or mistyped one is not "expects prose".
             let want = match c.get("target") {
                 Some(serde_json::Value::Null) => None,

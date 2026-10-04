@@ -66,7 +66,7 @@ BODY_CODE_EXTENSIONS = {
 }
 BODY_CODE_DIRS = {"bin", "sbin", "hooks", ".githooks", ".husky"}
 BODY_PROSE_TOKENS = {"node.js"}
-BODY_CODE_BASENAMES = {"skill.md", "makefile", "dockerfile", "justfile", "rakefile", "gemfile", "procfile"}
+BODY_CODE_BASENAMES = {"skill.md", "makefile", "dockerfile", "justfile", "rakefile", "gemfile", "procfile", "build.gradle"}
 _PATH_CHARS = "/-_."
 
 
