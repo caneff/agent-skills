@@ -291,10 +291,11 @@ def agent_status(name):
     has no such agent. Any other herdr failure stops the run: a herdr that cannot
     be asked is not a worker that is gone."""
     out = subprocess.run(["herdr", "agent", "get", name], capture_output=True, text=True)
-    try:
-        body = json.loads(out.stdout)
-    except ValueError:
-        body = {}
+    body = {}
+    for text in (out.stdout, out.stderr):  # herdr prints a result on stdout and an error on stderr
+        with contextlib.suppress(ValueError):
+            body = json.loads(text)
+            break
     if out.returncode == 0 and "result" in body:
         return body["result"]["agent"]["agent_status"]
     if body.get("error", {}).get("code") == "agent_not_found":

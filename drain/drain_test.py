@@ -182,7 +182,7 @@ if args[:2] == ["agent", "get"]:
     if env.get("HERDR_DOWN"):
         sys.stderr.write("herdr: no server\n"); sys.exit(1)
     if env.get("HERDR_GONE"):
-        print(json.dumps({"error": {"code": "agent_not_found", "message": "not found"}})); sys.exit(1)
+        sys.stderr.write(json.dumps({"error": {"code": "agent_not_found", "message": "not found"}}) + "\n"); sys.exit(1)
     counter = env["HERDR_LOG"] + ".polls"
     seen = int(open(counter).read()) if os.path.exists(counter) else 0
     open(counter, "w").write(str(seen + 1))
