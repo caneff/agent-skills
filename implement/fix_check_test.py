@@ -35,7 +35,7 @@ Next steps:
 class World:
     """One repo, one branch `implement-5` with one commit past main."""
 
-    def __init__(self):
+    def __init__(self, author_date=None):
         self.tmp = tempfile.mkdtemp(prefix="fix-check-")
         self.home = os.path.join(self.tmp, "home")
         self.bin = os.path.join(self.tmp, "bin")
@@ -43,6 +43,8 @@ class World:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         self.env = {**env, **IDENT, "HOME": self.home,
                     "PATH": self.bin + os.pathsep + os.environ["PATH"]}
+        if author_date is not None:  # commits are authored then; a rebase still stamps its committer date now
+            self.env["GIT_AUTHOR_DATE"] = f"{int(author_date)} +0000"
         origin = os.path.join(self.tmp, "origin.git")
         self.git(self.tmp, "init", "-q", "--bare", "-b", "main", origin)
         self.primary = os.path.join(self.tmp, "skills-repo")
@@ -137,7 +139,38 @@ def case(name, world, want_code, needle):
         print(f"PASS: {name}")
 
 
+def rebased_after_review():
+    """#1419: a rebase after the review wave moves every committer date past the sidecars, and
+    the sidecars must still read as this dispatch's: the branch is dated by author time."""
+    w = World(author_date=time.time() - 3600)
+    try:
+        w.findings(standards=["S1"])
+        written = time.time() - 1800  # after the commits were authored, before the rebase
+        for name in os.listdir(w.reviews):
+            os.utime(os.path.join(w.reviews, name), (written, written))
+        w.commit(w.primary, "moved-on")
+        w.git(w.primary, "push", "-q", "origin", "main")
+        w.git(w.work, "fetch", "-q", "origin")
+        w.git(w.work, "rebase", "-q", "origin/main")
+        committed = int(w.git(w.work, "log", "origin/main..HEAD", "--format=%ct", "-1"))
+        if committed <= written:
+            FAILS.append("FAIL: setup — the rebase did not move the committer date past the sidecars")
+            return
+        new_fix = w.git(w.work, "log", "origin/main..HEAD", "--format=%H", "--grep=^fix$")
+        w.dispositions(fixed("S1", new_fix))
+        os.utime(os.path.join(w.reviews, "dispositions-5.jsonl"), (written + 60, written + 60))
+        case("a rebase after the review wave leaves the sidecars fresh", w, 0, "1 findings")
+        old = time.time() - 10 * 86400
+        for name in ("findings-standards-5.jsonl", "findings-standards-5.done"):
+            os.utime(os.path.join(w.reviews, name), (old, old))
+        case("sidecars older than the branch's authored commits are still an earlier dispatch's", w, 1,
+             "findings-standards-5.jsonl is older than the first commit")
+    finally:
+        w.close()
+
+
 def main():
+    rebased_after_review()
     w = World()
     try:
         case("nothing in the cache: the reviewers never ran", w, 1, "findings-standards-5.jsonl is missing")

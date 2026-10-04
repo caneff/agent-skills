@@ -22,7 +22,7 @@ mechanically, what the removed verification pass used to grade:
   `findings-<axis>-<n>.done`, written after the sidecar was complete: an empty
   file is also what a reviewer that crashed leaves, and a truncated one is
   not told from a whole one without it (defect class 1);
-- every file of the review is newer than the branch's first commit, so a
+- every file of the review is newer than the branch's first authored commit, so a
   leftover of an earlier dispatch of the same ticket is not read as this one.
 
 A review the ledger records as skipped (`review_ledger.py append --type
@@ -106,13 +106,19 @@ def skipped_types(reviews, n):
 
 class Branch:
     """The branch under review: its commits past the default branch, their
-    start time and the tickets they close."""
+    start time and the tickets they close.
+
+    The start is the earliest author time, not committer time: a rebase after
+    the review wave rewrites every committer date to now, which would read each
+    sidecar as older than the branch (#1419). The cost: a redispatch that
+    reuses commits authored before its predecessor's sidecars cannot tell them
+    from its own; a reused commit's author time is the earlier dispatch's."""
 
     def __init__(self, name):
         self.name = name
         self.base = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
         self.commits = set(git("rev-list", f"{self.base}..{name}").split())
-        log = git("log", f"{self.base}..{name}", "--format=%ct%n%B%n==end==").split("==end==")
+        log = git("log", f"{self.base}..{name}", "--format=%at%n%B%n==end==").split("==end==")
         stamps = [int(chunk.strip().split("\n", 1)[0]) for chunk in log if chunk.strip()]
         self.started = min(stamps) if stamps else None
         self.closes = {int(m.group(1)) for m in CLOSES.finditer("\n".join(log))}
