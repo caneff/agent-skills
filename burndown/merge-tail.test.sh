@@ -40,12 +40,12 @@ section() {
     inside { print }' "$tail_doc" | flatten
 }
 
-# Scoped to `### The merge` **step 5** — the step that runs cleanup, and the
+# Scoped to `### The merge` **step 4** — the step that runs cleanup, and the
 # step #454's controller was reading. The whole section is 200 lines long, so
 # a needle loose in it is satisfied by prose nowhere near the cleanup call.
-merge_step5="$(sed -n '/^###[[:space:]]*The merge[[:space:]]*$/,/^##[[:space:]]/p' "$implement" \
-  | sed -n '/^5\.[[:space:]]/,/^6\.[[:space:]]/{/^6\.[[:space:]]/d; p}' | flatten)"
-[ -n "$merge_step5" ] || { echo "FAIL: implement/SKILL.md § The merge has no step 5" >&2; exit 1; }
+merge_step4="$(sed -n '/^###[[:space:]]*The merge[[:space:]]*$/,/^##[[:space:]]/p' "$implement" \
+  | sed -n '/^4\.[[:space:]]/,/^5\.[[:space:]]/{/^5\.[[:space:]]/d; p}' | flatten)"
+[ -n "$merge_step4" ] || { echo "FAIL: implement/SKILL.md § The merge has no step 4" >&2; exit 1; }
 
 fail=0
 
@@ -160,10 +160,10 @@ check_in "$ordering" 'loop.py landing' 'references/merge-tail.md § Answer, then
 # runs cleanup. `/implement`'s § The merge is where the #454 controller was
 # reading, and it ordered check, Codex pass, merge, cleanup and said nothing
 # about answering the worker.
-check_in "$merge_step5" 'outstanding question' 'implement/SKILL.md § The merge step 5'
-check_in "$merge_step5" 'before cleanup' 'implement/SKILL.md § The merge step 5'
-check_in "$merge_step5" 'not merely before the merge' 'implement/SKILL.md § The merge step 5'
-check_in "$merge_step5" 'merge-tail.md' 'implement/SKILL.md § The merge step 5'
+check_in "$merge_step4" 'outstanding question' 'implement/SKILL.md § The merge step 4'
+check_in "$merge_step4" 'before cleanup' 'implement/SKILL.md § The merge step 4'
+check_in "$merge_step4" 'not merely before the merge' 'implement/SKILL.md § The merge step 4'
+check_in "$merge_step4" 'merge-tail.md' 'implement/SKILL.md § The merge step 4'
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS burndown/merge-tail.test.sh"

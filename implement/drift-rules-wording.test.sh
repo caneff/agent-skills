@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Guards #1252: three rules against drift a PR creates, each stated once in
-# implement/SKILL.md — reuse before writing (§ Build), the stale-reference
-# check (§ Before the PR), and the blocking kinds (§ Review, beside the
-# severity mapping and the reachability bar). multi-axis-code-review points
-# at the blocking kinds rather than restating them, and its verification
-# pass fails a blocking-kind finding left as `leftover`. Prose assertion over
-# the two SKILL.md files; stale_refs_test.py exercises the script.
+# Guards #1252, as #1401 left it: two rules against drift a PR creates, each
+# stated once in implement/SKILL.md — reuse before writing (§ Build) and the
+# stale-reference check (§ Before the PR). The third, the "blocking kinds"
+# (a second copy, a stale claim) that were fixed in the PR while other
+# findings could be left over, went with the leftover outcome: § Review now
+# fixes every valid finding, so a kind that decides fix-versus-leftover has
+# nothing to decide, and the test asserts the tag is gone from the three files
+# that carried it. Prose assertion; stale_refs_test.py exercises the script.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"
@@ -25,9 +26,8 @@ review="$(sed -n '/^### Review$/,/^### Before the PR$/p' "$skill" | flatten)"
 before="$(sed -n '/^### Before the PR$/,/^### The PR$/p' "$skill" | flatten)"
 whole="$(flatten <"$skill")"
 spawn="$(sed -n '/^### 4\. Spawn the three sub-agents in parallel$/,/^### 5\. Aggregate$/p' "$maxis" | flatten)"
-verify="$(sed -n '/^### 6\. The verification pass$/,/^## Why separate axes$/p' "$maxis" | flatten)"
 maxis_text="$(flatten <"$maxis")"
-for s in build review before spawn verify; do
+for s in build review before spawn; do
   [ -n "${!s}" ] || { echo "FAIL: could not extract section '$s'" >&2; exit 1; }
 done
 
@@ -56,56 +56,15 @@ check_in "§ Before the PR" "$before" 'top-level name it removed or renamed'
 check_in "§ Before the PR" "$before" 'Exit 2 is not a clean tree'
 check_once SKILL.md "$whole" 'stale_refs.py'
 
-# 3. The blocking kinds, beside the severity mapping and the reachability bar.
-check_in "§ Review" "$review" '**The blocking kinds.**'
-check_in "§ Review" "$review" 'added a second copy of existing code or data'
-check_in "§ Review" "$review" 'left a doc, docstring, comment or alias claiming a state the PR changed'
-check_in "§ Review" "$review" 'is fixed in this PR before merge'
-check_in "§ Review" "$review" "The adjacent-fix rule's size limit does not apply"
-check_in "§ Review" "$review" 'It is never `leftover`'
-check_in "§ Review" "$review" 'never `filed` unless the fix needs its own design'
-check_in "§ Review" "$review" 'plain `fixed` line, with no `scope`'
-check_once SKILL.md "$whole" '**The blocking kinds.**'
-check_in "§ Build" "$build" "§ Review's blocking kinds"
-# The bar still comes first: an unreachable finding is disputed whatever its kind.
-check_in "§ Review" "$review" 'applied after the reachability bar'
-# § Review's text orders them: mapping, bar, blocking kinds, adjacent-fix rule.
-order="$(grep -n -F -e '**The severity mapping.**' -e '**The reachability bar.**' \
-  -e '**The blocking kinds.**' -e '**The adjacent-fix rule.**' "$skill" | cut -d: -f2- | sed 's/^ *//' | cut -c1-24 | tr '\n' '|')"
-[ "$order" = '**The severity mapping.*|**The reachability bar.*|**The blocking kinds.** |**The adjacent-fix rule.|' ] ||
-  { echo "FAIL: § Review's four rules are out of order: $order" >&2; fail=1; }
-
-# Chris's ruling on PR #1263 (P1): the blocking kinds cover a Codex-pass
-# finding at merge as well as a round-1 one, and each Codex disposition site
-# points back at § Review instead of offering `leftover` unqualified.
-grep -qx '### The merge' "$skill" || { echo "FAIL: heading '### The merge' missing from SKILL.md" >&2; exit 1; }
-grep -q '^## Someone else' "$skill" || { echo "FAIL: heading '## Someone else' missing from SKILL.md" >&2; exit 1; }
-merge="$(sed -n '/^### The merge$/,/^## Someone else/p' "$skill" | flatten)"
-[ -n "$merge" ] || { echo "FAIL: could not extract section 'merge'" >&2; exit 1; }
-check_in "§ Review" "$review" 'or of any Codex pass at merge'
-check_in "§ The merge first pass" "$merge" "one of § Review's blocking kinds as that rule disposes of it, never \`leftover\`"
-check_in "§ The merge second pass" "$merge" "or is one of § Review's blocking kinds, goes to the worker"
-# The verification pass and the sidecar belong to round 1; a Codex-pass
-# blocking fix is checked where § The merge checks every Codex fix.
-check_in "§ Review" "$review" 'A round-1 blocking finding'"'"'s sidecar line is the plain `fixed` line'
-check_in "§ Review" "$review" "A Codex-pass one is checked by the next Codex pass or the controller's own read of the fix diff"
-
-# multi-axis-code-review points at the rule, and states neither kind itself.
-check_in "multi-axis-code-review § 4" "$spawn" "\`implement/SKILL.md\` § Review's blocking kinds"
-check_in "multi-axis-code-review § 4" "$spawn" '`blocking:`'
-# The standing brief every reviewer reads carries the tag, not only the
-# caller's prose (S1 on PR #1252's round 1).
+# 3. The blocking kinds are retired: every valid finding is fixed in the PR.
 reviewer="$(flatten <"$here/../flow/claude/agents/diff-reviewer.md")"
-check_in "diff-reviewer.md" "$reviewer" "\`implement/SKILL.md\` § Review's blocking kinds"
-check_in "diff-reviewer.md" "$reviewer" '`blocking:`'
-check_in "§ Review" "$review" 'opening its sidecar `title` with `blocking:`'
-check_in "§ Before the PR" "$before" 'Commit first'
-check_in "multi-axis-code-review § 6" "$verify" 'on any of five things:'
-check_in "multi-axis-code-review § 6" "$verify" "a finding of one of \`implement/SKILL.md\` § Review's blocking kinds"
-for phrase in 'second copy of existing code or data' 'claiming a state the PR changed'; do
-  case "$maxis_text" in *"$phrase"*)
-    echo "FAIL: multi-axis-code-review restates the blocking kinds ('$phrase'); point at implement instead" >&2; fail=1 ;;
+for pair in "implement/SKILL.md:$whole" "multi-axis-code-review/SKILL.md:$maxis_text" "diff-reviewer.md:$reviewer"; do
+  case "${pair#*:}" in
+    *"blocking kinds"*|*'`blocking:`'*)
+      echo "FAIL: ${pair%%:*} still names the blocking kinds, which #1401 retired" >&2; fail=1 ;;
   esac
 done
+check_in "§ Review" "$review" 'a valid finding is fixed in the PR the review covers'
+check_in "§ Before the PR" "$before" 'Commit first'
 [ "$fail" -eq 0 ] && echo "PASS $0"
 exit "$fail"

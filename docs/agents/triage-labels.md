@@ -17,4 +17,4 @@ Edit the right-hand column to match whatever vocabulary you actually use.
 
 ## Codex forcing label
 
-`needs-codex` is not a triage role. On any ticket of a clump, it forces the merge-time Codex adversarial pass (`implement/SKILL.md` § The merge step 3) on a PR whose non-test, non-Markdown churn is under the size threshold, which would otherwise skip it. It bypasses the size check only: the kill switch, the reserve ceiling and the usage cap still skip the pass.
+`needs-codex` is not a triage role. On any ticket of a clump, it forces the review wave's Codex adversarial pass (`implement/SKILL.md` § The Codex pass) on a PR whose non-test, non-Markdown churn is under the size threshold, which would otherwise skip it. It bypasses the size check only: the kill switch, the reserve ceiling and the usage cap still skip the pass.

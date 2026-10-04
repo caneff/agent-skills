@@ -5,8 +5,8 @@ as one diff range for a single Codex run.
     codex-audit-range.py --ledger PATH --repo R --mark SHA|DATE [--base REF]
 
 Run from a checkout of the repo. Reads the review ledger (`docs/research/review_ledger.py`) for
-gate skip rows of repo R whose skip reason is exactly `size` or `ceiling` (`SKILL.md` § The merge
-step 3): `codex-gate` only, since a later pass skipped at the ceiling follows a gate pass that ran.
+gate skip rows of repo R whose skip reason is exactly `size` or `ceiling` (`SKILL.md` § The Codex
+pass): `codex-gate` only, since a later pass skipped at the ceiling follows a gate pass that ran.
 Finds each skipped ticket's merge commit on `--base` (default `origin/HEAD`): a squash commit whose
 subject ends `(#<pr>)` and either names `(#<ticket>)` earlier in the subject or has a body line
 closing it. A ledger row carries no date, so "since the mark" is read off that merge commit: not an

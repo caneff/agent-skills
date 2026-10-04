@@ -350,3 +350,31 @@ with fake_repo({"a.py": 5}) as (cwd, env):
                        capture_output=True, text=True)
     assert p.returncode == 30 and p.stdout.startswith("size check failed: ") and "'gh'" in p.stdout, p.stdout
 print("ok size")
+
+# `--size --base <ref>` (#1401) answers only the size question, for the first
+# ablation: no usage read and no kill switch, since a small PR is small whether or not Codex is on.
+def run_size_only(changes, base="main", **repo):
+    with fake_repo(changes, **repo) as (cwd, env):
+        p = subprocess.run([sys.executable, GATE, "--size", "--base", base],
+                           cwd=cwd, env=env, capture_output=True, text=True)
+        called = os.path.exists(os.path.join(env["HOME"], "codex-called"))
+        return p.returncode, p.stdout, called
+assert run_size_only({"a.py": 299}) == (40, "under size threshold (299 < 300)\n", False)
+assert run_size_only({"a.py": 300}) == (0, "at or above size threshold (300 >= 300)\n", False)
+# The kill switch and the usage ceiling answer a launch, not a size: both still say large.
+assert run_size_only({"a.py": 5000}, switch=True)[0] == 0
+assert run_size_only({"a.py": 5000}, pct=99)[0] == 0
+assert run_size_only({"a.py": 5}, switch=True)[0] == 40
+# No usage read even from a stale cache, which would run the fake `codex`.
+assert run_size_only({"a.py": 5000}, stale=True) == (0, "at or above size threshold (5000 >= 300)\n", False)
+# The forcing label does not make a small PR large (no ticket is read): the ablation measures size,
+# not Codex's reach.
+assert run_size_only({"a.py": 5}, labels={"1": ["needs-codex"]})[0] == 40
+# Unmeasurable is unknown (30), never small.
+status, out, _ = run_size_only({"a.py": 5}, base="nope")
+assert status == 30 and out.startswith("size check failed:"), (status, out)
+for bad in (["--size"], ["--size", "--audit"], ["--size", "--base"], ["--size", "--base", "main", "--tickets", "1"],
+            ["--size", "--percent"]):
+    status, out = run(cache(5), *bad)
+    assert status == 30 and out.startswith("usage: codex-usage-gate.py"), (bad, status, out)
+print("ok size-only")

@@ -7,22 +7,16 @@
     python3 burndown/runfile.py land     <run-id> --clump 901 --sha <sha>
     python3 burndown/runfile.py close    <run-id> --clump 901 --reason <text>
     python3 burndown/runfile.py pr-up    <run-id> --clump 901 --pr 950 | --clear
-    python3 burndown/runfile.py leftover <run-id> --clump 901 --pr 950 --from <dispositions sidecar> --pr-body <path>
-    python3 burndown/runfile.py check    --from <dispositions sidecar> --pr-body <path>
-    python3 burndown/runfile.py sweep-check --ticket <sweep ticket body> --pr-body <path> --from <dispositions sidecar>
-    python3 burndown/runfile.py round-1-empty --reviews-dir <dir> <ticket>
     python3 burndown/runfile.py show     <run-id>
     python3 burndown/runfile.py resume   <run-id> --live a,b [--controller <agent>]
 
 It holds the run id, the slot budget, the controller's herdr agent name, the
 **target repo** (the absolute path of the primary checkout of the repo the
 run works on, which `loop.py dispatch` prints into every `implement-dispatch`
-command and `sweep.py counts --repo` is checked against), and one entry per
+command and `counts.py --repo` is checked against), and one entry per
 clump — its ticket list, its workspace, its worker's **herdr agent name**, and
 its squash sha once it lands — or, for a clump that closed with no landing
-of its own, the reason it closed. It also holds the run's **leftovers**, copied at
-landing from each PR's dispositions sidecar (`implement/SKILL.md` § Review)
-rather than transcribed by hand. `resume`
+of its own, the reason it closed. `resume`
 reads it back and splits the clumps against the agents that are alive: the
 live workers to re-announce the controller to, the vanished ones to
 reconcile by hand, the landings already banked, and the clumps closed with no
@@ -43,11 +37,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import frontier  # noqa: E402
 
 CACHE_DIR = "~/.cache/burndown"
-# The one form of the PR-body fetch `leftover --pr-body` reads.
-_FETCH_BODY = "gh pr view <pr> --repo <owner/name> --json body --jq .body"
 # How long a writer waits for the run file's lock before refusing, matching the
 # `flock -w 30` the dispatch lane already waits with.
 LOCK_TIMEOUT = 30.0
@@ -85,21 +76,18 @@ _JOB_STATES = ("running", "none", "done")
 # What a clump registered for the first time records: its worker has launched
 # nothing yet (#1311).
 NEW_CLUMP_JOB = {"state": "none", "cores": 0}
-# The keys a `leftover` sidecar line carries.
-_SIDECAR_LEFTOVER_KEYS = ("id", "file", "title", "severity", "text")
-# What one leftover entry holds: the clump that carried the finding, the
-# full ticket list that clump closes, the PR it landed on, and the sidecar
-# line's own fields untouched.
-_LEFTOVER_KEYS = ("clump", "tickets", "pr", *_SIDECAR_LEFTOVER_KEYS)
-# The five outcomes `implement/SKILL.md` § Review's dispositions sidecar can
-# carry; why any other is refused, not skipped: `references/run-file.md`
-# § Leftovers.
-_SIDECAR_OUTCOMES = ("fixed", "disputed", "filed", "handed-back", "leftover")
+# The outcomes `implement/SKILL.md` § Review's dispositions sidecar can carry;
+# why any other is refused, not skipped: `references/run-file.md`. The LEGACY
+# ones are what pre-#1401 workers wrote: `counts.py` still reads them, so a burn
+# that was running when the review changed can close, and the merge check never
+# accepts them.
+SIDECAR_OUTCOMES = ("fixed", "moved", "disputed")
+LEGACY_OUTCOMES = ("filed", "handed-back", "leftover")
 
 
 def clean_git_env():
     # GIT_DIR and friends would repoint git at another repo whatever the path
-    # says. The scrub `checkout_top` and `sweep.default_reviews_dir` share;
+    # says. The scrub `checkout_top` and `counts.default_reviews_dir` share;
     # `closure.git_listing` has its own, wider one.
     return {k: v for k, v in os.environ.items()
             if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR")}
@@ -131,10 +119,10 @@ def checkout_top(where):
 
 def target_repo(run):
     """The checkout a run targets, or a `RunFileError` when its run file names
-    none. A run file from before the field loads (as `job` and `leftovers`
-    do), so the refusal is here, at each reader that needs the answer: a
-    missing target read as "no check needed" is a `--repo`-less command
-    aimed at whatever repo the cwd happens to be."""
+    none. A run file from before the field loads (as `job` does), so the
+    refusal is here, at each reader that needs the answer: a missing target
+    read as "no check needed" is a `--repo`-less command aimed at whatever
+    repo the cwd happens to be."""
     if run.get("repo") is None:
         raise RunFileError(
             f"run {run['run_id']} names no target repo — it was started "
@@ -341,13 +329,6 @@ def load(run_id, root=None):
             if entry["landed"] is not None and closed is not None:
                 raise RunFileError(
                     f"has clump #{entry['tickets'][0]} both landed and closed")
-        # Filled in rather than demanded, the same as `job` above: a run file
-        # written before leftovers existed is still that controller's run.
-        leftovers = run.get("leftovers", [])
-        if not isinstance(leftovers, list):
-            raise RunFileError(
-                f"holds leftovers as {type(leftovers).__name__}, not a list")
-        run["leftovers"] = [leftover_record(item) for item in leftovers]
         # Filled in with `None` the same way; `target_repo` refuses it.
         repo = run.get("repo")
         if repo is not None and (not isinstance(repo, str)
@@ -365,7 +346,7 @@ def start(run_id, slots=DEFAULT_SLOTS, controller=None, root=None, repo=None):
     if repo is None:
         raise RunFileError(
             "start needs --repo <checkout>: the run's target repo, which "
-            "dispatch and the sweep's counts are checked against")
+            "dispatch and the closing counts are checked against")
     repo = checkout_top(repo)
     if controller is not None:
         controller = named(controller, "herdr agent name")
@@ -376,7 +357,7 @@ def start(run_id, slots=DEFAULT_SLOTS, controller=None, root=None, repo=None):
                 f"run {run_id} already has a file at {target} — resume reads "
                 "it, and a second start would wipe it")
         run = {"run_id": run_id, "slots": slots, "controller": controller,
-               "repo": repo, "clumps": [], "leftovers": []}
+               "repo": repo, "clumps": []}
         save(run, root)
     return run
 
@@ -433,46 +414,15 @@ def pr_number(value):
     return positive_int(value, "PR number")
 
 
-def leftover_field(value, what):
-    """A leftover's id, file, title, severity or text: a non-blank string
-    with no line break (a CommonMark line ends at LF or a lone CR) — the
-    same hygiene `dispositions_fixture_test.py` holds the sidecar line to.
-    `render` prints one line per leftover, and an embedded break would split
-    that line in two."""
-    if (not isinstance(value, str) or not value.strip()
-            or "\n" in value or "\r" in value):
-        raise RunFileError(f"not a {what}: {value!r}")
-    return value
-
-
-def leftover_record(value):
-    """A leftover as the run file holds it: the clump and the full ticket
-    list it closes, the PR it landed on, and the sidecar line's own `id`,
-    `file`, `title`, `severity` and `text`, each checked."""
-    if not isinstance(value, dict):
-        raise RunFileError(f"not a leftover: {value!r}")
-    missing = [key for key in _LEFTOVER_KEYS if key not in value]
-    if missing:
-        raise RunFileError(f"a leftover is missing {', '.join(missing)}")
-    return {
-        "clump": positive_int(value["clump"], "clump ticket"),
-        "tickets": ticket_numbers(value["tickets"]),
-        "pr": pr_number(value["pr"]),
-        "id": leftover_field(value["id"], "finding id"),
-        "file": leftover_field(value["file"], "file"),
-        "title": leftover_field(value["title"], "title"),
-        "severity": leftover_field(value["severity"], "severity"),
-        "text": leftover_field(value["text"], "finding text"),
-    }
-
-
-def read_dispositions(sidecar_path):
+def read_dispositions(sidecar_path, legacy=False):
     """Every line of a dispositions sidecar (`implement/SKILL.md` § Review),
     in order, as `(line number, object)`. A line that is not a JSON object
-    with one of the five sidecar outcomes is refused by file and line — why
-    it is not skipped: `references/run-file.md` § Leftovers. So is a second
-    line carrying an id an earlier line already used (#1124): every reader
-    joins on the id, and one of the two would be dropped or counted twice."""
+    with one of the three sidecar outcomes is refused by file and line, and
+    so is a second line carrying an id an earlier line already used (#1124):
+    every reader joins on the id, and one of the two would be dropped or
+    counted twice. Why a bad line is refused and not skipped:
+    `references/run-file.md` § Dispositions and counts. `legacy` also accepts
+    the pre-#1401 outcomes, for `counts.py`."""
     try:
         with open(sidecar_path) as fh:
             raw_lines = fh.readlines()
@@ -491,11 +441,12 @@ def read_dispositions(sidecar_path):
             raise RunFileError(
                 f"{sidecar_path}:{n} is not readable JSON: {exc}") from exc
         outcome = obj.get("outcome") if isinstance(obj, dict) else None
-        if outcome not in _SIDECAR_OUTCOMES:
+        allowed = SIDECAR_OUTCOMES + (LEGACY_OUTCOMES if legacy else ())
+        if outcome not in allowed:
             raise RunFileError(
                 f"{sidecar_path}:{n} is not a dispositions sidecar line — "
                 f"its outcome is {outcome!r}, not one of "
-                f"{', '.join(_SIDECAR_OUTCOMES)}")
+                f"{', '.join(allowed)}")
         fid = obj.get("id")
         if not isinstance(fid, str) or not fid.strip():
             raise RunFileError(
@@ -510,425 +461,9 @@ def read_dispositions(sidecar_path):
     return out
 
 
-def read_leftover_lines(sidecar_path):
-    """Every `leftover` line of a dispositions sidecar, in order; the other
-    outcomes are skipped (`references/run-file.md` § Leftovers)."""
-    out = []
-    for n, obj in read_dispositions(sidecar_path):
-        if obj["outcome"] != "leftover":
-            continue
-        missing = [key for key in _SIDECAR_LEFTOVER_KEYS if key not in obj]
-        if missing:
-            raise RunFileError(
-                f"{sidecar_path}:{n} is a leftover missing "
-                f"{', '.join(missing)}")
-        out.append(obj)
-    return out
-
-
-# How a PR body's Decisions made cites a finding (`implement/SKILL.md`
-# § The PR): ids leading a list item, grouped by commas or "and", or one
-# named as `sidecar <id>` anywhere on the line.
-_OUTCOME_WORD = r"(fixed|disputed|filed|handed[- ]back|leftover)"
-_ID = r"[A-Za-z][A-Za-z0-9-]*[0-9][A-Za-z0-9]*"
-_LIST_MARKER = re.compile(r"\s*(?:(?:[-*+]|\d+[.)])\s+)?")
-# A sweep PR's controller cites an id file-qualified (`**e2e/scenarios.mjs
-# S8**`, #1213): a path token before the id, optionally `:<line>` or `#L<line>`.
-# The token carries a `/`, or is a bare file name in backticks: a dotted word
-# (`Node.js`, `v1.2`) is prose.
-_FILE_QUALIFIER = (r"(?P<file>[\w.\-/]*/[\w.\-/]*|[\w.\-/]+(?=`))"
-                   r"(?::\d+|#L\d+)?[*_`]*\s+[*_`]*")
-_FILE_QUALIFIER = r"(?:" + _FILE_QUALIFIER + r")?"
-_LEAD_ID = re.compile(r"[*_`]*" + _FILE_QUALIFIER + r"(?P<id>" + _ID
-                      + r")[*_`]*(?![\w-])")
-_ID_SEPARATOR = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+|\s*/\s*")
-_TAIL_ID = re.compile(r"\bsidecar(?:\s+id)?:?\s+[*_`]*(" + _ID + r")",
-                      re.IGNORECASE)
-_HEADING = re.compile(r"(#{1,6})\s")
-_DECISIONS = re.compile(r"(#{1,6})\s+Decisions made\b", re.IGNORECASE)
-
-
-def decisions_made(body_lines):
-    """The `(line number, text)` lines of the body's Decisions made section,
-    or `None` when it has none."""
-    out = None
-    for n, line in enumerate(body_lines, start=1):
-        heading = _HEADING.match(line)
-        if out is not None and heading and len(heading.group(1)) <= level:
-            break
-        if out is not None:
-            out.append((n, line))
-        elif _DECISIONS.match(line):
-            out, level = [], len(heading.group(1))
-    return out
-
-
-def _cites(line):
-    """The `(file or None, id)` pairs the leading ids of a Decisions made
-    line cite, and the position where the text after them starts."""
-    pos = _LIST_MARKER.match(line).end()
-    cites = []
-    while True:
-        token = _LEAD_ID.match(line, pos)
-        if token is None:
-            break
-        cites.append((token.group("file"), token.group("id")))
-        pos = token.end()
-        sep = _ID_SEPARATOR.match(line, pos)
-        if sep is None or _LEAD_ID.match(line, sep.end()) is None:
-            break
-        pos = sep.end()
-    return cites, pos
-
-
-def cited_ids(line):
-    """`(ids, rest, cites)` of a Decisions made line: the ids it cites, the
-    text after the leading ones, and the `(file or None, id)` pairs of the
-    leading ones. `- S1, P2 and C1: fixed` cites all three. A file-qualified
-    id (`**e2e/scenarios.mjs S8**`) cites the id alone; `cites` keeps its
-    file. `ids` lists the leading ids first, then the `sidecar <id>` tail
-    ids, so `ids[len(cites):]` is the tail."""
-    cites, pos = _cites(line)
-    ids = [fid for _, fid in cites]
-    ids += [m.group(1) for m in _TAIL_ID.finditer(line)]
-    return ids, line[pos:], cites
-
-
-def qualified_id(file, fid):
-    """The id a sweep item is recorded under, sidecar and body both:
-    `<file> <id>`. `fid` alone repeats across a sweep's source PRs."""
-    return f"{file} {fid}"
-
-
-def split_qualified(key):
-    """`(file or None, id)` of a finding id: the inverse of `qualified_id`.
-    An id never holds a space, so the last one splits a `<file> <id>`."""
-    file, _, fid = key.rpartition(" ")
-    return (file or None), fid
-
-
-def stated_outcome(rest):
-    """The outcome a line states outright: the disposition word opening the
-    text after its first colon outside parentheses, as in `S1 (hard):
-    fixed`. `None` when that word is something else."""
-    depth = 0
-    for i, ch in enumerate(rest):
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth = max(0, depth - 1)
-        elif ch == ":" and depth == 0:
-            word = re.match(r"\s*[*_`]*" + _OUTCOME_WORD + r"\b", rest[i + 1:],
-                            re.IGNORECASE)
-            return word and normal_outcome(word.group(1))
-    return None
-
-
-def normal_outcome(word):
-    return word.lower().replace(" ", "-")
-
-
-def body_records(body_lines):
-    """Every finding id Decisions made records, mapped to its records in
-    order: `(line number, stated outcome or None, every outcome word on the
-    line)`. A line naming an id with no outcome word at all records
-    nothing."""
-    records = {}
-    for n, line in decisions_made(body_lines) or []:
-        ids, rest, cites = cited_ids(line)
-        words = {normal_outcome(w) for w in
-                 re.findall(r"\b" + _OUTCOME_WORD + r"\b", rest, re.IGNORECASE)}
-        if ids and words:
-            # A file-qualified citation is recorded under its `<file> <id>`
-            # as well as the bare id: a sweep item's sidecar line is keyed
-            # by the qualified form, since a bare id repeats across files.
-            keys = ids + [qualified_id(file, fid) for file, fid in cites
-                          if file]
-            for key in keys:
-                records.setdefault(key, []).append(
-                    (n, stated_outcome(rest), words))
-    return records
-
-
-def refuse_reused_ids(body_path, records, held):
-    """A finding id the sidecar holds that the body records twice with two
-    different stated outcomes is an id two review rounds both used (#1177):
-    a round after the first prefixes its ids (`r2-S1`; the rule is in
-    `multi-axis-code-review/SKILL.md` § 4), so a bare id names one finding.
-    Only ids the sidecar holds are compared: a sweep PR's body cites sweep
-    items whose ids repeat across their source PRs (#1213), and those are
-    nobody's finding here."""
-    for fid, found in records.items():
-        if fid not in held:
-            continue
-        stated = {}
-        for line_n, outcome, _ in found:
-            if outcome is not None:
-                stated.setdefault(outcome, line_n)
-        if len(stated) > 1:
-            (one, one_n), (two, two_n) = list(stated.items())[:2]
-            raise RunFileError(
-                f"{body_path}:{one_n} and :{two_n} record {fid} "
-                f"more than once, as {one!r} and {two!r} — the "
-                "id was reused across review rounds, which is not a "
-                "stale sidecar. A review round after the first prefixes "
-                "its ids with the round (r2-S1, r2-C3), and a sweep PR's "
-                "own findings take r1-: rename the later round's ids in "
-                "the sidecar and the body. A changed disposition is edited "
-                "into its one line, not appended below the first")
-
-
-def refuse_disagreeing_pr_body(sidecar_path, body_path):
-    """A sidecar the PR body disagrees with predates a disposition change:
-    the controller's fix read or ruling reaches the PR body and the sidecar
-    in one step (`implement/SKILL.md` § The merge), so a line the body
-    contradicts is one that step never touched (#1085). The comparison is
-    by content, so a commit that changed no disposition refuses nothing
-    (#1147). A line that states its outcome must match the sidecar's; one
-    that only mentions outcome words disagrees when the sidecar's is not
-    among them. The refusals and their reasons: `references/run-file.md`
-    § Leftovers."""
-    try:
-        with open(body_path) as fh:
-            body_lines = fh.read().splitlines()
-    except OSError as exc:
-        raise RunFileError(
-            f"could not read the PR body {body_path}: {exc.strerror}"
-        ) from exc
-    if decisions_made(body_lines) is None:
-        raise RunFileError(
-            f"the PR body {body_path} has no Decisions made section — fetch "
-            f"it with `{_FETCH_BODY}`")
-    records = body_records(body_lines)
-    lines = read_dispositions(sidecar_path)
-    if lines and not any(obj["id"] in records for _, obj in lines):
-        raise RunFileError(
-            f"the PR body {body_path} cites none of {sidecar_path}'s finding "
-            "ids — is it this PR's body?")
-    held = {obj["id"] for _, obj in lines}
-    refuse_reused_ids(body_path, records, held)
-    for n, obj in lines:
-        if obj["id"] not in records:
-            continue
-        body_n, stated, words = records[obj["id"]][-1]
-        if stated is not None:
-            agrees = stated == obj["outcome"]
-            said = stated
-        else:
-            agrees = obj["outcome"] in words
-            said = " or ".join(sorted(words))
-        if not agrees:
-            raise RunFileError(
-                f"{body_path}:{body_n} records {obj['id']} as {said!r}, "
-                f"but {sidecar_path}:{n} says {obj['outcome']!r} — rewrite "
-                "the sidecar line; if the ruling genuinely divides a "
-                "controller-only finding (never a round-1 finding's own "
-                f"id), write it as two ids, one per half ({obj['id']}a, "
-                f"{obj['id']}b — implement/SKILL.md § Review's split "
-                "grammar), each with its own sidecar line; otherwise pass "
-                "--allow-stale")
-    # A sweep item's sidecar line is keyed `<file> <id>`; the bare id a
-    # qualified citation is also recorded under is not a second finding, so
-    # only a bare id the line cites itself is checked against a bare line, and
-    # the refusal for a qualified one names the qualified form (#1315). A bare
-    # cite matches only a bare line: one held only as `<file> <id>` is
-    # refused, naming those forms (#1343). Every such record is checked, not
-    # only the last, so a qualified cite beside it cannot stand in for it.
-    explicit = set()
-    for n, line in decisions_made(body_lines):
-        ids, _, cites = cited_ids(line)
-        explicit.update((fid, n) for fid in ids[len(cites):])
-        explicit.update((fid, n) for file, fid in cites if not file)
-    held_forms = {}
-    for h in held:
-        file, bare = split_qualified(h)
-        if file:
-            held_forms.setdefault(bare, []).append(h)
-    for fid, found in records.items():
-        file = split_qualified(fid)[0]
-        if fid in held:
-            continue
-        checked = found[-1:] if file else [r for r in found
-                                           if (fid, r[0]) in explicit]
-        for body_n, stated, _ in checked:
-            if stated != "leftover":
-                continue
-            if not file and fid in held_forms:
-                # The file in backticks, then the id: the one form
-                # `_FILE_QUALIFIER` reads for a root-level file too.
-                cite = " or ".join(
-                    f"`{split_qualified(h)[0]}` {fid}"
-                    for h in sorted(held_forms[fid]))
-                raise RunFileError(
-                    f"{body_path}:{body_n} records {fid} as a leftover, but "
-                    f"{sidecar_path} holds it only file-qualified — cite it "
-                    f"as {cite}, or, when it is a separate bare finding, "
-                    f"append its bare sidecar line")
-            keyed = " (its `id` is the `<file> <id>` form)" if file else ""
-            raise RunFileError(
-                f"{body_path}:{body_n} records {fid} as a leftover, but "
-                f"{sidecar_path} has no line for it — append it in § "
-                f"Review's leftover grammar{keyed}, or pass --allow-stale")
-
-
-_SWEEP_FILE = re.compile(r"##\s+(.+?)\s*$")
-_SWEEP_ITEM = re.compile(r"\s*[-*+]\s+\*\*(.+?)\*\*")
-
-
-def sweep_items(ticket_text):
-    """A sweep ticket's items as `<file> <id>`, in order: the grammar
-    `sweep.py render_body` emits — one `## <file>` section per file, one
-    `- **<id>**` bullet per item. A fenced block is skipped (`frontier.unfenced`), and the
-    `## Blocked by` declaration is not a file. A bullet that kept its own
-    file's prefix reads bare."""
-    items, file = [], None
-    for _, line in frontier.unfenced(ticket_text.splitlines()):
-        heading = _SWEEP_FILE.match(line)
-        if heading:
-            file = heading.group(1).strip("`")
-            if file.lower() == "blocked by":
-                file = None
-            continue
-        item = _SWEEP_ITEM.match(line)
-        if item and file:
-            bare = item.group(1).removeprefix(f"{file} ")
-            items.append(qualified_id(file, bare))
-    return items
-
-
-def refuse_unaccounted_sweep_items(ticket_path, body_path, sidecar_path):
-    """A sweep PR's worker accounts for every item of the sweep ticket: a
-    `leftover` line in the sidecar under its `<file> <id>`, or a
-    Decisions made line in the PR body stating it `fixed` (#1259).
-    An item in neither is one the next sweep never sees, since
-    `leftover` harvests the sidecar and nothing else. Refused by item name."""
-    try:
-        with open(ticket_path) as fh:
-            items = sweep_items(fh.read())
-        with open(body_path) as fh:
-            records = body_records(fh.read().splitlines())
-    except OSError as exc:
-        raise RunFileError(f"could not read {exc.filename}: {exc.strerror}"
-                           ) from exc
-    if not items:
-        raise RunFileError(
-            f"{ticket_path} holds no `## <file>` / `- **<id>**` sweep items "
-            "— it is not a sweep ticket, or its body was not fetched whole")
-    held = set()
-    if os.path.exists(sidecar_path):
-        held = {obj["id"] for _, obj in read_dispositions(sidecar_path)}
-    missing = []
-    for item in items:
-        if item in held:
-            continue
-        found = records.get(item)
-        if found:
-            if found[-1][1] == "fixed":
-                continue
-        missing.append(item)
-    if missing:
-        raise RunFileError(
-            "sweep item(s) in neither the sidecar nor the PR body as done: "
-            + ", ".join(missing) + f" — write each undone one as a "
-            f"`leftover` line in {sidecar_path} under its `<file> <id>`, "
-            "and cite it the same way in Decisions made "
-            "(implement/SKILL.md § Review)")
-
-
-_SIDECAR_NAME = re.compile(r"dispositions-([0-9]+)\.jsonl")
-
-
 def dispositions_path(reviews_dir, lowest):
-    """The sidecar `_SIDECAR_NAME` parses, for clump `<lowest>`."""
+    """The sidecar of clump `<lowest>`."""
     return os.path.join(reviews_dir, f"dispositions-{lowest}.jsonl")
-
-
-def findings_path(reviews_dir, axis, lowest):
-    """Round 1's `findings-<axis>-<lowest>.jsonl` (`implement/SKILL.md`
-    § Review), which `implement/verification-check.sh` also reads."""
-    return os.path.join(reviews_dir, f"findings-{axis}-{lowest}.jsonl")
-
-
-def round_1_found_nothing(reviews_dir, lowest):
-    """True only when all three axes' findings sidecars exist, are readable
-    and hold no non-blank line. This is the one home of the test:
-    `implement/verification-check.sh` runs it through `runfile.py
-    round-1-empty` to pass a clump without a verification pass. A missing,
-    unreadable or undecodable one is not an empty round."""
-    for axis in ("standards", "spec", "correctness"):
-        try:
-            with open(findings_path(reviews_dir, axis, lowest)) as fh:
-                if fh.read().strip():
-                    return False
-        except (OSError, UnicodeDecodeError):
-            return False
-    return True
-
-
-def refuse_foreign_sidecar(sidecar_path, tickets):
-    """A sidecar is `dispositions-<n>.jsonl` for the ticket `<n>` its PR was
-    dispatched for (`implement/SKILL.md` § Review). One whose `<n>` is not a
-    ticket this clump closes is another PR's file: its leftovers would be
-    attributed here for good, and one holding no leftover would record zero
-    and exit clean, the same as a PR that left nothing (#1084)."""
-    name = os.path.basename(sidecar_path)
-    match = _SIDECAR_NAME.fullmatch(name)
-    if match is None:
-        raise RunFileError(
-            f"{name} is not named dispositions-<n>.jsonl, so it names no "
-            "ticket to check against this clump")
-    if int(match.group(1)) not in tickets:
-        raise RunFileError(
-            f"{name} belongs to ticket #{match.group(1)}, not one of this "
-            f"clump's tickets ({', '.join(f'#{t}' for t in tickets)})")
-
-
-def leftover(run_id, lowest, pr, sidecar_path, root=None, pr_body=None):
-    """Copy every `leftover` line of a landed PR's dispositions sidecar into
-    the run file. The sidecar's `dispositions-<n>` must name one of the
-    clump's tickets. Idempotent per PR and finding id; a finding already
-    recorded under a different PR, or a clump with no recorded landing, is
-    refused — the reasons are in `references/run-file.md` § Leftovers.
-
-    Returns `(run, added)`, `added` being the finding ids this call
-    actually appended, for a caller to report a copy count.
-
-    `pr_body` is a file holding the PR's body, checked against the sidecar
-    by `refuse_disagreeing_pr_body`: a contradicted outcome, a leftover the
-    body records and the sidecar lacks, a body citing none of the sidecar's
-    ids, and a body with no Decisions made section are refused. `None` skips
-    the check; the CLI never passes it without `--allow-stale`."""
-    pr = pr_number(pr)
-    found = read_leftover_lines(sidecar_path)
-    if pr_body is not None:
-        refuse_disagreeing_pr_body(sidecar_path, pr_body)
-    with locked(run_id, root):
-        run = load(run_id, root)
-        entry = clump_entry(run, lowest)
-        if entry["landed"] is None:
-            raise RunFileError(
-                f"clump #{lowest} has not landed — `land` comes first")
-        refuse_foreign_sidecar(sidecar_path, entry["tickets"])
-        clump_prs = {item["id"]: item["pr"] for item in run["leftovers"]
-                     if item["clump"] == lowest}
-        added = []
-        for obj in found:
-            if clump_prs.get(obj["id"]) == pr:
-                continue
-            if obj["id"] in clump_prs:
-                raise RunFileError(
-                    f"finding {obj['id']} is already recorded under PR "
-                    f"#{clump_prs[obj['id']]}, not #{pr}")
-            record = leftover_record({
-                "clump": lowest, "tickets": entry["tickets"], "pr": pr,
-                "id": obj["id"], "file": obj["file"], "title": obj["title"],
-                "severity": obj["severity"], "text": obj["text"],
-            })
-            run["leftovers"].append(record)
-            clump_prs[obj["id"]] = pr
-            added.append(obj["id"])
-        save(run, root)
-    return run, added
 
 
 def job(run_id, lowest, state, cores=0, root=None):
@@ -1047,18 +582,22 @@ def land(run_id, lowest, sha, root=None):
 
 
 def close_reason(reason):
-    """Why a clump closed with no landing: one non-blank line, the hygiene a
-    leftover's fields keep, since `render_resume` prints it on one line."""
-    return leftover_field(reason, "close reason")
+    """Why a clump closed with no landing: one non-blank line with no line
+    break (a CommonMark line ends at LF or a lone CR), since `render_resume`
+    prints it on one line."""
+    if (not isinstance(reason, str) or not reason.strip()
+            or "\n" in reason or "\r" in reason):
+        raise RunFileError(f"not a close reason: {reason!r}")
+    return reason
 
 
 def close(run_id, lowest, reason, root=None):
     """Record that a clump closed with no landing of its own — its ticket
     found already fixed on the default branch, or handed to a nested spec run
     whose landings live in that run's own file (#1310). Distinct from `land`:
-    no squash sha exists, and `main`'s tip recorded as one is a landing the
-    sweep then looks for a sidecar behind. A closed clump holds no slot, has
-    no worker to re-announce to, and has no sidecar for `sweep.py counts`.
+    no squash sha exists, and `main`'s tip recorded as one is a landing
+    `counts.py` then looks for a sidecar behind. A closed clump holds no
+    slot, has no worker to re-announce to, and has no sidecar for `counts.py`.
     A landed clump is refused; closing again with the same reason is a no-op,
     with another reason is refused."""
     reason = close_reason(reason)
@@ -1140,11 +679,6 @@ def render(run):
                      f"{entry['agent']}  {entry['workspace']}  {state}  "
                      f"{render_job(entry.get('job'))}  "
                      f"{render_pr_up(entry.get('pr_up'))}")
-    for item in run.get("leftovers", []):
-        lines.append(
-            f"leftover  clump #{item['clump']}  {tickets_of(item)}  "
-            f"PR #{item['pr']}  {item['id']}  {item['severity']}  "
-            f"{item['file']}  {item['title']!r}")
     return "\n".join(lines)
 
 
@@ -1236,28 +770,6 @@ def main(argv):
                       help="why, on one line: e.g. already fixed on main as "
                            "#1202, or a nested spec run under its own run file")
 
-    lo = subs.add_parser(
-        "leftover",
-        help="copy a landed PR's leftover findings from its dispositions "
-             "sidecar")
-    lo.add_argument("run_id")
-    lo.add_argument("--clump", type=int, required=True,
-                    help="the clump's lowest ticket")
-    lo.add_argument("--pr", type=int, required=True)
-    lo.add_argument("--from", dest="from_path", required=True,
-                    metavar="PATH", help="the dispositions sidecar to copy from")
-    fresh = lo.add_mutually_exclusive_group(required=True)
-    fresh.add_argument("--pr-body", metavar="PATH",
-                       help=f"the PR's body, as `{_FETCH_BODY}` prints "
-                            "it. Refused as stale: a sidecar line its "
-                            "Decisions made contradicts, a leftover the body "
-                            "records that the sidecar lacks, a body that "
-                            "cites none of the sidecar's ids, and a body "
-                            "with no Decisions made section "
-                            "(references/run-file.md § Leftovers)")
-    fresh.add_argument("--allow-stale", action="store_true",
-                       help="skip the PR-body check")
-
     work = subs.add_parser("job", help="record a clump's parallel-job state")
     work.add_argument("run_id")
     work.add_argument("--clump", type=int, required=True,
@@ -1280,34 +792,6 @@ def main(argv):
     which.add_argument("--clear", action="store_true",
                        help="the controller handed findings back; the next "
                             "\"PR up\" records it again")
-
-    chk = subs.add_parser(
-        "check",
-        help="the PR-body comparison `leftover` runs at harvest, with no run "
-             "file: the worker's pre-\"PR up\" gate (#1214)")
-    chk.add_argument("--from", dest="from_path", required=True,
-                     metavar="PATH", help="the dispositions sidecar")
-    chk.add_argument("--pr-body", required=True, metavar="PATH",
-                     help="the PR's body")
-
-    swp = subs.add_parser(
-        "sweep-check",
-        help="a sweep PR's pre-\"PR up\" gate (#1259): every item of the "
-             "sweep ticket is a sidecar line or done in the PR body")
-    swp.add_argument("--ticket", required=True, metavar="PATH",
-                     help="the sweep ticket's body")
-    swp.add_argument("--pr-body", required=True, metavar="PATH",
-                     help="the PR's body")
-    swp.add_argument("--from", dest="from_path", required=True,
-                     metavar="PATH",
-                     help="the dispositions sidecar; may be absent or empty")
-
-    rnd = subs.add_parser(
-        "round-1-empty",
-        help="exit 0 only when ticket <n>'s three findings sidecars all "
-             "exist and are empty (#1336)")
-    rnd.add_argument("--reviews-dir", required=True, metavar="DIR")
-    rnd.add_argument("ticket", type=int)
 
     out = subs.add_parser("show", help="print the run file")
     out.add_argument("run_id")
@@ -1333,28 +817,6 @@ def main(argv):
             print(render(land(args.run_id, args.clump, args.sha, root)))
         elif args.command == "close":
             print(render(close(args.run_id, args.clump, args.reason, root)))
-        elif args.command == "leftover":
-            run, added = leftover(args.run_id, args.clump, args.pr,
-                                  args.from_path, root, args.pr_body)
-            print(render(run))
-            print(f"copied {len(added)} leftover(s) from {args.from_path}")
-        elif args.command == "check":
-            if not read_dispositions(args.from_path):
-                raise RunFileError(f"{args.from_path} has no lines — nothing "
-                                   "to compare the PR body against")
-            read_leftover_lines(args.from_path)
-            refuse_disagreeing_pr_body(args.from_path, args.pr_body)
-            print(f"{args.from_path} and {args.pr_body} agree")
-        elif args.command == "sweep-check":
-            refuse_unaccounted_sweep_items(args.ticket, args.pr_body,
-                                           args.from_path)
-            print(f"every sweep item in {args.ticket} is accounted for")
-        elif args.command == "round-1-empty":
-            if not round_1_found_nothing(args.reviews_dir, args.ticket):
-                raise RunFileError(
-                    f"round 1 of #{args.ticket} is not provably empty under "
-                    f"{args.reviews_dir}")
-            print(f"round 1 of #{args.ticket} found nothing")
         elif args.command == "job":
             state = ("running" if args.cores is not None
                      else "none" if args.none else "done")

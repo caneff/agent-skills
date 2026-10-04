@@ -972,6 +972,15 @@ class ReportTest(Case):
         self.assertEqual(types["standards"]["value"], 0.0)
         self.assertEqual(types["standards"]["leftover_rate"], 1.0)
 
+    def test_a_moved_finding_carries_value_like_a_filed_one(self):
+        # #1401: `moved` is a valid finding that went onto an open ticket, the
+        # successor of `filed` for a finding that needs its own design.
+        moved = [dict(report_rows()[0], findings=[
+            {"id": "m", "severity": "hard", "outcome": "moved", "partial": False,
+             "overlap": "unique", "k": 1}])]
+        types = self.report(rows=moved)
+        self.assertEqual(types["standards"]["value"], 3.0)
+
     def test_disputed_carries_no_value(self):
         only_disputed = [dict(report_rows()[0], findings=[
             {"id": "d", "severity": "hard", "outcome": "disputed", "partial": False,

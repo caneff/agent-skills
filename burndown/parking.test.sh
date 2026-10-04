@@ -74,15 +74,15 @@ check_in "$parking_text" 'Two consecutive parks' 'burndown/SKILL.md § Parking a
 check_in "$parking_text" 'bounded probe' 'burndown/SKILL.md § Parking and escalation'
 check_in "$parking_text" 'before it escalates' 'burndown/SKILL.md § Parking and escalation'
 
-# Rule 4: the three ruling clauses, each with the trap it closes.
+# Rule 4: the two ruling clauses, each with the trap it closes (the third,
+# on Codex findings, retired with #1401).
 check_in "$ruling_text" 'the thing that ships' 'burndown/SKILL.md § Before a controller rules'
 check_in "$ruling_text" "tool's source" 'burndown/SKILL.md § Before a controller rules'
 check_in "$ruling_text" 'not its help text' 'burndown/SKILL.md § Before a controller rules'
-check_in "$ruling_text" 'Codex finding' 'burndown/SKILL.md § Before a controller rules'
-check_in "$ruling_text" 'not a courier' 'burndown/SKILL.md § Before a controller rules'
+check_in "$ruling_text" 'friction log' 'burndown/SKILL.md § Before a controller rules'
 clauses="$(printf '%s\n' "$ruling" | grep -cE '^[0-9]+\. ' || true)"
-if [ "$clauses" -ne 3 ]; then
-  echo "FAIL: § Before a controller rules lists $clauses clauses, not 3" >&2
+if [ "$clauses" -ne 2 ]; then
+  echo "FAIL: § Before a controller rules lists $clauses clauses, not 2" >&2
   fail=1
 fi
 

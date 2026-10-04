@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """The dispositions sidecar fixture and the grammar SKILL.md § Review states
-must agree (#1025, #1027). A reader's test that binds to the fixture, as
-`multi-axis-code-review/check_adjacent_test.py` does, is tested on every
-form the prose states only while the two agree; a fixture line the prose
-never states is a form no writer produces.
+must agree (#1025, #1027). A reader's test that binds to the fixture is
+tested on every form the prose states only while the two agree; a fixture line the prose never states is a
+form no writer produces.
 
 Seam: the sidecar forms as § Review writes them — each backticked
 `{"id": ...}` object — against the lines of `fixtures/dispositions-sidecar.jsonl`,
@@ -49,16 +48,6 @@ def test_every_stated_form_has_a_fixture_line():
 def test_every_fixture_line_is_a_stated_form():
     extra = fixture_forms() - stated_forms()
     assert not extra, f"fixture lines § Review never states: {extra}"
-
-
-def test_the_leftover_line_carries_every_field_non_empty():
-    with open(FIXTURE) as fh:
-        objs = [json.loads(raw) for raw in fh if raw.strip()]
-    leftovers = [o for o in objs if o["outcome"] == "leftover"]
-    assert len(leftovers) == 1, leftovers
-    for field in ("id", "file", "title", "severity", "text"):
-        value = leftovers[0].get(field)
-        assert isinstance(value, str) and value and "\n" not in value, (field, value)
 
 
 def main():

@@ -103,8 +103,8 @@ So a component is a **family**, and it is split:
 - A **clump** is the family members whose closures are **identical**, lowest
   ticket first, at most `MAX_CLUMP` (3) of them. Identical closures would
   only rebase onto each other, so one worker takes them. The cap keeps that
-  worker inside one context: a heavy build is TDD plus three review axes, a
-  verification pass and a Codex round per ticket. The 3 is a controller's
+  worker inside one context: a heavy build is TDD plus three review axes
+  and a Codex pass per ticket. The 3 is a controller's
   guess from 2026-09-21 with no measurement behind it. A run that hits it
   should move it with evidence, not work around it. The render says
   `identical closures split at MAX_CLUMP=3` on any family it cut.

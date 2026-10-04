@@ -6,3 +6,7 @@ One line per friction point a controller or worker hits, instead of a prevention
 - 2026-10-04, agent-skills: `loop.py dispatch` prints the plain `implement-dispatch` verb for a spec clump; the controller had to switch to `--spec <n>` by hand. Cost: one wrong dispatch avoided by reading.
 - 2026-10-04, agent-skills: a `!` command Chris runs in the controller pane clears the pane's herdr name and session binding; `resolve-controller` then fails until the pane is renamed and the SessionStart hook replayed. Cost: two unreachable-controller episodes.
 - 2026-10-04, agent-skills: nothing stops a merge on a non-CLEAN `mergeStateStatus`; the controller merged PR #1376 while it read UNKNOWN. Cost: one unchecked merge (it was clean).
+
+Commit each line on its own with the subject `friction: <what happened>`.
+A burn's closing report counts them by that subject; the rule is
+`burndown/SKILL.md` § The friction log.
