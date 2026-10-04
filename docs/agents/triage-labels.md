@@ -14,3 +14,7 @@ The skills speak in terms of six canonical triage roles. This file maps those ro
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
 Edit the right-hand column to match whatever vocabulary you actually use.
+
+## Codex forcing label
+
+`needs-codex` is not a triage role. On any ticket of a clump, it forces the review wave's Codex adversarial pass (`implement/SKILL.md` § The Codex pass) on a PR whose non-test, non-Markdown churn is under the size threshold, which would otherwise skip it. It bypasses the size check only: the kill switch, the reserve ceiling and the usage cap still skip the pass.

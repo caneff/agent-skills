@@ -3,6 +3,8 @@ name: to-spec
 description: Turn the current conversation into a spec and publish it to the project issue tracker — no interview, just synthesis of what you've already discussed.
 ---
 
+Write a spec only when the work needs more than one session. Otherwise write a single ticket (`/file-ticket`, or `/to-tickets` for its default of one ticket) and stop: a spec that one session can build is a ticket with extra steps.
+
 This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user — just synthesize what you already know.
 
 The issue tracker and triage label vocabulary should have been provided to you — run `/setup-matt-pocock-skills` if not.

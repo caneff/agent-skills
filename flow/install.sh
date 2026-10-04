@@ -40,7 +40,7 @@ link claude/CLAUDE.md           "$HOME/.claude/CLAUDE.md"
 link claude/settings.json       "$HOME/.claude/settings.json"
 link claude/settings.local.json "$HOME/.claude/settings.local.json"
 for h in block-dangerous-git.sh refresh-landed.sh \
-         wrap-background-jobs.sh worker-stop-alert.sh worker-spin-alert.sh \
+         wrap-background-jobs.sh worker-stop-alert.sh \
          worker-alert-lib.sh package.json; do
   link "claude/hooks/$h" "$HOME/.claude/hooks/$h"
 done

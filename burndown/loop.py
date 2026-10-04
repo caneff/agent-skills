@@ -275,7 +275,8 @@ def hub_landing(landed_files, hub_files):
 # the prose says what `loop.py box` enforces rather than restating them.
 PROCESS_CAP = 28
 # A slot's peak, not its steady state: the worker plus the three review axes
-# `/multi-axis-code-review` runs at once, plus one for the verification pass.
+# `/multi-axis-code-review` runs at once, plus one for the Codex pass that
+# runs beside them.
 # A slot charged at 1 while it peaks at 5 is how three slots put 20 processes
 # on a box the check had read as 15 (#933). The one place the multiplier is
 # stated: `box_check` and the status line both read it here.

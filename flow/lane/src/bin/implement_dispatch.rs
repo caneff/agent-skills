@@ -59,8 +59,8 @@ Chris merges its PR. --model defaults to sonnet.
 
 --run <run-id> puts `--run <run-id>` in the brief. A burn's controller, a
 spec run's included, always passes its run id, so the worker knows a run file
-is under it and leaves the leftover sweep to the run. A brief with no --run is
-a worker with no run file under it, which files its own per-PR sweep. The id
+is under it, where it records a parallel job. A brief with no --run is a
+worker with no run file under it. The id
 follows burndown/runfile.py's grammar and must name a run file that exists,
 <id>.json under $BURNDOWN_CACHE_DIR or else ~/.cache/burndown, as runfile.py
 reads it; either failing is refused before the claim. Spec mode
@@ -807,7 +807,7 @@ fn run() -> Result<(), ExitCode> {
             return Err(die(format!("not a run id: {id:?} (letters, digits, dash, dot, underscore, starting with a letter or digit)")));
         }
         // A well-formed id naming no run would tell the worker a run file
-        // holds its leftovers when none does, and they would be lost.
+        // is under it when none is, and its job declaration would be lost.
         let file = run_file_path(id);
         if !file.is_file() {
             return Err(die(format!("no run file for --run {id}: {} is not a file", file.display())));

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Wording test for #1257: implement/verification-check.sh passes a heavy PR
-# with no verification pass only when all three findings sidecars exist and
-# are empty, and refuses an absent one. That is only reachable if each axis
-# reviewer is told to write its sidecar on every run, empty when it found
-# nothing. The instruction lives in multi-axis-code-review/SKILL.md § 4; this
+# Wording test for #1257: implement/fix-check.sh passes a heavy PR whose
+# reviewers found nothing only when all three findings sidecars exist, empty,
+# each beside its completion marker, and refuses an absent one. That is only
+# reachable if each axis reviewer is told to write its sidecar on every run,
+# empty when it found nothing. The instruction lives in multi-axis-code-review/SKILL.md § 4; this
 # pins it there (and not merely anywhere in the file), so deleting it is red.
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -30,3 +30,13 @@ brief=$(tr '\n' ' ' <flow/claude/agents/diff-reviewer.md | tr -s ' ')
 printf '%s' "$brief" | grep -qF "an empty file when you found nothing" ||
   fail "flow/claude/agents/diff-reviewer.md lacks the empty-sidecar rule"
 echo "ok: the standing brief carries it too"
+
+# #1401: the empty sidecar is accepted only beside the reviewer's completion
+# marker, so both the skill and the standing brief must tell a reviewer to
+# write it, and § 4 must say why an empty file alone is not enough.
+need "completion marker" "the marker is named"
+need "findings-<axis>-<n>.done" "the marker's file name"
+need "a reviewer that crashed" "why an empty sidecar alone is not enough"
+printf '%s' "$brief" | grep -qF "completion marker" ||
+  fail "flow/claude/agents/diff-reviewer.md lacks the completion-marker rule"
+echo "ok: both tell each axis to write the completion marker"

@@ -26,6 +26,12 @@ of the step. When the shell dies mid-compound-command the later
 steps never ran: a file you "just wrote" may still hold its old contents, so
 re-read it before debugging what it does.
 
+When Chris says stop, report it stopped only after the process table on both
+the WSL and the Windows side (`ps`, and `tasklist.exe` / `Get-Process` via
+interop) shows the job, every child it launched and anything it put on his
+screen gone. Why: killing the launcher shell leaves the real process, its
+windows and its lock running.
+
 ## Editing
 
 Prefer a surgical edit over rewriting the whole file when the result is the

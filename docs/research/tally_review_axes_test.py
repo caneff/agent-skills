@@ -267,13 +267,21 @@ def test_parses_a_valid_handed_back_disposition_line():
 
 
 def test_every_line_of_the_shared_sidecar_fixture_parses():
-    # The fixture is the one example of all five outcomes (#1027); a line the
+    # The fixture is the one example of every outcome the worker writes (#1401); a line the
     # tally cannot parse would be counted undisposed (#1076).
     fixture = SHARED_SIDECAR_FIXTURE
     lines = [ln for ln in fixture.read_text().splitlines() if ln.strip()]
     parsed = [t.parse_disposition_line(ln) for ln in lines]
     assert None not in parsed, [ln for ln, d in zip(lines, parsed) if d is None]
-    assert {d.outcome for d in parsed} == {"fixed", "disputed", "filed", "handed-back", "leftover"}
+    assert {d.outcome for d in parsed} == {"fixed", "disputed", "moved"}
+
+
+def test_parses_a_moved_disposition_line_and_refuses_one_with_no_ticket_number():
+    # #1401: `moved` names the open ticket the finding was added to, an int like `filed`'s.
+    d = t.parse_disposition_line(json.dumps({"id": "C1", "outcome": "moved", "ticket": 1234}))
+    assert d == t.Disposition(id="C1", outcome="moved", detail="1234")
+    for bad in ("1234", None, [1]):
+        assert t.parse_disposition_line(json.dumps({"id": "C1", "outcome": "moved", "ticket": bad})) is None
 
 
 def test_parses_a_valid_leftover_disposition_line():
@@ -311,7 +319,7 @@ def test_tally_sidecars_counts_the_shared_fixture_with_no_undisposed():
         ))
         (root / "skills" / "dispositions-855.jsonl").write_text(fixture.read_text())
         row = t.tally_sidecars(root)["skills/standards"]
-        assert row["undisposed"] == 0 and row["leftover"] == 1 and row["raised"] == len(ids)
+        assert row["undisposed"] == 0 and row["moved"] == 1 and row["raised"] == len(ids)
 
 
 def test_disposition_line_rejects_a_list_command():
@@ -401,7 +409,7 @@ def test_tally_sidecars_rolls_findings_and_dispositions_into_a_table():
         ]))
         table = t.tally_sidecars(root)
         assert table["skills/standards"] == {
-            "raised": 3, "fixed": 1, "disputed": 1, "filed": 0, "undisposed": 1,
+            "raised": 3, "fixed": 1, "disputed": 1, "moved": 0, "filed": 0, "undisposed": 1,
             "handed-back": 0, "leftover": 0,
         }
 
@@ -420,7 +428,7 @@ def test_tally_sidecars_rolls_a_handed_back_disposition_into_the_table():
         )
         table = t.tally_sidecars(root)
         assert table["skills/standards"] == {
-            "raised": 1, "fixed": 0, "disputed": 0, "filed": 0, "undisposed": 0,
+            "raised": 1, "fixed": 0, "disputed": 0, "moved": 0, "filed": 0, "undisposed": 0,
             "handed-back": 1, "leftover": 0,
         }
 
@@ -594,7 +602,7 @@ def test_tally_sidecars_counts_an_over_engineering_cut_as_a_standards_finding():
         )
         row = t.tally_sidecars(root)["skills/standards"]
         assert row == {"raised": 1, "undisposed": 0, "fixed": 0, "disputed": 0,
-                       "filed": 0, "handed-back": 0, "leftover": 1}
+                       "moved": 0, "filed": 0, "handed-back": 0, "leftover": 1}
 
 
 def test_tally_sidecars_counts_a_fixed_and_a_disputed_oe_id():
@@ -616,7 +624,7 @@ def test_tally_sidecars_counts_a_fixed_and_a_disputed_oe_id():
         )))
         row = t.tally_sidecars(root)["skills/standards"]
         assert row == {"raised": 2, "undisposed": 0, "fixed": 1, "disputed": 1,
-                       "filed": 0, "handed-back": 0, "leftover": 0}
+                       "moved": 0, "filed": 0, "handed-back": 0, "leftover": 0}
 
 
 def main():

@@ -71,13 +71,12 @@ worker" — an `AGENTS.md` rule applied to a tool that hard-codes an 8-worker
 portfolio, has no such knob, and times out at one worker. Help text
 compresses; source does not.
 
-**3 — a Codex finding's recommendation is evaluated, not couriered.** The
-Codex pass on that same `#559` recommended **the exact approach the dry run
-had already disproved**, having made the same help-text misreading.
-Forwarding it would have spent the worker's last review round on a
-regression. What prevented it was the controller having read the source an
-hour earlier for something unrelated — luck, not process, which is why the
-clause exists.
+A third clause, that a Codex finding's recommendation is evaluated by the
+controller before it reaches the worker, was retired with the one-wave ruling
+(#1401): the worker now reads Codex's findings itself, in the review wave, and
+the `#559` incident it came from (Codex recommended the approach a dry run had
+already disproved, on the same help-text misreading as clause 2) is the
+worker's to catch at disposition under the reachability bar.
 
 ## The bounded probe
 

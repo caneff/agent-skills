@@ -20,5 +20,5 @@ a burn owes the handoff is only this:
   slots cost this burn is stated where the nesting is, not here.
 
 A slice whose parent carries no `spec` label is an ordinary candidate. A spec
-with one open slice is still handed off: the run's closing ticket and
+with one open slice is still handed off: the run's closing check and
 spec-level review are the point, not the count.

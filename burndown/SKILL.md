@@ -38,7 +38,7 @@ branch (`references/loop.md` says why).
    budget (5 when `--slots` is omitted), the controller's own herdr
    agent name, and `--repo <primary checkout>`, required: the run's target,
    which every printed `implement-dispatch` command carries and
-   `sweep.py counts --repo` is checked against (§ Run state). Resuming an existing run instead:
+   `counts.py --repo` is checked against (§ Run state). Resuming an existing run instead:
    `runfile.py resume`, and then **one message per live, unlanded worker**
    — its `announce` bucket and only that one, via `loop.announce`. A
    landed or closed clump's worker gets none however its agent looks; a vanished one
@@ -160,17 +160,13 @@ branch (`references/loop.md` says why).
    `runfile.py land`, each clump that finishes with no landing of its own
    (its ticket found already fixed on `main`, or handed to a nested spec
    run, once that run has finished and not at the hand-off) with `runfile.py close <run-id> --clump <n> --reason <text>` rather
-   than a `land` at `main`'s tip, which `sweep.py counts` refuses for the
-   sidecar no PR wrote, each "PR up" with `runfile.py pr-up <run-id> --clump
-   <n> --pr <n>` as it arrives, for § Liveness, and each landing's leftover
-   findings with `runfile.py leftover <run-id> --clump <n> --pr <n> --from
-   <dispositions sidecar> --pr-body <the PR's body, from `gh pr view <pr>
-   --repo <owner/name> --json body --jq .body`>`, so a restart can pick the
-   run back up with nothing transcribed by hand
-   (`references/run-file.md` § Leftovers). The controller clears the PR-up
-   record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever it
-   hands findings back to the worker (Codex findings, or any ruling that
-   sends it back to work), since the PR stays open through the fix round,
+   than a `land` at `main`'s tip, which `counts.py` refuses for the
+   sidecar no PR wrote, and each "PR up" with `runfile.py pr-up <run-id>
+   --clump <n> --pr <n>` as it arrives, for § Liveness, so a restart can pick
+   the run back up with nothing transcribed by hand. The controller clears the
+   PR-up record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever
+   it hands findings back to the worker (a red seam's failure, or any ruling
+   that sends it back to work), since the PR stays open through the fix round,
    and records it again on the next "PR up".
 9. **Wait on the wake, and sweep on an idle one.** The loop waits by being
    idle, never inside a tool call: a controller in one hears no worker until
@@ -178,138 +174,70 @@ branch (`references/loop.md` says why).
    backstop it runs when it wakes with nothing else to do: § Liveness. A
    clump that cannot go on parks, and a run that parks twice with no landing
    between stops: § Parking and escalation.
-10. **At run close, file the sweep** (§ The sweep) and write the closing
-    report's three counts.
+10. **At run close, send Chris the closing report** (§ The closing report).
 
-## The sweep
+## The closing report
 
-Every landing's leftover findings are already in the run file — `runfile.py
-leftover`, § The loop step 8 above — kept in
-`references/run-file.md` § Leftovers: small review findings a PR left for
-later rather than fixed or filed as their own ticket. Nothing files them one
-at a time; they wait for the sweep.
-
-**Two filing moments**: at **run close**, and again whenever a run **stops
-on two parks** (§ Parking and escalation) — a stopped run still owes its
-leftovers a ticket, because the sweep is not what the run stopped on.
-
-**Filing is not one-shot, so check first.** A crash after `/file-ticket`
-creates the issue but before the controller records it, or a later run
-close following an earlier two-park stop, both re-render the same run and
-must not file a second open `Sweep: leftovers from burn <run-id>`. The
-title is deterministic, so the search is the recovery: before filing, at either
-moment,
+A burn ends with one report to Chris, and no sweep ticket: every valid review
+finding was fixed in the PR that raised it, or moved onto the open ticket for
+its component (`implement/SKILL.md` § Review), so no run carries findings
+forward. Before writing it, run `python3
+~/.agents/skills/docs/research/review_ledger.py harvest`, which joins each
+finding's outcome from the dispositions sidecars into the ledger. The report
+carries two counts, **fixed** and **moved**,
 
 ```
-gh issue list --repo <owner/name> --state all --limit 100 \
-  --search "Sweep: leftovers from burn <run-id> in:title" \
-  --json number,title,state --jq '.[] | select(.title == "Sweep: leftovers from burn <run-id>" and .state == "OPEN") | .number'
+python3 burndown/counts.py <run-id> --repo <primary checkout>
 ```
 
-This search has a twin in `implement/SKILL.md` (§ The PR); both are written
-out on purpose (#1254): a worker holds its file and not this one, and the
-titles differ. Change one, change the other. The search is fuzzy, so the
-`--jq` keeps only an exact title match that is still **open** and
-prints one bare number per line: the sweep's own number, never a run or
-ticket number. A **closed** match is not this run's sweep: it never
-reaches the frontier, so rewriting it loses the new leftovers (#1248). It is
-skipped, so a later run close files a new sweep under the same title; the
-next search finds only that open one. A non-zero exit from the search
-stops the run; it is not zero matches, and filing on it makes a duplicate.
-Exit 0 and more than one line stops the run rather than editing a guess. Exit 0 and one line: put
-that number in `sweep`; that issue already **is** this run's sweep, so
-update its body instead
-of filing another — a fresh render of the run's own leftovers, with any
-`## <file>` section already in the current body that a fold (below) put
-there kept as it stands, since a fold's own items never reappear in
-`sweep.py render`'s output and a bare overwrite would drop them —
-`gh issue edit`. Each producer writes its own file, the finished body
-(render, then the kept sections) goes through the one filter, and every
-step's exit gates the next —
+read from each landed clump's dispositions sidecar, which the worker writes
+(`implement/SKILL.md` § Review), naming each closed clump as skipped. The
+sidecars are found under the `--repo` checkout's cache directory, never the
+cwd's, which is not always the target; `--repo` is refused unless it is the
+run's recorded target. A landed clump with no dispositions sidecar is refused
+by number, never counted as zero: the worker writes the sidecar even when its
+reviewers found nothing.
+
+While an ablation runs (`docs/agents/ablations.md`, a section whose heading
+ends `running`), the report also carries its escape table, read from the
+ledger, and the controller appends the burn's line to that file's log:
 
 ```
-python3 burndown/sweep.py render <run-id> > <render path> \
-  && <kept sections> > <kept path> \
-  && cat <render path> <kept path> \
-     | python3 burndown/sweep.py blocked-by > <path> \
-  && gh issue edit "$sweep" --repo <owner/name> --body-file <path>
+python3 ~/.agents/skills/docs/research/review_ledger.py escapes --repo-dir <primary checkout>
 ```
 
-— so a failed render or a failed fetch of the kept sections never reaches
-the edit, which would replace the sweep with only the half that
-succeeded. The filter drops any `## Blocked by` already in the body and
-appends the one `None — can start immediately.` A body with none reads
-**unresolved** to `burndown/frontier.py` and is never dispatched. An empty
-body exits 1 too, since `--body-file` on an empty file blanks the sweep.
-Exit 0 and no output:
-render the run's leftovers —
+The table has one line per skipped component, with the number of PRs it was
+skipped on and the escapes attributed to them. What decides the ablation, and
+when, is that file's.
 
-```
-python3 burndown/sweep.py render <run-id>
-```
+The report also carries the **friction-log count**: the commits the run made
+to the log (§ The friction log), counted with
+`git -C ~/.agents/skills log --oneline --since=<run start> --grep='^friction:'`.
+A run that stopped on two parks (§ Parking and escalation) sends the same
+report.
 
-groups them by file, one bullet per item naming its ticket(s), clump,
-PR, finding id, severity and text — and file **its stdout** through
-`/file-ticket`, titled `Sweep: leftovers from burn <run-id>`, labelled
-`ready-for-agent`, with `## Blocked by` `None — can start immediately.` (`/file-ticket`
-writes it on first filing; only the update path above uses `sweep.py
-blocked-by`, so a body never carries two). A
-run with **zero leftovers files nothing**: stdout is empty and the
-"nothing to file" notice goes to stderr, so a caller piping stdout
-straight into `/file-ticket` files nothing rather than a ticket whose body
-is that sentence, and the report says so rather than leaving the reader to
-infer it from an absent link.
+## The friction log
 
-**The closing report carries three counts** — **fixed in-round**,
-**leftover**, **standalone** —
+A friction point the controller hits — a harness refusal, a rule that cost a
+turn, a tool that misreported — is one line appended to the one log,
+`docs/agents/friction-log.md` in this skills repo (`~/.agents/skills`),
+whichever repo the run targets, and never a ticket of its own. Each line is
+committed on its own with the subject `friction: <what happened>`; the line
+itself is date, repo, what happened, what it cost (ADR 0005). The weekly retro
+reads the log; a point becomes a ticket only on its second occurrence, and
+then through the search-before-filing rule in `~/.claude/CLAUDE.md`. The line
+is a docs-only change and ships on the default branch the way any non-code
+edit does.
 
-```
-python3 burndown/sweep.py counts <run-id> --repo <primary checkout>
-```
+## What the controller says to Chris
 
-reads them from each landed clump's dispositions sidecar (`implement/SKILL.md` § Review), names each closed clump as skipped, under the `--repo` checkout's cache directory — never the cwd's, which is not always the target, and refused unless `--repo` is the run's recorded target — so Chris can see whether the adjacent-fix rule is doing its job
-without re-deriving it from the PRs by hand.
-A landed clump with no dispositions sidecar counts as zero only when its
-three findings sidecars all exist and are empty (a clean round 1, which
-gets no verification pass); a missing findings sidecar is still refused.
-Controller observations about the loop itself stay standalone tickets (§
-Before a controller rules), never folded into the sweep and never in any
-sidecar — the controller adds its own filed-observation count to `counts`'
-standalone number by hand.
-
-**A per-PR sweep found on the frontier** (`implement/SKILL.md` § The PR: a
-worker whose brief carries no `--run <run-id>` files one of these, titled
-`Sweep: leftovers from PR #<n>`) is not a second sweep ticket for this
-run. `runfile.py leftover` cannot pull its items into the run file — it
-refuses any PR that is not one of this run's own landed clumps — so fold
-by body instead of by run file: its items are already rendered, in the
-same grouped-by-file shape `sweep.py render` produces, in the per-PR
-ticket's own body — **its file sections only**, never its own
-`## Blocked by` —
-
-```
-gh issue view <n> --repo <owner/name> --json body \
-  --jq '.body | split("\n## Blocked by")[0]'
-```
-
-stops before that heading, so the run sweep still declares exactly one
-`## Blocked by`: `blocked_by_section` (§ The frontier, below) reads every
-occurrence in a body, and a second one — the per-PR ticket's own,
-appended whole — reads `AMBIGUOUS` and drops the folded sweep off the
-frontier for good. That printed text is exactly what to append. File or
-update the run sweep (above) with it appended under its own file headers
-to the body `sweep.py render` printed, then close the per-PR ticket with
-a pointer to the run sweep —
-
-```
-gh issue close <n> --repo <owner/name> --comment "Folded into <run-sweep-url>"
-```
-
-— so the frontier still closes to exactly one open sweep per run.
-**A run with no leftovers of its own still files this thin sweep** when a
-per-PR one is there to fold — the zero-leftovers rule above is for a run
-with nothing to fold from any source, and a per-PR sweep on the frontier
-is a source.
+Only two things reach Chris: a decision that is contested or cannot be undone,
+restated in full (the number, the options and the recommendation, never "as
+above"), and the one closing report. A routine reversible choice is applied on
+the controller's recommendation and listed in the closing report. A worker's
+idle or stop notice and its "PR up" are never relayed, and a duplicate idle
+notification gets no reply at all. The one hand-off is a `ready-for-human`
+ticket's merge line, which Chris merges himself (`implement/SKILL.md` § The merge).
 
 ## The frontier
 
@@ -383,7 +311,7 @@ not a per-repo log. It holds the run id, the slot budget (default 5, set by
 `runfile.py start --slots <k>`), the controller's herdr agent name, the target repo
 (`runfile.py start --repo <checkout>`, recorded as the absolute path of its
 primary checkout, so a linked worktree names the same target; a
-run file from before the field makes `loop.py dispatch` and `sweep.py counts
+run file from before the field makes `loop.py dispatch` and `counts.py
 --repo` refuse, since a missing target must not read as no check), and
 per clump its ticket list, workspace, worker's herdr agent name, the
 parallel job its worker has out (§ Liveness) and squash sha once it
@@ -497,12 +425,15 @@ label swap to `ready-for-human`. What each cause cost on #781, and why a
 fourth one is not added quietly:
 [`references/parking.md`](references/parking.md).
 
+A park, and any friction the controller hit on the way to it, is also a line
+in the friction log (§ The friction log), not a ticket.
+
 A parked clump **keeps its workspace**, and its include closure stays **out of
 the frontier** while it is parked: releasing either invites a second worker
 into the same files, which is the collision § The loop step 5 exists to
 prevent. **Two consecutive parks with no landing between them stop the run** —
 a run that has stopped landing has stopped working, and the next thing it
-does is file the sweep (§ The sweep) and report to Chris rather than
+does is send the closing report (§ The closing report) to Chris rather than
 dispatch again.
 
 **Escalation.** The controller's escalation list lives in
@@ -520,8 +451,10 @@ table instead of three options in the dark
 
 ## Before a controller rules
 
-Three clauses, each a ruling that went wrong on #781. The evidence behind
-each: [`references/parking.md`](references/parking.md).
+Two clauses, each a ruling that went wrong on #781. The evidence behind each:
+[`references/parking.md`](references/parking.md). A friction point met while
+ruling goes to the friction log (§ The friction log, in this file), not to a
+new ticket.
 
 1. A ruling about **runtime behaviour** is checked against **the thing that
    ships**, not a proxy. A headless bundle, a unit harness or a build artifact
@@ -529,7 +462,3 @@ each: [`references/parking.md`](references/parking.md).
 2. A ruling about a **tool's behaviour** cites the **tool's source**, not its
    help text. Help text compresses; a conjunction reads as a disjunction and
    the ticket filed from it is wrong.
-3. A **Codex finding's recommendation** is **evaluated by the controller**
-   before it reaches the worker. The controller is not a courier: a plausible
-   remedy forwarded unread can spend a worker's last review round on a
-   regression.

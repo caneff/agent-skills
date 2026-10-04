@@ -66,10 +66,46 @@ had to resolve all of them before it could dispatch.
 
 `/wayfinder` is for work that outgrows one session — a shared map of decision
 tickets. Everyday non-trivial work: `/grill-me` when scope, assumptions, or
-decisions are fuzzy → `/to-spec` → `/to-tickets` (tracer-bullet slices) →
-`/implement`. An existing PRD doesn't replace `/to-spec` if decisions changed
-since. Why: a PRD written before a decision changed builds the old decision.
+decisions are fuzzy → `/to-spec` (only when the work needs more than one
+session) → `/to-tickets` (one ticket by default; slices only on disjoint
+files) → `/implement`. An existing PRD doesn't replace `/to-spec` if decisions
+changed since. Why: a PRD written before a decision changed builds the old
+decision.
 Skills live in `~/.agents/skills` (symlinked into `~/.claude/skills`).
+
+## Rulings and changes to the workflow
+
+- Write each design or content ruling Chris makes into the repo's decisions
+  doc when he makes it; a subagent that receives a ruling directly also
+  relays it to its spawner. A ruling that supersedes a ticket's text is
+  written onto the ticket before a reviewer is dispatched. Why: a ruling held
+  only in chat or in one agent is lost at compaction and returns as a
+  regression, and the reviewer fetches the ticket as its spec.
+- Before proposing a change to a workflow step or skill rule, find the
+  commit or ticket that introduced the current behaviour and state the
+  problem it solved; a proposal that undoes it says how that problem stays
+  solved. Why: otherwise the change brings back the failure the step was
+  written to prevent.
+
+## Auto mode and harness work
+
+Work that changes the harness itself is never dispatched into auto mode
+workers. Harness work means `flow/claude/settings.json`, hooks, mods, plugins,
+plugin load paths, and sessions driving other sessions. Chris runs it in a
+session outside auto mode, where each risky step is one prompt he approves.
+Why: the classifier exists to stop exactly this work, and its rules for it
+(`Self-Modification`, `Auto-Mode Bypass`, `Instruction Poisoning`,
+`Unauthorized Persistence`, and more) are must-name `soft_deny` rules that
+no `autoMode.allow` entry clears. Spec #1365 under auto mode cost about a
+dozen park-and-relay rounds in burn burn-skills-2026-10-03 (#1389 adds the
+pre-dispatch check).
+
+On any classifier denial, read the matched rule before proposing a fix:
+`claude auto-mode config`, the rule named in the brackets, its section and
+its `must name` clause. The fix options follow from that text, never from a
+guess at the classifier. Detail and the six failed guesses it would have
+saved: `docs/research/2026-10-04-auto-mode-self-modification-denials.md`
+(#1388 makes this a required park step).
 
 ## CI
 
@@ -87,6 +123,12 @@ private repos.
   sources first (GitHub search API, the tools' own repos and docs) before
   proposing a homegrown mechanism. Why: we are not the first to hit it, and
   the codebase cannot tell you what exists outside it.
+- **A git-ignored scratch script that produces something that ships** (a
+  published link, a sheet write, a frozen reference build): snapshot the
+  script, its inputs and its exact rebuild command into `docs/research/`
+  before reporting, and file the ticket that promotes it to tracked tooling.
+  Why: scratch is the only copy, and a worktree cleanup or restart loses the
+  way to regenerate it.
 - **An automated reminder** ("prompt me when X") is one line in that repo's
   `AGENTS.md` — not a hook, not new tooling. Why: a hook or tool for a
   reminder is more to maintain than the reminder is worth.

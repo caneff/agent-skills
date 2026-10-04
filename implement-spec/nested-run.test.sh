@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Guards #897: `implement-spec` is policy over `burndown/SKILL.md` § The loop
 # with four overrides — the nesting, the exploration pass's contradiction
-# check, the closing ticket, and the spec-level review — and it restates none
+# check, the closing check, and the spec-level review — and it restates none
 # of that loop. Prose assertions no Python harness can make; the two readers'
 # behaviour is tested in implement-spec/contradictions_test.py and
 # implement-spec/closing_ticket_test.py.
@@ -79,11 +79,29 @@ check_in "$skill_text" 'summary line' implement-spec/SKILL.md
 check_in "$skill_text" 'differently' implement-spec/SKILL.md
 check_in "$skill_text" 'contradictions.py' implement-spec/SKILL.md
 
-# Rule 5: the closing ticket names the seam and its blind spot, and a surface
+# Rule 5: the closing check names the seam and its blind spot, and a surface
 # the seam cannot reach buys one open of the real thing.
 check_in "$skill_text" 'blind' implement-spec/SKILL.md
 check_in "$skill_text" 'open of the real thing' implement-spec/SKILL.md
 check_in "$skill_text" 'closing_ticket.py' implement-spec/SKILL.md
+
+# Rule 5b (#1402): no separate closing ticket. The check runs in the last
+# slice's PR and the spec closes when that slice merges.
+check_in "$skill_text" "the last slice's PR" implement-spec/SKILL.md
+check_in "$skill_text" 'closes when its last slice merges' implement-spec/SKILL.md
+# Case-folded, and `generated ticket` too: the first form of this check was
+# case-sensitive and missed both a capitalised instruction and the stale
+# "The generated ticket carries" line it was written to catch.
+skill_lc="$(printf '%s' "$skill_text" | tr '[:upper:]' '[:lower:]')"
+closing_lc="$(printf '%s' "$closing_text" | tr '[:upper:]' '[:lower:]')"
+for needle in 'closing ticket' 'generated ticket' 'closing worker'; do
+  check_not_in "$skill_lc" "$needle" implement-spec/SKILL.md
+  check_not_in "$closing_lc" "$needle" implement-spec/references/closing-ticket.md
+done
+# And the mechanism behind the rule: who appends the section, and when.
+check_in "$skill_text" 'appends it to the last slice' implement-spec/SKILL.md
+check_in "$skill_text" 'before dispatching it' implement-spec/SKILL.md
+check_in "$skill_text" 'spec with one slice' implement-spec/SKILL.md
 
 # Rule 6: the spec-level review is handed shas, and the reason a range is
 # wrong is stated where the reader decides.

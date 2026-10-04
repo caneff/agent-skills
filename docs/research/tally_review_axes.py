@@ -63,27 +63,29 @@ _BRANCH_ISSUE_RE = re.compile(r"(?:implement|issue)-(\d+)\b")
 
 # findings-<axis>-<n>.jsonl — one round-1 axis's sidecar (#855).
 _FINDING_SIDECAR_RE = re.compile(rf"^findings-({AXIS_ALTS})-(\d+)\.jsonl$")
-# dispositions-<n>.jsonl — the verification pass's sidecar, one per issue,
-# joining round-1 findings across all three axes by id.
+# dispositions-<n>.jsonl — the worker's sidecar, one per issue (the verification
+# pass's before #1401), joining the review's findings across all axes by id.
 _DISPOSITION_SIDECAR_RE = re.compile(r"^dispositions-(\d+)\.jsonl$")
 
 _VALID_SEVERITIES = {"hard", "judgement"}
 # outcome -> the field on that outcome's line that carries its detail
-# (the fixing commit sha / the dispute reason / the follow-up ticket / the
-# handed-back `/file-ticket` command, #871's fourth outcome / the leftover
-# finding's one-line text, #1027's fifth).
+# (the fixing commit sha / the dispute reason / the ticket a finding was
+# moved onto, #1401). `filed`, `handed-back` and `leftover` are outcomes of the
+# pre-#1401 workers, still read so their sidecars tally.
 OUTCOME_DETAIL_FIELD = {
-    "fixed": "sha", "disputed": "reason", "filed": "ticket", "handed-back": "command",
-    "leftover": "text",
+    "fixed": "sha", "disputed": "reason", "moved": "ticket", "filed": "ticket",
+    "handed-back": "command", "leftover": "text",
 }
 # outcome -> the JSON type its detail field must actually be. `filed`'s
 # `ticket` is written unquoted (`"ticket": <n>`) per implement/SKILL.md, so
-# it alone is int; every other detail is prose and must be a non-empty str.
+# it and `moved`'s are int; every other detail is prose and must be a non-empty str.
 # A str/dict/list slipping through as a "ticket" or a non-str slipping
 # through as a `command`/`sha`/`reason` still tallied under Codex's gate
 # finding on #973's own PR — `str(detail)` on a list or dict "worked" and
 # hid the malformed line as if it had parsed cleanly.
-_OUTCOME_DETAIL_TYPE = {"fixed": str, "disputed": str, "filed": int, "handed-back": str, "leftover": str}
+_OUTCOME_DETAIL_TYPE = {
+    "fixed": str, "disputed": str, "moved": int, "filed": int, "handed-back": str, "leftover": str,
+}
 
 
 @dataclass(frozen=True)
@@ -105,7 +107,8 @@ class Finding:
 @dataclass(frozen=True)
 class Disposition:
     id: str
-    outcome: str  # "fixed" | "disputed" | "filed" | "handed-back" | "leftover"
+    # "fixed" | "disputed" | "moved", or a pre-#1401 "filed" | "handed-back" | "leftover"
+    outcome: str
     detail: str  # the outcome's field per OUTCOME_DETAIL_FIELD, always as str
 
 
@@ -228,9 +231,9 @@ def find_sidecar_files(root: Path = REVIEWS_ROOT) -> list[tuple[str, str]]:
 def tally_sidecars(root: Path = REVIEWS_ROOT) -> dict:
     """Roll every findings-<axis>-<n>.jsonl and dispositions-<n>.jsonl
     sidecar under `root` into a per-repo, per-axis table of raised vs
-    fixed/disputed/filed/handed-back/leftover/undisposed (#855). Findings are keyed by (repo,
-    issue, id), so a disposition only ever resolves the finding it names —
-    never a same-id finding filed under a different issue or repo.
+    fixed/disputed/moved (and the pre-#1401 filed/handed-back/leftover)/undisposed
+    (#855). Findings are keyed by (repo, issue, id), so a disposition only
+    ever resolves the finding it names — never a same-id finding filed under a different issue or repo.
 
     Two conflicts are surfaced rather than silently absorbed (round-1
     correctness C2/C3, standards S2): a duplicate id within one (repo,
