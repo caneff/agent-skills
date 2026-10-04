@@ -55,6 +55,23 @@ a step your own hands can do.
   frame, beside the target at the same scale. Why: I can only rule on the
   image.
 
+## Getting a pasted image to an agent as a file
+
+A paste into a teammate or subagent I have entered is not known to reach it
+(`docs/research/2026-09-28-teammate-attach.md`). When I say an image is on my
+clipboard, or a paste did not arrive, save the clipboard yourself and read the
+file; never ask me to save it. From WSL (the `-STA` is required):
+
+```
+out=<stable-dir>/clip-$(date +%Y%m%d-%H%M%S).png
+/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -STA -Command "Add-Type -AssemblyName System.Windows.Forms; \$i=[System.Windows.Forms.Clipboard]::GetImage(); if(\$i){\$i.Save('$(wslpath -w "$out")',[System.Drawing.Imaging.ImageFormat]::Png)}else{exit 3}"
+```
+
+Exit 3 means no image on the clipboard. `<stable-dir>` is a git-ignored
+directory outside `.claude/worktrees` (§ Showing me a file). Read the file
+yourself, or message its absolute path to the teammate, which opens it with
+`Read`. Tried 2026-10-04: a 64x64 test PNG round-tripped through the clipboard.
+
 ## Reading a rendered page yourself
 
 A **rendered** artifact — an HTML page, a report, a lineup — and any page you

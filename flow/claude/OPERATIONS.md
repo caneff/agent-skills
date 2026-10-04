@@ -138,6 +138,8 @@ defines them.
   send it to the controller, naming in the first line whose work it is and
   that the spawner was gone. Why: a report is never dropped because its
   addressee died.
+- Entering a named teammate or subagent, and handing it an image (save a
+  file, message the path): `docs/research/2026-09-28-teammate-attach.md`.
 - **The controller/worker pairing survives `/clear`** (#964). `/clear` wipes
   a session's context, not its process: the session's pid, and everything
   keyed to it, are still there afterward. `implement-dispatch` appends one
