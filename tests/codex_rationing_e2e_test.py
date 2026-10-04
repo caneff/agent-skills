@@ -24,9 +24,10 @@ from the fixture, never read back from the module:
      audited PR that touched its file, one `codex-audit` ledger row lists the three PRs, and the
      `next:` line names the newest merge.
   4. `mark` moves the audit mark to that sha; the next run finds nothing and stops with 3, recording
-     a `codex-audit` skip row with reason `empty`.
+     a `codex-audit` skip row with reason `empty`. At 100% usage the audit stops at the gate with 20,
+     recording a skip row with the gate's cap line: `--audit` lifts the ceiling, never the cap.
   5. `review_ledger.py report --format json` counts what the week wrote: three `codex-gate` rows, all
-     skipped (#102's launched pass is not run here, so it writes none); two `codex-audit` rows, one
+     skipped (#102's launched pass is not run here, so it writes none); three `codex-audit` rows, two
      skipped, three audited PRs.
 
 Seam: `bash tests/all.sh`, which runs this file. HOME, CODEX_HOME, the ledger, the review cache and
@@ -171,6 +172,12 @@ class RationingEndToEnd(Case):
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         self.assertIn("nothing to audit", r.stdout)
         self.assertEqual([a["skip_reason"] for a in self.rows("codex-audit")[1:]], ["empty"])
+        self.set_usage(100)
+        r = self.run_cli(AUDIT, "run", "--base", "main", "--ledger", self.ledger, "--cache", self.cache,
+                         "--trial", self.trial, "--dry-run")
+        self.assertEqual(r.returncode, 20, r.stdout + r.stderr)
+        self.assertIn("codex usage 100% — capped", r.stdout)
+        self.assertIn("codex usage 100% — capped", self.rows("codex-audit")[2]["skip_reason"])
 
         # 5. The report counts the week.
         r = self.run_cli(LEDGER_CLI, "report", "--ledger", self.ledger, "--format", "json")
@@ -178,7 +185,7 @@ class RationingEndToEnd(Case):
         by_type = {t["type"]: t for t in json.loads(r.stdout)["types"]}
         self.assertEqual((by_type["codex-gate"]["rows"], by_type["codex-gate"]["skipped_rows"]), (3, 3))
         self.assertEqual((by_type["codex-audit"]["rows"], by_type["codex-audit"]["skipped_rows"],
-                          by_type["codex-audit"]["audited_prs"]), (2, 1, 3))
+                          by_type["codex-audit"]["audited_prs"]), (3, 2, 3))
 
 
 if __name__ == "__main__":
