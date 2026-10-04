@@ -21,6 +21,8 @@ expect_none "unrelated command" "$(context "$hook" s4 "git status")"
 expect_none "ps as an argument" "$(context "$hook" s4 "echo ps")"
 expect_none "trigger in a grep pattern" "$(context "$hook" s4 "rg 'pgrep -f' docs/")"
 expect_none "trigger in a double-quoted pattern" "$(context "$hook" s4 'grep -n "ps -eo" SHELL-SAFETY.md')"
+# A separator inside quotes does not start a command.
+expect_none "trigger after a quoted separator" "$(context "$hook" s4 'git commit -m "stop it; ps aux"')"
 expect_none "trigger in a heredoc body" "$(context "$hook" s4 "cat > kill.sh <<'SH'
 ps -eo pid,args
 SH")"
