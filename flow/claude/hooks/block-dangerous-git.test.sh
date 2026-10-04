@@ -341,6 +341,8 @@ RUN_CWD="$repo/.claude/worktrees/implement-9" run "dot discard: implement-* work
   "git checkout -- ." "$blocked"
 run "dot discard: -C that backs out of a mutation path blocked" 2 \
   "git -C $repo/.scratch/mutation-m1/../.. checkout -- ." "$blocked"
+run "dot discard: -C that backs out of a mutation path into another worktree blocked" 2 \
+  "git -C $repo/.scratch/mutation-m1/../../.claude/worktrees/implement-9 checkout -- ." "$blocked"
 run "dot discard: mutation-named dir that is no worktree blocked" 2 \
   "git -C $repo/plain/.scratch/mutation-fake checkout -- ." "$blocked"
 run "dot discard: allowed target chained to a blocked one blocked" 2 \
