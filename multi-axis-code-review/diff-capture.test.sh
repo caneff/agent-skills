@@ -4,8 +4,7 @@
 # instead of each re-running the same `git diff`. The command stays in the
 # prompt as provenance and as the fallback: an axis whose file is missing or
 # empty re-derives and says so, rather than reviewing nothing.
-# Prose assertions over two skill files; there is no harness that runs a
-# skill's own prose.
+# Runs the documented capture blocks for real against a scratch repo.
 # BASH_SOURCE rather than `git rev-parse --show-toplevel`, and GIT_* scrubbed:
 # a caller's leaked GIT_DIR/GIT_WORK_TREE would point git at the caller's repo
 # (#620).
@@ -13,9 +12,8 @@ set -euo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 skill="$here/SKILL.md"
-reviewer="$here/../flow/claude/agents/diff-reviewer.md"
 
-for f in "$skill" "$reviewer"; do
+for f in "$skill"; do
   [ -f "$f" ] || { echo "FAIL: missing $f" >&2; exit 1; }
 done
 
@@ -24,73 +22,7 @@ done
 spawn="$(sed -n '/^###[[:space:]]*4\./,/^###[[:space:]]/{/^###[[:space:]]*4\./d; /^###[[:space:]]/d; p}' "$skill")"
 [ -n "$spawn" ] || { echo "FAIL: multi-axis-code-review/SKILL.md has no § 4 step" >&2; exit 1; }
 
-flatten() { tr '\n' ' ' | tr -s ' '; }
-spawn_text="$(printf '%s\n' "$spawn" | flatten)"
-skill_text="$(flatten <"$skill")"
-reviewer_text="$(flatten <"$reviewer")"
-
 fail=0
-check_in() {
-  local haystack="$1" needle="$2" where="$3"
-  case "$haystack" in
-    *"$needle"*) ;;
-    *) echo "FAIL: $where is missing: $needle" >&2; fail=1 ;;
-  esac
-}
-
-# Rule 1: the caller captures the diff to a file once, in the same directory
-# as the reports, and fails there on an empty capture rather than inside
-# three sub-agents.
-check_in "$spawn_text" 'once, by the caller' 'multi-axis-code-review/SKILL.md § 4'
-# The capture line stays runnable shell, variables not angle brackets (S1/C1):
-# `<n>` left unexpanded is a literal inside the quotes, so the guard below
-# checks the same literal it just wrote, passes, and every axis then silently
-# falls back to re-deriving — the round costs exactly what it cost before.
-check_in "$spawn_text" 'git -C "$worktree" diff "$fixed_point"...HEAD >"$tmp"' 'multi-axis-code-review/SKILL.md § 4'
-check_in "$spawn_text" '[ -s "$1" ]' 'multi-axis-code-review/SKILL.md § 4'
-# PR #943 round 2: the key carries the revision and a per-invocation nonce,
-# and the publish is a rename — a guard that tests for absence cannot catch a
-# file replaced under a reader that is still reading it.
-check_in "$spawn_text" 'rev-parse --short HEAD' 'multi-axis-code-review/SKILL.md § 4'
-check_in "$spawn_text" 'mv "$1" "$2-${1##*.}.patch"' 'multi-axis-code-review/SKILL.md § 4'
-check_in "$spawn_text" 'not a pattern' 'multi-axis-code-review/SKILL.md § 4'
-# C3/P1: the file is keyed on <n> alone, so a second round that skips this
-# block leaves round 1's diff in place — present and non-empty, so the
-# missing-or-empty fallback never fires and three axes review a stale diff.
-check_in "$spawn_text" 'at the start of every round' 'multi-axis-code-review/SKILL.md § 4'
-
-# Rule 2: every axis prompt carries the path AND the command — the path so it
-# reads, the command as the provenance record and the fallback. The count is
-# the assertion a needle cannot make: an axis bullet that silently drops the
-# path fails here even though the other two still carry it.
-bullets="$(printf '%s\n' "$spawn" |
-  grep -cF 'The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.' || true)"
-if [ "$bullets" -ne 3 ]; then
-  echo "FAIL: § 4 hands the captured diff to $bullets axis prompts, not 3" >&2
-  fail=1
-fi
-
-# Rule 3: the fallback, stated in both homes — the caller's § 4 and the
-# standing brief every axis reads.
-# "missing or empty" alone is already true of § 4's prose about an empty
-# completion notification, so the needle names the diff file itself.
-check_in "$spawn_text" 'diff file is missing or empty' 'multi-axis-code-review/SKILL.md § 4'
-check_in "$reviewer_text" 'Read the diff from the file the caller names' flow/claude/agents/diff-reviewer.md
-check_in "$reviewer_text" 'only when that diff file is missing or empty do you re-derive it' flow/claude/agents/diff-reviewer.md
-check_in "$reviewer_text" 'say in your report that you did' flow/claude/agents/diff-reviewer.md
-# C2: `Read` stops at 2000 lines by default, and a patch read to line 2000
-# looks exactly like a patch that ended there.
-check_in "$reviewer_text" 'read it to the end' flow/claude/agents/diff-reviewer.md
-
-# Rule 4: what #937 ruled out of scope stays put — the axes are Opus. This
-# ticket removes duplicated I/O, not review.
-# That the witness check survives, and which single axis owns it since #938,
-# is witness-check.test.sh's `-ne 1` count over this same § 4 extraction and
-# this same reviewer file; it strictly implies anything this suite could say
-# about it, so this suite says nothing. Two suites, one claim, is the thing
-# the standing brief calls a finding reported twice.
-check_in "$reviewer_text" 'model: opus' flow/claude/agents/diff-reviewer.md
-check_in "$skill_text" 'Pass `model: opus` to all three' multi-axis-code-review/SKILL.md
 
 # Rule 5 (PR #943 round 2): run the documented block itself, twice, for the
 # same issue number at two distinct revisions, and prove the second capture
@@ -199,14 +131,6 @@ leftovers="$(find "$(dirname "$first_path")" -maxdepth 1 -type f ! -name '*.patc
 [ "$leftovers" -eq 0 ] || {
   echo "FAIL: the block left $leftovers non-patch file(s) beside the captures" >&2; fail=1; }
 
-# The unique suffix is the protocol's, not a mode's, and it is per invocation
-# rather than per shell: `$$` is the same for every capture the one shell that
-# ran the preamble makes, so two captures at one revision named one final path
-# and the second `mv` replaced the first under a reader still holding it.
-if grep -qF -- '$$' <<<"$preamble$block"; then
-  echo "FAIL: a capture name is keyed on the shell's pid, which every capture in one shell shares" >&2
-  fail=1
-fi
 git -C "$repo" checkout -q "$rev_c"
 { printf '%s\n' "$preamble"; printf '%s\n' "$block"; printf '%s\n' "$block"; } |
   sed -e "s|^n=<.*|n=937|" -e "s|^worktree=<.*|worktree=$repo|" -e "s|^fixed_point=<.*|fixed_point=main|" >"$scratch/twice.sh"

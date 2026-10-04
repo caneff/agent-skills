@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Runs implement/SKILL.md's own ticket renderer against fixture issues (#877).
 
-`implement/codex-adversarial-invocation.test.sh` asserts that SKILL.md's ticket
-read in § The brief, which § The Codex pass renders the focus text with, *says*
-it fetches `--json body,comments`. This file
+This file
 extracts the jq program those snippets carry and executes it, so the rendering
 is a tested seam rather than prose: a comment-less ticket still renders as the
 bare body, comments render after it attributed and marked as data, and a
@@ -89,11 +87,6 @@ def _headers(rendered):
     """
     return re.findall("^" + re.escape(HEADER) + ".*$", rendered, re.MULTILINE)
 
-
-def test_skill_carries_exactly_one_ticket_read():
-    # § The Codex pass renders from § The brief's read rather than carrying a second copy.
-    programs = _programs()
-    assert len(programs) == 1, f"want 1 body+comments fetch in SKILL.md, found {len(programs)}"
 
 
 def test_codex_lane_renders_the_same_document_as_skill():

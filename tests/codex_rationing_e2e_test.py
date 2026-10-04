@@ -42,8 +42,7 @@ SKILL.md` § The merge step 3 runs the gate with `--base` and `--tickets`, comme
 PR and appends the skip row with `--skip-reason size` or `ceiling` exactly; that the real usage
 cache and the real `gh` answer as these fakes do; that a real Codex run's output parses; or that
 the controller running the audit confirms and files its findings per `implement/codex-audit.md`.
-The prose is held by `implement/codex-usage-preflight-wording.test.sh` and
-`implement/codex-pass-schedule.test.sh`; the rest is the closing ticket's two opens of the real
+The rest is the closing ticket's two opens of the real
 thing: the gate line on a real heavy PR, and `codex-audit.py run --dry-run` against a copy of the
 real ledger.
 """

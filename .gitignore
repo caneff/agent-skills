@@ -11,3 +11,6 @@ __pycache__/
 .scratch/
 # the /implement lane's Rust crate: its build output, never committed.
 flow/lane/target/
+# a loaded mod's engine-written type files and tsconfig, regenerated on load
+flow/mods/*/.claude-plugin/types/
+flow/mods/*/tsconfig.json

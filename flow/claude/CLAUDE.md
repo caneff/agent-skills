@@ -188,6 +188,10 @@ from a one-line mention in a doc.
 
 # Gotchas
 
+- `~/.claude/settings.json` is a symlink to
+  `~/.agents/skills/flow/claude/settings.json`: edit the repo file in place
+  and commit it, never write the home path through a temp file and
+  `os.replace`/`mv`, which swaps the link for a copy (four times on 2026-10-04).
 - A process kill gets its own Bash call and nothing else.
   Searching and killing safely: `~/.agents/skills/flow/claude/SHELL-SAFETY.md`.
 - Never print a path and ask me to open it — open it for me
