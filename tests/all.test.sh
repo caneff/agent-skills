@@ -2,24 +2,26 @@
 # Regression test for #620: a caller's leaked GIT_DIR/GIT_WORK_TREE/
 # GIT_INDEX_FILE/GIT_COMMON_DIR/GIT_OBJECT_DIRECTORY/
 # GIT_ALTERNATE_OBJECT_DIRECTORIES must not let this repo's suite touch that
-# caller's repo. Reproduces the incident by copying the working tree of this
-# repo into a scratch git repo (so it carries any uncommitted fix to
-# tests/all.sh, not just what's in HEAD) and running its own tests/all.sh
-# with the leak pointed at a separate victim repo, as it did on 2026-09-07.
+# caller's repo. Reproduces the incident of 2026-09-07 in a scratch repo that
+# holds only tests/all.sh and one probe suite that writes through git, run
+# with the leak pointed at a separate victim repo. The probe is what makes a
+# leak observable: with the scrub gone, all.sh resolves its root against the
+# victim, finds no suites there, and the probe's write would land in the
+# victim. (Until #1415 the shadow was a copy of the whole tree that ran every
+# suite again, 251 of the suite's 494 serial seconds, for the same three
+# assertions.)
 #
-# Guarded against re-entrant recursion: this file is itself discovered by
-# the nested tests/all.sh invocation below, so it no-ops on that pass —
+# Guarded against re-entrant recursion: a nested copy of this file would be
+# discovered by a nested tests/all.sh, so it no-ops on that pass —
 # gated on a sentinel value we mint ourselves, not merely on the variable
 # being set, so a stray GIT_ENV_SCRUB_TEST_ACTIVE left in the environment by
 # something else fails loudly instead of silently reading as a skip/PASS.
 #
-# Copies the working tree (never the .git dir) into the shadow: this
-# checkout may itself be a linked worktree, whose .git is a pointer file
-# back at the main repo's shared git dir — copying it verbatim would let a
-# leak in the shadow corrupt the real repo we're sitting in. The shadow gets
-# its own fresh `git init`, and the victim is a second, unrelated scratch
-# repo the leak actually points the env at, so a corruption is something we
-# can observe on a repo the run had no business touching.
+# The shadow is a fresh `git init` that gets only tests/all.sh (never the .git
+# dir: this checkout may be a linked worktree whose .git is a pointer file back
+# at the shared git dir), and the victim is a second, unrelated scratch repo the
+# leak actually points the env at, so a corruption is something we can observe
+# on a repo the run had no business touching.
 set -uo pipefail
 
 _nested_sentinel="git-env-scrub-nested-pass"
@@ -40,13 +42,19 @@ shadow=$(mktemp -d)
 victim=$(mktemp -d)
 trap 'rm -rf "$shadow" "$victim"' EXIT
 
-(cd "$root" && tar -c --exclude=.git .) | (cd "$shadow" && tar -x) \
-  || { echo "FAIL: could not copy the working tree into the shadow"; exit 1; }
+mkdir -p "$shadow/tests"
+cp "$root/tests/all.sh" "$shadow/tests/all.sh" \
+  || { echo "FAIL: could not copy tests/all.sh into the shadow"; exit 1; }
+# The probe writes through git: with the leak live it would land in the victim.
+cat >"$shadow/probe.test.sh" <<'PROBE'
+#!/usr/bin/env bash
+git config --local probe.ran yes
+PROBE
 git -C "$shadow" init -q \
   || { echo "FAIL: could not init the shadow repo"; exit 1; }
 git -C "$shadow" add -A \
   && git -C "$shadow" -c user.email=t@example.com -c user.name=t commit -q -m shadow \
-  || { echo "FAIL: could not commit the shadow working tree"; exit 1; }
+  || { echo "FAIL: could not commit the shadow"; exit 1; }
 
 git init -q "$victim" \
   || { echo "FAIL: could not init the victim repo"; exit 1; }
@@ -69,6 +77,11 @@ fi
 if ! printf '%s\n' "$out" | grep -qE '^[1-9][0-9]* suites passed$'; then
   echo "FAIL: nested tests/all.sh reported no suites run — it must have resolved its root against the leaked/victim repo instead of the shadow working tree"
   printf '%s\n' "$out"
+  exit 1
+fi
+
+if [ "$(git -C "$shadow" config --local --get probe.ran)" != yes ]; then
+  echo "FAIL: the probe suite did not write into the shadow repo, so the run did not resolve its root there"
   exit 1
 fi
 
