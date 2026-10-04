@@ -227,13 +227,13 @@ skipped: the reviewer puts the command's stderr on the first line of its
 summary, and the caller repeats it in its own report. A caller whose summary
 shows neither a refusal nor the `appended` line sends the reviewer back.
 
-**A witness check ends with one `append` per mutation** (#1270). The recipe
+**A witness check ends with one `append` per mutation** (#1270). The script
 under *Isolation* below runs `review_ledger.py append --type witness-mutation`
-(`call-site-mutation` for an id listed in `call_site_ids`) once per mutation id,
+(`call-site-mutation` for an id passed with `--call-site`) once per mutation id,
 reading the outcome its report loop wrote for that id and its wall clock, before it removes them. The row
 holds the outcome `red`, `green` or `unknown` and no tokens, which stay with the
 correctness row. An `unknown` stays `unknown`. A refusal is reported like the
-review's own: the recipe exits 4 and the reviewer puts the stderr on the first
+review's own: the script exits 4 and the reviewer puts the stderr on the first
 line of its summary.
 
 **Expand `<dir>` yourself before writing the prompt**, and prune anything
@@ -372,7 +372,7 @@ If the completion notification comes back missing or empty, read that file befor
 
 - The captured diff — the exact path the block printed, not a pattern — and its line count, the diff command that produced it, and the commit list.
 - The path or fetched contents of the spec if there is one (so "behaviour the ticket did not ask for" has a referent), the test command the repo uses, and the settled decisions.
-- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) when present in the reviewed repo, `docs/agents/defect-classes.md` checked by name, class 1 (an absent or malformed answer read as a benign one) and class 3 (a test that passes for a reason other than the one it claims) especially, since you own the witness check; when absent, check those same two shapes inline plus class 2 (a stated fallback with no mechanism behind it); (d) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it — and when a mutation goes red, read the message and confirm the failure is your assertion and not a missing file or a denied path, which is class 3 again. (e) every safety guard the diff adds — a check that refuses, validates or fails closed — gets a second, separate mutation: mutate its call site. For every entry point the guard exists to protect, delete or neutralize the call to the guard there, run the suite that covers that entry point, and confirm it goes red at that entry point — not only in the unit test that calls the guard directly; mutating the guard's own body (d) reddens that unit test and says nothing about whether anything still calls the guard. A call-site mutation that stays green is an unprotected entry point: report it as a finding naming the entry point, since the guard can be bypassed at the only place it matters. Read the failure message as in (d), so a red from a missing file is not taken for a red from the assertion. Isolate each mutation in a throwaway worktree — `git worktree add --detach <a path outside the checkout> HEAD`, removed afterwards with `git worktree remove --force` — and never in a copy of the tree, which on a linked worktree shares the checkout's own index. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. Prepare every mutation and launch them at once rather than walking them in turn — at most four running together — a third of the headroom under the box's 28-process cap, counted `ps -eo comm= | grep -cx claude` and never `ps aux | grep`, since your axis is one of three — and fewer, down to one at a time again, when the box is already busy or its process table cannot be read: slower, never refused. Each mutation keeps its own worktree and its own captured output, and you collect them by id when they finish; a call-site mutation gets its own id, distinct from the constraint mutation it accompanies, never shared with it, so a failure message is still read against the mutation that produced it. A mutation whose worktree, suite run or output never arrived is `unknown`, reported by that name — never counted as an assertion that held, which is class 1. Nothing is restored between mutations: each worktree is discarded whole, and the checkout is left exactly as found. A file outside the repository (`~/.local/bin`, a dotfile, a registry) is read with one plain command — `cat <path>` or `diff <a> <b>` — never inside a `cd ... && for` compound, which the permission classifier cannot read as the read it is and blocks; and a mutation never reaches a step that writes outside the worktree (an installer, a registry edit, a symlink into `~`): stub that seam or skip the mutation and report it `unknown`. Rate each bug PLAUSIBLE or CONFIRMED and say which. Findings and their evidence only, no preamble."
+- The brief: "Report: (a) bugs — for each, the concrete failure scenario: the input, environment or sequence that makes the diff misbehave, and what a user sees; think about the run nobody is watching (piped output, closed stdin, missing tool, empty result, a name with an odd character, a second run over the same state); (b) behaviour the ticket did not ask for; (c) when present in the reviewed repo, `docs/agents/defect-classes.md` checked by name, class 1 (an absent or malformed answer read as a benign one) and class 3 (a test that passes for a reason other than the one it claims) especially, since you own the witness check; when absent, check those same two shapes inline plus class 2 (a stated fallback with no mechanism behind it); (d) every new or changed test checked as a witness: strip the constraint under test and see whether the assertion still passes — one that survives is a hollow witness, flag it — and when a mutation goes red, read the message and confirm the failure is your assertion and not a missing file or a denied path, which is class 3 again. (e) every safety guard the diff adds — a check that refuses, validates or fails closed — gets a second, separate mutation: mutate its call site. For every entry point the guard exists to protect, delete or neutralize the call to the guard there, run the suite that covers that entry point, and confirm it goes red at that entry point — not only in the unit test that calls the guard directly; mutating the guard's own body (d) reddens that unit test and says nothing about whether anything still calls the guard. A call-site mutation that stays green is an unprotected entry point: report it as a finding naming the entry point, since the guard can be bypassed at the only place it matters. Read the failure message as in (d), so a red from a missing file is not taken for a red from the assertion. Run every mutation in a throwaway worktree, never in a copy of the tree, which on a linked worktree shares the checkout's own index. Run them all with one `bash ~/.agents/skills/multi-axis-code-review/witness-check.sh` call (described after this brief): it does the worktrees and their removal, the concurrency bound, the per-id output, `unknown` for an unreached mutation and the ledger rows. Your part is a file outside the checkout defining `mutate`. Re-run only the suite that covers the mutated test (the file it lives in, run the way the repo's gate runs that file), never the whole gate. Hand the script every id in that one call rather than walking them in turn: it runs them together under *The bound*, fewer when the box is busy, slower never refused. Each mutation keeps its own worktree and its own captured output, and you collect them by id when it finishes; a call-site mutation gets its own id, distinct from the constraint mutation it accompanies, never shared with it, so a failure message is still read against the mutation that produced it. A mutation whose worktree, suite run or output never arrived is `unknown`, reported by that name — never counted as an assertion that held, which is class 1. Nothing is restored between mutations: each worktree is discarded whole, and the checkout is left exactly as found. A file outside the repository (`~/.local/bin`, a dotfile, a registry) is read with one plain command — `cat <path>` or `diff <a> <b>` — never inside a `cd ... && for` compound, which the permission classifier cannot read as the read it is and blocks; and a mutation never reaches a step that writes outside the worktree (an installer, a registry edit, a symlink into `~`): stub that seam or skip the mutation and report it `unknown`. Rate each bug PLAUSIBLE or CONFIRMED and say which. Findings and their evidence only, no preamble."
 
 **What the witness check costs, and what actually isolates it** (#939). The
 check itself is the most valuable thing a review does. Neither line below runs it less.
@@ -429,179 +429,42 @@ machine, never as an idle one, which is class 1 applied to the bound itself.
 It never refuses: a witness check that declines because the machine is loaded
 is worse than a slow one.
 
-```
-worktree=<the worktree under review>
-ids=<space-separated mutation ids, one per new or changed test — the names you report by>
-ledger_args=( --repo <repo> --ticket <n> )   # as in § 4's append line
-call_site_ids=""   # <space-separated ids of the call-site mutations among $ids; every other id is a constraint mutation>
-mutate() { :; }   # <$1 the id, $2 the witness worktree, $3 a marker path: strip that test's constraint in $2, create the marker with `: >"$3"` on the line IMMEDIATELY before the covering suite's command, and run only that suite>
+The check is a script shipped with this skill,
+[`witness-check.sh`](witness-check.sh); its header holds the full contract.
+You write one file, outside the checkout, defining `mutate`:
 
-# Job control, so each background mutation is its own process group and an
-# interrupt can reach a covering suite's whole process tree rather than only
-# the wrapper shell around it. An interrupted run may print a job notice.
-set -m
-top=$(git -C "$worktree" rev-parse --show-toplevel) || exit 1
-# Split into an array with pathname expansion OFF, and use that array from here
-# on. An unquoted `$ids` expands before any validation can see it, so `ids='*'`
-# becomes the checkout's filenames - each of which passes the character check
-# below - and the run mutates a set nobody asked for while omitting the id that
-# was actually requested.
-set -f
-mutations=( $ids )
-set +f
-# An empty list is a failed enumeration upstream, not a clean check: every loop
-# below would run zero times, cleanup would succeed, and the run would report
-# success having witnessed nothing. Refused before anything is created.
-if [ "${#mutations[@]}" -eq 0 ]; then
-  echo "witness check: no mutations supplied - nothing was checked" >&2; exit 2
-fi
-# An id names a directory and an output file, so it is checked before anything
-# exists: a pytest nodeid (`tests/a.py::t1[x]`) would put a mutation's output
-# file inside its own worktree and break the per-id prefixing below. Refused by
-# name — map the test to a short id and report the mapping — never mangled.
-seen=" "
-for id in "${mutations[@]}"; do
-  case "$id" in ''|*[!A-Za-z0-9._-]*)
-    echo "witness check: '$id' is not usable as a mutation id (letters, digits, . - _)" >&2; exit 2;;
-  esac
-  case "$seen" in *" $id "*)
-    echo "witness check: id '$id' is named twice - one mutation would overwrite the other's output" >&2; exit 2;;
-  esac
-  seen="$seen$id "
-done
-root=$(mktemp -d)
-# Checked, not assumed: a TMPDIR under the reviewed tree would put the
-# throwaway worktrees inside the checkout, and those untracked directories then
-# block `git worktree remove` and `ship` long after the review reported green.
-case "$root" in "$top"/*)
-  echo "witness check: TMPDIR is inside the checkout ($root)" >&2; exit 1;;
-esac
-# Worktrees, outputs and statuses get disjoint directories: with all three in
-# one, the ids `x` and `x.out` are both legal and collide - the parent creates
-# worktree `x.out` while mutation `x` is opening its output file at that same
-# path, so `x`'s redirection fails against a directory and `x` is reported red
-# without its suite ever having run.
-mkdir -p "$root/worktrees" "$root/output" "$root/status" "$root/ran" "$root/seconds" "$root/outcome" || exit 1
-# Cleanup that reports rather than covers: an `rm -rf` over a worktree git
-# failed to deregister - a full disk is the plausible way - leaves exactly the
-# stale entry this recipe's own prose says never to create, and the run would
-# exit 0 having created it. A failed removal keeps its directory, keeps the
-# root, and says so.
-cleanup() {
-  cleanup_failed=0
-  for w in "$root"/worktrees/*/; do
-    [ -d "$w" ] || continue
-    git -C "$worktree" worktree remove --force "${w%/}" && continue
-    cleanup_failed=$(( cleanup_failed + 1 ))
-    echo "witness check: could not remove worktree ${w%/} - it is still registered" >&2
-  done
-  if [ "$cleanup_failed" -gt 0 ]; then
-    echo "witness check: $cleanup_failed worktree(s) left registered; keeping $root - list them with git worktree list and remove them by hand" >&2
-    return 1
-  fi
-  rm -rf "$root" 2>/dev/null
-}
-# Armed before the first `worktree add` and sweeping every mutation, because a
-# witness check that WORKS makes the covering suite fail — that failure is the
-# whole point, and it is the ordinary outcome, not the exceptional one. INT and
-# TERM as well: this run is minutes long, so a reviewer's ctrl-C is an ordinary
-# way for it to end, and it would otherwise leave N registered worktrees behind
-# to stall the next `worktree remove` and any later `merge-cleanup`.
-# Signalling this shell does not reach its background children, so without this
-# the covering suites keep running after their worktrees are force-removed,
-# holding the box and writing into deleted paths. Stop them, reap them, and only
-# then clean up.
-stop_children() {
-  pids=$(jobs -pr)
-  [ -n "$pids" ] || return 0
-  for pid in $pids; do kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null; done
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    [ -n "$(jobs -pr)" ] || break
-    sleep 0.5
-  done
-  for pid in $(jobs -pr); do kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null; done
-  wait 2>/dev/null
-}
-trap cleanup EXIT
-trap 'stop_children; cleanup; exit 130' INT TERM
-# The bound and its reason are *The bound* above. What the code adds is the
-# refusal to guess: no readable process table means a full box, not an idle one.
-if procs=$(ps -eo comm= 2>/dev/null) && [ -n "$procs" ]; then
-  busy=$(printf '%s\n' "$procs" | { grep -cx claude || true; })
-else
-  busy=28
-fi
-slots=$(( (28 - busy) / 3 )); [ "$slots" -gt 4 ] && slots=4; [ "$slots" -lt 1 ] && slots=1
-# A mutation's own output, head AND tail, every line tagged with the id that
-# produced it: pytest puts the assertion text at the end, so the head alone cuts
-# out exactly what you are reading for.
-show() {
-  n=$(wc -l <"$root/output/$1" 2>/dev/null || echo 0)
-  if [ "$n" -le 50 ]; then cat "$root/output/$1"
-  else head -25 "$root/output/$1"
-       printf '... %s lines omitted from the middle ...\n' "$(( n - 50 ))"
-       tail -25 "$root/output/$1"
-  fi 2>/dev/null | awk -v p="  $1| " '{print p $0}'
-}
-for id in "${mutations[@]}"; do
-  while [ "$(jobs -pr | wc -l)" -ge "$slots" ]; do wait -n; done
-  witness="$root/worktrees/$id"
-  started=$(date +%s)
-  if ! git -C "$worktree" worktree add --detach -q "$witness" HEAD; then
-    printf 'unknown\n' >"$root/status/$id"   # class 1: an unreached mutation is not a pass
-    printf '%s\n' "$(( $(date +%s) - started ))" >"$root/seconds/$id"   # the time the failed attempt took, never a stand-in zero
-    continue
-  fi
-  # `mutate` in its own subshell: a mutation body ends in a failing suite and
-  # is naturally written with `exit`, which would otherwise kill this job
-  # before its status is recorded and read back below as `unknown`.
-  { ( mutate "$id" "$witness" "$root/ran/$id" ) >"$root/output/$id" 2>&1
-    printf '%s\n' "$?" >"$root/status/$id"
-    printf '%s\n' "$(( $(date +%s) - started ))" >"$root/seconds/$id"; } &
-done
-wait
-for id in "${mutations[@]}"; do
-  # The marker says the wrapper reached the line before the covering suite - a
-  # wrapper that dies earlier (a missing test path, a denied command) exits
-  # nonzero and writes an error, and without this that reads as an assertion
-  # witnessed.
-  if [ ! -e "$root/ran/$id" ]; then
-    printf '%s: unknown — it never reached its covering suite, whatever it exited with\n' "$id"
-    printf 'unknown\n' >"$root/outcome/$id"
-    continue
-  fi
-  # 126 and 127 are the kernel answering directly: the command was not
-  # executable, or was not found, so it never started. The marker cannot know
-  # that - it is written on the line before - and every proxy for "the suite
-  # ran" is a proxy. Where a real answer exists, take it instead of inferring.
-  case "$(cat "$root/status/$id" 2>/dev/null)" in
-    126|127) printf '%s: unknown — its covering suite command never executed (not found, or not executable)\n' "$id"
-             printf 'unknown\n' >"$root/outcome/$id" ;;
-    0) printf '%s: HOLLOW — the assertion still passed with its constraint stripped\n' "$id"
-       printf 'green\n' >"$root/outcome/$id" ;;
-    [1-9]*) printf '%s: red — its own message follows; confirm it is your assertion, not a missing file or a denied path\n' "$id"
-            show "$id"
-            printf 'red\n' >"$root/outcome/$id" ;;
-    *) printf '%s: unknown — the mutation never ran to completion; report it by name, never as a pass\n' "$id"
-       printf 'unknown\n' >"$root/outcome/$id" ;;
-  esac
-done
-# One ledger row per mutation (#1270), written here because cleanup removes the files.
-# The outcome is the word the report loop above wrote for the id (`red`, `green` or
-# `unknown`), so the mapping from exit status to outcome has this one home; a missing
-# outcome file or wall clock is refused by `append`, never written as a stand-in.
-append_failed=0
-for id in "${mutations[@]}"; do
-  kind=witness-mutation
-  case " $call_site_ids " in *" $id "*) kind=call-site-mutation ;; esac
-  python3 ~/.agents/skills/docs/research/review_ledger.py append "${ledger_args[@]}" --type "$kind" \
-    --mutation-id "$id" --status-file "$root/outcome/$id" --seconds "$(cat "$root/seconds/$id" 2>/dev/null)" \
-    || append_failed=$(( append_failed + 1 ))
-done
-cleanup || exit 3
-trap - EXIT INT TERM
-[ "$append_failed" -eq 0 ] || { echo "witness check: $append_failed mutation row(s) not appended - put the refusal above on the first line of your summary" >&2; exit 4; }
 ```
+mutate() {   # $1 the id, $2 the witness worktree, $3 a marker path
+  # strip that test's constraint in $2, then on the line IMMEDIATELY before
+  # the covering suite's command create the marker, and run only that suite:
+  : >"$3"
+  ...
+}
+```
+
+and run it once, with every mutation id in the one call:
+
+```
+bash ~/.agents/skills/multi-axis-code-review/witness-check.sh \
+  --worktree <the worktree under review> --mutate <that file> \
+  --repo <repo> --ticket <n> \
+  [--call-site <id>]... -- <id>...
+```
+
+`--repo` and `--ticket` are the ledger's, as in § 4's append line; `--no-ledger`
+replaces them only outside a review. Each `--call-site` id is one of the ids.
+A single mutation that is already a patch, with the command that covers it,
+can go through `mutation-audit/witness.sh` instead, which writes the `mutate`
+for you (`mutation-audit/SKILL.md` § Single-diff witness mode).
+Exit 0 means every mutation ran and was reported — `<id>: red` with its own
+message, `<id>: HOLLOW`, or `<id>: unknown` — so read the output, not the
+status; the header lists the other exit codes.
+
+Each witness gets the setup a fresh worktree lacks (#1219), which the script's
+header states: no Python bytecode, no `__pycache__`, and a link to the reviewed
+tree's `node_modules`. Other ignored dependency directories (`.venv`,
+`vendor`) are not set up. A Cargo `target/` is not shared either: a fresh
+worktree has no `target/`, so each witness builds into its own.
 
 `git worktree remove`, never `rm -rf`: a directory deleted out from under the
 registration leaves a stale entry that stalls the next `worktree remove` and

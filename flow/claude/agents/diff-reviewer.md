@@ -66,7 +66,7 @@ it can be disposed of by id like any other finding (#1021).
 **Then run `review_ledger.py append` as your last step**, exactly as
 `multi-axis-code-review/SKILL.md` § 4 *Every review ends with `append`* says. A
 refusal is the first line of your summary, never skipped. The correctness
-axis's witness-check recipe appends one mutation row per mutation too
+axis's witness check appends one mutation row per mutation too
 (`multi-axis-code-review/SKILL.md` § 4, *A witness check ends with one `append`
 per mutation*); its refusal goes on that first line as well.
 
@@ -78,7 +78,8 @@ subsection), **spec** (missing, partial, unasked-for, or wrongly implemented
 against the originating issue), or **correctness** — bugs, behaviour the ticket
 did not ask for, and every new test checked as a witness: strip the constraint
 under test and see whether the assertion still passes. One that survives is a
-hollow witness. Mutate in the throwaway worktree your caller's brief describes,
-never in the checkout and never in a copy of it — a byte copy of a linked
-worktree shares the checkout's index, so a staged mutation lands in the real
-repository.
+hollow witness. Run the mutations with
+`multi-axis-code-review/witness-check.sh`, which puts each in its own throwaway
+worktree: never in the checkout and never in a copy of it, since a byte copy
+of a linked worktree shares the checkout's index, so a staged mutation lands in
+the real repository.
