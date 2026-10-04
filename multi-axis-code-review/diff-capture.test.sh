@@ -165,6 +165,35 @@ run_block "$rev_c" >/dev/null
   echo "FAIL: the block's 14-day sweep no longer collects a capture under the unique key" >&2
   fail=1; }
 
+# #1218: a declared generated path never reaches a reviewer, and a stat line says
+# what was left out. The declaration is the reviewed tree's own
+# docs/agents/review-generated-paths.txt; a commit past rev_c adds a generated
+# file beside a real change and the declaration itself.
+mkdir -p "$repo/gen" "$repo/docs/agents"
+printf '{"glyph": 1}\n' >"$repo/gen/glyphs.json"
+printf '# generated, never reviewed\n\ngen/\n' >"$repo/docs/agents/review-generated-paths.txt"
+echo third >>"$repo/f.txt"
+git -C "$repo" add -A && git -C "$repo" commit -qm third
+rev_d="$(git -C "$repo" rev-parse HEAD)"
+git -C "$repo" checkout -q "$rev_d"
+{ printf '%s\n' "$preamble"; printf '%s\n' "$block"; } |
+  sed -e "s|^n=<.*|n=1218|" -e "s|^worktree=<.*|worktree=$repo|" -e "s|^fixed_point=<.*|fixed_point=main|" >"$scratch/gen.sh"
+gen_out="$( cd "$repo" && HOME="$scratch/gen-home" bash "$scratch/gen.sh" 2>&1 )" ||
+  { echo "FAIL: the capture with a declared generated path did not publish: $gen_out" >&2; fail=1; }
+gen_patch="$(printf '%s\n' "$gen_out" | tail -1 | awk '{print $NF}')"
+if [ ! -f "$gen_patch" ]; then
+  echo "FAIL: no capture published for the generated-path case: $gen_out" >&2; fail=1
+else
+  grep -q '^diff --git a/f.txt' "$gen_patch" ||
+    { echo "FAIL: the capture dropped the real change to f.txt" >&2; fail=1; }
+  ! grep -q 'gen/glyphs.json' "$gen_patch" ||
+    { echo "FAIL: the capture still carries the declared generated file gen/glyphs.json" >&2; fail=1; }
+  grep -q 'docs/agents/review-generated-paths.txt' "$gen_patch" ||
+    { echo "FAIL: the capture dropped the declaration file, which is not itself generated" >&2; fail=1; }
+  printf '%s\n' "$gen_out" | grep -qE '^captured: .*excluded 1 generated file\(s\): gen/glyphs.json' ||
+    { echo "FAIL: no stat line naming the one excluded generated file: $gen_out" >&2; fail=1; }
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "PASS multi-axis-code-review/diff-capture.test.sh"
 else

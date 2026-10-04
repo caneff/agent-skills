@@ -251,6 +251,25 @@ mkdir -p "$dir"
 find "$dir" -maxdepth 1 -type f -mtime +13 -delete  # +13, not +14: find's -mtime +N means "older than N+1 days"
 n=<issue number from step 2, or the branch name>
 worktree=<the worktree under review>
+# Declared generated paths (#1218): the reviewed tree's own
+# docs/agents/review-generated-paths.txt, one git pathspec per line, blank lines
+# and `#` comments ignored. Goldens, lockfiles and regenerated data stay out of
+# every capture; no file means nothing is excluded.
+generated=(); excludes=()
+if [ -f "$worktree/docs/agents/review-generated-paths.txt" ]; then
+  while IFS= read -r p; do
+    case "$p" in ''|'#'*) ;; *) generated+=("$p"); excludes+=(":(exclude)$p") ;; esac
+  done <"$worktree/docs/agents/review-generated-paths.txt"
+fi
+capture_stat() { # <range>: the one stat line every axis prompt carries
+  local gen="" n=0 list=""
+  if [ "${#generated[@]}" -gt 0 ]; then
+    gen=$(git -C "$worktree" diff --name-only "$1" -- "${generated[@]}") || return 1
+    [ -z "$gen" ] || { n=$(printf '%s\n' "$gen" | wc -l); list=": $(printf '%s\n' "$gen" | paste -sd, -)"; }
+  fi
+  printf 'captured: %s; excluded %s generated file(s)%s\n' \
+    "$(git -C "$worktree" diff --shortstat "$1" -- . "${excludes[@]}")" "$n" "$list"
+}
 # The publish protocol, stated once for both capture modes below. Each mode sets
 # its own `patch` stem, takes a temp path from new_capture, writes into it, then
 # hands both to publish_capture, which appends the temp path's random suffix.
@@ -274,7 +293,8 @@ fixed_point=<the fixed point from step 1>
 head=$(git -C "$worktree" rev-parse --short HEAD) || exit 1
 patch="$dir/diff-$n-$head"               # revision; the protocol adds the per-invocation suffix
 tmp=$(new_capture) || exit 1
-git -C "$worktree" diff "$fixed_point"...HEAD >"$tmp" || { rm -f "$tmp"; exit 1; }
+git -C "$worktree" diff "$fixed_point"...HEAD -- . "${excludes[@]}" >"$tmp" || { rm -f "$tmp"; exit 1; }
+capture_stat "$fixed_point...HEAD" || { rm -f "$tmp"; exit 1; }
 publish_capture "$tmp" "$patch" || exit 1
 ```
 
@@ -336,12 +356,14 @@ key=$(printf '%s\n' "$ordered" | git -C "$worktree" hash-object --stdin | cut -c
 patch="$dir/diff-$n-list$key"             # list digest; the protocol adds the suffix
 tmp=$(new_capture) || exit 1
 for s in $ordered; do
-  one=$(git -C "$worktree" show --format='commit %H%n%n    %s%n' --patch "$s") || {
+  one=$(git -C "$worktree" show --format='commit %H%n%n    %s%n' --patch "$s" -- . "${excludes[@]}") || {
     rm -f "$tmp"; echo "sha-list review: could not read $s" >&2; exit 1; }
   printf '%s\n' "$one" | grep -q '^diff --git ' || {
-    rm -f "$tmp"; echo "sha-list review: $s changes no files" >&2; exit 1; }
+    rm -f "$tmp"; echo "sha-list review: $s changes no files (outside the declared generated paths)" >&2; exit 1; }
   printf '%s\n' "$one" >>"$tmp"
 done
+printf 'captured: sha-list of %s commit(s); excluded declared generated paths: %s\n' \
+  "$(set -- $ordered; echo $#)" "${generated[*]:-none}"
 publish_capture "$tmp" "$patch" || exit 1
 ```
 

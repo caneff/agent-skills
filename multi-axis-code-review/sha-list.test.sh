@@ -232,6 +232,25 @@ leftovers="$(find "$scratch_dir" -maxdepth 1 -type f ! -name '*.patch' | wc -l)"
 [ "$leftovers" -eq 0 ] ||
   { echo "FAIL: the block left $leftovers non-patch file(s) beside the captures" >&2; fail=1; }
 
+# #1218: a declared generated path stays out of the union too. The declaration is
+# read from the reviewed tree, so it sits untracked beside the commit it filters.
+mkdir -p "$repo/gen" "$repo/docs/agents"
+printf 'regenerated\n' >"$repo/gen/data.json"
+printf 'real\n' >>"$repo/keep-a.txt"
+git -C "$repo" add gen keep-a.txt && git -C "$repo" commit -qm "gen and real"
+g="$(git -C "$repo" rev-parse HEAD)"
+printf 'gen/\n' >"$repo/docs/agents/review-generated-paths.txt"
+gen_out="$(run_block "$g")" || { echo "FAIL: the block refused a commit with generated and real changes: $gen_out" >&2; fail=1; }
+gen_patch="$(printf '%s\n' "$gen_out" | tail -1 | awk '{print $NF}')"
+if [ ! -s "$gen_patch" ]; then
+  echo "FAIL: no capture for the generated-path commit: $gen_out" >&2; fail=1
+else
+  grep -q '^diff --git a/keep-a.txt' "$gen_patch" || { echo "FAIL: the real change is missing from the capture" >&2; fail=1; }
+  ! grep -q 'gen/data.json' "$gen_patch" || { echo "FAIL: the declared generated file is in the capture" >&2; fail=1; }
+  printf '%s\n' "$gen_out" | grep -q 'excluded declared generated paths: gen/' ||
+    { echo "FAIL: no line naming the excluded generated paths: $gen_out" >&2; fail=1; }
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "PASS multi-axis-code-review/sha-list.test.sh"
 else
