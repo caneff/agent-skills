@@ -1,7 +1,8 @@
 # Operations detail (read when dispatching agents, running long jobs, or merging)
 
 Pointer target for `CLAUDE.md` § Agents and jobs. One lane: dispatch, control,
-wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
+wait, status, merge preconditions, end. Terms as `~/.agents/skills/CONTEXT.md`
+defines them.
 
 ## Dispatch
 
@@ -273,6 +274,18 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   is that it is overrunning. Why: an answer built from what a worker was told
   restates the plan, not the state.
 
+## Merge preconditions
+
+A merge — the controller's, or the line handed to Chris — names its repo
+with `--repo owner/name`, and runs only after `gh pr view` shows the PR
+not-draft and `CLEAN`. Why: without `--repo`, `gh` resolves the PR number
+against whatever repo the current directory belongs to, and a draft or
+non-CLEAN PR either fails the merge or lands on a conflict. The full merge
+procedure is `implement/SKILL.md`'s, as the end section below says; these
+two preconditions sit here as well so the teaching hook
+`hooks/teach-merge.sh` can show them, on the first `gh pr view` or
+`gh pr checks` of a session, to a session with no implement skill loaded.
+
 ## End
 
 - Before reporting a commit sha, `git status --porcelain` is empty, and fix
@@ -280,8 +293,10 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   not the working tree, and an amend erases a sha already handed over.
 - The review loop, the before-the-PR checks and the controller's merge
   (CLEAN, `Closes` verified): `implement/SKILL.md` § Heavy tier; the light
-  tier's landing and its `Closes` check: `implement/SKILL.md` § Light tier. Why: one home, so the
-  lane and this file cannot drift apart.
+  tier's landing and its `Closes` check: `implement/SKILL.md` § Light tier.
+  Why: one home for the procedure, so the lane and this file cannot drift
+  apart. The two preconditions every merge shares are also stated in
+  § Merge preconditions, for the teaching hook that shows them.
 - The controller follows every merge with
   `merge-cleanup --repo <primary checkout> <branch>`
   (`--help` for PR/URL, `--sweep` and `--reap`). The sweep shows its plan and asks
