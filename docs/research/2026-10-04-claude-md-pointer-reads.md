@@ -48,3 +48,28 @@ not a read.
 - Unexplained: 90% of merging sessions never read OPERATIONS. Either the
   skills those sessions run already carry what they need (doc is partly dead
   weight) or they act without it. Not checked.
+
+## Follow-up: sessions where a skill already covered the action
+
+Same 14-day space. A session counts as "covered" if its transcript contains
+`Base directory for this skill: .../<skill>` for a skill that carries the
+procedure.
+
+| Doc | Triggered | Not covered by a skill | Of those, read the doc |
+|---|---|---|---|
+| OPERATIONS (covering: `burndown`, `implement`) | 227 | 14 | 9 |
+| WORKFLOW (covering: `burndown`, `implement`, `file-ticket`, `to-tickets`, `to-spec`, `wayfinder`, `grilling`) | 175 | 4 | 0 |
+| VISUAL-INSPECTION (covering: `computer-use`, `visual-teach`, `prototype`) | 36 | 35 | 6 |
+| SHELL-SAFETY (covering: `diagnosing-bugs`) | 36 | 36 | 0 |
+
+Revised reading: the low raw rates for OPERATIONS and WORKFLOW are mostly
+sessions where a skill already carried the procedure. When no skill was
+loaded, OPERATIONS was read 9 of 14 times. VISUAL-INSPECTION and
+SHELL-SAFETY have no covering skill, and the pointer misses most or all of
+the time.
+
+Already hook-enforced (in `flow/claude/settings.json`): Agent `model`
+(`require-agent-model.sh`), push and `gh pr merge` ownership plus history
+destroyers (`block-dangerous-git.sh`), background-job wrapping
+(`wrap-background-jobs.sh`). Commit identity is enforced by the lane's git
+hooks. The CLAUDE.md prose for these restates a deterministic guard.
