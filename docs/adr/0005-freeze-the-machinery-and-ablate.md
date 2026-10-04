@@ -15,8 +15,9 @@ changes a harness by removing one component at a time and measuring escapes.
 - No new tickets against the burn/review/implement machinery, except a bug
   that blocks work. Controller friction goes into one append-only friction
   log (`docs/agents/friction-log.md`), read at retro.
-- For the next burns, one component at a time is switched off (candidates:
-  the verification pass, Codex pass 2, one review axis); the review ledger
+- For the next burns, one component at a time is switched off (the
+  verification pass and Codex pass 2 are already removed by ADR 0004's
+  one-wave ruling; the first ablation is in #1401); the review ledger
   counts bugs that escape to the seam or a later review. A component with no
   escapes is deleted.
 
