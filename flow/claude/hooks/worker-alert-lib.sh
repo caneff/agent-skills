@@ -1,10 +1,10 @@
-# Shared helpers for worker-stop-alert.sh (#991): the
-# `/implement` brief-capture regex, the `~/.claude/sessions/*.json` registry
-# loop with its `/proc/<pid>/stat` field-22 liveness check, `logline()`'s
-# format, and the herdr agent-name and pane lookup. Sourced, not executed —
-# the hook `source`s this file so a registry schema change or a brief-format
-# change is one edit. The hook keeps its own alert text and dedupe key; only
-# these four pieces live here.
+# Shared helpers for worker-stop-alert.sh (#991): the `/implement`
+# brief-capture regex, the `~/.claude/sessions/*.json` registry loop with its
+# `/proc/<pid>/stat` field-22 liveness check, `logline()`'s format, and the
+# herdr agent-name and pane lookup. Sourced, not executed — the hook
+# `source`s this file so a registry schema change or a brief-format change is
+# one edit. The hook keeps its own alert text and dedupe key; only these four
+# pieces live here.
 
 # The brief: ticket number and controller name from a transcript's first
 # human message naming an /implement or /implement-spec command, or nothing
@@ -71,7 +71,7 @@ worker_alert_logline() { # <log> <key> <status> <message>
 }
 
 # This worker's own herdr agent name, via its pane id — falling back to the
-# bare pane id, then to "unknown pane", exactly as both hooks did inline.
+# bare pane id, then to "unknown pane", exactly as the hook did inline.
 worker_alert_worker_agent_name() { # -> name
   local n
   n="$(timeout 2 herdr agent get "${HERDR_PANE_ID:-}" 2>/dev/null | jq -r '.result.agent.name // empty' 2>/dev/null)"
