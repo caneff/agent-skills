@@ -11,13 +11,14 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 fails=0
 
-# A healthy fixture: flow dir with two hooks (one registered by path under
-# ~/.claude/hooks, one run from the repo, one unregistered by design) and a
-# HOME linking the settings and the one installed hook.
+# A healthy fixture: a flow dir with a hook registered by path under
+# ~/.claude/hooks (a.sh) and its lib (a-lib.sh), a hook run from the repo
+# (b.sh), one unregistered by design (quiet.sh) and a test file; and a HOME
+# linking the settings, a.sh and a-lib.sh.
 fixture() { # fixture <name> -> sets FLOW and HOME_DIR
   FLOW="$tmp/$1/flow"; HOME_DIR="$tmp/$1/home"
   mkdir -p "$FLOW/claude/hooks" "$HOME_DIR/.claude/hooks"
-  printf 'LINKED_HOOKS=(a.sh a-lib.sh)\nUNREGISTERED_BY_DESIGN=(quiet.sh)\n' > "$FLOW/hooks-manifest.sh"
+  printf 'LINKED_HOOKS=(a.sh a-lib.sh)\nUNREGISTERED_BY_DESIGN=(quiet.sh)\nSOURCED_LIBS=(a-lib.sh)\n' > "$FLOW/hooks-manifest.sh"
   for h in a.sh a-lib.sh b.sh quiet.sh a.test.sh; do : > "$FLOW/claude/hooks/$h"; done
   cat > "$FLOW/claude/settings.json" <<JSON
 {"hooks":{"PreToolUse":[{"hooks":[
@@ -62,6 +63,24 @@ cat > "$FLOW/claude/settings.json" <<'JSON'
 JSON
 case_ "a hook registered under ~/.claude/hooks but not in the manifest fails" 1 "b.sh is registered under"
 
+fixture stale-exemption
+rm "$FLOW/claude/hooks/quiet.sh"
+case_ "an UNREGISTERED_BY_DESIGN name with no file fails" 1 "quiet.sh is named in hooks-manifest.sh"
+fixture libish-hook
+: > "$FLOW/claude/hooks/new-lib.sh"
+case_ "a library-named hook is not exempt by its name" 1 "new-lib.sh is not registered"
+fixture disabled-suffix
+cat > "$FLOW/claude/settings.json" <<'JSON'
+{"statusLine":{"command":"bash /x/flow/claude/hooks/b.sh"},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/x/.claude/hooks/a.sh.disabled"}]}]}}
+JSON
+case_ "a path outside hooks, or a suffixed name, is not registration" 1 "a.sh is not registered"
+fixture quiet-ok
+out=$(bash "$check" --quiet --home "$HOME_DIR" --flow "$FLOW" 2>&1); rc=$?
+if [ "$rc" = 0 ] && [ -z "$out" ]; then echo "PASS: --quiet prints nothing when healthy"
+else echo "FAIL: --quiet healthy — rc=$rc out: $out"; fails=1; fi
+out=$(bash "$check" --quiet --home "$tmp/nohome" --flow "$FLOW" 2>&1); rc=$?
+if [ "$rc" = 1 ] && [[ "$out" == *PROBLEM* ]]; then echo "PASS: --quiet still prints a problem"
+else echo "FAIL: --quiet unhealthy — rc=$rc out: $out"; fails=1; fi
 fixture misplaced-automode
 cat > "$FLOW/claude/settings.json" <<'JSON'
 {"permissions":{"autoMode":{"allow":["$defaults"]}},"hooks":{"PreToolUse":[{"hooks":[

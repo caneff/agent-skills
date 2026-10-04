@@ -66,10 +66,7 @@
       "Bash(head /home/caneff/.local/bin/*)",
       "Bash(ls /home/caneff/.local/bin*)",
       "Bash(job-run:*)",
-      "Bash(uv run finders/*)",
-      "Bash(uv run --with google-auth --with requests tools/upton_links/sheet/write_rules.py:*)",
-      "Bash(uv run tools/upton_links/make_links.py:*)",
-      "Bash(uv run tools/upton_links/make_big.py:*)"
+      "Bash(uv run:*)"
     ],
     "ask": [
       "Bash(./e2e.sh *)",
@@ -78,7 +75,10 @@
       "Bash(/home/caneff/src/twitch-rules-scroller/e2e.sh *)",
       "Bash(bash /home/caneff/src/twitch-rules-scroller/e2e.sh *)",
       "Bash(*/.claude/worktrees/*/e2e.sh *)",
-      "Bash(bash */.claude/worktrees/*/e2e.sh *)"
+      "Bash(bash */.claude/worktrees/*/e2e.sh *)",
+      "Bash(job-run *e2e.sh*)",
+      "Bash(bash -c *e2e.sh*)",
+      "Bash(sh -c *e2e.sh*)"
     ],
     "deny": [
       "AskUserQuestion",
@@ -189,6 +189,11 @@
             "type": "command",
             "command": "bash /home/caneff/.agents/skills/flow/backup-sync.sh --commit >/dev/null 2>&1 || true",
             "statusMessage": "Backing up VS Code settings"
+          },
+          {
+            "type": "command",
+            "command": "bash /home/caneff/.agents/skills/flow/install-check.sh --quiet 2>&1 || true",
+            "statusMessage": "Checking the flow install"
           }
         ]
       },

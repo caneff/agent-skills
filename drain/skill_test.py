@@ -64,8 +64,8 @@ class LiveLayerTest(unittest.TestCase):
         self.assertIn("§ End-to-end seam", text)
 
     def test_live_run_waits_for_chris_and_runs_once_on_merged_main(self):
-        step = self.completion().split("**Live layer**", 1)[1].lower()
-        for needle in ("go", "once", "merged", "owed live checks", "fix or revert ticket"):
+        step = " ".join(self.completion().split("**Live layer**", 1)[1].lower().split())
+        for needle in ("on his go", "once on merged `main`", "owed live checks", "fix or revert ticket"):
             self.assertIn(needle, step, f"the live-run step does not say {needle!r}")
 
 

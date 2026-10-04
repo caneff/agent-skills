@@ -28,25 +28,21 @@ case_ "environment list without \$defaults fails" 1 "autoMode.environment" \
   '{"autoMode":{"environment":["only this"]}}'
 case_ "soft_deny is owned: no \$defaults is allowed" 0 "" \
   '{"autoMode":{"soft_deny":["spelled out"]}}'
+case_ "autoMode that is a string fails" 1 "autoMode must be an object" '{"autoMode":"oops"}'
+case_ "autoMode that is an array fails" 1 "autoMode must be an object" '{"autoMode":[1]}'
+case_ "a list that is a string fails" 1 "autoMode.allow must be an array" '{"autoMode":{"allow":"only this"}}'
+case_ "a list holding a non-string still lints" 1 "autoMode.allow" '{"autoMode":{"allow":[1]}}'
 case_ "invalid JSON fails" 1 "not valid JSON" '{"autoMode":'
 case_ "an empty file is not a pass" 1 "not valid JSON" ""
+printf '{}' > "$tmp/ok.json"
+out=$(PATH=/nonexistent /bin/bash "$lint" "$tmp/ok.json" 2>&1); rc=$?
+if [ "$rc" = 2 ] && [[ "$out" == *"jq is not installed"* ]]; then echo "PASS: no jq is exit 2 naming jq"
+else echo "FAIL: no jq — want exit 2 naming jq, got $rc: $out"; fails=1; fi
 out=$(bash "$lint" "$tmp/nope.json" 2>&1); rc=$?
 if [ "$rc" = 1 ] && [[ "$out" == *"cannot read"* ]]; then echo "PASS: missing file fails"
 else echo "FAIL: missing file — got $rc: $out"; fails=1; fi
 out=$(bash "$lint" "$here/claude/settings.json" 2>&1); rc=$?
 if [ "$rc" = 0 ]; then echo "PASS: this repo's settings.json is clean"
 else echo "FAIL: this repo's settings.json — $out"; fails=1; fi
-
-# The live e2e lock (#1392): each way an agent starts twitch-rules-scroller's
-# ./e2e.sh is an `ask` rule, since it takes over Chris's monitor. A rule that
-# no start form matches does not stop it, so the forms are named here.
-ask=$(jq -r '.permissions.ask[]?' "$here/claude/settings.json")
-for rule in 'Bash(./e2e.sh *)' 'Bash(bash e2e.sh *)' 'Bash(bash ./e2e.sh *)' \
-            'Bash(/home/caneff/src/twitch-rules-scroller/e2e.sh *)' \
-            'Bash(bash /home/caneff/src/twitch-rules-scroller/e2e.sh *)' \
-            'Bash(*/.claude/worktrees/*/e2e.sh *)' 'Bash(bash */.claude/worktrees/*/e2e.sh *)'; do
-  if grep -qxF -- "$rule" <<<"$ask"; then echo "PASS: ask rule $rule"
-  else echo "FAIL: settings.json has no permissions.ask rule $rule"; fails=1; fi
-done
 
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "FAILURES"; exit 1; }

@@ -53,12 +53,15 @@ auto mode prompt or deny it).
 
 The rule matches command text as written. It does not match "the same program
 invoked in a different form": `/usr/bin/curl` against `Bash(curl *)`,
-`sh -c '...'`, `git -C . push` against `Bash(git push *)`. Hence the seven
+`sh -c '...'`, `git -C . push` against `Bash(git push *)`. Hence the ten
 entries for `e2e.sh` in `permissions.ask`: `./e2e.sh`, `bash e2e.sh`,
-`bash ./e2e.sh`, the absolute path with and without `bash`, and the
-`.claude/worktrees/*/e2e.sh` copy with and without `bash`. A trailing ` *`
-also matches the bare command. Still unmatched, and so unblocked: `sh -c` and
-`bash -c './e2e.sh'` (the docs' `sh -c` row). `./e2e.sh` is matched in every
+`bash ./e2e.sh`, the absolute path with and without `bash`, the
+`.claude/worktrees/*/e2e.sh` copy with and without `bash`, and `job-run`,
+`bash -c` and `sh -c` wrappers. `Bash(job-run:*)` is allowed, so a `job-run --
+./e2e.sh` that no ask rule named would start with no prompt; `wrap-background-jobs.sh`
+rewrites a backgrounded command to `job-run`, and whether permissions are checked
+on the rewritten text was not verified, so both spellings are covered. A trailing ` *`
+also matches the bare command. Still unmatched, and so unblocked: any wrapper not named above. `./e2e.sh` is matched in every
 repo, not only twitch-rules-scroller; `ls ~/src/*/e2e.sh` on 2026-10-04 found
 only twitch-rules-scroller's. The rule is a prompt-before
 guard, not a security boundary.
@@ -97,8 +100,10 @@ guard, not a security boundary.
 
 ## Compute commands (#1225)
 
-Already in place, so nothing was added: `Bash(job-run:*)` in `permissions.allow`,
-and the "Shared-box compute runs" entry in `autoMode.allow`, which covers
-`uv run <script>`, `just <recipe>` and `node <script>` under `job-run`. A
-broader `Bash(uv run *)` was not added: per the section above it is a
-wildcarded interpreter, suspended in auto mode, so it would change nothing.
+Ruled by Chris 2026-09-28 (the #1225 triage brief): allow `job-run` and `uv run`
+in user settings. `Bash(job-run:*)` was already there; `Bash(uv run:*)` is added
+and the four narrower `uv run` path rules it makes redundant are dropped. In
+auto mode a wildcarded interpreter rule is suspended (above), so for the
+classifier the effective pre-authorization is the "Shared-box compute runs"
+entry in `autoMode.allow`, which covers `uv run <script>`, `just <recipe>` and
+`node <script>` under `job-run`; the `allow` rule applies in other modes.

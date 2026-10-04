@@ -4,15 +4,18 @@
 # every repo hook is registered in settings.json or named in
 # hooks-manifest.sh as unregistered by design. Prints one line per problem and
 # exits 1 on any; exit 0 means all of it holds.
-# Usage: install-check.sh [--home <dir>] [--flow <dir>]
+# --quiet prints nothing when all of it holds (for a SessionStart hook).
+# Usage: install-check.sh [--quiet] [--home <dir>] [--flow <dir>]
 set -uo pipefail
 flow="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 home="$HOME"
+quiet=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --home) home="${2:?--home needs a dir}"; shift 2 ;;
     --flow) flow="${2:?--flow needs a dir}"; shift 2 ;;
-    *) echo "usage: install-check.sh [--home <dir>] [--flow <dir>]" >&2; exit 2 ;;
+    --quiet) quiet=1; shift ;;
+    *) echo "usage: install-check.sh [--quiet] [--home <dir>] [--flow <dir>]" >&2; exit 2 ;;
   esac
 done
 # shellcheck source=hooks-manifest.sh
@@ -47,13 +50,22 @@ lint_out=$(bash "$(dirname "${BASH_SOURCE[0]}")/settings-lint.sh" "$settings") |
   while IFS= read -r line; do problem "${line#PROBLEM: }"; done <<< "$lint_out"
 }
 
-commands=$(jq -r '[.. | objects | select(has("command")) | .command] | .[]' "$settings") ||
+# Only the `hooks` block counts as registration: a path in `statusLine` or an
+# `env` value is not a hook.
+commands=$(jq -r '[.hooks | .. | objects | select(has("command")) | .command] | .[]' "$settings") ||
   { echo "cannot read hook commands from $settings" >&2; exit 2; }
 in_array() { local x=$1; shift; for e in "$@"; do [ "$e" = "$x" ] && return 0; done; return 1; }
+# A name in either list that no longer names a file is stale, so a rename
+# cannot leave an exemption pointing at nothing.
+for h in "${UNREGISTERED_BY_DESIGN[@]}" "${SOURCED_LIBS[@]}"; do
+  [ -e "$flow/claude/hooks/$h" ] || problem "$h is named in hooks-manifest.sh but $flow/claude/hooks/$h does not exist"
+done
 for path in "$flow"/claude/hooks/*.sh; do
   h=$(basename "$path")
-  case "$h" in *.test.sh | *-lib.sh | *testlib.sh) continue ;; esac
-  line=$(printf '%s\n' "$commands" | grep -F "/$h" | head -n1)
+  case "$h" in *.test.sh) continue ;; esac
+  in_array "$h" "${SOURCED_LIBS[@]}" && continue
+  # The name ends the path component: `a.sh.disabled` and `xa.sh` are not `a.sh`.
+  line=$(printf '%s\n' "$commands" | grep -E "/${h//./\\.}([[:space:]'\"]|\$)" | head -n1)
   if [ -z "$line" ]; then
     in_array "$h" "${UNREGISTERED_BY_DESIGN[@]}" ||
       problem "$h is not registered in $settings and is not listed in UNREGISTERED_BY_DESIGN"
@@ -62,5 +74,8 @@ for path in "$flow"/claude/hooks/*.sh; do
   fi
 done
 
-[ "$problems" = 0 ] && echo "install check: ok"
-[ "$problems" = 0 ]
+if [ "$problems" = 0 ]; then
+  [ -n "$quiet" ] || echo "install check: ok"
+  exit 0
+fi
+exit 1
