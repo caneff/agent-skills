@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Tests for the spec's closing ticket (#897).
+"""Tests for the spec's closing check (#897, reshaped by #1402).
 
-One seam, named on the ticket: `body(...)` — the closing ticket's generated
-body, asserted against a fixture repo that declares an end-to-end seam and
-what that seam is blind to. On #781's spec run the closing ticket named no
-seam at all and the closing worker stopped and asked; the seam that existed
-had already diverged from the live editor inside that same spec, so naming
-it is necessary and not sufficient.
+One seam, named on the ticket: `body(...)` — the closing-check section's
+generated body, asserted against a fixture repo that declares an end-to-end
+seam and what that seam is blind to. On #781's spec run the then-separate
+closing ticket named no seam at all and the closing worker stopped and asked;
+the seam that existed had already diverged from the live editor inside that
+same spec, so naming it is necessary and not sufficient.
 """
 import os
 import shutil
@@ -57,6 +57,16 @@ def clean_fixtures():
 def test_the_body_names_the_repos_declared_seam():
     got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
     assert "`npm run test:e2e` over the headless solver bundle" in got, got
+
+
+def test_the_body_is_a_section_of_the_last_slice_not_a_ticket_of_its_own():
+    # Stage 2 of the process redesign: the end-to-end test and the spec-level
+    # review run in the last slice's PR, so the body is appended to that
+    # slice and never filed as a closing ticket.
+    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
+    assert got.startswith("## Closing check"), got
+    assert "last slice" in got, got
+    assert "Close out the spec" not in got, got
 
 
 def test_the_body_names_what_the_seam_is_blind_to():
@@ -283,13 +293,22 @@ def test_an_agents_file_that_is_not_utf8_is_reported_not_raised():
         raise AssertionError("the latin-1 seam declaration was not read")
 
 
-def test_an_empty_sha_list_is_refused():
-    try:
-        T.body(repo(), spec=366, shas=[], surfaces=[])
-    except T.SeamError as exc:
-        assert "sha" in str(exc), exc
-    else:
-        raise AssertionError("a closing ticket with nothing to review was built")
+def test_a_one_slice_spec_has_no_earlier_landings_and_still_gets_the_seam():
+    # The last slice of a one-slice spec has no earlier landings: the section
+    # still names the seam, and drops the spec-level review it has nothing to
+    # read (C1/P3 of #1402).
+    got = T.body(repo(), spec=366, shas=[], surfaces=[])
+    assert "grid rendering at 4x4 and 6x6" in got, got
+    assert "spec-level review" not in got, got
+    assert "merge shas" not in got, got
+    assert "git cherry-pick" not in got, got
+
+
+def test_the_last_slice_pr_closes_the_spec():
+    # "The spec closes when its last slice merges" needs a closing line in the
+    # PR; nothing else in the run writes one for the spec (C4 of #1402).
+    got = T.body(repo(), spec=366, shas=SHAS, surfaces=[])
+    assert "`Closes #366`" in got, got
 
 
 def test_the_surfaces_question_must_be_answered():

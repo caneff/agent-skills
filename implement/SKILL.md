@@ -378,8 +378,9 @@ row, name the printed line in the PR body. An unreadable cache is exit 30,
 never headroom. Exit 20 also answers usage at or above the reserve ceiling, 70%
 (#1359), so the weekly audit of skipped PRs always has quota left; its ledger
 skip row takes `--skip-reason ceiling` exactly, distinct from the cap's printed
-line. Exit 40 (under the size threshold): its non-test, non-Markdown churn is
-under 300 lines and no ticket carries the `needs-codex` label; launch nothing,
+line. Exit 40 (under the size threshold): its non-test, non-Markdown
+churn is under 300 lines and no ticket carries the `needs-codex` label;
+launch nothing,
 append the skip row with `--skip-reason size` exactly (one reason for every
 size skip, so the ledger can count them), and say
 `Codex pass skipped: under size threshold (<churn> < 300)` in the PR body. The

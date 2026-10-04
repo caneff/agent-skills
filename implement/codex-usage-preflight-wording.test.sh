@@ -12,10 +12,12 @@ fail=0
 check_in() { # <file> <needle> — fixed-string, case-insensitive
   grep -qiF -- "$2" "$1" || { echo "FAIL $(basename "$1"): missing: $2"; fail=1; }
 }
-# The ceiling the prose quotes is the gate's own constant, so a retune that
+# The ceiling and size threshold the prose quotes are the gate's own constants, so a retune that
 # leaves the prose behind goes red here.
 ceiling=$(sed -n 's/^RESERVE_PERCENT = \([0-9][0-9]*\)$/\1/p' "$here/codex-usage-gate.py")
 [ -n "$ceiling" ] || { echo "FAIL codex-usage-gate.py: no RESERVE_PERCENT"; fail=1; }
+threshold=$(sed -n 's/^SIZE_THRESHOLD = \([0-9][0-9]*\)$/\1/p' "$here/codex-usage-gate.py")
+[ -n "$threshold" ] || { echo "FAIL codex-usage-gate.py: no SIZE_THRESHOLD"; fail=1; }
 check_not_in() { # <file> <needle> — fixed-string, case-insensitive
   ! grep -qiF -- "$2" "$1" || { echo "FAIL $(basename "$1"): still says: $2"; fail=1; }
 }
@@ -33,11 +35,13 @@ check_in "$here/SKILL.md" 'An unreadable cache is exit 30'
 check_in "$here/SKILL.md" 'no `codex@openai-codex` entry'
 check_in "$here/SKILL.md" '--base origin/<default> --tickets <n>...'
 check_in "$here/SKILL.md" 'Exit 40 (under the size threshold)'
-check_in "$here/SKILL.md" '`Codex pass skipped: under size threshold (<churn> < 300)` in the PR body'
+check_in "$here/SKILL.md" "\`Codex pass skipped: under size threshold (<churn> < ${threshold})\` in the PR body"
+check_in "$here/SKILL.md" "churn is under ${threshold} lines"
 check_in "$here/SKILL.md" '`--skip-reason size`'
 check_in "$here/SKILL.md" '`needs-codex` label'
 check_in "$here/SKILL.md" "the reserve ceiling, ${ceiling}%"
 check_in "$here/codex-lane.md" "the ${ceiling}% reserve ceiling"
+check_in "$here/codex-audit.md" "the reserve above ${ceiling} %"
 check_in "$here/SKILL.md" '`--skip-reason ceiling`'
 check_in "$here/../docs/agents/triage-labels.md" 'reserve ceiling'
 check_in "$here/../docs/agents/triage-labels.md" '`needs-codex`'

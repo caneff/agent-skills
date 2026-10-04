@@ -627,6 +627,23 @@ def _codex_wall(rec: dict) -> dict:
             "seconds": round((hi - lo).total_seconds(), 3)}
 
 
+def _codex_run_status(status: object, out: str | None) -> tuple[list[dict] | None, dict]:
+    """(the findings, or None; the findings status) of one Codex run, from its record's exit
+    `status` and its `.out` text (None when there is none). A status that is not an int is unknown
+    whether it finished; a non-zero one is a refusal: no findings, never a pass that found nothing."""
+    if not isinstance(status, int) or isinstance(status, bool):
+        return None, {"status": "refused", "reason": "the record has no status, or one that is not an integer: whether the run finished is unknown"}
+    if status != 0:
+        err = re.search(r"Codex error: (.*)", out or "")
+        detail = err.group(1).strip()[:200] if err else (
+            "no .out beside the record" if out is None else "no error line in the .out")
+        return None, {"status": "refused", "reason": f"exit status {status}: {detail}"}
+    if out is None:
+        return None, {"status": "unknown", "reason": "record has no .out beside it"}
+    parsed, why = parse_codex_out(out)
+    return parsed, {"status": "unknown", "reason": why} if parsed is None else {"status": "known"}
+
+
 def _ticket_groups(dispositions: dict[str, dict], ticket: int) -> list[str]:
     """The dispositions groups (`1016`, `975-983`) that cover a ticket."""
     return [g for g in sorted(dispositions) if str(ticket) in g.split("-")]
@@ -678,18 +695,10 @@ def harvest_codex(repo_dir: Path, repo: str, names: list[str], dispositions: dic
         sources = [where] + ([f"{repo_dir.name}/{stem}.out"] if out is not None else [])
         extra = {"exit_status": rec["status"]}
         findings: list[dict] = []
-        if rec["status"] != 0:
-            err = re.search(r"Codex error: (.*)", out or "")
-            detail = err.group(1).strip()[:200] if err else (
-                "no .out beside the record" if out is None else "no error line in the .out")
-            why = f"exit status {rec['status']}: {detail}"
-            fstatus = {"status": "refused", "reason": why}
-            extra["refusal"] = why
-        elif out is None:
-            fstatus = {"status": "unknown", "reason": "record has no .out beside it"}
+        parsed, fstatus = _codex_run_status(rec["status"], out)
+        if fstatus["status"] == "refused":
+            extra["refusal"] = fstatus["reason"]
         else:
-            parsed, why = parse_codex_out(out)
-            fstatus = {"status": "unknown", "reason": why} if parsed is None else {"status": "known"}
             groups = _ticket_groups(dispositions, ticket)
             for k, (f, labels) in enumerate(zip(parsed or [], _codex_labels(parsed or [])), 1):
                 hits = [(label, g, dispositions[g][f"codex-{phase}-{label}"]) for label in labels for g in groups
@@ -1229,24 +1238,17 @@ def cmd_append_audit(args) -> int:
         if not isinstance(rec, dict) or not isinstance(rec.get("prs"), list) \
                 or not all(isinstance(n, int) for n in rec["prs"]) or not isinstance(rec.get("range"), str):
             return refuse(f"record {args.record} needs `prs`, a list of PR numbers, and `range`, a string")
-        findings, fstatus = [], {"status": "known"}
-        if "status" not in rec:
-            fstatus = {"status": "refused", "reason": "the audit record has no status: whether the run finished is unknown"}
-        elif rec["status"] != 0:
-            fstatus = {"status": "refused", "reason": f"the audit run exited {rec['status']!r}"}
-        elif args.refusal is not None:
+        findings = []
+        out = args.record.with_suffix(".out")
+        parsed, fstatus = _codex_run_status(rec.get("status"), out.read_text(errors="replace") if out.is_file() else None)
+        if fstatus["status"] != "refused" and args.refusal is not None:
             if not args.refusal.strip():
                 return refuse("--refusal needs the reason")
-            fstatus = {"status": "refused", "reason": args.refusal}
-        else:
-            out = args.record.with_suffix(".out")
-            parsed, why = parse_codex_out(out.read_text()) if out.is_file() else (None, f"no {out.name}")
-            if parsed is None:
-                fstatus = {"status": "unknown", "reason": why}
-            unconfirmed = Joined.unknown("the controller confirms an audit finding by reading the code; not joined here")
-            for k, f in enumerate(parsed or [], 1):
-                findings.append({**_finding_entry(f"{AUDIT_TYPE}-{k}", f["severity"], unconfirmed, f["file"], f["title"]),
-                                 "overlap": "unique", "k": 1})
+            parsed, fstatus = None, {"status": "refused", "reason": args.refusal}
+        unconfirmed = Joined.unknown("the controller confirms an audit finding by reading the code; not joined here")
+        for k, f in enumerate(parsed or [], 1):
+            findings.append({**_finding_entry(f"{AUDIT_TYPE}-{k}", f["severity"], unconfirmed, f["file"], f["title"]),
+                             "overlap": "unique", "k": 1})
         stem = args.record.stem
         row = new_row(f"{repo}/audit/{AUDIT_TYPE}/1/{stem}", repo, [], AUDIT_TYPE, 1, stem, findings, fstatus,
                       [str(args.record)],

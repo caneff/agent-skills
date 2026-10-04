@@ -333,6 +333,17 @@ class AuditTest(CodexAppendCase):
         self.assertEqual(row["cost"]["usage_delta"]["delta"], 4.0)
         self.assertEqual(self.report()["codex-audit"]["refused_rows"], 1)
 
+    def test_an_audit_record_reads_its_status_as_a_gate_record_does(self):
+        """One record-to-status rule for both Codex row kinds: a failed run's refusal quotes the Codex
+        error line, and a status that is not an integer is never a clean run."""
+        self.audit("--record", self.audit_record(status=1, out=OUT_REFUSED))
+        self.assertEqual(self.only_row()["status"]["fields"]["findings"]["reason"],
+                         "exit status 1: You've hit your usage limit. Try again at Oct 3rd.")
+        self.ledger.unlink()
+        self.audit("--record", self.audit_record(status=False))
+        row = self.only_row()
+        self.assertEqual((row["findings"], row["status"]["fields"]["findings"]["status"]), ([], "refused"))
+
     def test_an_unreadable_out_is_unknown_never_a_clean_audit(self):
         self.audit("--record", self.audit_record(out=None))
         self.assertEqual(self.only_row()["status"]["fields"]["findings"]["status"], "unknown")

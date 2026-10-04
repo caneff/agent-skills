@@ -36,3 +36,8 @@ and measuring what breaks, never by adding a part per incident.
 2. Stage 5: #1401 (already filed).
 3. Stage 2: a one-paragraph change to `to-tickets` and `implement-spec`.
 4. Stage 3: ablate the burn machinery last, once stages 1, 2 and 5 have cut the ticket flow. What survives is kept.
+
+## Ruled 2026-10-04 (Chris)
+
+- Serial is acceptable: "a sensible way to address open issues automatedly without all this extra crap ... even if it is more serial and less parallel". Built as `drain`, #1403.
+- The unit of work is a bundle, not a ticket (worker-chosen, ruled "y" 2026-10-04 over directory bundles): "serial is impossible if we keep filing nitpicky small tickets ... make sure all tickets are meaty enough". `drain` hands the agent the oldest ticket plus every ready title, and the agent takes up to 8 it would fix in the same PR, so small tickets are fine to file and are done together.

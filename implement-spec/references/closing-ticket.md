@@ -1,8 +1,8 @@
-# The closing ticket: the seam, and what it cannot see
+# The closing check: the seam, and what it cannot see
 
-The policy is `implement-spec/SKILL.md` § The closing ticket;
-`implement-spec/closing_ticket.py` generates the body. This file is the
-declaration grammar and the evidence.
+The policy is `implement-spec/SKILL.md` § The closing check;
+`implement-spec/closing_ticket.py` generates the section appended to the last
+slice's body. This file is the declaration grammar and the evidence.
 
 ## The declaration
 
@@ -27,7 +27,7 @@ Both keys are required, and a value of nothing but emphasis markers is
 refused as naming nothing: `- **Seam**:**` reads as the value `**` (#1104).
 A repo that declares nothing is not a repo with no seam: the exploration pass supplies both halves instead (`--seam`,
 `--blind-to`), and a spec run that can supply neither has found something
-worth telling the controller before it writes a closing ticket at all.
+worth telling the controller before it writes the closing check at all.
 
 **The declaration outranks the exploration pass.** The pass fills only what
 the declaration omits, and where both are present and differ the generator
@@ -43,11 +43,11 @@ it.
 
 ## Why a seam with no blind spot is refused
 
-On #781's spec run the closing ticket said "write one end-to-end test over
-the whole spec's acceptance criteria", named no seam, and the closing worker
-stopped and asked. Naming one would not have been enough either. The seam
-that existed was the headless solver bundle, and it had **already diverged
-from the live editor inside that same spec**: `#367`'s no-ring header
+On #781's spec run the spec's separate final ticket said "write one
+end-to-end test over the whole spec's acceptance criteria", named no seam, and
+the worker stopped and asked. Naming one would not have been enough either.
+The seam that existed was the headless solver bundle, and it had **already
+diverged from the live editor inside that same spec**: `#367`'s no-ring header
 verified green headless and broke 4×4 and 6×6 in the real app.
 
 So the generator refuses a seam with no stated blind spot. A worker told only
@@ -68,7 +68,7 @@ failure the seam structurally cannot witness.
 ## One open of the real thing
 
 Where the spec puts a user-visible surface beyond the seam's reach, the
-closing ticket says so and its acceptance carries one open of the shipping
+closing check says so and its acceptance carries one open of the shipping
 surface per surface. This is the end-of-spec form of the standing rule that a
 ruling about runtime behaviour is checked against the thing that ships, not
 against a proxy for it.
@@ -82,16 +82,17 @@ commits from other sessions.
 
 The list alone is not enough, because `/multi-axis-code-review` pins **one**
 fixed point and reads `<fixed point>...HEAD`: it cannot take disjoint
-commits. A ticket that names the shas and stops states a procedure nothing
-can carry out, and a worker handed one invents the range the list exists to
-prevent. So the generated ticket carries the procedure that builds the
-comparison out of those commits: a detached worktree at the first sha, the
+commits. A closing check that names the shas and stops states a procedure
+nothing can carry out, and a worker handed one invents the range the list
+exists to prevent. So the generated section carries the procedure that builds
+the comparison out of those commits: a detached worktree at the first sha, the
 rest cherry-picked on in landing order, and the review run against
-`<first>~1`, with the worktree removed after. HEAD is then this spec's
-commits and nothing else. Where a cherry-pick conflicts, the fallback is one
-run per sha against its own parent — also written out, because "fall back to
-per-sha" with no commands is the same unexecutable instruction one level
-down.
+`<first>~1`, with the worktree removed after. HEAD is then this spec's commits
+and nothing else. Where a cherry-pick conflicts, the fallback is one run per
+sha against its own parent — also written out, because "fall back to per-sha"
+with no commands is the same unexecutable instruction one level down.
 
-The generator refuses an empty sha list: a closing ticket with nothing to
-review is a review that will be invented at the last minute.
+An empty sha list is the one-slice spec: the slice has no earlier landings,
+so the generated section omits the spec-level review and keeps the seam, the
+blind spot and the surfaces. It is not a refusal, because a refusal would
+leave every one-slice spec with no closing check at all.
