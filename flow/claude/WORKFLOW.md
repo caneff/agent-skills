@@ -71,6 +71,20 @@ decisions are fuzzy → `/to-spec` → `/to-tickets` (tracer-bullet slices) →
 since. Why: a PRD written before a decision changed builds the old decision.
 Skills live in `~/.agents/skills` (symlinked into `~/.claude/skills`).
 
+## Rulings and changes to the workflow
+
+- Write each design or content ruling Chris makes into the repo's decisions
+  doc when he makes it; a subagent that receives a ruling directly also
+  relays it to its spawner. A ruling that supersedes a ticket's text is
+  written onto the ticket before a reviewer is dispatched. Why: a ruling held
+  only in chat or in one agent is lost at compaction and returns as a
+  regression, and the reviewer fetches the ticket as its spec.
+- Before proposing a change to a workflow step or skill rule, find the
+  commit or ticket that introduced the current behaviour and state the
+  problem it solved; a proposal that undoes it says how that problem stays
+  solved. Why: otherwise the change brings back the failure the step was
+  written to prevent.
+
 ## Auto mode and harness work
 
 Work that changes the harness itself is never dispatched into auto mode
@@ -107,6 +121,12 @@ private repos.
   sources first (GitHub search API, the tools' own repos and docs) before
   proposing a homegrown mechanism. Why: we are not the first to hit it, and
   the codebase cannot tell you what exists outside it.
+- **A git-ignored scratch script that produces something that ships** (a
+  published link, a sheet write, a frozen reference build): snapshot the
+  script, its inputs and its exact rebuild command into `docs/research/`
+  before reporting, and file the ticket that promotes it to tracked tooling.
+  Why: scratch is the only copy, and a worktree cleanup or restart loses the
+  way to regenerate it.
 - **An automated reminder** ("prompt me when X") is one line in that repo's
   `AGENTS.md` — not a hook, not new tooling. Why: a hook or tool for a
   reminder is more to maintain than the reminder is worth.

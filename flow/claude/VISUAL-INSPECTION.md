@@ -48,7 +48,10 @@ a step your own hands can do.
   opener: `wslview <f>`, after `ls <f>` confirms it exists. Why: in the week
   of 2026-09-21 I saw sheets opened mid-write (truncated), a reused filename
   serving the previous round from cache, and `wslview` on a missing path
-  opening Explorer instead (#1231).
+  opening Explorer instead (#1231). In a design loop, every reply that
+  changes the picture opens the new render without being asked — the whole
+  frame, beside the target at the same scale. Why: I can only rule on the
+  image.
 
 ## Reading a rendered page yourself
 
@@ -119,3 +122,26 @@ I cannot see, and `wsl --shutdown` kills every session running in WSL.
   of interest before answering — don't squint at the full frame. Pillow and
   OpenCV are installed for bare `python3` (`import PIL, cv2`). Why: detail in
   a full frame is downscaled past reading.
+
+### Tuning toward a mockup
+
+- The mockup is the whole spec: reproduce its shapes, extents, colours and
+  lane order as given, and add no constraint or idea of your own. First
+  measure its features from its pixels (where each band enters and leaves
+  the frame, lane order per band, width changes along it) and check every
+  render against that list. Every claim about a render is read from the
+  render's own pixels, never from the parameters meant to produce it; a
+  constraint Chris states about the picture (what may sit on which colour)
+  is checked by computation over the render and reported as a pass count.
+  Why: free-hand edits drift back to shapes he rejected.
+- A tuning round changes only what Chris named and holds everything else
+  fixed, shown beside the previous version with the exact values changed.
+  Every variant he has seen keeps its own name and files and is never
+  overwritten; a variant he picks is frozen (source committed, rebuild
+  command recorded) and rebuilt once to confirm it reproduces
+  byte-identical. Why: a round that moves two things cannot be judged, and
+  he often returns to an earlier state.
+- When Chris rejects a second attempt at the same target, stop rendering:
+  say in plain words what the shape is, how it will be built and what it
+  will be checked against, then wait for his go. Why: fast free-hand retries
+  move further from the target each round.

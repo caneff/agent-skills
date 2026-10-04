@@ -37,6 +37,25 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   and `git -C`, pass `--repo` to every `gh` call. Why: an EnterWorktree that
   lands in a path that already exists is someone else's tree, and a commit
   made from the wrong cwd lands there.
+- Before every launch on this box, check `uptime` and `free -g`. Background
+  runs share one 32-core, 39 GB WSL box with other agents; count every
+  working Claude session against a 28-session cap, sessions you did not
+  start included (idle and done do not count — the cap protects cores).
+  burndown's counter is the reference: herdr's working panes plus every
+  `claude` pid no pane resolves to; without herdr, `ps -eo comm= | grep -cx
+  claude` (`ps aux | grep -c '[c]laude'` over-counts more than 2×). Keep the
+  sum of per-process `ulimit -v` caps under about 24 GB. A brief that asks an
+  agent to run solves, builds or test gates states the worker count and a
+  wall-clock ceiling. Why: three reviewers each defaulting to 8 workers is
+  24 cores for one diff, and caps summing to 66 GB crashed WSL.
+- One file has one writer per run. With two workers live on one repo the
+  controller names who owns each file; a change inside another worker's
+  file reaches you as verbatim text the controller hands you to paste, or
+  waits for that worker's PR — never as your own edit. Why: two writers on
+  one file is a conflict nobody owns.
+- Commit working code as soon as it runs and before launching a long job,
+  staging only your own files. Why: another agent may be committing to the
+  same branch.
 
 ### Herdr configuration
 
@@ -117,6 +136,12 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   sentence. Never answer a question and delegate the same question. An idle
   notice that repeats a report already relayed gets no reply at all. Why: a
   repeated report costs me a read and carries nothing new.
+- A subagent or teammate sends its final report with `SendMessage` to the
+  agent that sent the brief, by that agent's name, as the last act of its
+  turn — never to team-lead or main by default. If that agent has exited,
+  send it to the controller, naming in the first line whose work it is and
+  that the spawner was gone. Why: a report is never dropped because its
+  addressee died.
 - **The controller/worker pairing survives `/clear`** (#964). `/clear` wipes
   a session's context, not its process: the session's pid, and everything
   keyed to it, are still there afterward. `implement-dispatch` appends one
@@ -213,13 +238,33 @@ wait, status, end. Terms as `~/.agents/skills/CONTEXT.md` defines them.
   killed. Why: a plain background run loses its output and exit code when
   its shell is killed.
 - Append a completion line to a progress file (e.g. `PROGRESS.md`) after
-  every step and read it on wake; never stage or commit it. Never go idle
-  waiting on a background task: block on it (TaskOutput block=true, or poll
-  in-turn) and finish the checklist in the same turn. Why: monitor
-  notifications get lost, and an idle session is not woken by a lost one.
-- A Monitor pattern matches only the final line, a timeout, or an error
-  string — never a per-item line inside a sweep. Why: a per-item match fires
-  on the first item and reads as the run finishing.
+  every step and read it on wake; never stage or commit it. A background
+  job's completion wakes the parent: end the turn, never block on it or poll
+  in-turn (ruled 2026-10-04, superseding the block-in-turn step written for
+  lost monitor notifications; #925's 180 `echo ok` calls was the cost). If a
+  notification is lost, the next real event — a message, the progress file
+  on wake — catches it. Why: a spin is invisible; every liveness signal reads
+  healthy while it burns.
+- A watch on a background job matches failure signatures
+  (`Traceback|Error|REJECTED|bad_alloc|Killed`) and process exit, not only
+  the success line — and never a per-item line inside a sweep. Report a
+  crash, zero yield, UNKNOWN or failed verification to Chris before another
+  attempt; never retry the same configuration silently. Why: a per-item
+  match fires on the first item and reads as finishing; a success-only
+  watch sleeps through a crash.
+- A message that arrives while work is running changes that work. Check
+  messages on every poll. If it changes a run's parameters, kill the run
+  and restart with the new ones; if it adds to a deliverable, fold it in
+  and grep the deliverable for it before reporting done. Why: a message
+  read after the run is a run done twice.
+- Scripts, logs and outputs of long runs go in a git-ignored scratch
+  directory inside the worktree or the repo's research directory — never
+  `/tmp` or the session scratchpad, which a WSL restart wipes. Parallel
+  workers each get their own filename there. Why: a name unique only inside
+  one session scratchpad is not unique. (Retires when #1234's hook lands.)
+- A long unattended fetch or search writes each result to disk as it lands
+  and skips what is already there on restart. Why: a crash then costs one
+  item rather than the run.
 - No PushNotification toasts and no new desktop notifications; attention is
   batched. Why: each toast interrupts me for something not yet actionable.
 
