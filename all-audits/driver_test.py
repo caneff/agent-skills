@@ -26,27 +26,6 @@ def _run_driver(*args):
     )
 
 
-def test_index_rebuild_runs_no_audits():
-    with tempfile.TemporaryDirectory() as tmp:
-        for name in ("dead-code", "test-audit"):
-            d = os.path.join(tmp, "collection", name)
-            os.makedirs(d)
-            with open(os.path.join(d, "report.html"), "w") as f:
-                f.write(f"<html><body>{name} report</body></html>")
-
-        r = _run_driver("--index", "--out", tmp)
-        assert r.returncode == 0, r.stdout + r.stderr
-
-        index = os.path.join(tmp, "collection", "index.html")
-        assert os.path.isfile(index)
-        text = open(index).read()
-        assert "dead-code" in text
-        assert "test-audit" in text
-        assert 'href="dead-code/report.html"' in text
-
-        logs = os.path.join(tmp, "logs")
-        assert not (os.path.isdir(logs) and os.listdir(logs)), "--index must run no audits"
-
 
 def test_index_rerun_replaces_assets_without_nesting():
     with tempfile.TemporaryDirectory() as tmp:

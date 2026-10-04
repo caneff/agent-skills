@@ -43,6 +43,48 @@ scratch_repo() { # scratch_repo <dir> -> writes a patched backup-sync.sh + fixtu
   git -C "$dir" commit -q -m base
 }
 
+# --restore must not touch it at all, while --commit must still pick up and
+# push a harness write that landed on it through the link.
+#
+# Every case below runs a scratch COPY of backup-sync.sh with its
+# vscode/settings.json entry redirected under $tmp first (#1031 review
+# finding C1/P2): the real entry is an absolute /mnt/c/... path that ignores
+# $HOME, so running the unpatched script's --restore against a live machine
+# overwrites the operator's real Windows VS Code settings — confirmed on this
+# box (mtime moved to the run's own minute) before this redirect was added.
+# Run: bash flow/backup-sync.test.sh
+set -uo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fails=0
+
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+
+# A scratch repo: backup-sync.sh's own dir doubles as the git repo `--commit`
+# operates on ($here inside the script), so each case gets its own git-init'd
+# copy rather than ever touching this real checkout.
+scratch_repo() { # scratch_repo <dir> -> writes a patched backup-sync.sh + fixtures, git-inits it
+  local dir="$1"
+  mkdir -p "$dir/claude/output-styles" "$dir/vscode" "$dir/fake-vscode"
+  printf '{"env":{}}\n' > "$dir/claude/settings.json"
+  printf '# quill\n' > "$dir/claude/output-styles/quill.md"
+  printf '{"vscode":true}\n' > "$dir/vscode/settings.json"
+  # The real live path is a pre-existing file the glob matches; a glob over a
+  # not-yet-created path matches nothing, so the redirected fake live file
+  # has to already exist too, or every case below silently skips it. Starts
+  # identical to the repo copy (already "synced") so a case that only cares
+  # about claude/settings.json doesn't pick up a spurious vscode commit too.
+  printf '{"vscode":true}\n' > "$dir/fake-vscode/settings.json"
+  # Redirect the one entry whose live path is absolute and machine-real.
+  sed 's#/mnt/c/Users/\*/AppData/Roaming/Code/User/settings.json#'"$dir"'/fake-vscode/settings.json#' \
+    "$here/backup-sync.sh" > "$dir/backup-sync.sh"
+  chmod +x "$dir/backup-sync.sh"
+  git -C "$dir" init -q
+  git -C "$dir" config user.name t
+  git -C "$dir" config user.email t@example.com
+  git -C "$dir" add -A
+  git -C "$dir" commit -q -m base
+}
+
 if grep -q '"claude/settings.json"' "$here/backup-sync.sh"; then
   echo "FAIL claude/settings.json is still in backup-sync.sh's COPIES manifest"; fails=1
 else

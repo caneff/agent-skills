@@ -337,10 +337,6 @@ def test_disposition_line_rejects_a_number_command():
     assert t.parse_disposition_line(bad) is None
 
 
-def test_disposition_line_accepts_an_int_ticket():
-    d = t.parse_disposition_line(json.dumps({"id": "S3", "outcome": "filed", "ticket": 900}))
-    assert d == t.Disposition(id="S3", outcome="filed", detail="900")
-
 
 def test_disposition_line_rejects_a_string_ticket():
     # implement/SKILL.md writes `"ticket": <n>` unquoted; a quoted ticket

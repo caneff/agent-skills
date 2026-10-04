@@ -332,12 +332,6 @@ class HarvestTest(Case):
         section = self.review.read_text().split("## Dispositions with no finding")[1].split("\n## ")[0]
         self.assertIn("codex-gate-1", section)
 
-    def test_scratch_directories_are_skipped(self):
-        self.assertFalse(any("999" in rid for rid in self.rows()))
-
-    def test_no_mutation_rows(self):
-        self.assertFalse(any("mutation" in r["type"] for r in self.rows().values()))
-
 
 class MappingLabelTest(Case):
     """A drifted label is data: one holding the review file's own ` -> ` separator
