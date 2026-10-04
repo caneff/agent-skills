@@ -131,3 +131,40 @@ Separately: Quill's frontmatter has no `keep-coding-instructions: true` (checked
 - Whether the "may or may not be relevant" wrapper was ever on CLAUDE.md in older versions; only v2.1.284 and v2.1.289 transcripts were checked.
 
 Pages opened for this note: the eight code.claude.com pages named above (memory, skills, hooks, hooks-guide, output-styles, sub-agents, best-practices, features-overview); the Steering post; the Agent Skills engineering post; the skill authoring best-practices page; agents.md; the Codex AGENTS.md guide; Cursor Rules; GitHub's Copilot repository-instructions page; the HumanLayer, Willison and Vercel posts; arXiv abstracts 2307.03172, 2507.11538 and 2602.11988; the Lost in the Middle PDF (pages 1-6); the Chroma report; and the ManyIFEval OpenReview abstract via search.
+
+## Addendum: settings hooks vs mods (function hooks)
+
+Sources: "React to events", Anthropic, docs, undated,
+https://code.claude.com/docs/en/plugins/mods/events ; "Mods overview",
+Anthropic, docs, undated, https://code.claude.com/docs/en/plugins/mods/overview .
+Local: `claude --version` = 2.1.289 (mods need 2.1.287+); no mod installed
+(no `register.js` under `~/.claude/plugins` or `~/src`).
+
+What a mod adds for disclosure, versus a settings hook:
+
+- **Text before the action.** A `tool.call` hook runs before the tool. It can
+  `deny`, rewrite arguments, or answer with `{ result }` so the tool never
+  runs. A settings PreToolUse `additionalContext` arrives "alongside the tool
+  result", i.e. after.
+- **Prompt-time context.** `prompt.submit` can append text only Claude reads
+  (`context: [...]`), so a prompt mentioning "merge" can carry the merge
+  section. `skill.prompt` and `prompt.section` can rewrite a skill's text or a
+  system-prompt section.
+- **Shared state.** A mod's hooks share module variables, so "show the
+  SHELL-SAFETY section once per session" needs no temp file.
+- **Subagents.** `tool.call` fires for subagent tool calls too.
+
+Costs:
+
+- Fails open: a hook that throws or times out is skipped unless it has a
+  `.catch` handler.
+- Not loaded in a Desktop-app WSL session ("plugins aren't available in WSL
+  sessions"); the terminal CLI under WSL does load them.
+- Text that changes between requests from `prompt.section`/`skill.prompt`
+  invalidates the prompt cache.
+- New surface: JavaScript plugin plus marketplace install, versus the
+  existing tested shell hooks in `flow/claude/hooks/`.
+
+Anthropic's own guidance (overview, "Compare" table): pick a settings hook
+"to block, allow, or log an event with a script you already have"; pick a mod
+for a pane, a command, or "to rewrite an event".
