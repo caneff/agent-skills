@@ -158,11 +158,12 @@ branch (`references/loop.md` says why).
    step 1's resume has nothing to re-announce to — each landing with
    `runfile.py land`, each clump that finishes with no landing of its own
    (its ticket found already fixed on `main`, or handed to a nested spec
-   run, once that run has finished and not at the hand-off) with `runfile.py close <run-id> --clump <n> --reason <text>`, never
+   run, once that run has finished and not at the hand-off) with
+   `runfile.py close <run-id> --clump <n> --reason <text>`, never
    a `land` at `main`'s tip (why, and the recovery when one was recorded:
    `references/run-file.md`), and each "PR up" with `runfile.py pr-up <run-id>
-   --clump <n> --pr <n>` as it arrives, for this file's § Liveness, so a restart can pick
-   the run back up with nothing transcribed by hand. The controller clears the
+   --clump <n> --pr <n>` as it arrives, for this file's § Liveness, so a
+   restart can pick the run back up with nothing transcribed by hand. The controller clears the
    PR-up record with `runfile.py pr-up <run-id> --clump <n> --clear` whenever
    it hands findings back to the worker (a red seam's failure, or any ruling
    that sends it back to work), since the PR stays open through the fix round,

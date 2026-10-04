@@ -256,9 +256,11 @@ naming what is missing, when that transcript has no usage or the findings
 sidecar is absent, and then writes nothing. A refusal is reported, never
 skipped: the reviewer puts the command's stderr on the first line of its
 summary, and the caller repeats it in its own report. An `append` that never
-ran loses no row: the closing report's `harvest` writes one for every axis
-sidecar, costed from the reviewer's transcript (`unknown` when none can be
-attributed, never zero).
+ran leaves a row only if a burn's closing report runs `harvest` while the
+sidecar still exists: that `harvest` writes one per axis sidecar, costed from
+the reviewer's transcript (`unknown` when none can be attributed, never
+zero), and rebuilds it on every later `harvest`. A sidecar is pruned after 13
+days, and a run outside a burn has no closing report, so that row is gone.
 
 **A witness check ends with one `append` per mutation** (#1270). The script
 under *Isolation* below runs `review_ledger.py append --type witness-mutation`
