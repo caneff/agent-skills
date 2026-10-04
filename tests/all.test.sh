@@ -3,13 +3,15 @@
 # GIT_INDEX_FILE/GIT_COMMON_DIR/GIT_OBJECT_DIRECTORY/
 # GIT_ALTERNATE_OBJECT_DIRECTORIES must not let this repo's suite touch that
 # caller's repo. Reproduces the incident of 2026-09-07 in a scratch repo that
-# holds only tests/all.sh and one probe suite that writes through git, run
-# with the leak pointed at a separate victim repo. The probe is what makes a
-# leak observable: with the scrub gone, all.sh resolves its root against the
-# victim, finds no suites there, and the probe's write would land in the
-# victim. (Until #1415 the shadow was a copy of the whole tree that ran every
-# suite again, 251 of the suite's 494 serial seconds, for the same three
-# assertions.)
+# holds only tests/all.sh and one probe suite, run with the leak pointed at a
+# separate victim repo. Three assertions, each with its own job: exit 0; an "N
+# suites passed" line (with the scrub gone, all.sh resolves its root against the
+# victim, finds no suites, and reports 0 -- this is the check that catches a
+# missing scrub); and the victim unchanged, including its index and object
+# store (the probe writes through git, config and index and an object, so a
+# leak that reaches the suites all.sh runs lands in the victim). (Until #1415
+# the shadow was a copy of the whole tree that ran every suite again, 251 of
+# the suite's 494 serial seconds, for the same assertions.)
 #
 # Guarded against re-entrant recursion: a nested copy of this file would be
 # discovered by a nested tests/all.sh, so it no-ops on that pass —
@@ -49,6 +51,7 @@ cp "$root/tests/all.sh" "$shadow/tests/all.sh" \
 cat >"$shadow/probe.test.sh" <<'PROBE'
 #!/usr/bin/env bash
 git config --local probe.ran yes
+git update-index --add --cacheinfo "100644,$(git hash-object -w --stdin </dev/null),probe-marker"
 PROBE
 git -C "$shadow" init -q \
   || { echo "FAIL: could not init the shadow repo"; exit 1; }
@@ -59,7 +62,7 @@ git -C "$shadow" add -A \
 git init -q "$victim" \
   || { echo "FAIL: could not init the victim repo"; exit 1; }
 before_config=$(cat "$victim/.git/config")
-before_ls=$(cd "$victim" && ls -A)
+before_ls=$(cd "$victim" && ls -A; find .git -type f | sort)
 
 out=$(
   cd "$shadow" &&
@@ -86,7 +89,7 @@ if [ "$(git -C "$shadow" config --local --get probe.ran)" != yes ]; then
 fi
 
 after_config=$(cat "$victim/.git/config")
-after_ls=$(cd "$victim" && ls -A)
+after_ls=$(cd "$victim" && ls -A; find .git -type f | sort)
 if [ "$before_config" != "$after_config" ] || [ "$before_ls" != "$after_ls" ]; then
   echo "FAIL: the leaked GIT_DIR let the suite rewrite or write into the victim repo it pointed at"
   exit 1
